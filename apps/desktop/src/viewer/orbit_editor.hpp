@@ -4,18 +4,16 @@
 #include <QWidget>
 #include <functional>
 
-class QDoubleSpinBox;
-class QDateTimeEdit;
 class QLabel;
 class QLineEdit;
 class QPushButton;
-class QSpinBox;
 class QComboBox;
 class QCheckBox;
 class QTreeWidget;
 class QStackedWidget;
 namespace orbitforge::desktop {
 class EpochEditor;
+class QuantityEditor;
 class OrbitEditor final : public QWidget {
   public:
     explicit OrbitEditor(const OrbitInput &input, QWidget *parent = nullptr);
@@ -42,27 +40,29 @@ class OrbitEditor final : public QWidget {
     void write_elements(const core::CartesianState &state);
     bool create_mode_ = false, orbit_busy_ = false, model_busy_ = false;
     QTreeWidget *navigation_ = nullptr;
-    QLineEdit *object_ = nullptr, *mu_ = nullptr;
-    std::array<QLineEdit *, 3> position_{}, velocity_{};
+    QLineEdit *object_ = nullptr;
+    QuantityEditor *mu_ = nullptr;
+    std::array<QuantityEditor *, 3> position_{}, velocity_{};
     EpochEditor *epoch_ = nullptr, *first_ = nullptr, *last_ = nullptr;
     QComboBox *state_mode_ = nullptr;
     QStackedWidget *state_pages_ = nullptr;
-    std::array<QDoubleSpinBox *, 6> elements_{};
+    std::array<QuantityEditor *, 6> elements_{};
     int state_mode_index_ = 0;
-    QSpinBox *step_ = nullptr;
+    QuantityEditor *step_ = nullptr;
     QPushButton *apply_ = nullptr, *cancel_ = nullptr;
     QLabel *message_ = nullptr;
     QWidget *fields_ = nullptr;
     QWidget *model_fields_ = nullptr;
     QComboBox *model_kind_ = nullptr;
     QLineEdit *model_path_ = nullptr;
-    QDoubleSpinBox *model_diameter_ = nullptr;
+    QuantityEditor *model_diameter_ = nullptr;
     QPushButton *apply_model_ = nullptr;
     QLabel *model_message_ = nullptr;
     QComboBox *track_extent_ = nullptr;
-    QDoubleSpinBox *past_ = nullptr, *future_ = nullptr;
+    QuantityEditor *past_ = nullptr, *future_ = nullptr;
     QCheckBox *track_2d_ = nullptr, *label_2d_ = nullptr, *track_3d_ = nullptr;
     std::vector<QPushButton *> display_buttons_;
+    std::vector<QLabel *> display_messages_;
     void submit_display();
 };
 } // namespace orbitforge::desktop

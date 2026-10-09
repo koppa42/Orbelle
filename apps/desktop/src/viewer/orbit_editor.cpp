@@ -1,67 +1,29 @@
 #include "orbit_editor.hpp"
 #include "epoch_editor.hpp"
+#include "quantity_editor.hpp"
 #include "workbench_style.hpp"
 #include <QCheckBox>
 #include <QComboBox>
-#include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QLocale>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSignalBlocker>
-#include <QSpinBox>
 #include <QStackedWidget>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <cmath>
-#include <numbers>
 #include <orbitforge/runtime/two_body.hpp>
 
 namespace orbitforge::desktop {
 namespace {
-class ElementSpinBox final : public QDoubleSpinBox {
-  public:
-    QString textFromValue(double value) const override {
-        auto display_locale = locale();
-        display_locale.setNumberOptions(display_locale.numberOptions() |
-                                        QLocale::OmitGroupSeparator);
-        auto text = display_locale.toString(value, 'f', decimals());
-        if (text.contains(display_locale.decimalPoint())) {
-            while (text.endsWith('0'))
-                text.chop(1);
-            if (text.endsWith(display_locale.decimalPoint()))
-                text.chop(1);
-        }
-        return text == "-0" ? "0" : text;
-    }
-};
-double number(const QLineEdit *field) {
-    bool ok = false;
-    const double value = field->text().toDouble(&ok);
-    if (!ok || !std::isfinite(value))
-        throw std::invalid_argument("请输入有限数值，支持科学计数法。");
-    return value;
-}
-QWidget *with_unit(QWidget *field, const QString &unit) {
-    auto *row = new QWidget;
-    field->setMaximumWidth(240);
-    row->setMaximumWidth(276);
-    auto *layout = new QHBoxLayout(row);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(8);
-    layout->addWidget(field, 1);
-    auto *caption = new QLabel(unit);
-    caption->setObjectName("fieldUnit");
-    caption->setFixedWidth(28);
-    layout->addWidget(caption);
-    return row;
-}
+constexpr std::array element_units{Unit::metre,  Unit::one,    Unit::radian,
+                                   Unit::radian, Unit::radian, Unit::radian};
 QFrame *divider() {
     auto *line = new QFrame;
     line->setObjectName("sectionDivider");
@@ -177,21 +139,22 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     auto *cartesian_form = new QFormLayout(cartesian_page);
     cartesian_form->setContentsMargins(0, 0, 0, 0);
     state_pages_->addWidget(cartesian_page);
-    const auto vector_row = [&](const QString &label, const QString &unit, auto &fields) {
+    const auto vector_row = [&](const QString &label, Unit unit, const QString &name,
+                                auto &fields) {
         auto *caption = new QLabel(label);
         caption->setObjectName("muted");
         cartesian_form->addRow(caption);
         for (std::size_t i = 0; i < 3; ++i) {
             const auto axis = QString(QChar(static_cast<char>('X' + i)));
-            fields[i] = new QLineEdit;
-            fields[i]->setMinimumWidth(0);
-            fields[i]->setObjectName("vectorInput");
-            fields[i]->setAccessibleName(label + " " + axis);
-            cartesian_form->addRow(axis, with_unit(fields[i], unit));
+            fields[i] = new QuantityEditor(unit);
+            fields[i]->setObjectName(name + axis);
+            fields[i]->set_label(label + " " + axis);
+            fields[i]->set_single_step(1, unit);
+            cartesian_form->addRow(axis, fields[i]);
         }
     };
-    vector_row(QStringLiteral("位置"), "km", position_);
-    vector_row(QStringLiteral("速度"), "km/s", velocity_);
+    vector_row(QStringLiteral("位置"), Unit::kilometre, "position", position_);
+    vector_row(QStringLiteral("速度"), Unit::kilometres_per_second, "velocity", velocity_);
     auto *keplerian_page = new QWidget;
     auto *keplerian_form = new QFormLayout(keplerian_page);
     keplerian_form->setContentsMargins(0, 0, 0, 0);
@@ -199,23 +162,24 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     const QStringList labels{QStringLiteral("半长轴 a"),     QStringLiteral("偏心率 e"),
                              QStringLiteral("倾角 i"),       QStringLiteral("升交点赤经 Ω"),
                              QStringLiteral("近地点幅角 ω"), QStringLiteral("真近点角 ν")};
+    const QStringList names{"semiMajorAxis", "eccentricity",        "inclination",
+                            "raan",          "argumentOfPeriapsis", "trueAnomaly"};
     for (std::size_t i = 0; i < 6; ++i) {
-        auto *field = new ElementSpinBox;
-        field->setDecimals(i == 1 ? 12 : 9);
-        field->setRange(i == 0   ? -1e9
-                        : i == 5 ? -360
-                                 : 0,
-                        i == 0   ? 1e9
-                        : i == 1 ? 1000
-                        : i == 2 ? 180
-                                 : 360);
-        field->setSingleStep(i == 0 ? 10 : i == 1 ? 0.001 : 1);
-        field->setAccessibleName(labels[static_cast<int>(i)]);
+        const auto unit = i == 0 ? Unit::kilometre : i == 1 ? Unit::one : Unit::degree;
+        auto *field = new QuantityEditor(unit);
+        field->set_range(i == 0   ? -1e9
+                         : i == 5 ? -360
+                                  : 0,
+                         i == 0   ? 1e9
+                         : i == 1 ? 1000
+                         : i == 2 ? 180
+                                  : 360,
+                         unit);
+        field->set_single_step(i == 0 ? 10 : i == 1 ? 0.001 : 1, unit);
+        field->set_label(labels[static_cast<int>(i)]);
+        field->setObjectName(names[static_cast<int>(i)]);
         elements_[i] = field;
-        keplerian_form->addRow(labels[static_cast<int>(i)],
-                               with_unit(field, i == 0   ? "km"
-                                                : i == 1 ? ""
-                                                         : QStringLiteral("°")));
+        keplerian_form->addRow(labels[static_cast<int>(i)], field);
     }
     state_mode_->setToolTip(QStringLiteral("GCRF 瞬时根数；抛物线轨道使用位置 / 速度。"));
     state_pages_->addWidget(keplerian_page);
@@ -235,10 +199,12 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     time_row(QStringLiteral("终点"), last_);
     first_->setToolTip(QStringLiteral("分析时段由所属 Scenario 统一管理"));
     last_->setToolTip(first_->toolTip());
-    step_ = new QSpinBox;
+    step_ = new QuantityEditor(Unit::second);
     step_->setObjectName("displayStep");
-    step_->setRange(1, 60);
-    form->addRow(QStringLiteral("显示步长"), with_unit(step_, "s"));
+    step_->set_range(1, 60, Unit::second);
+    step_->set_quantum(1, Unit::second);
+    step_->set_label(QStringLiteral("显示步长"));
+    form->addRow(QStringLiteral("显示步长"), step_);
     auto *advanced = new QToolButton;
     advanced->setText(QStringLiteral("更多参数"));
     advanced->setCheckable(true);
@@ -247,9 +213,12 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     auto *advanced_fields = new QWidget;
     auto *advanced_form = new QFormLayout(advanced_fields);
     advanced_form->setContentsMargins(0, 0, 0, 0);
-    mu_ = new QLineEdit;
-    mu_->setMaximumWidth(240);
-    advanced_form->addRow(QStringLiteral("μ / km³/s²"), mu_);
+    mu_ = new QuantityEditor(Unit::kilometres_cubed_per_second_squared);
+    mu_->setObjectName("gravitationalParameter");
+    mu_->set_label(QStringLiteral("引力参数 μ"));
+    mu_->set_range(std::numeric_limits<double>::min(), std::numeric_limits<double>::max(),
+                   Unit::metres_cubed_per_second_squared);
+    advanced_form->addRow(QStringLiteral("引力参数 μ"), mu_);
     advanced_fields->hide();
     connect(advanced, &QToolButton::toggled, advanced_fields,
             [advanced, advanced_fields](bool open) {
@@ -313,6 +282,13 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         connect(apply, &QPushButton::clicked, this, [this] { submit_display(); });
         stack->addStretch();
         stack->addWidget(divider());
+        auto *error = new QLabel;
+        error->setObjectName("inputError");
+        error->setWordWrap(true);
+        error->setTextFormat(Qt::PlainText);
+        error->hide();
+        display_messages_.push_back(error);
+        stack->addWidget(error);
         stack->addWidget(apply, 0, Qt::AlignRight);
     };
     auto *common = display_page(QStringLiteral("轨迹范围"));
@@ -326,17 +302,18 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     common_form->addRow(QStringLiteral("显示范围"), track_extent_);
     track_extent_->setToolTip(QStringLiteral("同时用于二维与三维；非闭合轨道的一圈按一小时显示。"));
     const auto duration = [&] {
-        auto *field = new QDoubleSpinBox;
-        field->setMaximumWidth(240);
-        field->setButtonSymbols(QAbstractSpinBox::NoButtons);
-        field->setRange(0, 10080);
-        field->setDecimals(1);
-        field->setSuffix(QStringLiteral(" 分钟"));
-        field->setValue(45);
+        auto *field = new QuantityEditor(Unit::minute);
+        field->set_range(0, 10080, Unit::minute);
+        field->set_single_step(1, Unit::minute);
+        field->set_value(45, Unit::minute);
         return field;
     };
     past_ = duration();
     future_ = duration();
+    past_->setObjectName("pastDuration");
+    past_->set_label(QStringLiteral("当前时刻之前"));
+    future_->setObjectName("futureDuration");
+    future_->set_label(QStringLiteral("当前时刻之后"));
     common_form->addRow(QStringLiteral("当前时刻之前"), past_);
     common_form->addRow(QStringLiteral("当前时刻之后"), future_);
     connect(track_extent_, &QComboBox::currentIndexChanged, this, [this, common_form](int index) {
@@ -385,6 +362,13 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     display_buttons_.push_back(apply_track);
     connect(apply_track, &QPushButton::clicked, this, [this] { submit_display(); });
     appearance_content->addWidget(apply_track, 0, Qt::AlignRight);
+    auto *display_error = new QLabel;
+    display_error->setObjectName("inputError");
+    display_error->setWordWrap(true);
+    display_error->setTextFormat(Qt::PlainText);
+    display_error->hide();
+    display_messages_.push_back(display_error);
+    appearance_content->addWidget(display_error);
     appearance_content->addWidget(divider());
     model_fields_ = new QWidget;
     auto *form_model = new QFormLayout(model_fields_);
@@ -401,13 +385,12 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     auto *browse = new QPushButton(QStringLiteral("选择模型文件…"));
     form_model->addRow(QStringLiteral("模型文件"), model_path_);
     form_model->addRow(QString{}, browse);
-    model_diameter_ = new QDoubleSpinBox;
-    model_diameter_->setMaximumWidth(240);
-    model_diameter_->setButtonSymbols(QAbstractSpinBox::NoButtons);
-    model_diameter_->setDecimals(3);
-    model_diameter_->setRange(0.001, 10000);
-    model_diameter_->setValue(1000);
-    model_diameter_->setSuffix(" km");
+    model_diameter_ = new QuantityEditor(Unit::kilometre);
+    model_diameter_->setObjectName("modelDiameter");
+    model_diameter_->set_label(QStringLiteral("示意显示直径"));
+    model_diameter_->set_range(0.001, 10000, Unit::kilometre);
+    model_diameter_->set_single_step(1, Unit::kilometre);
+    model_diameter_->set_value(1000, Unit::kilometre);
     form_model->addRow(QStringLiteral("示意显示直径"), model_diameter_);
     appearance_content->addWidget(model_fields_);
     model_diameter_->setToolTip(QStringLiteral("模型示意尺寸；朝向固定于 ITRF。"));
@@ -460,8 +443,13 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     form_model->setRowVisible(browse, false);
     form_model->setRowVisible(model_diameter_, false);
     connect(apply_model_, &QPushButton::clicked, this, [this] {
-        if (appearance)
-            appearance(model_kind_->currentIndex(), model_path_->text(), model_diameter_->value());
+        try {
+            if (appearance)
+                appearance(model_kind_->currentIndex(), model_path_->text(),
+                           model_diameter_->value(Unit::kilometre));
+        } catch (const std::exception &error) {
+            show_appearance_result(QString::fromUtf8(error.what()), true);
+        }
     });
     navigation->setCurrentItem(navigation->topLevelItem(0)->child(0));
     set_input(input);
@@ -469,14 +457,14 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
 void OrbitEditor::set_input(const OrbitInput &input) {
     object_->setText(QString::fromStdString(input.object_id));
     for (std::size_t k = 0; k < 3; ++k) {
-        position_[k]->setText(QString::number(input.initial.position_m[k] / 1000, 'g', 15));
-        velocity_[k]->setText(QString::number(input.initial.velocity_mps[k] / 1000, 'g', 15));
+        position_[k]->set_value(input.initial.position_m[k], Unit::metre);
+        velocity_[k]->set_value(input.initial.velocity_mps[k], Unit::metres_per_second);
     }
-    mu_->setText(QString::number(input.mu / 1e9, 'g', 15));
+    mu_->set_value(input.mu, Unit::metres_cubed_per_second_squared);
     epoch_->set_epoch(input.initial.epoch);
     first_->set_epoch(input.first);
     last_->set_epoch(input.last);
-    step_->setValue(input.step_seconds);
+    step_->set_value(input.step_seconds, Unit::second);
     const QSignalBlocker block(state_mode_);
     state_mode_index_ = 0;
     try {
@@ -488,35 +476,32 @@ void OrbitEditor::set_input(const OrbitInput &input) {
     state_pages_->setCurrentIndex(state_mode_index_);
 }
 core::CartesianState OrbitEditor::read_state() const {
-    const core::GravitationalParameter mu{number(mu_) * 1e9};
+    const core::GravitationalParameter mu{mu_->value(Unit::metres_cubed_per_second_squared)};
     if (state_mode_index_ == 1) {
-        const double rad = std::numbers::pi / 180;
-        return runtime::to_cartesian({epoch_->epoch(), elements_[0]->value() * 1000,
-                                      elements_[1]->value(), elements_[2]->value() * rad,
-                                      elements_[3]->value() * rad, elements_[4]->value() * rad,
-                                      elements_[5]->value() * rad},
-                                     mu);
+        return runtime::to_cartesian(
+            {epoch_->epoch(), elements_[0]->value(Unit::metre), elements_[1]->value(Unit::one),
+             elements_[2]->value(Unit::radian), elements_[3]->value(Unit::radian),
+             elements_[4]->value(Unit::radian), elements_[5]->value(Unit::radian)},
+            mu);
     }
     core::CartesianState state{epoch_->epoch(), core::OriginId::earth, core::FrameId::gcrf, {}, {}};
     for (std::size_t k = 0; k < 3; ++k) {
-        state.position_m[k] = number(position_[k]) * 1000;
-        state.velocity_mps[k] = number(velocity_[k]) * 1000;
+        state.position_m[k] = position_[k]->value(Unit::metre);
+        state.velocity_mps[k] = velocity_[k]->value(Unit::metres_per_second);
     }
     return state;
 }
 void OrbitEditor::write_elements(const core::CartesianState &state) {
-    const auto elements =
-        runtime::to_keplerian(state, core::GravitationalParameter{number(mu_) * 1e9});
-    const double deg = 180 / std::numbers::pi;
+    const auto elements = runtime::to_keplerian(
+        state, core::GravitationalParameter{mu_->value(Unit::metres_cubed_per_second_squared)});
     const std::array<double, 6> values{
-        elements.semi_major_axis_m / 1000,        elements.eccentricity,
-        elements.inclination_rad * deg,           elements.raan_rad * deg,
-        elements.argument_of_periapsis_rad * deg, elements.true_anomaly_rad * deg};
+        elements.semi_major_axis_m,         elements.eccentricity,
+        elements.inclination_rad,           elements.raan_rad,
+        elements.argument_of_periapsis_rad, elements.true_anomaly_rad};
     for (std::size_t k = 0; k < 6; ++k)
-        if (values[k] < elements_[k]->minimum() || values[k] > elements_[k]->maximum())
-            throw std::out_of_range("轨道根数超出当前编辑器范围，请保留 Cartesian 状态。");
+        elements_[k]->validate_value(values[k], element_units[k]);
     for (std::size_t k = 0; k < 6; ++k)
-        elements_[k]->setValue(values[k]);
+        elements_[k]->set_value(values[k], element_units[k]);
 }
 void OrbitEditor::set_state_mode(int mode) {
     if (mode == state_mode_index_)
@@ -527,8 +512,8 @@ void OrbitEditor::set_state_mode(int mode) {
             write_elements(state);
         else
             for (std::size_t k = 0; k < 3; ++k) {
-                position_[k]->setText(QString::number(state.position_m[k] / 1000, 'g', 15));
-                velocity_[k]->setText(QString::number(state.velocity_mps[k] / 1000, 'g', 15));
+                position_[k]->set_value(state.position_m[k], Unit::metre);
+                velocity_[k]->set_value(state.velocity_mps[k], Unit::metres_per_second);
             }
         state_mode_index_ = mode;
         const QSignalBlocker block(state_mode_);
@@ -562,11 +547,11 @@ void OrbitEditor::submit() {
     try {
         OrbitInput input;
         input.object_id = object_->text().trimmed().toStdString();
-        input.mu = number(mu_) * 1e9;
+        input.mu = mu_->value(Unit::metres_cubed_per_second_squared);
         input.initial = read_state();
         input.first = first_->epoch();
         input.last = last_->epoch();
-        input.step_seconds = step_->value();
+        input.step_seconds = static_cast<int>(step_->value(Unit::second));
         if (apply)
             apply(std::move(input));
     } catch (const std::exception &error) {
@@ -594,7 +579,7 @@ void OrbitEditor::configure_appearance(int kind, const QString &path, double dia
 void OrbitEditor::set_appearance(int kind, const QString &path, double diameter_km) {
     model_kind_->setCurrentIndex(kind);
     model_path_->setText(path);
-    model_diameter_->setValue(diameter_km);
+    model_diameter_->set_value(diameter_km, Unit::kilometre);
 }
 void OrbitEditor::set_appearance_busy(bool busy) {
     model_busy_ = busy;
@@ -620,15 +605,25 @@ void OrbitEditor::show_appearance_result(const QString &message, bool error) {
 }
 void OrbitEditor::set_display(const DisplaySettings &settings) {
     track_extent_->setCurrentIndex(settings.extent);
-    past_->setValue(settings.past_minutes);
-    future_->setValue(settings.future_minutes);
+    past_->set_value(settings.past_minutes, Unit::minute);
+    future_->set_value(settings.future_minutes, Unit::minute);
     track_2d_->setChecked(settings.track_2d);
     label_2d_->setChecked(settings.labels_2d);
     track_3d_->setChecked(settings.track_3d);
 }
 void OrbitEditor::submit_display() {
-    if (display)
-        display({track_extent_->currentIndex(), past_->value(), future_->value(),
-                 track_2d_->isChecked(), label_2d_->isChecked(), track_3d_->isChecked()});
+    try {
+        if (display)
+            display({track_extent_->currentIndex(), past_->value(Unit::minute),
+                     future_->value(Unit::minute), track_2d_->isChecked(), label_2d_->isChecked(),
+                     track_3d_->isChecked()});
+        for (auto *error : display_messages_)
+            error->hide();
+    } catch (const std::exception &exception) {
+        for (auto *error : display_messages_) {
+            error->setText(QString::fromUtf8(exception.what()));
+            error->show();
+        }
+    }
 }
 } // namespace orbitforge::desktop

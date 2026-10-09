@@ -4,6 +4,7 @@
 #include "mission_timeline.hpp"
 #include "orbit_editor.hpp"
 #include "orbit_scene.hpp"
+#include "quantity_editor.hpp"
 #include "satellite_model.hpp"
 #include "scenario_dialog.hpp"
 #include "workbench_profile.hpp"
@@ -54,7 +55,6 @@
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSlider>
-#include <QSpinBox>
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QStyle>
@@ -3529,15 +3529,16 @@ class Workbench final : public QMainWindow {
             open_properties();
             require(workspace_->current_document() == properties_dialog_,
                     "Object properties did not open in the central workspace");
-            require(editor_->findChild<QSpinBox *>("displayStep")->value() == 60,
+            require(editor_->findChild<QuantityEditor *>("displayStep")->value(Unit::second) == 60,
                     "The default display step is not 60 seconds");
-            editor_->findChild<QSpinBox *>("displayStep")->setValue(45);
+            editor_->findChild<QuantityEditor *>("displayStep")->set_value(45, Unit::second);
             workspace_->select_view(1);
             ++orbit_smoke_stage_;
             break;
         case 47:
             require(ground_map_->isVisible() && !workspace_->current_document() &&
-                        editor_->findChild<QSpinBox *>("displayStep")->value() == 45,
+                        editor_->findChild<QuantityEditor *>("displayStep")->value(Unit::second) ==
+                            45,
                     "Switching to a view tab discarded the property draft");
             workspace_->open(properties_dialog_);
             ++orbit_smoke_stage_;
@@ -3547,7 +3548,37 @@ class Workbench final : public QMainWindow {
             require(navigation && navigation->topLevelItemCount() == 3 &&
                         navigation->topLevelItem(0)->childCount() == 2,
                     "The property navigation does not group orbit and range under Basic");
-            editor_->findChild<QSpinBox *>("displayStep")->setValue(60);
+            editor_->findChild<QuantityEditor *>("displayStep")->set_value(60, Unit::second);
+            {
+                auto *angle = editor_->findChild<QuantityEditor *>("raan");
+                angle->set_value(180, Unit::degree);
+                auto *selector = angle->findChild<QToolButton *>("quantityUnit");
+                QTimer::singleShot(0, selector->menu(), [this, selector, require] {
+                    require(selector->menu()->grab().save(smoke_dir_ + "/quantity-unit-menu.png"),
+                            "Cannot capture the quantity unit menu");
+                    for (auto *action : selector->menu()->actions())
+                        if (action->data().toInt() == static_cast<int>(Unit::radian))
+                            action->trigger();
+                    selector->menu()->close();
+                });
+                timer_.stop(); // Keep the scripted stage from re-entering the modal menu.
+                selector->showMenu();
+                timer_.start();
+                require(angle->unit() == Unit::radian &&
+                            std::abs(angle->value(Unit::degree) - 180) < 1e-12 &&
+                            angle->findChild<QLineEdit *>("quantityValue")
+                                ->text()
+                                .startsWith("3.14159"),
+                        "Clickable angle unit did not convert the number");
+                save_workbench_image("workspace-quantity-units.png");
+                angle->set_unit(Unit::degree);
+                // Unit changes are a draft; restore the actual orbit value before later checks.
+                angle->set_value(
+                    runtime::to_keplerian(orbit_->input.initial,
+                                          core::GravitationalParameter{orbit_->input.mu})
+                        .raan_rad,
+                    Unit::radian);
+            }
             save_workbench_image("workspace-properties.png");
             require(action_in_workspace("applyOrbit"),
                     "Orbit Apply button is clipped by the central workspace");
@@ -3567,7 +3598,8 @@ class Workbench final : public QMainWindow {
             break;
         case 50:
             require(workspace_->is_floating(properties_dialog_) &&
-                        editor_->findChild<QSpinBox *>("displayStep")->value() == 60,
+                        editor_->findChild<QuantityEditor *>("displayStep")->value(Unit::second) ==
+                            60,
                     "Detaching properties changed the field values");
             require(
                 properties_dialog_->window()->grab().save(smoke_dir_ + "/properties-detached.png"),
@@ -3687,7 +3719,8 @@ class Workbench final : public QMainWindow {
             require(timeline_->current_time() == smoke_timeline_epoch_ &&
                         timeline_->visible_first() == smoke_timeline_first_ &&
                         timeline_->visible_last() == smoke_timeline_last_ &&
-                        editor_->findChild<QSpinBox *>("displayStep")->value() == 60,
+                        editor_->findChild<QuantityEditor *>("displayStep")->value(Unit::second) ==
+                            60,
                     "Collapsing the timeline changed the instant, range or property draft");
             findChild<QAction *>("expandTimeline")->setChecked(true);
             ++orbit_smoke_stage_;

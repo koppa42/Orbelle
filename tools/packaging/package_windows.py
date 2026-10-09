@@ -28,6 +28,7 @@ def verify_normal_launch(executable, cwd, environment, reports):
     user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
     user32.IsWindowVisible.argtypes = [wintypes.HWND]
     user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    user32.PostMessageW.restype = wintypes.BOOL
     windows = []
     with (reports / 'normal-launch-stdout.log').open('wb') as stdout, (reports / 'normal-launch-stderr.log').open('wb') as stderr:
         process = subprocess.Popen([str(executable)], cwd=cwd, env=environment, stdout=stdout, stderr=stderr)
@@ -39,7 +40,9 @@ def verify_normal_launch(executable, cwd, environment, reports):
             if pid.value == process.pid and user32.IsWindowVisible(window):
                 title = ctypes.create_unicode_buffer(512)
                 user32.GetWindowTextW(window, title, len(title))
-                if title.value.startswith('OrbitForge'):
+                # Native 3D windows briefly appear as "OrbitForge" before Qt embeds them.
+                # Only the fully constructed workbench has this startup caption prefix.
+                if title.value.startswith('OrbitForge  |  '):
                     windows.append((window, title.value))
             return True
 
@@ -54,7 +57,13 @@ def verify_normal_launch(executable, cwd, environment, reports):
             time.sleep(2)
             if process.poll() is not None:
                 raise RuntimeError('Normal desktop exited before its window was closed')
-            user32.PostMessageW(windows[0][0], 0x0010, 0, 0)  # WM_CLOSE to this process only.
+            # Re-enumerate to avoid sending WM_CLOSE to a stale or reparented native handle.
+            windows.clear()
+            user32.EnumWindows(inspect, 0)
+            if len(windows) != 1:
+                raise RuntimeError('Cannot uniquely identify the normal desktop window')
+            if not user32.PostMessageW(windows[0][0], 0x0010, 0, 0):  # This process only.
+                raise ctypes.WinError(ctypes.get_last_error())
             if process.wait(timeout=30) != 0:
                 raise RuntimeError('Normal desktop launch/close failed')
         finally:

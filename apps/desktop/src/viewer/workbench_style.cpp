@@ -288,7 +288,6 @@ QLabel#sectionTitle { color: #b8c9da; font-size: 12px; font-weight: 600; padding
 QLabel#panelTitle { color: #e2e9f2; font-size: 17px; font-weight: 600; }
 QLabel#panelDescription { color: #8596aa; font-size: 11px; }
 QLabel#hint { color: #8c9db1; font-size: 11px; }
-QLabel#fieldUnit { color: #8e9eb0; font-size: 11px; }
 QToolButton#timeReadout { color: #e9b975; font-family: "Consolas"; font-size: 13px; padding: 4px 8px; }
 QLabel#timelineTitle { color: #b8c9da; font-weight: 600; }
 QToolBar#timelineBar QToolButton { padding: 3px; }
@@ -319,6 +318,16 @@ QLineEdit:focus, QDateTimeEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus, QCom
 QLineEdit:read-only { color: #a0b0c3; background: #202833; border-color: #303c4b; }
 QLineEdit:disabled, QDoubleSpinBox:disabled, QSpinBox:disabled { color: #6a7c92; background: #171d26; border-color: #2b3543; }
 QLineEdit#vectorInput, QSpinBox, QDoubleSpinBox { font-family: "Consolas"; font-size: 13px; }
+QFrame[quantityField="true"] { background: #191f28; border: 1px solid #374354; border-radius: 3px; }
+QFrame[quantityField="true"]:hover { border-color: #51657c; }
+QFrame[quantityField="true"][focused="true"] { border-color: #74b9ee; }
+QFrame[quantityField="true"][invalid="true"] { border-color: #b57467; }
+QFrame[quantityField="true"]:disabled { background: #171d26; border-color: #2b3543; }
+QFrame[quantityField="true"] QLineEdit { background: transparent; border: 0; padding: 5px 7px; min-height: 18px; font-family: "Consolas"; font-size: 13px; }
+QToolButton#quantityUnit { color: #9db4c9; border: 0; border-left: 1px solid #303c4b; border-radius: 0; padding: 4px 17px 4px 6px; min-height: 18px; }
+QToolButton#quantityUnit:hover, QToolButton#quantityUnit:focus { color: #d3eaff; background: #293b4d; }
+QToolButton#quantityUnit:disabled { color: #657282; }
+QToolButton#quantityUnit::menu-indicator { image: url(:/orbitforge/icons/chevron-down.png); subcontrol-origin: padding; subcontrol-position: right center; right: 5px; width: 9px; height: 6px; }
 QComboBox { padding-right: 25px; }
 QComboBox::drop-down { border: 0; width: 24px; }
 QComboBox::down-arrow { image: url(:/orbitforge/icons/chevron-down.png); width: 9px; height: 6px; }
