@@ -4,10 +4,20 @@ target_link_libraries(orbitforge_desktop PRIVATE
     OrbitForge::Runtime OrbitForge::Visualization Qt6::Widgets)
 orbitforge_warnings(orbitforge_desktop)
 if(ORBITFORGE_WITH_VSG)
+    # Original chevrons are pre-rendered at high resolution; no optional QtSvg plugin needed.
+    qt_add_resources(orbitforge_desktop "workbench_icons" PREFIX "/orbitforge"
+        BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+        FILES resources/icons/chevron-down.png
+              resources/icons/chevron-left.png resources/icons/chevron-right.png)
     find_package(vsgQt 0.4.0 EXACT CONFIG REQUIRED)
     find_package(rocky 1.1.0 EXACT CONFIG REQUIRED)
-    target_sources(orbitforge_desktop PRIVATE src/viewer/graphics_workbench.cpp)
-    target_link_libraries(orbitforge_desktop PRIVATE OrbitForge::GeoRocky vsgQt::vsgQt)
+    find_package(vsgXchange 1.1.13 EXACT CONFIG REQUIRED)
+    target_sources(orbitforge_desktop PRIVATE src/viewer/graphics_workbench.cpp
+        src/viewer/orbit_scene.cpp src/viewer/orbit_editor.cpp src/viewer/workbench_style.cpp
+        src/viewer/satellite_model.cpp src/viewer/mission_timeline.cpp src/viewer/scenario_dialog.cpp
+        src/viewer/epoch_editor.cpp src/viewer/ground_map.cpp)
+    target_link_libraries(orbitforge_desktop PRIVATE OrbitForge::GeoRocky vsgQt::vsgQt
+        vsgXchange::vsgXchange rocky::rocky)
     target_compile_definitions(orbitforge_desktop PRIVATE
         ORBITFORGE_DESKTOP_GRAPHICS
         ORBITFORGE_ROCKY_VERSION="${rocky_VERSION}"
@@ -15,10 +25,19 @@ if(ORBITFORGE_WITH_VSG)
     # Copy fixed runtime resources alongside the build output, independent of source paths.
     add_custom_command(TARGET orbitforge_desktop POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01"
+            "$<TARGET_FILE_DIR:orbitforge_desktop>/resources/eop-current"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${ROCKY_SHARE_DIR}/shaders" "$<TARGET_FILE_DIR:orbitforge_desktop>/resources/rocky/shaders"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${PROJECT_SOURCE_DIR}/data/samples/eop/iers_c04_2000_01_01_2000_01_02"
             "$<TARGET_FILE_DIR:orbitforge_desktop>/resources/eop"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${PROJECT_SOURCE_DIR}/data/samples/imagery/nasa_blue_marble_2002"
+            "$<TARGET_FILE_DIR:orbitforge_desktop>/resources/earth"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${PROJECT_SOURCE_DIR}/data/samples/models"
+            "$<TARGET_FILE_DIR:orbitforge_desktop>/resources/models"
         VERBATIM)
     orbitforge_copy_runtime_dlls(orbitforge_desktop)
     if(ORBITFORGE_BUILD_BENCHMARKS)
@@ -41,5 +60,5 @@ if(ORBITFORGE_WITH_VSG)
             VERBATIM)
     endif()
 endif()
-# Deployment/installer rules follow after the VSG/vsgQt integration PoC.
+# The relocatable Windows preview is assembled by tools/packaging/package_windows.py.
 

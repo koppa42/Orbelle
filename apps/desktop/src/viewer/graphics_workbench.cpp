@@ -1,4 +1,12 @@
 #include "graphics_workbench.hpp"
+#include "epoch_editor.hpp"
+#include "ground_map.hpp"
+#include "mission_timeline.hpp"
+#include "orbit_editor.hpp"
+#include "orbit_scene.hpp"
+#include "satellite_model.hpp"
+#include "scenario_dialog.hpp"
+#include "workbench_style.hpp"
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
 #include "benchmark_gpu.hpp"
 #include "benchmark_presentation.hpp"
@@ -7,34 +15,60 @@
 #endif
 #include <QAction>
 #include <QApplication>
+#include <QCalendarWidget>
+#include <QCloseEvent>
+#include <QComboBox>
+#include <QDateEdit>
+#include <QDateTime>
+#include <QDateTimeEdit>
+#include <QDialog>
 #include <QDir>
 #include <QDockWidget>
+#include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QExposeEvent>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontInfo>
+#include <QFormLayout>
+#include <QFrame>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QKeyEvent>
 #include <QLabel>
+#include <QLineEdit>
+#include <QLineF>
 #include <QMainWindow>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QPlatformSurfaceEvent>
+#include <QPushButton>
 #include <QResizeEvent>
 #include <QScreen>
+#include <QScrollArea>
+#include <QSignalBlocker>
 #include <QSlider>
+#include <QSpinBox>
+#include <QStackedWidget>
 #include <QStatusBar>
+#include <QStyle>
+#include <QTimeZone>
 #include <QTimer>
 #include <QToolBar>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <future>
 #include <iostream>
 #include <mutex>
 #include <orbitforge/geo_rocky/globe.hpp>
@@ -44,11 +78,18 @@
 #include <orbitforge/render_vsg/swapchain_capture.hpp>
 #include <orbitforge/runtime/demo.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
+#include <orbitforge/runtime/two_body.hpp>
 #include <vsg/all.h>
 #include <vsgQt/Window.h>
 
 namespace orbitforge::desktop {
 namespace {
+QString display_tai(core::Epoch epoch, bool date = true) {
+    // Display calendar only: TAI has fixed 86400-second days.
+    const auto time = QDateTime(QDate(2000, 1, 1), QTime(12, 0), QTimeZone::UTC)
+                          .addMSecs(epoch.tai_nanoseconds() / 1'000'000);
+    return time.toString(date ? "yyyy-MM-dd  HH:mm:ss.zzz" : "HH:mm:ss");
+}
 struct ValidationLog {
     std::atomic_uint errors{0}, warnings{0};
     std::mutex mutex;
@@ -173,21 +214,36 @@ class EmbeddedWindow final : public vsgQt::Window {
 };
 
 class Workbench final : public QMainWindow {
+    struct Satellite {
+        std::shared_ptr<const OrbitScene> orbit;
+        QTreeWidgetItem *item = nullptr;
+        vsg::ref_ptr<vsg::Group> model_host = vsg::Group::create();
+        vsg::ref_ptr<vsg::MatrixTransform> model;
+        int model_kind = 0;
+        double model_diameter_km = 1000;
+        QString model_path;
+    };
+
   public:
     Workbench(QApplication &app, ValidationLog &log, const QString &smoke_dir, bool validation,
               const QString &benchmark_manifest, const QString &timing_dir, bool timing_probe,
               bool output_only_probe)
         : app_(app), log_(log), smoke_dir_(smoke_dir), validation_(validation),
-          benchmarking_(!benchmark_manifest.isEmpty()),
-          session_(runtime::make_circular_demo_session()), frames_(runtime::make_frame_provider()),
+          benchmarking_(!benchmark_manifest.isEmpty()), frames_(runtime::make_frame_provider()),
           eop_(runtime::load_eop_snapshot(
               std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) /
               "resources/eop/manifest.json")),
           viewer_(vsgQt::Viewer::create()),
-          markers_(std::make_unique<render_vsg::MarkerLayer>(benchmarking_ ? 10000 : 1)),
+          markers_(std::make_unique<render_vsg::MarkerLayer>(10000)),
           selection_(
               std::make_unique<render_vsg::MarkerLayer>(1, render_vsg::MarkerStyle::selection)) {
         try {
+            playing_ = benchmarking_;
+            eop_history_ = eop_;
+            if (!benchmarking_)
+                eop_current_ = runtime::load_eop_snapshot(
+                    std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) /
+                    "resources/eop-current/manifest.json");
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
             if (benchmarking_)
                 benchmark_ = std::make_unique<BenchmarkScene>(benchmark_manifest, *frames_, *eop_);
@@ -207,67 +263,379 @@ class Workbench final : public QMainWindow {
             hints_ = vsg::ResourceHints::create();
             // Background static uploads must finish before a task/window is replaced.
             hints_->dataTransferHint = vsg::COMPILE_TRAVERSAL_TRANSFER_DATA_AND_WAIT;
-            globe_ = geo_rocky::make_globe(viewer_);
+            const auto resources =
+                std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) /
+                "resources";
+            globe_ = geo_rocky::make_globe(viewer_, benchmarking_ ? std::filesystem::path{}
+                                                                  : resources / "earth/earth.vrt");
             scene_ = vsg::Group::create();
             scene_->addChild(globe_->node());
             scene_->addChild(markers_->node());
+            if (!benchmarking_) {
+                model_group_ = vsg::Group::create();
+                scene_->addChild(model_group_);
+                scene_menu_ = menuBar()->addMenu(QStringLiteral("场景"));
+                insert_menu_ = menuBar()->addMenu(QStringLiteral("插入"));
+                view_menu_ = menuBar()->addMenu(QStringLiteral("视图"));
+                time_menu_ = menuBar()->addMenu(QStringLiteral("时间"));
+                commands_ = addToolBar(QStringLiteral("场景与图形"));
+                commands_->setObjectName("commandBar");
+                commands_->setMovable(false);
+                commands_->setIconSize(QSize(16, 16));
+                commands_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+                auto *symbol = new QLabel;
+                symbol->setPixmap(
+                    workbench_icon(WorkbenchIcon::orbit, QColor("#3476be")).pixmap(26, 26));
+                commands_->addWidget(symbol);
+                auto *name = new QLabel("OrbitForge");
+                name->setObjectName("brand");
+                commands_->addWidget(name);
+                auto *workspace = new QLabel(QStringLiteral("未创建场景"));
+                workspace_label_ = workspace;
+                workspace->setObjectName("workspaceName");
+                commands_->addWidget(workspace);
+                auto *space = new QWidget;
+                space->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+                commands_->addWidget(space);
+                new_action_ = commands_->addAction(workbench_icon(WorkbenchIcon::orbit),
+                                                   QStringLiteral("新建场景"));
+                new_action_->setShortcut(QKeySequence("Ctrl+N"));
+                connect(new_action_, &QAction::triggered, this, [this] { create_scenario(); });
+                scene_menu_->addAction(new_action_);
+                example_action_ = scene_menu_->addAction(QStringLiteral("打开二体示例"));
+                connect(example_action_, &QAction::triggered, this, [this] { open_example(); });
+                scene_menu_->addSeparator();
+                insert_action_ = commands_->addAction(workbench_icon(WorkbenchIcon::satellite),
+                                                      QStringLiteral("插入卫星"));
+                insert_action_->setShortcut(QKeySequence("Ctrl+Shift+S"));
+                connect(insert_action_, &QAction::triggered, this,
+                        [this] { begin_insert_satellite(); });
+                insert_menu_->addAction(insert_action_);
+                commands_->addSeparator();
+            }
             if (benchmarking_) {
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
                 for (std::size_t i = 0; i < 100; ++i)
                     scene_->addChild(render_vsg::make_track(benchmark_->cache->track(i * 100)));
 #endif
             } else {
-                const auto series = session_.sample(runtime::demo_epochs());
-                std::vector<visualization::RenderSnapshot> track;
-                for (std::size_t i = 0; i < series.states().size(); ++i) {
-                    auto snapshot = visualization::make_snapshot(series, i);
-                    track.push_back(visualization::rotate_snapshot(
-                        snapshot,
-                        frames_->gcrf_to_itrf(snapshot.epoch, eop_->at(snapshot.epoch).sample)));
-                }
-                scene_->addChild(render_vsg::make_track(track));
+                orbit_group_ = vsg::Group::create();
+                scene_->addChild(orbit_group_);
             }
             snapshot_ = sample_frame(core::Epoch{0});
             markers_->update(snapshot_);
-            initial_position_ = snapshot_.markers.front().position_m;
+            initial_position_ = snapshot_.markers.empty() ? std::array<double, 3>{7e6, 0, 0}
+                                                          : snapshot_.markers.front().position_m;
             scene_->addChild(selection_->node());
             setWindowTitle(benchmarking_ ? QStringLiteral("OrbitForge — 万星双视图基准场景")
-                                         : QStringLiteral("OrbitForge — 双视窗圆轨道"));
-            resize_to_screen(1480, 900);
+                                         : QStringLiteral("OrbitForge  |  新建场景"));
+            resize_to_screen(1600, 960);
             auto *objects = new QTreeWidget;
+            objects_ = objects;
             objects->setHeaderLabel(QStringLiteral("场景"));
-            auto *scenario =
-                new QTreeWidgetItem(objects, {benchmarking_ ? QStringLiteral("固定星座 · 10,000 颗")
-                                                            : QStringLiteral("圆轨道示例")});
-            new QTreeWidgetItem(scenario,
-                                {benchmarking_ ? QStringLiteral("100 条轨迹 · 每视图 200 标签")
-                                               : QStringLiteral("demo-satellite")});
+            if (!benchmarking_)
+                objects->setHeaderHidden(true);
+            if (benchmarking_) {
+                auto *scenario =
+                    new QTreeWidgetItem(objects, {QStringLiteral("固定星座 · 10,000 颗")});
+                object_item_ =
+                    new QTreeWidgetItem(scenario, {QStringLiteral("100 条轨迹 · 每视图 200 标签")});
+            }
             objects->expandAll();
-            auto *object_dock = new QDockWidget(QStringLiteral("对象"), this);
-            object_dock->setWidget(objects);
+            if (!benchmarking_) {
+                objects->setIconSize(QSize(18, 18));
+                objects->setIndentation(16);
+                objects->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+                connect(objects, &QTreeWidget::currentItemChanged, this,
+                        [this](QTreeWidgetItem *item, QTreeWidgetItem *) {
+                            set_selection(object_index(item), false);
+                        });
+            }
+            auto *object_dock = new QDockWidget(QStringLiteral("对象浏览器"), this);
+            object_dock_ = object_dock;
+            if (benchmarking_) {
+                object_dock->setWidget(objects);
+            } else {
+                auto *explorer = new QWidget;
+                auto *layout = new QVBoxLayout(explorer);
+                layout->setContentsMargins(10, 10, 10, 12);
+                layout->setSpacing(10);
+                auto *search = new QLineEdit;
+                search->setPlaceholderText(QStringLiteral("搜索对象…"));
+                search->addAction(workbench_icon(WorkbenchIcon::search),
+                                  QLineEdit::LeadingPosition);
+                search->setClearButtonEnabled(true);
+                connect(search, &QLineEdit::textChanged, objects, [this](const QString &text) {
+                    for (auto &satellite : satellites_)
+                        satellite.item->setHidden(
+                            !satellite.item->text(0).contains(text, Qt::CaseInsensitive));
+                });
+                layout->addWidget(search);
+                layout->addWidget(objects, 1);
+                object_dock->setWidget(explorer);
+                style_dock(object_dock, WorkbenchIcon::orbit);
+            }
             addDockWidget(Qt::LeftDockWidgetArea, object_dock);
-            object_dock->setMaximumWidth(220);
-            auto *toolbar = addToolBar(QStringLiteral("时间"));
+            object_dock->setMaximumWidth(benchmarking_ ? 220 : 290);
+            if (!benchmarking_)
+                object_dock->setMinimumWidth(200);
+            if (!benchmarking_ && runtime::two_body_available()) {
+                editor_ = new OrbitEditor(OrbitInput{});
+                properties_dialog_ = new QDialog(this, Qt::Window);
+                properties_dialog_->setAttribute(Qt::WA_QuitOnClose, false);
+                properties_dialog_->setWindowTitle(QStringLiteral("对象属性"));
+                properties_dialog_->resize(
+                    980, std::min(660, screen()->availableGeometry().height() - 100));
+                properties_dialog_->setMinimumSize(910, 500);
+                auto *dialog_layout = new QVBoxLayout(properties_dialog_);
+                dialog_layout->setContentsMargins(0, 0, 0, 0);
+                dialog_layout->setSpacing(0);
+                inspector_pages_ = new QStackedWidget;
+                inspector_pages_->addWidget(editor_);
+                auto *empty = new QLabel(QStringLiteral("选择一颗卫星\n\n在对象树或三维视图中选择卫"
+                                                        "星，\n即可编辑轨道参数与显示外观。"));
+                empty->setObjectName("muted");
+                empty->setAlignment(Qt::AlignCenter);
+                empty->setWordWrap(true);
+                inspector_pages_->addWidget(empty);
+                dialog_layout->addWidget(inspector_pages_, 1);
+                resizeDocks({object_dock}, {224}, Qt::Horizontal);
+                editor_->apply = [this](OrbitInput input) { start_orbit(std::move(input)); };
+                editor_->cancel = [this] {
+                    if (cancellation_)
+                        cancellation_->store(true);
+                };
+                editor_->appearance = [this](int kind, const QString &path, double diameter) {
+                    start_model(kind, path, diameter);
+                };
+                auto *properties = new QAction(workbench_icon(WorkbenchIcon::properties),
+                                               QStringLiteral("属性"), this);
+                addAction(properties);
+                properties_action_ = properties;
+                properties->setShortcut(QKeySequence("Ctrl+I"));
+                connect(properties, &QAction::triggered, this, [this] { open_properties(); });
+                connect(objects, &QTreeWidget::itemDoubleClicked, this,
+                        [this](QTreeWidgetItem *item, int) {
+                            const auto index = object_index(item);
+                            if (!index) {
+                                if (item == scenario_item_)
+                                    open_scenario_properties();
+                                return;
+                            }
+                            set_selection(index);
+                            open_properties();
+                        });
+                scene_menu_->addAction(properties);
+                scene_menu_->addSeparator();
+                auto *quit = scene_menu_->addAction(QStringLiteral("退出"));
+                connect(quit, &QAction::triggered, this, &QWidget::close);
+                view_menu_->addAction(object_dock->toggleViewAction());
+                show_orbit_status();
+            }
+            auto *toolbar = new QToolBar(QStringLiteral("时间"), this);
+            time_toolbar_ = toolbar;
+            addToolBar(benchmarking_ ? Qt::TopToolBarArea : Qt::BottomToolBarArea, toolbar);
+            toolbar->setMovable(false);
+            toolbar->setIconSize(QSize(18, 18));
+            toolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
             if (run_)
                 toolbar->setEnabled(false);
 #endif
-            auto *play = toolbar->addAction(QStringLiteral("播放 / 暂停"));
-            connect(play, &QAction::triggered, this, [this] {
-                playing_ = !playing_;
-                clock_.restart();
-            });
-            slider_ = new QSlider(Qt::Horizontal);
-            slider_->setRange(0, benchmarking_ ? 600 : 300);
-            slider_->setMinimumWidth(300);
-            toolbar->addWidget(slider_);
+            auto *play =
+                new QAction(workbench_icon(playing_ ? WorkbenchIcon::pause : WorkbenchIcon::play),
+                            playing_ ? QStringLiteral("暂停") : QStringLiteral("播放"), this);
+            play_action_ = play;
+            connect(play, &QAction::triggered, this, [this] { set_playing(!playing_); });
+            if (benchmarking_) {
+                toolbar->addAction(play);
+                slider_ = new QSlider(Qt::Horizontal);
+                slider_->setRange(0, 600);
+                slider_->setMinimumWidth(300);
+                toolbar->addWidget(slider_);
+            } else {
+                toolbar->setObjectName("timelineBar");
+                auto *timeline = new QWidget;
+                timeline->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+                auto *layout = new QVBoxLayout(timeline);
+                layout->setContentsMargins(0, 0, 0, 0);
+                layout->setSpacing(0);
+                auto *controls = new QHBoxLayout;
+                controls->setContentsMargins(16, 6, 22, 6);
+                controls->setSpacing(8);
+                auto *heading = new QLabel(QStringLiteral("时间轴"));
+                heading->setObjectName("sectionTitle");
+                heading->setMinimumWidth(110);
+                controls->addWidget(heading);
+                auto *start = new QAction(workbench_icon(WorkbenchIcon::first),
+                                          QStringLiteral("分析起点"), this);
+                auto *end = new QAction(workbench_icon(WorkbenchIcon::last),
+                                        QStringLiteral("分析终点"), this);
+                start->setShortcut(QKeySequence("Ctrl+Home"));
+                end->setShortcut(QKeySequence("Ctrl+End"));
+                play->setShortcut(QKeySequence("Ctrl+Space"));
+                connect(start, &QAction::triggered, this, [this] {
+                    set_playing(false);
+                    if (scenario_)
+                        seek_epoch(scenario_->first());
+                });
+                connect(end, &QAction::triggered, this, [this] {
+                    set_playing(false);
+                    if (scenario_)
+                        seek_epoch(scenario_->last());
+                });
+                for (auto *action : {start, play, end}) {
+                    auto *button = new QToolButton;
+                    button->setDefaultAction(action);
+                    button->setFixedSize(32, 30);
+                    button->setIconSize(QSize(18, 18));
+                    if (action == play)
+                        button->setObjectName("transportPlay");
+                    controls->addWidget(button);
+                }
+                time_menu_->addAction(start);
+                time_menu_->addAction(play);
+                time_menu_->addAction(end);
+                time_menu_->addSeparator();
+                auto *jump = time_menu_->addAction(QStringLiteral("跳转到指定时间…"));
+                jump->setShortcut(QKeySequence("Ctrl+T"));
+                connect(jump, &QAction::triggered, this, [this] { choose_time(); });
+                auto *speed = new QDoubleSpinBox;
+                speed->setButtonSymbols(QAbstractSpinBox::NoButtons);
+                speed->setDecimals(1);
+                speed->setRange(0.1, 1000);
+                speed->setValue(20);
+                speed->setSuffix(QStringLiteral(" ×"));
+                speed->setFixedWidth(86);
+                speed->setToolTip(QStringLiteral("仿真时间相对实际时间的播放倍率"));
+                speed->setAccessibleName(QStringLiteral("播放倍率"));
+                controls->addWidget(speed);
+                connect(speed, &QDoubleSpinBox::valueChanged, this,
+                        [this](double value) { playback_rate_ = value; });
+                controls->addStretch();
+                auto *time_scale = new QComboBox;
+                time_scale->addItems({"UTC", "TAI", "TT"});
+                time_scale->setAccessibleName(QStringLiteral("时间轴显示标准"));
+                controls->addWidget(time_scale);
+                connect(time_scale, &QComboBox::currentIndexChanged, this, [this](int index) {
+                    display_scale_ = static_cast<CalendarScale>(index);
+                    if (timeline_)
+                        timeline_->set_scale(display_scale_);
+                });
+                time_label_ = new QLabel;
+                time_label_->setObjectName("timeReadout");
+                controls->addWidget(time_label_);
+                layout->addLayout(controls);
+                timeline_ = new MissionTimeline;
+                slider_ = timeline_;
+                connect(slider_, &QSlider::sliderPressed, this, [this] { set_playing(false); });
+                layout->addWidget(timeline_);
+                toolbar->addWidget(timeline);
+                auto *credit = new QLabel("NASA Blue Marble");
+                credit->setObjectName("hint");
+                statusBar()->addPermanentWidget(credit);
+                show_orbit_status();
+            }
             connect(slider_, &QSlider::valueChanged, this, [this](int value) {
-                seconds_ = value;
+                seconds_ = benchmarking_ ? value : duration_seconds() * value / 10000.0;
                 requested_time_ = true;
                 clock_.restart();
             });
             build_slot(false);
             build_slot(true);
+            if (!benchmarking_) {
+                ground_map_ = new GroundMap(QString::fromStdWString(
+                    (resources / "earth/land_ocean_ice_2048.jpg").wstring()));
+                ground_map_->select = [this](std::optional<std::size_t> index) {
+                    set_selection(index);
+                };
+                map_dock_ = new QDockWidget(QStringLiteral("二维地面视图"), this);
+                auto *map_panel = new QWidget;
+                auto *map_layout = new QVBoxLayout(map_panel);
+                map_layout->setContentsMargins(0, 0, 0, 0);
+                map_layout->setSpacing(0);
+                auto *map_controls = new QHBoxLayout;
+                map_controls->setContentsMargins(10, 4, 10, 4);
+                auto *projection = new QLabel(QStringLiteral("等距圆柱"));
+                projection->setObjectName("hint");
+                map_controls->addWidget(projection);
+                map_controls->addStretch();
+                for (const auto &[label, factor] :
+                     {std::pair{QStringLiteral("−"), 1 / 1.3}, std::pair{QStringLiteral("+"), 1.3},
+                      std::pair{QStringLiteral("全球"), 0.0}}) {
+                    auto *button = new QToolButton;
+                    button->setText(label);
+                    connect(button, &QToolButton::clicked, this, [this, factor] {
+                        if (factor == 0)
+                            ground_map_->reset_view();
+                        else
+                            ground_map_->zoom(factor, ground_map_->rect().center());
+                    });
+                    map_controls->addWidget(button);
+                }
+                map_layout->addLayout(map_controls);
+                map_layout->addWidget(ground_map_, 1);
+                map_dock_->setWidget(map_panel);
+                style_dock(map_dock_, WorkbenchIcon::map);
+                addDockWidget(Qt::RightDockWidgetArea, map_dock_);
+                map_action_ = map_dock_->toggleViewAction();
+                map_action_->setText(QStringLiteral("二维视图"));
+                map_action_->setIcon(workbench_icon(WorkbenchIcon::map));
+                map_action_->setShortcut(QKeySequence("Ctrl+3"));
+                view_menu_->addAction(map_action_);
+                commands_->addAction(map_action_);
+                connect(map_dock_, &QDockWidget::visibilityChanged, this, [this](bool visible) {
+                    if (visible && !map_dock_->isFloating())
+                        resizeDocks({map_dock_}, {std::max(380, width() / 2 - 110)},
+                                    Qt::Horizontal);
+                    fit_pending_ = true;
+                });
+                map_dock_->hide();
+                fit_views();
+                commands_->addSeparator();
+                auto *fit = commands_->addAction(workbench_icon(WorkbenchIcon::fit),
+                                                 QStringLiteral("适配轨道"));
+                fit_action_ = fit;
+                fit->setShortcut(QKeySequence("Ctrl+0"));
+                connect(fit, &QAction::triggered, this, [this] { fit_views(); });
+                auto *focus = commands_->addAction(workbench_icon(WorkbenchIcon::focus),
+                                                   QStringLiteral("定位卫星"));
+                focus_action_ = focus;
+                focus->setShortcut(QKeySequence("Ctrl+L"));
+                connect(focus, &QAction::triggered, this, [this] { focus_satellite(); });
+                view_menu_->addSeparator();
+                view_menu_->addAction(fit);
+                view_menu_->addAction(focus);
+                objects->setContextMenuPolicy(Qt::CustomContextMenu);
+                connect(objects, &QWidget::customContextMenuRequested, this,
+                        [this, objects, focus](const QPoint &point) {
+                            auto *item = objects->itemAt(point);
+                            const auto index = object_index(item);
+                            QMenu menu(this);
+                            if (index) {
+                                set_selection(index);
+                                if (properties_action_)
+                                    menu.addAction(properties_action_);
+                                menu.addAction(focus);
+                            } else {
+                                if (item && item == scenario_item_) {
+                                    auto *properties =
+                                        menu.addAction(workbench_icon(WorkbenchIcon::properties),
+                                                       QStringLiteral("属性"));
+                                    properties->setEnabled(!busy());
+                                    connect(properties, &QAction::triggered, this,
+                                            [this] { open_scenario_properties(); });
+                                    menu.addSeparator();
+                                }
+                                menu.addAction(new_action_);
+                                menu.addAction(insert_action_);
+                            }
+                            menu.exec(objects->viewport()->mapToGlobal(point));
+                        });
+                slots_[1]->dock->hide();
+                update_actions();
+                set_selection(std::nullopt);
+            }
             rebuild();
             connect(&timer_, &QTimer::timeout, this, [this] {
                 try {
@@ -294,11 +662,22 @@ class Workbench final : public QMainWindow {
         }
     }
     ~Workbench() override { shutdown(); }
+    void closeEvent(QCloseEvent *event) override {
+        if (properties_dialog_)
+            properties_dialog_->close();
+        QMainWindow::closeEvent(event);
+    }
     void shutdown() {
         if (stopped_)
             return;
         stopped_ = true;
         timer_.stop();
+        if (cancellation_)
+            cancellation_->store(true);
+        if (candidate_.valid())
+            candidate_.wait();
+        if (model_candidate_.valid())
+            model_candidate_.wait();
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
         if (run_)
             run_->stop_inputs();
@@ -356,6 +735,14 @@ class Workbench final : public QMainWindow {
         if (scene_)
             scene_->children.clear();
         scene_ = {};
+        orbit_group_ = {};
+        smoke_old_track_ = {};
+        model_group_ = {};
+        model_node_ = {};
+        for (auto &satellite : satellites_) {
+            satellite.model_host->children.clear();
+            satellite.model = {};
+        }
         markers_.reset();
         selection_.reset();
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
@@ -413,6 +800,52 @@ class Workbench final : public QMainWindow {
                     messages.append(message);
             }
             report.insert("validation_messages", messages);
+            if (!benchmarking_) {
+                report.insert("ui_font_family", QFontInfo(font()).family());
+                report.insert(
+                    "ground_map",
+                    QJsonObject{
+                        {"projection",
+                         "equirectangular; WGS84 ellipsoid; Rocky conversion; display only"},
+                        {"tracks", static_cast<qint64>(ground_map_->track_count())},
+                        {"epoch_tai_ns", QString::number(ground_map_->epoch().tai_nanoseconds())}});
+            }
+            if (scenario_) {
+                QJsonArray objects;
+                for (const auto &satellite : satellites_)
+                    objects.append(QJsonObject{
+                        {"id", QString::fromStdString(satellite.orbit->input.object_id)},
+                        {"revision",
+                         static_cast<qint64>(satellite.orbit->session.provenance().input_revision)},
+                        {"model_kind", satellite.model_kind}});
+                report.insert("scenario",
+                              QJsonObject{{"name", QString::fromStdString(scenario_->name())},
+                                          {"revision", static_cast<qint64>(scenario_->revision())},
+                                          {"objects", objects}});
+            }
+            if (orbit_) {
+                const auto &provenance = orbit_->track.samples().provenance();
+                report.insert(
+                    "orbit",
+                    QJsonObject{
+                        {"object_id", QString::fromStdString(provenance.object_id)},
+                        {"input_revision", static_cast<qint64>(provenance.input_revision)},
+                        {"algorithm", QString::fromStdString(provenance.algorithm)},
+                        {"cache_nodes",
+                         static_cast<qint64>(orbit_->track.samples().states().size())},
+                        {"first_tai_ns", QString::number(orbit_->input.first.tai_nanoseconds())},
+                        {"last_tai_ns", QString::number(orbit_->input.last.tai_nanoseconds())},
+                        {"step_seconds", orbit_->input.step_seconds},
+                        {"max_quarter_segment_check_error_m", orbit_->max_check_error_m},
+                        {"min_radius_m", orbit_->min_radius_m},
+                        {"max_radius_m", orbit_->max_radius_m},
+                        {"eop_source_id", QString::fromStdString(orbit_->eop_source_id)},
+                        {"display_model", "ITRF cubic Hermite; no extrapolation; display only"}});
+                report.insert("interactions", interaction_report_);
+                report.insert("imagery", "nasa-blue-marble-land-ocean-ice-2002-2048");
+                report.insert("appearance", QJsonObject{{"kind", model_kind_},
+                                                        {"diameter_km", model_diameter_km_}});
+            }
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
             if (benchmark_) {
                 report.insert("benchmark", benchmark_->report);
@@ -481,10 +914,647 @@ class Workbench final : public QMainWindow {
         if (benchmark_)
             return benchmark_->cache->sample(epoch);
 #endif
-        const std::array epochs{epoch};
-        const auto sample = session_.sample(epochs);
-        return visualization::rotate_snapshot(visualization::make_snapshot(sample, 0),
-                                              frames_->gcrf_to_itrf(epoch, eop_->at(epoch).sample));
+        visualization::RenderSnapshot result{epoch, core::FrameId::itrf, core::OriginId::earth, {}};
+        for (const auto &satellite : satellites_)
+            result.markers.push_back(satellite.orbit->track.sample(epoch).markers.front());
+        return result;
+    }
+    double duration_seconds() const {
+        return benchmarking_ ? 600
+               : scenario_   ? scenario_->last().seconds_since(scenario_->first())
+                             : 1;
+    }
+    bool busy() const { return candidate_.valid() || model_candidate_.valid(); }
+    void update_actions() {
+        if (benchmarking_)
+            return;
+        const bool active = scenario_.has_value();
+        const bool idle = !busy();
+        if (new_action_)
+            new_action_->setEnabled(idle);
+        if (example_action_)
+            example_action_->setEnabled(idle && runtime::two_body_available());
+        if (insert_action_)
+            insert_action_->setEnabled(active && idle && editor_);
+        if (insert_menu_)
+            insert_menu_->setEnabled(active);
+        if (time_toolbar_) {
+            time_toolbar_->setEnabled(active);
+            time_toolbar_->setVisible(active);
+        }
+        if (object_dock_) {
+            if (!active)
+                object_dock_->hide();
+            object_dock_->toggleViewAction()->setEnabled(active);
+        }
+        if (time_menu_)
+            time_menu_->setEnabled(active);
+        if (fit_action_)
+            fit_action_->setEnabled(active);
+        if (aux_action_)
+            aux_action_->setEnabled(active);
+        if (map_action_)
+            map_action_->setEnabled(active);
+        if (properties_action_)
+            properties_action_->setEnabled(
+                idle && (selected_.has_value() ||
+                         (scenario_ && objects_->currentItem() == scenario_item_)));
+        if (focus_action_)
+            focus_action_->setEnabled(selected_.has_value());
+    }
+    std::optional<std::size_t> object_index(const QTreeWidgetItem *item) const {
+        for (std::size_t i = 0; i < satellites_.size(); ++i)
+            if (satellites_[i].item == item)
+                return i;
+        return std::nullopt;
+    }
+    bool confirm_replace_scenario() {
+        if (!scenario_ || satellites_.empty())
+            return true;
+        return QMessageBox::question(
+                   this, QStringLiteral("替换当前场景"),
+                   QStringLiteral("当前版本尚未支持场景文件保存。继续将关闭当前场景及其对象。"),
+                   QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel) == QMessageBox::Ok;
+    }
+    void create_scenario() {
+        if (busy())
+            return;
+        const auto &coverage = eop_current_->data_info();
+        auto next = new_scenario_dialog(
+            this, coverage.first_epoch, coverage.last_epoch,
+            [this](core::Epoch first, core::Epoch last) { (void)data_for_interval(first, last); });
+        if (next && confirm_replace_scenario())
+            activate_scenario(std::move(*next));
+    }
+    std::shared_ptr<const core::IEarthOrientationProvider>
+    data_for_interval(core::Epoch first, core::Epoch last) const {
+        if (last.tai_nanoseconds() <= first.tai_nanoseconds())
+            throw std::invalid_argument("结束时间必须晚于开始时间。");
+        for (const auto &candidate : {eop_current_, eop_history_}) {
+            if (candidate &&
+                first.tai_nanoseconds() >= candidate->data_info().first_epoch.tai_nanoseconds() &&
+                last.tai_nanoseconds() <= candidate->data_info().last_epoch.tai_nanoseconds())
+                return candidate;
+        }
+        throw std::out_of_range("所选时段超出已安装的地球定向数据覆盖，请选择覆盖范围内的时间。");
+    }
+    void activate_scenario(application::Scenario next) {
+        if (busy())
+            throw std::logic_error(
+                "Finish the pending object update before replacing the scenario");
+        const auto next_eop = data_for_interval(next.first(), next.last());
+        if (!next.objects().empty())
+            throw std::invalid_argument("Create an empty scenario before inserting objects");
+        const auto old_tracks = orbit_group_->children;
+        const auto old_models = model_group_->children;
+        begin_change();
+        try {
+            orbit_group_->children.clear();
+            model_group_->children.clear();
+            rebuild();
+        } catch (...) {
+            orbit_group_->children = old_tracks;
+            model_group_->children = old_models;
+            rebuild();
+            throw;
+        }
+        if (properties_dialog_)
+            properties_dialog_->close();
+        satellites_.clear();
+        if (ground_map_) {
+            ground_map_->set_orbits({});
+            ground_map_->reset_view();
+        }
+        orbit_.reset();
+        model_node_ = {};
+        editor_target_.reset();
+        model_kind_ = 0;
+        model_diameter_km_ = 1000;
+        const QSignalBlocker block(objects_);
+        objects_->clear();
+        object_item_ = nullptr;
+        scenario_ = std::move(next);
+        eop_ = next_eop;
+        scenario_item_ = new QTreeWidgetItem(objects_, {QString::fromStdString(scenario_->name())});
+        scenario_item_->setIcon(0, workbench_icon(WorkbenchIcon::earth));
+        scenario_item_->setToolTip(
+            0, QStringLiteral("Scenario · 中心天体 Earth\n%1 — %2 TAI")
+                   .arg(display_tai(scenario_->first()), display_tai(scenario_->last())));
+        scenario_item_->setExpanded(true);
+        workspace_label_->setText(QString::fromStdString(scenario_->name()));
+        setWindowTitle(QString::fromStdString(scenario_->name()) + QStringLiteral(" · OrbitForge"));
+        set_selection(std::nullopt);
+        set_playing(false);
+        seek_epoch(scenario_->first());
+        snapshot_ = sample_frame(scenario_->first());
+        update_satellite();
+        selection_->update(snapshot_);
+        for (auto &slot : slots_)
+            slot->pick_candidates.clear();
+        workspace_pages_->setCurrentIndex(0);
+        object_dock_->show();
+        fit_pending_ = true;
+        update_actions();
+        show_orbit_status();
+    }
+    void open_example() {
+        if (busy() || !confirm_replace_scenario())
+            return;
+        activate_scenario(application::Scenario("TwoBodyExample", core::Epoch{0},
+                                                core::Epoch{7'200'000'000'000}));
+        begin_insert_satellite();
+        editor_->submit();
+        properties_dialog_->close();
+    }
+    void show_properties_dialog() {
+        if (!property_positioned_) {
+            properties_dialog_->move(frameGeometry().center() -
+                                     properties_dialog_->rect().center());
+            property_positioned_ = true;
+        }
+        properties_dialog_->show();
+        properties_dialog_->raise();
+        properties_dialog_->activateWindow();
+    }
+    void begin_insert_satellite() {
+        if (!scenario_ || !editor_ || busy())
+            return;
+        if (satellites_.size() >= 10000) {
+            QMessageBox::information(this, QStringLiteral("对象数量"),
+                                     QStringLiteral("当前场景最多支持 10,000 个卫星显示对象。"));
+            return;
+        }
+        OrbitInput input;
+        std::size_t suffix = satellites_.size() + 1;
+        do {
+            input.object_id = "Satellite" + std::to_string(suffix++);
+        } while (std::any_of(satellites_.begin(), satellites_.end(), [&](const auto &satellite) {
+            return satellite.orbit->input.object_id == input.object_id;
+        }));
+        input.first = scenario_->first();
+        input.last = scenario_->last();
+        input.initial.epoch = scenario_->first();
+        editor_target_.reset();
+        editor_->set_input(input);
+        editor_->set_create_mode(true);
+        editor_->set_appearance(0, {}, 1000);
+        editor_->show_appearance_result(QStringLiteral("新卫星默认使用点标记。"));
+        editor_->setToolTip({});
+        editor_->show_result(QStringLiteral("填写初始状态，点击“插入卫星”后加入场景。"));
+        inspector_pages_->setCurrentIndex(0);
+        properties_dialog_->setWindowTitle(QStringLiteral("插入卫星 · ") +
+                                           QString::fromStdString(scenario_->name()));
+        show_properties_dialog();
+    }
+    void set_playing(bool value) {
+        playing_ = value;
+        if (play_action_) {
+            play_action_->setText(value ? QStringLiteral("暂停") : QStringLiteral("播放"));
+            play_action_->setIcon(
+                workbench_icon(value ? WorkbenchIcon::pause : WorkbenchIcon::play));
+        }
+        clock_.restart();
+    }
+    void seek_epoch(core::Epoch epoch) {
+        if (!scenario_ || epoch.tai_nanoseconds() < scenario_->first().tai_nanoseconds() ||
+            epoch.tai_nanoseconds() > scenario_->last().tai_nanoseconds())
+            throw std::out_of_range("Requested display epoch lies outside the analysis interval");
+        seconds_ = epoch.seconds_since(scenario_->first());
+        requested_time_ = true;
+        const QSignalBlocker block(slider_);
+        slider_->setValue(qRound(seconds_ / duration_seconds() * 10000));
+        clock_.restart();
+    }
+    void choose_time() {
+        if (!scenario_)
+            return;
+        const bool resume = playing_;
+        set_playing(false);
+        QDialog dialog(this);
+        dialog.setWindowTitle(QStringLiteral("跳转时间"));
+        auto *layout = new QVBoxLayout(&dialog);
+        auto *caption = new QLabel(QStringLiteral("选择当前分析时段内的时间"));
+        layout->addWidget(caption);
+        auto *time = new EpochEditor;
+        time->set_scale(display_scale_);
+        time->set_range(scenario_->first(), scenario_->last());
+        time->set_epoch(snapshot_.epoch);
+        time->setMinimumWidth(380);
+        layout->addWidget(time);
+        auto *buttons = new QHBoxLayout;
+        buttons->addStretch();
+        auto *cancel = new QPushButton(QStringLiteral("取消"));
+        auto *apply = new QPushButton(QStringLiteral("跳转"));
+        apply->setObjectName("applyOrbit");
+        buttons->addWidget(cancel);
+        buttons->addWidget(apply);
+        layout->addLayout(buttons);
+        connect(cancel, &QPushButton::clicked, &dialog, &QDialog::reject);
+        connect(apply, &QPushButton::clicked, &dialog, [&dialog, time] {
+            try {
+                (void)time->epoch();
+                dialog.accept();
+            } catch (const std::exception &error) {
+                QMessageBox::information(&dialog, QStringLiteral("时间无效"),
+                                         QString::fromUtf8(error.what()));
+            }
+        });
+        if (dialog.exec() == QDialog::Accepted) {
+            const auto epoch = time->epoch();
+            if (scenario_ && epoch.tai_nanoseconds() >= scenario_->first().tai_nanoseconds() &&
+                epoch.tai_nanoseconds() <= scenario_->last().tai_nanoseconds())
+                seek_epoch(epoch);
+            else
+                QMessageBox::information(
+                    this, QStringLiteral("分析时段已更新"),
+                    QStringLiteral("新轨道的分析时段已改变，请重新选择跳转时间。"));
+        } else
+            set_playing(resume);
+    }
+    void open_properties() {
+        if (!selected_ && scenario_ && objects_->currentItem() == scenario_item_) {
+            open_scenario_properties();
+            return;
+        }
+        if (!properties_dialog_ || !selected_ || busy())
+            return;
+        editor_target_ = selected_;
+        const auto &satellite = satellites_.at(*editor_target_);
+        editor_->set_input(satellite.orbit->input);
+        editor_->set_create_mode(false);
+        editor_->set_appearance(satellite.model_kind, satellite.model_path,
+                                satellite.model_diameter_km);
+        editor_->show_appearance_result(satellite.model ? QStringLiteral("当前使用三维模型。")
+                                                        : QStringLiteral("当前使用点标记。"));
+        inspector_pages_->setCurrentIndex(0);
+        properties_dialog_->setWindowTitle(
+            QString::fromStdString(satellite.orbit->input.object_id) +
+            QStringLiteral(" · 对象属性"));
+        show_orbit_status();
+        show_properties_dialog();
+    }
+    void open_scenario_properties() {
+        if (!scenario_ || busy())
+            return;
+        QDialog dialog(this);
+        dialog.setObjectName("scenarioProperties");
+        dialog.setWindowTitle(QString::fromStdString(scenario_->name()) +
+                              QStringLiteral(" · 场景属性"));
+        dialog.setMinimumWidth(620);
+        auto *layout = new QVBoxLayout(&dialog);
+        layout->setContentsMargins(22, 18, 22, 18);
+        auto *form = new QFormLayout;
+        form->setSpacing(12);
+        auto *name = new QLineEdit(QString::fromStdString(scenario_->name()));
+        name->setReadOnly(true);
+        form->addRow(QStringLiteral("场景名称"), name);
+        form->addRow(QStringLiteral("中心天体"), new QLabel(QStringLiteral("Earth / 地球")));
+        for (const auto &[label, epoch] :
+             {std::pair{QStringLiteral("开始时间"), scenario_->first()},
+              std::pair{QStringLiteral("结束时间"), scenario_->last()}}) {
+            auto *control = new EpochEditor;
+            control->set_epoch(epoch);
+            control->set_read_only(true);
+            form->addRow(label, control);
+        }
+        form->addRow(QStringLiteral("对象数量"), new QLabel(QString::number(satellites_.size())));
+        form->addRow(
+            QStringLiteral("时长"),
+            new QLabel(QString::number(scenario_->last().seconds_since(scenario_->first()) / 3600,
+                                       'g', 8) +
+                       QStringLiteral(" 小时")));
+        layout->addLayout(form);
+        auto *hint =
+            new QLabel(QStringLiteral("当前版本的场景时段在创建后保持固定。\n地球定向数据：") +
+                       QString::fromStdString(eop_->data_info().id) +
+                       (eop_ == eop_current_ ? QStringLiteral("（含预测值）") : QString{}));
+        hint->setObjectName("hint");
+        hint->setWordWrap(true);
+        layout->addWidget(hint);
+        auto *close = new QPushButton(QStringLiteral("关闭"));
+        layout->addWidget(close, 0, Qt::AlignRight);
+        connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
+        dialog.exec();
+    }
+    void set_selection(std::optional<std::size_t> selection, bool synchronize_tree = true) {
+        selected_ = selection;
+        if (benchmarking_)
+            return;
+        if (ground_map_)
+            ground_map_->set_selection(selection);
+        if (synchronize_tree && objects_) {
+            const QSignalBlocker block(objects_);
+            objects_->clearSelection();
+            objects_->setCurrentItem(selected_ ? satellites_.at(*selected_).item : nullptr);
+            if (selected_)
+                objects_->scrollToItem(satellites_.at(*selected_).item);
+        }
+        update_actions();
+        show_timeline_status();
+    }
+    void update_satellite() {
+        if (benchmarking_) {
+            markers_->update(snapshot_);
+            return;
+        }
+        visualization::RenderSnapshot points{
+            snapshot_.epoch, snapshot_.frame, snapshot_.origin, {}};
+        for (std::size_t i = 0; i < satellites_.size(); ++i) {
+            const auto &satellite = satellites_[i];
+            const auto &marker = snapshot_.markers.at(i);
+            if (satellite.model) {
+                const auto &r = marker.position_m;
+                satellite.model->matrix = vsg::translate(r[0], r[1], r[2]) *
+                                          vsg::scale(satellite.model_diameter_km * 1000);
+            } else
+                points.markers.push_back(marker);
+        }
+        markers_->update(points);
+        if (ground_map_)
+            ground_map_->set_snapshot(snapshot_);
+    }
+    void start_model(int kind, const QString &path, double diameter_km) {
+        if (busy() || !editor_target_)
+            return;
+        if (kind < 0 || kind > 2 || !std::isfinite(diameter_km) || diameter_km <= 0 ||
+            (kind == 2 && path.isEmpty())) {
+            editor_->show_appearance_result(QStringLiteral("请选择模型文件和有效的显示尺寸。"),
+                                            true);
+            return;
+        }
+        pending_model_kind_ = kind;
+        pending_model_target_ = *editor_target_;
+        pending_model_path_ = path;
+        pending_model_diameter_km_ = diameter_km;
+        model_candidate_ = std::async(std::launch::async, [kind, path] {
+            if (kind == 0)
+                return vsg::ref_ptr<vsg::MatrixTransform>{};
+            auto placement = vsg::MatrixTransform::create();
+            placement->addChild(make_satellite_model(
+                kind == 1 ? std::filesystem::path{} : std::filesystem::path(path.toStdWString())));
+            return placement;
+        });
+        editor_->set_appearance_busy(true);
+        update_actions();
+    }
+    void poll_model() {
+        if (!model_candidate_.valid() ||
+            model_candidate_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            return;
+        editor_->set_appearance_busy(false);
+        try {
+            auto candidate = model_candidate_.get();
+            auto &satellite = satellites_.at(pending_model_target_);
+            const auto previous = satellite.model_host->children;
+            begin_change();
+            try {
+                satellite.model_host->children.clear();
+                if (candidate)
+                    satellite.model_host->addChild(candidate);
+                rebuild();
+            } catch (...) {
+                satellite.model_host->children = previous;
+                try {
+                    rebuild();
+                } catch (...) {
+                    fail("Cannot restore the previous satellite appearance");
+                    return;
+                }
+                throw;
+            }
+            satellite.model = std::move(candidate);
+            satellite.model_kind = pending_model_kind_;
+            satellite.model_diameter_km = pending_model_diameter_km_;
+            satellite.model_path = pending_model_path_;
+            if (pending_model_target_ == 0) {
+                model_node_ = satellite.model;
+                model_kind_ = satellite.model_kind;
+                model_diameter_km_ = satellite.model_diameter_km;
+            }
+            last_model_outcome_ = "applied";
+            update_satellite();
+            editor_->show_appearance_result(
+                satellite.model ? QStringLiteral("已应用三维模型；轨道状态保持不变。")
+                                : QStringLiteral("当前使用点标记。"));
+        } catch (const std::exception &error) {
+            editor_->show_appearance_result(
+                QStringLiteral("未应用；原外观保留。\n") + QString::fromUtf8(error.what()), true);
+            last_model_outcome_ = "rejected";
+        } catch (const vsg::Exception &error) {
+            editor_->show_appearance_result(QStringLiteral("模型编译失败；原外观保留。\n") +
+                                                QString::fromStdString(error.message),
+                                            true);
+            last_model_outcome_ = "rejected";
+        }
+        update_actions();
+    }
+    void show_timeline_status() {
+        if (timeline_ && scenario_) {
+            timeline_->set_interval(
+                scenario_->first().tai_nanoseconds() / 1'000'000,
+                scenario_->last().tai_nanoseconds() / 1'000'000,
+                selected_
+                    ? QString::fromStdString(satellites_.at(*selected_).orbit->input.object_id)
+                    : QString::fromStdString(scenario_->name()),
+                selected_.has_value());
+        }
+    }
+    void show_orbit_status() {
+        show_timeline_status();
+        if (!editor_ || !editor_target_ || busy())
+            return;
+        const auto &orbit = satellites_.at(*editor_target_).orbit;
+        const auto &coverage = eop_->data_info();
+        editor_->show_result(
+            QStringLiteral("轨道已就绪 · 分析时长 %1 min").arg(duration_seconds() / 60, 0, 'f', 1));
+        editor_->setToolTip(
+            QStringLiteral("当前地球定向数据覆盖：\n%1 — %2 TAI\n"
+                           "显示插值抽样误差 %3 m，不作为分析输入。")
+                .arg(display_tai(coverage.first_epoch), display_tai(coverage.last_epoch))
+                .arg(orbit->max_check_error_m, 0, 'g', 4));
+    }
+    void start_orbit(OrbitInput input) {
+        if (busy() || !scenario_)
+            return;
+        pending_orbit_target_ = editor_target_;
+        input.first = scenario_->first();
+        input.last = scenario_->last();
+        if (editor_target_)
+            input.object_id = satellites_.at(*editor_target_).orbit->input.object_id;
+        else if (std::any_of(satellites_.begin(), satellites_.end(), [&](const auto &satellite) {
+                     return satellite.orbit->input.object_id == input.object_id;
+                 })) {
+            last_orbit_outcome_ = "rejected";
+            editor_->show_result(QStringLiteral("对象 ID 已存在，请使用其他名称。"), true);
+            return;
+        }
+        cancellation_ = std::make_shared<std::atomic_bool>(false);
+        last_orbit_outcome_.clear();
+        const auto revision =
+            editor_target_
+                ? satellites_.at(*editor_target_).orbit->session.provenance().input_revision + 1
+                : 1;
+        candidate_ = std::async(std::launch::async, [this, input = std::move(input), revision,
+                                                     cancel = cancellation_] {
+            auto session = runtime::make_two_body_session(
+                input.initial, core::GravitationalParameter{input.mu}, input.object_id, revision);
+            return prepare_orbit_scene(input, std::move(session), *frames_, *eop_, *cancel);
+        });
+        editor_->set_busy(true);
+        update_actions();
+    }
+    void poll_orbit() {
+        if (!candidate_.valid() ||
+            candidate_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            return;
+        editor_->set_busy(false);
+        try {
+            auto candidate = candidate_.get();
+            if (cancellation_->load())
+                throw OrbitCancelled{};
+            auto next_scenario = scenario_->with_object(candidate->session);
+            std::vector<std::shared_ptr<const OrbitScene>> orbits;
+            for (const auto &satellite : satellites_)
+                orbits.push_back(satellite.orbit);
+            if (pending_orbit_target_)
+                orbits.at(*pending_orbit_target_) = candidate;
+            else
+                orbits.push_back(candidate);
+            auto ground_tracks = GroundMap::prepare_tracks(orbits);
+            auto track = render_vsg::make_track(candidate->track.nodes());
+            auto model_host = vsg::Group::create();
+            const auto previous = orbit_group_->children;
+            const auto previous_models = model_group_->children;
+            begin_change();
+            try {
+                if (pending_orbit_target_)
+                    orbit_group_->children.at(*pending_orbit_target_) = track;
+                else {
+                    orbit_group_->addChild(track);
+                    model_group_->addChild(model_host);
+                }
+                rebuild();
+            } catch (...) {
+                orbit_group_->children = previous;
+                model_group_->children = previous_models;
+                try {
+                    rebuild();
+                } catch (...) {
+                    fail("Cannot restore the previous orbit after scene compilation failed");
+                    return;
+                }
+                throw;
+            }
+            std::size_t index = pending_orbit_target_.value_or(satellites_.size());
+            if (pending_orbit_target_)
+                satellites_[index].orbit = std::move(candidate);
+            else {
+                Satellite satellite;
+                satellite.orbit = std::move(candidate);
+                satellite.model_host = model_host;
+                satellite.item = new QTreeWidgetItem(
+                    scenario_item_, {QString::fromStdString(satellite.orbit->input.object_id)});
+                satellite.item->setIcon(
+                    0, workbench_icon(WorkbenchIcon::satellite, QColor("#78a4c9")));
+                satellite.item->setToolTip(0, QStringLiteral("双击打开对象属性 · 默认显示为点"));
+                satellites_.push_back(std::move(satellite));
+                scenario_item_->setExpanded(true);
+            }
+            scenario_ = std::move(next_scenario);
+            ground_map_->publish_tracks(std::move(ground_tracks));
+            editor_target_ = index;
+            editor_->set_create_mode(false);
+            properties_dialog_->setWindowTitle(
+                QString::fromStdString(satellites_[index].orbit->input.object_id) +
+                QStringLiteral(" · 对象属性"));
+            orbit_ = satellites_.front().orbit;
+            object_item_ = satellites_.front().item;
+            snapshot_ = sample_frame(scenario_->first());
+            update_satellite();
+            set_selection(index);
+            selection_->update({snapshot_.epoch, snapshot_.frame, snapshot_.origin, {}});
+            for (auto &slot : slots_)
+                slot->pick_candidates.clear();
+            seconds_ = 0;
+            requested_time_ = true;
+            const QSignalBlocker block(slider_);
+            slider_->setValue(0);
+            clock_.restart();
+            initial_position_ = snapshot_.markers.front().position_m;
+            fit_views();
+            fit_pending_ = true;
+            show_orbit_status();
+            last_orbit_outcome_ = "applied";
+        } catch (const OrbitCancelled &) {
+            editor_->show_result(QStringLiteral("已取消；继续显示原场景。"));
+            last_orbit_outcome_ = "cancelled";
+        } catch (const std::exception &error) {
+            editor_->show_result(
+                QStringLiteral("未应用；原场景保留。\n") + QString::fromUtf8(error.what()), true);
+            last_orbit_outcome_ = "rejected";
+        } catch (const vsg::Exception &error) {
+            editor_->show_result(QStringLiteral("轨迹资源编译失败；原场景已恢复。\n") +
+                                     QString::fromStdString(error.message),
+                                 true);
+            last_orbit_outcome_ = "rejected";
+        }
+        update_actions();
+    }
+    void fit_views() {
+        if (benchmarking_ || !scenario_)
+            return;
+        double bound = 6378137.0;
+        for (const auto &satellite : satellites_)
+            bound = std::max(bound, satellite.orbit->max_radius_m);
+        bound *= 1.15;
+        const auto r = snapshot_.markers.empty()
+                           ? std::array<double, 3>{-3e6, 5e6, 2e6}
+                           : snapshot_.markers.at(selected_.value_or(0)).position_m;
+        const auto direction = vsg::normalize(vsg::dvec3(r[0], r[1], r[2]));
+        const auto reference_up =
+            std::abs(direction.z) > 0.9 ? vsg::dvec3(0, 1, 0) : vsg::dvec3(0, 0, 1);
+        const auto side = vsg::normalize(vsg::cross(reference_up, direction));
+        for (std::size_t i = 0; i < slots_.size(); ++i) {
+            auto &slot = *slots_[i];
+            auto *perspective =
+                dynamic_cast<vsg::Perspective *>(slot.camera->projectionMatrix.get());
+            const double half_fov = std::atan(std::tan(35.0 * std::acos(-1.0) / 360.0) *
+                                              std::min(1.0, perspective->aspectRatio));
+            const double distance = bound / std::sin(half_fov);
+            const auto view_direction = vsg::normalize(direction + side * (i ? 0.22 : -0.22));
+            auto *look = dynamic_cast<vsg::LookAt *>(slot.camera->viewMatrix.get());
+            look->eye = view_direction * distance;
+            look->center = vsg::dvec3(0, 0, 0);
+            look->up = vsg::normalize(vsg::cross(view_direction, side));
+            if (slot.trackball)
+                slot.trackball->setViewpoint(vsg::LookAt::create(look->eye, look->center, look->up),
+                                             0);
+            perspective->nearDistance = 6378.137;
+            perspective->farDistance = distance + bound * 20;
+        }
+    }
+    void focus_satellite() {
+        if (!selected_)
+            return;
+        const auto &satellite = satellites_.at(*selected_);
+        const auto &r = snapshot_.markers.at(*selected_).position_m;
+        const vsg::dvec3 centre(r[0], r[1], r[2]);
+        const double distance = satellite.model ? satellite.model_diameter_km * 3000 : 1e6;
+        for (auto &slot : slots_) {
+            auto *look = dynamic_cast<vsg::LookAt *>(slot->camera->viewMatrix.get());
+            const auto direction = vsg::normalize(look->eye - centre);
+            const auto viewpoint =
+                vsg::LookAt::create(centre + direction * distance, centre, look->up);
+            if (slot->trackball)
+                slot->trackball->setViewpoint(viewpoint, 0);
+            else {
+                look->eye = viewpoint->eye;
+                look->center = centre;
+            }
+            auto *perspective =
+                dynamic_cast<vsg::Perspective *>(slot->camera->projectionMatrix.get());
+            perspective->nearDistance = std::max(0.01, distance * 1e-4);
+        }
     }
     void fail(const std::string &message) {
         failure_ = QString::fromStdString(message);
@@ -520,14 +1590,99 @@ class Workbench final : public QMainWindow {
             current->container->setFixedSize(width, height);
         }
         if (secondary) {
-            current->dock = new QDockWidget(QStringLiteral("三维视图 2"), this);
+            current->dock = new QDockWidget(QStringLiteral("辅助三维视图"), this);
             current->dock->setWidget(current->container);
             addDockWidget(Qt::RightDockWidgetArea, current->dock);
-            resizeDocks({current->dock}, {600}, Qt::Horizontal);
-            auto *action = menuBar()->addAction(QStringLiteral("显示视图 2"));
-            connect(action, &QAction::triggered, current->dock, &QWidget::show);
+            if (benchmarking_) {
+                resizeDocks({current->dock}, {600}, Qt::Horizontal);
+                auto *action = menuBar()->addAction(QStringLiteral("显示视图 2"));
+                connect(action, &QAction::triggered, current->dock, &QWidget::show);
+            } else {
+                style_dock(current->dock, WorkbenchIcon::views);
+                auto *action = current->dock->toggleViewAction();
+                aux_action_ = action;
+                action->setIcon(workbench_icon(WorkbenchIcon::views));
+                action->setText(QStringLiteral("辅助视图"));
+                action->setShortcut(QKeySequence("Ctrl+2"));
+                view_menu_->addAction(action);
+                commands_->addAction(action);
+                connect(current->dock, &QDockWidget::visibilityChanged, this,
+                        [this](bool) { fit_pending_ = true; });
+            }
         } else {
-            setCentralWidget(current->container);
+            if (benchmarking_) {
+                setCentralWidget(current->container);
+            } else {
+                auto *panel = new QWidget;
+                auto *layout = new QVBoxLayout(panel);
+                layout->setContentsMargins(0, 0, 0, 0);
+                layout->setSpacing(0);
+                auto *header = new QWidget;
+                header->setObjectName("viewHeading");
+                auto *bar = new QHBoxLayout(header);
+                bar->setContentsMargins(14, 7, 14, 7);
+                bar->setSpacing(10);
+                auto *symbol = new QLabel;
+                symbol->setPixmap(
+                    workbench_icon(WorkbenchIcon::earth, QColor("#65cbdc")).pixmap(18, 18));
+                bar->addWidget(symbol);
+                auto *title = new QLabel(QStringLiteral("3D 地球"));
+                title->setObjectName("viewTitle");
+                bar->addWidget(title);
+                auto *reference = new QLabel("ITRF");
+                reference->setObjectName("badge");
+                bar->addWidget(reference);
+                bar->addStretch();
+                auto *hint = new QLabel(QStringLiteral("拖动旋转 · 滚轮缩放"));
+                hint->setObjectName("hint");
+                bar->addWidget(hint);
+                layout->addWidget(header);
+                layout->addWidget(current->container, 1);
+                workspace_pages_ = new QStackedWidget;
+                workspace_pages_->addWidget(panel);
+                auto *welcome = new QWidget;
+                welcome->setObjectName("welcome");
+                auto *welcome_layout = new QVBoxLayout(welcome);
+                welcome_layout->setContentsMargins(48, 40, 48, 40);
+                welcome_layout->addStretch();
+                auto *mark = new QLabel;
+                mark->setPixmap(
+                    workbench_icon(WorkbenchIcon::orbit, QColor("#4a80b5")).pixmap(56, 56));
+                welcome_layout->addWidget(mark, 0, Qt::AlignHCenter);
+                auto *heading = new QLabel(QStringLiteral("从一个场景开始"));
+                heading->setObjectName("welcomeTitle");
+                heading->setAlignment(Qt::AlignCenter);
+                welcome_layout->addWidget(heading);
+                auto *description =
+                    new QLabel(QStringLiteral("创建 "
+                                              "Scenario，设定分析时间，再插入卫星。\n轨道参数与显示"
+                                              "外观可在对象属性中配置。"));
+                description->setObjectName("muted");
+                description->setAlignment(Qt::AlignCenter);
+                description->setWordWrap(true);
+                welcome_layout->addWidget(description);
+                welcome_layout->addSpacing(20);
+                auto *create = new QPushButton(workbench_icon(WorkbenchIcon::orbit),
+                                               QStringLiteral("新建场景"));
+                create->setObjectName("applyOrbit");
+                create->setMinimumWidth(200);
+                connect(create, &QPushButton::clicked, new_action_, &QAction::trigger);
+                welcome_layout->addWidget(create, 0, Qt::AlignHCenter);
+                auto *example = new QPushButton(QStringLiteral("打开二体示例"));
+                example->setMinimumWidth(200);
+                connect(example, &QPushButton::clicked, example_action_, &QAction::trigger);
+                welcome_layout->addWidget(example, 0, Qt::AlignHCenter);
+                welcome_layout->addSpacing(24);
+                auto *steps = new QLabel(
+                    QStringLiteral("01  创建场景     →     02  插入对象     →     03  配置与分析"));
+                steps->setObjectName("hint");
+                steps->setAlignment(Qt::AlignCenter);
+                welcome_layout->addWidget(steps);
+                welcome_layout->addStretch();
+                workspace_pages_->addWidget(welcome);
+                workspace_pages_->setCurrentWidget(welcome);
+                setCentralWidget(workspace_pages_);
+            }
         }
         constexpr double radius = 6378137.0;
         // Two independent cameras that both face the fixed demo's visible hemisphere.
@@ -551,7 +1706,8 @@ class Workbench final : public QMainWindow {
             if (run_ && !injecting_input_)
                 return;
 #endif
-            selected_ = render_vsg::pick_marker(current->pick_candidates, point.x(), point.y(), 8);
+            set_selection(
+                render_vsg::pick_marker(current->pick_candidates, point.x(), point.y(), 8));
         };
         current->window->initializeWindow();
     }
@@ -605,7 +1761,9 @@ class Workbench final : public QMainWindow {
         globe_->prepare_view(*slot.view);
         auto render_graph = vsg::RenderGraph::create(adapter, slot.view);
         slot.render_graph = render_graph;
-        render_graph->setClearValues({{0.018f, 0.025f, 0.045f, 1.0f}});
+        render_graph->setClearValues(benchmarking_
+                                         ? VkClearColorValue{{0.018f, 0.025f, 0.045f, 1.0f}}
+                                         : VkClearColorValue{{0.004f, 0.008f, 0.017f, 1.0f}});
         slot.graph = vsg::CommandGraph::create(adapter);
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
         if (run_) {
@@ -689,6 +1847,28 @@ class Workbench final : public QMainWindow {
         }
     }
     void frame() {
+        poll_orbit();
+        poll_model();
+        if (!benchmarking_ && !smoke_dir_.isEmpty())
+            scenario_smoke_step();
+        if (!benchmarking_ && !scenario_)
+            return;
+        if (!benchmarking_ && !smoke_dir_.isEmpty() && smoke_bootstrap_ == 3 &&
+            frame_count_ == 20) {
+            save_workbench_image("workbench-default.png");
+            slots_[1]->dock->show();
+            open_properties();
+        }
+        if (!benchmarking_ && !smoke_dir_.isEmpty() && properties_dialog_ &&
+            smoke_bootstrap_ == 3) {
+            if (frame_count_ == 21 &&
+                !properties_dialog_->grab().save(smoke_dir_ + "/object-properties.png"))
+                throw std::runtime_error("Cannot save the object properties panel");
+            if (frame_count_ == 22)
+                properties_dialog_->close();
+        }
+        if (!smoke_dir_.isEmpty() && !benchmarking_ && editor_)
+            orbit_smoke_step();
         if (viewer_->windows().empty())
             return;
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
@@ -722,20 +1902,28 @@ class Workbench final : public QMainWindow {
             }
         }
 #endif
-        if (!requested_time_ && (playing_ || !smoke_dir_.isEmpty())) {
-            seconds_ = !smoke_dir_.isEmpty()
-                           ? static_cast<double>(frame_count_)
-                           : std::fmod(seconds_ + static_cast<double>(clock_.restart()) *
-                                                      (benchmarking_ ? 0.01 : 0.02),
-                                       benchmarking_ ? 600.0 : 300.0);
+        if (!requested_time_ && (playing_ || (benchmarking_ && !smoke_dir_.isEmpty()))) {
+            seconds_ =
+                !smoke_dir_.isEmpty()
+                    ? std::fmod(static_cast<double>(frame_count_), duration_seconds())
+                    : std::fmod(seconds_ + static_cast<double>(clock_.restart()) *
+                                               (benchmarking_ ? 0.01 : playback_rate_ * 0.001),
+                                duration_seconds());
             slider_->blockSignals(true);
-            slider_->setValue(static_cast<int>(seconds_));
+            slider_->setValue(benchmarking_ ? static_cast<int>(seconds_)
+                                            : qRound(10000 * seconds_ / duration_seconds()));
             slider_->blockSignals(false);
         }
         requested_time_ = false;
-        const core::Epoch epoch(static_cast<std::int64_t>(std::llround(seconds_ * 1e9)));
+        const core::Epoch epoch((benchmarking_ ? 0 : scenario_->first().tai_nanoseconds()) +
+                                static_cast<std::int64_t>(std::llround(seconds_ * 1e9)));
         snapshot_ = sample_frame(epoch);
-        markers_->update(snapshot_);
+        update_satellite();
+        if (time_label_)
+            time_label_->setText(calendar_text(snapshot_.epoch, display_scale_) +
+                                 (display_scale_ == CalendarScale::utc   ? " UTC"
+                                  : display_scale_ == CalendarScale::tai ? " TAI"
+                                                                         : " TT"));
         visualization::RenderSnapshot selected_snapshot{
             snapshot_.epoch, snapshot_.frame, snapshot_.origin, {}};
         if (selected_)
@@ -756,6 +1944,10 @@ class Workbench final : public QMainWindow {
             const auto previous = slot->render_graph->previous_extent;
             if (extent.width != previous.width || extent.height != previous.height)
                 run_exclusive([&] { slot->render_graph->resized(); });
+        }
+        if (!benchmarking_ && (frame_count_ == 0 || fit_pending_)) {
+            fit_views();
+            fit_pending_ = false;
         }
         viewer_->update();
         for (const auto &slot : slots_) {
@@ -781,13 +1973,18 @@ class Workbench final : public QMainWindow {
         const bool capture =
             !smoke_dir_.isEmpty() &&
             (frame_count_ == 19 || frame_count_ == 189 ||
-             (benchmarking_ && (frame_count_ == 30 || frame_count_ == 160 || frame_count_ == 180)));
+             (benchmarking_ &&
+              (frame_count_ == 30 || frame_count_ == 160 || frame_count_ == 180)) ||
+             (!benchmarking_ &&
+              (smoke_bootstrap_ == 1 || orbit_capture_ ||
+               (orbit_smoke_stage_ == orbit_smoke_complete && frame_count_ >= 189))));
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
         const auto update_qpc = run_ ? BenchmarkRun::qpc() : 0;
 #endif
         if (capture)
             for (const auto &slot : slots_)
-                slot->capture->request();
+                if (slot->capture && slot->window->isExposed())
+                    slot->capture->request();
         // VSG's convenience wrappers discard VkResult. This GUI-thread loop checks them.
         for (const auto &task : viewer_->recordAndSubmitTasks)
             for (const auto &graph : task->commandGraphs)
@@ -813,7 +2010,8 @@ class Workbench final : public QMainWindow {
 #endif
             if (capture)
                 for (const auto &slot : slots_)
-                    if (std::find(task->commandGraphs.begin(), task->commandGraphs.end(),
+                    if (slot->window->isExposed() &&
+                        std::find(task->commandGraphs.begin(), task->commandGraphs.end(),
                                   slot->graph) != task->commandGraphs.end()) {
                         const auto pixels = slot->capture->read_after_submit(*task->fence());
                         slot->captured_image =
@@ -900,14 +2098,18 @@ class Workbench final : public QMainWindow {
 #endif
         ++frame_count_;
         statusBar()->showMessage(
-            QStringLiteral("ITRF · 椭球地球 | 2000-01-01 12:00:00 TAI + %1 s | %2")
-                .arg(seconds_, 0, 'f', 1)
-                .arg(selected_ ? QString::fromStdString(snapshot_.markers.at(*selected_).object_id)
-                               : QStringLiteral("未选中")));
-        if (!smoke_dir_.isEmpty()) {
+            benchmarking_ ? QStringLiteral("ITRF · 固定双视图基准场景")
+            : satellites_.empty()
+                ? QStringLiteral("空场景  ·  使用“插入卫星”添加第一个对象")
+                : QStringLiteral("就绪  ·  二体轨道  /  地固空间轨迹  ·  %1")
+                      .arg(selected_
+                               ? QString::fromStdString(snapshot_.markers.at(*selected_).object_id)
+                               : QStringLiteral("未选择对象")));
+        if (!smoke_dir_.isEmpty() && (benchmarking_ || smoke_bootstrap_ == 3)) {
             if (frame_count_ == 20) {
                 for (std::size_t i = 0; i < slots_.size(); ++i)
-                    if (!slots_[i]->captured_image.save(smoke_dir_ +
+                    if (slots_[i]->window->isExposed() &&
+                        !slots_[i]->captured_image.save(smoke_dir_ +
                                                         QString("/view-%1-initial.png").arg(i)))
                         throw std::runtime_error("Cannot save initial swapchain image");
             }
@@ -925,7 +2127,8 @@ class Workbench final : public QMainWindow {
                 recreate_window(*slots_[0]);
             if (frame_count_ == 145)
                 recreate_window(*slots_[1]);
-            if (frame_count_ == 190)
+            if (frame_count_ >= 190 &&
+                (benchmarking_ || !editor_ || orbit_smoke_stage_ == orbit_smoke_complete))
                 finish_smoke();
             else if (benchmarking_)
                 benchmark_smoke_step();
@@ -942,6 +2145,560 @@ class Workbench final : public QMainWindow {
         QCoreApplication::sendEvent(slot.window, &press);
         QCoreApplication::sendEvent(slot.window, &release);
         injecting_input_ = false;
+    }
+    void scenario_smoke_step() {
+        const auto require = [](bool condition, const char *message) {
+            if (!condition)
+                throw std::runtime_error(message);
+        };
+        const auto record = [&](const char *kind) {
+            interaction_report_.append(QJsonObject{{"kind", kind}, {"passed", true}});
+        };
+        if (smoke_bootstrap_ == 0) {
+            require(!scenario_ && satellites_.empty() && !insert_action_->isEnabled() &&
+                        !time_toolbar_->isEnabled(),
+                    "Startup must require a scenario before inserting objects");
+            require(grab().save(smoke_dir_ + "/welcome.png"), "Cannot save welcome screenshot");
+            record("startup-without-scenario");
+            EpochEditor epoch_control;
+            epoch_control.set_epoch(core::Epoch{1});
+            for (auto scale : {CalendarScale::tai, CalendarScale::tt, CalendarScale::utc}) {
+                epoch_control.set_scale(scale);
+                require(epoch_control.epoch() == core::Epoch{1},
+                        "Time scale selection changed the physical epoch");
+            }
+            const auto clock_provider = runtime::make_builtin_time_provider();
+            const auto leap = clock_provider->from_utc({2016, 12, 31, 23, 59, 60, 0});
+            epoch_control.set_epoch(core::Epoch{leap.tai_nanoseconds() - 1'000'000'000});
+            epoch_control.adjust_seconds(1);
+            require(epoch_control.epoch() == leap &&
+                        epoch_control.findChild<QLineEdit *>("epochValue")->text() ==
+                            "2016-12-31 23:59:60 UTC",
+                    "UTC shortcut skipped the leap second");
+            epoch_control.findChild<QLineEdit *>("epochValue")->setText("2016-12-31 23:59:59 UTC");
+            epoch_control.findChild<QLineEdit *>("epochValue")->setText("2016-12-31 23:59:60 UTC");
+            require(epoch_control.epoch() == leap, "UTC leap-second calendar input lost its epoch");
+            epoch_control.set_scale(CalendarScale::tt);
+            require(epoch_control.findChild<QLineEdit *>("epochValue")->text() ==
+                        "2017-01-01 00:01:08.184 TT",
+                    "TT calendar offset is incorrect at the leap second");
+            epoch_control.set_scale(CalendarScale::utc);
+            epoch_control.findChild<QLineEdit *>("epochValue")->setText("2016-12-30 23:59:60 UTC");
+            bool rejected_leap = false;
+            try {
+                (void)epoch_control.epoch();
+            } catch (const std::exception &) {
+                rejected_leap = true;
+            }
+            require(rejected_leap, "Invalid UTC second 60 was accepted by the editor");
+            epoch_control.findChild<QLineEdit *>("epochValue")
+                ->setText("2000-01-01 12:00:32.184000001 TT");
+            require(epoch_control.epoch() == core::Epoch{1},
+                    "Pasted unified TT epoch lost nanoseconds");
+            epoch_control.set_epoch(epoch_control.epoch());
+            require(epoch_control.findChild<QLineEdit *>("epochValue")->text() ==
+                        "2000-01-01 12:00:32.184000001 TT",
+                    "Rebinding a pasted epoch lost its explicit time scale");
+            epoch_control.open_picker();
+            auto *picker = epoch_control.findChild<QFrame *>("epochPopup");
+            require(picker, "Unified epoch picker did not open");
+            for (const int scale : {0, 1, 2})
+                picker->findChild<QComboBox *>("pickerScale")->setCurrentIndex(scale);
+            picker->findChild<QPushButton *>("applyOrbit")->click();
+            require(epoch_control.epoch() == core::Epoch{1},
+                    "Picker scale changes lost nanoseconds");
+            EpochEditor tai_control;
+            tai_control.findChild<QLineEdit *>("epochValue")
+                ->setText("2250-01-01 00:00:00.000000001 TAI");
+            tai_control.set_epoch(tai_control.epoch());
+            tai_control.adjust_seconds(1);
+            require(tai_control.findChild<QLineEdit *>("epochValue")->text() ==
+                        "2250-01-01 00:00:01.000000001 TAI",
+                    "Pasted TAI binding/adjustment incorrectly required UTC coverage");
+            record("time-scales-calendar-and-leap-shortcuts");
+            // Exercise the same modal creation path as Ctrl+N without re-entering frame().
+            timer_.stop();
+            QTimer::singleShot(0, this, [this] {
+                auto *dialog = findChild<QDialog *>("newScenarioDialog");
+                if (dialog)
+                    dialog->reject();
+                else
+                    fail("Scenario creation dialog did not open");
+            });
+            create_scenario();
+            require(!scenario_, "Cancelling new scenario created one");
+            record("cancel-new-scenario");
+            QTimer::singleShot(0, this, [this] {
+                auto *dialog = findChild<QDialog *>("newScenarioDialog");
+                if (!dialog) {
+                    fail("Scenario creation dialog did not open");
+                    return;
+                }
+                auto *start =
+                    dynamic_cast<EpochEditor *>(dialog->findChild<QWidget *>("scenarioStart"));
+                auto *end =
+                    dynamic_cast<EpochEditor *>(dialog->findChild<QWidget *>("scenarioEnd"));
+                const auto time = runtime::make_builtin_time_provider();
+                const auto today = QDateTime::currentDateTimeUtc().date();
+                const auto next_day = today.addDays(1);
+                if (start->epoch() !=
+                        time->from_utc({today.year(), today.month(), today.day(), 0, 0, 0, 0}) ||
+                    end->epoch() != time->from_utc({next_day.year(), next_day.month(),
+                                                    next_day.day(), 0, 0, 0, 0})) {
+                    fail("Scenario defaults must be UTC today's midnight through tomorrow's "
+                         "midnight");
+                    dialog->reject();
+                    return;
+                }
+                if (!dialog->grab().save(smoke_dir_ + "/new-scenario-default.png"))
+                    fail("Cannot save default scenario panel");
+                start->open_picker();
+                if (auto *popup = start->findChild<QFrame *>("epochPopup")) {
+                    if (!popup->grab().save(smoke_dir_ + "/epoch-picker.png"))
+                        fail("Cannot save date picker");
+                    popup->close();
+                } else
+                    fail("Calendar did not open");
+                interaction_report_.append(QJsonObject{
+                    {"kind", "utc-today-one-day-default-and-popovers"}, {"passed", true}});
+                dynamic_cast<EpochEditor *>(dialog->findChild<QWidget *>("scenarioStart"))
+                    ->set_epoch(core::Epoch{-1'000'000'000'000});
+                dynamic_cast<EpochEditor *>(dialog->findChild<QWidget *>("scenarioEnd"))
+                    ->set_epoch(core::Epoch{6'600'000'000'000});
+                if (!dialog->grab().save(smoke_dir_ + "/new-scenario.png"))
+                    fail("Cannot save creation panel");
+                dialog->findChild<QPushButton *>("applyOrbit")->click();
+            });
+            create_scenario();
+            timer_.start();
+            require(scenario_->objects().empty() && satellites_.empty() &&
+                        insert_action_->isEnabled(),
+                    "A new scenario must be empty and enable insertion");
+            record("create-empty-scenario");
+            smoke_bootstrap_ = 1;
+        } else if (smoke_bootstrap_ == 1 && frame_count_ >= 3) {
+            save_workbench_image("empty-scenario.png");
+            begin_insert_satellite();
+            properties_dialog_->close();
+            require(satellites_.empty() && scenario_->objects().empty(),
+                    "Closing an insertion draft created an object");
+            record("close-insert-without-applying");
+            begin_insert_satellite();
+            editor_->submit();
+            smoke_bootstrap_ = 2;
+        } else if (smoke_bootstrap_ == 2 && !busy()) {
+            require(last_orbit_outcome_ == "applied" && satellites_.size() == 1 &&
+                        scenario_->objects().size() == 1 && selected_ == 0,
+                    "First inserted satellite was not published into the scenario");
+            record("insert-first-satellite");
+            properties_dialog_->close();
+            smoke_bootstrap_ = 3;
+            frame_count_ = 0;
+        }
+    }
+    void orbit_smoke_step() {
+        if (smoke_bootstrap_ != 3 || frame_count_ < 24 || busy() ||
+            orbit_smoke_stage_ == orbit_smoke_complete)
+            return;
+        const auto require = [](bool condition, const char *message) {
+            if (!condition)
+                throw std::runtime_error(message);
+        };
+        const auto record = [&](const char *kind) {
+            interaction_report_.append(QJsonObject{
+                {"kind", kind},
+                {"passed", true},
+                {"revision",
+                 static_cast<qint64>(orbit_->track.samples().provenance().input_revision)},
+                {"rendered_tai_ns", QString::number(snapshot_.epoch.tai_nanoseconds())}});
+        };
+        auto input = orbit_->input;
+        switch (orbit_smoke_stage_) {
+        case 0:
+            // Start below the south pole to cover the former north-facing camera assumption.
+            input.initial.position_m = {0, 0, -7e6};
+            input.initial.velocity_mps = {6200, 5300, 0};
+            editor_->set_input(input);
+            editor_->set_state_mode(0);
+            editor_->set_state_mode(1);
+            require(editor_->findChild<QComboBox *>("stateRepresentation")->currentIndex() == 1,
+                    "Classical element state conversion failed in the editor");
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        case 1:
+            require(last_orbit_outcome_ == "applied" && selected_ == 0 &&
+                        orbit_->input.object_id == "Satellite1" &&
+                        orbit_->max_radius_m - orbit_->min_radius_m > 1e6,
+                    "Edited inclined eccentric orbit was not published");
+            record("apply-edited-initial-state");
+            require(std::abs(orbit_->input.initial.position_m[0]) < 0.001 &&
+                        std::abs(orbit_->input.initial.position_m[1]) < 0.001 &&
+                        std::abs(orbit_->input.initial.position_m[2] + 7e6) < 0.001,
+                    "Changing state representation changed the initial position beyond 1 mm");
+            record("apply-keplerian-orbit");
+            smoke_old_track_ = orbit_group_->children.front();
+            slider_->setValue(10000);
+            orbit_capture_ = true;
+            ++orbit_smoke_stage_;
+            break;
+        case 2:
+            require(snapshot_.epoch == orbit_->input.last, "Analysis end seek failed");
+            record("seek-analysis-end");
+            save_interaction_images("orbit-end");
+            slider_->setValue(0);
+            ++orbit_smoke_stage_;
+            break;
+        case 3:
+            require(snapshot_.epoch == orbit_->input.first, "Analysis start seek failed");
+            record("seek-analysis-start");
+            save_interaction_images("orbit-start");
+            orbit_capture_ = false;
+            try {
+                activate_scenario(application::Scenario("Invalid", core::Epoch{0},
+                                                        core::Epoch{100'000'000'000'000}));
+                throw std::runtime_error("Out-of-coverage scenario was accepted");
+            } catch (const std::out_of_range &) {
+                require(scenario_->name() == "Scenario1" &&
+                            orbit_group_->children.front() == smoke_old_track_,
+                        "Invalid scenario replaced the live scene");
+            }
+            record("reject-scenario-eop-coverage");
+            input.initial.velocity_mps = {0, 0, 0};
+            editor_->set_input(input);
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        case 4: {
+            require(last_orbit_outcome_ == "rejected" &&
+                        orbit_->track.samples().provenance().input_revision == 2 &&
+                        orbit_group_->children.front() == smoke_old_track_,
+                    "Invalid edit replaced the live scene");
+            record("reject-invalid-initial-state");
+            const auto error_message = editor_->findChild<QLabel *>("orbitResult")->text();
+            set_selection(std::nullopt);
+            require(editor_->findChild<QLabel *>("orbitResult")->text() == error_message,
+                    "Changing selection overwrote the property panel's failed update result");
+            set_selection(0);
+            record("selection-preserves-property-error");
+            input.step_seconds = 1;
+            editor_->set_input(input);
+            editor_->submit();
+            cancellation_->store(true);
+            orbit_smoke_stage_ = 6;
+            break;
+        }
+        case 6:
+            require(last_orbit_outcome_ == "cancelled" &&
+                        orbit_->track.samples().provenance().input_revision == 2 &&
+                        orbit_group_->children.front() == smoke_old_track_,
+                    "Cancelled computation replaced the live scene");
+            record("cancel-candidate");
+            smoke_old_track_ = {};
+            for (auto &slot : slots_) {
+                slot->window->hide();
+                slot->window->destroy();
+            }
+            require(viewer_->windows().empty(), "Views remained after destroying both windows");
+            editor_->set_input(input);
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        case 7:
+            require(last_orbit_outcome_ == "applied" && viewer_->windows().empty() &&
+                        orbit_->track.samples().provenance().input_revision == 3,
+                    "Orbit could not be applied with all native windows closed");
+            record("apply-without-windows");
+            for (auto &slot : slots_) {
+                slot->window->initializeWindow();
+                slot->window->show();
+            }
+            fit_pending_ = true;
+            ++orbit_smoke_stage_;
+            break;
+        case 8:
+            if (slots_[0]->pick_candidates.empty() || slots_[1]->pick_candidates.empty())
+                return;
+            inject_click(*slots_[0], {slots_[0]->pick_candidates.front().x_pixels,
+                                      slots_[0]->pick_candidates.front().y_pixels});
+            orbit_capture_ = true;
+            ++orbit_smoke_stage_;
+            break;
+        case 9:
+            require(selected_ == std::optional<std::size_t>{0} && selection_->size() == 1,
+                    "First view could not select the edited satellite");
+            record("select-edited-orbit-view0");
+            save_interaction_images("orbit-selected-view0");
+            inject_click(*slots_[0], {0, 0});
+            ++orbit_smoke_stage_;
+            break;
+        case 10:
+            require(!selected_ && selection_->size() == 0, "Edited orbit selection did not clear");
+            require(!slots_[1]->pick_candidates.empty(), "Edited orbit disappeared from view 2");
+            record("clear-edited-selection");
+            inject_click(*slots_[1], {slots_[1]->pick_candidates.front().x_pixels,
+                                      slots_[1]->pick_candidates.front().y_pixels});
+            ++orbit_smoke_stage_;
+            break;
+        case 11:
+            require(selected_ == std::optional<std::size_t>{0} && selection_->size() == 1,
+                    "Second view could not select the edited satellite");
+            record("select-edited-orbit-view1");
+            save_interaction_images("orbit-selected-view1");
+            orbit_capture_ = false;
+            ++orbit_smoke_stage_;
+            break;
+        case 12:
+            editor_->configure_appearance(1, {}, 1000);
+            ++orbit_smoke_stage_;
+            break;
+        case 13:
+            require(last_model_outcome_ == "applied" && model_kind_ == 1 && markers_->size() == 0,
+                    "Built-in satellite model was not applied");
+            record("built-in-satellite-model");
+            focus_satellite();
+            orbit_capture_ = true;
+            ++orbit_smoke_stage_;
+            break;
+        case 14:
+            save_interaction_images("satellite-model");
+            editor_->configure_appearance(
+                2, QCoreApplication::applicationDirPath() + "/resources/models/satellite_demo.gltf",
+                1000);
+            ++orbit_smoke_stage_;
+            break;
+        case 15:
+            require(last_model_outcome_ == "applied" && model_kind_ == 2,
+                    "Local glTF satellite model was not applied");
+            record("local-gltf-satellite-model");
+            ++orbit_smoke_stage_;
+            break;
+        case 16:
+            save_interaction_images("satellite-gltf");
+            editor_->configure_appearance(2, smoke_dir_ + "/absent-model.glb", 1000);
+            ++orbit_smoke_stage_;
+            break;
+        case 17:
+            require(last_model_outcome_ == "rejected" && model_kind_ == 2,
+                    "Missing model replaced the existing satellite appearance");
+            record("reject-missing-model");
+            editor_->configure_appearance(0, {}, 1000);
+            ++orbit_smoke_stage_;
+            break;
+        case 18:
+            require(last_model_outcome_ == "applied" && model_kind_ == 0 && markers_->size() == 1,
+                    "Point fallback was not restored");
+            record("restore-point-marker");
+            fit_views();
+            orbit_capture_ = false;
+            ++orbit_smoke_stage_;
+            break;
+        case 19:
+            begin_insert_satellite();
+            input.object_id = "Satellite1";
+            editor_->set_input(input);
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        case 20:
+            require(last_orbit_outcome_ == "rejected" && satellites_.size() == 1,
+                    "Duplicate insertion changed the scene");
+            record("reject-duplicate-object-id");
+            input.object_id = "Satellite2";
+            input.initial.position_m = {1e6, 0, -7e6};
+            editor_->set_input(input);
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        case 21:
+            require(
+                last_orbit_outcome_ == "applied" && satellites_.size() == 2 &&
+                    scenario_->objects().size() == 2 && selected_ == 1 &&
+                    orbit_->session.provenance().input_revision == 3 && markers_->size() == 2,
+                "Second insertion changed the first satellite or failed to select the new object");
+            record("insert-second-satellite");
+            input = satellites_[1].orbit->input;
+            input.initial.velocity_mps[0] += 10;
+            editor_->set_input(input);
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        case 22:
+            require(last_orbit_outcome_ == "applied" &&
+                        satellites_[1].orbit->session.provenance().input_revision == 2 &&
+                        orbit_->session.provenance().input_revision == 3 && selected_ == 1,
+                    "Editing satellite 2 affected satellite 1");
+            record("independent-object-properties");
+            editor_->configure_appearance(1, {}, 500);
+            ++orbit_smoke_stage_;
+            break;
+        case 23:
+            require(last_model_outcome_ == "applied" && satellites_[1].model_kind == 1 &&
+                        satellites_[0].model_kind == 0 && markers_->size() == 1,
+                    "Appearance was not applied only to the chosen satellite");
+            record("independent-object-appearance");
+            editor_->configure_appearance(0, {}, 500);
+            ++orbit_smoke_stage_;
+            break;
+        case 24:
+            require(last_model_outcome_ == "applied" && markers_->size() == 2,
+                    "Second point marker was not restored");
+            open_properties();
+            input = satellites_[1].orbit->input;
+            input.initial.position_m[0] += 1e6;
+            editor_->set_input(input);
+            properties_dialog_->close();
+            require(satellites_[1].orbit->input.initial.position_m[0] !=
+                        input.initial.position_m[0],
+                    "Closing properties applied a draft");
+            record("close-properties-without-applying");
+            fit_views();
+            set_selection(0);
+            seek_epoch(scenario_->first());
+            orbit_capture_ = true;
+            ++orbit_smoke_stage_;
+            break;
+        case 25:
+            save_workbench_image("scenario-two-satellites.png");
+            orbit_capture_ = false;
+            ++orbit_smoke_stage_;
+            break;
+        case 26: {
+            const auto time = runtime::make_builtin_time_provider();
+            const auto today = QDateTime::currentDateTimeUtc().date();
+            const auto tomorrow = today.addDays(1);
+            activate_scenario(application::Scenario(
+                "Today", time->from_utc({today.year(), today.month(), today.day(), 0, 0, 0, 0}),
+                time->from_utc({tomorrow.year(), tomorrow.month(), tomorrow.day(), 0, 0, 0, 0})));
+            begin_insert_satellite();
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 27:
+            require(last_orbit_outcome_ == "applied" && satellites_.size() == 1 &&
+                        eop_ == eop_current_ && orbit_->track.samples().states().size() > 1000,
+                    "Current UTC one-day scenario failed to propagate with current EOP data");
+            record("current-utc-day-orbit-and-predicted-eop");
+            require(!commands_->actions().contains(properties_action_),
+                    "Properties action remains in the command bar");
+            timer_.stop();
+            QTimer::singleShot(0, this, [this] {
+                auto *dialog = findChild<QDialog *>("scenarioProperties");
+                if (!dialog) {
+                    fail("Scenario properties did not open");
+                    return;
+                }
+                if (!dialog->grab().save(smoke_dir_ + "/scenario-properties.png"))
+                    fail("Cannot save scenario properties");
+                dialog->accept();
+            });
+            open_scenario_properties();
+            timer_.start();
+            record("scenario-tree-properties");
+            open_properties();
+            require(properties_dialog_->grab().save(smoke_dir_ + "/current-object-properties.png"),
+                    "Cannot save current object properties");
+            properties_dialog_->close();
+            slots_[1]->dock->hide();
+            fit_views();
+            orbit_capture_ = true;
+            ++orbit_smoke_stage_;
+            break;
+        case 28:
+            save_workbench_image("current-day-workbench.png");
+            map_dock_->show();
+            ground_map_->reset_view();
+            fit_views();
+            ++orbit_smoke_stage_;
+            break;
+        case 29: {
+            require(ground_map_->track_count() == satellites_.size() &&
+                        ground_map_->epoch() == snapshot_.epoch,
+                    "2D map does not share the published scenario and epoch");
+            require(QLineF(ground_coordinates({7e6, 0, 0}), QPointF(0, 0)).length() < 1e-9 &&
+                        QLineF(ground_coordinates({0, 7e6, 0}), QPointF(90, 0)).length() < 1e-9 &&
+                        std::abs(ground_coordinates({0, 0, 7e6}).y() - 90) < 1e-9,
+                    "2D geodetic axes are incorrect");
+            const double e2 = 6.6943799901413165e-3;
+            const double radius = 6378137.0 / std::sqrt(1 - e2 * 0.5);
+            const auto latitude45 =
+                ground_coordinates({(radius + 500000) / std::sqrt(2.0), 0,
+                                    (radius * (1 - e2) + 500000) / std::sqrt(2.0)});
+            require(std::abs(latitude45.y() - 45) < 1e-6,
+                    "2D latitude is geocentric instead of WGS84 geodetic");
+            const auto seam = ground_path({QPointF(179, 10), QPointF(-179, 12)});
+            require(seam.elementCount() == 4 && seam.elementAt(1).x == 180 &&
+                        seam.elementAt(2).isMoveTo() && seam.elementAt(2).x == -180 &&
+                        std::abs(seam.elementAt(1).y - 11) < 1e-12,
+                    "Ground track draws a false segment across the antimeridian");
+            const auto exact_seam = ground_path({QPointF(180, 10), QPointF(-180, 10)});
+            for (int i = 0; i < exact_seam.elementCount(); ++i)
+                require(std::isfinite(exact_seam.elementAt(i).x) &&
+                            std::isfinite(exact_seam.elementAt(i).y),
+                        "Exact antimeridian produced an invalid path");
+            for (const int direction : {-1, 1}) {
+                const auto vertical =
+                    ground_path({QPointF(direction * 180, 10), QPointF(-direction * 180, 12)});
+                require(std::abs(vertical.length() - 2.0) < 1e-12,
+                        "Ground track dropped latitude changes along the antimeridian");
+            }
+            save_workbench_image("workbench-2d-3d.png");
+            require(ground_map_->grab().save(smoke_dir_ + "/ground-map.png"), "Cannot save 2D map");
+            set_selection(std::nullopt);
+            const auto point = ground_map_->marker_position(0);
+            const auto global = ground_map_->mapToGlobal(point);
+            QMouseEvent press(QEvent::MouseButtonPress, point, global, Qt::LeftButton,
+                              Qt::LeftButton, Qt::NoModifier);
+            QMouseEvent release(QEvent::MouseButtonRelease, point, global, Qt::LeftButton,
+                                Qt::NoButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(ground_map_, &press);
+            QCoreApplication::sendEvent(ground_map_, &release);
+            require(selected_ == 0 && objects_->currentItem() == satellites_[0].item,
+                    "Picking a 2D satellite does not select the same scene object");
+            record("2d-geodetic-projection-seam-and-selection");
+            seek_epoch(scenario_->last());
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 30: {
+            require(ground_map_->epoch() == scenario_->last() &&
+                        ground_map_->epoch() == snapshot_.epoch &&
+                        QLineF(ground_map_->marker_coordinates(0),
+                               ground_coordinates(snapshot_.markers[0].position_m))
+                                .length() < 1e-10,
+                    "2D/3D epoch or position diverged after a timeline seek");
+            const auto center = QPointF(ground_map_->rect().center());
+            QWheelEvent wheel(center, ground_map_->mapToGlobal(center), QPoint{}, QPoint{0, 120},
+                              Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+            QCoreApplication::sendEvent(ground_map_, &wheel);
+            require(ground_map_->zoom_factor() > 1, "2D wheel zoom did not respond");
+            map_dock_->setFloating(true);
+            map_dock_->resize(780, 480);
+            record("2d-3d-shared-time-and-zoom");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 31:
+            require(map_dock_->isFloating() && map_dock_->isVisible(), "2D view cannot float");
+            ground_map_->reset_view();
+            require(map_dock_->grab().save(smoke_dir_ + "/ground-map-floating.png"),
+                    "Cannot save floating 2D view");
+            map_dock_->setFloating(false);
+            map_dock_->hide();
+            slots_[1]->dock->show();
+            seek_epoch(scenario_->first());
+            fit_views();
+            record("2d-floating-and-dock-restore");
+            ++orbit_smoke_stage_;
+            break;
+        case 32:
+            require(ground_map_->epoch() == snapshot_.epoch,
+                    "Hidden 2D view lost its current epoch");
+            orbit_capture_ = false;
+            ++orbit_smoke_stage_;
+            break;
+        }
     }
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
     void benchmark_input(const BenchmarkInputEvent &input) {
@@ -1023,6 +2780,21 @@ class Workbench final : public QMainWindow {
                                                 QString("/%1-view-%2.png").arg(step).arg(i)))
                 throw std::runtime_error("Cannot save the interaction swapchain image");
     }
+    void save_workbench_image(const QString &name) {
+        // QWidget does not paint native Vulkan children. Insert same-frame
+        // swapchain readbacks into the actual Qt control capture, without restyling.
+        auto workbench = grab();
+        QPainter painter(&workbench);
+        for (const auto &slot : slots_) {
+            if (!slot->container->isVisible() || slot->captured_image.isNull())
+                continue;
+            const auto position = slot->container->mapTo(this, QPoint{});
+            painter.drawImage(QRect(position, slot->container->size()), slot->captured_image);
+        }
+        painter.end();
+        if (!workbench.save(smoke_dir_ + "/" + name))
+            throw std::runtime_error("Cannot save workbench controls and view capture");
+    }
     void recreate_window(Slot &slot) {
         // QWindow::destroy sends SurfaceAboutToBeDestroyed; winId creates a new native surface.
         slot.window->destroy();
@@ -1079,7 +2851,7 @@ class Workbench final : public QMainWindow {
                 throw std::runtime_error("Rendered image lacks the globe or satellite marker");
             if (foreground_at_edge)
                 throw std::runtime_error("The initial camera clips the globe or demo track");
-            if (benchmarking_ && selected_pixels < 20)
+            if (selected_ && selected_pixels < 20)
                 throw std::runtime_error(
                     "The selected satellite ring is missing from the rendered view");
             view_report_.append(QJsonObject{
@@ -1090,7 +2862,7 @@ class Workbench final : public QMainWindow {
                 {"capture_width_pixels", pixels.width()},
                 {"capture_height_pixels", pixels.height()},
                 {"capture_frame", static_cast<qint64>(frame_count_)},
-                {"capture_epoch_tai_ns", static_cast<qint64>(std::llround(seconds_ * 1e9))},
+                {"capture_epoch_tai_ns", static_cast<qint64>(snapshot_.epoch.tai_nanoseconds())},
                 {"foreground_pixels", foreground},
                 {"foreground_pixels_at_edge", foreground_at_edge},
                 {"marker_pixels", marker},
@@ -1110,6 +2882,8 @@ class Workbench final : public QMainWindow {
                 {"device_pixel_ratio", window->devicePixelRatio()},
                 {"gpu", QString::fromUtf8(properties.deviceName)}});
         }
+        if (!benchmarking_)
+            save_workbench_image("workbench.png");
         timer_.stop();
         // Exercise shutdown while the background compiler has no remaining view contexts.
         for (auto &slot : slots_)
@@ -1126,9 +2900,42 @@ class Workbench final : public QMainWindow {
     bool injecting_input_ = false;
     bool shared_device_ = false, shared_scene_ = false, independent_cameras_ = false;
     bool all_windows_closed_ = false;
-    application::Session session_;
+    std::shared_ptr<const OrbitScene> orbit_;
+    std::optional<application::Scenario> scenario_;
+    std::vector<Satellite> satellites_;
+    QTreeWidgetItem *scenario_item_ = nullptr;
+    std::optional<std::size_t> editor_target_, pending_orbit_target_;
+    std::size_t pending_model_target_ = 0;
+    QString pending_model_path_;
+    QStackedWidget *workspace_pages_ = nullptr;
+    QLabel *workspace_label_ = nullptr;
+    QAction *new_action_ = nullptr, *example_action_ = nullptr, *insert_action_ = nullptr;
+    QAction *fit_action_ = nullptr, *aux_action_ = nullptr, *map_action_ = nullptr;
+    GroundMap *ground_map_ = nullptr;
+    QDockWidget *map_dock_ = nullptr;
+    QToolBar *time_toolbar_ = nullptr;
+    QMenu *insert_menu_ = nullptr;
+    int smoke_bootstrap_ = 0;
+    static constexpr int orbit_smoke_complete = 33;
+    std::future<std::shared_ptr<const OrbitScene>> candidate_;
+    std::shared_ptr<std::atomic_bool> cancellation_;
+    OrbitEditor *editor_ = nullptr;
+    QTreeWidgetItem *object_item_ = nullptr;
+    QTreeWidget *objects_ = nullptr;
+    QDockWidget *object_dock_ = nullptr;
+    QStackedWidget *inspector_pages_ = nullptr;
+    QAction *properties_action_ = nullptr, *focus_action_ = nullptr, *play_action_ = nullptr;
+    QString last_orbit_outcome_;
+    QString last_model_outcome_;
+    std::future<vsg::ref_ptr<vsg::MatrixTransform>> model_candidate_;
+    vsg::ref_ptr<vsg::MatrixTransform> model_node_;
+    vsg::ref_ptr<vsg::Group> model_group_;
+    int model_kind_ = 0, pending_model_kind_ = 0;
+    double model_diameter_km_ = 1000, pending_model_diameter_km_ = 1000;
+    int orbit_smoke_stage_ = 0;
+    bool orbit_capture_ = false, fit_pending_ = false;
     std::unique_ptr<core::IFrameProvider> frames_;
-    std::unique_ptr<core::IEarthOrientationProvider> eop_;
+    std::shared_ptr<const core::IEarthOrientationProvider> eop_, eop_history_, eop_current_;
     vsg::ref_ptr<vsgQt::Viewer> viewer_;
     vsg::ref_ptr<vsg::Device> shared_device_ref_;
     vsg::ref_ptr<vsg::ResourceHints> hints_;
@@ -1137,8 +2944,18 @@ class Workbench final : public QMainWindow {
     std::unique_ptr<render_vsg::MarkerLayer> selection_;
     std::unique_ptr<render_vsg::IEarthDisplay> globe_;
     vsg::ref_ptr<vsg::Group> scene_;
+    vsg::ref_ptr<vsg::Group> orbit_group_;
+    vsg::ref_ptr<vsg::Node> smoke_old_track_;
     std::vector<std::unique_ptr<Slot>> slots_;
     QSlider *slider_ = nullptr;
+    MissionTimeline *timeline_ = nullptr;
+    QLabel *time_label_ = nullptr;
+    QDialog *properties_dialog_ = nullptr;
+    bool property_positioned_ = false;
+    QToolBar *commands_ = nullptr;
+    QMenu *scene_menu_ = nullptr, *view_menu_ = nullptr, *time_menu_ = nullptr;
+    double playback_rate_ = 20;
+    CalendarScale display_scale_ = CalendarScale::utc;
     QTimer timer_;
     QElapsedTimer clock_;
     QJsonArray view_report_;
@@ -1170,6 +2987,8 @@ int run_graphics_workbench(QApplication &app) {
     }
     const auto benchmark_manifest =
         benchmark_index >= 0 ? arguments[benchmark_index + 1] : QString{};
+    if (benchmark_manifest.isEmpty())
+        apply_workbench_style(app);
     const auto timing_index = arguments.indexOf("--benchmark-run");
     const bool timing_probe = arguments.contains("--benchmark-trace-probe");
     const bool output_only_probe = arguments.contains("--benchmark-output-only-probe");
@@ -1183,7 +3002,14 @@ int run_graphics_workbench(QApplication &app) {
         return 1;
     }
     const auto timing_dir = timing_index >= 0 ? arguments[timing_index + 1] : QString{};
-    const auto smoke_index = arguments.indexOf("--graphics-smoke");
+    const auto portable_smoke_index = arguments.indexOf("--portable-smoke");
+    const auto graphics_smoke_index = arguments.indexOf("--graphics-smoke");
+    if (portable_smoke_index >= 0 && graphics_smoke_index >= 0) {
+        std::cerr << "Select either portable smoke or validation-layer smoke\n";
+        return 1;
+    }
+    const auto smoke_index =
+        portable_smoke_index >= 0 ? portable_smoke_index : graphics_smoke_index;
     if (smoke_index >= 0 && smoke_index + 1 >= arguments.size()) {
         std::cerr << "--graphics-smoke requires an output directory\n";
         return 1;
@@ -1194,7 +3020,7 @@ int run_graphics_workbench(QApplication &app) {
             << "Timing and graphics-smoke modes are separate; probe requires --benchmark-run\n";
         return 1;
     }
-    const bool validation = smoke_index >= 0 || arguments.contains("--validation");
+    const bool validation = graphics_smoke_index >= 0 || arguments.contains("--validation");
     if (validation) {
         std::uint32_t count = 0;
         if (vkEnumerateInstanceLayerProperties(&count, nullptr) != VK_SUCCESS)
@@ -1226,6 +3052,13 @@ int run_graphics_workbench(QApplication &app) {
         }
     }
     qputenv("ROCKY_FILE_PATH", resources.toUtf8());
+    const auto local_resources = QCoreApplication::applicationDirPath() + "/resources";
+    if (QFileInfo(local_resources + "/proj/proj.db").isFile()) {
+        qputenv("PROJ_DATA", (local_resources + "/proj").toUtf8());
+        qputenv("PROJ_NETWORK", "OFF");
+    }
+    if (QDir(local_resources + "/gdal").exists())
+        qputenv("GDAL_DATA", (local_resources + "/gdal").toUtf8());
     ValidationLog log;
     try {
         Workbench window(app, log, smoke_dir, validation, benchmark_manifest, timing_dir,

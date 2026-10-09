@@ -1,0 +1,14 @@
+NASA Blue Marble: Land Surface, Ocean Color and Sea Ice (2002).
+Credit: NASA Goddard Space Flight Center. Image by Reto Stockli;
+enhancements by Robert Simmon. Additional data/support: MODIS teams,
+USGS EROS and Flagstaff, Defense Meteorological Satellite Program.
+
+The JPEG is unmodified. earth.vrt adds global longitude/latitude
+georeferencing for display. It is not a terrain or scientific analysis dataset.
+
+Source:
+https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57730/land_ocean_ice_2048.jpg
+Background: https://science.nasa.gov/resource/blue-marble/
+NASA media usage: https://www.nasa.gov/nasa-brand-center/images-and-media/
+NASA imagery is generally not subject to copyright in the United States.
+NASA material is separate from the software license. No endorsement is implied.

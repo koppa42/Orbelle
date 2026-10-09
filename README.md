@@ -9,14 +9,21 @@
 - 可选 ERFA 2.0.1 Provider：显式 UTC↔TAI、TAI→TT 两部分 JD，以及含观测天极偏移的 GCRF↔ITRF 位置和速度变换；C++ 与 Python 共用接口。
 - 本地 IERS 20 C04 快照导入、SHA256 校验、跨闰秒插值及严格覆盖范围；附带一周历史验证数据。
 - 可选 CSPICE N0067 Provider：显式本地 LSK/SPK 快照、TAI↔TDB、日月几何状态和批量查询；内核与错误状态统一串行管理。
+- 通用二体传播：复用 CSPICE `prop2b_c`，接受显式地心 GCRF 初态与 μ，支持椭圆、抛物线、双曲线；C++、Python、桌面共用 Runtime 工厂。
+- 经典瞬时根数与 Cartesian 转换：CSPICE `conics_c` / `oscltx_c`；输入 a、e、i、Ω、ω、ν，公开 API 使用米和弧度，桌面使用 km 和度。
+- Scenario 场景：先建立统一分析时段，再插入对象；不可变场景版本保存多个 Session，拒绝重复 ID 和过期修订。
 - CMake 安装/导出的 C++ SDK、pybind11/scikit-build-core wheel 构建入口。
 - GoogleTest/CTest 核心与集成测试、Python API 测试、安装后的 SDK 消费端案例。
 - Linux x64 无界面 Release、ASan/UBSan 和断网环境中的 SDK / Python wheel 验证入口；已验证 Ubuntu 24.04、GCC 13.3、Python 3.12。
 - 可选 Qt/VSG/Rocky 双视窗工作台：共享设备与场景、独立相机、ITRF 显示和时间播放；Windows 三档缩放、窗口重建及 Vulkan 验证通过。
+- 桌面场景工作流：启动页、新建场景、插入多颗卫星、独立对象属性面板、离线地球贴图、可选三维模型；默认以点显示。
+- 二维地面地图：经纬网、星下点、跨日期变更线的地面轨迹、缩放平移及浮动停靠，与三维共享时间和卫星选择。
+- UTC/TAI/TT 日期与时间输入、弹出日历/时间选择、默认 UTC 今天零点至次日零点；当前 IERS Bulletin A 数据快照随便携包部署并明确标记预测值。
+- Windows 便携目录与 ZIP 打包入口：收集 DLL、Qt 插件、MSVC 运行库和离线资源，验证无开发环境 PATH、异地工作目录下的启动。
 - 可选固定万星基准场景：两视图、100 条轨迹、每视图 200 标签、缓存跳转与选中反馈；尚无正式渲染性能测试结果。
 - 可选无界面计算基准：批量状态生成、完整参考系变换、CSPICE 单次/批量查询与上下文切换，保存逐轮计时及数值检查。
 
-基础 Qt 窗口显示示例状态表；`desktop-graphics` 双视窗路径已通过 Windows 单星集成检查，结果见[图形验证记录](docs/validation/p0_graphics.md)。时间/参考系通过 Orekit 独立天文级数交叉校验，星历通过 jplephem 读取原始 DE440s 的独立实现对照。尚无日内 EOP 潮汐改正、TEME、通用二体/J2/SGP4、事件/Access、HDF5 结果存储、异步分析任务和安装包。P0 的全部退出条件尚未完成。
+基础 Qt 窗口显示示例状态表；`desktop-graphics` 提供场景工作台，操作说明见[场景与属性工作流](docs/architecture/scenario_workbench.md)。时间/参考系通过 Orekit 独立天文级数交叉校验，星历通过 jplephem 读取原始 DE440s 的独立实现对照。尚无日内 EOP 潮汐改正、TEME、J2/SGP4、事件/Access、场景文件保存、HDF5 结果存储或通用分析任务系统。便携包为开发预览，P0 的全部退出条件和 P1/P2 尚未完成。
 
 ## 快速构建
 
@@ -60,6 +67,9 @@ C++ SDK 由模块安装生成。Python 构建入口 `pyproject.toml` 放在仓�
 - [时间与参考系契约](docs/architecture/time_frames.md)
 - [CSPICE 星历与时间接口](docs/architecture/spice.md)
 - [图形集成约定](docs/architecture/graphics.md)
+- [场景与属性工作流](docs/architecture/scenario_workbench.md)
+- [二体与场景工作台验证记录](docs/validation/p1_two_body_workbench.md)
+- [通用二体验证协议](docs/validation/p1_two_body_protocol.md)
 - [图形集成验收协议](docs/validation/p0_graphics_protocol.md)
 - [图形集成验证记录](docs/validation/p0_graphics.md)
 - [万星双视图场景预检](docs/validation/p0_graphics_10k.md)

@@ -30,6 +30,7 @@ def main() -> int:
     environment = os.environ.copy()
     environment["PATH"] = str(prefix / "bin") + os.pathsep + environment.get("PATH", "")
     environment["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(prefix / "Qt6/plugins/platforms")
+    environment["QT_PLUGIN_PATH"] = str(prefix / "Qt6/plugins")
     environment["QT_QPA_PLATFORM"] = "windows"
     environment["VK_LAYER_PATH"] = str(prefix / "bin")
     environment["PROJ_DATA"] = str(prefix / "share/proj")
