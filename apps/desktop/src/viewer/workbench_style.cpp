@@ -368,6 +368,8 @@ QWidget#objectExplorer { background: #171d26; }
 QLineEdit#objectSearch { background: #141a22; padding: 4px 7px; border-color: #303d4d; }
 QWidget#workspaceHeading { background: #171d26; border-bottom: 1px solid #303947; }
 QWidget#workspaceHeading QToolButton, QTabBar QToolButton { padding: 0; }
+QSplitter::handle { background: #111720; }
+QSplitter::handle:hover { background: #3f607c; }
 QWidget#viewHeading QToolButton { padding: 2px; }
 QWidget#viewHeading QComboBox { background: transparent; border-color: transparent; min-height: 18px; padding: 3px 25px 3px 6px; }
 QWidget#viewHeading QComboBox:hover { background: #263242; border-color: #405169; }

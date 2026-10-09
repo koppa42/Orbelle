@@ -50,6 +50,8 @@ double number(const QLineEdit *field) {
 }
 QWidget *with_unit(QWidget *field, const QString &unit) {
     auto *row = new QWidget;
+    field->setMaximumWidth(240);
+    row->setMaximumWidth(276);
     auto *layout = new QHBoxLayout(row);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(8);
@@ -132,6 +134,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     layout->addWidget(divider());
     fields_ = new QWidget;
     fields_->setObjectName("propertyFields");
+    fields_->setMaximumWidth(800);
     auto *columns = new QHBoxLayout(fields_);
     columns->setContentsMargins(0, 0, 0, 0);
     columns->setSpacing(24);
@@ -245,6 +248,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     auto *advanced_form = new QFormLayout(advanced_fields);
     advanced_form->setContentsMargins(0, 0, 0, 0);
     mu_ = new QLineEdit;
+    mu_->setMaximumWidth(240);
     advanced_form->addRow(QStringLiteral("μ / km³/s²"), mu_);
     advanced_fields->hide();
     connect(advanced, &QToolButton::toggled, advanced_fields,
@@ -257,6 +261,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     form->setSizeConstraint(QLayout::SetMinAndMaxSize);
     auto *parameters = new QScrollArea;
     parameters->setWidgetResizable(true);
+    parameters->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     parameters->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     parameters->setWidget(fields_);
     layout->addWidget(parameters, 1);
@@ -315,12 +320,14 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     common_form->setContentsMargins(0, 0, 0, 0);
     track_extent_ = new QComboBox;
     track_extent_->setObjectName("trackExtent");
+    track_extent_->setMaximumWidth(320);
     track_extent_->addItems({QStringLiteral("一圈轨迹"), QStringLiteral("整个场景时段"),
                              QStringLiteral("自定义前后时长")});
     common_form->addRow(QStringLiteral("显示范围"), track_extent_);
     track_extent_->setToolTip(QStringLiteral("同时用于二维与三维；非闭合轨道的一圈按一小时显示。"));
     const auto duration = [&] {
         auto *field = new QDoubleSpinBox;
+        field->setMaximumWidth(240);
         field->setButtonSymbols(QAbstractSpinBox::NoButtons);
         field->setRange(0, 10080);
         field->setDecimals(1);
@@ -340,9 +347,11 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     common_form->setRowVisible(future_, false);
     auto *range_fields = new QWidget;
     range_fields->setObjectName("propertyFields");
+    range_fields->setMaximumWidth(480);
     range_fields->setLayout(common_form);
     auto *range_scroll = new QScrollArea;
     range_scroll->setWidgetResizable(true);
+    range_scroll->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     range_scroll->setWidget(range_fields);
     common->addWidget(range_scroll, 1);
     apply_display(common);
@@ -364,6 +373,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     appearance_layout->addWidget(appearance_title);
     auto *appearance_fields = new QWidget;
     appearance_fields->setObjectName("propertyFields");
+    appearance_fields->setMaximumWidth(560);
     auto *appearance_content = new QVBoxLayout(appearance_fields);
     appearance_content->setContentsMargins(0, 0, 0, 0);
     appearance_content->setSpacing(14);
@@ -381,15 +391,18 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     form_model->setContentsMargins(0, 0, 0, 0);
     form_model->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     model_kind_ = new QComboBox;
+    model_kind_->setMaximumWidth(320);
     model_kind_->addItems({QStringLiteral("点标记（默认）"), QStringLiteral("内置卫星模型"),
                            QStringLiteral("本地三维模型")});
     form_model->addRow(QStringLiteral("显示方式"), model_kind_);
     model_path_ = new QLineEdit;
+    model_path_->setMaximumWidth(440);
     model_path_->setPlaceholderText(QStringLiteral(".glb / .gltf / .vsgb / .vsgt"));
     auto *browse = new QPushButton(QStringLiteral("选择模型文件…"));
     form_model->addRow(QStringLiteral("模型文件"), model_path_);
     form_model->addRow(QString{}, browse);
     model_diameter_ = new QDoubleSpinBox;
+    model_diameter_->setMaximumWidth(240);
     model_diameter_->setButtonSymbols(QAbstractSpinBox::NoButtons);
     model_diameter_->setDecimals(3);
     model_diameter_->setRange(0.001, 10000);
@@ -401,6 +414,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     appearance_content->addStretch();
     auto *appearance_scroll = new QScrollArea;
     appearance_scroll->setWidgetResizable(true);
+    appearance_scroll->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     appearance_scroll->setWidget(appearance_fields);
     appearance_layout->addWidget(appearance_scroll, 1);
     apply_model_ = new QPushButton(QStringLiteral("应用外观"));

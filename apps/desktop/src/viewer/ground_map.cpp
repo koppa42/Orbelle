@@ -49,7 +49,7 @@ QPainterPath ground_path(const std::vector<QPointF> &points) {
 GroundMap::GroundMap(const QString &imagery, QWidget *parent) : QWidget(parent), imagery_(imagery) {
     if (imagery_.isNull())
         throw std::runtime_error("Cannot load offline imagery for the 2D map");
-    setMinimumSize(360, 260);
+    setMinimumSize(160, 100);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
     setAccessibleName(QStringLiteral("二维地面轨迹，滚轮缩放、拖动平移、点击选择卫星、Home 复位"));

@@ -663,16 +663,14 @@ class Workbench final : public QMainWindow {
                 ground_map_->select = [this](std::optional<std::size_t> index) {
                     set_selection(index);
                 };
-                map_dock_ = new QDockWidget(QStringLiteral("二维地面视图"), this);
                 map_panel_ = new QWidget;
                 auto *map_layout = new QVBoxLayout(map_panel_);
                 map_layout->setContentsMargins(0, 0, 0, 0);
                 map_layout->setSpacing(0);
                 map_layout->addWidget(make_view_controls(std::nullopt));
                 map_layout->addWidget(ground_map_, 1);
-                map_dock_->setWidget(map_panel_);
-                style_dock(map_dock_, WorkbenchIcon::map);
-                addDockWidget(Qt::RightDockWidgetArea, map_dock_);
+                workspace_->add_view(map_panel_, QStringLiteral("二维视图"),
+                                     workbench_icon(WorkbenchIcon::map));
                 map_action_ = new QAction(QStringLiteral("二维视图"), this);
                 map_action_->setIcon(workbench_icon(WorkbenchIcon::map));
                 map_action_->setShortcut(QKeySequence("Ctrl+3"));
@@ -683,20 +681,6 @@ class Workbench final : public QMainWindow {
                                                       QStringLiteral("三维视图"));
                 three_d->setShortcut(QKeySequence("Ctrl+1"));
                 connect(three_d, &QAction::triggered, this, [this] { workspace_->select_view(0); });
-                auto *both = view_menu_->addAction(workbench_icon(WorkbenchIcon::views),
-                                                   QStringLiteral("二维 / 三维并排"));
-                both->setShortcut(QKeySequence("Ctrl+4"));
-                connect(both, &QAction::triggered, this, [this] { workspace_->select_view(2); });
-                connect(map_dock_, &QDockWidget::visibilityChanged, this, [this](bool visible) {
-                    if (!changing_view_mode_ && view_mode_ != 1) {
-                        view_mode_ = visible ? 2 : 0;
-                        workspace_->indicate_view(view_mode_);
-                    }
-                    if (visible && !map_dock_->isFloating())
-                        resizeDocks({map_dock_}, {std::max(380, width() / 2 - 110)},
-                                    Qt::Horizontal);
-                });
-                map_dock_->hide();
                 fit_views();
                 auto *fit = new QAction(workbench_icon(WorkbenchIcon::fit),
                                         QStringLiteral("适配轨道"), this);
@@ -1194,7 +1178,7 @@ class Workbench final : public QMainWindow {
         workspace_pages_->setCurrentIndex(0);
         if (scenario_properties_)
             scenario_properties_->close();
-        workspace_->select_view(view_mode_);
+        workspace_->select_view(0);
         object_dock_->show();
         fit_pending_ = true;
         update_actions();
@@ -1360,6 +1344,7 @@ class Workbench final : public QMainWindow {
         auto *form = new QFormLayout;
         form->setSpacing(12);
         auto *name = new QLineEdit(QString::fromStdString(scenario_->name()));
+        name->setMaximumWidth(380);
         name->setReadOnly(true);
         form->addRow(QStringLiteral("场景名称"), name);
         form->addRow(QStringLiteral("中心天体"), new QLabel(QStringLiteral("Earth / 地球")));
@@ -1849,30 +1834,39 @@ class Workbench final : public QMainWindow {
         app_.exit(1);
         QTimer::singleShot(0, this, [this] { app_.exit(1); });
     }
-    void set_view_mode(int mode) {
-        if (!scenario_ || !map_panel_ || changing_view_mode_)
-            return;
-        changing_view_mode_ = true;
-        view_mode_ = mode;
-        workspace_->indicate_view(mode);
-        if (mode == 1) {
-            map_dock_->hide();
-            if (view_stack_->indexOf(map_panel_) < 0) {
-                map_dock_->setWidget(nullptr);
-                view_stack_->addWidget(map_panel_);
-            }
-            view_stack_->setCurrentWidget(map_panel_);
-        } else {
-            view_stack_->setCurrentIndex(0);
-            if (view_stack_->indexOf(map_panel_) >= 0) {
-                view_stack_->removeWidget(map_panel_);
-                map_dock_->setWidget(map_panel_);
-            }
-            map_dock_->setVisible(mode == 2);
-            if (mode == 2)
-                map_panel_->show();
+    void smoke_set_view_layout(int mode) {
+        workspace_->dock_page(view_panel_);
+        workspace_->dock_page(map_panel_);
+        workspace_->select_view(0);
+        if (mode == 2)
+            workspace_->split_page(map_panel_, view_panel_, Qt::RightEdge);
+        else {
+            workspace_->merge_page(map_panel_, view_panel_);
+            workspace_->select_view(mode);
         }
-        changing_view_mode_ = false;
+    }
+    QTabBar *smoke_tabs(const QString &title) const {
+        for (auto *tabs : workspace_->findChildren<QTabBar *>())
+            for (int i = 0; i < tabs->count(); ++i)
+                if (tabs->tabText(i) == title)
+                    return tabs;
+        throw std::runtime_error("Workspace page is missing");
+    }
+    void smoke_drag_page(const QString &title, const QPoint &global) {
+        auto *tabs = smoke_tabs(title);
+        int index = 0;
+        while (tabs->tabText(index) != title)
+            ++index;
+        const auto start = tabs->tabRect(index).center();
+        QMouseEvent press(QEvent::MouseButtonPress, start, tabs->mapToGlobal(start), Qt::LeftButton,
+                          Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent move(QEvent::MouseMove, tabs->mapFromGlobal(global), global, Qt::NoButton,
+                         Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease, tabs->mapFromGlobal(global), global,
+                            Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(tabs, &press);
+        QCoreApplication::sendEvent(tabs, &move);
+        QCoreApplication::sendEvent(tabs, &release);
     }
     void zoom_view(std::size_t index, double factor) {
         auto &slot = *slots_.at(index);
@@ -2035,7 +2029,7 @@ class Workbench final : public QMainWindow {
         traits->device = shared_device_ref_;
         current->window = new EmbeddedWindow(viewer_, traits);
         current->container = QWidget::createWindowContainer(current->window);
-        current->container->setMinimumSize(240, 240);
+        current->container->setMinimumSize(64, 64);
         if (benchmarking_) {
             const auto ratio = current->window->devicePixelRatio();
             const int width = qRound(1280.0 / ratio), height = qRound(720.0 / ratio);
@@ -2080,16 +2074,10 @@ class Workbench final : public QMainWindow {
                 layout->setSpacing(0);
                 layout->addWidget(make_view_controls(0));
                 layout->addWidget(current->container, 1);
-                view_stack_ = new QStackedWidget;
-                view_stack_->addWidget(panel);
-                workspace_ = new Workspace(view_stack_);
-                workspace_->add_view(QStringLiteral("三维视图"),
+                view_panel_ = panel;
+                workspace_ = new Workspace;
+                workspace_->add_view(panel, QStringLiteral("三维视图"),
                                      workbench_icon(WorkbenchIcon::earth));
-                workspace_->add_view(QStringLiteral("二维视图"),
-                                     workbench_icon(WorkbenchIcon::map));
-                workspace_->add_view(QStringLiteral("并排查看"),
-                                     workbench_icon(WorkbenchIcon::views));
-                workspace_->view_requested = [this](int mode) { set_view_mode(mode); };
                 workspace_pages_ = new QStackedWidget;
                 workspace_pages_->addWidget(workspace_);
                 auto *welcome = new QWidget;
@@ -3062,7 +3050,7 @@ class Workbench final : public QMainWindow {
             break;
         case 28:
             save_workbench_image("current-day-workbench.png");
-            map_dock_->show();
+            workspace_->split_page(map_panel_, view_panel_, Qt::RightEdge);
             ground_map_->reset_view();
             fit_views();
             ++orbit_smoke_stage_;
@@ -3129,19 +3117,20 @@ class Workbench final : public QMainWindow {
                               Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
             QCoreApplication::sendEvent(ground_map_, &wheel);
             require(ground_map_->zoom_factor() > 1, "2D wheel zoom did not respond");
-            map_dock_->setFloating(true);
-            map_dock_->resize(780, 480);
+            workspace_->detach_page(map_panel_);
+            map_panel_->window()->resize(780, 480);
             record("2d-3d-shared-time-and-zoom");
             ++orbit_smoke_stage_;
             break;
         }
         case 31:
-            require(map_dock_->isFloating() && map_dock_->isVisible(), "2D view cannot float");
+            require(workspace_->is_floating(map_panel_) && map_panel_->isVisible(),
+                    "2D view cannot float");
             ground_map_->reset_view();
-            require(map_dock_->grab().save(smoke_dir_ + "/ground-map-floating.png"),
+            require(map_panel_->window()->grab().save(smoke_dir_ + "/ground-map-floating.png"),
                     "Cannot save floating 2D view");
-            map_dock_->setFloating(false);
-            map_dock_->hide();
+            workspace_->dock_page(map_panel_);
+            workspace_->select_view(0);
             slots_[1]->dock->show();
             seek_epoch(scenario_->first());
             fit_views();
@@ -3256,25 +3245,23 @@ class Workbench final : public QMainWindow {
                 return;
             slots_[1]->dock->hide();
             seek_epoch(core::Epoch{scenario_->first().tai_nanoseconds() + 6 * 3600'000'000'000LL});
-            set_view_mode(2);
+            smoke_set_view_layout(2);
             ++orbit_smoke_stage_;
             break;
         case 39:
             if (!view_captures_ready() || !caches_ready())
                 return;
-            require(view_mode_ == 2 && ground_map_->isVisible() &&
-                        slots_[0]->container->isVisible(),
+            require(ground_map_->isVisible() && slots_[0]->container->isVisible(),
                     "Parallel view layout did not expose both renderers");
             save_workbench_image("views-parallel.png");
             smoke_view_epoch_ = snapshot_.epoch;
             smoke_sun_ = sun_direction_;
-            set_view_mode(1);
+            smoke_set_view_layout(1);
             ++orbit_smoke_stage_;
             break;
         case 40:
             require(ground_map_->isVisible() && !slots_[0]->container->isVisible() &&
-                        !map_dock_->isVisible() && snapshot_.epoch == smoke_view_epoch_ &&
-                        selected_ == 0,
+                        snapshot_.epoch == smoke_view_epoch_ && selected_ == 0,
                     "2D-only layout lost its content, time or selection");
             save_workbench_image("views-2d.png");
             smoke_map_image_ = ground_map_->grab().toImage();
@@ -3303,7 +3290,7 @@ class Workbench final : public QMainWindow {
                     "Playback stopped when the 3D window was hidden");
             set_playing(false);
             record("2d-only-playback-and-solar-time-synchronization");
-            set_view_mode(0);
+            smoke_set_view_layout(0);
             seek_epoch(core::Epoch{scenario_->first().tai_nanoseconds() + 6 * 3600'000'000'000LL});
             fit_views();
             ++orbit_smoke_stage_;
@@ -3324,17 +3311,17 @@ class Workbench final : public QMainWindow {
                     "3D lighting switch did not change the rendered globe");
             record("3d-daylight-toggle-and-restored-native-view");
             lighting_action_->setChecked(true);
-            set_view_mode(2);
+            smoke_set_view_layout(2);
             ++orbit_smoke_stage_;
             break;
         case 45:
             if (!view_captures_ready())
                 return;
-            require(ground_map_->isVisible() && map_dock_->widget() == map_panel_,
-                    "2D map did not return from central view to dock");
-            record("map-central-to-dock-roundtrip");
+            require(ground_map_->isVisible() && slots_[0]->container->isVisible(),
+                    "2D/3D pages did not return to split groups");
+            record("map-tab-to-split-roundtrip");
             lighting_action_->setChecked(false);
-            set_view_mode(0);
+            smoke_set_view_layout(0);
             slots_[1]->dock->show();
             seek_epoch(scenario_->first());
             fit_views();
@@ -3380,7 +3367,7 @@ class Workbench final : public QMainWindow {
             save_workbench_image("workspace-display-settings.png");
             require(action_in_workspace("applyDisplay"),
                     "Display Apply button is clipped by the central workspace");
-            workspace_->detach_document(properties_dialog_);
+            workspace_->detach_page(properties_dialog_);
             ++orbit_smoke_stage_;
             break;
         case 50:
@@ -3390,7 +3377,7 @@ class Workbench final : public QMainWindow {
             require(
                 properties_dialog_->window()->grab().save(smoke_dir_ + "/properties-detached.png"),
                 "Cannot capture detached properties");
-            workspace_->dock_document(properties_dialog_);
+            workspace_->dock_page(properties_dialog_);
             require(workspace_->current_document() == properties_dialog_,
                     "Detached properties did not return to the workspace");
             properties_dialog_->close();
@@ -3522,6 +3509,153 @@ class Workbench final : public QMainWindow {
             ++orbit_smoke_stage_;
             break;
         case 59:
+            if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
+                return;
+            slots_[1]->dock->hide();
+            workspace_->select_view(0);
+            smoke_wait_frame_ = frame_count_ + 3;
+            ++orbit_smoke_stage_;
+            break;
+        case 60: {
+            if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
+                return;
+            smoke_cache_ = orbit_;
+            smoke_view_epoch_ = snapshot_.epoch;
+            auto *look = dynamic_cast<vsg::LookAt *>(slots_[0]->camera->viewMatrix.get());
+            smoke_camera_ = {look->eye, look->center, look->up};
+            require(smoke_tabs(QStringLiteral("三维视图"))->count() == 2,
+                    "Workspace still has a special parallel-view tab");
+            smoke_drag_page(QStringLiteral("三维视图"),
+                            workspace_->mapToGlobal(
+                                QPoint(workspace_->width() - 12, workspace_->height() / 2)));
+            smoke_wait_frame_ = frame_count_ + 3;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 61: {
+            if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
+                return;
+            require(ground_map_->isVisible() && slots_[0]->container->isVisible() &&
+                        smoke_tabs(QStringLiteral("三维视图")) !=
+                            smoke_tabs(QStringLiteral("二维视图")),
+                    "Dragging the native 3D page did not split the workspace");
+            auto *look = dynamic_cast<vsg::LookAt *>(slots_[0]->camera->viewMatrix.get());
+            require(orbit_ == smoke_cache_ && snapshot_.epoch == smoke_view_epoch_ &&
+                        look->eye == smoke_camera_[0] && look->center == smoke_camera_[1] &&
+                        look->up == smoke_camera_[2],
+                    "Dragging 3D changed the camera, current time or orbit cache");
+            save_workbench_image("workspace-drag-split.png");
+            record("drag-native-3d-tab-to-split-without-resetting-state");
+            auto *tabs = smoke_tabs(QStringLiteral("二维视图"));
+            smoke_drag_page(QStringLiteral("三维视图"),
+                            tabs->mapToGlobal(QPoint(tabs->width() - 8, 16)));
+            smoke_wait_frame_ = frame_count_ + 3;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 62:
+            if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
+                return;
+            require(smoke_tabs(QStringLiteral("三维视图")) ==
+                            smoke_tabs(QStringLiteral("二维视图")) &&
+                        !ground_map_->isVisible() && slots_[0]->container->isVisible(),
+                    "Dragging 3D back to the tab bar did not merge the groups");
+            record("drag-native-3d-tab-to-merge");
+            smoke_drag_page(QStringLiteral("三维视图"), workspace_->mapToGlobal(QPoint(-80, 100)));
+            smoke_wait_frame_ = frame_count_ + 3;
+            ++orbit_smoke_stage_;
+            break;
+        case 63: {
+            if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
+                return;
+            require(workspace_->is_floating(view_panel_) && slots_[0]->container->isVisible(),
+                    "Dragging 3D out did not create a floating page");
+            auto *window = view_panel_->window();
+            require(window->width() >= 480 && window->height() >= 320,
+                    qPrintable(QString("Floating 3D page is too small: %1 x %2")
+                                   .arg(window->width())
+                                   .arg(window->height())));
+            auto picture = window->grab();
+            QPainter painter(&picture);
+            painter.drawImage(
+                QRect(slots_[0]->container->mapTo(window, QPoint{}), slots_[0]->container->size()),
+                slots_[0]->captured_image);
+            painter.end();
+            require(picture.save(smoke_dir_ + "/workspace-3d-floating.png"),
+                    "Cannot capture floating 3D page");
+            record("drag-native-3d-tab-to-floating-window");
+            workspace_->dock_page(view_panel_);
+            smoke_wait_frame_ = frame_count_ + 3;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 64:
+            if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
+                return;
+            require(!workspace_->is_floating(view_panel_), "3D page did not dock again");
+            workspace_->close_page(view_panel_);
+            require(!workspace_->contains(view_panel_), "3D page could not close");
+            workspace_->select_view(0);
+            smoke_wait_frame_ = frame_count_ + 3;
+            ++orbit_smoke_stage_;
+            break;
+        case 65: {
+            if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
+                return;
+            auto *look = dynamic_cast<vsg::LookAt *>(slots_[0]->camera->viewMatrix.get());
+            require(workspace_->contains(view_panel_) && slots_[0]->container->isVisible() &&
+                        orbit_ == smoke_cache_ && snapshot_.epoch == smoke_view_epoch_ &&
+                        look->eye == smoke_camera_[0] && look->center == smoke_camera_[1] &&
+                        look->up == smoke_camera_[2],
+                    "Floating/closing/reopening 3D lost the camera, time or cached orbit");
+            save_workbench_image("workspace-pages-restored.png");
+            record("native-3d-float-dock-close-reopen-preserves-state");
+            smoke_drag_page(QStringLiteral("二维视图"),
+                            workspace_->mapToGlobal(
+                                QPoint(workspace_->width() / 2, workspace_->height() - 12)));
+            smoke_wait_frame_ = frame_count_ + 3;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 66: {
+            if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
+                return;
+            require(ground_map_->isVisible() && slots_[0]->container->isVisible() &&
+                        map_panel_->mapTo(workspace_, QPoint{}).y() >
+                            view_panel_->mapTo(workspace_, QPoint{}).y(),
+                    "Dragging to the bottom edge did not create a vertical split");
+            const auto globe_rect = QRect(slots_[0]->container->mapTo(workspace_, QPoint{}),
+                                          slots_[0]->container->size());
+            const auto map_tabs = smoke_tabs(QStringLiteral("二维视图"));
+            require(globe_rect.bottom() < map_tabs->mapTo(workspace_, QPoint{}).y() &&
+                        workspace_->rect().contains(
+                            QRect(ground_map_->mapTo(workspace_, QPoint{}), ground_map_->size())),
+                    "Vertical split clips the map tabs or the map content");
+            save_workbench_image("workspace-drag-vertical.png");
+            record("drag-pages-to-vertical-split");
+            auto *tabs = smoke_tabs(QStringLiteral("三维视图"));
+            smoke_drag_page(QStringLiteral("二维视图"),
+                            tabs->mapToGlobal(QPoint(tabs->width() - 8, 16)));
+            workspace_->select_view(0);
+            smoke_wait_frame_ = frame_count_ + 3;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 67: {
+            if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
+                return;
+            auto *look = dynamic_cast<vsg::LookAt *>(slots_[0]->camera->viewMatrix.get());
+            require(orbit_ == smoke_cache_ && snapshot_.epoch == smoke_view_epoch_ &&
+                        look->eye == smoke_camera_[0] && look->center == smoke_camera_[1] &&
+                        look->up == smoke_camera_[2],
+                    "Vertical split/merge changed the camera, time or cached orbit");
+            slots_[1]->dock->show();
+            fit_views();
+            smoke_wait_frame_ = frame_count_ + 3;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 68:
             if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
                 return;
             orbit_capture_ = false;
@@ -3752,11 +3886,9 @@ class Workbench final : public QMainWindow {
     std::size_t pending_model_target_ = 0;
     QString pending_model_path_;
     QStackedWidget *workspace_pages_ = nullptr;
-    QStackedWidget *view_stack_ = nullptr;
+    QWidget *view_panel_ = nullptr;
     Workspace *workspace_ = nullptr;
     QWidget *map_panel_ = nullptr;
-    int view_mode_ = 0;
-    bool changing_view_mode_ = false;
     std::vector<QToolButton *> view_focus_buttons_;
     QAction *lighting_action_ = nullptr, *tracks_action_ = nullptr;
     std::optional<core::Epoch> sun_epoch_;
@@ -3769,11 +3901,11 @@ class Workbench final : public QMainWindow {
     QAction *new_action_ = nullptr, *example_action_ = nullptr, *insert_action_ = nullptr;
     QAction *fit_action_ = nullptr, *aux_action_ = nullptr, *map_action_ = nullptr;
     GroundMap *ground_map_ = nullptr;
-    QDockWidget *map_dock_ = nullptr;
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 60;
+    static constexpr int orbit_smoke_complete = 69;
+    std::array<vsg::dvec3, 3> smoke_camera_;
     std::shared_ptr<const OrbitScene> smoke_cache_;
     std::size_t smoke_publications_ = 0;
     core::Epoch smoke_view_epoch_{0};

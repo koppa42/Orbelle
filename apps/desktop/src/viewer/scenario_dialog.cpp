@@ -29,6 +29,7 @@ new_scenario_dialog(QWidget *parent, core::Epoch coverage_first, core::Epoch cov
     form->setHorizontalSpacing(18);
     form->setVerticalSpacing(14);
     auto *name = new QLineEdit("Scenario1");
+    name->setMaximumWidth(380);
     name->setObjectName("scenarioName");
     name->selectAll();
     form->addRow(QStringLiteral("场景名称"), name);
