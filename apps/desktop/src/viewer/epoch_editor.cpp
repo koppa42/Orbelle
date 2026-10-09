@@ -8,6 +8,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPainter>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScreen>
@@ -15,6 +16,7 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStyle>
+#include <QStyleOptionSpinBox>
 #include <QTextCharFormat>
 #include <QTimeZone>
 #include <QToolButton>
@@ -25,6 +27,28 @@
 
 namespace orbitforge::desktop {
 namespace {
+template <class Base> class TimeSpinBox final : public Base {
+    void paintEvent(QPaintEvent *event) override {
+        Base::paintEvent(event);
+        QStyleOptionSpinBox option;
+        this->initStyleOption(&option);
+        QPainter painter(this);
+        static const auto up = workbench_icon(WorkbenchIcon::chevron_up);
+        static const auto down = workbench_icon(WorkbenchIcon::chevron_down);
+        // QSS paints the button surfaces; use the same vector chevrons as the workbench.
+        for (const bool increase : {true, false}) {
+            const auto area = this->style()->subControlRect(
+                QStyle::CC_SpinBox, &option,
+                increase ? QStyle::SC_SpinBoxUp : QStyle::SC_SpinBoxDown, this);
+            const auto step =
+                increase ? QAbstractSpinBox::StepUpEnabled : QAbstractSpinBox::StepDownEnabled;
+            const bool enabled = this->isEnabled() && (option.stepEnabled & step);
+            (increase ? up : down)
+                .paint(&painter, QRect(area.center() - QPoint(8, 8), QSize(16, 16)),
+                       Qt::AlignCenter, enabled ? QIcon::Normal : QIcon::Disabled);
+        }
+    }
+};
 const QDateTime origin(QDate(2000, 1, 1), QTime(12, 0), QTimeZone::UTC);
 QString scale_name(CalendarScale scale) {
     return scale == CalendarScale::utc ? "UTC" : scale == CalendarScale::tai ? "TAI" : "TT";
@@ -273,9 +297,9 @@ void EpochEditor::open_picker() {
     calendar->setWeekdayTextFormat(Qt::Sunday, weekend);
     layout->addWidget(calendar);
     auto *row = new QHBoxLayout;
-    auto *hours = new QSpinBox;
-    auto *minutes = new QSpinBox;
-    auto *seconds = new QDoubleSpinBox;
+    auto *hours = new TimeSpinBox<QSpinBox>;
+    auto *minutes = new TimeSpinBox<QSpinBox>;
+    auto *seconds = new TimeSpinBox<QDoubleSpinBox>;
     hours->setObjectName("pickerHour");
     minutes->setObjectName("pickerMinute");
     seconds->setObjectName("pickerSecond");
@@ -285,7 +309,11 @@ void EpochEditor::open_picker() {
     hours->setMinimumWidth(68);
     minutes->setMinimumWidth(68);
     seconds->setMinimumWidth(106);
-    const auto add = [&](const QString &label, QWidget *field) {
+    const auto add = [&](const QString &label, QAbstractSpinBox *field) {
+        field->setProperty("stepButtons", true);
+        field->setButtonSymbols(QAbstractSpinBox::UpDownArrows);
+        field->setAccelerated(true);
+        field->setAccessibleName(label);
         auto *column = new QVBoxLayout;
         auto *caption = new QLabel(label);
         caption->setObjectName("hint");

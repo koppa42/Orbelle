@@ -21,7 +21,9 @@ class WorkbenchStyle final : public QProxyStyle {
     void polish(QWidget *widget) override {
         QProxyStyle::polish(widget);
         if (auto *number = qobject_cast<QAbstractSpinBox *>(widget))
-            number->setButtonSymbols(QAbstractSpinBox::NoButtons);
+            number->setButtonSymbols(widget->property("stepButtons").toBool()
+                                         ? QAbstractSpinBox::UpDownArrows
+                                         : QAbstractSpinBox::NoButtons);
     }
 };
 } // namespace
@@ -318,6 +320,13 @@ QLineEdit:focus, QDateTimeEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus, QCom
 QLineEdit:read-only { color: #a0b0c3; background: #202833; border-color: #303c4b; }
 QLineEdit:disabled, QDoubleSpinBox:disabled, QSpinBox:disabled { color: #6a7c92; background: #171d26; border-color: #2b3543; }
 QLineEdit#vectorInput, QSpinBox, QDoubleSpinBox { font-family: "Consolas"; font-size: 13px; }
+QSpinBox[stepButtons="true"], QDoubleSpinBox[stepButtons="true"] { padding-right: 29px; min-height: 22px; }
+QAbstractSpinBox[stepButtons="true"]::up-button, QAbstractSpinBox[stepButtons="true"]::down-button { subcontrol-origin: border; width: 24px; border-left: 1px solid #374354; background: #202b38; }
+QAbstractSpinBox[stepButtons="true"]::up-button { subcontrol-position: top right; border-top-right-radius: 3px; border-bottom: 1px solid #303c4b; }
+QAbstractSpinBox[stepButtons="true"]::down-button { subcontrol-position: bottom right; border-bottom-right-radius: 3px; }
+QAbstractSpinBox[stepButtons="true"]::up-button:hover, QAbstractSpinBox[stepButtons="true"]::down-button:hover { background: #2a435a; }
+QAbstractSpinBox[stepButtons="true"]::up-button:pressed, QAbstractSpinBox[stepButtons="true"]::down-button:pressed { background: #365d80; }
+QAbstractSpinBox[stepButtons="true"]::up-button:off, QAbstractSpinBox[stepButtons="true"]::down-button:off { background: #1b232e; }
 QFrame[quantityField="true"] { background: #191f28; border: 1px solid #374354; border-radius: 3px; }
 QFrame[quantityField="true"]:hover { border-color: #51657c; }
 QFrame[quantityField="true"][focused="true"] { border-color: #74b9ee; }
