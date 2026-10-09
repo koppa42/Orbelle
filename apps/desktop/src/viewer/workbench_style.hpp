@@ -18,6 +18,8 @@ enum class WorkbenchIcon {
     pause,
     first,
     last,
+    slower,
+    faster,
     search,
     close,
     detach,

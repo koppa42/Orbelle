@@ -196,6 +196,17 @@ QIcon workbench_icon(WorkbenchIcon icon, const QColor &color) {
             p.drawEllipse(QRectF(4, 3, 12, 12));
             line(14, 14, 21, 21);
             break;
+        case WorkbenchIcon::slower:
+        case WorkbenchIcon::faster:
+            if (icon == WorkbenchIcon::slower) {
+                p.translate(24, 0);
+                p.scale(-1, 1);
+            }
+            line(4, 6, 10, 12);
+            line(10, 12, 4, 18);
+            line(13, 6, 19, 12);
+            line(19, 12, 13, 18);
+            break;
         case WorkbenchIcon::close:
             line(7, 7, 17, 17);
             line(7, 17, 17, 7);
@@ -294,6 +305,11 @@ QToolButton#timeReadout { color: #e9b975; font-family: "Consolas"; font-size: 13
 QLabel#timelineTitle { color: #b8c9da; font-weight: 600; }
 QToolBar#timelineBar QToolButton { padding: 3px; }
 QToolBar#timelineBar QComboBox, QToolBar#timelineBar QDoubleSpinBox { min-height: 18px; padding-top: 3px; padding-bottom: 3px; }
+QFrame#playbackRateField { background: #191f28; border: 1px solid #374354; border-radius: 3px; }
+QFrame#playbackRateField:hover { border-color: #51657c; }
+QFrame#playbackRateField QDoubleSpinBox { background: transparent; border: 0; padding: 3px 6px; }
+QToolButton#playbackRatePresets { border: 0; border-left: 1px solid #303c4b; border-radius: 0; padding: 3px; }
+QToolButton#playbackRatePresets:hover { background: #293b4d; }
 QLabel#timeBound { color: #8597ad; font-family: "Consolas"; font-size: 10px; }
 QFrame#sectionDivider { background: #303947; max-height: 1px; border: 0; }
 QFrame#timelineDivider { background: #374354; max-width: 1px; border: 0; }

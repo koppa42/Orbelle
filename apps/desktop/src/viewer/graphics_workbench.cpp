@@ -67,12 +67,14 @@
 #include <QVBoxLayout>
 #include <QWheelEvent>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstring>
 #include <functional>
 #include <future>
 #include <iostream>
+#include <iterator>
 #include <mutex>
 #include <orbitforge/geo_rocky/globe.hpp>
 #include <orbitforge/render_vsg/compile_manager.hpp>
@@ -88,6 +90,16 @@
 
 namespace orbitforge::desktop {
 namespace {
+constexpr std::array playback_rates{0.1,  0.5,  1.0,   2.0,   5.0,   10.0,
+                                    20.0, 50.0, 100.0, 200.0, 500.0, 1000.0};
+double adjacent_playback_rate(double current, bool faster) {
+    if (faster) {
+        const auto next = std::upper_bound(playback_rates.begin(), playback_rates.end(), current);
+        return next == playback_rates.end() ? playback_rates.back() : *next;
+    }
+    const auto next = std::lower_bound(playback_rates.begin(), playback_rates.end(), current);
+    return next == playback_rates.begin() ? playback_rates.front() : *std::prev(next);
+}
 QString display_tai(core::Epoch epoch, bool date = true) {
     // Display calendar only: TAI has fixed 86400-second days.
     const auto time = QDateTime(QDate(2000, 1, 1), QTime(12, 0), QTimeZone::UTC)
@@ -522,6 +534,14 @@ class Workbench final : public QMainWindow {
                                           QStringLiteral("分析起点"), this);
                 auto *end = new QAction(workbench_icon(WorkbenchIcon::last),
                                         QStringLiteral("分析终点"), this);
+                auto *slower = new QAction(workbench_icon(WorkbenchIcon::slower),
+                                           QStringLiteral("减慢播放"), this);
+                auto *faster = new QAction(workbench_icon(WorkbenchIcon::faster),
+                                           QStringLiteral("加快播放"), this);
+                slower->setObjectName("slowerPlayback");
+                faster->setObjectName("fasterPlayback");
+                slower->setShortcut(QKeySequence("Ctrl+["));
+                faster->setShortcut(QKeySequence("Ctrl+]"));
                 start->setShortcut(QKeySequence("Ctrl+Home"));
                 end->setShortcut(QKeySequence("Ctrl+End"));
                 play->setShortcut(QKeySequence("Ctrl+Space"));
@@ -535,35 +555,90 @@ class Workbench final : public QMainWindow {
                     if (scenario_)
                         seek_epoch(scenario_->last());
                 });
-                for (auto *action : {start, play, end}) {
+                for (auto *action : {start, slower, play, faster, end}) {
                     auto *button = new QToolButton;
                     button->setDefaultAction(action);
                     button->setFixedSize(28, 28);
                     button->setIconSize(QSize(18, 18));
                     if (action == play)
                         button->setObjectName("transportPlay");
+                    button->setAccessibleName(action->text());
                     controls->addWidget(button);
+                    time_menu_->addAction(action);
                 }
-                time_menu_->addAction(start);
-                time_menu_->addAction(play);
-                time_menu_->addAction(end);
                 time_menu_->addSeparator();
                 auto *jump = time_menu_->addAction(QStringLiteral("跳转到指定时间…"));
                 jump->setShortcut(QKeySequence("Ctrl+T"));
                 jump->setToolTip(QStringLiteral("跳转到指定时间 · Ctrl+T"));
                 connect(jump, &QAction::triggered, this, [this] { choose_time(); });
                 auto *speed = new QDoubleSpinBox;
+                speed->setObjectName("playbackRate");
                 speed->setButtonSymbols(QAbstractSpinBox::NoButtons);
+                speed->setKeyboardTracking(false);
                 speed->setDecimals(1);
-                speed->setRange(0.1, 1000);
-                speed->setValue(20);
+                speed->setRange(playback_rates.front(), playback_rates.back());
+                speed->setValue(playback_rate_);
                 speed->setSuffix(QStringLiteral(" ×"));
-                speed->setFixedWidth(84);
+                speed->setMinimumWidth(0);
                 speed->setToolTip(QStringLiteral("仿真时间相对实际时间的播放倍率"));
                 speed->setAccessibleName(QStringLiteral("播放倍率"));
-                controls->addWidget(speed);
-                connect(speed, &QDoubleSpinBox::valueChanged, this,
-                        [this](double value) { playback_rate_ = value; });
+                auto *rate_field = new QFrame;
+                rate_field->setObjectName("playbackRateField");
+                rate_field->setFixedWidth(110);
+                auto *rate_layout = new QHBoxLayout(rate_field);
+                rate_layout->setContentsMargins(1, 1, 1, 1);
+                rate_layout->setSpacing(0);
+                rate_layout->addWidget(speed, 1);
+                auto *presets = new QMenu(QStringLiteral("播放倍率"), this);
+                presets->setObjectName("playbackRateMenu");
+                for (const double rate : playback_rates) {
+                    auto *action = presets->addAction(QString::number(rate, 'g', 5) + " ×");
+                    action->setCheckable(true);
+                    action->setData(rate);
+                }
+                const auto update_rate = [this, speed, slower, faster, presets] {
+                    const double rate = speed->value();
+                    playback_rate_ = rate;
+                    slower->setEnabled(rate > playback_rates.front());
+                    faster->setEnabled(rate < playback_rates.back());
+                    slower->setToolTip(QStringLiteral("减慢至 %1× · Ctrl+[")
+                                           .arg(adjacent_playback_rate(rate, false), 0, 'g', 5));
+                    faster->setToolTip(QStringLiteral("加快至 %1× · Ctrl+]")
+                                           .arg(adjacent_playback_rate(rate, true), 0, 'g', 5));
+                    for (auto *action : presets->actions())
+                        action->setChecked(action->data().toDouble() == rate);
+                };
+                for (auto *action : presets->actions())
+                    connect(action, &QAction::triggered, this, [speed, action, update_rate] {
+                        speed->setValue(action->data().toDouble());
+                        update_rate();
+                    });
+                connect(speed, &QDoubleSpinBox::valueChanged, this, update_rate);
+                for (const auto &[action, increase] :
+                     {std::pair{slower, false}, std::pair{faster, true}})
+                    connect(action, &QAction::triggered, this, [speed, increase] {
+                        speed->interpretText();
+                        speed->setValue(adjacent_playback_rate(speed->value(), increase));
+                    });
+                connect(presets, &QMenu::aboutToShow, this, [presets, update_rate] {
+                    update_rate();
+                    for (auto *action : presets->actions())
+                        if (action->isChecked())
+                            presets->setActiveAction(action);
+                });
+                auto *preset_button = new QToolButton;
+                preset_button->setObjectName("playbackRatePresets");
+                preset_button->setIcon(workbench_icon(WorkbenchIcon::chevron_down));
+                preset_button->setIconSize(QSize(14, 14));
+                preset_button->setFixedSize(24, 26);
+                preset_button->setPopupMode(QToolButton::InstantPopup);
+                preset_button->setToolTip(QStringLiteral("选择播放倍率"));
+                preset_button->setAccessibleName(preset_button->toolTip());
+                preset_button->setMenu(presets);
+                rate_layout->addWidget(preset_button);
+                controls->addWidget(rate_field);
+                time_menu_->addMenu(presets);
+                update_rate();
                 timeline_ = new MissionTimeline;
                 slider_ = timeline_;
                 time_menu_->addSeparator();
@@ -3423,6 +3498,54 @@ class Workbench final : public QMainWindow {
             require(timeline_->sizeHint().height() == 118,
                     "Optional satellite row did not collapse");
             record("timeline-readout-jump-and-optional-object-row");
+            {
+                auto *rate = findChild<QDoubleSpinBox *>("playbackRate");
+                auto *slower = findChild<QAction *>("slowerPlayback");
+                auto *faster = findChild<QAction *>("fasterPlayback");
+                auto *presets = findChild<QToolButton *>("playbackRatePresets");
+                const auto epoch = snapshot_.epoch;
+                const auto first = timeline_->visible_first(), last = timeline_->visible_last();
+                timer_.stop();
+                QTimer::singleShot(0, presets->menu(), [this, presets, require] {
+                    require(presets->menu()->grab().save(smoke_dir_ + "/playback-rate-menu.png"),
+                            "Cannot capture playback rate presets");
+                    for (auto *action : presets->menu()->actions())
+                        if (action->data().toDouble() == 100)
+                            action->trigger();
+                    presets->menu()->close();
+                });
+                presets->showMenu();
+                timer_.start();
+                require(rate->value() == 100 && playback_rate_ == 100 && !playing_,
+                        "Selecting a playback preset did not update the effective rate");
+                slower->trigger();
+                require(playback_rate_ == 50, "Slower button did not select the preceding rate");
+                faster->trigger();
+                require(playback_rate_ == 100, "Faster button did not select the following rate");
+                rate->findChild<QLineEdit *>()->setText(QStringLiteral("37.5 ×"));
+                rate->interpretText();
+                require(playback_rate_ == 37.5, "Custom playback rate was not accepted");
+                slower->trigger();
+                require(playback_rate_ == 20, "Custom rate did not step down to a preset");
+                rate->setValue(37.5);
+                faster->trigger();
+                require(playback_rate_ == 50, "Custom rate did not step up to a preset");
+                rate->setValue(0.1);
+                require(!slower->isEnabled(), "Slower button is enabled at the minimum rate");
+                rate->setValue(1000);
+                require(!faster->isEnabled(), "Faster button is enabled at the maximum rate");
+                rate->setValue(20);
+                set_playing(true);
+                faster->trigger();
+                require(playing_ && playback_rate_ == 50,
+                        "Changing the rate interrupted active playback");
+                set_playing(false);
+                rate->setValue(20);
+                require(snapshot_.epoch == epoch && timeline_->visible_first() == first &&
+                            timeline_->visible_last() == last,
+                        "Changing the playback rate sought time or changed the visible interval");
+                record("timeline-playback-rate-controls");
+            }
             save_workbench_image("timeline-workbench.png");
             require(time_toolbar_->grab().save(smoke_dir_ + "/timeline.png"),
                     "Cannot save the compact timeline");
