@@ -21,7 +21,10 @@ enum class WorkbenchIcon {
     close,
     detach,
     calendar,
-    clock
+    clock,
+    zoom_in,
+    zoom_out,
+    time_fit
 };
 void apply_workbench_style(QApplication &app);
 QIcon workbench_icon(WorkbenchIcon icon, const QColor &color = QColor("#91aac3"));

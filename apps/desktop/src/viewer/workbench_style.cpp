@@ -39,6 +39,23 @@ QIcon workbench_icon(WorkbenchIcon icon, const QColor &color) {
             p.drawLine(QPointF(x, y), QPointF(a, b));
         };
         switch (icon) {
+        case WorkbenchIcon::zoom_in:
+        case WorkbenchIcon::zoom_out:
+            p.drawEllipse(QRectF(3, 3, 13, 13));
+            line(14, 14, 21, 21);
+            line(6, 9.5, 13, 9.5);
+            if (icon == WorkbenchIcon::zoom_in)
+                line(9.5, 6, 9.5, 13);
+            break;
+        case WorkbenchIcon::time_fit:
+            line(3, 5, 3, 19);
+            line(21, 5, 21, 19);
+            line(7, 12, 17, 12);
+            line(10, 9, 7, 12);
+            line(10, 15, 7, 12);
+            line(14, 9, 17, 12);
+            line(14, 15, 17, 12);
+            break;
         case WorkbenchIcon::calendar:
             p.drawRoundedRect(QRectF(4, 5, 16, 16), 2, 2);
             line(4, 10, 20, 10);
@@ -249,9 +266,13 @@ QLabel#panelTitle { color: #d8e5f1; font-size: 19px; font-weight: 600; }
 QLabel#panelDescription { color: #788da2; font-size: 11px; }
 QLabel#hint { color: #7e93a8; font-size: 11px; }
 QLabel#fieldUnit { color: #7890a7; font-size: 11px; }
-QLabel#timeReadout { color: #a3c2df; font-family: "Consolas"; font-size: 13px; }
+QToolButton#timeReadout { color: #e4bc88; font-family: "Consolas"; font-size: 13px; padding: 4px 8px; }
+QLabel#timelineTitle { color: #b6cce0; font-weight: 600; }
+QToolBar#timelineBar QToolButton { padding: 3px; }
+QToolBar#timelineBar QComboBox, QToolBar#timelineBar QDoubleSpinBox { min-height: 18px; padding-top: 3px; padding-bottom: 3px; }
 QLabel#timeBound { color: #71879e; font-family: "Consolas"; font-size: 10px; }
 QFrame#sectionDivider { background: #2a3b4c; max-height: 1px; border: 0; }
+QFrame#timelineDivider { background: #304254; max-width: 1px; border: 0; }
 QListWidget#propertyNavigation { background: #131e29; border: 0; border-right: 1px solid #2b3b4b; padding: 20px 8px; outline: 0; }
 QListWidget#propertyNavigation::item { padding: 10px 8px; margin: 3px 0; border-radius: 4px; color: #829bb3; }
 QListWidget#propertyNavigation::item:selected { background: #213952; color: #a6c9e9; }

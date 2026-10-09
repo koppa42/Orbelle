@@ -19,6 +19,7 @@
 - 桌面场景工作流：启动页、新建场景、插入多颗卫星、独立对象属性面板、离线地球贴图、可选三维模型；默认以点显示。
 - 二维地面地图：经纬网、星下点、跨日期变更线的地面轨迹、缩放平移及浮动停靠，与三维共享时间和卫星选择。
 - UTC/TAI/TT 日期与时间输入、弹出日历/时间选择、默认 UTC 今天零点至次日零点；当前 IERS Bulletin A 数据快照随便携包部署并明确标记预测值。
+- 分层时间轴：场景总览、可缩放刻度、当前时刻游标与精确跳转；默认只显示场景区间，所选卫星的传播区间按需展开。
 - Windows 便携目录与 ZIP 打包入口：收集 DLL、Qt 插件、MSVC 运行库和离线资源，验证无开发环境 PATH、异地工作目录下的启动。
 - 可选固定万星基准场景：两视图、100 条轨迹、每视图 200 标签、缓存跳转与选中反馈；尚无正式渲染性能测试结果。
 - 可选无界面计算基准：批量状态生成、完整参考系变换、CSPICE 单次/批量查询与上下文切换，保存逐轮计时及数值检查。
@@ -69,6 +70,7 @@ C++ SDK 由模块安装生成。Python 构建入口 `pyproject.toml` 放在仓�
 - [图形集成约定](docs/architecture/graphics.md)
 - [场景与属性工作流](docs/architecture/scenario_workbench.md)
 - [二体与场景工作台验证记录](docs/validation/p1_two_body_workbench.md)
+- [时间轴交互与便携包验证](docs/validation/timeline_2026_10_09.md)
 - [通用二体验证协议](docs/validation/p1_two_body_protocol.md)
 - [图形集成验收协议](docs/validation/p0_graphics_protocol.md)
 - [图形集成验证记录](docs/validation/p0_graphics.md)

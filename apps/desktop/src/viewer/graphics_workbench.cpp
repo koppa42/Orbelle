@@ -79,6 +79,7 @@
 #include <orbitforge/runtime/demo.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
+#include <tuple>
 #include <vsg/all.h>
 #include <vsgQt/Window.h>
 
@@ -461,11 +462,11 @@ class Workbench final : public QMainWindow {
                 layout->setContentsMargins(0, 0, 0, 0);
                 layout->setSpacing(0);
                 auto *controls = new QHBoxLayout;
-                controls->setContentsMargins(16, 6, 22, 6);
-                controls->setSpacing(8);
+                controls->setContentsMargins(16, 5, 14, 5);
+                controls->setSpacing(5);
                 auto *heading = new QLabel(QStringLiteral("时间轴"));
-                heading->setObjectName("sectionTitle");
-                heading->setMinimumWidth(110);
+                heading->setObjectName("timelineTitle");
+                heading->setMinimumWidth(66);
                 controls->addWidget(heading);
                 auto *start = new QAction(workbench_icon(WorkbenchIcon::first),
                                           QStringLiteral("分析起点"), this);
@@ -499,6 +500,7 @@ class Workbench final : public QMainWindow {
                 time_menu_->addSeparator();
                 auto *jump = time_menu_->addAction(QStringLiteral("跳转到指定时间…"));
                 jump->setShortcut(QKeySequence("Ctrl+T"));
+                jump->setToolTip(QStringLiteral("跳转到指定时间 · Ctrl+T"));
                 connect(jump, &QAction::triggered, this, [this] { choose_time(); });
                 auto *speed = new QDoubleSpinBox;
                 speed->setButtonSymbols(QAbstractSpinBox::NoButtons);
@@ -506,14 +508,67 @@ class Workbench final : public QMainWindow {
                 speed->setRange(0.1, 1000);
                 speed->setValue(20);
                 speed->setSuffix(QStringLiteral(" ×"));
-                speed->setFixedWidth(86);
+                speed->setFixedWidth(84);
                 speed->setToolTip(QStringLiteral("仿真时间相对实际时间的播放倍率"));
                 speed->setAccessibleName(QStringLiteral("播放倍率"));
                 controls->addWidget(speed);
                 connect(speed, &QDoubleSpinBox::valueChanged, this,
                         [this](double value) { playback_rate_ = value; });
+                timeline_ = new MissionTimeline;
+                slider_ = timeline_;
+                time_menu_->addSeparator();
+                auto *object_interval = time_menu_->addAction(QStringLiteral("显示所选卫星区间"));
+                object_interval->setObjectName("showTimelineObject");
+                object_interval->setCheckable(true);
+                connect(object_interval, &QAction::toggled, this,
+                        [this](bool show) { timeline_->set_show_object_interval(show); });
+                connect(slider_, &QSlider::sliderPressed, this, [this] { set_playing(false); });
+                timeline_->seek_requested = [this](qint64 tai_ms) {
+                    if (!scenario_)
+                        return;
+                    set_playing(false);
+                    const auto epoch = tai_ms <= scenario_->first().tai_nanoseconds() / 1'000'000
+                                           ? scenario_->first()
+                                       : tai_ms >= scenario_->last().tai_nanoseconds() / 1'000'000
+                                           ? scenario_->last()
+                                           : core::Epoch{tai_ms * 1'000'000};
+                    seek_epoch(epoch);
+                };
+                auto *divider = new QFrame;
+                divider->setObjectName("timelineDivider");
+                divider->setFrameShape(QFrame::VLine);
+                divider->setFixedHeight(18);
+                controls->addWidget(divider);
+                for (const auto &[icon, text, name, command] :
+                     {std::tuple{WorkbenchIcon::zoom_out, QStringLiteral("缩小时间轴 · −"),
+                                 "timelineZoomOut",
+                                 std::function<void()>{[this] { timeline_->zoom(0.5); }}},
+                      std::tuple{WorkbenchIcon::zoom_in, QStringLiteral("放大时间轴 · +"),
+                                 "timelineZoomIn",
+                                 std::function<void()>{[this] { timeline_->zoom(2); }}},
+                      std::tuple{WorkbenchIcon::focus, QStringLiteral("定位当前时间 · C"),
+                                 "timelineCenter",
+                                 std::function<void()>{[this] { timeline_->center_current(); }}},
+                      std::tuple{WorkbenchIcon::time_fit, QStringLiteral("显示全时段 · F"),
+                                 "timelineFit",
+                                 std::function<void()>{[this] { timeline_->reset_view(); }}}}) {
+                    auto *button = new QToolButton;
+                    button->setIcon(workbench_icon(icon));
+                    button->setObjectName(name);
+                    button->setToolTip(text);
+                    button->setAccessibleName(text);
+                    button->setFixedSize(30, 30);
+                    connect(button, &QToolButton::clicked, this, command);
+                    controls->addWidget(button);
+                }
                 controls->addStretch();
+                time_label_ = new QToolButton;
+                time_label_->setObjectName("timeReadout");
+                time_label_->setDefaultAction(jump);
+                time_label_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+                controls->addWidget(time_label_);
                 auto *time_scale = new QComboBox;
+                time_scale->setObjectName("timelineScale");
                 time_scale->addItems({"UTC", "TAI", "TT"});
                 time_scale->setAccessibleName(QStringLiteral("时间轴显示标准"));
                 controls->addWidget(time_scale);
@@ -522,13 +577,7 @@ class Workbench final : public QMainWindow {
                     if (timeline_)
                         timeline_->set_scale(display_scale_);
                 });
-                time_label_ = new QLabel;
-                time_label_->setObjectName("timeReadout");
-                controls->addWidget(time_label_);
                 layout->addLayout(controls);
-                timeline_ = new MissionTimeline;
-                slider_ = timeline_;
-                connect(slider_, &QSlider::sliderPressed, this, [this] { set_playing(false); });
                 layout->addWidget(timeline_);
                 toolbar->addWidget(timeline);
                 auto *credit = new QLabel("NASA Blue Marble");
@@ -1056,6 +1105,8 @@ class Workbench final : public QMainWindow {
         fit_pending_ = true;
         update_actions();
         show_orbit_status();
+        if (timeline_)
+            timeline_->reset_view();
     }
     void open_example() {
         if (busy() || !confirm_replace_scenario())
@@ -1123,6 +1174,8 @@ class Workbench final : public QMainWindow {
         requested_time_ = true;
         const QSignalBlocker block(slider_);
         slider_->setValue(qRound(seconds_ / duration_seconds() * 10000));
+        if (timeline_)
+            timeline_->set_current_time(epoch.tai_nanoseconds() / 1'000'000, true);
         clock_.restart();
     }
     void choose_time() {
@@ -1131,6 +1184,7 @@ class Workbench final : public QMainWindow {
         const bool resume = playing_;
         set_playing(false);
         QDialog dialog(this);
+        dialog.setObjectName("jumpTimeDialog");
         dialog.setWindowTitle(QStringLiteral("跳转时间"));
         auto *layout = new QVBoxLayout(&dialog);
         auto *caption = new QLabel(QStringLiteral("选择当前分析时段内的时间"));
@@ -1350,13 +1404,16 @@ class Workbench final : public QMainWindow {
     }
     void show_timeline_status() {
         if (timeline_ && scenario_) {
+            const auto first_ms = scenario_->first().tai_nanoseconds() / 1'000'000;
+            // The ruler resolves milliseconds; keep a drawable span for a valid
+            // sub-millisecond scenario. Seeks still clamp to the exact Epoch bounds.
+            const auto last_ms =
+                std::max(first_ms + 1, scenario_->last().tai_nanoseconds() / 1'000'000);
             timeline_->set_interval(
-                scenario_->first().tai_nanoseconds() / 1'000'000,
-                scenario_->last().tai_nanoseconds() / 1'000'000,
+                first_ms, last_ms, QString::fromStdString(scenario_->name()),
                 selected_
                     ? QString::fromStdString(satellites_.at(*selected_).orbit->input.object_id)
-                    : QString::fromStdString(scenario_->name()),
-                selected_.has_value());
+                    : QString{});
         }
     }
     void show_orbit_status() {
@@ -1920,10 +1977,9 @@ class Workbench final : public QMainWindow {
         snapshot_ = sample_frame(epoch);
         update_satellite();
         if (time_label_)
-            time_label_->setText(calendar_text(snapshot_.epoch, display_scale_) +
-                                 (display_scale_ == CalendarScale::utc   ? " UTC"
-                                  : display_scale_ == CalendarScale::tai ? " TAI"
-                                                                         : " TT"));
+            time_label_->setText(calendar_text(snapshot_.epoch, display_scale_));
+        if (timeline_)
+            timeline_->set_current_time(snapshot_.epoch.tai_nanoseconds() / 1'000'000);
         visualization::RenderSnapshot selected_snapshot{
             snapshot_.epoch, snapshot_.frame, snapshot_.origin, {}};
         if (selected_)
@@ -2695,6 +2751,109 @@ class Workbench final : public QMainWindow {
         case 32:
             require(ground_map_->epoch() == snapshot_.epoch,
                     "Hidden 2D view lost its current epoch");
+            slots_[1]->dock->hide();
+            seek_epoch(core::Epoch{scenario_->first().tai_nanoseconds() + 43'200'123'000'000});
+            timeline_->zoom(4);
+            fit_views();
+            ++orbit_smoke_stage_;
+            break;
+        case 33: {
+            if (!view_captures_ready())
+                return;
+            save_workbench_image("timeline-zoom.png");
+            const auto epoch = snapshot_.epoch;
+            const auto visible = timeline_->visible_last() - timeline_->visible_first();
+            require(visible == 21'600'000, "Timeline zoom did not expose a six-hour interval");
+            set_selection(std::nullopt);
+            set_selection(0);
+            require(timeline_->visible_last() - timeline_->visible_first() == visible &&
+                        snapshot_.epoch == epoch,
+                    "Changing selected object reset the visible interval or simulation time");
+            record("timeline-zoom-and-selection-preserves-range");
+            timeline_->zoom(1'000'000);
+            const auto plot = timeline_->detail_rect();
+            const auto point = QPointF(plot.left() + plot.width() * 0.371, plot.center().y());
+            smoke_timeline_epoch_ = timeline_->visible_first() + 371;
+            set_playing(true);
+            QMouseEvent press(QEvent::MouseButtonPress, point, timeline_->mapToGlobal(point),
+                              Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            QMouseEvent release(QEvent::MouseButtonRelease, point, timeline_->mapToGlobal(point),
+                                Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(timeline_, &press);
+            QCoreApplication::sendEvent(timeline_, &release);
+            require(!playing_, "Timeline scrubbing did not pause playback");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 34:
+            require(snapshot_.epoch.tai_nanoseconds() == smoke_timeline_epoch_ * 1'000'000 &&
+                        timeline_->current_time() == smoke_timeline_epoch_ &&
+                        ground_map_->epoch() == snapshot_.epoch,
+                    "Zoomed timeline seek lost millisecond precision or 2D/3D synchronization");
+            record("timeline-precise-pointer-seek-and-pause");
+            findChild<QComboBox *>("timelineScale")->setCurrentIndex(2);
+            ++orbit_smoke_stage_;
+            break;
+        case 35:
+            require(snapshot_.epoch.tai_nanoseconds() == smoke_timeline_epoch_ * 1'000'000 &&
+                        time_label_->text() == calendar_text(snapshot_.epoch, CalendarScale::tt),
+                    "Changing the timeline time standard changed the physical instant");
+            record("timeline-scale-preserves-instant");
+            require(time_toolbar_->grab().save(smoke_dir_ + "/timeline-precision-tt.png"),
+                    "Cannot save the precise TT time ruler");
+            findChild<QComboBox *>("timelineScale")->setCurrentIndex(0);
+            timeline_->reset_view();
+            findChild<QAction *>("showTimelineObject")->setChecked(true);
+            ++orbit_smoke_stage_;
+            break;
+        case 36:
+            require(time_toolbar_->grab().save(smoke_dir_ + "/timeline-object-expanded.png"),
+                    "Cannot save the optional object interval");
+            findChild<QAction *>("showTimelineObject")->setChecked(false);
+            smoke_timeline_epoch_ =
+                scenario_->first().tai_nanoseconds() / 1'000'000 + 13 * 3'600'000 + 1234;
+            timer_.stop();
+            QTimer::singleShot(0, this, [this] {
+                auto *dialog = findChild<QDialog *>("jumpTimeDialog");
+                if (!dialog) {
+                    fail("Clicking the time readout did not open precise time input");
+                    return;
+                }
+                dialog->findChild<QLineEdit *>("epochValue")
+                    ->setText(calendar_text(core::Epoch{smoke_timeline_epoch_ * 1'000'000},
+                                            CalendarScale::utc)
+                                  .replace("  ", " ") +
+                              " UTC");
+                dialog->findChild<QPushButton *>("applyOrbit")->click();
+            });
+            time_label_->click();
+            timer_.start();
+            ++orbit_smoke_stage_;
+            break;
+        case 37:
+            if (!view_captures_ready())
+                return;
+            require(snapshot_.epoch.tai_nanoseconds() == smoke_timeline_epoch_ * 1'000'000 &&
+                        ground_map_->epoch() == snapshot_.epoch,
+                    "Precise readout jump did not update the shared epoch");
+            require(timeline_->sizeHint().height() == 118,
+                    "Optional satellite row did not collapse");
+            record("timeline-readout-jump-and-optional-object-row");
+            save_workbench_image("timeline-workbench.png");
+            require(time_toolbar_->grab().save(smoke_dir_ + "/timeline.png"),
+                    "Cannot save the compact timeline");
+            // Restore the known visible marker fixture for the final native-window checks.
+            slots_[1]->dock->show();
+            seek_epoch(scenario_->first());
+            fit_views();
+            orbit_capture_ = true;
+            ++orbit_smoke_stage_;
+            break;
+        case 38:
+            // Qt applies dock layout changes on the next event-loop iteration.
+            // Wait for matching native geometry and readback before final validation.
+            if (!view_captures_ready())
+                return;
             orbit_capture_ = false;
             ++orbit_smoke_stage_;
             break;
@@ -2779,6 +2938,21 @@ class Workbench final : public QMainWindow {
             if (!slots_[i]->captured_image.save(smoke_dir_ +
                                                 QString("/%1-view-%2.png").arg(step).arg(i)))
                 throw std::runtime_error("Cannot save the interaction swapchain image");
+    }
+    bool view_captures_ready() const {
+        for (const auto &slot : slots_) {
+            if (!slot->container->isVisible())
+                continue;
+            const auto extent = slot->window->windowAdapter->extent2D();
+            const auto ratio = slot->window->devicePixelRatio();
+            if (slot->captured_image.width() != static_cast<int>(extent.width) ||
+                slot->captured_image.height() != static_cast<int>(extent.height) ||
+                std::abs(extent.width - slot->container->width() * ratio) > 1 ||
+                std::abs(extent.height - slot->container->height() * ratio) > 1 ||
+                slot->window->size() != slot->container->size())
+                return false;
+        }
+        return true;
     }
     void save_workbench_image(const QString &name) {
         // QWidget does not paint native Vulkan children. Insert same-frame
@@ -2916,7 +3090,8 @@ class Workbench final : public QMainWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 33;
+    static constexpr int orbit_smoke_complete = 39;
+    qint64 smoke_timeline_epoch_ = 0;
     std::future<std::shared_ptr<const OrbitScene>> candidate_;
     std::shared_ptr<std::atomic_bool> cancellation_;
     OrbitEditor *editor_ = nullptr;
@@ -2949,7 +3124,7 @@ class Workbench final : public QMainWindow {
     std::vector<std::unique_ptr<Slot>> slots_;
     QSlider *slider_ = nullptr;
     MissionTimeline *timeline_ = nullptr;
-    QLabel *time_label_ = nullptr;
+    QToolButton *time_label_ = nullptr;
     QDialog *properties_dialog_ = nullptr;
     bool property_positioned_ = false;
     QToolBar *commands_ = nullptr;

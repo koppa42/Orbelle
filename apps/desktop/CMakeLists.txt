@@ -22,6 +22,19 @@ if(ORBITFORGE_WITH_VSG)
         ORBITFORGE_DESKTOP_GRAPHICS
         ORBITFORGE_ROCKY_VERSION="${rocky_VERSION}"
         ORBITFORGE_VSGQT_VERSION="${vsgQt_VERSION}")
+    if(BUILD_TESTING AND ORBITFORGE_WITH_ERFA)
+        add_executable(orbitforge_timeline_tests tests/timeline_test.cpp
+            src/viewer/mission_timeline.cpp src/viewer/epoch_editor.cpp
+            src/viewer/workbench_style.cpp)
+        target_link_libraries(orbitforge_timeline_tests PRIVATE
+            OrbitForge::Runtime Qt6::Widgets GTest::gtest_main)
+        orbitforge_warnings(orbitforge_timeline_tests)
+        orbitforge_copy_runtime_dlls(orbitforge_timeline_tests)
+        gtest_discover_tests(orbitforge_timeline_tests DISCOVERY_MODE PRE_TEST
+            TEST_PREFIX "desktop." PROPERTIES TIMEOUT 10
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+            ENVIRONMENT_MODIFICATION "QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>")
+    endif()
     # Copy fixed runtime resources alongside the build output, independent of source paths.
     add_custom_command(TARGET orbitforge_desktop POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
