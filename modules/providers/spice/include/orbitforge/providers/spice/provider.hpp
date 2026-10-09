@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <memory>
 #include <orbitforge/core/ephemeris/ephemeris_provider.hpp>
+#include <orbitforge/core/propagation/keplerian_elements.hpp>
 #include <orbitforge/core/propagation/state_provider.hpp>
 #include <orbitforge/core/units/quantities.hpp>
 
@@ -15,4 +16,8 @@ load_snapshot(const std::filesystem::path &manifest, const std::filesystem::path
 // shares the same CSPICE global-state lock as ephemeris queries.
 [[nodiscard]] std::shared_ptr<const core::IStateProvider>
 make_two_body(core::CartesianState initial, core::GravitationalParameter mu);
+[[nodiscard]] core::CartesianState to_cartesian(core::KeplerianElements elements,
+                                                core::GravitationalParameter mu);
+[[nodiscard]] core::KeplerianElements to_keplerian(core::CartesianState state,
+                                                   core::GravitationalParameter mu);
 } // namespace orbitforge::providers::spice

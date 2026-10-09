@@ -1,0 +1,8 @@
+IERS Rapid Service / Prediction Center, Bulletin A finals2000A.
+Source: https://datacenter.iers.org/data/9/finals2000A.all
+Retrieved: 2026-10-09; coverage: 2026-09-01 through 2026-11-01 UTC midnight inclusive.
+Original daily records include observation (I) and prediction (P) flags.
+Prediction is not final observed C04 data. Only complete x/y, UT1, dX/dY records are selected.
+Interpolation: cubic Hermite in TAI, shared adjacent secants for all five rates.
+dX/dY milliarcseconds are converted to radians. No subdaily tides or extrapolation.
+Format: https://maia.usno.navy.mil/ser7/readme.finals2000A

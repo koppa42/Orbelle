@@ -19,6 +19,8 @@ struct Node {
     core::Epoch epoch;
     std::array<double, 5> value;
     std::array<double, 5> rate;
+    unsigned prediction_mask = 0;
+    unsigned rate_prediction_mask = 0;
 };
 
 std::string read_file(const std::filesystem::path &path, std::size_t max_bytes) {
@@ -132,6 +134,86 @@ std::vector<Node> parse_c04(const std::string &bytes, int first, int last,
     return nodes;
 }
 
+std::vector<Node> parse_finals(const std::string &bytes, int first, int last,
+                               const core::ITimeProvider &time) {
+    std::vector<Node> nodes;
+    std::istringstream input(bytes);
+    std::string line;
+    const auto mjd_zero = std::chrono::sys_days(std::chrono::year(1858) / 11 / 17);
+    while (std::getline(input, line)) {
+        if (line.empty() || line[0] == '#')
+            continue;
+        if (line.size() < 15)
+            throw core::EopDataError("Truncated finals2000A date");
+        const auto field = [&](std::size_t offset, std::size_t count) {
+            std::istringstream stream(line.substr(offset, count));
+            stream.imbue(std::locale::classic());
+            double value;
+            if (!(stream >> value) || !std::isfinite(value))
+                throw core::EopDataError("Missing or nonfinite finals2000A field");
+            stream >> std::ws;
+            if (!stream.eof())
+                throw core::EopDataError("Invalid finals2000A numeric field");
+            return value;
+        };
+        const double mjd = field(7, 8);
+        if (mjd < first || mjd > last)
+            continue;
+        if (line.size() < 134 || mjd != first + static_cast<int>(nodes.size()))
+            throw core::EopDataError("finals2000A requires complete, consecutive daily samples");
+        const auto date_field = [&](std::size_t offset) {
+            const auto value = field(offset, 2);
+            if (value != std::floor(value) || value < 0 || value > 99)
+                throw core::EopDataError("Invalid finals2000A calendar field");
+            return static_cast<int>(value);
+        };
+        const int year = date_field(0) + (mjd <= 51543 ? 1900 : 2000), month = date_field(2),
+                  day = date_field(4);
+        const auto date =
+            std::chrono::year(year) / static_cast<unsigned>(month) / static_cast<unsigned>(day);
+        if (!date.ok() || (std::chrono::sys_days(date) - mjd_zero).count() != mjd)
+            throw core::EopDataError("finals2000A date/MJD mismatch");
+        unsigned prediction = 0;
+        for (const auto &[offset, mask] :
+             {std::pair{16u, 1u}, std::pair{57u, 2u}, std::pair{95u, 4u}}) {
+            if (line[offset] != 'I' && line[offset] != 'P')
+                throw core::EopDataError("Missing finals2000A observation/prediction flag");
+            if (line[offset] == 'P')
+                prediction |= mask;
+        }
+        const double x = field(18, 9), y = field(37, 9), dut1 = field(58, 10),
+                     dx = field(97, 9) / 1000, dy = field(116, 9) / 1000;
+        if (std::abs(x) >= 10 || std::abs(y) >= 10 || std::abs(dut1) >= 2 || std::abs(dx) >= 10 ||
+            std::abs(dy) >= 10)
+            throw core::EopDataError("finals2000A parameter outside supported domain");
+        for (const auto &[offset, count] :
+             {std::pair{27u, 9u}, std::pair{46u, 9u}, std::pair{68u, 10u}, std::pair{106u, 9u},
+              std::pair{125u, 9u}})
+            if (field(offset, count) < 0)
+                throw core::EopDataError("Negative finals2000A uncertainty");
+        const auto epoch = time.from_utc({year, month, day, 0, 0, 0, 0});
+        nodes.push_back(
+            {epoch,
+             {dut1 - time.tai_minus_utc_seconds(epoch), x * radians_per_arcsecond,
+              y * radians_per_arcsecond, dx * radians_per_arcsecond, dy * radians_per_arcsecond},
+             {},
+             prediction});
+    }
+    if (nodes.size() != static_cast<std::size_t>(last - first + 1))
+        throw core::EopDataError("finals2000A does not cover the declared interval");
+    // Bulletin A does not always supply LOD and does not supply polar-motion rates.
+    // Use shared adjacent secants for all five fields; keep this interpolation
+    // explicitly distinct from the C04 model that uses measured rates.
+    for (std::size_t i = 0; i < nodes.size(); ++i) {
+        const auto left = i == 0 ? i : i - 1, right = i + 1 == nodes.size() ? i : i + 1;
+        const auto dt = nodes[right].epoch.seconds_since(nodes[left].epoch);
+        nodes[i].rate_prediction_mask = nodes[left].prediction_mask | nodes[right].prediction_mask;
+        for (std::size_t k = 0; k < 5; ++k)
+            nodes[i].rate[k] = (nodes[right].value[k] - nodes[left].value[k]) / dt;
+    }
+    return nodes;
+}
+
 class EopSnapshot final : public core::IEarthOrientationProvider {
   public:
     EopSnapshot(std::vector<Node> nodes, core::EopDataInfo info)
@@ -153,12 +235,14 @@ class EopSnapshot final : public core::IEarthOrientationProvider {
                 return n.epoch.tai_nanoseconds() < t.tai_nanoseconds();
             });
         std::array<double, 5> value{}, rate{};
+        unsigned prediction_mask = upper->prediction_mask | upper->rate_prediction_mask;
         if (upper->epoch == epoch) {
             value = upper->value;
             rate = upper->rate;
         } else {
             const auto &b = *upper;
             const auto &a = *(upper - 1);
+            prediction_mask |= a.prediction_mask | a.rate_prediction_mask;
             const double h = b.epoch.seconds_since(a.epoch);
             const double t = epoch.seconds_since(a.epoch) / h;
             // Stable Hermite form around the left value. Avoid cancellation of UT1-TAI's
@@ -171,7 +255,10 @@ class EopSnapshot final : public core::IEarthOrientationProvider {
                 rate[k] = a.rate[k] + t * (2 * c2 + 3 * t * c3) / h;
             }
         }
-        return {{epoch, value[0], value[1], value[2], value[3], value[4], source_id_},
+        const auto source = info_.interpolation == "finals2000a-hermite-tai-v1"
+                                ? source_id_ + ";prediction-mask=" + std::to_string(prediction_mask)
+                                : source_id_;
+        return {{epoch, value[0], value[1], value[2], value[3], value[4], source},
                 {rate[0], rate[1], rate[2], rate[3], rate[4]}};
     }
     const core::EopDataInfo &data_info() const noexcept override { return info_; }
@@ -187,10 +274,15 @@ std::unique_ptr<core::IEarthOrientationProvider>
 load_eop_snapshot(const std::filesystem::path &manifest_path, const core::ITimeProvider &time) {
     try {
         const auto manifest = nlohmann::json::parse(read_file(manifest_path, 64 * 1024));
+        const bool finals = manifest.value("format", std::string{}) == "iers-finals2000a";
+        const std::string frame = finals ? "ITRS" : "ITRF2020";
+        const std::string interpolation =
+            finals ? "finals2000a-hermite-tai-v1" : "c04-hermite-tai-v1";
         if (!manifest.is_object() || !manifest.at("schema_version").is_number_integer() ||
-            manifest.at("schema_version") != 1 || manifest.at("format") != "iers-20-c04-0h-dxdy" ||
-            manifest.at("reference_frame") != "ITRF2020" ||
-            manifest.at("interpolation") != "c04-hermite-tai-v1") {
+            manifest.at("schema_version") != 1 ||
+            (!finals && manifest.at("format") != "iers-20-c04-0h-dxdy") ||
+            manifest.at("reference_frame") != frame ||
+            manifest.at("interpolation") != interpolation) {
             throw core::EopDataError(
                 "Unsupported EOP manifest version, format, frame or interpolation");
         }
@@ -232,12 +324,13 @@ load_eop_snapshot(const std::filesystem::path &manifest_path, const core::ITimeP
         if (last <= first) {
             throw core::EopDataError("EOP snapshot requires at least two daily samples");
         }
-        auto nodes = parse_c04(bytes, first, last, time);
+        auto nodes =
+            finals ? parse_finals(bytes, first, last, time) : parse_c04(bytes, first, last, time);
         core::EopDataInfo info{id,
                                hash,
                                source,
-                               "ITRF2020",
-                               "c04-hermite-tai-v1",
+                               frame,
+                               interpolation,
                                nodes.front().epoch,
                                nodes.back().epoch,
                                time.data_info()};

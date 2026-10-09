@@ -47,6 +47,88 @@ TEST(TwoBody, InitialEpochPreservesAllBitsAndMetadataWithoutKernelFiles) {
     EXPECT_DOUBLE_EQ(provider->state_at(initial.epoch).position_m[0], 7e6);
 }
 
+TEST(Keplerian, MatchesIndependentPerifocalGeometryForEllipsesAndHyperbolas) {
+    for (const auto &[a, e] : {std::pair{9e6, 0.2}, std::pair{-9e6, 1.4}, std::pair{7e6, 0.0}})
+        for (const double nu : {-1.2, 0.0, 1.2}) {
+            const double p = a * (1 - e * e), r = p / (1 + e * std::cos(nu)),
+                         speed = std::sqrt(earth_mu / p);
+            // i=90°, Ω=90°, ω=0: perifocal X maps to GCRF Y and Y to Z.
+            const KeplerianElements elements{Epoch{123456789},     a, e, std::numbers::pi / 2,
+                                             std::numbers::pi / 2, 0, nu};
+            near(providers::spice::to_cartesian(elements, GravitationalParameter{earth_mu}),
+                 state({0, r * std::cos(nu), r * std::sin(nu)},
+                       {0, -speed * std::sin(nu), speed * (e + std::cos(nu))}, elements.epoch),
+                 1e-6, 1e-8);
+        }
+}
+TEST(Keplerian, RoundTripsGeneralCircularEquatorialAndRetrogradeStates) {
+    for (const double inclination : {0.0, 1e-6, 0.9, std::numbers::pi})
+        for (const double eccentricity : {0.0, 0.1, 1.4}) {
+            const KeplerianElements input{Epoch{8'000'000'000'000'000'000},
+                                          eccentricity > 1 ? -9e6 : 9e6,
+                                          eccentricity,
+                                          inclination,
+                                          0.8,
+                                          0.6,
+                                          -0.5};
+            const auto cartesian =
+                providers::spice::to_cartesian(input, GravitationalParameter{earth_mu});
+            const auto recovered =
+                providers::spice::to_keplerian(cartesian, GravitationalParameter{earth_mu});
+            near(providers::spice::to_cartesian(recovered, GravitationalParameter{earth_mu}),
+                 cartesian, 0.001, 1e-6);
+        }
+}
+TEST(Keplerian, NearParabolicTrueAnomalyAvoidsMeanAnomalyCancellation) {
+    for (const double e : {1 - 1e-8, 1 - 1e-10, 1 + 1e-10, 1 + 1e-8})
+        for (const double nu : {-1.2, 1.2}) {
+            const double q = 7e6, p = q * (1 + e), radius = p / (1 + e * std::cos(nu)),
+                         speed = std::sqrt(earth_mu / p);
+            const KeplerianElements elements{Epoch{0}, q / (1 - e), e, 0, 0, 0, nu};
+            // Independent polar conic geometry, without eccentric/mean anomaly.
+            near(providers::spice::to_cartesian(elements, GravitationalParameter{earth_mu}),
+                 state({radius * std::cos(nu), radius * std::sin(nu), 0},
+                       {-speed * std::sin(nu), speed * (e + std::cos(nu)), 0}),
+                 1e-6, 1e-8);
+        }
+}
+TEST(Keplerian, RejectsInvalidBranchesAndPreservesSpiceAfterFailure) {
+    const auto workspace =
+        std::filesystem::path(ORBITFORGE_SPICE_TEST_DIR) / "element-error-recovery";
+    auto ephemeris = providers::spice::load_snapshot(ORBITFORGE_SPICE_SAMPLE, workspace);
+    const auto epoch = ephemeris->data_info().first_epoch;
+    const auto moon = ephemeris->geometric_state(301, 399, epoch);
+    KeplerianElements input{Epoch{0}, 7e6, 0.1, 0.9, 0, 0, 0};
+    auto invalid = input;
+    invalid.eccentricity = 1;
+    EXPECT_THROW((void)providers::spice::to_cartesian(invalid, GravitationalParameter{earth_mu}),
+                 std::invalid_argument);
+    invalid = input;
+    invalid.inclination_rad = -1;
+    EXPECT_THROW((void)providers::spice::to_cartesian(invalid, GravitationalParameter{earth_mu}),
+                 std::invalid_argument);
+    invalid = input;
+    invalid.semi_major_axis_m = -7e6;
+    invalid.eccentricity = 1.4;
+    invalid.true_anomaly_rad = std::numbers::pi;
+    EXPECT_THROW((void)providers::spice::to_cartesian(invalid, GravitationalParameter{earth_mu}),
+                 std::invalid_argument);
+    auto parabolic = state({3, 0, 0}, {0, 2, 0});
+    EXPECT_THROW((void)providers::spice::to_keplerian(parabolic, GravitationalParameter{6}),
+                 std::invalid_argument);
+    // Actual library error, not wrapper validation: periapsis underflows to 0 km.
+    invalid = input;
+    invalid.semi_major_axis_m = std::numeric_limits<double>::denorm_min();
+    invalid.eccentricity = 0;
+    EXPECT_THROW((void)providers::spice::to_cartesian(invalid, GravitationalParameter{earth_mu}),
+                 PropagationError);
+    EXPECT_EQ(providers::spice::to_cartesian(input, GravitationalParameter{earth_mu}).epoch,
+              Epoch{0});
+    const auto recovered_moon = ephemeris->geometric_state(301, 399, epoch);
+    EXPECT_EQ(recovered_moon.position_m, moon.position_m);
+    EXPECT_EQ(recovered_moon.velocity_mps, moon.velocity_mps);
+}
+
 TEST(TwoBody, InclinedCircularGeometryUsesElapsedTaiSecondsInBothDirections) {
     // r=10, mu=1000: angular rate exactly 1 rad/s in the YZ plane.
     const auto initial = state({0, 10, 0}, {0, 0, 10}, Epoch{8'000'000'000'000'000'000});

@@ -61,6 +61,13 @@ int main(int argc, char **argv) {
         return 10;
     if (orbitforge::runtime::two_body_available()) {
         using namespace orbitforge;
+        const core::KeplerianElements elements{core::Epoch{1}, 7e6, 0.1, 0.3, 0.2, 0.4, 0.5};
+        const auto converted =
+            runtime::to_cartesian(elements, core::GravitationalParameter{3.986004418e14});
+        const auto recovered =
+            runtime::to_keplerian(converted, core::GravitationalParameter{3.986004418e14});
+        if (recovered.epoch != elements.epoch || std::abs(recovered.semi_major_axis_m - 7e6) > 1e-6)
+            return 13;
         const core::CartesianState initial{
             core::Epoch{0}, core::OriginId::earth, core::FrameId::gcrf, {3, 0, 0}, {0, 2, 0}};
         const auto states = runtime::make_two_body_session(initial, core::GravitationalParameter{6},

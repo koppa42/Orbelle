@@ -64,6 +64,61 @@ TEST(IersEop, PublishedNodesUseSiUnitsAndLeapOffsets) {
                 b.rates.ut1_minus_tai_seconds_per_second, 1e-18);
 }
 
+TEST(IersFinals, PublishedPredictedValuesUnitsProvenanceAndNoExtrapolation) {
+    const auto time = providers::erfa::make_builtin_time_provider();
+    const auto table = providers::iers::load_eop_snapshot(ORBITFORGE_FINALS_SAMPLE, *time);
+    const auto epoch = time->from_utc({2026, 10, 9, 0, 0, 0, 0});
+    const auto sample = table->at(epoch).sample;
+    EXPECT_NEAR(sample.ut1_minus_tai_seconds, -37.0302856, 1e-12);
+    EXPECT_NEAR(sample.polar_motion_x_rad, 0.167231 * arcsec, 1e-18);
+    EXPECT_NEAR(sample.polar_motion_y_rad, 0.322270 * arcsec, 1e-18);
+    EXPECT_NEAR(sample.celestial_pole_dx_rad, 0.000146 * arcsec, 1e-18);
+    EXPECT_NEAR(sample.celestial_pole_dy_rad, 0.000259 * arcsec, 1e-18);
+    EXPECT_NE(sample.source_id.find("prediction-mask=7"), std::string::npos);
+    EXPECT_EQ(table->data_info().interpolation, "finals2000a-hermite-tai-v1");
+    EXPECT_THROW((void)table->at(shift(table->data_info().last_epoch, 1e-9)),
+                 core::EopCoverageError);
+    const auto middle = shift(epoch, 3600);
+    const auto state = table->at(middle), before = table->at(shift(middle, -1)),
+               after = table->at(shift(middle, 1));
+    EXPECT_NEAR(state.rates.ut1_minus_tai_seconds_per_second,
+                (after.sample.ut1_minus_tai_seconds - before.sample.ut1_minus_tai_seconds) / 2,
+                1e-13);
+    EXPECT_NEAR(state.rates.polar_motion_x_rad_per_second,
+                (after.sample.polar_motion_x_rad - before.sample.polar_motion_x_rad) / 2, 1e-20);
+}
+
+TEST(IersFinals, RejectsMissingCpoFlagsAndNonfiniteRecords) {
+    const auto time = providers::erfa::make_builtin_time_provider();
+    const auto manifest = nlohmann::json::parse(read(ORBITFORGE_FINALS_SAMPLE));
+    const auto original =
+        read(std::filesystem::path(ORBITFORGE_FINALS_SAMPLE).parent_path() / "finals2000A.data");
+    auto invalid = original;
+    invalid[95] = ' ';
+    EXPECT_THROW((void)providers::iers::load_eop_snapshot(fixture(invalid, manifest), *time),
+                 core::EopDataError);
+    invalid = original;
+    invalid.replace(97, 9, "         ");
+    EXPECT_THROW((void)providers::iers::load_eop_snapshot(fixture(invalid, manifest), *time),
+                 core::EopDataError);
+    invalid = original;
+    invalid.replace(18, 9, "      nan");
+    EXPECT_THROW((void)providers::iers::load_eop_snapshot(fixture(invalid, manifest), *time),
+                 core::EopDataError);
+}
+
+TEST(IersFinals, PredictionProvenanceIncludesInterpolantDerivativeDependencies) {
+    const auto time = providers::erfa::make_builtin_time_provider();
+    const auto table = providers::iers::load_eop_snapshot(ORBITFORGE_FINALS_SAMPLE, *time);
+    for (const auto &[date, mask] :
+         {std::pair{core::UtcDateTime{2026, 9, 21, 0, 0, 0, 0}, "prediction-mask=0"},
+          std::pair{core::UtcDateTime{2026, 9, 21, 12, 0, 0, 0}, "prediction-mask=4"},
+          std::pair{core::UtcDateTime{2026, 9, 22, 0, 0, 0, 0}, "prediction-mask=4"},
+          std::pair{core::UtcDateTime{2026, 10, 7, 0, 0, 0, 0}, "prediction-mask=4"},
+          std::pair{core::UtcDateTime{2026, 10, 7, 12, 0, 0, 0}, "prediction-mask=7"}})
+        EXPECT_NE(table->at(time->from_utc(date)).sample.source_id.find(mask), std::string::npos);
+}
+
 TEST(IersEop, CoverageIsClosedAndNeverExtrapolated) {
     const auto time = providers::erfa::make_builtin_time_provider();
     const auto table = load(*time);

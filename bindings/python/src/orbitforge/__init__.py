@@ -11,6 +11,7 @@ from ._native import (
     EphemerisDataError, EphemerisCoverageError, EphemerisQueryError,
     ephemeris_available, load_spice_snapshot,
     PropagationError, two_body_available, make_two_body_session,
+    KeplerianElements, to_cartesian, to_keplerian,
 )
 
 __all__ = [
@@ -25,5 +26,6 @@ __all__ = [
     "EphemerisDataError", "EphemerisCoverageError", "EphemerisQueryError",
     "ephemeris_available", "load_spice_snapshot",
     "PropagationError", "two_body_available", "make_two_body_session",
+    "KeplerianElements", "to_cartesian", "to_keplerian",
 ]
 

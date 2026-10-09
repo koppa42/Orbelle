@@ -14,6 +14,25 @@ bool two_body_available() noexcept {
 #endif
 }
 
+core::CartesianState to_cartesian(core::KeplerianElements elements,
+                                  core::GravitationalParameter mu) {
+#ifdef ORBITFORGE_HAS_SPICE
+    return providers::spice::to_cartesian(elements, mu);
+#else
+    (void)elements;
+    (void)mu;
+    throw std::runtime_error("Orbital element conversion requires ORBITFORGE_WITH_SPICE");
+#endif
+}
+core::KeplerianElements to_keplerian(core::CartesianState state, core::GravitationalParameter mu) {
+#ifdef ORBITFORGE_HAS_SPICE
+    return providers::spice::to_keplerian(state, mu);
+#else
+    (void)state;
+    (void)mu;
+    throw std::runtime_error("Orbital element conversion requires ORBITFORGE_WITH_SPICE");
+#endif
+}
 application::Session make_two_body_session(core::CartesianState initial,
                                            core::GravitationalParameter mu, std::string object_id,
                                            std::uint64_t input_revision) {

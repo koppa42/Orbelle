@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "iers-finals2000a-2026-10-09",
+  "format": "iers-finals2000a",
+  "data_file": "finals2000A.data",
+  "sha256": "9a173ec7897f661b182edd83cc48db3fa7ea39e9be864c547d00f949d33dd53a",
+  "source_url": "https://datacenter.iers.org/data/9/finals2000A.all",
+  "source_sha256": "0baf00f67a39ab362a3e4f07d2a1f084842178523f56bcf5a861e7ac084d411a",
+  "retrieved_on": "2026-10-09",
+  "first_mjd": 61284,
+  "last_mjd": 61345,
+  "reference_frame": "ITRS",
+  "interpolation": "finals2000a-hermite-tai-v1"
+}

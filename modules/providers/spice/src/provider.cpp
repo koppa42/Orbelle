@@ -449,6 +449,121 @@ std::shared_ptr<const core::IStateProvider> make_two_body(core::CartesianState i
     return std::make_shared<TwoBody>(std::move(initial), mu);
 }
 
+namespace {
+double anomaly_remainder(double value, bool hyperbolic) {
+    if (std::abs(value) >= 0.5)
+        return hyperbolic ? std::sinh(value) - value : value - std::sin(value);
+    // Evaluate sinh(H)-H or E-sin(E) without subtracting nearly equal values.
+    // Only the elementary anomaly conversion uses this series; CSPICE still
+    // solves the conic. Twelve terms suffice for |value| < 0.5 in double precision.
+    double term = value * value * value / 6, sum = term;
+    const double square = (hyperbolic ? 1 : -1) * value * value;
+    for (int n = 2; n <= 12; ++n) {
+        term *= square / ((2 * n) * (2 * n + 1));
+        sum += term;
+    }
+    return sum;
+}
+} // namespace
+
+core::CartesianState to_cartesian(core::KeplerianElements elements,
+                                  core::GravitationalParameter parameter) {
+    const double mu = parameter.metres_cubed_per_second_squared;
+    const double a = elements.semi_major_axis_m, e = elements.eccentricity;
+    const double pi = std::acos(-1.0);
+    for (double value : {a, e, elements.inclination_rad, elements.raan_rad,
+                         elements.argument_of_periapsis_rad, elements.true_anomaly_rad, mu})
+        if (!std::isfinite(value))
+            throw std::invalid_argument("Orbital elements and mu must be finite");
+    if (mu <= 0 || e < 0 || e == 1 || a == 0 || (a > 0) != (e < 1) ||
+        elements.inclination_rad < 0 || elements.inclination_rad > pi)
+        throw std::invalid_argument("Require elliptical a>0, 0<=e<1 or hyperbolic a<0, e>1, and "
+                                    "0<=i<=pi; parabolic states use Cartesian input");
+    const double nu = std::remainder(elements.true_anomaly_rad, 2 * pi);
+    double anomaly = 0;
+    if (e < 1) {
+        const double eccentric =
+            std::atan2(std::sqrt((1 - e) * (1 + e)) * std::sin(nu), e + std::cos(nu));
+        anomaly = (1 - e) * eccentric + e * anomaly_remainder(eccentric, false);
+    } else {
+        const double denominator = 1 + e * std::cos(nu);
+        if (denominator <= 0)
+            throw std::invalid_argument("True anomaly lies outside the hyperbolic branch");
+        const double sinh_h = std::sqrt((e - 1) * (e + 1)) * std::sin(nu) / denominator;
+        const double hyperbolic = std::asinh(sinh_h);
+        anomaly = (e - 1) * hyperbolic + e * anomaly_remainder(hyperbolic, true);
+    }
+    // Pure conversion at the same epoch: no TDB/TAI elapsed-time interpretation.
+    // Use the documented CSPICE kilometre units at this adapter boundary.
+    const std::array<double, 8> conic{a * (1 - e) / 1000,
+                                      e,
+                                      elements.inclination_rad,
+                                      std::remainder(elements.raan_rad, 2 * pi),
+                                      std::remainder(elements.argument_of_periapsis_rad, 2 * pi),
+                                      anomaly,
+                                      0,
+                                      mu / 1e9};
+    for (double value : conic)
+        if (!std::isfinite(value))
+            throw std::invalid_argument("Orbital element conversion overflow");
+    std::array<double, 6> values{};
+    try {
+        std::scoped_lock guard(engine().mutex);
+        initialize_engine();
+        conics_c(conic.data(), 0, values.data());
+        check_spice();
+    } catch (const core::EphemerisQueryError &error) {
+        throw core::PropagationError(error.what());
+    } catch (const core::EphemerisDataError &error) {
+        throw core::PropagationError(error.what());
+    }
+    for (double &value : values) {
+        value *= 1000;
+        if (!std::isfinite(value))
+            throw core::PropagationError("Orbital element conversion returned nonfinite values");
+    }
+    return {elements.epoch,
+            core::OriginId::earth,
+            core::FrameId::gcrf,
+            {values[0], values[1], values[2]},
+            {values[3], values[4], values[5]}};
+}
+
+core::KeplerianElements to_keplerian(core::CartesianState state, core::GravitationalParameter mu) {
+    // Reuse the same finite, origin/frame and non-radial validation as propagation.
+    (void)make_two_body(state, mu);
+    std::array<double, 6> input{};
+    for (std::size_t i = 0; i < 3; ++i) {
+        input[i] = state.position_m[i] / 1000;
+        input[i + 3] = state.velocity_mps[i] / 1000;
+    }
+    std::array<double, SPICE_OSCLTX_NELTS> output{};
+    try {
+        std::scoped_lock guard(engine().mutex);
+        initialize_engine();
+        oscltx_c(input.data(), 0, mu.metres_cubed_per_second_squared / 1e9, output.data());
+        check_spice();
+    } catch (const core::EphemerisQueryError &error) {
+        throw core::PropagationError(error.what());
+    } catch (const core::EphemerisDataError &error) {
+        throw core::PropagationError(error.what());
+    }
+    core::KeplerianElements elements{state.epoch, output[9] * 1000, output[1], output[2],
+                                     output[3],   output[4],        output[8]};
+    if (elements.semi_major_axis_m == 0 || elements.eccentricity == 1)
+        throw std::invalid_argument(
+            "Semi-major axis is undefined near a parabolic orbit; retain Cartesian input");
+    const auto recovered = to_cartesian(elements, mu);
+    // NAIF recommends this check near singular element sets; never silently replace
+    // a valid Cartesian draft with a numerically unreliable element representation.
+    for (std::size_t i = 0; i < 3; ++i)
+        if (std::abs(recovered.position_m[i] - state.position_m[i]) > 0.001 ||
+            std::abs(recovered.velocity_mps[i] - state.velocity_mps[i]) > 1e-6)
+            throw core::PropagationError(
+                "Classical elements are numerically ill-conditioned; retain Cartesian input");
+    return elements;
+}
+
 std::unique_ptr<core::IEphemerisProvider> load_snapshot(const std::filesystem::path &manifest_path,
                                                         const std::filesystem::path &workspace) {
     try {

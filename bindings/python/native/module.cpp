@@ -1,5 +1,5 @@
-#include <orbitforge/runtime/demo.hpp>
 #include <orbitforge/application/scenario.hpp>
+#include <orbitforge/runtime/demo.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -48,20 +48,54 @@ PYBIND11_MODULE(_native, module) {
             },
             py::arg("epochs"), py::call_guard<py::gil_scoped_release>());
     py::class_<application::Scenario>(module, "Scenario")
-        .def(py::init<std::string, core::Epoch, core::Epoch>(), py::arg("name"), py::arg("first"), py::arg("last"))
+        .def(py::init<std::string, core::Epoch, core::Epoch>(), py::arg("name"), py::arg("first"),
+             py::arg("last"))
         .def_property_readonly("name", &application::Scenario::name)
         .def_property_readonly("first", &application::Scenario::first)
         .def_property_readonly("last", &application::Scenario::last)
         .def_property_readonly("revision", &application::Scenario::revision)
-        .def_property_readonly("object_count", [](const application::Scenario &scenario) { return scenario.objects().size(); })
-        .def("with_object", &application::Scenario::with_object, py::arg("session"), py::call_guard<py::gil_scoped_release>())
-        .def("sample", [](const application::Scenario &scenario, const std::vector<core::Epoch> &epochs) {
-            return scenario.sample(epochs);
-        }, py::arg("epochs"), py::call_guard<py::gil_scoped_release>());
+        .def_property_readonly(
+            "object_count",
+            [](const application::Scenario &scenario) { return scenario.objects().size(); })
+        .def("with_object", &application::Scenario::with_object, py::arg("session"),
+             py::call_guard<py::gil_scoped_release>())
+        .def(
+            "sample",
+            [](const application::Scenario &scenario, const std::vector<core::Epoch> &epochs) {
+                return scenario.sample(epochs);
+            },
+            py::arg("epochs"), py::call_guard<py::gil_scoped_release>());
     module.def("make_circular_demo_session", &runtime::make_circular_demo_session);
     module.def("demo_epochs", &runtime::demo_epochs);
     py::register_exception<core::PropagationError>(module, "PropagationError", PyExc_RuntimeError);
     module.def("two_body_available", &runtime::two_body_available);
+    py::class_<core::KeplerianElements>(module, "KeplerianElements")
+        .def(py::init<core::Epoch, double, double, double, double, double, double>(),
+             py::arg("epoch"), py::arg("semi_major_axis_m"), py::arg("eccentricity"),
+             py::arg("inclination_rad"), py::arg("raan_rad"), py::arg("argument_of_periapsis_rad"),
+             py::arg("true_anomaly_rad"))
+        .def_readonly("epoch", &core::KeplerianElements::epoch)
+        .def_readonly("semi_major_axis_m", &core::KeplerianElements::semi_major_axis_m)
+        .def_readonly("eccentricity", &core::KeplerianElements::eccentricity)
+        .def_readonly("inclination_rad", &core::KeplerianElements::inclination_rad)
+        .def_readonly("raan_rad", &core::KeplerianElements::raan_rad)
+        .def_readonly("argument_of_periapsis_rad",
+                      &core::KeplerianElements::argument_of_periapsis_rad)
+        .def_readonly("true_anomaly_rad", &core::KeplerianElements::true_anomaly_rad);
+    module.def(
+        "to_cartesian",
+        [](core::KeplerianElements elements, double mu) {
+            return runtime::to_cartesian(elements, core::GravitationalParameter{mu});
+        },
+        py::arg("elements"), py::arg("gravitational_parameter_m3_s2"),
+        py::call_guard<py::gil_scoped_release>());
+    module.def(
+        "to_keplerian",
+        [](core::CartesianState state, double mu) {
+            return runtime::to_keplerian(state, core::GravitationalParameter{mu});
+        },
+        py::arg("state"), py::arg("gravitational_parameter_m3_s2"),
+        py::call_guard<py::gil_scoped_release>());
     module.def(
         "make_two_body_session",
         [](core::CartesianState initial, double gravitational_parameter_m3_s2,
