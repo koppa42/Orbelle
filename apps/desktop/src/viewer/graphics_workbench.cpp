@@ -7,6 +7,7 @@
 #include "quantity_editor.hpp"
 #include "satellite_model.hpp"
 #include "scenario_dialog.hpp"
+#include "startup_splash.hpp"
 #include "workbench_profile.hpp"
 #include "workbench_style.hpp"
 #include "workspace.hpp"
@@ -29,6 +30,7 @@
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
+#include <QEventLoop>
 #include <QExposeEvent>
 #include <QFile>
 #include <QFileInfo>
@@ -75,6 +77,7 @@
 #include <future>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <mutex>
 #include <orbitforge/geo_rocky/globe.hpp>
 #include <orbitforge/render_vsg/compile_manager.hpp>
@@ -4427,9 +4430,28 @@ int run_graphics_workbench(QApplication &app) {
         qputenv("GDAL_DATA", (local_resources + "/gdal").toUtf8());
     ValidationLog log;
     try {
+        std::unique_ptr<StartupSplash> splash;
+        if (benchmark_manifest.isEmpty()) {
+            splash = std::make_unique<StartupSplash>(app.primaryScreen());
+            splash->show();
+            splash->showMessage(QStringLiteral("正在加载地球与工作台…"));
+            app.processEvents(QEventLoop::ExcludeUserInputEvents);
+            if (!smoke_dir.isEmpty()) {
+                QDir().mkpath(smoke_dir);
+                if (!splash->grab().save(smoke_dir + "/startup-splash.png"))
+                    throw std::runtime_error("Cannot capture the startup splash");
+            }
+        }
         Workbench window(app, log, smoke_dir, validation, benchmark_manifest, timing_dir,
                          timing_probe, output_only_probe);
         window.show();
+        if (splash) {
+            splash->finish(&window);
+            if (splash->isVisible())
+                throw std::runtime_error(
+                    "Startup splash did not close after opening the workbench");
+            splash.reset();
+        }
         const int code = app.exec();
         window.shutdown();
         return window.report(code);

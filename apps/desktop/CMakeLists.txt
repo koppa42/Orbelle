@@ -8,7 +8,8 @@ if(ORBITFORGE_WITH_VSG)
     qt_add_resources(orbitforge_desktop "workbench_icons" PREFIX "/orbitforge"
         BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
         FILES resources/icons/chevron-down.png
-              resources/icons/chevron-left.png resources/icons/chevron-right.png)
+              resources/icons/chevron-left.png resources/icons/chevron-right.png
+              resources/startup/star-gazing.png)
     find_package(vsgQt 0.4.0 EXACT CONFIG REQUIRED)
     find_package(rocky 1.1.0 EXACT CONFIG REQUIRED)
     find_package(vsgXchange 1.1.13 EXACT CONFIG REQUIRED)
@@ -16,7 +17,8 @@ if(ORBITFORGE_WITH_VSG)
         src/viewer/orbit_scene.cpp src/viewer/orbit_editor.cpp src/viewer/workbench_style.cpp
         src/viewer/satellite_model.cpp src/viewer/mission_timeline.cpp src/viewer/scenario_dialog.cpp
         src/viewer/epoch_editor.cpp src/viewer/ground_map.cpp src/viewer/workspace.cpp
-        src/viewer/workbench_profile.cpp src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp)
+        src/viewer/workbench_profile.cpp src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
+        src/viewer/startup_splash.cpp src/viewer/startup_splash.hpp)
     set_target_properties(orbitforge_desktop PROPERTIES AUTOMOC ON)
     target_link_libraries(orbitforge_desktop PRIVATE OrbitForge::GeoRocky vsgQt::vsgQt
         vsgXchange::vsgXchange rocky::rocky)
