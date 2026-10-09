@@ -19,7 +19,9 @@ class GroundMapTest : public ::testing::Test {
         }
         ASSERT_TRUE(directory_.isValid());
         QImage image(720, 360, QImage::Format_RGB32);
-        image.fill(QColor("#284966"));
+        for (int y = 0; y < image.height(); ++y)
+            for (int x = 0; x < image.width(); ++x)
+                image.setPixelColor(x, y, QColor(25 + x / 10, 40 + y / 5, 70 + (x + y) / 12));
         imagery_ = directory_.filePath("earth.png");
         ASSERT_TRUE(image.save(imagery_));
     }
@@ -43,6 +45,44 @@ class GroundMapTest : public ::testing::Test {
         map.set_sun_direction({1, 0, 0});
     }
     static QImage pixels(GroundMap &map) { return map.grab().toImage(); }
+    static GroundMap::Track dense_track() {
+        auto result = track();
+        result.points.clear();
+        result.epochs.clear();
+        for (int i = 0; i < 4000; ++i) {
+            result.points.emplace_back(std::remainder(i * 0.7, 360.0), 50 * std::sin(i * 0.017));
+            result.epochs.emplace_back(i * 10);
+        }
+        result.last = result.points.size();
+        result.path = ground_path(result.points);
+        return result;
+    }
+    static bool settle(GroundMap &map) {
+        QElapsedTimer deadline;
+        deadline.start();
+        do {
+            QCoreApplication::processEvents();
+            (void)pixels(map);
+            if (map.tracks_ready())
+                return true;
+            QThread::msleep(1);
+        } while (deadline.elapsed() < 3000);
+        return false;
+    }
+    static void expect_same_pixels(const QImage &a, const QImage &b) {
+        ASSERT_EQ(a.size(), b.size());
+        int maximum = 0;
+        for (int y = 0; y < a.height(); ++y)
+            for (int x = 0; x < a.width(); ++x) {
+                const auto p = a.pixelColor(x, y), q = b.pixelColor(x, y);
+                maximum =
+                    std::max({maximum, std::abs(p.red() - q.red()), std::abs(p.green() - q.green()),
+                              std::abs(p.blue() - q.blue())});
+            }
+        // Translating cached pixels versus rasterizing translated coordinates can
+        // differ by rounding at the antialiased edge (2/255 per channel).
+        EXPECT_LE(maximum, 2);
+    }
     static void pan(GroundMap &map) {
         QMouseEvent press(QEvent::MouseButtonPress, QPointF(300, 180), QPointF(300, 180),
                           Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
@@ -88,22 +128,7 @@ TEST_F(GroundMapTest, CachedPanAndResizeMatchFreshRendering) {
     (void)pixels(cached);
     pan(cached);
     pan(fresh);
-    {
-        const auto a = pixels(cached), b = pixels(fresh);
-        int maximum = 0, changed = 0;
-        for (int y = 0; y < a.height(); ++y)
-            for (int x = 0; x < a.width(); ++x) {
-                const auto p = a.pixelColor(x, y), q = b.pixelColor(x, y);
-                const auto delta =
-                    std::max({std::abs(p.red() - q.red()), std::abs(p.green() - q.green()),
-                              std::abs(p.blue() - q.blue())});
-                maximum = std::max(maximum, delta);
-                changed += delta != 0;
-            }
-        // Translating a raster versus rasterizing translated floating coordinates can
-        // differ by at most rounding in the antialiased edge (2/255 per channel).
-        EXPECT_LE(maximum, 2) << "Changed pixels: " << changed;
-    }
+    expect_same_pixels(pixels(cached), pixels(fresh));
     cached.resize(880, 450);
     fresh.resize(880, 450);
     EXPECT_EQ(pixels(cached), pixels(fresh));
@@ -133,27 +158,53 @@ TEST_F(GroundMapTest, ObsoleteWorkerCannotRestoreAReplacedOrbit) {
     GroundMap map(imagery_), fresh(imagery_);
     configure(map);
     configure(fresh);
-    auto long_track = track();
-    long_track.points.clear();
-    long_track.epochs.clear();
-    for (int i = 0; i < 4000; ++i) {
-        long_track.points.emplace_back(std::remainder(i * 0.7, 360.0), 50 * std::sin(i * 0.017));
-        long_track.epochs.emplace_back(i * 10);
-    }
-    long_track.last = long_track.points.size();
-    long_track.path = ground_path(long_track.points);
-    map.replace_track(0, std::move(long_track));
-    (void)pixels(map); // Starts an immutable worker request and draws an immediate preview.
+    map.replace_track(0, dense_track());
+    (void)pixels(map); // Starts an immutable preview request.
     EXPECT_FALSE(map.tracks_ready());
     map.replace_track(0, track());
-    QElapsedTimer deadline;
-    deadline.start();
-    while (!map.tracks_ready() && deadline.elapsed() < 2000) {
-        QCoreApplication::processEvents();
-        (void)pixels(map);
-        QThread::msleep(1);
-    }
-    ASSERT_TRUE(map.tracks_ready());
+    ASSERT_TRUE(settle(map));
     EXPECT_EQ(pixels(map), pixels(fresh));
+}
+TEST_F(GroundMapTest, ZoomBurstAndResizeSettleAtTheLatestViewport) {
+    GroundMap map(imagery_), fresh(imagery_);
+    for (auto *view : {&map, &fresh}) {
+        configure(*view);
+        view->replace_track(0, dense_track());
+    }
+    ASSERT_TRUE(settle(map));
+    for (int i = 0; i < 12; ++i) {
+        for (auto *view : {&map, &fresh})
+            view->zoom(i < 8 ? 1.2 : 1 / 1.2, QPointF(240, 180));
+        EXPECT_FALSE(map.tracks_ready());
+        (void)pixels(map); // Reproject cached coverage while obsolete work is cancelled.
+        QCoreApplication::processEvents();
+    }
+    for (auto *view : {&map, &fresh}) {
+        view->resize(820, 480);
+        view->set_selection(0);
+    }
+    ASSERT_TRUE(settle(map));
+    ASSERT_TRUE(settle(fresh));
+    expect_same_pixels(pixels(map), pixels(fresh));
+}
+TEST_F(GroundMapTest, PanBeyondCachedCoverageAndBackgroundChangesMatchFreshRendering) {
+    GroundMap cached(imagery_), fresh(imagery_);
+    for (auto *map : {&cached, &fresh}) {
+        configure(*map);
+        map->zoom(4, QPointF(300, 180));
+    }
+    (void)pixels(cached);
+    for (int i = 0; i < 12; ++i) {
+        pan(cached);
+        pan(fresh);
+        (void)pixels(cached);
+    }
+    expect_same_pixels(pixels(cached), pixels(fresh));
+    for (auto *map : {&cached, &fresh}) {
+        map->set_sun_direction({0, 0.8, 0.6});
+        map->set_grid_visible(false);
+        map->set_sun_visible(false);
+    }
+    expect_same_pixels(pixels(cached), pixels(fresh));
 }
 } // namespace orbitforge::desktop

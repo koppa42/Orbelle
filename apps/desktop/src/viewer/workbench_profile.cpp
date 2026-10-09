@@ -1,6 +1,7 @@
 #include "workbench_profile.hpp"
 #include <QDir>
 #include <QFile>
+#include <QImage>
 #include <QJsonDocument>
 #include <algorithm>
 #include <numeric>
@@ -52,5 +53,9 @@ void WorkbenchProfile::finish(const QJsonObject &metadata) {
             QJsonDocument(QJsonObject{{"metadata", metadata}, {"phases", phases}}).toJson()) < 0)
         throw std::runtime_error("Cannot write workbench profile");
     recording_ = false;
+}
+void WorkbenchProfile::capture(const QString &name, const QImage &image) const {
+    if (!image.save(output_ + "/" + name + ".png"))
+        throw std::runtime_error("Cannot save workbench profile image");
 }
 } // namespace orbitforge::desktop

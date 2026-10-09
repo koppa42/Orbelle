@@ -5,6 +5,7 @@
 #include <map>
 #include <vector>
 
+class QImage;
 namespace orbitforge::desktop {
 // Opt-in GUI-thread measurements; normal application runs collect no samples.
 class WorkbenchProfile {
@@ -14,6 +15,7 @@ class WorkbenchProfile {
     void phase(const QString &name, bool recording);
     void tick();
     void finish(const QJsonObject &metadata);
+    void capture(const QString &name, const QImage &image) const;
     static WorkbenchProfile *active;
     void record(const char *name, double milliseconds);
 

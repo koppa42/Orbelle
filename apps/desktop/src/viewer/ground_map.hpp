@@ -6,6 +6,7 @@
 #include <QTimer>
 #include <QTransform>
 #include <QWidget>
+#include <atomic>
 #include <functional>
 #include <future>
 #include <optional>
@@ -82,9 +83,10 @@ class GroundMap final : public QWidget {
     QTransform map_transform() const;
     void clamp_pan();
     void rebuild_night();
-    void paint_background(QPainter &p);
-    void paint_tracks(QPainter &p);
-    void invalidate_tracks();
+    void paint_background(QPainter &p, const QRectF &bounds);
+    void paint_grid(QPainter &p);
+    void paint_axes(QPainter &p);
+    void invalidate_tracks(bool geometry_changed = true);
     struct Stroke {
         QPainterPath path;
         QColor color;
@@ -94,23 +96,31 @@ class GroundMap final : public QWidget {
         QImage image;
         QRectF bounds;
         QTransform transform;
-        std::uint64_t revision;
+        std::uint64_t revision = 0;
+        double ratio = 1;
         double milliseconds = 0;
+        bool complete = true;
+        bool preview = false;
     };
+    Raster raster_request(double margin = 160) const;
+    Raster preview_request() const;
+    QTransform raster_transform(const Raster &raster) const;
+    bool covers_view(const Raster &raster, bool exact_scale = true) const;
+    void cancel_obsolete_raster();
+    static void allocate_raster(Raster &raster, QImage::Format format);
     std::vector<Stroke> strokes() const;
     static Raster rasterize(Raster result, const std::vector<Stroke> &strokes,
                             const std::atomic_bool &cancelled);
     void poll_raster();
     void install_raster(Raster result);
     std::future<Raster> pending_raster_;
-    std::atomic_bool cancel_raster_{false};
+    std::shared_ptr<std::atomic_bool> cancel_raster_;
     QTimer raster_timer_;
     std::uint64_t trails_revision_ = 0;
+    std::uint64_t geometry_revision_ = 0;
     QImage imagery_;
     QImage night_;
-    QImage background_, trails_;
-    QRectF background_area_, trails_bounds_;
-    QTransform trails_transform_;
+    Raster background_, trails_, preview_, pending_view_;
     bool background_dirty_ = true, trails_dirty_ = true, night_dirty_ = true;
     std::array<double, 3> sun_direction_{1, 0, 0};
     std::optional<QPointF> cursor_position_;

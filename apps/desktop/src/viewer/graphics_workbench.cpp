@@ -2370,9 +2370,9 @@ class Workbench final : public QMainWindow {
         }
         if (satellites_.empty())
             return true;
-        static const QStringList phases{"3d-paused",  "3d-drag", "2d-paused",
-                                        "2d-hover",   "2d-pan",  "2d-play",
-                                        "split-play", "2d-zoom", "3d-zoom"};
+        static const QStringList phases{"3d-paused",  "3d-drag", "2d-paused",  "2d-hover",
+                                        "2d-pan",     "2d-play", "split-play", "2d-zoom",
+                                        "2d-settled", "3d-zoom"};
         constexpr int warmup = 45, measured = 180, length = warmup + measured;
         const int phase = profile_frame_ / length, local = profile_frame_ % length;
         if (phase == phases.size()) {
@@ -2388,6 +2388,7 @@ class Workbench final : public QMainWindow {
                 {"map_width", ground_map_->width()},
                 {"map_height", ground_map_->height()},
                 {"device_pixel_ratio", devicePixelRatioF()},
+                {"map_quality_restored_after_zoom", true},
                 {"scope",
                  "GUI CPU and timer cadence; synthetic Qt input, not input-to-photon latency"}});
             finished_ = true;
@@ -2411,7 +2412,7 @@ class Workbench final : public QMainWindow {
                 workspace_->select_view(1);
             else if (phase == 6)
                 workspace_->split_page(map_panel_, view_panel_, Qt::RightEdge);
-            else {
+            else if (phase != 8) {
                 workspace_->merge_page(map_panel_, view_panel_);
                 workspace_->select_view(phase == 7 ? 1 : 0);
             }
@@ -2436,7 +2437,7 @@ class Workbench final : public QMainWindow {
                 mouse(phase == 1 ? static_cast<QObject *>(slots_[0]->window) : ground_map_,
                       QEvent::MouseButtonRelease, point, Qt::LeftButton, Qt::NoButton);
         }
-        if (phase >= 7 && local % 3 == 0) {
+        if ((phase == 7 || phase == 9) && local % 3 == 0) {
             QWheelEvent wheel(QPointF(300, 250), QPointF(300, 250), {},
                               QPoint(0, local % 60 < 30 ? 120 : -120), Qt::NoButton, Qt::NoModifier,
                               Qt::NoScrollPhase, false);
@@ -2444,6 +2445,13 @@ class Workbench final : public QMainWindow {
                 phase == 7 ? static_cast<QObject *>(ground_map_) : slots_[0]->window, &wheel);
             if (phase == 7 && local % 30 == 0)
                 set_selection(static_cast<std::size_t>(local / 30) % satellites_.size());
+        }
+        // The final idle phase must restore exact-scale quality after the zoom burst.
+        // Capture outside a measured interval; the next phase resets the cadence clock.
+        if (phase == 8 && local == length - 1) {
+            if (!ground_map_->tracks_ready())
+                throw std::runtime_error("Map quality did not settle after the zoom profile");
+            profile_->capture("2d-settled", ground_map_->grab().toImage());
         }
         ++profile_frame_;
         return true;

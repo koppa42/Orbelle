@@ -3,6 +3,7 @@
 #include <QKeyEvent>
 #include <QLineF>
 #include <QMouseEvent>
+#include <QPaintEvent>
 #include <QPainter>
 #include <QWheelEvent>
 #include <algorithm>
@@ -13,7 +14,8 @@
 
 namespace orbitforge::desktop {
 namespace {
-void draw_track(QPainter &painter, const QPainterPath &path) {
+bool draw_track(QPainter &painter, const QPainterPath &path,
+                const std::atomic_bool *cancelled = nullptr) {
     // Independent line primitives avoid the raster stroker's large intersecting
     // polygons. Keep every segment and preserve all antimeridian breaks.
     std::array<QLineF, 256> lines;
@@ -21,6 +23,8 @@ void draw_track(QPainter &painter, const QPainterPath &path) {
     int count = 0;
     QPointF previous;
     for (int i = 0; i < path.elementCount(); ++i) {
+        if ((i % 256) == 0 && cancelled && cancelled->load(std::memory_order_relaxed))
+            return false;
         const auto element = path.elementAt(i);
         const QPointF point(element.x, element.y);
         const bool outside = (previous.x() < clip.left() && point.x() < clip.left()) ||
@@ -38,6 +42,7 @@ void draw_track(QPainter &painter, const QPainterPath &path) {
     }
     if (count)
         painter.drawLines(lines.data(), count);
+    return !cancelled || !cancelled->load(std::memory_order_relaxed);
 }
 } // namespace
 QPointF ground_coordinates(const std::array<double, 3> &position) {
@@ -87,7 +92,8 @@ GroundMap::GroundMap(const QString &imagery, QWidget *parent) : QWidget(parent),
 }
 GroundMap::~GroundMap() {
     raster_timer_.stop();
-    cancel_raster_.store(true);
+    if (cancel_raster_)
+        cancel_raster_->store(true);
     if (pending_raster_.valid())
         pending_raster_.wait();
 }
@@ -140,7 +146,7 @@ void GroundMap::set_selection(std::optional<std::size_t> index) {
     if (selected_ == index)
         return;
     selected_ = index;
-    invalidate_tracks();
+    invalidate_tracks(false);
 }
 void GroundMap::set_display(std::size_t index, const DisplaySettings &settings, core::Epoch first,
                             core::Epoch last) {
@@ -201,10 +207,20 @@ void GroundMap::rebuild_night() {
     }
     for (int y = 0; y < night_.height(); ++y) {
         const double lat = (90 - (y + 0.5) / night_.height() * 180) * std::numbers::pi / 180;
+        const double cos_lat = std::cos(lat), axial = std::sin(lat) * direction[2];
         auto *pixels = reinterpret_cast<QRgb *>(night_.scanLine(y));
         for (int x = 0; x < night_.width(); ++x) {
-            const double cosine =
-                std::cos(lat) * longitude_component[x] + std::sin(lat) * direction[2];
+            const double cosine = cos_lat * longitude_component[x] + axial;
+            // Only twilight pixels need the smooth transition. The two constant
+            // regions are exactly the same as clamping the expression below.
+            if (cosine >= 0.003) {
+                pixels[x] = qRgb(255, 255, 255);
+                continue;
+            }
+            if (cosine <= -0.003) {
+                pixels[x] = qRgb(42, 64, 90);
+                continue;
+            }
             // A narrow visual twilight transition around the geometric terminator.
             const double t = std::clamp(0.5 - cosine / 0.006, 0.0, 1.0);
             const double night = t * t * (3 - 2 * t);
@@ -227,7 +243,6 @@ void GroundMap::set_grid_visible(bool enabled) {
     if (grid_ == enabled)
         return;
     grid_ = enabled;
-    background_dirty_ = true;
     update();
 }
 void GroundMap::set_tracks_visible(bool enabled) {
@@ -253,6 +268,7 @@ void GroundMap::focus_selection() {
     zoom(std::max(1.0, 2.0 / zoom_), plot_rect().center());
     pan_ += plot_rect().center() - marker_position(*selected_);
     clamp_pan();
+    cancel_obsolete_raster();
     update();
 }
 QRectF GroundMap::plot_rect() const { return QRectF(rect()).adjusted(38, 14, -16, -44); }
@@ -283,6 +299,7 @@ void GroundMap::clamp_pan() {
 void GroundMap::reset_view() {
     zoom_ = 1;
     pan_ = {};
+    cancel_obsolete_raster();
     update();
 }
 void GroundMap::zoom(double factor, QPointF anchor) {
@@ -291,22 +308,29 @@ void GroundMap::zoom(double factor, QPointF anchor) {
     pan_ = anchor - plot_rect().center() - (anchor - before.center()) * (next / zoom_);
     zoom_ = next;
     clamp_pan();
+    cancel_obsolete_raster();
     update();
 }
-void GroundMap::resizeEvent(QResizeEvent *) { clamp_pan(); }
-void GroundMap::invalidate_tracks() {
+void GroundMap::resizeEvent(QResizeEvent *) {
+    clamp_pan();
+    cancel_obsolete_raster();
+}
+void GroundMap::invalidate_tracks(bool geometry_changed) {
     ++trails_revision_;
+    if (geometry_changed)
+        ++geometry_revision_;
     trails_dirty_ = true;
+    cancel_obsolete_raster();
     update();
 }
-void GroundMap::paint_background(QPainter &p) {
+void GroundMap::paint_background(QPainter &p, const QRectF &bounds) {
     p.setRenderHint(QPainter::Antialiasing);
     p.setRenderHint(QPainter::SmoothPixmapTransform);
-    p.fillRect(rect(), QColor("#080f18"));
-    const auto plot = plot_rect(), area = map_rect();
+    p.fillRect(bounds, QColor("#080f18"));
+    const auto area = map_rect();
     const auto transform = map_transform();
     p.save();
-    p.setClipRect(plot);
+    p.setClipRect(bounds);
     p.drawImage(area, imagery_);
     p.fillRect(area, QColor(4, 12, 24, 35));
     if (lighting_) {
@@ -315,17 +339,6 @@ void GroundMap::paint_background(QPainter &p) {
         p.setCompositionMode(QPainter::CompositionMode_Multiply);
         p.drawImage(area, night_);
         p.setCompositionMode(QPainter::CompositionMode_SourceOver);
-    }
-    const int grid_step = area.width() > 6000   ? 5
-                          : area.width() > 3000 ? 10
-                          : area.width() > 1600 ? 15
-                                                : 30;
-    if (grid_) {
-        p.setPen(QPen(QColor(177, 208, 233, 75), 0.7, Qt::DotLine));
-        for (int lon = -180; lon <= 180; lon += grid_step)
-            p.drawLine(transform.map(QPointF(lon, -90)), transform.map(QPointF(lon, 90)));
-        for (int lat = -90; lat <= 90; lat += grid_step)
-            p.drawLine(transform.map(QPointF(-180, lat)), transform.map(QPointF(180, lat)));
     }
     if (show_sun_) {
         const auto sun = transform.map(
@@ -341,6 +354,29 @@ void GroundMap::paint_background(QPainter &p) {
         }
     }
     p.restore();
+}
+void GroundMap::paint_grid(QPainter &p) {
+    if (!grid_)
+        return;
+    const auto area = map_rect();
+    const auto transform = map_transform();
+    const int grid_step = area.width() > 6000   ? 5
+                          : area.width() > 3000 ? 10
+                          : area.width() > 1600 ? 15
+                                                : 30;
+    p.setPen(QPen(QColor(177, 208, 233, 75), 0.7, Qt::DotLine));
+    for (int lon = -180; lon <= 180; lon += grid_step)
+        p.drawLine(transform.map(QPointF(lon, -90)), transform.map(QPointF(lon, 90)));
+    for (int lat = -90; lat <= 90; lat += grid_step)
+        p.drawLine(transform.map(QPointF(-180, lat)), transform.map(QPointF(180, lat)));
+}
+void GroundMap::paint_axes(QPainter &p) {
+    const auto plot = plot_rect(), area = map_rect();
+    const auto transform = map_transform();
+    const int grid_step = area.width() > 6000   ? 5
+                          : area.width() > 3000 ? 10
+                          : area.width() > 1600 ? 15
+                                                : 30;
     p.setPen(QColor("#7c94ad"));
     QFont mono("Consolas");
     mono.setPixelSize(10);
@@ -375,6 +411,11 @@ GroundMap::Raster GroundMap::rasterize(Raster result, const std::vector<Stroke> 
                                        const std::atomic_bool &cancelled) {
     QElapsedTimer elapsed;
     elapsed.start();
+    if (cancelled.load()) {
+        result.complete = false;
+        return result;
+    }
+    allocate_raster(result, QImage::Format_ARGB32_Premultiplied);
     result.image.fill(Qt::transparent);
     QPainter p(&result.image);
     p.translate(-result.bounds.topLeft());
@@ -382,33 +423,95 @@ GroundMap::Raster GroundMap::rasterize(Raster result, const std::vector<Stroke> 
     p.setRenderHint(QPainter::Antialiasing);
     p.setBrush(Qt::NoBrush);
     for (const auto &stroke : strokes) {
-        if (cancelled.load())
+        if (cancelled.load()) {
+            result.complete = false;
             break;
+        }
         const auto path = result.transform.map(stroke.path);
-        p.setPen(QPen(QColor(4, 15, 26, 140), 2.8));
-        draw_track(p, path);
-        p.setPen(QPen(stroke.color, stroke.width));
-        draw_track(p, path);
+        if (result.preview) {
+            QPen pen(stroke.color);
+            pen.setWidthF(1);
+            pen.setCosmetic(true);
+            p.setPen(pen);
+        } else {
+            p.setPen(QPen(QColor(4, 15, 26, 140), 2.8));
+            if (!draw_track(p, path, &cancelled)) {
+                result.complete = false;
+                break;
+            }
+            p.setPen(QPen(stroke.color, stroke.width));
+        }
+        if (!draw_track(p, path, &cancelled)) {
+            result.complete = false;
+            break;
+        }
     }
     p.end();
     result.milliseconds = elapsed.nsecsElapsed() * 1e-6;
     return result;
 }
 bool GroundMap::tracks_ready() const {
-    const auto transform = map_transform();
-    const QPointF delta(transform.dx() - trails_transform_.dx(),
-                        transform.dy() - trails_transform_.dy());
-    return !trails_dirty_ && !trails_.isNull() &&
-           trails_.devicePixelRatio() == devicePixelRatioF() &&
-           transform.m11() == trails_transform_.m11() &&
-           trails_bounds_.translated(delta).contains(plot_rect());
+    return !trails_dirty_ && !trails_.image.isNull() && covers_view(trails_);
+}
+GroundMap::Raster GroundMap::raster_request(double margin) const {
+    Raster request;
+    request.ratio = devicePixelRatioF();
+    request.bounds = plot_rect().adjusted(-margin, -margin, margin, margin);
+    request.bounds.moveLeft(std::floor(request.bounds.left() * request.ratio) / request.ratio);
+    request.bounds.moveTop(std::floor(request.bounds.top() * request.ratio) / request.ratio);
+    request.bounds.setSize(QSizeF(qCeil(request.bounds.width() * request.ratio) / request.ratio,
+                                  qCeil(request.bounds.height() * request.ratio) / request.ratio));
+    request.transform = map_transform();
+    request.revision = trails_revision_;
+    return request;
+}
+GroundMap::Raster GroundMap::preview_request() const {
+    Raster request;
+    // A bounded whole-map image covers every viewport, including zooming out and
+    // crossing a cached viewport edge. It is only a transient visual fallback.
+    request.bounds = QRectF(0, 0, 2048, 1024);
+    request.transform = QTransform(2048.0 / 360, 0, 0, -1024.0 / 180, 1024, 512);
+    request.revision = geometry_revision_;
+    request.preview = true;
+    return request;
+}
+void GroundMap::allocate_raster(Raster &raster, QImage::Format format) {
+    raster.image = QImage(QSize(qCeil(raster.bounds.width() * raster.ratio),
+                                qCeil(raster.bounds.height() * raster.ratio)),
+                          format);
+    if (raster.image.isNull())
+        throw std::bad_alloc();
+    raster.image.setDevicePixelRatio(raster.ratio);
+}
+QTransform GroundMap::raster_transform(const Raster &raster) const {
+    const auto current = map_transform();
+    const auto scale = current.m11() / raster.transform.m11();
+    return QTransform(scale, 0, 0, scale, current.dx() - scale * raster.transform.dx(),
+                      current.dy() - scale * raster.transform.dy());
+}
+bool GroundMap::covers_view(const Raster &raster, bool exact_scale) const {
+    if (raster.bounds.isEmpty() || raster.ratio != devicePixelRatioF())
+        return false;
+    const auto transform = raster_transform(raster);
+    if (exact_scale ? transform.m11() != 1 : transform.m11() < 0.5 || transform.m11() > 2)
+        return false;
+    return transform.mapRect(raster.bounds).contains(plot_rect());
+}
+void GroundMap::cancel_obsolete_raster() {
+    if (cancel_raster_ && (pending_view_.preview ? pending_view_.revision != geometry_revision_
+                                                 : pending_view_.revision != trails_revision_ ||
+                                                       !covers_view(pending_view_)))
+        cancel_raster_->store(true, std::memory_order_relaxed);
 }
 void GroundMap::install_raster(Raster result) {
-    if (result.revision != trails_revision_)
-        return; // The orbit/range/selection changed while this immutable request was drawing.
-    trails_ = std::move(result.image);
-    trails_bounds_ = result.bounds;
-    trails_transform_ = result.transform;
+    if (result.preview) {
+        if (result.complete && result.revision == geometry_revision_)
+            preview_ = std::move(result);
+        return;
+    }
+    if (!result.complete || result.revision != trails_revision_ || !covers_view(result))
+        return;
+    trails_ = std::move(result);
     trails_dirty_ = false;
 }
 void GroundMap::poll_raster() {
@@ -418,114 +521,105 @@ void GroundMap::poll_raster() {
     try {
         auto result = pending_raster_.get();
         if (WorkbenchProfile::active)
-            WorkbenchProfile::active->record("map_tracks_worker_ms", result.milliseconds);
+            WorkbenchProfile::active->record(!result.complete ? "map_tracks_cancelled_ms"
+                                             : result.preview ? "map_preview_worker_ms"
+                                                              : "map_tracks_worker_ms",
+                                             result.milliseconds);
         install_raster(std::move(result));
     } catch (const std::exception &) {
-        // Keep the immediate, complete line rendering if allocation fails.
+        // Keep any valid cached image and allow a later paint to retry.
     }
     raster_timer_.stop();
+    cancel_raster_.reset();
     update();
 }
-void GroundMap::paint_tracks(QPainter &p) {
-    // While the high quality raster is prepared, draw every visible segment with a
-    // one-device-pixel cosmetic pen. No propagation or geometric simplification.
-    p.save();
-    p.setRenderHint(QPainter::Antialiasing, false);
-    const auto transform = map_transform();
-    for (const auto &stroke : strokes()) {
-        QPen pen(stroke.color);
-        pen.setWidthF(1.0 / devicePixelRatioF());
-        pen.setCosmetic(true);
-        p.setPen(pen);
-        draw_track(p, transform.map(stroke.path));
-    }
-    p.restore();
-}
-void GroundMap::paintEvent(QPaintEvent *) {
+void GroundMap::paintEvent(QPaintEvent *event) {
     const ProfileScope profile("map_paint_ms");
-    const auto ratio = devicePixelRatioF();
-    const QSize pixels(qCeil(width() * ratio), qCeil(height() * ratio));
-    const auto area = map_rect(), plot = plot_rect();
-    const auto transform = map_transform();
-    if (background_dirty_ || background_.size() != pixels || background_area_ != area ||
-        background_.devicePixelRatio() != ratio) {
+    const auto plot = plot_rect();
+    const bool footer_only = event->rect().top() >= height() - 24;
+    if (!footer_only &&
+        (background_dirty_ || background_.image.isNull() || !covers_view(background_))) {
         const ProfileScope rebuild("map_background_ms");
-        background_ = QImage(pixels, QImage::Format_RGB32);
-        background_.setDevicePixelRatio(ratio);
-        background_.fill(QColor("#080f18"));
-        QPainter cache(&background_);
-        paint_background(cache);
-        background_area_ = area;
+        background_ = raster_request(96);
+        allocate_raster(background_, QImage::Format_RGB32);
+        QPainter cache(&background_.image);
+        cache.translate(-background_.bounds.topLeft());
+        paint_background(cache, background_.bounds);
         background_dirty_ = false;
     }
     // One immutable worker request at a time; never queue intermediate viewports.
     // Heavy rasterization must not hold the shared Qt input / Vulkan frame thread.
+    cancel_obsolete_raster();
     poll_raster();
-    if (!tracks_ready() && !pending_raster_.valid()) {
+    if (!footer_only && !tracks_ready() && !pending_raster_.valid()) {
         const auto paths = strokes();
         std::size_t vertices = 0;
         for (const auto &stroke : paths)
             vertices += stroke.path.elementCount();
-        Raster request;
-        request.bounds = plot.adjusted(-160, -160, 160, 160);
-        request.bounds.moveLeft(std::floor(request.bounds.left() * ratio) / ratio);
-        request.bounds.moveTop(std::floor(request.bounds.top() * ratio) / ratio);
-        request.image = QImage(
-            QSize(qCeil(request.bounds.width() * ratio), qCeil(request.bounds.height() * ratio)),
-            QImage::Format_ARGB32_Premultiplied);
-        request.image.setDevicePixelRatio(ratio);
-        request.transform = transform;
-        request.revision = trails_revision_;
+        auto request = raster_request();
         if (vertices > 1024) {
-            pending_raster_ = std::async(
-                std::launch::async, [request = std::move(request), paths, this]() mutable {
-                    return rasterize(std::move(request), paths, cancel_raster_);
-                });
+            if (preview_.image.isNull() || preview_.revision != geometry_revision_)
+                request = preview_request();
+            pending_view_ = request;
+            cancel_raster_ = std::make_shared<std::atomic_bool>(false);
+            pending_raster_ = std::async(std::launch::async, [request = std::move(request), paths,
+                                                              cancel = cancel_raster_]() mutable {
+                return rasterize(std::move(request), paths, *cancel);
+            });
             raster_timer_.start();
         } else {
             const ProfileScope rebuild("map_tracks_ms");
-            install_raster(rasterize(std::move(request), paths, cancel_raster_));
+            const std::atomic_bool cancelled{false};
+            install_raster(rasterize(std::move(request), paths, cancelled));
         }
     }
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     p.setRenderHint(QPainter::SmoothPixmapTransform);
-    p.drawImage(QPointF(0, 0), background_);
-    p.save();
-    p.setClipRect(plot);
-    if (tracks_ready()) {
-        const QPointF delta(transform.dx() - trails_transform_.dx(),
-                            transform.dy() - trails_transform_.dy());
-        p.drawImage(trails_bounds_.topLeft() + delta, trails_);
-    } else
-        paint_tracks(p);
-    for (std::size_t i = 0; i < points_.size(); ++i) {
-        const auto point = marker_position(i);
-        if (!plot.contains(point))
-            continue;
-        p.setPen(QPen(QColor("#172d42"), 1.5));
-        p.setBrush(selected_ == i ? QColor("#ffce81") : QColor("#d0efff"));
-        p.drawEllipse(point, 4, 4);
-        if (selected_ == i) {
-            p.setBrush(Qt::NoBrush);
-            p.setPen(QPen(QColor("#ffce81"), 1));
-            p.drawEllipse(point, 8, 8);
+    p.fillRect(rect(), QColor("#080f18"));
+    if (!footer_only) {
+        p.save();
+        p.setClipRect(plot);
+        p.drawImage(raster_transform(background_).mapRect(background_.bounds), background_.image);
+        paint_grid(p);
+        // Reproject a complete cached image during zooming, only while its coverage
+        // includes the whole viewport. A new exact-scale image still replaces it.
+        const Raster *display = nullptr;
+        if (!trails_dirty_ && !trails_.image.isNull() && covers_view(trails_, false))
+            display = &trails_;
+        else if (!preview_.image.isNull() && preview_.revision == geometry_revision_)
+            display = &preview_;
+        if (display)
+            p.drawImage(raster_transform(*display).mapRect(display->bounds), display->image);
+        for (std::size_t i = 0; i < points_.size(); ++i) {
+            const auto point = marker_position(i);
+            if (!plot.contains(point))
+                continue;
+            p.setPen(QPen(QColor("#172d42"), 1.5));
+            p.setBrush(selected_ == i ? QColor("#ffce81") : QColor("#d0efff"));
+            p.drawEllipse(point, 4, 4);
+            if (selected_ == i) {
+                p.setBrush(Qt::NoBrush);
+                p.setPen(QPen(QColor("#ffce81"), 1));
+                p.drawEllipse(point, 8, 8);
+            }
+            if (!labels_ || (i < tracks_.size() && !tracks_[i].label))
+                continue;
+            const auto name = fontMetrics().elidedText(points_[i].name, Qt::ElideRight,
+                                                       static_cast<int>(plot.width()) - 12);
+            const auto label_width = fontMetrics().horizontalAdvance(name) + 12;
+            const QRectF label(std::clamp(point.x() + 12, plot.left(), plot.right() - label_width),
+                               std::clamp(point.y() - 12, plot.top(), plot.bottom() - 22),
+                               label_width, 22);
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(13, 32, 49, 215));
+            p.drawRoundedRect(label, 3, 3);
+            p.setPen(QColor("#d9e9f6"));
+            p.drawText(label, Qt::AlignCenter, name);
         }
-        if (!labels_ || (i < tracks_.size() && !tracks_[i].label))
-            continue;
-        const auto name = fontMetrics().elidedText(points_[i].name, Qt::ElideRight,
-                                                   static_cast<int>(plot.width()) - 12);
-        const auto label_width = fontMetrics().horizontalAdvance(name) + 12;
-        const QRectF label(std::clamp(point.x() + 12, plot.left(), plot.right() - label_width),
-                           std::clamp(point.y() - 12, plot.top(), plot.bottom() - 22), label_width,
-                           22);
-        p.setPen(Qt::NoPen);
-        p.setBrush(QColor(13, 32, 49, 215));
-        p.drawRoundedRect(label, 3, 3);
-        p.setPen(QColor("#d9e9f6"));
-        p.drawText(label, Qt::AlignCenter, name);
+        p.restore();
+        paint_axes(p);
     }
-    p.restore();
     p.setFont(font());
     p.setPen(QColor("#92aac2"));
     QString caption = QStringLiteral("WGS84 · 等距圆柱   |   滚轮缩放 · 拖动平移");
@@ -568,6 +662,7 @@ void GroundMap::mouseMoveEvent(QMouseEvent *event) {
     if (moved_) {
         pan_ += event->position() - last_mouse_;
         clamp_pan();
+        cancel_obsolete_raster();
         update();
     }
     last_mouse_ = event->position();
