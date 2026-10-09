@@ -69,6 +69,7 @@ C++ SDK 由模块安装生成。Python 构建入口 `pyproject.toml` 放在仓�
 - [呈现阶段组合受控对照](docs/validation/p0_output_stage_probe.md)
 - [Linux 无界面构建与交付验证](docs/validation/p0_linux_headless.md)
 - [独立计算吞吐量协议](docs/validation/p0_compute_protocol.md)
+- [独立计算吞吐量基线](docs/validation/p0_compute.md)
 - [CSPICE 验证记录](docs/validation/p0_spice.md)
 - [EOP 与完整状态变换验证记录](docs/validation/p0_eop_state.md)
 - [时间与位置旋转阶段记录](docs/validation/p0_time_frames.md)
