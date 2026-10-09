@@ -16,7 +16,10 @@ Workspace::Workspace(QWidget *view, QWidget *parent) : QWidget(parent), view_(vi
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    auto *bar = new QHBoxLayout;
+    auto *heading = new QWidget;
+    heading->setObjectName("workspaceHeading");
+    heading->setFixedHeight(34);
+    auto *bar = new QHBoxLayout(heading);
     bar->setContentsMargins(0, 0, 6, 0);
     bar->setSpacing(2);
     tabs_ = new QTabBar;
@@ -25,15 +28,18 @@ Workspace::Workspace(QWidget *view, QWidget *parent) : QWidget(parent), view_(vi
     tabs_->setExpanding(false);
     tabs_->setDrawBase(false);
     tabs_->setUsesScrollButtons(true);
+    tabs_->setIconSize(QSize(16, 16));
     bar->addWidget(tabs_, 1);
     detach_ = new QToolButton;
     detach_->setObjectName("detachDocument");
     detach_->setIcon(workbench_icon(WorkbenchIcon::detach));
+    detach_->setFixedSize(24, 24);
+    detach_->setIconSize(QSize(16, 16));
     detach_->setToolTip(QStringLiteral("在独立窗口打开当前页面"));
     detach_->setAccessibleName(detach_->toolTip());
     detach_->setEnabled(false);
     bar->addWidget(detach_);
-    layout->addLayout(bar);
+    layout->addWidget(heading);
     pages_ = new QStackedWidget;
     pages_->addWidget(view_);
     layout->addWidget(pages_, 1);
@@ -87,7 +93,8 @@ void Workspace::append_tab(Document &document) {
     tabs_->setTabData(tab, QVariant::fromValue(reinterpret_cast<quintptr>(&document)));
     auto *close = new QToolButton;
     close->setIcon(workbench_icon(WorkbenchIcon::close));
-    close->setFixedSize(22, 22);
+    close->setFixedSize(20, 20);
+    close->setIconSize(QSize(14, 14));
     close->setToolTip(QStringLiteral("关闭页面"));
     close->setAccessibleName(close->toolTip());
     connect(close, &QToolButton::clicked, this,

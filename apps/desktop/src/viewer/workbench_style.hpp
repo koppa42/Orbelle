@@ -5,6 +5,7 @@ class QApplication;
 class QDockWidget;
 namespace orbitforge::desktop {
 enum class WorkbenchIcon {
+    new_scenario,
     orbit,
     earth,
     map,
@@ -24,9 +25,11 @@ enum class WorkbenchIcon {
     clock,
     zoom_in,
     zoom_out,
-    time_fit
+    time_fit,
+    chevron_up,
+    chevron_down
 };
 void apply_workbench_style(QApplication &app);
-QIcon workbench_icon(WorkbenchIcon icon, const QColor &color = QColor("#91aac3"));
+QIcon workbench_icon(WorkbenchIcon icon, const QColor &color = QColor("#a7b6c7"));
 void style_dock(QDockWidget *dock, WorkbenchIcon icon);
 } // namespace orbitforge::desktop

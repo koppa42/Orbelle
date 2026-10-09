@@ -293,23 +293,18 @@ class Workbench final : public QMainWindow {
                 commands_ = addToolBar(QStringLiteral("场景与图形"));
                 commands_->setObjectName("commandBar");
                 commands_->setMovable(false);
-                commands_->setIconSize(QSize(16, 16));
+                commands_->setFixedHeight(40);
+                commands_->setIconSize(QSize(18, 18));
                 commands_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
                 auto *symbol = new QLabel;
                 symbol->setPixmap(
-                    workbench_icon(WorkbenchIcon::orbit, QColor("#3476be")).pixmap(26, 26));
+                    workbench_icon(WorkbenchIcon::orbit, QColor("#74b9ee")).pixmap(22, 22));
                 commands_->addWidget(symbol);
                 auto *name = new QLabel("OrbitForge");
                 name->setObjectName("brand");
                 commands_->addWidget(name);
-                auto *workspace = new QLabel(QStringLiteral("未创建场景"));
-                workspace_label_ = workspace;
-                workspace->setObjectName("workspaceName");
-                commands_->addWidget(workspace);
-                auto *space = new QWidget;
-                space->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-                commands_->addWidget(space);
-                new_action_ = commands_->addAction(workbench_icon(WorkbenchIcon::orbit),
+                commands_->addSeparator();
+                new_action_ = commands_->addAction(workbench_icon(WorkbenchIcon::new_scenario),
                                                    QStringLiteral("新建场景"));
                 new_action_->setShortcut(QKeySequence("Ctrl+N"));
                 connect(new_action_, &QAction::triggered, this, [this] { create_scenario(); });
@@ -323,7 +318,16 @@ class Workbench final : public QMainWindow {
                 connect(insert_action_, &QAction::triggered, this,
                         [this] { begin_insert_satellite(); });
                 insert_menu_->addAction(insert_action_);
-                commands_->addSeparator();
+                auto *space = new QWidget;
+                space->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+                commands_->addWidget(space);
+                auto *scene_symbol = new QLabel;
+                scene_symbol->setPixmap(workbench_icon(WorkbenchIcon::earth).pixmap(16, 16));
+                commands_->addWidget(scene_symbol);
+                workspace_label_ = new QLabel(QStringLiteral("未创建场景"));
+                workspace_label_->setObjectName("workspaceName");
+                workspace_label_->setMaximumWidth(260);
+                commands_->addWidget(workspace_label_);
             }
             if (benchmarking_) {
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
@@ -371,10 +375,12 @@ class Workbench final : public QMainWindow {
                 object_dock->setWidget(objects);
             } else {
                 auto *explorer = new QWidget;
+                explorer->setObjectName("objectExplorer");
                 auto *layout = new QVBoxLayout(explorer);
-                layout->setContentsMargins(10, 10, 10, 12);
-                layout->setSpacing(10);
+                layout->setContentsMargins(8, 8, 8, 8);
+                layout->setSpacing(6);
                 auto *search = new QLineEdit;
+                search->setObjectName("objectSearch");
                 search->setPlaceholderText(QStringLiteral("搜索对象…"));
                 search->addAction(workbench_icon(WorkbenchIcon::search),
                                   QLineEdit::LeadingPosition);
@@ -492,11 +498,11 @@ class Workbench final : public QMainWindow {
                 layout->setContentsMargins(0, 0, 0, 0);
                 layout->setSpacing(0);
                 auto *controls = new QHBoxLayout;
-                controls->setContentsMargins(16, 5, 14, 5);
-                controls->setSpacing(5);
+                controls->setContentsMargins(10, 4, 10, 4);
+                controls->setSpacing(4);
                 auto *heading = new QLabel(QStringLiteral("时间轴"));
                 heading->setObjectName("timelineTitle");
-                heading->setMinimumWidth(66);
+                heading->setMinimumWidth(60);
                 controls->addWidget(heading);
                 auto *start = new QAction(workbench_icon(WorkbenchIcon::first),
                                           QStringLiteral("分析起点"), this);
@@ -518,7 +524,7 @@ class Workbench final : public QMainWindow {
                 for (auto *action : {start, play, end}) {
                     auto *button = new QToolButton;
                     button->setDefaultAction(action);
-                    button->setFixedSize(32, 30);
+                    button->setFixedSize(28, 28);
                     button->setIconSize(QSize(18, 18));
                     if (action == play)
                         button->setObjectName("transportPlay");
@@ -587,7 +593,8 @@ class Workbench final : public QMainWindow {
                     button->setObjectName(name);
                     button->setToolTip(text);
                     button->setAccessibleName(text);
-                    button->setFixedSize(30, 30);
+                    button->setFixedSize(28, 28);
+                    button->setIconSize(QSize(18, 18));
                     connect(button, &QToolButton::clicked, this, command);
                     controls->addWidget(button);
                 }
@@ -607,6 +614,34 @@ class Workbench final : public QMainWindow {
                     if (timeline_)
                         timeline_->set_scale(display_scale_);
                 });
+                auto *expand = time_menu_->addAction(QStringLiteral("展开时间轴"));
+                expand->setObjectName("expandTimeline");
+                expand->setCheckable(true);
+                expand->setChecked(true);
+                expand->setShortcut(QKeySequence("Ctrl+J"));
+                auto *collapse = new QToolButton;
+                collapse->setObjectName("collapseTimeline");
+                collapse->setFixedSize(28, 28);
+                collapse->setIconSize(QSize(16, 16));
+                collapse->setIcon(workbench_icon(WorkbenchIcon::chevron_down));
+                collapse->setToolTip(QStringLiteral("收起时间轴 · Ctrl+J"));
+                collapse->setAccessibleName(collapse->toolTip());
+                connect(collapse, &QToolButton::clicked, expand, &QAction::toggle);
+                connect(expand, &QAction::toggled, this, [this, collapse, timeline](bool expanded) {
+                    timeline_->setVisible(expanded);
+                    // QToolBar caches the widget action's size hint; refresh both layouts.
+                    timeline->layout()->activate();
+                    time_toolbar_->layout()->invalidate();
+                    time_toolbar_->updateGeometry();
+                    this->layout()->invalidate();
+                    this->layout()->activate();
+                    collapse->setIcon(workbench_icon(expanded ? WorkbenchIcon::chevron_down
+                                                              : WorkbenchIcon::chevron_up));
+                    collapse->setToolTip(expanded ? QStringLiteral("收起时间轴 · Ctrl+J")
+                                                  : QStringLiteral("展开时间轴 · Ctrl+J"));
+                    collapse->setAccessibleName(collapse->toolTip());
+                });
+                controls->addWidget(collapse);
                 layout->addLayout(controls);
                 layout->addWidget(timeline_);
                 toolbar->addWidget(timeline);
@@ -1146,6 +1181,7 @@ class Workbench final : public QMainWindow {
                    .arg(display_tai(scenario_->first()), display_tai(scenario_->last())));
         scenario_item_->setExpanded(true);
         workspace_label_->setText(QString::fromStdString(scenario_->name()));
+        workspace_label_->setToolTip(workspace_label_->text());
         setWindowTitle(QString::fromStdString(scenario_->name()) + QStringLiteral(" · OrbitForge"));
         set_selection(std::nullopt);
         set_playing(false);
@@ -1884,8 +1920,9 @@ class Workbench final : public QMainWindow {
     QWidget *make_view_controls(std::optional<std::size_t> slot) {
         auto *header = new QWidget;
         header->setObjectName("viewHeading");
+        header->setFixedHeight(34);
         auto *bar = new QHBoxLayout(header);
-        bar->setContentsMargins(10, 3, 8, 3);
+        bar->setContentsMargins(10, 3, 6, 3);
         bar->setSpacing(3);
         auto *title = new QLabel(slot ? QStringLiteral("地球") : QStringLiteral("地面 · WGS84"));
         title->setObjectName("viewTitle");
@@ -1906,6 +1943,7 @@ class Workbench final : public QMainWindow {
         const auto button = [&](WorkbenchIcon icon, const QString &text, auto command) {
             auto *control = new QToolButton;
             control->setIcon(workbench_icon(icon));
+            control->setIconSize(QSize(17, 17));
             control->setFixedSize(28, 28);
             control->setToolTip(text);
             control->setAccessibleName(text);
@@ -1971,6 +2009,7 @@ class Workbench final : public QMainWindow {
         auto *display = new QToolButton;
         display->setObjectName(slot ? "display3D" : "display2D");
         display->setIcon(workbench_icon(WorkbenchIcon::properties));
+        display->setIconSize(QSize(18, 18));
         display->setToolTip(QStringLiteral("显示设置"));
         display->setAccessibleName(QStringLiteral("显示设置"));
         display->setFixedSize(30, 28);
@@ -3435,6 +3474,54 @@ class Workbench final : public QMainWindow {
             ++orbit_smoke_stage_;
             break;
         case 55:
+            // Complete the frame-driven surface lifecycle checks before measuring layout.
+            if (frame_count_ < 150 || frame_count_ < smoke_wait_frame_ || !view_captures_ready())
+                return;
+            slots_[1]->dock->hide();
+            open_properties();
+            ++orbit_smoke_stage_;
+            break;
+        case 56:
+            smoke_workspace_height_ = workspace_->height();
+            smoke_timeline_epoch_ = timeline_->current_time();
+            smoke_timeline_first_ = timeline_->visible_first();
+            smoke_timeline_last_ = timeline_->visible_last();
+            findChild<QToolButton *>("collapseTimeline")->click();
+            ++orbit_smoke_stage_;
+            break;
+        case 57:
+            save_workbench_image("workspace-collapsed-timeline.png");
+            require(!timeline_->isVisible() && time_label_->isVisible() &&
+                        play_action_->isEnabled(),
+                    "Collapsing the timeline did not keep the transport controls visible");
+            require(workspace_->height() >= smoke_workspace_height_ + 100,
+                    qPrintable(QString("Collapsing the timeline did not release workspace "
+                                       "height: %1 -> %2")
+                                   .arg(smoke_workspace_height_)
+                                   .arg(workspace_->height())));
+            require(timeline_->current_time() == smoke_timeline_epoch_ &&
+                        timeline_->visible_first() == smoke_timeline_first_ &&
+                        timeline_->visible_last() == smoke_timeline_last_ &&
+                        editor_->findChild<QSpinBox *>("displayStep")->value() == 60,
+                    "Collapsing the timeline changed the instant, range or property draft");
+            findChild<QAction *>("expandTimeline")->setChecked(true);
+            ++orbit_smoke_stage_;
+            break;
+        case 58:
+            require(timeline_->isVisible() && workspace_->height() == smoke_workspace_height_ &&
+                        timeline_->current_time() == smoke_timeline_epoch_ &&
+                        timeline_->visible_first() == smoke_timeline_first_ &&
+                        timeline_->visible_last() == smoke_timeline_last_,
+                    "Restoring the timeline changed its time or browsing range");
+            record("timeline-collapse-restores-workspace-and-time-range");
+            properties_dialog_->close();
+            slots_[1]->dock->show();
+            fit_views();
+            fit_pending_ = true;
+            smoke_wait_frame_ = frame_count_ + 3;
+            ++orbit_smoke_stage_;
+            break;
+        case 59:
             if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
                 return;
             orbit_capture_ = false;
@@ -3686,7 +3773,7 @@ class Workbench final : public QMainWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 56;
+    static constexpr int orbit_smoke_complete = 60;
     std::shared_ptr<const OrbitScene> smoke_cache_;
     std::size_t smoke_publications_ = 0;
     core::Epoch smoke_view_epoch_{0};
@@ -3694,6 +3781,8 @@ class Workbench final : public QMainWindow {
     QImage smoke_map_image_, smoke_globe_image_;
     std::uint64_t smoke_wait_frame_ = 0;
     qint64 smoke_timeline_epoch_ = 0;
+    qint64 smoke_timeline_first_ = 0, smoke_timeline_last_ = 0;
+    int smoke_workspace_height_ = 0;
     std::future<std::shared_ptr<const OrbitScene>> candidate_;
     std::future<std::shared_ptr<const OrbitScene>> display_candidate_;
     std::shared_ptr<const OrbitScene> display_source_, failed_display_source_;

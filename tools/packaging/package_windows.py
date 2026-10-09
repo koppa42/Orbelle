@@ -151,6 +151,7 @@ def main():
         '默认显示一圈，显示步长60秒；跳转后按需补算，默认卫星为点标记。\n'
         '三维默认GCRF惯性系，可切换ITRF；二维为ITRF/WGS84。\n'
         'Ctrl+Space 播放/暂停；Ctrl+0 适配轨道；Ctrl+L 定位卫星；Ctrl+T 跳转时间。\n\n'
+        'Ctrl+J 收起/展开时间轴，保留播放控制、当前时间和浏览范围。\n'
         'Ctrl+3 打开二维地图，与三维共享时间和选择；滚轮缩放、拖动平移、双击复位。\n\n'
         'Run OrbitForge.exe from this folder.\n'
         'DLLs, Qt plugins, offline Earth imagery and example model are included.\n'

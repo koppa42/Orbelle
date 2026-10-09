@@ -212,18 +212,18 @@ std::vector<qint64> MissionTimeline::ruler_ticks() const {
 void MissionTimeline::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
-    p.fillRect(rect(), QColor("#131e29"));
+    p.fillRect(rect(), QColor("#151b24"));
     const auto overview = overview_rect();
     const auto detail = detail_rect();
     const auto left = detail.left(), right = detail.right();
-    p.fillRect(QRectF(0, 0, left - 10, height()), QColor("#16222e"));
-    p.setPen(QColor("#293948"));
+    p.fillRect(QRectF(0, 0, left - 10, height()), QColor("#1c2430"));
+    p.setPen(QColor("#303c4b"));
     p.drawLine(QPointF(0, 41), QPointF(width(), 41));
     p.drawLine(QPointF(left - 10, 0), QPointF(left - 10, height()));
 
-    p.setPen(QColor("#a3b8cb"));
+    p.setPen(QColor("#b6c5d7"));
     p.drawText(QRectF(16, 2, left - 32, 20), Qt::AlignVCenter, QStringLiteral("场景总览"));
-    p.setPen(QColor("#71889e"));
+    p.setPen(QColor("#8396ac"));
     p.drawText(QRectF(16, 21, left - 32, 16), Qt::AlignVCenter, duration_text(last_ - first_));
     p.drawText(QRectF(16, 48, left - 32, 18), Qt::AlignVCenter,
                QStringLiteral("时间 / ") + scale_name(scale_));
@@ -233,26 +233,26 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
     QFont mono("Consolas");
     mono.setPixelSize(11);
     p.setFont(mono);
-    p.setPen(QColor("#7f95ab"));
+    p.setPen(QColor("#90a4bc"));
     // Always include both endpoint dates, even for an exact one-day scenario.
     p.drawText(QRectF(left, 1, detail.width() / 2, 18), Qt::AlignLeft | Qt::AlignVCenter,
                full_time(first_, scale_).left(20));
     p.drawText(QRectF(left + detail.width() / 2, 1, detail.width() / 2, 18),
                Qt::AlignRight | Qt::AlignVCenter, full_time(last_, scale_).left(20));
-    p.fillRect(overview, QColor("#0c1620"));
-    p.setPen(QColor("#283a4b"));
+    p.fillRect(overview, QColor("#101721"));
+    p.setPen(QColor("#2b3b4d"));
     for (int i = 0; i <= 24; ++i) {
         const auto x = left + overview.width() * i / 24;
         p.drawLine(QPointF(x, overview.top()), QPointF(x, overview.bottom()));
     }
     const double a = position_at(view_first_, true), b = position_at(view_last_, true);
     p.fillRect(QRectF(a, overview.top(), std::max(2.0, b - a), overview.height()),
-               QColor("#2b4861"));
-    p.setPen(QPen(QColor("#6c90ad"), 1));
+               QColor("#2a435b"));
+    p.setPen(QPen(QColor("#5a83a6"), 1));
     p.setBrush(Qt::NoBrush);
     p.drawRect(QRectF(a, overview.top(), std::max(2.0, b - a), overview.height()));
     if (b - a >= 18) {
-        p.setPen(QPen(QColor("#a1bfd5"), 2));
+        p.setPen(QPen(QColor("#a6c8e3"), 2));
         for (double x : {a + 3, b - 3})
             p.drawLine(QPointF(x, overview.top() + 3), QPointF(x, overview.bottom() - 3));
     }
@@ -263,7 +263,7 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
 
     p.save();
     p.setClipRect(detail.adjusted(-1, 0, 1, 0));
-    p.setPen(QColor("#7890a6"));
+    p.setPen(QColor("#91a6bc"));
     p.drawText(QRectF(left, 45, 110, 17), Qt::AlignLeft | Qt::AlignVCenter,
                full_time(view_first_, scale_).left(10));
     p.drawText(QRectF(right - 110, 45, 110, 17), Qt::AlignRight | Qt::AlignVCenter,
@@ -275,7 +275,7 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
     const auto ticks = ruler_ticks();
     // Five subdivisions per major SI interval, with calendar-aligned major ticks.
     for (std::size_t i = 1; i < ticks.size(); ++i) {
-        p.setPen(QColor("#3c5062"));
+        p.setPen(QColor("#40536a"));
         for (int part = 1; part < 5; ++part) {
             const auto epoch = ticks[i - 1] + (ticks[i] - ticks[i - 1]) * part / 5;
             const auto x = position_at(epoch);
@@ -285,27 +285,27 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
     const double label_width = step < 1000 ? 84 : 62;
     for (const auto epoch : ticks) {
         const auto x = position_at(epoch);
-        p.setPen(QColor("#233544"));
+        p.setPen(QColor("#263445"));
         p.drawLine(QPointF(x, 86), QPointF(x, 139));
-        p.setPen(QColor("#5d768d"));
+        p.setPen(QColor("#5c7690"));
         p.drawLine(QPointF(x, 78), QPointF(x, 86));
         if (x - left > label_width * 1.6 && right - x > label_width * 1.6) {
-            p.setPen(QColor("#8fa7bd"));
+            p.setPen(QColor("#a5bcd3"));
             p.drawText(QRectF(x - label_width / 2, 62, label_width, 17), Qt::AlignCenter,
                        label(epoch));
             if (view_last_ - view_first_ >= day_ms * 2) {
-                p.setPen(QColor("#71889e"));
+                p.setPen(QColor("#8396ac"));
                 p.drawText(QRectF(x - 40, 45, 80, 17), Qt::AlignCenter,
                            full_time(epoch, scale_).mid(5, 5));
             }
         }
     }
-    p.setPen(QColor("#afc2d3"));
+    p.setPen(QColor("#c1d0e1"));
     p.drawText(QRectF(left, 62, label_width + 4, 17), Qt::AlignLeft | Qt::AlignVCenter,
                label(view_first_));
     p.drawText(QRectF(right - label_width - 4, 62, label_width + 4, 17),
                Qt::AlignRight | Qt::AlignVCenter, label(view_last_));
-    p.setPen(QColor("#425b70"));
+    p.setPen(QColor("#455d76"));
     p.drawLine(QPointF(left, 85), QPointF(right, 85));
     p.restore();
 
@@ -314,24 +314,24 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
     const auto track = [&](double y, const QString &name, const QString &caption, const QIcon &icon,
                            const QColor &fill, const QColor &edge) {
         p.setFont(font());
-        p.setPen(QColor("#a2b7ca"));
+        p.setPen(QColor("#bacadd"));
         p.drawPixmap(QRect(16, static_cast<int>(y) + 2, 14, 14), icon.pixmap(28, 28));
         p.drawText(QRectF(38, y, left - 56, 18), Qt::AlignVCenter,
                    fontMetrics().elidedText(name, Qt::ElideRight, static_cast<int>(left - 58)));
         p.setPen(edge);
         p.setBrush(fill);
         p.drawRect(QRectF(left, y, detail.width(), 18));
-        p.setPen(QColor("#a2bdd1"));
+        p.setPen(QColor("#b4cfe6"));
         p.drawText(QRectF(left + 9, y, detail.width() - 18, 18), Qt::AlignVCenter, caption);
     };
-    track(91, scenario_, QStringLiteral("场景分析区间"), scenario_icon, QColor("#213345"),
-          QColor("#3d566b"));
+    track(91, scenario_, QStringLiteral("场景分析区间"), scenario_icon, QColor("#23374b"),
+          QColor("#3b5974"));
     if (show_object_interval_ && !object_.isEmpty())
-        track(117, object_, QStringLiteral("轨道传播"), satellite_icon, QColor("#234351"),
-              QColor("#3e6879"));
+        track(117, object_, QStringLiteral("轨道传播"), satellite_icon, QColor("#213e49"),
+              QColor("#3e6b7d"));
     else if (show_object_interval_) {
         p.setFont(font());
-        p.setPen(QColor("#6c8297"));
+        p.setPen(QColor("#8c9eb4"));
         p.drawText(QRectF(left + 9, 117, detail.width() - 18, 18), Qt::AlignVCenter,
                    QStringLiteral("选择卫星查看传播区间"));
     }
@@ -349,7 +349,7 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
                                 QPointF(x + direction * 6, 89)});
     }
     if (hasFocus()) {
-        p.setPen(QPen(QColor("#54718b"), 1));
+        p.setPen(QPen(QColor("#74b9ee"), 1));
         p.drawLine(QPointF(left, height() - 2), QPointF(right, height() - 2));
     }
 }
