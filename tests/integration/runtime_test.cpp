@@ -3,11 +3,33 @@
 #include <orbitforge/runtime/demo.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
+#include <orbitforge/runtime/two_body.hpp>
 #ifdef ORBITFORGE_HAS_VISUALIZATION
 #include <orbitforge/visualization/snapshot.hpp>
+#include <orbitforge/visualization/state_track.hpp>
 #endif
 
 using namespace orbitforge;
+
+TEST(Runtime, TwoBodyFactorySharesApplicationOwnershipAndBuildCapability) {
+    EXPECT_EQ(runtime::two_body_available(), static_cast<bool>(ORBITFORGE_EXPECT_SPICE));
+    const core::CartesianState initial{
+        core::Epoch{0}, core::OriginId::earth, core::FrameId::gcrf, {3, 0, 0}, {0, 2, 0}};
+    if (!runtime::two_body_available()) {
+        EXPECT_THROW((void)runtime::make_two_body_session(initial, core::GravitationalParameter{6},
+                                                          "unavailable"),
+                     std::runtime_error);
+        return;
+    }
+    const auto result =
+        runtime::make_two_body_session(initial, core::GravitationalParameter{6}, "parabolic", 7)
+            .sample(std::array{core::Epoch{4'000'000'000}});
+    EXPECT_EQ(result.provenance().object_id, "parabolic");
+    EXPECT_EQ(result.provenance().input_revision, 7U);
+    EXPECT_EQ(result.provenance().algorithm, "two-body-cspice-n0067-prop2b-tai-v1");
+    EXPECT_NEAR(result.states().front().position_m[1], 6, 1e-8);
+    EXPECT_NEAR(result.states().front().velocity_mps[0], -1, 1e-8);
+}
 
 TEST(Runtime, EphemerisFactoryMatchesBuildCapability) {
     ASSERT_EQ(runtime::ephemeris_available(), static_cast<bool>(ORBITFORGE_EXPECT_SPICE));
@@ -61,6 +83,52 @@ TEST(Application, UsesInjectedProviderInsteadOfDemoImplementation) {
     EXPECT_EQ(result.states().front().position_m[0], 1.0);
 }
 #ifdef ORBITFORGE_HAS_VISUALIZATION
+TEST(Visualization, HermiteDisplayTrackReproducesCubicAndDoesNotExtrapolate) {
+    // Non-uniform intervals at a large absolute epoch, with exact cubic derivatives.
+    constexpr std::int64_t base = 8'000'000'000'000'000'000;
+    std::vector<core::CartesianState> states;
+    for (const auto t : {0, 2, 7})
+        states.push_back({core::Epoch{base + t * 1'000'000'000LL},
+                          core::OriginId::earth,
+                          core::FrameId::itrf,
+                          {double(t * t * t), double(t * t), double(t)},
+                          {double(3 * t * t), double(2 * t), 1}});
+    const visualization::StateTrack track{results::StateSeries{{"test", 9, "cubic"}, states}};
+    states.front().position_m[0] = 500;
+    EXPECT_EQ(track.nodes().front().markers.front().position_m[0], 0);
+    for (const auto ns :
+         {0LL, 1LL, 999'999'999LL, 2'000'000'000LL, 3'456'789'012LL, 7'000'000'000LL}) {
+        const core::Epoch epoch{base + ns};
+        const auto sample = track.sample(epoch);
+        const double t = static_cast<double>(ns) * 1e-9;
+        EXPECT_EQ(sample.epoch, epoch);
+        EXPECT_EQ(sample.frame, core::FrameId::itrf);
+        EXPECT_EQ(sample.markers.front().object_id, "test");
+        EXPECT_NEAR(sample.markers.front().position_m[0], t * t * t, 1e-10);
+        EXPECT_NEAR(sample.markers.front().position_m[1], t * t, 1e-10);
+        EXPECT_NEAR(sample.markers.front().position_m[2], t, 1e-10);
+    }
+    EXPECT_THROW((void)track.sample(core::Epoch{base - 1}), std::out_of_range);
+    EXPECT_THROW((void)track.sample(core::Epoch{base + 7'000'000'001}), std::out_of_range);
+    states.back().epoch = states.front().epoch;
+    EXPECT_THROW((visualization::StateTrack{results::StateSeries{{"bad", 1, "test"}, states}}),
+                 std::invalid_argument);
+}
+
+TEST(Visualization, DisplayTrackRejectsMixedAxesAndNonfiniteTangents) {
+    const core::CartesianState a{
+        core::Epoch{0}, core::OriginId::earth, core::FrameId::itrf, {1, 2, 3}, {4, 5, 6}};
+    auto b = a;
+    b.epoch = core::Epoch{1'000'000'000};
+    b.frame = core::FrameId::gcrf;
+    EXPECT_THROW((visualization::StateTrack{results::StateSeries{{"bad", 1, "test"}, {a, b}}}),
+                 std::invalid_argument);
+    b.frame = a.frame;
+    b.velocity_mps[2] = std::numeric_limits<double>::infinity();
+    EXPECT_THROW((visualization::StateTrack{results::StateSeries{{"bad", 1, "test"}, {a, b}}}),
+                 std::invalid_argument);
+}
+
 TEST(Visualization, ExplicitRotationPreservesSourceAndRejectsWrongEpochOrFrame) {
     const visualization::RenderSnapshot source{core::Epoch(12),
                                                core::FrameId::gcrf,

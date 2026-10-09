@@ -372,7 +372,82 @@ class Snapshot final : public core::IEphemerisProvider {
     std::unique_ptr<KernelCopies> copies_;
     std::string source_;
 };
+
+class TwoBody final : public core::IStateProvider {
+  public:
+    TwoBody(core::CartesianState initial, core::GravitationalParameter mu)
+        : initial_(std::move(initial)), mu_(mu.metres_cubed_per_second_squared) {
+        if (initial_.origin != core::OriginId::earth || initial_.frame != core::FrameId::gcrf) {
+            throw std::invalid_argument("Two-body initial state must be Earth-centred GCRF");
+        }
+        if (!std::isfinite(mu_) || mu_ <= 0) {
+            throw std::invalid_argument(
+                "Two-body gravitational parameter must be finite and positive");
+        }
+        for (std::size_t k = 0; k < 3; ++k) {
+            if (!std::isfinite(initial_.position_m[k]) ||
+                !std::isfinite(initial_.velocity_mps[k])) {
+                throw std::invalid_argument("Two-body initial state must be finite");
+            }
+            input_[k] = initial_.position_m[k];
+            input_[k + 3] = initial_.velocity_mps[k];
+        }
+        const auto r = std::hypot(input_[0], input_[1], input_[2]);
+        const auto v = std::hypot(input_[3], input_[4], input_[5]);
+        if (!(r > 0) || !(v > 0) || !std::isfinite(r) || !std::isfinite(v)) {
+            throw std::invalid_argument(
+                "Two-body position and velocity norms must be finite and nonzero");
+        }
+        // Normalize before the cross product so this validation does not square
+        // dimensional numbers or introduce a near-radial eccentricity cutoff.
+        const std::array<double, 3> a{input_[0] / r, input_[1] / r, input_[2] / r};
+        const std::array<double, 3> b{input_[3] / v, input_[4] / v, input_[5] / v};
+        if (std::hypot(a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
+                       a[0] * b[1] - a[1] * b[0]) == 0) {
+            throw std::invalid_argument("Radial two-body motion is unsupported");
+        }
+        // Validate the CSPICE numerical domain before a Session can be published.
+        (void)propagate(initial_.epoch);
+    }
+
+    core::CartesianState state_at(core::Epoch epoch) const override {
+        return epoch == initial_.epoch ? initial_ : propagate(epoch);
+    }
+
+  private:
+    core::CartesianState propagate(core::Epoch epoch) const {
+        std::array<double, 6> values{};
+        try {
+            std::scoped_lock guard(engine().mutex);
+            initialize_engine();
+            // prop2b accepts consistent units (including SI) and no kernels.
+            // It must not clear or replace engine().active.
+            prop2b_c(mu_, input_.data(), epoch.seconds_since(initial_.epoch), values.data());
+            check_spice();
+        } catch (const core::EphemerisQueryError &error) {
+            throw core::PropagationError(error.what());
+        } catch (const core::EphemerisDataError &error) {
+            throw core::PropagationError(error.what());
+        }
+        if (!std::all_of(values.begin(), values.end(), [](double x) { return std::isfinite(x); })) {
+            throw core::PropagationError("CSPICE two-body propagation returned a non-finite state");
+        }
+        return {epoch,
+                initial_.origin,
+                initial_.frame,
+                {values[0], values[1], values[2]},
+                {values[3], values[4], values[5]}};
+    }
+    const core::CartesianState initial_;
+    const double mu_;
+    std::array<double, 6> input_{};
+};
 } // namespace
+
+std::shared_ptr<const core::IStateProvider> make_two_body(core::CartesianState initial,
+                                                          core::GravitationalParameter mu) {
+    return std::make_shared<TwoBody>(std::move(initial), mu);
+}
 
 std::unique_ptr<core::IEphemerisProvider> load_snapshot(const std::filesystem::path &manifest_path,
                                                         const std::filesystem::path &workspace) {

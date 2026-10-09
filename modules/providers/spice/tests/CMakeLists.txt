@@ -1,4 +1,4 @@
-add_executable(orbitforge_spice_tests provider_test.cpp)
+add_executable(orbitforge_spice_tests provider_test.cpp two_body_test.cpp)
 target_link_libraries(orbitforge_spice_tests PRIVATE OrbitForge::Spice GTest::gtest_main
     unofficial::cspice::cspice nlohmann_json::nlohmann_json)
 target_include_directories(orbitforge_spice_tests SYSTEM PRIVATE "${PICOSHA2_INCLUDE_DIR}")

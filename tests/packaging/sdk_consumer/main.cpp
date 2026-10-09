@@ -1,9 +1,17 @@
 #include <cmath>
 #include <iostream>
+#include <orbitforge/application/scenario.hpp>
 #include <orbitforge/runtime/demo.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
+#include <orbitforge/runtime/two_body.hpp>
 int main(int argc, char **argv) {
+    const orbitforge::application::Scenario empty("SDK mission", orbitforge::core::Epoch{0},
+                                                  orbitforge::core::Epoch{10'000'000'000});
+    const auto populated = empty.with_object(orbitforge::runtime::make_circular_demo_session());
+    if (!empty.objects().empty() || populated.objects().size() != 1 ||
+        populated.sample(std::array{orbitforge::core::Epoch{0}}).size() != 1)
+        return 12;
     const auto result = orbitforge::runtime::make_circular_demo_session().sample(
         orbitforge::runtime::demo_epochs());
     if (result.states().size() != 6 || result.states().front().position_m[0] != 7e6) {
@@ -48,6 +56,19 @@ int main(int argc, char **argv) {
     }
     if (orbitforge::runtime::ephemeris_available() != static_cast<bool>(ORBITFORGE_EXPECT_SPICE)) {
         return 7;
+    }
+    if (orbitforge::runtime::two_body_available() != static_cast<bool>(ORBITFORGE_EXPECT_SPICE))
+        return 10;
+    if (orbitforge::runtime::two_body_available()) {
+        using namespace orbitforge;
+        const core::CartesianState initial{
+            core::Epoch{0}, core::OriginId::earth, core::FrameId::gcrf, {3, 0, 0}, {0, 2, 0}};
+        const auto states = runtime::make_two_body_session(initial, core::GravitationalParameter{6},
+                                                           "sdk-two-body", 3)
+                                .sample(std::array{core::Epoch{4'000'000'000}});
+        if (std::abs(states.states().front().position_m[1] - 6) > 1e-8 ||
+            states.provenance().input_revision != 3)
+            return 11;
     }
     if (orbitforge::runtime::ephemeris_available()) {
         if (argc != 4) {

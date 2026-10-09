@@ -5,11 +5,12 @@
 #include <span>
 
 namespace orbitforge::application {
-// Minimal read-only P0 session. Editing, jobs and result publication are not implemented yet.
+// Immutable provider session. Scenario replaces whole sessions on an input revision.
 class Session {
   public:
     Session(std::shared_ptr<const core::IStateProvider> provider, results::Provenance provenance);
     [[nodiscard]] results::StateSeries sample(std::span<const core::Epoch> epochs) const;
+    [[nodiscard]] const results::Provenance &provenance() const noexcept { return provenance_; }
 
   private:
     std::shared_ptr<const core::IStateProvider> provider_;

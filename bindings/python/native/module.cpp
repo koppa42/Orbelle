@@ -1,4 +1,6 @@
 #include <orbitforge/runtime/demo.hpp>
+#include <orbitforge/application/scenario.hpp>
+#include <orbitforge/runtime/two_body.hpp>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -38,14 +40,38 @@ PYBIND11_MODULE(_native, module) {
         .def_property_readonly("provenance", &results::StateSeries::provenance)
         .def_property_readonly("states", &results::StateSeries::states);
     py::class_<application::Session>(module, "Session")
+        .def_property_readonly("provenance", &application::Session::provenance)
         .def(
             "sample",
             [](const application::Session &session, const std::vector<core::Epoch> &epochs) {
                 return session.sample(epochs);
             },
             py::arg("epochs"), py::call_guard<py::gil_scoped_release>());
+    py::class_<application::Scenario>(module, "Scenario")
+        .def(py::init<std::string, core::Epoch, core::Epoch>(), py::arg("name"), py::arg("first"), py::arg("last"))
+        .def_property_readonly("name", &application::Scenario::name)
+        .def_property_readonly("first", &application::Scenario::first)
+        .def_property_readonly("last", &application::Scenario::last)
+        .def_property_readonly("revision", &application::Scenario::revision)
+        .def_property_readonly("object_count", [](const application::Scenario &scenario) { return scenario.objects().size(); })
+        .def("with_object", &application::Scenario::with_object, py::arg("session"), py::call_guard<py::gil_scoped_release>())
+        .def("sample", [](const application::Scenario &scenario, const std::vector<core::Epoch> &epochs) {
+            return scenario.sample(epochs);
+        }, py::arg("epochs"), py::call_guard<py::gil_scoped_release>());
     module.def("make_circular_demo_session", &runtime::make_circular_demo_session);
     module.def("demo_epochs", &runtime::demo_epochs);
+    py::register_exception<core::PropagationError>(module, "PropagationError", PyExc_RuntimeError);
+    module.def("two_body_available", &runtime::two_body_available);
+    module.def(
+        "make_two_body_session",
+        [](core::CartesianState initial, double gravitational_parameter_m3_s2,
+           std::string object_id, std::uint64_t input_revision) {
+            return runtime::make_two_body_session(
+                std::move(initial), core::GravitationalParameter{gravitational_parameter_m3_s2},
+                std::move(object_id), input_revision);
+        },
+        py::arg("initial"), py::arg("gravitational_parameter_m3_s2"), py::arg("object_id"),
+        py::arg("input_revision") = 1, py::call_guard<py::gil_scoped_release>());
     bind_time_frames(module);
     bind_ephemeris(module);
 }
