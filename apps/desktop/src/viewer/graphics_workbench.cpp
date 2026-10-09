@@ -6,6 +6,7 @@
 #include "orbit_scene.hpp"
 #include "satellite_model.hpp"
 #include "scenario_dialog.hpp"
+#include "workbench_profile.hpp"
 #include "workbench_style.hpp"
 #include "workspace.hpp"
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
@@ -244,6 +245,19 @@ class Workbench final : public QMainWindow {
           selection_(
               std::make_unique<render_vsg::MarkerLayer>(1, render_vsg::MarkerStyle::selection)) {
         try {
+            const auto args = app.arguments();
+            const auto profile_index = args.indexOf("--workbench-profile");
+            if (profile_index >= 0) {
+                if (profile_index + 1 >= args.size() || benchmarking_ || !smoke_dir.isEmpty())
+                    throw std::invalid_argument(
+                        "Use --workbench-profile <new directory> separately");
+                profile_ = std::make_unique<WorkbenchProfile>(args[profile_index + 1]);
+                const auto count_index = args.indexOf("--profile-satellites");
+                if (count_index >= 0)
+                    profile_count_ = args.value(count_index + 1).toInt();
+                if (profile_count_ < 1 || profile_count_ > 128)
+                    throw std::invalid_argument("Profile satellite count must be in [1, 128]");
+            }
             playing_ = benchmarking_;
             eop_history_ = eop_;
             if (!benchmarking_)
@@ -776,6 +790,8 @@ class Workbench final : public QMainWindow {
             display_candidate_.wait();
         if (model_candidate_.valid())
             model_candidate_.wait();
+        if (profile_orbits_.valid())
+            profile_orbits_.wait();
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
         if (run_)
             run_->stop_inputs();
@@ -790,6 +806,7 @@ class Workbench final : public QMainWindow {
             globe_->stop_background_work();
         if (viewer_) {
             viewer_->deviceWaitIdle();
+            smoke_render_tasks_.clear();
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
             for (const auto &slot : slots_)
                 if (slot->gpu)
@@ -1392,6 +1409,7 @@ class Workbench final : public QMainWindow {
         show_timeline_status();
     }
     void update_satellite() {
+        const ProfileScope profile("satellite_update_ms");
         if (benchmarking_) {
             markers_->update(snapshot_);
             return;
@@ -1447,6 +1465,7 @@ class Workbench final : public QMainWindow {
         if (ground_map_)
             ground_map_->set_snapshot(fixed);
         globe_->set_illumination(sun_direction_, lighting_action_->isChecked());
+        satellite_state_dirty_ = false;
     }
     void start_model(int kind, const QString &path, double diameter_km) {
         if (busy() || !editor_target_)
@@ -1587,14 +1606,7 @@ class Workbench final : public QMainWindow {
             if (cancellation_->load())
                 throw OrbitCancelled{};
             auto next_scenario = scenario_->with_object(candidate->session);
-            std::vector<std::shared_ptr<const OrbitScene>> orbits;
-            for (const auto &satellite : satellites_)
-                orbits.push_back(satellite.orbit);
-            if (pending_orbit_target_)
-                orbits.at(*pending_orbit_target_) = candidate;
-            else
-                orbits.push_back(candidate);
-            auto ground_tracks = GroundMap::prepare_tracks(orbits);
+            auto ground_tracks = GroundMap::prepare_tracks({candidate});
             auto fixed_track = std::make_shared<render_vsg::TrackLayer>(candidate->track.nodes());
             auto inertial_track =
                 std::make_shared<render_vsg::TrackLayer>(candidate->inertial_track.nodes());
@@ -1604,15 +1616,15 @@ class Workbench final : public QMainWindow {
             auto model_host = vsg::Group::create();
             const auto previous = orbit_group_->children;
             const auto previous_models = model_group_->children;
-            begin_change();
             try {
-                if (pending_orbit_target_)
-                    orbit_group_->children.at(*pending_orbit_target_) = track;
-                else {
-                    orbit_group_->addChild(track);
-                    model_group_->addChild(model_host);
-                }
-                rebuild();
+                publish_static_node(track, [&] {
+                    if (pending_orbit_target_)
+                        orbit_group_->children.at(*pending_orbit_target_) = track;
+                    else {
+                        orbit_group_->addChild(track);
+                        model_group_->addChild(model_host);
+                    }
+                });
             } catch (...) {
                 orbit_group_->children = previous;
                 model_group_->children = previous_models;
@@ -1640,7 +1652,10 @@ class Workbench final : public QMainWindow {
                 scenario_item_->setExpanded(true);
             }
             scenario_ = std::move(next_scenario);
-            ground_map_->publish_tracks(std::move(ground_tracks));
+            if (pending_orbit_target_)
+                ground_map_->replace_track(index, std::move(ground_tracks.front()));
+            else
+                ground_map_->append_track(std::move(ground_tracks.front()));
             satellites_[index].fixed_track = std::move(fixed_track);
             satellites_[index].inertial_track = std::move(inertial_track);
             satellites_[index].tracks = track;
@@ -1717,6 +1732,7 @@ class Workbench final : public QMainWindow {
             display_candidate_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
             return;
         try {
+            const ProfileScope profile("cache_publish_ms");
             auto candidate = display_candidate_.get();
             if (display_target_ >= satellites_.size() ||
                 satellites_[display_target_].orbit != display_source_ ||
@@ -1735,10 +1751,9 @@ class Workbench final : public QMainWindow {
             auto prepared_map = GroundMap::prepare_tracks({candidate});
             auto map_track = std::move(prepared_map.front());
             const auto previous = orbit_group_->children.at(display_target_);
-            begin_change();
-            orbit_group_->children.at(display_target_) = tracks;
             try {
-                rebuild();
+                publish_static_node(tracks,
+                                    [&] { orbit_group_->children.at(display_target_) = tracks; });
             } catch (...) {
                 orbit_group_->children.at(display_target_) = previous;
                 rebuild();
@@ -1750,6 +1765,7 @@ class Workbench final : public QMainWindow {
             satellite.inertial_track = std::move(inertial);
             satellite.tracks = tracks;
             ground_map_->replace_track(display_target_, std::move(map_track));
+            satellite_state_dirty_ = true;
             orbit_ = satellites_.front().orbit;
             ++display_cache_publications_;
             statusBar()->showMessage(QStringLiteral("轨迹已更新"), 2000);
@@ -1977,6 +1993,7 @@ class Workbench final : public QMainWindow {
             connect(lighting_action_, &QAction::toggled, this, [this](bool enabled) {
                 if (ground_map_)
                     ground_map_->set_lighting(enabled);
+                satellite_state_dirty_ = true;
             });
             tracks_action_ = new QAction(QStringLiteral("三维轨迹"), this);
             tracks_action_->setCheckable(true);
@@ -2240,6 +2257,26 @@ class Workbench final : public QMainWindow {
             compiler_->begin_change(*viewer_);
         viewer_->deviceWaitIdle();
     }
+    void publish_static_node(vsg::ref_ptr<vsg::Node> node, const std::function<void()> &publish) {
+        // Track buffers are static. Compile only the replacement, retaining the current
+        // render tasks, swapchains and all other satellites. An idle barrier protects
+        // resources referenced by previous submissions before the old node is released.
+        if (compiler_ && !viewer_->recordAndSubmitTasks.empty()) {
+            const auto compiled = compiler_->compile(node);
+            if (!compiled)
+                throw std::runtime_error("Track compilation failed: " + compiled.message);
+            run_exclusive([&] {
+                viewer_->deviceWaitIdle();
+                if (compiled.requiresViewerUpdate(viewer_.get()))
+                    vsg::updateViewer(*viewer_, compiled);
+                publish();
+            });
+        } else {
+            begin_change();
+            publish();
+            rebuild();
+        }
+    }
     void run_exclusive(const std::function<void()> &operation) {
         if (compiler_)
             compiler_->run_exclusive(operation);
@@ -2272,7 +2309,149 @@ class Workbench final : public QMainWindow {
             compiler_->end_change(*viewer_);
         }
     }
+    bool profile_step() {
+        if (!profile_)
+            return true;
+        if (!profile_started_) {
+            profile_started_ = true;
+            const auto time = runtime::make_builtin_time_provider();
+            const auto first = time->from_utc({2026, 10, 9, 0, 0, 0, 0});
+            const auto last = time->from_utc({2026, 10, 10, 0, 0, 0, 0});
+            activate_scenario(application::Scenario("Interaction profile", first, last));
+            cancellation_ = std::make_shared<std::atomic_bool>(false);
+            profile_orbits_ = std::async(std::launch::async, [this, first, last,
+                                                              cancel = cancellation_] {
+                std::vector<std::shared_ptr<const OrbitScene>> orbits;
+                for (int i = 0; i < profile_count_; ++i) {
+                    OrbitInput input;
+                    input.first = input.initial.epoch = first;
+                    input.last = last;
+                    input.object_id = "Profile-" + std::to_string(i + 1);
+                    const auto angle = 6.283185307179586 * i / profile_count_;
+                    input.initial.position_m = {7e6 * std::cos(angle), 7e6 * std::sin(angle), 0};
+                    input.initial.velocity_mps = {-6200 * std::sin(angle), 6200 * std::cos(angle),
+                                                  5300};
+                    auto session = runtime::make_two_body_session(
+                        input.initial, core::GravitationalParameter{input.mu}, input.object_id, 1);
+                    orbits.push_back(
+                        prepare_orbit_scene(input, std::move(session), *frames_, *eop_, *cancel));
+                }
+                return orbits;
+            });
+        }
+        if (profile_orbits_.valid()) {
+            if (profile_orbits_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+                return true;
+            auto orbits = profile_orbits_.get();
+            begin_change();
+            for (const auto &orbit : orbits) {
+                Satellite satellite;
+                satellite.orbit = orbit;
+                satellite.display.extent = 1;
+                satellite.fixed_track =
+                    std::make_shared<render_vsg::TrackLayer>(orbit->track.nodes());
+                satellite.inertial_track =
+                    std::make_shared<render_vsg::TrackLayer>(orbit->inertial_track.nodes());
+                satellite.tracks = vsg::Switch::create();
+                satellite.tracks->addChild(true, satellite.inertial_track->node());
+                satellite.tracks->addChild(true, satellite.fixed_track->node());
+                satellite.item = new QTreeWidgetItem(
+                    scenario_item_, {QString::fromStdString(orbit->input.object_id)});
+                orbit_group_->addChild(satellite.tracks);
+                model_group_->addChild(satellite.model_host);
+                scenario_ = scenario_->with_object(orbit->session);
+                satellites_.push_back(std::move(satellite));
+            }
+            rebuild();
+            ground_map_->set_orbits(orbits);
+            orbit_ = orbits.front();
+            satellite_state_dirty_ = true;
+            fit_pending_ = true;
+        }
+        if (satellites_.empty())
+            return true;
+        static const QStringList phases{"3d-paused",  "3d-drag", "2d-paused",
+                                        "2d-hover",   "2d-pan",  "2d-play",
+                                        "split-play", "2d-zoom", "3d-zoom"};
+        constexpr int warmup = 45, measured = 180, length = warmup + measured;
+        const int phase = profile_frame_ / length, local = profile_frame_ % length;
+        if (phase == phases.size()) {
+            profile_->finish(QJsonObject{
+                {"satellites", profile_count_},
+                {"track_nodes_per_satellite", 1441},
+                {"step_seconds", 60},
+                {"duration_seconds", 86400},
+                {"gpu", QString::fromUtf8(slots_[0]
+                                              ->window->windowAdapter->getPhysicalDevice()
+                                              ->getProperties()
+                                              .deviceName)},
+                {"map_width", ground_map_->width()},
+                {"map_height", ground_map_->height()},
+                {"device_pixel_ratio", devicePixelRatioF()},
+                {"scope",
+                 "GUI CPU and timer cadence; synthetic Qt input, not input-to-photon latency"}});
+            finished_ = true;
+            timer_.stop();
+            app_.exit(0);
+            return false;
+        }
+        profile_->phase(phases[phase], local >= warmup);
+        profile_->tick();
+        const auto mouse = [](QObject *target, QEvent::Type type, QPointF p, Qt::MouseButton button,
+                              Qt::MouseButtons buttons) {
+            QMouseEvent event(type, p, p, button, buttons, Qt::NoModifier);
+            QCoreApplication::sendEvent(target, &event);
+        };
+        if (local == 0) {
+            std::cerr << "Profile phase: " << phases[phase].toStdString() << '\n';
+            set_playing(phase == 5 || phase == 6);
+            if (phase < 2)
+                workspace_->select_view(0);
+            else if (phase < 6)
+                workspace_->select_view(1);
+            else if (phase == 6)
+                workspace_->split_page(map_panel_, view_panel_, Qt::RightEdge);
+            else {
+                workspace_->merge_page(map_panel_, view_panel_);
+                workspace_->select_view(phase == 7 ? 1 : 0);
+            }
+            if (phase == 1)
+                mouse(slots_[0]->window, QEvent::MouseButtonPress, QPointF(300, 250),
+                      Qt::LeftButton, Qt::LeftButton);
+            if (phase == 4) {
+                ground_map_->zoom(2, ground_map_->rect().center());
+                mouse(ground_map_, QEvent::MouseButtonPress, QPointF(300, 250), Qt::LeftButton,
+                      Qt::LeftButton);
+            }
+            if (phase == 5)
+                ground_map_->reset_view();
+        }
+        if (phase == 1 || phase == 3 || phase == 4) {
+            const QPointF point(300 + 75 * std::sin(local * 0.045),
+                                250 + 45 * std::cos(local * 0.045));
+            mouse(phase == 1 ? static_cast<QObject *>(slots_[0]->window) : ground_map_,
+                  QEvent::MouseMove, point, Qt::NoButton,
+                  phase == 3 ? Qt::NoButton : Qt::LeftButton);
+            if (local == length - 1 && phase != 3)
+                mouse(phase == 1 ? static_cast<QObject *>(slots_[0]->window) : ground_map_,
+                      QEvent::MouseButtonRelease, point, Qt::LeftButton, Qt::NoButton);
+        }
+        if (phase >= 7 && local % 3 == 0) {
+            QWheelEvent wheel(QPointF(300, 250), QPointF(300, 250), {},
+                              QPoint(0, local % 60 < 30 ? 120 : -120), Qt::NoButton, Qt::NoModifier,
+                              Qt::NoScrollPhase, false);
+            QCoreApplication::sendEvent(
+                phase == 7 ? static_cast<QObject *>(ground_map_) : slots_[0]->window, &wheel);
+            if (phase == 7 && local % 30 == 0)
+                set_selection(static_cast<std::size_t>(local / 30) % satellites_.size());
+        }
+        ++profile_frame_;
+        return true;
+    }
     void frame() {
+        if (!profile_step())
+            return;
+        const ProfileScope profile("frame_cpu_ms");
         poll_orbit();
         poll_model();
         poll_display_cache();
@@ -2344,12 +2523,17 @@ class Workbench final : public QMainWindow {
         requested_time_ = false;
         const core::Epoch epoch((benchmarking_ ? 0 : scenario_->first().tai_nanoseconds()) +
                                 static_cast<std::int64_t>(std::llround(seconds_ * 1e9)));
-        snapshot_ = sample_frame(epoch);
-        update_satellite();
+        if (benchmarking_ || satellite_state_dirty_ || snapshot_.epoch != epoch) {
+            snapshot_ = sample_frame(epoch);
+            update_satellite();
+        }
         request_display_cache();
-        if (time_label_)
+        if (time_label_ && (time_label_epoch_ != epoch || time_label_scale_ != display_scale_)) {
             time_label_->setText(calendar_text(snapshot_.epoch, display_scale_));
-        if (timeline_)
+            time_label_epoch_ = epoch;
+            time_label_scale_ = display_scale_;
+        }
+        if (timeline_ && timeline_->current_time() != epoch.tai_nanoseconds() / 1'000'000)
             timeline_->set_current_time(snapshot_.epoch.tai_nanoseconds() / 1'000'000);
         visualization::RenderSnapshot selected_snapshot{
             snapshot_.epoch, snapshot_.frame, snapshot_.origin, {}};
@@ -2365,7 +2549,10 @@ class Workbench final : public QMainWindow {
         }
         bool active = false;
         // Image acquisition can recreate an out-of-date swapchain and wait for the device.
-        run_exclusive([&] { active = viewer_->advanceToNextFrame(seconds_); });
+        {
+            const ProfileScope acquire("acquire_ms");
+            run_exclusive([&] { active = viewer_->advanceToNextFrame(seconds_); });
+        }
         if (!active)
             throw std::runtime_error("VSG viewer became inactive");
         viewer_->handleEvents();
@@ -3416,6 +3603,7 @@ class Workbench final : public QMainWindow {
             require(immediate == exact,
                     "Uncached time did not query the analysis session directly");
             smoke_publications_ = display_cache_publications_;
+            smoke_render_tasks_ = viewer_->recordAndSubmitTasks;
             seek_epoch(jump);
             ++orbit_smoke_stage_;
             break;
@@ -3424,11 +3612,13 @@ class Workbench final : public QMainWindow {
             if (!caches_ready())
                 return;
             require(display_cache_publications_ > smoke_publications_ && orbit_ != smoke_cache_ &&
+                        viewer_->recordAndSubmitTasks == smoke_render_tasks_ &&
                         orbit_->track.samples().states().size() < 200 &&
                         orbit_->session.provenance().input_revision ==
                             smoke_cache_->session.provenance().input_revision,
                     "Seeking did not refill a bounded cache without revising the orbit");
             record("uncached-seek-exact-position-and-asynchronous-period-cache");
+            smoke_render_tasks_.clear();
             open_properties();
             editor_->findChild<QComboBox *>("trackExtent")->setCurrentIndex(1);
             editor_->findChild<QPushButton *>("applyDisplay")->click();
@@ -3875,6 +4065,9 @@ class Workbench final : public QMainWindow {
     QString smoke_dir_, failure_;
     bool validation_, stopped_ = false, finished_ = false, playing_ = true;
     bool benchmarking_, requested_time_ = false;
+    bool satellite_state_dirty_ = true;
+    std::optional<core::Epoch> time_label_epoch_;
+    CalendarScale time_label_scale_ = CalendarScale::utc;
     bool injecting_input_ = false;
     bool shared_device_ = false, shared_scene_ = false, independent_cameras_ = false;
     bool all_windows_closed_ = false;
@@ -3907,6 +4100,7 @@ class Workbench final : public QMainWindow {
     static constexpr int orbit_smoke_complete = 69;
     std::array<vsg::dvec3, 3> smoke_camera_;
     std::shared_ptr<const OrbitScene> smoke_cache_;
+    vsg::RecordAndSubmitTasks smoke_render_tasks_;
     std::size_t smoke_publications_ = 0;
     core::Epoch smoke_view_epoch_{0};
     std::array<double, 3> smoke_sun_{};
@@ -3961,6 +4155,10 @@ class Workbench final : public QMainWindow {
     double playback_rate_ = 20;
     CalendarScale display_scale_ = CalendarScale::utc;
     QTimer timer_;
+    std::unique_ptr<WorkbenchProfile> profile_;
+    std::future<std::vector<std::shared_ptr<const OrbitScene>>> profile_orbits_;
+    int profile_count_ = 24, profile_frame_ = 0;
+    bool profile_started_ = false;
     QElapsedTimer clock_;
     QJsonArray view_report_;
     QJsonArray interaction_report_;

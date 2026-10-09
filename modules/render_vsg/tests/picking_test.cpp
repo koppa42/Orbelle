@@ -105,4 +105,40 @@ TEST(DisplayTrack, SelectsCachedSegmentsWithoutReplacingGeometry) {
     samples[2].frame = core::FrameId::itrf;
     EXPECT_THROW((void)render_vsg::TrackLayer{samples}, std::invalid_argument);
 }
+TEST(DisplayTrack, SharesLivePipelineWithoutRetainingItAfterAllLayersClose) {
+    const std::vector<visualization::RenderSnapshot> samples{
+        {core::Epoch{0}, core::FrameId::gcrf, core::OriginId::earth, {{"A", {7e6, 0, 0}}}},
+        {core::Epoch{10}, core::FrameId::gcrf, core::OriginId::earth, {{"A", {7e6, 1e3, 0}}}}};
+    vsg::observer_ptr<vsg::StateCommand> pipeline;
+    {
+        render_vsg::TrackLayer first(samples), second(samples);
+        const auto a = first.node().cast<vsg::StateGroup>();
+        const auto b = second.node().cast<vsg::StateGroup>();
+        ASSERT_EQ(a->stateCommands.size(), 1);
+        ASSERT_EQ(b->stateCommands.size(), 1);
+        EXPECT_EQ(a->stateCommands.front(), b->stateCommands.front());
+        EXPECT_NE(a->children.front(), b->children.front());
+        pipeline = a->stateCommands.front();
+    }
+    EXPECT_FALSE(pipeline.valid());
+}
+TEST(DisplayMarkers, UnchangedPositionsDoNotScheduleAnotherBufferUpload) {
+    render_vsg::MarkerLayer markers(2);
+    visualization::RenderSnapshot snapshot{
+        core::Epoch{0}, core::FrameId::gcrf, core::OriginId::earth, {{"A", {7e6, 0, 0}}}};
+    markers.update(snapshot);
+    const auto group = markers.node().cast<vsg::StateGroup>();
+    const auto draw = group->children.front().cast<vsg::VertexDraw>();
+    const auto data = draw->arrays.front()->data;
+    vsg::ModifiedCount previous;
+    data->getModifiedCount(previous);
+    markers.update(snapshot);
+    EXPECT_FALSE(data->differentModifiedCount(previous));
+    snapshot.markers.front().position_m[0] += 100;
+    markers.update(snapshot);
+    EXPECT_TRUE(data->differentModifiedCount(previous));
+    snapshot.markers.clear();
+    markers.update(snapshot);
+    EXPECT_EQ(markers.size(), 0);
+}
 } // namespace

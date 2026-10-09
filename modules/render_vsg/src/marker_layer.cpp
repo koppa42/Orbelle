@@ -1,5 +1,6 @@
 #include <cmath>
 #include <limits>
+#include <mutex>
 #include <orbitforge/render_vsg/marker_layer.hpp>
 #include <stdexcept>
 #include <vsg/all.h>
@@ -44,9 +45,15 @@ void main() {
 }
 )glsl";
 
-vsg::ref_ptr<vsg::StateGroup> geometry(vsg::ref_ptr<vsg::vec3Array> positions,
-                                       vsg::ref_ptr<vsg::VertexDraw> draw, bool points,
-                                       MarkerStyle style = MarkerStyle::satellite) {
+vsg::ref_ptr<vsg::BindGraphicsPipeline> shared_pipeline(bool points, MarkerStyle style) {
+    // Pipelines belong to the live layers, not to a process-lifetime GPU cache.
+    // Their per-view/device implementations are managed by VSG.
+    static std::mutex mutex;
+    static std::array<vsg::observer_ptr<vsg::BindGraphicsPipeline>, 3> shared;
+    const std::lock_guard lock(mutex);
+    const std::size_t index = !points ? 0 : style == MarkerStyle::satellite ? 1 : 2;
+    if (auto pipeline = shared[index].ref_ptr())
+        return pipeline;
     auto input = vsg::VertexInputState::create(
         vsg::VertexInputState::Bindings{{0, sizeof(vsg::vec3), VK_VERTEX_INPUT_RATE_VERTEX}},
         vsg::VertexInputState::Attributes{{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}});
@@ -70,8 +77,15 @@ vsg::ref_ptr<vsg::StateGroup> geometry(vsg::ref_ptr<vsg::vec3Array> positions,
         vsg::GraphicsPipelineStates{input, assembly, vsg::RasterizationState::create(),
                                     vsg::MultisampleState::create(), vsg::ColorBlendState::create(),
                                     depth});
+    auto bind = vsg::BindGraphicsPipeline::create(pipeline);
+    shared[index] = bind;
+    return bind;
+}
+vsg::ref_ptr<vsg::StateGroup> geometry(vsg::ref_ptr<vsg::vec3Array> positions,
+                                       vsg::ref_ptr<vsg::VertexDraw> draw, bool points,
+                                       MarkerStyle style = MarkerStyle::satellite) {
     auto group = vsg::StateGroup::create();
-    group->add(vsg::BindGraphicsPipeline::create(pipeline));
+    group->add(shared_pipeline(points, style));
     draw->assignArrays(vsg::DataList{positions});
     draw->instanceCount = 1;
     group->addChild(draw);
@@ -125,6 +139,9 @@ void MarkerLayer::update(const visualization::RenderSnapshot &snapshot) {
     converted.clear();
     for (const auto &marker : snapshot.markers)
         converted.push_back(display_position(marker));
+    if (impl_->draw->vertexCount == converted.size() &&
+        std::equal(converted.begin(), converted.end(), impl_->positions->begin()))
+        return;
     std::copy(converted.begin(), converted.end(), impl_->positions->begin());
     impl_->positions->dirty();
     impl_->draw->vertexCount = static_cast<std::uint32_t>(converted.size());

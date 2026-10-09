@@ -3,15 +3,21 @@
 #include "orbit_scene.hpp"
 #include <QImage>
 #include <QPainterPath>
+#include <QTimer>
 #include <QTransform>
 #include <QWidget>
 #include <functional>
+#include <future>
 #include <optional>
+#include <span>
 
 namespace orbitforge::desktop {
 // Display projection only: ITRF Cartesian positions onto the WGS84 reference ellipsoid.
 QPointF ground_coordinates(const std::array<double, 3> &position_m);
-QPainterPath ground_path(const std::vector<QPointF> &longitude_latitude);
+QPainterPath ground_path(std::span<const QPointF> longitude_latitude);
+inline QPainterPath ground_path(std::initializer_list<QPointF> points) {
+    return ground_path(std::span<const QPointF>(points.begin(), points.size()));
+}
 
 class GroundMap final : public QWidget {
   public:
@@ -25,11 +31,13 @@ class GroundMap final : public QWidget {
     };
     using PreparedTracks = std::vector<Track>;
     explicit GroundMap(const QString &imagery, QWidget *parent = nullptr);
+    ~GroundMap() override;
     std::function<void(std::optional<std::size_t>)> select;
     void set_orbits(const std::vector<std::shared_ptr<const OrbitScene>> &orbits);
     static PreparedTracks
     prepare_tracks(const std::vector<std::shared_ptr<const OrbitScene>> &orbits);
     void publish_tracks(PreparedTracks tracks);
+    void append_track(Track track);
     void replace_track(std::size_t index, Track track);
     void set_snapshot(const visualization::RenderSnapshot &snapshot);
     void set_selection(std::optional<std::size_t> index);
@@ -50,6 +58,7 @@ class GroundMap final : public QWidget {
     [[nodiscard]] QPointF marker_position(std::size_t index) const;
     [[nodiscard]] QPointF marker_coordinates(std::size_t index) const;
     [[nodiscard]] double zoom_factor() const { return zoom_; }
+    [[nodiscard]] bool tracks_ready() const;
 
   protected:
     void paintEvent(QPaintEvent *) override;
@@ -66,13 +75,43 @@ class GroundMap final : public QWidget {
     struct Point {
         QString name;
         QPointF geographic;
+        bool operator==(const Point &) const = default;
     };
     QRectF plot_rect() const;
     QRectF map_rect() const;
     QTransform map_transform() const;
     void clamp_pan();
+    void rebuild_night();
+    void paint_background(QPainter &p);
+    void paint_tracks(QPainter &p);
+    void invalidate_tracks();
+    struct Stroke {
+        QPainterPath path;
+        QColor color;
+        double width;
+    };
+    struct Raster {
+        QImage image;
+        QRectF bounds;
+        QTransform transform;
+        std::uint64_t revision;
+        double milliseconds = 0;
+    };
+    std::vector<Stroke> strokes() const;
+    static Raster rasterize(Raster result, const std::vector<Stroke> &strokes,
+                            const std::atomic_bool &cancelled);
+    void poll_raster();
+    void install_raster(Raster result);
+    std::future<Raster> pending_raster_;
+    std::atomic_bool cancel_raster_{false};
+    QTimer raster_timer_;
+    std::uint64_t trails_revision_ = 0;
     QImage imagery_;
     QImage night_;
+    QImage background_, trails_;
+    QRectF background_area_, trails_bounds_;
+    QTransform trails_transform_;
+    bool background_dirty_ = true, trails_dirty_ = true, night_dirty_ = true;
     std::array<double, 3> sun_direction_{1, 0, 0};
     std::optional<QPointF> cursor_position_;
     bool lighting_ = true, grid_ = true, show_tracks_ = true, labels_ = true, show_sun_ = true;
