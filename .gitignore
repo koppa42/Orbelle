@@ -9,3 +9,20 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
+# Generated validation artifacts; keep reports and screenshots under out/validation/.
+/docs/validation/results/
+*.log
+*.log.*
+
+# Accidental in-source build output.
+/build/
+/CMakeFiles/
+/CMakeCache.txt
+/Testing/
+/compile_commands.json
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.pch
+

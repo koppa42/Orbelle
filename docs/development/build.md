@@ -2,6 +2,10 @@
 
 从仓库根目录执行命令。当前已验证 Windows 骨架与图形工作台，以及 Ubuntu 24.04 x64 下的完整无界面天文计算模块、SDK 和 Python wheel。Linux 验证通过本地 Docker 执行，尚未配置托管 CI 服务；具体范围见 [Linux 验证记录](../validation/p0_linux_headless.md)。
 
+## 提交范围
+
+Git 保留源码、构建配置、测试与复现脚本、必要的测试输入和运行资源，以及整理后的文档。构建日志、原始 JSON/CSV/XML 报告、自动截图、重复源码快照和发布包属于生成产物，放在已忽略的 `out/validation/`、`out/releases/` 等目录，不复制进 `docs/`，不使用 `git add -f` 绕过忽略规则。提交前检查 `git diff --cached --stat` 和文件列表；验证结论与运行命令写入文档即可。历史产物的本机存放位置见[验证记录说明](../validation/README.md)。
+
 ## 无界面与 Core
 
 ```powershell

@@ -9,4 +9,3 @@
 /data/samples/spice/**/manifest.json -text
 /data/samples/fonts/** -text
 /benchmarks/scenarios/windows_10k_two_views.json -text
-/docs/validation/results/** -text
