@@ -1,28 +1,87 @@
+# Local build, install, dependency, and package output.
 /out/
 /local/
+/build/
+/dist/
 /vcpkg_installed/
 /CMakeUserPresets.json
-/.vs/
-/.idea/
+
+# CMake and Ninja output, including accidental in-source builds.
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+install_manifest.txt
+compile_commands.json
+build.ninja
+rules.ninja
+.ninja_deps
+.ninja_log
+
+# Compiled binaries and debug intermediates.
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.exp
+*.pdb
+*.ilk
+*.idb
+*.ipdb
+*.iobj
+*.pch
+*.gch
+*.tlog/
+*.dSYM/
+
+# Python environments, caches, and packages.
+.venv/
+venv/
 __pycache__/
 *.py[cod]
 *.egg-info/
+*.whl
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+
+# Coverage output.
+.coverage
+.coverage.*
+htmlcov/
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
 
 # Generated validation artifacts; keep reports and screenshots under out/validation/.
 /docs/validation/results/
 *.log
 *.log.*
 
-# Accidental in-source build output.
-/build/
-/CMakeFiles/
-/CMakeCache.txt
-/Testing/
-/compile_commands.json
-*.obj
-*.pdb
-*.ilk
-*.idb
-*.pch
+# Editor and operating-system temporary files.
+.vs/
+.idea/
+.cache/clangd/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.swp
+*.swo
+*~
+*.tmp
+.DS_Store
+Thumbs.db
+Desktop.ini
 
