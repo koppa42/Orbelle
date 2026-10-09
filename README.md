@@ -14,6 +14,7 @@
 - Linux x64 无界面 Release、ASan/UBSan 和断网环境中的 SDK / Python wheel 验证入口；已验证 Ubuntu 24.04、GCC 13.3、Python 3.12。
 - 可选 Qt/VSG/Rocky 双视窗工作台：共享设备与场景、独立相机、ITRF 显示和时间播放；Windows 三档缩放、窗口重建及 Vulkan 验证通过。
 - 可选固定万星基准场景：两视图、100 条轨迹、每视图 200 标签、缓存跳转与选中反馈；尚无正式渲染性能测试结果。
+- 可选无界面计算基准：批量状态生成、完整参考系变换、CSPICE 单次/批量查询与上下文切换，保存逐轮计时及数值检查。
 
 基础 Qt 窗口显示示例状态表；`desktop-graphics` 双视窗路径已通过 Windows 单星集成检查，结果见[图形验证记录](docs/validation/p0_graphics.md)。时间/参考系通过 Orekit 独立天文级数交叉校验，星历通过 jplephem 读取原始 DE440s 的独立实现对照。尚无日内 EOP 潮汐改正、TEME、通用二体/J2/SGP4、事件/Access、HDF5 结果存储、异步分析任务和安装包。P0 的全部退出条件尚未完成。
 
@@ -67,6 +68,7 @@ C++ SDK 由模块安装生成。Python 构建入口 `pyproject.toml` 放在仓�
 - [呈现反馈原始记录与结束排空](docs/validation/p0_presentation_feedback.md)
 - [呈现阶段组合受控对照](docs/validation/p0_output_stage_probe.md)
 - [Linux 无界面构建与交付验证](docs/validation/p0_linux_headless.md)
+- [独立计算吞吐量协议](docs/validation/p0_compute_protocol.md)
 - [CSPICE 验证记录](docs/validation/p0_spice.md)
 - [EOP 与完整状态变换验证记录](docs/validation/p0_eop_state.md)
 - [时间与位置旋转阶段记录](docs/validation/p0_time_frames.md)

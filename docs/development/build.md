@@ -235,6 +235,28 @@ tools/dev/run-desktop.ps1 -Executable out/build/graphics-benchmark/apps/desktop/
 
 冻结负载和采样计划见 `benchmarks/scenarios/windows_10k_two_views.json`。首像素输出的明确呈现 ID 关联、局部时钟校准及 CPU/RAM 采样已接入可选基准；仍有反馈缺失，尚无正式性能结论。计时命令、VSG #2 的 ABI 重建要求与边界见[计时接入记录](../validation/p0_graphics_timing.md)。字体来源和许可证在 `data/samples/fonts/roboto_mono_3_001/`，构建时复制到可执行文件旁的 `resources/font/`。
 
+## 独立计算吞吐量
+
+`compute-benchmark` 只启用 Core / Results / Application / Runtime 与 ERFA/IERS/CSPICE，
+不查找 Qt、VSG、Rocky。复用 `tests`、`time-frames`、`spice` vcpkg features 的已安装依赖：
+
+```powershell
+cmake --preset compute-benchmark "-DCMAKE_PREFIX_PATH=$PWD/out/dependencies/installed/x64-windows"
+cmake --build --preset compute-benchmark
+ctest --preset compute-benchmark
+python tools/validation/run_compute_benchmark.py --executable out/build/compute-benchmark/benchmarks/compute/Release/orbitforge_compute_benchmark.exe --profile baseline --output out/reports/compute-first-run
+```
+
+每次使用新输出目录。runner 从可执行文件所在的 CMake 构建树保存配置、可用的依赖状态、
+二进制及源码散列，记录运行前后输入一致性；`raw.json` 保留所有轮次，`summary.json`
+仅汇总有效测量。完整工作量、计时边界和数值门槛见[计算协议](../validation/p0_compute_protocol.md)。
+`--profile smoke` 只做少量功能检查，不能替代正式工作量。
+
+Linux 可用相同 preset 加 `-G Ninja` 和 Linux 依赖前缀；单配置生成器的程序路径没有 `Release/`。
+已有 Linux 验证环境支持 `python3 tools/ci/check_linux.py --stage compute --source /src --work /work --reports /reports/new-compute-run`，
+依次运行 Release 与 ASan/UBSan 的完整 headless 测试和小工作量，不自动开展 Linux 性能测试。
+`--stage all` 保持原交付流程；计算基准阶段需显式选择。
+
 ## 格式与检查
 
 项目自有 C++ 目标启用较严格警告并默认视警告为错误；第三方目标不继承项目的告警策略。`.clang-format` 和 `.clang-tidy` 记录统一配置。

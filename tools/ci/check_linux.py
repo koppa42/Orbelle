@@ -88,7 +88,8 @@ class Check:
     def fingerprint(self):
         roots = ("README.md", "CMakeLists.txt", "CMakePresets.json", "vcpkg.json",
                  "vcpkg-configuration.json", "pyproject.toml", "cmake", "modules",
-                 "bindings", "tests", "data", "examples", "tools")
+                 "bindings", "tests", "data", "examples", "tools", "benchmarks/compute",
+                 "docs/validation/p0_compute_protocol.md")
         files = []
         for root in roots:
             path = self.source / root
@@ -146,6 +147,28 @@ class Check:
             self.run("sdk-install", "cmake", "--install", build, "--component", "SDK")
             self.run("cpp-example", build / "examples/cpp/orbitforge_example")
             self.save_artifact("release", prefix)
+
+    def compute(self):
+        """Validate portability and instrumented smoke workloads, not Linux performance."""
+        for sanitizer in (False, True):
+            name = "compute-sanitizers" if sanitizer else "compute-release"
+            build = self.work / "build" / name
+            flags = {"ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+                     "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"} if sanitizer else {}
+            self.run(f"{name}-configure", "cmake", "--preset", "compute-benchmark", "-G", "Ninja",
+                     "-S", self.source, "-B", build, f"-DCMAKE_PREFIX_PATH={self.prefix}",
+                     f"-DCMAKE_BUILD_TYPE={'RelWithDebInfo' if sanitizer else 'Release'}",
+                     f"-DORBITFORGE_ENABLE_SANITIZERS={'ON' if sanitizer else 'OFF'}",
+                     cwd=self.source, extra_env=flags)
+            self.run(f"{name}-build", "cmake", "--build", build, extra_env=flags)
+            self.run(f"{name}-tests", "ctest", "--test-dir", build, "--output-on-failure",
+                     "--no-tests=error", "--output-junit", self.reports / f"{name}-tests.xml",
+                     extra_env=flags)
+            self.run(f"{name}-smoke", sys.executable,
+                     self.source / "tools/validation/run_compute_benchmark.py",
+                     "--executable", build / "benchmarks/compute/orbitforge_compute_benchmark",
+                     "--source", self.source, "--profile", "smoke",
+                     "--output", self.reports / f"{name}-smoke", extra_env=flags)
 
     def clear_artifact(self, name):
         directory = self.work / "artifacts"
@@ -275,7 +298,7 @@ class Check:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage", choices=("all", "dependencies", "release", "sanitizers",
-                                           "wheel", "export", "consumer"), default="all")
+                                           "wheel", "export", "consumer", "compute"), default="all")
     parser.add_argument("--source", type=Path)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--reports", type=Path, required=True)

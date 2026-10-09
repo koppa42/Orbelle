@@ -7,6 +7,20 @@
   },
   "configurePresets": [
     {
+      "name": "compute-benchmark",
+      "inherits": "astronomy",
+      "displayName": "Headless computation throughput",
+      "cacheVariables": {
+        "ORBITFORGE_BUILD_COMPUTE_BENCHMARKS": "ON",
+        "ORBITFORGE_BUILD_DESKTOP": "OFF",
+        "ORBITFORGE_BUILD_VISUALIZATION": "OFF",
+        "ORBITFORGE_BUILD_EXAMPLES": "OFF",
+        "ORBITFORGE_BUILD_DATA_TOOLS": "OFF",
+        "ORBITFORGE_WITH_VSG": "OFF",
+        "ORBITFORGE_WITH_ROCKY": "OFF"
+      }
+    },
+    {
       "name": "linux-astronomy",
       "inherits": "astronomy",
       "displayName": "Linux headless astronomy validation",
@@ -98,6 +112,7 @@
     }
   ],
   "buildPresets": [
+    { "name": "compute-benchmark", "configurePreset": "compute-benchmark", "configuration": "Release" },
     { "name": "linux-astronomy", "configurePreset": "linux-astronomy" },
     { "name": "linux-sanitizers", "configurePreset": "linux-sanitizers" },
     {
@@ -142,6 +157,13 @@
     }
   ],
   "testPresets": [
+    {
+      "name": "compute-benchmark",
+      "configurePreset": "compute-benchmark",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
     {
       "name": "linux-astronomy",
       "configurePreset": "linux-astronomy",
