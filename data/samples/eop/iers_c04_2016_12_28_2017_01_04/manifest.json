@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "iers-20-c04-v4-20161228-20170104-retrieved-20261009",
+  "format": "iers-20-c04-0h-dxdy",
+  "data_file": "eop.c04",
+  "sha256": "17d215cabecf54f6ee5aba9a62bdce41397625a03a5e739388933d7fc30be274",
+  "source_url": "https://hpiers.obspm.fr/iers/eop/eopc04/eopc04.1962-now",
+  "source_sha256": "9fb4ac0567b4260662a72aef597f754f2c575f75d70d50ff753e669b57791f46",
+  "retrieved_on": "2026-10-09",
+  "first_mjd": 57750,
+  "last_mjd": 57757,
+  "reference_frame": "ITRF2020",
+  "interpolation": "c04-hermite-tai-v1"
+}

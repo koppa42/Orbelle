@@ -1,0 +1,11 @@
+# Preserve the exact bytes used by the data manifest's SHA256 on every platform.
+/data/samples/time/*.dat -text
+/data/samples/eop/**/*.c04 -text
+/data/samples/eop/**/manifest.json -text
+/data/manifests/*.json -text
+/data/samples/spice/**/*.bsp -text
+/data/samples/spice/**/*.tls -text
+/data/samples/spice/**/manifest.json -text
+/data/samples/fonts/** -text
+/benchmarks/scenarios/windows_10k_two_views.json -text
+/docs/validation/results/** -text

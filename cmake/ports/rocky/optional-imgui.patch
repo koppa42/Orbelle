@@ -1,0 +1,82 @@
+--- a/src/rocky/vsg/Application.cpp
++++ b/src/rocky/vsg/Application.cpp
+@@ -6,7 +6,9 @@
+ #include "Application.h"
+ #include "MapManipulator.h"
+ #include "ecs/TransformSystem.h"
++#ifdef ROCKY_HAS_IMGUI
+ #include "imgui/ImGuiIntegration.h"
++#endif
+ 
+ #include <rocky/contrib/EarthFileImporter.h>
+ 
+@@ -583,9 +585,7 @@
+ }
+ 
+ 
+-#ifndef ROCKY_HAS_IMGUI
+-using RenderImGuiContext = vsg::Node;
+-#endif
++#ifdef ROCKY_HAS_IMGUI
+ 
+ void
+ Application::install(vsg::ref_ptr<ImGuiRenderer> group, vsg::ref_ptr<vsg::View> view)
+@@ -643,6 +643,7 @@
+ #endif
+ }
+ 
++#endif // ROCKY_HAS_IMGUI
+ 
+ void
+ Application::onAddWindow(Window& window)
+--- a/src/rocky/vsg/Application.h
++++ b/src/rocky/vsg/Application.h
+@@ -70,7 +70,9 @@
+         inline bool active() const;
+ 
+         //! Installs a RenderImGuiContext that will render ImGui elements to the specified view
++#ifdef ROCKY_HAS_IMGUI
+         void install(vsg::ref_ptr<ImGuiRenderer>, vsg::ref_ptr<vsg::View>);
++#endif
+ 
+         //! Frame number
+         std::uint64_t frameCount() const;
+@@ -157,7 +159,9 @@
+ 
+         void ctor(int& argc, char** argv);
+ 
++#ifdef ROCKY_HAS_IMGUI
+         void install(vsg::ref_ptr<ImGuiRenderer>, vsg::ref_ptr<vsg::View>, bool installIdleFunction);
++#endif
+ 
+         friend class DisplayManager;
+ 
+--- a/src/rocky/vsg/ecs/ECSNode.cpp
++++ b/src/rocky/vsg/ecs/ECSNode.cpp
+@@ -123,8 +123,8 @@
+         add(MeshSystemNode::create(registry));
+         add(LineSystemNode::create(registry));
+         add(PointSystemNode::create(registry));
++#ifdef ROCKY_HAS_IMGUI
+         add(LabelSystem::create(registry));
+-#ifdef ROCKY_HAS_IMGUI
+         add(WidgetSystemNode::create(registry));
+ #endif
+     }
+--- a/src/rocky/vsg/ecs/LabelSystem.cpp
++++ b/src/rocky/vsg/ecs/LabelSystem.cpp
+@@ -5,6 +5,8 @@
+  * MIT License
+  */
+ #include "LabelSystem.h"
++
++#ifdef ROCKY_HAS_IMGUI
+ 
+ #include <algorithm>
+ #include <cfloat>
+@@ -320,3 +322,5 @@
+ {
+     r.remove<detail::LabelStyleDetail>(e);
+ }
++
++#endif // ROCKY_HAS_IMGUI

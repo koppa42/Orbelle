@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "family": "Roboto Mono",
+  "version": "3.001",
+  "sourceCommit": "111eb14e367888c9374da4da0b018e72cf8ac46d",
+  "sourceUrl": "https://github.com/googlefonts/RobotoMono/tree/111eb14e367888c9374da4da0b018e72cf8ac46d",
+  "retrievedOn": "2026-10-09",
+  "license": "SIL Open Font License 1.1",
+  "files": {
+    "RobotoMono-Regular.ttf": "af0bff7599c3df3831755c16e39b3c496df74b8c8d8a1161b14dc8461be17cb4",
+    "OFL.txt": "50ab8dd54680d3473f649c9db86fece88434d097c7834475c1c72d2f8c429215"
+  },
+  "use": "Fixed ASCII satellite labels in the rendering benchmark; unmodified upstream font"
+}

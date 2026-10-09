@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 2,
+  "status": "workload-defined-performance-not-yet-measured",
+  "name": "windows-10k-two-views",
+  "workload": {
+    "fixture": "circular-100x100-v1",
+    "satellites": 10000,
+    "epoch": "2000-01-01T12:00:00 TAI",
+    "durationSeconds": 600,
+    "orbitDefinition": {
+      "planes": 100,
+      "satellitesPerPlane": 100,
+      "planeIndex": "i in [0,99]; band=floor(i/10); slot j in [0,99]",
+      "radiusMeters": "6378137 + 550000 + 40000*band",
+      "inclinationDegrees": "35 + 7*band",
+      "raanDegrees": "36*(i%10)",
+      "slotPhaseDegrees": "360*(j+i/100)/100",
+      "dynamics": "Core CircularTwoBody rotated into GCRF planes; rendering fixture only",
+      "displayFrame": "Earth/ITRF via ERFA IAU 2006/2000A and fixed IERS C04 snapshot"
+    },
+    "viewports": [
+      {
+        "width": 1280,
+        "height": 720
+      },
+      {
+        "width": 1280,
+        "height": 720
+      }
+    ],
+    "maximumVisibleTracksPerView": 100,
+    "maximumVisibleLabelsPerView": 200,
+    "tracks": {
+      "submittedPerView": 100,
+      "objectIndices": "0,100,...,9900",
+      "verticesPerTrack": 121,
+      "sampleStepSeconds": 5,
+      "widthPixels": 1,
+      "visibility": "depth-tested; no adaptive tessellation"
+    },
+    "labels": {
+      "submittedPerView": 200,
+      "selection": "first 200 eligible object indices, stable ID order",
+      "eligibility": "inside clip volume and viewport with 80 pixel margin; WGS84 ellipsoid unoccluded",
+      "layout": "world-anchored billboard; overlapping labels retained for fixed load",
+      "glyphEmPixels": 12,
+      "font": "Roboto Mono Regular 3.001",
+      "fontSha256": "af0bff7599c3df3831755c16e39b3c496df74b8c8d8a1161b14dc8461be17cb4",
+      "text": "SAT-00000 through SAT-09999; ASCII"
+    },
+    "markers": {"diameterPixels": 8, "selectionRingDiameterPixels": 18, "pickRadiusPixels": 8},
+    "cache": {"sampleStepSeconds": 1, "samples": 601, "interpolation": "linear ITRF display positions only"},
+    "globe": {"model": "WGS84 ellipsoid", "imagery": null, "elevation": null, "maximumLevel": 5, "screenSpaceErrorPixels": 32, "lighting": false},
+    "cameras": {"fieldOfViewDegrees": 35, "equatorialDistanceEarthRadii": 6, "zEarthRadii": 2.6, "azimuthOffsetsRadians": [-0.35, 0.35]},
+    "playbackRate": 10,
+    "qtTimerMilliseconds": 16
+  },
+  "targets": {
+    "frameTimeP95Ms": 33.3,
+    "frameTimeP99Ms": 50,
+    "cachedTimeJumpP95Ms": 200,
+    "selectionFeedbackP95Ms": 100
+  },
+  "measurementPlan": {
+    "status": "instrumentation-pending",
+    "repeats": 3,
+    "warmupSeconds": 10,
+    "stablePlaybackSeconds": 60,
+    "cachedJumpTrials": 100,
+    "selectionTrials": 100,
+    "frameTiming": "per-view displayed-frame intervals from process-scoped presentation trace; retain dropped/occluded frames and coverage diagnostics",
+    "responseTiming": "input timestamp to presentation of frame containing requested epoch/selection; CPU completion is diagnostic only",
+    "separate": ["cache-precomputation", "cold-start", "uncached-jump", "CPU-submit", "GPU-execution"],
+    "pending": ["presentation-and-input-correlation", "CPU-GPU-and-memory-sampling", "driver-version-at-run"]
+  }
+}
+

@@ -1,0 +1,11 @@
+/out/
+/local/
+/vcpkg_installed/
+/CMakeUserPresets.json
+/.vs/
+/.idea/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+

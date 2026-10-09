@@ -1,0 +1,209 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "linux-astronomy",
+      "inherits": "astronomy",
+      "displayName": "Linux headless astronomy validation",
+      "generator": "Ninja",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
+      "cacheVariables": {
+        "ORBITFORGE_BUILD_DESKTOP": "OFF",
+        "ORBITFORGE_WITH_VSG": "OFF",
+        "ORBITFORGE_WITH_ROCKY": "OFF"
+      }
+    },
+    {
+      "name": "linux-sanitizers",
+      "inherits": "linux-astronomy",
+      "displayName": "Linux headless address and undefined behavior checks",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "ORBITFORGE_ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "graphics-benchmark",
+      "inherits": "desktop-graphics",
+      "displayName": "Fixed 10k satellite graphics workload",
+      "cacheVariables": { "ORBITFORGE_BUILD_BENCHMARKS": "ON" }
+    },
+    {
+      "name": "desktop-graphics",
+      "inherits": "astronomy",
+      "displayName": "Qt / VSG / Rocky graphics integration",
+      "cacheVariables": {
+        "ORBITFORGE_BUILD_DESKTOP": "ON",
+        "ORBITFORGE_WITH_VSG": "ON",
+        "ORBITFORGE_WITH_ROCKY": "ON"
+      }
+    },
+    {
+      "name": "headless",
+      "displayName": "Headless C++ skeleton",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+        "BUILD_TESTING": "OFF"
+      }
+    },
+    {
+      "name": "headless-tests",
+      "inherits": "headless",
+      "displayName": "Headless with GoogleTest",
+      "cacheVariables": {
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "time-frames",
+      "inherits": "headless-tests",
+      "displayName": "ERFA time and frame reference tests",
+      "cacheVariables": {
+        "ORBITFORGE_WITH_ERFA": "ON"
+      }
+    },
+    {
+      "name": "astronomy",
+      "inherits": "time-frames",
+      "displayName": "ERFA and CSPICE foundation",
+      "cacheVariables": {
+        "ORBITFORGE_WITH_SPICE": "ON",
+        "ORBITFORGE_BUILD_DATA_TOOLS": "ON"
+      }
+    },
+    {
+      "name": "core-only",
+      "inherits": "headless",
+      "displayName": "Core with no application or UI dependencies",
+      "cacheVariables": {
+        "ORBITFORGE_BUILD_APPLICATION": "OFF",
+        "ORBITFORGE_BUILD_VISUALIZATION": "OFF",
+        "ORBITFORGE_BUILD_EXAMPLES": "OFF"
+      }
+    },
+    {
+      "name": "desktop",
+      "inherits": "headless",
+      "displayName": "Qt Widgets skeleton",
+      "cacheVariables": {
+        "ORBITFORGE_BUILD_DESKTOP": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "linux-astronomy", "configurePreset": "linux-astronomy" },
+    { "name": "linux-sanitizers", "configurePreset": "linux-sanitizers" },
+    {
+      "name": "graphics-benchmark",
+      "configurePreset": "graphics-benchmark",
+      "configuration": "Release"
+    },
+    {
+      "name": "desktop-graphics",
+      "configurePreset": "desktop-graphics",
+      "configuration": "Release"
+    },
+    {
+      "name": "astronomy",
+      "configurePreset": "astronomy",
+      "configuration": "Release"
+    },
+    {
+      "name": "time-frames",
+      "configurePreset": "time-frames",
+      "configuration": "Release"
+    },
+    {
+      "name": "headless",
+      "configurePreset": "headless",
+      "configuration": "Release"
+    },
+    {
+      "name": "headless-tests",
+      "configurePreset": "headless-tests",
+      "configuration": "Release"
+    },
+    {
+      "name": "core-only",
+      "configurePreset": "core-only",
+      "configuration": "Release"
+    },
+    {
+      "name": "desktop",
+      "configurePreset": "desktop",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "linux-astronomy",
+      "configurePreset": "linux-astronomy",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "linux-sanitizers",
+      "configurePreset": "linux-sanitizers",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" },
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+        "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"
+      }
+    },
+    {
+      "name": "graphics-benchmark",
+      "configurePreset": "graphics-benchmark",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "desktop-graphics",
+      "configurePreset": "desktop-graphics",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "astronomy",
+      "configurePreset": "astronomy",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "time-frames",
+      "configurePreset": "time-frames",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "headless-tests",
+      "configurePreset": "headless-tests",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    }
+  ]
+}

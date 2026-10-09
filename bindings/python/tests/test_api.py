@@ -1,0 +1,46 @@
+import math
+import unittest
+import orbitforge as of
+
+
+class StandaloneApiTests(unittest.TestCase):
+    def test_demo_contract_and_energy(self):
+        result = of.make_circular_demo_session().sample(of.demo_epochs())
+        self.assertEqual(result.provenance.object_id, "demo-satellite")
+        self.assertEqual(result.provenance.input_revision, 1)
+        self.assertEqual(len(result.states), 6)
+        self.assertEqual(result.states[0].position_m, [7_000_000.0, 0.0, 0.0])
+        for state in result.states:
+            self.assertEqual(state.frame, of.FrameId.GCRF)
+            self.assertEqual(state.origin, of.OriginId.EARTH)
+            radius = math.hypot(*state.position_m)
+            energy = sum(v * v for v in state.velocity_mps) / 2 - 3.986004418e14 / radius
+            self.assertAlmostEqual(radius, 7_000_000.0, delta=1e-8)
+            self.assertAlmostEqual(energy, -3.986004418e14 / 14_000_000.0, delta=1e-7)
+
+    def test_epoch_preserves_nanoseconds_at_large_epoch(self):
+        self.assertEqual(of.Epoch(8_000_000_000_000_000_001).seconds_since(
+            of.Epoch(8_000_000_000_000_000_000)), 1e-9)
+
+    def test_invalid_epoch_is_not_silently_converted(self):
+        with self.assertRaises(TypeError):
+            of.Epoch("2026-01-01T00:00:00Z")
+        with self.assertRaises(TypeError):
+            of.Epoch(0.5)
+
+    def test_results_survive_session_destruction_and_are_read_only(self):
+        result = of.make_circular_demo_session().sample([of.Epoch(0)])
+        state = result.states[0]
+        del result
+        self.assertEqual(state.position_m[0], 7_000_000.0)
+        with self.assertRaises(AttributeError):
+            state.position_m = [0.0, 0.0, 0.0]
+
+    def test_empty_sampling_is_explicit(self):
+        result = of.make_circular_demo_session().sample([])
+        self.assertEqual(result.states, [])
+
+
+if __name__ == "__main__":
+    unittest.main()
+

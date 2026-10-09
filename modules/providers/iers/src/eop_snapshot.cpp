@@ -1,0 +1,251 @@
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <fstream>
+#include <locale>
+#include <nlohmann/json.hpp>
+#include <numbers>
+#include <orbitforge/providers/iers/eop_snapshot.hpp>
+#include <picosha2.h>
+#include <sstream>
+#include <vector>
+
+namespace orbitforge::providers::iers {
+namespace {
+constexpr double radians_per_arcsecond = std::numbers::pi / (180.0 * 3600.0);
+constexpr double seconds_per_day = 86400.0;
+struct Node {
+    core::Epoch epoch;
+    std::array<double, 5> value;
+    std::array<double, 5> rate;
+};
+
+std::string read_file(const std::filesystem::path &path, std::size_t max_bytes) {
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    if (!input) {
+        throw core::EopDataError("Cannot read EOP file: " + path.string());
+    }
+    const auto size = input.tellg();
+    if (size < 0 || static_cast<std::uintmax_t>(size) > max_bytes) {
+        throw core::EopDataError("EOP input exceeds the supported file size");
+    }
+    std::string bytes(static_cast<std::size_t>(size), '\0');
+    input.seekg(0);
+    if (!input.read(bytes.data(), static_cast<std::streamsize>(bytes.size()))) {
+        throw core::EopDataError("Incomplete EOP file read");
+    }
+    return bytes;
+}
+
+bool is_sha256(const std::string &value) {
+    return value.size() == 64 && std::all_of(value.begin(), value.end(), [](char c) {
+               return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+           });
+}
+
+int manifest_mjd(const nlohmann::json &manifest, const char *key) {
+    const auto &value = manifest.at(key);
+    // This interpolation uses observed x/y rates and CPO; pre-1984 C04 contains placeholders.
+    if (!value.is_number_integer() || value < 45700 || value > 100000) {
+        throw core::EopDataError("EOP coverage MJD must be a supported integer");
+    }
+    return value.get<int>();
+}
+
+std::vector<Node> parse_c04(const std::string &bytes, int first, int last,
+                            const core::ITimeProvider &time) {
+    if (bytes.find("20 C04") == std::string::npos ||
+        bytes.find("sampled at 0h UTC") == std::string::npos ||
+        bytes.find("dX(\")") == std::string::npos || bytes.find("dY(\")") == std::string::npos) {
+        throw core::EopDataError("Expected IERS 20 C04 0h UTC dX/dY header");
+    }
+    std::vector<Node> nodes;
+    std::istringstream input(bytes);
+    std::string line;
+    int previous_mjd = -1;
+    const auto mjd_zero = std::chrono::sys_days(std::chrono::year(1858) / 11 / 17);
+    while (std::getline(input, line)) {
+        const auto start = line.find_first_not_of(" \t\r");
+        if (start == std::string::npos || line[start] == '#') {
+            continue;
+        }
+        std::istringstream row(line);
+        row.imbue(std::locale::classic());
+        int year = 0, month = 0, day = 0, hour = 0;
+        std::array<double, 17> fields{};
+        if (!(row >> year >> month >> day >> hour)) {
+            throw core::EopDataError("Malformed C04 date fields");
+        }
+        for (auto &field : fields) {
+            if (!(row >> field) || !std::isfinite(field)) {
+                throw core::EopDataError("Missing or nonfinite C04 field");
+            }
+        }
+        row >> std::ws;
+        if (!row.eof() || year < 1600 || year > 2400 || month < 1 || month > 12 || day < 1 ||
+            day > 31 || hour != 0) {
+            throw core::EopDataError("C04 requires exactly 21 fields and a valid 0h UTC date");
+        }
+        const auto date =
+            std::chrono::year(year) / static_cast<unsigned>(month) / static_cast<unsigned>(day);
+        if (!date.ok()) {
+            throw core::EopDataError("Invalid C04 calendar date");
+        }
+        const auto calendar_mjd = (std::chrono::sys_days(date) - mjd_zero).count();
+        if (fields[0] != static_cast<double>(calendar_mjd) ||
+            (previous_mjd >= 0 && calendar_mjd != previous_mjd + 1)) {
+            throw core::EopDataError("C04 date/MJD mismatch, duplicate, unordered or missing day");
+        }
+        previous_mjd = static_cast<int>(calendar_mjd);
+        if (std::abs(fields[1]) >= 10 || std::abs(fields[2]) >= 10 || std::abs(fields[3]) >= 2 ||
+            std::abs(fields[4]) >= 10 || std::abs(fields[5]) >= 10 || std::abs(fields[6]) >= 10 ||
+            std::abs(fields[7]) >= 10 || std::abs(fields[8]) >= 1 ||
+            std::any_of(fields.begin() + 9, fields.end(), [](double v) { return v < 0; })) {
+            throw core::EopDataError(
+                "C04 parameter or uncertainty is outside the supported domain");
+        }
+        if (calendar_mjd < first || calendar_mjd > last) {
+            continue; // The manifest explicitly selects this window of the hash-checked file.
+        }
+        const auto epoch = time.from_utc({year, month, day, 0, 0, 0, 0});
+        const double ut1_tai = fields[3] - time.tai_minus_utc_seconds(epoch);
+        nodes.push_back(
+            {epoch,
+             {ut1_tai, fields[1] * radians_per_arcsecond, fields[2] * radians_per_arcsecond,
+              fields[4] * radians_per_arcsecond, fields[5] * radians_per_arcsecond},
+             {-fields[8] / seconds_per_day, fields[6] * radians_per_arcsecond / seconds_per_day,
+              fields[7] * radians_per_arcsecond / seconds_per_day, 0, 0}});
+    }
+    if (nodes.size() != static_cast<std::size_t>(last - first + 1)) {
+        throw core::EopDataError("C04 file does not cover every day declared in the manifest");
+    }
+    // C04 has no dX/dY rates. Adjacent secants give shared node rates and a C1 interpolant.
+    for (std::size_t i = 0; i < nodes.size(); ++i) {
+        const auto left = i == 0 ? i : i - 1;
+        const auto right = i + 1 == nodes.size() ? i : i + 1;
+        const double dt = nodes[right].epoch.seconds_since(nodes[left].epoch);
+        for (std::size_t k = 3; k < 5; ++k) {
+            nodes[i].rate[k] = (nodes[right].value[k] - nodes[left].value[k]) / dt;
+        }
+    }
+    return nodes;
+}
+
+class EopSnapshot final : public core::IEarthOrientationProvider {
+  public:
+    EopSnapshot(std::vector<Node> nodes, core::EopDataInfo info)
+        : nodes_(std::move(nodes)), info_(std::move(info)),
+          source_id_(info_.id + ";sha256=" + info_.sha256 +
+                     ";time-sha256=" + info_.time_data.sha256 +
+                     ";first-tai-ns=" + std::to_string(info_.first_epoch.tai_nanoseconds()) +
+                     ";last-tai-ns=" + std::to_string(info_.last_epoch.tai_nanoseconds()) +
+                     ";interpolation=" + info_.interpolation + ";subdaily-tides=none") {}
+
+    core::EarthOrientationState at(core::Epoch epoch) const override {
+        if (epoch.tai_nanoseconds() < nodes_.front().epoch.tai_nanoseconds() ||
+            epoch.tai_nanoseconds() > nodes_.back().epoch.tai_nanoseconds()) {
+            throw core::EopCoverageError(
+                "Epoch is outside this EOP snapshot; extrapolation is disabled");
+        }
+        const auto upper =
+            std::lower_bound(nodes_.begin(), nodes_.end(), epoch, [](const Node &n, core::Epoch t) {
+                return n.epoch.tai_nanoseconds() < t.tai_nanoseconds();
+            });
+        std::array<double, 5> value{}, rate{};
+        if (upper->epoch == epoch) {
+            value = upper->value;
+            rate = upper->rate;
+        } else {
+            const auto &b = *upper;
+            const auto &a = *(upper - 1);
+            const double h = b.epoch.seconds_since(a.epoch);
+            const double t = epoch.seconds_since(a.epoch) / h;
+            // Stable Hermite form around the left value. Avoid cancellation of UT1-TAI's
+            // ~37-second offset while differentiating millisecond daily variations.
+            for (std::size_t k = 0; k < 5; ++k) {
+                const double delta = b.value[k] - a.value[k];
+                const double c2 = 3 * delta - h * (2 * a.rate[k] + b.rate[k]);
+                const double c3 = -2 * delta + h * (a.rate[k] + b.rate[k]);
+                value[k] = a.value[k] + t * (h * a.rate[k] + t * (c2 + t * c3));
+                rate[k] = a.rate[k] + t * (2 * c2 + 3 * t * c3) / h;
+            }
+        }
+        return {{epoch, value[0], value[1], value[2], value[3], value[4], source_id_},
+                {rate[0], rate[1], rate[2], rate[3], rate[4]}};
+    }
+    const core::EopDataInfo &data_info() const noexcept override { return info_; }
+
+  private:
+    std::vector<Node> nodes_;
+    core::EopDataInfo info_;
+    std::string source_id_;
+};
+} // namespace
+
+std::unique_ptr<core::IEarthOrientationProvider>
+load_eop_snapshot(const std::filesystem::path &manifest_path, const core::ITimeProvider &time) {
+    try {
+        const auto manifest = nlohmann::json::parse(read_file(manifest_path, 64 * 1024));
+        if (!manifest.is_object() || !manifest.at("schema_version").is_number_integer() ||
+            manifest.at("schema_version") != 1 || manifest.at("format") != "iers-20-c04-0h-dxdy" ||
+            manifest.at("reference_frame") != "ITRF2020" ||
+            manifest.at("interpolation") != "c04-hermite-tai-v1") {
+            throw core::EopDataError(
+                "Unsupported EOP manifest version, format, frame or interpolation");
+        }
+        constexpr std::array keys{"schema_version", "snapshot_id",     "format",
+                                  "data_file",      "sha256",          "source_url",
+                                  "source_sha256",  "retrieved_on",    "first_mjd",
+                                  "last_mjd",       "reference_frame", "interpolation"};
+        for (const auto &[key, value] : manifest.items()) {
+            (void)value;
+            if (std::find(keys.begin(), keys.end(), key) == keys.end()) {
+                throw core::EopDataError("Unknown EOP manifest field: " + key);
+            }
+        }
+        const auto id = manifest.at("snapshot_id").get<std::string>();
+        const auto hash = manifest.at("sha256").get<std::string>();
+        const auto source = manifest.at("source_url").get<std::string>();
+        if (id.empty() || source.empty() || !is_sha256(hash) ||
+            !is_sha256(manifest.at("source_sha256").get<std::string>()) ||
+            manifest.at("retrieved_on").get<std::string>().empty()) {
+            throw core::EopDataError("Incomplete EOP provenance or invalid SHA256");
+        }
+        const auto filename = std::filesystem::path(manifest.at("data_file").get<std::string>());
+        if (filename.empty() || filename.has_parent_path() || filename.has_root_path() ||
+            filename == "." || filename == "..") {
+            throw core::EopDataError("EOP data_file must be a filename beside its manifest");
+        }
+        const auto directory =
+            std::filesystem::canonical(std::filesystem::absolute(manifest_path).parent_path());
+        const auto data_path = std::filesystem::canonical(directory / filename);
+        if (data_path.parent_path() != directory) {
+            throw core::EopDataError("EOP data_file resolves outside the snapshot directory");
+        }
+        const auto bytes = read_file(data_path, 16 * 1024 * 1024);
+        if (picosha2::hash256_hex_string(bytes) != hash) {
+            throw core::EopDataError("EOP data SHA256 mismatch");
+        }
+        const int first = manifest_mjd(manifest, "first_mjd");
+        const int last = manifest_mjd(manifest, "last_mjd");
+        if (last <= first) {
+            throw core::EopDataError("EOP snapshot requires at least two daily samples");
+        }
+        auto nodes = parse_c04(bytes, first, last, time);
+        core::EopDataInfo info{id,
+                               hash,
+                               source,
+                               "ITRF2020",
+                               "c04-hermite-tai-v1",
+                               nodes.front().epoch,
+                               nodes.back().epoch,
+                               time.data_info()};
+        return std::make_unique<EopSnapshot>(std::move(nodes), std::move(info));
+    } catch (const core::EopDataError &) {
+        throw;
+    } catch (const std::exception &error) {
+        throw core::EopDataError(std::string("Cannot load EOP snapshot: ") + error.what());
+    }
+}
+} // namespace orbitforge::providers::iers

@@ -1,0 +1,55 @@
+--- a/src/rocky/vsg/VSGContext.cpp
++++ b/src/rocky/vsg/VSGContext.cpp
+@@ -666,34 +666,32 @@
+ 
+     // One-time update functions
+     // Swap-and-run lets update functions re-queue themselves
+-    if (!_functionsToRunDuringNextUpdate.empty())
+-    {
+-        std::vector<std::function<void(VSGContext)>> temp;
+-        {
+-            std::scoped_lock lock(_functionsToRunDuringNextUpdateMutex);
+-            temp.swap(_functionsToRunDuringNextUpdate);
+-        }
+-        for (auto& f : temp)
+-        {
+-            f(this);
+-        }
++    std::vector<std::function<void(VSGContext)>> temp;
++    {
++        std::scoped_lock lock(_functionsToRunDuringNextUpdateMutex);
++        temp.swap(_functionsToRunDuringNextUpdate);
++    }
++    for (auto& f : temp)
++    {
++        f(this);
+     }
+ 
+     // One-shot update priority queue
+     _priorityUpdateQueue->run();
+ 
+     // Merge compilation results
+-    if (_compileResult)
+     {
+         std::unique_lock lock(_compileMutex);
+-
+-        if (_compileResult.requiresViewerUpdate())
+-        {
+-            vsg::updateViewer(*_viewer, _compileResult);
+-        }
+-        _compileResult.reset();
+-
+-        requestFrame();
++        if (_compileResult)
++        {
++            if (_compileResult.requiresViewerUpdate())
++            {
++                vsg::updateViewer(*_viewer, _compileResult);
++            }
++            _compileResult.reset();
++
++            requestFrame();
++        }
+     }
+ 
+     // process the garbage collector

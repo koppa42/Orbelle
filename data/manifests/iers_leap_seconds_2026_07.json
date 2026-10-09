@@ -1,0 +1,12 @@
+{
+  "snapshot_id": "iers-bulletin-c-72-2026-07",
+  "source_url": "https://hpiers.obspm.fr/iers/bul/bulc/Leap_Second.dat",
+  "retrieved_on": "2026-10-09",
+  "file": "data/samples/time/iers_leap_seconds_2026_07.dat",
+  "sha256": "6cb6f5d4b819f2e568e25db4b0b26d89dedf031fdffb18bc94d40f4e94e268d7",
+  "utc_valid_from_mjd": 41317,
+  "utc_valid_until_mjd": 61584,
+  "utc_valid_from": "1972-01-01T00:00:00Z",
+  "utc_valid_until_exclusive": "2027-06-28T00:00:00Z",
+  "expiry_policy": "Reject UTC conversions at or after midnight on the published expiry date. No extrapolation or automatic update."
+}

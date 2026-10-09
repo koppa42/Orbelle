@@ -1,0 +1,47 @@
+{
+  "name": "orbitforge",
+  "version-semver": "0.1.0",
+  "builtin-baseline": "9b965a116838c6cdcd36bca60d1b81b030c8ab8d",
+  "dependencies": [],
+  "features": {
+    "graphics": {
+      "description": "Qt / VSG / Rocky desktop rendering integration",
+      "dependencies": [
+        "vsgqt",
+        { "name": "vsg", "features": ["windowing"] },
+        { "name": "rocky", "features": ["gdal"] }
+      ]
+    },
+    "graphics-validation": {
+      "description": "Vulkan validation layers for desktop lifecycle verification",
+      "dependencies": ["vulkan-validationlayers"]
+    },
+    "spice": {
+      "description": "Serialized CSPICE ephemeris provider and verified local kernels",
+      "dependencies": ["cspice", "nlohmann-json", "picosha2"]
+    },
+    "time-frames": {
+      "description": "ERFA time and Earth orientation provider",
+      "dependencies": ["erfa", "nlohmann-json", "picosha2"]
+    },
+    "tests": {
+      "description": "C++ unit and integration test framework",
+      "dependencies": [
+        "gtest"
+      ]
+    },
+    "desktop": {
+      "description": "Qt Widgets table workbench without optional graphics features",
+      "dependencies": [
+        {
+          "name": "qtbase",
+          "default-features": false,
+          "features": [
+            "widgets"
+          ]
+        }
+      ]
+    }
+  }
+}
+

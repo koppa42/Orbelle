@@ -1,0 +1,11 @@
+--- a/include/vsg/app/Presentation.h
++++ b/include/vsg/app/Presentation.h
+@@ -22,7 +22,7 @@
+ {
+ 
+     /// Presentation provides support for presenting swapchains associated with windows.
+-    class Presentation : public Inherit<Object, Presentation>
++    class VSG_DECLSPEC Presentation : public Inherit<Object, Presentation>
+     {
+     public:
+         VkResult present();

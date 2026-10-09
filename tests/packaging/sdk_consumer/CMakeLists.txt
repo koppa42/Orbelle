@@ -1,0 +1,22 @@
+cmake_minimum_required(VERSION 3.28)
+project(OrbitForgeSdkConsumer LANGUAGES CXX)
+option(ORBITFORGE_EXPECT_TIME_FRAMES "Expect the installed SDK to include ERFA" OFF)
+option(ORBITFORGE_EXPECT_SPICE "Expect the installed SDK to include CSPICE" OFF)
+find_package(OrbitForge 0.1.0 EXACT CONFIG REQUIRED COMPONENTS Runtime)
+add_executable(sdk_consumer main.cpp)
+target_link_libraries(sdk_consumer PRIVATE OrbitForge::Runtime)
+target_compile_definitions(sdk_consumer PRIVATE
+    ORBITFORGE_EXPECT_TIME_FRAMES=$<BOOL:${ORBITFORGE_EXPECT_TIME_FRAMES}>)
+target_compile_definitions(sdk_consumer PRIVATE ORBITFORGE_EXPECT_SPICE=$<BOOL:${ORBITFORGE_EXPECT_SPICE}>)
+enable_testing()
+set(ORBITFORGE_EOP_MANIFEST "" CACHE FILEPATH "EOP manifest in the installed SDK")
+if(ORBITFORGE_EXPECT_TIME_FRAMES AND NOT EXISTS "${ORBITFORGE_EOP_MANIFEST}")
+    message(FATAL_ERROR "Provide ORBITFORGE_EOP_MANIFEST from the installed SDK")
+endif()
+set(ORBITFORGE_SPICE_MANIFEST "" CACHE FILEPATH "SPICE manifest in the installed SDK")
+if(ORBITFORGE_EXPECT_SPICE AND NOT EXISTS "${ORBITFORGE_SPICE_MANIFEST}")
+    message(FATAL_ERROR "Provide ORBITFORGE_SPICE_MANIFEST from the installed SDK")
+endif()
+add_test(NAME installed_sdk COMMAND sdk_consumer "${ORBITFORGE_EOP_MANIFEST}"
+    "${ORBITFORGE_SPICE_MANIFEST}" "${CMAKE_CURRENT_BINARY_DIR}/spice-workspace")
+

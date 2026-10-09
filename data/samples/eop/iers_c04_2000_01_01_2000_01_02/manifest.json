@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "iers-c04-p0-tai-zero-v1",
+  "format": "iers-20-c04-0h-dxdy",
+  "data_file": "eop.c04",
+  "sha256": "7c49148548609953431d1c6063d08d331f869edfc057cdd74d9a465a94c1f261",
+  "source_url": "https://hpiers.obspm.fr/iers/eop/eopc04/eopc04.1962-now",
+  "source_sha256": "9fb4ac0567b4260662a72aef597f754f2c575f75d70d50ff753e669b57791f46",
+  "retrieved_on": "2026-10-09",
+  "first_mjd": 51544,
+  "last_mjd": 51545,
+  "reference_frame": "ITRF2020",
+  "interpolation": "c04-hermite-tai-v1"
+}

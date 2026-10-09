@@ -1,0 +1,8 @@
+# EARTH ORIENTATION PARAMETER (EOP) PRODUCT CENTER CENTER (PARIS OBSERVATORY) - INTERNATIONAL EARTH ROTATION AND REFERENCE SYSTEMS SERVICE  
+# EOP (IERS) 20 C04 TIME SERIES  consistent with ITRF 2020 - sampled at 0h UTC     
+# Description: https://hpiers.obspm.fr/eoppc/eop/eopc04/readme        Contact: christian.bizouard@obspm.fr                              
+# Reference Precession-Nutation Model: IAU 2000
+# format(4(i4),f10.2,2(f12.6),f12.7,2(f12.6),2(f12.6),f12.7,2(f12.6),f12.7,2(f12.6),2(f12.6),f12.7)
+# YR  MM  DD  HH       MJD        x(")        y(")  UT1-UTC(s)       dX(")       dY(")  xrt("/day)  yrt("/day)      LOD(s)        x Er        y Er  UT1-UTC Er       dX Er       dY Er      xrt Er      yrt Er      LOD Er
+2000   1   1   0  51544.00    0.043261    0.377991   0.3554724   -0.000137   -0.000026    0.000271   -0.000113   0.0009394    0.000084    0.000067   0.0000295    0.000120    0.000101    0.000228    0.000280   0.0000274
+2000   1   2   0  51545.00    0.043502    0.377750   0.3546007   -0.000126   -0.000056    0.000206   -0.000048   0.0008034    0.000080    0.000064   0.0000137    0.000125    0.000104    0.000218    0.000270   0.0000289

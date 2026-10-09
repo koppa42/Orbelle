@@ -1,0 +1,4 @@
+add_executable(orbitforge_example circular_orbit.cpp)
+target_link_libraries(orbitforge_example PRIVATE OrbitForge::Runtime)
+orbitforge_warnings(orbitforge_example)
+
