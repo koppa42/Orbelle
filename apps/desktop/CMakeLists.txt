@@ -15,17 +15,27 @@ if(ORBITFORGE_WITH_VSG)
     target_sources(orbitforge_desktop PRIVATE src/viewer/graphics_workbench.cpp
         src/viewer/orbit_scene.cpp src/viewer/orbit_editor.cpp src/viewer/workbench_style.cpp
         src/viewer/satellite_model.cpp src/viewer/mission_timeline.cpp src/viewer/scenario_dialog.cpp
-        src/viewer/epoch_editor.cpp src/viewer/ground_map.cpp)
+        src/viewer/epoch_editor.cpp src/viewer/ground_map.cpp src/viewer/workspace.cpp)
     target_link_libraries(orbitforge_desktop PRIVATE OrbitForge::GeoRocky vsgQt::vsgQt
         vsgXchange::vsgXchange rocky::rocky)
     target_compile_definitions(orbitforge_desktop PRIVATE
         ORBITFORGE_DESKTOP_GRAPHICS
         ORBITFORGE_ROCKY_VERSION="${rocky_VERSION}"
         ORBITFORGE_VSGQT_VERSION="${vsgQt_VERSION}")
+    if(BUILD_TESTING AND ORBITFORGE_WITH_ERFA AND ORBITFORGE_WITH_SPICE)
+        add_executable(orbitforge_orbit_scene_tests tests/orbit_scene_test.cpp src/viewer/orbit_scene.cpp)
+        target_link_libraries(orbitforge_orbit_scene_tests PRIVATE
+            OrbitForge::Runtime OrbitForge::Visualization GTest::gtest_main)
+        target_compile_definitions(orbitforge_orbit_scene_tests PRIVATE
+            ORBITFORGE_TEST_EOP="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json")
+        orbitforge_warnings(orbitforge_orbit_scene_tests)
+        orbitforge_copy_runtime_dlls(orbitforge_orbit_scene_tests)
+        gtest_discover_tests(orbitforge_orbit_scene_tests TEST_PREFIX "desktop." PROPERTIES TIMEOUT 60)
+    endif()
     if(BUILD_TESTING AND ORBITFORGE_WITH_ERFA)
         add_executable(orbitforge_timeline_tests tests/timeline_test.cpp
             src/viewer/mission_timeline.cpp src/viewer/epoch_editor.cpp
-            src/viewer/workbench_style.cpp)
+            src/viewer/workbench_style.cpp src/viewer/workspace.cpp tests/workspace_test.cpp)
         target_link_libraries(orbitforge_timeline_tests PRIVATE
             OrbitForge::Runtime Qt6::Widgets GTest::gtest_main)
         orbitforge_warnings(orbitforge_timeline_tests)

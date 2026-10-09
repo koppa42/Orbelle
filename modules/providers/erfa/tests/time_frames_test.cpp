@@ -9,6 +9,22 @@
 
 using namespace orbitforge;
 
+TEST(ErfaDisplaySun, MatchesPublishedEpv00ReferenceAndRejectsUnsupportedDates) {
+    // Independent epv00 reference from ERFA 2.0.1 t_erfa_c.c at MJD(TT) 53411.52501161.
+    const auto epoch = core::Epoch(static_cast<std::int64_t>(
+        std::llround(((53411.52501161 - 51544.5) * 86400 - 32.184) * 1e9)));
+    const auto direction = providers::erfa::display_sun_direction_gcrf(epoch);
+    const std::array<double, 3> earth{-0.7757238809297706813, 0.5598052241363340596,
+                                      0.2426998466481686993};
+    const auto length = std::hypot(earth[0], earth[1], earth[2]);
+    for (std::size_t i = 0; i < 3; ++i)
+        EXPECT_NEAR(direction[i], -earth[i] / length, 2e-12);
+    EXPECT_NEAR(std::hypot(direction[0], direction[1], direction[2]), 1, 2e-16);
+    EXPECT_THROW(
+        (void)providers::erfa::display_sun_direction_gcrf(core::Epoch(7'000'000'000'000'000'000LL)),
+        core::TimeDataRangeError);
+}
+
 TEST(ErfaTime, TaiReferenceAndJ2000TtAreDistinct) {
     const auto time = providers::erfa::make_builtin_time_provider();
     EXPECT_EQ(time->from_utc({2000, 1, 1, 11, 59, 28, 0}), core::Epoch(0));

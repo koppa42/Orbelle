@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <optional>
+#include <orbitforge/core/frames/frame_provider.hpp>
 #include <orbitforge/visualization/snapshot.hpp>
 #include <span>
 #include <vsg/app/Camera.h>
@@ -14,7 +15,8 @@ struct ProjectedMarker {
 // Display-only visibility against the WGS84 ellipsoid, not an Access calculation.
 [[nodiscard]] std::vector<ProjectedMarker>
 visible_markers(const visualization::RenderSnapshot &snapshot, const vsg::Camera &camera,
-                std::uint32_t width_pixels, std::uint32_t height_pixels, double margin_pixels = 0);
+                std::uint32_t width_pixels, std::uint32_t height_pixels, double margin_pixels = 0,
+                const core::PositionRotation *to_itrf = nullptr);
 [[nodiscard]] std::optional<std::size_t> pick_marker(std::span<const ProjectedMarker> markers,
                                                      double x_pixels, double y_pixels,
                                                      double radius_pixels);

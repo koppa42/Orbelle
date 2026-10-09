@@ -1,4 +1,5 @@
 #pragma once
+#include "display_settings.hpp"
 #include "orbit_scene.hpp"
 #include <QWidget>
 #include <functional>
@@ -10,7 +11,8 @@ class QLineEdit;
 class QPushButton;
 class QSpinBox;
 class QComboBox;
-class QListWidget;
+class QCheckBox;
+class QTreeWidget;
 class QStackedWidget;
 namespace orbitforge::desktop {
 class EpochEditor;
@@ -19,7 +21,10 @@ class OrbitEditor final : public QWidget {
     explicit OrbitEditor(const OrbitInput &input, QWidget *parent = nullptr);
     std::function<void(OrbitInput)> apply;
     std::function<void()> cancel;
+    std::function<void()> close_requested;
     std::function<void(int, QString, double)> appearance;
+    std::function<void(DisplaySettings)> display;
+    void set_display(const DisplaySettings &settings);
     void set_input(const OrbitInput &input);
     void set_create_mode(bool create);
     void set_state_mode(int mode);
@@ -36,7 +41,7 @@ class OrbitEditor final : public QWidget {
     core::CartesianState read_state() const;
     void write_elements(const core::CartesianState &state);
     bool create_mode_ = false, orbit_busy_ = false, model_busy_ = false;
-    QListWidget *navigation_ = nullptr;
+    QTreeWidget *navigation_ = nullptr;
     QLineEdit *object_ = nullptr, *mu_ = nullptr;
     std::array<QLineEdit *, 3> position_{}, velocity_{};
     EpochEditor *epoch_ = nullptr, *first_ = nullptr, *last_ = nullptr;
@@ -54,5 +59,10 @@ class OrbitEditor final : public QWidget {
     QDoubleSpinBox *model_diameter_ = nullptr;
     QPushButton *apply_model_ = nullptr;
     QLabel *model_message_ = nullptr;
+    QComboBox *track_extent_ = nullptr;
+    QDoubleSpinBox *past_ = nullptr, *future_ = nullptr;
+    QCheckBox *track_2d_ = nullptr, *label_2d_ = nullptr, *track_3d_ = nullptr;
+    std::vector<QPushButton *> display_buttons_;
+    void submit_display();
 };
 } // namespace orbitforge::desktop

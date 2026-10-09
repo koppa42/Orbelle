@@ -304,4 +304,13 @@ std::unique_ptr<core::ITimeProvider> make_builtin_time_provider() {
 std::unique_ptr<core::IFrameProvider> make_frame_provider() {
     return std::make_unique<FrameProvider>();
 }
+std::array<double, 3> display_sun_direction_gcrf(core::Epoch epoch) {
+    const auto tt = tt_jd(epoch);
+    double heliocentric[2][3], barycentric[2][3];
+    if (eraEpv00(tt.day, tt.fraction, heliocentric, barycentric) != 0)
+        throw core::TimeDataRangeError("Display sunlight requires an epoch within 1900–2100");
+    const double length = std::hypot(heliocentric[0][0], heliocentric[0][1], heliocentric[0][2]);
+    return {-heliocentric[0][0] / length, -heliocentric[0][1] / length,
+            -heliocentric[0][2] / length};
+}
 } // namespace orbitforge::providers::erfa

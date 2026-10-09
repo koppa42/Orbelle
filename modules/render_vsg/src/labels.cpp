@@ -31,14 +31,29 @@ void require_itrf(const visualization::RenderSnapshot &snapshot) {
 } // namespace
 std::vector<ProjectedMarker> visible_markers(const visualization::RenderSnapshot &snapshot,
                                              const vsg::Camera &camera, std::uint32_t width,
-                                             std::uint32_t height, double margin) {
-    require_itrf(snapshot);
+                                             std::uint32_t height, double margin,
+                                             const core::PositionRotation *to_itrf) {
+    if (snapshot.frame == core::FrameId::gcrf) {
+        if (snapshot.origin != core::OriginId::earth || !to_itrf ||
+            to_itrf->epoch != snapshot.epoch || to_itrf->from != core::FrameId::gcrf ||
+            to_itrf->to != core::FrameId::itrf || to_itrf->origin != snapshot.origin)
+            throw std::invalid_argument(
+                "GCRF visibility requires an epoch-matched Earth-fixed rotation");
+    } else
+        require_itrf(snapshot);
     if (!camera.viewMatrix || !camera.projectionMatrix || !width || !height ||
         !std::isfinite(margin) || margin < 0)
         throw std::invalid_argument("Invalid display viewport");
     const auto view = camera.viewMatrix->transform();
     const auto projection = camera.projectionMatrix->transform() * view;
     const auto eye = vsg::inverse(view) * vsg::dvec3(0, 0, 0);
+    const auto fixed = [&](vsg::dvec3 value) {
+        if (snapshot.frame == core::FrameId::itrf)
+            return value;
+        const auto p = to_itrf->apply_position({value.x, value.y, value.z});
+        return vsg::dvec3(p[0], p[1], p[2]);
+    };
+    const auto fixed_eye = fixed(eye);
     std::vector<ProjectedMarker> result;
     for (std::size_t i = 0; i < snapshot.markers.size(); ++i) {
         const auto &p = snapshot.markers[i].position_m;
@@ -50,7 +65,7 @@ std::vector<ProjectedMarker> visible_markers(const visualization::RenderSnapshot
         const double x = (clip.x / clip.w + 1) * 0.5 * width;
         const double y = (clip.y / clip.w + 1) * 0.5 * height;
         if (!std::isfinite(x) || !std::isfinite(y) || x < margin || x >= width - margin ||
-            y < margin || y >= height - margin || earth_occludes(eye, position))
+            y < margin || y >= height - margin || earth_occludes(fixed_eye, fixed(position)))
             continue;
         result.push_back({i, x, y});
     }

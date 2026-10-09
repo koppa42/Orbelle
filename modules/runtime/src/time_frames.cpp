@@ -37,4 +37,12 @@ load_eop_snapshot(const std::filesystem::path &manifest) {
     throw std::runtime_error("EOP loading requires a build with ORBITFORGE_WITH_ERFA=ON");
 #endif
 }
+std::array<double, 3> display_sun_direction_gcrf(core::Epoch epoch) {
+#ifdef ORBITFORGE_HAS_ERFA
+    return providers::erfa::display_sun_direction_gcrf(epoch);
+#else
+    (void)epoch;
+    throw std::runtime_error("Display sunlight requires ORBITFORGE_WITH_ERFA=ON");
+#endif
+}
 } // namespace orbitforge::runtime

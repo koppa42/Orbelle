@@ -25,9 +25,6 @@ new_scenario_dialog(QWidget *parent, core::Epoch coverage_first, core::Epoch cov
     auto *title = new QLabel(QStringLiteral("新建场景"));
     title->setObjectName("panelTitle");
     layout->addWidget(title);
-    auto *description = new QLabel(QStringLiteral("设定分析时段，开始构建你的轨道场景。"));
-    description->setObjectName("panelDescription");
-    layout->addWidget(description);
     auto *form = new QFormLayout;
     form->setHorizontalSpacing(18);
     form->setVerticalSpacing(14);
@@ -56,13 +53,11 @@ new_scenario_dialog(QWidget *parent, core::Epoch coverage_first, core::Epoch cov
     error->setObjectName("inputError");
     error->setWordWrap(true);
     layout->addLayout(form);
-    auto *hint = new QLabel(QStringLiteral("场景统一管理分析时段，创建后再插入卫星。\n"
-                                           "当前数据覆盖：%1 — %2 UTC（含预测值）。")
-                                .arg(calendar_text(coverage_first, CalendarScale::utc),
-                                     calendar_text(coverage_last, CalendarScale::utc)));
-    hint->setObjectName("hint");
-    hint->setWordWrap(true);
-    layout->addWidget(hint);
+    const auto coverage = QStringLiteral("可用时段：%1 — %2 UTC")
+                              .arg(calendar_text(coverage_first, CalendarScale::utc),
+                                   calendar_text(coverage_last, CalendarScale::utc));
+    first->setToolTip(coverage);
+    last->setToolTip(coverage);
     layout->addWidget(error);
     auto *buttons = new QHBoxLayout;
     buttons->addStretch();

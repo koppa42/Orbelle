@@ -78,8 +78,10 @@ vsg::ref_ptr<vsg::StateGroup> geometry(vsg::ref_ptr<vsg::vec3Array> positions,
     return group;
 }
 void check_frame(const visualization::RenderSnapshot &snapshot) {
-    if (snapshot.frame != core::FrameId::itrf || snapshot.origin != core::OriginId::earth) {
-        throw std::invalid_argument("The globe renderer requires explicit Earth/ITRF positions");
+    if ((snapshot.frame != core::FrameId::itrf && snapshot.frame != core::FrameId::gcrf) ||
+        snapshot.origin != core::OriginId::earth) {
+        throw std::invalid_argument(
+            "The globe renderer requires explicit Earth/ITRF or Earth/GCRF positions");
     }
 }
 vsg::vec3 display_position(const visualization::Marker &marker) {
@@ -127,21 +129,57 @@ void MarkerLayer::update(const visualization::RenderSnapshot &snapshot) {
     impl_->positions->dirty();
     impl_->draw->vertexCount = static_cast<std::uint32_t>(converted.size());
 }
-vsg::ref_ptr<vsg::Node> make_track(std::span<const visualization::RenderSnapshot> samples) {
+struct TrackLayer::Impl {
+    vsg::ref_ptr<vsg::Node> root;
+    vsg::ref_ptr<vsg::VertexDraw> draw;
+    std::vector<core::Epoch> epochs;
+};
+TrackLayer::TrackLayer(std::span<const visualization::RenderSnapshot> samples)
+    : impl_(std::make_unique<Impl>()) {
     if (samples.size() < 2 || samples.size() > std::numeric_limits<std::uint32_t>::max()) {
         throw std::invalid_argument("A track requires at least two samples within Vulkan limits");
     }
     auto positions = vsg::vec3Array::create(static_cast<std::uint32_t>(samples.size()));
     for (std::size_t i = 0; i < samples.size(); ++i) {
         check_frame(samples[i]);
-        if (samples[i].markers.size() != 1 ||
+        if (samples[i].markers.size() != 1 || samples[i].frame != samples.front().frame ||
+            (i && samples[i].epoch.tai_nanoseconds() <= samples[i - 1].epoch.tai_nanoseconds()) ||
             samples[i].markers.front().object_id != samples.front().markers.front().object_id) {
             throw std::invalid_argument("A track requires one consistent object ID");
         }
         positions->at(i) = display_position(samples[i].markers.front());
+        impl_->epochs.push_back(samples[i].epoch);
     }
     auto draw = vsg::VertexDraw::create();
     draw->vertexCount = static_cast<std::uint32_t>(samples.size());
-    return geometry(positions, draw, false);
+    impl_->draw = draw;
+    impl_->root = geometry(positions, draw, false);
+}
+TrackLayer::~TrackLayer() = default;
+vsg::ref_ptr<vsg::Node> TrackLayer::node() const { return impl_->root; }
+std::size_t TrackLayer::size() const { return impl_->draw->vertexCount; }
+void TrackLayer::set_interval(core::Epoch first, core::Epoch last) {
+    if (last.tai_nanoseconds() < first.tai_nanoseconds())
+        throw std::invalid_argument("Reversed display interval");
+    const auto &epochs = impl_->epochs;
+    if (first == last || first.tai_nanoseconds() > epochs.back().tai_nanoseconds() ||
+        last.tai_nanoseconds() < epochs.front().tai_nanoseconds()) {
+        impl_->draw->vertexCount = 0;
+        return;
+    }
+    const auto compare = [](core::Epoch a, core::Epoch b) {
+        return a.tai_nanoseconds() < b.tai_nanoseconds();
+    };
+    auto begin = std::upper_bound(epochs.begin(), epochs.end(), first, compare);
+    if (begin != epochs.begin())
+        --begin;
+    auto end = std::lower_bound(epochs.begin(), epochs.end(), last, compare);
+    if (end != epochs.end())
+        ++end;
+    impl_->draw->firstVertex = static_cast<std::uint32_t>(std::distance(epochs.begin(), begin));
+    impl_->draw->vertexCount = static_cast<std::uint32_t>(std::distance(begin, end));
+}
+vsg::ref_ptr<vsg::Node> make_track(std::span<const visualization::RenderSnapshot> samples) {
+    return TrackLayer(samples).node();
 }
 } // namespace orbitforge::render_vsg

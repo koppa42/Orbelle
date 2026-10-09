@@ -1,4 +1,5 @@
 #pragma once
+#include "display_settings.hpp"
 #include "orbit_scene.hpp"
 #include <QImage>
 #include <QPainterPath>
@@ -17,6 +18,10 @@ class GroundMap final : public QWidget {
     struct Track {
         QString name;
         QPainterPath path;
+        std::vector<QPointF> points;
+        std::vector<core::Epoch> epochs;
+        std::size_t first = 0, last = 0;
+        bool visible = true, label = true;
     };
     using PreparedTracks = std::vector<Track>;
     explicit GroundMap(const QString &imagery, QWidget *parent = nullptr);
@@ -25,8 +30,19 @@ class GroundMap final : public QWidget {
     static PreparedTracks
     prepare_tracks(const std::vector<std::shared_ptr<const OrbitScene>> &orbits);
     void publish_tracks(PreparedTracks tracks);
+    void replace_track(std::size_t index, Track track);
     void set_snapshot(const visualization::RenderSnapshot &snapshot);
     void set_selection(std::optional<std::size_t> index);
+    void set_display(std::size_t index, const DisplaySettings &settings, core::Epoch first,
+                     core::Epoch last);
+    void set_sun_direction(const std::array<double, 3> &direction);
+    void set_lighting(bool enabled);
+    void set_grid_visible(bool enabled);
+    void set_tracks_visible(bool enabled);
+    void set_labels_visible(bool enabled);
+    void set_sun_visible(bool enabled);
+    void focus_selection();
+    [[nodiscard]] const std::array<double, 3> &sun_direction() const { return sun_direction_; }
     void reset_view();
     void zoom(double factor, QPointF anchor);
     [[nodiscard]] core::Epoch epoch() const { return epoch_; }
@@ -40,6 +56,7 @@ class GroundMap final : public QWidget {
     void resizeEvent(QResizeEvent *) override;
     void mousePressEvent(QMouseEvent *) override;
     void mouseMoveEvent(QMouseEvent *) override;
+    void leaveEvent(QEvent *) override;
     void mouseReleaseEvent(QMouseEvent *) override;
     void mouseDoubleClickEvent(QMouseEvent *) override;
     void wheelEvent(QWheelEvent *) override;
@@ -55,6 +72,10 @@ class GroundMap final : public QWidget {
     QTransform map_transform() const;
     void clamp_pan();
     QImage imagery_;
+    QImage night_;
+    std::array<double, 3> sun_direction_{1, 0, 0};
+    std::optional<QPointF> cursor_position_;
+    bool lighting_ = true, grid_ = true, show_tracks_ = true, labels_ = true, show_sun_ = true;
     std::vector<Track> tracks_;
     std::vector<Point> points_;
     std::optional<std::size_t> selected_;

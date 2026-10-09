@@ -9,6 +9,8 @@ namespace orbitforge::runtime {
 // These factories throw std::runtime_error when ORBITFORGE_WITH_ERFA is disabled.
 [[nodiscard]] std::unique_ptr<core::ITimeProvider> make_builtin_time_provider();
 [[nodiscard]] std::unique_ptr<core::IFrameProvider> make_frame_provider();
+// Approximate geometric sunlight for display; not an eclipse/visibility model.
+[[nodiscard]] std::array<double, 3> display_sun_direction_gcrf(core::Epoch epoch);
 [[nodiscard]] std::unique_ptr<core::IEarthOrientationProvider>
 load_eop_snapshot(const std::filesystem::path &manifest);
 } // namespace orbitforge::runtime

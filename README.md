@@ -15,9 +15,10 @@
 - CMake 安装/导出的 C++ SDK、pybind11/scikit-build-core wheel 构建入口。
 - GoogleTest/CTest 核心与集成测试、Python API 测试、安装后的 SDK 消费端案例。
 - Linux x64 无界面 Release、ASan/UBSan 和断网环境中的 SDK / Python wheel 验证入口；已验证 Ubuntu 24.04、GCC 13.3、Python 3.12。
-- 可选 Qt/VSG/Rocky 双视窗工作台：共享设备与场景、独立相机、ITRF 显示和时间播放；Windows 三档缩放、窗口重建及 Vulkan 验证通过。
-- 桌面场景工作流：启动页、新建场景、插入多颗卫星、独立对象属性面板、离线地球贴图、可选三维模型；默认以点显示。
-- 二维地面地图：经纬网、星下点、跨日期变更线的地面轨迹、缩放平移及浮动停靠，与三维共享时间和卫星选择。
+- 可选 Qt/VSG/Rocky 双视窗工作台：共享设备与场景、独立相机，三维默认 GCRF、可切换 ITRF；地球随时间旋转，支持昼夜光照。
+- 桌面场景工作流：新建场景、插入多颗卫星，二维/三维与属性共用主工作区标签页，属性支持弹出/放回和分组导航；离线地球贴图、可选三维模型，默认以点显示。
+- 默认一圈、60 s显示步长，按需准备局部轨迹缓存，未缓存时刻的位置由 Session 即时求值；基本分组设置显示范围，二维/三维分别配置显示。
+- 二维地面地图：ITRF/WGS84 经纬网、星下点、跨日期变更线轨迹、昼夜分界、缩放平移及浮动停靠，与三维共享时间和卫星选择。
 - UTC/TAI/TT 日期与时间输入、弹出日历/时间选择、默认 UTC 今天零点至次日零点；当前 IERS Bulletin A 数据快照随便携包部署并明确标记预测值。
 - 分层时间轴：场景总览、可缩放刻度、当前时刻游标与精确跳转；默认只显示场景区间，所选卫星的传播区间按需展开。
 - Windows 便携目录与 ZIP 打包入口：收集 DLL、Qt 插件、MSVC 运行库和离线资源，验证无开发环境 PATH、异地工作目录下的启动。
@@ -71,6 +72,7 @@ C++ SDK 由模块安装生成。Python 构建入口 `pyproject.toml` 放在仓�
 - [场景与属性工作流](docs/architecture/scenario_workbench.md)
 - [二体与场景工作台验证记录](docs/validation/p1_two_body_workbench.md)
 - [时间轴交互与便携包验证](docs/validation/timeline_2026_10_09.md)
+- [工作区、视图与按需缓存验证](docs/validation/workspace_views_2026_10_10.md)
 - [通用二体验证协议](docs/validation/p1_two_body_protocol.md)
 - [图形集成验收协议](docs/validation/p0_graphics_protocol.md)
 - [图形集成验证记录](docs/validation/p0_graphics.md)

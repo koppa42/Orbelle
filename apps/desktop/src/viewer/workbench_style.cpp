@@ -273,10 +273,10 @@ QToolBar#timelineBar QComboBox, QToolBar#timelineBar QDoubleSpinBox { min-height
 QLabel#timeBound { color: #71879e; font-family: "Consolas"; font-size: 10px; }
 QFrame#sectionDivider { background: #2a3b4c; max-height: 1px; border: 0; }
 QFrame#timelineDivider { background: #304254; max-width: 1px; border: 0; }
-QListWidget#propertyNavigation { background: #131e29; border: 0; border-right: 1px solid #2b3b4b; padding: 20px 8px; outline: 0; }
-QListWidget#propertyNavigation::item { padding: 10px 8px; margin: 3px 0; border-radius: 4px; color: #829bb3; }
-QListWidget#propertyNavigation::item:selected { background: #213952; color: #a6c9e9; }
-QListWidget#propertyNavigation::item:disabled { color: #4e647a; }
+QTreeWidget#propertyNavigation { background: #131e29; border: 0; border-right: 1px solid #2b3b4b; padding: 14px 6px; outline: 0; }
+QTreeWidget#propertyNavigation::item { height: 29px; padding: 2px 5px; border-radius: 2px; color: #9eafc1; }
+QTreeWidget#propertyNavigation::item:selected { background: #243c54; color: #c4def3; }
+QTreeWidget#propertyNavigation::item:disabled { color: #4e647a; }
 QTreeWidget { background: #14202b; border: 0; outline: 0; padding: 2px 0; }
 QTreeWidget::item { height: 25px; border-radius: 3px; padding: 2px; }
 QTreeWidget::item:selected { background: #243e57; color: #bad6f0; }

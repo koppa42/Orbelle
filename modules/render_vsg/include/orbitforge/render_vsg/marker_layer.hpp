@@ -23,6 +23,20 @@ class MarkerLayer {
     std::unique_ptr<Impl> impl_;
 };
 
+// Immutable vertex buffer; interval changes only adjust the draw range, without GPU compilation.
+class TrackLayer {
+  public:
+    explicit TrackLayer(std::span<const visualization::RenderSnapshot> samples);
+    ~TrackLayer();
+    [[nodiscard]] vsg::ref_ptr<vsg::Node> node() const;
+    void set_interval(core::Epoch first, core::Epoch last);
+    [[nodiscard]] std::size_t size() const;
+
+  private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
 [[nodiscard]] vsg::ref_ptr<vsg::Node>
 make_track(std::span<const visualization::RenderSnapshot> samples);
 } // namespace orbitforge::render_vsg

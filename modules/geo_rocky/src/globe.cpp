@@ -1,10 +1,13 @@
 #include <algorithm>
+#include <cmath>
 #include <orbitforge/geo_rocky/globe.hpp>
 #include <rocky/GDALImageLayer.h>
 #include <rocky/vsg/DisplayManager.h>
 #include <rocky/vsg/MapNode.h>
+#include <rocky/vsg/SkyNode.h>
 #include <rocky/vsg/ViewDependentState.h>
 #include <stdexcept>
+#include <vsg/nodes/Switch.h>
 
 namespace orbitforge::geo_rocky {
 namespace {
@@ -21,12 +24,27 @@ class Globe final : public render_vsg::IEarthDisplay {
             throw std::runtime_error(context->status.error().message);
         context->activeViewIDs.clear();
         traits_.initialize(context);
+        root_ = vsg::Group::create();
+        if (!imagery.empty()) {
+            sky_ = rocky::SkyNode::create(context);
+            sky_->ambient->intensity = 0.008f;
+            sky_->sun->intensity = 1.0f;
+            sky_switch_ = vsg::Switch::create();
+            sky_switch_->addChild(true, sky_);
+            root_->addChild(sky_switch_);
+            unlit_switch_ = vsg::Switch::create();
+            auto ambient = vsg::AmbientLight::create();
+            ambient->intensity = 1.0f;
+            unlit_switch_->addChild(false, ambient);
+            root_->addChild(unlit_switch_);
+        }
         map_ = rocky::MapNode::create(context);
+        root_->addChild(map_);
         if (!map_->terrainNode->status.ok())
             throw std::runtime_error(map_->terrainNode->status.error().message);
         map_->terrainSettings().maxLevel = 5u;
         map_->terrainSettings().pixelError = 32.0f;
-        map_->terrainSettings().lighting = false;
+        map_->terrainSettings().lighting = !imagery.empty();
         map_->terrainSettings().supportMultiThreadedRecord = false;
         if (!imagery.empty()) {
             if (!std::filesystem::is_regular_file(imagery)) {
@@ -46,7 +64,20 @@ class Globe final : public render_vsg::IEarthDisplay {
         stop_background_work();
         map_ = {};
     }
-    vsg::ref_ptr<vsg::Node> node() const override { return map_; }
+    vsg::ref_ptr<vsg::Node> node() const override {
+        return sky_ ? vsg::ref_ptr<vsg::Node>(root_) : vsg::ref_ptr<vsg::Node>(map_);
+    }
+    void set_illumination(const std::array<double, 3> &sun_direction, bool enabled) override {
+        const auto length = std::hypot(sun_direction[0], sun_direction[1], sun_direction[2]);
+        if (!std::isfinite(length) || std::abs(length - 1.0) > 1e-6)
+            throw std::invalid_argument("Display sunlight requires a finite unit vector");
+        if (!sky_)
+            return;
+        sky_->sun->direction = vsg::vec3(-sun_direction[0], -sun_direction[1], -sun_direction[2]);
+        sky_switch_->setAllChildren(enabled);
+        unlit_switch_->setAllChildren(!enabled);
+        map_->terrainSettings().lighting = enabled;
+    }
     void prepare_window(vsg::WindowTraits &traits, bool validation) override {
         traits_.configureTraits(&traits);
         traits.debugLayer = validation;
@@ -71,6 +102,10 @@ class Globe final : public render_vsg::IEarthDisplay {
     rocky::VSGContextSingleton context_;
     TraitsHelper traits_;
     vsg::ref_ptr<rocky::MapNode> map_;
+    vsg::ref_ptr<vsg::Group> root_;
+    vsg::ref_ptr<rocky::SkyNode> sky_;
+    vsg::ref_ptr<vsg::Switch> sky_switch_;
+    vsg::ref_ptr<vsg::Switch> unlit_switch_;
 };
 } // namespace
 std::unique_ptr<render_vsg::IEarthDisplay> make_globe(vsg::ref_ptr<vsg::Viewer> viewer,
