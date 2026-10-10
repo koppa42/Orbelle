@@ -24,7 +24,7 @@ static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
-                        lock_tag = 0x4b434f4c;
+                        lock_tag = 0x4b434f4c, stations_tag = 0x4e545347;
 [[noreturn]] void invalid(const char *message) { throw ProjectError(message); }
 void check(bool condition, const char *message) {
     if (!condition)
@@ -184,7 +184,8 @@ void validate_project(const Project &project) {
           "Invalid project analysis interval");
     check(project.current.tai_nanoseconds() >= first && project.current.tai_nanoseconds() <= last,
           "Project current time is outside its analysis interval");
-    check(project.satellites.size() <= max_objects, "Project exceeds 10000 satellites");
+    check(project.satellites.size() + project.ground_stations.size() <= max_objects,
+          "Project exceeds 10000 objects");
     std::set<std::string> ids;
     for (const auto &satellite : project.satellites) {
         const auto &input = satellite.orbit;
@@ -219,6 +220,16 @@ void validate_project(const Project &project) {
                   (satellite.model_kind != 2 || !satellite.model_path.empty()),
               "Invalid project model settings");
     }
+    for (const auto &station : project.ground_stations) {
+        text_check(station.object_id, true);
+        text_check(station.display_name, !station.display_name.empty());
+        check(ids.insert(station.object_id).second, "Duplicate project object ID");
+        try {
+            (void)core::ground_station_position(station.location);
+        } catch (const std::invalid_argument &error) {
+            throw ProjectError(error.what());
+        }
+    }
     if (project.earth_orientation) {
         const auto &data = *project.earth_orientation;
         for (const auto *value :
@@ -247,6 +258,12 @@ std::size_t satellite_index(const Project &project, const std::string &id) {
                                     [&](const auto &s) { return s.orbit.object_id == id; });
     check(found != project.satellites.end(), "Project object ID does not exist");
     return static_cast<std::size_t>(found - project.satellites.begin());
+}
+std::size_t station_index(const Project &project, const std::string &id) {
+    const auto found = std::find_if(project.ground_stations.begin(), project.ground_stations.end(),
+                                    [&](const auto &s) { return s.object_id == id; });
+    check(found != project.ground_stations.end(), "Project ground station ID does not exist");
+    return static_cast<std::size_t>(found - project.ground_stations.begin());
 }
 } // namespace
 Project Project::with_settings(std::string new_name, core::Epoch begin, core::Epoch end) const {
@@ -290,9 +307,34 @@ Project Project::with_satellite_copy(const std::string &id, std::string new_id,
     validate_project(result);
     return result;
 }
+Project Project::renamed_ground_station(const std::string &id, std::string new_name) const {
+    text_check(new_name, true);
+    auto result = *this;
+    result.ground_stations.at(station_index(*this, id)).display_name = std::move(new_name);
+    validate_project(result);
+    return result;
+}
+Project Project::without_ground_station(const std::string &id) const {
+    auto result = *this;
+    result.ground_stations.erase(result.ground_stations.begin() +
+                                 static_cast<std::ptrdiff_t>(station_index(*this, id)));
+    validate_project(result);
+    return result;
+}
+Project Project::with_ground_station_copy(const std::string &id, std::string new_id,
+                                          std::string new_name) const {
+    text_check(new_name, true);
+    auto station = ground_stations.at(station_index(*this, id));
+    station.object_id = std::move(new_id);
+    station.display_name = std::move(new_name);
+    auto result = *this;
+    result.ground_stations.push_back(std::move(station));
+    validate_project(result);
+    return result;
+}
 std::vector<std::uint8_t> encode_project(const Project &project) {
     validate_project(project);
-    Writer scene, objects, payload, file;
+    Writer scene, objects, stations, payload, file;
     scene.text(project.name);
     scene.epoch(project.first);
     scene.epoch(project.last);
@@ -323,6 +365,15 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         objects.text(satellite.model_path);
     }
     payload.section(objects_tag, objects, 2);
+    stations.number(project.ground_stations.size(), 4);
+    for (const auto &station : project.ground_stations) {
+        stations.text(station.object_id);
+        stations.text(station.display_name);
+        stations.real(station.location.longitude_rad);
+        stations.real(station.location.latitude_rad);
+        stations.real(station.location.height_m);
+    }
+    payload.section(stations_tag, stations);
     if (project.earth_orientation) {
         Writer data;
         write_data(data, *project.earth_orientation);
@@ -335,7 +386,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
     locked.text(lock.sha256());
     payload.section(lock_tag, locked);
     file.raw(magic);
-    file.number(4, 4);
+    file.number(5, 4);
     file.number(payload.bytes.size());
     file.number(crc32(payload.bytes), 4);
     file.raw(payload.bytes);
@@ -346,7 +397,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     Reader file{bytes};
     check(std::ranges::equal(file.raw(magic.size()), magic), "Not an OrbitForge project file");
     const auto version = file.number(4);
-    check(version >= 1 && version <= 4, "Unsupported OrbitForge project version");
+    check(version >= 1 && version <= 5, "Unsupported OrbitForge project version");
     const auto length = file.number();
     const auto checksum = file.number(4);
     check(length == file.bytes.size(), "Project length mismatch");
@@ -355,7 +406,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     while (!file.bytes.empty()) {
         const auto tag = static_cast<std::uint32_t>(file.number(4));
         check(tag == scene_tag || tag == objects_tag || tag == data_tag ||
-                  (version >= 3 && tag == lock_tag),
+                  (version >= 3 && tag == lock_tag) || (version >= 5 && tag == stations_tag),
               "Unsupported project section");
         check(file.number(4) ==
                   ((tag == objects_tag && version >= 2) || (tag == data_tag && version >= 4) ? 2U
@@ -413,6 +464,20 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         project.satellites.push_back(std::move(satellite));
     }
     objects.done();
+    if (version >= 5) {
+        check(sections.contains(stations_tag), "Missing ground stations section");
+        Reader stations{sections.at(stations_tag)};
+        const auto station_count = stations.number(4);
+        check(station_count + count <= max_objects, "Project exceeds 10000 objects");
+        for (std::uint64_t i = 0; i < station_count; ++i) {
+            ProjectGroundStation station;
+            station.object_id = stations.text();
+            station.display_name = stations.text();
+            station.location = {stations.real(), stations.real(), stations.real()};
+            project.ground_stations.push_back(std::move(station));
+        }
+        stations.done();
+    }
     if (sections.contains(data_tag)) {
         Reader data{sections.at(data_tag)};
         project.earth_orientation = read_data(data);

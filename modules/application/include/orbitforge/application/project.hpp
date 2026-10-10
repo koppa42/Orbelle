@@ -5,6 +5,7 @@
 #include <orbitforge/core/frames/eop_provider.hpp>
 #include <orbitforge/core/frames/state.hpp>
 #include <orbitforge/core/propagation/central_body.hpp>
+#include <orbitforge/core/propagation/ground_station.hpp>
 #include <span>
 #include <vector>
 
@@ -46,11 +47,20 @@ struct ProjectSatellite {
     // remain external; a missing asset must not silently change the project.
     std::string model_path;
 };
+struct ProjectGroundStation {
+    std::string object_id = "ground-station-1";
+    std::string display_name;
+    core::GroundStationLocation location;
+    [[nodiscard]] const std::string &name() const {
+        return display_name.empty() ? object_id : display_name;
+    }
+};
 struct Project {
     Project(std::string name, core::Epoch first, core::Epoch last);
     std::string name;
     core::Epoch first, last, current;
     std::vector<ProjectSatellite> satellites;
+    std::vector<ProjectGroundStation> ground_stations;
     // Provenance of the last calculation, not a requirement to load an old file.
     // The desktop checks current data/policy and requires consent for changes.
     std::optional<core::EopDataInfo> earth_orientation;
@@ -64,6 +74,10 @@ struct Project {
     [[nodiscard]] Project without_satellite(const std::string &id) const;
     [[nodiscard]] Project with_satellite_copy(const std::string &id, std::string new_id,
                                               std::string name) const;
+    [[nodiscard]] Project renamed_ground_station(const std::string &id, std::string name) const;
+    [[nodiscard]] Project without_ground_station(const std::string &id) const;
+    [[nodiscard]] Project with_ground_station_copy(const std::string &id, std::string new_id,
+                                                   std::string name) const;
 };
 class ProjectError : public std::runtime_error {
   public:

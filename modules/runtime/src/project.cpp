@@ -2,6 +2,11 @@
 #include <orbitforge/runtime/project.hpp>
 
 namespace orbitforge::runtime {
+application::Session make_ground_station_session(const application::ProjectGroundStation &station,
+                                                 std::uint64_t revision) {
+    return {std::make_shared<core::GroundStation>(station.location),
+            {station.object_id, revision, "ground-station-wgs84-fixed-itrf-v1"}};
+}
 application::Session make_orbit_session(const application::OrbitInput &input,
                                         std::uint64_t revision) {
     const auto &body = core::central_body(input.initial.origin);
@@ -20,6 +25,8 @@ application::Scenario make_project_scenario(const application::Project &project)
     result = result.with_data_lock(project.data_lock());
     for (const auto &satellite : project.satellites)
         result = result.with_object(make_orbit_session(satellite.orbit));
+    for (const auto &station : project.ground_stations)
+        result = result.with_object(make_ground_station_session(station));
     return result;
 }
 } // namespace orbitforge::runtime

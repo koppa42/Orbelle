@@ -3,6 +3,9 @@
 #include <orbitforge/application/scenario.hpp>
 
 namespace orbitforge::runtime {
+[[nodiscard]] application::Session
+make_ground_station_session(const application::ProjectGroundStation &station,
+                            std::uint64_t revision = 1);
 [[nodiscard]] application::Session make_orbit_session(const application::OrbitInput &input,
                                                       std::uint64_t revision = 1);
 // Rebuilds a new immutable computation snapshot; no display cache is stored on disk.

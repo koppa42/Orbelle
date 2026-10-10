@@ -5,7 +5,9 @@
 #include <vsg/nodes/Node.h>
 
 namespace orbitforge::render_vsg {
-enum class MarkerStyle { satellite, selection };
+// Ground annotations require per-view CPU horizon culling before update(). They
+// overlay the visible surface so screen-space glyph edges are not depth-clipped.
+enum class MarkerStyle { satellite, selection, ground_station, ground_selection };
 // Shared geometry for all views. update() is called on the GUI/update thread,
 // before record/submit; it copies display values and never writes into results.
 class MarkerLayer {

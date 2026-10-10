@@ -9,6 +9,7 @@
 #include <atomic>
 #include <functional>
 #include <future>
+#include <map>
 #include <optional>
 #include <span>
 
@@ -41,6 +42,7 @@ class GroundMap final : public QWidget {
     void append_track(Track track);
     void replace_track(std::size_t index, Track track);
     void set_name(std::size_t index, const QString &name);
+    void set_ground_stations(const std::vector<application::ProjectGroundStation> &stations);
     void set_snapshot(const visualization::RenderSnapshot &snapshot);
     void set_selection(std::optional<std::size_t> index);
     void set_display(std::size_t index, const DisplaySettings &settings, core::Epoch first,
@@ -77,6 +79,7 @@ class GroundMap final : public QWidget {
     struct Point {
         QString name;
         QPointF geographic;
+        bool ground_station = false;
         bool operator==(const Point &) const = default;
     };
     QRectF plot_rect() const;
@@ -128,6 +131,7 @@ class GroundMap final : public QWidget {
     bool lighting_ = true, grid_ = true, show_tracks_ = true, labels_ = true, show_sun_ = true;
     std::vector<Track> tracks_;
     std::vector<Point> points_;
+    std::map<std::string, QString> station_names_;
     std::optional<std::size_t> selected_;
     core::Epoch epoch_{0};
     double zoom_ = 1;

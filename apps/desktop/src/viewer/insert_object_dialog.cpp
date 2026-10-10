@@ -41,7 +41,7 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
     destination->setToolTip(scenario_name);
     heading->addWidget(destination);
     layout->addLayout(heading);
-    auto *description = new QLabel(QStringLiteral("选择对象类型，再决定如何设置初始轨道。"));
+    auto *description = new QLabel(QStringLiteral("选择对象类型，再设置初始参数。"));
     description->setObjectName("dialogDescription");
     layout->addWidget(description);
 
@@ -67,6 +67,9 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
     auto *satellite = new QTreeWidgetItem(group, {QStringLiteral("卫星")});
     satellite->setIcon(0, workbench_icon(WorkbenchIcon::satellite, QColor("#80b9e4")));
     satellite->setData(0, Qt::UserRole, static_cast<int>(InsertObjectType::satellite));
+    auto *station = new QTreeWidgetItem(group, {QStringLiteral("地面站")});
+    station->setIcon(0, workbench_icon(WorkbenchIcon::ground_station, QColor("#87d4c6")));
+    station->setData(0, Qt::UserRole, static_cast<int>(InsertObjectType::ground_station));
     group->setExpanded(true);
     types->setCurrentItem(satellite);
     left->addWidget(types, 1);
@@ -93,6 +96,7 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
         card_layout->setSpacing(2);
         card_layout->addWidget(choice);
         auto *caption = new QLabel(description);
+        caption->setProperty("method", static_cast<int>(method));
         caption->setObjectName("hint");
         caption->setContentsMargins(22, 4, 0, 0);
         caption->setWordWrap(true);
@@ -140,10 +144,27 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
                                 ? QStringLiteral("配置属性")
                                 : QStringLiteral("直接插入"));
     });
-    QObject::connect(types, &QTreeWidget::currentItemChanged, &dialog,
-                     [insert](QTreeWidgetItem *item) {
-                         insert->setEnabled(item && item->data(0, Qt::UserRole).isValid());
-                     });
+    QObject::connect(
+        types, &QTreeWidget::currentItemChanged, &dialog,
+        [insert, &dialog, methods](QTreeWidgetItem *item) {
+            insert->setEnabled(item && item->data(0, Qt::UserRole).isValid());
+            const bool station_type =
+                item && item->data(0, Qt::UserRole).toInt() ==
+                            static_cast<int>(InsertObjectType::ground_station);
+            for (auto *label : dialog.findChildren<QLabel *>()) {
+                if (!label->property("method").isValid())
+                    continue;
+                const auto method = label->property("method").toInt();
+                const auto caption =
+                    method == static_cast<int>(InsertObjectMethod::defaults)
+                        ? (station_type ? QStringLiteral("WGS84 · 0° 经度 · 0° 纬度 · 0 m 椭球高")
+                                        : QStringLiteral("二体传播 · 场景起始时刻 · 60 s 步长"))
+                        : (station_type ? QStringLiteral("设置名称、经纬度与椭球高")
+                                        : QStringLiteral("设置轨道、参考系与传播器"));
+                label->setText(caption);
+                methods->button(method)->setAccessibleDescription(caption);
+            }
+        });
     QObject::connect(close, &QPushButton::clicked, &dialog, &QDialog::reject);
     std::optional<InsertObjectRequest> result;
     QObject::connect(insert, &QPushButton::clicked, &dialog, [&] {

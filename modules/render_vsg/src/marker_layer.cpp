@@ -27,6 +27,14 @@ constexpr const char *line_source = R"glsl(#version 450
 layout(location=0) out vec4 color;
 void main() { color = vec4(0.35, 0.82, 1.0, 1.0); }
 )glsl";
+constexpr const char *station_source = R"glsl(#version 450
+layout(location=0) out vec4 color;
+void main() {
+    vec2 p = gl_PointCoord * 2.0 - 1.0;
+    if (abs(p.x) + abs(p.y) > 1.0) discard;
+    color = vec4(0.22, 0.85, 0.68, 1.0);
+}
+)glsl";
 constexpr const char *selection_vertex_source = R"glsl(#version 450
 layout(push_constant) uniform Matrices { mat4 projection; mat4 modelview; } pc;
 layout(location=0) in vec3 position;
@@ -49,9 +57,13 @@ vsg::ref_ptr<vsg::BindGraphicsPipeline> shared_pipeline(bool points, MarkerStyle
     // Pipelines belong to the live layers, not to a process-lifetime GPU cache.
     // Their per-view/device implementations are managed by VSG.
     static std::mutex mutex;
-    static std::array<vsg::observer_ptr<vsg::BindGraphicsPipeline>, 3> shared;
+    static std::array<vsg::observer_ptr<vsg::BindGraphicsPipeline>, 5> shared;
     const std::lock_guard lock(mutex);
-    const std::size_t index = !points ? 0 : style == MarkerStyle::satellite ? 1 : 2;
+    const std::size_t index = !points                                ? 0
+                              : style == MarkerStyle::satellite      ? 1
+                              : style == MarkerStyle::selection      ? 2
+                              : style == MarkerStyle::ground_station ? 3
+                                                                     : 4;
     if (auto pipeline = shared[index].ref_ptr())
         return pipeline;
     auto input = vsg::VertexInputState::create(
@@ -62,8 +74,12 @@ vsg::ref_ptr<vsg::BindGraphicsPipeline> shared_pipeline(bool points, MarkerStyle
         points ? VK_PRIMITIVE_TOPOLOGY_POINT_LIST : VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
     auto layout = vsg::PipelineLayout::create(
         vsg::DescriptorSetLayouts{}, vsg::PushConstantRanges{{VK_SHADER_STAGE_VERTEX_BIT, 0, 128}});
-    const bool selected = style == MarkerStyle::selection;
+    const bool selected = style == MarkerStyle::selection || style == MarkerStyle::ground_selection;
     auto depth = vsg::DepthStencilState::create();
+    if (style == MarkerStyle::ground_station || style == MarkerStyle::ground_selection) {
+        depth->depthTestEnable = false;
+        depth->depthWriteEnable = false;
+    }
     if (selected)
         depth->depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
     auto pipeline = vsg::GraphicsPipeline::create(
@@ -73,7 +89,9 @@ vsg::ref_ptr<vsg::BindGraphicsPipeline> shared_pipeline(bool points, MarkerStyle
                                      selected ? selection_vertex_source : vertex_source),
             vsg::ShaderStage::create(VK_SHADER_STAGE_FRAGMENT_BIT, "main",
                                      selected ? selection_source
-                                              : (points ? point_source : line_source))},
+                                     : style == MarkerStyle::ground_station
+                                         ? station_source
+                                         : (points ? point_source : line_source))},
         vsg::GraphicsPipelineStates{input, assembly, vsg::RasterizationState::create(),
                                     vsg::MultisampleState::create(), vsg::ColorBlendState::create(),
                                     depth});

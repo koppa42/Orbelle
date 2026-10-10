@@ -204,6 +204,15 @@ QIcon workbench_icon(WorkbenchIcon icon, const QColor &color) {
             line(9, 3, 9, 18);
             line(15, 6, 15, 21);
             break;
+        case WorkbenchIcon::ground_station:
+            p.drawArc(QRectF(4, 3, 13, 13), 180 * 16, 180 * 16);
+            line(4, 9.5, 17, 9.5);
+            line(10, 10, 16, 4);
+            p.drawEllipse(QPointF(17, 3), 1, 1);
+            line(10, 16, 8, 21);
+            line(11, 16, 14, 21);
+            line(5, 21, 17, 21);
+            break;
         case WorkbenchIcon::satellite:
             p.save();
             p.translate(12, 12);

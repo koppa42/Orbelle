@@ -88,7 +88,7 @@ GroundMap::GroundMap(const QString &imagery, QWidget *parent) : QWidget(parent),
     setMinimumSize(160, 100);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
-    setAccessibleName(QStringLiteral("二维地面轨迹，滚轮缩放、拖动平移、点击选择卫星、Home 复位"));
+    setAccessibleName(QStringLiteral("二维地面轨迹，滚轮缩放、拖动平移、点击选择对象、Home 复位"));
 }
 GroundMap::~GroundMap() {
     raster_timer_.stop();
@@ -141,15 +141,23 @@ void GroundMap::set_snapshot(const visualization::RenderSnapshot &snapshot) {
     std::vector<Point> points;
     for (std::size_t i = 0; i < snapshot.markers.size(); ++i) {
         const auto &marker = snapshot.markers[i];
-        points.push_back(
-            {i < tracks_.size() ? tracks_[i].name : QString::fromStdString(marker.object_id),
-             ground_coordinates(marker.position_m)});
+        const auto station = station_names_.find(marker.object_id);
+        points.push_back({station != station_names_.end() ? station->second
+                          : i < tracks_.size()            ? tracks_[i].name
+                                               : QString::fromStdString(marker.object_id),
+                          ground_coordinates(marker.position_m), station != station_names_.end()});
     }
     epoch_ = snapshot.epoch;
     if (points_ == points)
         return;
     points_ = std::move(points);
     update();
+}
+void GroundMap::set_ground_stations(
+    const std::vector<application::ProjectGroundStation> &stations) {
+    station_names_.clear();
+    for (const auto &station : stations)
+        station_names_.emplace(station.object_id, QString::fromStdString(station.name()));
 }
 void GroundMap::set_selection(std::optional<std::size_t> index) {
     if (selected_ == index)
@@ -605,8 +613,14 @@ void GroundMap::paintEvent(QPaintEvent *event) {
             if (!plot.contains(point))
                 continue;
             p.setPen(QPen(QColor("#172d42"), 1.5));
-            p.setBrush(selected_ == i ? QColor("#ffce81") : QColor("#d0efff"));
-            p.drawEllipse(point, 4, 4);
+            p.setBrush(selected_ == i              ? QColor("#ffce81")
+                       : points_[i].ground_station ? QColor("#87d4c6")
+                                                   : QColor("#d0efff"));
+            if (points_[i].ground_station)
+                p.drawPolygon(QPolygonF{point + QPointF(0, -6), point + QPointF(6, 0),
+                                        point + QPointF(0, 6), point + QPointF(-6, 0)});
+            else
+                p.drawEllipse(point, 4, 4);
             if (selected_ == i) {
                 p.setBrush(Qt::NoBrush);
                 p.setPen(QPen(QColor("#ffce81"), 1));

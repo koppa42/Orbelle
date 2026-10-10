@@ -4,7 +4,7 @@ class QString;
 class QWidget;
 
 namespace orbitforge::desktop {
-enum class InsertObjectType { satellite };
+enum class InsertObjectType { satellite, ground_station };
 enum class InsertObjectMethod { define_properties, defaults };
 struct InsertObjectRequest {
     InsertObjectType type;

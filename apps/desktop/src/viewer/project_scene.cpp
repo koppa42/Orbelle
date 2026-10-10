@@ -34,7 +34,10 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
             if (std::none_of(project.satellites.begin(), project.satellites.end(),
                              [&](const auto &s) {
                                  return s.orbit.object_id == session.provenance().object_id;
-                             }))
+                             }) &&
+                std::none_of(
+                    project.ground_stations.begin(), project.ground_stations.end(),
+                    [&](const auto &s) { return s.object_id == session.provenance().object_id; }))
                 retained_sessions =
                     retained_sessions->without_object(session.provenance().object_id);
     }
@@ -86,6 +89,21 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
             result->scenario = result->scenario.with_object(std::move(session));
         result->orbits.push_back(std::move(orbit));
         result->models.push_back(std::move(model));
+    }
+    for (const auto &station : result->project.ground_stations) {
+        if (cancelled.load())
+            throw OrbitCancelled{};
+        const auto existing = std::find_if(
+            result->scenario.objects().begin(), result->scenario.objects().end(),
+            [&](const auto &s) { return s.provenance().object_id == station.object_id; });
+        const bool retained = existing != result->scenario.objects().end();
+        const bool recompute = edited_object && *edited_object == station.object_id;
+        if (retained && recompute &&
+            existing->provenance().input_revision == std::numeric_limits<std::uint64_t>::max())
+            throw std::overflow_error("Object input revision exhausted");
+        if (!retained || recompute)
+            result->scenario = result->scenario.with_object(runtime::make_ground_station_session(
+                station, retained ? existing->provenance().input_revision + 1 : 1));
     }
     result->ground_tracks = GroundMap::prepare_tracks(result->orbits);
     for (std::size_t i = 0; i < result->ground_tracks.size(); ++i)

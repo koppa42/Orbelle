@@ -31,6 +31,18 @@ void bind_data_lock(py::module_ &module) {
 }
 void bind_project(py::module_ &module) {
     py::register_exception<application::ProjectError>(module, "ProjectError", PyExc_ValueError);
+    py::class_<core::GroundStationLocation>(module, "GroundStationLocation")
+        .def(py::init<double, double, double>(), py::arg("longitude_rad") = 0,
+             py::arg("latitude_rad") = 0, py::arg("height_m") = 0)
+        .def_readwrite("longitude_rad", &core::GroundStationLocation::longitude_rad)
+        .def_readwrite("latitude_rad", &core::GroundStationLocation::latitude_rad)
+        .def_readwrite("height_m", &core::GroundStationLocation::height_m);
+    py::class_<application::ProjectGroundStation>(module, "ProjectGroundStation")
+        .def(py::init<>())
+        .def_readwrite("object_id", &application::ProjectGroundStation::object_id)
+        .def_readwrite("display_name", &application::ProjectGroundStation::display_name)
+        .def_readwrite("location", &application::ProjectGroundStation::location)
+        .def_property_readonly("name", &application::ProjectGroundStation::name);
     py::enum_<application::OrbitPropagator>(module, "OrbitPropagator")
         .value("TWO_BODY", application::OrbitPropagator::two_body)
         .value("J2_SECULAR", application::OrbitPropagator::j2_secular);
@@ -68,6 +80,7 @@ void bind_project(py::module_ &module) {
         .def_readwrite("last", &application::Project::last)
         .def_readwrite("current", &application::Project::current)
         .def_readwrite("satellites", &application::Project::satellites)
+        .def_readwrite("ground_stations", &application::Project::ground_stations)
         .def_readwrite("earth_orientation", &application::Project::earth_orientation)
         .def_property_readonly("data_lock", &application::Project::data_lock)
         .def("with_settings", &application::Project::with_settings, py::arg("name"),
@@ -77,6 +90,21 @@ void bind_project(py::module_ &module) {
         .def("without_satellite", &application::Project::without_satellite, py::arg("object_id"))
         .def("with_satellite_copy", &application::Project::with_satellite_copy,
              py::arg("object_id"), py::arg("new_id"), py::arg("name"))
+        .def("renamed_ground_station", &application::Project::renamed_ground_station,
+             py::arg("object_id"), py::arg("name"))
+        .def("without_ground_station", &application::Project::without_ground_station,
+             py::arg("object_id"))
+        .def("with_ground_station_copy", &application::Project::with_ground_station_copy,
+             py::arg("object_id"), py::arg("new_id"), py::arg("name"))
+        .def(
+            "add_ground_station",
+            [](application::Project &project, application::ProjectGroundStation station) {
+                auto candidate = project;
+                candidate.ground_stations.push_back(std::move(station));
+                application::validate_project(candidate);
+                project = std::move(candidate);
+            },
+            py::arg("station"))
         .def(
             "add_satellite",
             [](application::Project &project, application::OrbitInput input,

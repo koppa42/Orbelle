@@ -2,6 +2,7 @@
 #include "eop_catalog.hpp"
 #include "epoch_editor.hpp"
 #include "ground_map.hpp"
+#include "ground_station_editor.hpp"
 #include "insert_object_dialog.hpp"
 #include "mission_timeline.hpp"
 #include "orbit_editor.hpp"
@@ -245,6 +246,11 @@ class EmbeddedWindow final : public vsgQt::Window {
 };
 
 class Workbench final : public QMainWindow {
+    struct Station {
+        application::ProjectGroundStation config;
+        QTreeWidgetItem *item = nullptr;
+        [[nodiscard]] QString name() const { return QString::fromStdString(config.name()); }
+    };
     struct Satellite {
         std::shared_ptr<const OrbitScene> orbit;
         std::string display_name;
@@ -484,6 +490,9 @@ class Workbench final : public QMainWindow {
                     for (auto &satellite : satellites_)
                         satellite.item->setHidden(
                             !satellite.item->text(0).contains(text, Qt::CaseInsensitive));
+                    for (auto &station : stations_)
+                        station.item->setHidden(
+                            !station.name().contains(text, Qt::CaseInsensitive));
                 });
                 layout->addWidget(search);
                 layout->addWidget(objects, 1);
@@ -749,7 +758,7 @@ class Workbench final : public QMainWindow {
                 timeline_ = new MissionTimeline;
                 slider_ = timeline_;
                 time_menu_->addSeparator();
-                auto *object_interval = time_menu_->addAction(QStringLiteral("显示所选卫星区间"));
+                auto *object_interval = time_menu_->addAction(QStringLiteral("显示所选对象区间"));
                 object_interval->setObjectName("showTimelineObject");
                 object_interval->setCheckable(true);
                 connect(object_interval, &QAction::toggled, this,
@@ -885,7 +894,7 @@ class Workbench final : public QMainWindow {
                 fit->setShortcut(QKeySequence("Ctrl+0"));
                 connect(fit, &QAction::triggered, this, [this] { fit_views(); });
                 auto *focus = new QAction(workbench_icon(WorkbenchIcon::focus),
-                                          QStringLiteral("定位卫星"), this);
+                                          QStringLiteral("定位对象"), this);
                 focus_action_ = focus;
                 focus->setShortcut(QKeySequence("Ctrl+L"));
                 connect(focus, &QAction::triggered, this, [this] {
@@ -1041,6 +1050,8 @@ class Workbench final : public QMainWindow {
 #endif
             slot->trackball = {};
             slot->labels.reset();
+            slot->station_markers.reset();
+            slot->station_selection.reset();
             if (slot->window) {
                 slot->window->attached = {};
                 slot->window->detaching = {};
@@ -1232,6 +1243,7 @@ class Workbench final : public QMainWindow {
         std::shared_ptr<BenchmarkGpu> gpu;
 #endif
         std::unique_ptr<render_vsg::LabelLayer> labels;
+        std::unique_ptr<render_vsg::MarkerLayer> station_markers, station_selection;
         std::vector<render_vsg::ProjectedMarker> pick_candidates;
         QImage captured_image;
         std::uint64_t creations = 0, destructions = 0, presentations = 0;
@@ -1261,6 +1273,19 @@ class Workbench final : public QMainWindow {
                 result.markers.push_back({satellite.orbit->input.object_id, position});
             }
         }
+        for (const auto &station : stations_) {
+            auto location = station.config.location;
+            // A display-only surface clearance prevents z-fighting and keeps negative-height
+            // stations visible on the reference globe. Numerical sessions retain exact height.
+            location.height_m = std::max(location.height_m, 100.0);
+            auto position = core::ground_station_position(location);
+            if (display_frame_ == core::FrameId::gcrf) {
+                if (!rotation)
+                    rotation = frames_->gcrf_to_itrf(epoch, eop_->at(epoch).sample);
+                position = rotation->inverse_position(position);
+            }
+            result.markers.push_back({station.config.object_id, position});
+        }
         return result;
     }
     double duration_seconds() const {
@@ -1276,9 +1301,11 @@ class Workbench final : public QMainWindow {
             return;
         const bool active = scenario_.has_value();
         const bool idle = !busy();
+        if (station_editor_)
+            station_editor_->set_busy(!idle);
         for (auto *action : {rename_action_, duplicate_action_, delete_action_})
             if (action)
-                action->setEnabled(selected_.has_value() && idle);
+                action->setEnabled(selected_marker_index().has_value() && idle);
         if (eop_action_)
             eop_action_->setEnabled(idle);
         if (cancel_project_button_)
@@ -1322,18 +1349,37 @@ class Workbench final : public QMainWindow {
             map_action_->setEnabled(active);
         if (properties_action_)
             properties_action_->setEnabled(
-                idle && (selected_.has_value() ||
+                idle && (selected_marker_index().has_value() ||
                          (scenario_ && objects_->currentItem() == scenario_item_)));
         if (focus_action_)
-            focus_action_->setEnabled(selected_.has_value());
+            focus_action_->setEnabled(selected_marker_index().has_value());
         for (auto *button : view_focus_buttons_)
-            button->setEnabled(selected_.has_value());
+            button->setEnabled(selected_marker_index().has_value());
     }
     std::optional<std::size_t> object_index(const QTreeWidgetItem *item) const {
         for (std::size_t i = 0; i < satellites_.size(); ++i)
             if (satellites_[i].item == item)
                 return i;
+        for (std::size_t i = 0; i < stations_.size(); ++i)
+            if (stations_[i].item == item)
+                return satellites_.size() + i;
         return std::nullopt;
+    }
+    std::optional<std::size_t> selected_marker_index() const {
+        return selected_station_
+                   ? std::optional<std::size_t>{satellites_.size() + *selected_station_}
+                   : selected_;
+    }
+    QString selected_name() const {
+        return selected_           ? satellites_.at(*selected_).name()
+               : selected_station_ ? stations_.at(*selected_station_).name()
+                                   : QString{};
+    }
+    bool object_id_exists(const std::string &id) const {
+        return std::any_of(satellites_.begin(), satellites_.end(),
+                           [&](const auto &s) { return s.orbit->input.object_id == id; }) ||
+               std::any_of(stations_.begin(), stations_.end(),
+                           [&](const auto &s) { return s.config.object_id == id; });
     }
     void mark_project_dirty(bool dirty = true) {
         project_dirty_ = dirty;
@@ -1368,6 +1414,8 @@ class Workbench final : public QMainWindow {
                         .toStdString();
             project.satellites.push_back(std::move(object));
         }
+        for (const auto &station : stations_)
+            project.ground_stations.push_back(station.config);
         return project;
     }
     void save_project_to(const QString &path) {
@@ -1530,7 +1578,11 @@ class Workbench final : public QMainWindow {
             display_cancellation_->store(true);
         project_edit_ = editing;
         project_settings_edit_ = settings.has_value();
-        project_orbit_edit_ = edited_object.has_value();
+        project_orbit_edit_ =
+            edited_object && std::any_of(project.satellites.begin(), project.satellites.end(),
+                                         [&](const auto &satellite) {
+                                             return satellite.orbit.object_id == *edited_object;
+                                         });
         pending_project_selection_ = selection;
         pending_project_path_ = editing ? project_path_ : QFileInfo(path).absoluteFilePath();
         if (editing)
@@ -1574,6 +1626,7 @@ class Workbench final : public QMainWindow {
             if (project_cancellation_->load())
                 throw OrbitCancelled{};
             std::vector<Satellite> satellites;
+            std::vector<Station> stations;
             auto root = std::make_unique<QTreeWidgetItem>(
                 QStringList{QString::fromStdString(candidate->project.name)});
             root->setIcon(0, workbench_icon(WorkbenchIcon::earth));
@@ -1609,6 +1662,18 @@ class Workbench final : public QMainWindow {
                     0, workbench_icon(WorkbenchIcon::satellite, QColor("#78a4c9")));
                 satellites.push_back(std::move(satellite));
             }
+            for (const auto &config : candidate->project.ground_stations) {
+                Station station{config};
+                station.item = new QTreeWidgetItem(root.get(), {station.name()});
+                station.item->setIcon(
+                    0, workbench_icon(WorkbenchIcon::ground_station, QColor("#87d4c6")));
+                station.item->setToolTip(0, QStringLiteral("地面站 · WGS84\nID：%1")
+                                                .arg(QString::fromStdString(config.object_id)));
+                if (auto *search = findChild<QLineEdit *>("objectSearch"))
+                    station.item->setHidden(
+                        !station.name().contains(search->text(), Qt::CaseInsensitive));
+                stations.push_back(std::move(station));
+            }
             const auto previous_tracks = orbit_group_->children,
                        previous_models = model_group_->children;
             begin_change();
@@ -1627,6 +1692,9 @@ class Workbench final : public QMainWindow {
             if (scenario_properties_)
                 scenario_properties_->close();
             satellites_ = std::move(satellites);
+            stations_ = std::move(stations);
+            if (station_editor_)
+                station_editor_->close();
             scenario_ = std::move(candidate->scenario);
             eop_ = candidate->eop;
             sun_epoch_.reset();
@@ -1646,6 +1714,7 @@ class Workbench final : public QMainWindow {
             model_kind_ = satellites_.empty() ? 0 : satellites_.front().model_kind;
             model_diameter_km_ = satellites_.empty() ? 1000 : satellites_.front().model_diameter_km;
             ground_map_->publish_tracks(std::move(candidate->ground_tracks));
+            ground_map_->set_ground_stations(candidate->project.ground_stations);
             if (!project_edit_)
                 ground_map_->reset_view();
             workspace_label_->setText(QString::fromStdString(scenario_->name()) +
@@ -1714,9 +1783,19 @@ class Workbench final : public QMainWindow {
                         : QStringLiteral("更新失败，原场景保留。请调整设置后重试。"));
                 result->show();
             }
+        if (station_editor_ && last_project_outcome_ != "opened")
+            station_editor_->show_result(QStringLiteral("未应用，原场景保留。请调整后重试。"));
         update_actions();
     }
     void rename_selected_to(const QString &name) {
+        if (!busy() && selected_station_) {
+            const auto &station = stations_.at(*selected_station_).config;
+            start_project(
+                project_snapshot(project_path_)
+                    .renamed_ground_station(station.object_id, name.trimmed().toStdString()),
+                project_path_, true, selected_marker_index());
+            return;
+        }
         if (busy() || !selected_)
             return;
         auto &satellite = satellites_.at(*selected_);
@@ -1735,12 +1814,12 @@ class Workbench final : public QMainWindow {
         mark_project_dirty();
     }
     void rename_selected() {
-        if (busy() || !selected_)
+        if (busy() || !selected_marker_index())
             return;
         bool accepted = false;
         const auto name =
             QInputDialog::getText(this, QStringLiteral("重命名对象"), QStringLiteral("名称"),
-                                  QLineEdit::Normal, satellites_.at(*selected_).name(), &accepted);
+                                  QLineEdit::Normal, selected_name(), &accepted);
         if (accepted) {
             try {
                 rename_selected_to(name);
@@ -1751,17 +1830,28 @@ class Workbench final : public QMainWindow {
         }
     }
     void duplicate_selected() {
-        if (busy() || !selected_)
+        if (busy() || !selected_marker_index())
             return;
         try {
             const auto project = project_snapshot(project_path_);
+            if (selected_station_) {
+                const auto &source = project.ground_stations.at(*selected_station_);
+                std::string id;
+                unsigned suffix = 1;
+                do {
+                    id = source.object_id + "-copy-" + std::to_string(suffix++);
+                } while (object_id_exists(id));
+                start_project(
+                    project.with_ground_station_copy(source.object_id, id, source.name() + " 副本"),
+                    project_path_, true, satellites_.size() + stations_.size());
+                return;
+            }
             const auto &source = project.satellites.at(*selected_);
             std::string id;
             unsigned suffix = 1;
             do {
                 id = source.orbit.object_id + "-copy-" + std::to_string(suffix++);
-            } while (std::any_of(project.satellites.begin(), project.satellites.end(),
-                                 [&](const auto &s) { return s.orbit.object_id == id; }));
+            } while (object_id_exists(id));
             start_project(
                 project.with_satellite_copy(source.orbit.object_id, id, source.name() + " 副本"),
                 project_path_, true, satellites_.size());
@@ -1770,21 +1860,25 @@ class Workbench final : public QMainWindow {
         }
     }
     void delete_selected() {
-        if (busy() || !selected_)
+        if (busy() || !selected_marker_index())
             return;
-        const auto index = *selected_;
+        const auto index = *selected_marker_index();
         if (QMessageBox::question(
                 this, QStringLiteral("删除对象"),
-                QStringLiteral("删除“%1”？此操作尚不支持撤销。").arg(satellites_.at(index).name()),
+                QStringLiteral("删除“%1”？此操作尚不支持撤销。").arg(selected_name()),
                 QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes)
             return;
         try {
-            auto project = project_snapshot(project_path_)
-                               .without_satellite(satellites_.at(index).orbit->input.object_id);
-            const auto selection =
-                project.satellites.empty()
-                    ? std::optional<std::size_t>{}
-                    : std::optional<std::size_t>{std::min(index, project.satellites.size() - 1)};
+            const auto current = project_snapshot(project_path_);
+            auto project =
+                selected_station_
+                    ? current.without_ground_station(
+                          stations_.at(*selected_station_).config.object_id)
+                    : current.without_satellite(satellites_.at(index).orbit->input.object_id);
+            const auto count = project.satellites.size() + project.ground_stations.size();
+            const auto selection = count == 0
+                                       ? std::optional<std::size_t>{}
+                                       : std::optional<std::size_t>{std::min(index, count - 1)};
             start_project(std::move(project), project_path_, true, selection);
         } catch (const std::exception &error) {
             QMessageBox::warning(this, QStringLiteral("删除失败"), QString::fromUtf8(error.what()));
@@ -1835,8 +1929,12 @@ class Workbench final : public QMainWindow {
         if (properties_dialog_)
             properties_dialog_->close();
         satellites_.clear();
+        stations_.clear();
+        if (station_editor_)
+            station_editor_->close();
         if (ground_map_) {
             ground_map_->set_orbits({});
+            ground_map_->set_ground_stations({});
             ground_map_->reset_view();
         }
         orbit_.reset();
@@ -1902,23 +2000,24 @@ class Workbench final : public QMainWindow {
         case InsertObjectType::satellite:
             begin_insert_satellite(request->method);
             break;
+        case InsertObjectType::ground_station:
+            begin_insert_station(request->method);
+            break;
         }
     }
     void begin_insert_satellite(InsertObjectMethod method = InsertObjectMethod::define_properties) {
         if (!scenario_ || !editor_ || busy())
             return;
-        if (satellites_.size() >= 10000) {
+        if (satellites_.size() + stations_.size() >= 10000) {
             QMessageBox::information(this, QStringLiteral("对象数量"),
-                                     QStringLiteral("当前场景最多支持 10,000 个卫星显示对象。"));
+                                     QStringLiteral("当前场景最多支持 10,000 个对象。"));
             return;
         }
         OrbitInput input;
         std::size_t suffix = satellites_.size() + 1;
         do {
             input.object_id = "Satellite" + std::to_string(suffix++);
-        } while (std::any_of(satellites_.begin(), satellites_.end(), [&](const auto &satellite) {
-            return satellite.orbit->input.object_id == input.object_id;
-        }));
+        } while (object_id_exists(input.object_id));
         input.first = scenario_->first();
         input.last = scenario_->last();
         input.initial.epoch = scenario_->first();
@@ -1940,6 +2039,65 @@ class Workbench final : public QMainWindow {
         } else {
             show_properties_dialog();
         }
+    }
+    void configure_station_editor(const application::ProjectGroundStation &station, bool creating) {
+        if (!station_editor_) {
+            station_editor_ = new GroundStationEditor(this);
+            station_editor_->apply = [this](application::ProjectGroundStation value) {
+                if (busy() || !scenario_)
+                    return;
+                auto project = project_snapshot(project_path_);
+                auto index = stations_.size();
+                std::optional<std::string> edited;
+                if (station_editor_target_) {
+                    const auto found = std::find_if(
+                        project.ground_stations.begin(), project.ground_stations.end(),
+                        [&](const auto &s) { return s.object_id == *station_editor_target_; });
+                    if (found == project.ground_stations.end())
+                        throw std::invalid_argument("地面站已不存在，请重新选择对象。");
+                    index = static_cast<std::size_t>(found - project.ground_stations.begin());
+                    if (found->location == value.location && found->name() == value.name()) {
+                        station_editor_->show_result(QStringLiteral("参数未改变。"));
+                        return;
+                    }
+                    if (found->location != value.location)
+                        edited = value.object_id;
+                    *found = std::move(value);
+                } else {
+                    project.ground_stations.push_back(std::move(value));
+                }
+                application::validate_project(project);
+                if (start_project(std::move(project), project_path_, true,
+                                  satellites_.size() + index, edited))
+                    station_editor_->show_result(QStringLiteral("正在应用…"));
+                else
+                    station_editor_->show_result(QStringLiteral("未应用，原场景保留。"));
+            };
+        }
+        station_editor_target_ =
+            creating ? std::nullopt : std::optional<std::string>{station.object_id};
+        station_editor_->set_station(station, creating);
+    }
+    void begin_insert_station(InsertObjectMethod method = InsertObjectMethod::define_properties) {
+        if (!scenario_ || busy())
+            return;
+        if (satellites_.size() + stations_.size() >= 10000) {
+            QMessageBox::information(this, QStringLiteral("对象数量"),
+                                     QStringLiteral("当前场景最多支持 10,000 个对象。"));
+            return;
+        }
+        application::ProjectGroundStation station;
+        auto suffix = stations_.size() + 1;
+        do {
+            station.object_id = "GroundStation" + std::to_string(suffix++);
+        } while (object_id_exists(station.object_id));
+        station.display_name = "地面站 " + std::to_string(suffix - 1);
+        configure_station_editor(station, true);
+        if (method == InsertObjectMethod::defaults) {
+            station_editor_->close();
+            station_editor_->apply(station);
+        } else
+            workspace_->open(station_editor_);
     }
     void set_playing(bool value) {
         playing_ = value;
@@ -2011,6 +2169,11 @@ class Workbench final : public QMainWindow {
             set_playing(resume);
     }
     void open_properties() {
+        if (selected_station_ && !busy()) {
+            configure_station_editor(stations_.at(*selected_station_).config, false);
+            workspace_->open(station_editor_);
+            return;
+        }
         if (!selected_ && scenario_ && objects_->currentItem() == scenario_item_) {
             open_scenario_properties();
             return;
@@ -2034,8 +2197,8 @@ class Workbench final : public QMainWindow {
         if (!scenario_ || busy())
             return false;
         if (settings.first != scenario_->first() || settings.last != scenario_->last())
-            return start_project(project_snapshot(project_path_), project_path_, true, selected_,
-                                 std::nullopt, settings);
+            return start_project(project_snapshot(project_path_), project_path_, true,
+                                 selected_marker_index(), std::nullopt, settings);
         const auto checked = project_snapshot(project_path_)
                                  .with_settings(settings.name, settings.first, settings.last);
         if (checked.name == scenario_->name())
@@ -2062,7 +2225,7 @@ class Workbench final : public QMainWindow {
         auto &dialog = *scenario_properties_;
         if (workspace_->contains(&dialog)) {
             if (auto *count = dialog.findChild<QLabel *>("scenarioObjectCount"))
-                count->setText(QString::number(satellites_.size()));
+                count->setText(QString::number(satellites_.size() + stations_.size()));
             workspace_->open(&dialog);
             return;
         }
@@ -2125,7 +2288,7 @@ class Workbench final : public QMainWindow {
         last->set_epoch(scenario_->last());
         form->addRow(QStringLiteral("开始时间"), first);
         form->addRow(QStringLiteral("结束时间"), last);
-        auto *count = new QLabel(QString::number(satellites_.size()));
+        auto *count = new QLabel(QString::number(satellites_.size() + stations_.size()));
         count->setObjectName("scenarioObjectCount");
         form->addRow(QStringLiteral("对象数量"), count);
         auto *duration = new QLabel;
@@ -2244,17 +2407,27 @@ class Workbench final : public QMainWindow {
         workspace_->open(&dialog);
     }
     void set_selection(std::optional<std::size_t> selection, bool synchronize_tree = true) {
-        selected_ = selection;
-        if (benchmarking_)
+        if (benchmarking_) {
+            selected_ = selection;
             return;
+        }
+        if (selection && *selection >= satellites_.size() + stations_.size())
+            selection.reset();
+        selected_ = selection && *selection < satellites_.size() ? selection : std::nullopt;
+        selected_station_ = selection && *selection >= satellites_.size()
+                                ? std::optional<std::size_t>{*selection - satellites_.size()}
+                                : std::nullopt;
         if (ground_map_)
             ground_map_->set_selection(selection);
         if (synchronize_tree && objects_) {
             const QSignalBlocker block(objects_);
             objects_->clearSelection();
-            objects_->setCurrentItem(selected_ ? satellites_.at(*selected_).item : nullptr);
-            if (selected_)
-                objects_->scrollToItem(satellites_.at(*selected_).item);
+            auto *item = selected_           ? satellites_.at(*selected_).item
+                         : selected_station_ ? stations_.at(*selected_station_).item
+                                             : nullptr;
+            objects_->setCurrentItem(item);
+            if (item)
+                objects_->scrollToItem(item);
         }
         update_actions();
         show_timeline_status();
@@ -2313,6 +2486,11 @@ class Workbench final : public QMainWindow {
                 points.markers.push_back(marker);
         }
         markers_->update(points);
+        for (std::size_t i = 0; i < stations_.size(); ++i) {
+            const auto &station = stations_[i].config;
+            fixed.markers.push_back(
+                {station.object_id, core::ground_station_position(station.location)});
+        }
         if (ground_map_)
             ground_map_->set_snapshot(fixed);
         globe_->set_illumination(sun_direction_, lighting_action_->isChecked());
@@ -2400,7 +2578,7 @@ class Workbench final : public QMainWindow {
             const auto last_ms =
                 std::max(first_ms + 1, scenario_->last().tai_nanoseconds() / 1'000'000);
             timeline_->set_interval(first_ms, last_ms, QString::fromStdString(scenario_->name()),
-                                    selected_ ? satellites_.at(*selected_).name() : QString{});
+                                    selected_name());
         }
     }
     void show_orbit_status() {
@@ -2419,9 +2597,7 @@ class Workbench final : public QMainWindow {
         input.last = scenario_->last();
         if (editor_target_)
             input.object_id = satellites_.at(*editor_target_).orbit->input.object_id;
-        else if (std::any_of(satellites_.begin(), satellites_.end(), [&](const auto &satellite) {
-                     return satellite.orbit->input.object_id == input.object_id;
-                 })) {
+        else if (object_id_exists(input.object_id)) {
             last_orbit_outcome_ = "rejected";
             editor_->show_result(QStringLiteral("对象 ID 已存在，请使用其他名称。"), true);
             return;
@@ -2678,7 +2854,7 @@ class Workbench final : public QMainWindow {
         bound *= 1.15;
         const auto r = snapshot_.markers.empty()
                            ? std::array<double, 3>{-3e6, 5e6, 2e6}
-                           : snapshot_.markers.at(selected_.value_or(0)).position_m;
+                           : snapshot_.markers.at(selected_marker_index().value_or(0)).position_m;
         const auto direction = vsg::normalize(vsg::dvec3(r[0], r[1], r[2]));
         const auto reference_up =
             std::abs(direction.z) > 0.9 ? vsg::dvec3(0, 1, 0) : vsg::dvec3(0, 0, 1);
@@ -2705,25 +2881,29 @@ class Workbench final : public QMainWindow {
         }
     }
     void focus_satellite(std::optional<std::size_t> target = std::nullopt) {
-        if (!selected_)
+        if (!selected_marker_index())
             return;
-        const auto &satellite = satellites_.at(*selected_);
-        const auto &r = snapshot_.markers.at(*selected_).position_m;
+        const auto &r = snapshot_.markers.at(*selected_marker_index()).position_m;
         const vsg::dvec3 centre(r[0], r[1], r[2]);
-        const double distance = satellite.model ? satellite.model_diameter_km * 3000 : 1e6;
+        const double distance = selected_ && satellites_.at(*selected_).model
+                                    ? satellites_.at(*selected_).model_diameter_km * 3000
+                                    : 1e6;
         for (std::size_t i = 0; i < slots_.size(); ++i) {
             if (target && *target != i)
                 continue;
             auto &slot = slots_[i];
             auto *look = dynamic_cast<vsg::LookAt *>(slot->camera->viewMatrix.get());
-            const auto direction = vsg::normalize(look->eye - centre);
-            const auto viewpoint =
-                vsg::LookAt::create(centre + direction * distance, centre, look->up);
+            const auto direction = vsg::normalize(selected_station_ ? centre : look->eye - centre);
+            const auto up = selected_station_ ? (std::abs(direction.z) > 0.9 ? vsg::dvec3(0, 1, 0)
+                                                                             : vsg::dvec3(0, 0, 1))
+                                              : look->up;
+            const auto viewpoint = vsg::LookAt::create(centre + direction * distance, centre, up);
             if (slot->trackball)
                 slot->trackball->setViewpoint(viewpoint, 0);
             else {
                 look->eye = viewpoint->eye;
                 look->center = centre;
+                look->up = up;
             }
             auto *perspective =
                 dynamic_cast<vsg::Perspective *>(slot->camera->projectionMatrix.get());
@@ -2856,7 +3036,7 @@ class Workbench final : public QMainWindow {
                        ground_map_->reset_view();
                });
         view_focus_buttons_.push_back(
-            button(WorkbenchIcon::focus, QStringLiteral("定位所选卫星"), [this, slot] {
+            button(WorkbenchIcon::focus, QStringLiteral("定位所选对象"), [this, slot] {
                 if (slot)
                     focus_satellite(slot);
                 else
@@ -3057,6 +3237,14 @@ class Workbench final : public QMainWindow {
         // its raw identity in a queued CompileResult until the next update.
         if (!slot.view) {
             slot.view = vsg::View::create(slot.camera, scene_);
+            if (!benchmarking_) {
+                slot.station_markers = std::make_unique<render_vsg::MarkerLayer>(
+                    10000, render_vsg::MarkerStyle::ground_station);
+                slot.station_selection = std::make_unique<render_vsg::MarkerLayer>(
+                    1, render_vsg::MarkerStyle::ground_selection);
+                slot.view->addChild(slot.station_markers->node());
+                slot.view->addChild(slot.station_selection->node());
+            }
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
             if (benchmark_) {
                 slot.labels = std::make_unique<render_vsg::LabelLayer>(200, benchmark_->font);
@@ -3457,6 +3645,21 @@ class Workbench final : public QMainWindow {
             slot->pick_candidates = render_vsg::visible_markers(
                 snapshot_, *slot->camera, extent.width, extent.height, 0,
                 snapshot_.frame == core::FrameId::gcrf ? &*display_to_itrf_ : nullptr);
+            if (slot->station_markers) {
+                visualization::RenderSnapshot visible_stations{
+                    snapshot_.epoch, snapshot_.frame, snapshot_.origin, {}};
+                auto selected_station = visible_stations;
+                for (const auto &point : slot->pick_candidates) {
+                    if (point.index < satellites_.size())
+                        continue;
+                    const auto &marker = snapshot_.markers.at(point.index);
+                    visible_stations.markers.push_back(marker);
+                    if (selected_marker_index() == point.index)
+                        selected_station.markers.push_back(marker);
+                }
+                slot->station_markers->update(visible_stations);
+                slot->station_selection->update(selected_station);
+            }
             if (slot->labels) {
                 const auto eligible = render_vsg::visible_markers(snapshot_, *slot->camera,
                                                                   extent.width, extent.height, 80);
@@ -3594,11 +3797,12 @@ class Workbench final : public QMainWindow {
 #endif
         ++frame_count_;
         statusBar()->showMessage(benchmarking_ ? QStringLiteral("ITRF · 固定双视图基准场景")
-                                 : satellites_.empty()
+                                 : satellites_.empty() && stations_.empty()
                                      ? QStringLiteral("空场景  ·  使用“插入对象”添加第一个对象")
                                      : QStringLiteral("就绪  ·  %1")
-                                           .arg(selected_ ? satellites_.at(*selected_).name()
-                                                          : QStringLiteral("未选择对象")));
+                                           .arg(selected_marker_index()
+                                                    ? selected_name()
+                                                    : QStringLiteral("未选择对象")));
         if (!smoke_dir_.isEmpty() && (benchmarking_ || smoke_bootstrap_ == 3)) {
             if (frame_count_ == 20) {
                 for (std::size_t i = 0; i < slots_.size(); ++i)
@@ -5686,6 +5890,282 @@ class Workbench final : public QMainWindow {
                 ++orbit_smoke_stage_;
             }
             break;
+        case 103: {
+            timer_.stop();
+            QTimer::singleShot(0, this, [this, require] {
+                auto *dialog = findChild<QDialog *>("insertObjectsDialog");
+                require(dialog, "Missing insertion chooser for ground station");
+                auto *types = dialog->findChild<QTreeWidget *>("insertObjectTypes");
+                types->setCurrentItem(types->topLevelItem(0)->child(1));
+                require(dialog->grab().save(smoke_dir_ + "/insert-ground-station.png"),
+                        "Cannot capture station chooser");
+                dialog->findChild<QPushButton *>("insertObject")->click();
+            });
+            show_insert_objects();
+            timer_.start();
+            require(station_editor_ && workspace_->current_document() == station_editor_ &&
+                        stations_.empty(),
+                    "Station insertion must open an uncommitted property page");
+            station_editor_->findChild<QLineEdit *>("stationName")
+                ->setText(QStringLiteral("海岸观测站"));
+            station_editor_->findChild<QuantityEditor *>("stationLongitude")
+                ->set_value(114.2, Unit::degree);
+            station_editor_->findChild<QuantityEditor *>("stationLatitude")
+                ->set_value(22.3, Unit::degree);
+            station_editor_->findChild<QuantityEditor *>("stationHeight")
+                ->set_value(-200, Unit::metre);
+            station_editor_->findChild<QPushButton *>("applyGroundStation")->click();
+            require(busy(), "Station creation did not start");
+            record("ground-station-insert-via-object-chooser");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 104: {
+            orbit_capture_ = true;
+            require(last_project_outcome_ == "opened" && stations_.size() == 1 &&
+                        selected_station_ == 0 && !selected_ &&
+                        stations_[0].config.location.height_m == -200 &&
+                        scenario_->objects().size() == satellites_.size() + 1,
+                    "Station creation did not publish the model and selection together");
+            const auto index = satellites_.size();
+            require(QLineF(ground_map_->marker_coordinates(index), QPointF(114.2, 22.3)).length() <
+                        1e-8,
+                    "Station map location uses incorrect geodetic coordinates");
+            change_display_frame(1);
+            const auto displayed = snapshot_.markers.at(index).position_m;
+            const auto exact = core::ground_station_position(stations_[0].config.location);
+            double offset = 0;
+            for (std::size_t i = 0; i < 3; ++i)
+                offset += std::pow(displayed[i] - exact[i], 2);
+            require(std::abs(std::sqrt(offset) - 300) < 1e-6,
+                    "Station display clearance changed the numerical height");
+            workspace_->select_view(0);
+            focus_satellite(0);
+            const auto back =
+                -vsg::normalize(vsg::dvec3(displayed[0], displayed[1], displayed[2])) * 14e6;
+            slots_[1]->trackball->setViewpoint(
+                vsg::LookAt::create(back, vsg::dvec3{}, vsg::dvec3(0, 0, 1)), 0);
+            set_selection(std::nullopt);
+            smoke_final_frames_ = 0;
+            record("ground-station-negative-height-keeps-exact-computation");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 105: {
+            if (++smoke_final_frames_ < 4)
+                break;
+            const auto &candidates = slots_[0]->pick_candidates;
+            const auto found =
+                std::find_if(candidates.begin(), candidates.end(),
+                             [&](const auto &point) { return point.index == satellites_.size(); });
+            require(found != candidates.end(), "Front-facing ground station is not pickable in 3D");
+            require(slots_[0]->station_markers->size() == 1 &&
+                        slots_[1]->station_markers->size() == 0,
+                    "Ground station annotations ignored per-view Earth occlusion");
+            int teal = 0;
+            const auto &pixels = slots_[0]->captured_image;
+            require(pixels.save(smoke_dir_ + "/ground-station-glyph.png"),
+                    "Cannot capture the station glyph");
+            for (int y = static_cast<int>(found->y_pixels) - 5;
+                 y <= static_cast<int>(found->y_pixels) + 5; ++y)
+                for (int x = static_cast<int>(found->x_pixels) - 5;
+                     x <= static_cast<int>(found->x_pixels) + 5; ++x) {
+                    if (!pixels.rect().contains(x, y))
+                        continue;
+                    const auto color = pixels.pixelColor(x, y);
+                    if (color.green() > 180 && color.blue() > 120 &&
+                        color.red() < color.green() * 0.7)
+                        ++teal;
+                }
+            require(teal >= 6, "Ground station glyph was not rendered above the surface");
+            inject_click(*slots_[0], {found->x_pixels, found->y_pixels});
+            require(selected_station_ == 0 && objects_->currentItem() == stations_[0].item,
+                    "3D ground station pick selected a satellite");
+            record("ground-station-visible-glyph-and-3d-pick");
+            open_properties();
+            smoke_project_bytes_ = application::encode_project(project_snapshot(project_path_));
+            auto *latitude = station_editor_->findChild<QuantityEditor *>("stationLatitude");
+            latitude->findChild<QLineEdit *>("quantityValue")->setText("95");
+            station_editor_->findChild<QPushButton *>("applyGroundStation")->click();
+            require(!busy() && smoke_project_bytes_ ==
+                                   application::encode_project(project_snapshot(project_path_)),
+                    "Invalid station latitude changed the scene");
+            station_editor_->findChild<QPushButton *>("resetGroundStation")->click();
+            station_editor_->findChild<QuantityEditor *>("stationHeight")
+                ->set_value(0.35, Unit::kilometre);
+            station_editor_->findChild<QPushButton *>("applyGroundStation")->click();
+            record("ground-station-invalid-input-reset-and-unit-edit");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 106: {
+            const auto found = std::find_if(
+                scenario_->objects().begin(), scenario_->objects().end(), [&](const auto &session) {
+                    return session.provenance().object_id == stations_[0].config.object_id;
+                });
+            require(
+                last_project_outcome_ == "opened" && stations_[0].config.location.height_m == 350 &&
+                    found != scenario_->objects().end() && found->provenance().input_revision == 2,
+                "Editing station position failed to revise its numerical session");
+            rename_selected_to(QStringLiteral("北岸地面站"));
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 107:
+            require(last_project_outcome_ == "opened" && stations_[0].config.name() == "北岸地面站",
+                    "Station rename failed");
+            duplicate_action_->trigger();
+            ++orbit_smoke_stage_;
+            break;
+        case 108:
+            require(last_project_outcome_ == "opened" && stations_.size() == 2 &&
+                        selected_station_ == 1 &&
+                        stations_[0].config.object_id != stations_[1].config.object_id &&
+                        stations_[0].config.location == stations_[1].config.location,
+                    "Station copy did not preserve location and create a separate identity");
+            confirm_delete(false);
+            require(!busy() && stations_.size() == 2, "Cancelled deletion removed a station");
+            confirm_delete(true);
+            ++orbit_smoke_stage_;
+            break;
+        case 109:
+            require(last_project_outcome_ == "opened" && stations_.size() == 1 &&
+                        selected_station_ == 0,
+                    "Station deletion lost the surviving station selection");
+            record("ground-station-rename-copy-and-delete");
+            save_project_to(smoke_dir_ + "/ground-stations.orbitforge");
+            start_project(
+                application::load_project(std::filesystem::path(project_path_.toStdWString())),
+                project_path_);
+            ++orbit_smoke_stage_;
+            break;
+        case 110: {
+            require(last_project_outcome_ == "opened" && stations_.size() == 1 &&
+                        !selected_marker_index() && stations_[0].config.location.height_m == 350 &&
+                        stations_[0].config.name() == "北岸地面站",
+                    "Station project failed to reopen with its saved coordinates and name");
+            auto *search = findChild<QLineEdit *>("objectSearch");
+            search->setText(QStringLiteral("北岸"));
+            require(!stations_[0].item->isHidden() && satellites_[0].item->isHidden(),
+                    "Object search omitted ground stations");
+            search->clear();
+            workspace_->split_page(map_panel_, view_panel_, Qt::RightEdge);
+            ground_map_->reset_view();
+            const auto index = satellites_.size();
+            const auto point = ground_map_->marker_position(index);
+            const auto global = ground_map_->mapToGlobal(point);
+            QMouseEvent press(QEvent::MouseButtonPress, point, global, Qt::LeftButton,
+                              Qt::LeftButton, Qt::NoModifier);
+            QMouseEvent release(QEvent::MouseButtonRelease, point, global, Qt::LeftButton,
+                                Qt::NoButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(ground_map_, &press);
+            QCoreApplication::sendEvent(ground_map_, &release);
+            require(selected_station_ == 0 && objects_->currentItem() == stations_[0].item,
+                    "2D station pick failed to synchronize the scene tree");
+            const auto geographic = ground_map_->marker_coordinates(index);
+            change_display_frame(0);
+            seek_epoch(scenario_->first());
+            snapshot_ = sample_frame(scenario_->first());
+            update_satellite();
+            const auto start = snapshot_.markers.at(index).position_m;
+            seek_epoch(scenario_->last());
+            snapshot_ = sample_frame(scenario_->last());
+            update_satellite();
+            require(start != snapshot_.markers.at(index).position_m &&
+                        QLineF(geographic, ground_map_->marker_coordinates(index)).length() < 1e-8,
+                    "Ground station did not rotate in GCRF while staying fixed on the map");
+            focus_satellite();
+            open_properties();
+            record("ground-station-reopen-search-2d-pick-and-earth-rotation");
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 111: {
+            if (++smoke_final_frames_ < 4)
+                break;
+            save_workbench_image("ground-station-properties.png");
+            require(station_editor_->findChild<QPushButton *>("applyGroundStation")->isVisible(),
+                    "Station apply button is hidden at this scale");
+            station_editor_->close();
+            const auto first = core::Epoch{scenario_->first().tai_nanoseconds() + 1'000'000'000};
+            require(apply_scenario_settings({scenario_->name(), first, scenario_->last()}),
+                    "Scenario interval edit rejected a mixed station project");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 112: {
+            require(last_project_outcome_ == "opened" && selected_station_ == 0 &&
+                        stations_.size() == 1,
+                    "Scenario interval edit lost its station or selection");
+            save_workbench_image("ground-station-map-and-globe.png");
+            auto only_stations = project_snapshot(project_path_);
+            only_stations.satellites.clear();
+            start_project(std::move(only_stations), project_path_, true, 0);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 113:
+            require(last_project_outcome_ == "opened" && !orbit_ && satellites_.empty() &&
+                        stations_.size() == 1 && selected_station_ == 0 &&
+                        snapshot_.markers.size() == 1,
+                    "Station-only scenario incorrectly requires a satellite");
+            begin_insert_station(InsertObjectMethod::defaults);
+            ++orbit_smoke_stage_;
+            break;
+        case 114:
+            require(last_project_outcome_ == "opened" && stations_.size() == 2 &&
+                        selected_station_ == 1 &&
+                        stations_[1].config.location == core::GroundStationLocation{},
+                    "Default station insertion failed in a station-only scenario");
+            begin_insert_satellite(InsertObjectMethod::defaults);
+            ++orbit_smoke_stage_;
+            break;
+        case 115:
+            require(last_orbit_outcome_ == "applied" && satellites_.size() == 1 &&
+                        stations_.size() == 2 && snapshot_.markers.size() == 3 && selected_ == 0 &&
+                        snapshot_.markers[1].object_id == stations_[0].config.object_id &&
+                        snapshot_.markers[2].object_id == stations_[1].config.object_id,
+                    "Inserting a satellite changed ground station marker identities");
+            confirm_delete(true);
+            ++orbit_smoke_stage_;
+            break;
+        case 116:
+            require(last_project_outcome_ == "opened" && satellites_.empty() &&
+                        stations_.size() == 2 && selected_station_ == 0,
+                    "Deleting the last satellite failed to retain station objects");
+            confirm_delete(true);
+            ++orbit_smoke_stage_;
+            break;
+        case 117:
+            require(last_project_outcome_ == "opened" && stations_.size() == 1 &&
+                        selected_station_ == 0,
+                    "Station-only deletion lost the surviving object");
+            confirm_delete(true);
+            ++orbit_smoke_stage_;
+            break;
+        case 118:
+            require(last_project_outcome_ == "opened" && scenario_->objects().empty() &&
+                        !selected_marker_index() && snapshot_.markers.empty() &&
+                        markers_->size() == 0 && !delete_action_->isEnabled(),
+                    "Deleting the last station left a ghost marker or enabled object action");
+            record("ground-station-only-defaults-mixed-insertion-and-delete-last");
+            start_project(application::load_project(std::filesystem::path(
+                              (smoke_dir_ + "/scenario-edited.orbitforge").toStdWString())),
+                          smoke_dir_ + "/scenario-edited.orbitforge");
+            ++orbit_smoke_stage_;
+            break;
+        case 119:
+            require(last_project_outcome_ == "opened" && stations_.empty() && !satellites_.empty(),
+                    "Opening a satellite-only project retained old station objects");
+            fit_views();
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        case 120:
+            if (++smoke_final_frames_ >= 4)
+                ++orbit_smoke_stage_;
+            break;
         }
     }
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
@@ -5922,6 +6402,10 @@ class Workbench final : public QMainWindow {
     std::optional<std::size_t> pending_project_selection_;
     QPushButton *cancel_project_button_ = nullptr;
     std::vector<Satellite> satellites_;
+    std::vector<Station> stations_;
+    GroundStationEditor *station_editor_ = nullptr;
+    std::optional<std::string> station_editor_target_;
+    std::optional<std::size_t> selected_station_;
     QTreeWidgetItem *scenario_item_ = nullptr;
     std::optional<std::size_t> editor_target_, pending_orbit_target_;
     bool insert_defaults_pending_ = false;
@@ -5946,7 +6430,7 @@ class Workbench final : public QMainWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 103;
+    static constexpr int orbit_smoke_complete = 121;
     int smoke_final_frames_ = 0;
     std::vector<std::uint8_t> smoke_project_bytes_;
     application::DataLock smoke_data_lock_;

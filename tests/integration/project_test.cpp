@@ -1,9 +1,75 @@
+#include <cmath>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <limits>
 #include <orbitforge/runtime/project.hpp>
+#include <orbitforge/runtime/time_frames.hpp>
 
 using namespace orbitforge;
+TEST(ProjectGroundStation, RoundTripMixedObjectsAndImmutableEditsPreserveIdentityAndLocation) {
+    application::Project project("Mixed", core::Epoch{0}, core::Epoch{7200000000000});
+    application::ProjectSatellite satellite;
+    project.satellites.push_back(satellite);
+    project.ground_stations.push_back({"station-a", "海岸观测站", {1.2, -0.4, -350}});
+    const auto bytes = application::encode_project(project);
+    const auto restored = application::decode_project(bytes);
+    EXPECT_EQ(application::encode_project(restored), bytes);
+    EXPECT_EQ(restored.ground_stations.at(0).location, project.ground_stations[0].location);
+    auto changed = restored.renamed_ground_station("station-a", "岸站");
+    changed = changed.with_ground_station_copy("station-a", "station-b", "副本");
+    changed = changed.without_ground_station("station-a");
+    EXPECT_EQ(changed.ground_stations.at(0).object_id, "station-b");
+    EXPECT_EQ(changed.ground_stations[0].location, project.ground_stations[0].location);
+    EXPECT_EQ(changed.satellites[0].orbit.object_id, satellite.orbit.object_id);
+    EXPECT_EQ(application::encode_project(project), bytes);
+    EXPECT_THROW(
+        (void)changed.with_ground_station_copy("station-b", satellite.orbit.object_id, "Collision"),
+        application::ProjectError);
+    EXPECT_THROW(
+        (void)changed.with_satellite_copy(satellite.orbit.object_id, "station-b", "Collision"),
+        application::ProjectError);
+    EXPECT_THROW((void)changed.renamed_ground_station("station-b", " "), application::ProjectError);
+    EXPECT_THROW((void)changed.without_ground_station("missing"), application::ProjectError);
+}
+TEST(ProjectGroundStation, StationOnlyRuntimeWorksWithoutAnOrbitProviderAndKeepsProvenance) {
+    application::Project project("Stations", core::Epoch{0}, core::Epoch{1'000'000'001});
+    project.ground_stations.push_back({"station", "Station", {0, 0, -400}});
+    auto scenario = runtime::make_project_scenario(project);
+    const auto result = scenario.sample(std::array{project.first, project.last});
+    ASSERT_EQ(result.size(), 1U);
+    EXPECT_EQ(result[0].provenance().object_id, "station");
+    EXPECT_EQ(result[0].provenance().input_revision, 1U);
+    EXPECT_EQ(result[0].states()[0].frame, core::FrameId::itrf);
+    EXPECT_EQ(result[0].states()[0].position_m[0], 6377737);
+    EXPECT_EQ(result[0].states()[0].position_m, result[0].states()[1].position_m);
+    const auto revised = project.with_settings("Shorter", core::Epoch{1}, project.last);
+    EXPECT_EQ(revised.ground_stations[0].location, project.ground_stations[0].location);
+    EXPECT_EQ(runtime::make_project_scenario(revised).objects().size(), 1U);
+}
+TEST(ProjectGroundStation, InertialVelocityIncludesEarthRotationAndMatchesPositionDerivative) {
+    if (!runtime::time_frames_available())
+        GTEST_SKIP();
+    const core::GroundStation station({0, 0, 0});
+    const auto frames = runtime::make_frame_provider();
+    const auto transform = [&](core::Epoch epoch) {
+        return frames->gcrf_to_itrf_state(epoch,
+                                          {{epoch, -32, 0, 0, 0, 0, "synthetic"}, {0, 0, 0, 0, 0}});
+    };
+    const auto fixed = station.state_at(core::Epoch{0});
+    const auto inertial = transform(fixed.epoch).inverse(fixed);
+    const auto before_epoch = core::Epoch{-500000000}, after_epoch = core::Epoch{500000000};
+    const auto before = transform(before_epoch).inverse(station.state_at(before_epoch));
+    const auto after = transform(after_epoch).inverse(station.state_at(after_epoch));
+    const auto restored = transform(fixed.epoch).apply(inertial);
+    double speed_squared = 0;
+    for (std::size_t i = 0; i < 3; ++i) {
+        EXPECT_NEAR(inertial.velocity_mps[i], after.position_m[i] - before.position_m[i], 0.0003);
+        EXPECT_NEAR(restored.position_m[i], fixed.position_m[i], 1e-8);
+        EXPECT_NEAR(restored.velocity_mps[i], 0, 1e-9);
+        speed_squared += inertial.velocity_mps[i] * inertial.velocity_mps[i];
+    }
+    EXPECT_NEAR(std::sqrt(speed_squared), 465.1, 0.1);
+}
 namespace {
 application::Project example() {
     application::Project project{"任务 A", core::Epoch{123456789}, core::Epoch{7200123456789}};

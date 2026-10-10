@@ -14,6 +14,7 @@ enum class WorkbenchIcon {
     earth,
     map,
     satellite,
+    ground_station,
     properties,
     fit,
     focus,
