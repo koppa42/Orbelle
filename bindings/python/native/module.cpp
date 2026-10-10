@@ -62,6 +62,8 @@ PYBIND11_MODULE(_native, module) {
         .def_property_readonly("data_lock", &application::Scenario::data_lock,
                                py::return_value_policy::copy)
         .def("with_data_lock", &application::Scenario::with_data_lock, py::arg("data_lock"))
+        .def("with_settings", &application::Scenario::with_settings, py::arg("name"),
+             py::arg("first"), py::arg("last"))
         .def_property_readonly(
             "object_count",
             [](const application::Scenario &scenario) { return scenario.objects().size(); })

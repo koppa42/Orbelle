@@ -50,6 +50,19 @@ Scenario Scenario::without_object(const std::string &object_id) const {
     ++result.revision_;
     return result;
 }
+Scenario Scenario::with_settings(std::string name, core::Epoch first, core::Epoch last) const {
+    const Scenario validated(std::move(name), first, last);
+    if (validated.name_ == name_ && first == first_ && last == last_)
+        return *this;
+    if (revision_ == std::numeric_limits<std::uint64_t>::max())
+        throw std::overflow_error("Scenario revision exhausted");
+    auto result = *this;
+    result.name_ = validated.name_;
+    result.first_ = first;
+    result.last_ = last;
+    ++result.revision_;
+    return result;
+}
 Scenario Scenario::with_data_lock(DataLock lock) const {
     if (lock == data_lock_)
         return *this;

@@ -1283,6 +1283,12 @@ class Workbench final : public QMainWindow {
             eop_action_->setEnabled(idle);
         if (cancel_project_button_)
             cancel_project_button_->setVisible(project_candidate_.valid());
+        if (scenario_properties_) {
+            for (const auto *name :
+                 {"scenarioSettingsFields", "applyScenarioSettings", "resetScenarioSettings"})
+                if (auto *control = scenario_properties_->findChild<QWidget *>(name))
+                    control->setEnabled(idle);
+        }
         if (open_action_)
             open_action_->setEnabled(idle);
         if (save_action_)
@@ -1476,15 +1482,22 @@ class Workbench final : public QMainWindow {
     }
     bool start_project(application::Project project, const QString &path, bool editing = false,
                        std::optional<std::size_t> selection = std::nullopt,
-                       std::optional<std::string> edited_object = std::nullopt) {
+                       std::optional<std::string> edited_object = std::nullopt,
+                       std::optional<ScenarioSettings> settings = std::nullopt) {
         if (busy())
             throw std::logic_error("Finish the pending update before opening a project");
+        const auto first = settings ? settings->first : project.first;
+        const auto last = settings ? settings->last : project.last;
+        // Check edits before asking to replace calculation data. The original lock
+        // remains available for consent even when its coverage cannot span the new interval.
+        if (settings)
+            application::validate_project(application::Project{settings->name, first, last});
         EopCatalog::Provider next_data;
         try {
-            next_data = data_for_interval(project.first, project.last);
+            next_data = data_for_interval(first, last);
         } catch (const std::out_of_range &) {
             last_project_outcome_ = "rejected";
-            show_data_coverage(project.first, project.last);
+            show_data_coverage(first, last);
             return false;
         }
         if (project.earth_orientation &&
@@ -1493,8 +1506,7 @@ class Workbench final : public QMainWindow {
                 QMessageBox::Question, QStringLiteral("场景数据已变化"),
                 QStringLiteral("当前数据或使用策略与此场景上次计算不一致。\n是否使用当前数据更新场"
                                "景并继续？\n%1\n\n取消将保留当前场景，不打开或重新计算。")
-                    .arg(extrapolation_description(next_data->data_info(), project.first,
-                                                   project.last)),
+                    .arg(extrapolation_description(next_data->data_info(), first, last)),
                 QMessageBox::Yes | QMessageBox::Cancel, this);
             message.setObjectName("dataChangeDialog");
             message.button(QMessageBox::Yes)->setText(QStringLiteral("使用当前数据"));
@@ -1509,9 +1521,15 @@ class Workbench final : public QMainWindow {
                 return false;
             }
         }
+        const auto recorded_data = project.data_lock();
+        if (settings) {
+            project.earth_orientation = next_data->data_info();
+            project = project.with_settings(settings->name, first, last);
+        }
         if (display_cancellation_)
             display_cancellation_->store(true);
         project_edit_ = editing;
+        project_settings_edit_ = settings.has_value();
         project_orbit_edit_ = edited_object.has_value();
         pending_project_selection_ = selection;
         pending_project_path_ = editing ? project_path_ : QFileInfo(path).absoluteFilePath();
@@ -1529,7 +1547,7 @@ class Workbench final : public QMainWindow {
                                                 : QStringLiteral("取消打开"));
         project_cancellation_ = std::make_shared<std::atomic_bool>(false);
         last_project_outcome_.clear();
-        project_recorded_data_ = project.data_lock();
+        project_recorded_data_ = recorded_data;
         // Capture exactly the data the user checked/approved, even if a download
         // completes while the confirmation dialog is open.
         std::vector<EopCatalog::Provider> installed_data{next_data};
@@ -1687,6 +1705,15 @@ class Workbench final : public QMainWindow {
                 show_properties_dialog();
             insert_defaults_pending_ = false;
         }
+        if (project_settings_edit_ && last_project_outcome_ != "opened" && scenario_properties_)
+            if (auto *result =
+                    scenario_properties_->findChild<QLabel *>("scenarioSettingsResult")) {
+                result->setText(
+                    last_project_outcome_ == "cancelled"
+                        ? QStringLiteral("已取消更新，原场景保留。可继续修改后重新应用。")
+                        : QStringLiteral("更新失败，原场景保留。请调整设置后重试。"));
+                result->show();
+            }
         update_actions();
     }
     void rename_selected_to(const QString &name) {
@@ -2003,12 +2030,42 @@ class Workbench final : public QMainWindow {
         show_orbit_status();
         show_properties_dialog();
     }
+    bool apply_scenario_settings(const ScenarioSettings &settings) {
+        if (!scenario_ || busy())
+            return false;
+        if (settings.first != scenario_->first() || settings.last != scenario_->last())
+            return start_project(project_snapshot(project_path_), project_path_, true, selected_,
+                                 std::nullopt, settings);
+        const auto checked = project_snapshot(project_path_)
+                                 .with_settings(settings.name, settings.first, settings.last);
+        if (checked.name == scenario_->name())
+            return false;
+        // A rename keeps the current calculation, playback and display caches intact.
+        scenario_ = scenario_->with_settings(checked.name, checked.first, checked.last);
+        const auto name = QString::fromStdString(checked.name);
+        scenario_item_->setText(0, name);
+        workspace_label_->setText(name + (eop_->data_info().extrapolation_days > 0
+                                              ? QStringLiteral(" · EOP 外推")
+                                              : QString{}));
+        workspace_label_->setToolTip(workspace_label_->text());
+        if (scenario_properties_)
+            scenario_properties_->setWindowTitle(name + QStringLiteral(" · 场景属性"));
+        show_timeline_status();
+        mark_project_dirty();
+        return true;
+    }
     void open_scenario_properties() {
         if (!scenario_ || busy())
             return;
         if (!scenario_properties_)
             scenario_properties_ = new QDialog(this);
         auto &dialog = *scenario_properties_;
+        if (workspace_->contains(&dialog)) {
+            if (auto *count = dialog.findChild<QLabel *>("scenarioObjectCount"))
+                count->setText(QString::number(satellites_.size()));
+            workspace_->open(&dialog);
+            return;
+        }
         if (auto *previous = dialog.layout()) {
             while (auto *item = previous->takeAt(0)) {
                 if (item->widget())
@@ -2030,12 +2087,23 @@ class Workbench final : public QMainWindow {
         auto *layout = new QVBoxLayout(&dialog);
         layout->setContentsMargins(24, 22, 24, 18);
         layout->setSpacing(16);
-        auto *title = new QLabel(QStringLiteral("场景概览"));
+        auto *title = new QLabel(QStringLiteral("场景设置"));
         title->setObjectName("panelTitle");
         layout->addWidget(title);
-        auto *description = new QLabel(QStringLiteral("分析时段、对象与本次计算使用的数据。"));
+        auto *description =
+            new QLabel(QStringLiteral("调整名称与分析时段，保留卫星的初始历元和轨道参数。"));
         description->setObjectName("dialogDescription");
+        description->setWordWrap(true);
         layout->addWidget(description);
+        auto *scroll = new QScrollArea;
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        auto *body = new QWidget;
+        auto *body_layout = new QVBoxLayout(body);
+        body_layout->setContentsMargins(0, 0, 8, 0);
+        body_layout->setSpacing(14);
+        scroll->setWidget(body);
+        layout->addWidget(scroll, 1);
         auto *section = new QFrame;
         section->setObjectName("formSection");
         section->setMaximumWidth(880);
@@ -2045,27 +2113,50 @@ class Workbench final : public QMainWindow {
         form->setSpacing(12);
         form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
         auto *name = new QLineEdit(QString::fromStdString(scenario_->name()));
+        name->setObjectName("scenarioSettingsName");
         name->setMaximumWidth(380);
-        name->setReadOnly(true);
         form->addRow(QStringLiteral("场景名称"), name);
         form->addRow(QStringLiteral("中心天体"), new QLabel(QStringLiteral("Earth / 地球")));
-        for (const auto &[label, epoch] :
-             {std::pair{QStringLiteral("开始时间"), scenario_->first()},
-              std::pair{QStringLiteral("结束时间"), scenario_->last()}}) {
-            auto *control = new EpochEditor;
-            control->set_epoch(epoch);
-            control->set_read_only(true);
-            control->setToolTip(QStringLiteral("场景时段在创建后保持固定。"));
-            form->addRow(label, control);
-        }
-        form->addRow(QStringLiteral("对象数量"), new QLabel(QString::number(satellites_.size())));
-        form->addRow(
-            QStringLiteral("时长"),
-            new QLabel(QString::number(scenario_->last().seconds_since(scenario_->first()) / 3600,
-                                       'g', 8) +
-                       QStringLiteral(" 小时")));
+        auto *first = new EpochEditor;
+        auto *last = new EpochEditor;
+        first->setObjectName("scenarioSettingsStart");
+        last->setObjectName("scenarioSettingsEnd");
+        first->set_epoch(scenario_->first());
+        last->set_epoch(scenario_->last());
+        form->addRow(QStringLiteral("开始时间"), first);
+        form->addRow(QStringLiteral("结束时间"), last);
+        auto *count = new QLabel(QString::number(satellites_.size()));
+        count->setObjectName("scenarioObjectCount");
+        form->addRow(QStringLiteral("对象数量"), count);
+        auto *duration = new QLabel;
+        duration->setObjectName("scenarioSettingsDuration");
+        form->addRow(QStringLiteral("时长"), duration);
         section_layout->addLayout(form);
-        layout->addWidget(section);
+        auto *fields = new QWidget;
+        fields->setObjectName("scenarioSettingsFields");
+        auto *fields_layout = new QVBoxLayout(fields);
+        fields_layout->setContentsMargins(0, 0, 0, 0);
+        fields_layout->addWidget(section);
+        body_layout->addWidget(fields);
+        auto *hint = new QLabel(
+            QStringLiteral("修改时段后将重新准备全部轨迹。当前时刻超出新范围时，定位到最近的边界；"
+                           "数据不足或更新失败时保留原场景。"));
+        hint->setWordWrap(true);
+        hint->setObjectName("dialogDescription");
+        hint->setMaximumWidth(880);
+        body_layout->addWidget(hint);
+        auto *data_section = new QFrame;
+        data_section->setObjectName("formSection");
+        data_section->setMaximumWidth(880);
+        auto *data_layout = new QVBoxLayout(data_section);
+        data_layout->setContentsMargins(20, 16, 20, 16);
+        auto *data_title = new QLabel(QStringLiteral("当前已应用的计算数据"));
+        data_title->setObjectName("sectionTitle");
+        data_layout->addWidget(data_title);
+        form = new QFormLayout;
+        form->setSpacing(12);
+        data_layout->addLayout(form);
+        body_layout->addWidget(data_section);
         auto *eop_caption = new QLabel(QString::fromStdString(eop_->data_info().id));
         if (eop_->data_info().interpolation.starts_with("finals2000a"))
             eop_caption->setText(eop_caption->text() + QStringLiteral(" · 可能含预测值"));
@@ -2084,9 +2175,71 @@ class Workbench final : public QMainWindow {
         extrapolated->setObjectName("scenarioExtrapolation");
         extrapolated->setWordWrap(true);
         form->addRow(QStringLiteral("外推情况"), extrapolated);
-        layout->addStretch();
+        body_layout->addStretch();
+        auto *result = new QLabel;
+        result->setObjectName("scenarioSettingsResult");
+        result->setWordWrap(true);
+        result->hide();
+        layout->addWidget(result);
+        auto *buttons = new QHBoxLayout;
+        auto *reset = new QPushButton(QStringLiteral("重置"));
+        reset->setObjectName("resetScenarioSettings");
+        reset->setAutoDefault(false);
+        buttons->addWidget(reset);
+        buttons->addStretch();
         auto *close = new QPushButton(QStringLiteral("关闭"));
-        layout->addWidget(close, 0, Qt::AlignRight);
+        close->setAutoDefault(false);
+        buttons->addWidget(close);
+        auto *apply = new QPushButton(QStringLiteral("应用更改"));
+        apply->setObjectName("applyScenarioSettings");
+        apply->setProperty("primary", true);
+        apply->setDefault(true);
+        buttons->addWidget(apply);
+        layout->addLayout(buttons);
+        const auto preview = [first, last, duration] {
+            try {
+                const auto seconds = last->epoch().seconds_since(first->epoch());
+                duration->setText(seconds > 0 ? QString::number(seconds / 3600, 'g', 10) +
+                                                    QStringLiteral(" 小时")
+                                              : QStringLiteral("结束时间须晚于开始时间"));
+            } catch (const std::exception &) {
+                duration->setText(QStringLiteral("请输入有效的起止时间"));
+            }
+        };
+        for (auto *control : {first, last})
+            connect(control->findChild<QLineEdit *>("epochValue"), &QLineEdit::textChanged,
+                    duration, preview, Qt::QueuedConnection);
+        preview();
+        connect(reset, &QPushButton::clicked, &dialog, [this, name, first, last, result, preview] {
+            name->setText(QString::fromStdString(scenario_->name()));
+            first->set_epoch(scenario_->first());
+            last->set_epoch(scenario_->last());
+            preview();
+            result->hide();
+        });
+        connect(apply, &QPushButton::clicked, &dialog, [this, name, first, last, result] {
+            try {
+                if (name->text().trimmed().isEmpty())
+                    throw std::invalid_argument("请输入场景名称。");
+                const ScenarioSettings settings{name->text().trimmed().toStdString(),
+                                                first->epoch(), last->epoch()};
+                if (settings.last.tai_nanoseconds() <= settings.first.tai_nanoseconds())
+                    throw std::invalid_argument("结束时间必须晚于开始时间。");
+                const bool unchanged = settings.name == scenario_->name() &&
+                                       settings.first == scenario_->first() &&
+                                       settings.last == scenario_->last();
+                if (unchanged)
+                    result->setText(QStringLiteral("设置未变化。"));
+                else if (apply_scenario_settings(settings))
+                    result->setText(busy() ? QStringLiteral("正在更新，可在状态栏取消。")
+                                           : QStringLiteral("场景名称已更新。"));
+                else
+                    result->setText(QStringLiteral("未应用，原场景保留。"));
+            } catch (const std::exception &error) {
+                result->setText(QString::fromUtf8(error.what()));
+            }
+            result->show();
+        });
         connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
         workspace_->open(&dialog);
     }
@@ -3753,6 +3906,9 @@ class Workbench final : public QMainWindow {
                 box->button(accepted ? QMessageBox::Yes : QMessageBox::Cancel)->click();
             });
         };
+        const auto scenario_epoch_control = [this](const char *name) {
+            return dynamic_cast<EpochEditor *>(scenario_properties_->findChild<QWidget *>(name));
+        };
         auto input = orbit_ ? orbit_->input : OrbitInput{};
         switch (orbit_smoke_stage_) {
         case 0:
@@ -5302,6 +5458,234 @@ class Workbench final : public QMainWindow {
                 ++orbit_smoke_stage_;
             }
             break;
+        case 94:
+            start_project(application::load_project(std::filesystem::path(
+                              (smoke_dir_ + "/imported-data.orbitforge").toStdWString())),
+                          smoke_dir_ + "/imported-data.orbitforge");
+            ++orbit_smoke_stage_;
+            break;
+        case 95: {
+            require(last_project_outcome_ == "opened" && satellites_.size() >= 2,
+                    "Scenario editing needs the restored multi-object fixture");
+            set_selection(satellites_.size() - 1);
+            smoke_cache_ = satellites_[0].orbit;
+            const auto revision = scenario_->revision();
+            open_scenario_properties();
+            auto *name = scenario_properties_->findChild<QLineEdit *>("scenarioSettingsName");
+            auto *first = scenario_epoch_control("scenarioSettingsStart");
+            auto *last = scenario_epoch_control("scenarioSettingsEnd");
+            auto *apply = scenario_properties_->findChild<QPushButton *>("applyScenarioSettings");
+            auto *reset = scenario_properties_->findChild<QPushButton *>("resetScenarioSettings");
+            auto *result = scenario_properties_->findChild<QLabel *>("scenarioSettingsResult");
+            require(name && first && last && apply && reset && !name->isReadOnly(),
+                    "Missing editable scenario settings");
+            apply->click();
+            require(!busy() && !project_dirty_ && scenario_->revision() == revision,
+                    "Unchanged settings created a revision or dirty project");
+            name->setText("  ");
+            apply->click();
+            require(!busy() && !project_dirty_ && result->isVisible(),
+                    "Invalid name did not preserve the scene");
+            reset->click();
+            first->set_epoch(scenario_->last());
+            last->set_epoch(scenario_->first());
+            apply->click();
+            require(!busy() && !project_dirty_ && scenario_->revision() == revision,
+                    "Reversed interval changed the scenario");
+            reset->click();
+            require(first->epoch() == scenario_->first() && last->epoch() == scenario_->last(),
+                    "Reset did not restore applied bounds");
+            record("scenario-settings-invalid-noop-and-reset-preserve-state");
+            name->setText(QStringLiteral("调整后的分析场景"));
+            workspace_->select_view(0);
+            open_scenario_properties();
+            require(scenario_properties_->findChild<QLineEdit *>("scenarioSettingsName") == name &&
+                        name->text() == QStringLiteral("调整后的分析场景"),
+                    "Returning to scenario properties discarded an unapplied draft");
+            record("scenario-settings-draft-survives-view-switch");
+            set_playing(true);
+            apply->click();
+            require(!busy() && project_dirty_ && playing_ && satellites_[0].orbit == smoke_cache_ &&
+                        scenario_->revision() == revision + 1 &&
+                        scenario_item_->text(0) == name->text() &&
+                        workspace_label_->text().startsWith(name->text()),
+                    "Scenario rename rebuilt a cache or lost playback/title state");
+            set_playing(false);
+            record("scenario-rename-preserves-playback-caches-and-object-revisions");
+            save_project_to(smoke_dir_ + "/scenario-edit-base.orbitforge");
+            smoke_settings_project_ = project_snapshot(project_path_);
+            const auto span =
+                scenario_->last().tai_nanoseconds() - scenario_->first().tai_nanoseconds();
+            smoke_view_epoch_ = core::Epoch{scenario_->first().tai_nanoseconds() + span / 4 + 123};
+            first->set_epoch(smoke_view_epoch_);
+            last->set_epoch(core::Epoch{scenario_->last().tai_nanoseconds() - span / 4});
+            // The live time is before the candidate range; publication must clamp to its start.
+            seek_epoch(scenario_->first());
+            snapshot_ = sample_frame(scenario_->first());
+            update_satellite();
+            apply->click();
+            require(busy() && !apply->isEnabled() && !reset->isEnabled(),
+                    "Scenario edits did not disable concurrent submissions");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 96: {
+            require(last_project_outcome_ == "opened" && project_dirty_ &&
+                        scenario_->first() == smoke_view_epoch_ &&
+                        snapshot_.epoch == smoke_view_epoch_,
+                    "Changed scenario bounds lost the clamped physical time");
+            require(selected_ == satellites_.size() - 1,
+                    "Changed scenario bounds lost the selected satellite");
+            require(QFileInfo(project_path_) ==
+                        QFileInfo(smoke_dir_ + "/scenario-edit-base.orbitforge"),
+                    "Changed scenario bounds lost the project file identity");
+            const auto &before = *smoke_settings_project_;
+            for (std::size_t i = 0; i < satellites_.size(); ++i) {
+                const auto &satellite = satellites_[i];
+                const auto &settings_input = satellite.orbit->input;
+                require(
+                    settings_input.first == scenario_->first() &&
+                        settings_input.last == scenario_->last() &&
+                        settings_input.initial.epoch == before.satellites[i].orbit.initial.epoch &&
+                        settings_input.initial.position_m ==
+                            before.satellites[i].orbit.initial.position_m &&
+                        settings_input.initial.velocity_mps ==
+                            before.satellites[i].orbit.initial.velocity_mps &&
+                        satellite.display == before.satellites[i].display &&
+                        satellite.name().toStdString() == before.satellites[i].name(),
+                    "Scenario resizing changed a satellite's physical input or display settings");
+                require(scenario_->objects()[i].provenance().input_revision ==
+                                satellite.orbit->session.provenance().input_revision &&
+                            cache_covers(*satellite.orbit, snapshot_.epoch, snapshot_.epoch),
+                        "New bounds did not have consistent sessions and display caches");
+            }
+            require(satellites_[0].orbit->session.provenance().input_revision ==
+                            smoke_cache_->session.provenance().input_revision &&
+                        timeline_->current_time() == snapshot_.epoch.tai_nanoseconds() / 1'000'000,
+                    "Scenario resizing changed numerical revisions or left a stale timeline");
+            record("scenario-resize-rebuilds-all-displays-preserves-inputs-and-clamps-start");
+            open_scenario_properties();
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
+            require(scenario_properties_->grab().save(smoke_dir_ + "/scenario-settings.png"),
+                    "Cannot capture scenario settings");
+            scenario_properties_->close();
+            save_project_to(smoke_dir_ + "/scenario-edited.orbitforge");
+            smoke_settings_project_ = project_snapshot(project_path_);
+            start_project(*smoke_settings_project_, project_path_);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 97: {
+            require(last_project_outcome_ == "opened" && !project_dirty_ &&
+                        application::encode_project(project_snapshot(project_path_)) ==
+                            application::encode_project(*smoke_settings_project_),
+                    "Scenario settings did not survive reopening");
+            record("scenario-edited-project-roundtrip");
+            smoke_cache_ = satellites_[0].orbit;
+            open_scenario_properties();
+            auto *last = scenario_epoch_control("scenarioSettingsEnd");
+            auto *apply = scenario_properties_->findChild<QPushButton *>("applyScenarioSettings");
+            last->set_epoch(core::Epoch{eop_->data_info().last_epoch.tai_nanoseconds() +
+                                        5 * 86'400'000'000'000LL});
+            answer_data(false, "dataCoverageDialog");
+            apply->click();
+            require(!busy() && !project_dirty_ && satellites_[0].orbit == smoke_cache_,
+                    "Unavailable data during scenario editing changed the live scene");
+            for (auto index : eop_catalog_->current_indices())
+                if (eop_catalog_->providers()[index]->data_info().interpolation ==
+                    eop_->data_info().interpolation)
+                    eop_catalog_->set_extrapolation_days(index, 1);
+            last->set_epoch(
+                core::Epoch{eop_->data_info().last_epoch.tai_nanoseconds() + 600'000'000'000});
+            answer_data(false);
+            apply->click();
+            require(!busy() && !project_dirty_ && satellites_[0].orbit == smoke_cache_ &&
+                        scenario_->data_lock() == smoke_settings_project_->data_lock(),
+                    "Declining replacement data during scenario editing changed the live scene");
+            record("scenario-edit-coverage-and-data-decline-preserve-original");
+            answer_data(true);
+            apply->click();
+            require(busy(), "Approved scenario edit was not submitted");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 98: {
+            require(last_project_outcome_ == "opened" && project_dirty_ &&
+                        eop_->data_info().extrapolation_days == 1 &&
+                        scenario_->data_lock() != smoke_settings_project_->data_lock(),
+                    "Scenario resizing did not apply the approved data policy");
+            for (const auto &satellite : satellites_)
+                require(satellite.orbit->input.last == scenario_->last() &&
+                            satellite.orbit->eop_source_id.find("limit-days=1") !=
+                                std::string::npos,
+                        "Scenario editing mixed calculation policies");
+            record("scenario-edit-data-consent-publishes-one-consistent-calculation");
+            save_project_to(smoke_dir_ + "/scenario-edited.orbitforge");
+            smoke_settings_project_ = project_snapshot(project_path_);
+            smoke_cache_ = satellites_[0].orbit;
+            open_scenario_properties();
+            auto *first = scenario_epoch_control("scenarioSettingsStart");
+            first->set_epoch(core::Epoch{scenario_->first().tai_nanoseconds() + 1'000'000'000});
+            scenario_properties_->findChild<QPushButton *>("applyScenarioSettings")->click();
+            require(busy() && cancel_project_button_->isVisible(),
+                    "Missing scenario update cancellation");
+            cancel_project_button_->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 99: {
+            require(last_project_outcome_ == "cancelled" && !project_dirty_ &&
+                        satellites_[0].orbit == smoke_cache_ &&
+                        scenario_->first() == smoke_settings_project_->first &&
+                        scenario_properties_->findChild<QPushButton *>("applyScenarioSettings")
+                            ->isEnabled(),
+                    "Cancelled scenario editing changed state or left the form locked");
+            record("scenario-edit-cancellation-preserves-scene-and-restores-form");
+            auto oversized = project_snapshot(project_path_);
+            oversized.satellites[0].orbit.step_seconds = 1;
+            oversized.satellites[0].display.extent = 1;
+            start_project(std::move(oversized), project_path_, true, selected_, std::nullopt,
+                          ScenarioSettings{scenario_->name(), eop_->data_info().first_epoch,
+                                           scenario_->last()});
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 100: {
+            require(last_project_outcome_ == "rejected" && !project_dirty_ &&
+                        satellites_[0].orbit == smoke_cache_ &&
+                        application::encode_project(project_snapshot(project_path_)) ==
+                            application::encode_project(*smoke_settings_project_),
+                    "A failed scene preparation published part of a scenario edit");
+            record("scenario-edit-preparation-failure-retains-all-applied-state");
+            scenario_properties_->findChild<QPushButton *>("resetScenarioSettings")->click();
+            seek_epoch(scenario_->last());
+            snapshot_ = sample_frame(scenario_->last());
+            update_satellite();
+            smoke_view_epoch_ = core::Epoch{scenario_->last().tai_nanoseconds() - 123'456'789};
+            scenario_epoch_control("scenarioSettingsEnd")->set_epoch(smoke_view_epoch_);
+            scenario_properties_->findChild<QPushButton *>("applyScenarioSettings")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 101:
+            require(last_project_outcome_ == "opened" && project_dirty_ &&
+                        snapshot_.epoch == smoke_view_epoch_ &&
+                        scenario_->last() == smoke_view_epoch_,
+                    "Scenario shrinking failed to clamp current time to the exact final epoch");
+            record("scenario-edit-clamps-end-with-nanosecond-precision");
+            save_project_to(smoke_dir_ + "/scenario-edited.orbitforge");
+            // A longer interval can put the final marker behind Earth from the
+            // retained camera. Frame its current position for the pixel checks.
+            fit_views();
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        case 102:
+            if (++smoke_final_frames_ >= 4) {
+                save_workbench_image("scenario-edited-workspace.png");
+                ++orbit_smoke_stage_;
+            }
+            break;
         }
     }
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
@@ -5534,7 +5918,7 @@ class Workbench final : public QMainWindow {
     QAction *rename_action_ = nullptr, *duplicate_action_ = nullptr, *delete_action_ = nullptr;
     QAction *eop_action_ = nullptr;
     std::unique_ptr<EopCatalog> eop_catalog_;
-    bool project_edit_ = false, project_orbit_edit_ = false;
+    bool project_edit_ = false, project_orbit_edit_ = false, project_settings_edit_ = false;
     std::optional<std::size_t> pending_project_selection_;
     QPushButton *cancel_project_button_ = nullptr;
     std::vector<Satellite> satellites_;
@@ -5562,12 +5946,13 @@ class Workbench final : public QMainWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 94;
+    static constexpr int orbit_smoke_complete = 103;
     int smoke_final_frames_ = 0;
     std::vector<std::uint8_t> smoke_project_bytes_;
     application::DataLock smoke_data_lock_;
     std::array<vsg::dvec3, 3> smoke_camera_;
     std::shared_ptr<const OrbitScene> smoke_cache_;
+    std::optional<application::Project> smoke_settings_project_;
     vsg::RecordAndSubmitTasks smoke_render_tasks_;
     std::size_t smoke_publications_ = 0;
     core::Epoch smoke_view_epoch_{0};

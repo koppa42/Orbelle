@@ -13,6 +13,7 @@
 - 一阶 J2 长期项解析传播：独立的平均根数类型，CSPICE 求解椭圆；支持长期项设置，速度包含进动导数。卫星属性支持二体/J2 切换及 GCRF/ITRF 初态输入，μ 统一读取中心天体。
 - 经典瞬时根数与 Cartesian 转换：CSPICE `conics_c` / `oscltx_c`；输入 a、e、i、Ω、ω、ν，公开 API 使用米和弧度，桌面使用 km 和度。
 - Scenario 场景：先建立统一分析时段，再插入对象；不可变场景版本保存多个 Session，拒绝重复 ID 和过期修订。
+- 场景属性可修改名称和分析时段：保留卫星初始条件与显示设置，统一重建轨迹，当前时刻限制在新范围内；数据变化须确认，覆盖不足、取消或失败保留原场景。C++ / Python 提供相同的设置更新 API。
 - 对象重命名、复制和删除：显示名称与稳定 ID 分离，存续计算修订保留；EOP 快照可从桌面导入、校验、持久保存，打开或重算时确认数据变化，见[对象与数据管理](docs/architecture/object_data_management.md)。
 - `.orbitforge` 项目文件：版本化分段容器、CRC 校验和原子保存；保存二体/J2 输入、对象显示设置与数据版本引用，支持桌面/Python/C++ 互通、保存/另存为/打开及未保存提示。外部模型和 EOP 快照仍为独立依赖，详见[项目文件格式](docs/architecture/project_files.md)。
 - Scenario 数据锁：保存 EOP 和时间数据的内容 SHA-256、解释配置及依赖清单总哈希；旧项目可升级，已有场景的数据不会随目录更新自动改变，详见[数据引用契约](docs/architecture/scenario_data_lock.md)。
@@ -82,6 +83,7 @@ C++ SDK 由模块安装生成。Python 构建入口 `pyproject.toml` 放在仓�
 - [工作区、视图与按需缓存验证](docs/validation/workspace_views_2026_10_10.md)
 - [工作台界面细化与便携包验证](docs/validation/workbench_ui_2026_10_10.md)
 - [工作台视觉统一与高 DPI 检查](docs/validation/ui_refresh_2026_10_10.md)
+- [场景名称与分析时段编辑验证](docs/validation/scenario_settings_2026_10_10.md)
 - [通用二体验证协议](docs/validation/p1_two_body_protocol.md)
 - [图形集成验收协议](docs/validation/p0_graphics_protocol.md)
 - [图形集成验证记录](docs/validation/p0_graphics.md)

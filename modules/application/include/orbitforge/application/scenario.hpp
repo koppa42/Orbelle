@@ -19,6 +19,10 @@ class Scenario {
     // This rejects duplicate insertions and stale asynchronous candidates.
     [[nodiscard]] Scenario with_object(Session session) const;
     [[nodiscard]] Scenario without_object(const std::string &object_id) const;
+    // Analysis bounds and display name do not change numerical initial conditions.
+    // Callers must validate external data coverage before publishing the new scene.
+    [[nodiscard]] Scenario with_settings(std::string name, core::Epoch first,
+                                         core::Epoch last) const;
     [[nodiscard]] const DataLock &data_lock() const noexcept { return data_lock_; }
     [[nodiscard]] Scenario with_data_lock(DataLock lock) const;
     [[nodiscard]] std::vector<results::StateSeries>

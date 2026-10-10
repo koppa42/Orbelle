@@ -249,6 +249,22 @@ std::size_t satellite_index(const Project &project, const std::string &id) {
     return static_cast<std::size_t>(found - project.satellites.begin());
 }
 } // namespace
+Project Project::with_settings(std::string new_name, core::Epoch begin, core::Epoch end) const {
+    check(begin.tai_nanoseconds() < end.tai_nanoseconds(),
+          "Scenario analysis interval must have positive duration");
+    auto result = *this;
+    result.name = std::move(new_name);
+    result.first = begin;
+    result.last = end;
+    result.current = core::Epoch{
+        std::clamp(current.tai_nanoseconds(), begin.tai_nanoseconds(), end.tai_nanoseconds())};
+    for (auto &satellite : result.satellites) {
+        satellite.orbit.first = begin;
+        satellite.orbit.last = end;
+    }
+    validate_project(result);
+    return result;
+}
 Project Project::renamed_satellite(const std::string &id, std::string new_name) const {
     text_check(new_name, true);
     auto result = *this;

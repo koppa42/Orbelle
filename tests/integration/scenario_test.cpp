@@ -69,3 +69,26 @@ TEST(Scenario, DataBindingCreatesANewScenarioRevisionAndKeepsReadersAndSessions)
     EXPECT_EQ(changed.with_object(object("B")).data_lock(), lock);
     EXPECT_EQ(changed.without_object("A").data_lock(), lock);
 }
+TEST(Scenario, SettingsPreserveNumericalSessionsAndReadersWhileChangingSampleBounds) {
+    const auto original = application::Scenario("Mission", core::Epoch{0}, core::Epoch{100})
+                              .with_object(object("A"))
+                              .with_object(object("A", 2));
+    const auto changed = original.with_settings("Revised", core::Epoch{-50}, core::Epoch{50});
+    EXPECT_EQ(changed.revision(), original.revision() + 1);
+    EXPECT_EQ(changed.name(), "Revised");
+    EXPECT_EQ(original.name(), "Mission");
+    EXPECT_EQ(original.first(), core::Epoch{0});
+    EXPECT_EQ(original.last(), core::Epoch{100});
+    EXPECT_EQ(changed.objects()[0].provenance().input_revision, 2U);
+    EXPECT_EQ(changed.sample(std::array{core::Epoch{0}})[0].states()[0].position_m,
+              original.sample(std::array{core::Epoch{0}})[0].states()[0].position_m);
+    EXPECT_NO_THROW((void)changed.sample(std::array{core::Epoch{-50}, core::Epoch{50}}));
+    EXPECT_THROW((void)changed.sample(std::array{core::Epoch{51}}), std::out_of_range);
+    EXPECT_THROW((void)original.sample(std::array{core::Epoch{-50}}), std::out_of_range);
+    EXPECT_EQ(changed.with_settings("Revised", changed.first(), changed.last()).revision(),
+              changed.revision());
+    EXPECT_THROW((void)original.with_settings(" ", core::Epoch{0}, core::Epoch{1}),
+                 std::invalid_argument);
+    EXPECT_THROW((void)original.with_settings("Mission", core::Epoch{1}, core::Epoch{1}),
+                 std::invalid_argument);
+}

@@ -9,6 +9,54 @@ import orbitforge as of
 
 
 class ProjectTests(unittest.TestCase):
+    def test_settings_keep_two_body_and_j2_initial_conditions_and_roundtrip(self):
+        original = self.make_project()
+        first, last = of.Epoch(700123456790), of.Epoch(1800123456789)
+        revised = original.with_settings('修改后的任务', first, last)
+        self.assertEqual(revised.current.tai_nanoseconds, first.tai_nanoseconds)
+        before = original.to_scenario().sample([first, last])
+        after = revised.to_scenario().sample([first, last])
+        for old, new, old_states, new_states in zip(original.satellites, revised.satellites,
+                                                  before, after):
+            self.assertEqual(new.orbit.initial.epoch.tai_nanoseconds,
+                             old.orbit.initial.epoch.tai_nanoseconds)
+            self.assertEqual(new.orbit.first.tai_nanoseconds, first.tai_nanoseconds)
+            self.assertEqual(new.orbit.last.tai_nanoseconds, last.tai_nanoseconds)
+            self.assertEqual(new.orbit.object_id, old.orbit.object_id)
+            for x, y in zip(old_states.states, new_states.states):
+                self.assertEqual(x.position_m, y.position_m)
+                self.assertEqual(x.velocity_mps, y.velocity_mps)
+        scenario = original.to_scenario()
+        changed = scenario.with_settings(revised.name, first, last)
+        self.assertEqual(changed.revision, scenario.revision + 1)
+        self.assertEqual(changed.object_count, scenario.object_count)
+        self.assertEqual(scenario.name, original.name)
+        with self.assertRaises(IndexError):
+            changed.sample([original.first])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / '修改时段.orbitforge'
+            revised.save(path)
+            restored = of.load_project(path)
+            self.assertEqual(restored.name, revised.name)
+            self.assertEqual(restored.first.tai_nanoseconds, first.tai_nanoseconds)
+            self.assertEqual(restored.current.tai_nanoseconds, first.tai_nanoseconds)
+        self.assertEqual(original.name, '任务 Python')
+        self.assertEqual(original.first.tai_nanoseconds, 123456789)
+
+    def test_settings_validate_existing_coverage_and_invalid_intervals(self):
+        original = self.bound_project()
+        beyond = of.Epoch(original.earth_orientation.last_epoch.tai_nanoseconds + 1)
+        with self.assertRaises(of.ProjectError):
+            original.with_settings('Out of coverage', original.first, beyond)
+        with self.assertRaises(of.ProjectError):
+            original.with_settings('Reversed', original.last, original.first)
+        with self.assertRaises(of.ProjectError):
+            original.with_settings(' ', original.first, original.last)
+        earlier = of.Epoch(original.current.tai_nanoseconds - 1)
+        changed = original.with_settings('Clamped', original.first, earlier)
+        self.assertEqual(changed.current.tai_nanoseconds, earlier.tai_nanoseconds)
+        self.assertEqual(changed.data_lock.sha256, original.data_lock.sha256)
+
     def bound_project(self):
         project = self.make_project()
         manifest = Path(of.__file__).parent / 'data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json'

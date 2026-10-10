@@ -68,6 +68,63 @@ TEST(Project, RejectsTruncationCorruptionFutureVersionAndTrailingBytes) {
     bad.push_back(0);
     EXPECT_THROW((void)application::decode_project(bad), application::ProjectError);
 }
+TEST(Project, SettingsPreserveInitialConditionsAndSynchronizeAllIntervalsAndCurrentTime) {
+    const auto original = example();
+    const auto bytes = application::encode_project(original);
+    const auto first = core::Epoch{original.current.tai_nanoseconds() + 123};
+    const auto last = core::Epoch{original.last.tai_nanoseconds() - 456};
+    const auto changed = original.with_settings("Adjusted", first, last);
+    EXPECT_EQ(changed.current, first);
+    EXPECT_EQ(changed.first, first);
+    EXPECT_EQ(changed.last, last);
+    EXPECT_EQ(changed.data_lock(), original.data_lock());
+    const auto restored = application::decode_project(application::encode_project(changed));
+    EXPECT_EQ(restored.name, "Adjusted");
+    EXPECT_EQ(restored.current, first);
+    ASSERT_EQ(restored.satellites.size(), original.satellites.size());
+    for (std::size_t i = 0; i < restored.satellites.size(); ++i) {
+        const auto &before = original.satellites[i];
+        const auto &after = restored.satellites[i];
+        EXPECT_EQ(after.orbit.first, first);
+        EXPECT_EQ(after.orbit.last, last);
+        EXPECT_EQ(after.orbit.initial.epoch, before.orbit.initial.epoch);
+        EXPECT_EQ(after.orbit.initial.position_m, before.orbit.initial.position_m);
+        EXPECT_EQ(after.orbit.initial.velocity_mps, before.orbit.initial.velocity_mps);
+        EXPECT_EQ(after.orbit.propagator, before.orbit.propagator);
+        EXPECT_EQ(after.orbit.object_id, before.orbit.object_id);
+        EXPECT_EQ(after.display, before.display);
+        EXPECT_EQ(after.model_path, before.model_path);
+    }
+    EXPECT_EQ(original.with_settings(original.name, original.first, original.current).current,
+              original.current);
+    const auto earlier_end = core::Epoch{original.current.tai_nanoseconds() - 1};
+    EXPECT_EQ(original.with_settings(original.name, original.first, earlier_end).current,
+              earlier_end);
+    EXPECT_EQ(original.with_settings(original.name, original.first, original.last).current,
+              original.current);
+    EXPECT_EQ(application::encode_project(original), bytes);
+}
+TEST(Project, SettingsRequireValidDataCoverageAndNeverMutateOnFailure) {
+    const auto original = example();
+    const auto bytes = application::encode_project(original);
+    const auto later = core::Epoch{original.last.tai_nanoseconds() + 1};
+    EXPECT_THROW((void)original.with_settings("Extended", original.first, later),
+                 application::ProjectError);
+    EXPECT_THROW((void)original.with_settings(" ", original.first, original.last),
+                 application::ProjectError);
+    EXPECT_THROW((void)original.with_settings("Invalid", original.last, original.first),
+                 application::ProjectError);
+    auto updated_data = original;
+    updated_data.earth_orientation->last_epoch = later;
+    const auto extended = updated_data.with_settings("Extended", original.first, later);
+    EXPECT_EQ(extended.last, later);
+    EXPECT_NE(extended.data_lock(), original.data_lock());
+    EXPECT_EQ(application::encode_project(original), bytes);
+    const application::Project empty{"Empty", core::Epoch{0}, core::Epoch{1}};
+    const auto updated_empty = empty.with_settings("Empty revised", core::Epoch{3}, core::Epoch{5});
+    EXPECT_TRUE(updated_empty.satellites.empty());
+    EXPECT_EQ(updated_empty.current, core::Epoch{3});
+}
 TEST(Project, RejectsAmbiguousInputsAndInvalidReferencesBeforeWriting) {
     auto project = example();
     project.satellites[1].orbit.object_id = project.satellites[0].orbit.object_id;

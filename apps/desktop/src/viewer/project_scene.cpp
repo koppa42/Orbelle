@@ -26,6 +26,8 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
             "No current EOP data covers this project's analysis interval");
     project.earth_orientation = eop->data_info();
     if (retained_sessions) {
+        retained_sessions =
+            retained_sessions->with_settings(project.name, project.first, project.last);
         // Keep surviving numerical sessions; rebuild every display with the same current EOP.
         const auto previous = *retained_sessions;
         for (const auto &session : previous.objects())

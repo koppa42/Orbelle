@@ -55,6 +55,11 @@ struct Project {
     // The desktop checks current data/policy and requires consent for changes.
     std::optional<core::EopDataInfo> earth_orientation;
     [[nodiscard]] DataLock data_lock() const;
+    // Updates all object analysis bounds, preserving initial epochs and display settings.
+    // Current time is clamped to the new interval. Attached data must cover it;
+    // explicitly replace earth_orientation first when selecting different data.
+    [[nodiscard]] Project with_settings(std::string name, core::Epoch first,
+                                        core::Epoch last) const;
     [[nodiscard]] Project renamed_satellite(const std::string &id, std::string name) const;
     [[nodiscard]] Project without_satellite(const std::string &id) const;
     [[nodiscard]] Project with_satellite_copy(const std::string &id, std::string new_id,

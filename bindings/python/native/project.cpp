@@ -70,6 +70,8 @@ void bind_project(py::module_ &module) {
         .def_readwrite("satellites", &application::Project::satellites)
         .def_readwrite("earth_orientation", &application::Project::earth_orientation)
         .def_property_readonly("data_lock", &application::Project::data_lock)
+        .def("with_settings", &application::Project::with_settings, py::arg("name"),
+             py::arg("first"), py::arg("last"))
         .def("renamed_satellite", &application::Project::renamed_satellite, py::arg("object_id"),
              py::arg("name"))
         .def("without_satellite", &application::Project::without_satellite, py::arg("object_id"))
