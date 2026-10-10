@@ -4,6 +4,8 @@
 #include "workbench_style.hpp"
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QFrame>
@@ -18,7 +20,7 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <cmath>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbitforge/runtime/j2.hpp>
 
 namespace orbitforge::desktop {
 namespace {
@@ -112,6 +114,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     state_form->setVerticalSpacing(8);
     state_form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     auto *state_title = new QLabel(QStringLiteral("初始状态"));
+    state_title_ = state_title;
     state_title->setObjectName("sectionTitle");
     state_form->addRow(state_title);
     form->setContentsMargins(0, 0, 0, 0);
@@ -124,11 +127,34 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         form->addRow(label);
     };
     section(QStringLiteral("传播设置"));
-    form->addRow(QStringLiteral("传播器"), new QLabel(QStringLiteral("二体 · Two Body")));
-    form->addRow(QStringLiteral("参考系"), new QLabel(QStringLiteral("地心 GCRF")));
+    auto *propagator_row = new QHBoxLayout;
+    propagator_row->setSpacing(6);
+    propagator_ = new QComboBox;
+    propagator_->setObjectName("orbitPropagator");
+    propagator_->setAccessibleName(QStringLiteral("轨道传播器"));
+    propagator_->addItems({QStringLiteral("二体 · Two Body"), QStringLiteral("J2 · 长期摄动")});
+    propagator_row->addWidget(propagator_, 1);
+    auto *settings_button = new QPushButton(QStringLiteral("设置…"));
+    settings_button->setObjectName("propagatorSettings");
+    settings_button->setAutoDefault(false);
+    propagator_row->addWidget(settings_button);
+    form->addRow(QStringLiteral("传播器"), propagator_row);
+    connect(settings_button, &QPushButton::clicked, this, &OrbitEditor::open_propagator_settings);
+    connect(propagator_, &QComboBox::currentIndexChanged, this, [this](int index) {
+        set_propagator(index == 0 ? OrbitPropagator::two_body : OrbitPropagator::j2_secular);
+    });
     epoch_ = new EpochEditor;
     form->addRow(new QLabel(QStringLiteral("初始历元")));
     form->addRow(epoch_);
+    reference_frame_ = new QComboBox;
+    reference_frame_->setObjectName("initialReferenceFrame");
+    reference_frame_->setAccessibleName(QStringLiteral("初始状态参考系"));
+    reference_frame_->addItems({QStringLiteral("GCRF · 地心惯性"), QStringLiteral("ITRF · 地固")});
+    reference_frame_->setToolTip(QStringLiteral("ITRF 使用位置 / 速度；轨道根数在 GCRF 下定义。"));
+    form->insertRow(2, QStringLiteral("参考系"), reference_frame_);
+    connect(reference_frame_, &QComboBox::currentIndexChanged, this, [this](int index) {
+        set_reference_frame(index == 0 ? core::FrameId::gcrf : core::FrameId::itrf);
+    });
     state_mode_ = new QComboBox;
     state_mode_->setObjectName("stateRepresentation");
     state_mode_->addItems(
@@ -180,6 +206,8 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         field->setObjectName(names[static_cast<int>(i)]);
         elements_[i] = field;
         keplerian_form->addRow(labels[static_cast<int>(i)], field);
+        if (i == 5)
+            anomaly_label_ = qobject_cast<QLabel *>(keplerian_form->labelForField(field));
     }
     state_mode_->setToolTip(QStringLiteral("GCRF 瞬时根数；抛物线轨道使用位置 / 速度。"));
     state_pages_->addWidget(keplerian_page);
@@ -205,28 +233,6 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     step_->set_quantum(1, Unit::second);
     step_->set_label(QStringLiteral("显示步长"));
     form->addRow(QStringLiteral("显示步长"), step_);
-    auto *advanced = new QToolButton;
-    advanced->setText(QStringLiteral("更多参数"));
-    advanced->setCheckable(true);
-    advanced->setArrowType(Qt::RightArrow);
-    advanced->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    auto *advanced_fields = new QWidget;
-    auto *advanced_form = new QFormLayout(advanced_fields);
-    advanced_form->setContentsMargins(0, 0, 0, 0);
-    mu_ = new QuantityEditor(Unit::kilometres_cubed_per_second_squared);
-    mu_->setObjectName("gravitationalParameter");
-    mu_->set_label(QStringLiteral("引力参数 μ"));
-    mu_->set_range(std::numeric_limits<double>::min(), std::numeric_limits<double>::max(),
-                   Unit::metres_cubed_per_second_squared);
-    advanced_form->addRow(QStringLiteral("引力参数 μ"), mu_);
-    advanced_fields->hide();
-    connect(advanced, &QToolButton::toggled, advanced_fields,
-            [advanced, advanced_fields](bool open) {
-                advanced_fields->setVisible(open);
-                advanced->setArrowType(open ? Qt::DownArrow : Qt::RightArrow);
-            });
-    form->addRow(advanced);
-    form->addRow(advanced_fields);
     form->setSizeConstraint(QLayout::SetMinAndMaxSize);
     auto *parameters = new QScrollArea;
     parameters->setWidgetResizable(true);
@@ -455,49 +461,82 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     set_input(input);
 }
 void OrbitEditor::set_input(const OrbitInput &input) {
+    const QSignalBlocker state_block(state_mode_), frame_block(reference_frame_),
+        propagator_block(propagator_);
+    body_ = input.initial.origin;
+    propagator_kind_ = input.propagator;
+    j2_options_ = input.j2;
+    input_frame_ = input.input_frame;
+    propagator_->setCurrentIndex(propagator_kind_ == OrbitPropagator::two_body ? 0 : 1);
+    reference_frame_->setCurrentIndex(input_frame_ == core::FrameId::gcrf ? 0 : 1);
+    update_state_labels();
     object_->setText(QString::fromStdString(input.object_id));
-    for (std::size_t k = 0; k < 3; ++k) {
-        position_[k]->set_value(input.initial.position_m[k], Unit::metre);
-        velocity_[k]->set_value(input.initial.velocity_mps[k], Unit::metres_per_second);
-    }
-    mu_->set_value(input.mu, Unit::metres_cubed_per_second_squared);
     epoch_->set_epoch(input.initial.epoch);
     first_->set_epoch(input.first);
     last_->set_epoch(input.last);
     step_->set_value(input.step_seconds, Unit::second);
-    const QSignalBlocker block(state_mode_);
+    write_cartesian(in_frame(input.initial, input_frame_));
     state_mode_index_ = 0;
-    try {
-        write_elements(input.initial);
-        state_mode_index_ = 1;
-    } catch (const std::exception &) { /* Valid parabolic states retain Cartesian input. */
-    }
+    if (input_frame_ == core::FrameId::gcrf)
+        try {
+            write_elements(input.initial);
+            state_mode_index_ = 1;
+        } catch (const std::exception &) { /* Parabolic states retain Cartesian input. */
+        }
     state_mode_->setCurrentIndex(state_mode_index_);
     state_pages_->setCurrentIndex(state_mode_index_);
 }
 core::CartesianState OrbitEditor::read_state() const {
-    const core::GravitationalParameter mu{mu_->value(Unit::metres_cubed_per_second_squared)};
     if (state_mode_index_ == 1) {
+        if (propagator_kind_ == OrbitPropagator::j2_secular)
+            return runtime::j2_mean_ellipse_state(
+                {epoch_->epoch(), elements_[0]->value(Unit::metre), elements_[1]->value(Unit::one),
+                 elements_[2]->value(Unit::radian), elements_[3]->value(Unit::radian),
+                 elements_[4]->value(Unit::radian), elements_[5]->value(Unit::radian)},
+                body_);
         return runtime::to_cartesian(
             {epoch_->epoch(), elements_[0]->value(Unit::metre), elements_[1]->value(Unit::one),
              elements_[2]->value(Unit::radian), elements_[3]->value(Unit::radian),
              elements_[4]->value(Unit::radian), elements_[5]->value(Unit::radian)},
-            mu);
+            core::central_body(body_).mu);
     }
-    core::CartesianState state{epoch_->epoch(), core::OriginId::earth, core::FrameId::gcrf, {}, {}};
+    core::CartesianState state{epoch_->epoch(), body_, input_frame_, {}, {}};
     for (std::size_t k = 0; k < 3; ++k) {
         state.position_m[k] = position_[k]->value(Unit::metre);
         state.velocity_mps[k] = velocity_[k]->value(Unit::metres_per_second);
     }
-    return state;
+    return in_frame(state, core::FrameId::gcrf);
+}
+core::CartesianState OrbitEditor::in_frame(core::CartesianState state, core::FrameId frame) const {
+    if (state.frame == frame)
+        return state;
+    if (!transform_state)
+        throw std::runtime_error("参考系转换需要场景的地球定向数据。");
+    return transform_state(std::move(state), frame);
+}
+void OrbitEditor::write_cartesian(const core::CartesianState &state) {
+    for (std::size_t k = 0; k < 3; ++k) {
+        position_[k]->validate_value(state.position_m[k], Unit::metre);
+        velocity_[k]->validate_value(state.velocity_mps[k], Unit::metres_per_second);
+    }
+    for (std::size_t k = 0; k < 3; ++k) {
+        position_[k]->set_value(state.position_m[k], Unit::metre);
+        velocity_[k]->set_value(state.velocity_mps[k], Unit::metres_per_second);
+    }
 }
 void OrbitEditor::write_elements(const core::CartesianState &state) {
-    const auto elements = runtime::to_keplerian(
-        state, core::GravitationalParameter{mu_->value(Unit::metres_cubed_per_second_squared)});
-    const std::array<double, 6> values{
-        elements.semi_major_axis_m,         elements.eccentricity,
-        elements.inclination_rad,           elements.raan_rad,
-        elements.argument_of_periapsis_rad, elements.true_anomaly_rad};
+    std::array<double, 6> values;
+    if (propagator_kind_ == OrbitPropagator::j2_secular) {
+        const auto elements = runtime::j2_mean_ellipse_elements(state);
+        values = {elements.semi_major_axis_m,         elements.eccentricity,
+                  elements.inclination_rad,           elements.raan_rad,
+                  elements.argument_of_periapsis_rad, elements.mean_anomaly_rad};
+    } else {
+        const auto elements = runtime::to_keplerian(state, core::central_body(body_).mu);
+        values = {elements.semi_major_axis_m,         elements.eccentricity,
+                  elements.inclination_rad,           elements.raan_rad,
+                  elements.argument_of_periapsis_rad, elements.true_anomaly_rad};
+    }
     for (std::size_t k = 0; k < 6; ++k)
         elements_[k]->validate_value(values[k], element_units[k]);
     for (std::size_t k = 0; k < 6; ++k)
@@ -511,10 +550,12 @@ void OrbitEditor::set_state_mode(int mode) {
         if (mode == 1)
             write_elements(state);
         else
-            for (std::size_t k = 0; k < 3; ++k) {
-                position_[k]->set_value(state.position_m[k], Unit::metre);
-                velocity_[k]->set_value(state.velocity_mps[k], Unit::metres_per_second);
-            }
+            write_cartesian(in_frame(state, input_frame_));
+        if (mode == 1) {
+            const QSignalBlocker frame_block(reference_frame_);
+            input_frame_ = core::FrameId::gcrf;
+            reference_frame_->setCurrentIndex(0);
+        }
         state_mode_index_ = mode;
         const QSignalBlocker block(state_mode_);
         state_mode_->setCurrentIndex(mode);
@@ -524,6 +565,138 @@ void OrbitEditor::set_state_mode(int mode) {
         const QSignalBlocker block(state_mode_);
         state_mode_->setCurrentIndex(state_mode_index_);
         show_result(QString::fromUtf8(exception.what()), true);
+    }
+}
+void OrbitEditor::set_reference_frame(core::FrameId frame) {
+    if (frame == input_frame_)
+        return;
+    const QSignalBlocker frame_block(reference_frame_), mode_block(state_mode_);
+    try {
+        if (frame != core::FrameId::gcrf && frame != core::FrameId::itrf)
+            throw std::invalid_argument("Unsupported initial-state reference frame");
+        const auto state = in_frame(read_state(), frame);
+        write_cartesian(state);
+        input_frame_ = frame;
+        state_mode_index_ = 0;
+        state_mode_->setCurrentIndex(0);
+        state_pages_->setCurrentIndex(0);
+        show_result({});
+    } catch (const std::exception &error) {
+        show_result(QString::fromUtf8(error.what()), true);
+    }
+    reference_frame_->setCurrentIndex(input_frame_ == core::FrameId::gcrf ? 0 : 1);
+}
+void OrbitEditor::set_propagator(OrbitPropagator propagator) {
+    if (propagator == propagator_kind_)
+        return;
+    const auto previous = propagator_kind_;
+    const QSignalBlocker block(propagator_);
+    try {
+        const auto state = read_state();
+        if (propagator == OrbitPropagator::j2_secular)
+            (void)runtime::j2_mean_ellipse_elements(state);
+        propagator_kind_ = propagator;
+        if (state_mode_index_ == 1)
+            write_elements(state);
+        update_state_labels();
+        show_result(propagator == OrbitPropagator::j2_secular
+                        ? QStringLiteral("以当前椭圆定义 J2 平均根数，不含周期项转换。")
+                        : QStringLiteral("以当前椭圆定义二体初始状态。"));
+    } catch (const std::exception &error) {
+        propagator_kind_ = previous;
+        show_result(QString::fromUtf8(error.what()), true);
+    }
+    propagator_->setCurrentIndex(propagator_kind_ == OrbitPropagator::two_body ? 0 : 1);
+}
+void OrbitEditor::update_state_labels() {
+    const bool j2 = propagator_kind_ == OrbitPropagator::j2_secular;
+    state_title_->setText(j2 ? QStringLiteral("初始平均椭圆 · J2") : QStringLiteral("初始状态"));
+    state_mode_->setItemText(0, j2 ? QStringLiteral("平均椭圆位置 / 速度")
+                                   : QStringLiteral("位置 / 速度 · Cartesian"));
+    state_mode_->setItemText(1, j2 ? QStringLiteral("J2 平均轨道根数")
+                                   : QStringLiteral("经典轨道根数 · 瞬时"));
+    state_mode_->setToolTip(j2 ? QStringLiteral("一阶长期项平均椭圆；位置/速度是辅助开普勒状态，"
+                                                "不代表瞬时根数或传播轨迹的实际速度。")
+                               : QStringLiteral("GCRF 瞬时根数；抛物线轨道使用位置 / 速度。"));
+    anomaly_label_->setText(j2 ? QStringLiteral("平近点角 M") : QStringLiteral("真近点角 ν"));
+    elements_[5]->set_label(anomaly_label_->text());
+    elements_[5]->setObjectName(j2 ? "meanAnomaly" : "trueAnomaly");
+}
+void OrbitEditor::open_propagator_settings() {
+    try {
+        QDialog dialog(this);
+        dialog.setObjectName("propagatorSettingsDialog");
+        const bool j2 = propagator_kind_ == OrbitPropagator::j2_secular;
+        dialog.setWindowTitle(j2 ? QStringLiteral("J2 摄动 · 传播器设置")
+                                 : QStringLiteral("二体 · 传播器设置"));
+        dialog.setMinimumWidth(430);
+        auto *layout = new QVBoxLayout(&dialog);
+        layout->setContentsMargins(20, 18, 20, 16);
+        layout->setSpacing(14);
+        auto *form = new QFormLayout;
+        form->setVerticalSpacing(10);
+        const auto &body = core::central_body(body_);
+        form->addRow(QStringLiteral("中心天体"), new QLabel(QStringLiteral("地球 · IERS 2003")));
+        form->addRow(
+            QStringLiteral("引力参数 μ"),
+            new QLabel(QString::number(body.mu.metres_cubed_per_second_squared / 1e9, 'g', 15) +
+                       QStringLiteral(" km³/s²")));
+        form->addRow(QStringLiteral("传播参考系"), new QLabel(QStringLiteral("GCRF")));
+        auto *step = new QuantityEditor(step_->unit());
+        step->setObjectName("propagationDisplayStep");
+        step->set_label(QStringLiteral("显示步长"));
+        step->set_range(1, 60, Unit::second);
+        step->set_quantum(1, Unit::second);
+        step->set_value(step_->value(Unit::second), Unit::second);
+        form->addRow(QStringLiteral("显示步长"), step);
+        layout->addLayout(form);
+        auto *node = new QCheckBox(QStringLiteral("升交点赤经进动"), &dialog);
+        auto *apsis = new QCheckBox(QStringLiteral("近地点幅角进动"), &dialog);
+        auto *mean = new QCheckBox(QStringLiteral("平近点角长期修正"), &dialog);
+        node->setObjectName("j2NodePrecession");
+        apsis->setObjectName("j2ApsidalPrecession");
+        mean->setObjectName("j2MeanMotionCorrection");
+        node->setChecked(j2_options_.node_precession);
+        apsis->setChecked(j2_options_.apsidal_precession);
+        mean->setChecked(j2_options_.mean_motion_correction);
+        if (j2) {
+            form->addRow(
+                QStringLiteral("参考半径"),
+                new QLabel(QString::number(body.equatorial_radius_m / 1000, 'g', 15) + " km"));
+            form->addRow(QStringLiteral("J2 系数"), new QLabel(QString::number(body.j2, 'g', 15)));
+            layout->addWidget(divider());
+            layout->addWidget(node);
+            layout->addWidget(apsis);
+            layout->addWidget(mean);
+        } else {
+            node->hide();
+            apsis->hide();
+            mean->hide();
+        }
+        auto *error = new QLabel;
+        error->setObjectName("error");
+        error->setWordWrap(true);
+        error->hide();
+        layout->addWidget(error);
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("确定"));
+        buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+        layout->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
+            try {
+                step_->set_value(step->value(Unit::second), Unit::second);
+                if (j2)
+                    j2_options_ = {node->isChecked(), apsis->isChecked(), mean->isChecked()};
+                dialog.accept();
+            } catch (const std::exception &exception) {
+                error->setText(QString::fromUtf8(exception.what()));
+                error->show();
+            }
+        });
+        dialog.exec();
+    } catch (const std::exception &error) {
+        show_result(QString::fromUtf8(error.what()), true);
     }
 }
 void OrbitEditor::set_create_mode(bool create) {
@@ -547,8 +720,10 @@ void OrbitEditor::submit() {
     try {
         OrbitInput input;
         input.object_id = object_->text().trimmed().toStdString();
-        input.mu = mu_->value(Unit::metres_cubed_per_second_squared);
         input.initial = read_state();
+        input.propagator = propagator_kind_;
+        input.j2 = j2_options_;
+        input.input_frame = input_frame_;
         input.first = first_->epoch();
         input.last = last_->epoch();
         input.step_seconds = static_cast<int>(step_->value(Unit::second));

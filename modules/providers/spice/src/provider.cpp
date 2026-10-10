@@ -635,4 +635,135 @@ std::unique_ptr<core::IEphemerisProvider> load_snapshot(const std::filesystem::p
         throw core::EphemerisDataError(std::string("Cannot load SPICE snapshot: ") + error.what());
     }
 }
+namespace {
+void validate_j2(const core::J2MeanElements &elements, const core::CentralBody &body) {
+    for (const double value :
+         {elements.semi_major_axis_m, elements.eccentricity, elements.inclination_rad,
+          elements.raan_rad, elements.argument_of_periapsis_rad, elements.mean_anomaly_rad,
+          body.mu.metres_cubed_per_second_squared, body.equatorial_radius_m, body.j2})
+        if (!std::isfinite(value))
+            throw std::invalid_argument("J2 elements and central-body constants must be finite");
+    if (body.origin != core::OriginId::earth || body.mu.metres_cubed_per_second_squared <= 0 ||
+        body.equatorial_radius_m <= 0 || std::abs(body.j2) > 0.01 ||
+        elements.semi_major_axis_m <= 0 || elements.eccentricity < 0 ||
+        elements.eccentricity >= 1 || elements.inclination_rad < 0 ||
+        elements.inclination_rad > std::acos(-1.0) ||
+        elements.semi_major_axis_m * (1 - elements.eccentricity) <= body.equatorial_radius_m)
+        throw std::invalid_argument("J2 requires an Earth-centred mean ellipse with pericentre "
+                                    "above the reference surface");
+}
+std::array<double, 3> cross(const std::array<double, 3> &a, const std::array<double, 3> &b) {
+    return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+}
+class J2Secular final : public core::IStateProvider {
+  public:
+    J2Secular(core::J2MeanElements initial, core::CentralBody body, core::J2SecularOptions options)
+        : initial_(initial), body_(body) {
+        validate_j2(initial_, body_);
+        const double a = initial_.semi_major_axis_m, e = initial_.eccentricity;
+        const double p = a * (1 - e) * (1 + e), c = std::cos(initial_.inclination_rad);
+        n_ = std::sqrt(body_.mu.metres_cubed_per_second_squared / a) / a;
+        const double factor = body_.j2 * std::pow(body_.equatorial_radius_m / p, 2) * n_;
+        node_rate_ = options.node_precession ? -1.5 * factor * c : 0;
+        apsis_rate_ = options.apsidal_precession ? 0.75 * factor * (5 * c * c - 1) : 0;
+        mean_rate_ = n_ + (options.mean_motion_correction
+                               ? 0.75 * factor * std::sqrt((1 - e) * (1 + e)) * (3 * c * c - 1)
+                               : 0);
+        if (!(n_ > 0) || !std::isfinite(n_) || !(mean_rate_ > 0))
+            throw std::invalid_argument("J2 mean motion is outside the numerical domain");
+        (void)state_at(initial_.epoch);
+    }
+    core::CartesianState state_at(core::Epoch epoch) const override {
+        auto elements = initial_;
+        const auto dt = epoch.seconds_since(initial_.epoch);
+        const auto advance = [dt](double initial, double rate) {
+            return std::remainder(std::fma(rate, dt, initial), 2 * std::acos(-1.0));
+        };
+        elements.epoch = epoch;
+        elements.raan_rad = advance(initial_.raan_rad, node_rate_);
+        elements.argument_of_periapsis_rad =
+            advance(initial_.argument_of_periapsis_rad, apsis_rate_);
+        elements.mean_anomaly_rad = advance(initial_.mean_anomaly_rad, mean_rate_);
+        auto state = j2_mean_ellipse_state(elements, body_);
+        const std::array<double, 3> normal{
+            std::sin(elements.inclination_rad) * std::sin(elements.raan_rad),
+            -std::sin(elements.inclination_rad) * std::cos(elements.raan_rad),
+            std::cos(elements.inclination_rad)};
+        const auto node_velocity = cross({0, 0, 1}, state.position_m);
+        const auto apsis_velocity = cross(normal, state.position_m);
+        // Differentiate the evolving ellipse, including its orientation and anomaly.
+        // Keplerian velocity alone is not tangent to this secular trajectory.
+        for (std::size_t k = 0; k < 3; ++k) {
+            state.velocity_mps[k] = state.velocity_mps[k] * (mean_rate_ / n_) +
+                                    node_rate_ * node_velocity[k] + apsis_rate_ * apsis_velocity[k];
+            if (!std::isfinite(state.velocity_mps[k]))
+                throw core::PropagationError("J2 returned non-finite velocity");
+        }
+        return state;
+    }
+
+  private:
+    core::J2MeanElements initial_;
+    core::CentralBody body_;
+    double n_ = 0, node_rate_ = 0, apsis_rate_ = 0, mean_rate_ = 0;
+};
+} // namespace
+core::CartesianState j2_mean_ellipse_state(core::J2MeanElements elements,
+                                           const core::CentralBody &body) {
+    validate_j2(elements, body);
+    const double turn = 2 * std::acos(-1.0);
+    const std::array<double, 8> conic{elements.semi_major_axis_m * (1 - elements.eccentricity) /
+                                          1000,
+                                      elements.eccentricity,
+                                      elements.inclination_rad,
+                                      std::remainder(elements.raan_rad, turn),
+                                      std::remainder(elements.argument_of_periapsis_rad, turn),
+                                      std::remainder(elements.mean_anomaly_rad, turn),
+                                      0,
+                                      body.mu.metres_cubed_per_second_squared / 1e9};
+    std::array<double, 6> values{};
+    try {
+        std::scoped_lock guard(engine().mutex);
+        initialize_engine();
+        conics_c(conic.data(), 0, values.data());
+        check_spice();
+    } catch (const core::EphemerisQueryError &error) {
+        throw core::PropagationError(error.what());
+    } catch (const core::EphemerisDataError &error) {
+        throw core::PropagationError(error.what());
+    }
+    for (double &value : values) {
+        value *= 1000;
+        if (!std::isfinite(value))
+            throw core::PropagationError("J2 mean ellipse conversion returned non-finite values");
+    }
+    return {elements.epoch,
+            body.origin,
+            core::FrameId::gcrf,
+            {values[0], values[1], values[2]},
+            {values[3], values[4], values[5]}};
+}
+core::J2MeanElements j2_mean_ellipse_elements(core::CartesianState auxiliary_state,
+                                              const core::CentralBody &body) {
+    const auto ellipse = to_keplerian(auxiliary_state, body.mu);
+    const auto e = ellipse.eccentricity, nu = ellipse.true_anomaly_rad;
+    if (e >= 1)
+        throw std::invalid_argument("J2 mean propagation requires a closed ellipse");
+    const double eccentric =
+        std::atan2(std::sqrt((1 - e) * (1 + e)) * std::sin(nu), e + std::cos(nu));
+    core::J2MeanElements mean{ellipse.epoch,
+                              ellipse.semi_major_axis_m,
+                              e,
+                              ellipse.inclination_rad,
+                              ellipse.raan_rad,
+                              ellipse.argument_of_periapsis_rad,
+                              (1 - e) * eccentric + e * anomaly_remainder(eccentric, false)};
+    validate_j2(mean, body);
+    return mean;
+}
+std::shared_ptr<const core::IStateProvider> make_j2(core::J2MeanElements initial,
+                                                    const core::CentralBody &body,
+                                                    core::J2SecularOptions options) {
+    return std::make_shared<J2Secular>(initial, body, options);
+}
 } // namespace orbitforge::providers::spice

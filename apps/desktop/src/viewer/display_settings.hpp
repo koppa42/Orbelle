@@ -23,10 +23,11 @@ display_interval(const OrbitInput &input, const DisplaySettings &settings, core:
         const double r = std::hypot(state.position_m[0], state.position_m[1], state.position_m[2]);
         const double v =
             std::hypot(state.velocity_mps[0], state.velocity_mps[1], state.velocity_mps[2]);
-        const double reciprocal_a = 2 / r - v * v / input.mu;
-        const double period = reciprocal_a > 0 ? 2 * std::numbers::pi /
-                                                     std::sqrt(input.mu * std::pow(reciprocal_a, 3))
-                                               : 3600;
+        const double reciprocal_a = 2 / r - v * v / input.mu();
+        const double period =
+            reciprocal_a > 0
+                ? 2 * std::numbers::pi / std::sqrt(input.mu() * std::pow(reciprocal_a, 3))
+                : 3600;
         const auto span = std::min(static_cast<double>(last - first), period * 1e9);
         const auto begin =
             std::clamp(current.tai_nanoseconds() - static_cast<std::int64_t>(span / 2), first,

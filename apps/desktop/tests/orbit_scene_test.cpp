@@ -1,10 +1,34 @@
 #include "../src/viewer/display_settings.hpp"
 #include <chrono>
 #include <gtest/gtest.h>
+#include <orbitforge/runtime/j2.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 
 namespace orbitforge::desktop {
+TEST(OrbitPreparation, J2MinuteCacheUsesTrajectoryDerivativeAndPreservesSettings) {
+    const auto time = runtime::make_builtin_time_provider();
+    const auto frames = runtime::make_frame_provider();
+    const auto eop = runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+    OrbitInput input;
+    input.first = time->from_utc({2026, 10, 9, 0, 0, 0, 0});
+    input.last = time->from_utc({2026, 10, 10, 0, 0, 0, 0});
+    input.initial.epoch = input.first;
+    input.propagator = OrbitPropagator::j2_secular;
+    input.j2 = {true, false, true};
+    const auto session = make_orbit_session(input, 3);
+    EXPECT_NE(session.provenance().algorithm.find("apsis=0"), std::string::npos);
+    const std::atomic_bool cancelled{false};
+    for (const auto epoch :
+         {input.first, core::Epoch{input.first.tai_nanoseconds() + 12 * 3600'000'000'000LL}}) {
+        const auto orbit = prepare_orbit_scene(input, session, *frames, *eop, cancelled,
+                                               display_cache_interval(input, {}, epoch));
+        EXPECT_LE(orbit->max_check_error_m, 1);
+        EXPECT_LE(orbit->max_inertial_check_error_m, 1);
+        EXPECT_EQ(orbit->input.j2, input.j2);
+        EXPECT_LT(orbit->track.samples().states().size(), 200);
+    }
+}
 TEST(OrbitPreparation, FullDayRetainsValidatedEarthFixedCache) {
     const auto time = runtime::make_builtin_time_provider();
     const auto frames = runtime::make_frame_provider();
@@ -15,7 +39,7 @@ TEST(OrbitPreparation, FullDayRetainsValidatedEarthFixedCache) {
     input.last = time->from_utc({2026, 10, 10, 0, 0, 0, 0});
     input.initial.epoch = input.first;
     auto session = runtime::make_two_body_session(
-        input.initial, core::GravitationalParameter{input.mu}, input.object_id, 1);
+        input.initial, core::GravitationalParameter{input.mu()}, input.object_id, 1);
     const std::atomic_bool cancelled{false};
     const auto start = std::chrono::steady_clock::now();
     const auto orbit = prepare_orbit_scene(input, std::move(session), *frames, *eop, cancelled);
@@ -41,7 +65,7 @@ TEST(OrbitPreparation, DefaultMinuteStepPreparesOnlyTheRequestedPeriod) {
     input.last = time->from_utc({2026, 10, 10, 0, 0, 0, 0});
     input.initial.epoch = input.first;
     const auto session = runtime::make_two_body_session(
-        input.initial, core::GravitationalParameter{input.mu}, input.object_id, 7);
+        input.initial, core::GravitationalParameter{input.mu()}, input.object_id, 7);
     const std::atomic_bool cancelled{false};
     const DisplaySettings settings;
     const auto orbit = prepare_orbit_scene(input, session, *frames, *eop, cancelled,

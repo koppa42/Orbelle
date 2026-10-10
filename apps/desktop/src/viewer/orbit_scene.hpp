@@ -4,17 +4,28 @@
 #include <optional>
 #include <orbitforge/application/session.hpp>
 #include <orbitforge/core/frames/frame_provider.hpp>
+#include <orbitforge/core/propagation/central_body.hpp>
+#include <orbitforge/core/propagation/j2_mean_elements.hpp>
 #include <orbitforge/visualization/state_track.hpp>
 
 namespace orbitforge::desktop {
+enum class OrbitPropagator { two_body, j2_secular };
 struct OrbitInput {
+    // Canonical GCRF. For J2 this is the auxiliary mean ellipse, not an osculating state.
     core::CartesianState initial{
         core::Epoch{0}, core::OriginId::earth, core::FrameId::gcrf, {7e6, 0, 0}, {0, 6200, 5300}};
-    double mu = 3.986004418e14;
+    OrbitPropagator propagator = OrbitPropagator::two_body;
+    core::J2SecularOptions j2;
+    core::FrameId input_frame = core::FrameId::gcrf;
+    [[nodiscard]] double mu() const {
+        return core::central_body(initial.origin).mu.metres_cubed_per_second_squared;
+    }
     std::string object_id = "satellite-1";
     core::Epoch first{0}, last{7'200'000'000'000};
     int step_seconds = 60;
 };
+[[nodiscard]] application::Session make_orbit_session(const OrbitInput &input,
+                                                      std::uint64_t revision = 1);
 struct OrbitScene {
     OrbitInput input;
     application::Session session;

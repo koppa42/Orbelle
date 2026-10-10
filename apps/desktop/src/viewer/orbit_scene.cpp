@@ -3,8 +3,20 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <orbitforge/runtime/j2.hpp>
 
 namespace orbitforge::desktop {
+application::Session make_orbit_session(const OrbitInput &input, std::uint64_t revision) {
+    const auto &body = core::central_body(input.initial.origin);
+    switch (input.propagator) {
+    case OrbitPropagator::two_body:
+        return runtime::make_two_body_session(input.initial, body.mu, input.object_id, revision);
+    case OrbitPropagator::j2_secular:
+        return runtime::make_j2_session(runtime::j2_mean_ellipse_elements(input.initial), input.j2,
+                                        input.object_id, revision, body.origin);
+    }
+    throw std::invalid_argument("Unsupported orbit propagator");
+}
 std::shared_ptr<const OrbitScene>
 prepare_orbit_scene(OrbitInput input, application::Session session,
                     const core::IFrameProvider &frames, const core::IEarthOrientationProvider &eop,

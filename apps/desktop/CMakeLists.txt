@@ -39,6 +39,8 @@ if(ORBITFORGE_WITH_VSG)
             src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
             src/viewer/orbit_editor.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp)
         set_target_properties(orbitforge_quantity_tests PROPERTIES AUTOMOC ON)
+        target_compile_definitions(orbitforge_quantity_tests PRIVATE
+            ORBITFORGE_TEST_EOP="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json")
         target_link_libraries(orbitforge_quantity_tests PRIVATE
             OrbitForge::Runtime OrbitForge::Visualization Qt6::Widgets GTest::gtest_main)
         orbitforge_warnings(orbitforge_quantity_tests)

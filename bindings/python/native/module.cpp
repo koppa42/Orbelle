@@ -9,6 +9,7 @@ using namespace orbitforge;
 
 void bind_time_frames(py::module_ &module);
 void bind_ephemeris(py::module_ &module);
+void bind_j2(py::module_ &module);
 
 PYBIND11_MODULE(_native, module) {
     module.doc() = "OrbitForge P0 native API. Time is explicit TAI, positions are metres.";
@@ -108,4 +109,5 @@ PYBIND11_MODULE(_native, module) {
         py::arg("input_revision") = 1, py::call_guard<py::gil_scoped_release>());
     bind_time_frames(module);
     bind_ephemeris(module);
+    bind_j2(module);
 }

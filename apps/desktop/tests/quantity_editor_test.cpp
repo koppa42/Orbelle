@@ -1,15 +1,21 @@
 #include "../src/viewer/orbit_editor.hpp"
 #include "../src/viewer/quantity_editor.hpp"
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QMenu>
 #include <QPushButton>
+#include <QTimer>
 #include <QToolButton>
 #include <cmath>
 #include <gtest/gtest.h>
 #include <numbers>
+#include <orbitforge/runtime/j2.hpp>
+#include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 
 namespace orbitforge::desktop {
@@ -165,8 +171,7 @@ TEST_F(QuantityTest, OrbitSubmissionReadsMixedUnitsAsSIAndKeepsUnitPreferences) 
     velocity.set_unit(Unit::metres_per_second);
     text(position)->setText("7.2e6");
     text(velocity)->setText("6300");
-    auto &mu = field(editor, "gravitationalParameter");
-    mu.set_unit(Unit::metres_cubed_per_second_squared);
+    EXPECT_EQ(editor.findChild<QuantityEditor *>("gravitationalParameter"), nullptr);
     auto &step = field(editor, "displayStep");
     step.set_unit(Unit::minute);
     text(step)->setText("0.75");
@@ -176,7 +181,7 @@ TEST_F(QuantityTest, OrbitSubmissionReadsMixedUnitsAsSIAndKeepsUnitPreferences) 
     ASSERT_TRUE(submitted);
     EXPECT_DOUBLE_EQ(submitted->initial.position_m[0], 7.2e6);
     EXPECT_DOUBLE_EQ(submitted->initial.velocity_mps[1], 6300);
-    EXPECT_DOUBLE_EQ(submitted->mu, input.mu);
+    EXPECT_DOUBLE_EQ(submitted->mu(), input.mu());
     EXPECT_EQ(submitted->step_seconds, 45);
     editor.set_input(*submitted);
     EXPECT_EQ(position.unit(), Unit::metre);
@@ -201,7 +206,7 @@ TEST_F(QuantityTest, KeplerianSubmissionUsesRadiansWithoutDoubleConversion) {
     }
     const auto expected =
         runtime::to_cartesian({input.initial.epoch, 7.8e6, 0.1, 0.6, 1.3, 2.1, -0.2},
-                              core::GravitationalParameter{input.mu});
+                              core::GravitationalParameter{input.mu()});
     std::optional<OrbitInput> submitted;
     editor.apply = [&](OrbitInput result) { submitted = std::move(result); };
     editor.submit();
@@ -237,5 +242,99 @@ TEST_F(QuantityTest, DisplayDurationAndModelDiameterKeepExistingStorageUnits) {
         if (button->text() == QStringLiteral("应用外观"))
             button->click();
     EXPECT_DOUBLE_EQ(applied, 17);
+}
+TEST_F(QuantityTest, FrameSwitchAndItrfInputUseFullPositionVelocityTransform) {
+    const auto frames = runtime::make_frame_provider();
+    const auto eop = runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+    OrbitInput input;
+    input.initial.epoch =
+        runtime::make_builtin_time_provider()->from_utc({2026, 10, 9, 0, 0, 0, 0});
+    OrbitEditor editor(input);
+    editor.transform_state = [&](core::CartesianState state, core::FrameId frame) {
+        const auto transform = frames->gcrf_to_itrf_state(state.epoch, eop->at(state.epoch));
+        return frame == core::FrameId::itrf ? transform.apply(state) : transform.inverse(state);
+    };
+    editor.findChild<QComboBox *>("initialReferenceFrame")->setCurrentIndex(1);
+    EXPECT_EQ(editor.findChild<QComboBox *>("stateRepresentation")->currentIndex(), 0);
+    const auto transform =
+        frames->gcrf_to_itrf_state(input.initial.epoch, eop->at(input.initial.epoch));
+    auto expected_fixed = transform.apply(input.initial);
+    EXPECT_NEAR(field(editor, "positionX").value(Unit::metre), expected_fixed.position_m[0], 1e-6);
+    EXPECT_NEAR(field(editor, "velocityY").value(Unit::metres_per_second),
+                expected_fixed.velocity_mps[1], 1e-8);
+    // Editing fixed-frame velocity must include the Earth rotation term on submission.
+    field(editor, "velocityY").set_value(1000, Unit::metres_per_second);
+    expected_fixed.velocity_mps[1] = 1000;
+    std::optional<OrbitInput> submitted;
+    editor.apply = [&](OrbitInput result) { submitted = result; };
+    editor.submit();
+    ASSERT_TRUE(submitted);
+    const auto expected = transform.inverse(expected_fixed);
+    EXPECT_EQ(submitted->input_frame, core::FrameId::itrf);
+    for (std::size_t k = 0; k < 3; ++k) {
+        EXPECT_NEAR(submitted->initial.position_m[k], expected.position_m[k], 1e-6);
+        EXPECT_NEAR(submitted->initial.velocity_mps[k], expected.velocity_mps[k], 1e-8);
+    }
+    editor.set_input(*submitted);
+    EXPECT_EQ(editor.findChild<QComboBox *>("initialReferenceFrame")->currentIndex(), 1);
+    editor.set_state_mode(1);
+    EXPECT_EQ(editor.findChild<QComboBox *>("initialReferenceFrame")->currentIndex(), 0);
+    submitted.reset();
+    editor.submit();
+    ASSERT_TRUE(submitted);
+    for (std::size_t k = 0; k < 3; ++k)
+        EXPECT_NEAR(submitted->initial.position_m[k], expected.position_m[k], .001);
+}
+TEST_F(QuantityTest, FailedFrameSwitchRetainsTheOriginalDraft) {
+    OrbitEditor editor(OrbitInput{});
+    const double original = field(editor, "semiMajorAxis").value(Unit::metre);
+    editor.transform_state = [](core::CartesianState, core::FrameId) -> core::CartesianState {
+        throw std::out_of_range("No EOP coverage");
+    };
+    editor.findChild<QComboBox *>("initialReferenceFrame")->setCurrentIndex(1);
+    EXPECT_EQ(editor.findChild<QComboBox *>("initialReferenceFrame")->currentIndex(), 0);
+    EXPECT_EQ(editor.findChild<QComboBox *>("stateRepresentation")->currentIndex(), 1);
+    EXPECT_DOUBLE_EQ(field(editor, "semiMajorAxis").value(Unit::metre), original);
+}
+TEST_F(QuantityTest, J2MeanAnomalySettingsAndReopeningKeepTheirMeaning) {
+    OrbitEditor editor(OrbitInput{});
+    editor.findChild<QComboBox *>("orbitPropagator")->setCurrentIndex(1);
+    field(editor, "meanAnomaly").set_value(90, Unit::degree);
+    QTimer::singleShot(0, &editor, [&] {
+        auto *dialog = editor.findChild<QDialog *>("propagatorSettingsDialog");
+        ASSERT_NE(dialog, nullptr);
+        dialog->findChild<QCheckBox *>("j2ApsidalPrecession")->setChecked(false);
+        dialog->findChild<QuantityEditor *>("propagationDisplayStep")->set_value(30, Unit::second);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    editor.open_propagator_settings();
+    std::optional<OrbitInput> submitted;
+    editor.apply = [&](OrbitInput result) { submitted = result; };
+    editor.submit();
+    ASSERT_TRUE(submitted);
+    EXPECT_EQ(submitted->propagator, OrbitPropagator::j2_secular);
+    EXPECT_FALSE(submitted->j2.apsidal_precession);
+    EXPECT_TRUE(submitted->j2.node_precession);
+    EXPECT_EQ(submitted->step_seconds, 30);
+    const auto mean = runtime::j2_mean_ellipse_elements(submitted->initial);
+    EXPECT_NEAR(mean.mean_anomaly_rad, std::numbers::pi / 2, 1e-13);
+    editor.set_input(*submitted);
+    EXPECT_NEAR(field(editor, "meanAnomaly").value(Unit::degree), 90, 1e-10);
+    QTimer::singleShot(0, &editor, [&] {
+        auto *dialog = editor.findChild<QDialog *>("propagatorSettingsDialog");
+        ASSERT_NE(dialog, nullptr);
+        EXPECT_FALSE(dialog->findChild<QCheckBox *>("j2ApsidalPrecession")->isChecked());
+        dialog->findChild<QCheckBox *>("j2ApsidalPrecession")->setChecked(true);
+        dialog->findChild<QuantityEditor *>("propagationDisplayStep")->set_value(10, Unit::second);
+        dialog->reject();
+    });
+    editor.open_propagator_settings();
+    editor.submit();
+    EXPECT_FALSE(submitted->j2.apsidal_precession);
+    EXPECT_EQ(submitted->step_seconds, 30);
+    editor.findChild<QComboBox *>("orbitPropagator")->setCurrentIndex(0);
+    EXPECT_NE(editor.findChild<QuantityEditor *>("trueAnomaly"), nullptr);
+    editor.submit();
+    EXPECT_EQ(submitted->propagator, OrbitPropagator::two_body);
 }
 } // namespace orbitforge::desktop

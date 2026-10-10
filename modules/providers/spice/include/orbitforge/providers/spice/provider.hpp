@@ -2,6 +2,8 @@
 #include <filesystem>
 #include <memory>
 #include <orbitforge/core/ephemeris/ephemeris_provider.hpp>
+#include <orbitforge/core/propagation/central_body.hpp>
+#include <orbitforge/core/propagation/j2_mean_elements.hpp>
 #include <orbitforge/core/propagation/keplerian_elements.hpp>
 #include <orbitforge/core/propagation/state_provider.hpp>
 #include <orbitforge/core/units/quantities.hpp>
@@ -20,4 +22,11 @@ make_two_body(core::CartesianState initial, core::GravitationalParameter mu);
                                                 core::GravitationalParameter mu);
 [[nodiscard]] core::KeplerianElements to_keplerian(core::CartesianState state,
                                                    core::GravitationalParameter mu);
+[[nodiscard]] core::CartesianState j2_mean_ellipse_state(core::J2MeanElements elements,
+                                                         const core::CentralBody &body);
+[[nodiscard]] core::J2MeanElements j2_mean_ellipse_elements(core::CartesianState auxiliary_state,
+                                                            const core::CentralBody &body);
+[[nodiscard]] std::shared_ptr<const core::IStateProvider> make_j2(core::J2MeanElements initial,
+                                                                  const core::CentralBody &body,
+                                                                  core::J2SecularOptions options);
 } // namespace orbitforge::providers::spice

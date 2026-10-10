@@ -20,12 +20,14 @@
 #include <QAction>
 #include <QApplication>
 #include <QCalendarWidget>
+#include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDateEdit>
 #include <QDateTime>
 #include <QDateTimeEdit>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
@@ -430,6 +432,24 @@ class Workbench final : public QMainWindow {
                 object_dock->setMinimumWidth(200);
             if (!benchmarking_ && runtime::two_body_available()) {
                 editor_ = new OrbitEditor(OrbitInput{});
+                editor_->transform_state = [this](core::CartesianState state, core::FrameId frame) {
+                    if (state.frame == frame)
+                        return state;
+                    for (const auto &source : {eop_, eop_current_, eop_history_}) {
+                        if (!source)
+                            continue;
+                        const auto &coverage = source->data_info();
+                        if (state.epoch.tai_nanoseconds() <
+                                coverage.first_epoch.tai_nanoseconds() ||
+                            state.epoch.tai_nanoseconds() > coverage.last_epoch.tai_nanoseconds())
+                            continue;
+                        const auto transform =
+                            frames_->gcrf_to_itrf_state(state.epoch, source->at(state.epoch));
+                        return frame == core::FrameId::itrf ? transform.apply(state)
+                                                            : transform.inverse(state);
+                    }
+                    throw std::out_of_range("初始历元超出已安装的地球定向数据范围。");
+                };
                 properties_dialog_ = new QDialog(this, Qt::Window);
                 properties_dialog_->setAttribute(Qt::WA_QuitOnClose, false);
                 properties_dialog_->setWindowTitle(QStringLiteral("对象属性"));
@@ -1667,8 +1687,7 @@ class Workbench final : public QMainWindow {
         const auto eop = eop_;
         candidate_ = std::async(std::launch::async, [this, input = std::move(input), revision,
                                                      cache, eop, cancel = cancellation_] {
-            auto session = runtime::make_two_body_session(
-                input.initial, core::GravitationalParameter{input.mu}, input.object_id, revision);
+            auto session = make_orbit_session(input, revision);
             return prepare_orbit_scene(input, std::move(session), *frames_, *eop, *cancel, cache);
         });
         editor_->set_busy(true);
@@ -2409,8 +2428,7 @@ class Workbench final : public QMainWindow {
                     input.initial.position_m = {7e6 * std::cos(angle), 7e6 * std::sin(angle), 0};
                     input.initial.velocity_mps = {-6200 * std::sin(angle), 6200 * std::cos(angle),
                                                   5300};
-                    auto session = runtime::make_two_body_session(
-                        input.initial, core::GravitationalParameter{input.mu}, input.object_id, 1);
+                    auto session = make_orbit_session(input, 1);
                     orbits.push_back(
                         prepare_orbit_scene(input, std::move(session), *frames_, *eop_, *cancel));
                 }
@@ -3701,7 +3719,7 @@ class Workbench final : public QMainWindow {
                 // Unit changes are a draft; restore the actual orbit value before later checks.
                 angle->set_value(
                     runtime::to_keplerian(orbit_->input.initial,
-                                          core::GravitationalParameter{orbit_->input.mu})
+                                          core::GravitationalParameter{orbit_->input.mu()})
                         .raan_rad,
                     Unit::radian);
             }
@@ -4012,9 +4030,76 @@ class Workbench final : public QMainWindow {
             ++orbit_smoke_stage_;
             break;
         }
-        case 68:
+        case 68: {
             if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
                 return;
+            smoke_cache_ = orbit_;
+            set_selection(0);
+            slots_[1]->dock->hide();
+            open_properties();
+            auto *frame = editor_->findChild<QComboBox *>("initialReferenceFrame");
+            require(frame && !editor_->findChild<QuantityEditor *>("gravitationalParameter"),
+                    "Satellite properties must select a frame and inherit the body's mu");
+            frame->setCurrentIndex(1);
+            const auto &initial = orbit_->input.initial;
+            const auto expected =
+                frames_->gcrf_to_itrf_state(initial.epoch, eop_->at(initial.epoch)).apply(initial);
+            require(frame->currentIndex() == 1 &&
+                        std::abs(editor_->findChild<QuantityEditor *>("velocityY")
+                                     ->value(Unit::metres_per_second) -
+                                 expected.velocity_mps[1]) < 1e-6,
+                    "The initial ITRF state did not include the velocity rotation term");
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
+            save_workbench_image("initial-state-itrf.png");
+            frame->setCurrentIndex(0);
+            editor_->set_state_mode(1);
+            editor_->findChild<QComboBox *>("orbitPropagator")->setCurrentIndex(1);
+            require(editor_->findChild<QuantityEditor *>("meanAnomaly"),
+                    "J2 input must identify the mean anomaly");
+            QTimer::singleShot(0, editor_, [this, require] {
+                auto *dialog = editor_->findChild<QDialog *>("propagatorSettingsDialog");
+                require(dialog, "J2 settings did not open");
+                dialog->findChild<QCheckBox *>("j2ApsidalPrecession")->setChecked(false);
+                require(dialog->grab().save(smoke_dir_ + "/j2-settings.png"),
+                        "Cannot capture J2 settings");
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            });
+            timer_.stop();
+            editor_->open_propagator_settings();
+            timer_.start();
+            editor_->submit();
+            record("initial-state-frame-conversion-and-j2-settings");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 69:
+            require(last_orbit_outcome_ == "applied" &&
+                        orbit_->input.propagator == OrbitPropagator::j2_secular &&
+                        !orbit_->input.j2.apsidal_precession &&
+                        orbit_->max_inertial_check_error_m <= 1 &&
+                        orbit_->session.provenance().algorithm.find("apsis=0") != std::string::npos,
+                    "Configured J2 propagation was not published");
+            save_workbench_image("j2-properties.png");
+            properties_dialog_->close();
+            slots_[1]->dock->show();
+            fit_views();
+            smoke_wait_frame_ = frame_count_ + 3;
+            ++orbit_smoke_stage_;
+            break;
+        case 70:
+            if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
+                return;
+            save_workbench_image("j2-orbit.png");
+            record("publish-j2-trajectory-with-validated-display-cache");
+            editor_->set_input(smoke_cache_->input);
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        case 71:
+            require(last_orbit_outcome_ == "applied" &&
+                        orbit_->input.propagator == OrbitPropagator::two_body,
+                    "Could not switch back from J2 to two-body propagation");
+            record("switch-propagator-back-to-two-body");
             orbit_capture_ = false;
             ++orbit_smoke_stage_;
             break;
@@ -4264,7 +4349,7 @@ class Workbench final : public QMainWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 69;
+    static constexpr int orbit_smoke_complete = 72;
     std::array<vsg::dvec3, 3> smoke_camera_;
     std::shared_ptr<const OrbitScene> smoke_cache_;
     vsg::RecordAndSubmitTasks smoke_render_tasks_;

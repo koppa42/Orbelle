@@ -12,6 +12,8 @@ from ._native import (
     ephemeris_available, load_spice_snapshot,
     PropagationError, two_body_available, make_two_body_session,
     KeplerianElements, to_cartesian, to_keplerian,
+    CentralBody, central_body, J2MeanElements, J2SecularOptions,
+    j2_mean_ellipse_state, j2_mean_ellipse_elements, make_j2_session,
 )
 
 __all__ = [
@@ -27,5 +29,7 @@ __all__ = [
     "ephemeris_available", "load_spice_snapshot",
     "PropagationError", "two_body_available", "make_two_body_session",
     "KeplerianElements", "to_cartesian", "to_keplerian",
+    "CentralBody", "central_body", "J2MeanElements", "J2SecularOptions",
+    "j2_mean_ellipse_state", "j2_mean_ellipse_elements", "make_j2_session",
 ]
 
