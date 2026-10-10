@@ -476,15 +476,6 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     extrapolation_note->setWordWrap(true);
     settings_layout->addWidget(extrapolation_note);
     settings_layout->addStretch();
-    auto *expand = new QToolButton;
-    expand->setObjectName("dataCenterDetails");
-    expand->setText(QStringLiteral("来源、文件与校验信息"));
-    expand->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    expand->setCheckable(true);
-    expand->setArrowType(Qt::RightArrow);
-    file_layout->addWidget(expand, 0, Qt::AlignLeft);
-    expand->setChecked(true);
-    expand->setArrowType(Qt::DownArrow);
     auto *technical = new QLabel;
     technical->setObjectName("dataInventoryDetails");
     technical->setTextFormat(Qt::PlainText);
@@ -543,8 +534,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
         state->setVisible(!group);
         facts->setVisible(!group);
         note->setVisible(!group);
-        expand->setVisible(!group);
-        technical->setVisible(!group && expand->isChecked());
+        technical->setVisible(!group);
         if (group) {
             title->setText(QStringLiteral("地球定向参数"));
             data_description->setText(
@@ -682,10 +672,6 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     };
     QObject::connect(move_up, &QToolButton::clicked, &dialog, [&] { move_priority(-1); });
     QObject::connect(move_down, &QToolButton::clicked, &dialog, [&] { move_priority(1); });
-    QObject::connect(expand, &QToolButton::toggled, &dialog, [&](bool visible) {
-        technical->setVisible(visible);
-        expand->setArrowType(visible ? Qt::DownArrow : Qt::RightArrow);
-    });
     QObject::connect(download, &QPushButton::clicked, &dialog, [&] {
         operation_error.clear();
         catalog.start_download({}, *selected());

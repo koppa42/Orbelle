@@ -238,6 +238,9 @@ TEST(DataCenterDialog, GroupedSourcesKeepDownloadStateAndPriorityIndependent) {
             EXPECT_TRUE(overview->viewport()->rect().intersects(
                 QRect(download->mapTo(overview->viewport(), QPoint()), download->size())));
             capture(dialog, "downloaded");
+            pages->setCurrentIndex(2);
+            capture(dialog, "finals-file");
+            pages->setCurrentIndex(0);
             server.hold = false;
             catalog.start_download(server.url());
             ++stage;
@@ -268,6 +271,8 @@ TEST(DataCenterDialog, GroupedSourcesKeepDownloadStateAndPriorityIndependent) {
             EXPECT_TRUE(download->isVisible());
             EXPECT_TRUE(checked->text().contains(QStringLiteral("尚未检查")));
             capture(dialog, "utc");
+            pages->setCurrentIndex(2);
+            capture(dialog, "utc-file");
             list->setCurrentItem(finals);
             server.fail = false;
             server.hold = true;

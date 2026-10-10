@@ -5464,19 +5464,19 @@ class Workbench final : public QMainWindow {
             QTimer::singleShot(0, [&, source] {
                 auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
                 require(dialog != nullptr, "Missing EOP dialog");
-                auto *expand = dialog->findChild<QToolButton *>("dataCenterDetails");
+                auto *details = dialog->findChild<QLabel *>("dataInventoryDetails");
                 auto *automatic = dialog->findChild<QCheckBox *>("dataAutoUpdate");
                 auto *inventory = dialog->findChild<QTreeWidget *>("dataInventory");
                 auto *priority = dialog->findChild<QListWidget *>("eopSourcePriority");
                 auto *pages = dialog->findChild<QTabWidget *>("dataPages");
-                require(
-                    pages && expand && expand->isChecked() && automatic && automatic->isChecked() &&
-                        inventory && inventory->topLevelItemCount() == 2 && priority &&
-                        inventory->topLevelItem(0)->childCount() == 2 && priority->isVisible() &&
-                        !dialog->findChild<QComboBox *>("eopSnapshots") &&
-                        !dialog->findChild<QPushButton *>("setDefaultEop") &&
-                        !dialog->findChild<QPushButton *>("applyEopSnapshot"),
-                    "Data inventory must show current data without version/default controls");
+                require(pages && details && automatic && automatic->isChecked() && inventory &&
+                            inventory->topLevelItemCount() == 2 && priority &&
+                            inventory->topLevelItem(0)->childCount() == 2 &&
+                            priority->isVisible() &&
+                            !dialog->findChild<QComboBox *>("eopSnapshots") &&
+                            !dialog->findChild<QPushButton *>("setDefaultEop") &&
+                            !dialog->findChild<QPushButton *>("applyEopSnapshot"),
+                        "Data inventory must show current data without version/default controls");
                 auto *group = inventory->topLevelItem(0);
                 auto *finals = group->child(0);
                 auto *c04 = group->child(1);

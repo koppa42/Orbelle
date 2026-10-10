@@ -550,7 +550,6 @@ QLabel#dataPriorityNote { color: #a1aec7; padding: 16px; background: #20293b; bo
 QLabel#dataInventoryDetails { color: #a1aec7; font-family: "Consolas"; font-size: 11px; padding: 10px; background: #161c2a; border-radius: 6px; }
 QLabel#dataCenterStatus { color: #b3c5fa; }
 QLabel#dataCenterStatus[warning="true"] { color: #e6c68b; }
-QToolButton#dataCenterDetails { color: #a6b7dd; padding-left: 0; }
 QWidget#dataFooter { background: #171e2c; border-top: 1px solid #2e374b; }
 QFrame#formSection { background: #20283a; border: 1px solid #2e394e; border-radius: 7px; }
 QFrame#choiceCard { background: #20283a; border: 1px solid #354057; border-radius: 8px; }
