@@ -14,6 +14,7 @@ from ._native import (
     KeplerianElements, to_cartesian, to_keplerian,
     CentralBody, central_body, J2MeanElements, J2SecularOptions,
     j2_mean_ellipse_state, j2_mean_ellipse_elements, make_j2_session,
+    Project, ProjectSatellite, ProjectError, OrbitInput, OrbitDisplay, OrbitPropagator, load_project,
 )
 
 __all__ = [
@@ -31,5 +32,6 @@ __all__ = [
     "KeplerianElements", "to_cartesian", "to_keplerian",
     "CentralBody", "central_body", "J2MeanElements", "J2SecularOptions",
     "j2_mean_ellipse_state", "j2_mean_ellipse_elements", "make_j2_session",
+    "Project", "ProjectSatellite", "ProjectError", "OrbitInput", "OrbitDisplay", "OrbitPropagator", "load_project",
 ]
 

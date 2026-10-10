@@ -1,4 +1,4 @@
-add_executable(orbitforge_integration_tests runtime_test.cpp scenario_test.cpp)
+add_executable(orbitforge_integration_tests runtime_test.cpp scenario_test.cpp project_test.cpp)
 target_link_libraries(orbitforge_integration_tests PRIVATE OrbitForge::Runtime GTest::gtest_main)
 target_compile_definitions(orbitforge_integration_tests PRIVATE
     ORBITFORGE_EXPECT_ERFA=$<BOOL:${ORBITFORGE_WITH_ERFA}>

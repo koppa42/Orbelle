@@ -21,6 +21,8 @@ def main() -> int:
     parser.add_argument("--scales", nargs="+", type=float, default=[1.0, 1.5, 2.0])
     parser.add_argument("--benchmark-scenario", type=Path,
                         help="Use the fixed 10k workload; still a validation preflight, not timing")
+    parser.add_argument("--project-fixture", type=Path,
+                        help="Open a Python-created two-body/J2 .orbitforge file in the desktop checks")
     args = parser.parse_args()
     executable = args.executable.resolve(strict=True)
     prefix = args.dependency_prefix.resolve(strict=True)
@@ -55,6 +57,8 @@ def main() -> int:
         command = [str(executable), "--graphics-smoke", str(run_dir)]
         if scenario:
             command += ["--benchmark-scenario", str(scenario)]
+        if args.project_fixture:
+            command += ["--project-smoke-input", str(args.project_fixture.resolve(strict=True))]
         record = {"requested_scale": scale, "command": command}
         try:
             process = subprocess.run(command, env=environment, cwd=executable.parent,

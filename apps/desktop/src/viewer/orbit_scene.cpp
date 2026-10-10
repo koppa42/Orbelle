@@ -4,21 +4,11 @@
 #include <cmath>
 #include <limits>
 #include <orbitforge/runtime/j2.hpp>
+#include <orbitforge/runtime/project.hpp>
 
 namespace orbitforge::desktop {
 application::Session make_orbit_session(const OrbitInput &input, std::uint64_t revision) {
-    const auto &body = core::central_body(input.initial.origin);
-    switch (input.propagator) {
-    case OrbitPropagator::two_body:
-        return runtime::make_two_body_session(input.initial, body.mu, input.object_id, revision);
-    case OrbitPropagator::j2_secular:
-        // Standard J2 includes every first-order secular term. Partial-term options
-        // remain available through the runtime API for diagnostic comparisons only.
-        return runtime::make_j2_session(runtime::j2_mean_ellipse_elements(input.initial),
-                                        core::J2SecularOptions{}, input.object_id, revision,
-                                        body.origin);
-    }
-    throw std::invalid_argument("Unsupported orbit propagator");
+    return runtime::make_orbit_session(input, revision);
 }
 std::shared_ptr<const OrbitScene>
 prepare_orbit_scene(OrbitInput input, application::Session session,

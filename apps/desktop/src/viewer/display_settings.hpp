@@ -5,13 +5,7 @@
 #include <numbers>
 
 namespace orbitforge::desktop {
-struct DisplaySettings {
-    // 0 = one osculating two-body period (one hour for open orbits), 1 = full, 2 = custom.
-    int extent = 0;
-    double past_minutes = 45, future_minutes = 45;
-    bool track_2d = true, labels_2d = true, track_3d = true;
-    bool operator==(const DisplaySettings &) const = default;
-};
+using DisplaySettings = application::OrbitDisplay;
 inline std::pair<core::Epoch, core::Epoch>
 display_interval(const OrbitInput &input, const DisplaySettings &settings, core::Epoch current) {
     const auto first = input.first.tai_nanoseconds(), last = input.last.tai_nanoseconds();

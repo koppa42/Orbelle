@@ -1,6 +1,6 @@
 # OrbitForge
 
-航天任务分析与仿真平台。当前是已批准目录方案的 **P0 工程骨架**，首个产品版本以 P2 轨道与 Access 分析为边界。
+航天任务分析与仿真平台。当前已进入 **P1 轨道工作台开发**，P0 的全部验收项仍待完成；首个产品版本以 P2 轨道与 Access 分析为边界。
 
 ## 当前可运行内容
 
@@ -13,6 +13,7 @@
 - 一阶 J2 长期项解析传播：独立的平均根数类型，CSPICE 求解椭圆；支持长期项设置，速度包含进动导数。卫星属性支持二体/J2 切换及 GCRF/ITRF 初态输入，μ 统一读取中心天体。
 - 经典瞬时根数与 Cartesian 转换：CSPICE `conics_c` / `oscltx_c`；输入 a、e、i、Ω、ω、ν，公开 API 使用米和弧度，桌面使用 km 和度。
 - Scenario 场景：先建立统一分析时段，再插入对象；不可变场景版本保存多个 Session，拒绝重复 ID 和过期修订。
+- `.orbitforge` 项目文件：版本化分段容器、CRC 校验和原子保存；保存二体/J2 输入、对象显示设置与数据版本引用，支持桌面/Python/C++ 互通、保存/另存为/打开及未保存提示。外部模型和 EOP 快照仍为独立依赖，详见[项目文件格式](docs/architecture/project_files.md)。
 - CMake 安装/导出的 C++ SDK、pybind11/scikit-build-core wheel 构建入口。
 - GoogleTest/CTest 核心与集成测试、Python API 测试、安装后的 SDK 消费端案例。
 - Linux x64 无界面 Release、ASan/UBSan 和断网环境中的 SDK / Python wheel 验证入口；已验证 Ubuntu 24.04、GCC 13.3、Python 3.12。
@@ -26,7 +27,7 @@
 - 可选固定万星基准场景：两视图、100 条轨迹、每视图 200 标签、缓存跳转与选中反馈；尚无正式渲染性能测试结果。
 - 可选无界面计算基准：批量状态生成、完整参考系变换、CSPICE 单次/批量查询与上下文切换，保存逐轮计时及数值检查。
 
-基础 Qt 窗口显示示例状态表；`desktop-graphics` 提供场景工作台，操作说明见[场景与属性工作流](docs/architecture/scenario_workbench.md)。时间/参考系通过 Orekit 独立天文级数交叉校验，星历通过 jplephem 读取原始 DE440s 的独立实现对照。尚无日内 EOP 潮汐改正、TEME、SGP4、事件/Access、场景文件保存、HDF5 结果存储或通用分析任务系统。便携包为开发预览，P0 的全部退出条件和 P1/P2 尚未完成。
+基础 Qt 窗口显示示例状态表；`desktop-graphics` 提供场景工作台，操作说明见[场景与属性工作流](docs/architecture/scenario_workbench.md)。时间/参考系通过 Orekit 独立天文级数交叉校验，星历通过 jplephem 读取原始 DE440s 的独立实现对照。尚无日内 EOP 潮汐改正、TEME、SGP4、事件/Access、HDF5 结果存储或通用分析任务系统。便携包为开发预览，P0 的全部退出条件和 P1/P2 尚未完成。
 
 ## 快速构建
 
@@ -71,6 +72,8 @@ C++ SDK 由模块安装生成。Python 构建入口 `pyproject.toml` 放在仓�
 - [CSPICE 星历与时间接口](docs/architecture/spice.md)
 - [图形集成约定](docs/architecture/graphics.md)
 - [场景与属性工作流](docs/architecture/scenario_workbench.md)
+- [项目文件格式与桌面/Python 互通](docs/architecture/project_files.md)
+- [项目保存与打开验证](docs/validation/project_files_2026_10_10.md)
 - [二体与场景工作台验证记录](docs/validation/p1_two_body_workbench.md)
 - [时间轴交互与便携包验证](docs/validation/timeline_2026_10_09.md)
 - [工作区、视图与按需缓存验证](docs/validation/workspace_views_2026_10_10.md)

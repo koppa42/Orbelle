@@ -5,6 +5,7 @@
 #include "mission_timeline.hpp"
 #include "orbit_editor.hpp"
 #include "orbit_scene.hpp"
+#include "project_scene.hpp"
 #include "quantity_editor.hpp"
 #include "satellite_model.hpp"
 #include "scenario_dialog.hpp"
@@ -36,6 +37,7 @@
 #include <QEventLoop>
 #include <QExposeEvent>
 #include <QFile>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QFontInfo>
 #include <QFormLayout>
@@ -342,12 +344,28 @@ class Workbench final : public QMainWindow {
                 new_action_->setShortcut(QKeySequence("Ctrl+N"));
                 connect(new_action_, &QAction::triggered, this, [this] { create_scenario(); });
                 scene_menu_->addAction(new_action_);
+                open_action_ = commands_->addAction(QStringLiteral("打开"));
+                open_action_->setShortcut(QKeySequence::Open);
+                open_action_->setObjectName("openProject");
+                connect(open_action_, &QAction::triggered, this, [this] { choose_project(); });
+                scene_menu_->addAction(open_action_);
+                save_action_ = commands_->addAction(QStringLiteral("保存"));
+                save_action_->setShortcut(QKeySequence::Save);
+                save_action_->setObjectName("saveProject");
+                save_action_->setToolTip(QStringLiteral("保存已应用的场景和对象属性"));
+                connect(save_action_, &QAction::triggered, this,
+                        [this] { (void)save_project_dialog(false); });
+                scene_menu_->addAction(save_action_);
+                save_as_action_ = scene_menu_->addAction(QStringLiteral("另存为…"));
+                save_as_action_->setShortcut(QKeySequence::SaveAs);
+                connect(save_as_action_, &QAction::triggered, this,
+                        [this] { (void)save_project_dialog(true); });
                 example_action_ = scene_menu_->addAction(QStringLiteral("打开二体示例"));
                 connect(example_action_, &QAction::triggered, this, [this] { open_example(); });
                 scene_menu_->addSeparator();
                 insert_action_ = commands_->addAction(workbench_icon(WorkbenchIcon::satellite),
                                                       QStringLiteral("插入对象"));
-                insert_action_->setShortcut(QKeySequence("Ctrl+Shift+S"));
+                insert_action_->setShortcut(QKeySequence("Ctrl+Shift+I"));
                 connect(insert_action_, &QAction::triggered, this,
                         [this] { show_insert_objects(); });
                 insert_menu_->addAction(insert_action_);
@@ -481,6 +499,7 @@ class Workbench final : public QMainWindow {
                         auto &satellite = satellites_.at(*editor_target_);
                         (void)display_interval(*satellite.orbit, settings, snapshot_.epoch);
                         satellite.display = settings;
+                        mark_project_dirty();
                         update_satellite();
                         statusBar()->showMessage(QStringLiteral("已应用显示设置，将按需更新轨迹"),
                                                  5000);
@@ -766,6 +785,7 @@ class Workbench final : public QMainWindow {
             }
             connect(slider_, &QSlider::valueChanged, this, [this](int value) {
                 seconds_ = benchmarking_ ? value : duration_seconds() * value / 10000.0;
+                precise_epoch_.reset();
                 requested_time_ = true;
                 clock_.restart();
             });
@@ -869,6 +889,20 @@ class Workbench final : public QMainWindow {
     }
     ~Workbench() override { shutdown(); }
     void closeEvent(QCloseEvent *event) override {
+        if (!benchmarking_ && smoke_dir_.isEmpty() && !profile_) {
+            if (busy()) {
+                if (project_candidate_.valid() && project_cancellation_)
+                    project_cancellation_->store(true);
+                event->ignore();
+                statusBar()->showMessage(QStringLiteral("请等待当前操作完成，或先取消轨道计算。"),
+                                         5000);
+                return;
+            }
+            if (!confirm_replace_scenario()) {
+                event->ignore();
+                return;
+            }
+        }
         if (properties_dialog_)
             properties_dialog_->close();
         if (scenario_properties_)
@@ -884,6 +918,10 @@ class Workbench final : public QMainWindow {
             cancellation_->store(true);
         if (display_cancellation_)
             display_cancellation_->store(true);
+        if (project_cancellation_)
+            project_cancellation_->store(true);
+        if (project_candidate_.valid())
+            project_candidate_.wait();
         if (candidate_.valid())
             candidate_.wait();
         if (display_candidate_.valid())
@@ -1160,12 +1198,22 @@ class Workbench final : public QMainWindow {
                : scenario_   ? scenario_->last().seconds_since(scenario_->first())
                              : 1;
     }
-    bool busy() const { return candidate_.valid() || model_candidate_.valid(); }
+    bool busy() const {
+        return candidate_.valid() || model_candidate_.valid() || project_candidate_.valid();
+    }
     void update_actions() {
         if (benchmarking_)
             return;
         const bool active = scenario_.has_value();
         const bool idle = !busy();
+        if (cancel_project_button_)
+            cancel_project_button_->setVisible(project_candidate_.valid());
+        if (open_action_)
+            open_action_->setEnabled(idle);
+        if (save_action_)
+            save_action_->setEnabled(active && idle);
+        if (save_as_action_)
+            save_as_action_->setEnabled(active && idle);
         if (new_action_)
             new_action_->setEnabled(idle);
         if (example_action_)
@@ -1206,13 +1254,244 @@ class Workbench final : public QMainWindow {
                 return i;
         return std::nullopt;
     }
-    bool confirm_replace_scenario() {
-        if (!scenario_ || satellites_.empty())
+    void mark_project_dirty(bool dirty = true) {
+        project_dirty_ = dirty;
+        if (scenario_) {
+            const auto filename = project_path_.isEmpty() ? QStringLiteral("未保存")
+                                                          : QFileInfo(project_path_).fileName();
+            setWindowTitle(QString::fromStdString(scenario_->name()) + QStringLiteral(" · ") +
+                           filename + QStringLiteral("[*] · OrbitForge"));
+        }
+        setWindowModified(dirty);
+    }
+    application::Project project_snapshot(const QString &destination) const {
+        if (!scenario_)
+            throw application::ProjectError("No active project");
+        application::Project project{scenario_->name(), scenario_->first(), scenario_->last()};
+        project.current = snapshot_.epoch;
+        project.earth_orientation = eop_->data_info();
+        const QDir directory(QFileInfo(destination).absolutePath());
+        for (const auto &satellite : satellites_) {
+            application::ProjectSatellite object;
+            object.orbit = satellite.orbit->input;
+            object.display = satellite.display;
+            object.model_kind = satellite.model_kind;
+            object.model_diameter_m = satellite.model_diameter_km * 1000;
+            if (object.model_kind == 2)
+                object.model_path =
+                    directory.relativeFilePath(QFileInfo(satellite.model_path).absoluteFilePath())
+                        .toStdString();
+            project.satellites.push_back(std::move(object));
+        }
+        return project;
+    }
+    void save_project_to(const QString &path) {
+        const auto absolute = QFileInfo(path).absoluteFilePath();
+        application::save_project(std::filesystem::path(absolute.toStdWString()),
+                                  project_snapshot(absolute), true);
+        project_path_ = absolute;
+        mark_project_dirty(false);
+        statusBar()->showMessage(QStringLiteral("已保存：%1").arg(project_path_), 6000);
+    }
+    bool save_project_dialog(bool save_as) {
+        if (!scenario_ || busy())
+            return false;
+        QString path = project_path_;
+        if (save_as || path.isEmpty()) {
+            QFileDialog dialog(this, QStringLiteral("保存项目"));
+            dialog.setAcceptMode(QFileDialog::AcceptSave);
+            dialog.setFileMode(QFileDialog::AnyFile);
+            dialog.setNameFilter(QStringLiteral("OrbitForge 项目 (*.orbitforge)"));
+            dialog.setDefaultSuffix(QStringLiteral("orbitforge"));
+            dialog.selectFile(path.isEmpty() ? QStringLiteral("项目.orbitforge") : path);
+            if (dialog.exec() != QDialog::Accepted)
+                return false;
+            path = dialog.selectedFiles().value(0);
+        }
+        try {
+            save_project_to(path);
             return true;
-        return QMessageBox::question(
-                   this, QStringLiteral("替换当前场景"),
-                   QStringLiteral("当前版本尚未支持场景文件保存。继续将关闭当前场景及其对象。"),
-                   QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel) == QMessageBox::Ok;
+        } catch (const std::exception &error) {
+            QMessageBox::warning(this, QStringLiteral("保存失败"), QString::fromUtf8(error.what()));
+            return false;
+        }
+    }
+    bool confirm_replace_scenario() {
+        if (!scenario_ || !project_dirty_)
+            return true;
+        const auto answer = QMessageBox::question(
+            this, QStringLiteral("保存当前项目？"),
+            QStringLiteral("当前项目有已应用但尚未保存的更改。是否先保存？\n属性页中尚未应用的输入"
+                           "不会写入项目。"),
+            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+        if (answer == QMessageBox::Save)
+            return save_project_dialog(false);
+        return answer == QMessageBox::Discard;
+    }
+    void choose_project() {
+        if (busy())
+            return;
+        const auto path =
+            QFileDialog::getOpenFileName(this, QStringLiteral("打开项目"), project_path_,
+                                         QStringLiteral("OrbitForge 项目 (*.orbitforge)"));
+        if (path.isEmpty())
+            return;
+        try {
+            // Parse before prompting to replace; an invalid file cannot disturb the current
+            // project.
+            auto project = application::load_project(std::filesystem::path(path.toStdWString()));
+            if (confirm_replace_scenario())
+                start_project(std::move(project), path);
+        } catch (const std::exception &error) {
+            QMessageBox::warning(this, QStringLiteral("无法打开项目"),
+                                 QString::fromUtf8(error.what()));
+        }
+    }
+    void start_project(application::Project project, const QString &path) {
+        if (busy())
+            throw std::logic_error("Finish the pending update before opening a project");
+        if (display_cancellation_)
+            display_cancellation_->store(true);
+        pending_project_path_ = QFileInfo(path).absoluteFilePath();
+        if (!cancel_project_button_) {
+            cancel_project_button_ = new QPushButton(QStringLiteral("取消打开"), statusBar());
+            statusBar()->addPermanentWidget(cancel_project_button_);
+            connect(cancel_project_button_, &QPushButton::clicked, this, [this] {
+                if (project_cancellation_)
+                    project_cancellation_->store(true);
+            });
+        }
+        project_cancellation_ = std::make_shared<std::atomic_bool>(false);
+        last_project_outcome_.clear();
+        project_binding_added_ = !project.earth_orientation.has_value();
+        const std::vector<std::shared_ptr<const core::IEarthOrientationProvider>> installed_data{
+            eop_current_, eop_history_};
+        project_candidate_ =
+            std::async(std::launch::async,
+                       [this, project = std::move(project),
+                        source = std::filesystem::path(pending_project_path_.toStdWString()),
+                        installed_data, cancel = project_cancellation_]() mutable {
+                           return prepare_project_scene(std::move(project), source, *frames_,
+                                                        installed_data, *cancel);
+                       });
+        update_actions();
+        statusBar()->showMessage(QStringLiteral("正在打开项目并准备轨迹…"));
+    }
+    void poll_project() {
+        if (!project_candidate_.valid() ||
+            project_candidate_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            return;
+        try {
+            auto candidate = project_candidate_.get();
+            if (project_cancellation_->load())
+                throw OrbitCancelled{};
+            std::vector<Satellite> satellites;
+            auto root = std::make_unique<QTreeWidgetItem>(
+                QStringList{QString::fromStdString(candidate->project.name)});
+            root->setIcon(0, workbench_icon(WorkbenchIcon::earth));
+            auto tracks = vsg::Group::create(), models = vsg::Group::create();
+            for (std::size_t i = 0; i < candidate->orbits.size(); ++i) {
+                Satellite satellite;
+                const auto &config = candidate->project.satellites[i];
+                satellite.orbit = candidate->orbits[i];
+                satellite.display = config.display;
+                satellite.model_kind = config.model_kind;
+                satellite.model_diameter_km = config.model_diameter_m / 1000;
+                satellite.model_path = QString::fromStdString(config.model_path);
+                satellite.model = candidate->models[i];
+                if (satellite.model)
+                    satellite.model_host->addChild(satellite.model);
+                models->addChild(satellite.model_host);
+                satellite.fixed_track =
+                    std::make_shared<render_vsg::TrackLayer>(satellite.orbit->track.nodes());
+                satellite.inertial_track = std::make_shared<render_vsg::TrackLayer>(
+                    satellite.orbit->inertial_track.nodes());
+                satellite.tracks = vsg::Switch::create();
+                satellite.tracks->addChild(true, satellite.inertial_track->node());
+                satellite.tracks->addChild(true, satellite.fixed_track->node());
+                tracks->addChild(satellite.tracks);
+                satellite.item = new QTreeWidgetItem(
+                    root.get(), {QString::fromStdString(config.orbit.object_id)});
+                satellite.item->setIcon(
+                    0, workbench_icon(WorkbenchIcon::satellite, QColor("#78a4c9")));
+                satellites.push_back(std::move(satellite));
+            }
+            const auto previous_tracks = orbit_group_->children,
+                       previous_models = model_group_->children;
+            begin_change();
+            try {
+                orbit_group_->children = tracks->children;
+                model_group_->children = models->children;
+                rebuild();
+            } catch (...) {
+                orbit_group_->children = previous_tracks;
+                model_group_->children = previous_models;
+                rebuild();
+                throw;
+            }
+            if (properties_dialog_)
+                properties_dialog_->close();
+            if (scenario_properties_)
+                scenario_properties_->close();
+            satellites_ = std::move(satellites);
+            scenario_ = std::move(candidate->scenario);
+            eop_ = candidate->eop;
+            sun_epoch_.reset();
+            editor_target_.reset();
+            pending_orbit_target_.reset();
+            {
+                const QSignalBlocker block(objects_);
+                objects_->clear();
+                scenario_item_ = root.release();
+                objects_->addTopLevelItem(scenario_item_);
+                scenario_item_->setExpanded(true);
+            }
+            orbit_ = satellites_.empty() ? nullptr : satellites_.front().orbit;
+            object_item_ = satellites_.empty() ? nullptr : satellites_.front().item;
+            model_node_ = satellites_.empty() ? vsg::ref_ptr<vsg::MatrixTransform>{}
+                                              : satellites_.front().model;
+            model_kind_ = satellites_.empty() ? 0 : satellites_.front().model_kind;
+            model_diameter_km_ = satellites_.empty() ? 1000 : satellites_.front().model_diameter_km;
+            ground_map_->publish_tracks(std::move(candidate->ground_tracks));
+            ground_map_->reset_view();
+            workspace_label_->setText(QString::fromStdString(scenario_->name()));
+            workspace_label_->setToolTip(workspace_label_->text());
+            set_selection(std::nullopt);
+            set_playing(false);
+            seek_epoch(candidate->project.current);
+            snapshot_ = sample_frame(candidate->project.current);
+            satellite_state_dirty_ = true;
+            update_satellite();
+            selection_->update({snapshot_.epoch, snapshot_.frame, snapshot_.origin, {}});
+            for (auto &slot : slots_)
+                slot->pick_candidates.clear();
+            workspace_pages_->setCurrentIndex(0);
+            workspace_->select_view(0);
+            object_dock_->show();
+            fit_pending_ = true;
+            show_timeline_status();
+            if (timeline_)
+                timeline_->reset_view();
+            project_path_ = pending_project_path_;
+            mark_project_dirty(project_binding_added_);
+            last_project_outcome_ = "opened";
+            statusBar()->showMessage(QStringLiteral("已打开：%1").arg(project_path_), 6000);
+        } catch (const OrbitCancelled &) {
+            last_project_outcome_ = "cancelled";
+            statusBar()->showMessage(QStringLiteral("已取消打开；继续显示原场景。"), 5000);
+        } catch (const std::exception &error) {
+            last_project_outcome_ = "rejected";
+            statusBar()->showMessage(
+                QStringLiteral("项目未打开：%1").arg(QString::fromUtf8(error.what())));
+            if (smoke_dir_.isEmpty())
+                QMessageBox::warning(this, QStringLiteral("项目未打开"),
+                                     QString::fromUtf8(error.what()));
+        } catch (const vsg::Exception &error) {
+            last_project_outcome_ = "rejected";
+            statusBar()->showMessage(
+                QStringLiteral("项目图形准备失败：%1").arg(QString::fromStdString(error.message)));
+        }
+        update_actions();
     }
     void create_scenario() {
         if (busy())
@@ -1284,6 +1563,8 @@ class Workbench final : public QMainWindow {
         workspace_label_->setText(QString::fromStdString(scenario_->name()));
         workspace_label_->setToolTip(workspace_label_->text());
         setWindowTitle(QString::fromStdString(scenario_->name()) + QStringLiteral(" · OrbitForge"));
+        project_path_.clear();
+        mark_project_dirty();
         set_selection(std::nullopt);
         set_playing(false);
         seek_epoch(scenario_->first());
@@ -1364,6 +1645,8 @@ class Workbench final : public QMainWindow {
     }
     void set_playing(bool value) {
         playing_ = value;
+        if (value)
+            precise_epoch_.reset();
         if (play_action_) {
             play_action_->setText(value ? QStringLiteral("暂停") : QStringLiteral("播放"));
             play_action_->setIcon(
@@ -1376,6 +1659,7 @@ class Workbench final : public QMainWindow {
             epoch.tai_nanoseconds() > scenario_->last().tai_nanoseconds())
             throw std::out_of_range("Requested display epoch lies outside the analysis interval");
         seconds_ = epoch.seconds_since(scenario_->first());
+        precise_epoch_ = epoch;
         requested_time_ = true;
         const QSignalBlocker block(slider_);
         slider_->setValue(qRound(seconds_ / duration_seconds() * 10000));
@@ -1638,6 +1922,7 @@ class Workbench final : public QMainWindow {
             satellite.model_kind = pending_model_kind_;
             satellite.model_diameter_km = pending_model_diameter_km_;
             satellite.model_path = pending_model_path_;
+            mark_project_dirty();
             if (pending_model_target_ == 0) {
                 model_node_ = satellite.model;
                 model_kind_ = satellite.model_kind;
@@ -1769,6 +2054,7 @@ class Workbench final : public QMainWindow {
                 scenario_item_->setExpanded(true);
             }
             scenario_ = std::move(next_scenario);
+            mark_project_dirty();
             if (pending_orbit_target_)
                 ground_map_->replace_track(index, std::move(ground_tracks.front()));
             else
@@ -1790,6 +2076,7 @@ class Workbench final : public QMainWindow {
             for (auto &slot : slots_)
                 slot->pick_candidates.clear();
             seconds_ = 0;
+            precise_epoch_.reset();
             requested_time_ = true;
             const QSignalBlocker block(slider_);
             slider_->setValue(0);
@@ -2237,6 +2524,10 @@ class Workbench final : public QMainWindow {
                 create->setMinimumWidth(200);
                 connect(create, &QPushButton::clicked, new_action_, &QAction::trigger);
                 welcome_layout->addWidget(create, 0, Qt::AlignHCenter);
+                auto *open = new QPushButton(QStringLiteral("打开项目…"));
+                open->setMinimumWidth(200);
+                connect(open, &QPushButton::clicked, open_action_, &QAction::trigger);
+                welcome_layout->addWidget(open, 0, Qt::AlignHCenter);
                 auto *example = new QPushButton(QStringLiteral("打开二体示例"));
                 example->setMinimumWidth(200);
                 connect(example, &QPushButton::clicked, example_action_, &QAction::trigger);
@@ -2581,6 +2872,7 @@ class Workbench final : public QMainWindow {
         const ProfileScope profile("frame_cpu_ms");
         poll_orbit();
         poll_model();
+        poll_project();
         poll_display_cache();
         if (!benchmarking_ && !smoke_dir_.isEmpty())
             scenario_smoke_step();
@@ -2648,8 +2940,11 @@ class Workbench final : public QMainWindow {
             slider_->blockSignals(false);
         }
         requested_time_ = false;
-        const core::Epoch epoch((benchmarking_ ? 0 : scenario_->first().tai_nanoseconds()) +
-                                static_cast<std::int64_t>(std::llround(seconds_ * 1e9)));
+        const core::Epoch epoch =
+            !benchmarking_ && !playing_ && precise_epoch_
+                ? *precise_epoch_
+                : core::Epoch((benchmarking_ ? 0 : scenario_->first().tai_nanoseconds()) +
+                              static_cast<std::int64_t>(std::llround(seconds_ * 1e9)));
         if (benchmarking_ || satellite_state_dirty_ || snapshot_.epoch != epoch) {
             snapshot_ = sample_frame(epoch);
             update_satellite();
@@ -3129,8 +3424,8 @@ class Workbench final : public QMainWindow {
             interaction_report_.append(QJsonObject{
                 {"kind", kind},
                 {"passed", true},
-                {"revision",
-                 static_cast<qint64>(orbit_->track.samples().provenance().input_revision)},
+                {"revision", static_cast<qint64>(
+                                 orbit_ ? orbit_->track.samples().provenance().input_revision : 0)},
                 {"rendered_tai_ns", QString::number(snapshot_.epoch.tai_nanoseconds())}});
         };
         const auto caches_ready = [&] {
@@ -3147,7 +3442,7 @@ class Workbench final : public QMainWindow {
                     return true;
             return false;
         };
-        auto input = orbit_->input;
+        auto input = orbit_ ? orbit_->input : OrbitInput{};
         switch (orbit_smoke_stage_) {
         case 0:
             // Start below the south pole to cover the former north-facing camera assumption.
@@ -4199,6 +4494,130 @@ class Workbench final : public QMainWindow {
                     "Could not switch back from J2 to two-body propagation");
             record("switch-propagator-back-to-two-body");
             orbit_capture_ = false;
+            begin_insert_satellite();
+            input = satellites_.front().orbit->input;
+            input.object_id = "ProjectJ2";
+            input.propagator = OrbitPropagator::j2_secular;
+            start_orbit(input);
+            ++orbit_smoke_stage_;
+            break;
+        case 72:
+            require(last_orbit_outcome_ == "applied" && satellites_.size() == 2 &&
+                        satellites_[1].orbit->input.propagator == OrbitPropagator::j2_secular,
+                    "Project test did not create two different propagators");
+            satellites_[1].display.extent = 2;
+            satellites_[1].display.past_minutes = 12.5;
+            satellites_[1].display.future_minutes = 6.25;
+            satellites_[1].display.labels_2d = false;
+            start_model(1, {}, 250);
+            ++orbit_smoke_stage_;
+            break;
+        case 73: {
+            require(last_model_outcome_ == "applied" && project_dirty_,
+                    "Project changes were not marked unsaved");
+            set_playing(false);
+            const core::Epoch epoch{scenario_->first().tai_nanoseconds() + 123'456'789'123};
+            seek_epoch(epoch);
+            snapshot_ = sample_frame(epoch);
+            update_satellite();
+            const auto path = smoke_dir_ + QStringLiteral("/项目.orbitforge");
+            save_project_to(path);
+            require(!project_dirty_, "Successful save did not clear the modified marker");
+            smoke_project_bytes_ = application::encode_project(project_snapshot(path));
+            auto saved = application::load_project(std::filesystem::path(path.toStdWString()));
+            require(saved.current == epoch, "Saved current time lost nanoseconds");
+            start_project(std::move(saved), path);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 74: {
+            require(last_project_outcome_ == "opened" && !project_dirty_ &&
+                        satellites_.size() == 2 && satellites_[1].model_kind == 1 &&
+                        satellites_[1].model_diameter_km == 250 &&
+                        !satellites_[1].display.labels_2d &&
+                        satellites_[1].orbit->input.propagator == OrbitPropagator::j2_secular,
+                    "Saved project did not restore objects and display settings");
+            require(application::encode_project(project_snapshot(project_path_)) ==
+                        smoke_project_bytes_,
+                    "Desktop project roundtrip changed its persisted inputs");
+            record("project-save-open-two-body-j2-display-nanoseconds");
+            save_workbench_image("project-restored.png");
+            smoke_cache_ = orbit_;
+            auto wrong_data = project_snapshot(project_path_);
+            wrong_data.earth_orientation->sha256[0] =
+                wrong_data.earth_orientation->sha256[0] == 'a' ? 'b' : 'a';
+            start_project(std::move(wrong_data), project_path_);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 75: {
+            require(last_project_outcome_ == "rejected" && orbit_ == smoke_cache_ &&
+                        satellites_.size() == 2 && !project_dirty_,
+                    "Data mismatch changed the active project");
+            record("project-data-mismatch-preserves-active-scene");
+            auto missing_model = project_snapshot(project_path_);
+            missing_model.satellites[1].model_kind = 2;
+            missing_model.satellites[1].model_path = "missing-project-model.glb";
+            start_project(std::move(missing_model), project_path_);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 76: {
+            require(last_project_outcome_ == "rejected" && orbit_ == smoke_cache_ &&
+                        satellites_.size() == 2,
+                    "A missing external model replaced the active project");
+            record("project-missing-model-preserves-active-scene");
+            mark_project_dirty();
+            QTimer::singleShot(0, [] {
+                if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+                    box->button(QMessageBox::Cancel)->click();
+            });
+            require(!confirm_replace_scenario() && project_dirty_,
+                    "Cancel discarded unsaved changes");
+            QTimer::singleShot(0, [] {
+                if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+                    box->button(QMessageBox::Save)->click();
+            });
+            require(confirm_replace_scenario() && !project_dirty_, "Save-before-replace failed");
+            record("project-unsaved-cancel-and-save");
+            auto empty =
+                application::Project{"Empty project", scenario_->first(), scenario_->last()};
+            empty.earth_orientation = eop_->data_info();
+            start_project(std::move(empty), smoke_dir_ + "/empty.orbitforge");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 77: {
+            require(last_project_outcome_ == "opened" && satellites_.empty() &&
+                        scenario_->objects().empty() && ground_map_->track_count() == 0,
+                    "Empty project did not clear all objects");
+            record("project-open-empty-scene");
+            const auto args = app_.arguments();
+            const auto fixture_index = args.indexOf("--project-smoke-input");
+            const auto path = fixture_index >= 0 ? args.value(fixture_index + 1)
+                                                 : smoke_dir_ + QStringLiteral("/项目.orbitforge");
+            start_project(application::load_project(std::filesystem::path(path.toStdWString())),
+                          path);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 78:
+            require(last_project_outcome_ == "opened" && satellites_.size() == 2 &&
+                        satellites_[0].orbit->input.propagator == OrbitPropagator::two_body &&
+                        satellites_[1].orbit->input.propagator == OrbitPropagator::j2_secular,
+                    "Project interoperability input failed to open");
+            save_project_to(smoke_dir_ + "/desktop-roundtrip.orbitforge");
+            record("project-interoperability-load-and-save");
+            smoke_cache_ = orbit_;
+            start_project(project_snapshot(project_path_), project_path_);
+            project_cancellation_->store(true);
+            ++orbit_smoke_stage_;
+            break;
+        case 79:
+            require(last_project_outcome_ == "cancelled" && orbit_ == smoke_cache_ &&
+                        !project_dirty_,
+                    "Cancelling project preparation changed the current scene");
+            record("project-cancel-open-preserves-current-scene");
             ++orbit_smoke_stage_;
             break;
         }
@@ -4423,6 +4842,13 @@ class Workbench final : public QMainWindow {
     bool all_windows_closed_ = false;
     std::shared_ptr<const OrbitScene> orbit_;
     std::optional<application::Scenario> scenario_;
+    QString project_path_, pending_project_path_, last_project_outcome_;
+    bool project_dirty_ = false, project_binding_added_ = false;
+    std::optional<core::Epoch> precise_epoch_;
+    std::shared_ptr<std::atomic_bool> project_cancellation_;
+    std::future<std::shared_ptr<PreparedProject>> project_candidate_;
+    QAction *open_action_ = nullptr, *save_action_ = nullptr, *save_as_action_ = nullptr;
+    QPushButton *cancel_project_button_ = nullptr;
     std::vector<Satellite> satellites_;
     QTreeWidgetItem *scenario_item_ = nullptr;
     std::optional<std::size_t> editor_target_, pending_orbit_target_;
@@ -4448,7 +4874,8 @@ class Workbench final : public QMainWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 72;
+    static constexpr int orbit_smoke_complete = 80;
+    std::vector<std::uint8_t> smoke_project_bytes_;
     std::array<vsg::dvec3, 3> smoke_camera_;
     std::shared_ptr<const OrbitScene> smoke_cache_;
     vsg::RecordAndSubmitTasks smoke_render_tasks_;

@@ -3,9 +3,17 @@
 #include <orbitforge/application/scenario.hpp>
 #include <orbitforge/runtime/demo.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
+#include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 int main(int argc, char **argv) {
+    const orbitforge::application::Project project("SDK project", orbitforge::core::Epoch{123},
+                                                   orbitforge::core::Epoch{10'000'000'123});
+    const auto restored = orbitforge::application::decode_project(
+        orbitforge::application::encode_project(project));
+    if (restored.first != project.first || restored.last != project.last ||
+        !orbitforge::runtime::make_project_scenario(restored).objects().empty())
+        return 14;
     const orbitforge::application::Scenario empty("SDK mission", orbitforge::core::Epoch{0},
                                                   orbitforge::core::Epoch{10'000'000'000});
     const auto populated = empty.with_object(orbitforge::runtime::make_circular_demo_session());

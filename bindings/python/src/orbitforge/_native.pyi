@@ -367,3 +367,50 @@ def j2_mean_ellipse_elements(auxiliary_state: CartesianState) -> J2MeanElements:
 def make_j2_session(initial: J2MeanElements, object_id: str, options: J2SecularOptions = ...,
                     input_revision: int = 1, body: OriginId = OriginId.EARTH) -> Session: ...
 
+class ProjectError(ValueError): ...
+
+class OrbitPropagator:
+    TWO_BODY: OrbitPropagator
+    J2_SECULAR: OrbitPropagator
+
+class OrbitInput:
+    def __init__(self) -> None: ...
+    initial: CartesianState
+    propagator: OrbitPropagator
+    input_frame: FrameId
+    object_id: str
+    first: Epoch
+    last: Epoch
+    step_seconds: int
+
+class OrbitDisplay:
+    def __init__(self) -> None: ...
+    extent: int
+    past_minutes: float
+    future_minutes: float
+    track_2d: bool
+    labels_2d: bool
+    track_3d: bool
+
+class ProjectSatellite:
+    def __init__(self) -> None: ...
+    orbit: OrbitInput
+    display: OrbitDisplay
+    model_kind: int
+    model_diameter_m: float
+    model_path: str
+
+class Project:
+    def __init__(self, name: str, first: Epoch, last: Epoch) -> None: ...
+    name: str
+    first: Epoch
+    last: Epoch
+    current: Epoch
+    satellites: list[ProjectSatellite]
+    earth_orientation: EopDataInfo | None
+    def add_satellite(self, input: OrbitInput, display: OrbitDisplay = ...) -> None: ...
+    def to_scenario(self) -> Scenario: ...
+    def save(self, path: str | PathLike[str], overwrite: bool = False) -> None: ...
+
+def load_project(path: str | PathLike[str]) -> Project: ...
+
