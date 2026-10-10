@@ -87,6 +87,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     identity->setSpacing(10);
     identity->addWidget(new QLabel(QStringLiteral("对象 ID")));
     object_ = new QLineEdit;
+    object_->setObjectName("objectId");
     object_->setAccessibleName(QStringLiteral("卫星对象 ID"));
     object_->setMaximumWidth(250);
     identity->addWidget(object_);

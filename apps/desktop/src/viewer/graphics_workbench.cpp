@@ -1,6 +1,7 @@
 #include "graphics_workbench.hpp"
 #include "epoch_editor.hpp"
 #include "ground_map.hpp"
+#include "insert_object_dialog.hpp"
 #include "mission_timeline.hpp"
 #include "orbit_editor.hpp"
 #include "orbit_scene.hpp"
@@ -54,6 +55,7 @@
 #include <QPainter>
 #include <QPlatformSurfaceEvent>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QResizeEvent>
 #include <QScreen>
 #include <QScrollArea>
@@ -344,10 +346,10 @@ class Workbench final : public QMainWindow {
                 connect(example_action_, &QAction::triggered, this, [this] { open_example(); });
                 scene_menu_->addSeparator();
                 insert_action_ = commands_->addAction(workbench_icon(WorkbenchIcon::satellite),
-                                                      QStringLiteral("插入卫星"));
+                                                      QStringLiteral("插入对象"));
                 insert_action_->setShortcut(QKeySequence("Ctrl+Shift+S"));
                 connect(insert_action_, &QAction::triggered, this,
-                        [this] { begin_insert_satellite(); });
+                        [this] { show_insert_objects(); });
                 insert_menu_->addAction(insert_action_);
                 auto *space = new QWidget;
                 space->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
@@ -1311,7 +1313,19 @@ class Workbench final : public QMainWindow {
         properties_dialog_->close();
     }
     void show_properties_dialog() { workspace_->open(properties_dialog_); }
-    void begin_insert_satellite() {
+    void show_insert_objects() {
+        if (!scenario_ || !editor_ || busy())
+            return;
+        const auto request = insert_object_dialog(this, QString::fromStdString(scenario_->name()));
+        if (!request)
+            return;
+        switch (request->type) {
+        case InsertObjectType::satellite:
+            begin_insert_satellite(request->method);
+            break;
+        }
+    }
+    void begin_insert_satellite(InsertObjectMethod method = InsertObjectMethod::define_properties) {
         if (!scenario_ || !editor_ || busy())
             return;
         if (satellites_.size() >= 10000) {
@@ -1340,7 +1354,13 @@ class Workbench final : public QMainWindow {
         inspector_pages_->setCurrentIndex(0);
         properties_dialog_->setWindowTitle(QStringLiteral("插入卫星 · ") +
                                            QString::fromStdString(scenario_->name()));
-        show_properties_dialog();
+        insert_defaults_pending_ = method == InsertObjectMethod::defaults;
+        if (insert_defaults_pending_) {
+            properties_dialog_->close();
+            start_orbit(std::move(input));
+        } else {
+            show_properties_dialog();
+        }
     }
     void set_playing(bool value) {
         playing_ = value;
@@ -1792,6 +1812,9 @@ class Workbench final : public QMainWindow {
                                  true);
             last_orbit_outcome_ = "rejected";
         }
+        if (insert_defaults_pending_ && last_orbit_outcome_ == "rejected")
+            show_properties_dialog();
+        insert_defaults_pending_ = false;
         update_actions();
     }
     void request_display_cache() {
@@ -2826,7 +2849,7 @@ class Workbench final : public QMainWindow {
         statusBar()->showMessage(
             benchmarking_ ? QStringLiteral("ITRF · 固定双视图基准场景")
             : satellites_.empty()
-                ? QStringLiteral("空场景  ·  使用“插入卫星”添加第一个对象")
+                ? QStringLiteral("空场景  ·  使用“插入对象”添加第一个对象")
                 : QStringLiteral("就绪  ·  %1")
                       .arg(selected_
                                ? QString::fromStdString(snapshot_.markers.at(*selected_).object_id)
@@ -2871,6 +2894,53 @@ class Workbench final : public QMainWindow {
         QCoreApplication::sendEvent(slot.window, &press);
         QCoreApplication::sendEvent(slot.window, &release);
         injecting_input_ = false;
+    }
+    void smoke_insert_dialog(std::optional<InsertObjectMethod> method,
+                             const QString &screenshot = {}, bool escape = false) {
+        timer_.stop();
+        QString error;
+        bool handled = false;
+        QTimer click_timer;
+        click_timer.setSingleShot(true);
+        connect(&click_timer, &QTimer::timeout, this, [&] {
+            handled = true;
+            auto *dialog = findChild<QDialog *>("insertObjectsDialog");
+            if (!dialog) {
+                error = "Insert objects command did not open the chooser";
+                return;
+            }
+            auto *types = dialog->findChild<QTreeWidget *>("insertObjectTypes");
+            auto *properties = dialog->findChild<QRadioButton *>("insertDefineProperties");
+            auto *defaults = dialog->findChild<QRadioButton *>("insertDefaults");
+            auto *insert = dialog->findChild<QPushButton *>("insertObject");
+            if (!types || !types->currentItem() || !properties || !defaults || !insert ||
+                !properties->isChecked() ||
+                types->currentItem()->data(0, Qt::UserRole).toInt() !=
+                    static_cast<int>(InsertObjectType::satellite)) {
+                error = "Insert objects chooser has no valid initial selection";
+                dialog->reject();
+                return;
+            }
+            if (method == InsertObjectMethod::defaults)
+                defaults->click();
+            if (!screenshot.isEmpty() && !dialog->grab().save(smoke_dir_ + "/" + screenshot))
+                error = "Cannot save insert objects chooser";
+            if (method) {
+                insert->click();
+            } else if (escape) {
+                QKeyEvent key(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+                QCoreApplication::sendEvent(dialog, &key);
+            } else {
+                dialog->findChild<QPushButton *>("closeInsertObjects")->click();
+            }
+        });
+        click_timer.start(0);
+        insert_action_->trigger();
+        timer_.start();
+        if (!handled)
+            throw std::runtime_error("Insert objects command did not enter the chooser");
+        if (!error.isEmpty())
+            throw std::runtime_error(error.toStdString());
     }
     void scenario_smoke_step() {
         const auto require = [](bool condition, const char *message) {
@@ -3004,19 +3074,44 @@ class Workbench final : public QMainWindow {
             smoke_bootstrap_ = 1;
         } else if (smoke_bootstrap_ == 1 && frame_count_ >= 3) {
             save_workbench_image("empty-scenario.png");
-            begin_insert_satellite();
+            smoke_insert_dialog(std::nullopt, "insert-objects.png");
+            require(satellites_.empty() && scenario_->objects().empty() && !busy(),
+                    "Closing the insertion chooser created an object");
+            record("cancel-insert-object-chooser");
+            smoke_insert_dialog(InsertObjectMethod::define_properties);
+            require(workspace_->current_document() == properties_dialog_ && satellites_.empty(),
+                    "Define properties must open an uncommitted workspace draft");
+            record("insert-object-define-properties-in-workspace");
+            auto *id = editor_->findChild<QLineEdit *>("objectId");
+            require(id, "Missing insertion draft object ID");
+            id->setText("UncommittedDraft");
+            smoke_insert_dialog(std::nullopt, {}, true);
+            require(id->text() == "UncommittedDraft" &&
+                        workspace_->current_document() == properties_dialog_ && satellites_.empty(),
+                    "Escape in the chooser changed the existing properties draft");
+            record("escape-insert-chooser-preserves-properties-draft");
             properties_dialog_->close();
             require(satellites_.empty() && scenario_->objects().empty(),
                     "Closing an insertion draft created an object");
             record("close-insert-without-applying");
-            begin_insert_satellite();
-            editor_->submit();
+            smoke_insert_dialog(InsertObjectMethod::defaults, "insert-objects-defaults.png");
+            require(workspace_->current_document() != properties_dialog_,
+                    "Default insertion unnecessarily opened the properties page");
             smoke_bootstrap_ = 2;
         } else if (smoke_bootstrap_ == 2 && !busy()) {
             require(last_orbit_outcome_ == "applied" && satellites_.size() == 1 &&
                         scenario_->objects().size() == 1 && selected_ == 0,
                     "First inserted satellite was not published into the scenario");
             record("insert-first-satellite");
+            require(orbit_->input.object_id == "Satellite1" &&
+                        orbit_->input.initial.epoch == scenario_->first() &&
+                        orbit_->input.first == scenario_->first() &&
+                        orbit_->input.last == scenario_->last() &&
+                        orbit_->input.step_seconds == 60 &&
+                        orbit_->input.propagator == OrbitPropagator::two_body &&
+                        orbit_->input.initial.position_m == OrbitInput{}.initial.position_m,
+                    "Default insertion did not use the scenario and satellite defaults");
+            record("insert-object-defaults-inherits-scenario");
             properties_dialog_->close();
             smoke_bootstrap_ = 3;
             frame_count_ = 0;
@@ -3234,7 +3329,9 @@ class Workbench final : public QMainWindow {
             ++orbit_smoke_stage_;
             break;
         case 19:
-            begin_insert_satellite();
+            smoke_insert_dialog(InsertObjectMethod::define_properties);
+            require(editor_->findChild<QLineEdit *>("objectId")->text() == "Satellite2",
+                    "Insertion chooser did not generate a unique satellite ID");
             input.object_id = "Satellite1";
             editor_->set_input(input);
             editor_->submit();
@@ -4328,6 +4425,7 @@ class Workbench final : public QMainWindow {
     std::vector<Satellite> satellites_;
     QTreeWidgetItem *scenario_item_ = nullptr;
     std::optional<std::size_t> editor_target_, pending_orbit_target_;
+    bool insert_defaults_pending_ = false;
     std::size_t pending_model_target_ = 0;
     QString pending_model_path_;
     QStackedWidget *workspace_pages_ = nullptr;

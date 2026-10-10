@@ -321,6 +321,10 @@ QTreeWidget { background: #171d26; border: 0; outline: 0; padding: 2px 0; }
 QTreeWidget::item { height: 24px; border-radius: 2px; padding: 2px 4px; }
 QTreeWidget::item:selected { background: #263e55; color: #d3eaff; }
 QTreeWidget::item:hover:!selected { background: #242f3e; }
+QTreeWidget#insertObjectTypes { background: #171d26; border: 1px solid #303947; border-radius: 3px; padding: 6px; }
+QTreeWidget#insertObjectTypes::item { height: 30px; padding: 2px 6px; }
+QDialog#insertObjectsDialog QRadioButton { color: #dce5ef; font-size: 13px; spacing: 9px; }
+QDialog#insertObjectsDialog QRadioButton:hover { color: #a9d5f6; }
 QHeaderView::section { background: #191f28; color: #93a2b5; border: 0; padding: 5px; }
 QToolBar { background: #191f28; border: 0; spacing: 3px; padding: 3px 8px; }
 QToolBar#commandBar { border-bottom: 1px solid #303947; padding: 4px 10px; }
@@ -363,9 +367,9 @@ QPushButton:hover, QToolButton:hover { background: #293645; border-color: #526b8
 QPushButton:pressed, QToolButton:pressed { background: #31445a; }
 QToolButton:checked { background: #29455f; color: #d4eaff; border-color: #507799; }
 QPushButton:disabled { background: #202a37; color: #6b7d92; border-color: #344255; }
-QPushButton#applyOrbit { background: #39688e; border: 1px solid #39688e; color: #ffffff; font-weight: 600; }
-QPushButton#applyOrbit:hover { background: #467da8; border-color: #467da8; }
-QPushButton#applyOrbit:disabled { background: #2b4158; border-color: #2b4158; color: #91a9be; }
+QPushButton#applyOrbit, QPushButton#insertObject { background: #39688e; border: 1px solid #39688e; color: #ffffff; font-weight: 600; }
+QPushButton#applyOrbit:hover, QPushButton#insertObject:hover { background: #467da8; border-color: #467da8; }
+QPushButton#applyOrbit:disabled, QPushButton#insertObject:disabled { background: #2b4158; border-color: #2b4158; color: #91a9be; }
 QToolButton#transportPlay { background: #263f55; border: 1px solid #4d7193; }
 QToolButton#transportPlay:hover { background: #34536f; }
 QTabWidget::pane { border: 0; }

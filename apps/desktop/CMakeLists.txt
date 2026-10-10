@@ -16,6 +16,7 @@ if(ORBITFORGE_WITH_VSG)
     target_sources(orbitforge_desktop PRIVATE src/viewer/graphics_workbench.cpp
         src/viewer/orbit_scene.cpp src/viewer/orbit_editor.cpp src/viewer/workbench_style.cpp
         src/viewer/satellite_model.cpp src/viewer/mission_timeline.cpp src/viewer/scenario_dialog.cpp
+        src/viewer/insert_object_dialog.cpp src/viewer/insert_object_dialog.hpp
         src/viewer/epoch_editor.cpp src/viewer/ground_map.cpp src/viewer/workspace.cpp
         src/viewer/workbench_profile.cpp src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
         src/viewer/startup_splash.cpp src/viewer/startup_splash.hpp)
