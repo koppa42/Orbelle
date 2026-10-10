@@ -120,7 +120,7 @@ class Check:
                  f"--x-buildtrees-root={deps / 'buildtrees'}",
                  f"--x-packages-root={deps / 'packages'}", f"--downloads-root={deps / 'downloads'}",
                  "--triplet=x64-linux", "--x-no-default-features", "--x-feature=tests",
-                 "--x-feature=time-frames", "--x-feature=spice",
+                 "--x-feature=time-frames", "--x-feature=spice", "--x-feature=data-catalog",
                  extra_env={"VCPKG_BINARY_SOURCES": f"clear;files,{deps / 'binary-cache'},readwrite"})
         shutil.copy2(deps / "installed/vcpkg/status", self.reports / "vcpkg-status.txt")
 

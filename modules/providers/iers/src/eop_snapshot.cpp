@@ -46,10 +46,10 @@ bool is_sha256(const std::string &value) {
            });
 }
 
-int manifest_mjd(const nlohmann::json &manifest, const char *key) {
+int manifest_mjd(const nlohmann::json &manifest, const char *key, int minimum) {
     const auto &value = manifest.at(key);
     // This interpolation uses observed x/y rates and CPO; pre-1984 C04 contains placeholders.
-    if (!value.is_number_integer() || value < 45700 || value > 100000) {
+    if (!value.is_number_integer() || value < minimum || value > 100000) {
         throw core::EopDataError("EOP coverage MJD must be a supported integer");
     }
     return value.get<int>();
@@ -319,8 +319,8 @@ load_eop_snapshot(const std::filesystem::path &manifest_path, const core::ITimeP
         if (picosha2::hash256_hex_string(bytes) != hash) {
             throw core::EopDataError("EOP data SHA256 mismatch");
         }
-        const int first = manifest_mjd(manifest, "first_mjd");
-        const int last = manifest_mjd(manifest, "last_mjd");
+        const int first = manifest_mjd(manifest, "first_mjd", finals ? 41317 : 45700);
+        const int last = manifest_mjd(manifest, "last_mjd", finals ? 41317 : 45700);
         if (last <= first) {
             throw core::EopDataError("EOP snapshot requires at least two daily samples");
         }

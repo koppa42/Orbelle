@@ -8,5 +8,5 @@ EOP 已有独立 schema 1 清单，与数据一同保存在 `data/samples/eop/<�
 
 SPICE 也已有独立 schema 1 清单，放在 `data/samples/spice/<快照目录>/`，记录有序内核、原始/派生文件散列、来源、生产者、模型和允许的 TAI 窗口。Runtime 通过显式清单与工作目录加载，生成 Provider 拥有的运行副本；格式与限制见 [CSPICE 接口](../../docs/architecture/spice.md)。样例目录内的 README 说明派生过程和分发条件。
 
-项目已通过 [Scenario 数据锁](../../docs/architecture/scenario_data_lock.md)固定 EOP 和时间依赖；桌面可导入并选择本地 EOP 快照。统一的数据目录、自动/手动下载及动态时间数据加载按[数据中心方案](../../docs/architecture/data_center.md)继续推进，尚未实现。开发机下载目录可配置为 `local/data`；正式结果不放在这里。禁止只修改清单中的有效期来延长过期数据的适用范围。
+项目通过 [Scenario 数据锁](../../docs/architecture/scenario_data_lock.md)固定 EOP 和时间依赖；桌面数据中心已有统一目录、EOP 导入及 finals2000A 自动/手动下载。动态时间数据加载、其他数据类型及缺失旧版本获取按[数据中心方案](../../docs/architecture/data_center.md)继续推进。开发机下载目录可配置为 `local/data`；正式结果不放在这里。禁止只修改清单中的有效期来延长过期数据的适用范围。
 

@@ -1,0 +1,440 @@
+#include <orbitforge/runtime/data_catalog.hpp>
+#include <orbitforge/runtime/time_frames.hpp>
+#include <stdexcept>
+
+#ifdef ORBITFORGE_HAS_DATA_CATALOG
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <fstream>
+#include <locale>
+#include <mutex>
+#include <nlohmann/json.hpp>
+#include <picosha2.h>
+#include <sqlite3.h>
+#include <sstream>
+
+namespace orbitforge::runtime {
+namespace {
+using Json = nlohmann::json;
+void check(bool value, const std::string &message) {
+    if (!value)
+        throw std::runtime_error(message);
+}
+std::string utf8(const std::filesystem::path &path) {
+    const auto value = path.u8string();
+    return {reinterpret_cast<const char *>(value.data()), value.size()};
+}
+bool hash_valid(const std::string &value) {
+    return value.size() == 64 && std::all_of(value.begin(), value.end(), [](char c) {
+               return (c >= 'a' && c <= 'f') || (c >= '0' && c <= '9');
+           });
+}
+std::string read(const std::filesystem::path &path, std::size_t limit = 16 * 1024 * 1024) {
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    check(input.is_open(), "Cannot read catalog file: " + utf8(path));
+    const auto size = input.tellg();
+    check(size >= 0 && static_cast<std::uint64_t>(size) <= limit,
+          "Catalog file exceeds size limit");
+    std::string bytes(static_cast<std::size_t>(size), '\0');
+    input.seekg(0);
+    input.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    check(static_cast<bool>(input) && input.peek() == std::char_traits<char>::eof(),
+          "Cannot read a stable catalog file");
+    return bytes;
+}
+void write(const std::filesystem::path &path, const std::string &bytes) {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    output.exceptions(std::ios::failbit | std::ios::badbit);
+    output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    output.close();
+}
+struct Stage {
+    std::filesystem::path path;
+    explicit Stage(const std::filesystem::path &root) {
+        std::filesystem::create_directories(root);
+        for (unsigned i = 0; i < 10000; ++i) {
+            auto candidate = root / ("stage-" + std::to_string(i));
+            if (std::filesystem::create_directory(candidate)) {
+                path = std::move(candidate);
+                return;
+            }
+        }
+        throw std::runtime_error("Cannot allocate data staging directory");
+    }
+    ~Stage() {
+        if (path.empty())
+            return;
+        // Only exact direct children created by this operation; never recursive deletion.
+        std::error_code error;
+        for (auto it = std::filesystem::directory_iterator(path, error);
+             !error && it != std::filesystem::directory_iterator(); it.increment(error))
+            std::filesystem::remove(it->path(), error);
+        std::filesystem::remove(path, error);
+    }
+};
+struct Statement {
+    sqlite3 *db;
+    sqlite3_stmt *value = nullptr;
+    Statement(sqlite3 *connection, const char *sql) : db(connection) {
+        check(sqlite3_prepare_v2(db, sql, -1, &value, nullptr) == SQLITE_OK, sqlite3_errmsg(db));
+    }
+    ~Statement() { sqlite3_finalize(value); }
+    void text(int index, const std::string &text) {
+        check(text.size() <= 65536, "Catalog field exceeds limit");
+        check(sqlite3_bind_text(value, index, text.data(), static_cast<int>(text.size()),
+                                SQLITE_TRANSIENT) == SQLITE_OK,
+              sqlite3_errmsg(db));
+    }
+    void integer(int index, std::int64_t number) {
+        check(sqlite3_bind_int64(value, index, number) == SQLITE_OK, sqlite3_errmsg(db));
+    }
+    bool next() {
+        const int code = sqlite3_step(value);
+        check(code == SQLITE_ROW || code == SQLITE_DONE, sqlite3_errmsg(db));
+        return code == SQLITE_ROW;
+    }
+    std::string text(int index) const {
+        const auto *data = sqlite3_column_text(value, index);
+        return data ? reinterpret_cast<const char *>(data) : "";
+    }
+};
+void sql(sqlite3 *db, const char *command) {
+    check(sqlite3_exec(db, command, nullptr, nullptr, nullptr) == SQLITE_OK, sqlite3_errmsg(db));
+}
+struct Transaction {
+    sqlite3 *db;
+    explicit Transaction(sqlite3 *connection) : db(connection) { sql(db, "BEGIN IMMEDIATE"); }
+    ~Transaction() { sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr); }
+    void commit() { sql(db, "COMMIT"); }
+};
+} // namespace
+struct DataCatalog::Impl {
+    std::filesystem::path root;
+    sqlite3 *db = nullptr;
+    mutable std::recursive_mutex mutex;
+    ~Impl() {
+        if (db)
+            sqlite3_close(db);
+    }
+    std::filesystem::path directory(const std::string &key) const {
+        check(hash_valid(key), "Invalid catalog snapshot hash");
+        return root / "snapshots" / key;
+    }
+    CatalogSnapshot describe(const std::string &key, const core::EopDataInfo &info) const {
+        return {key,
+                info.id,
+                info.source_url,
+                info.first_epoch,
+                info.last_epoch,
+                directory(key) / "manifest.json"};
+    }
+    std::unique_ptr<core::IEarthOrientationProvider> verify(const std::string &key) const {
+        const auto folder = directory(key);
+        check(std::filesystem::canonical(folder).parent_path() == root / "snapshots",
+              "Catalog snapshot resolves outside its directory");
+        const auto record = Json::parse(read(folder / "record.json", 65536));
+        check(record.at("schema") == 1 && record.at("lock_sha256") == key,
+              "Catalog record identity mismatch");
+        const auto bytes = read(folder / "manifest.json", 65536);
+        check(picosha2::hash256_hex_string(bytes) ==
+                  record.at("manifest_sha256").get<std::string>(),
+              "Catalog manifest SHA256 mismatch");
+        auto provider = load_eop_snapshot(folder / "manifest.json");
+        check(application::eop_data_lock(provider->data_info()).sha256() == key,
+              "Catalog snapshot does not match its pinned data/time identity");
+        const auto blob = root / "blobs" / "sha256" / provider->data_info().sha256;
+        check(picosha2::hash256_hex_string(read(blob)) == provider->data_info().sha256,
+              "Catalog content blob SHA256 mismatch");
+        return provider;
+    }
+    void index(const std::string &key, const core::EopDataInfo &info) {
+        Statement row(db, "INSERT OR IGNORE INTO snapshots VALUES(?, ?, ?, ?, ?)");
+        row.text(1, key);
+        row.text(2, info.id);
+        row.text(3, info.source_url);
+        row.integer(4, info.first_epoch.tai_nanoseconds());
+        row.integer(5, info.last_epoch.tai_nanoseconds());
+        row.next();
+        const auto lock = application::eop_data_lock(info);
+        for (const auto &ref : lock.references()) {
+            Statement dep(db, "INSERT OR IGNORE INTO dependencies VALUES(?, ?, ?, ?, ?, ?)");
+            dep.text(1, key);
+            dep.text(2, ref.role);
+            dep.text(3, ref.snapshot_id);
+            dep.text(4, ref.content_sha256);
+            dep.text(5, ref.interpretation_version);
+            dep.text(6, ref.configuration_sha256);
+            dep.next();
+        }
+    }
+    void blob(const std::string &bytes, const std::string &hash,
+              const std::filesystem::path &stage) {
+        check(hash_valid(hash) && picosha2::hash256_hex_string(bytes) == hash,
+              "Invalid blob SHA256");
+        const auto target = root / "blobs" / "sha256" / hash;
+        if (std::filesystem::exists(target)) {
+            check(read(target) == bytes, "Existing content blob is damaged; refusing replacement");
+            return;
+        }
+        const auto pending = stage / "blob.pending";
+        write(pending, bytes);
+        std::filesystem::rename(pending, target);
+    }
+};
+bool data_catalog_available() noexcept { return true; }
+DataCatalog::DataCatalog(std::filesystem::path root) : impl_(std::make_unique<Impl>()) {
+    std::filesystem::create_directories(root);
+    impl_->root = std::filesystem::canonical(root);
+    for (const auto &part : {"snapshots", "blobs/sha256", "staging"})
+        std::filesystem::create_directories(impl_->root / part);
+    check(sqlite3_open_v2(utf8(impl_->root / "catalog.sqlite").c_str(), &impl_->db,
+                          SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
+                          nullptr) == SQLITE_OK,
+          "Cannot open data catalog");
+    sqlite3_busy_timeout(impl_->db, 10000);
+    sql(impl_->db, "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL");
+    Transaction transaction(impl_->db);
+    Statement version(impl_->db, "PRAGMA user_version");
+    version.next();
+    const auto schema = sqlite3_column_int(version.value, 0);
+    version.next();
+    check(schema == 0 || schema == 1, "Unsupported data catalog schema");
+    sql(impl_->db,
+        "CREATE TABLE IF NOT EXISTS snapshots(lock_hash TEXT PRIMARY KEY, id TEXT NOT NULL, "
+        "source_url TEXT NOT NULL, first_ns INTEGER NOT NULL, last_ns INTEGER NOT NULL);"
+        "CREATE TABLE IF NOT EXISTS dependencies(lock_hash TEXT REFERENCES snapshots(lock_hash), "
+        "role TEXT, snapshot_id TEXT, content_hash TEXT, interpretation TEXT, configuration_hash "
+        "TEXT, PRIMARY KEY(lock_hash,role));"
+        "CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL); PRAGMA "
+        "user_version=1");
+    // Recover only successfully published directories left by a process that stopped
+    // between file publication and the SQLite commit; invalid records stay unindexed.
+    for (const auto &entry : std::filesystem::directory_iterator(impl_->root / "snapshots")) {
+        const auto key = entry.path().filename().string();
+        if (!entry.is_directory() || !hash_valid(key))
+            continue;
+        Statement exists(impl_->db, "SELECT 1 FROM snapshots WHERE lock_hash=?");
+        exists.text(1, key);
+        if (exists.next())
+            continue;
+        try {
+            impl_->index(key, impl_->verify(key)->data_info());
+        } catch (const std::exception &) {
+        }
+    }
+    transaction.commit();
+}
+DataCatalog::~DataCatalog() = default;
+const std::filesystem::path &DataCatalog::root() const noexcept { return impl_->root; }
+CatalogSnapshot DataCatalog::install_eop(const std::filesystem::path &manifest_path) {
+    std::lock_guard guard(impl_->mutex);
+    // Validate copied bytes before publication, even if the source changes after the first load.
+    (void)load_eop_snapshot(manifest_path);
+    const auto manifest_bytes = read(manifest_path, 65536);
+    const auto manifest = Json::parse(manifest_bytes);
+    const auto filename = std::filesystem::path(manifest.at("data_file").get<std::string>());
+    check(!filename.empty() && !filename.has_parent_path() && filename != "manifest.json" &&
+              filename != "record.json" && filename != "blob.pending",
+          "Invalid snapshot data filename");
+    const auto source = std::filesystem::canonical(manifest_path).parent_path();
+    const auto data = std::filesystem::canonical(source / filename);
+    check(data.parent_path() == source, "EOP data resolves outside its source directory");
+    const auto data_bytes = read(data);
+    Stage stage(impl_->root / "staging");
+    write(stage.path / "manifest.json", manifest_bytes);
+    write(stage.path / filename, data_bytes);
+    const auto provider = load_eop_snapshot(stage.path / "manifest.json");
+    const auto &info = provider->data_info();
+    const auto key = application::eop_data_lock(info).sha256();
+    Transaction transaction(impl_->db);
+    const auto destination = impl_->directory(key);
+    if (std::filesystem::exists(destination)) {
+        const auto existing = impl_->verify(key);
+        impl_->index(key, existing->data_info());
+        transaction.commit();
+        return impl_->describe(key, existing->data_info());
+    }
+    impl_->blob(data_bytes, info.sha256, stage.path);
+    std::filesystem::remove(stage.path / filename);
+    std::error_code link_error;
+    std::filesystem::create_hard_link(impl_->root / "blobs" / "sha256" / info.sha256,
+                                      stage.path / filename, link_error);
+    if (link_error)
+        write(stage.path / filename, data_bytes);
+    write(stage.path / "record.json",
+          Json{{"schema", 1},
+               {"kind", "earth-orientation"},
+               {"lock_sha256", key},
+               {"manifest_sha256", picosha2::hash256_hex_string(manifest_bytes)}}
+              .dump(2));
+    std::filesystem::rename(stage.path, destination);
+    stage.path.clear();
+    impl_->index(key, info);
+    transaction.commit();
+    return impl_->describe(key, info);
+}
+std::vector<CatalogSnapshot> DataCatalog::snapshots() const {
+    std::lock_guard guard(impl_->mutex);
+    Statement rows(impl_->db,
+                   "SELECT lock_hash,id,source_url,first_ns,last_ns FROM snapshots ORDER BY rowid");
+    std::vector<CatalogSnapshot> result;
+    while (rows.next()) {
+        const auto key = rows.text(0);
+        result.push_back({key, rows.text(1), rows.text(2),
+                          core::Epoch(sqlite3_column_int64(rows.value, 3)),
+                          core::Epoch(sqlite3_column_int64(rows.value, 4)),
+                          impl_->directory(key) / "manifest.json"});
+    }
+    return result;
+}
+std::unique_ptr<core::IEarthOrientationProvider>
+DataCatalog::load_eop(const std::string &key) const {
+    std::lock_guard guard(impl_->mutex);
+    Statement exists(impl_->db, "SELECT 1 FROM snapshots WHERE lock_hash=?");
+    exists.text(1, key);
+    check(exists.next(), "Pinned EOP data is not installed: " + key);
+    return impl_->verify(key);
+}
+std::unique_ptr<core::IEarthOrientationProvider>
+DataCatalog::resolve_eop(const application::DataLock &lock) const {
+    auto provider = load_eop(lock.sha256());
+    check(application::eop_data_lock(provider->data_info()) == lock,
+          "Data dependency lock mismatch");
+    return provider;
+}
+std::string DataCatalog::setting(const std::string &key) const {
+    std::lock_guard guard(impl_->mutex);
+    Statement row(impl_->db, "SELECT value FROM settings WHERE key=?");
+    row.text(1, key);
+    return row.next() ? row.text(0) : "";
+}
+void DataCatalog::set_setting(const std::string &key, const std::string &value) {
+    std::lock_guard guard(impl_->mutex);
+    Statement row(
+        impl_->db,
+        "INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+    row.text(1, key);
+    row.text(2, value);
+    row.next();
+}
+CatalogSnapshot DataCatalog::import_finals(const std::filesystem::path &source,
+                                           const std::string &url, const std::string &retrieved) {
+    std::lock_guard guard(impl_->mutex);
+    check(!url.empty() && !retrieved.empty(), "Source URL and retrieval date are required");
+    const auto bytes = read(source);
+    std::istringstream lines(bytes);
+    std::string line;
+    int first = -1, last = -1, previous = -1;
+    bool incomplete_tail = false;
+    const auto mjd_zero = std::chrono::sys_days(std::chrono::year(1858) / 11 / 17);
+    while (std::getline(lines, line)) {
+        if (line.find_first_not_of(" \t\r") == std::string::npos)
+            continue;
+        check(line.size() >= 134, "Truncated finals2000A source row");
+        const auto number = [&](std::size_t offset, std::size_t count) {
+            std::istringstream field(line.substr(offset, count));
+            field.imbue(std::locale::classic());
+            double value = 0;
+            check(static_cast<bool>(field >> value) && std::isfinite(value),
+                  "Invalid finals2000A numeric field");
+            field >> std::ws;
+            check(field.eof(), "Invalid finals2000A numeric field");
+            return value;
+        };
+        const auto day_number = number(7, 8);
+        check(day_number >= 41317 && day_number <= 100000 && day_number == std::floor(day_number),
+              "Invalid finals2000A MJD");
+        const auto mjd = static_cast<int>(day_number);
+        check(previous < 0 || mjd == previous + 1,
+              "Missing, duplicate or unordered finals2000A row");
+        previous = mjd;
+        const auto calendar_field = [&](std::size_t offset) {
+            const double value = number(offset, 2);
+            check(value >= 0 && value <= 99 && value == std::floor(value),
+                  "Invalid finals2000A date");
+            return static_cast<int>(value);
+        };
+        const auto date = std::chrono::year(calendar_field(0) + (mjd <= 51543 ? 1900 : 2000)) /
+                          static_cast<unsigned>(calendar_field(2)) /
+                          static_cast<unsigned>(calendar_field(4));
+        check(date.ok() && (std::chrono::sys_days(date) - mjd_zero).count() == mjd,
+              "finals2000A date/MJD mismatch");
+        // A component is either entirely absent in the prediction tail or fully
+        // specified. A damaged field inside an otherwise present group is an error.
+        const auto group = [&](std::size_t flag, std::size_t end,
+                               std::initializer_list<std::pair<std::size_t, std::size_t>> fields) {
+            if (line.substr(flag, end - flag).find_first_not_of(" \t\r") == std::string::npos)
+                return false;
+            check(line[flag] == 'I' || line[flag] == 'P', "Invalid finals2000A source flag");
+            std::size_t index = 0;
+            for (const auto &[offset, count] : fields) {
+                const auto value = number(offset, count);
+                check(index++ % 2 == 0 || value >= 0, "Negative finals2000A uncertainty");
+            }
+            return true;
+        };
+        const bool polar = group(16, 55, {{18, 9}, {27, 9}, {37, 9}, {46, 9}});
+        const bool ut1 = group(57, 78, {{58, 10}, {68, 10}});
+        const bool pole = group(95, 134, {{97, 9}, {106, 9}, {116, 9}, {125, 9}});
+        if (!(polar && ut1 && pole)) {
+            incomplete_tail = true;
+            continue;
+        }
+        check(!incomplete_tail, "Incomplete finals2000A record before complete daily records");
+        if (first < 0)
+            first = mjd;
+        last = mjd;
+    }
+    const auto clock = make_builtin_time_provider();
+    first = std::max(first, clock->data_info().utc_valid_from_mjd);
+    last = std::min(last, clock->data_info().utc_valid_until_mjd - 1);
+    check(last > first, "finals2000A lacks two complete daily records within time-data coverage");
+    const auto hash = picosha2::hash256_hex_string(bytes);
+    const Json manifest{{"schema_version", 1},
+                        {"snapshot_id", "iers-finals2000a-all-" + hash.substr(0, 16)},
+                        {"format", "iers-finals2000a"},
+                        {"data_file", "finals2000A.all"},
+                        {"sha256", hash},
+                        {"source_url", url},
+                        {"source_sha256", hash},
+                        {"retrieved_on", retrieved},
+                        {"first_mjd", first},
+                        {"last_mjd", last},
+                        {"reference_frame", "ITRS"},
+                        {"interpolation", "finals2000a-hermite-tai-v1"}};
+    Stage stage(impl_->root / "staging");
+    write(stage.path / "manifest.json", manifest.dump(2));
+    write(stage.path / "finals2000A.all", bytes);
+    return install_eop(stage.path / "manifest.json");
+}
+} // namespace orbitforge::runtime
+#else
+namespace orbitforge::runtime {
+struct DataCatalog::Impl {
+    std::filesystem::path root;
+};
+namespace {
+[[noreturn]] void unavailable() { throw std::runtime_error("Data catalog support is not enabled"); }
+} // namespace
+bool data_catalog_available() noexcept { return false; }
+DataCatalog::DataCatalog(std::filesystem::path) { unavailable(); }
+DataCatalog::~DataCatalog() = default;
+const std::filesystem::path &DataCatalog::root() const noexcept { return impl_->root; }
+CatalogSnapshot DataCatalog::install_eop(const std::filesystem::path &) { unavailable(); }
+CatalogSnapshot DataCatalog::import_finals(const std::filesystem::path &, const std::string &,
+                                           const std::string &) {
+    unavailable();
+}
+std::vector<CatalogSnapshot> DataCatalog::snapshots() const { unavailable(); }
+std::unique_ptr<core::IEarthOrientationProvider> DataCatalog::load_eop(const std::string &) const {
+    unavailable();
+}
+std::unique_ptr<core::IEarthOrientationProvider>
+DataCatalog::resolve_eop(const application::DataLock &) const {
+    unavailable();
+}
+std::string DataCatalog::setting(const std::string &) const { unavailable(); }
+void DataCatalog::set_setting(const std::string &, const std::string &) { unavailable(); }
+} // namespace orbitforge::runtime
+#endif

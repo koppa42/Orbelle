@@ -4,9 +4,15 @@
   "builtin-baseline": "9b965a116838c6cdcd36bca60d1b81b030c8ab8d",
   "dependencies": [],
   "features": {
+    "data-catalog": {
+      "description": "Shared SQLite data catalog",
+      "dependencies": ["sqlite3"]
+    },
     "graphics": {
       "description": "Qt / VSG / Rocky desktop rendering integration",
       "dependencies": [
+        "sqlite3",
+        { "name": "qtbase", "default-features": false, "features": ["widgets", "network", "openssl"] },
         "vsgqt",
         { "name": "vsg", "features": ["windowing"] },
         { "name": "rocky", "features": ["gdal"] }

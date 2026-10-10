@@ -1,5 +1,8 @@
 @PACKAGE_INIT@
 include(CMakeFindDependencyMacro)
+if(@ORBITFORGE_WITH_DATA_CATALOG@)
+    find_dependency(unofficial-sqlite3 CONFIG)
+endif()
 if(@ORBITFORGE_WITH_ERFA@)
     find_dependency(erfa 2.0.1 EXACT CONFIG)
 endif()

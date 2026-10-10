@@ -154,6 +154,10 @@ Python wheel 只安装 `Python` CMake component，不携带 C++ SDK 和桌面文
 
 ## EOP 导入与独立参考验证
 
+标准 wheel 现还启用 `ORBITFORGE_WITH_DATA_CATALOG=ON`，需要 vcpkg 的 `data-catalog` feature（SQLite）。图形桌面的 `graphics` feature 已显式包含 SQLite、Qt Network 和 OpenSSL。已有依赖目录中没有 SQLite 时，应保留此前所需 features 并在 `vcpkg install` 命令追加 `--x-feature=data-catalog`。
+
+普通 `headless-tests` 不启用数据目录，因此保持无 SQLite 依赖；需要在无界面 C++ SDK 中使用目录时，可配置 `-DORBITFORGE_WITH_ERFA=ON -DORBITFORGE_WITH_DATA_CATALOG=ON`。安装后的 SDK 通过 `find_dependency(unofficial-sqlite3)` 接入，Windows wheel 携带相应运行库与许可通知。Windows 便携包还包含 Qt TLS 插件；打包验证使用独立 `ORBITFORGE_DATA_HOME`，不写用户已有数据目录。
+
 准备本地 IERS 20 C04 0h dX/dY 原始文件后，显式截取并生成新目录：
 
 ```powershell

@@ -1,6 +1,7 @@
 #include <cmath>
 #include <iostream>
 #include <orbitforge/application/scenario.hpp>
+#include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/demo.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/project.hpp>
@@ -52,6 +53,14 @@ int main(int argc, char **argv) {
         const auto utc = time->to_utc(epoch);
         const auto frames = orbitforge::runtime::make_frame_provider();
         const auto eop = orbitforge::runtime::load_eop_snapshot(argv[1]);
+        if (orbitforge::runtime::data_catalog_available()) {
+            orbitforge::runtime::DataCatalog catalog("sdk-data-catalog");
+            const auto entry = catalog.install_eop(argv[1]);
+            const auto lock = orbitforge::application::eop_data_lock(eop->data_info());
+            if (entry.lock_sha256 != lock.sha256() ||
+                catalog.resolve_eop(lock)->data_info().id != eop->data_info().id)
+                return 17;
+        }
         const auto transform = frames->gcrf_to_itrf_state(epoch, eop->at(epoch));
         if (utc.second != 60 || utc.nanosecond != 123456789 ||
             transform.rotation.to != orbitforge::core::FrameId::itrf) {

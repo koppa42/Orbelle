@@ -12,6 +12,7 @@ void bind_ephemeris(py::module_ &module);
 void bind_j2(py::module_ &module);
 void bind_project(py::module_ &module);
 void bind_data_lock(py::module_ &module);
+void bind_data_catalog(py::module_ &module);
 
 PYBIND11_MODULE(_native, module) {
     module.doc() = "OrbitForge P0 native API. Time is explicit TAI, positions are metres.";
@@ -119,4 +120,5 @@ PYBIND11_MODULE(_native, module) {
     bind_ephemeris(module);
     bind_j2(module);
     bind_project(module);
+    bind_data_catalog(module);
 }

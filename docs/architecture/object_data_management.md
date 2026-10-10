@@ -1,6 +1,6 @@
 # 对象与 EOP 数据管理
 
-第二步在项目持久化之上补齐对象管理和本地数据导入基础。桌面、Python 和 C++ 共用对象配置、数据导入和 Scenario 数据锁实现。当前导入界面是过渡入口；下一步按[统一数据中心方案](data_center.md)收敛管理和下载。
+第二步在项目持久化之上补齐对象管理和本地数据导入基础。桌面、Python 和 C++ 共用对象配置、数据导入和 Scenario 数据锁实现。数据入口现已合并到[统一数据中心](data_center.md)，支持 finals2000A 手动与自动下载。
 
 ## 对象操作
 
@@ -20,15 +20,15 @@
 
 ## 快照导入与选择
 
-“场景 → 地球定向数据”列出内置和用户导入的快照，可查看 ID、SHA256、覆盖时间、来源、参考系、插值和时间数据版本。C04 标为事后解；Bulletin A 提示可能含预测值，原始 I/P 标记仍保存在 Provider 的逐时刻来源记录中。
+“数据 → 数据中心”列出内置和用户导入的 EOP 快照及内置时间版本。可查看 ID、文件与依赖 SHA-256、覆盖时间、参考系、插值和时间数据版本。C04 标为事后解；Bulletin A 提示可能含预测值，原始 I/P 标记仍保存在 Provider 的逐时刻来源记录中。
 
-导入入口接受已准备好的 `manifest.json` 和同目录数据文件，支持 `iers-20-c04-0h-dxdy` / `iers-finals2000a`。已有原始 IERS 文件先用 `tools/data/import_c04.py` 或 `tools/data/import_finals.py` 转为快照；各脚本的 `--help` 提供来源 URL、取回日期和截取日期参数。此步骤没有在线下载或自动更新。
+数据中心默认全量下载 finals2000A，首次安装后可自动更新，不需要选择日期或手工准备清单。“版本与场景引用”详情中可导入完整原文件，或导入已有 `manifest.json` 与同目录数据文件（支持 `iers-20-c04-0h-dxdy` / `iers-finals2000a`）。C04 原文件仍使用 `tools/data/import_c04.py` 转为快照。
 
-Runtime 调用 IERS Provider 校验清单版本、字段、SHA256、覆盖范围和数据行，再把清单及数据复制到独占临时目录，复验后通过目录重命名发布。存储目录键为清单原始字节的 SHA256；相同导入幂等，已有版本不覆盖。并发相同导入会复验已有发布结果。失败清理本次临时文件，未承诺断电持久性。
+Runtime 的 `DataCatalog` 调用 IERS Provider 校验清单、SHA-256、覆盖范围和数据行，复验临时副本后发布并记录到 SQLite。内容文件按原始字节哈希去重，快照目录按 Scenario 数据锁命名；相同导入幂等，已有版本不覆盖。底层旧 API `import_eop_snapshot()` 仍保留原来的清单哈希目录格式，便于兼容已有工具。
 
-桌面在 Qt `AppLocalDataLocation/eop` 保存快照；Windows 默认 `%LOCALAPPDATA%/OrbitForge/eop`。启动时重建目录列表并验证每个快照；损坏条目不加载，原因在数据窗口显示。测试将目录隔离到 smoke 输出，不改用户数据。导入后不依赖原始文件位置，也不自动切换当前项目。
+桌面使用 Qt `AppLocalDataLocation/data`，Windows 默认 `%LOCALAPPDATA%/OrbitForge/data`。旧 `eop` 目录在启动时按原身份导入并保留原文件；损坏条目的原因在窗口显示。测试将目录隔离到 smoke 输出，不改用户数据。导入后不依赖原文件位置，也不自动切换当前项目。
 
-没有场景时，“用于新建场景”设置本次运行的优先数据版本；若不覆盖新场景，会寻找其他覆盖版本。已有场景时，只有完整覆盖分析时段的条目能应用。成功切换后重建地固显示轨迹和太阳方向，并标记项目未保存；轨道的 GCRF 输入与计算 Session 保持不变。保存固定所选 EOP 和时间版本，重新打开要求精确匹配；缺失或损坏不能静默换为其他版本。
+“设为新场景默认”持久保存优先版本，不影响已有场景；若不覆盖新场景，会寻找其他覆盖版本。已有场景时，只有完整覆盖分析时段的条目能应用。成功切换后重建地固显示轨迹和太阳方向，并标记项目未保存；轨道的 GCRF 输入与计算 Session 保持不变。保存固定所选 EOP 和时间版本，重新打开要求精确匹配；缺失不能静默换为其他版本。
 
 用户导入的数据没有嵌入项目文件，迁移到其他电脑时需另外导入相同快照。此版本不提供目录删除、UTC 闰秒数据更新或自动缺失数据下载。
 
@@ -52,8 +52,9 @@ project = project.renamed_satellite(object_id, '观测卫星')
 project = project.with_satellite_copy(object_id, 'observer-copy', '观测卫星 副本')
 project = project.without_satellite('observer-copy')
 
-installed = of.import_eop_snapshot('snapshot/manifest.json', Path('data/eop-store'))
-project.earth_orientation = of.load_eop_snapshot(installed).data_info
+catalog = of.DataCatalog(Path('data/shared-store'))
+installed = catalog.install_eop('snapshot/manifest.json')
+project.earth_orientation = catalog.load_eop(installed.lock_sha256).data_info
 project.save('mission-updated.orbitforge')
 ```
 

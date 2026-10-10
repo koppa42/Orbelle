@@ -111,11 +111,13 @@ def main():
     for name in ('proj', 'gdal'):
         shutil.copytree(prefix / 'share' / name, output / 'resources' / name)
     plugins = []
-    for subdir in ('platforms', 'imageformats'):
+    for subdir in ('platforms', 'imageformats', 'tls'):
         target = output / 'plugins' / subdir
         target.mkdir(parents=True)
         files = ([prefix / 'Qt6/plugins/platforms/qwindows.dll'] if subdir == 'platforms'
-                 else sorted((prefix / 'Qt6/plugins/imageformats').glob('*.dll')))
+                 else sorted((prefix / 'Qt6/plugins' / subdir).glob('*.dll')))
+        if subdir == 'tls' and not any(path.name == 'qschannelbackend.dll' for path in files):
+            raise RuntimeError('The Windows data downloader requires the Qt Schannel TLS backend')
         for path in files:
             shutil.copy2(path, target / path.name)
             plugins.append(target / path.name)
@@ -151,7 +153,9 @@ def main():
     (output / 'README.txt').write_text(
         'OrbitForge Windows x64 preview\n\n解压整个文件夹，然后双击 OrbitForge.exe。\n'
         '请保留同目录 DLL、plugins 和 resources 文件夹。\n'
-        '先新建场景（Ctrl+N），默认UTC今天零点至次日零点，再插入卫星（Ctrl+Shift+S）。\n'
+        '先新建场景（Ctrl+N），默认UTC今天零点至次日零点，再插入卫星（Ctrl+Shift+I）。\n'
+        '数据 → 数据中心：统一管理 EOP 版本，可导入、手动下载或设置自动检查/下载。\n'
+        '新版本安装后不自动修改已有场景，需明确选择应用。项目按依赖哈希固定数据。\n'
         '日期、时间、UTC/TAI/TT合并输入；点击日历图标展开选择器。\n'
         '数值框支持直接输入和键盘微调，轨道支持经典瞬时根数与位置/速度。\n'
         '传播器可选二体与J2长期摄动，点击“设置…”配置显示步长和J2长期项。\n'
@@ -183,6 +187,7 @@ def main():
                        if not key.upper().startswith(('QT_', 'QML', 'VSG', 'ROCKY', 'GDAL', 'PROJ', 'VK_'))}
         system_root = Path(os.environ['SystemRoot'])
         environment['PATH'] = os.pathsep.join(map(str, (system_root / 'System32', system_root)))
+        environment['ORBITFORGE_DATA_HOME'] = str(reports / 'user-data')
         # Run from an unrelated empty directory to verify relative resource discovery.
         cwd = reports / 'empty-cwd'
         cwd.mkdir()

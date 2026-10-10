@@ -4,6 +4,11 @@ target_link_libraries(orbitforge_desktop PRIVATE
     OrbitForge::Runtime OrbitForge::Visualization Qt6::Widgets)
 orbitforge_warnings(orbitforge_desktop)
 if(ORBITFORGE_WITH_VSG)
+    if(NOT ORBITFORGE_WITH_DATA_CATALOG)
+        message(FATAL_ERROR "The graphical desktop requires ORBITFORGE_WITH_DATA_CATALOG")
+    endif()
+    find_package(Qt6 6.8 CONFIG REQUIRED COMPONENTS Network)
+    target_link_libraries(orbitforge_desktop PRIVATE Qt6::Network)
     # Original chevrons are pre-rendered at high resolution; no optional QtSvg plugin needed.
     qt_add_resources(orbitforge_desktop "workbench_icons" PREFIX "/orbitforge"
         BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
@@ -14,7 +19,7 @@ if(ORBITFORGE_WITH_VSG)
     find_package(rocky 1.1.0 EXACT CONFIG REQUIRED)
     find_package(vsgXchange 1.1.13 EXACT CONFIG REQUIRED)
     target_sources(orbitforge_desktop PRIVATE src/viewer/graphics_workbench.cpp
-        src/viewer/project_scene.cpp src/viewer/eop_catalog.cpp
+        src/viewer/project_scene.cpp src/viewer/eop_catalog.cpp src/viewer/data_center_dialog.cpp
         src/viewer/orbit_scene.cpp src/viewer/orbit_editor.cpp src/viewer/workbench_style.cpp
         src/viewer/satellite_model.cpp src/viewer/mission_timeline.cpp src/viewer/scenario_dialog.cpp
         src/viewer/insert_object_dialog.cpp src/viewer/insert_object_dialog.hpp
@@ -28,6 +33,16 @@ if(ORBITFORGE_WITH_VSG)
         ORBITFORGE_DESKTOP_GRAPHICS
         ORBITFORGE_ROCKY_VERSION="${rocky_VERSION}"
         ORBITFORGE_VSGQT_VERSION="${vsgQt_VERSION}")
+    if(BUILD_TESTING)
+        add_executable(orbitforge_data_center_tests tests/data_center_test.cpp src/viewer/eop_catalog.cpp)
+        target_compile_definitions(orbitforge_data_center_tests PRIVATE
+            ORBITFORGE_TEST_FINALS="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json"
+            ORBITFORGE_TEST_C04="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json")
+        target_link_libraries(orbitforge_data_center_tests PRIVATE OrbitForge::Runtime Qt6::Network GTest::gtest_main)
+        orbitforge_warnings(orbitforge_data_center_tests)
+        orbitforge_copy_runtime_dlls(orbitforge_data_center_tests)
+        gtest_discover_tests(orbitforge_data_center_tests DISCOVERY_MODE PRE_TEST TEST_PREFIX "desktop." PROPERTIES TIMEOUT 30)
+    endif()
     if(BUILD_TESTING AND ORBITFORGE_WITH_ERFA AND ORBITFORGE_WITH_SPICE)
         add_executable(orbitforge_orbit_scene_tests tests/orbit_scene_test.cpp src/viewer/orbit_scene.cpp)
         target_link_libraries(orbitforge_orbit_scene_tests PRIVATE

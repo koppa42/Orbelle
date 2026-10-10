@@ -294,14 +294,30 @@ class Workbench final : public QMainWindow {
                     std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) /
                     "resources/eop-current/manifest.json");
             if (!benchmarking_) {
-                const auto store =
-                    smoke_dir_.isEmpty()
+                const auto configured_home = qEnvironmentVariable("ORBITFORGE_DATA_HOME");
+                const auto normal_home =
+                    configured_home.isEmpty()
                         ? QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) +
-                              "/eop"
-                        : smoke_dir_ + "/eop-store";
+                              "/data"
+                        : QDir(configured_home).absolutePath();
+                const auto store = smoke_dir_.isEmpty() ? normal_home : smoke_dir_ + "/data-store";
+                const auto resources =
+                    std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) /
+                    "resources";
                 eop_catalog_ = std::make_unique<EopCatalog>(
                     std::filesystem::path(store.toStdWString()),
-                    std::vector<EopCatalog::Provider>{eop_current_, eop_history_});
+                    std::vector<std::filesystem::path>{resources / "eop-current/manifest.json",
+                                                       resources / "eop/manifest.json"},
+                    smoke_dir_.isEmpty() && configured_home.isEmpty()
+                        ? std::filesystem::path((QStandardPaths::writableLocation(
+                                                     QStandardPaths::AppLocalDataLocation) +
+                                                 "/eop")
+                                                    .toStdWString())
+                        : std::filesystem::path{},
+                    smoke_dir_.isEmpty());
+                eop_current_ = eop_catalog_->providers().at(0);
+                eop_history_ = eop_catalog_->providers().at(1);
+                eop_ = eop_history_;
             }
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
             if (benchmarking_)
@@ -380,7 +396,8 @@ class Workbench final : public QMainWindow {
                         [this] { (void)save_project_dialog(true); });
                 example_action_ = scene_menu_->addAction(QStringLiteral("打开二体示例"));
                 connect(example_action_, &QAction::triggered, this, [this] { open_example(); });
-                eop_action_ = scene_menu_->addAction(QStringLiteral("地球定向数据…"));
+                auto *data_menu = menuBar()->addMenu(QStringLiteral("数据"));
+                eop_action_ = data_menu->addAction(QStringLiteral("数据中心…"));
                 eop_action_->setObjectName("manageEopData");
                 connect(eop_action_, &QAction::triggered, this, [this] { manage_eop_data(); });
                 scene_menu_->addSeparator();
@@ -1649,7 +1666,7 @@ class Workbench final : public QMainWindow {
             return;
         const auto &next = eop_catalog_->providers().at(index);
         if (!scenario_) {
-            eop_catalog_->preferred = index;
+            eop_catalog_->set_preferred(index);
             return;
         }
         if (next == eop_)
@@ -4932,6 +4949,14 @@ class Workbench final : public QMainWindow {
             QTimer::singleShot(0, [&, source] {
                 auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
                 require(dialog != nullptr, "Missing EOP dialog");
+                auto *expand = dialog->findChild<QToolButton *>("dataCenterDetails");
+                auto *automatic = dialog->findChild<QCheckBox *>("dataAutoUpdate");
+                require(expand && !expand->isChecked() && automatic && automatic->isChecked() &&
+                            dialog->findChild<QPushButton *>("downloadEop") &&
+                            dialog->findChild<QPushButton *>("importRawEop"),
+                        "Missing simple data center controls");
+                dialog->grab().save(smoke_dir_ + "/data-center-downloads.png");
+                expand->click();
                 auto *choices = dialog->findChild<QComboBox *>("eopSnapshots");
                 auto *apply = dialog->findChild<QPushButton *>("applyEopSnapshot");
                 choices->setCurrentIndex(eop_ == eop_current_ ? 1 : 0);
@@ -4949,6 +4974,15 @@ class Workbench final : public QMainWindow {
                 require(eop_->data_info().id.find("smoke-imported-") != 0,
                         "Import implicitly switched the active data");
                 dialog->grab().save(smoke_dir_ + "/eop-data-dialog.png");
+                automatic->setChecked(false);
+                automatic->setChecked(true);
+                require(eop_catalog_->automatic_updates() && !eop_catalog_->downloading(),
+                        "Update policy was not saved or unexpectedly started a download");
+                automatic->setChecked(false);
+                dialog->findChild<QPushButton *>("setDefaultEop")->click();
+                require(eop_catalog_->preferred == 2 && scenario_->data_lock() == smoke_data_lock_,
+                        "Changing the new-scenario default changed the active data lock");
+                record("data-center-policies-default-and-download-controls");
                 apply->click();
             });
             eop_action_->trigger();
@@ -4981,8 +5015,14 @@ class Workbench final : public QMainWindow {
             changed.close();
             eop_catalog_ = std::make_unique<EopCatalog>(
                 eop_catalog_->store(),
-                std::vector<EopCatalog::Provider>{eop_current_, eop_history_});
-            require(eop_catalog_->providers().size() == 3 && eop_catalog_->warnings().empty(),
+                std::vector<std::filesystem::path>{
+                    std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) /
+                        "resources/eop-current/manifest.json",
+                    std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) /
+                        "resources/eop/manifest.json"},
+                std::filesystem::path{}, false);
+            require(eop_catalog_->providers().size() == 3 && eop_catalog_->warnings().empty() &&
+                        eop_catalog_->preferred == 2 && !eop_catalog_->automatic_updates(),
                     "Imported data did not survive catalog reconstruction");
             start_project(
                 application::load_project(std::filesystem::path(project_path_.toStdWString())),

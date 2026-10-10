@@ -52,6 +52,7 @@
       "inherits": "astronomy",
       "displayName": "Qt / VSG / Rocky graphics integration",
       "cacheVariables": {
+        "ORBITFORGE_WITH_DATA_CATALOG": "ON",
         "ORBITFORGE_BUILD_DESKTOP": "ON",
         "ORBITFORGE_WITH_VSG": "ON",
         "ORBITFORGE_WITH_ROCKY": "ON"

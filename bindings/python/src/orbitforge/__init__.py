@@ -16,6 +16,7 @@ from ._native import (
     j2_mean_ellipse_state, j2_mean_ellipse_elements, make_j2_session,
     Project, ProjectSatellite, ProjectError, OrbitInput, OrbitDisplay, OrbitPropagator, load_project,
     DataReference, DataLock,
+    DataCatalog, CatalogSnapshot, data_catalog_available,
 )
 
 __all__ = [
@@ -35,5 +36,6 @@ __all__ = [
     "j2_mean_ellipse_state", "j2_mean_ellipse_elements", "make_j2_session",
     "Project", "ProjectSatellite", "ProjectError", "OrbitInput", "OrbitDisplay", "OrbitPropagator", "load_project",
     "DataReference", "DataLock",
+    "DataCatalog", "CatalogSnapshot", "data_catalog_available",
 ]
 

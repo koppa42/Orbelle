@@ -49,7 +49,7 @@
 
 v3 中，即使没有任何依赖，LOCK 也必须存在。缺失 LOCK、根哈希错误、DATA 与 LOCK 不一致均拒绝，不能借此退化为自动选择最新数据。已绑定项目缺少数据时不会静默改绑。
 
-`DataLock` 是引用值，不自行加载文件或下载数据。无界面 `Project.to_scenario()` 保存这份身份信息，当前二体/J2 的 GCRF 传播不需要 EOP；调用者真正使用外部数据时仍应由 resolver 校验并加载相应 Provider。当前桌面已经通过 EOP 目录执行精确匹配，通用 resolver 属于[数据中心后续工作](data_center.md)。
+`DataLock` 是引用值，不自行加载文件或下载数据。无界面 `Project.to_scenario()` 保存这份身份信息，当前二体/J2 的 GCRF 传播不需要 EOP；调用者真正使用外部数据时仍应校验并加载相应 Provider。`runtime::DataCatalog::resolve_eop()` 已提供 EOP/时间依赖的精确解析，其他数据类型属于[数据中心后续工作](data_center.md)。
 
 ## API
 
