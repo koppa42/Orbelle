@@ -5,7 +5,6 @@
 #include <orbitforge/application/session.hpp>
 #include <orbitforge/core/frames/frame_provider.hpp>
 #include <orbitforge/core/propagation/central_body.hpp>
-#include <orbitforge/core/propagation/j2_mean_elements.hpp>
 #include <orbitforge/visualization/state_track.hpp>
 
 namespace orbitforge::desktop {
@@ -15,7 +14,6 @@ struct OrbitInput {
     core::CartesianState initial{
         core::Epoch{0}, core::OriginId::earth, core::FrameId::gcrf, {7e6, 0, 0}, {0, 6200, 5300}};
     OrbitPropagator propagator = OrbitPropagator::two_body;
-    core::J2SecularOptions j2;
     core::FrameId input_frame = core::FrameId::gcrf;
     [[nodiscard]] double mu() const {
         return core::central_body(initial.origin).mu.metres_cubed_per_second_squared;

@@ -4154,28 +4154,29 @@ class Workbench final : public QMainWindow {
             require(editor_->findChild<QuantityEditor *>("meanAnomaly"),
                     "J2 input must identify the mean anomaly");
             QTimer::singleShot(0, editor_, [this, require] {
-                auto *dialog = editor_->findChild<QDialog *>("propagatorSettingsDialog");
-                require(dialog, "J2 settings did not open");
-                dialog->findChild<QCheckBox *>("j2ApsidalPrecession")->setChecked(false);
-                require(dialog->grab().save(smoke_dir_ + "/j2-settings.png"),
-                        "Cannot capture J2 settings");
-                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+                auto *dialog = editor_->findChild<QDialog *>("propagatorDetailsDialog");
+                require(dialog && dialog->findChildren<QCheckBox *>().empty() &&
+                            dialog->findChildren<QuantityEditor *>().empty(),
+                        "Model information must not duplicate sampling or offer partial J2 terms");
+                require(dialog->grab().save(smoke_dir_ + "/j2-model.png"),
+                        "Cannot capture J2 model information");
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Close)->click();
             });
             timer_.stop();
-            editor_->open_propagator_settings();
+            editor_->findChild<QPushButton *>("propagatorDetails")->click();
             timer_.start();
             editor_->submit();
-            record("initial-state-frame-conversion-and-j2-settings");
+            record("initial-state-frame-conversion-and-j2-model-details");
             ++orbit_smoke_stage_;
             break;
         }
         case 69:
             require(last_orbit_outcome_ == "applied" &&
                         orbit_->input.propagator == OrbitPropagator::j2_secular &&
-                        !orbit_->input.j2.apsidal_precession &&
                         orbit_->max_inertial_check_error_m <= 1 &&
-                        orbit_->session.provenance().algorithm.find("apsis=0") != std::string::npos,
-                    "Configured J2 propagation was not published");
+                        orbit_->session.provenance().algorithm.find("node=1;apsis=1;mean=1") !=
+                            std::string::npos,
+                    "J2 propagation did not publish every secular term");
             save_workbench_image("j2-properties.png");
             properties_dialog_->close();
             slots_[1]->dock->show();

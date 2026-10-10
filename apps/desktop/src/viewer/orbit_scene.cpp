@@ -12,8 +12,11 @@ application::Session make_orbit_session(const OrbitInput &input, std::uint64_t r
     case OrbitPropagator::two_body:
         return runtime::make_two_body_session(input.initial, body.mu, input.object_id, revision);
     case OrbitPropagator::j2_secular:
-        return runtime::make_j2_session(runtime::j2_mean_ellipse_elements(input.initial), input.j2,
-                                        input.object_id, revision, body.origin);
+        // Standard J2 includes every first-order secular term. Partial-term options
+        // remain available through the runtime API for diagnostic comparisons only.
+        return runtime::make_j2_session(runtime::j2_mean_ellipse_elements(input.initial),
+                                        core::J2SecularOptions{}, input.object_id, revision,
+                                        body.origin);
     }
     throw std::invalid_argument("Unsupported orbit propagator");
 }

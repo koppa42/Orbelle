@@ -135,12 +135,13 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     propagator_->setAccessibleName(QStringLiteral("轨道传播器"));
     propagator_->addItems({QStringLiteral("二体 · Two Body"), QStringLiteral("J2 · 长期摄动")});
     propagator_row->addWidget(propagator_, 1);
-    auto *settings_button = new QPushButton(QStringLiteral("设置…"));
-    settings_button->setObjectName("propagatorSettings");
-    settings_button->setAutoDefault(false);
-    propagator_row->addWidget(settings_button);
+    auto *model_button = new QPushButton(QStringLiteral("模型…"));
+    model_button->setObjectName("propagatorDetails");
+    model_button->setToolTip(QStringLiteral("查看传播模型与中心天体常数"));
+    model_button->setAutoDefault(false);
+    propagator_row->addWidget(model_button);
     form->addRow(QStringLiteral("传播器"), propagator_row);
-    connect(settings_button, &QPushButton::clicked, this, &OrbitEditor::open_propagator_settings);
+    connect(model_button, &QPushButton::clicked, this, &OrbitEditor::open_propagator_details);
     connect(propagator_, &QComboBox::currentIndexChanged, this, [this](int index) {
         set_propagator(index == 0 ? OrbitPropagator::two_body : OrbitPropagator::j2_secular);
     });
@@ -466,7 +467,6 @@ void OrbitEditor::set_input(const OrbitInput &input) {
         propagator_block(propagator_);
     body_ = input.initial.origin;
     propagator_kind_ = input.propagator;
-    j2_options_ = input.j2;
     input_frame_ = input.input_frame;
     propagator_->setCurrentIndex(propagator_kind_ == OrbitPropagator::two_body ? 0 : 1);
     reference_frame_->setCurrentIndex(input_frame_ == core::FrameId::gcrf ? 0 : 1);
@@ -623,78 +623,47 @@ void OrbitEditor::update_state_labels() {
     elements_[5]->set_label(anomaly_label_->text());
     elements_[5]->setObjectName(j2 ? "meanAnomaly" : "trueAnomaly");
 }
-void OrbitEditor::open_propagator_settings() {
+void OrbitEditor::open_propagator_details() {
     try {
         QDialog dialog(this);
-        dialog.setObjectName("propagatorSettingsDialog");
+        dialog.setObjectName("propagatorDetailsDialog");
         const bool j2 = propagator_kind_ == OrbitPropagator::j2_secular;
-        dialog.setWindowTitle(j2 ? QStringLiteral("J2 摄动 · 传播器设置")
-                                 : QStringLiteral("二体 · 传播器设置"));
-        dialog.setMinimumWidth(430);
+        dialog.setWindowTitle(j2 ? QStringLiteral("J2 · 模型信息")
+                                 : QStringLiteral("二体 · 模型信息"));
+        dialog.setMinimumWidth(400);
         auto *layout = new QVBoxLayout(&dialog);
         layout->setContentsMargins(20, 18, 20, 16);
         layout->setSpacing(14);
         auto *form = new QFormLayout;
+        form->setHorizontalSpacing(18);
         form->setVerticalSpacing(10);
+        const auto row = [&](const QString &label, const QString &value) {
+            auto *text = new QLabel(value);
+            text->setTextFormat(Qt::PlainText);
+            text->setTextInteractionFlags(Qt::TextSelectableByMouse);
+            form->addRow(label, text);
+        };
         const auto &body = core::central_body(body_);
-        form->addRow(QStringLiteral("中心天体"), new QLabel(QStringLiteral("地球 · IERS 2003")));
-        form->addRow(
-            QStringLiteral("引力参数 μ"),
-            new QLabel(QString::number(body.mu.metres_cubed_per_second_squared / 1e9, 'g', 15) +
-                       QStringLiteral(" km³/s²")));
-        form->addRow(QStringLiteral("传播参考系"), new QLabel(QStringLiteral("GCRF")));
-        auto *step = new QuantityEditor(step_->unit());
-        step->setObjectName("propagationDisplayStep");
-        step->set_label(QStringLiteral("显示步长"));
-        step->set_range(1, 60, Unit::second);
-        step->set_quantum(1, Unit::second);
-        step->set_value(step_->value(Unit::second), Unit::second);
-        form->addRow(QStringLiteral("显示步长"), step);
-        layout->addLayout(form);
-        auto *node = new QCheckBox(QStringLiteral("升交点赤经进动"), &dialog);
-        auto *apsis = new QCheckBox(QStringLiteral("近地点幅角进动"), &dialog);
-        auto *mean = new QCheckBox(QStringLiteral("平近点角长期修正"), &dialog);
-        node->setObjectName("j2NodePrecession");
-        apsis->setObjectName("j2ApsidalPrecession");
-        mean->setObjectName("j2MeanMotionCorrection");
-        node->setChecked(j2_options_.node_precession);
-        apsis->setChecked(j2_options_.apsidal_precession);
-        mean->setChecked(j2_options_.mean_motion_correction);
+        row(QStringLiteral("传播模型"),
+            j2 ? QStringLiteral("一阶 J2 长期项") : QStringLiteral("二体"));
+        row(QStringLiteral("中心天体"), QStringLiteral("地球 · IERS 2003"));
+        row(QStringLiteral("引力参数 μ"),
+            QString::number(body.mu.metres_cubed_per_second_squared / 1e9, 'g', 15) +
+                QStringLiteral(" km³/s²"));
+        row(QStringLiteral("传播参考系"), QStringLiteral("GCRF"));
         if (j2) {
-            form->addRow(
-                QStringLiteral("参考半径"),
-                new QLabel(QString::number(body.equatorial_radius_m / 1000, 'g', 15) + " km"));
-            form->addRow(QStringLiteral("J2 系数"), new QLabel(QString::number(body.j2, 'g', 15)));
-            layout->addWidget(divider());
-            layout->addWidget(node);
-            layout->addWidget(apsis);
-            layout->addWidget(mean);
-        } else {
-            node->hide();
-            apsis->hide();
-            mean->hide();
+            row(QStringLiteral("参考半径"),
+                QString::number(body.equatorial_radius_m / 1000, 'g', 15) + " km");
+            row(QStringLiteral("J2 系数"), QString::number(body.j2, 'g', 15));
+            row(QStringLiteral("长期项"), QStringLiteral("Ω、ω、M（全部计入）"));
         }
-        auto *error = new QLabel;
-        error->setObjectName("error");
-        error->setWordWrap(true);
-        error->hide();
-        layout->addWidget(error);
-        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-        buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("确定"));
-        buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+        layout->addLayout(form);
+        layout->addWidget(divider());
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close);
+        buttons->button(QDialogButtonBox::Close)->setText(QStringLiteral("关闭"));
+        buttons->button(QDialogButtonBox::Close)->setDefault(true);
         layout->addWidget(buttons);
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-        connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
-            try {
-                step_->set_value(step->value(Unit::second), Unit::second);
-                if (j2)
-                    j2_options_ = {node->isChecked(), apsis->isChecked(), mean->isChecked()};
-                dialog.accept();
-            } catch (const std::exception &exception) {
-                error->setText(QString::fromUtf8(exception.what()));
-                error->show();
-            }
-        });
         dialog.exec();
     } catch (const std::exception &error) {
         show_result(QString::fromUtf8(error.what()), true);
@@ -723,7 +692,6 @@ void OrbitEditor::submit() {
         input.object_id = object_->text().trimmed().toStdString();
         input.initial = read_state();
         input.propagator = propagator_kind_;
-        input.j2 = j2_options_;
         input.input_frame = input_frame_;
         input.first = first_->epoch();
         input.last = last_->epoch();

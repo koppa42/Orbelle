@@ -6,7 +6,7 @@
 #include <orbitforge/runtime/two_body.hpp>
 
 namespace orbitforge::desktop {
-TEST(OrbitPreparation, J2MinuteCacheUsesTrajectoryDerivativeAndPreservesSettings) {
+TEST(OrbitPreparation, J2MinuteCacheUsesAllSecularTermsAndTrajectoryDerivative) {
     const auto time = runtime::make_builtin_time_provider();
     const auto frames = runtime::make_frame_provider();
     const auto eop = runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
@@ -15,9 +15,8 @@ TEST(OrbitPreparation, J2MinuteCacheUsesTrajectoryDerivativeAndPreservesSettings
     input.last = time->from_utc({2026, 10, 10, 0, 0, 0, 0});
     input.initial.epoch = input.first;
     input.propagator = OrbitPropagator::j2_secular;
-    input.j2 = {true, false, true};
     const auto session = make_orbit_session(input, 3);
-    EXPECT_NE(session.provenance().algorithm.find("apsis=0"), std::string::npos);
+    EXPECT_NE(session.provenance().algorithm.find("node=1;apsis=1;mean=1"), std::string::npos);
     const std::atomic_bool cancelled{false};
     for (const auto epoch :
          {input.first, core::Epoch{input.first.tai_nanoseconds() + 12 * 3600'000'000'000LL}}) {
@@ -25,7 +24,7 @@ TEST(OrbitPreparation, J2MinuteCacheUsesTrajectoryDerivativeAndPreservesSettings
                                                display_cache_interval(input, {}, epoch));
         EXPECT_LE(orbit->max_check_error_m, 1);
         EXPECT_LE(orbit->max_inertial_check_error_m, 1);
-        EXPECT_EQ(orbit->input.j2, input.j2);
+        EXPECT_EQ(orbit->session.provenance().algorithm, session.provenance().algorithm);
         EXPECT_LT(orbit->track.samples().states().size(), 200);
     }
 }

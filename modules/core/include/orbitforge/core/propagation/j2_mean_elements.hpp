@@ -14,6 +14,8 @@ struct J2MeanElements {
     double argument_of_periapsis_rad;
     double mean_anomaly_rad;
 };
+// Use all terms for standard J2 propagation. Partial terms support diagnostic
+// comparisons and do not represent the complete first-order secular model.
 struct J2SecularOptions {
     bool node_precession = true;
     bool apsidal_precession = true;

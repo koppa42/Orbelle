@@ -296,45 +296,66 @@ TEST_F(QuantityTest, FailedFrameSwitchRetainsTheOriginalDraft) {
     EXPECT_EQ(editor.findChild<QComboBox *>("stateRepresentation")->currentIndex(), 1);
     EXPECT_DOUBLE_EQ(field(editor, "semiMajorAxis").value(Unit::metre), original);
 }
-TEST_F(QuantityTest, J2MeanAnomalySettingsAndReopeningKeepTheirMeaning) {
+TEST_F(QuantityTest, J2MeanAnomalyAndReadOnlyModelDetailsPreserveDraft) {
     OrbitEditor editor(OrbitInput{});
     editor.findChild<QComboBox *>("orbitPropagator")->setCurrentIndex(1);
     field(editor, "meanAnomaly").set_value(90, Unit::degree);
-    QTimer::singleShot(0, &editor, [&] {
-        auto *dialog = editor.findChild<QDialog *>("propagatorSettingsDialog");
-        ASSERT_NE(dialog, nullptr);
-        dialog->findChild<QCheckBox *>("j2ApsidalPrecession")->setChecked(false);
-        dialog->findChild<QuantityEditor *>("propagationDisplayStep")->set_value(30, Unit::second);
-        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
-    });
-    editor.open_propagator_settings();
+    auto &step = field(editor, "displayStep");
+    step.set_unit(Unit::minute);
+    step.set_value(30, Unit::second);
+    int submissions = 0;
     std::optional<OrbitInput> submitted;
-    editor.apply = [&](OrbitInput result) { submitted = result; };
+    editor.apply = [&](OrbitInput result) {
+        ++submissions;
+        submitted = result;
+    };
+    QTimer::singleShot(0, &editor, [&] {
+        auto *dialog = editor.findChild<QDialog *>("propagatorDetailsDialog");
+        ASSERT_NE(dialog, nullptr);
+        EXPECT_TRUE(dialog->findChildren<QCheckBox *>().empty());
+        EXPECT_TRUE(dialog->findChildren<QuantityEditor *>().empty());
+        EXPECT_TRUE(dialog->findChildren<QLineEdit *>().empty());
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Close)->click();
+    });
+    editor.findChild<QPushButton *>("propagatorDetails")->click();
+    EXPECT_EQ(submissions, 0);
+    EXPECT_EQ(step.unit(), Unit::minute);
+    EXPECT_DOUBLE_EQ(step.value(Unit::minute), 0.5);
     editor.submit();
     ASSERT_TRUE(submitted);
     EXPECT_EQ(submitted->propagator, OrbitPropagator::j2_secular);
-    EXPECT_FALSE(submitted->j2.apsidal_precession);
-    EXPECT_TRUE(submitted->j2.node_precession);
     EXPECT_EQ(submitted->step_seconds, 30);
     const auto mean = runtime::j2_mean_ellipse_elements(submitted->initial);
     EXPECT_NEAR(mean.mean_anomaly_rad, std::numbers::pi / 2, 1e-13);
     editor.set_input(*submitted);
     EXPECT_NEAR(field(editor, "meanAnomaly").value(Unit::degree), 90, 1e-10);
+    // Inspecting a model must not validate or overwrite a partially edited field.
+    text(step)->setText("unfinished");
     QTimer::singleShot(0, &editor, [&] {
-        auto *dialog = editor.findChild<QDialog *>("propagatorSettingsDialog");
+        auto *dialog = editor.findChild<QDialog *>("propagatorDetailsDialog");
         ASSERT_NE(dialog, nullptr);
-        EXPECT_FALSE(dialog->findChild<QCheckBox *>("j2ApsidalPrecession")->isChecked());
-        dialog->findChild<QCheckBox *>("j2ApsidalPrecession")->setChecked(true);
-        dialog->findChild<QuantityEditor *>("propagationDisplayStep")->set_value(10, Unit::second);
-        dialog->reject();
+        QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        QCoreApplication::sendEvent(dialog, &escape);
     });
-    editor.open_propagator_settings();
+    editor.open_propagator_details();
+    EXPECT_EQ(submissions, 1);
+    EXPECT_EQ(text(step)->text(), "unfinished");
+    EXPECT_EQ(step.unit(), Unit::minute);
+    step.set_value(30, Unit::second);
     editor.submit();
-    EXPECT_FALSE(submitted->j2.apsidal_precession);
     EXPECT_EQ(submitted->step_seconds, 30);
     editor.findChild<QComboBox *>("orbitPropagator")->setCurrentIndex(0);
     EXPECT_NE(editor.findChild<QuantityEditor *>("trueAnomaly"), nullptr);
+    QTimer::singleShot(0, &editor, [&] {
+        auto *dialog = editor.findChild<QDialog *>("propagatorDetailsDialog");
+        ASSERT_NE(dialog, nullptr);
+        EXPECT_TRUE(dialog->findChildren<QuantityEditor *>().empty());
+        EXPECT_TRUE(dialog->findChildren<QCheckBox *>().empty());
+        dialog->reject();
+    });
+    editor.open_propagator_details();
     editor.submit();
     EXPECT_EQ(submitted->propagator, OrbitPropagator::two_body);
+    EXPECT_EQ(submitted->step_seconds, 30);
 }
 } // namespace orbitforge::desktop

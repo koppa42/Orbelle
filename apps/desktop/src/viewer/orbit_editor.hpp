@@ -29,7 +29,7 @@ class OrbitEditor final : public QWidget {
     void set_state_mode(int mode);
     void set_reference_frame(core::FrameId frame);
     void set_propagator(OrbitPropagator propagator);
-    void open_propagator_settings();
+    void open_propagator_details();
     void set_appearance(int kind, const QString &path, double diameter_km);
     void submit();
     void set_busy(bool busy);
@@ -48,7 +48,6 @@ class OrbitEditor final : public QWidget {
     core::OriginId body_ = core::OriginId::earth;
     core::FrameId input_frame_ = core::FrameId::gcrf;
     OrbitPropagator propagator_kind_ = OrbitPropagator::two_body;
-    core::J2SecularOptions j2_options_;
     bool create_mode_ = false, orbit_busy_ = false, model_busy_ = false;
     QTreeWidget *navigation_ = nullptr;
     QLineEdit *object_ = nullptr;
