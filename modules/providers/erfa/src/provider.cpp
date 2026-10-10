@@ -3,9 +3,14 @@
 #include <cmath>
 #include <cstdint>
 #include <erfa.h>
+#include <fstream>
+#include <locale>
 #include <numbers>
 #include <orbitforge/providers/erfa/provider.hpp>
+#include <picosha2.h>
+#include <sstream>
 #include <stdexcept>
+#include <vector>
 
 namespace orbitforge::providers::erfa {
 namespace {
@@ -36,36 +41,9 @@ constexpr bool valid_table() {
 }
 static_assert(valid_table(), "Unsupported leap-second snapshot");
 
-int offset_at_day(int mjd) {
-    const auto it = std::upper_bound(detail::leap_seconds.begin(), detail::leap_seconds.end(), mjd,
-                                     [](int day, auto row) { return day < row.mjd; });
-    return (it - 1)->tai_minus_utc;
-}
-
-std::int64_t day_start_tai(int mjd) {
-    return ((static_cast<std::int64_t>(mjd) - epoch_mjd) * seconds_per_day - 43'200 +
-            offset_at_day(mjd)) *
-           ns_per_second;
-}
-
 std::int64_t floor_div(std::int64_t value, std::int64_t divisor) {
     const auto quotient = value / divisor;
     return quotient - (value % divisor < 0 ? 1 : 0);
-}
-
-int utc_day(core::Epoch epoch) {
-    const auto ticks = epoch.tai_nanoseconds();
-    if (ticks < day_start_tai(detail::utc_valid_from_mjd) ||
-        ticks >= day_start_tai(detail::utc_valid_until_mjd)) {
-        throw core::TimeDataRangeError(
-            "Epoch is outside the pinned UTC leap-second snapshot validity");
-    }
-    // The range check above also makes the addition and narrowing safe.
-    auto day = static_cast<int>(floor_div(ticks + 43'200 * ns_per_second, ns_per_day)) + epoch_mjd;
-    while (ticks < day_start_tai(day)) {
-        --day;
-    }
-    return day;
 }
 
 core::JulianDate tai_jd(core::Epoch epoch) {
@@ -99,6 +77,11 @@ core::JulianDate tt_jd(core::Epoch epoch) {
 
 class TimeProvider final : public core::ITimeProvider {
   public:
+    TimeProvider()
+        : rows_(detail::leap_seconds.begin(), detail::leap_seconds.end()),
+          info_(detail::time_data_info) {}
+    TimeProvider(std::vector<detail::LeapSecond> rows, core::TimeDataInfo info)
+        : rows_(std::move(rows)), info_(std::move(info)) {}
     core::Epoch from_utc(const core::UtcDateTime &utc) const override {
         // Guard ERFA's C calendar arithmetic against extreme integer years. The compiled
         // table's asserted MJD limits lie entirely within this broad year range.
@@ -115,7 +98,7 @@ class TimeProvider final : public core::ITimeProvider {
             utc.second > 60 || utc.nanosecond < 0 || utc.nanosecond >= ns_per_second) {
             throw std::invalid_argument("Invalid UTC calendar date or clock fields");
         }
-        if (mjd < detail::utc_valid_from_mjd || mjd >= detail::utc_valid_until_mjd) {
+        if (mjd < info_.utc_valid_from_mjd || mjd >= info_.utc_valid_until_mjd) {
             throw core::TimeDataRangeError(
                 "UTC is outside the pinned leap-second snapshot validity");
         }
@@ -125,6 +108,8 @@ class TimeProvider final : public core::ITimeProvider {
             throw std::invalid_argument("UTC second 60 is not a leap second in this snapshot");
         }
         const auto elapsed_seconds = utc.hour * 3600 + utc.minute * 60 + utc.second;
+        if (elapsed_seconds >= seconds_per_day + offset_at_day(day + 1) - offset_at_day(day))
+            throw std::invalid_argument("UTC second is removed by a negative leap second");
         return core::Epoch(day_start_tai(day) + elapsed_seconds * ns_per_second + utc.nanosecond);
     }
 
@@ -164,7 +149,34 @@ class TimeProvider final : public core::ITimeProvider {
         }
         throw std::invalid_argument("Unsupported time scale");
     }
-    const core::TimeDataInfo &data_info() const noexcept override { return detail::time_data_info; }
+    const core::TimeDataInfo &data_info() const noexcept override { return info_; }
+
+  private:
+    int offset_at_day(int mjd) const {
+        const auto it = std::upper_bound(rows_.begin(), rows_.end(), mjd,
+                                         [](int day, auto row) { return day < row.mjd; });
+        return it == rows_.begin() ? rows_.front().tai_minus_utc : (it - 1)->tai_minus_utc;
+    }
+    std::int64_t day_start_tai(int mjd) const {
+        return ((static_cast<std::int64_t>(mjd) - epoch_mjd) * seconds_per_day - 43'200 +
+                offset_at_day(mjd)) *
+               ns_per_second;
+    }
+    int utc_day(core::Epoch epoch) const {
+        const auto ticks = epoch.tai_nanoseconds();
+        if (ticks < day_start_tai(info_.utc_valid_from_mjd) ||
+            ticks >= day_start_tai(info_.utc_valid_until_mjd))
+            throw core::TimeDataRangeError("Epoch is outside the UTC leap-second data validity");
+        auto day =
+            static_cast<int>(floor_div(ticks + 43'200 * ns_per_second, ns_per_day)) + epoch_mjd;
+        while (ticks < day_start_tai(day))
+            --day;
+        while (ticks >= day_start_tai(day + 1))
+            ++day;
+        return day;
+    }
+    std::vector<detail::LeapSecond> rows_;
+    core::TimeDataInfo info_;
 };
 
 core::Matrix3 matrix_value(const double matrix[3][3]) {
@@ -300,6 +312,76 @@ class FrameProvider final : public core::IFrameProvider {
 
 std::unique_ptr<core::ITimeProvider> make_builtin_time_provider() {
     return std::make_unique<TimeProvider>();
+}
+std::unique_ptr<core::ITimeProvider> load_time_snapshot(const std::filesystem::path &file) {
+    const auto check = [](bool ok, const char *message) {
+        if (!ok)
+            throw std::invalid_argument(message);
+    };
+    std::ifstream input(file, std::ios::binary | std::ios::ate);
+    check(static_cast<bool>(input), "Cannot read IERS leap-second file");
+    const auto size = input.tellg();
+    check(size > 0 && size <= 65536, "Invalid IERS leap-second file size");
+    std::string bytes(static_cast<std::size_t>(size), '\0');
+    input.seekg(0);
+    check(static_cast<bool>(input.read(bytes.data(), size)), "Incomplete leap-second file");
+    const auto calendar_mjd = [&](int year, int month, int day) {
+        double base = 0, mjd = 0;
+        check(year >= 1972 && year <= 2200 && eraCal2jd(year, month, day, &base, &mjd) == 0,
+              "Invalid date in leap-second file");
+        check(mjd >= 41317 && mjd <= 100000, "Leap-second date outside supported range");
+        return static_cast<int>(mjd);
+    };
+    constexpr std::array months{"January",   "February", "March",    "April",
+                                "May",       "June",     "July",     "August",
+                                "September", "October",  "November", "December"};
+    std::vector<detail::LeapSecond> rows;
+    int expires = 0;
+    std::istringstream lines(bytes);
+    std::string line;
+    while (std::getline(lines, line)) {
+        const auto first = line.find_first_not_of(" \t\r");
+        if (first == std::string::npos)
+            continue;
+        if (line[first] == '#') {
+            const auto marker = line.find("File expires on ");
+            if (marker != std::string::npos) {
+                check(expires == 0, "Duplicate leap-second expiration date");
+                std::istringstream date(line.substr(marker + 16));
+                int day = 0, year = 0;
+                std::string month;
+                check(static_cast<bool>(date >> day >> month >> year), "Missing expiration date");
+                date >> std::ws;
+                const auto found = std::find(months.begin(), months.end(), month);
+                check(date.eof() && found != months.end(), "Malformed expiration date");
+                expires = calendar_mjd(year, static_cast<int>(found - months.begin()) + 1, day);
+            }
+            continue;
+        }
+        std::istringstream row(line);
+        row.imbue(std::locale::classic());
+        double mjd = 0;
+        int day = 0, month = 0, year = 0, offset = 0;
+        check(static_cast<bool>(row >> mjd >> day >> month >> year >> offset),
+              "Malformed IERS leap-second record");
+        row >> std::ws;
+        const auto date = calendar_mjd(year, month, day);
+        check(row.eof() && mjd == date && offset >= 0 && offset <= 1000 && rows.size() < 512,
+              "Invalid IERS leap-second record");
+        check(rows.empty()
+                  ? date == 41317 && offset == 10
+                  : date > rows.back().mjd && std::abs(offset - rows.back().tai_minus_utc) == 1,
+              "Leap-second table must start in 1972 and contain ordered one-second changes");
+        rows.push_back({date, offset});
+    }
+    check(!rows.empty() && expires > rows.back().mjd, "Missing or invalid leap-second expiration");
+    const auto hash = picosha2::hash256_hex_string(bytes);
+    if (hash == detail::time_data_info.sha256)
+        return make_builtin_time_provider();
+    core::TimeDataInfo info{"iers-leap-seconds-" + hash.substr(0, 16), hash,
+                            "https://hpiers.obspm.fr/iers/bul/bulc/Leap_Second.dat",
+                            rows.front().mjd, expires};
+    return std::make_unique<TimeProvider>(std::move(rows), std::move(info));
 }
 std::unique_ptr<core::IFrameProvider> make_frame_provider() {
     return std::make_unique<FrameProvider>();

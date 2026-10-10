@@ -8,10 +8,13 @@ class QLabel;
 class QToolButton;
 namespace orbitforge::desktop {
 enum class CalendarScale { utc, tai, tt };
-QString calendar_text(core::Epoch epoch, CalendarScale scale, bool date = true);
+QString calendar_text(core::Epoch epoch, CalendarScale scale, bool date = true,
+                      const core::ITimeProvider *time = nullptr);
 class EpochEditor final : public QWidget {
   public:
-    explicit EpochEditor(QWidget *parent = nullptr);
+    explicit EpochEditor(QWidget *parent = nullptr,
+                         std::shared_ptr<const core::ITimeProvider> time = {});
+    void set_time_provider(std::shared_ptr<const core::ITimeProvider> time);
     [[nodiscard]] core::Epoch epoch() const;
     void set_epoch(core::Epoch epoch);
     void set_scale(CalendarScale scale);
@@ -24,7 +27,7 @@ class EpochEditor final : public QWidget {
     bool eventFilter(QObject *watched, QEvent *event) override;
 
   private:
-    std::unique_ptr<core::ITimeProvider> time_;
+    std::shared_ptr<const core::ITimeProvider> time_;
     QLineEdit *value_ = nullptr;
     QToolButton *picker_button_ = nullptr;
     QLabel *error_ = nullptr;

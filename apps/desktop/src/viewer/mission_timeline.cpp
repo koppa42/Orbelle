@@ -18,16 +18,11 @@ constexpr qint64 day_ms = 86'400'000;
 constexpr qint64 minimum_span = 1'000;
 const QDateTime origin(QDate(2000, 1, 1), QTime(12, 0), QTimeZone::UTC);
 const QColor cursor_color("#e4b16c");
-const core::ITimeProvider &time_provider() {
-    static const auto provider = runtime::make_builtin_time_provider();
-    return *provider;
-}
-
 QString scale_name(CalendarScale scale) {
     return scale == CalendarScale::utc ? "UTC" : scale == CalendarScale::tai ? "TAI" : "TT";
 }
-QString full_time(qint64 epoch, CalendarScale scale) {
-    return calendar_text(core::Epoch{epoch * 1'000'000}, scale);
+QString full_time(qint64 epoch, CalendarScale scale, const core::ITimeProvider &time) {
+    return calendar_text(core::Epoch{epoch * 1'000'000}, scale, true, &time);
 }
 QString duration_text(qint64 milliseconds) {
     if (milliseconds % day_ms == 0)
@@ -46,30 +41,30 @@ qint64 floor_multiple(qint64 value, qint64 step) {
 }
 // Calendar coordinates are used only to align ticks. Every UTC tick is converted
 // separately: a single TAI-UTC offset would misalign ticks after a leap second.
-qint64 calendar_coordinate(qint64 epoch, CalendarScale scale) {
+qint64 calendar_coordinate(qint64 epoch, CalendarScale scale, const core::ITimeProvider &time) {
     if (scale != CalendarScale::utc)
         return origin.toMSecsSinceEpoch() + epoch + (scale == CalendarScale::tt ? 32184 : 0);
-    const auto p = time_provider().to_utc(core::Epoch{epoch * 1'000'000});
+    const auto p = time.to_utc(core::Epoch{epoch * 1'000'000});
     return QDateTime(QDate(p.year, p.month, p.day),
                      QTime(p.hour, p.minute, std::min(p.second, 59), p.nanosecond / 1'000'000),
                      QTimeZone::UTC)
         .toMSecsSinceEpoch();
 }
-qint64 from_coordinate(qint64 calendar, CalendarScale scale) {
+qint64 from_coordinate(qint64 calendar, CalendarScale scale, const core::ITimeProvider &time) {
     if (scale != CalendarScale::utc)
         return calendar - origin.toMSecsSinceEpoch() - (scale == CalendarScale::tt ? 32184 : 0);
     const auto value = QDateTime::fromMSecsSinceEpoch(calendar, QTimeZone::UTC);
     const auto date = value.date();
     const auto clock = value.time();
-    return time_provider()
-               .from_utc({date.year(), date.month(), date.day(), clock.hour(), clock.minute(),
+    return time.from_utc({date.year(), date.month(), date.day(), clock.hour(), clock.minute(),
                           clock.second(), clock.msec() * 1'000'000})
                .tai_nanoseconds() /
            1'000'000;
 }
 } // namespace
 
-MissionTimeline::MissionTimeline(QWidget *parent) : QSlider(Qt::Horizontal, parent) {
+MissionTimeline::MissionTimeline(QWidget *parent)
+    : QSlider(Qt::Horizontal, parent), time_(runtime::make_builtin_time_provider()) {
     setObjectName("missionTimeline");
     setRange(0, 10000);
     setFocusPolicy(Qt::StrongFocus);
@@ -108,6 +103,12 @@ void MissionTimeline::set_interval(qint64 first, qint64 last, const QString &sce
         reset_view();
         set_current_time(std::clamp(current_, first_, last_));
     }
+    update();
+}
+void MissionTimeline::set_time_provider(std::shared_ptr<const core::ITimeProvider> time) {
+    if (!time)
+        throw std::invalid_argument("Missing timeline time provider");
+    time_ = std::move(time);
     update();
 }
 void MissionTimeline::set_scale(CalendarScale scale) {
@@ -184,14 +185,14 @@ qint64 MissionTimeline::tick_step() const {
 std::vector<qint64> MissionTimeline::ruler_ticks() const {
     std::vector<qint64> result;
     const auto step = tick_step();
-    const auto begin = floor_multiple(calendar_coordinate(view_first_, scale_), step);
-    const auto end = calendar_coordinate(view_last_, scale_) + step +
+    const auto begin = floor_multiple(calendar_coordinate(view_first_, scale_, *time_), step);
+    const auto end = calendar_coordinate(view_last_, scale_, *time_) + step +
                      (scale_ == CalendarScale::utc && step <= 1000 ? 1000 : 0);
     std::optional<qint64> previous;
     for (auto calendar = begin; calendar <= end; calendar += step) {
         qint64 epoch;
         try {
-            epoch = from_coordinate(calendar, scale_);
+            epoch = from_coordinate(calendar, scale_, *time_);
         } catch (const std::out_of_range &) {
             // An aligned tick can be just outside the time provider's coverage.
             continue;
@@ -236,9 +237,9 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
     p.setPen(QColor("#90a4bc"));
     // Always include both endpoint dates, even for an exact one-day scenario.
     p.drawText(QRectF(left, 1, detail.width() / 2, 18), Qt::AlignLeft | Qt::AlignVCenter,
-               full_time(first_, scale_).left(20));
+               full_time(first_, scale_, *time_).left(20));
     p.drawText(QRectF(left + detail.width() / 2, 1, detail.width() / 2, 18),
-               Qt::AlignRight | Qt::AlignVCenter, full_time(last_, scale_).left(20));
+               Qt::AlignRight | Qt::AlignVCenter, full_time(last_, scale_, *time_).left(20));
     p.fillRect(overview, QColor("#101721"));
     p.setPen(QColor("#2b3b4d"));
     for (int i = 0; i <= 24; ++i) {
@@ -265,12 +266,12 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
     p.setClipRect(detail.adjusted(-1, 0, 1, 0));
     p.setPen(QColor("#91a6bc"));
     p.drawText(QRectF(left, 45, 110, 17), Qt::AlignLeft | Qt::AlignVCenter,
-               full_time(view_first_, scale_).left(10));
+               full_time(view_first_, scale_, *time_).left(10));
     p.drawText(QRectF(right - 110, 45, 110, 17), Qt::AlignRight | Qt::AlignVCenter,
-               full_time(view_last_, scale_).left(10));
+               full_time(view_last_, scale_, *time_).left(10));
     const auto step = tick_step();
     const auto label = [&](qint64 epoch) {
-        return full_time(epoch, scale_).mid(12, step < 1000 ? 12 : 8);
+        return full_time(epoch, scale_, *time_).mid(12, step < 1000 ? 12 : 8);
     };
     const auto ticks = ruler_ticks();
     // Five subdivisions per major SI interval, with calendar-aligned major ticks.
@@ -296,7 +297,7 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
             if (view_last_ - view_first_ >= day_ms * 2) {
                 p.setPen(QColor("#8396ac"));
                 p.drawText(QRectF(x - 40, 45, 80, 17), Qt::AlignCenter,
-                           full_time(epoch, scale_).mid(5, 5));
+                           full_time(epoch, scale_, *time_).mid(5, 5));
             }
         }
     }
@@ -439,7 +440,7 @@ void MissionTimeline::mouseMoveEvent(QMouseEvent *event) {
     } else if (detail_rect().contains(event->position())) {
         setCursor(Qt::CrossCursor);
         QToolTip::showText(event->globalPosition().toPoint(),
-                           full_time(time_at(event->position().x()), scale_) + " " +
+                           full_time(time_at(event->position().x()), scale_, *time_) + " " +
                                scale_name(scale_) +
                                QStringLiteral("\n单击跳转 · 滚轮缩放 · Shift 拖动平移"),
                            this);

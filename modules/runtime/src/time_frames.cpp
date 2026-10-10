@@ -10,9 +10,9 @@ namespace orbitforge::runtime {
 namespace {
 class LimitedEop final : public core::IEarthOrientationProvider {
   public:
-    LimitedEop(std::shared_ptr<const core::IEarthOrientationProvider> source, int days)
-        : source_(std::move(source)), time_(make_builtin_time_provider()),
-          info_(source_->data_info()) {
+    LimitedEop(std::shared_ptr<const core::IEarthOrientationProvider> source, int days,
+               std::shared_ptr<const core::ITimeProvider> time)
+        : source_(std::move(source)), time_(std::move(time)), info_(source_->data_info()) {
         if (info_.extrapolation_days != 0 || days < 1 || days > core::max_eop_extrapolation_days)
             throw std::invalid_argument("EOP extrapolation requires original data and 1..30 days");
         if (info_.time_data.sha256 != time_->data_info().sha256 ||
@@ -50,20 +50,24 @@ class LimitedEop final : public core::IEarthOrientationProvider {
 
   private:
     std::shared_ptr<const core::IEarthOrientationProvider> source_;
-    std::unique_ptr<core::ITimeProvider> time_;
+    std::shared_ptr<const core::ITimeProvider> time_;
     core::EopDataInfo info_;
 };
 } // namespace
 #endif
 std::unique_ptr<core::IEarthOrientationProvider>
-with_eop_extrapolation(std::shared_ptr<const core::IEarthOrientationProvider> source, int days) {
+with_eop_extrapolation(std::shared_ptr<const core::IEarthOrientationProvider> source, int days,
+                       std::shared_ptr<const core::ITimeProvider> time) {
 #ifdef ORBITFORGE_HAS_ERFA
     if (!source)
         throw std::invalid_argument("Missing EOP source");
-    return std::make_unique<LimitedEop>(std::move(source), days);
+    if (!time)
+        time = make_builtin_time_provider();
+    return std::make_unique<LimitedEop>(std::move(source), days, std::move(time));
 #else
     (void)source;
     (void)days;
+    (void)time;
     throw std::runtime_error("EOP extrapolation requires ORBITFORGE_WITH_ERFA=ON");
 #endif
 }
@@ -86,6 +90,25 @@ std::unique_ptr<core::IFrameProvider> make_frame_provider() {
     return providers::erfa::make_frame_provider();
 #else
     throw std::runtime_error("Frame provider requires a build with ORBITFORGE_WITH_ERFA=ON");
+#endif
+}
+std::unique_ptr<core::ITimeProvider> load_time_snapshot(const std::filesystem::path &file) {
+#ifdef ORBITFORGE_HAS_ERFA
+    return providers::erfa::load_time_snapshot(file);
+#else
+    (void)file;
+    throw std::runtime_error("Time data loading requires ORBITFORGE_WITH_ERFA=ON");
+#endif
+}
+std::unique_ptr<core::IEarthOrientationProvider>
+load_eop_snapshot_with_time(const std::filesystem::path &manifest,
+                            const core::ITimeProvider &time) {
+#ifdef ORBITFORGE_HAS_ERFA
+    return providers::iers::load_eop_snapshot(manifest, time);
+#else
+    (void)manifest;
+    (void)time;
+    throw std::runtime_error("EOP loading requires ORBITFORGE_WITH_ERFA=ON");
 #endif
 }
 std::unique_ptr<core::IEarthOrientationProvider>

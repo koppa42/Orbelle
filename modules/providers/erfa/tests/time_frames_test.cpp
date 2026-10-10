@@ -1,5 +1,7 @@
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <limits>
@@ -8,6 +10,47 @@
 #include <string>
 
 using namespace orbitforge;
+
+TEST(ErfaTime, DownloadedLeapTablesValidateDatesAndOwnTheirPositiveAndNegativeTransitions) {
+    struct TemporaryFile {
+        std::filesystem::path path =
+            std::filesystem::temp_directory_path() /
+            ("orbitforge-leaps-" +
+             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".dat");
+        ~TemporaryFile() {
+            std::error_code error;
+            std::filesystem::remove(path, error);
+        }
+        void write(const std::string &bytes) {
+            std::ofstream out(path, std::ios::binary);
+            out << bytes;
+        }
+    } file;
+    const std::string header = "# File expires on 1 January 1973\n";
+    const std::string first = "41317.0 1 1 1972 10\n";
+    file.write(header + first + "41499.0 1 7 1972 11\n");
+    const auto positive = providers::erfa::load_time_snapshot(file.path);
+    const auto leap = positive->from_utc({1972, 6, 30, 23, 59, 60, 0});
+    EXPECT_EQ(positive->to_utc(leap).second, 60);
+    EXPECT_DOUBLE_EQ(positive->from_utc({1972, 7, 1, 0, 0, 0, 0}).seconds_since(leap), 1);
+    file.write(header + first + "41499.0 1 7 1972 9\n");
+    const auto negative = providers::erfa::load_time_snapshot(file.path);
+    EXPECT_THROW((void)negative->from_utc({1972, 6, 30, 23, 59, 59, 0}), std::invalid_argument);
+    const auto end = negative->from_utc({1972, 6, 30, 23, 59, 58, 0});
+    const auto next = negative->from_utc({1972, 7, 1, 0, 0, 0, 0});
+    EXPECT_DOUBLE_EQ(next.seconds_since(end), 1);
+    EXPECT_EQ(negative->to_utc(next).day, 1);
+    EXPECT_EQ(negative->to_utc(next).hour, 0);
+    EXPECT_EQ(positive->to_utc(leap).second, 60); // Replacing the source never mutates a provider.
+    EXPECT_THROW((void)negative->from_utc({1973, 1, 1, 0, 0, 0, 0}), core::TimeDataRangeError);
+    for (const auto &bytes :
+         {first, header + first + "41499.0 2 7 1972 11\n", header + first + "41499.0 1 7 1972 12\n",
+          header + first + first, std::string("# File expires on 31 February 1973\n") + first,
+          header + header + first, header + first + "<html>network error</html>"}) {
+        file.write(bytes);
+        EXPECT_THROW((void)providers::erfa::load_time_snapshot(file.path), std::invalid_argument);
+    }
+}
 
 TEST(ErfaDisplaySun, MatchesPublishedEpv00ReferenceAndRejectsUnsupportedDates) {
     // Independent epv00 reference from ERFA 2.0.1 t_erfa_c.c at MJD(TT) 53411.52501161.

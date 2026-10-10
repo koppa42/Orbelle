@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <QTemporaryFile>
 #include <QTimer>
+#include <array>
 #include <optional>
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
@@ -30,31 +31,41 @@ class EopCatalog : public QObject {
     }
     [[nodiscard]] std::uint64_t revision() const { return revision_; }
     [[nodiscard]] std::vector<DataInventoryItem> inventory() const;
-    [[nodiscard]] DataUpdateStatus update_status() const;
+    [[nodiscard]] DataUpdateStatus
+    update_status(DataProduct product = DataProduct::finals2000a) const;
+    [[nodiscard]] std::shared_ptr<const core::ITimeProvider> time_provider() const { return time_; }
     [[nodiscard]] DataProduct preferred_product() const;
     void set_preferred_product(DataProduct product);
-    void set_automatic_updates(bool enabled);
-    [[nodiscard]] bool automatic_updates() const;
-    void set_update_interval_hours(int hours);
-    [[nodiscard]] int update_interval_hours() const;
+    void set_automatic_updates(bool enabled, DataProduct product = DataProduct::finals2000a);
+    [[nodiscard]] bool automatic_updates(DataProduct product = DataProduct::finals2000a) const;
+    void set_update_interval_hours(int hours, DataProduct product = DataProduct::finals2000a);
+    [[nodiscard]] int update_interval_hours(DataProduct product = DataProduct::finals2000a) const;
     void set_extrapolation_days(std::size_t index, int days);
     [[nodiscard]] int extrapolation_days(std::size_t index) const;
     [[nodiscard]] Provider for_interval(core::Epoch first, core::Epoch last) const;
-    void start_download(QUrl url = {});
+    void start_download(QUrl url = {}, DataProduct product = DataProduct::finals2000a);
     void cancel_download();
     void check_updates_if_due(qint64 now, QUrl source = {});
-    [[nodiscard]] bool has_full_download() const;
+    [[nodiscard]] bool has_full_download(DataProduct product = DataProduct::finals2000a) const;
     [[nodiscard]] bool downloading() const { return reply_ != nullptr; }
+    [[nodiscard]] DataProduct active_product() const { return active_product_; }
     [[nodiscard]] const QString &status() const { return status_; }
     [[nodiscard]] qint64 received_bytes() const { return received_; }
     [[nodiscard]] qint64 total_bytes() const { return total_; }
     [[nodiscard]] std::optional<std::size_t> last_installed() const { return last_installed_; }
-    void import_raw(const std::filesystem::path &source);
+    void import_raw(const std::filesystem::path &source,
+                    DataProduct product = DataProduct::finals2000a);
 
   private:
     std::size_t append(Provider provider);
     void refresh_current(std::optional<std::size_t> acquired = std::nullopt);
-    [[nodiscard]] std::optional<std::size_t> current_finals() const;
+    [[nodiscard]] std::optional<std::size_t> current_index(DataProduct product) const;
+    [[nodiscard]] std::string current_hash(DataProduct product) const;
+    void install_source(const std::filesystem::path &source, DataProduct product,
+                        const std::string &url, runtime::DataAcquisition acquisition);
+    DataUpdateStatus &update(DataProduct product) {
+        return updates_[static_cast<std::size_t>(product)];
+    }
     void save_update_status();
     std::filesystem::path store_;
     runtime::DataCatalog data_;
@@ -69,7 +80,10 @@ class EopCatalog : public QObject {
     QString status_;
     qint64 received_ = 0;
     qint64 total_ = -1;
-    DataUpdateStatus update_;
+    std::array<DataUpdateStatus, 3> updates_;
+    DataProduct active_product_ = DataProduct::finals2000a;
+    std::shared_ptr<const core::ITimeProvider> time_;
+    std::filesystem::path time_file_;
     std::vector<std::pair<std::string, std::filesystem::path>> bundled_;
     bool cancelled_ = false;
     QString transfer_error_;

@@ -18,7 +18,7 @@
 - 对象重命名、复制和删除：显示名称与稳定 ID 分离，存续计算修订保留；EOP 快照可从桌面导入、校验、持久保存，打开或重算时确认数据变化，见[对象与数据管理](docs/architecture/object_data_management.md)。
 - `.orbitforge` 项目文件：版本化分段容器、CRC 校验和原子保存；保存二体/J2 输入、对象显示设置与数据版本引用，支持桌面/Python/C++ 互通、保存/另存为/打开及未保存提示。外部模型和 EOP 快照仍为独立依赖，详见[项目文件格式](docs/architecture/project_files.md)。
 - Scenario 数据锁：保存 EOP 和时间数据的内容 SHA-256、解释配置及依赖清单总哈希；旧项目可升级，已有场景的数据不会随目录更新自动改变，详见[数据引用契约](docs/architecture/scenario_data_lock.md)。
-- 统一数据中心：左侧“地球定向参数”下分 finals2000A、C04 两个子项。选中父级可在右侧拖动调整计算优先级，选中子级查看获取时间、覆盖范围及最近检查结果。默认 finals2000A 优先，实际覆盖优先于外推。默认自动获取完整 finals2000A，支持手动更新、检查频率、下载进度和失败重试。C04 本地导入，UTC 随程序更新。场景打开或计算时检查数据和策略变化并请求确认，哈希用于溯源，详见[数据中心](docs/architecture/data_center.md)。
+- 统一数据中心：左侧“地球定向参数”下分 finals2000A、C04 两个子项。选中父级可在右侧拖动调整计算优先级，选中子级查看获取时间、覆盖范围及最近检查结果。默认 C04 优先，近期及预测时段回退 finals2000A，实际覆盖优先于外推。三种数据均支持自动获取完整文件，支持手动更新、检查频率、下载进度和失败重试。详情分为概览、更新与计算、文件信息，UTC 更新同步重建 EOP 时间依赖。场景打开或计算时检查数据和策略变化并请求确认，哈希用于溯源，详见[数据中心](docs/architecture/data_center.md)。
 - CMake 安装/导出的 C++ SDK、pybind11/scikit-build-core wheel 构建入口。
 - GoogleTest/CTest 核心与集成测试、Python API 测试、安装后的 SDK 消费端案例。
 - Linux x64 无界面 Release、ASan/UBSan 和断网环境中的 SDK / Python wheel 验证入口；已验证 Ubuntu 24.04、GCC 13.3、Python 3.12。

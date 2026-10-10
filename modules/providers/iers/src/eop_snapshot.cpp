@@ -57,7 +57,9 @@ int manifest_mjd(const nlohmann::json &manifest, const char *key, int minimum) {
 
 std::vector<Node> parse_c04(const std::string &bytes, int first, int last,
                             const core::ITimeProvider &time) {
-    if (bytes.find("20 C04") == std::string::npos ||
+    if ((bytes.find("20 C04") == std::string::npos &&
+         bytes.find("20u23 C04") == std::string::npos &&
+         bytes.find("20u24 C04") == std::string::npos) ||
         bytes.find("sampled at 0h UTC") == std::string::npos ||
         bytes.find("dX(\")") == std::string::npos || bytes.find("dY(\")") == std::string::npos) {
         throw core::EopDataError("Expected IERS 20 C04 0h UTC dX/dY header");

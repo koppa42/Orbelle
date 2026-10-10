@@ -30,6 +30,23 @@ class DataCatalogTests(unittest.TestCase):
         project.earth_orientation = info
         return project
 
+    def test_full_c04_and_runtime_time_data_survive_reopening(self):
+        original = Path(of.__file__).parent / 'notices/iers_leap_seconds_2026_07.dat'
+        source = self.root / 'Leap_Second.dat'
+        source.write_bytes(original.read_bytes().replace(b'28 June 2027', b'28 June 2028'))
+        catalog = of.DataCatalog(self.root / 'catalog')
+        time_file = catalog.install_time(source)
+        time_provider = of.load_time_snapshot(time_file)
+        self.assertEqual(time_provider.to_utc(time_provider.from_utc(of.UtcDateTime(2028, 1, 1))).year, 2028)
+        entry = catalog.import_c04(C04 / 'eop.c04', 'https://example.test/c04', '2026-10-10', time_file)
+        provider = catalog.load_eop(entry.lock_sha256)
+        self.assertEqual(provider.data_info.time_data.sha256, time_provider.data_info.sha256)
+        lock = self.project(provider).data_lock
+        del catalog
+        reopened = of.DataCatalog(self.root / 'catalog')
+        self.assertEqual(reopened.resolve_eop(lock).data_info.time_data.sha256, time_provider.data_info.sha256)
+        self.assertEqual(Path(reopened.time_file(time_provider.data_info.sha256)), Path(time_file))
+
     def test_acquisition_receipts_are_persistent_local_metadata(self):
         store = self.root / 'catalog'
         catalog = of.DataCatalog(store)

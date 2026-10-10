@@ -1,7 +1,11 @@
 #include "../src/viewer/mission_timeline.hpp"
 #include <QApplication>
+#include <QDate>
+#include <QFile>
 #include <QKeyEvent>
+#include <QLineEdit>
 #include <QMouseEvent>
+#include <QTemporaryDir>
 #include <QWheelEvent>
 #include <algorithm>
 #include <cmath>
@@ -68,6 +72,34 @@ TEST_F(Timeline, ZoomedPointerAndKeyboardSeekKeepMillisecondPrecision) {
     key(widget, Qt::Key_End);
     EXPECT_EQ(*requested, first + day);
     EXPECT_EQ(widget.visible_last(), first + day);
+}
+TEST_F(Timeline, DownloadedTimeDataDrivesFutureEditorsAndCalendarTicks) {
+    QTemporaryDir temporary;
+    ASSERT_TRUE(temporary.isValid());
+    QFile file(temporary.path() + "/leaps.dat");
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    const auto leap_mjd = QDate(1858, 11, 17).daysTo(QDate(2028, 1, 1));
+    file.write("# File expires on 1 January 2029\n41317.0 1 1 1972 10\n" +
+               QByteArray::number(leap_mjd) + ".0 1 1 2028 11\n");
+    file.close();
+    std::shared_ptr<const core::ITimeProvider> time =
+        runtime::load_time_snapshot(std::filesystem::path(file.fileName().toStdWString()));
+    const auto begin = time->from_utc({2027, 12, 31, 23, 59, 58, 0});
+    const auto end = time->from_utc({2028, 1, 1, 0, 0, 1, 0});
+    EpochEditor editor(nullptr, time);
+    editor.set_epoch(end);
+    EXPECT_TRUE(editor.findChild<QLineEdit *>("epochValue")->text().contains("2028-01-01"));
+    EXPECT_EQ(editor.epoch(), end);
+    EXPECT_TRUE(calendar_text(end, CalendarScale::utc, true, time.get()).startsWith("2028-01-01"));
+    MissionTimeline timeline;
+    timeline.resize(1400, 144);
+    timeline.set_time_provider(time);
+    timeline.set_interval(begin.tai_nanoseconds() / 1'000'000, end.tai_nanoseconds() / 1'000'000,
+                          "Future UTC");
+    const auto ticks = timeline.ruler_ticks();
+    const auto leap = time->from_utc({2027, 12, 31, 23, 59, 60, 0}).tai_nanoseconds() / 1'000'000;
+    EXPECT_NE(std::find(ticks.begin(), ticks.end(), leap), ticks.end());
+    EXPECT_FALSE(timeline.grab().isNull());
 }
 TEST_F(Timeline, OverviewResizesAndPansWithoutChangingSimulationTime) {
     MissionTimeline widget;

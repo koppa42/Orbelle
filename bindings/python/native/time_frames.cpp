@@ -113,6 +113,8 @@ void bind_time_frames(py::module_ &module) {
         .def("inverse", &core::StateTransform::inverse, py::arg("state"));
     module.def("time_frames_available", &runtime::time_frames_available);
     module.def("make_builtin_time_provider", &runtime::make_builtin_time_provider);
+    module.def("load_time_snapshot", &runtime::load_time_snapshot, py::arg("file"),
+               py::call_guard<py::gil_scoped_release>());
     module.def("make_frame_provider", &runtime::make_frame_provider);
     module.def("load_eop_snapshot", &runtime::load_eop_snapshot, py::arg("manifest"),
                py::arg("extrapolation_days") = 0, py::call_guard<py::gil_scoped_release>());

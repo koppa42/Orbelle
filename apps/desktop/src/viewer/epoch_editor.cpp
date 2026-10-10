@@ -130,15 +130,18 @@ void show_popup(QWidget *popup, QWidget *anchor) {
     popup->show();
 }
 } // namespace
-QString calendar_text(core::Epoch epoch, CalendarScale scale, bool date) {
-    static const auto time = runtime::make_builtin_time_provider();
+QString calendar_text(core::Epoch epoch, CalendarScale scale, bool date,
+                      const core::ITimeProvider *time) {
+    static const auto builtin = runtime::make_builtin_time_provider();
+    if (!time)
+        time = builtin.get();
     const auto p = calendar_parts(epoch, scale, *time);
     return date ? QDate(p.year, p.month, p.day).toString("yyyy-MM-dd") + "  " + clock_text(p) +
                       QString(".%1").arg(p.nanosecond / 1'000'000, 3, 10, QChar('0'))
                 : clock_text(p);
 }
-EpochEditor::EpochEditor(QWidget *parent)
-    : QWidget(parent), time_(runtime::make_builtin_time_provider()) {
+EpochEditor::EpochEditor(QWidget *parent, std::shared_ptr<const core::ITimeProvider> time)
+    : QWidget(parent), time_(time ? std::move(time) : runtime::make_builtin_time_provider()) {
     setMaximumWidth(380);
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -191,6 +194,15 @@ bool EpochEditor::eventFilter(QObject *watched, QEvent *event) {
         field->update();
     }
     return QWidget::eventFilter(watched, event);
+}
+void EpochEditor::set_time_provider(std::shared_ptr<const core::ITimeProvider> time) {
+    if (!time)
+        throw std::invalid_argument("Missing time provider");
+    if (time_->data_info().sha256 == time->data_info().sha256)
+        return;
+    const auto value = stored_;
+    time_ = std::move(time);
+    set_epoch(value);
 }
 core::Epoch EpochEditor::epoch() const {
     const auto value = dirty_ ? parse_epoch(value_->text(), *time_).value : stored_;

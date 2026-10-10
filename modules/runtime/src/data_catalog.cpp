@@ -169,13 +169,22 @@ struct DataCatalog::Impl {
         check(std::filesystem::canonical(folder).parent_path() == root / "snapshots",
               "Catalog snapshot resolves outside its directory");
         const auto record = Json::parse(read(folder / "record.json", 65536));
-        check(record.at("schema") == 1 && record.at("lock_sha256") == key,
+        check((record.at("schema") == 1 || record.at("schema") == 2) &&
+                  record.at("lock_sha256") == key,
               "Catalog record identity mismatch");
         const auto bytes = read(folder / "manifest.json", 65536);
         check(picosha2::hash256_hex_string(bytes) ==
                   record.at("manifest_sha256").get<std::string>(),
               "Catalog manifest SHA256 mismatch");
-        auto provider = load_eop_snapshot(folder / "manifest.json");
+        auto clock = make_builtin_time_provider();
+        if (record.at("schema") == 2) {
+            check(std::filesystem::canonical(folder / "leap-seconds.dat").parent_path() == folder,
+                  "Time data resolves outside its snapshot directory");
+            clock = load_time_snapshot(folder / "leap-seconds.dat");
+            check(clock->data_info().sha256 == record.at("time_sha256").get<std::string>(),
+                  "Time data SHA256 mismatch");
+        }
+        auto provider = load_eop_snapshot_with_time(folder / "manifest.json", *clock);
         check(application::eop_data_lock(provider->data_info()).sha256() == key,
               "Catalog snapshot does not match its pinned data/time identity");
         const auto blob = root / "blobs" / "sha256" / provider->data_info().sha256;
@@ -221,7 +230,7 @@ bool data_catalog_available() noexcept { return true; }
 DataCatalog::DataCatalog(std::filesystem::path root) : impl_(std::make_unique<Impl>()) {
     std::filesystem::create_directories(root);
     impl_->root = std::filesystem::canonical(root);
-    for (const auto &part : {"snapshots", "blobs/sha256", "staging"})
+    for (const auto &part : {"snapshots", "blobs/sha256", "staging", "time"})
         std::filesystem::create_directories(impl_->root / part);
     check(sqlite3_open_v2(utf8(impl_->root / "catalog.sqlite").c_str(), &impl_->db,
                           SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
@@ -263,15 +272,19 @@ DataCatalog::DataCatalog(std::filesystem::path root) : impl_(std::make_unique<Im
 }
 DataCatalog::~DataCatalog() = default;
 const std::filesystem::path &DataCatalog::root() const noexcept { return impl_->root; }
-CatalogSnapshot DataCatalog::install_eop(const std::filesystem::path &manifest_path) {
+CatalogSnapshot DataCatalog::install_eop(const std::filesystem::path &manifest_path,
+                                         const std::filesystem::path &time_file) {
     std::lock_guard guard(impl_->mutex);
+    const auto clock =
+        time_file.empty() ? make_builtin_time_provider() : load_time_snapshot(time_file);
     // Validate copied bytes before publication, even if the source changes after the first load.
-    (void)load_eop_snapshot(manifest_path);
+    (void)load_eop_snapshot_with_time(manifest_path, *clock);
     const auto manifest_bytes = read(manifest_path, 65536);
     const auto manifest = Json::parse(manifest_bytes);
     const auto filename = std::filesystem::path(manifest.at("data_file").get<std::string>());
     check(!filename.empty() && !filename.has_parent_path() && filename != "manifest.json" &&
-              filename != "record.json" && filename != "blob.pending",
+              filename != "record.json" && filename != "blob.pending" &&
+              filename != "leap-seconds.dat",
           "Invalid snapshot data filename");
     const auto source = std::filesystem::canonical(manifest_path).parent_path();
     const auto data = std::filesystem::canonical(source / filename);
@@ -280,7 +293,13 @@ CatalogSnapshot DataCatalog::install_eop(const std::filesystem::path &manifest_p
     Stage stage(impl_->root / "staging");
     write(stage.path / "manifest.json", manifest_bytes);
     write(stage.path / filename, data_bytes);
-    const auto provider = load_eop_snapshot(stage.path / "manifest.json");
+    if (!time_file.empty()) {
+        write(stage.path / "leap-seconds.dat", read(time_file, 65536));
+        check(load_time_snapshot(stage.path / "leap-seconds.dat")->data_info().sha256 ==
+                  clock->data_info().sha256,
+              "Time data changed during installation");
+    }
+    const auto provider = load_eop_snapshot_with_time(stage.path / "manifest.json", *clock);
     const auto &info = provider->data_info();
     const auto key = application::eop_data_lock(info).sha256();
     Transaction transaction(impl_->db);
@@ -299,10 +318,11 @@ CatalogSnapshot DataCatalog::install_eop(const std::filesystem::path &manifest_p
     if (link_error)
         write(stage.path / filename, data_bytes);
     write(stage.path / "record.json",
-          Json{{"schema", 1},
+          Json{{"schema", time_file.empty() ? 1 : 2},
                {"kind", "earth-orientation"},
                {"lock_sha256", key},
-               {"manifest_sha256", picosha2::hash256_hex_string(manifest_bytes)}}
+               {"manifest_sha256", picosha2::hash256_hex_string(manifest_bytes)},
+               {"time_sha256", clock->data_info().sha256}}
               .dump(2));
     publish(stage.path, destination);
     stage.path.clear();
@@ -330,7 +350,8 @@ std::vector<CatalogSnapshot> DataCatalog::snapshots() const {
     }
     return result;
 }
-void DataCatalog::record_acquisition(const std::string &key, DataAcquisition kind) {
+void DataCatalog::record_acquisition(const std::string &key, DataAcquisition kind,
+                                     std::optional<std::int64_t> acquired_at) {
     std::lock_guard guard(impl_->mutex);
     check(hash_valid(key) && kind >= DataAcquisition::bundled &&
               kind <= DataAcquisition::downloaded,
@@ -342,9 +363,9 @@ void DataCatalog::record_acquisition(const std::string &key, DataAcquisition kin
     row.text(1, key);
     row.integer(2, static_cast<int>(kind));
     if (kind != DataAcquisition::bundled)
-        row.integer(3, std::chrono::duration_cast<std::chrono::seconds>(
-                           std::chrono::system_clock::now().time_since_epoch())
-                           .count());
+        row.integer(3, acquired_at.value_or(std::chrono::duration_cast<std::chrono::seconds>(
+                                                std::chrono::system_clock::now().time_since_epoch())
+                                                .count()));
     row.next();
 }
 std::unique_ptr<core::IEarthOrientationProvider>
@@ -377,8 +398,87 @@ void DataCatalog::set_setting(const std::string &key, const std::string &value) 
     row.text(2, value);
     row.next();
 }
+void DataCatalog::set_settings(const std::map<std::string, std::string> &values) {
+    std::lock_guard guard(impl_->mutex);
+    Transaction transaction(impl_->db);
+    for (const auto &[key, value] : values)
+        set_setting(key, value);
+    transaction.commit();
+}
+std::filesystem::path DataCatalog::time_file(const std::string &hash) const {
+    std::lock_guard guard(impl_->mutex);
+    check(hash_valid(hash), "Invalid UTC content hash");
+    const auto file = impl_->root / "time" / (hash + ".dat");
+    check(std::filesystem::canonical(file).parent_path() == impl_->root / "time",
+          "UTC data resolves outside its catalog directory");
+    check(load_time_snapshot(file)->data_info().sha256 == hash, "UTC content SHA256 mismatch");
+    return file;
+}
+std::filesystem::path DataCatalog::install_time(const std::filesystem::path &source) {
+    std::lock_guard guard(impl_->mutex);
+    const auto expected = load_time_snapshot(source)->data_info().sha256;
+    Stage stage(impl_->root / "staging");
+    write(stage.path / "time.dat", read(source, 65536));
+    const auto info = load_time_snapshot(stage.path / "time.dat")->data_info();
+    check(info.sha256 == expected, "UTC file changed during installation");
+    const auto target = impl_->root / "time" / (info.sha256 + ".dat");
+    if (std::filesystem::exists(target))
+        return time_file(info.sha256);
+    publish(stage.path / "time.dat", target);
+    return target;
+}
+CatalogSnapshot DataCatalog::import_c04(const std::filesystem::path &source, const std::string &url,
+                                        const std::string &retrieved,
+                                        const std::filesystem::path &time_file) {
+    std::lock_guard guard(impl_->mutex);
+    check(!url.empty() && !retrieved.empty(), "Source URL and retrieval date are required");
+    const auto bytes = read(source);
+    std::istringstream lines(bytes);
+    std::string line;
+    int first = -1, last = -1;
+    while (std::getline(lines, line)) {
+        const auto start = line.find_first_not_of(" \t\r");
+        if (start == std::string::npos || line[start] == '#')
+            continue;
+        std::istringstream row(line);
+        row.imbue(std::locale::classic());
+        int year = 0, month = 0, day = 0, hour = 0;
+        double mjd = 0;
+        check(static_cast<bool>(row >> year >> month >> day >> hour >> mjd) && std::isfinite(mjd) &&
+                  mjd >= 37665 && mjd <= 100000 && mjd == std::floor(mjd),
+              "Invalid C04 date fields");
+        if (first < 0)
+            first = static_cast<int>(mjd);
+        last = static_cast<int>(mjd);
+    }
+    const auto clock =
+        time_file.empty() ? make_builtin_time_provider() : load_time_snapshot(time_file);
+    // Earlier records are retained in the full original file, but do not supply
+    // the measured polar rates required by our C04 state interpolation.
+    first = std::max({first, 45700, clock->data_info().utc_valid_from_mjd});
+    last = std::min(last, clock->data_info().utc_valid_until_mjd - 1);
+    check(last > first, "C04 lacks two complete daily records within supported coverage");
+    const auto hash = picosha2::hash256_hex_string(bytes);
+    const Json manifest{{"schema_version", 1},
+                        {"snapshot_id", "iers-c04-all-" + hash.substr(0, 16)},
+                        {"format", "iers-20-c04-0h-dxdy"},
+                        {"data_file", "eop.c04"},
+                        {"sha256", hash},
+                        {"source_url", url},
+                        {"source_sha256", hash},
+                        {"retrieved_on", retrieved},
+                        {"first_mjd", first},
+                        {"last_mjd", last},
+                        {"reference_frame", "ITRF2020"},
+                        {"interpolation", "c04-hermite-tai-v1"}};
+    Stage stage(impl_->root / "staging");
+    write(stage.path / "manifest.json", manifest.dump(2));
+    write(stage.path / "eop.c04", bytes);
+    return install_eop(stage.path / "manifest.json", time_file);
+}
 CatalogSnapshot DataCatalog::import_finals(const std::filesystem::path &source,
-                                           const std::string &url, const std::string &retrieved) {
+                                           const std::string &url, const std::string &retrieved,
+                                           const std::filesystem::path &time_file) {
     std::lock_guard guard(impl_->mutex);
     check(!url.empty() && !retrieved.empty(), "Source URL and retrieval date are required");
     const auto bytes = read(source);
@@ -445,7 +545,8 @@ CatalogSnapshot DataCatalog::import_finals(const std::filesystem::path &source,
             first = mjd;
         last = mjd;
     }
-    const auto clock = make_builtin_time_provider();
+    const auto clock =
+        time_file.empty() ? make_builtin_time_provider() : load_time_snapshot(time_file);
     first = std::max(first, clock->data_info().utc_valid_from_mjd);
     last = std::min(last, clock->data_info().utc_valid_until_mjd - 1);
     check(last > first, "finals2000A lacks two complete daily records within time-data coverage");
@@ -465,7 +566,7 @@ CatalogSnapshot DataCatalog::import_finals(const std::filesystem::path &source,
     Stage stage(impl_->root / "staging");
     write(stage.path / "manifest.json", manifest.dump(2));
     write(stage.path / "finals2000A.all", bytes);
-    return install_eop(stage.path / "manifest.json");
+    return install_eop(stage.path / "manifest.json", time_file);
 }
 } // namespace orbitforge::runtime
 #else
@@ -480,13 +581,25 @@ bool data_catalog_available() noexcept { return false; }
 DataCatalog::DataCatalog(std::filesystem::path) { unavailable(); }
 DataCatalog::~DataCatalog() = default;
 const std::filesystem::path &DataCatalog::root() const noexcept { return impl_->root; }
-CatalogSnapshot DataCatalog::install_eop(const std::filesystem::path &) { unavailable(); }
-CatalogSnapshot DataCatalog::import_finals(const std::filesystem::path &, const std::string &,
-                                           const std::string &) {
+CatalogSnapshot DataCatalog::install_eop(const std::filesystem::path &,
+                                         const std::filesystem::path &) {
     unavailable();
 }
+CatalogSnapshot DataCatalog::import_finals(const std::filesystem::path &, const std::string &,
+                                           const std::string &, const std::filesystem::path &) {
+    unavailable();
+}
+CatalogSnapshot DataCatalog::import_c04(const std::filesystem::path &, const std::string &,
+                                        const std::string &, const std::filesystem::path &) {
+    unavailable();
+}
+std::filesystem::path DataCatalog::install_time(const std::filesystem::path &) { unavailable(); }
+std::filesystem::path DataCatalog::time_file(const std::string &) const { unavailable(); }
 std::vector<CatalogSnapshot> DataCatalog::snapshots() const { unavailable(); }
-void DataCatalog::record_acquisition(const std::string &, DataAcquisition) { unavailable(); }
+void DataCatalog::record_acquisition(const std::string &, DataAcquisition,
+                                     std::optional<std::int64_t>) {
+    unavailable();
+}
 std::unique_ptr<core::IEarthOrientationProvider> DataCatalog::load_eop(const std::string &) const {
     unavailable();
 }
@@ -496,5 +609,6 @@ DataCatalog::resolve_eop(const application::DataLock &) const {
 }
 std::string DataCatalog::setting(const std::string &) const { unavailable(); }
 void DataCatalog::set_setting(const std::string &, const std::string &) { unavailable(); }
+void DataCatalog::set_settings(const std::map<std::string, std::string> &) { unavailable(); }
 } // namespace orbitforge::runtime
 #endif

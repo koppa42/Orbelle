@@ -532,6 +532,10 @@ QListWidget#eopSourcePriority { background: transparent; border: 0; outline: 0; 
 QListWidget#eopSourcePriority::item { border: 0; padding: 0; }
 QLabel#dataName { font-size: 20px; font-weight: 600; color: #eff2fc; }
 QLabel#dataDescription { color: #a1aec7; }
+QTabWidget#dataPages::pane { border: 0; background: transparent; }
+QTabWidget#dataPages QTabBar::tab { background: transparent; color: #93a2bd; border: 0; border-bottom: 2px solid #30394e; padding: 11px 20px; margin-right: 8px; }
+QTabWidget#dataPages QTabBar::tab:selected { color: #e7eaff; border-bottom-color: #a3afff; }
+QTabWidget#dataPages QTabBar::tab:hover { color: #cbd5f4; background: #242d43; }
 QLabel#dataStatus { border-radius: 9px; padding: 4px 10px; font-size: 11px; background: #303b52; color: #c0cbe2; }
 QLabel#dataStatus[tone="ready"] { background: #203c3e; color: #9ee0ce; }
 QLabel#dataStatus[tone="warning"] { background: #443727; color: #e6c68b; }
@@ -541,7 +545,8 @@ QLabel#dataUpdateSchedule { color: #93a2bd; font-size: 11px; }
 QProgressBar#dataDownloadProgress { background: #28334b; border: 0; border-radius: 2px; }
 QProgressBar#dataDownloadProgress::chunk { background: #93a1e8; border-radius: 2px; }
 QLabel#dataSource { color: #a6b7dd; }
-QLabel#dataNote, QLabel#dataPriorityNote { color: #a1aec7; padding: 10px 12px; background: #20293b; border-radius: 6px; }
+QLabel#dataNote { color: #93a2bd; padding: 4px 0; font-size: 11px; }
+QLabel#dataPriorityNote { color: #a1aec7; padding: 16px; background: #20293b; border-radius: 6px; }
 QLabel#dataInventoryDetails { color: #a1aec7; font-family: "Consolas"; font-size: 11px; padding: 10px; background: #161c2a; border-radius: 6px; }
 QLabel#dataCenterStatus { color: #b3c5fa; }
 QLabel#dataCenterStatus[warning="true"] { color: #e6c68b; }

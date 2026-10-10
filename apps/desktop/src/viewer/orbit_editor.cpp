@@ -46,6 +46,10 @@ QFrame *divider() {
     return line;
 }
 } // namespace
+void OrbitEditor::set_time_provider(std::shared_ptr<const core::ITimeProvider> time) {
+    for (auto *field : {epoch_, first_, last_})
+        field->set_time_provider(time);
+}
 OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(parent) {
     auto *outer = new QHBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);

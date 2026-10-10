@@ -74,6 +74,7 @@
 #include <QStatusBar>
 #include <QStyle>
 #include <QTabBar>
+#include <QTabWidget>
 #include <QTimeZone>
 #include <QTimer>
 #include <QToolBar>
@@ -1481,9 +1482,11 @@ class Workbench final : public QMainWindow {
         }
     }
     void show_data_coverage(core::Epoch first, core::Epoch last) {
-        const auto label = [](core::Epoch epoch) {
+        const auto label = [this](core::Epoch epoch) {
             try {
-                return calendar_text(epoch, CalendarScale::utc) + QStringLiteral(" UTC");
+                return desktop::calendar_text(epoch, CalendarScale::utc, true,
+                                              eop_catalog_->time_provider().get()) +
+                       QStringLiteral(" UTC");
             } catch (const std::out_of_range &) {
                 return QString::number(epoch.tai_nanoseconds()) + QStringLiteral(" TAI ns");
             }
@@ -1510,6 +1513,10 @@ class Workbench final : public QMainWindow {
     }
     QString extrapolation_description(const core::EopDataInfo &info, core::Epoch first,
                                       core::Epoch last) const {
+        const auto time = time_for(info.time_data);
+        const auto calendar_text = [&](core::Epoch epoch, CalendarScale scale) {
+            return desktop::calendar_text(epoch, scale, true, time.get());
+        };
         QStringList ranges;
         if (first.tai_nanoseconds() < info.first_epoch.tai_nanoseconds())
             ranges.push_back(
@@ -1697,6 +1704,7 @@ class Workbench final : public QMainWindow {
                 station_editor_->close();
             scenario_ = std::move(candidate->scenario);
             eop_ = candidate->eop;
+            time_label_epoch_.reset();
             sun_epoch_.reset();
             editor_target_.reset();
             pending_orbit_target_.reset();
@@ -1894,15 +1902,41 @@ class Workbench final : public QMainWindow {
             return;
         const auto &coverage =
             eop_catalog_->providers().at(eop_catalog_->preferred_index())->data_info();
-        auto next = new_scenario_dialog(
-            this, coverage.first_epoch, coverage.last_epoch,
-            [this](core::Epoch first, core::Epoch last) { (void)data_for_interval(first, last); });
-        if (next && confirm_replace_scenario())
-            activate_scenario(std::move(*next));
+        try {
+            auto next = new_scenario_dialog(
+                this, coverage.first_epoch, coverage.last_epoch,
+                [this](core::Epoch first, core::Epoch last) {
+                    (void)data_for_interval(first, last);
+                },
+                eop_catalog_->time_provider());
+            if (next && confirm_replace_scenario())
+                activate_scenario(std::move(*next));
+        } catch (const core::TimeDataRangeError &) {
+            QMessageBox::warning(
+                this, QStringLiteral("UTC 数据需要更新"),
+                QStringLiteral("当前日期超出闰秒数据有效期，请在数据中心更新 UTC / 闰秒后重试。"));
+        }
     }
     std::shared_ptr<const core::IEarthOrientationProvider>
     data_for_interval(core::Epoch first, core::Epoch last) const {
         return eop_catalog_->for_interval(first, last);
+    }
+    std::shared_ptr<const core::ITimeProvider> time_for(const core::TimeDataInfo &info) const {
+        if (active_time_ && active_time_->data_info().sha256 == info.sha256)
+            return active_time_;
+        if (eop_catalog_ && eop_catalog_->time_provider()->data_info().sha256 == info.sha256)
+            return eop_catalog_->time_provider();
+        auto builtin = runtime::make_builtin_time_provider();
+        if (builtin->data_info().sha256 == info.sha256)
+            return builtin;
+        return runtime::load_time_snapshot(eop_catalog_->data().time_file(info.sha256));
+    }
+    std::shared_ptr<const core::ITimeProvider> active_time() const {
+        active_time_ = time_for(eop_->data_info().time_data);
+        return active_time_;
+    }
+    QString calendar_text(core::Epoch epoch, CalendarScale scale, bool date = true) const {
+        return desktop::calendar_text(epoch, scale, date, active_time().get());
     }
     void activate_scenario(application::Scenario next) {
         if (busy())
@@ -1947,6 +1981,7 @@ class Workbench final : public QMainWindow {
         object_item_ = nullptr;
         scenario_ = std::move(next);
         eop_ = next_eop;
+        time_label_epoch_.reset();
         scenario_ = scenario_->with_data_lock(application::eop_data_lock(eop_->data_info()));
         scenario_item_ = new QTreeWidgetItem(objects_, {QString::fromStdString(scenario_->name())});
         scenario_item_->setIcon(0, workbench_icon(WorkbenchIcon::earth));
@@ -2022,6 +2057,7 @@ class Workbench final : public QMainWindow {
         input.last = scenario_->last();
         input.initial.epoch = scenario_->first();
         editor_target_.reset();
+        editor_->set_time_provider(eop_catalog_->time_provider());
         editor_->set_input(input);
         editor_->set_create_mode(true);
         editor_->set_appearance(0, {}, 1000);
@@ -2132,7 +2168,7 @@ class Workbench final : public QMainWindow {
         dialog.setObjectName("jumpTimeDialog");
         dialog.setWindowTitle(QStringLiteral("跳转时间"));
         auto *layout = new QVBoxLayout(&dialog);
-        auto *time = new EpochEditor;
+        auto *time = new EpochEditor(nullptr, active_time());
         time->set_scale(display_scale_);
         time->set_range(scenario_->first(), scenario_->last());
         time->set_epoch(snapshot_.epoch);
@@ -2182,6 +2218,7 @@ class Workbench final : public QMainWindow {
             return;
         editor_target_ = selected_;
         const auto &satellite = satellites_.at(*editor_target_);
+        editor_->set_time_provider(eop_catalog_->time_provider());
         editor_->set_input(satellite.orbit->input);
         editor_->set_create_mode(false);
         editor_->set_appearance(satellite.model_kind, satellite.model_path,
@@ -2280,8 +2317,8 @@ class Workbench final : public QMainWindow {
         name->setMaximumWidth(380);
         form->addRow(QStringLiteral("场景名称"), name);
         form->addRow(QStringLiteral("中心天体"), new QLabel(QStringLiteral("Earth / 地球")));
-        auto *first = new EpochEditor;
-        auto *last = new EpochEditor;
+        auto *first = new EpochEditor(nullptr, eop_catalog_->time_provider());
+        auto *last = new EpochEditor(nullptr, eop_catalog_->time_provider());
         first->setObjectName("scenarioSettingsStart");
         last->setObjectName("scenarioSettingsEnd");
         first->set_epoch(scenario_->first());
@@ -2572,6 +2609,7 @@ class Workbench final : public QMainWindow {
     }
     void show_timeline_status() {
         if (timeline_ && scenario_) {
+            timeline_->set_time_provider(active_time());
             const auto first_ms = scenario_->first().tai_nanoseconds() / 1'000'000;
             // The ruler resolves milliseconds; keep a drawable span for a valid
             // sub-millisecond scenario. Seeks still clamp to the exact Epoch bounds.
@@ -5402,6 +5440,7 @@ class Workbench final : public QMainWindow {
             break;
         }
         case 86: {
+            eop_catalog_->set_preferred_product(DataProduct::finals2000a);
             require(last_project_outcome_ == "opened" && satellites_.size() == 2 &&
                         satellites_[0].name() == QStringLiteral("观测卫星 A"),
                     "Object names were not restored from the project");
@@ -5429,14 +5468,15 @@ class Workbench final : public QMainWindow {
                 auto *automatic = dialog->findChild<QCheckBox *>("dataAutoUpdate");
                 auto *inventory = dialog->findChild<QTreeWidget *>("dataInventory");
                 auto *priority = dialog->findChild<QListWidget *>("eopSourcePriority");
-                require(expand && !expand->isChecked() && automatic && automatic->isChecked() &&
-                            inventory && inventory->topLevelItemCount() == 2 && priority &&
-                            inventory->topLevelItem(0)->childCount() == 2 &&
-                            priority->isVisible() &&
-                            !dialog->findChild<QComboBox *>("eopSnapshots") &&
-                            !dialog->findChild<QPushButton *>("setDefaultEop") &&
-                            !dialog->findChild<QPushButton *>("applyEopSnapshot"),
-                        "Data inventory must show current data without version/default controls");
+                auto *pages = dialog->findChild<QTabWidget *>("dataPages");
+                require(
+                    pages && expand && expand->isChecked() && automatic && automatic->isChecked() &&
+                        inventory && inventory->topLevelItemCount() == 2 && priority &&
+                        inventory->topLevelItem(0)->childCount() == 2 && priority->isVisible() &&
+                        !dialog->findChild<QComboBox *>("eopSnapshots") &&
+                        !dialog->findChild<QPushButton *>("setDefaultEop") &&
+                        !dialog->findChild<QPushButton *>("applyEopSnapshot"),
+                    "Data inventory must show current data without version/default controls");
                 auto *group = inventory->topLevelItem(0);
                 auto *finals = group->child(0);
                 auto *c04 = group->child(1);
@@ -5465,10 +5505,14 @@ class Workbench final : public QMainWindow {
                         "Bundled samples must not claim a full download or a successful check");
                 auto *frequency = dialog->findChild<QComboBox *>("dataUpdateFrequency");
                 require(frequency, "Missing automatic update interval");
+                require(!automatic->isVisible(),
+                        "Overview must not expose advanced update settings");
+                pages->setCurrentIndex(1);
                 frequency->setCurrentIndex(frequency->findData(6));
                 require(eop_catalog_->update_interval_hours() == 6,
                         "Automatic update frequency was not persisted");
                 frequency->setCurrentIndex(frequency->findData(24));
+                pages->setCurrentIndex(0);
                 QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
                 require(dialog->grab().save(smoke_dir_ + "/data-center-sample.png"),
                         "Cannot save sample installation state");
@@ -5484,6 +5528,7 @@ class Workbench final : public QMainWindow {
                 require(dialog->grab().save(smoke_dir_ + "/data-center-utc.png"),
                         "Cannot save UTC data details");
                 inventory->setCurrentItem(finals);
+                pages->setCurrentIndex(1);
                 require(!allow->isChecked() && !days->isEnabled(),
                         "Extrapolation should default off");
                 allow->setChecked(true);
@@ -5493,6 +5538,7 @@ class Workbench final : public QMainWindow {
                 inventory->setCurrentItem(c04);
                 require(!allow->isChecked(), "EOP policies must be independent by product");
                 inventory->setCurrentItem(finals);
+                pages->setCurrentIndex(1);
                 require(allow->isChecked() && days->value() == 2,
                         "Lost extrapolation setting on selection change");
                 QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
@@ -5508,22 +5554,26 @@ class Workbench final : public QMainWindow {
                         QMetaObject::invokeMethod(file, "accept");
                     }
                 });
+                pages->setCurrentIndex(2);
                 dialog->findChild<QPushButton *>("importEopSnapshot")->click();
                 require(eop_catalog_->providers().size() == 3, "Snapshot import failed");
                 require(eop_->data_info().id.find("smoke-imported-") != 0,
                         "Import implicitly switched the active data");
                 const auto imported_row =
                     eop_->data_info().interpolation.starts_with("finals2000a") ? 0 : 1;
+                const auto imported =
+                    eop_catalog_->inventory()[static_cast<std::size_t>(imported_row)];
                 require(inventory->topLevelItemCount() == 2 &&
                             inventory->currentItem() == group->child(imported_row) &&
-                            eop_catalog_->inventory()[static_cast<std::size_t>(imported_row)]
-                                    .provider_index == 2 &&
-                            dialog->findChild<QLabel *>("dataAcquiredAt")
-                                ->text()
-                                .contains(QStringLiteral("导入")),
+                            imported.provider_index == 2 && imported.acquired_at &&
+                            imported.acquisition == runtime::DataAcquisition::imported &&
+                            dialog->findChild<QLabel *>("dataAcquiredAt")->text() ==
+                                QDateTime::fromSecsSinceEpoch(*imported.acquired_at)
+                                    .toLocalTime()
+                                    .toString("yyyy-MM-dd HH:mm"),
                         "Import must select its source with an acquisition timestamp");
                 dialog->grab().save(smoke_dir_ + "/data-center-inventory.png");
-                expand->click();
+                pages->setCurrentIndex(2);
                 dialog->grab().save(smoke_dir_ + "/eop-data-dialog.png");
                 inventory->setCurrentItem(finals);
                 automatic->setChecked(false);
@@ -6434,6 +6484,7 @@ class Workbench final : public QMainWindow {
     QAction *rename_action_ = nullptr, *duplicate_action_ = nullptr, *delete_action_ = nullptr;
     QAction *eop_action_ = nullptr;
     std::unique_ptr<EopCatalog> eop_catalog_;
+    mutable std::shared_ptr<const core::ITimeProvider> active_time_;
     bool project_edit_ = false, project_orbit_edit_ = false, project_settings_edit_ = false;
     std::optional<std::size_t> pending_project_selection_;
     QPushButton *cancel_project_button_ = nullptr;

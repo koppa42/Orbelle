@@ -15,7 +15,8 @@
 namespace orbitforge::desktop {
 std::optional<application::Scenario>
 new_scenario_dialog(QWidget *parent, core::Epoch coverage_first, core::Epoch coverage_last,
-                    const std::function<void(core::Epoch, core::Epoch)> &validate) {
+                    const std::function<void(core::Epoch, core::Epoch)> &validate,
+                    std::shared_ptr<const core::ITimeProvider> time) {
     QDialog dialog(parent);
     dialog.setObjectName("newScenarioDialog");
     dialog.setWindowTitle(QStringLiteral("新建场景 · Scenario"));
@@ -40,13 +41,14 @@ new_scenario_dialog(QWidget *parent, core::Epoch coverage_first, core::Epoch cov
     name->selectAll();
     form->addRow(QStringLiteral("场景名称"), name);
     form->addRow(QStringLiteral("中心天体"), new QLabel(QStringLiteral("Earth / 地球")));
-    const auto time = runtime::make_builtin_time_provider();
+    if (!time)
+        time = runtime::make_builtin_time_provider();
     const QDate today = QDateTime::currentDateTimeUtc().date();
     const auto midnight = [&](QDate date) {
         return time->from_utc({date.year(), date.month(), date.day(), 0, 0, 0, 0});
     };
     const auto make_time = [&](core::Epoch value) {
-        auto *edit = new EpochEditor;
+        auto *edit = new EpochEditor(nullptr, time);
         edit->set_epoch(value);
         return edit;
     };
@@ -61,9 +63,10 @@ new_scenario_dialog(QWidget *parent, core::Epoch coverage_first, core::Epoch cov
     error->setWordWrap(true);
     error->hide();
     layout->addLayout(form);
-    const auto coverage = QStringLiteral("可用时段：%1 — %2 UTC")
-                              .arg(calendar_text(coverage_first, CalendarScale::utc),
-                                   calendar_text(coverage_last, CalendarScale::utc));
+    const auto coverage =
+        QStringLiteral("可用时段：%1 — %2 UTC")
+            .arg(calendar_text(coverage_first, CalendarScale::utc, true, time.get()),
+                 calendar_text(coverage_last, CalendarScale::utc, true, time.get()));
     first->setToolTip(coverage);
     last->setToolTip(coverage);
     layout->addWidget(error);

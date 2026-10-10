@@ -10,7 +10,7 @@ ERFA 2.0.1 与 IERS C04 Provider 通过 Runtime 供 C++ SDK 和独立 Python 包
 
 快照覆盖 **[1972-01-01 00:00:00 UTC, 2027-06-28 00:00:00 UTC)**。官方文件只给出到期日期，本项目保守地取到期日零点为排他上界。超出范围抛出 `TimeDataRangeError`，Python 中继承 `ValueError`；不使用 ERFA 内建的旧表兜底，也不自动延长有效期。日期非法或不存在的 `second=60` 抛出 `std::invalid_argument`，Python 映射为 `ValueError`。
 
-ERFA 的 `eraCal2jd` / `eraJd2cal` 提供日历换算。UTC↔TAI 的偏移选择与正闰秒纳秒记账使用整数，避免经过双精度 JD 丢失原始纳秒。当前编译数据仅支持 1972 年以后、每次增加一秒的已公布历史记录；不支持 1972 年前的 UTC 频率调整。未来出现负闰秒时需要扩展实现和测试，当前构建校验会拒绝这种表。代码不调用 `eraSetLeapSeconds`，不改变 ERFA 全局数据。
+ERFA 的 `eraCal2jd` / `eraJd2cal` 提供日历换算。UTC↔TAI 的偏移选择与正闰秒纳秒记账使用整数，避免经过双精度 JD 丢失原始纳秒。当前编译数据仅支持 1972 年以后、每次增加一秒的已公布历史记录；不支持 1972 年前的 UTC 频率调整。`load_time_snapshot(file)` 可加载 IERS Leap_Second.dat，每个实例持有独立只读记录及有效期，验证正／负单秒变化；负闰秒删除的 UTC 秒不可输入，正闰秒保留 `23:59:60`。内置编译表仍校验已公布的正闰秒历史。代码不调用 `eraSetLeapSeconds`，不改变 ERFA 全局数据。
 
 `julian_date(epoch, TimeScale::tai/tt)` 返回带时间尺度标签的两部分 JD。内部算法应分别传递 `day` 和 `fraction`，不要先求和。TAI→TT 使用 `eraTaitt`，偏移为 32.184 s；它不依赖 UTC 表的覆盖范围。两部分 JD 属于浮点算法输入，不承诺覆盖整个 Epoch 范围的无损反向转换，目前也没有从任意浮点 JD 构造 Epoch 的 API。
 
@@ -76,7 +76,7 @@ GCRF/ITRF 表示地心 GCRS/ITRS 的轴向关系，没有实现特定 ITRF 实�
 
 Runtime 始终公开能力查询 `time_frames_available()`；禁用 Provider 的构建调用相应工厂会抛出明确的错误。Python 绑定通过 Runtime 装配，公开头文件不泄漏 ERFA 类型。当前 Provider 只读、无可变缓存；调用的 ERFA 函数也不访问可变闰秒表。
 
-闰秒表更新仍需重新构建；EOP 可在运行时显式加载不同版本目录。TAI↔TDB 与太阳/月球几何状态已由独立的 [CSPICE Provider](spice.md) 提供；ERFA 的 `julian_date` 仍只接受 TAI/TT。全局数据目录管理、下载更新流程、TCB、TEME，以及星历状态到 GCRF 的完整模型转换尚未实现。
+闰秒表可通过 `load_time_snapshot` 在运行时独立加载；桌面数据中心可联网更新，既有实例保持不变。EOP 通过 `load_eop_snapshot_with_time` 或带 `time_file` 的 DataCatalog 导入绑定对应时间数据。TAI↔TDB 与太阳/月球几何状态已由独立的 [CSPICE Provider](spice.md) 提供；ERFA 的 `julian_date` 仍只接受 TAI/TT。统一数据目录与 EOP／UTC 下载更新已实现；TCB、TEME 以及星历状态到 GCRF 的完整模型转换尚未实现。
 
 ## 依据
 

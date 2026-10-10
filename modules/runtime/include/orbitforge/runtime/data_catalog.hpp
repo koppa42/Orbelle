@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <optional>
 #include <orbitforge/application/data_lock.hpp>
@@ -28,21 +29,31 @@ class DataCatalog {
     DataCatalog(const DataCatalog &) = delete;
     DataCatalog &operator=(const DataCatalog &) = delete;
     [[nodiscard]] const std::filesystem::path &root() const noexcept;
-    CatalogSnapshot install_eop(const std::filesystem::path &manifest);
+    CatalogSnapshot install_eop(const std::filesystem::path &manifest,
+                                const std::filesystem::path &time_file = {});
     // Installs the entire original file. Coverage is the complete daily prefix
     // intersected with the time provider validity; incomplete predictions stay in the blob.
     CatalogSnapshot import_finals(const std::filesystem::path &source,
-                                  const std::string &source_url, const std::string &retrieved_on);
+                                  const std::string &source_url, const std::string &retrieved_on,
+                                  const std::filesystem::path &time_file = {});
+    CatalogSnapshot import_c04(const std::filesystem::path &source, const std::string &source_url,
+                               const std::string &retrieved_on,
+                               const std::filesystem::path &time_file = {});
+    // Publish a validated immutable UTC file; activation is a separate settings transaction.
+    [[nodiscard]] std::filesystem::path install_time(const std::filesystem::path &source);
+    [[nodiscard]] std::filesystem::path time_file(const std::string &sha256) const;
     [[nodiscard]] std::vector<CatalogSnapshot> snapshots() const;
     // Local receipt metadata is separate from immutable content and Scenario locks.
     // Call only after successful acquisition; a 304 response is not a download.
-    void record_acquisition(const std::string &lock_sha256, DataAcquisition acquisition);
+    void record_acquisition(const std::string &lock_sha256, DataAcquisition acquisition,
+                            std::optional<std::int64_t> acquired_at = std::nullopt);
     [[nodiscard]] std::unique_ptr<core::IEarthOrientationProvider>
     resolve_eop(const application::DataLock &lock) const;
     [[nodiscard]] std::unique_ptr<core::IEarthOrientationProvider>
     load_eop(const std::string &lock_sha256) const;
     [[nodiscard]] std::string setting(const std::string &key) const;
     void set_setting(const std::string &key, const std::string &value);
+    void set_settings(const std::map<std::string, std::string> &values);
 
   private:
     struct Impl;

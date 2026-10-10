@@ -73,7 +73,10 @@ class DataCenterTest : public ::testing::Test {
     static void complete(EopCatalog &catalog) {
         QElapsedTimer timer;
         timer.start();
-        const int limit = qEnvironmentVariableIsEmpty("ORBITFORGE_LIVE_IERS_URL") ? 15000 : 120000;
+        const int limit = qEnvironmentVariableIsEmpty("ORBITFORGE_LIVE_IERS_URL") &&
+                                  qEnvironmentVariableIsEmpty("ORBITFORGE_LIVE_IERS")
+                              ? 15000
+                              : 120000;
         while (catalog.downloading() && timer.elapsed() < limit)
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
         ASSERT_FALSE(catalog.downloading()) << catalog.status().toStdString();
@@ -107,7 +110,9 @@ TEST_F(DataCenterTest, DownloadSelectsCurrentDataWithoutChangingActiveProviders)
         const auto time = runtime::make_builtin_time_provider();
         EXPECT_EQ(time->to_utc(installed.first_epoch).year, 1973);
     }
-    EXPECT_EQ(catalog.preferred_index(), catalog.providers().size() - 1);
+    EXPECT_EQ(catalog.preferred_product(), DataProduct::c04);
+    EXPECT_EQ(catalog.for_interval(installed.first_epoch, installed.last_epoch),
+              catalog.providers().at(*catalog.last_installed()));
     const auto receipt = catalog.data().snapshots().back();
     EXPECT_EQ(receipt.acquisition, runtime::DataAcquisition::downloaded);
     ASSERT_TRUE(receipt.acquired_at_unix_seconds);
@@ -193,20 +198,20 @@ TEST_F(DataCenterTest, ReimportingExistingContentSelectsItAndPersistsAcrossResta
         file.write("\n");
         file.close();
         catalog.import_raw(source);
-        EXPECT_EQ(catalog.preferred_index(), 2);
+        EXPECT_EQ(catalog.inventory()[0].provider_index, 2);
         ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
         file.write(payload());
         file.close();
         catalog.import_raw(source);
-        EXPECT_EQ(catalog.preferred_index(), 1);
+        EXPECT_EQ(catalog.inventory()[0].provider_index, 1);
         EXPECT_EQ(catalog.current_indices().size(), 2);
         EXPECT_EQ(catalog.providers().size(), 3);
     }
     EopCatalog reopened(store, {ORBITFORGE_TEST_C04}, {}, false);
-    EXPECT_EQ(
-        application::eop_data_lock(reopened.providers()[reopened.preferred_index()]->data_info())
-            .sha256(),
-        selected_key);
+    EXPECT_EQ(application::eop_data_lock(
+                  reopened.providers()[*reopened.inventory()[0].provider_index]->data_info())
+                  .sha256(),
+              selected_key);
     EXPECT_EQ(reopened.current_indices().size(), 2);
 }
 TEST_F(DataCenterTest, AutomaticUpdatesAcquireFirstFullFileAndRespectIntervalAndOptOut) {
@@ -239,7 +244,7 @@ TEST_F(DataCenterTest, AutomaticUpdatesAcquireFirstFullFileAndRespectIntervalAnd
     EXPECT_TRUE(catalog.downloading());
     complete(catalog);
     EXPECT_EQ(catalog.providers().size(), 2);
-    EXPECT_EQ(catalog.preferred_index(), catalog.providers().size() - 1);
+    EXPECT_EQ(catalog.inventory()[0].provider_index, catalog.providers().size() - 1);
     EXPECT_THROW(catalog.set_update_interval_hours(0), std::invalid_argument);
     EXPECT_THROW(catalog.set_update_interval_hours(169), std::invalid_argument);
 }
@@ -279,7 +284,7 @@ TEST_F(DataCenterTest, ConditionalUpdatesSkipUnchangedBytesAndPreserveOldVersion
     catalog.check_updates_if_due(QDateTime::currentSecsSinceEpoch(), server.url());
     complete(catalog);
     EXPECT_EQ(catalog.providers().size(), 3);
-    EXPECT_EQ(catalog.preferred_index(), catalog.providers().size() - 1);
+    EXPECT_EQ(catalog.inventory()[0].provider_index, catalog.providers().size() - 1);
     EXPECT_NO_THROW((void)catalog.data().load_eop(first_key));
     EXPECT_NE(application::eop_data_lock(catalog.providers().back()->data_info()).sha256(),
               first_key);
@@ -306,11 +311,11 @@ TEST_F(DataCenterTest, InventorySeparatesInstallationCoverageAndUpdateCapabiliti
     EXPECT_FALSE(missing[0].last.isValid());
     EXPECT_TRUE(missing[0].online_updates);
     EXPECT_TRUE(missing[1].manifest_import);
-    EXPECT_FALSE(missing[1].online_updates);
+    EXPECT_TRUE(missing[1].online_updates);
     EXPECT_EQ(missing[2].product, DataProduct::utc);
     EXPECT_EQ(missing[2].installation, DataInstallation::builtin);
     EXPECT_TRUE(missing[2].exclusive_end);
-    EXPECT_FALSE(missing[2].online_updates);
+    EXPECT_TRUE(missing[2].online_updates);
     EXPECT_FALSE(missing[2].extrapolation);
     EXPECT_FALSE(missing[2].acquired_at);
 
@@ -413,6 +418,113 @@ TEST_F(DataCenterTest, InterruptedAndLegacyChecksNeverClaimThatCurrentDataIsLate
     EXPECT_EQ(interrupted.update_status().attempted_at, 1234567890);
     EXPECT_EQ(interrupted.update_status().checked_at, 1234567800);
 }
+TEST_F(DataCenterTest, LiveOfficialProductsAreValidated) {
+    if (qEnvironmentVariableIsEmpty("ORBITFORGE_LIVE_IERS"))
+        GTEST_SKIP() << "Opt-in official network check";
+    EopCatalog catalog(root() / "data", {ORBITFORGE_TEST_FINALS, ORBITFORGE_TEST_C04}, {}, false);
+    for (const auto product : {DataProduct::utc, DataProduct::c04, DataProduct::finals2000a}) {
+        catalog.start_download({}, product);
+        complete(catalog);
+        const auto state = catalog.update_status(product).state;
+        ASSERT_TRUE(state == DataUpdateState::updated || state == DataUpdateState::unchanged)
+            << catalog.status().toStdString();
+        EXPECT_TRUE(catalog.has_full_download(product));
+        const auto item = catalog.inventory()[static_cast<std::size_t>(product)];
+        EXPECT_EQ(item.installation, DataInstallation::downloaded);
+        EXPECT_TRUE(item.acquired_at);
+        std::cout << "product=" << static_cast<int>(product)
+                  << " bytes=" << item.file_size.value_or(0)
+                  << " coverage=" << item.first.toString(Qt::ISODate).toStdString() << " / "
+                  << item.last.toString(Qt::ISODate).toStdString()
+                  << " sha256=" << item.sha256.toStdString() << '\n';
+    }
+}
+TEST_F(DataCenterTest, C04AndUtcDownloadsAreIndependentAndRebindCalculationTimeAtomically) {
+    QFile c04(QString::fromStdWString(
+        (std::filesystem::path(ORBITFORGE_TEST_C04).parent_path() / "eop.c04").wstring()));
+    ASSERT_TRUE(c04.open(QIODevice::ReadOnly));
+    auto c04_bytes = c04.readAll();
+    const auto day = QDate(1858, 11, 17).daysTo(QDate(2027, 1, 1));
+    c04_bytes.replace("2000   1   1   0  51544.00",
+                      "2027   1   1   0  " + QByteArray::number(day) + ".00");
+    c04_bytes.replace("2000   1   2   0  51545.00",
+                      "2027   1   2   0  " + QByteArray::number(day + 1) + ".00");
+    QFile leap(QString::fromStdString(ORBITFORGE_TEST_TIME));
+    ASSERT_TRUE(leap.open(QIODevice::ReadOnly));
+    auto time_bytes = leap.readAll();
+    time_bytes.replace("28 June 2027", "28 June 2028");
+    time_bytes += "\n" + QByteArray::number(day) + ".0 1 1 2027 38\n"; // Synthetic positive leap.
+    const auto store = root() / "data";
+    application::DataLock new_lock;
+    std::string new_time_hash;
+    {
+        EopCatalog catalog(store, {ORBITFORGE_TEST_FINALS, ORBITFORGE_TEST_C04}, {}, false);
+        const auto old_time = catalog.time_provider();
+        Server c04_server(c04_bytes);
+        c04_server.etag = "\"c04\"";
+        catalog.start_download(c04_server.url(), DataProduct::c04);
+        complete(catalog);
+        ASSERT_EQ(catalog.update_status(DataProduct::c04).state, DataUpdateState::updated)
+            << catalog.status().toStdString();
+        ASSERT_TRUE(catalog.inventory()[1].acquired_at);
+        const auto receipt = catalog.inventory()[1].acquired_at;
+        const auto first = old_time->from_utc({2027, 1, 1, 0, 0, 0, 0});
+        const auto last = old_time->from_utc({2027, 1, 2, 0, 0, 0, 0});
+        const auto active = catalog.for_interval(first, last);
+        const auto value = active->at(first).sample.ut1_minus_tai_seconds;
+        catalog.start_download(c04_server.url(), DataProduct::c04);
+        complete(catalog);
+        EXPECT_EQ(catalog.update_status(DataProduct::c04).state, DataUpdateState::unchanged);
+        EXPECT_EQ(catalog.update_status().state, DataUpdateState::never_checked);
+        EXPECT_EQ(catalog.inventory()[1].acquired_at, receipt);
+        catalog.set_automatic_updates(false, DataProduct::c04);
+        catalog.set_update_interval_hours(168, DataProduct::utc);
+        EXPECT_TRUE(catalog.automatic_updates());
+        EXPECT_EQ(catalog.update_interval_hours(), 24);
+        Server time_server(time_bytes);
+        time_server.etag = "\"utc\"";
+        catalog.start_download(time_server.url(), DataProduct::utc);
+        complete(catalog);
+        ASSERT_EQ(catalog.update_status(DataProduct::utc).state, DataUpdateState::updated)
+            << catalog.status().toStdString();
+        EXPECT_EQ(catalog.inventory()[2].installation, DataInstallation::downloaded);
+        EXPECT_EQ(catalog.inventory()[1].acquired_at, receipt);
+        const auto time = catalog.time_provider();
+        new_time_hash = time->data_info().sha256;
+        EXPECT_NE(new_time_hash, old_time->data_info().sha256);
+        const auto next_first = time->from_utc({2027, 1, 1, 0, 0, 0, 0});
+        const auto next_last = time->from_utc({2027, 1, 2, 0, 0, 0, 0});
+        EXPECT_DOUBLE_EQ(next_first.seconds_since(first), 1);
+        EXPECT_NO_THROW((void)time->from_utc({2028, 1, 1, 0, 0, 0, 0}));
+        EXPECT_THROW((void)old_time->from_utc({2028, 1, 1, 0, 0, 0, 0}), core::TimeDataRangeError);
+        const auto updated = catalog.for_interval(next_first, next_last);
+        new_lock = application::eop_data_lock(updated->data_info());
+        EXPECT_EQ(updated->data_info().time_data.sha256, new_time_hash);
+        EXPECT_DOUBLE_EQ(updated->at(next_first).sample.ut1_minus_tai_seconds, value - 1);
+        EXPECT_DOUBLE_EQ(active->at(first).sample.ut1_minus_tai_seconds, value);
+        EXPECT_NE(new_lock, application::eop_data_lock(active->data_info()));
+        EXPECT_EQ(catalog.data().resolve_eop(new_lock)->data_info().time_data.sha256,
+                  new_time_hash);
+        catalog.start_download(time_server.url(), DataProduct::utc);
+        complete(catalog);
+        EXPECT_EQ(catalog.update_status(DataProduct::utc).state, DataUpdateState::unchanged);
+        Server invalid("# File expires on tomorrow\n<html>not a leap table</html>");
+        catalog.start_download(invalid.url(), DataProduct::utc);
+        complete(catalog);
+        EXPECT_EQ(catalog.update_status(DataProduct::utc).state, DataUpdateState::failed);
+        EXPECT_EQ(catalog.time_provider(), time);
+        EXPECT_EQ(catalog.for_interval(next_first, next_last), updated);
+    }
+    EopCatalog reopened(store, {ORBITFORGE_TEST_FINALS, ORBITFORGE_TEST_C04}, {}, false);
+    EXPECT_TRUE(reopened.warnings().empty()) << reopened.warnings().join('\n').toStdString();
+    EXPECT_EQ(reopened.time_provider()->data_info().sha256, new_time_hash);
+    EXPECT_EQ(reopened.data().resolve_eop(new_lock)->data_info().time_data.sha256, new_time_hash);
+    EXPECT_FALSE(reopened.automatic_updates(DataProduct::c04));
+    EXPECT_TRUE(reopened.automatic_updates());
+    EXPECT_EQ(reopened.update_interval_hours(DataProduct::utc), 168);
+    EXPECT_EQ(reopened.update_status(DataProduct::utc).state, DataUpdateState::failed);
+    EXPECT_EQ(reopened.update_status(DataProduct::c04).state, DataUpdateState::unchanged);
+}
 TEST_F(DataCenterTest, SourcePriorityPersistsAndRealCoveragePrecedesExtrapolation) {
     // Synthetic overlapping dates exercise source selection, not scientific accuracy.
     QFile original(QString::fromStdString(ORBITFORGE_TEST_C04));
@@ -443,6 +555,11 @@ TEST_F(DataCenterTest, SourcePriorityPersistsAndRealCoveragePrecedesExtrapolatio
                                                      root() / "overlap.json"};
     {
         EopCatalog catalog(store, bundled, {}, false);
+        EXPECT_EQ(catalog.preferred_product(), DataProduct::c04);
+        const auto default_info = catalog.providers()[1]->data_info();
+        EXPECT_EQ(catalog.for_interval(default_info.first_epoch, default_info.last_epoch),
+                  catalog.providers()[1]);
+        catalog.set_preferred_product(DataProduct::finals2000a);
         const auto finals = catalog.providers()[0], c04 = catalog.providers()[1];
         const auto first = c04->data_info().first_epoch, last = c04->data_info().last_epoch;
         const auto active = catalog.for_interval(first, last);

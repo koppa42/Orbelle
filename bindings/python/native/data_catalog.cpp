@@ -26,12 +26,17 @@ void bind_data_catalog(py::module_ &module) {
         .def_property_readonly("root", &runtime::DataCatalog::root)
         .def_property_readonly("snapshots", &runtime::DataCatalog::snapshots)
         .def("record_acquisition", &runtime::DataCatalog::record_acquisition,
-             py::arg("lock_sha256"), py::arg("acquisition"))
+             py::arg("lock_sha256"), py::arg("acquisition"), py::arg("acquired_at") = std::nullopt)
         .def("install_eop", &runtime::DataCatalog::install_eop, py::arg("manifest"),
-             py::call_guard<py::gil_scoped_release>())
+             py::arg("time_file") = "", py::call_guard<py::gil_scoped_release>())
         .def("import_finals", &runtime::DataCatalog::import_finals, py::arg("source"),
-             py::arg("source_url"), py::arg("retrieved_on"),
+             py::arg("source_url"), py::arg("retrieved_on"), py::arg("time_file") = "",
              py::call_guard<py::gil_scoped_release>())
+        .def("import_c04", &runtime::DataCatalog::import_c04, py::arg("source"),
+             py::arg("source_url"), py::arg("retrieved_on"), py::arg("time_file") = "",
+             py::call_guard<py::gil_scoped_release>())
+        .def("install_time", &runtime::DataCatalog::install_time, py::arg("source"))
+        .def("time_file", &runtime::DataCatalog::time_file, py::arg("sha256"))
         .def("resolve_eop", &runtime::DataCatalog::resolve_eop, py::arg("data_lock"),
              py::call_guard<py::gil_scoped_release>())
         .def("load_eop", &runtime::DataCatalog::load_eop, py::arg("lock_sha256"),

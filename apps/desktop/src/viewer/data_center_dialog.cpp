@@ -14,10 +14,12 @@
 #include <QPushButton>
 #include <QScreen>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStyle>
 #include <QStyledItemDelegate>
+#include <QTabWidget>
 #include <QTimeZone>
 #include <QToolButton>
 #include <QTreeWidget>
@@ -26,6 +28,17 @@
 
 namespace orbitforge::desktop {
 namespace {
+class DataCenterWindow final : public QDialog {
+  public:
+    using QDialog::QDialog;
+
+  protected:
+    void resizeEvent(QResizeEvent *event) override {
+        QDialog::resizeEvent(event);
+        if (auto *sidebar = findChild<QWidget *>("dataSidebar"))
+            sidebar->setFixedWidth(std::clamp(width() / 4, 220, 258));
+    }
+};
 QString installation_text(const DataInventoryItem &item) {
     switch (item.installation) {
     case DataInstallation::missing:
@@ -187,7 +200,7 @@ class PriorityDelegate final : public QStyledItemDelegate {
 };
 } // namespace
 void show_data_center(QWidget *parent, EopCatalog &catalog) {
-    QDialog dialog(parent);
+    DataCenterWindow dialog(parent);
     dialog.setObjectName("eopDataDialog");
     dialog.setWindowTitle(QStringLiteral("数据中心"));
     dialog.setWindowIcon(workbench_icon(WorkbenchIcon::database));
@@ -212,7 +225,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     panels->setSpacing(0);
     auto *sidebar = new QWidget;
     sidebar->setObjectName("dataSidebar");
-    sidebar->setFixedWidth(258);
+    sidebar->setFixedWidth(std::clamp(dialog.width() / 4, 220, 258));
     auto *sidebar_layout = new QVBoxLayout(sidebar);
     sidebar_layout->setContentsMargins(12, 18, 12, 18);
     sidebar_layout->setSpacing(12);
@@ -247,15 +260,11 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     inventory_note->setObjectName("dataSidebarCaption");
     sidebar_layout->addWidget(inventory_note);
     panels->addWidget(sidebar);
-    auto *scroll = new QScrollArea;
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
     auto *panel = new QWidget;
     auto *detail_layout = new QVBoxLayout(panel);
-    detail_layout->setContentsMargins(28, 18, 28, 18);
-    detail_layout->setSpacing(10);
-    scroll->setWidget(panel);
-    panels->addWidget(scroll, 1);
+    detail_layout->setContentsMargins(30, 26, 30, 24);
+    detail_layout->setSpacing(18);
+    panels->addWidget(panel, 1);
     layout->addLayout(panels, 1);
     auto *title = new QLabel;
     title->setObjectName("dataName");
@@ -270,7 +279,13 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     data_description->setObjectName("dataDescription");
     data_description->setWordWrap(true);
     detail_layout->addWidget(data_description);
+    auto *priority_scroll = new QScrollArea;
+    priority_scroll->setWidgetResizable(true);
+    priority_scroll->setFrameShape(QFrame::NoFrame);
+    priority_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    priority_scroll->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
     auto *priority_panel = new QWidget;
+    priority_scroll->setWidget(priority_panel);
     auto *priority_layout = new QVBoxLayout(priority_panel);
     priority_layout->setContentsMargins(0, 10, 0, 0);
     priority_layout->setSpacing(12);
@@ -323,14 +338,37 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     priority_error->setWordWrap(true);
     priority_error->hide();
     priority_layout->addWidget(priority_error);
-    detail_layout->addWidget(priority_panel);
+    priority_layout->addStretch();
+    detail_layout->addWidget(priority_scroll, 1);
+    auto *pages = new QTabWidget;
+    pages->setObjectName("dataPages");
+    pages->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+    const auto page = [&](const QString &label) {
+        auto *scroll = new QScrollArea;
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        auto *widget = new QWidget;
+        auto *page_layout = new QVBoxLayout(widget);
+        page_layout->setContentsMargins(0, 24, 0, 0);
+        page_layout->setSpacing(22);
+        scroll->setWidget(widget);
+        pages->addTab(scroll, label);
+        return page_layout;
+    };
+    auto *overview_layout = page(QStringLiteral("概览"));
+    auto *settings_layout = page(QStringLiteral("更新与计算"));
+    auto *file_layout = page(QStringLiteral("文件信息"));
+    detail_layout->addWidget(pages, 1);
     auto *facts = new QFrame;
     facts->setObjectName("dataFacts");
     auto *form = new QFormLayout(facts);
-    form->setContentsMargins(18, 14, 18, 14);
+    form->setContentsMargins(22, 22, 22, 22);
     form->setHorizontalSpacing(20);
-    form->setVerticalSpacing(10);
+    form->setVerticalSpacing(18);
     form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     const auto field = [&](const QString &caption, const char *name) {
         auto *label = new QLabel;
         label->setObjectName(name);
@@ -342,23 +380,21 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
         form->addRow(field_caption, label);
         return label;
     };
-    auto *acquired = field(QStringLiteral("获取时间（本地）"), "dataAcquiredAt");
+    auto *acquired = field(QStringLiteral("下载 / 导入时间"), "dataAcquiredAt");
     auto *first = field(QStringLiteral("覆盖起点（UTC）"), "dataValidFrom");
     auto *until = field(QStringLiteral("覆盖截止（UTC）"), "dataValidUntil");
-    auto *checked = field(QStringLiteral("最近检查（本地）"), "dataLastChecked");
-    detail_layout->addWidget(facts);
+    auto *checked = field(QStringLiteral("最近检查"), "dataLastChecked");
+    acquired->setToolTip(QStringLiteral("本地时间"));
+    checked->setToolTip(QStringLiteral("本地时间"));
+    overview_layout->addWidget(facts);
     auto *note = new QLabel;
     note->setObjectName("dataNote");
     note->setWordWrap(true);
-    detail_layout->addWidget(note);
     auto *acquisition = new QWidget;
     acquisition->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
     auto *acquisition_layout = new QVBoxLayout(acquisition);
     acquisition_layout->setContentsMargins(0, 0, 0, 0);
-    acquisition_layout->setSpacing(6);
-    auto *acquisition_title = new QLabel(QStringLiteral("获取与更新"));
-    acquisition_title->setObjectName("sectionTitle");
-    acquisition_layout->addWidget(acquisition_title);
+    acquisition_layout->setSpacing(14);
     auto *actions = new QHBoxLayout;
     actions->setSpacing(10);
     auto *download = new QPushButton;
@@ -372,7 +408,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     manifest->setObjectName("importEopSnapshot");
     actions->addWidget(download);
     actions->addWidget(raw);
-    actions->addWidget(manifest);
+    file_layout->addWidget(manifest, 0, Qt::AlignLeft);
     actions->addStretch();
     acquisition_layout->addLayout(actions);
     auto *automatic_row = new QWidget;
@@ -391,23 +427,30 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     automatic_layout->addSpacing(8);
     automatic_layout->addWidget(frequency);
     automatic_layout->addStretch();
-    acquisition_layout->addWidget(automatic_row);
+    auto *update_title = new QLabel(QStringLiteral("自动更新"));
+    update_title->setObjectName("sectionTitle");
+    settings_layout->addWidget(update_title);
+    settings_layout->addWidget(automatic_row);
     auto *schedule = new QLabel;
     schedule->setObjectName("dataUpdateSchedule");
     schedule->setWordWrap(true);
-    acquisition_layout->addWidget(schedule);
+    settings_layout->addWidget(schedule);
     auto *progress = new QProgressBar;
     progress->setObjectName("dataDownloadProgress");
     progress->setTextVisible(false);
     progress->setFixedHeight(5);
     acquisition_layout->addWidget(progress);
-    detail_layout->addWidget(acquisition);
+    overview_layout->addWidget(acquisition);
+    overview_layout->addWidget(note);
+    overview_layout->addStretch();
     auto *policy_title = new QLabel(QStringLiteral("覆盖范围之外"));
     policy_title->setObjectName("sectionTitle");
-    detail_layout->addWidget(policy_title);
+    settings_layout->addSpacing(12);
+    settings_layout->addWidget(policy_title);
     auto *extrapolation = new QWidget;
-    auto *extrapolation_layout = new QHBoxLayout(extrapolation);
+    auto *extrapolation_layout = new QVBoxLayout(extrapolation);
     extrapolation_layout->setContentsMargins(0, 0, 0, 0);
+    extrapolation_layout->setSpacing(14);
     auto *allow = new QCheckBox(QStringLiteral("允许有限外推"));
     allow->setObjectName("allowEopExtrapolation");
     auto *days = new WorkbenchSpinBox<QSpinBox>;
@@ -419,28 +462,37 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     days->setValue(3);
     days->setSuffix(QStringLiteral(" 天"));
     extrapolation_layout->addWidget(allow);
-    extrapolation_layout->addSpacing(12);
+    auto *limit_row = new QHBoxLayout;
     auto *limit_caption = new QLabel(QStringLiteral("前后各最多"));
     limit_caption->setObjectName("hint");
-    extrapolation_layout->addWidget(limit_caption);
-    extrapolation_layout->addWidget(days);
-    extrapolation_layout->addStretch();
-    detail_layout->addWidget(extrapolation);
+    limit_row->addWidget(limit_caption);
+    limit_row->addWidget(days);
+    limit_row->addStretch();
+    extrapolation_layout->addLayout(limit_row);
+    settings_layout->addWidget(extrapolation);
+    auto *extrapolation_note = new QLabel(
+        QStringLiteral("端点线性估算，距离覆盖时段越远，误差越大。闰秒有效期不会随外推延长。"));
+    extrapolation_note->setObjectName("hint");
+    extrapolation_note->setWordWrap(true);
+    settings_layout->addWidget(extrapolation_note);
+    settings_layout->addStretch();
     auto *expand = new QToolButton;
     expand->setObjectName("dataCenterDetails");
     expand->setText(QStringLiteral("来源、文件与校验信息"));
     expand->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     expand->setCheckable(true);
     expand->setArrowType(Qt::RightArrow);
-    detail_layout->addWidget(expand, 0, Qt::AlignLeft);
+    file_layout->addWidget(expand, 0, Qt::AlignLeft);
+    expand->setChecked(true);
+    expand->setArrowType(Qt::DownArrow);
     auto *technical = new QLabel;
     technical->setObjectName("dataInventoryDetails");
     technical->setTextFormat(Qt::PlainText);
     technical->setWordWrap(true);
+    technical->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     technical->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    technical->hide();
-    detail_layout->addWidget(technical);
-    detail_layout->addStretch(1);
+    file_layout->addWidget(technical);
+    file_layout->addStretch();
     auto *warnings = new QLabel(catalog.warnings().join('\n'));
     warnings->setObjectName("inputError");
     warnings->setContentsMargins(24, 8, 24, 8);
@@ -486,7 +538,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     };
     const auto update_details = [&] {
         const bool group = !selected();
-        priority_panel->setVisible(group);
+        priority_scroll->setVisible(group);
+        pages->setVisible(!group);
         state->setVisible(!group);
         facts->setVisible(!group);
         note->setVisible(!group);
@@ -503,18 +556,23 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
         }
         const auto &item = selected_item();
         const bool is_time = item.product == DataProduct::utc;
-        acquisition->setVisible(!is_time);
+        acquisition->show();
         policy_title->setVisible(item.extrapolation);
         extrapolation->setVisible(item.extrapolation);
+        extrapolation_note->setVisible(item.extrapolation);
         download->setVisible(item.online_updates);
         raw->setVisible(item.raw_import);
-        manifest->setVisible(item.manifest_import && !item.raw_import);
+        manifest->setVisible(item.manifest_import);
+        manifest->setText(QStringLiteral("导入带清单的数据包…"));
         automatic_row->setVisible(item.online_updates);
         schedule->setVisible(item.online_updates);
         const QSignalBlocker auto_block(automatic), frequency_block(frequency), allow_block(allow),
             days_block(days);
-        automatic->setChecked(catalog.automatic_updates());
-        const auto hours = catalog.update_interval_hours();
+        automatic->setChecked(catalog.automatic_updates(item.product));
+        schedule->setText(automatic->isChecked()
+                              ? QStringLiteral("在应用运行时检查；尚未安装完整文件时会自动下载。")
+                              : QStringLiteral("自动更新已关闭，可随时手动下载或检查。"));
+        const auto hours = catalog.update_interval_hours(item.product);
         if (frequency->findData(hours) < 0)
             frequency->addItem(QStringLiteral("每 %1 小时").arg(hours), hours);
         frequency->setCurrentIndex(frequency->findData(hours));
@@ -529,11 +587,10 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
         title->setText(is_time                                    ? QStringLiteral("UTC / 闰秒")
                        : item.product == DataProduct::finals2000a ? QStringLiteral("finals2000A")
                                                                   : QStringLiteral("C04"));
-        data_description->setText(
-            is_time ? QStringLiteral("UTC、TAI 与 TT 之间的时间转换")
-            : item.product == DataProduct::finals2000a
-                ? QStringLiteral("地球定向参数 · 包含观测和预测，支持自动下载与更新")
-                : QStringLiteral("地球定向参数 · 通过本地文件导入"));
+        data_description->setText(is_time ? QStringLiteral("UTC、TAI 与 TT 之间的时间转换")
+                                  : item.product == DataProduct::finals2000a
+                                      ? QStringLiteral("快速观测与预测 · 适用于近期和未来时段")
+                                      : QStringLiteral("综合参考序列 · 历史时段的默认首选"));
         state->setText(installation_text(item));
         state->setProperty("tone", item.installation == DataInstallation::bundled_sample ||
                                            item.installation == DataInstallation::missing
@@ -541,11 +598,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
                                        : "ready");
         state->style()->unpolish(state);
         state->style()->polish(state);
-        acquired->setText(item.acquired_at
-                              ? local_time(*item.acquired_at) +
-                                    (item.acquisition == runtime::DataAcquisition::downloaded
-                                         ? QStringLiteral(" · 下载")
-                                         : QStringLiteral(" · 导入"))
+        acquired->setText(item.acquired_at ? local_time(*item.acquired_at)
                           : item.acquisition == runtime::DataAcquisition::bundled
                               ? QStringLiteral("内置，随程序附带")
                           : item.installation == DataInstallation::missing
@@ -553,15 +606,14 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
                               : QStringLiteral("未记录（已有本地文件）"));
         first->setText(coverage_time(item.first));
         until->setText(coverage_time(item.last) +
-                       (item.exclusive_end ? QStringLiteral("（不含当日）") : QString{}));
+                       (item.exclusive_end ? QStringLiteral("\n不含当日") : QString{}));
         qobject_cast<QLabel *>(form->labelForField(until))
             ->setText(is_time ? QStringLiteral("有效截止（UTC）")
                               : QStringLiteral("覆盖截止（UTC）"));
         if (is_time)
-            note->setText(
-                QDateTime::currentDateTimeUtc() >= item.last
-                    ? QStringLiteral("已超过有效截止，需要更新程序内的 UTC 数据后再计算后续时段。")
-                    : QStringLiteral("随程序更新。有效截止之后的时段需要新的 UTC 数据。"));
+            note->setText(QDateTime::currentDateTimeUtc() >= item.last
+                              ? QStringLiteral("闰秒数据已到期，请检查更新后再计算后续时段。")
+                              : QStringLiteral("有效期来自 IERS 公告；到期后可在此联网更新。"));
         else if (item.installation == DataInstallation::bundled_sample)
             note->setText(
                 item.online_updates
@@ -572,14 +624,9 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
                               ? QStringLiteral("下载完整文件后，可查看实际计算覆盖范围。")
                               : QStringLiteral("导入本地 C04 数据后，可查看计算覆盖范围。"));
         else
-            note->setText(
-                QStringLiteral("覆盖截止后仍可用于对应的历史场景。上方时段不含外推。") +
-                (item.online_updates ? QStringLiteral("是否有更新以联网检查为准。") : QString{}));
-        if (!is_time && item.extrapolation && allow->isChecked())
-            note->setText(note->text() +
-                          QStringLiteral(" 已启用端点线性外推，精度随距离降低；UTC 有效期不变。"));
-        const auto location = is_time             ? QStringLiteral("内嵌在程序中")
-                              : item.file.empty() ? QStringLiteral("尚无本地文件")
+            note->setText(QStringLiteral("以上为可计算时段，不含外推；历史数据可持续使用。"));
+        const auto location = is_time && item.file.empty() ? QStringLiteral("内嵌在程序中")
+                              : item.file.empty()          ? QStringLiteral("尚无本地文件")
                                                   : QString::fromStdWString(item.file.wstring());
         technical->setText(
             QStringLiteral("来源：%1\n文件：%2\n大小：%3\nSHA-256：%4%5")
@@ -608,6 +655,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     };
     const auto selection_changed = [&] {
         operation_error.clear();
+        pages->setCurrentIndex(0);
+        qobject_cast<QScrollArea *>(pages->widget(0))->verticalScrollBar()->setValue(0);
         update_details();
     };
     QObject::connect(list, &QTreeWidget::currentItemChanged, &dialog, selection_changed);
@@ -639,7 +688,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     });
     QObject::connect(download, &QPushButton::clicked, &dialog, [&] {
         operation_error.clear();
-        catalog.start_download();
+        catalog.start_download({}, *selected());
     });
     QObject::connect(manifest, &QPushButton::clicked, &dialog, [&] {
         const auto file = QFileDialog::getOpenFileName(&dialog, QStringLiteral("导入 EOP 数据"), {},
@@ -656,13 +705,13 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
         }
     });
     QObject::connect(raw, &QPushButton::clicked, &dialog, [&] {
-        const auto file =
-            QFileDialog::getOpenFileName(&dialog, QStringLiteral("导入完整 finals2000A 文件"));
+        const auto file = QFileDialog::getOpenFileName(
+            &dialog, QStringLiteral("导入 %1 文件").arg(title->text()));
         if (file.isEmpty())
             return;
         operation_error.clear();
         try {
-            catalog.import_raw(std::filesystem::path(file.toStdWString()));
+            catalog.import_raw(std::filesystem::path(file.toStdWString()), *selected());
             rebuild();
             if (catalog.last_installed())
                 select_provider(static_cast<int>(*catalog.last_installed()));
@@ -672,7 +721,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     });
     QObject::connect(automatic, &QCheckBox::toggled, &dialog, [&](bool value) {
         try {
-            catalog.set_automatic_updates(value);
+            catalog.set_automatic_updates(value, *selected());
         } catch (const std::exception &error) {
             show_error(error);
         }
@@ -680,7 +729,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     });
     QObject::connect(frequency, &QComboBox::currentIndexChanged, &dialog, [&] {
         try {
-            catalog.set_update_interval_hours(frequency->currentData().toInt());
+            catalog.set_update_interval_hours(frequency->currentData().toInt(), *selected());
         } catch (const std::exception &error) {
             show_error(error);
         }
@@ -711,30 +760,29 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
             seen_revision = catalog.revision();
             seen_day = today;
         }
-        const auto update = catalog.update_status();
         const bool busy = catalog.downloading();
-        const bool failed =
-            update.state == DataUpdateState::failed || update.state == DataUpdateState::interrupted;
-        for (auto *node : {finals_node, c04_node}) {
+        for (auto *node : {finals_node, c04_node, utc_node}) {
             const auto &entry =
                 inventory_item(static_cast<DataProduct>(node->data(0, Qt::UserRole).toInt()));
             const auto name = entry.product == DataProduct::finals2000a
                                   ? QStringLiteral("finals2000A")
-                                  : QStringLiteral("C04");
-            const auto installation = entry.online_updates && (busy || failed)
+                              : entry.product == DataProduct::c04 ? QStringLiteral("C04")
+                                                                  : QStringLiteral("UTC / 闰秒");
+            const auto update = catalog.update_status(entry.product);
+            const bool failed = update.state == DataUpdateState::failed ||
+                                update.state == DataUpdateState::interrupted;
+            const auto installation = (busy && catalog.active_product() == entry.product) || failed
                                           ? check_text(update.state)
                                           : installation_text(entry);
             node->setText(0, name + "\n" + installation + "\n" +
-                                 (entry.last.isValid() ? QStringLiteral("覆盖至 ") +
+                                 (entry.last.isValid() ? (entry.product == DataProduct::utc
+                                                              ? QStringLiteral("有效至 ")
+                                                              : QStringLiteral("覆盖至 ")) +
                                                              entry.last.date().toString(Qt::ISODate)
                                                        : QStringLiteral("尚无覆盖数据")));
             node->setData(0, Qt::UserRole + 1, entry.online_updates && failed);
             node->setToolTip(0, node->text(0));
         }
-        const auto &utc = inventory_item(DataProduct::utc);
-        utc_node->setText(0,
-                          QStringLiteral("UTC / 闰秒\n%1\n有效至 %2")
-                              .arg(installation_text(utc), utc.last.date().toString(Qt::ISODate)));
         if (priority->item(0)->data(Qt::UserRole).toInt() !=
             static_cast<int>(catalog.preferred_product())) {
             syncing_priority = true;
@@ -762,13 +810,15 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
         if (!selected())
             return;
         const auto &item = selected_item();
+        const auto update = catalog.update_status(item.product);
+        const bool downloading_this = busy && catalog.active_product() == item.product;
         checked->setText(
             item.online_updates
-                ? (update.attempted_at ? local_time(*update.attempted_at) + " · " : QString{}) +
+                ? (update.attempted_at ? local_time(*update.attempted_at) + "\n" : QString{}) +
                       check_text(update.state)
             : item.product == DataProduct::utc ? QStringLiteral("随程序更新")
                                                : QStringLiteral("本地导入，不联网检查"));
-        download->setText(busy ? check_text(update.state)
+        download->setText(downloading_this ? check_text(update.state)
                           : update.state == DataUpdateState::failed ||
                                   update.state == DataUpdateState::interrupted
                               ? QStringLiteral("重试下载 / 更新")
@@ -779,8 +829,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
         download->setEnabled(!busy);
         raw->setEnabled(!busy);
         manifest->setEnabled(!busy);
-        cancel->setVisible(item.online_updates && busy);
-        progress->setVisible(item.online_updates && busy);
+        cancel->setVisible(downloading_this);
+        progress->setVisible(downloading_this);
         if (busy && catalog.total_bytes() > 0) {
             progress->setRange(0, 1000);
             progress->setValue(static_cast<int>(
@@ -793,7 +843,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
                               : QStringLiteral("自动更新已关闭，可随时手动下载或检查。"));
         QString message = operation_error;
         if (message.isEmpty() && item.online_updates) {
-            if (busy) {
+            if (downloading_this) {
                 message = update.message;
                 if (catalog.received_bytes() > 0)
                     message +=

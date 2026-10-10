@@ -1,4 +1,5 @@
 find_package(erfa 2.0.1 EXACT CONFIG REQUIRED)
+find_path(PICOSHA2_INCLUDE_DIR NAMES picosha2.h REQUIRED)
 
 # Compile the explicitly pinned, hash-checked snapshot into the provider. The installed
 # SDK/wheel never needs the source checkout, network, or a mutable global ERFA table.
@@ -25,6 +26,7 @@ configure_file(src/leap_seconds.hpp.in generated/leap_seconds.hpp @ONLY)
 
 orbitforge_module(orbitforge_erfa Erfa src/provider.cpp)
 target_include_directories(orbitforge_erfa PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_include_directories(orbitforge_erfa SYSTEM PRIVATE "${PICOSHA2_INCLUDE_DIR}")
 target_link_libraries(orbitforge_erfa PUBLIC OrbitForge::Core PRIVATE erfa::erfa)
 foreach(component SDK Python)
     if(component STREQUAL "SDK")

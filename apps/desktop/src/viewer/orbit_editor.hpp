@@ -3,6 +3,7 @@
 #include "orbit_scene.hpp"
 #include <QWidget>
 #include <functional>
+#include <orbitforge/core/time/time_provider.hpp>
 
 class QLabel;
 class QLineEdit;
@@ -17,6 +18,7 @@ class QuantityEditor;
 class OrbitEditor final : public QWidget {
   public:
     explicit OrbitEditor(const OrbitInput &input, QWidget *parent = nullptr);
+    void set_time_provider(std::shared_ptr<const core::ITimeProvider> time);
     std::function<void(OrbitInput)> apply;
     std::function<void()> cancel;
     std::function<void()> close_requested;

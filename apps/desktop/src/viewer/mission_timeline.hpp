@@ -14,6 +14,7 @@ class MissionTimeline final : public QSlider {
                       const QString &selected_object = {});
     void set_current_time(qint64 tai_ms, bool reveal = false);
     void set_scale(CalendarScale scale);
+    void set_time_provider(std::shared_ptr<const core::ITimeProvider> time);
     void set_show_object_interval(bool show);
     void reset_view();
     void zoom(double factor);
@@ -55,5 +56,6 @@ class MissionTimeline final : public QSlider {
     QString scenario_, object_;
     bool show_object_interval_ = false;
     CalendarScale scale_ = CalendarScale::utc;
+    std::shared_ptr<const core::ITimeProvider> time_;
 };
 } // namespace orbitforge::desktop
