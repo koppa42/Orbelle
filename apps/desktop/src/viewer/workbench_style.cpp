@@ -416,7 +416,7 @@ QTreeWidget { background: #171e2c; border: 0; outline: 0; padding: 2px 0; }
 QTreeWidget::item { height: 26px; border-radius: 4px; padding: 2px 4px; }
 QTreeWidget::item:selected { background: #343d61; color: #e3e8ff; }
 QTreeWidget::item:hover:!selected { background: #242f3e; }
-QTreeWidget::branch:selected { background: #171e2c; }
+QTreeWidget::branch { background: #171e2c; }
 QTreeWidget#insertObjectTypes { background: #171e2c; border: 1px solid #2e374b; border-radius: 5px; padding: 4px; }
 QTreeWidget#insertObjectTypes::item { height: 24px; padding: 2px 6px; }
 QDialog#insertObjectsDialog QRadioButton { color: #dce5ef; spacing: 8px; }
