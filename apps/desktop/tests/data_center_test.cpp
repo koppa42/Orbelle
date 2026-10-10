@@ -5,6 +5,8 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QHostAddress>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
@@ -410,6 +412,80 @@ TEST_F(DataCenterTest, InterruptedAndLegacyChecksNeverClaimThatCurrentDataIsLate
     EXPECT_EQ(interrupted.update_status().state, DataUpdateState::interrupted);
     EXPECT_EQ(interrupted.update_status().attempted_at, 1234567890);
     EXPECT_EQ(interrupted.update_status().checked_at, 1234567800);
+}
+TEST_F(DataCenterTest, SourcePriorityPersistsAndRealCoveragePrecedesExtrapolation) {
+    // Synthetic overlapping dates exercise source selection, not scientific accuracy.
+    QFile original(QString::fromStdString(ORBITFORGE_TEST_C04));
+    ASSERT_TRUE(original.open(QIODevice::ReadOnly));
+    auto manifest = QJsonDocument::fromJson(original.readAll()).object();
+    QFile data(QString::fromStdWString(
+        (std::filesystem::path(ORBITFORGE_TEST_C04).parent_path() / "eop.c04").wstring()));
+    ASSERT_TRUE(data.open(QIODevice::ReadOnly));
+    auto bytes = data.readAll();
+    bytes.replace("2000   1   1   0  51544.00", "2026   9   1   0  61284.00");
+    bytes.replace("2000   1   2   0  51545.00", "2026   9   2   0  61285.00");
+    manifest["snapshot_id"] = "test-c04-overlap";
+    manifest["data_file"] = "overlap.c04";
+    manifest["sha256"] =
+        QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+    manifest["first_mjd"] = 61284;
+    manifest["last_mjd"] = 61285;
+    QFile fixture(temp.path() + "/overlap.c04");
+    ASSERT_TRUE(fixture.open(QIODevice::WriteOnly));
+    ASSERT_EQ(fixture.write(bytes), bytes.size());
+    fixture.close();
+    QFile metadata(temp.path() + "/overlap.json");
+    ASSERT_TRUE(metadata.open(QIODevice::WriteOnly));
+    metadata.write(QJsonDocument(manifest).toJson());
+    metadata.close();
+    const auto store = root() / "data";
+    const std::vector<std::filesystem::path> bundled{ORBITFORGE_TEST_FINALS,
+                                                     root() / "overlap.json"};
+    {
+        EopCatalog catalog(store, bundled, {}, false);
+        const auto finals = catalog.providers()[0], c04 = catalog.providers()[1];
+        const auto first = c04->data_info().first_epoch, last = c04->data_info().last_epoch;
+        const auto active = catalog.for_interval(first, last);
+        const auto active_lock = application::eop_data_lock(active->data_info());
+        EXPECT_EQ(catalog.preferred_product(), DataProduct::finals2000a);
+        EXPECT_EQ(active, finals);
+        catalog.set_preferred_product(DataProduct::c04);
+        EXPECT_EQ(catalog.preferred_index(), 1);
+        EXPECT_EQ(catalog.for_interval(first, last), c04);
+        EXPECT_EQ(application::eop_data_lock(active->data_info()), active_lock);
+        EXPECT_EQ(active, finals);
+        catalog.set_extrapolation_days(1, 2);
+        const core::Epoch after{last.tai_nanoseconds() + 3'600'000'000'000};
+        EXPECT_EQ(catalog.for_interval(last, after), finals);
+        const core::Epoch before{first.tai_nanoseconds() - 3'600'000'000'000};
+        catalog.set_extrapolation_days(0, 3);
+        EXPECT_EQ(catalog.for_interval(before, first)->data_info().sha256, c04->data_info().sha256);
+        EXPECT_EQ(catalog.for_interval(before, first)->data_info().extrapolation_days, 2);
+        catalog.set_preferred_product(DataProduct::finals2000a);
+        EXPECT_EQ(catalog.for_interval(first, last), finals);
+        EXPECT_EQ(catalog.for_interval(before, first)->data_info().sha256,
+                  finals->data_info().sha256);
+        catalog.set_preferred_product(DataProduct::c04);
+        catalog.set_extrapolation_days(1, 0);
+        EXPECT_EQ(catalog.for_interval(before, first)->data_info().sha256,
+                  finals->data_info().sha256);
+        catalog.import_snapshot(ORBITFORGE_TEST_FINALS);
+        EXPECT_EQ(catalog.preferred_product(), DataProduct::c04);
+        EXPECT_EQ(catalog.for_interval(first, last), c04);
+        EXPECT_THROW(catalog.set_preferred_product(DataProduct::utc), std::invalid_argument);
+        EXPECT_EQ(catalog.preferred_product(), DataProduct::c04);
+    }
+    EopCatalog reopened(store, bundled, {}, false);
+    EXPECT_EQ(reopened.preferred_product(), DataProduct::c04);
+    EXPECT_EQ(reopened.preferred_index(), 1);
+    const auto &info = reopened.providers()[1]->data_info();
+    EXPECT_EQ(reopened.for_interval(info.first_epoch, info.last_epoch), reopened.providers()[1]);
+    EopCatalog missing(root() / "missing", {ORBITFORGE_TEST_FINALS}, {}, false);
+    missing.set_preferred_product(DataProduct::c04);
+    const auto available = missing.providers()[0];
+    EXPECT_EQ(
+        missing.for_interval(available->data_info().first_epoch, available->data_info().last_epoch),
+        available);
 }
 TEST_F(DataCenterTest, ExtrapolationPoliciesAreIndependentPersistentAndNeverChangeActiveProviders) {
     const auto store = root() / "data";

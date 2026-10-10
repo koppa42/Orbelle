@@ -46,6 +46,8 @@ if(ORBITFORGE_WITH_VSG)
         gtest_discover_tests(orbitforge_data_center_tests DISCOVERY_MODE PRE_TEST TEST_PREFIX "desktop." PROPERTIES TIMEOUT 30)
         add_executable(orbitforge_data_center_ui_tests tests/data_center_dialog_test.cpp
             src/viewer/eop_catalog.cpp src/viewer/data_center_dialog.cpp src/viewer/workbench_style.cpp)
+        qt_add_resources(orbitforge_data_center_ui_tests "data_center_icons" PREFIX "/orbitforge"
+            BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/icons/chevron-down.png)
         target_compile_definitions(orbitforge_data_center_ui_tests PRIVATE
             ORBITFORGE_TEST_FINALS="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json")
         target_link_libraries(orbitforge_data_center_ui_tests PRIVATE

@@ -1,6 +1,7 @@
 #include "../src/viewer/eop_catalog.hpp"
 #include "../src/viewer/workbench_style.hpp"
 #include <QApplication>
+#include <QComboBox>
 #include <QDialog>
 #include <QDir>
 #include <QElapsedTimer>
@@ -14,6 +15,8 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QToolButton>
+#include <QTreeWidget>
 #include <gtest/gtest.h>
 
 namespace orbitforge::desktop {
@@ -63,7 +66,7 @@ class DownloadServer : public QTcpServer {
         return QUrl(QStringLiteral("http://127.0.0.1:%1/finals").arg(serverPort()));
     }
 };
-TEST(DataCenterDialog, DownloadProgressResultsAndProductSwitchingStayConsistent) {
+TEST(DataCenterDialog, GroupedSourcesKeepDownloadStateAndPriorityIndependent) {
     static int argc = 1;
     static char name[] = "data_center_ui_test";
     static char *argv[] = {name, nullptr};
@@ -104,24 +107,56 @@ TEST(DataCenterDialog, DownloadProgressResultsAndProductSwitchingStayConsistent)
             dialog->reject();
             return;
         }
-        auto *list = dialog->findChild<QListWidget *>("dataInventory");
+        auto *list = dialog->findChild<QTreeWidget *>("dataInventory");
+        auto *priority = dialog->findChild<QListWidget *>("eopSourcePriority");
         auto *checked = dialog->findChild<QLabel *>("dataLastChecked");
         auto *badge = dialog->findChild<QLabel *>("dataStatus");
         auto *progress = dialog->findChild<QProgressBar *>("dataDownloadProgress");
         auto *cancel = dialog->findChild<QPushButton *>("cancelEopDownload");
         auto *download = dialog->findChild<QPushButton *>("downloadEop");
         auto *status = dialog->findChild<QLabel *>("dataCenterStatus");
-        ASSERT_TRUE(list && checked && badge && progress && cancel && download && status);
+        ASSERT_TRUE(list && priority && checked && badge && progress && cancel && download &&
+                    status);
+        ASSERT_EQ(list->topLevelItemCount(), 2);
+        auto *group = list->topLevelItem(0);
+        ASSERT_EQ(group->childCount(), 2);
+        auto *finals = group->child(0);
+        auto *c04 = group->child(1);
+        auto *utc = list->topLevelItem(1);
         switch (stage) {
         case 0:
+            EXPECT_EQ(list->currentItem(), group);
+            EXPECT_TRUE(group->isExpanded());
+            EXPECT_TRUE(priority->isVisible());
+            EXPECT_EQ(priority->count(), 2);
+            EXPECT_EQ(priority->dragDropMode(), QAbstractItemView::InternalMove);
+            EXPECT_FALSE(dialog->findChild<QComboBox *>("eopDataSource"));
+            EXPECT_FALSE(download->isVisible());
+            EXPECT_FALSE(checked->isVisible());
+            EXPECT_EQ(priority->item(0)->data(Qt::UserRole).toInt(),
+                      static_cast<int>(DataProduct::finals2000a));
+            EXPECT_TRUE(priority->model()->moveRow({}, 1, {}, 0));
+            EXPECT_EQ(catalog.preferred_product(), DataProduct::c04);
+            capture(dialog, "priority-c04");
+            EXPECT_TRUE(priority->model()->moveRow({}, 1, {}, 0));
+            EXPECT_EQ(catalog.preferred_product(), DataProduct::finals2000a);
+            priority->setCurrentRow(1);
+            dialog->findChild<QToolButton *>("eopPriorityUp")->click();
+            EXPECT_EQ(catalog.preferred_product(), DataProduct::c04);
+            dialog->findChild<QToolButton *>("eopPriorityDown")->click();
+            EXPECT_EQ(catalog.preferred_product(), DataProduct::finals2000a);
+            capture(dialog, "priority");
+            list->setCurrentItem(finals);
+            EXPECT_FALSE(priority->isVisible());
             EXPECT_TRUE(badge->text().contains(QStringLiteral("示例")));
             EXPECT_TRUE(checked->text().contains(QStringLiteral("尚未检查")));
-            list->setCurrentRow(1);
+            list->setCurrentItem(c04);
+            EXPECT_EQ(catalog.preferred_product(), DataProduct::finals2000a);
             EXPECT_TRUE(badge->text().contains(QStringLiteral("未导入")));
             EXPECT_TRUE(dialog->findChild<QPushButton *>("importEopSnapshot")->isVisible());
             EXPECT_FALSE(download->isVisible());
             capture(dialog, "missing-c04");
-            list->setCurrentRow(0);
+            list->setCurrentItem(finals);
             capture(dialog, "sample");
             catalog.start_download(server.url());
             ++stage;
@@ -135,18 +170,33 @@ TEST(DataCenterDialog, DownloadProgressResultsAndProductSwitchingStayConsistent)
             EXPECT_GT(progress->value(), 0);
             EXPECT_LT(progress->value(), progress->maximum());
             capture(dialog, "downloading");
-            list->setCurrentRow(2);
+            list->setCurrentItem(c04);
+            EXPECT_FALSE(progress->isVisible());
+            EXPECT_FALSE(cancel->isVisible());
+            EXPECT_TRUE(finals->text(0).contains(QStringLiteral("正在下载")));
+            EXPECT_EQ(checked->text(), QStringLiteral("本地导入，不联网检查"));
+            list->setCurrentItem(utc);
+            EXPECT_FALSE(priority->isVisible());
             EXPECT_FALSE(progress->isVisible());
             EXPECT_FALSE(cancel->isVisible());
             EXPECT_EQ(checked->text(), QStringLiteral("随程序更新"));
-            list->setCurrentRow(0);
+            list->setCurrentItem(group);
+            EXPECT_TRUE(priority->isVisible());
+            EXPECT_FALSE(download->isVisible());
+            EXPECT_FALSE(progress->isVisible());
+            list->setCurrentItem(finals);
             EXPECT_TRUE(progress->isVisible());
+            list->setCurrentItem(c04);
             server.release();
             ++stage;
             break;
         case 2:
-            if (catalog.downloading() || !badge->text().contains(QStringLiteral("完整包")))
+            if (catalog.downloading())
                 break;
+            EXPECT_EQ(list->currentItem(), c04);
+            EXPECT_TRUE(badge->text().contains(QStringLiteral("未导入")));
+            list->setCurrentItem(finals);
+            EXPECT_TRUE(badge->text().contains(QStringLiteral("完整包")));
             EXPECT_FALSE(progress->isVisible());
             EXPECT_FALSE(cancel->isVisible());
             EXPECT_TRUE(checked->text().contains(QStringLiteral("检查成功")));
@@ -175,12 +225,15 @@ TEST(DataCenterDialog, DownloadProgressResultsAndProductSwitchingStayConsistent)
             EXPECT_TRUE(status->isVisible());
             EXPECT_EQ(catalog.inventory()[0].acquired_at, downloaded_at);
             capture(dialog, "failed");
-            list->setCurrentRow(2);
+            list->setCurrentItem(c04);
+            EXPECT_FALSE(status->isVisible());
+            EXPECT_TRUE(finals->text(0).contains(QStringLiteral("检查失败")));
+            list->setCurrentItem(utc);
             EXPECT_FALSE(status->isVisible());
             EXPECT_FALSE(download->isVisible());
             EXPECT_EQ(checked->text(), QStringLiteral("随程序更新"));
             capture(dialog, "utc");
-            list->setCurrentRow(0);
+            list->setCurrentItem(finals);
             server.fail = false;
             server.hold = true;
             catalog.start_download(server.url());

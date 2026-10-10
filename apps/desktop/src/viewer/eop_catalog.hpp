@@ -31,6 +31,8 @@ class EopCatalog : public QObject {
     [[nodiscard]] std::uint64_t revision() const { return revision_; }
     [[nodiscard]] std::vector<DataInventoryItem> inventory() const;
     [[nodiscard]] DataUpdateStatus update_status() const;
+    [[nodiscard]] DataProduct preferred_product() const;
+    void set_preferred_product(DataProduct product);
     void set_automatic_updates(bool enabled);
     [[nodiscard]] bool automatic_updates() const;
     void set_update_interval_hours(int hours);

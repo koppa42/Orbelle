@@ -5427,18 +5427,38 @@ class Workbench final : public QMainWindow {
                 require(dialog != nullptr, "Missing EOP dialog");
                 auto *expand = dialog->findChild<QToolButton *>("dataCenterDetails");
                 auto *automatic = dialog->findChild<QCheckBox *>("dataAutoUpdate");
-                auto *inventory = dialog->findChild<QListWidget *>("dataInventory");
+                auto *inventory = dialog->findChild<QTreeWidget *>("dataInventory");
+                auto *priority = dialog->findChild<QListWidget *>("eopSourcePriority");
                 require(expand && !expand->isChecked() && automatic && automatic->isChecked() &&
-                            inventory && inventory->count() == 3 &&
+                            inventory && inventory->topLevelItemCount() == 2 && priority &&
+                            inventory->topLevelItem(0)->childCount() == 2 &&
+                            priority->isVisible() &&
                             !dialog->findChild<QComboBox *>("eopSnapshots") &&
                             !dialog->findChild<QPushButton *>("setDefaultEop") &&
                             !dialog->findChild<QPushButton *>("applyEopSnapshot"),
                         "Data inventory must show current data without version/default controls");
+                auto *group = inventory->topLevelItem(0);
+                auto *finals = group->child(0);
+                auto *c04 = group->child(1);
+                auto *utc = inventory->topLevelItem(1);
+                require(
+                    priority->model()->moveRow({}, 1, {}, 0) &&
+                        eop_catalog_->preferred_product() == DataProduct::c04 &&
+                        inventory->currentItem() == group &&
+                        scenario_->data_lock() == smoke_data_lock_,
+                    "Reordering sources must persist priority without changing the active scene");
+                require(priority->model()->moveRow({}, 1, {}, 0) &&
+                            eop_catalog_->preferred_product() == DataProduct::finals2000a,
+                        "Cannot restore default source priority");
+                QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
+                require(dialog->grab().save(smoke_dir_ + "/data-center-priority.png"),
+                        "Cannot save source priority page");
+                inventory->setCurrentItem(finals);
                 require(dialog->findChild<QLabel *>("dataAcquiredAt")
                             ->text()
                             .contains(QStringLiteral("内置")),
                         "Missing acquisition information");
-                require(inventory->item(0)->text().contains(QStringLiteral("内置示例")) &&
+                require(finals->text(0).contains(QStringLiteral("内置示例")) &&
                             dialog->findChild<QLabel *>("dataLastChecked")
                                 ->text()
                                 .contains(QStringLiteral("尚未检查")),
@@ -5452,34 +5472,34 @@ class Workbench final : public QMainWindow {
                 QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
                 require(dialog->grab().save(smoke_dir_ + "/data-center-sample.png"),
                         "Cannot save sample installation state");
-                inventory->setCurrentRow(2);
+                inventory->setCurrentItem(utc);
                 require(
                     dialog->findChild<QLabel *>("dataValidUntil")->text().contains("2027-06-28"),
                     "Missing UTC expiry information");
                 auto *allow = dialog->findChild<QCheckBox *>("allowEopExtrapolation");
                 auto *days = dialog->findChild<QSpinBox *>("eopExtrapolationDays");
-                require(allow && days && !allow->isVisible(),
+                require(allow && days && !allow->isVisible() && !priority->isVisible(),
                         "UTC must not expose EOP extrapolation controls");
                 QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
                 require(dialog->grab().save(smoke_dir_ + "/data-center-utc.png"),
                         "Cannot save UTC data details");
-                inventory->setCurrentRow(0);
+                inventory->setCurrentItem(finals);
                 require(!allow->isChecked() && !days->isEnabled(),
                         "Extrapolation should default off");
                 allow->setChecked(true);
                 days->setValue(2);
                 require(eop_catalog_->extrapolation_days(0) == 2,
                         "Extrapolation limit was not saved");
-                inventory->setCurrentRow(1);
+                inventory->setCurrentItem(c04);
                 require(!allow->isChecked(), "EOP policies must be independent by product");
-                inventory->setCurrentRow(0);
+                inventory->setCurrentItem(finals);
                 require(allow->isChecked() && days->value() == 2,
                         "Lost extrapolation setting on selection change");
                 QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
                 require(dialog->grab().save(smoke_dir_ + "/data-center-extrapolation.png"),
                         "Cannot save EOP policy details");
                 allow->setChecked(false);
-                inventory->setCurrentRow(1);
+                inventory->setCurrentItem(c04);
                 record("data-center-per-product-extrapolation-controls");
                 QTimer::singleShot(0, [source] {
                     if (auto *file =
@@ -5494,17 +5514,18 @@ class Workbench final : public QMainWindow {
                         "Import implicitly switched the active data");
                 const auto imported_row =
                     eop_->data_info().interpolation.starts_with("finals2000a") ? 0 : 1;
-                require(inventory->count() == 3 &&
+                require(inventory->topLevelItemCount() == 2 &&
+                            inventory->currentItem() == group->child(imported_row) &&
                             eop_catalog_->inventory()[static_cast<std::size_t>(imported_row)]
                                     .provider_index == 2 &&
                             dialog->findChild<QLabel *>("dataAcquiredAt")
                                 ->text()
                                 .contains(QStringLiteral("导入")),
-                        "Import must update its current data row with an acquisition timestamp");
+                        "Import must select its source with an acquisition timestamp");
                 dialog->grab().save(smoke_dir_ + "/data-center-inventory.png");
                 expand->click();
                 dialog->grab().save(smoke_dir_ + "/eop-data-dialog.png");
-                inventory->setCurrentRow(0);
+                inventory->setCurrentItem(finals);
                 automatic->setChecked(false);
                 automatic->setChecked(true);
                 require(eop_catalog_->automatic_updates() && !eop_catalog_->downloading(),

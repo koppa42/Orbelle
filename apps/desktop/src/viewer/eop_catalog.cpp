@@ -292,7 +292,21 @@ void EopCatalog::refresh_current(std::optional<std::size_t> acquired) {
         current_.push_back(*finals);
     if (c04)
         current_.push_back(*c04);
+    if (preferred_product() == DataProduct::c04)
+        std::reverse(current_.begin(), current_.end());
     ++revision_;
+}
+DataProduct EopCatalog::preferred_product() const {
+    return data_.setting("eop-preferred-product") == "c04" ? DataProduct::c04
+                                                           : DataProduct::finals2000a;
+}
+void EopCatalog::set_preferred_product(DataProduct product) {
+    if (product != DataProduct::finals2000a && product != DataProduct::c04)
+        throw std::invalid_argument("EOP priority must be finals2000A or C04");
+    if (product == preferred_product())
+        return;
+    data_.set_setting("eop-preferred-product", product == DataProduct::c04 ? "c04" : "finals2000a");
+    refresh_current();
 }
 bool EopCatalog::automatic_updates() const { return data_.setting("finals-auto-update") != "0"; }
 void EopCatalog::set_automatic_updates(bool enabled) {

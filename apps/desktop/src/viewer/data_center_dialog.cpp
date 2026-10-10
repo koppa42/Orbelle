@@ -20,6 +20,7 @@
 #include <QStyledItemDelegate>
 #include <QTimeZone>
 #include <QToolButton>
+#include <QTreeWidget>
 #include <QVBoxLayout>
 #include <algorithm>
 
@@ -78,6 +79,26 @@ QString bytes_text(quint64 bytes) {
         return QStringLiteral("%1 KiB").arg(static_cast<double>(bytes) / 1024, 0, 'f', 1);
     return QStringLiteral("%1 MiB").arg(static_cast<double>(bytes) / (1024 * 1024), 0, 'f', 1);
 }
+class DataTreeWidget final : public QTreeWidget {
+  protected:
+    void drawBranches(QPainter *painter, const QRect &rect,
+                      const QModelIndex &index) const override {
+        painter->fillRect(rect, QColor("#171e2c"));
+        if (!model()->hasChildren(index))
+            return;
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        painter->setPen(QPen(QColor("#a4b1ca"), 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        const QPointF center(rect.right() - indentation() / 2.0, rect.center().y());
+        const auto points = isExpanded(index)
+                                ? QPolygonF{center + QPointF(-3, -2), center + QPointF(0, 1),
+                                            center + QPointF(3, -2)}
+                                : QPolygonF{center + QPointF(-1, -3), center + QPointF(2, 0),
+                                            center + QPointF(-1, 3)};
+        painter->drawPolyline(points);
+        painter->restore();
+    }
+};
 class DataItemDelegate final : public QStyledItemDelegate {
   public:
     using QStyledItemDelegate::QStyledItemDelegate;
@@ -92,25 +113,75 @@ class DataItemDelegate final : public QStyledItemDelegate {
                                                               : Qt::transparent);
         painter->setBrush(QColor(selected ? "#303b5d" : hover ? "#252f45" : "#171e2c"));
         painter->drawRoundedRect(bounds, 7, 7);
-        const auto icon = index.data(Qt::UserRole).toInt() == static_cast<int>(DataProduct::utc)
+        const bool child = index.parent().isValid();
+        const auto icon = child ? WorkbenchIcon::database
+                          : index.data(Qt::UserRole).toInt() == static_cast<int>(DataProduct::utc)
                               ? WorkbenchIcon::clock
                               : WorkbenchIcon::earth;
         workbench_icon(icon, QColor(selected ? "#c0c9ff" : "#8e9ebb"))
-            .paint(painter, QRect(bounds.left() + 12, bounds.top() + 13, 20, 20));
+            .paint(painter, QRect(bounds.left() + 12, bounds.top() + 12, 18, 18));
+        const auto left = bounds.left() + 40;
+        const auto width = bounds.right() - left - 8;
         const auto lines = index.data().toString().split('\n');
         auto title_font = option.font;
         title_font.setPixelSize(13);
         title_font.setWeight(QFont::DemiBold);
         painter->setFont(title_font);
         painter->setPen(QColor(selected ? "#eff2ff" : "#d0d9eb"));
-        painter->drawText(bounds.adjusted(43, 9, -10, -52), Qt::AlignVCenter, lines.value(0));
+        painter->drawText(QRect(left, bounds.top() + 8, width, 22), Qt::AlignVCenter,
+                          painter->fontMetrics().elidedText(lines.value(0), Qt::ElideRight, width));
         title_font.setPixelSize(11);
         title_font.setWeight(QFont::Normal);
         painter->setFont(title_font);
-        painter->setPen(QColor(selected ? "#b4c2e6" : "#93a2bd"));
-        painter->drawText(bounds.adjusted(43, 33, -10, -29), Qt::AlignVCenter, lines.value(1));
-        painter->setPen(QColor(index.data(Qt::UserRole + 1).toBool() ? "#e6c68b" : "#98a8c3"));
-        painter->drawText(bounds.adjusted(43, 54, -10, -8), Qt::AlignVCenter, lines.value(2));
+        painter->setPen(QColor(index.data(Qt::UserRole + 1).toBool() ? "#e6c68b"
+                               : selected                            ? "#b4c2e6"
+                                                                     : "#93a2bd"));
+        painter->drawText(QRect(left, bounds.top() + 32, width, 17), Qt::AlignVCenter,
+                          painter->fontMetrics().elidedText(lines.value(1), Qt::ElideRight, width));
+        painter->setPen(QColor("#98a8c3"));
+        painter->drawText(QRect(left, bounds.top() + 52, width, 17), Qt::AlignVCenter,
+                          painter->fontMetrics().elidedText(lines.value(2), Qt::ElideRight, width));
+        painter->restore();
+    }
+};
+class PriorityDelegate final : public QStyledItemDelegate {
+  public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+    void paint(QPainter *painter, const QStyleOptionViewItem &option,
+               const QModelIndex &index) const override {
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        const auto bounds = option.rect.adjusted(1, 4, -1, -4);
+        const bool selected = option.state & QStyle::State_Selected;
+        const bool hover = option.state & QStyle::State_MouseOver;
+        painter->setPen(QColor(selected ? "#8493d1" : "#35425c"));
+        painter->setBrush(QColor(selected ? "#2a3451" : hover ? "#252f45" : "#20283a"));
+        painter->drawRoundedRect(bounds, 8, 8);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor("#8e9ebb"));
+        for (int x = 0; x < 2; ++x)
+            for (int y = 0; y < 3; ++y)
+                painter->drawEllipse(
+                    QPointF(bounds.left() + 15 + x * 5, bounds.center().y() - 5 + y * 5), 1.2, 1.2);
+        auto font = option.font;
+        font.setPixelSize(14);
+        font.setWeight(QFont::DemiBold);
+        painter->setFont(font);
+        painter->setPen(QColor("#aebbf0"));
+        painter->drawText(QRect(bounds.left() + 33, bounds.top(), 24, bounds.height()),
+                          Qt::AlignCenter, QString::number(index.row() + 1));
+        const auto lines = index.data().toString().split('\n');
+        const auto left = bounds.left() + 72;
+        const auto width = bounds.width() - 96;
+        painter->setPen(QColor("#e7edff"));
+        painter->drawText(QRect(left, bounds.top() + 12, width, 22), Qt::AlignVCenter,
+                          lines.value(0));
+        font.setPixelSize(12);
+        font.setWeight(QFont::Normal);
+        painter->setFont(font);
+        painter->setPen(QColor("#a1aec7"));
+        painter->drawText(QRect(left, bounds.top() + 40, width, 20), Qt::AlignVCenter,
+                          painter->fontMetrics().elidedText(lines.value(1), Qt::ElideRight, width));
         painter->restore();
     }
 };
@@ -127,7 +198,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     auto *heading = new QVBoxLayout;
-    heading->setContentsMargins(24, 20, 24, 18);
+    heading->setContentsMargins(24, 16, 24, 14);
     heading->setSpacing(6);
     auto *heading_title = new QLabel(QStringLiteral("数据中心"));
     heading_title->setObjectName("panelTitle");
@@ -148,7 +219,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     auto *inventory_caption = new QLabel(QStringLiteral("数据列表"));
     inventory_caption->setObjectName("dataSidebarCaption");
     sidebar_layout->addWidget(inventory_caption);
-    auto *list = new QListWidget;
+    auto *list = new DataTreeWidget;
     list->setObjectName("dataInventory");
     list->setAccessibleName(QStringLiteral("数据及安装状态"));
     list->setItemDelegate(new DataItemDelegate(list));
@@ -156,6 +227,21 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     list->setMinimumHeight(280);
     list->setSelectionMode(QAbstractItemView::SingleSelection);
+    list->setHeaderHidden(true);
+    list->setIndentation(16);
+    auto *eop_node = new QTreeWidgetItem(list, {QStringLiteral("地球定向参数\n来源与计算优先级")});
+    eop_node->setSizeHint(0, QSize(0, 62));
+    const auto add_source = [&](DataProduct product, QTreeWidgetItem *parent) {
+        auto *item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(list);
+        item->setData(0, Qt::UserRole, static_cast<int>(product));
+        item->setSizeHint(0, QSize(0, 80));
+        return item;
+    };
+    auto *finals_node = add_source(DataProduct::finals2000a, eop_node);
+    auto *c04_node = add_source(DataProduct::c04, eop_node);
+    auto *utc_node = add_source(DataProduct::utc, nullptr);
+    eop_node->setExpanded(true);
+    list->setCurrentItem(eop_node);
     sidebar_layout->addWidget(list, 1);
     auto *inventory_note = new QLabel(QStringLiteral("所有场景共用这些数据"));
     inventory_note->setObjectName("dataSidebarCaption");
@@ -166,7 +252,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     scroll->setFrameShape(QFrame::NoFrame);
     auto *panel = new QWidget;
     auto *detail_layout = new QVBoxLayout(panel);
-    detail_layout->setContentsMargins(28, 20, 28, 20);
+    detail_layout->setContentsMargins(28, 18, 28, 18);
     detail_layout->setSpacing(10);
     scroll->setWidget(panel);
     panels->addWidget(scroll, 1);
@@ -184,12 +270,66 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     data_description->setObjectName("dataDescription");
     data_description->setWordWrap(true);
     detail_layout->addWidget(data_description);
+    auto *priority_panel = new QWidget;
+    auto *priority_layout = new QVBoxLayout(priority_panel);
+    priority_layout->setContentsMargins(0, 10, 0, 0);
+    priority_layout->setSpacing(12);
+    auto *priority_heading = new QHBoxLayout;
+    auto *priority_caption = new QLabel(QStringLiteral("计算优先级"));
+    priority_caption->setObjectName("sectionTitle");
+    priority_heading->addWidget(priority_caption);
+    priority_heading->addStretch();
+    auto *move_up = new QToolButton;
+    move_up->setObjectName("eopPriorityUp");
+    move_up->setIcon(workbench_icon(WorkbenchIcon::chevron_up));
+    move_up->setToolTip(QStringLiteral("上移（Alt+↑）"));
+    move_up->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Up));
+    auto *move_down = new QToolButton;
+    move_down->setObjectName("eopPriorityDown");
+    move_down->setIcon(workbench_icon(WorkbenchIcon::chevron_down));
+    move_down->setToolTip(QStringLiteral("下移（Alt+↓）"));
+    move_down->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Down));
+    priority_heading->addWidget(move_up);
+    priority_heading->addWidget(move_down);
+    priority_layout->addLayout(priority_heading);
+    auto *priority = new QListWidget;
+    priority->setObjectName("eopSourcePriority");
+    priority->setAccessibleName(QStringLiteral("地球定向参数计算优先级"));
+    priority->setItemDelegate(new PriorityDelegate(priority));
+    priority->setMouseTracking(true);
+    priority->setCursor(Qt::OpenHandCursor);
+    priority->setDragDropMode(QAbstractItemView::InternalMove);
+    priority->setDefaultDropAction(Qt::MoveAction);
+    priority->setDragDropOverwriteMode(false);
+    priority->setSelectionMode(QAbstractItemView::SingleSelection);
+    priority->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    priority->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    priority->setFixedHeight(176);
+    for (const auto product : {DataProduct::finals2000a, DataProduct::c04}) {
+        auto *item = new QListWidgetItem(priority);
+        item->setData(Qt::UserRole, static_cast<int>(product));
+        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
+        item->setSizeHint(QSize(0, 84));
+    }
+    priority->setCurrentRow(0);
+    priority_layout->addWidget(priority);
+    auto *priority_note = new QLabel(QStringLiteral("先按顺序选择能完整覆盖场景时段的数据。\n两种来"
+                                                    "源均不足时，再按此顺序尝试允许的有限外推。"));
+    priority_note->setObjectName("dataPriorityNote");
+    priority_note->setWordWrap(true);
+    priority_layout->addWidget(priority_note);
+    auto *priority_error = new QLabel;
+    priority_error->setObjectName("inputError");
+    priority_error->setWordWrap(true);
+    priority_error->hide();
+    priority_layout->addWidget(priority_error);
+    detail_layout->addWidget(priority_panel);
     auto *facts = new QFrame;
     facts->setObjectName("dataFacts");
     auto *form = new QFormLayout(facts);
     form->setContentsMargins(18, 14, 18, 14);
     form->setHorizontalSpacing(20);
-    form->setVerticalSpacing(12);
+    form->setVerticalSpacing(10);
     form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     const auto field = [&](const QString &caption, const char *name) {
         auto *label = new QLabel;
@@ -207,11 +347,15 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     auto *until = field(QStringLiteral("覆盖截止（UTC）"), "dataValidUntil");
     auto *checked = field(QStringLiteral("最近检查（本地）"), "dataLastChecked");
     detail_layout->addWidget(facts);
+    auto *note = new QLabel;
+    note->setObjectName("dataNote");
+    note->setWordWrap(true);
+    detail_layout->addWidget(note);
     auto *acquisition = new QWidget;
     acquisition->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
     auto *acquisition_layout = new QVBoxLayout(acquisition);
     acquisition_layout->setContentsMargins(0, 0, 0, 0);
-    acquisition_layout->setSpacing(8);
+    acquisition_layout->setSpacing(6);
     auto *acquisition_title = new QLabel(QStringLiteral("获取与更新"));
     acquisition_title->setObjectName("sectionTitle");
     acquisition_layout->addWidget(acquisition_title);
@@ -282,10 +426,6 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     extrapolation_layout->addWidget(days);
     extrapolation_layout->addStretch();
     detail_layout->addWidget(extrapolation);
-    auto *note = new QLabel;
-    note->setObjectName("dataNote");
-    note->setWordWrap(true);
-    detail_layout->insertWidget(3, note);
     auto *expand = new QToolButton;
     expand->setObjectName("dataCenterDetails");
     expand->setText(QStringLiteral("来源、文件与校验信息"));
@@ -328,18 +468,39 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     close->setMinimumWidth(88);
     footer->addWidget(close);
     layout->addWidget(footer_panel);
-    std::vector<DataInventoryItem> entries;
+    auto entries = catalog.inventory();
     QString operation_error;
-    const auto selected = [&] {
-        return list->currentItem()
-                   ? static_cast<DataProduct>(list->currentItem()->data(Qt::UserRole).toInt())
-                   : DataProduct::finals2000a;
+    bool syncing_priority = false;
+    const auto selected = [&]() -> std::optional<DataProduct> {
+        return list->currentItem() == eop_node
+                   ? std::nullopt
+                   : std::optional{static_cast<DataProduct>(
+                         list->currentItem()->data(0, Qt::UserRole).toInt())};
+    };
+    const auto inventory_item = [&](DataProduct product) -> const DataInventoryItem & {
+        return *std::find_if(entries.begin(), entries.end(),
+                             [&](const auto &entry) { return entry.product == product; });
     };
     const auto selected_item = [&]() -> const DataInventoryItem & {
-        return *std::find_if(entries.begin(), entries.end(),
-                             [&](const auto &entry) { return entry.product == selected(); });
+        return inventory_item(*selected());
     };
     const auto update_details = [&] {
+        const bool group = !selected();
+        priority_panel->setVisible(group);
+        state->setVisible(!group);
+        facts->setVisible(!group);
+        note->setVisible(!group);
+        expand->setVisible(!group);
+        technical->setVisible(!group && expand->isChecked());
+        if (group) {
+            title->setText(QStringLiteral("地球定向参数"));
+            data_description->setText(
+                QStringLiteral("拖动数据来源调整计算顺序，排在上方的优先使用。"));
+            acquisition->hide();
+            policy_title->hide();
+            extrapolation->hide();
+            return;
+        }
         const auto &item = selected_item();
         const bool is_time = item.product == DataProduct::utc;
         acquisition->setVisible(!is_time);
@@ -365,12 +526,14 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
             days->setEnabled(limit > 0);
             limit_caption->setEnabled(limit > 0);
         }
-        title->setText(is_time ? QStringLiteral("UTC / 闰秒") : QStringLiteral("地球定向参数"));
+        title->setText(is_time                                    ? QStringLiteral("UTC / 闰秒")
+                       : item.product == DataProduct::finals2000a ? QStringLiteral("finals2000A")
+                                                                  : QStringLiteral("C04"));
         data_description->setText(
             is_time ? QStringLiteral("UTC、TAI 与 TT 之间的时间转换")
             : item.product == DataProduct::finals2000a
-                ? QStringLiteral("finals2000A · 地球自转与极移参数，包含观测和预测")
-                : QStringLiteral("C04 · 地球定向参数，通过本地文件导入"));
+                ? QStringLiteral("地球定向参数 · 包含观测和预测，支持自动下载与更新")
+                : QStringLiteral("地球定向参数 · 通过本地文件导入"));
         state->setText(installation_text(item));
         state->setProperty("tone", item.installation == DataInstallation::bundled_sample ||
                                            item.installation == DataInstallation::missing
@@ -431,28 +594,45 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
         operation_error = QString::fromUtf8(error.what());
     };
     const auto select_provider = [&](int index) {
-        for (std::size_t row = 0; row < entries.size(); ++row)
-            if (entries[row].provider_index == static_cast<std::size_t>(index))
-                list->setCurrentRow(static_cast<int>(row));
+        for (const auto &entry : entries)
+            if (entry.provider_index == static_cast<std::size_t>(index)) {
+                eop_node->setExpanded(true);
+                list->setCurrentItem(entry.product == DataProduct::finals2000a ? finals_node
+                                                                               : c04_node);
+                return;
+            }
     };
     const auto rebuild = [&] {
-        const auto previous = selected();
         entries = catalog.inventory();
-        const QSignalBlocker blocker(list);
-        list->clear();
-        for (const auto &entry : entries) {
-            auto *item = new QListWidgetItem(list);
-            item->setData(Qt::UserRole, static_cast<int>(entry.product));
-            item->setSizeHint(QSize(0, 88));
-            if (entry.product == previous)
-                list->setCurrentItem(item);
-        }
         update_details();
     };
-    QObject::connect(list, &QListWidget::currentRowChanged, &dialog, [&] {
+    const auto selection_changed = [&] {
         operation_error.clear();
         update_details();
+    };
+    QObject::connect(list, &QTreeWidget::currentItemChanged, &dialog, selection_changed);
+    QObject::connect(priority->model(), &QAbstractItemModel::rowsMoved, &dialog, [&] {
+        move_up->setEnabled(priority->currentRow() > 0);
+        move_down->setEnabled(priority->currentRow() >= 0 &&
+                              priority->currentRow() < priority->count() - 1);
+        if (syncing_priority)
+            return;
+        operation_error.clear();
+        try {
+            catalog.set_preferred_product(
+                static_cast<DataProduct>(priority->item(0)->data(Qt::UserRole).toInt()));
+        } catch (const std::exception &error) {
+            show_error(error);
+        }
     });
+    const auto move_priority = [&](int offset) {
+        const auto row = priority->currentRow();
+        const auto target = row + offset;
+        if (row >= 0 && target >= 0 && target < priority->count())
+            priority->model()->moveRow({}, row, {}, target > row ? target + 1 : target);
+    };
+    QObject::connect(move_up, &QToolButton::clicked, &dialog, [&] { move_priority(-1); });
+    QObject::connect(move_down, &QToolButton::clicked, &dialog, [&] { move_priority(1); });
     QObject::connect(expand, &QToolButton::toggled, &dialog, [&](bool visible) {
         technical->setVisible(visible);
         expand->setArrowType(visible ? Qt::DownArrow : Qt::RightArrow);
@@ -507,7 +687,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
         update_details();
     });
     const auto save_extrapolation = [&] {
-        if (!selected_item().provider_index)
+        if (!selected() || !selected_item().provider_index)
             return;
         try {
             catalog.set_extrapolation_days(*selected_item().provider_index,
@@ -531,32 +711,57 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
             seen_revision = catalog.revision();
             seen_day = today;
         }
-        const auto &item = selected_item();
         const auto update = catalog.update_status();
         const bool busy = catalog.downloading();
-        for (int row = 0; row < list->count(); ++row) {
-            const auto &entry = entries[static_cast<std::size_t>(row)];
-            const bool failed =
-                entry.online_updates && (update.state == DataUpdateState::failed ||
-                                         update.state == DataUpdateState::interrupted);
-            const auto coverage = entry.last.isValid()
-                                      ? (entry.exclusive_end ? QStringLiteral("有效至 ")
-                                                             : QStringLiteral("覆盖至 ")) +
-                                            entry.last.date().toString(Qt::ISODate)
-                                      : QStringLiteral("尚无覆盖数据");
-            const auto summary = failed                         ? check_text(update.state)
-                                 : entry.online_updates && busy ? check_text(update.state)
-                                                                : coverage;
-            const auto name = entry.product == DataProduct::utc ? QStringLiteral("UTC / 闰秒")
-                                                                : QStringLiteral("地球定向参数");
-            const auto product = entry.product == DataProduct::finals2000a
-                                     ? QStringLiteral("finals2000A · ")
-                                 : entry.product == DataProduct::c04 ? QStringLiteral("C04 · ")
-                                                                     : QString{};
-            list->item(row)->setText(name + "\n" + product + installation_text(entry) + "\n" +
-                                     summary);
-            list->item(row)->setData(Qt::UserRole + 1, failed);
+        const bool failed =
+            update.state == DataUpdateState::failed || update.state == DataUpdateState::interrupted;
+        for (auto *node : {finals_node, c04_node}) {
+            const auto &entry =
+                inventory_item(static_cast<DataProduct>(node->data(0, Qt::UserRole).toInt()));
+            const auto name = entry.product == DataProduct::finals2000a
+                                  ? QStringLiteral("finals2000A")
+                                  : QStringLiteral("C04");
+            const auto installation = entry.online_updates && (busy || failed)
+                                          ? check_text(update.state)
+                                          : installation_text(entry);
+            node->setText(0, name + "\n" + installation + "\n" +
+                                 (entry.last.isValid() ? QStringLiteral("覆盖至 ") +
+                                                             entry.last.date().toString(Qt::ISODate)
+                                                       : QStringLiteral("尚无覆盖数据")));
+            node->setData(0, Qt::UserRole + 1, entry.online_updates && failed);
+            node->setToolTip(0, node->text(0));
         }
+        const auto &utc = inventory_item(DataProduct::utc);
+        utc_node->setText(0,
+                          QStringLiteral("UTC / 闰秒\n%1\n有效至 %2")
+                              .arg(installation_text(utc), utc.last.date().toString(Qt::ISODate)));
+        if (priority->item(0)->data(Qt::UserRole).toInt() !=
+            static_cast<int>(catalog.preferred_product())) {
+            syncing_priority = true;
+            priority->model()->moveRow({}, 1, {}, 0);
+            syncing_priority = false;
+        }
+        for (int row = 0; row < priority->count(); ++row) {
+            auto *entry_item = priority->item(row);
+            const auto &entry =
+                inventory_item(static_cast<DataProduct>(entry_item->data(Qt::UserRole).toInt()));
+            const auto name = entry.product == DataProduct::finals2000a
+                                  ? QStringLiteral("finals2000A")
+                                  : QStringLiteral("C04");
+            entry_item->setText(name + "\n" + installation_text(entry) +
+                                (entry.first.isValid() ? QStringLiteral(" · %1 — %2 UTC")
+                                                             .arg(coverage_time(entry.first),
+                                                                  coverage_time(entry.last))
+                                                       : QStringLiteral(" · 尚无覆盖数据")));
+        }
+        move_up->setEnabled(priority->currentRow() > 0);
+        move_down->setEnabled(priority->currentRow() >= 0 &&
+                              priority->currentRow() < priority->count() - 1);
+        priority_error->setText(operation_error);
+        priority_error->setVisible(!operation_error.isEmpty());
+        if (!selected())
+            return;
+        const auto &item = selected_item();
         checked->setText(
             item.online_updates
                 ? (update.attempted_at ? local_time(*update.attempted_at) + " · " : QString{}) +
@@ -617,7 +822,12 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
         }
         status->setVisible(!status->text().isEmpty());
     };
-    QObject::connect(list, &QListWidget::currentRowChanged, &dialog, refresh);
+    QObject::connect(list, &QTreeWidget::currentItemChanged, &dialog, refresh);
+    QObject::connect(priority, &QListWidget::currentRowChanged, &dialog, [&] {
+        move_up->setEnabled(priority->currentRow() > 0);
+        move_down->setEnabled(priority->currentRow() >= 0 &&
+                              priority->currentRow() < priority->count() - 1);
+    });
     QObject::connect(download, &QPushButton::clicked, &dialog, refresh);
     QObject::connect(raw, &QPushButton::clicked, &dialog, refresh);
     QObject::connect(manifest, &QPushButton::clicked, &dialog, refresh);
