@@ -1,4 +1,5 @@
 #pragma once
+#include "data_inventory.hpp"
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QObject>
@@ -28,8 +29,12 @@ class EopCatalog : public QObject {
         return current_.empty() ? 0 : current_.front();
     }
     [[nodiscard]] std::uint64_t revision() const { return revision_; }
+    [[nodiscard]] std::vector<DataInventoryItem> inventory() const;
+    [[nodiscard]] DataUpdateStatus update_status() const;
     void set_automatic_updates(bool enabled);
     [[nodiscard]] bool automatic_updates() const;
+    void set_update_interval_hours(int hours);
+    [[nodiscard]] int update_interval_hours() const;
     void set_extrapolation_days(std::size_t index, int days);
     [[nodiscard]] int extrapolation_days(std::size_t index) const;
     [[nodiscard]] Provider for_interval(core::Epoch first, core::Epoch last) const;
@@ -40,12 +45,15 @@ class EopCatalog : public QObject {
     [[nodiscard]] bool downloading() const { return reply_ != nullptr; }
     [[nodiscard]] const QString &status() const { return status_; }
     [[nodiscard]] qint64 received_bytes() const { return received_; }
+    [[nodiscard]] qint64 total_bytes() const { return total_; }
     [[nodiscard]] std::optional<std::size_t> last_installed() const { return last_installed_; }
     void import_raw(const std::filesystem::path &source);
 
   private:
     std::size_t append(Provider provider);
     void refresh_current(std::optional<std::size_t> acquired = std::nullopt);
+    [[nodiscard]] std::optional<std::size_t> current_finals() const;
+    void save_update_status();
     std::filesystem::path store_;
     runtime::DataCatalog data_;
     std::vector<Provider> providers_;
@@ -58,6 +66,9 @@ class EopCatalog : public QObject {
     QTimer schedule_, deadline_;
     QString status_;
     qint64 received_ = 0;
+    qint64 total_ = -1;
+    DataUpdateStatus update_;
+    std::vector<std::pair<std::string, std::filesystem::path>> bundled_;
     bool cancelled_ = false;
     QString transfer_error_;
     std::optional<std::size_t> last_installed_;

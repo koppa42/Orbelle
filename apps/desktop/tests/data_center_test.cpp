@@ -111,6 +111,10 @@ TEST_F(DataCenterTest, DownloadSelectsCurrentDataWithoutChangingActiveProviders)
     ASSERT_TRUE(receipt.acquired_at_unix_seconds);
     EXPECT_GE(*receipt.acquired_at_unix_seconds, before);
     EXPECT_LE(*receipt.acquired_at_unix_seconds, QDateTime::currentSecsSinceEpoch());
+    EXPECT_EQ(catalog.inventory()[0].installation, DataInstallation::downloaded);
+    EXPECT_EQ(catalog.update_status().state,
+              live.isEmpty() ? DataUpdateState::unchanged : DataUpdateState::updated);
+    EXPECT_TRUE(catalog.update_status().checked_at);
     EXPECT_EQ(application::eop_data_lock(original->data_info()), lock);
     EXPECT_EQ(catalog.data().resolve_eop(lock)->data_info().id, original->data_info().id);
     catalog.start_download(endpoint);
@@ -126,6 +130,8 @@ TEST_F(DataCenterTest, CancelHttpFailureTruncationAndInvalidDataNeverInstall) {
     complete(catalog);
     EXPECT_EQ(catalog.providers().size(), 1);
     EXPECT_TRUE(catalog.status().contains(QStringLiteral("取消")));
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::cancelled);
+    EXPECT_FALSE(catalog.update_status().checked_at);
     for (int kind = 0; kind < 3; ++kind) {
         Server failure(kind == 0 ? QByteArray("<html>invalid</html>") : payload(),
                        kind == 1 ? 404 : 200, kind == 2);
@@ -133,6 +139,8 @@ TEST_F(DataCenterTest, CancelHttpFailureTruncationAndInvalidDataNeverInstall) {
         complete(catalog);
         EXPECT_EQ(catalog.providers().size(), 1);
         EXPECT_FALSE(catalog.last_installed().has_value());
+        EXPECT_EQ(catalog.update_status().state, DataUpdateState::failed);
+        EXPECT_FALSE(catalog.update_status().checked_at);
         EXPECT_TRUE(std::filesystem::is_empty(root() / "data/staging"));
     }
 }
@@ -199,19 +207,27 @@ TEST_F(DataCenterTest, ReimportingExistingContentSelectsItAndPersistsAcrossResta
         selected_key);
     EXPECT_EQ(reopened.current_indices().size(), 2);
 }
-TEST_F(DataCenterTest, UpdatesStartAfterFirstDownloadAndRespectDailyIntervalAndOptOut) {
+TEST_F(DataCenterTest, AutomaticUpdatesAcquireFirstFullFileAndRespectIntervalAndOptOut) {
     EopCatalog catalog(root() / "data", {ORBITFORGE_TEST_FINALS}, {}, false);
     Server server(payload());
     const auto now = QDateTime::currentSecsSinceEpoch();
     EXPECT_TRUE(catalog.automatic_updates());
     catalog.check_updates_if_due(now, server.url());
-    EXPECT_FALSE(catalog.downloading());
-    catalog.start_download(server.url());
+    EXPECT_TRUE(catalog.downloading());
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::checking);
     complete(catalog);
     EXPECT_EQ(catalog.providers().size(), 2);
     EXPECT_TRUE(catalog.has_full_download());
     catalog.check_updates_if_due(now, server.url());
     EXPECT_FALSE(catalog.downloading());
+    catalog.set_update_interval_hours(6);
+    catalog.data().set_setting("finals-last-attempt", std::to_string(now - 5 * 3600));
+    catalog.check_updates_if_due(now, server.url());
+    EXPECT_FALSE(catalog.downloading());
+    catalog.data().set_setting("finals-last-attempt", std::to_string(now - 6 * 3600));
+    catalog.check_updates_if_due(now, server.url());
+    EXPECT_TRUE(catalog.downloading());
+    complete(catalog);
     catalog.set_automatic_updates(false);
     catalog.data().set_setting("finals-last-attempt", "0");
     catalog.check_updates_if_due(now, server.url());
@@ -222,6 +238,8 @@ TEST_F(DataCenterTest, UpdatesStartAfterFirstDownloadAndRespectDailyIntervalAndO
     complete(catalog);
     EXPECT_EQ(catalog.providers().size(), 2);
     EXPECT_EQ(catalog.preferred_index(), catalog.providers().size() - 1);
+    EXPECT_THROW(catalog.set_update_interval_hours(0), std::invalid_argument);
+    EXPECT_THROW(catalog.set_update_interval_hours(169), std::invalid_argument);
 }
 TEST_F(DataCenterTest, ConditionalUpdatesSkipUnchangedBytesAndPreserveOldVersionsAcrossRestart) {
     Server server(payload());
@@ -245,6 +263,9 @@ TEST_F(DataCenterTest, ConditionalUpdatesSkipUnchangedBytesAndPreserveOldVersion
     complete(catalog);
     EXPECT_TRUE(server.requests.back().contains("If-None-Match: \"revision-1\""));
     EXPECT_EQ(catalog.received_bytes(), 0);
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::unchanged);
+    const auto checked_at = catalog.update_status().checked_at;
+    EXPECT_TRUE(checked_at);
     EXPECT_EQ(catalog.providers().size(), 2);
     EXPECT_TRUE(catalog.status().contains(QStringLiteral("未重复下载")));
     EXPECT_EQ(catalog.data().snapshots().back().acquired_at_unix_seconds, downloaded_at);
@@ -274,6 +295,121 @@ TEST_F(DataCenterTest, ConditionalUpdatesSkipUnchangedBytesAndPreserveOldVersion
     EXPECT_EQ(catalog.data().snapshots().back().acquired_at_unix_seconds,
               current_receipt.acquired_at_unix_seconds);
     EXPECT_TRUE(std::filesystem::is_empty(store / "staging"));
+}
+TEST_F(DataCenterTest, InventorySeparatesInstallationCoverageAndUpdateCapabilities) {
+    EopCatalog empty(root() / "empty", {}, {}, false);
+    const auto missing = empty.inventory();
+    ASSERT_EQ(missing.size(), 3);
+    EXPECT_EQ(missing[0].installation, DataInstallation::missing);
+    EXPECT_FALSE(missing[0].last.isValid());
+    EXPECT_TRUE(missing[0].online_updates);
+    EXPECT_TRUE(missing[1].manifest_import);
+    EXPECT_FALSE(missing[1].online_updates);
+    EXPECT_EQ(missing[2].product, DataProduct::utc);
+    EXPECT_EQ(missing[2].installation, DataInstallation::builtin);
+    EXPECT_TRUE(missing[2].exclusive_end);
+    EXPECT_FALSE(missing[2].online_updates);
+    EXPECT_FALSE(missing[2].extrapolation);
+    EXPECT_FALSE(missing[2].acquired_at);
+
+    EopCatalog samples(root() / "samples", {ORBITFORGE_TEST_FINALS, ORBITFORGE_TEST_C04}, {},
+                       false);
+    const auto installed = samples.inventory();
+    EXPECT_EQ(installed[0].installation, DataInstallation::bundled_sample);
+    EXPECT_EQ(installed[1].installation, DataInstallation::bundled_sample);
+    EXPECT_FALSE(installed[0].acquired_at);
+    EXPECT_TRUE(installed[0].file_size);
+    EXPECT_TRUE(std::filesystem::exists(installed[0].file));
+    EXPECT_EQ(installed[1].last.date(), QDate(2000, 1, 2));
+    EXPECT_EQ(samples.update_status().state, DataUpdateState::never_checked);
+    samples.import_snapshot(ORBITFORGE_TEST_C04);
+    const auto imported = samples.inventory();
+    EXPECT_EQ(imported[1].installation, DataInstallation::local_file);
+    EXPECT_TRUE(imported[1].acquired_at);
+    EXPECT_EQ(imported[1].last, installed[1].last);
+}
+TEST_F(DataCenterTest, LocalReplacementMustNotReuseAnOlderFilesOnlineVerification) {
+    Server server(payload());
+    server.etag = "\"server-file\"";
+    EopCatalog catalog(root() / "data", {ORBITFORGE_TEST_FINALS}, {}, false);
+    catalog.start_download(server.url());
+    complete(catalog);
+    const auto verified = catalog.update_status().checked_sha256;
+    QFile imported(temp.filePath("different.all"));
+    ASSERT_TRUE(imported.open(QIODevice::WriteOnly));
+    imported.write(payload() + "\n");
+    imported.close();
+    catalog.import_raw(std::filesystem::path(imported.fileName().toStdWString()));
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::local_changed);
+    EXPECT_EQ(catalog.inventory()[0].installation, DataInstallation::local_file);
+    catalog.start_download(server.url());
+    complete(catalog);
+    ASSERT_EQ(server.requests.size(), 2);
+    EXPECT_FALSE(server.requests.back().contains("If-None-Match"));
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::updated);
+    EXPECT_EQ(catalog.update_status().checked_sha256, verified);
+    EXPECT_EQ(catalog.inventory()[0].sha256, verified);
+    catalog.import_snapshot(ORBITFORGE_TEST_FINALS);
+    EXPECT_FALSE(catalog.has_full_download());
+}
+TEST_F(DataCenterTest, UpdateResultsAndPreferencesSurviveFailureCancellationAndRestart) {
+    const auto store = root() / "data";
+    std::optional<qint64> checked_at, downloaded_at;
+    QString verified;
+    {
+        EopCatalog catalog(store, {}, {}, false);
+        Server server(payload());
+        catalog.start_download(server.url());
+        complete(catalog);
+        checked_at = catalog.update_status().checked_at;
+        verified = catalog.update_status().checked_sha256;
+        downloaded_at = catalog.inventory()[0].acquired_at;
+        Server bad("invalid", 500);
+        catalog.start_download(bad.url());
+        complete(catalog);
+        EXPECT_EQ(catalog.update_status().state, DataUpdateState::failed);
+        EXPECT_EQ(catalog.update_status().checked_at, checked_at);
+        EXPECT_EQ(catalog.inventory()[0].acquired_at, downloaded_at);
+        catalog.set_update_interval_hours(168);
+        catalog.set_automatic_updates(false);
+    }
+    {
+        EopCatalog catalog(store, {}, {}, false);
+        EXPECT_EQ(catalog.update_status().state, DataUpdateState::failed);
+        EXPECT_EQ(catalog.update_status().checked_at, checked_at);
+        EXPECT_EQ(catalog.update_status().checked_sha256, verified);
+        EXPECT_EQ(catalog.update_interval_hours(), 168);
+        EXPECT_FALSE(catalog.automatic_updates());
+        Server server(payload());
+        catalog.start_download(server.url());
+        catalog.cancel_download();
+        complete(catalog);
+        EXPECT_EQ(catalog.update_status().state, DataUpdateState::cancelled);
+        EXPECT_EQ(catalog.update_status().checked_at, checked_at);
+        EXPECT_EQ(catalog.inventory()[0].acquired_at, downloaded_at);
+    }
+    EopCatalog reopened(store, {}, {}, false);
+    EXPECT_EQ(reopened.update_status().state, DataUpdateState::cancelled);
+    EXPECT_EQ(reopened.update_status().checked_at, checked_at);
+}
+TEST_F(DataCenterTest, InterruptedAndLegacyChecksNeverClaimThatCurrentDataIsLatest) {
+    const auto store = root() / "data";
+    {
+        runtime::DataCatalog data(store);
+        data.set_setting("finals-last-attempt", "1234567890");
+        data.set_setting("finals-status", "数据已是最新");
+    }
+    {
+        EopCatalog legacy(store, {}, {}, false);
+        EXPECT_EQ(legacy.update_status().state, DataUpdateState::never_checked);
+        EXPECT_FALSE(legacy.update_status().checked_at);
+        legacy.data().set_setting("finals-update-record",
+                                  R"({"schema":1,"state":1,"checked_at":"1234567800"})");
+    }
+    EopCatalog interrupted(store, {}, {}, false);
+    EXPECT_EQ(interrupted.update_status().state, DataUpdateState::interrupted);
+    EXPECT_EQ(interrupted.update_status().attempted_at, 1234567890);
+    EXPECT_EQ(interrupted.update_status().checked_at, 1234567800);
 }
 TEST_F(DataCenterTest, ExtrapolationPoliciesAreIndependentPersistentAndNeverChangeActiveProviders) {
     const auto store = root() / "data";

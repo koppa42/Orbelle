@@ -44,6 +44,18 @@ if(ORBITFORGE_WITH_VSG)
         orbitforge_warnings(orbitforge_data_center_tests)
         orbitforge_copy_runtime_dlls(orbitforge_data_center_tests)
         gtest_discover_tests(orbitforge_data_center_tests DISCOVERY_MODE PRE_TEST TEST_PREFIX "desktop." PROPERTIES TIMEOUT 30)
+        add_executable(orbitforge_data_center_ui_tests tests/data_center_dialog_test.cpp
+            src/viewer/eop_catalog.cpp src/viewer/data_center_dialog.cpp src/viewer/workbench_style.cpp)
+        target_compile_definitions(orbitforge_data_center_ui_tests PRIVATE
+            ORBITFORGE_TEST_FINALS="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json")
+        target_link_libraries(orbitforge_data_center_ui_tests PRIVATE
+            OrbitForge::Runtime Qt6::Widgets Qt6::Network GTest::gtest_main)
+        orbitforge_warnings(orbitforge_data_center_ui_tests)
+        orbitforge_copy_runtime_dlls(orbitforge_data_center_ui_tests)
+        gtest_discover_tests(orbitforge_data_center_ui_tests DISCOVERY_MODE PRE_TEST
+            TEST_PREFIX "desktop." PROPERTIES TIMEOUT 20
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+            ENVIRONMENT_MODIFICATION "QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>")
     endif()
     if(BUILD_TESTING AND ORBITFORGE_WITH_ERFA AND ORBITFORGE_WITH_SPICE)
         add_executable(orbitforge_orbit_scene_tests tests/orbit_scene_test.cpp src/viewer/orbit_scene.cpp)

@@ -5438,6 +5438,20 @@ class Workbench final : public QMainWindow {
                             ->text()
                             .contains(QStringLiteral("内置")),
                         "Missing acquisition information");
+                require(inventory->item(0)->text().contains(QStringLiteral("内置示例")) &&
+                            dialog->findChild<QLabel *>("dataLastChecked")
+                                ->text()
+                                .contains(QStringLiteral("尚未检查")),
+                        "Bundled samples must not claim a full download or a successful check");
+                auto *frequency = dialog->findChild<QComboBox *>("dataUpdateFrequency");
+                require(frequency, "Missing automatic update interval");
+                frequency->setCurrentIndex(frequency->findData(6));
+                require(eop_catalog_->update_interval_hours() == 6,
+                        "Automatic update frequency was not persisted");
+                frequency->setCurrentIndex(frequency->findData(24));
+                QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
+                require(dialog->grab().save(smoke_dir_ + "/data-center-sample.png"),
+                        "Cannot save sample installation state");
                 inventory->setCurrentRow(2);
                 require(
                     dialog->findChild<QLabel *>("dataValidUntil")->text().contains("2027-06-28"),
@@ -5481,7 +5495,8 @@ class Workbench final : public QMainWindow {
                 const auto imported_row =
                     eop_->data_info().interpolation.starts_with("finals2000a") ? 0 : 1;
                 require(inventory->count() == 3 &&
-                            inventory->item(imported_row)->data(Qt::UserRole).toInt() == 2 &&
+                            eop_catalog_->inventory()[static_cast<std::size_t>(imported_row)]
+                                    .provider_index == 2 &&
                             dialog->findChild<QLabel *>("dataAcquiredAt")
                                 ->text()
                                 .contains(QStringLiteral("导入")),
