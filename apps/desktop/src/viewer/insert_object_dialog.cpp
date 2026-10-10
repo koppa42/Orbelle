@@ -17,11 +17,11 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
     dialog.setObjectName("insertObjectsDialog");
     dialog.setWindowTitle(QStringLiteral("插入对象"));
     dialog.setWindowIcon(workbench_icon(WorkbenchIcon::satellite));
-    dialog.setMinimumSize(600, 320);
-    dialog.resize(660, 346);
+    dialog.setMinimumSize(540, 280);
+    dialog.resize(560, 292);
     auto *layout = new QVBoxLayout(&dialog);
-    layout->setContentsMargins(24, 22, 24, 20);
-    layout->setSpacing(18);
+    layout->setContentsMargins(20, 16, 20, 16);
+    layout->setSpacing(12);
 
     auto *heading = new QHBoxLayout;
     auto *title = new QLabel(QStringLiteral("插入对象"));
@@ -32,15 +32,15 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
     destination->setObjectName("muted");
     destination->setTextFormat(Qt::PlainText);
     destination->setText(destination->fontMetrics().elidedText(
-        QStringLiteral("场景 / ") + scenario_name, Qt::ElideMiddle, 300));
+        QStringLiteral("场景 / ") + scenario_name, Qt::ElideMiddle, 240));
     destination->setToolTip(scenario_name);
     heading->addWidget(destination);
     layout->addLayout(heading);
 
     auto *columns = new QHBoxLayout;
-    columns->setSpacing(24);
+    columns->setSpacing(20);
     auto *left = new QVBoxLayout;
-    left->setSpacing(8);
+    left->setSpacing(6);
     auto *type_heading = new QLabel(QStringLiteral("对象类型"));
     type_heading->setObjectName("sectionTitle");
     left->addWidget(type_heading);
@@ -51,8 +51,8 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
     types->setRootIsDecorated(false);
     types->setItemsExpandable(false);
     types->setIndentation(14);
-    types->setIconSize({20, 20});
-    types->setMinimumWidth(170);
+    types->setIconSize({16, 16});
+    types->setMinimumWidth(160);
     auto *group = new QTreeWidgetItem(types, {QStringLiteral("场景对象")});
     group->setFlags(Qt::ItemIsEnabled);
     group->setForeground(0, QColor("#8c9db1"));
@@ -69,7 +69,7 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
     auto *method_heading = new QLabel(QStringLiteral("插入方式"));
     method_heading->setObjectName("sectionTitle");
     right->addWidget(method_heading);
-    right->addSpacing(18);
+    right->addSpacing(10);
     auto *methods = new QButtonGroup(&dialog);
     const auto add_method = [&](const char *name, InsertObjectMethod method, const QString &text,
                                 const QString &description) {
@@ -80,7 +80,7 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
         right->addWidget(choice);
         auto *caption = new QLabel(description);
         caption->setObjectName("hint");
-        caption->setContentsMargins(24, 5, 0, 0);
+        caption->setContentsMargins(22, 4, 0, 0);
         caption->setWordWrap(true);
         right->addWidget(caption);
         return choice;
@@ -89,7 +89,7 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
         add_method("insertDefineProperties", InsertObjectMethod::define_properties,
                    QStringLiteral("定义属性"), QStringLiteral("设置轨道、参考系与传播器"));
     properties->setChecked(true);
-    right->addSpacing(24);
+    right->addSpacing(18);
     add_method("insertDefaults", InsertObjectMethod::defaults, QStringLiteral("使用默认参数"),
                QStringLiteral("二体传播 · 场景起始时刻 · 60 s 步长"));
     right->addStretch(1);
@@ -109,7 +109,7 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
     auto *insert = new QPushButton(QStringLiteral("配置属性"));
     insert->setObjectName("insertObject");
     insert->setDefault(true);
-    insert->setMinimumWidth(96);
+    insert->setMinimumWidth(84);
     buttons->addWidget(close);
     buttons->addWidget(insert);
     layout->addLayout(buttons);
