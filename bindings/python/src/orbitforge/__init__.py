@@ -6,7 +6,7 @@ from ._native import (
     TimeDataInfo, TimeDataRangeError, TimeProvider, TimeScale, UtcDateTime,
     make_builtin_time_provider, make_frame_provider, time_frames_available,
     EarthOrientationRates, EarthOrientationState, EarthOrientationProvider,
-    EopDataInfo, EopDataError, EopCoverageError, StateTransform, load_eop_snapshot,
+    EopDataInfo, EopDataError, EopCoverageError, StateTransform, load_eop_snapshot, import_eop_snapshot,
     TdbTime, EphemerisState, KernelDataInfo, EphemerisDataInfo, EphemerisProvider,
     EphemerisDataError, EphemerisCoverageError, EphemerisQueryError,
     ephemeris_available, load_spice_snapshot,
@@ -15,6 +15,7 @@ from ._native import (
     CentralBody, central_body, J2MeanElements, J2SecularOptions,
     j2_mean_ellipse_state, j2_mean_ellipse_elements, make_j2_session,
     Project, ProjectSatellite, ProjectError, OrbitInput, OrbitDisplay, OrbitPropagator, load_project,
+    DataReference, DataLock,
 )
 
 __all__ = [
@@ -24,7 +25,7 @@ __all__ = [
     "TimeDataInfo", "TimeDataRangeError", "TimeProvider", "TimeScale", "UtcDateTime",
     "make_builtin_time_provider", "make_frame_provider", "time_frames_available",
     "EarthOrientationRates", "EarthOrientationState", "EarthOrientationProvider",
-    "EopDataInfo", "EopDataError", "EopCoverageError", "StateTransform", "load_eop_snapshot",
+    "EopDataInfo", "EopDataError", "EopCoverageError", "StateTransform", "load_eop_snapshot", "import_eop_snapshot",
     "TdbTime", "EphemerisState", "KernelDataInfo", "EphemerisDataInfo", "EphemerisProvider",
     "EphemerisDataError", "EphemerisCoverageError", "EphemerisQueryError",
     "ephemeris_available", "load_spice_snapshot",
@@ -33,5 +34,6 @@ __all__ = [
     "CentralBody", "central_body", "J2MeanElements", "J2SecularOptions",
     "j2_mean_ellipse_state", "j2_mean_ellipse_elements", "make_j2_session",
     "Project", "ProjectSatellite", "ProjectError", "OrbitInput", "OrbitDisplay", "OrbitPropagator", "load_project",
+    "DataReference", "DataLock",
 ]
 

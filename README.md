@@ -13,7 +13,9 @@
 - 一阶 J2 长期项解析传播：独立的平均根数类型，CSPICE 求解椭圆；支持长期项设置，速度包含进动导数。卫星属性支持二体/J2 切换及 GCRF/ITRF 初态输入，μ 统一读取中心天体。
 - 经典瞬时根数与 Cartesian 转换：CSPICE `conics_c` / `oscltx_c`；输入 a、e、i、Ω、ω、ν，公开 API 使用米和弧度，桌面使用 km 和度。
 - Scenario 场景：先建立统一分析时段，再插入对象；不可变场景版本保存多个 Session，拒绝重复 ID 和过期修订。
+- 对象重命名、复制和删除：显示名称与稳定 ID 分离，存续计算修订保留；EOP 快照可从桌面导入、校验、持久保存并选择应用，见[对象与数据管理](docs/architecture/object_data_management.md)。
 - `.orbitforge` 项目文件：版本化分段容器、CRC 校验和原子保存；保存二体/J2 输入、对象显示设置与数据版本引用，支持桌面/Python/C++ 互通、保存/另存为/打开及未保存提示。外部模型和 EOP 快照仍为独立依赖，详见[项目文件格式](docs/architecture/project_files.md)。
+- Scenario 数据锁：保存 EOP 和时间数据的内容 SHA-256、解释配置及依赖清单总哈希；旧项目可升级，已有场景的数据不会随目录更新自动改变，详见[数据引用契约](docs/architecture/scenario_data_lock.md)。统一目录及自动/手动下载见[后续数据中心方案](docs/architecture/data_center.md)。
 - CMake 安装/导出的 C++ SDK、pybind11/scikit-build-core wheel 构建入口。
 - GoogleTest/CTest 核心与集成测试、Python API 测试、安装后的 SDK 消费端案例。
 - Linux x64 无界面 Release、ASan/UBSan 和断网环境中的 SDK / Python wheel 验证入口；已验证 Ubuntu 24.04、GCC 13.3、Python 3.12。

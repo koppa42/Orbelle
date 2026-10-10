@@ -1,12 +1,13 @@
 #include "project_scene.hpp"
 #include "satellite_model.hpp"
+#include <algorithm>
 
 namespace orbitforge::desktop {
 std::shared_ptr<PreparedProject> prepare_project_scene(
     application::Project project, const std::filesystem::path &path,
     const core::IFrameProvider &frames,
     const std::vector<std::shared_ptr<const core::IEarthOrientationProvider>> &installed_data,
-    const std::atomic_bool &cancelled) {
+    const std::atomic_bool &cancelled, std::optional<application::Scenario> retained_sessions) {
     application::validate_project(project);
     std::shared_ptr<const core::IEarthOrientationProvider> eop;
     for (const auto &candidate : installed_data) {
@@ -28,17 +29,35 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
                   "retained"
                 : "No installed EOP data covers this project's analysis interval");
     project.earth_orientation = eop->data_info();
+    if (retained_sessions) {
+        // Object management keeps every surviving numerical session and revision.
+        // This path never edits orbit inputs; normal orbit edits use with_object.
+        const auto previous = *retained_sessions;
+        for (const auto &session : previous.objects())
+            if (std::none_of(project.satellites.begin(), project.satellites.end(),
+                             [&](const auto &s) {
+                                 return s.orbit.object_id == session.provenance().object_id;
+                             }))
+                retained_sessions =
+                    retained_sessions->without_object(session.provenance().object_id);
+    }
     auto result = std::make_shared<PreparedProject>(
         PreparedProject{project,
-                        application::Scenario(project.name, project.first, project.last),
+                        retained_sessions.value_or(
+                            application::Scenario(project.name, project.first, project.last)),
                         eop,
                         {},
                         {},
                         {}});
+    result->scenario = result->scenario.with_data_lock(project.data_lock());
     for (auto &satellite : result->project.satellites) {
         if (cancelled.load())
             throw OrbitCancelled{};
-        auto session = make_orbit_session(satellite.orbit);
+        const auto existing = std::find_if(
+            result->scenario.objects().begin(), result->scenario.objects().end(),
+            [&](const auto &s) { return s.provenance().object_id == satellite.orbit.object_id; });
+        const bool retained = existing != result->scenario.objects().end();
+        auto session = retained ? *existing : make_orbit_session(satellite.orbit);
         auto orbit = prepare_orbit_scene(
             satellite.orbit, session, frames, *eop, cancelled,
             display_cache_interval(satellite.orbit, satellite.display, project.current));
@@ -58,11 +77,15 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
             model = vsg::MatrixTransform::create();
             model->addChild(make_satellite_model(model_path));
         }
-        result->scenario = result->scenario.with_object(std::move(session));
+        if (!retained)
+            result->scenario = result->scenario.with_object(std::move(session));
         result->orbits.push_back(std::move(orbit));
         result->models.push_back(std::move(model));
     }
     result->ground_tracks = GroundMap::prepare_tracks(result->orbits);
+    for (std::size_t i = 0; i < result->ground_tracks.size(); ++i)
+        result->ground_tracks[i].name =
+            QString::fromStdString(result->project.satellites[i].name());
     if (cancelled.load())
         throw OrbitCancelled{};
     return result;

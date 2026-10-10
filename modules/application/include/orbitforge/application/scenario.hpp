@@ -1,4 +1,5 @@
 #pragma once
+#include <orbitforge/application/data_lock.hpp>
 #include <orbitforge/application/session.hpp>
 #include <string>
 #include <vector>
@@ -17,6 +18,9 @@ class Scenario {
     // Insert a new ID at revision 1, or replace its immediately preceding revision.
     // This rejects duplicate insertions and stale asynchronous candidates.
     [[nodiscard]] Scenario with_object(Session session) const;
+    [[nodiscard]] Scenario without_object(const std::string &object_id) const;
+    [[nodiscard]] const DataLock &data_lock() const noexcept { return data_lock_; }
+    [[nodiscard]] Scenario with_data_lock(DataLock lock) const;
     [[nodiscard]] std::vector<results::StateSeries>
     sample(std::span<const core::Epoch> epochs) const;
 
@@ -25,5 +29,6 @@ class Scenario {
     core::Epoch first_, last_;
     std::uint64_t revision_ = 1;
     std::vector<Session> objects_;
+    DataLock data_lock_;
 };
 } // namespace orbitforge::application

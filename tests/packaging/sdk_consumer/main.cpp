@@ -9,14 +9,28 @@
 int main(int argc, char **argv) {
     const orbitforge::application::Project project("SDK project", orbitforge::core::Epoch{123},
                                                    orbitforge::core::Epoch{10'000'000'123});
-    const auto restored = orbitforge::application::decode_project(
-        orbitforge::application::encode_project(project));
+    const auto restored =
+        orbitforge::application::decode_project(orbitforge::application::encode_project(project));
     if (restored.first != project.first || restored.last != project.last ||
-        !orbitforge::runtime::make_project_scenario(restored).objects().empty())
+        !orbitforge::runtime::make_project_scenario(restored).objects().empty() ||
+        restored.data_lock() != project.data_lock())
         return 14;
     const orbitforge::application::Scenario empty("SDK mission", orbitforge::core::Epoch{0},
                                                   orbitforge::core::Epoch{10'000'000'000});
     const auto populated = empty.with_object(orbitforge::runtime::make_circular_demo_session());
+    const auto removed = populated.without_object(populated.objects()[0].provenance().object_id);
+    if (!removed.objects().empty() || removed.revision() != populated.revision() + 1)
+        return 15;
+    auto named = project;
+    orbitforge::application::ProjectSatellite satellite;
+    satellite.orbit.first = project.first;
+    satellite.orbit.last = project.last;
+    named.satellites.push_back(satellite);
+    named = named.renamed_satellite("satellite-1", "Observer")
+                .with_satellite_copy("satellite-1", "satellite-2", "Observer copy")
+                .without_satellite("satellite-1");
+    if (named.satellites.size() != 1 || named.satellites[0].name() != "Observer copy")
+        return 16;
     if (!empty.objects().empty() || populated.objects().size() != 1 ||
         populated.sample(std::array{orbitforge::core::Epoch{0}}).size() != 1)
         return 12;

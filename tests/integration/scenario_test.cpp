@@ -39,3 +39,33 @@ TEST(Scenario, IndependentObjectsAndRevisionsPreserveReaders) {
     EXPECT_EQ(states[1].provenance().object_id, "B");
     EXPECT_EQ(states[0].states().size(), 2U);
 }
+TEST(Scenario, RemovalPreservesSurvivingRevisionsAndExistingReaders) {
+    const auto original = application::Scenario("Mission", core::Epoch{0}, core::Epoch{100})
+                              .with_object(object("A"))
+                              .with_object(object("B"))
+                              .with_object(object("B", 2));
+    const auto removed = original.without_object("A");
+    EXPECT_EQ(original.objects().size(), 2U);
+    ASSERT_EQ(removed.objects().size(), 1U);
+    EXPECT_EQ(removed.objects()[0].provenance().object_id, "B");
+    EXPECT_EQ(removed.objects()[0].provenance().input_revision, 2U);
+    EXPECT_EQ(removed.revision(), original.revision() + 1);
+    EXPECT_EQ(removed.sample(std::array{core::Epoch{0}})[0].states()[0].position_m,
+              original.sample(std::array{core::Epoch{0}})[1].states()[0].position_m);
+    EXPECT_TRUE(removed.without_object("B").objects().empty());
+    EXPECT_THROW((void)removed.without_object("A"), std::invalid_argument);
+}
+TEST(Scenario, DataBindingCreatesANewScenarioRevisionAndKeepsReadersAndSessions) {
+    const auto original =
+        application::Scenario("Mission", core::Epoch{0}, core::Epoch{100}).with_object(object("A"));
+    const application::DataLock lock(
+        {{"utc-time", "test", std::string(64, 'a'), "test-v1", std::string(64, 'b')}});
+    const auto changed = original.with_data_lock(lock);
+    EXPECT_TRUE(original.data_lock().references().empty());
+    EXPECT_EQ(changed.data_lock(), lock);
+    EXPECT_EQ(changed.revision(), original.revision() + 1);
+    EXPECT_EQ(changed.objects()[0].provenance().input_revision, 1U);
+    EXPECT_EQ(changed.with_data_lock(lock).revision(), changed.revision());
+    EXPECT_EQ(changed.with_object(object("B")).data_lock(), lock);
+    EXPECT_EQ(changed.without_object("A").data_lock(), lock);
+}

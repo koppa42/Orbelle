@@ -13,4 +13,6 @@ namespace orbitforge::runtime {
 [[nodiscard]] std::array<double, 3> display_sun_direction_gcrf(core::Epoch epoch);
 [[nodiscard]] std::unique_ptr<core::IEarthOrientationProvider>
 load_eop_snapshot(const std::filesystem::path &manifest);
+[[nodiscard]] std::filesystem::path import_eop_snapshot(const std::filesystem::path &manifest,
+                                                        const std::filesystem::path &store);
 } // namespace orbitforge::runtime

@@ -2,6 +2,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <gtest/gtest.h>
 #include <iomanip>
 #include <limits>
@@ -62,6 +63,57 @@ TEST(IersEop, PublishedNodesUseSiUnitsAndLeapOffsets) {
     EXPECT_NEAR(end_of_leap.sample.ut1_minus_tai_seconds, b.sample.ut1_minus_tai_seconds, 1e-12);
     EXPECT_NEAR(end_of_leap.rates.ut1_minus_tai_seconds_per_second,
                 b.rates.ut1_minus_tai_seconds_per_second, 1e-18);
+}
+TEST(IersImport, ConcurrentImportsAreIdempotentAndIndependentOfTheSource) {
+    const auto time = providers::erfa::make_builtin_time_provider();
+    const auto original_manifest = nlohmann::json::parse(read(ORBITFORGE_EOP_SAMPLE));
+    const auto original_data =
+        read(std::filesystem::path(ORBITFORGE_EOP_SAMPLE).parent_path() / "eop.c04");
+    const auto source = fixture(original_data, original_manifest);
+    const auto store = source.parent_path() / "store";
+    auto first = std::async(std::launch::async, [&] {
+        return providers::iers::import_eop_snapshot(source, store, *time);
+    });
+    auto second = std::async(std::launch::async, [&] {
+        return providers::iers::import_eop_snapshot(source, store, *time);
+    });
+    const auto saved = first.get();
+    EXPECT_EQ(saved, second.get());
+    EXPECT_EQ(read(saved), read(source));
+    EXPECT_EQ(read(saved.parent_path() / "eop.c04"), original_data);
+    std::ofstream(source.parent_path() / "eop.c04") << "changed source";
+    EXPECT_NO_THROW((void)providers::iers::load_eop_snapshot(saved, *time));
+    EXPECT_THROW((void)providers::iers::import_eop_snapshot(source, store, *time),
+                 core::EopDataError);
+    EXPECT_EQ(read(saved.parent_path() / "eop.c04"), original_data);
+    std::ofstream(source.parent_path() / "eop.c04", std::ios::binary) << original_data;
+    // Corrupted installed versions are reported; importing must never silently replace one.
+    std::ofstream(saved.parent_path() / "eop.c04") << "corrupted installed bytes";
+    EXPECT_THROW((void)providers::iers::import_eop_snapshot(source, store, *time),
+                 core::EopDataError);
+    EXPECT_EQ(read(saved.parent_path() / "eop.c04"), "corrupted installed bytes");
+    std::ofstream(saved.parent_path() / "eop.c04", std::ios::binary) << original_data;
+    EXPECT_EQ(std::distance(std::filesystem::directory_iterator(store),
+                            std::filesystem::directory_iterator{}),
+              1);
+}
+TEST(IersImport, FinalsSnapshotAndInvalidManifestNeverPublishPartialData) {
+    const auto time = providers::erfa::make_builtin_time_provider();
+    auto manifest = nlohmann::json::parse(read(ORBITFORGE_FINALS_SAMPLE));
+    const auto bytes =
+        read(std::filesystem::path(ORBITFORGE_FINALS_SAMPLE).parent_path() / "finals2000A.data");
+    const auto source = fixture(bytes, manifest);
+    const auto store = source.parent_path() / "store";
+    const auto saved = providers::iers::import_eop_snapshot(source, store, *time);
+    EXPECT_EQ(providers::iers::load_eop_snapshot(saved, *time)->data_info().interpolation,
+              "finals2000a-hermite-tai-v1");
+    manifest["data_file"] = "../outside.data";
+    std::ofstream(source) << manifest.dump();
+    EXPECT_THROW((void)providers::iers::import_eop_snapshot(source, store, *time),
+                 core::EopDataError);
+    EXPECT_EQ(std::distance(std::filesystem::directory_iterator(store),
+                            std::filesystem::directory_iterator{}),
+              1);
 }
 
 TEST(IersFinals, PublishedPredictedValuesUnitsProvenanceAndNoExtrapolation) {

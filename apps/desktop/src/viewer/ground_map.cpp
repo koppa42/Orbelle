@@ -129,13 +129,22 @@ void GroundMap::append_track(Track track) {
     tracks_.push_back(std::move(track));
     invalidate_tracks();
 }
+void GroundMap::set_name(std::size_t index, const QString &name) {
+    tracks_.at(index).name = name;
+    if (index < points_.size())
+        points_[index].name = name;
+    update();
+}
 void GroundMap::set_snapshot(const visualization::RenderSnapshot &snapshot) {
     if (snapshot.frame != core::FrameId::itrf || snapshot.origin != core::OriginId::earth)
         throw std::invalid_argument("2D map requires an Earth/ITRF snapshot");
     std::vector<Point> points;
-    for (const auto &marker : snapshot.markers)
+    for (std::size_t i = 0; i < snapshot.markers.size(); ++i) {
+        const auto &marker = snapshot.markers[i];
         points.push_back(
-            {QString::fromStdString(marker.object_id), ground_coordinates(marker.position_m)});
+            {i < tracks_.size() ? tracks_[i].name : QString::fromStdString(marker.object_id),
+             ground_coordinates(marker.position_m)});
+    }
     epoch_ = snapshot.epoch;
     if (points_ == points)
         return;

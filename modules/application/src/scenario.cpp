@@ -37,6 +37,29 @@ Scenario Scenario::with_object(Session session) const {
     ++result.revision_;
     return result;
 }
+Scenario Scenario::without_object(const std::string &object_id) const {
+    const auto existing = std::find_if(objects_.begin(), objects_.end(), [&](const auto &object) {
+        return object.provenance().object_id == object_id;
+    });
+    if (existing == objects_.end())
+        throw std::invalid_argument("Scenario object ID does not exist");
+    if (revision_ == std::numeric_limits<std::uint64_t>::max())
+        throw std::overflow_error("Scenario revision exhausted");
+    auto result = *this;
+    result.objects_.erase(result.objects_.begin() + (existing - objects_.begin()));
+    ++result.revision_;
+    return result;
+}
+Scenario Scenario::with_data_lock(DataLock lock) const {
+    if (lock == data_lock_)
+        return *this;
+    if (revision_ == std::numeric_limits<std::uint64_t>::max())
+        throw std::overflow_error("Scenario revision exhausted");
+    auto result = *this;
+    result.data_lock_ = std::move(lock);
+    ++result.revision_;
+    return result;
+}
 std::vector<results::StateSeries> Scenario::sample(std::span<const core::Epoch> epochs) const {
     for (const auto epoch : epochs)
         if (epoch.tai_nanoseconds() < first_.tai_nanoseconds() ||

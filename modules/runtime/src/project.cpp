@@ -17,6 +17,7 @@ application::Session make_orbit_session(const application::OrbitInput &input,
 application::Scenario make_project_scenario(const application::Project &project) {
     application::validate_project(project);
     application::Scenario result{project.name, project.first, project.last};
+    result = result.with_data_lock(project.data_lock());
     for (const auto &satellite : project.satellites)
         result = result.with_object(make_orbit_session(satellite.orbit));
     return result;

@@ -5,6 +5,30 @@
 
 namespace py = pybind11;
 using namespace orbitforge;
+void bind_data_lock(py::module_ &module) {
+    py::class_<application::DataReference>(module, "DataReference")
+        .def(py::init<std::string, std::string, std::string, std::string, std::string>(),
+             py::arg("role"), py::arg("snapshot_id"), py::arg("content_sha256"),
+             py::arg("interpretation_version"), py::arg("configuration_sha256"))
+        .def_readonly("role", &application::DataReference::role)
+        .def_readonly("snapshot_id", &application::DataReference::snapshot_id)
+        .def_readonly("content_sha256", &application::DataReference::content_sha256)
+        .def_readonly("interpretation_version", &application::DataReference::interpretation_version)
+        .def_readonly("configuration_sha256", &application::DataReference::configuration_sha256);
+    py::class_<application::DataLock>(module, "DataLock")
+        .def(py::init<std::vector<application::DataReference>>(),
+             py::arg("references") = std::vector<application::DataReference>{})
+        .def_property_readonly("sha256", &application::DataLock::sha256)
+        .def_property_readonly("references",
+                               [](const application::DataLock &lock) {
+                                   return std::vector<application::DataReference>(
+                                       lock.references().begin(), lock.references().end());
+                               })
+        .def("canonical_bytes", [](const application::DataLock &lock) {
+            const auto bytes = lock.canonical_bytes();
+            return py::bytes(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+        });
+}
 void bind_project(py::module_ &module) {
     py::register_exception<application::ProjectError>(module, "ProjectError", PyExc_ValueError);
     py::enum_<application::OrbitPropagator>(module, "OrbitPropagator")
@@ -30,6 +54,8 @@ void bind_project(py::module_ &module) {
     py::class_<application::ProjectSatellite>(module, "ProjectSatellite")
         .def(py::init<>())
         .def_readwrite("orbit", &application::ProjectSatellite::orbit)
+        .def_readwrite("display_name", &application::ProjectSatellite::display_name)
+        .def_property_readonly("name", &application::ProjectSatellite::name)
         .def_readwrite("display", &application::ProjectSatellite::display)
         .def_readwrite("model_kind", &application::ProjectSatellite::model_kind)
         .def_readwrite("model_diameter_m", &application::ProjectSatellite::model_diameter_m)
@@ -43,6 +69,12 @@ void bind_project(py::module_ &module) {
         .def_readwrite("current", &application::Project::current)
         .def_readwrite("satellites", &application::Project::satellites)
         .def_readwrite("earth_orientation", &application::Project::earth_orientation)
+        .def_property_readonly("data_lock", &application::Project::data_lock)
+        .def("renamed_satellite", &application::Project::renamed_satellite, py::arg("object_id"),
+             py::arg("name"))
+        .def("without_satellite", &application::Project::without_satellite, py::arg("object_id"))
+        .def("with_satellite_copy", &application::Project::with_satellite_copy,
+             py::arg("object_id"), py::arg("new_id"), py::arg("name"))
         .def(
             "add_satellite",
             [](application::Project &project, application::OrbitInput input,

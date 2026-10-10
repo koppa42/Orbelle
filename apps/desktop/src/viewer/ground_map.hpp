@@ -40,6 +40,7 @@ class GroundMap final : public QWidget {
     void publish_tracks(PreparedTracks tracks);
     void append_track(Track track);
     void replace_track(std::size_t index, Track track);
+    void set_name(std::size_t index, const QString &name);
     void set_snapshot(const visualization::RenderSnapshot &snapshot);
     void set_selection(std::optional<std::size_t> index);
     void set_display(std::size_t index, const DisplaySettings &settings, core::Epoch first,

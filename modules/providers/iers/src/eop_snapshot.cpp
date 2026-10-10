@@ -341,4 +341,75 @@ load_eop_snapshot(const std::filesystem::path &manifest_path, const core::ITimeP
         throw core::EopDataError(std::string("Cannot load EOP snapshot: ") + error.what());
     }
 }
+std::filesystem::path import_eop_snapshot(const std::filesystem::path &manifest_path,
+                                          const std::filesystem::path &store,
+                                          const core::ITimeProvider &time) {
+    // Validate the source before creating anything. Validate the copied bytes again
+    // so changing the source during import cannot publish unchecked data.
+    (void)load_eop_snapshot(manifest_path, time);
+    const auto manifest_bytes = read_file(manifest_path, 64 * 1024);
+    const auto manifest = nlohmann::json::parse(manifest_bytes);
+    const auto filename = std::filesystem::path(manifest.at("data_file").get<std::string>());
+    if (filename.empty() || filename.has_parent_path() || filename.has_root_path() ||
+        filename == "." || filename == ".." || filename == "manifest.json")
+        throw core::EopDataError("Invalid snapshot data filename for import");
+    const auto source = std::filesystem::canonical(manifest_path).parent_path();
+    const auto data_path = std::filesystem::canonical(source / filename);
+    if (data_path.parent_path() != source)
+        throw core::EopDataError("Snapshot data resolves outside its directory");
+    const auto data_bytes = read_file(data_path, 16 * 1024 * 1024);
+    std::filesystem::create_directories(store);
+    const auto root = std::filesystem::canonical(store);
+    const auto destination = root / picosha2::hash256_hex_string(manifest_bytes);
+    const auto published = destination / "manifest.json";
+    const auto verify_existing = [&] {
+        if (std::filesystem::canonical(destination).parent_path() != root ||
+            read_file(published, 64 * 1024) != manifest_bytes)
+            throw core::EopDataError("Snapshot store entry does not match its content address");
+        (void)load_eop_snapshot(published, time);
+    };
+    if (std::filesystem::exists(destination)) {
+        verify_existing();
+        return published;
+    }
+    std::filesystem::path temporary;
+    for (unsigned i = 0; i < 1000; ++i) {
+        temporary = root / (".import-" + destination.filename().string() + "-" + std::to_string(i));
+        if (std::filesystem::create_directory(temporary))
+            break;
+        temporary.clear();
+    }
+    if (temporary.empty())
+        throw core::EopDataError("Cannot allocate a snapshot import directory");
+    const auto cleanup = [&] {
+        std::error_code ignored;
+        std::filesystem::remove(temporary / filename, ignored);
+        std::filesystem::remove(temporary / "manifest.json", ignored);
+        std::filesystem::remove(temporary, ignored);
+    };
+    try {
+        const auto write = [](const std::filesystem::path &path, const std::string &bytes) {
+            std::ofstream output(path, std::ios::binary | std::ios::trunc);
+            output.exceptions(std::ios::failbit | std::ios::badbit);
+            output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+            output.close();
+        };
+        write(temporary / "manifest.json", manifest_bytes);
+        write(temporary / filename, data_bytes);
+        (void)load_eop_snapshot(temporary / "manifest.json", time);
+        std::error_code error;
+        std::filesystem::rename(temporary, destination, error);
+        if (error) {
+            // A concurrent identical import may already have published the same entry.
+            if (!std::filesystem::exists(destination))
+                throw std::filesystem::filesystem_error("Cannot publish EOP snapshot", error);
+            verify_existing();
+            cleanup();
+        }
+        return published;
+    } catch (...) {
+        cleanup();
+        throw;
+    }
+}
 } // namespace orbitforge::providers::iers

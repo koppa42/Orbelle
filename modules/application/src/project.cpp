@@ -23,7 +23,8 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144;
+constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
+                        lock_tag = 0x4b434f4c;
 [[noreturn]] void invalid(const char *message) { throw ProjectError(message); }
 void check(bool condition, const char *message) {
     if (!condition)
@@ -104,9 +105,9 @@ struct Writer {
     }
     void epoch(core::Epoch value) { number(std::bit_cast<std::uint64_t>(value.tai_nanoseconds())); }
     void real(double value) { number(std::bit_cast<std::uint64_t>(value)); }
-    void section(std::uint32_t tag, const Writer &data) {
+    void section(std::uint32_t tag, const Writer &data, unsigned version = 1) {
         number(tag, 4);
-        number(1, 4);
+        number(version, 4);
         number(data.bytes.size());
         number(crc32(data.bytes), 4);
         raw(data.bytes);
@@ -169,6 +170,13 @@ core::EopDataInfo read_data(Reader &in) {
 } // namespace
 Project::Project(std::string project_name, core::Epoch begin, core::Epoch end)
     : name(std::move(project_name)), first(begin), last(end), current(begin) {}
+DataLock Project::data_lock() const {
+    try {
+        return earth_orientation ? eop_data_lock(*earth_orientation) : DataLock{};
+    } catch (const std::invalid_argument &error) {
+        throw ProjectError(error.what());
+    }
+}
 void validate_project(const Project &project) {
     text_check(project.name, true);
     const auto first = project.first.tai_nanoseconds(), last = project.last.tai_nanoseconds();
@@ -181,6 +189,7 @@ void validate_project(const Project &project) {
     for (const auto &satellite : project.satellites) {
         const auto &input = satellite.orbit;
         text_check(input.object_id, true);
+        text_check(satellite.display_name, !satellite.display_name.empty());
         check(ids.insert(input.object_id).second, "Duplicate project object ID");
         check(input.first == project.first && input.last == project.last,
               "Satellite interval must match the project");
@@ -233,6 +242,39 @@ bool matching_project_data(const core::EopDataInfo &a, const core::EopDataInfo &
            a.time_data.utc_valid_from_mjd == b.time_data.utc_valid_from_mjd &&
            a.time_data.utc_valid_until_mjd == b.time_data.utc_valid_until_mjd;
 }
+namespace {
+std::size_t satellite_index(const Project &project, const std::string &id) {
+    const auto found = std::find_if(project.satellites.begin(), project.satellites.end(),
+                                    [&](const auto &s) { return s.orbit.object_id == id; });
+    check(found != project.satellites.end(), "Project object ID does not exist");
+    return static_cast<std::size_t>(found - project.satellites.begin());
+}
+} // namespace
+Project Project::renamed_satellite(const std::string &id, std::string new_name) const {
+    text_check(new_name, true);
+    auto result = *this;
+    result.satellites.at(satellite_index(*this, id)).display_name = std::move(new_name);
+    validate_project(result);
+    return result;
+}
+Project Project::without_satellite(const std::string &id) const {
+    auto result = *this;
+    result.satellites.erase(result.satellites.begin() +
+                            static_cast<std::ptrdiff_t>(satellite_index(*this, id)));
+    validate_project(result);
+    return result;
+}
+Project Project::with_satellite_copy(const std::string &id, std::string new_id,
+                                     std::string new_name) const {
+    text_check(new_name, true);
+    auto satellite = satellites.at(satellite_index(*this, id));
+    satellite.orbit.object_id = std::move(new_id);
+    satellite.display_name = std::move(new_name);
+    auto result = *this;
+    result.satellites.push_back(std::move(satellite));
+    validate_project(result);
+    return result;
+}
 std::vector<std::uint8_t> encode_project(const Project &project) {
     validate_project(project);
     Writer scene, objects, payload, file;
@@ -246,6 +288,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
     for (const auto &satellite : project.satellites) {
         const auto &input = satellite.orbit;
         objects.text(input.object_id);
+        objects.text(satellite.display_name);
         objects.number(input.propagator == OrbitPropagator::two_body ? 1 : 2, 4);
         objects.number(input.input_frame == core::FrameId::gcrf ? 1 : 2, 4);
         objects.epoch(input.initial.epoch);
@@ -264,14 +307,19 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         objects.real(satellite.model_diameter_m);
         objects.text(satellite.model_path);
     }
-    payload.section(objects_tag, objects);
+    payload.section(objects_tag, objects, 2);
     if (project.earth_orientation) {
         Writer data;
         write_data(data, *project.earth_orientation);
         payload.section(data_tag, data);
     }
+    const auto lock = project.data_lock();
+    Writer locked;
+    locked.raw(lock.canonical_bytes());
+    locked.text(lock.sha256());
+    payload.section(lock_tag, locked);
     file.raw(magic);
-    file.number(1, 4);
+    file.number(3, 4);
     file.number(payload.bytes.size());
     file.number(crc32(payload.bytes), 4);
     file.raw(payload.bytes);
@@ -281,7 +329,8 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     check(bytes.size() <= max_file, "Project exceeds 64 MiB");
     Reader file{bytes};
     check(std::ranges::equal(file.raw(magic.size()), magic), "Not an OrbitForge project file");
-    check(file.number(4) == 1, "Unsupported OrbitForge project version");
+    const auto version = file.number(4);
+    check(version >= 1 && version <= 3, "Unsupported OrbitForge project version");
     const auto length = file.number();
     const auto checksum = file.number(4);
     check(length == file.bytes.size(), "Project length mismatch");
@@ -289,9 +338,11 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     std::map<std::uint32_t, std::span<const std::uint8_t>> sections;
     while (!file.bytes.empty()) {
         const auto tag = static_cast<std::uint32_t>(file.number(4));
-        check(tag == scene_tag || tag == objects_tag || tag == data_tag,
+        check(tag == scene_tag || tag == objects_tag || tag == data_tag ||
+                  (version >= 3 && tag == lock_tag),
               "Unsupported project section");
-        check(file.number(4) == 1, "Unsupported project section version");
+        check(file.number(4) == (tag == objects_tag && version >= 2 ? 2U : 1U),
+              "Unsupported project section version");
         const auto size = file.number();
         const auto section_crc = file.number(4);
         check(size <= file.bytes.size(), "Truncated project section");
@@ -316,6 +367,8 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         ProjectSatellite satellite;
         auto &input = satellite.orbit;
         input.object_id = objects.text();
+        if (version >= 2)
+            satellite.display_name = objects.text();
         const auto propagator = objects.number(4), frame = objects.number(4);
         check(propagator == 1 || propagator == 2, "Unsupported project propagator");
         check(frame == 1 || frame == 2, "Unsupported input reference frame");
@@ -348,6 +401,26 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         data.done();
     }
     validate_project(project);
+    if (version >= 3) {
+        check(sections.contains(lock_tag), "Missing scenario data lock");
+        Reader locked{sections.at(lock_tag)};
+        check(locked.text() == "orbitforge-data-lock-v1", "Unsupported data lock encoding");
+        const auto reference_count = locked.number(4);
+        check(reference_count <= 64, "Data lock exceeds 64 references");
+        std::vector<DataReference> references;
+        for (std::uint64_t i = 0; i < reference_count; ++i)
+            references.push_back(
+                {locked.text(), locked.text(), locked.text(), locked.text(), locked.text()});
+        try {
+            const DataLock lock(std::move(references));
+            check(lock.sha256() == locked.text(), "Scenario data lock SHA256 mismatch");
+            check(lock == project.data_lock(),
+                  "Scenario data references disagree with project metadata");
+        } catch (const std::invalid_argument &error) {
+            throw ProjectError(error.what());
+        }
+        locked.done();
+    }
     return project;
 }
 Project load_project(const std::filesystem::path &path) {

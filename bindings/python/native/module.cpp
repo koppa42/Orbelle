@@ -11,6 +11,7 @@ void bind_time_frames(py::module_ &module);
 void bind_ephemeris(py::module_ &module);
 void bind_j2(py::module_ &module);
 void bind_project(py::module_ &module);
+void bind_data_lock(py::module_ &module);
 
 PYBIND11_MODULE(_native, module) {
     module.doc() = "OrbitForge P0 native API. Time is explicit TAI, positions are metres.";
@@ -49,6 +50,7 @@ PYBIND11_MODULE(_native, module) {
                 return session.sample(epochs);
             },
             py::arg("epochs"), py::call_guard<py::gil_scoped_release>());
+    bind_data_lock(module);
     py::class_<application::Scenario>(module, "Scenario")
         .def(py::init<std::string, core::Epoch, core::Epoch>(), py::arg("name"), py::arg("first"),
              py::arg("last"))
@@ -56,10 +58,15 @@ PYBIND11_MODULE(_native, module) {
         .def_property_readonly("first", &application::Scenario::first)
         .def_property_readonly("last", &application::Scenario::last)
         .def_property_readonly("revision", &application::Scenario::revision)
+        .def_property_readonly("data_lock", &application::Scenario::data_lock,
+                               py::return_value_policy::copy)
+        .def("with_data_lock", &application::Scenario::with_data_lock, py::arg("data_lock"))
         .def_property_readonly(
             "object_count",
             [](const application::Scenario &scenario) { return scenario.objects().size(); })
         .def("with_object", &application::Scenario::with_object, py::arg("session"),
+             py::call_guard<py::gil_scoped_release>())
+        .def("without_object", &application::Scenario::without_object, py::arg("object_id"),
              py::call_guard<py::gil_scoped_release>())
         .def(
             "sample",

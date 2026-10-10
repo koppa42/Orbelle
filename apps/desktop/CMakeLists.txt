@@ -14,7 +14,7 @@ if(ORBITFORGE_WITH_VSG)
     find_package(rocky 1.1.0 EXACT CONFIG REQUIRED)
     find_package(vsgXchange 1.1.13 EXACT CONFIG REQUIRED)
     target_sources(orbitforge_desktop PRIVATE src/viewer/graphics_workbench.cpp
-        src/viewer/project_scene.cpp
+        src/viewer/project_scene.cpp src/viewer/eop_catalog.cpp
         src/viewer/orbit_scene.cpp src/viewer/orbit_editor.cpp src/viewer/workbench_style.cpp
         src/viewer/satellite_model.cpp src/viewer/mission_timeline.cpp src/viewer/scenario_dialog.cpp
         src/viewer/insert_object_dialog.cpp src/viewer/insert_object_dialog.hpp

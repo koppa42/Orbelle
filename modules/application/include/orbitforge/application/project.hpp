@@ -1,6 +1,7 @@
 #pragma once
 #include <filesystem>
 #include <optional>
+#include <orbitforge/application/data_lock.hpp>
 #include <orbitforge/core/frames/eop_provider.hpp>
 #include <orbitforge/core/frames/state.hpp>
 #include <orbitforge/core/propagation/central_body.hpp>
@@ -32,6 +33,11 @@ struct OrbitDisplay {
 };
 struct ProjectSatellite {
     OrbitInput orbit;
+    // Empty means use the stable object ID (including projects written by v1).
+    std::string display_name;
+    [[nodiscard]] const std::string &name() const {
+        return display_name.empty() ? orbit.object_id : display_name;
+    }
     OrbitDisplay display;
     // 0 = point, 1 = built-in schematic, 2 = external model.
     int model_kind = 0;
@@ -48,6 +54,11 @@ struct Project {
     // Unbound Python-created projects may select installed data on first open.
     // Once bound, the exact data and interpolation versions must match.
     std::optional<core::EopDataInfo> earth_orientation;
+    [[nodiscard]] DataLock data_lock() const;
+    [[nodiscard]] Project renamed_satellite(const std::string &id, std::string name) const;
+    [[nodiscard]] Project without_satellite(const std::string &id) const;
+    [[nodiscard]] Project with_satellite_copy(const std::string &id, std::string new_id,
+                                              std::string name) const;
 };
 class ProjectError : public std::runtime_error {
   public:

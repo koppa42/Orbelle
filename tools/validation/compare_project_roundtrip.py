@@ -12,7 +12,7 @@ import orbitforge as of
 def fingerprint(satellite):
     orbit, display = satellite.orbit, satellite.display
     state = orbit.initial
-    return (orbit.object_id, orbit.propagator, orbit.input_frame, orbit.step_seconds,
+    return (orbit.object_id, satellite.display_name, orbit.propagator, orbit.input_frame, orbit.step_seconds,
             orbit.first.tai_nanoseconds, orbit.last.tai_nanoseconds,
             state.epoch.tai_nanoseconds, state.origin, state.frame,
             state.position_m, state.velocity_mps, display.extent,

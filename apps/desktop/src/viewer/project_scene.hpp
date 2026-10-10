@@ -17,5 +17,6 @@ struct PreparedProject {
     application::Project project, const std::filesystem::path &path,
     const core::IFrameProvider &frames,
     const std::vector<std::shared_ptr<const core::IEarthOrientationProvider>> &installed_data,
-    const std::atomic_bool &cancelled);
+    const std::atomic_bool &cancelled,
+    std::optional<application::Scenario> retained_sessions = std::nullopt);
 } // namespace orbitforge::desktop

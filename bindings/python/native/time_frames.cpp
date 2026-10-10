@@ -115,4 +115,6 @@ void bind_time_frames(py::module_ &module) {
     module.def("make_frame_provider", &runtime::make_frame_provider);
     module.def("load_eop_snapshot", &runtime::load_eop_snapshot, py::arg("manifest"),
                py::call_guard<py::gil_scoped_release>());
+    module.def("import_eop_snapshot", &runtime::import_eop_snapshot, py::arg("manifest"),
+               py::arg("store"), py::call_guard<py::gil_scoped_release>());
 }

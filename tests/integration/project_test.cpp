@@ -139,3 +139,96 @@ TEST(Project, EmptyProjectAndExtremeEpochsRoundTripWithoutRounding) {
     EXPECT_TRUE(loaded.satellites.empty());
     EXPECT_TRUE(runtime::make_project_scenario(loaded).objects().empty());
 }
+TEST(Project, ObjectEditsPreserveIdentityAndDoNotMutatePreviousSnapshots) {
+    const auto original = example();
+    const auto renamed = original.renamed_satellite("TwoBody", "观测卫星");
+    EXPECT_EQ(original.satellites[0].name(), "TwoBody");
+    EXPECT_EQ(renamed.satellites[0].name(), "观测卫星");
+    EXPECT_EQ(renamed.satellites[0].orbit.object_id, "TwoBody");
+    const auto copied = renamed.with_satellite_copy("TwoBody", "copy-1", "观测卫星 副本");
+    ASSERT_EQ(copied.satellites.size(), 3U);
+    EXPECT_EQ(copied.satellites.back().orbit.initial.position_m,
+              renamed.satellites[0].orbit.initial.position_m);
+    EXPECT_EQ(copied.satellites.back().display, renamed.satellites[0].display);
+    EXPECT_EQ(copied.satellites.back().model_path, renamed.satellites[0].model_path);
+    EXPECT_EQ(copied.satellites.back().orbit.object_id, "copy-1");
+    const auto restored = application::decode_project(application::encode_project(copied));
+    EXPECT_EQ(restored.satellites[0].display_name, "观测卫星");
+    EXPECT_EQ(restored.satellites.back().display_name, "观测卫星 副本");
+    const auto removed = copied.without_satellite("TwoBody");
+    EXPECT_EQ(removed.satellites[0].orbit.object_id, "长期项");
+    EXPECT_EQ(removed.satellites[1].orbit.object_id, "copy-1");
+    EXPECT_TRUE(removed.without_satellite("长期项").without_satellite("copy-1").satellites.empty());
+    EXPECT_THROW((void)original.renamed_satellite("TwoBody", " \t"), application::ProjectError);
+    EXPECT_THROW((void)original.renamed_satellite("missing", "name"), application::ProjectError);
+    EXPECT_THROW((void)original.without_satellite("missing"), application::ProjectError);
+    EXPECT_THROW((void)original.with_satellite_copy("TwoBody", "长期项", "copy"),
+                 application::ProjectError);
+}
+TEST(Project, VersionOneFilesRetainIdsAndAcquireNamesOnlyWhenEdited) {
+    const auto old = application::load_project(ORBITFORGE_PROJECT_V1);
+    ASSERT_EQ(old.satellites.size(), 2U);
+    EXPECT_TRUE(old.satellites[0].display_name.empty());
+    EXPECT_EQ(old.satellites[0].name(), old.satellites[0].orbit.object_id);
+    const auto updated = application::decode_project(application::encode_project(old));
+    EXPECT_EQ(updated.satellites[0].orbit.initial.position_m,
+              old.satellites[0].orbit.initial.position_m);
+    EXPECT_EQ(updated.current, old.current);
+}
+TEST(Project, DataLockPinsFilesInterpretationCoverageAndTransitiveTimeDependency) {
+    const auto project = example();
+    const auto locked = project.data_lock();
+    ASSERT_EQ(locked.references().size(), 2U);
+    EXPECT_EQ(locked.references()[0].role, "earth-orientation");
+    EXPECT_EQ(locked.references()[0].content_sha256, project.earth_orientation->sha256);
+    EXPECT_EQ(locked.references()[1].role, "utc-time");
+    EXPECT_EQ(locked.references()[1].content_sha256, project.earth_orientation->time_data.sha256);
+    auto relocated = project;
+    relocated.earth_orientation->source_url = "https://mirror.invalid/data";
+    relocated.earth_orientation->time_data.source_url = "https://mirror.invalid/time";
+    EXPECT_EQ(relocated.data_lock(), locked);
+    auto changed = project;
+    changed.earth_orientation->sha256[0] = 'c';
+    EXPECT_NE(changed.data_lock().sha256(), locked.sha256());
+    changed = project;
+    changed.earth_orientation->interpolation += "-new";
+    EXPECT_NE(changed.data_lock().sha256(), locked.sha256());
+    changed = project;
+    changed.earth_orientation->first_epoch = core::Epoch{-1};
+    EXPECT_NE(changed.data_lock().sha256(), locked.sha256());
+    changed = project;
+    changed.earth_orientation->time_data.sha256[0] = 'c';
+    const auto other = changed.data_lock();
+    EXPECT_NE(other.sha256(), locked.sha256());
+    EXPECT_NE(other.references()[0].configuration_sha256,
+              locked.references()[0].configuration_sha256);
+    EXPECT_EQ(other.references()[0].content_sha256, locked.references()[0].content_sha256);
+    EXPECT_EQ(application::decode_project(application::encode_project(project)).data_lock(),
+              locked);
+}
+TEST(Project, DataLocksHaveStableCanonicalOrderAndRejectDuplicateRoles) {
+    // Independently computed using .NET SHA256 over the documented empty encoding.
+    EXPECT_EQ(application::DataLock{}.sha256(),
+              "81700a60bcada79003d1ea38a39cbea749f3997c1cdea22737be0bee6b7aeab1");
+    const auto lock = example().data_lock();
+    std::vector<application::DataReference> reversed(lock.references().rbegin(),
+                                                     lock.references().rend());
+    EXPECT_EQ(application::DataLock(reversed), lock);
+    EXPECT_EQ(application::DataLock(reversed).canonical_bytes(), lock.canonical_bytes());
+    reversed.push_back(reversed.front());
+    EXPECT_THROW((void)application::DataLock(reversed), std::invalid_argument);
+    reversed.pop_back();
+    reversed.front().content_sha256 = "not-a-hash";
+    EXPECT_THROW((void)application::DataLock(reversed), std::invalid_argument);
+}
+TEST(Project, VersionTwoFilesUpgradeNamesAndDataReferencesWithoutChangingInputs) {
+    const auto old = application::load_project(ORBITFORGE_PROJECT_V2);
+    ASSERT_EQ(old.satellites.size(), 2U);
+    EXPECT_EQ(old.satellites[0].display_name, "观测卫星 A");
+    EXPECT_EQ(old.data_lock().references().size(), 2U);
+    const auto updated = application::decode_project(application::encode_project(old));
+    EXPECT_EQ(updated.data_lock(), old.data_lock());
+    EXPECT_EQ(updated.satellites[0].orbit.initial.position_m,
+              old.satellites[0].orbit.initial.position_m);
+    EXPECT_EQ(updated.current, old.current);
+}

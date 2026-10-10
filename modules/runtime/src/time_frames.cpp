@@ -37,6 +37,17 @@ load_eop_snapshot(const std::filesystem::path &manifest) {
     throw std::runtime_error("EOP loading requires a build with ORBITFORGE_WITH_ERFA=ON");
 #endif
 }
+std::filesystem::path import_eop_snapshot(const std::filesystem::path &manifest,
+                                          const std::filesystem::path &store) {
+#ifdef ORBITFORGE_HAS_ERFA
+    const auto time = make_builtin_time_provider();
+    return providers::iers::import_eop_snapshot(manifest, store, *time);
+#else
+    (void)manifest;
+    (void)store;
+    throw std::runtime_error("EOP import requires a build with ORBITFORGE_WITH_ERFA=ON");
+#endif
+}
 std::array<double, 3> display_sun_direction_gcrf(core::Epoch epoch) {
 #ifdef ORBITFORGE_HAS_ERFA
     return providers::erfa::display_sun_direction_gcrf(epoch);

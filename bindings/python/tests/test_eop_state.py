@@ -16,6 +16,19 @@ SAMPLE = Path(of.__file__).parent / "data/eop/iers_c04_2016_12_28_2017_01_04"
 
 
 class EopStateApiTests(unittest.TestCase):
+    def test_import_is_persistent_idempotent_and_independent_of_source(self):
+        source = self.relocated()
+        store = source.parent / 'installed'
+        saved = of.import_eop_snapshot(source / 'manifest.json', store)
+        self.assertEqual(saved, of.import_eop_snapshot(source / 'manifest.json', store))
+        before = of.load_eop_snapshot(saved).at(self.epoch)
+        (source / 'eop.c04').write_text('changed', encoding='utf-8')
+        after = of.load_eop_snapshot(saved).at(self.epoch)
+        self.assertEqual(before.sample.ut1_minus_tai_seconds, after.sample.ut1_minus_tai_seconds)
+        with self.assertRaises(of.EopDataError):
+            of.import_eop_snapshot(source / 'manifest.json', store)
+        self.assertEqual(len(list(store.iterdir())), 1)
+
     def setUp(self):
         self.time = of.make_builtin_time_provider()
         self.frames = of.make_frame_provider()
