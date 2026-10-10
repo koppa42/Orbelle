@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QScreen>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -18,7 +19,10 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
     dialog.setWindowTitle(QStringLiteral("插入对象"));
     dialog.setWindowIcon(workbench_icon(WorkbenchIcon::satellite));
     dialog.setMinimumSize(540, 280);
-    dialog.resize(560, 292);
+    const auto *screen = parent ? parent->screen() : dialog.screen();
+    const auto available = screen->availableGeometry().size() - QSize(48, 80);
+    dialog.resize(QSize(900, 600).boundedTo(available).expandedTo(dialog.minimumSize()));
+    dialog.setSizeGripEnabled(true);
     auto *layout = new QVBoxLayout(&dialog);
     layout->setContentsMargins(20, 16, 20, 16);
     layout->setSpacing(12);
@@ -62,7 +66,7 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
     group->setExpanded(true);
     types->setCurrentItem(satellite);
     left->addWidget(types, 1);
-    columns->addLayout(left, 2);
+    columns->addLayout(left, 3);
 
     auto *right = new QVBoxLayout;
     right->setSpacing(0);
@@ -93,7 +97,7 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
     add_method("insertDefaults", InsertObjectMethod::defaults, QStringLiteral("使用默认参数"),
                QStringLiteral("二体传播 · 场景起始时刻 · 60 s 步长"));
     right->addStretch(1);
-    columns->addLayout(right, 3);
+    columns->addLayout(right, 2);
     layout->addLayout(columns, 1);
 
     auto *divider = new QFrame;
