@@ -13,6 +13,11 @@
 #include <picosha2.h>
 #include <sqlite3.h>
 #include <sstream>
+#ifdef _WIN32
+#define NOMINMAX
+#include <Windows.h>
+#include <thread>
+#endif
 
 namespace orbitforge::runtime {
 namespace {
@@ -48,6 +53,28 @@ void write(const std::filesystem::path &path, const std::string &bytes) {
     output.exceptions(std::ios::failbit | std::ios::badbit);
     output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
     output.close();
+}
+void publish(const std::filesystem::path &source, const std::filesystem::path &destination) {
+    for (unsigned attempt = 0;; ++attempt) {
+        std::error_code error;
+        std::filesystem::rename(source, destination, error);
+        if (!error)
+            return;
+#ifdef _WIN32
+        // A short-lived handle in another process can deny publication on Windows.
+        // Retry only sharing/access errors; never replace publication with a partial copy.
+        if (attempt < 5 && error.category() == std::system_category() &&
+            (error.value() == ERROR_ACCESS_DENIED || error.value() == ERROR_SHARING_VIOLATION ||
+             error.value() == ERROR_LOCK_VIOLATION)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20U << attempt));
+            continue;
+        }
+#else
+        (void)attempt;
+#endif
+        throw std::filesystem::filesystem_error("Cannot publish catalog data", source, destination,
+                                                error);
+    }
 }
 struct Stage {
     std::filesystem::path path;
@@ -122,12 +149,20 @@ struct DataCatalog::Impl {
         return root / "snapshots" / key;
     }
     CatalogSnapshot describe(const std::string &key, const core::EopDataInfo &info) const {
-        return {key,
-                info.id,
-                info.source_url,
-                info.first_epoch,
-                info.last_epoch,
-                directory(key) / "manifest.json"};
+        CatalogSnapshot result{key,
+                               info.id,
+                               info.source_url,
+                               info.first_epoch,
+                               info.last_epoch,
+                               directory(key) / "manifest.json"};
+        Statement receipt(db, "SELECT kind,acquired_at FROM acquisitions WHERE lock_hash=?");
+        receipt.text(1, key);
+        if (receipt.next()) {
+            result.acquisition = static_cast<DataAcquisition>(sqlite3_column_int(receipt.value, 0));
+            if (sqlite3_column_type(receipt.value, 1) != SQLITE_NULL)
+                result.acquired_at_unix_seconds = sqlite3_column_int64(receipt.value, 1);
+        }
+        return result;
     }
     std::unique_ptr<core::IEarthOrientationProvider> verify(const std::string &key) const {
         const auto folder = directory(key);
@@ -179,7 +214,7 @@ struct DataCatalog::Impl {
         }
         const auto pending = stage / "blob.pending";
         write(pending, bytes);
-        std::filesystem::rename(pending, target);
+        publish(pending, target);
     }
 };
 bool data_catalog_available() noexcept { return true; }
@@ -199,15 +234,16 @@ DataCatalog::DataCatalog(std::filesystem::path root) : impl_(std::make_unique<Im
     version.next();
     const auto schema = sqlite3_column_int(version.value, 0);
     version.next();
-    check(schema == 0 || schema == 1, "Unsupported data catalog schema");
+    check(schema >= 0 && schema <= 2, "Unsupported data catalog schema");
     sql(impl_->db,
         "CREATE TABLE IF NOT EXISTS snapshots(lock_hash TEXT PRIMARY KEY, id TEXT NOT NULL, "
         "source_url TEXT NOT NULL, first_ns INTEGER NOT NULL, last_ns INTEGER NOT NULL);"
         "CREATE TABLE IF NOT EXISTS dependencies(lock_hash TEXT REFERENCES snapshots(lock_hash), "
         "role TEXT, snapshot_id TEXT, content_hash TEXT, interpretation TEXT, configuration_hash "
         "TEXT, PRIMARY KEY(lock_hash,role));"
-        "CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL); PRAGMA "
-        "user_version=1");
+        "CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+        "CREATE TABLE IF NOT EXISTS acquisitions(lock_hash TEXT PRIMARY KEY REFERENCES "
+        "snapshots(lock_hash), kind INTEGER NOT NULL, acquired_at INTEGER); PRAGMA user_version=2");
     // Recover only successfully published directories left by a process that stopped
     // between file publication and the SQLite commit; invalid records stay unindexed.
     for (const auto &entry : std::filesystem::directory_iterator(impl_->root / "snapshots")) {
@@ -268,7 +304,7 @@ CatalogSnapshot DataCatalog::install_eop(const std::filesystem::path &manifest_p
                {"lock_sha256", key},
                {"manifest_sha256", picosha2::hash256_hex_string(manifest_bytes)}}
               .dump(2));
-    std::filesystem::rename(stage.path, destination);
+    publish(stage.path, destination);
     stage.path.clear();
     impl_->index(key, info);
     transaction.commit();
@@ -277,16 +313,39 @@ CatalogSnapshot DataCatalog::install_eop(const std::filesystem::path &manifest_p
 std::vector<CatalogSnapshot> DataCatalog::snapshots() const {
     std::lock_guard guard(impl_->mutex);
     Statement rows(impl_->db,
-                   "SELECT lock_hash,id,source_url,first_ns,last_ns FROM snapshots ORDER BY rowid");
+                   "SELECT s.lock_hash,id,source_url,first_ns,last_ns,a.kind,a.acquired_at "
+                   "FROM snapshots s LEFT JOIN acquisitions a ON s.lock_hash=a.lock_hash "
+                   "ORDER BY COALESCE(a.acquired_at,0),s.rowid");
     std::vector<CatalogSnapshot> result;
     while (rows.next()) {
         const auto key = rows.text(0);
         result.push_back({key, rows.text(1), rows.text(2),
                           core::Epoch(sqlite3_column_int64(rows.value, 3)),
                           core::Epoch(sqlite3_column_int64(rows.value, 4)),
-                          impl_->directory(key) / "manifest.json"});
+                          impl_->directory(key) / "manifest.json",
+                          static_cast<DataAcquisition>(sqlite3_column_int(rows.value, 5)),
+                          sqlite3_column_type(rows.value, 6) == SQLITE_NULL
+                              ? std::nullopt
+                              : std::optional<std::int64_t>{sqlite3_column_int64(rows.value, 6)}});
     }
     return result;
+}
+void DataCatalog::record_acquisition(const std::string &key, DataAcquisition kind) {
+    std::lock_guard guard(impl_->mutex);
+    check(hash_valid(key) && kind >= DataAcquisition::bundled &&
+              kind <= DataAcquisition::downloaded,
+          "Invalid data acquisition receipt");
+    // Re-registering bundled resources on launch must never rewrite a real receipt.
+    Statement row(impl_->db,
+                  "INSERT INTO acquisitions VALUES(?,?,?) ON CONFLICT(lock_hash) DO UPDATE SET "
+                  "kind=excluded.kind,acquired_at=excluded.acquired_at WHERE excluded.kind<>1");
+    row.text(1, key);
+    row.integer(2, static_cast<int>(kind));
+    if (kind != DataAcquisition::bundled)
+        row.integer(3, std::chrono::duration_cast<std::chrono::seconds>(
+                           std::chrono::system_clock::now().time_since_epoch())
+                           .count());
+    row.next();
 }
 std::unique_ptr<core::IEarthOrientationProvider>
 DataCatalog::load_eop(const std::string &key) const {
@@ -427,6 +486,7 @@ CatalogSnapshot DataCatalog::import_finals(const std::filesystem::path &, const 
     unavailable();
 }
 std::vector<CatalogSnapshot> DataCatalog::snapshots() const { unavailable(); }
+void DataCatalog::record_acquisition(const std::string &, DataAcquisition) { unavailable(); }
 std::unique_ptr<core::IEarthOrientationProvider> DataCatalog::load_eop(const std::string &) const {
     unavailable();
 }

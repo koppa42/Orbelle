@@ -51,8 +51,8 @@ struct Project {
     std::string name;
     core::Epoch first, last, current;
     std::vector<ProjectSatellite> satellites;
-    // Unbound Python-created projects may select installed data on first open.
-    // Once bound, the exact data and interpolation versions must match.
+    // Provenance of the last calculation, not a requirement to load an old file.
+    // The desktop checks current data/policy and requires consent for changes.
     std::optional<core::EopDataInfo> earth_orientation;
     [[nodiscard]] DataLock data_lock() const;
     [[nodiscard]] Project renamed_satellite(const std::string &id, std::string name) const;

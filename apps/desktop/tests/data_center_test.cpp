@@ -8,6 +8,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
+#include <cmath>
 #include <gtest/gtest.h>
 #include <orbitforge/application/project.hpp>
 
@@ -77,10 +78,15 @@ class DataCenterTest : public ::testing::Test {
     }
     QTemporaryDir temp;
 };
-TEST_F(DataCenterTest, DownloadInstallsOnceWithoutSwitchingPinnedScenesOrDefault) {
+TEST_F(DataCenterTest, DownloadSelectsCurrentDataWithoutChangingActiveProviders) {
     EopCatalog catalog(root() / "data", {ORBITFORGE_TEST_FINALS, ORBITFORGE_TEST_C04}, {}, false);
     auto original = catalog.providers().front();
     const auto lock = application::eop_data_lock(original->data_info());
+    for (const auto &entry : catalog.data().snapshots()) {
+        EXPECT_EQ(entry.acquisition, runtime::DataAcquisition::bundled);
+        EXPECT_FALSE(entry.acquired_at_unix_seconds);
+    }
+    const auto before = QDateTime::currentSecsSinceEpoch();
     Server server(payload());
     const auto live = qEnvironmentVariable("ORBITFORGE_LIVE_IERS_URL");
     const auto endpoint = live.isEmpty() ? server.url() : QUrl(live);
@@ -99,7 +105,12 @@ TEST_F(DataCenterTest, DownloadInstallsOnceWithoutSwitchingPinnedScenesOrDefault
         const auto time = runtime::make_builtin_time_provider();
         EXPECT_EQ(time->to_utc(installed.first_epoch).year, 1973);
     }
-    EXPECT_EQ(catalog.preferred, 0);
+    EXPECT_EQ(catalog.preferred_index(), catalog.providers().size() - 1);
+    const auto receipt = catalog.data().snapshots().back();
+    EXPECT_EQ(receipt.acquisition, runtime::DataAcquisition::downloaded);
+    ASSERT_TRUE(receipt.acquired_at_unix_seconds);
+    EXPECT_GE(*receipt.acquired_at_unix_seconds, before);
+    EXPECT_LE(*receipt.acquired_at_unix_seconds, QDateTime::currentSecsSinceEpoch());
     EXPECT_EQ(application::eop_data_lock(original->data_info()), lock);
     EXPECT_EQ(catalog.data().resolve_eop(lock)->data_info().id, original->data_info().id);
     catalog.start_download(endpoint);
@@ -145,14 +156,48 @@ TEST_F(DataCenterTest, LegacyMigrationAndPreferencesSurviveRestart) {
         EopCatalog catalog(root() / "data", {ORBITFORGE_TEST_FINALS}, root() / "eop", false);
         ASSERT_EQ(catalog.providers().size(), 2);
         EXPECT_EQ(application::eop_data_lock(catalog.providers()[1]->data_info()), lock);
-        catalog.set_preferred(1);
         catalog.set_automatic_updates(false);
     }
     EopCatalog reopened(root() / "data", {ORBITFORGE_TEST_FINALS}, root() / "eop", false);
-    EXPECT_EQ(reopened.preferred, 1);
+    EXPECT_EQ(reopened.current_indices().size(), 2);
     EXPECT_FALSE(reopened.automatic_updates());
     EXPECT_EQ(reopened.providers().size(), 2);
     EXPECT_TRUE(std::filesystem::exists(old));
+    const auto migrated = reopened.data().snapshots().back();
+    EXPECT_EQ(migrated.acquisition, runtime::DataAcquisition::unknown);
+    EXPECT_FALSE(migrated.acquired_at_unix_seconds);
+}
+TEST_F(DataCenterTest, ReimportingExistingContentSelectsItAndPersistsAcrossRestart) {
+    const auto store = root() / "data";
+    std::string selected_key;
+    {
+        EopCatalog catalog(store, {ORBITFORGE_TEST_C04}, {}, false);
+        const auto source = root() / "finals.all";
+        QFile file(QString::fromStdWString(source.wstring()));
+        ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+        file.write(payload());
+        file.close();
+        catalog.import_raw(source);
+        selected_key = application::eop_data_lock(catalog.providers().back()->data_info()).sha256();
+        ASSERT_TRUE(file.open(QIODevice::Append));
+        file.write("\n");
+        file.close();
+        catalog.import_raw(source);
+        EXPECT_EQ(catalog.preferred_index(), 2);
+        ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        file.write(payload());
+        file.close();
+        catalog.import_raw(source);
+        EXPECT_EQ(catalog.preferred_index(), 1);
+        EXPECT_EQ(catalog.current_indices().size(), 2);
+        EXPECT_EQ(catalog.providers().size(), 3);
+    }
+    EopCatalog reopened(store, {ORBITFORGE_TEST_C04}, {}, false);
+    EXPECT_EQ(
+        application::eop_data_lock(reopened.providers()[reopened.preferred_index()]->data_info())
+            .sha256(),
+        selected_key);
+    EXPECT_EQ(reopened.current_indices().size(), 2);
 }
 TEST_F(DataCenterTest, UpdatesStartAfterFirstDownloadAndRespectDailyIntervalAndOptOut) {
     EopCatalog catalog(root() / "data", {ORBITFORGE_TEST_FINALS}, {}, false);
@@ -176,28 +221,34 @@ TEST_F(DataCenterTest, UpdatesStartAfterFirstDownloadAndRespectDailyIntervalAndO
     EXPECT_TRUE(catalog.downloading());
     complete(catalog);
     EXPECT_EQ(catalog.providers().size(), 2);
-    EXPECT_EQ(catalog.preferred, 0);
+    EXPECT_EQ(catalog.preferred_index(), catalog.providers().size() - 1);
 }
 TEST_F(DataCenterTest, ConditionalUpdatesSkipUnchangedBytesAndPreserveOldVersionsAcrossRestart) {
     Server server(payload());
     server.etag = "\"revision-1\"";
     const auto store = root() / "data";
     std::string first_key;
+    std::optional<std::int64_t> downloaded_at;
     {
         EopCatalog catalog(store, {ORBITFORGE_TEST_C04}, {}, false);
         catalog.start_download(server.url());
         complete(catalog);
         ASSERT_TRUE(catalog.last_installed());
         first_key = application::eop_data_lock(catalog.providers().back()->data_info()).sha256();
+        downloaded_at = catalog.data().snapshots().back().acquired_at_unix_seconds;
+        ASSERT_TRUE(downloaded_at);
         EXPECT_FALSE(server.requests.back().contains("If-None-Match"));
     }
     EopCatalog catalog(store, {ORBITFORGE_TEST_C04}, {}, false);
+    const auto revision = catalog.revision();
     catalog.start_download(server.url());
     complete(catalog);
     EXPECT_TRUE(server.requests.back().contains("If-None-Match: \"revision-1\""));
     EXPECT_EQ(catalog.received_bytes(), 0);
     EXPECT_EQ(catalog.providers().size(), 2);
     EXPECT_TRUE(catalog.status().contains(QStringLiteral("未重复下载")));
+    EXPECT_EQ(catalog.data().snapshots().back().acquired_at_unix_seconds, downloaded_at);
+    EXPECT_EQ(catalog.revision(), revision);
     server.etag = "\"revision-2\"";
     // A new source revision, even with unchanged useful values, has its own full-file identity.
     server.bytes += '\n';
@@ -205,18 +256,128 @@ TEST_F(DataCenterTest, ConditionalUpdatesSkipUnchangedBytesAndPreserveOldVersion
     catalog.check_updates_if_due(QDateTime::currentSecsSinceEpoch(), server.url());
     complete(catalog);
     EXPECT_EQ(catalog.providers().size(), 3);
-    EXPECT_EQ(catalog.preferred, 0);
+    EXPECT_EQ(catalog.preferred_index(), catalog.providers().size() - 1);
     EXPECT_NO_THROW((void)catalog.data().load_eop(first_key));
     EXPECT_NE(application::eop_data_lock(catalog.providers().back()->data_info()).sha256(),
               first_key);
     // A failed newer response must not replace the validator for the installed revision.
     server.etag = "\"broken-revision\"";
     server.bytes = "<html>error</html>";
+    const auto current_revision = catalog.revision();
+    const auto current_receipt = catalog.data().snapshots().back();
     catalog.start_download(server.url());
     complete(catalog);
     EXPECT_EQ(catalog.data().setting("finals-etag"), "\"revision-2\"");
     EXPECT_EQ(catalog.providers().size(), 3);
+    EXPECT_EQ(catalog.current_indices().size(), 2);
+    EXPECT_EQ(catalog.revision(), current_revision);
+    EXPECT_EQ(catalog.data().snapshots().back().acquired_at_unix_seconds,
+              current_receipt.acquired_at_unix_seconds);
     EXPECT_TRUE(std::filesystem::is_empty(store / "staging"));
+}
+TEST_F(DataCenterTest, ExtrapolationPoliciesAreIndependentPersistentAndNeverChangeActiveProviders) {
+    const auto store = root() / "data";
+    EopCatalog::Provider active;
+    core::Epoch begin{0}, end{0};
+    {
+        EopCatalog catalog(store, {ORBITFORGE_TEST_FINALS, ORBITFORGE_TEST_C04}, {}, false);
+        EXPECT_EQ(catalog.extrapolation_days(0), 0);
+        EXPECT_EQ(catalog.extrapolation_days(1), 0);
+        const auto &info = catalog.providers()[0]->data_info();
+        begin = core::Epoch{info.last_epoch.tai_nanoseconds() + 1'000'000'000};
+        end = core::Epoch{begin.tai_nanoseconds() + 60'000'000'000};
+        EXPECT_THROW((void)catalog.for_interval(begin, end), core::EopCoverageError);
+        catalog.set_extrapolation_days(0, 2);
+        active = catalog.for_interval(begin, end);
+        EXPECT_EQ(active->data_info().extrapolation_days, 2);
+        EXPECT_EQ(active->data_info().last_epoch, info.last_epoch);
+        EXPECT_EQ(catalog.extrapolation_days(1), 0);
+        EXPECT_EQ(
+            catalog.for_interval(info.first_epoch, info.last_epoch)->data_info().extrapolation_days,
+            0);
+        catalog.set_extrapolation_days(0, 0);
+        EXPECT_THROW((void)catalog.for_interval(begin, end), core::EopCoverageError);
+        EXPECT_NO_THROW((void)active->at(end));
+        catalog.set_extrapolation_days(0, 3);
+        EXPECT_THROW(catalog.set_extrapolation_days(0, 31), std::invalid_argument);
+        EXPECT_THROW(catalog.set_extrapolation_days(1, -1), std::invalid_argument);
+    }
+    EopCatalog reopened(store, {ORBITFORGE_TEST_FINALS, ORBITFORGE_TEST_C04}, {}, false);
+    EXPECT_EQ(reopened.extrapolation_days(0), 3);
+    EXPECT_EQ(reopened.extrapolation_days(1), 0);
+    EXPECT_EQ(active->data_info().extrapolation_days, 2);
+    EXPECT_EQ(reopened.for_interval(begin, end)->data_info().extrapolation_days, 3);
+    reopened.data().set_setting("extrapolation-finals2000a-days", "invalid");
+    EXPECT_EQ(reopened.extrapolation_days(0), 0);
+}
+TEST_F(DataCenterTest, LimitedExtrapolationIsContinuousDifferentiableAndBoundedAtBothEnds) {
+    constexpr std::int64_t day = 86'400'000'000'000;
+    for (const auto *manifest : {ORBITFORGE_TEST_FINALS, ORBITFORGE_TEST_C04}) {
+        const auto strict = runtime::load_eop_snapshot(manifest);
+        const auto extended = runtime::load_eop_snapshot(manifest, 2);
+        const auto &info = strict->data_info();
+        EXPECT_EQ(extended->data_info().sha256, info.sha256);
+        EXPECT_EQ(extended->data_info().first_epoch, info.first_epoch);
+        EXPECT_EQ(extended->data_info().last_epoch, info.last_epoch);
+        for (const auto direction : {-1, 1}) {
+            const auto anchor = direction < 0 ? info.first_epoch : info.last_epoch;
+            const auto limit = core::Epoch{anchor.tai_nanoseconds() + direction * 2 * day};
+            EXPECT_NO_THROW((void)extended->at(limit));
+            EXPECT_THROW((void)extended->at(core::Epoch{limit.tai_nanoseconds() + direction}),
+                         core::EopCoverageError);
+            const auto inside = extended->at(anchor);
+            EXPECT_EQ(inside.sample.ut1_minus_tai_seconds,
+                      strict->at(anchor).sample.ut1_minus_tai_seconds);
+            const auto adjacent = extended->at(core::Epoch{anchor.tai_nanoseconds() + direction});
+            EXPECT_NEAR(adjacent.sample.ut1_minus_tai_seconds, inside.sample.ut1_minus_tai_seconds,
+                        1e-12);
+            const auto earlier =
+                extended->at(core::Epoch{anchor.tai_nanoseconds() - 1'000'000'000});
+            const auto later = extended->at(core::Epoch{anchor.tai_nanoseconds() + 1'000'000'000});
+            EXPECT_NEAR(
+                (later.sample.ut1_minus_tai_seconds - earlier.sample.ut1_minus_tai_seconds) / 2,
+                inside.rates.ut1_minus_tai_seconds_per_second, 1e-11);
+            EXPECT_NEAR((later.sample.polar_motion_x_rad - earlier.sample.polar_motion_x_rad) / 2,
+                        inside.rates.polar_motion_x_rad_per_second, 1e-15);
+            EXPECT_NEAR((later.sample.polar_motion_y_rad - earlier.sample.polar_motion_y_rad) / 2,
+                        inside.rates.polar_motion_y_rad_per_second, 1e-15);
+            EXPECT_NEAR(
+                (later.sample.celestial_pole_dx_rad - earlier.sample.celestial_pole_dx_rad) / 2,
+                inside.rates.celestial_pole_dx_rad_per_second, 1e-15);
+            EXPECT_NEAR(
+                (later.sample.celestial_pole_dy_rad - earlier.sample.celestial_pole_dy_rad) / 2,
+                inside.rates.celestial_pole_dy_rad_per_second, 1e-15);
+            EXPECT_NE(
+                extended->at(limit).sample.source_id.find("extrapolation=endpoint-linear-tai-v1"),
+                std::string::npos);
+            EXPECT_THROW((void)strict->at(limit), core::EopCoverageError);
+        }
+    }
+}
+TEST_F(DataCenterTest, ExtrapolationNeverExtendsLeapSecondValidity) {
+    class EndOfTimeData final : public core::IEarthOrientationProvider {
+      public:
+        core::EopDataInfo info;
+        explicit EndOfTimeData(const core::ITimeProvider &clock)
+            : info{"test",
+                   std::string(64, 'a'),
+                   "test",
+                   "ITRS",
+                   "test",
+                   clock.from_utc({2027, 6, 26, 0, 0, 0, 0}),
+                   clock.from_utc({2027, 6, 27, 0, 0, 0, 0}),
+                   clock.data_info()} {}
+        const core::EopDataInfo &data_info() const noexcept override { return info; }
+        core::EarthOrientationState at(core::Epoch t) const override {
+            return {{t, -37, 0, 0, 0, 0, "test"}, {0, 0, 0, 0, 0}};
+        }
+    };
+    const auto time = runtime::make_builtin_time_provider();
+    auto source = std::make_shared<EndOfTimeData>(*time);
+    const auto extended = runtime::with_eop_extrapolation(source, 30);
+    const auto expiry = core::Epoch{source->info.last_epoch.tai_nanoseconds() + 86'400'000'000'000};
+    EXPECT_NO_THROW((void)extended->at(core::Epoch{expiry.tai_nanoseconds() - 1}));
+    EXPECT_THROW((void)extended->at(expiry), core::TimeDataRangeError);
 }
 } // namespace
 } // namespace orbitforge::desktop

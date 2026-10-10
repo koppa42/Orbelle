@@ -40,9 +40,17 @@ struct EopDataInfo {
     std::string reference_frame;
     std::string interpolation;
     Epoch first_epoch;
-    Epoch last_epoch; // Inclusive; no extrapolation past this sample.
+    Epoch last_epoch; // Inclusive original coverage; never extended by a usage policy.
     TimeDataInfo time_data;
+    int extrapolation_days = 0; // 0 disables; otherwise endpoint-linear-tai-v1, both ends.
 };
+inline constexpr int max_eop_extrapolation_days = 30;
+[[nodiscard]] inline bool eop_covers(const EopDataInfo &info, Epoch epoch) noexcept {
+    return info.extrapolation_days >= 0 && info.extrapolation_days <= max_eop_extrapolation_days &&
+           info.first_epoch.tai_nanoseconds() < info.last_epoch.tai_nanoseconds() &&
+           epoch.seconds_since(info.first_epoch) >= -info.extrapolation_days * 86400.0 &&
+           epoch.seconds_since(info.last_epoch) <= info.extrapolation_days * 86400.0;
+}
 class IEarthOrientationProvider {
   public:
     virtual ~IEarthOrientationProvider() = default;

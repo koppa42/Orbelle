@@ -83,7 +83,8 @@ void bind_time_frames(py::module_ &module) {
         .def_readonly("interpolation", &core::EopDataInfo::interpolation)
         .def_readonly("first_epoch", &core::EopDataInfo::first_epoch)
         .def_readonly("last_epoch", &core::EopDataInfo::last_epoch)
-        .def_readonly("time_data", &core::EopDataInfo::time_data);
+        .def_readonly("time_data", &core::EopDataInfo::time_data)
+        .def_readonly("extrapolation_days", &core::EopDataInfo::extrapolation_days);
     py::class_<core::IEarthOrientationProvider>(module, "EarthOrientationProvider")
         .def("at", &core::IEarthOrientationProvider::at, py::arg("epoch"),
              py::call_guard<py::gil_scoped_release>())
@@ -114,7 +115,7 @@ void bind_time_frames(py::module_ &module) {
     module.def("make_builtin_time_provider", &runtime::make_builtin_time_provider);
     module.def("make_frame_provider", &runtime::make_frame_provider);
     module.def("load_eop_snapshot", &runtime::load_eop_snapshot, py::arg("manifest"),
-               py::call_guard<py::gil_scoped_release>());
+               py::arg("extrapolation_days") = 0, py::call_guard<py::gil_scoped_release>());
     module.def("import_eop_snapshot", &runtime::import_eop_snapshot, py::arg("manifest"),
                py::arg("store"), py::call_guard<py::gil_scoped_release>());
 }

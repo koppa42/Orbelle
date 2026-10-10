@@ -51,6 +51,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QLineF>
+#include <QListWidget>
 #include <QMainWindow>
 #include <QMenu>
 #include <QMenuBar>
@@ -65,6 +66,7 @@
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSlider>
+#include <QSpinBox>
 #include <QStackedWidget>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -499,9 +501,7 @@ class Workbench final : public QMainWindow {
                         if (!source)
                             continue;
                         const auto &coverage = source->data_info();
-                        if (state.epoch.tai_nanoseconds() <
-                                coverage.first_epoch.tai_nanoseconds() ||
-                            state.epoch.tai_nanoseconds() > coverage.last_epoch.tai_nanoseconds())
+                        if (!core::eop_covers(coverage, state.epoch))
                             continue;
                         const auto transform =
                             frames_->gcrf_to_itrf_state(state.epoch, source->at(state.epoch));
@@ -549,6 +549,8 @@ class Workbench final : public QMainWindow {
                     }
                 };
                 editor_->cancel = [this] {
+                    if (project_candidate_.valid() && project_orbit_edit_ && project_cancellation_)
+                        project_cancellation_->store(true);
                     if (cancellation_)
                         cancellation_->store(true);
                 };
@@ -1114,6 +1116,9 @@ class Workbench final : public QMainWindow {
                     messages.append(message);
             }
             report.insert("validation_messages", messages);
+            if (eop_catalog_)
+                report.insert("data_catalog_warnings",
+                              QJsonArray::fromStringList(eop_catalog_->warnings()));
             if (!benchmarking_) {
                 report.insert("ui_font_family", QFontInfo(font()).family());
                 report.insert(
@@ -1417,13 +1422,93 @@ class Workbench final : public QMainWindow {
                                  QString::fromUtf8(error.what()));
         }
     }
-    void start_project(application::Project project, const QString &path, bool editing = false,
-                       std::optional<std::size_t> selection = std::nullopt) {
+    void show_data_coverage(core::Epoch first, core::Epoch last) {
+        const auto label = [](core::Epoch epoch) {
+            try {
+                return calendar_text(epoch, CalendarScale::utc) + QStringLiteral(" UTC");
+            } catch (const std::out_of_range &) {
+                return QString::number(epoch.tai_nanoseconds()) + QStringLiteral(" TAI ns");
+            }
+        };
+        QString coverage;
+        for (const auto index : eop_catalog_->current_indices()) {
+            const auto &info = eop_catalog_->providers().at(index)->data_info();
+            coverage += QStringLiteral("\n%1 — %2（允许外推：%3 天）")
+                            .arg(label(info.first_epoch), label(info.last_epoch))
+                            .arg(eop_catalog_->extrapolation_days(index));
+        }
+        QMessageBox message(
+            QMessageBox::Warning, QStringLiteral("数据覆盖不足"),
+            QStringLiteral("场景需要：%1 — "
+                           "%2\n当前数据覆盖：%3\n\n请在数据中心更新数据或调整外推设置后重试。UTC "
+                           "/ 闰秒有效期不可外推。")
+                .arg(label(first), label(last), coverage),
+            QMessageBox::Cancel, this);
+        message.setObjectName("dataCoverageDialog");
+        auto *manage = message.addButton(QStringLiteral("打开数据中心"), QMessageBox::ActionRole);
+        message.exec();
+        if (message.clickedButton() == manage)
+            show_data_center(this, *eop_catalog_);
+    }
+    QString extrapolation_description(const core::EopDataInfo &info, core::Epoch first,
+                                      core::Epoch last) const {
+        QStringList ranges;
+        if (first.tai_nanoseconds() < info.first_epoch.tai_nanoseconds())
+            ranges.push_back(
+                calendar_text(first, CalendarScale::utc) + QStringLiteral(" — ") +
+                calendar_text(core::Epoch{std::min(last.tai_nanoseconds(),
+                                                   info.first_epoch.tai_nanoseconds())},
+                              CalendarScale::utc));
+        if (last.tai_nanoseconds() > info.last_epoch.tai_nanoseconds())
+            ranges.push_back(calendar_text(core::Epoch{std::max(first.tai_nanoseconds(),
+                                                                info.last_epoch.tai_nanoseconds())},
+                                           CalendarScale::utc) +
+                             QStringLiteral(" — ") + calendar_text(last, CalendarScale::utc));
+        return ranges.empty()
+                   ? QStringLiteral("未使用外推")
+                   : QStringLiteral("已使用 EOP 外推（端点线性估算，上限 %1 天）\n%2 UTC")
+                         .arg(info.extrapolation_days)
+                         .arg(ranges.join(QStringLiteral("\n")));
+    }
+    bool start_project(application::Project project, const QString &path, bool editing = false,
+                       std::optional<std::size_t> selection = std::nullopt,
+                       std::optional<std::string> edited_object = std::nullopt) {
         if (busy())
             throw std::logic_error("Finish the pending update before opening a project");
+        EopCatalog::Provider next_data;
+        try {
+            next_data = data_for_interval(project.first, project.last);
+        } catch (const std::out_of_range &) {
+            last_project_outcome_ = "rejected";
+            show_data_coverage(project.first, project.last);
+            return false;
+        }
+        if (project.earth_orientation &&
+            project.data_lock() != application::eop_data_lock(next_data->data_info())) {
+            QMessageBox message(
+                QMessageBox::Question, QStringLiteral("场景数据已变化"),
+                QStringLiteral("当前数据或使用策略与此场景上次计算不一致。\n是否使用当前数据更新场"
+                               "景并继续？\n%1\n\n取消将保留当前场景，不打开或重新计算。")
+                    .arg(extrapolation_description(next_data->data_info(), project.first,
+                                                   project.last)),
+                QMessageBox::Yes | QMessageBox::Cancel, this);
+            message.setObjectName("dataChangeDialog");
+            message.button(QMessageBox::Yes)->setText(QStringLiteral("使用当前数据"));
+            message.setDefaultButton(QMessageBox::Cancel);
+            message.setDetailedText(
+                QStringLiteral("上次数据：%1\n当前数据：%2")
+                    .arg(QString::fromStdString(project.data_lock().sha256()),
+                         QString::fromStdString(
+                             application::eop_data_lock(next_data->data_info()).sha256())));
+            if (message.exec() != QMessageBox::Yes) {
+                last_project_outcome_ = "cancelled";
+                return false;
+            }
+        }
         if (display_cancellation_)
             display_cancellation_->store(true);
         project_edit_ = editing;
+        project_orbit_edit_ = edited_object.has_value();
         pending_project_selection_ = selection;
         pending_project_path_ = editing ? project_path_ : QFileInfo(path).absoluteFilePath();
         if (editing)
@@ -1440,24 +1525,23 @@ class Workbench final : public QMainWindow {
                                                 : QStringLiteral("取消打开"));
         project_cancellation_ = std::make_shared<std::atomic_bool>(false);
         last_project_outcome_.clear();
-        project_binding_added_ = !project.earth_orientation.has_value();
-        auto installed_data = eop_catalog_->providers();
-        std::rotate(installed_data.begin(),
-                    installed_data.begin() + static_cast<std::ptrdiff_t>(eop_catalog_->preferred),
-                    installed_data.begin() +
-                        static_cast<std::ptrdiff_t>(eop_catalog_->preferred + 1));
+        project_recorded_data_ = project.data_lock();
+        // Capture exactly the data the user checked/approved, even if a download
+        // completes while the confirmation dialog is open.
+        std::vector<EopCatalog::Provider> installed_data{next_data};
         const auto retained = editing ? scenario_ : std::nullopt;
-        project_candidate_ =
-            std::async(std::launch::async,
-                       [this, project = std::move(project),
-                        source = std::filesystem::path(pending_project_path_.toStdWString()),
-                        installed_data, retained, cancel = project_cancellation_]() mutable {
-                           return prepare_project_scene(std::move(project), source, *frames_,
-                                                        installed_data, *cancel, retained);
-                       });
+        project_candidate_ = std::async(
+            std::launch::async,
+            [this, project = std::move(project),
+             source = std::filesystem::path(pending_project_path_.toStdWString()), installed_data,
+             retained, edited_object, cancel = project_cancellation_]() mutable {
+                return prepare_project_scene(std::move(project), source, *frames_, installed_data,
+                                             *cancel, retained, edited_object);
+            });
         update_actions();
         statusBar()->showMessage(editing ? QStringLiteral("正在更新场景并准备轨迹…")
                                          : QStringLiteral("正在打开项目并准备轨迹…"));
+        return true;
     }
     void poll_project() {
         if (!project_candidate_.valid() ||
@@ -1542,7 +1626,10 @@ class Workbench final : public QMainWindow {
             ground_map_->publish_tracks(std::move(candidate->ground_tracks));
             if (!project_edit_)
                 ground_map_->reset_view();
-            workspace_label_->setText(QString::fromStdString(scenario_->name()));
+            workspace_label_->setText(QString::fromStdString(scenario_->name()) +
+                                      (eop_->data_info().extrapolation_days > 0
+                                           ? QStringLiteral(" · EOP 外推")
+                                           : QString{}));
             workspace_label_->setToolTip(workspace_label_->text());
             set_selection(project_edit_ ? pending_project_selection_ : std::nullopt);
             set_playing(false);
@@ -1563,7 +1650,8 @@ class Workbench final : public QMainWindow {
             if (timeline_ && !project_edit_)
                 timeline_->reset_view();
             project_path_ = pending_project_path_;
-            mark_project_dirty(project_edit_ || project_binding_added_);
+            mark_project_dirty(project_edit_ ||
+                               candidate->project.data_lock() != project_recorded_data_);
             last_project_outcome_ = "opened";
             statusBar()->showMessage(project_edit_
                                          ? QStringLiteral("已更新场景")
@@ -1584,6 +1672,16 @@ class Workbench final : public QMainWindow {
             last_project_outcome_ = "rejected";
             statusBar()->showMessage(
                 QStringLiteral("项目图形准备失败：%1").arg(QString::fromStdString(error.message)));
+        }
+        if (project_orbit_edit_) {
+            editor_->set_busy(false);
+            last_orbit_outcome_ =
+                last_project_outcome_ == "opened" ? "applied" : last_project_outcome_;
+            if (last_project_outcome_ != "opened")
+                editor_->show_result(QStringLiteral("未应用；原场景保留。"), true);
+            if (insert_defaults_pending_ && last_orbit_outcome_ == "rejected")
+                show_properties_dialog();
+            insert_defaults_pending_ = false;
         }
         update_actions();
     }
@@ -1661,42 +1759,16 @@ class Workbench final : public QMainWindow {
             QMessageBox::warning(this, QStringLiteral("删除失败"), QString::fromUtf8(error.what()));
         }
     }
-    void apply_eop_snapshot(std::size_t index) {
-        if (busy())
-            return;
-        const auto &next = eop_catalog_->providers().at(index);
-        if (!scenario_) {
-            eop_catalog_->set_preferred(index);
-            return;
-        }
-        if (next == eop_)
-            return;
-        auto project = project_snapshot(project_path_);
-        project.earth_orientation = next->data_info();
-        application::validate_project(project);
-        start_project(std::move(project), project_path_, true, selected_);
-    }
     void manage_eop_data() {
         if (busy())
             return;
-        const auto interval = scenario_
-                                  ? std::optional{std::pair{scenario_->first(), scenario_->last()}}
-                                  : std::nullopt;
-        const auto choice =
-            choose_eop_snapshot(this, *eop_catalog_, scenario_ ? eop_ : nullptr, interval);
-        if (choice) {
-            try {
-                apply_eop_snapshot(*choice);
-            } catch (const std::exception &error) {
-                QMessageBox::warning(this, QStringLiteral("数据未应用"),
-                                     QString::fromUtf8(error.what()));
-            }
-        }
+        show_data_center(this, *eop_catalog_);
     }
     void create_scenario() {
         if (busy())
             return;
-        const auto &coverage = eop_catalog_->providers().at(eop_catalog_->preferred)->data_info();
+        const auto &coverage =
+            eop_catalog_->providers().at(eop_catalog_->preferred_index())->data_info();
         auto next = new_scenario_dialog(
             this, coverage.first_epoch, coverage.last_epoch,
             [this](core::Epoch first, core::Epoch last) { (void)data_for_interval(first, last); });
@@ -1705,17 +1777,7 @@ class Workbench final : public QMainWindow {
     }
     std::shared_ptr<const core::IEarthOrientationProvider>
     data_for_interval(core::Epoch first, core::Epoch last) const {
-        if (last.tai_nanoseconds() <= first.tai_nanoseconds())
-            throw std::invalid_argument("结束时间必须晚于开始时间。");
-        auto installed_data = eop_catalog_->providers();
-        installed_data.insert(installed_data.begin(), installed_data.at(eop_catalog_->preferred));
-        for (const auto &candidate : installed_data) {
-            if (candidate &&
-                first.tai_nanoseconds() >= candidate->data_info().first_epoch.tai_nanoseconds() &&
-                last.tai_nanoseconds() <= candidate->data_info().last_epoch.tai_nanoseconds())
-                return candidate;
-        }
-        throw std::out_of_range("所选时段超出已安装的地球定向数据覆盖，请选择覆盖范围内的时间。");
+        return eop_catalog_->for_interval(first, last);
     }
     void activate_scenario(application::Scenario next) {
         if (busy())
@@ -1763,7 +1825,9 @@ class Workbench final : public QMainWindow {
             0, QStringLiteral("Scenario · 中心天体 Earth\n%1 — %2 TAI")
                    .arg(display_tai(scenario_->first()), display_tai(scenario_->last())));
         scenario_item_->setExpanded(true);
-        workspace_label_->setText(QString::fromStdString(scenario_->name()));
+        workspace_label_->setText(
+            QString::fromStdString(scenario_->name()) +
+            (eop_->data_info().extrapolation_days > 0 ? QStringLiteral(" · EOP 外推") : QString{}));
         workspace_label_->setToolTip(workspace_label_->text());
         setWindowTitle(QString::fromStdString(scenario_->name()) + QStringLiteral(" · OrbitForge"));
         project_path_.clear();
@@ -1994,9 +2058,14 @@ class Workbench final : public QMainWindow {
         auto *locked = new QLineEdit(QString::fromStdString(scenario_->data_lock().sha256()));
         locked->setObjectName("scenarioDataHash");
         locked->setReadOnly(true);
-        locked->setToolTip(QStringLiteral(
-            "场景数据依赖清单的 SHA-256；包含文件内容、解析规则、覆盖范围和时间数据依赖。"));
-        form->addRow(QStringLiteral("数据依赖 SHA-256"), locked);
+        locked->setToolTip(
+            QStringLiteral("本次计算的数据来源记录；再次打开或计算时检查变化并请求确认。"));
+        form->addRow(QStringLiteral("本次计算数据 SHA-256"), locked);
+        auto *extrapolated = new QLabel(
+            extrapolation_description(eop_->data_info(), scenario_->first(), scenario_->last()));
+        extrapolated->setObjectName("scenarioExtrapolation");
+        extrapolated->setWordWrap(true);
+        form->addRow(QStringLiteral("外推情况"), extrapolated);
         auto *close = new QPushButton(QStringLiteral("关闭"));
         layout->addWidget(close, 0, Qt::AlignRight);
         connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
@@ -2184,6 +2253,39 @@ class Workbench final : public QMainWindow {
                  })) {
             last_orbit_outcome_ = "rejected";
             editor_->show_result(QStringLiteral("对象 ID 已存在，请使用其他名称。"), true);
+            return;
+        }
+        try {
+            const auto current_data = data_for_interval(input.first, input.last);
+            if (!application::matching_project_data(current_data->data_info(), eop_->data_info())) {
+                // Publish all tracks and their provider together, never mix EOP revisions.
+                auto project = project_snapshot(project_path_);
+                const auto id = input.object_id;
+                if (editor_target_)
+                    project.satellites.at(*editor_target_).orbit = std::move(input);
+                else {
+                    application::ProjectSatellite added;
+                    added.orbit = std::move(input);
+                    project.satellites.push_back(std::move(added));
+                }
+                if (start_project(std::move(project), project_path_, true,
+                                  editor_target_.value_or(satellites_.size()), id)) {
+                    last_orbit_outcome_.clear();
+                    editor_->set_busy(true);
+                } else {
+                    last_orbit_outcome_ = last_project_outcome_;
+                    editor_->show_result(QStringLiteral("未重新计算；原场景保留。"));
+                }
+                return;
+            }
+        } catch (const std::out_of_range &) {
+            last_orbit_outcome_ = "rejected";
+            show_data_coverage(input.first, input.last);
+            editor_->show_result(QStringLiteral("数据覆盖不足；原场景保留。"), true);
+            return;
+        } catch (const std::exception &error) {
+            last_orbit_outcome_ = "rejected";
+            editor_->show_result(QString::fromUtf8(error.what()), true);
             return;
         }
         cancellation_ = std::make_shared<std::atomic_bool>(false);
@@ -3654,6 +3756,13 @@ class Workbench final : public QMainWindow {
             });
             delete_action_->trigger();
         };
+        const auto answer_data = [require](bool accepted, const char *name = "dataChangeDialog") {
+            QTimer::singleShot(0, [accepted, name, require] {
+                auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+                require(box && box->objectName() == name, "Missing data approval/coverage dialog");
+                box->button(accepted ? QMessageBox::Yes : QMessageBox::Cancel)->click();
+            });
+        };
         auto input = orbit_ ? orbit_->input : OrbitInput{};
         switch (orbit_smoke_stage_) {
         case 0:
@@ -4755,18 +4864,35 @@ class Workbench final : public QMainWindow {
             record("project-save-open-two-body-j2-display-nanoseconds");
             save_workbench_image("project-restored.png");
             smoke_cache_ = orbit_;
+            const auto smoke_time = runtime::make_builtin_time_provider();
+            application::Project uncovered{"Uncovered",
+                                           smoke_time->from_utc({2027, 1, 1, 0, 0, 0, 0}),
+                                           smoke_time->from_utc({2027, 1, 2, 0, 0, 0, 0})};
+            answer_data(false, "dataCoverageDialog");
+            require(!start_project(uncovered, project_path_) && orbit_ == smoke_cache_ && !busy() &&
+                        !project_dirty_,
+                    "Coverage failure replaced the current scene");
+            record("project-coverage-gap-preserves-scene");
             auto wrong_data = project_snapshot(project_path_);
             wrong_data.earth_orientation->sha256[0] =
                 wrong_data.earth_orientation->sha256[0] == 'a' ? 'b' : 'a';
+            answer_data(false);
+            require(!start_project(wrong_data, project_path_) && !busy() &&
+                        orbit_ == smoke_cache_ && !project_dirty_,
+                    "Declining changed data modified the scene");
+            record("project-data-change-decline-preserves-scene");
+            answer_data(true);
             start_project(std::move(wrong_data), project_path_);
             ++orbit_smoke_stage_;
             break;
         }
         case 75: {
-            require(last_project_outcome_ == "rejected" && orbit_ == smoke_cache_ &&
-                        satellites_.size() == 2 && !project_dirty_,
-                    "Data mismatch changed the active project");
-            record("project-data-mismatch-preserves-active-scene");
+            require(last_project_outcome_ == "opened" && satellites_.size() == 2 &&
+                        project_dirty_ &&
+                        scenario_->data_lock() == application::eop_data_lock(eop_->data_info()),
+                    "Saved data hash prevented the project from using current data");
+            record("project-data-change-approval-uses-current-data");
+            smoke_cache_ = orbit_;
             auto missing_model = project_snapshot(project_path_);
             missing_model.satellites[1].model_kind = 2;
             missing_model.satellites[1].model_path = "missing-project-model.glb";
@@ -4951,16 +5077,40 @@ class Workbench final : public QMainWindow {
                 require(dialog != nullptr, "Missing EOP dialog");
                 auto *expand = dialog->findChild<QToolButton *>("dataCenterDetails");
                 auto *automatic = dialog->findChild<QCheckBox *>("dataAutoUpdate");
+                auto *inventory = dialog->findChild<QListWidget *>("dataInventory");
                 require(expand && !expand->isChecked() && automatic && automatic->isChecked() &&
-                            dialog->findChild<QPushButton *>("downloadEop") &&
-                            dialog->findChild<QPushButton *>("importRawEop"),
-                        "Missing simple data center controls");
-                dialog->grab().save(smoke_dir_ + "/data-center-downloads.png");
-                expand->click();
-                auto *choices = dialog->findChild<QComboBox *>("eopSnapshots");
-                auto *apply = dialog->findChild<QPushButton *>("applyEopSnapshot");
-                choices->setCurrentIndex(eop_ == eop_current_ ? 1 : 0);
-                require(!apply->isEnabled(), "Out-of-coverage EOP could be applied");
+                            inventory && inventory->count() == 3 &&
+                            !dialog->findChild<QComboBox *>("eopSnapshots") &&
+                            !dialog->findChild<QPushButton *>("setDefaultEop") &&
+                            !dialog->findChild<QPushButton *>("applyEopSnapshot"),
+                        "Data inventory must show current data without version/default controls");
+                require(dialog->findChild<QLabel *>("dataAcquiredAt")
+                            ->text()
+                            .contains(QStringLiteral("内置")),
+                        "Missing acquisition information");
+                inventory->setCurrentRow(2);
+                require(
+                    dialog->findChild<QLabel *>("dataValidUntil")->text().contains("2027-06-28"),
+                    "Missing UTC expiry information");
+                auto *allow = dialog->findChild<QCheckBox *>("allowEopExtrapolation");
+                auto *days = dialog->findChild<QSpinBox *>("eopExtrapolationDays");
+                require(allow && days && !allow->isVisible(),
+                        "UTC must not expose EOP extrapolation controls");
+                inventory->setCurrentRow(0);
+                require(!allow->isChecked() && !days->isEnabled(),
+                        "Extrapolation should default off");
+                allow->setChecked(true);
+                days->setValue(2);
+                require(eop_catalog_->extrapolation_days(0) == 2,
+                        "Extrapolation limit was not saved");
+                inventory->setCurrentRow(1);
+                require(!allow->isChecked(), "EOP policies must be independent by product");
+                inventory->setCurrentRow(0);
+                require(allow->isChecked() && days->value() == 2,
+                        "Lost extrapolation setting on selection change");
+                allow->setChecked(false);
+                inventory->setCurrentRow(1);
+                record("data-center-per-product-extrapolation-controls");
                 QTimer::singleShot(0, [source] {
                     if (auto *file =
                             qobject_cast<QFileDialog *>(QApplication::activeModalWidget())) {
@@ -4969,23 +5119,34 @@ class Workbench final : public QMainWindow {
                     }
                 });
                 dialog->findChild<QPushButton *>("importEopSnapshot")->click();
-                require(eop_catalog_->providers().size() == 3 && apply->isEnabled(),
-                        "Snapshot import failed");
+                require(eop_catalog_->providers().size() == 3, "Snapshot import failed");
                 require(eop_->data_info().id.find("smoke-imported-") != 0,
                         "Import implicitly switched the active data");
+                const auto imported_row =
+                    eop_->data_info().interpolation.starts_with("finals2000a") ? 0 : 1;
+                require(inventory->count() == 3 &&
+                            inventory->item(imported_row)->data(Qt::UserRole).toInt() == 2 &&
+                            dialog->findChild<QLabel *>("dataAcquiredAt")
+                                ->text()
+                                .contains(QStringLiteral("导入")),
+                        "Import must update its current data row with an acquisition timestamp");
+                dialog->grab().save(smoke_dir_ + "/data-center-inventory.png");
+                expand->click();
                 dialog->grab().save(smoke_dir_ + "/eop-data-dialog.png");
+                inventory->setCurrentRow(0);
                 automatic->setChecked(false);
                 automatic->setChecked(true);
                 require(eop_catalog_->automatic_updates() && !eop_catalog_->downloading(),
                         "Update policy was not saved or unexpectedly started a download");
                 automatic->setChecked(false);
-                dialog->findChild<QPushButton *>("setDefaultEop")->click();
-                require(eop_catalog_->preferred == 2 && scenario_->data_lock() == smoke_data_lock_,
-                        "Changing the new-scenario default changed the active data lock");
-                record("data-center-policies-default-and-download-controls");
-                apply->click();
+                require(scenario_->data_lock() == smoke_data_lock_,
+                        "Refreshing the data inventory changed the active data lock");
+                record("data-inventory-acquisition-expiry-and-no-history-controls");
+                dialog->reject();
             });
             eop_action_->trigger();
+            answer_data(true);
+            start_project(project_snapshot(project_path_), project_path_);
             project_cancellation_->store(true);
             ++orbit_smoke_stage_;
             break;
@@ -4994,18 +5155,41 @@ class Workbench final : public QMainWindow {
             require(last_project_outcome_ == "cancelled" && !project_dirty_ &&
                         scenario_->data_lock() == smoke_data_lock_ &&
                         eop_->data_info().id.find("smoke-imported-") != 0,
-                    "Cancelled EOP switch changed the current data");
-            record("eop-import-dialog-coverage-and-cancel-switch");
-            apply_eop_snapshot(2);
+                    "Cancelled reload changed the current calculation data");
+            record("data-update-keeps-active-result-and-cancelled-reload");
+            set_selection(0);
+            open_properties();
+            smoke_cache_ = orbit_;
+            {
+                auto edited_input = satellites_[0].orbit->input;
+                edited_input.initial.position_m[0] *= 1.0001;
+                answer_data(false);
+                start_orbit(edited_input);
+                require(!busy() && orbit_ == smoke_cache_ && last_orbit_outcome_ == "cancelled" &&
+                            scenario_->data_lock() == smoke_data_lock_,
+                        "Declining recalculation changed the scene");
+                record("recalculation-data-change-decline-preserves-scene");
+                answer_data(true);
+                start_orbit(std::move(edited_input));
+            }
             ++orbit_smoke_stage_;
             break;
         case 88: {
-            require(last_project_outcome_ == "opened" && project_dirty_ &&
-                        scenario_->data_lock() != smoke_data_lock_ &&
-                        eop_->data_info().id.find("smoke-imported-") == 0 &&
-                        orbit_->eop_source_id.find("smoke-imported-") != std::string::npos,
-                    "Switch did not update the EOP provider and orbit display cache");
-            record("eop-switch-rebuilds-tracks-and-pins-version");
+            require(
+                last_project_outcome_ == "opened" && project_dirty_ &&
+                    scenario_->data_lock() != smoke_data_lock_ &&
+                    eop_->data_info().id.find("smoke-imported-") == 0 &&
+                    last_orbit_outcome_ == "applied" &&
+                    orbit_->session.provenance().input_revision ==
+                        smoke_cache_->session.provenance().input_revision + 1 &&
+                    orbit_->input.initial.position_m != smoke_cache_->input.initial.position_m &&
+                    std::all_of(satellites_.begin(), satellites_.end(),
+                                [](const auto &satellite) {
+                                    return satellite.orbit->eop_source_id.find("smoke-imported-") !=
+                                           std::string::npos;
+                                }),
+                "Recalculation did not use current data consistently for every object");
+            record("recalculation-uses-current-data-and-rebuilds-all-tracks");
             save_project_to(smoke_dir_ + "/imported-data.orbitforge");
             // Recreate the catalog as on a fresh process; source files are no longer needed.
             QFile changed(smoke_dir_ + "/import-source/manifest.json");
@@ -5022,7 +5206,11 @@ class Workbench final : public QMainWindow {
                         "resources/eop/manifest.json"},
                 std::filesystem::path{}, false);
             require(eop_catalog_->providers().size() == 3 && eop_catalog_->warnings().empty() &&
-                        eop_catalog_->preferred == 2 && !eop_catalog_->automatic_updates(),
+                        eop_catalog_->current_indices().size() == 2 &&
+                        std::find(eop_catalog_->current_indices().begin(),
+                                  eop_catalog_->current_indices().end(),
+                                  2) != eop_catalog_->current_indices().end() &&
+                        !eop_catalog_->automatic_updates(),
                     "Imported data did not survive catalog reconstruction");
             start_project(
                 application::load_project(std::filesystem::path(project_path_.toStdWString())),
@@ -5034,8 +5222,8 @@ class Workbench final : public QMainWindow {
             require(last_project_outcome_ == "opened" && !project_dirty_ &&
                         eop_->data_info().id.find("smoke-imported-") == 0 &&
                         satellites_[0].name() == QStringLiteral("观测卫星 A"),
-                    "Reopening could not resolve the installed exact EOP version");
-            record("eop-catalog-reload-resolves-project-after-source-removal");
+                    "Reopening could not use the current installed EOP data");
+            record("data-catalog-reload-uses-current-data-after-source-removal");
             require(scenario_->data_lock() == application::eop_data_lock(eop_->data_info()) &&
                         scenario_->data_lock() ==
                             application::load_project(
@@ -5047,9 +5235,76 @@ class Workbench final : public QMainWindow {
                         scenario_->data_lock().sha256(),
                     "Scenario properties did not expose the bound data hash");
             scenario_properties_->close();
-            record("scenario-data-lock-survives-edits-switch-cancel-and-reopen");
+            record("calculation-data-provenance-survives-save-and-reopen");
             save_workbench_image("objects-and-data-restored.png");
             ++orbit_smoke_stage_;
+            break;
+        case 90: {
+            const auto index = eop_catalog_->preferred_index();
+            eop_catalog_->set_extrapolation_days(index, 2);
+            const auto last = eop_catalog_->providers().at(index)->data_info().last_epoch;
+            const core::Epoch first{last.tai_nanoseconds() + 3'600'000'000'000};
+            application::Project extrapolated{
+                "EOP extrapolation", first, core::Epoch{first.tai_nanoseconds() + 600'000'000'000}};
+            application::ProjectSatellite satellite;
+            satellite.orbit.initial.epoch = first;
+            satellite.orbit.first = extrapolated.first;
+            satellite.orbit.last = extrapolated.last;
+            extrapolated.satellites.push_back(std::move(satellite));
+            start_project(std::move(extrapolated), smoke_dir_ + "/extrapolated.orbitforge");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 91: {
+            require(last_project_outcome_ == "opened" && satellites_.size() == 1 &&
+                        eop_->data_info().extrapolation_days == 2 &&
+                        satellites_[0].orbit->eop_source_id.find(
+                            "extrapolation=endpoint-linear-tai-v1") != std::string::npos,
+                    "Extrapolated EOP could not prepare an actual orbit scene");
+            open_scenario_properties();
+            require(findChild<QLabel *>("scenarioExtrapolation")
+                        ->text()
+                        .contains(QStringLiteral("已使用 EOP 外推")),
+                    "Scenario does not identify actual extrapolation");
+            scenario_properties_->close();
+            record("finite-eop-extrapolation-prepares-orbit-and-displays-provenance");
+            save_project_to(smoke_dir_ + "/extrapolated.orbitforge");
+            smoke_cache_ = orbit_;
+            smoke_data_lock_ = scenario_->data_lock();
+            const auto index = eop_catalog_->preferred_index();
+            eop_catalog_->set_extrapolation_days(index, 0);
+            answer_data(false, "dataCoverageDialog");
+            require(!start_project(project_snapshot(project_path_), project_path_) &&
+                        orbit_ == smoke_cache_,
+                    "Disabled extrapolation reused a stored permission");
+            eop_catalog_->set_extrapolation_days(index, 3);
+            answer_data(false);
+            require(!start_project(project_snapshot(project_path_), project_path_) &&
+                        scenario_->data_lock() == smoke_data_lock_,
+                    "Declining a changed extrapolation policy changed data");
+            record("extrapolation-policy-change-and-disable-recheck-on-open");
+            eop_catalog_->set_extrapolation_days(index, 2);
+            start_project(
+                application::load_project(std::filesystem::path(project_path_.toStdWString())),
+                project_path_);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 92:
+            require(last_project_outcome_ == "opened" && !project_dirty_ &&
+                        scenario_->data_lock() == smoke_data_lock_ &&
+                        eop_->data_info().extrapolation_days == 2,
+                    "Extrapolation provenance did not survive save/reopen");
+            record("extrapolation-project-roundtrip-keeps-original-coverage-and-policy");
+            ++orbit_smoke_stage_;
+            break;
+        case 93:
+            // Closing a property page can queue a native-window resize. Let Qt/VSG
+            // settle before comparing swapchain captures to current widget sizes.
+            if (++smoke_final_frames_ >= 4) {
+                save_workbench_image("extrapolated-scene.png");
+                ++orbit_smoke_stage_;
+            }
             break;
         }
     }
@@ -5274,7 +5529,8 @@ class Workbench final : public QMainWindow {
     std::shared_ptr<const OrbitScene> orbit_;
     std::optional<application::Scenario> scenario_;
     QString project_path_, pending_project_path_, last_project_outcome_;
-    bool project_dirty_ = false, project_binding_added_ = false;
+    bool project_dirty_ = false;
+    application::DataLock project_recorded_data_;
     std::optional<core::Epoch> precise_epoch_;
     std::shared_ptr<std::atomic_bool> project_cancellation_;
     std::future<std::shared_ptr<PreparedProject>> project_candidate_;
@@ -5282,7 +5538,7 @@ class Workbench final : public QMainWindow {
     QAction *rename_action_ = nullptr, *duplicate_action_ = nullptr, *delete_action_ = nullptr;
     QAction *eop_action_ = nullptr;
     std::unique_ptr<EopCatalog> eop_catalog_;
-    bool project_edit_ = false;
+    bool project_edit_ = false, project_orbit_edit_ = false;
     std::optional<std::size_t> pending_project_selection_;
     QPushButton *cancel_project_button_ = nullptr;
     std::vector<Satellite> satellites_;
@@ -5310,7 +5566,8 @@ class Workbench final : public QMainWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 90;
+    static constexpr int orbit_smoke_complete = 94;
+    int smoke_final_frames_ = 0;
     std::vector<std::uint8_t> smoke_project_bytes_;
     application::DataLock smoke_data_lock_;
     std::array<vsg::dvec3, 3> smoke_camera_;

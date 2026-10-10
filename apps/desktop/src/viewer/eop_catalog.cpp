@@ -9,13 +9,19 @@ namespace orbitforge::desktop {
 namespace {
 constexpr auto source_url = "https://datacenter.iers.org/data/9/finals2000A.all";
 constexpr qint64 max_download = 16 * 1024 * 1024;
+const char *extrapolation_key(const core::EopDataInfo &info) {
+    return info.interpolation.starts_with("finals2000a") ? "extrapolation-finals2000a-days"
+                                                         : "extrapolation-c04-days";
+}
 } // namespace
 EopCatalog::EopCatalog(std::filesystem::path store, std::vector<std::filesystem::path> bundled,
                        std::filesystem::path legacy, bool automatic)
     : store_(std::move(store)), data_(store_) {
     for (const auto &manifest : bundled) {
         try {
-            import_snapshot(manifest);
+            const auto entry = data_.install_eop(manifest);
+            data_.record_acquisition(entry.lock_sha256, runtime::DataAcquisition::bundled);
+            append(data_.load_eop(entry.lock_sha256));
         } catch (const std::exception &error) {
             warnings_.push_back(QString::fromUtf8(error.what()));
             append(runtime::load_eop_snapshot(manifest));
@@ -30,7 +36,8 @@ EopCatalog::EopCatalog(std::filesystem::path store, std::vector<std::filesystem:
                 }))
                 continue;
             try {
-                import_snapshot(entry.path() / "manifest.json");
+                const auto installed = data_.install_eop(entry.path() / "manifest.json");
+                append(data_.load_eop(installed.lock_sha256));
             } catch (const std::exception &error) {
                 warnings_.push_back(QString::fromUtf8(error.what()));
             }
@@ -44,10 +51,7 @@ EopCatalog::EopCatalog(std::filesystem::path store, std::vector<std::filesystem:
                                 QString::fromUtf8(error.what()));
         }
     }
-    const auto default_key = data_.setting("default-eop");
-    for (std::size_t i = 0; i < providers_.size(); ++i)
-        if (application::eop_data_lock(providers_[i]->data_info()).sha256() == default_key)
-            preferred = i;
+    refresh_current();
     status_ = QString::fromStdString(data_.setting("finals-status"));
     deadline_.setSingleShot(true);
     connect(&deadline_, &QTimer::timeout, this, [this] {
@@ -93,12 +97,50 @@ std::size_t EopCatalog::append(Provider provider) {
 }
 std::size_t EopCatalog::import_snapshot(const std::filesystem::path &manifest) {
     const auto entry = data_.install_eop(manifest);
-    return append(data_.load_eop(entry.lock_sha256));
+    data_.record_acquisition(entry.lock_sha256, runtime::DataAcquisition::imported);
+    const auto index = append(data_.load_eop(entry.lock_sha256));
+    refresh_current(index);
+    return index;
 }
-void EopCatalog::set_preferred(std::size_t index) {
-    const auto key = application::eop_data_lock(providers_.at(index)->data_info()).sha256();
-    data_.set_setting("default-eop", key);
-    preferred = index;
+void EopCatalog::refresh_current(std::optional<std::size_t> acquired) {
+    std::optional<std::size_t> finals, c04;
+    if (acquired) {
+        const auto &info = providers_.at(*acquired)->data_info();
+        data_.set_setting(info.interpolation.starts_with("finals2000a") ? "current-finals2000a"
+                                                                        : "current-c04",
+                          application::eop_data_lock(info).sha256());
+    }
+    const auto choose = [&](std::size_t index) {
+        (providers_[index]->data_info().interpolation.starts_with("finals2000a") ? finals : c04) =
+            index;
+    };
+    // Include usable bundled fallbacks even if their catalog copies were damaged.
+    for (std::size_t i = 0; i < providers_.size(); ++i)
+        choose(i);
+    // Existing stores without current pointers fall back to receipt/insertion order.
+    for (const auto &entry : data_.snapshots())
+        for (std::size_t i = 0; i < providers_.size(); ++i)
+            if (application::eop_data_lock(providers_[i]->data_info()).sha256() ==
+                entry.lock_sha256) {
+                choose(i);
+                break;
+            }
+    // Explicit pointers preserve the last successful acquisition even when timestamps
+    // coincide, the local clock changes, or previously installed bytes are imported again.
+    for (const auto &name : {"current-finals2000a", "current-c04"}) {
+        const auto key = data_.setting(name);
+        for (std::size_t i = 0; i < providers_.size(); ++i)
+            if (application::eop_data_lock(providers_[i]->data_info()).sha256() == key) {
+                choose(i);
+                break;
+            }
+    }
+    current_.clear();
+    if (finals)
+        current_.push_back(*finals);
+    if (c04)
+        current_.push_back(*c04);
+    ++revision_;
 }
 bool EopCatalog::automatic_updates() const {
     // Updates begin after the user installs the first complete file.
@@ -107,12 +149,52 @@ bool EopCatalog::automatic_updates() const {
 void EopCatalog::set_automatic_updates(bool enabled) {
     data_.set_setting("finals-auto-update", enabled ? "1" : "0");
 }
+int EopCatalog::extrapolation_days(std::size_t index) const {
+    bool valid = false;
+    const auto days =
+        QString::fromStdString(data_.setting(extrapolation_key(providers_.at(index)->data_info())))
+            .toInt(&valid);
+    return valid && days >= 0 && days <= core::max_eop_extrapolation_days ? days : 0;
+}
+void EopCatalog::set_extrapolation_days(std::size_t index, int days) {
+    if (days < 0 || days > core::max_eop_extrapolation_days)
+        throw std::invalid_argument("EOP extrapolation limit must be 0..30 days");
+    data_.set_setting(extrapolation_key(providers_.at(index)->data_info()), std::to_string(days));
+    ++revision_;
+}
+EopCatalog::Provider EopCatalog::for_interval(core::Epoch first, core::Epoch last) const {
+    if (first.tai_nanoseconds() >= last.tai_nanoseconds())
+        throw std::invalid_argument("结束时间必须晚于开始时间。");
+    const auto time = runtime::make_builtin_time_provider();
+    (void)time->to_utc(first);
+    (void)time->to_utc(last);
+    // Real file coverage always wins over an extrapolated alternative.
+    for (const auto index : current_) {
+        const auto &provider = providers_.at(index);
+        if (core::eop_covers(provider->data_info(), first) &&
+            core::eop_covers(provider->data_info(), last))
+            return provider;
+    }
+    for (const auto index : current_) {
+        const auto days = extrapolation_days(index);
+        if (days == 0)
+            continue;
+        auto info = providers_.at(index)->data_info();
+        info.extrapolation_days = days;
+        if (core::eop_covers(info, first) && core::eop_covers(info, last))
+            return runtime::with_eop_extrapolation(providers_.at(index), days);
+    }
+    throw core::EopCoverageError(
+        "所选时段超出当前 EOP 数据覆盖及允许的外推范围，请在数据中心更新数据或调整外推设置。");
+}
 void EopCatalog::import_raw(const std::filesystem::path &source) {
     const auto entry = data_.import_finals(
         source, source_url,
         QDateTime::currentDateTimeUtc().date().toString(Qt::ISODate).toStdString());
+    data_.record_acquisition(entry.lock_sha256, runtime::DataAcquisition::imported);
     last_installed_ = append(data_.load_eop(entry.lock_sha256));
-    status_ = QStringLiteral("已安装：%1；场景绑定保持不变。")
+    refresh_current(last_installed_);
+    status_ = QStringLiteral("已安装：%1；打开或重算时检查数据变化。")
                   .arg(QString::fromStdString(entry.snapshot_id));
 }
 void EopCatalog::cancel_download() {
@@ -210,13 +292,16 @@ void EopCatalog::start_download(QUrl url) {
                         std::filesystem::path(download_->fileName().toStdWString()),
                         url.toString().toStdString(),
                         QDateTime::currentDateTimeUtc().date().toString(Qt::ISODate).toStdString());
+                    data_.record_acquisition(entry.lock_sha256,
+                                             runtime::DataAcquisition::downloaded);
                     last_installed_ = append(data_.load_eop(entry.lock_sha256));
+                    refresh_current(last_installed_);
                     data_.set_setting("finals-installed-source", hash);
                     data_.set_setting("finals-source-url", url.toString().toStdString());
                     data_.set_setting("finals-etag", finished->rawHeader("ETag").toStdString());
                     data_.set_setting("finals-last-modified",
                                       finished->rawHeader("Last-Modified").toStdString());
-                    status_ = QStringLiteral("完整数据已就绪，已有场景继续使用固定版本。");
+                    status_ = QStringLiteral("完整数据已就绪，打开或重算时检查数据变化。");
                 }
             } catch (const std::exception &error) {
                 status_ = QString::fromUtf8(error.what());

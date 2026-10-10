@@ -232,3 +232,24 @@ TEST(Project, VersionTwoFilesUpgradeNamesAndDataReferencesWithoutChangingInputs)
               old.satellites[0].orbit.initial.position_m);
     EXPECT_EQ(updated.current, old.current);
 }
+TEST(Project, ExtrapolationPolicyRoundTripsAndParticipatesInProvenanceWithoutExtendingRawCoverage) {
+    auto project = example();
+    const auto original_hash = project.data_lock();
+    project.earth_orientation->extrapolation_days = 1;
+    EXPECT_NE(project.data_lock(), original_hash);
+    const auto changed_hash = project.data_lock();
+    project.earth_orientation->extrapolation_days = 2;
+    EXPECT_NE(project.data_lock(), changed_hash);
+    project.earth_orientation->last_epoch =
+        core::Epoch{project.last.tai_nanoseconds() - 86'400'000'000'000};
+    project.earth_orientation->first_epoch =
+        core::Epoch{project.earth_orientation->last_epoch.tai_nanoseconds() - 86'400'000'000'000};
+    const auto loaded = application::decode_project(application::encode_project(project));
+    EXPECT_EQ(loaded.earth_orientation->extrapolation_days, 2);
+    EXPECT_EQ(loaded.earth_orientation->last_epoch, project.earth_orientation->last_epoch);
+    EXPECT_EQ(loaded.data_lock(), project.data_lock());
+    project.earth_orientation->extrapolation_days = 0;
+    EXPECT_THROW(application::validate_project(project), application::ProjectError);
+    project.earth_orientation->extrapolation_days = 31;
+    EXPECT_THROW(application::validate_project(project), application::ProjectError);
+}

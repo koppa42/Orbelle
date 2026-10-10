@@ -12,11 +12,13 @@ struct PreparedProject {
     std::vector<vsg::ref_ptr<vsg::MatrixTransform>> models;
     GroundMap::PreparedTracks ground_tracks;
 };
-// Preparation owns its input and never changes the live workbench.
+// Preparation selects current data covering the interval; saved hashes are provenance.
+// Inputs and providers are captured for the whole calculation, leaving the live workbench intact.
 [[nodiscard]] std::shared_ptr<PreparedProject> prepare_project_scene(
     application::Project project, const std::filesystem::path &path,
     const core::IFrameProvider &frames,
     const std::vector<std::shared_ptr<const core::IEarthOrientationProvider>> &installed_data,
     const std::atomic_bool &cancelled,
-    std::optional<application::Scenario> retained_sessions = std::nullopt);
+    std::optional<application::Scenario> retained_sessions = std::nullopt,
+    const std::optional<std::string> &edited_object = std::nullopt);
 } // namespace orbitforge::desktop

@@ -6,17 +6,27 @@ namespace py = pybind11;
 using namespace orbitforge;
 void bind_data_catalog(py::module_ &module) {
     module.def("data_catalog_available", &runtime::data_catalog_available);
+    py::enum_<runtime::DataAcquisition>(module, "DataAcquisition")
+        .value("unknown", runtime::DataAcquisition::unknown)
+        .value("bundled", runtime::DataAcquisition::bundled)
+        .value("imported", runtime::DataAcquisition::imported)
+        .value("downloaded", runtime::DataAcquisition::downloaded);
     py::class_<runtime::CatalogSnapshot>(module, "CatalogSnapshot")
         .def_readonly("lock_sha256", &runtime::CatalogSnapshot::lock_sha256)
         .def_readonly("snapshot_id", &runtime::CatalogSnapshot::snapshot_id)
         .def_readonly("source_url", &runtime::CatalogSnapshot::source_url)
         .def_readonly("first", &runtime::CatalogSnapshot::first)
         .def_readonly("last", &runtime::CatalogSnapshot::last)
-        .def_readonly("manifest", &runtime::CatalogSnapshot::manifest);
+        .def_readonly("manifest", &runtime::CatalogSnapshot::manifest)
+        .def_readonly("acquisition", &runtime::CatalogSnapshot::acquisition)
+        .def_readonly("acquired_at_unix_seconds",
+                      &runtime::CatalogSnapshot::acquired_at_unix_seconds);
     py::class_<runtime::DataCatalog>(module, "DataCatalog")
         .def(py::init<std::filesystem::path>(), py::arg("root"))
         .def_property_readonly("root", &runtime::DataCatalog::root)
         .def_property_readonly("snapshots", &runtime::DataCatalog::snapshots)
+        .def("record_acquisition", &runtime::DataCatalog::record_acquisition,
+             py::arg("lock_sha256"), py::arg("acquisition"))
         .def("install_eop", &runtime::DataCatalog::install_eop, py::arg("manifest"),
              py::call_guard<py::gil_scoped_release>())
         .def("import_finals", &runtime::DataCatalog::import_finals, py::arg("source"),

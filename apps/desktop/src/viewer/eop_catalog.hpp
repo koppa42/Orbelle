@@ -23,9 +23,16 @@ class EopCatalog : public QObject {
     [[nodiscard]] const QStringList &warnings() const { return warnings_; }
     [[nodiscard]] const std::filesystem::path &store() const { return store_; }
     runtime::DataCatalog &data() { return data_; }
-    void set_preferred(std::size_t index);
+    [[nodiscard]] const std::vector<std::size_t> &current_indices() const { return current_; }
+    [[nodiscard]] std::size_t preferred_index() const {
+        return current_.empty() ? 0 : current_.front();
+    }
+    [[nodiscard]] std::uint64_t revision() const { return revision_; }
     void set_automatic_updates(bool enabled);
     [[nodiscard]] bool automatic_updates() const;
+    void set_extrapolation_days(std::size_t index, int days);
+    [[nodiscard]] int extrapolation_days(std::size_t index) const;
+    [[nodiscard]] Provider for_interval(core::Epoch first, core::Epoch last) const;
     void start_download(QUrl url = {});
     void cancel_download();
     void check_updates_if_due(qint64 now, QUrl source = {});
@@ -35,13 +42,15 @@ class EopCatalog : public QObject {
     [[nodiscard]] qint64 received_bytes() const { return received_; }
     [[nodiscard]] std::optional<std::size_t> last_installed() const { return last_installed_; }
     void import_raw(const std::filesystem::path &source);
-    std::size_t preferred = 0;
 
   private:
     std::size_t append(Provider provider);
+    void refresh_current(std::optional<std::size_t> acquired = std::nullopt);
     std::filesystem::path store_;
     runtime::DataCatalog data_;
     std::vector<Provider> providers_;
+    std::vector<std::size_t> current_;
+    std::uint64_t revision_ = 0;
     QStringList warnings_;
     QNetworkAccessManager network_;
     QNetworkReply *reply_ = nullptr;
@@ -53,8 +62,5 @@ class EopCatalog : public QObject {
     QString transfer_error_;
     std::optional<std::size_t> last_installed_;
 };
-// Imports remain installed if cancelled; only acceptance selects a data version.
-std::optional<std::size_t>
-choose_eop_snapshot(QWidget *parent, EopCatalog &catalog, const EopCatalog::Provider &current,
-                    std::optional<std::pair<core::Epoch, core::Epoch>> interval);
+void show_data_center(QWidget *parent, EopCatalog &catalog);
 } // namespace orbitforge::desktop

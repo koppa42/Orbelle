@@ -28,8 +28,7 @@ prepare_orbit_scene(OrbitInput input, application::Session session,
     const auto last = cache_interval ? cache_interval->second.tai_nanoseconds() : analysis_last;
     if (last <= first)
         throw std::invalid_argument("Analysis end must be later than its start");
-    if (analysis_first < info.first_epoch.tai_nanoseconds() ||
-        analysis_last > info.last_epoch.tai_nanoseconds())
+    if (!core::eop_covers(info, input.first) || !core::eop_covers(info, input.last))
         throw std::out_of_range("Analysis interval is outside the installed EOP coverage");
     if (first < analysis_first || last > analysis_last)
         throw std::out_of_range("Display cache must lie inside the analysis interval");
@@ -93,7 +92,12 @@ prepare_orbit_scene(OrbitInput input, application::Session session,
         }
     }
     check_cancel();
-    const auto eop_source = eop.at(nodes.front().epoch).sample.source_id;
+    auto eop_source = eop.at(nodes.front().epoch).sample.source_id;
+    if (info.extrapolation_days > 0)
+        eop_source +=
+            ";policy=endpoint-linear-tai-v1;limit-days=" + std::to_string(info.extrapolation_days) +
+            ";analysis-first-tai-ns=" + std::to_string(analysis_first) +
+            ";analysis-last-tai-ns=" + std::to_string(analysis_last);
     return std::make_shared<const OrbitScene>(OrbitScene{
         std::move(input), std::move(session), std::move(track), std::move(inertial_track),
         max_error, max_inertial_error, min_radius, max_radius, eop_source,

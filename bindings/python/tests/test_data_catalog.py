@@ -7,6 +7,7 @@ import json
 import shutil
 import sqlite3
 import tempfile
+import time
 import unittest
 
 import orbitforge as of
@@ -28,6 +29,55 @@ class DataCatalogTests(unittest.TestCase):
         project = of.Project('Pinned', info.first_epoch, info.last_epoch)
         project.earth_orientation = info
         return project
+
+    def test_acquisition_receipts_are_persistent_local_metadata(self):
+        store = self.root / 'catalog'
+        catalog = of.DataCatalog(store)
+        entry = catalog.install_eop(C04 / 'manifest.json')
+        lock = self.project(catalog.load_eop(entry.lock_sha256)).data_lock
+        self.assertEqual(entry.acquisition, of.DataAcquisition.unknown)
+        self.assertIsNone(entry.acquired_at_unix_seconds)
+        catalog.record_acquisition(entry.lock_sha256, of.DataAcquisition.bundled)
+        self.assertEqual(catalog.snapshots[0].acquisition, of.DataAcquisition.bundled)
+        self.assertIsNone(catalog.snapshots[0].acquired_at_unix_seconds)
+        before = int(time.time())
+        catalog.record_acquisition(entry.lock_sha256, of.DataAcquisition.downloaded)
+        receipt = catalog.snapshots[0]
+        self.assertGreaterEqual(receipt.acquired_at_unix_seconds, before)
+        self.assertLessEqual(receipt.acquired_at_unix_seconds, int(time.time()))
+        del catalog
+        reopened = of.DataCatalog(store)
+        # Startup re-registration of bundled bytes must not erase a real receipt.
+        reopened.record_acquisition(entry.lock_sha256, of.DataAcquisition.bundled)
+        again = reopened.install_eop(C04 / 'manifest.json')
+        self.assertEqual(again.acquisition, of.DataAcquisition.downloaded)
+        self.assertEqual(again.acquired_at_unix_seconds, receipt.acquired_at_unix_seconds)
+        self.assertEqual(again.lock_sha256, entry.lock_sha256)
+        self.assertEqual(self.project(reopened.resolve_eop(lock)).data_lock.sha256, lock.sha256)
+        reopened.record_acquisition(entry.lock_sha256, of.DataAcquisition.imported)
+        self.assertEqual(reopened.snapshots[0].acquisition, of.DataAcquisition.imported)
+        with self.assertRaises(RuntimeError):
+            reopened.record_acquisition('a' * 64, of.DataAcquisition.downloaded)
+        del reopened
+
+    def test_schema_one_migration_does_not_invent_acquisition_dates(self):
+        store = self.root / 'catalog'
+        catalog = of.DataCatalog(store)
+        entry = catalog.install_eop(C04 / 'manifest.json')
+        del catalog
+        with sqlite3.connect(store / 'catalog.sqlite') as db:
+            db.execute('DROP TABLE acquisitions')
+            db.execute('PRAGMA user_version=1')
+        db.close()
+        upgraded = of.DataCatalog(store)
+        self.assertEqual(upgraded.snapshots[0].lock_sha256, entry.lock_sha256)
+        self.assertEqual(upgraded.snapshots[0].acquisition, of.DataAcquisition.unknown)
+        self.assertIsNone(upgraded.snapshots[0].acquired_at_unix_seconds)
+        self.assertTrue(upgraded.load_eop(entry.lock_sha256).data_info.id)
+        del upgraded
+        with sqlite3.connect(store / 'catalog.sqlite') as db:
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 2)
+        db.close()
 
     def test_shared_content_preserves_two_independent_scenario_locks(self):
         source = self.root / 'source'

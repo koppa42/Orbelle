@@ -79,13 +79,22 @@ DataLock eop_data_lock(const core::EopDataInfo &info) {
     time_config.integer(static_cast<std::uint32_t>(time.utc_valid_until_mjd), 4);
     DataReference time_ref{"utc-time", time.id, time.sha256, time_version, time_config.digest()};
 
-    constexpr auto eop_version = "orbitforge-eop-reader-v1";
+    const auto eop_version =
+        info.extrapolation_days == 0 ? "orbitforge-eop-reader-v1" : "orbitforge-eop-reader-v2";
     Canonical eop_config;
     eop_config.text(eop_version);
     eop_config.text(info.reference_frame);
     eop_config.text(info.interpolation);
     eop_config.epoch(info.first_epoch);
     eop_config.epoch(info.last_epoch);
+    check(info.extrapolation_days >= 0 &&
+              info.extrapolation_days <= core::max_eop_extrapolation_days,
+          "Invalid EOP extrapolation limit");
+    // Preserve the identity of strict legacy data. A nonzero policy is independently hashed.
+    if (info.extrapolation_days != 0) {
+        eop_config.text("endpoint-linear-tai-v1");
+        eop_config.integer(static_cast<unsigned>(info.extrapolation_days), 4);
+    }
     // Include the complete time dependency identity, not just its display ID.
     eop_config.text(DataLock({time_ref}).sha256());
     DataReference eop_ref{"earth-orientation", info.id, info.sha256, eop_version,

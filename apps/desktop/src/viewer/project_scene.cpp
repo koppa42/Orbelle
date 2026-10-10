@@ -1,37 +1,32 @@
 #include "project_scene.hpp"
 #include "satellite_model.hpp"
 #include <algorithm>
+#include <limits>
 
 namespace orbitforge::desktop {
 std::shared_ptr<PreparedProject> prepare_project_scene(
     application::Project project, const std::filesystem::path &path,
     const core::IFrameProvider &frames,
     const std::vector<std::shared_ptr<const core::IEarthOrientationProvider>> &installed_data,
-    const std::atomic_bool &cancelled, std::optional<application::Scenario> retained_sessions) {
+    const std::atomic_bool &cancelled, std::optional<application::Scenario> retained_sessions,
+    const std::optional<std::string> &edited_object) {
     application::validate_project(project);
     std::shared_ptr<const core::IEarthOrientationProvider> eop;
     for (const auto &candidate : installed_data) {
         if (!candidate)
             continue;
         const auto &info = candidate->data_info();
-        if (info.first_epoch.tai_nanoseconds() <= project.first.tai_nanoseconds() &&
-            info.last_epoch.tai_nanoseconds() >= project.last.tai_nanoseconds() &&
-            (!project.earth_orientation ||
-             application::matching_project_data(*project.earth_orientation, info))) {
+        if (core::eop_covers(info, project.first) && core::eop_covers(info, project.last)) {
             eop = candidate;
             break;
         }
     }
     if (!eop)
         throw application::ProjectError(
-            project.earth_orientation
-                ? "The project's exact EOP/time data version is not installed; current project "
-                  "retained"
-                : "No installed EOP data covers this project's analysis interval");
+            "No current EOP data covers this project's analysis interval");
     project.earth_orientation = eop->data_info();
     if (retained_sessions) {
-        // Object management keeps every surviving numerical session and revision.
-        // This path never edits orbit inputs; normal orbit edits use with_object.
+        // Keep surviving numerical sessions; rebuild every display with the same current EOP.
         const auto previous = *retained_sessions;
         for (const auto &session : previous.objects())
             if (std::none_of(project.satellites.begin(), project.satellites.end(),
@@ -57,7 +52,15 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
             result->scenario.objects().begin(), result->scenario.objects().end(),
             [&](const auto &s) { return s.provenance().object_id == satellite.orbit.object_id; });
         const bool retained = existing != result->scenario.objects().end();
-        auto session = retained ? *existing : make_orbit_session(satellite.orbit);
+        const bool recompute = edited_object && *edited_object == satellite.orbit.object_id;
+        if (retained && recompute &&
+            existing->provenance().input_revision == std::numeric_limits<std::uint64_t>::max())
+            throw std::overflow_error("Object input revision exhausted");
+        auto session =
+            retained && !recompute
+                ? *existing
+                : make_orbit_session(satellite.orbit,
+                                     retained ? existing->provenance().input_revision + 1 : 1);
         auto orbit = prepare_orbit_scene(
             satellite.orbit, session, frames, *eop, cancelled,
             display_cache_interval(satellite.orbit, satellite.display, project.current));
@@ -77,7 +80,7 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
             model = vsg::MatrixTransform::create();
             model->addChild(make_satellite_model(model_path));
         }
-        if (!retained)
+        if (!retained || recompute)
             result->scenario = result->scenario.with_object(std::move(session));
         result->orbits.push_back(std::move(orbit));
         result->models.push_back(std::move(model));

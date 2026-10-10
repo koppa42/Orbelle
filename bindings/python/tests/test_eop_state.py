@@ -83,6 +83,41 @@ class EopStateApiTests(unittest.TestCase):
         first = clipped.data_info.first_epoch
         self.assertNotEqual(self.eop.at(first).sample.source_id, clipped.at(first).sample.source_id)
 
+    def test_finite_extrapolation_across_leap_second_and_velocity_transform(self):
+        destination = self.relocated()
+        path = destination / 'manifest.json'
+        manifest = json.loads(path.read_text(encoding='utf-8'))
+        manifest['last_mjd'] = 57753  # 2016-12-31, immediately before the leap second.
+        path.write_text(json.dumps(manifest), encoding='utf-8')
+        strict = of.load_eop_snapshot(path)
+        extended = of.load_eop_snapshot(path, extrapolation_days=2)
+        self.assertEqual(extended.data_info.sha256, strict.data_info.sha256)
+        self.assertEqual(extended.data_info.last_epoch.tai_nanoseconds,
+                         strict.data_info.last_epoch.tai_nanoseconds)
+        self.assertEqual(extended.data_info.extrapolation_days, 2)
+        leap = self.time.from_utc(of.UtcDateTime(2016, 12, 31, 23, 59, 60))
+        midnight = self.time.from_utc(of.UtcDateTime(2017, 1, 1))
+        a, b = extended.at(leap), extended.at(midnight)
+        self.assertAlmostEqual(b.sample.ut1_minus_tai_seconds - a.sample.ut1_minus_tai_seconds,
+                               a.rates.ut1_minus_tai_seconds_per_second, delta=1e-13)
+        self.assertIn('extrapolation=endpoint-linear-tai-v1', b.sample.source_id)
+        with self.assertRaises(of.EopCoverageError):
+            strict.at(midnight)
+        for limit in (-1, 31):
+            with self.assertRaises(ValueError):
+                of.load_eop_snapshot(path, extrapolation_days=limit)
+        # Independently compare transformed velocity to a central position difference.
+        def fixed_position(offset):
+            t = of.Epoch(midnight.tai_nanoseconds + round(offset * 1e9))
+            r = [7e6, 7500 * offset, 0]
+            return self.frames.gcrf_to_itrf(t, extended.at(t).sample).apply_position(r)
+        before, after = fixed_position(-0.1), fixed_position(0.1)
+        state = of.CartesianState(midnight, of.OriginId.EARTH, of.FrameId.GCRF,
+                                  [7e6, 0, 0], [0, 7500, 0])
+        result = self.frames.gcrf_to_itrf_state(midnight, b).apply(state)
+        for i in range(3):
+            self.assertAlmostEqual((after[i] - before[i]) / 0.2, result.velocity_mps[i], delta=0.001)
+
     def test_fixed_ground_state_and_roundtrip(self):
         transform = self.frames.gcrf_to_itrf_state(self.epoch, self.eop.at(self.epoch))
         ground = of.CartesianState(self.epoch, of.OriginId.EARTH, of.FrameId.ITRF,

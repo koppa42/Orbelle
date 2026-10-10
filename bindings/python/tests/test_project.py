@@ -49,7 +49,7 @@ class ProjectTests(unittest.TestCase):
             path = Path(directory) / 'bound.orbitforge'
             project.save(path)
             original = path.read_bytes()
-            self.assertEqual(struct.unpack_from('<I', original, 8)[0], 3)
+            self.assertEqual(struct.unpack_from('<I', original, 8)[0], 4)
             def rewrite(tag_to_change, mutate):
                 sections = []
                 offset = 24
@@ -72,6 +72,49 @@ class ProjectTests(unittest.TestCase):
             digest = project.earth_orientation.sha256.encode('ascii')
             changed = (b'0' if digest[:1] != b'0' else b'1') + digest[1:]
             rewrite(b'DATA', lambda body: body.replace(digest, changed, 1))
+            with self.assertRaisesRegex(of.ProjectError, 'references disagree'):
+                of.load_project(path)
+
+    def test_v3_upgrade_and_v4_extrapolation_policy_integrity(self):
+        project = self.bound_project()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'policy.orbitforge'
+            project.save(path)
+            original = path.read_bytes()
+            # Reconstruct a legacy v3 container from the documented DATA v1 encoding.
+            sections, offset = [], 24
+            while offset < len(original):
+                tag, version, size, _ = struct.unpack_from('<IIQI', original, offset)
+                body = original[offset + 20:offset + 20 + size]
+                offset += 20 + size
+                if tag.to_bytes(4, 'little') == b'DATA':
+                    body, version = body[:-4], 1
+                sections.append(struct.pack('<IIQI', tag, version, len(body), zlib.crc32(body)) + body)
+            payload = b''.join(sections)
+            path.write_bytes(original[:8] + struct.pack('<IQI', 3, len(payload), zlib.crc32(payload)) + payload)
+            loaded = of.load_project(path)
+            self.assertEqual(loaded.earth_orientation.extrapolation_days, 0)
+            self.assertEqual(loaded.data_lock.sha256, project.data_lock.sha256)
+            sample = Path(of.__file__).parent / 'data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json'
+            loaded.earth_orientation = of.load_eop_snapshot(sample, 3).data_info
+            loaded.save(path, overwrite=True)
+            restored = of.load_project(path)
+            self.assertEqual(restored.earth_orientation.extrapolation_days, 3)
+            self.assertEqual(restored.data_lock.sha256, loaded.data_lock.sha256)
+            self.assertNotEqual(restored.data_lock.sha256, project.data_lock.sha256)
+            self.assertEqual(restored.earth_orientation.sha256, project.earth_orientation.sha256)
+            original = path.read_bytes()
+            # A changed policy with repaired CRCs must still fail the independent data hash.
+            sections, offset = [], 24
+            while offset < len(original):
+                tag, version, size, _ = struct.unpack_from('<IIQI', original, offset)
+                body = original[offset + 20:offset + 20 + size]
+                offset += 20 + size
+                if tag.to_bytes(4, 'little') == b'DATA':
+                    body = body[:-4] + struct.pack('<I', 4)
+                sections.append(struct.pack('<IIQI', tag, version, len(body), zlib.crc32(body)) + body)
+            payload = b''.join(sections)
+            path.write_bytes(original[:12] + struct.pack('<QI', len(payload), zlib.crc32(payload)) + payload)
             with self.assertRaisesRegex(of.ProjectError, 'references disagree'):
                 of.load_project(path)
 

@@ -227,8 +227,7 @@ void validate_project(const Project &project) {
         text_check(data.source_url);
         text_check(data.time_data.source_url);
         check(hash_valid(data.sha256) && hash_valid(data.time_data.sha256), "Invalid data SHA256");
-        check(data.first_epoch.tai_nanoseconds() <= first &&
-                  data.last_epoch.tai_nanoseconds() >= last &&
+        check(core::eop_covers(data, project.first) && core::eop_covers(data, project.last) &&
                   data.time_data.utc_valid_from_mjd >= 0 &&
                   data.time_data.utc_valid_until_mjd > data.time_data.utc_valid_from_mjd,
               "Project data does not cover the analysis interval");
@@ -237,8 +236,8 @@ void validate_project(const Project &project) {
 bool matching_project_data(const core::EopDataInfo &a, const core::EopDataInfo &b) {
     return a.id == b.id && a.sha256 == b.sha256 && a.reference_frame == b.reference_frame &&
            a.interpolation == b.interpolation && a.first_epoch == b.first_epoch &&
-           a.last_epoch == b.last_epoch && a.time_data.id == b.time_data.id &&
-           a.time_data.sha256 == b.time_data.sha256 &&
+           a.last_epoch == b.last_epoch && a.extrapolation_days == b.extrapolation_days &&
+           a.time_data.id == b.time_data.id && a.time_data.sha256 == b.time_data.sha256 &&
            a.time_data.utc_valid_from_mjd == b.time_data.utc_valid_from_mjd &&
            a.time_data.utc_valid_until_mjd == b.time_data.utc_valid_until_mjd;
 }
@@ -311,7 +310,8 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
     if (project.earth_orientation) {
         Writer data;
         write_data(data, *project.earth_orientation);
-        payload.section(data_tag, data);
+        data.number(static_cast<unsigned>(project.earth_orientation->extrapolation_days), 4);
+        payload.section(data_tag, data, 2);
     }
     const auto lock = project.data_lock();
     Writer locked;
@@ -319,7 +319,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
     locked.text(lock.sha256());
     payload.section(lock_tag, locked);
     file.raw(magic);
-    file.number(3, 4);
+    file.number(4, 4);
     file.number(payload.bytes.size());
     file.number(crc32(payload.bytes), 4);
     file.raw(payload.bytes);
@@ -330,7 +330,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     Reader file{bytes};
     check(std::ranges::equal(file.raw(magic.size()), magic), "Not an OrbitForge project file");
     const auto version = file.number(4);
-    check(version >= 1 && version <= 3, "Unsupported OrbitForge project version");
+    check(version >= 1 && version <= 4, "Unsupported OrbitForge project version");
     const auto length = file.number();
     const auto checksum = file.number(4);
     check(length == file.bytes.size(), "Project length mismatch");
@@ -341,7 +341,9 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         check(tag == scene_tag || tag == objects_tag || tag == data_tag ||
                   (version >= 3 && tag == lock_tag),
               "Unsupported project section");
-        check(file.number(4) == (tag == objects_tag && version >= 2 ? 2U : 1U),
+        check(file.number(4) ==
+                  ((tag == objects_tag && version >= 2) || (tag == data_tag && version >= 4) ? 2U
+                                                                                             : 1U),
               "Unsupported project section version");
         const auto size = file.number();
         const auto section_crc = file.number(4);
@@ -398,6 +400,11 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     if (sections.contains(data_tag)) {
         Reader data{sections.at(data_tag)};
         project.earth_orientation = read_data(data);
+        if (version >= 4) {
+            const auto days = data.number(4);
+            check(days <= core::max_eop_extrapolation_days, "Invalid EOP extrapolation limit");
+            project.earth_orientation->extrapolation_days = static_cast<int>(days);
+        }
         data.done();
     }
     validate_project(project);
