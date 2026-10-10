@@ -212,12 +212,12 @@ std::vector<qint64> MissionTimeline::ruler_ticks() const {
 void MissionTimeline::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
-    p.fillRect(rect(), QColor("#151b24"));
+    p.fillRect(rect(), QColor("#161d2c"));
     const auto overview = overview_rect();
     const auto detail = detail_rect();
     const auto left = detail.left(), right = detail.right();
-    p.fillRect(QRectF(0, 0, left - 10, height()), QColor("#1c2430"));
-    p.setPen(QColor("#303c4b"));
+    p.fillRect(QRectF(0, 0, left - 10, height()), QColor("#1c2537"));
+    p.setPen(QColor("#303b52"));
     p.drawLine(QPointF(0, 41), QPointF(width(), 41));
     p.drawLine(QPointF(left - 10, 0), QPointF(left - 10, height()));
 
@@ -247,12 +247,12 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
     }
     const double a = position_at(view_first_, true), b = position_at(view_last_, true);
     p.fillRect(QRectF(a, overview.top(), std::max(2.0, b - a), overview.height()),
-               QColor("#2a435b"));
-    p.setPen(QPen(QColor("#5a83a6"), 1));
+               QColor("#353f62"));
+    p.setPen(QPen(QColor("#8798da"), 1));
     p.setBrush(Qt::NoBrush);
     p.drawRect(QRectF(a, overview.top(), std::max(2.0, b - a), overview.height()));
     if (b - a >= 18) {
-        p.setPen(QPen(QColor("#a6c8e3"), 2));
+        p.setPen(QPen(QColor("#c0caff"), 2));
         for (double x : {a + 3, b - 3})
             p.drawLine(QPointF(x, overview.top() + 3), QPointF(x, overview.bottom() - 3));
     }
@@ -320,15 +320,15 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
                    fontMetrics().elidedText(name, Qt::ElideRight, static_cast<int>(left - 58)));
         p.setPen(edge);
         p.setBrush(fill);
-        p.drawRect(QRectF(left, y, detail.width(), 18));
+        p.drawRoundedRect(QRectF(left, y, detail.width(), 18), 3, 3);
         p.setPen(QColor("#b4cfe6"));
         p.drawText(QRectF(left + 9, y, detail.width() - 18, 18), Qt::AlignVCenter, caption);
     };
-    track(91, scenario_, QStringLiteral("场景分析区间"), scenario_icon, QColor("#23374b"),
-          QColor("#3b5974"));
+    track(91, scenario_, QStringLiteral("场景分析区间"), scenario_icon, QColor("#303a59"),
+          QColor("#576a9b"));
     if (show_object_interval_ && !object_.isEmpty())
-        track(117, object_, QStringLiteral("轨道传播"), satellite_icon, QColor("#213e49"),
-              QColor("#3e6b7d"));
+        track(117, object_, QStringLiteral("轨道传播"), satellite_icon, QColor("#233e49"),
+              QColor("#4e8090"));
     else if (show_object_interval_) {
         p.setFont(font());
         p.setPen(QColor("#8c9eb4"));

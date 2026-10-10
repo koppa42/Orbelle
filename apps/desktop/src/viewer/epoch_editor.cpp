@@ -1,14 +1,15 @@
 #include "epoch_editor.hpp"
+#include "workbench_spin_box.hpp"
 #include "workbench_style.hpp"
 #include <QCalendarWidget>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDoubleSpinBox>
+#include <QEvent>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QPainter>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScreen>
@@ -16,7 +17,6 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStyle>
-#include <QStyleOptionSpinBox>
 #include <QTextCharFormat>
 #include <QTimeZone>
 #include <QToolButton>
@@ -27,28 +27,6 @@
 
 namespace orbitforge::desktop {
 namespace {
-template <class Base> class TimeSpinBox final : public Base {
-    void paintEvent(QPaintEvent *event) override {
-        Base::paintEvent(event);
-        QStyleOptionSpinBox option;
-        this->initStyleOption(&option);
-        QPainter painter(this);
-        static const auto up = workbench_icon(WorkbenchIcon::chevron_up);
-        static const auto down = workbench_icon(WorkbenchIcon::chevron_down);
-        // QSS paints the button surfaces; use the same vector chevrons as the workbench.
-        for (const bool increase : {true, false}) {
-            const auto area = this->style()->subControlRect(
-                QStyle::CC_SpinBox, &option,
-                increase ? QStyle::SC_SpinBoxUp : QStyle::SC_SpinBoxDown, this);
-            const auto step =
-                increase ? QAbstractSpinBox::StepUpEnabled : QAbstractSpinBox::StepDownEnabled;
-            const bool enabled = this->isEnabled() && (option.stepEnabled & step);
-            (increase ? up : down)
-                .paint(&painter, QRect(area.center() - QPoint(8, 8), QSize(16, 16)),
-                       Qt::AlignCenter, enabled ? QIcon::Normal : QIcon::Disabled);
-        }
-    }
-};
 const QDateTime origin(QDate(2000, 1, 1), QTime(12, 0), QTimeZone::UTC);
 QString scale_name(CalendarScale scale) {
     return scale == CalendarScale::utc ? "UTC" : scale == CalendarScale::tai ? "TAI" : "TT";
@@ -171,6 +149,7 @@ EpochEditor::EpochEditor(QWidget *parent)
     row->setContentsMargins(0, 0, 4, 0);
     row->setSpacing(0);
     value_ = new QLineEdit;
+    value_->installEventFilter(this);
     value_->setObjectName("epochValue");
     value_->setMinimumWidth(265);
     value_->setAccessibleName(QStringLiteral("历元，日期、时间和 UTC / TAI / TT"));
@@ -201,6 +180,17 @@ EpochEditor::EpochEditor(QWidget *parent)
     });
     connect(picker_button_, &QToolButton::clicked, this, &EpochEditor::open_picker);
     set_epoch(core::Epoch{0});
+}
+bool EpochEditor::eventFilter(QObject *watched, QEvent *event) {
+    if (watched == value_ &&
+        (event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut)) {
+        auto *field = value_->parentWidget();
+        field->setProperty("focused", event->type() == QEvent::FocusIn);
+        field->style()->unpolish(field);
+        field->style()->polish(field);
+        field->update();
+    }
+    return QWidget::eventFilter(watched, event);
 }
 core::Epoch EpochEditor::epoch() const {
     const auto value = dirty_ ? parse_epoch(value_->text(), *time_).value : stored_;
@@ -243,6 +233,7 @@ void EpochEditor::set_range(core::Epoch first, core::Epoch last) {
 }
 void EpochEditor::set_read_only(bool value) {
     value_->setReadOnly(value);
+    value_->setMinimumWidth(value ? 246 : 265);
     value_->parentWidget()->setProperty("readOnly", value);
     value_->parentWidget()->style()->unpolish(value_->parentWidget());
     value_->parentWidget()->style()->polish(value_->parentWidget());
@@ -297,9 +288,9 @@ void EpochEditor::open_picker() {
     calendar->setWeekdayTextFormat(Qt::Sunday, weekend);
     layout->addWidget(calendar);
     auto *row = new QHBoxLayout;
-    auto *hours = new TimeSpinBox<QSpinBox>;
-    auto *minutes = new TimeSpinBox<QSpinBox>;
-    auto *seconds = new TimeSpinBox<QDoubleSpinBox>;
+    auto *hours = new WorkbenchSpinBox<QSpinBox>;
+    auto *minutes = new WorkbenchSpinBox<QSpinBox>;
+    auto *seconds = new WorkbenchSpinBox<QDoubleSpinBox>;
     hours->setObjectName("pickerHour");
     minutes->setObjectName("pickerMinute");
     seconds->setObjectName("pickerSecond");

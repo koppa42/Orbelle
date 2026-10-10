@@ -1,5 +1,6 @@
 #include "scenario_dialog.hpp"
 #include "epoch_editor.hpp"
+#include "workbench_style.hpp"
 #include <QDateTime>
 #include <QDialog>
 #include <QFormLayout>
@@ -18,6 +19,7 @@ new_scenario_dialog(QWidget *parent, core::Epoch coverage_first, core::Epoch cov
     QDialog dialog(parent);
     dialog.setObjectName("newScenarioDialog");
     dialog.setWindowTitle(QStringLiteral("新建场景 · Scenario"));
+    dialog.setWindowIcon(workbench_icon(WorkbenchIcon::orbit));
     dialog.setMinimumWidth(560);
     auto *layout = new QVBoxLayout(&dialog);
     layout->setContentsMargins(28, 26, 28, 22);
@@ -25,9 +27,13 @@ new_scenario_dialog(QWidget *parent, core::Epoch coverage_first, core::Epoch cov
     auto *title = new QLabel(QStringLiteral("新建场景"));
     title->setObjectName("panelTitle");
     layout->addWidget(title);
+    auto *description = new QLabel(QStringLiteral("为新的轨道分析设定名称与时间范围。"));
+    description->setObjectName("dialogDescription");
+    layout->addWidget(description);
     auto *form = new QFormLayout;
     form->setHorizontalSpacing(18);
     form->setVerticalSpacing(14);
+    form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     auto *name = new QLineEdit("Scenario1");
     name->setMaximumWidth(380);
     name->setObjectName("scenarioName");
@@ -53,6 +59,7 @@ new_scenario_dialog(QWidget *parent, core::Epoch coverage_first, core::Epoch cov
     auto *error = new QLabel;
     error->setObjectName("inputError");
     error->setWordWrap(true);
+    error->hide();
     layout->addLayout(form);
     const auto coverage = QStringLiteral("可用时段：%1 — %2 UTC")
                               .arg(calendar_text(coverage_first, CalendarScale::utc),
@@ -60,6 +67,10 @@ new_scenario_dialog(QWidget *parent, core::Epoch coverage_first, core::Epoch cov
     first->setToolTip(coverage);
     last->setToolTip(coverage);
     layout->addWidget(error);
+    auto *divider = new QFrame;
+    divider->setObjectName("sectionDivider");
+    divider->setFixedHeight(1);
+    layout->addWidget(divider);
     auto *buttons = new QHBoxLayout;
     buttons->addStretch();
     auto *cancel = new QPushButton(QStringLiteral("取消"));
@@ -80,6 +91,7 @@ new_scenario_dialog(QWidget *parent, core::Epoch coverage_first, core::Epoch cov
             dialog.accept();
         } catch (const std::exception &exception) {
             error->setText(QString::fromUtf8(exception.what()));
+            error->show();
         }
     });
     if (dialog.exec() != QDialog::Accepted)

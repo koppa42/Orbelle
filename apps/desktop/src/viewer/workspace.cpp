@@ -115,7 +115,7 @@ Workspace::Workspace(QWidget *parent) : QWidget(parent) {
                                 Qt::WindowTransparentForInput);
     drag_label_->setAttribute(Qt::WA_ShowWithoutActivating);
     drag_label_->setStyleSheet(
-        "background: #263e55; color: #d3eaff; border: 1px solid #74b9ee; padding: 6px 12px;");
+        "background: #343d61; color: #e3e8ff; border: 1px solid #a3afff; padding: 6px 12px;");
     connect(qApp, &QApplication::focusChanged, this, [this](QWidget *, QWidget *now) {
         for (auto *pane : panes_)
             if (now && pane->isAncestorOf(now)) {

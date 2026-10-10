@@ -8,6 +8,7 @@
 #include <QPushButton>
 #include <QRadioButton>
 #include <QScreen>
+#include <QStyle>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -21,11 +22,11 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
     dialog.setMinimumSize(540, 280);
     const auto *screen = parent ? parent->screen() : dialog.screen();
     const auto available = screen->availableGeometry().size() - QSize(48, 80);
-    dialog.resize(QSize(900, 600).boundedTo(available).expandedTo(dialog.minimumSize()));
+    dialog.resize(QSize(780, 440).boundedTo(available).expandedTo(dialog.minimumSize()));
     dialog.setSizeGripEnabled(true);
     auto *layout = new QVBoxLayout(&dialog);
-    layout->setContentsMargins(20, 16, 20, 16);
-    layout->setSpacing(12);
+    layout->setContentsMargins(24, 22, 24, 20);
+    layout->setSpacing(16);
 
     auto *heading = new QHBoxLayout;
     auto *title = new QLabel(QStringLiteral("插入对象"));
@@ -40,6 +41,9 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
     destination->setToolTip(scenario_name);
     heading->addWidget(destination);
     layout->addLayout(heading);
+    auto *description = new QLabel(QStringLiteral("选择对象类型，再决定如何设置初始轨道。"));
+    description->setObjectName("dialogDescription");
+    layout->addWidget(description);
 
     auto *columns = new QHBoxLayout;
     columns->setSpacing(20);
@@ -66,7 +70,7 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
     group->setExpanded(true);
     types->setCurrentItem(satellite);
     left->addWidget(types, 1);
-    columns->addLayout(left, 3);
+    columns->addLayout(left, 2);
 
     auto *right = new QVBoxLayout;
     right->setSpacing(0);
@@ -81,23 +85,36 @@ std::optional<InsertObjectRequest> insert_object_dialog(QWidget *parent,
         choice->setObjectName(name);
         choice->setAccessibleDescription(description);
         methods->addButton(choice, static_cast<int>(method));
-        right->addWidget(choice);
+        auto *card = new QFrame;
+        card->setObjectName("choiceCard");
+        card->setProperty("selected", false);
+        auto *card_layout = new QVBoxLayout(card);
+        card_layout->setContentsMargins(14, 12, 14, 12);
+        card_layout->setSpacing(2);
+        card_layout->addWidget(choice);
         auto *caption = new QLabel(description);
         caption->setObjectName("hint");
         caption->setContentsMargins(22, 4, 0, 0);
         caption->setWordWrap(true);
-        right->addWidget(caption);
+        card_layout->addWidget(caption);
+        right->addWidget(card);
+        QObject::connect(choice, &QRadioButton::toggled, card, [card](bool selected) {
+            card->setProperty("selected", selected);
+            card->style()->unpolish(card);
+            card->style()->polish(card);
+            card->update();
+        });
         return choice;
     };
     auto *properties =
         add_method("insertDefineProperties", InsertObjectMethod::define_properties,
                    QStringLiteral("定义属性"), QStringLiteral("设置轨道、参考系与传播器"));
     properties->setChecked(true);
-    right->addSpacing(18);
+    right->addSpacing(10);
     add_method("insertDefaults", InsertObjectMethod::defaults, QStringLiteral("使用默认参数"),
                QStringLiteral("二体传播 · 场景起始时刻 · 60 s 步长"));
     right->addStretch(1);
-    columns->addLayout(right, 2);
+    columns->addLayout(right, 3);
     layout->addLayout(columns, 1);
 
     auto *divider = new QFrame;

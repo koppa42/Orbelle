@@ -25,7 +25,8 @@ if(ORBITFORGE_WITH_VSG)
         src/viewer/insert_object_dialog.cpp src/viewer/insert_object_dialog.hpp
         src/viewer/epoch_editor.cpp src/viewer/ground_map.cpp src/viewer/workspace.cpp
         src/viewer/workbench_profile.cpp src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
-        src/viewer/startup_splash.cpp src/viewer/startup_splash.hpp)
+        src/viewer/startup_splash.cpp src/viewer/startup_splash.hpp
+        src/viewer/welcome_page.cpp src/viewer/welcome_page.hpp)
     set_target_properties(orbitforge_desktop PROPERTIES AUTOMOC ON)
     target_link_libraries(orbitforge_desktop PRIVATE OrbitForge::GeoRocky vsgQt::vsgQt
         vsgXchange::vsgXchange rocky::rocky)

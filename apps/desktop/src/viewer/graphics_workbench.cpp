@@ -11,6 +11,7 @@
 #include "satellite_model.hpp"
 #include "scenario_dialog.hpp"
 #include "startup_splash.hpp"
+#include "welcome_page.hpp"
 #include "workbench_profile.hpp"
 #include "workbench_style.hpp"
 #include "workspace.hpp"
@@ -364,7 +365,7 @@ class Workbench final : public QMainWindow {
                 commands_ = addToolBar(QStringLiteral("场景与图形"));
                 commands_->setObjectName("commandBar");
                 commands_->setMovable(false);
-                commands_->setFixedHeight(40);
+                commands_->setFixedHeight(44);
                 commands_->setIconSize(QSize(18, 18));
                 commands_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
                 auto *symbol = new QLabel;
@@ -380,12 +381,14 @@ class Workbench final : public QMainWindow {
                 new_action_->setShortcut(QKeySequence("Ctrl+N"));
                 connect(new_action_, &QAction::triggered, this, [this] { create_scenario(); });
                 scene_menu_->addAction(new_action_);
-                open_action_ = commands_->addAction(QStringLiteral("打开"));
+                open_action_ = commands_->addAction(workbench_icon(WorkbenchIcon::folder),
+                                                    QStringLiteral("打开"));
                 open_action_->setShortcut(QKeySequence::Open);
                 open_action_->setObjectName("openProject");
                 connect(open_action_, &QAction::triggered, this, [this] { choose_project(); });
                 scene_menu_->addAction(open_action_);
-                save_action_ = commands_->addAction(QStringLiteral("保存"));
+                save_action_ = commands_->addAction(workbench_icon(WorkbenchIcon::save),
+                                                    QStringLiteral("保存"));
                 save_action_->setShortcut(QKeySequence::Save);
                 save_action_->setObjectName("saveProject");
                 save_action_->setToolTip(QStringLiteral("保存已应用的场景和对象属性"));
@@ -399,7 +402,8 @@ class Workbench final : public QMainWindow {
                 example_action_ = scene_menu_->addAction(QStringLiteral("打开二体示例"));
                 connect(example_action_, &QAction::triggered, this, [this] { open_example(); });
                 auto *data_menu = menuBar()->addMenu(QStringLiteral("数据"));
-                eop_action_ = data_menu->addAction(QStringLiteral("数据中心…"));
+                eop_action_ = data_menu->addAction(workbench_icon(WorkbenchIcon::database),
+                                                   QStringLiteral("数据中心…"));
                 eop_action_->setObjectName("manageEopData");
                 connect(eop_action_, &QAction::triggered, this, [this] { manage_eop_data(); });
                 scene_menu_->addSeparator();
@@ -2024,9 +2028,22 @@ class Workbench final : public QMainWindow {
                               QStringLiteral(" · 场景属性"));
         dialog.setMinimumWidth(620);
         auto *layout = new QVBoxLayout(&dialog);
-        layout->setContentsMargins(22, 18, 22, 18);
+        layout->setContentsMargins(24, 22, 24, 18);
+        layout->setSpacing(16);
+        auto *title = new QLabel(QStringLiteral("场景概览"));
+        title->setObjectName("panelTitle");
+        layout->addWidget(title);
+        auto *description = new QLabel(QStringLiteral("分析时段、对象与本次计算使用的数据。"));
+        description->setObjectName("dialogDescription");
+        layout->addWidget(description);
+        auto *section = new QFrame;
+        section->setObjectName("formSection");
+        section->setMaximumWidth(880);
+        auto *section_layout = new QVBoxLayout(section);
+        section_layout->setContentsMargins(20, 16, 20, 16);
         auto *form = new QFormLayout;
         form->setSpacing(12);
+        form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
         auto *name = new QLineEdit(QString::fromStdString(scenario_->name()));
         name->setMaximumWidth(380);
         name->setReadOnly(true);
@@ -2047,7 +2064,8 @@ class Workbench final : public QMainWindow {
             new QLabel(QString::number(scenario_->last().seconds_since(scenario_->first()) / 3600,
                                        'g', 8) +
                        QStringLiteral(" 小时")));
-        layout->addLayout(form);
+        section_layout->addLayout(form);
+        layout->addWidget(section);
         auto *eop_caption = new QLabel(QString::fromStdString(eop_->data_info().id));
         if (eop_->data_info().interpolation.starts_with("finals2000a"))
             eop_caption->setText(eop_caption->text() + QStringLiteral(" · 可能含预测值"));
@@ -2066,10 +2084,10 @@ class Workbench final : public QMainWindow {
         extrapolated->setObjectName("scenarioExtrapolation");
         extrapolated->setWordWrap(true);
         form->addRow(QStringLiteral("外推情况"), extrapolated);
+        layout->addStretch();
         auto *close = new QPushButton(QStringLiteral("关闭"));
         layout->addWidget(close, 0, Qt::AlignRight);
         connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
-        layout->addStretch();
         workspace_->open(&dialog);
     }
     void set_selection(std::optional<std::size_t> selection, bool synchronize_tree = true) {
@@ -2813,35 +2831,7 @@ class Workbench final : public QMainWindow {
                                      workbench_icon(WorkbenchIcon::earth));
                 workspace_pages_ = new QStackedWidget;
                 workspace_pages_->addWidget(workspace_);
-                auto *welcome = new QWidget;
-                welcome->setObjectName("welcome");
-                auto *welcome_layout = new QVBoxLayout(welcome);
-                welcome_layout->setContentsMargins(48, 40, 48, 40);
-                welcome_layout->addStretch();
-                auto *mark = new QLabel;
-                mark->setPixmap(
-                    workbench_icon(WorkbenchIcon::orbit, QColor("#4a80b5")).pixmap(56, 56));
-                welcome_layout->addWidget(mark, 0, Qt::AlignHCenter);
-                auto *heading = new QLabel(QStringLiteral("从一个场景开始"));
-                heading->setObjectName("welcomeTitle");
-                heading->setAlignment(Qt::AlignCenter);
-                welcome_layout->addWidget(heading);
-                welcome_layout->addSpacing(20);
-                auto *create = new QPushButton(workbench_icon(WorkbenchIcon::orbit),
-                                               QStringLiteral("新建场景"));
-                create->setObjectName("applyOrbit");
-                create->setMinimumWidth(200);
-                connect(create, &QPushButton::clicked, new_action_, &QAction::trigger);
-                welcome_layout->addWidget(create, 0, Qt::AlignHCenter);
-                auto *open = new QPushButton(QStringLiteral("打开项目…"));
-                open->setMinimumWidth(200);
-                connect(open, &QPushButton::clicked, open_action_, &QAction::trigger);
-                welcome_layout->addWidget(open, 0, Qt::AlignHCenter);
-                auto *example = new QPushButton(QStringLiteral("打开二体示例"));
-                example->setMinimumWidth(200);
-                connect(example, &QPushButton::clicked, example_action_, &QAction::trigger);
-                welcome_layout->addWidget(example, 0, Qt::AlignHCenter);
-                welcome_layout->addStretch();
+                auto *welcome = make_welcome_page(new_action_, open_action_, example_action_);
                 workspace_pages_->addWidget(welcome);
                 workspace_pages_->setCurrentWidget(welcome);
                 setCentralWidget(workspace_pages_);
@@ -5096,6 +5086,9 @@ class Workbench final : public QMainWindow {
                 auto *days = dialog->findChild<QSpinBox *>("eopExtrapolationDays");
                 require(allow && days && !allow->isVisible(),
                         "UTC must not expose EOP extrapolation controls");
+                QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
+                require(dialog->grab().save(smoke_dir_ + "/data-center-utc.png"),
+                        "Cannot save UTC data details");
                 inventory->setCurrentRow(0);
                 require(!allow->isChecked() && !days->isEnabled(),
                         "Extrapolation should default off");
@@ -5108,6 +5101,9 @@ class Workbench final : public QMainWindow {
                 inventory->setCurrentRow(0);
                 require(allow->isChecked() && days->value() == 2,
                         "Lost extrapolation setting on selection change");
+                QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
+                require(dialog->grab().save(smoke_dir_ + "/data-center-extrapolation.png"),
+                        "Cannot save EOP policy details");
                 allow->setChecked(false);
                 inventory->setCurrentRow(1);
                 record("data-center-per-product-extrapolation-controls");

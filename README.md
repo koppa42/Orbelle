@@ -81,6 +81,7 @@ C++ SDK 由模块安装生成。Python 构建入口 `pyproject.toml` 放在仓�
 - [时间轴交互与便携包验证](docs/validation/timeline_2026_10_09.md)
 - [工作区、视图与按需缓存验证](docs/validation/workspace_views_2026_10_10.md)
 - [工作台界面细化与便携包验证](docs/validation/workbench_ui_2026_10_10.md)
+- [工作台视觉统一与高 DPI 检查](docs/validation/ui_refresh_2026_10_10.md)
 - [通用二体验证协议](docs/validation/p1_two_body_protocol.md)
 - [图形集成验收协议](docs/validation/p0_graphics_protocol.md)
 - [图形集成验证记录](docs/validation/p0_graphics.md)

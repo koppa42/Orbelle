@@ -26,6 +26,19 @@ namespace orbitforge::desktop {
 namespace {
 constexpr std::array element_units{Unit::metre,  Unit::one,    Unit::radian,
                                    Unit::radian, Unit::radian, Unit::radian};
+class StatePages final : public QStackedWidget {
+  public:
+    StatePages() {
+        connect(this, &QStackedWidget::currentChanged, this, [this] { updateGeometry(); });
+    }
+    QSize sizeHint() const override {
+        return currentWidget() ? currentWidget()->sizeHint() : QStackedWidget::sizeHint();
+    }
+    QSize minimumSizeHint() const override {
+        return currentWidget() ? currentWidget()->minimumSizeHint()
+                               : QStackedWidget::minimumSizeHint();
+    }
+};
 QFrame *divider() {
     auto *line = new QFrame;
     line->setObjectName("sectionDivider");
@@ -40,8 +53,9 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     auto *navigation = new QTreeWidget;
     navigation_ = navigation;
     navigation->setObjectName("propertyNavigation");
-    navigation->setFixedWidth(156);
+    navigation->setFixedWidth(164);
     navigation->setHeaderHidden(true);
+    navigation->setRootIsDecorated(false);
     navigation->setIndentation(16);
     navigation->setUniformRowHeights(true);
     navigation->setIconSize(QSize(17, 17));
@@ -56,6 +70,9 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     };
     const auto page = [](QTreeWidgetItem *group, const QString &name, int index) {
         auto *item = new QTreeWidgetItem(group, {name});
+        const std::array icons{WorkbenchIcon::orbit, WorkbenchIcon::clock, WorkbenchIcon::map,
+                               WorkbenchIcon::satellite};
+        item->setIcon(0, workbench_icon(icons.at(static_cast<std::size_t>(index))));
         item->setData(0, Qt::UserRole, index);
     };
     auto *basic = category(QStringLiteral("基本"));
@@ -99,28 +116,31 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     layout->addWidget(divider());
     fields_ = new QWidget;
     fields_->setObjectName("propertyFields");
-    fields_->setMaximumWidth(800);
+    fields_->setMaximumWidth(900);
     auto *columns = new QHBoxLayout(fields_);
     columns->setContentsMargins(0, 0, 0, 0);
-    columns->setSpacing(24);
-    auto *settings = new QWidget;
-    auto *initial_state = new QWidget;
-    settings->setMinimumWidth(304);
-    initial_state->setMinimumWidth(330);
+    columns->setSpacing(16);
+    auto *settings = new QFrame;
+    auto *initial_state = new QFrame;
+    settings->setObjectName("formSection");
+    initial_state->setObjectName("formSection");
+    settings->setMinimumWidth(350);
+    initial_state->setMinimumWidth(338);
     columns->addWidget(settings, 1, Qt::AlignTop);
     columns->addWidget(initial_state, 1, Qt::AlignTop);
     auto *form = new QFormLayout(settings);
     auto *state_form = new QFormLayout(initial_state);
-    state_form->setContentsMargins(0, 0, 0, 0);
+    state_form->setContentsMargins(14, 10, 14, 16);
     state_form->setVerticalSpacing(8);
     state_form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     auto *state_title = new QLabel(QStringLiteral("初始状态"));
     state_title_ = state_title;
     state_title->setObjectName("sectionTitle");
     state_form->addRow(state_title);
-    form->setContentsMargins(0, 0, 0, 0);
+    form->setContentsMargins(14, 10, 14, 16);
     form->setVerticalSpacing(8);
-    form->setHorizontalSpacing(8);
+    form->setHorizontalSpacing(10);
+    form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     const auto section = [&](const QString &text) {
         auto *label = new QLabel(text);
@@ -162,10 +182,12 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     state_mode_->addItems(
         {QStringLiteral("位置 / 速度 · Cartesian"), QStringLiteral("经典轨道根数")});
     state_form->addRow(state_mode_);
-    state_pages_ = new QStackedWidget;
+    state_pages_ = new StatePages;
     auto *cartesian_page = new QWidget;
     auto *cartesian_form = new QFormLayout(cartesian_page);
     cartesian_form->setContentsMargins(0, 0, 0, 0);
+    cartesian_form->setVerticalSpacing(8);
+    cartesian_form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     state_pages_->addWidget(cartesian_page);
     const auto vector_row = [&](const QString &label, Unit unit, const QString &name,
                                 auto &fields) {
@@ -187,6 +209,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     auto *keplerian_form = new QFormLayout(keplerian_page);
     keplerian_form->setContentsMargins(0, 0, 0, 0);
     keplerian_form->setVerticalSpacing(10);
+    keplerian_form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     const QStringList labels{QStringLiteral("半长轴 a"),     QStringLiteral("偏心率 e"),
                              QStringLiteral("倾角 i"),       QStringLiteral("升交点赤经 Ω"),
                              QStringLiteral("近地点幅角 ω"), QStringLiteral("真近点角 ν")};
@@ -221,8 +244,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         field->set_read_only(true);
         auto *caption = new QLabel(label);
         caption->setObjectName("hint");
-        form->addRow(caption);
-        form->addRow(field);
+        form->addRow(caption, field);
     };
     section(QStringLiteral("所属场景时段"));
     time_row(QStringLiteral("起点"), first_);
@@ -248,6 +270,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     message_->setWordWrap(true);
     message_->setTextFormat(Qt::PlainText);
     message_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    message_->hide();
     layout->addWidget(message_);
     auto *buttons = new QHBoxLayout;
     buttons->addStretch();
@@ -272,7 +295,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         if (cancel)
             cancel();
     });
-    const auto display_page = [&](const QString &heading) {
+    const auto display_page = [&](const QString &heading, const QString &description) {
         auto *page = new QWidget;
         tabs->addWidget(page);
         auto *stack = new QVBoxLayout(page);
@@ -281,11 +304,16 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         auto *title = new QLabel(heading);
         title->setObjectName("panelTitle");
         stack->addWidget(title);
+        auto *caption = new QLabel(description);
+        caption->setObjectName("dialogDescription");
+        caption->setWordWrap(true);
+        stack->addWidget(caption);
         return stack;
     };
     const auto apply_display = [&](QVBoxLayout *stack) {
         auto *apply = new QPushButton(QStringLiteral("应用显示设置"));
         apply->setObjectName("applyDisplay");
+        apply->setProperty("primary", true);
         display_buttons_.push_back(apply);
         connect(apply, &QPushButton::clicked, this, [this] { submit_display(); });
         stack->addStretch();
@@ -299,9 +327,11 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         stack->addWidget(error);
         stack->addWidget(apply, 0, Qt::AlignRight);
     };
-    auto *common = display_page(QStringLiteral("轨迹范围"));
+    auto *common = display_page(QStringLiteral("轨迹范围"),
+                                QStringLiteral("同时设置二维地面轨迹与三维空间轨迹的显示时段。"));
     auto *common_form = new QFormLayout;
     common_form->setContentsMargins(0, 0, 0, 0);
+    common_form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     track_extent_ = new QComboBox;
     track_extent_->setObjectName("trackExtent");
     track_extent_->setMaximumWidth(320);
@@ -340,13 +370,21 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     range_scroll->setWidget(range_fields);
     common->addWidget(range_scroll, 1);
     apply_display(common);
-    auto *map = display_page(QStringLiteral("二维视图设置"));
+    auto *map = display_page(QStringLiteral("二维视图设置"),
+                             QStringLiteral("设置当前卫星在地图中的轨迹与标注。"));
+    auto *map_options = new QFrame;
+    map_options->setObjectName("formSection");
+    map_options->setMaximumWidth(480);
+    auto *map_layout = new QVBoxLayout(map_options);
+    map_layout->setContentsMargins(18, 14, 18, 14);
+    map_layout->setSpacing(12);
     track_2d_ = new QCheckBox(QStringLiteral("显示地面轨迹"));
     label_2d_ = new QCheckBox(QStringLiteral("显示对象名称"));
     track_2d_->setChecked(true);
     label_2d_->setChecked(true);
-    map->addWidget(track_2d_);
-    map->addWidget(label_2d_);
+    map_layout->addWidget(track_2d_);
+    map_layout->addWidget(label_2d_);
+    map->addWidget(map_options);
     apply_display(map);
     auto *appearance_tab = new QWidget;
     tabs->addWidget(appearance_tab);
@@ -356,6 +394,9 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     auto *appearance_title = new QLabel(QStringLiteral("三维视图设置"));
     appearance_title->setObjectName("panelTitle");
     appearance_layout->addWidget(appearance_title);
+    auto *appearance_description = new QLabel(QStringLiteral("设置空间轨迹、卫星外观与示意尺寸。"));
+    appearance_description->setObjectName("dialogDescription");
+    appearance_layout->addWidget(appearance_description);
     auto *appearance_fields = new QWidget;
     appearance_fields->setObjectName("propertyFields");
     appearance_fields->setMaximumWidth(560);
@@ -381,6 +422,8 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     model_fields_ = new QWidget;
     auto *form_model = new QFormLayout(model_fields_);
     form_model->setContentsMargins(0, 0, 0, 0);
+    form_model->setVerticalSpacing(12);
+    form_model->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     form_model->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     model_kind_ = new QComboBox;
     model_kind_->setMaximumWidth(320);
@@ -711,8 +754,8 @@ void OrbitEditor::set_busy(bool busy) {
         show_result(QStringLiteral("正在计算…"));
 }
 void OrbitEditor::show_result(const QString &message, bool error) {
-    message_->setStyleSheet(error ? "color: #e6a197; font-size: 11px"
-                                  : "color: #74899c; font-size: 11px");
+    message_->setStyleSheet(error ? "color: #efb0a9; font-size: 12px"
+                                  : "color: #a1aec7; font-size: 12px");
     message_->setText(message);
     message_->setVisible(!message.isEmpty());
 }
@@ -742,8 +785,8 @@ void OrbitEditor::refresh_enabled() {
     apply_model_->setEnabled(idle && !create_mode_);
 }
 void OrbitEditor::show_appearance_result(const QString &message, bool error) {
-    model_message_->setStyleSheet(error ? "color: #e6a197; font-size: 11px"
-                                        : "color: #74899c; font-size: 11px");
+    model_message_->setStyleSheet(error ? "color: #efb0a9; font-size: 12px"
+                                        : "color: #a1aec7; font-size: 12px");
     model_message_->setText(message);
     model_message_->setVisible(!message.isEmpty());
 }

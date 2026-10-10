@@ -20,6 +20,9 @@ class EpochEditor final : public QWidget {
     void adjust_seconds(int seconds);
     void open_picker();
 
+  protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
   private:
     std::unique_ptr<core::ITimeProvider> time_;
     QLineEdit *value_ = nullptr;

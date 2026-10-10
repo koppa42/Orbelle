@@ -46,7 +46,7 @@ void StartupSplash::drawContents(QPainter *painter) {
     painter->fillRect(QRectF(0, 434, 960, 106), footer);
 
     QFont font;
-    font.setFamilies({"Segoe UI", "Microsoft YaHei UI"});
+    font.setFamilies({"Microsoft YaHei UI", "Segoe UI"});
     font.setPixelSize(42);
     font.setWeight(QFont::DemiBold);
     painter->setFont(font);

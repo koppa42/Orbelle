@@ -6,6 +6,10 @@ class QDockWidget;
 namespace orbitforge::desktop {
 enum class WorkbenchIcon {
     new_scenario,
+    folder,
+    save,
+    download,
+    database,
     orbit,
     earth,
     map,
@@ -32,6 +36,6 @@ enum class WorkbenchIcon {
     chevron_down
 };
 void apply_workbench_style(QApplication &app);
-QIcon workbench_icon(WorkbenchIcon icon, const QColor &color = QColor("#a7b6c7"));
+QIcon workbench_icon(WorkbenchIcon icon, const QColor &color = QColor("#b2bed5"));
 void style_dock(QDockWidget *dock, WorkbenchIcon icon);
 } // namespace orbitforge::desktop
