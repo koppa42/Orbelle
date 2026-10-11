@@ -435,6 +435,7 @@ class Project:
     current: Epoch
     satellites: list[ProjectSatellite]
     ground_stations: list[ProjectGroundStation]
+    reports: list[ReportDefinition]
     earth_orientation: EopDataInfo | None
     def add_satellite(self, input: OrbitInput, display: OrbitDisplay = ...) -> None: ...
     def to_scenario(self) -> Scenario: ...
@@ -519,3 +520,75 @@ class DataCatalog:
     def setting(self, key: str) -> str: ...
     def set_setting(self, key: str, value: str) -> None: ...
 
+
+class ReportKind:
+    SCENARIO_SUMMARY: ReportKind
+    OBJECT_SUMMARY: ReportKind
+    CARTESIAN_STATE: ReportKind
+    GROUND_STATIONS: ReportKind
+
+class ReportUnits:
+    SI: ReportUnits
+    ENGINEERING: ReportUnits
+
+class ReportTimeScale:
+    UTC: ReportTimeScale
+    TAI: ReportTimeScale
+    TT: ReportTimeScale
+
+class ReportDefinition:
+    def __init__(self) -> None: ...
+    id: str
+    name: str
+    kind: ReportKind
+    object_ids: list[str]
+    follow_scenario: bool
+    first: Epoch
+    last: Epoch
+    step_nanoseconds: int
+    frame: FrameId
+    units: ReportUnits
+    time_scale: ReportTimeScale
+
+class ReportColumn:
+    @property
+    def id(self) -> str: ...
+    @property
+    def title(self) -> str: ...
+    @property
+    def unit(self) -> str: ...
+
+class ReportTable:
+    @property
+    def columns(self) -> list[ReportColumn]: ...
+    @property
+    def rows(self) -> list[list[str | int | float | Epoch | None]]: ...
+    @property
+    def row_count(self) -> int: ...
+
+class ReportResult:
+    @property
+    def definition(self) -> ReportDefinition: ...
+    @property
+    def table(self) -> ReportTable: ...
+    @property
+    def input_sha256(self) -> str: ...
+    @property
+    def data_sha256(self) -> str: ...
+    @property
+    def time_sha256(self) -> str: ...
+    @property
+    def algorithm(self) -> str: ...
+    @property
+    def first(self) -> Epoch: ...
+    @property
+    def last(self) -> Epoch: ...
+    def column_title(self, column: int) -> str: ...
+    def cell_text(self, row: int, column: int) -> str: ...
+    def export_csv(self, path: str | PathLike[str], overwrite: bool = False) -> None: ...
+
+def estimate_report_rows(project: Project, definition: ReportDefinition) -> int: ...
+def report_input_sha256(project: Project) -> str: ...
+def generate_report(project: Project, definition: ReportDefinition,
+                    eop_manifest: str | PathLike[str] | None = None,
+                    time_file: str | PathLike[str] | None = None) -> ReportResult: ...

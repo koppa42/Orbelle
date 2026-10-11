@@ -24,7 +24,7 @@ static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
-                        lock_tag = 0x4b434f4c, stations_tag = 0x4e545347;
+                        lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052;
 [[noreturn]] void invalid(const char *message) { throw ProjectError(message); }
 void check(bool condition, const char *message) {
     if (!condition)
@@ -230,6 +230,20 @@ void validate_project(const Project &project) {
             throw ProjectError(error.what());
         }
     }
+    check(project.reports.size() <= 128, "Project exceeds 128 report definitions");
+    std::set<std::string> report_ids;
+    for (const auto &report : project.reports) {
+        text_check(report.id, true);
+        text_check(report.name, true);
+        check(report_ids.insert(report.id).second, "Duplicate report ID");
+        for (const auto &id : report.object_ids)
+            text_check(id, true);
+        try {
+            validate_report_definition(report);
+        } catch (const std::invalid_argument &error) {
+            throw ProjectError(error.what());
+        }
+    }
     if (project.earth_orientation) {
         const auto &data = *project.earth_orientation;
         for (const auto *value :
@@ -374,6 +388,24 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         stations.real(station.location.height_m);
     }
     payload.section(stations_tag, stations);
+    Writer reports;
+    reports.number(project.reports.size(), 4);
+    for (const auto &report : project.reports) {
+        reports.text(report.id);
+        reports.text(report.name);
+        reports.number(static_cast<unsigned>(report.kind), 4);
+        reports.number(report.object_ids.size(), 4);
+        for (const auto &id : report.object_ids)
+            reports.text(id);
+        reports.number(report.follow_scenario, 1);
+        reports.epoch(report.first);
+        reports.epoch(report.last);
+        reports.number(static_cast<std::uint64_t>(report.step_nanoseconds));
+        reports.number(report.frame == core::FrameId::gcrf ? 1 : 2, 4);
+        reports.number(static_cast<unsigned>(report.units), 4);
+        reports.number(static_cast<unsigned>(report.time_scale), 4);
+    }
+    payload.section(reports_tag, reports);
     if (project.earth_orientation) {
         Writer data;
         write_data(data, *project.earth_orientation);
@@ -386,7 +418,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
     locked.text(lock.sha256());
     payload.section(lock_tag, locked);
     file.raw(magic);
-    file.number(5, 4);
+    file.number(6, 4);
     file.number(payload.bytes.size());
     file.number(crc32(payload.bytes), 4);
     file.raw(payload.bytes);
@@ -397,7 +429,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     Reader file{bytes};
     check(std::ranges::equal(file.raw(magic.size()), magic), "Not an OrbitForge project file");
     const auto version = file.number(4);
-    check(version >= 1 && version <= 5, "Unsupported OrbitForge project version");
+    check(version >= 1 && version <= 6, "Unsupported OrbitForge project version");
     const auto length = file.number();
     const auto checksum = file.number(4);
     check(length == file.bytes.size(), "Project length mismatch");
@@ -406,7 +438,8 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     while (!file.bytes.empty()) {
         const auto tag = static_cast<std::uint32_t>(file.number(4));
         check(tag == scene_tag || tag == objects_tag || tag == data_tag ||
-                  (version >= 3 && tag == lock_tag) || (version >= 5 && tag == stations_tag),
+                  (version >= 3 && tag == lock_tag) || (version >= 5 && tag == stations_tag) ||
+                  (version >= 6 && tag == reports_tag),
               "Unsupported project section");
         check(file.number(4) ==
                   ((tag == objects_tag && version >= 2) || (tag == data_tag && version >= 4) ? 2U
@@ -477,6 +510,39 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             project.ground_stations.push_back(std::move(station));
         }
         stations.done();
+    }
+    if (version >= 6) {
+        check(sections.contains(reports_tag), "Missing reports section");
+        Reader reports{sections.at(reports_tag)};
+        const auto report_count = reports.number(4);
+        check(report_count <= 128, "Project exceeds 128 report definitions");
+        for (std::uint64_t i = 0; i < report_count; ++i) {
+            ReportDefinition report;
+            report.id = reports.text();
+            report.name = reports.text();
+            const auto kind = reports.number(4);
+            check(kind <= 3, "Unsupported report template");
+            report.kind = static_cast<ReportKind>(kind);
+            const auto bindings = reports.number(4);
+            check(bindings <= max_objects, "Report exceeds 10000 object bindings");
+            for (std::uint64_t j = 0; j < bindings; ++j)
+                report.object_ids.push_back(reports.text());
+            report.follow_scenario = reports.boolean();
+            report.first = reports.epoch();
+            report.last = reports.epoch();
+            const auto step = reports.number();
+            check(step >= 1 && step <= 86400ULL * 1'000'000'000, "Invalid report step");
+            report.step_nanoseconds = static_cast<std::int64_t>(step);
+            const auto frame = reports.number(4), units = reports.number(4),
+                       scale = reports.number(4);
+            check((frame == 1 || frame == 2) && units <= 1 && scale <= 2,
+                  "Unsupported report format");
+            report.frame = frame == 1 ? core::FrameId::gcrf : core::FrameId::itrf;
+            report.units = static_cast<ReportUnits>(units);
+            report.time_scale = static_cast<ReportTimeScale>(scale);
+            project.reports.push_back(std::move(report));
+        }
+        reports.done();
     }
     if (sections.contains(data_tag)) {
         Reader data{sections.at(data_tag)};

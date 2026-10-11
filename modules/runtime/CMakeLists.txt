@@ -1,6 +1,7 @@
 orbitforge_module(orbitforge_runtime Runtime src/demo.cpp src/time_frames.cpp src/ephemeris.cpp
-    src/two_body.cpp src/j2.cpp src/project.cpp src/data_catalog.cpp)
+    src/two_body.cpp src/j2.cpp src/project.cpp src/data_catalog.cpp src/report.cpp)
 target_link_libraries(orbitforge_runtime PUBLIC OrbitForge::Application)
+target_include_directories(orbitforge_runtime SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/modules/application/third_party")
 if(ORBITFORGE_WITH_DATA_CATALOG)
     find_package(unofficial-sqlite3 CONFIG REQUIRED)
     find_package(nlohmann_json 3.12.0 EXACT CONFIG REQUIRED)

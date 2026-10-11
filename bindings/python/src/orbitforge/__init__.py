@@ -18,6 +18,8 @@ from ._native import (
     ProjectGroundStation, GroundStationLocation,
     DataReference, DataLock,
     DataCatalog, CatalogSnapshot, DataAcquisition, data_catalog_available,
+    ReportKind, ReportUnits, ReportTimeScale, ReportDefinition, ReportColumn, ReportTable,
+    ReportResult, estimate_report_rows, report_input_sha256, generate_report,
 )
 
 __all__ = [
@@ -39,5 +41,7 @@ __all__ = [
     "ProjectGroundStation", "GroundStationLocation",
     "DataReference", "DataLock",
     "DataCatalog", "CatalogSnapshot", "DataAcquisition", "data_catalog_available",
+    "ReportKind", "ReportUnits", "ReportTimeScale", "ReportDefinition", "ReportColumn", "ReportTable",
+    "ReportResult", "estimate_report_rows", "report_input_sha256", "generate_report",
 ]
 

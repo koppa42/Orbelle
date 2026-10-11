@@ -19,6 +19,7 @@ if(ORBITFORGE_WITH_VSG)
     find_package(rocky 1.1.0 EXACT CONFIG REQUIRED)
     find_package(vsgXchange 1.1.13 EXACT CONFIG REQUIRED)
     target_sources(orbitforge_desktop PRIVATE src/viewer/graphics_workbench.cpp
+        src/viewer/report_dialog.cpp
         src/viewer/project_scene.cpp src/viewer/eop_catalog.cpp src/viewer/data_center_dialog.cpp
         src/viewer/orbit_scene.cpp src/viewer/orbit_editor.cpp src/viewer/workbench_style.cpp
         src/viewer/satellite_model.cpp src/viewer/mission_timeline.cpp src/viewer/scenario_dialog.cpp
@@ -85,6 +86,15 @@ if(ORBITFORGE_WITH_VSG)
             ENVIRONMENT_MODIFICATION "QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>")
     endif()
     if(BUILD_TESTING AND ORBITFORGE_WITH_ERFA)
+        add_executable(orbitforge_report_ui_tests tests/report_dialog_test.cpp
+            src/viewer/report_dialog.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp src/viewer/workspace.cpp)
+        target_link_libraries(orbitforge_report_ui_tests PRIVATE OrbitForge::Runtime Qt6::Widgets GTest::gtest_main)
+        orbitforge_warnings(orbitforge_report_ui_tests)
+        orbitforge_copy_runtime_dlls(orbitforge_report_ui_tests)
+        gtest_discover_tests(orbitforge_report_ui_tests DISCOVERY_MODE PRE_TEST
+            TEST_PREFIX "desktop." PROPERTIES TIMEOUT 20
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+            ENVIRONMENT_MODIFICATION "QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>")
         add_executable(orbitforge_ground_map_tests tests/ground_map_test.cpp
             src/viewer/ground_map.cpp src/viewer/workbench_profile.cpp)
         target_link_libraries(orbitforge_ground_map_tests PRIVATE

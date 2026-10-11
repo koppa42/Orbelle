@@ -81,6 +81,7 @@ void bind_project(py::module_ &module) {
         .def_readwrite("current", &application::Project::current)
         .def_readwrite("satellites", &application::Project::satellites)
         .def_readwrite("ground_stations", &application::Project::ground_stations)
+        .def_readwrite("reports", &application::Project::reports)
         .def_readwrite("earth_orientation", &application::Project::earth_orientation)
         .def_property_readonly("data_lock", &application::Project::data_lock)
         .def("with_settings", &application::Project::with_settings, py::arg("name"),

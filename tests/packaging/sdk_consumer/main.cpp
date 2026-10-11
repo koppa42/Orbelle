@@ -5,6 +5,7 @@
 #include <orbitforge/runtime/demo.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/project.hpp>
+#include <orbitforge/runtime/report.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 int main(int argc, char **argv) {
@@ -12,6 +13,16 @@ int main(int argc, char **argv) {
                                                    orbitforge::core::Epoch{10'000'000'123});
     const auto restored =
         orbitforge::application::decode_project(orbitforge::application::encode_project(project));
+    auto report_project = project;
+    report_project.ground_stations.push_back({"station", "SDK station", {0, 0, 0}});
+    orbitforge::application::ReportDefinition report;
+    report.id = "sdk-report";
+    report.name = "SDK report";
+    report.frame = orbitforge::core::FrameId::itrf;
+    report.time_scale = orbitforge::application::ReportTimeScale::tai;
+    const auto table = orbitforge::runtime::generate_report({report_project, {}, {}, {}}, report);
+    if (table.table.rows().size() != 2 || std::get<double>(table.table.rows()[0][4]) != 6378137)
+        return 18;
     if (restored.first != project.first || restored.last != project.last ||
         !orbitforge::runtime::make_project_scenario(restored).objects().empty() ||
         restored.data_lock() != project.data_lock())

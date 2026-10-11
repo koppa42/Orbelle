@@ -312,7 +312,7 @@ void Workspace::update_title(Page &page) {
             pane->window->setWindowTitle(page.title);
     }
 }
-void Workspace::open(QDialog *content) {
+void Workspace::open(QDialog *content, bool wrap_in_scroll_area) {
     auto *page = find(content);
     if (!page) {
         auto entry = std::make_unique<Page>();
@@ -322,11 +322,14 @@ void Workspace::open(QDialog *content) {
         page->icon = workbench_icon(WorkbenchIcon::properties);
         content->setWindowFlags(Qt::Widget);
         content->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
-        auto *scroll = new QScrollArea;
-        scroll->setFrameShape(QFrame::NoFrame);
-        scroll->setWidgetResizable(true);
-        scroll->setWidget(content);
-        page->host = scroll;
+        if (wrap_in_scroll_area) {
+            auto *scroll = new QScrollArea;
+            scroll->setFrameShape(QFrame::NoFrame);
+            scroll->setWidgetResizable(true);
+            scroll->setWidget(content);
+            page->host = scroll;
+        } else
+            page->host = content;
         content->installEventFilter(this);
         connect(content, &QWidget::windowTitleChanged, this, [this, page] { update_title(*page); });
         connect(content, &QDialog::finished, this, [this, content] { close_page(content); });

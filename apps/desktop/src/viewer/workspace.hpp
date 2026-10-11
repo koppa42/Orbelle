@@ -18,7 +18,8 @@ class Workspace final : public QWidget {
     ~Workspace() override;
     int add_view(QWidget *content, const QString &title, const QIcon &icon);
     void select_view(int index);
-    void open(QDialog *document);
+    // Documents with their own scrolling keep fixed actions outside the scrollable area.
+    void open(QDialog *document, bool wrap_in_scroll_area = true);
     void close_page(QWidget *content);
     void detach_page(QWidget *content);
     void dock_page(QWidget *content);

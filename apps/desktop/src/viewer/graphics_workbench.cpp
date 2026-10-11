@@ -9,6 +9,7 @@
 #include "orbit_scene.hpp"
 #include "project_scene.hpp"
 #include "quantity_editor.hpp"
+#include "report_dialog.hpp"
 #include "satellite_model.hpp"
 #include "scenario_dialog.hpp"
 #include "startup_splash.hpp"
@@ -75,6 +76,7 @@
 #include <QStyle>
 #include <QTabBar>
 #include <QTabWidget>
+#include <QTableView>
 #include <QTimeZone>
 #include <QTimer>
 #include <QToolBar>
@@ -413,6 +415,11 @@ class Workbench final : public QMainWindow {
                                                    QStringLiteral("数据中心…"));
                 eop_action_->setObjectName("manageEopData");
                 connect(eop_action_, &QAction::triggered, this, [this] { manage_eop_data(); });
+                auto *analysis_menu = menuBar()->addMenu(QStringLiteral("分析"));
+                report_action_ = analysis_menu->addAction(workbench_icon(WorkbenchIcon::properties),
+                                                          QStringLiteral("报告…"));
+                report_action_->setObjectName("openReports");
+                connect(report_action_, &QAction::triggered, this, [this] { show_reports(); });
                 scene_menu_->addSeparator();
                 insert_action_ = commands_->addAction(workbench_icon(WorkbenchIcon::satellite),
                                                       QStringLiteral("插入对象"));
@@ -916,6 +923,19 @@ class Workbench final : public QMainWindow {
                                 if (properties_action_)
                                     menu.addAction(properties_action_);
                                 menu.addAction(focus);
+                                auto *report = menu.addAction(QStringLiteral("报告…"));
+                                report->setEnabled(!busy());
+                                connect(report, &QAction::triggered, this, [this] {
+                                    show_reports();
+                                    if (selected_station_)
+                                        report_dialog_->select_object(
+                                            stations_.at(*selected_station_).config.object_id,
+                                            application::ReportKind::ground_stations);
+                                    else if (selected_)
+                                        report_dialog_->select_object(
+                                            satellites_.at(*selected_).orbit->input.object_id,
+                                            application::ReportKind::cartesian_state);
+                                });
                                 menu.addSeparator();
                                 menu.addAction(rename_action_);
                                 menu.addAction(duplicate_action_);
@@ -1309,6 +1329,8 @@ class Workbench final : public QMainWindow {
                 action->setEnabled(selected_marker_index().has_value() && idle);
         if (eop_action_)
             eop_action_->setEnabled(idle);
+        if (report_action_)
+            report_action_->setEnabled(active && idle);
         if (cancel_project_button_)
             cancel_project_button_->setVisible(project_candidate_.valid());
         if (scenario_properties_) {
@@ -1384,6 +1406,8 @@ class Workbench final : public QMainWindow {
     }
     void mark_project_dirty(bool dirty = true) {
         project_dirty_ = dirty;
+        if (report_dialog_ && scenario_)
+            report_dialog_->update_project(project_snapshot(project_path_), active_time());
         if (scenario_) {
             const auto filename = project_path_.isEmpty() ? QStringLiteral("未保存")
                                                           : QFileInfo(project_path_).fileName();
@@ -1417,7 +1441,64 @@ class Workbench final : public QMainWindow {
         }
         for (const auto &station : stations_)
             project.ground_stations.push_back(station.config);
+        project.reports = reports_;
         return project;
+    }
+    runtime::ReportContext report_context() const {
+        return {project_snapshot(project_path_), active_time(), runtime::make_frame_provider(),
+                eop_};
+    }
+    void show_reports() {
+        if (!scenario_ || busy())
+            return;
+        if (!report_dialog_) {
+            report_dialog_ = new ReportDialog(
+                project_snapshot(project_path_), active_time(),
+                [this](ReportDialog::Ready done) {
+                    try {
+                        if (busy()) {
+                            done({}, QStringLiteral("场景正在更新，请完成后再生成报告。"));
+                            return;
+                        }
+                        const auto current =
+                            data_for_interval(scenario_->first(), scenario_->last());
+                        if (scenario_->data_lock() !=
+                            application::eop_data_lock(current->data_info())) {
+                            if (start_project(project_snapshot(project_path_), project_path_, true,
+                                              selected_marker_index()))
+                                pending_report_context_ = std::move(done);
+                            else
+                                done({}, QStringLiteral("未生成报告；场景数据未更新。"));
+                        } else
+                            done(report_context(), {});
+                    } catch (const std::exception &error) {
+                        done({}, QString::fromUtf8(error.what()));
+                    }
+                },
+                [this](std::vector<application::ReportDefinition> reports) {
+                    if (busy())
+                        throw std::runtime_error("场景正在更新，请完成后再保存报告配置。");
+                    auto project = project_snapshot(project_path_);
+                    project.reports = reports;
+                    application::validate_project(project);
+                    reports_ = std::move(reports);
+                    mark_project_dirty();
+                },
+                [this](core::Epoch epoch) {
+                    set_playing(false);
+                    seek_epoch(epoch);
+                },
+                this);
+        }
+        workspace_->open(report_dialog_, false);
+    }
+    void close_reports() {
+        if (report_dialog_) {
+            workspace_->close_page(report_dialog_);
+            delete report_dialog_;
+            report_dialog_ = nullptr;
+        }
+        reports_.clear();
     }
     void save_project_to(const QString &path) {
         const auto absolute = QFileInfo(path).absoluteFilePath();
@@ -1704,6 +1785,9 @@ class Workbench final : public QMainWindow {
                 station_editor_->close();
             scenario_ = std::move(candidate->scenario);
             eop_ = candidate->eop;
+            if (!project_edit_)
+                close_reports();
+            reports_ = candidate->project.reports;
             time_label_epoch_.reset();
             sun_epoch_.reset();
             editor_target_.reset();
@@ -1793,6 +1877,14 @@ class Workbench final : public QMainWindow {
             }
         if (station_editor_ && last_project_outcome_ != "opened")
             station_editor_->show_result(QStringLiteral("未应用，原场景保留。请调整后重试。"));
+        if (pending_report_context_) {
+            auto done = std::move(pending_report_context_);
+            pending_report_context_ = {};
+            if (last_project_outcome_ == "opened")
+                done(report_context(), {});
+            else
+                done({}, QStringLiteral("未生成报告；场景更新未完成，上次结果保留。"));
+        }
         update_actions();
     }
     void rename_selected_to(const QString &name) {
@@ -1964,6 +2056,7 @@ class Workbench final : public QMainWindow {
             properties_dialog_->close();
         satellites_.clear();
         stations_.clear();
+        close_reports();
         if (station_editor_)
             station_editor_->close();
         if (ground_map_) {
@@ -6252,6 +6345,128 @@ class Workbench final : public QMainWindow {
             if (++smoke_final_frames_ >= 4)
                 ++orbit_smoke_stage_;
             break;
+        case 121:
+            report_action_->trigger();
+            require(report_dialog_ && workspace_->contains(report_dialog_),
+                    "Report did not open in the workspace");
+            report_dialog_->findChild<QListWidget *>("reportLibrary")->setCurrentRow(2);
+            report_dialog_->findChild<QComboBox *>("reportFrame")->setCurrentIndex(1);
+            report_dialog_->findChild<QDoubleSpinBox *>("reportStep")->setValue(600);
+            report_dialog_->findChild<QLineEdit *>("reportName")
+                ->setText(QStringLiteral("轨道位置报告"));
+            report_dialog_->findChild<QPushButton *>("saveReport")->click();
+            require(reports_.size() == 1 && project_dirty_,
+                    "Report configuration was not attached to the project");
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        case 122:
+            if (++smoke_final_frames_ < 4)
+                break;
+            require(workspace_->rect().contains(
+                        report_dialog_->findChild<QPushButton *>("generateReport")
+                            ->mapTo(workspace_,
+                                    report_dialog_->findChild<QPushButton *>("generateReport")
+                                        ->rect()
+                                        .bottomRight())),
+                    "Report generation action is clipped by the workspace");
+            save_workbench_image("report-configuration.png");
+            report_dialog_->findChild<QPushButton *>("generateReport")->click();
+            ++orbit_smoke_stage_;
+            break;
+        case 123: {
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            const auto *table = report_dialog_->findChild<QTableView *>("reportTable");
+            require(table->model()->rowCount() > 0, "Report generation did not produce a table");
+            save_workbench_image("report-results.png");
+            QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, true);
+            QTimer::singleShot(0, this, [this, require] {
+                auto *chooser = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
+                require(chooser != nullptr, "CSV export did not open a file chooser");
+                chooser->selectFile(smoke_dir_ + "/report.csv");
+                static_cast<QDialog *>(chooser)->accept();
+            });
+            report_dialog_->findChild<QPushButton *>("exportReportCsv")->click();
+            QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, false);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 124: {
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            QFile csv(smoke_dir_ + "/report.csv");
+            require(csv.open(QIODevice::ReadOnly) && csv.readAll().contains("Time (UTC)"),
+                    "Report CSV was not exported");
+            set_selection(0);
+            rename_selected_to(QStringLiteral("报告测试卫星"));
+            require(report_dialog_->findChild<QLabel *>("reportResultLabel")
+                        ->text()
+                        .contains(QStringLiteral("场景已变化")),
+                    "Report did not mark changed inputs as stale");
+            save_project_to(smoke_dir_ + "/reports.orbitforge");
+            const auto restored =
+                application::load_project(std::filesystem::path(project_path_.toStdWString()));
+            require(restored.reports.size() == 1 &&
+                        restored.reports[0].step_nanoseconds == 600'000'000'000,
+                    "Saved report configuration lost its sampling interval");
+            start_project(restored, project_path_);
+            record("reports-workspace-generate-csv-stale-and-project-save");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 125:
+            require(last_project_outcome_ == "opened" && reports_.size() == 1,
+                    "Project reopen lost report configurations");
+            report_action_->trigger();
+            report_dialog_->findChild<QListWidget *>("reportLibrary")->setCurrentRow(4);
+            report_dialog_->findChild<QPushButton *>("generateReport")->click();
+            ++orbit_smoke_stage_;
+            break;
+        case 126: {
+            auto *generate = report_dialog_->findChild<QPushButton *>("generateReport");
+            if (!generate->isEnabled())
+                break;
+            require(report_dialog_->findChild<QTableView *>("reportTable")->model()->rowCount() > 0,
+                    "Reopened report could not regenerate");
+            smoke_data_lock_ = scenario_->data_lock();
+            for (const auto index : eop_catalog_->current_indices()) {
+                const auto &info = eop_catalog_->providers()[index]->data_info();
+                if (info.id == eop_->data_info().id && info.sha256 == eop_->data_info().sha256)
+                    eop_catalog_->set_extrapolation_days(
+                        index, eop_->data_info().extrapolation_days == 30
+                                   ? 29
+                                   : eop_->data_info().extrapolation_days + 1);
+            }
+            answer_data(false);
+            generate->click();
+            require(generate->isEnabled() && scenario_->data_lock() == smoke_data_lock_,
+                    "Declined report data update changed the active scenario");
+            answer_data(true);
+            generate->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 127:
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            require(last_project_outcome_ == "opened" &&
+                        scenario_->data_lock() != smoke_data_lock_ && project_dirty_ &&
+                        report_dialog_->findChild<QLabel *>("reportResultLabel")
+                            ->text()
+                            .contains(QStringLiteral("与当前场景一致")),
+                    "Accepted report data update did not rebuild and resume generation");
+            record("reports-reopen-and-confirm-current-data-before-regeneration");
+            workspace_->close_page(report_dialog_);
+            workspace_->select_view(0);
+            fit_views();
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        case 128:
+            if (++smoke_final_frames_ >= 4)
+                ++orbit_smoke_stage_;
+            break;
         }
     }
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
@@ -6483,6 +6698,10 @@ class Workbench final : public QMainWindow {
     QAction *open_action_ = nullptr, *save_action_ = nullptr, *save_as_action_ = nullptr;
     QAction *rename_action_ = nullptr, *duplicate_action_ = nullptr, *delete_action_ = nullptr;
     QAction *eop_action_ = nullptr;
+    QAction *report_action_ = nullptr;
+    ReportDialog *report_dialog_ = nullptr;
+    std::vector<application::ReportDefinition> reports_;
+    ReportDialog::Ready pending_report_context_;
     std::unique_ptr<EopCatalog> eop_catalog_;
     mutable std::shared_ptr<const core::ITimeProvider> active_time_;
     bool project_edit_ = false, project_orbit_edit_ = false, project_settings_edit_ = false;
@@ -6517,7 +6736,7 @@ class Workbench final : public QMainWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 121;
+    static constexpr int orbit_smoke_complete = 129;
     int smoke_final_frames_ = 0;
     std::vector<std::uint8_t> smoke_project_bytes_;
     application::DataLock smoke_data_lock_;

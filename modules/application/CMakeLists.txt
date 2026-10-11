@@ -1,5 +1,5 @@
 orbitforge_module(orbitforge_application Application src/session.cpp src/scenario.cpp src/project.cpp
-    src/data_lock.cpp)
+    src/data_lock.cpp src/report.cpp)
 target_link_libraries(orbitforge_application PUBLIC OrbitForge::Core OrbitForge::Results)
 target_include_directories(orbitforge_application SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 # Keep headless builds independent of the provider dependency toolchain.

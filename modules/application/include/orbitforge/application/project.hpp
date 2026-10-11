@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <optional>
 #include <orbitforge/application/data_lock.hpp>
+#include <orbitforge/application/report.hpp>
 #include <orbitforge/core/frames/eop_provider.hpp>
 #include <orbitforge/core/frames/state.hpp>
 #include <orbitforge/core/propagation/central_body.hpp>
@@ -61,6 +62,7 @@ struct Project {
     core::Epoch first, last, current;
     std::vector<ProjectSatellite> satellites;
     std::vector<ProjectGroundStation> ground_stations;
+    std::vector<ReportDefinition> reports;
     // Provenance of the last calculation, not a requirement to load an old file.
     // The desktop checks current data/policy and requires consent for changes.
     std::optional<core::EopDataInfo> earth_orientation;
