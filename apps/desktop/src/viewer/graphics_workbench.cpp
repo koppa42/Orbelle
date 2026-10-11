@@ -924,18 +924,22 @@ class Workbench final : public QMainWindow {
                                     menu.addAction(properties_action_);
                                 menu.addAction(focus);
                                 auto *report = menu.addAction(QStringLiteral("报告…"));
+                                report->setObjectName("openObjectReport");
                                 report->setEnabled(!busy());
-                                connect(report, &QAction::triggered, this, [this] {
-                                    show_reports();
-                                    if (selected_station_)
-                                        report_dialog_->select_object(
-                                            stations_.at(*selected_station_).config.object_id,
-                                            application::ReportKind::ground_stations);
-                                    else if (selected_)
-                                        report_dialog_->select_object(
-                                            satellites_.at(*selected_).orbit->input.object_id,
-                                            application::ReportKind::cartesian_state);
-                                });
+                                const auto report_id =
+                                    selected_station_
+                                        ? stations_.at(*selected_station_).config.object_id
+                                        : satellites_.at(*selected_).orbit->input.object_id;
+                                const auto report_kind =
+                                    selected_station_ ? application::ReportKind::ground_stations
+                                                      : application::ReportKind::cartesian_state;
+                                connect(report, &QAction::triggered, this,
+                                        [this, report_id, report_kind] {
+                                            show_reports();
+                                            if (report_dialog_)
+                                                report_dialog_->select_object(report_id,
+                                                                              report_kind);
+                                        });
                                 menu.addSeparator();
                                 menu.addAction(rename_action_);
                                 menu.addAction(duplicate_action_);
@@ -6349,7 +6353,7 @@ class Workbench final : public QMainWindow {
             report_action_->trigger();
             require(report_dialog_ && workspace_->contains(report_dialog_),
                     "Report did not open in the workspace");
-            report_dialog_->findChild<QListWidget *>("reportLibrary")->setCurrentRow(2);
+            report_dialog_->findChild<QComboBox *>("reportLibrary")->setCurrentIndex(2);
             report_dialog_->findChild<QComboBox *>("reportFrame")->setCurrentIndex(1);
             report_dialog_->findChild<QDoubleSpinBox *>("reportStep")->setValue(600);
             report_dialog_->findChild<QLineEdit *>("reportName")
@@ -6419,7 +6423,7 @@ class Workbench final : public QMainWindow {
             require(last_project_outcome_ == "opened" && reports_.size() == 1,
                     "Project reopen lost report configurations");
             report_action_->trigger();
-            report_dialog_->findChild<QListWidget *>("reportLibrary")->setCurrentRow(4);
+            report_dialog_->findChild<QComboBox *>("reportLibrary")->setCurrentIndex(4);
             report_dialog_->findChild<QPushButton *>("generateReport")->click();
             ++orbit_smoke_stage_;
             break;
@@ -6464,6 +6468,53 @@ class Workbench final : public QMainWindow {
             ++orbit_smoke_stage_;
             break;
         case 128:
+            if (++smoke_final_frames_ >= 4)
+                ++orbit_smoke_stage_;
+            break;
+        case 129: {
+            auto *item = satellites_.at(1).item;
+            objects_->scrollToItem(item);
+            QTimer::singleShot(0, this, [this, require] {
+                auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+                require(menu != nullptr, "Object report context menu did not open");
+                auto *action = menu->findChild<QAction *>("openObjectReport");
+                require(action != nullptr, "Object report action is missing");
+                // The clicked object's stable ID must survive unrelated selection changes.
+                set_selection(0);
+                action->trigger();
+                menu->close();
+            });
+            objects_->customContextMenuRequested(objects_->visualItemRect(item).center());
+            require(report_dialog_->findChild<QLabel *>("reportScopeLabel")->text() ==
+                        item->text(0),
+                    "Context report did not bind the right-clicked object");
+            report_dialog_->findChild<QComboBox *>("reportLibrary")->setCurrentIndex(1);
+            report_dialog_->findChild<QPushButton *>("saveReport")->click();
+            require(reports_.back().object_ids ==
+                        std::vector<std::string>{satellites_.at(1).orbit->input.object_id},
+                    "Changing report type widened the object scope");
+            report_dialog_->findChild<QPushButton *>("generateReport")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 130: {
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            auto *model = report_dialog_->findChild<QTableView *>("reportTable")->model();
+            require(model->rowCount() == 1 &&
+                        model->data(model->index(0, 0)).toString() ==
+                            QString::fromStdString(satellites_.at(1).orbit->input.object_id),
+                    "Object report included an unselected object");
+            save_workbench_image("object-report-results.png");
+            record("object-report-context-scope-survives-template-change");
+            workspace_->close_page(report_dialog_);
+            workspace_->select_view(0);
+            fit_views();
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 131:
             if (++smoke_final_frames_ >= 4)
                 ++orbit_smoke_stage_;
             break;
@@ -6736,7 +6787,7 @@ class Workbench final : public QMainWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 129;
+    static constexpr int orbit_smoke_complete = 132;
     int smoke_final_frames_ = 0;
     std::vector<std::uint8_t> smoke_project_bytes_;
     application::DataLock smoke_data_lock_;

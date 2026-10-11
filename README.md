@@ -82,6 +82,7 @@ C++ SDK 由模块安装生成。Python 构建入口 `pyproject.toml` 放在仓�
 - [项目保存与打开验证](docs/validation/project_files_2026_10_10.md)
 - [基础报告、STK 对照与后续阶段](docs/architecture/reports.md)
 - [报告计算、桌面与便携包验证](docs/validation/reports_2026_10_11.md)
+- [报告单对象范围与左右布局验证](docs/validation/report_ui_2026_10_11.md)
 - [二体与场景工作台验证记录](docs/validation/p1_two_body_workbench.md)
 - [时间轴交互与便携包验证](docs/validation/timeline_2026_10_09.md)
 - [工作区、视图与按需缓存验证](docs/validation/workspace_views_2026_10_10.md)

@@ -550,6 +550,21 @@ QLabel#dataPriorityNote { color: #a1aec7; padding: 16px; background: #20293b; bo
 QLabel#dataInventoryDetails { color: #a1aec7; font-family: "Consolas"; font-size: 11px; padding: 10px; background: #161c2a; border-radius: 6px; }
 QLabel#dataCenterStatus { color: #b3c5fa; }
 QLabel#dataCenterStatus[warning="true"] { color: #e6c68b; }
+QWidget#reportHeading { background: #1c2333; border-bottom: 1px solid #30394e; }
+QLabel#reportHeadingTitle { color: #eff2fc; font-size: 18px; font-weight: 600; }
+QWidget#reportSettingsPanel, QWidget#reportSettings { background: #171e2c; }
+QWidget#reportGenerateActions { background: #171e2c; border-top: 1px solid #30394e; }
+QLabel#reportSectionTitle { color: #a8b7d2; font-size: 12px; font-weight: 600; }
+QLabel#reportScopeLabel { color: #e4e9fa; font-weight: 600; }
+QLabel#reportScopeDetail, QLabel#reportInterval, QLabel#reportEstimate { color: #92a3bd; font-size: 11px; }
+QLabel#reportInterval { font-family: "Consolas"; }
+QLabel#reportResultTitle { color: #e4e9fa; font-size: 14px; font-weight: 600; }
+QLabel#reportResultLabel { color: #a4b3cd; font-size: 11px; }
+QLabel#reportEmptyTitle { color: #b1bdd7; font-size: 18px; }
+QLabel#reportStatus { color: #9daec8; background: #171e2c; border-top: 1px solid #30394e; font-size: 11px; }
+QTableView#reportTable { border: 1px solid #30394e; border-radius: 4px; }
+QWidget#reportHeading QPushButton, QWidget#reportSettings QPushButton { background: transparent; }
+QWidget#reportSettings QComboBox, QWidget#reportSettings QLineEdit, QWidget#reportSettings QDoubleSpinBox { min-height: 18px; }
 QWidget#dataFooter { background: #171e2c; border-top: 1px solid #2e374b; }
 QFrame#formSection { background: #20283a; border: 1px solid #2e394e; border-radius: 7px; }
 QFrame#choiceCard { background: #20283a; border: 1px solid #354057; border-radius: 8px; }
