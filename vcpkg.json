@@ -12,7 +12,7 @@
       "description": "Qt / VSG / Rocky desktop rendering integration",
       "dependencies": [
         "sqlite3",
-        { "name": "qtbase", "default-features": false, "features": ["widgets", "network", "openssl", "freetype"] },
+        { "name": "qtbase", "default-features": false, "features": ["widgets", "network", "openssl", "freetype", "png", "jpeg"] },
         "vsgqt",
         { "name": "vsg", "features": ["windowing"] },
         { "name": "rocky", "features": ["gdal"] }

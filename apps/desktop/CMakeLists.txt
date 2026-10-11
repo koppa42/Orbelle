@@ -8,6 +8,11 @@ if(ORBITFORGE_WITH_VSG)
         message(FATAL_ERROR "The graphical desktop requires ORBITFORGE_WITH_DATA_CATALOG")
     endif()
     find_package(Qt6 6.8 CONFIG REQUIRED COMPONENTS Network)
+    if(NOT QT_FEATURE_imageformat_png OR NOT QT_FEATURE_imageformat_jpeg)
+        message(FATAL_ERROR
+            "The graphical desktop requires Qt PNG and JPEG support for artwork, "
+            "report exports and Earth imagery. Enable qtbase[png,jpeg] in vcpkg.")
+    endif()
     if(BUILD_TESTING AND NOT TARGET Qt6::QOffscreenIntegrationPlugin)
         message(FATAL_ERROR
             "Desktop UI tests require Qt's offscreen platform plugin. "
@@ -64,7 +69,7 @@ if(ORBITFORGE_WITH_VSG)
         gtest_discover_tests(orbitforge_data_center_ui_tests DISCOVERY_MODE PRE_TEST
             TEST_PREFIX "desktop." PROPERTIES TIMEOUT 20
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-            ENVIRONMENT_MODIFICATION "QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>")
+            ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
     endif()
     if(BUILD_TESTING AND ORBITFORGE_WITH_ERFA AND ORBITFORGE_WITH_SPICE)
         add_executable(orbitforge_orbit_scene_tests tests/orbit_scene_test.cpp src/viewer/orbit_scene.cpp)
@@ -90,7 +95,7 @@ if(ORBITFORGE_WITH_VSG)
         gtest_discover_tests(orbitforge_quantity_tests DISCOVERY_MODE PRE_TEST
             TEST_PREFIX "desktop." PROPERTIES TIMEOUT 10
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-            ENVIRONMENT_MODIFICATION "QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>")
+            ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
     endif()
     if(BUILD_TESTING AND ORBITFORGE_WITH_ERFA)
         add_executable(orbitforge_report_ui_tests tests/report_dialog_test.cpp
@@ -103,7 +108,7 @@ if(ORBITFORGE_WITH_VSG)
         gtest_discover_tests(orbitforge_report_ui_tests DISCOVERY_MODE PRE_TEST
             TEST_PREFIX "desktop." PROPERTIES TIMEOUT 20
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-            ENVIRONMENT_MODIFICATION "QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>")
+            ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbitforge_ground_map_tests tests/ground_map_test.cpp
             src/viewer/ground_map.cpp src/viewer/workbench_profile.cpp)
         target_link_libraries(orbitforge_ground_map_tests PRIVATE
@@ -113,7 +118,7 @@ if(ORBITFORGE_WITH_VSG)
         gtest_discover_tests(orbitforge_ground_map_tests DISCOVERY_MODE PRE_TEST
             TEST_PREFIX "desktop." PROPERTIES TIMEOUT 10
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-            ENVIRONMENT_MODIFICATION "QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>")
+            ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbitforge_timeline_tests tests/timeline_test.cpp
             src/viewer/mission_timeline.cpp src/viewer/epoch_editor.cpp
             src/viewer/workbench_style.cpp src/viewer/workspace.cpp tests/workspace_test.cpp)
@@ -124,7 +129,7 @@ if(ORBITFORGE_WITH_VSG)
         gtest_discover_tests(orbitforge_timeline_tests DISCOVERY_MODE PRE_TEST
             TEST_PREFIX "desktop." PROPERTIES TIMEOUT 10
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-            ENVIRONMENT_MODIFICATION "QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>")
+            ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
     endif()
     # Copy fixed runtime resources alongside the build output, independent of source paths.
     add_custom_command(TARGET orbitforge_desktop POST_BUILD
