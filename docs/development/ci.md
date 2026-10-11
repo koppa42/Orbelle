@@ -1,6 +1,20 @@
 # CI 与版本发布
 
-GitHub Actions 在每个 Pull Request、`main` 更新及手动运行时执行 CI。推送 `vX.Y.Z` 标签会在标签指向的提交上重新运行同一套检查；全部成功后，自动创建 GitHub Release。
+所有改动先推送主题分支，再通过 Pull Request 进入 `main`；禁止直接推送 `main`。合并前更新到最新目标分支，确认当前提交的 **CI passed** 成功，再由维护者确认合并。提交或推送分支不代表授权合并。
+
+## 触发与分层
+
+| 触发 | 执行范围 |
+| --- | --- |
+| 代码、测试、CI、依赖或资源 PR | 完整 Windows / Linux 构建、测试、交付验证与 Python 版本矩阵 |
+| 纯文档 PR | 版本一致性及工具测试；跳过原生构建和 Python wheel 矩阵 |
+| 合并后 `main` 更新 | 版本一致性及工具测试；检查两平台共享依赖缓存，缺失时只编译依赖，不重复构建和测试产品 |
+| 手动运行 | 完整检查，可用于复核当前 `main` 或排查问题 |
+| `vX.Y.Z` 标签 | 在标签提交上重新运行完整检查；全部成功后创建 GitHub Release |
+
+纯文档的范围限于根目录 `README.md`、`AGENTS.md` 和 `docs/` 下的 Markdown 文件。其他路径、空差异或无法确定的差异均执行全量检查。分类对比 PR 模拟合并提交与其目标分支父提交，包含 PR 的全部提交以及重命名前后的路径；不能仅凭最后一次提交或文件扩展名跳过测试。
+
+PR 使用 GitHub 默认的[模拟合并引用](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)运行。合并后不再完整重跑的前提是合并前已基于最新 `main` 验证；目标分支变化时先更新 PR 并等待新的检查结果。若启用合并队列，需先接入 `merge_group` 事件。
 
 ## 检查范围
 
@@ -11,11 +25,17 @@ GitHub Actions 在每个 Pull Request、`main` 更新及手动运行时执行 CI
 | Linux SDK and installed Python API | 新 runner，不检出源码；校验交付散列、迁移目录、构建 SDK 消费端、离线安装 wheel，运行 Python API、示例和 C++/Python 对照 |
 | Windows desktop, SDK and Python 3.13 | Windows Server 2022 / VS 2022：完整桌面构建、CTest 与 Qt offscreen 测试、便携包、SDK 与基准 wheel 构建，解压 SDK 后编译消费端，在新虚拟环境中运行 Python API 测试 |
 | Python 3.11 / 3.12 / 3.14 / 3.15 × Windows / Linux | 复用相应平台的原生依赖，分别构建 wheel，在新虚拟环境离线安装后运行 API 测试及五个示例；任一版本失败都阻止发布 |
-| CI passed | 汇总门槛；任何检查失败、跳过或取消都会失败 |
+| CI passed | 按本次范围检查全部预期作业；应执行的作业失败、取消或意外跳过都会失败，仅允许纯文档和缓存维护模式中明确计划的跳过 |
 
-建议在 GitHub 的 `main` 分支规则中将 **CI passed** 设为必需检查。工作流本身不会修改仓库的分支保护设置。
+GitHub 的 `main` 分支规则应要求通过 PR 合并、**CI passed** 成功，并要求分支合并前保持最新；禁用绕过和强制推送。仓库中的规范和工作流不会自动修改 GitHub 分支保护设置。
+
+## 缓存与耗时
 
 依赖使用仓库固定的 vcpkg 基线与 overlay，并缓存编译结果。Windows CI 使用专用的 `x64-windows-release` triplet，固定 v143 工具链，只构建实际用于测试和发布的 Release 依赖。本地默认 triplet 不变。首次 Windows 构建需要从源码编译 Qt、VSG、Rocky、GDAL 等依赖，耗时会明显长于后续运行；即使后续依赖失败，已完成的包也会保存到部分缓存，供下次继续使用。缓存区分 runner 镜像和依赖配置，vcpkg 另按编译器及包 ABI 校验是否可复用。失败诊断保留 14 天，测试交付物和发布候选包保留 7 天。
+
+GitHub 将 PR 生成的缓存限制在该 PR 的合并引用中，其他 PR 和 `main` 不能读取；PR 可以读取目标分支的缓存，详见[缓存访问范围](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache)。因此保留 `main` 上的依赖缓存维护：精确命中时不运行依赖安装，未命中时生成供后续 PR 使用的共享缓存。首次建立缓存、依赖变化或 runner 工具链变化仍可能需要较长编译，不能承诺每次都命中缓存。
+
+排查耗时时先区分 `Install dependencies` / `Warm shared dependencies` 与项目构建、测试、打包。查看缓存是否命中、vcpkg 恢复了多少包、哪些包重新编译；不要用减少 Python 支持版本或跳过行为测试来掩盖依赖冷启动问题。
 
 本地日常开发只需验证 Python 3.13；多版本兼容性由 CI 负责，不必在开发机安装多套 Python。`pyproject.toml` 的 `[tool.orbitforge.ci]` 统一定义基准版本和测试版本，CI 矩阵与发布附件检查共用这份配置。桌面和 SDK 每个平台只构建一次；其他解释器版本只构建 Python 包。
 

@@ -38,10 +38,12 @@ jobs:
       vcpkg-baseline: ${{ steps.version.outputs.vcpkg-baseline }}
       baseline-python: ${{ steps.version.outputs.baseline-python }}
       python-matrix: ${{ steps.version.outputs.python-matrix }}
+      scope: ${{ steps.plan.outputs.scope }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 2
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.13'
@@ -53,14 +55,20 @@ jobs:
           args=()
           if [[ -n "$RELEASE_TAG" ]]; then args+=(--tag "$RELEASE_TAG"); fi
           python tools/ci/version.py --github-output "${args[@]}"
+      - name: Select required checks
+        id: plan
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: python tools/ci/plan_ci.py plan
       - name: Test data and delivery tools
         run: |
           python -m unittest discover -s tools/data/tests -v
           python -m unittest discover -s tests/packaging -v
 
   linux:
-    name: Linux C++, sanitizers and Python ${{ needs.metadata.outputs.baseline-python }}
+    name: ${{ needs.metadata.outputs.scope == 'cache' && 'Linux dependency cache' || format('Linux C++, sanitizers and Python {0}', needs.metadata.outputs.baseline-python) }}
     needs: metadata
+    if: needs.metadata.outputs.scope != 'docs'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -70,6 +78,9 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ needs.metadata.outputs.baseline-python }}
+      - name: Identify runner image
+        id: toolchain
+        run: echo "image=$ImageVersion" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: microsoft/vcpkg
@@ -77,16 +88,27 @@ jobs:
           path: out/tools/vcpkg
           persist-credentials: false
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache
         with:
           path: ${{ runner.temp }}/linux/dependencies/binary-cache
-          key: vcpkg-ubuntu24-x64-v1-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/ports/**') }}
-          restore-keys: vcpkg-ubuntu24-x64-v1-
+          key: vcpkg-ubuntu24-x64-v1-${{ steps.toolchain.outputs.image }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/ports/**', 'tools/ci/check_linux.py') }}
+          restore-keys: |
+            vcpkg-ubuntu24-x64-v1-${{ steps.toolchain.outputs.image }}-
+            vcpkg-ubuntu24-x64-v1-
       - name: Prepare toolchain
+        if: needs.metadata.outputs.scope == 'full' || steps.cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential clang ninja-build ncompress pkg-config python3-dev python3-venv
           out/tools/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+      - name: Warm shared dependencies
+        if: needs.metadata.outputs.scope == 'cache' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          python tools/ci/check_linux.py --stage dependencies --source "$GITHUB_WORKSPACE" \
+            --vcpkg-root "$GITHUB_WORKSPACE/out/tools/vcpkg" \
+            --work "$RUNNER_TEMP/linux" --reports "$RUNNER_TEMP/reports/linux-dependencies"
       - name: Build, test and export
+        if: needs.metadata.outputs.scope == 'full'
         run: |
           python tools/ci/check_linux.py --source "$GITHUB_WORKSPACE" \
             --vcpkg-root "$GITHUB_WORKSPACE/out/tools/vcpkg" \
@@ -94,6 +116,7 @@ jobs:
             --delivery "$RUNNER_TEMP/delivery"
           tar -czf "$RUNNER_TEMP/linux-delivery.tar.gz" -C "$RUNNER_TEMP/delivery" .
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: needs.metadata.outputs.scope == 'full'
         with:
           name: linux-delivery
           path: ${{ runner.temp }}/linux-delivery.tar.gz
@@ -102,7 +125,7 @@ jobs:
           overwrite: true
           retention-days: 7
       - name: Upload diagnostics
-        if: always()
+        if: always() && (needs.metadata.outputs.scope == 'full' || steps.cache.outputs.cache-hit != 'true')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: linux-build-reports
@@ -113,6 +136,7 @@ jobs:
   linux-consumer:
     name: Linux SDK and installed Python API
     needs: [metadata, linux]
+    if: needs.metadata.outputs.scope == 'full'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -157,8 +181,9 @@ jobs:
           retention-days: 14
 
   windows:
-    name: Windows desktop, SDK and Python ${{ needs.metadata.outputs.baseline-python }}
+    name: ${{ needs.metadata.outputs.scope == 'cache' && 'Windows dependency cache' || format('Windows desktop, SDK and Python {0}', needs.metadata.outputs.baseline-python) }}
     needs: metadata
+    if: needs.metadata.outputs.scope != 'docs'
     runs-on: windows-2022
     timeout-minutes: 180
     defaults:
@@ -197,6 +222,7 @@ jobs:
             vcpkg-win2022-release-v2-
       - name: Install dependencies
         id: dependencies
+        if: needs.metadata.outputs.scope == 'full' || steps.cache.outputs.cache-hit != 'true'
         run: |
           & out/tools/vcpkg/bootstrap-vcpkg.bat -disableMetrics
           if ($LASTEXITCODE) { throw 'vcpkg bootstrap failed' }
@@ -217,6 +243,7 @@ jobs:
           path: ${{ runner.temp }}/vcpkg-binary-cache
           key: ${{ steps.cache.outputs.cache-primary-key }}${{ steps.dependencies.outcome != 'success' && format('-partial-{0}-{1}', github.run_id, github.run_attempt) || '' }}
       - name: Build, test and package
+        if: needs.metadata.outputs.scope == 'full'
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
         run: |
@@ -224,6 +251,7 @@ jobs:
             --work "$env:RUNNER_TEMP/windows" --reports "$env:RUNNER_TEMP/reports/windows" `
             --output "$env:RUNNER_TEMP/assets" --version "$env:VERSION"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: needs.metadata.outputs.scope == 'full'
         with:
           name: windows-release-assets
           path: ${{ runner.temp }}/assets/*
@@ -232,6 +260,7 @@ jobs:
           overwrite: true
           retention-days: 7
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: needs.metadata.outputs.scope == 'full'
         with:
           name: windows-python-dependencies
           path: ${{ runner.temp }}/windows-python-dependencies.tar.gz
@@ -240,7 +269,7 @@ jobs:
           overwrite: true
           retention-days: 7
       - name: Upload diagnostics
-        if: always()
+        if: always() && (needs.metadata.outputs.scope == 'full' || steps.cache.outputs.cache-hit != 'true')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: windows-reports
@@ -254,6 +283,7 @@ jobs:
   python-matrix:
     name: Python ${{ matrix.python }} / ${{ matrix.platform }}
     needs: [metadata, linux, windows]
+    if: needs.metadata.outputs.scope == 'full'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     strategy:
@@ -318,8 +348,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Require every check
         env:
+          CI_SCOPE: ${{ needs.metadata.outputs.scope }}
           RESULTS: ${{ toJSON(needs) }}
-        run: |
-          python3 -c 'import json, os; results=json.loads(os.environ["RESULTS"]); assert all(job["result"] == "success" for job in results.values()), results'
+        run: python3 tools/ci/plan_ci.py check
