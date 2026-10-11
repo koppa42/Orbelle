@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.28)
 project(OrbitForgeSdkConsumer LANGUAGES CXX)
 option(ORBITFORGE_EXPECT_TIME_FRAMES "Expect the installed SDK to include ERFA" OFF)
 option(ORBITFORGE_EXPECT_SPICE "Expect the installed SDK to include CSPICE" OFF)
-find_package(OrbitForge 0.1.0 EXACT CONFIG REQUIRED COMPONENTS Runtime)
+find_package(OrbitForge CONFIG REQUIRED COMPONENTS Runtime)
 add_executable(sdk_consumer main.cpp)
 target_link_libraries(sdk_consumer PRIVATE OrbitForge::Runtime)
 target_compile_definitions(sdk_consumer PRIVATE

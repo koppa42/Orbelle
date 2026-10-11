@@ -1,0 +1,91 @@
+"""Validate release assets, upload a complete draft, then make it public."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import zipfile
+
+from version import ROOT, check
+
+
+def validate_assets(directory, version):
+    expected = {
+        f"OrbitForge-{version}-win-x64.zip",
+        f"OrbitForge-{version}-sdk-win-x64.zip",
+        f"OrbitForge-{version}-sdk-linux-x64.tar.gz",
+        f"orbitforge-{version}-cp313-cp313-win_amd64.whl",
+        f"orbitforge-{version}-cp313-cp313-linux_x86_64.whl",
+    }
+    actual = {p.name for p in directory.iterdir()}
+    if actual != expected:
+        raise ValueError(f"Release assets differ: missing={expected - actual}, unexpected={actual - expected}")
+    for name in sorted(expected):
+        path = directory / name
+        if not path.is_file() or path.stat().st_size == 0:
+            raise ValueError(f"Empty or invalid asset: {name}")
+        if name.endswith(".whl"):
+            with zipfile.ZipFile(path) as wheel:
+                metadata = wheel.read(f"orbitforge-{version}.dist-info/METADATA").decode("utf-8")
+                if f"\nVersion: {version}\n" not in metadata:
+                    raise ValueError(f"Wheel metadata version differs: {name}")
+                if wheel.testzip() is not None:
+                    raise ValueError(f"Corrupt wheel: {name}")
+    return [directory / name for name in sorted(expected)]
+
+
+def publish(tag, assets, repo, run=subprocess.run):
+    version = check(ROOT, tag)
+    files = validate_assets(assets, version)
+    checksums = assets / "SHA256SUMS"
+    lines = []
+    for path in files:
+        with path.open("rb") as stream:
+            lines.append(f"{hashlib.file_digest(stream, 'sha256').hexdigest()}  {path.name}\n")
+    checksums.write_text("".join(lines), encoding="utf-8", newline="\n")
+    files.append(checksums)
+
+    def gh(*args, **kwargs):
+        return run(["gh", *args, "--repo", repo], **kwargs)
+
+    existing = gh("release", "view", tag, "--json", "isDraft", capture_output=True, text=True)
+    if existing.returncode == 0 and not json.loads(existing.stdout)["isDraft"]:
+        raise ValueError(f"{tag} is already published; published releases are never overwritten")
+    if existing.returncode != 0:
+        notes = (
+            "Windows x64 desktop: download the portable ZIP and extract the whole folder. "
+            "The desktop requires a Vulkan-capable GPU and driver.\n\n"
+            "C++ SDKs include headless Runtime/ERFA/IERS/CSPICE/SQLite and their link dependencies. "
+            "See README.txt inside the archive.\n\n"
+            "Python wheels: CPython 3.13 x64 on Windows and Ubuntu 24.04. "
+            "The Linux wheel is a native linux_x86_64 build, not a manylinux wheel. "
+            "Install the matching file with pip install <wheel>.\n\n"
+            "CI checks C++, sanitizers, installed SDK/Python APIs and Qt offscreen tests. "
+            "GPU rendering and performance require separate hardware validation. "
+            "SHA256SUMS covers every uploaded package.\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            note_path = Path(temporary) / "release-notes.md"
+            note_path.write_text(notes, encoding="utf-8")
+            gh("release", "create", tag, "--verify-tag", "--draft", "--title", f"OrbitForge {tag}",
+               "--generate-notes", "--notes-file", str(note_path), check=True)
+    # A failed upload leaves a draft. Reruns can replace only these known assets.
+    gh("release", "upload", tag, *map(str, files), "--clobber", check=True)
+    uploaded = gh("release", "view", tag, "--json", "assets", capture_output=True, text=True, check=True)
+    if {asset["name"] for asset in json.loads(uploaded.stdout)["assets"]} != {path.name for path in files}:
+        raise ValueError("Draft asset list does not match the tested packages; leaving it unpublished")
+    gh("release", "edit", tag, "--draft=false", check=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--tag", required=True)
+    parser.add_argument("--assets", type=Path, required=True)
+    args = parser.parse_args()
+    publish(args.tag, args.assets, os.environ["GH_REPO"])
+
+
+if __name__ == "__main__":
+    main()

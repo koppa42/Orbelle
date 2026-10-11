@@ -27,6 +27,7 @@
       "generator": "Ninja",
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
       "cacheVariables": {
+        "ORBITFORGE_WITH_DATA_CATALOG": "ON",
         "ORBITFORGE_BUILD_DESKTOP": "OFF",
         "ORBITFORGE_WITH_VSG": "OFF",
         "ORBITFORGE_WITH_ROCKY": "OFF"

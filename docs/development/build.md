@@ -1,6 +1,6 @@
 # 构建与测试
 
-从仓库根目录执行命令。Windows 提供桌面工作台、SDK 和 Python 包；Linux 提供无界面构建与交付验证入口，可通过本地 Docker 在隔离目录执行。尚未配置托管 CI，Linux 桌面图形尚未验证。
+从仓库根目录执行命令。Windows 提供桌面工作台、SDK 和 Python 包；Linux 提供无界面构建与交付验证入口，可通过本地 Docker 在隔离目录执行。GitHub Actions 自动检查 PR，并在推送版本标签后发布，见 [CI 与版本发布](ci.md)。Linux 桌面图形尚未验证。
 
 ## 首次准备
 
@@ -102,7 +102,7 @@ docker run --rm --mount "type=bind,source=$orbitRoot,target=/source,readonly" --
 docker run --rm --network none --mount "type=bind,source=$orbitRun/delivery,target=/input,readonly" --mount "type=bind,source=$orbitRun,target=/reports" orbitforge-linux-validation:ubuntu24.04 python3 /input/check_linux.py --stage consumer --delivery /input --work /work --reports /reports/consumer
 ```
 
-构建阶段依次安装 `x64-linux` 计算/测试依赖、运行 Release 和 ASan/UBSan 测试、生成 wheel、导出 SDK/依赖/测试数据。每轮 SDK 安装和 wheel 输出使用全新目录，避免上轮残留掩盖缺文件。wheel 从逐文件校验的源码副本构建，防止构建后端遍历庞大的本机 `out/`。消费端把导出文件移到新的路径，校验 SHA256，再从安装前缀构建 C++ 案例，并在新虚拟环境离线安装 wheel、运行 Python API 测试和四个示例。`commands.json` 保存每一步命令和退出码；只有全部选定步骤成功才生成 `passed.json`。输出目录已有证据时脚本拒绝覆盖。
+构建阶段依次安装 `x64-linux` 计算/测试依赖、运行 Release 和 ASan/UBSan 测试、生成 wheel、导出 SDK/依赖/测试数据。每轮 SDK 安装和 wheel 输出使用全新目录，避免上轮残留掩盖缺文件。wheel 从逐文件校验的源码副本构建，防止构建后端遍历庞大的本机 `out/`。消费端把导出文件移到新的路径，校验 SHA256，再从安装前缀构建 C++ 案例，并在新虚拟环境离线安装 wheel、运行 Python API 测试和五个示例。`commands.json` 保存每一步命令和退出码；只有全部选定步骤成功才生成 `passed.json`。输出目录已有证据时脚本拒绝覆盖。
 
 可用 `--stage dependencies|release|sanitizers|wheel|export|consumer` 单独执行相应阶段；复用构建卷时，为每次执行指定新的 `--reports`。`export` 需要先完成 Release 安装和 wheel 构建，并使用新的 `--delivery`。Sanitizer 检查范围是启用插桩的项目代码；vcpkg 中未插桩的第三方库不能据此宣称内部检查通过。
 
