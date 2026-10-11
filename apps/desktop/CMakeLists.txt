@@ -8,6 +8,11 @@ if(ORBITFORGE_WITH_VSG)
         message(FATAL_ERROR "The graphical desktop requires ORBITFORGE_WITH_DATA_CATALOG")
     endif()
     find_package(Qt6 6.8 CONFIG REQUIRED COMPONENTS Network)
+    if(BUILD_TESTING AND NOT TARGET Qt6::QOffscreenIntegrationPlugin)
+        message(FATAL_ERROR
+            "Desktop UI tests require Qt's offscreen platform plugin. "
+            "Enable qtbase[freetype] in vcpkg and allow Qt plugin target imports.")
+    endif()
     target_link_libraries(orbitforge_desktop PRIVATE Qt6::Network)
     # Original chevrons are pre-rendered at high resolution; no optional QtSvg plugin needed.
     qt_add_resources(orbitforge_desktop "workbench_icons" PREFIX "/orbitforge"
