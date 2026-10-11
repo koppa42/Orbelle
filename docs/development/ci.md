@@ -9,13 +9,13 @@ GitHub Actions 在每个 Pull Request、`main` 更新及手动运行时执行 CI
 | Versions and tooling | CMake、Python、vcpkg 版本一致性；数据导入、交付与发布脚本测试 |
 | Linux C++, sanitizers and Python 3.13 | Ubuntu 24.04：完整无界面 C++ 测试、ASan/UBSan、SDK 安装、基准 Python wheel 构建 |
 | Linux SDK and installed Python API | 新 runner，不检出源码；校验交付散列、迁移目录、构建 SDK 消费端、离线安装 wheel，运行 Python API、示例和 C++/Python 对照 |
-| Windows desktop, SDK and Python 3.13 | Windows Server 2025 / VS 2022：完整桌面构建、CTest 与 Qt offscreen 测试、便携包、SDK 与基准 wheel 构建，解压 SDK 后编译消费端，在新虚拟环境中运行 Python API 测试 |
+| Windows desktop, SDK and Python 3.13 | Windows Server 2022 / VS 2022：完整桌面构建、CTest 与 Qt offscreen 测试、便携包、SDK 与基准 wheel 构建，解压 SDK 后编译消费端，在新虚拟环境中运行 Python API 测试 |
 | Python 3.11 / 3.12 / 3.14 / 3.15 × Windows / Linux | 复用相应平台的原生依赖，分别构建 wheel，在新虚拟环境离线安装后运行 API 测试及五个示例；任一版本失败都阻止发布 |
 | CI passed | 汇总门槛；任何检查失败、跳过或取消都会失败 |
 
 建议在 GitHub 的 `main` 分支规则中将 **CI passed** 设为必需检查。工作流本身不会修改仓库的分支保护设置。
 
-依赖使用仓库固定的 vcpkg 基线与 overlay，并缓存编译结果。首次 Windows 构建需要从源码编译 Qt、VSG、Rocky、GDAL 等依赖，耗时会明显长于后续运行。失败诊断保留 14 天，测试交付物和发布候选包保留 7 天。
+依赖使用仓库固定的 vcpkg 基线与 overlay，并缓存编译结果。Windows CI 使用专用的 `x64-windows-release` triplet，固定 v143 工具链，只构建实际用于测试和发布的 Release 依赖。本地默认 triplet 不变。首次 Windows 构建需要从源码编译 Qt、VSG、Rocky、GDAL 等依赖，耗时会明显长于后续运行；即使后续依赖失败，已完成的包也会保存到部分缓存，供下次继续使用。缓存区分 runner 镜像和依赖配置，vcpkg 另按编译器及包 ABI 校验是否可复用。失败诊断保留 14 天，测试交付物和发布候选包保留 7 天。
 
 本地日常开发只需验证 Python 3.13；多版本兼容性由 CI 负责，不必在开发机安装多套 Python。`pyproject.toml` 的 `[tool.orbitforge.ci]` 统一定义基准版本和测试版本，CI 矩阵与发布附件检查共用这份配置。桌面和 SDK 每个平台只构建一次；其他解释器版本只构建 Python 包。
 
