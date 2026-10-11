@@ -5,10 +5,14 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "orbitforge"
 version = "0.1.0"
-description = "OrbitForge P0 standalone computation skeleton"
+description = "OrbitForge orbital analysis, scenario management, and reporting"
 readme = "README.md"
 requires-python = ">=3.11"
 classifiers = ["Programming Language :: Python :: 3", "Programming Language :: C++"]
+
+[project.urls]
+Repository = "https://github.com/koppa42/OrbitForge"
+Issues = "https://github.com/koppa42/OrbitForge/issues"
 
 [tool.scikit-build]
 minimum-version = "build-system.requires"

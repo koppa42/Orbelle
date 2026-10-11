@@ -2,6 +2,20 @@
 
 从仓库根目录执行命令。当前已验证 Windows 骨架与图形工作台，以及 Ubuntu 24.04 x64 下的完整无界面天文计算模块、SDK 和 Python wheel。Linux 验证通过本地 Docker 执行，尚未配置托管 CI 服务；具体范围见 [Linux 验证记录](../validation/p0_linux_headless.md)。
 
+## 首次准备
+
+```powershell
+git clone https://github.com/koppa42/OrbitForge.git
+cd OrbitForge
+```
+
+- 基础构建：Git、CMake 3.28+ 和 C++20 编译器。Windows 需要 Visual Studio 的 C++ 桌面开发组件与 Windows SDK；Linux 可用 GCC / Clang 和 Ninja。
+- 天文计算与桌面：先准备可在命令行调用的 vcpkg，再按下方功能安装依赖。仓库固定 registry 基线和 overlay，公共预设不依赖开发机的绝对路径。
+- Python 包：Python 3.11+，构建后端版本由 `pyproject.toml` 固定。
+- Windows 图形运行：支持 Vulkan 的 GPU / 驱动；开发启动脚本使用 PowerShell 7（`pwsh`）。Linux 桌面尚未验证。
+
+完整场景工作台使用 `desktop-graphics`；`desktop` 仅用于基础 Qt 状态表。无界面基础示例可直接从下一节开始，不需要安装 vcpkg 依赖。
+
 ## 提交范围
 
 Git 保留源码、构建配置、测试与复现脚本、必要的测试输入和运行资源，以及整理后的文档。构建日志、原始 JSON/CSV/XML 报告、自动截图、重复源码快照和发布包属于生成产物，放在已忽略的 `out/validation/`、`out/releases/` 等目录，不复制进 `docs/`，不使用 `git add -f` 绕过忽略规则。提交前检查 `git diff --cached --stat` 和文件列表；验证结论与运行命令写入文档即可。历史产物的本机存放位置见[验证记录说明](../validation/README.md)。
@@ -53,7 +67,7 @@ ctest --preset time-frames
 
 固定 registry 基线中没有 ERFA port，因此仓库提供一个静态库 overlay。它用 CMake 包装未改动的 ERFA 2.0.1 C 源码，以官方压缩包 SHA512 固定内容。port 同时导出 `erfa::erfa`，选择平台标准 C 数学库，安装原始许可证。当前 Windows 验证使用 x64-windows 的动态 MSVC 运行库，ERFA 本身为静态库。
 
-启用 Provider 的配置阶段会检查固定 IERS 原文的 SHA256，校验失败会停止配置。升级数据需要同时审核原文、清单、有效期和边界测试，不能只改有效期。运行时不会自动访问 IERS 网络服务。
+启用 Provider 的配置阶段会检查固定 IERS 原文的 SHA256，校验失败会停止配置。升级仓库内置数据需要同时审核原文、清单、有效期和边界测试，不能只改有效期。Provider 本身只读取显式数据；桌面数据中心另行负责联网下载与自动更新。
 
 ERFA 自带测试可在取得校验匹配的源码后验证：将 `cmake/ports/erfa/CMakeLists.txt` 和 `erfaConfig.cmake.in` 复制到解压根目录，用单独构建目录加 `-DBUILD_TESTING=ON` 配置，再构建并运行 CTest。本轮已运行原版 `t_erfa_c` 和 `t_erfa_c_extra`。
 
@@ -127,9 +141,10 @@ ctest --test-dir out/build/sdk-consumer-astronomy -C Release --output-on-failure
 
 ## 独立 Python 包
 
-标准 wheel 已启用 ERFA/IERS/CSPICE。先按 `astronomy` 一节安装依赖，再在专用构建虚拟环境准备 `pyproject.toml` 指定的 Python 构建依赖。常规命令：
+标准 wheel 已启用 ERFA/IERS/CSPICE 和 SQLite 数据目录。先安装以下功能依赖，再在专用构建虚拟环境执行 wheel 构建；隔离构建会安装 `pyproject.toml` 指定的构建后端。常规命令：
 
 ```powershell
+vcpkg install --x-manifest-root=. --x-install-root=out/dependencies/installed --x-buildtrees-root=out/dependencies/buildtrees --x-packages-root=out/dependencies/packages --triplet=x64-windows --x-feature=tests --x-feature=time-frames --x-feature=spice --x-feature=data-catalog --x-no-default-features
 $env:CMAKE_PREFIX_PATH = "$PWD/out/dependencies/installed/x64-windows"
 python -m pip wheel . --no-deps --wheel-dir out/dist
 python -m venv out/venvs/python-smoke
@@ -202,7 +217,7 @@ cmake --build --preset desktop
 
 桌面目标需要 Qt 6.8+ Widgets；本次使用已安装的 Qt 6.11.0。manifest 的 `desktop` feature 给出 Qt Widgets 所需依赖，完整图形路径本次验证的版本组合见[图形记录](../validation/p0_graphics.md)。
 
-程序位置：`out/build/desktop/apps/desktop/Release/orbitforge_desktop.exe`。本机运行时需要 Qt DLL 和 platform plugin 可被找到，可在当前进程环境设置 Qt `bin` 与 `plugins` 路径。支持 `-platform offscreen --smoke-test` 自动退出，用于窗口创建和结果填充验证。正式安装/部署规则将在图形集成后补充。
+程序位置：`out/build/desktop/apps/desktop/Release/orbitforge_desktop.exe`。本机运行时需要 Qt DLL 和 platform plugin 可被找到，可在当前进程环境设置 Qt `bin` 与 `plugins` 路径。支持 `-platform offscreen --smoke-test` 自动退出，用于窗口创建和结果填充验证。完整工作台的 Windows 便携打包方式见下文。
 
 ## 双视窗图形集成
 
@@ -218,9 +233,19 @@ python tools/validation/run_graphics_smoke.py --executable out/build/desktop-gra
 
 每次运行选择新的输出目录。脚本需要真实 Windows 桌面和 Vulkan GPU，会启动图形窗口；不是 offscreen 测试。默认分别运行 100%、150%、200% 的 Qt 缩放，启用 Khronos 同步验证，记录窗口重建、实际呈现、共享设备/场景、独立相机以及交换链图像检查，最后测试缺少 shader 和不可用 Vulkan 驱动的明确失败路径。驱动发现覆盖仅作用于失败测试子进程；实际 DPR 还受显示器系统缩放影响。
 
-构建后 shader 和圆轨道用 EOP 快照复制到可执行文件旁的 `resources/`。运行脚本只为子进程配置依赖 DLL、Qt platform plugin 和 validation layer；开发路径不等于独立安装包。当前默认是无影像的 Rocky 椭球地球。渲染模块与 Qt 工作台的边界、后台编译屏障和退出次序见[集成约定](../architecture/graphics.md)。
+构建后 shader、EOP 样例与离线地球影像等资源复制到可执行文件旁的 `resources/`。运行脚本只为子进程配置依赖 DLL、Qt platform plugin 和 validation layer；开发路径不等于独立安装包。工作台默认使用带离线影像的 Rocky 地球。渲染模块与 Qt 工作台的边界、后台编译屏障和退出次序见[集成约定](../architecture/graphics.md)。
 
 日常打开图形工作台可执行 `pwsh tools/dev/run-desktop.ps1`。启动器为子进程设置固定依赖和 PROJ/GDAL 数据路径，不改变调用者的环境；它会等待窗口关闭。使用 `-Executable`、`-DependencyPrefix` 可覆盖开发路径，附加程序参数通过 `-DesktopArguments` 传入。
+
+## Windows 便携包
+
+完成 `desktop-graphics` 的 Release 构建后，使用全新的输出目录打包：
+
+```powershell
+python tools/packaging/package_windows.py --build-dir out/build/desktop-graphics --dependency-prefix out/dependencies/installed/x64-windows --output out/releases/OrbitForge-0.1.0-win-x64 --reports out/validation/package-win-x64 --verify --zip
+```
+
+脚本收集应用程序、运行库、Qt 插件、离线资源及第三方许可，并生成同名 ZIP。`--verify` 在真实 Windows 桌面与 Vulkan GPU 上检查打包结果；运行时使用隔离的数据目录。解压后的入口是 `OrbitForge.exe`。完整参数可用 `python tools/packaging/package_windows.py --help` 查看。
 
 ## 万星双视图场景预检
 
