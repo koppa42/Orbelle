@@ -1,9 +1,9 @@
-"""Geometric station-to-sensor Access, using the repository's explicit EOP fixture."""
+"""Geometric station-to-sensor Access, using the packaged historical EOP sample."""
 from pathlib import Path
 import math
 import orbitforge as of
 
-manifest = Path(__file__).resolve().parents[2] / "data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
+manifest = Path(of.__file__).parent / "data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
 project = of.Project("Ground access", of.Epoch(0), of.Epoch(7_200_000_000_000))
 project.earth_orientation = of.load_eop_snapshot(manifest).data_info
 project.add_satellite(of.OrbitInput())

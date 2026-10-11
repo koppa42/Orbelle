@@ -8,7 +8,7 @@ import zlib
 import orbitforge as of
 from project_fixtures import legacy_stations
 
-EOP = Path(__file__).resolve().parents[3] / 'data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json'
+EOP = Path(of.__file__).parent / 'data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json'
 
 
 class AccessTests(unittest.TestCase):
