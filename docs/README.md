@@ -19,7 +19,9 @@
 
 ## 开发与验证
 
+- [开发者规范：模块职责、实现约定、验证与 PR 要求](development/requirements.md)
 - [构建、测试、SDK / Python 包及便携交付](development/build.md)
+- [CI 与版本发布](development/ci.md)
 - [数值、计算吞吐量与图形验证方法](validation/README.md)
 
 仓库保留当前接口约定、验证方法与必要的固定输入。开发过程记录、逐次日志、截图及程序包保存在本地，不随源码分发；复现时按对应文档重新生成。
