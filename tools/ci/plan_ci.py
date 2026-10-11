@@ -10,14 +10,16 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[2]
 JOBS = {"metadata", "linux", "linux-consumer", "windows", "python-matrix"}
 REQUIRED = {
-    "full": JOBS,
+    "full": JOBS - {"linux-consumer"},
     "docs": {"metadata"},
-    "cache": {"metadata", "linux", "windows"},
+    "baseline": {"metadata", "linux", "windows"},
+    "release": JOBS,
 }
 DESCRIPTIONS = {
-    "full": "Full build, tests, SDK/desktop packages and every supported Python version.",
+    "full": "Native and desktop tests plus every supported Python version; no release packages.",
     "docs": "Documentation-only PR: version and tooling checks; native builds are skipped.",
-    "cache": "Main maintenance: version/tooling checks and shared dependency caches; no repeat product build.",
+    "baseline": "Main integration tests: native/desktop and baseline Python; no matrix or release packages.",
+    "release": "Full tests, release package builds and isolated installation checks.",
 }
 
 
@@ -49,9 +51,9 @@ def pull_request_paths(source):
 
 def select_scope(event, ref, source=ROOT, release_tag=""):
     if release_tag:
-        return "full"
+        return "release"
     if event == "push" and ref == "refs/heads/main":
-        return "cache"
+        return "baseline"
     if event == "pull_request":
         try:
             if documentation_only(pull_request_paths(source)):

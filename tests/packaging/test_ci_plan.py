@@ -1,4 +1,4 @@
-"""Documentation and cache-only runs must never conceal a failed required job."""
+"""Test-only runs must never hide failures or require release packaging jobs."""
 
 import importlib.util
 from pathlib import Path
@@ -32,15 +32,15 @@ class ScopeTests(unittest.TestCase):
         with patch.object(plan, "pull_request_paths", return_value=[]):
             self.assertEqual(plan.select_scope("pull_request", "refs/pull/3/merge"), "full")
 
-    def test_only_main_push_uses_cache_maintenance(self):
-        self.assertEqual(plan.select_scope("push", "refs/heads/main"), "cache")
+    def test_main_push_runs_baseline_tests_and_only_tags_enable_packaging(self):
+        self.assertEqual(plan.select_scope("push", "refs/heads/main"), "baseline")
         for event, ref in (("workflow_dispatch", "refs/heads/main"),
                            ("workflow_call", "refs/heads/main"),
                            ("push", "refs/tags/v0.1.0"),
                            ("merge_group", "refs/heads/main"), ("", "")):
             with self.subTest(event=event, ref=ref):
                 self.assertEqual(plan.select_scope(event, ref), "full")
-        self.assertEqual(plan.select_scope("push", "refs/heads/main", release_tag="v0.1.0"), "full")
+        self.assertEqual(plan.select_scope("push", "refs/tags/v0.1.0", release_tag="v0.1.0"), "release")
 
 
 class RequiredChecksTests(unittest.TestCase):
@@ -49,12 +49,12 @@ class RequiredChecksTests(unittest.TestCase):
                 for name in plan.JOBS}
 
     def test_expected_checks_and_intentional_skips_pass(self):
-        for scope in ("full", "docs", "cache"):
+        for scope in ("full", "docs", "baseline", "release"):
             with self.subTest(scope=scope):
                 plan.check_results(scope, self.results(scope))
 
     def test_failure_cancellation_or_skip_cannot_pass_a_required_job(self):
-        for scope in ("full", "docs", "cache"):
+        for scope in ("full", "docs", "baseline", "release"):
             for name in plan.REQUIRED[scope]:
                 for result in ("failure", "cancelled", "skipped", ""):
                     with self.subTest(scope=scope, job=name, result=result):
@@ -76,6 +76,16 @@ class RequiredChecksTests(unittest.TestCase):
         results["windows"]["result"] = "failure"
         with self.assertRaises(ValueError):
             plan.check_results("docs", results)
+
+    def test_release_requires_installation_checks_but_pr_and_main_do_not(self):
+        results = self.results("full")
+        self.assertEqual(results["linux-consumer"]["result"], "skipped")
+        with self.assertRaises(ValueError):
+            plan.check_results("release", results)
+        results = self.results("baseline")
+        self.assertEqual(results["python-matrix"]["result"], "skipped")
+        with self.assertRaises(ValueError):
+            plan.check_results("full", results)
 
 
 class MergeDiffTests(unittest.TestCase):

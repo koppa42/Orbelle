@@ -124,7 +124,7 @@ class Check:
                  extra_env={"VCPKG_BINARY_SOURCES": f"clear;files,{deps / 'binary-cache'},readwrite"})
         shutil.copy2(deps / "installed/vcpkg/status", self.reports / "vcpkg-status.txt")
 
-    def build(self, sanitizer=False):
+    def build(self, sanitizer=False, install=True):
         name = "sanitizers" if sanitizer else "release"
         build = self.work / "build" / name
         # A fresh staging prefix prevents a previous install from hiding missing files.
@@ -144,9 +144,19 @@ class Check:
         shutil.copy2(build / "CMakeCache.txt", self.reports / f"{name}-CMakeCache.txt")
         shutil.copy2(build / "compile_commands.json", self.reports / f"{name}-compile_commands.json")
         if not sanitizer:
-            self.run("sdk-install", "cmake", "--install", build, "--component", "SDK")
             self.run("cpp-example", build / "examples/cpp/orbitforge_example")
-            self.save_artifact("release", prefix)
+            if install:
+                self.run("sdk-install", "cmake", "--install", build, "--component", "SDK")
+                self.save_artifact("release", prefix)
+
+    def tests(self):
+        self.dependencies()
+        self.build(install=False)
+        self.build(sanitizer=True)
+        self.run("python-api", sys.executable, self.source / "tools/ci/check_python.py",
+                 "--dependency-prefix", self.prefix, "--work", self.work / "python",
+                 "--reports", self.reports / "python", "--cpp-example",
+                 self.work / "build/release/examples/cpp/orbitforge_example")
 
     def compute(self):
         """Validate portability and instrumented smoke workloads, not Linux performance."""
@@ -298,12 +308,13 @@ class Check:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", choices=("all", "dependencies", "release", "sanitizers",
+    parser.add_argument("--stage", choices=("all", "tests", "dependencies", "release", "sanitizers",
                                            "wheel", "export", "consumer", "compute"), default="all")
     parser.add_argument("--source", type=Path)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--reports", type=Path, required=True)
     parser.add_argument("--delivery", type=Path)
+    parser.add_argument("--test-dependencies", type=Path)
     parser.add_argument("--vcpkg-root", default=os.environ.get("VCPKG_ROOT", "/opt/vcpkg"))
     parser.add_argument("--jobs", type=int, default=4)
     args = parser.parse_args()
@@ -313,6 +324,8 @@ def main():
         parser.error("Build stages require --source")
     if args.stage == "consumer" and not args.delivery:
         parser.error("Consumer validation requires --delivery")
+    if args.test_dependencies and not args.source:
+        parser.error("Test dependency export requires --source")
     check = Check(args)
     check.environment()
     stages = ("dependencies", "release", "sanitizers", "wheel", "export") if args.stage == "all" else (args.stage,)
@@ -321,6 +334,10 @@ def main():
             check.build(stage == "sanitizers")
         else:
             getattr(check, stage)()
+    if args.test_dependencies:
+        check.run("export-python-dependencies", sys.executable,
+                  check.source / "tools/ci/export_python_dependencies.py",
+                  "--dependency-prefix", check.prefix, "--output", args.test_dependencies.resolve())
     check.verify_source()
     (check.reports / "passed.json").write_text(
         json.dumps({"stages": stages, "passed": True}, indent=2) + "\n", encoding="utf-8")

@@ -66,7 +66,7 @@ jobs:
           python -m unittest discover -s tests/packaging -v
 
   linux:
-    name: ${{ needs.metadata.outputs.scope == 'cache' && 'Linux dependency cache' || format('Linux C++, sanitizers and Python {0}', needs.metadata.outputs.baseline-python) }}
+    name: Linux C++, sanitizers and Python ${{ needs.metadata.outputs.baseline-python }}
     needs: metadata
     if: needs.metadata.outputs.scope != 'docs'
     runs-on: ubuntu-24.04
@@ -96,28 +96,32 @@ jobs:
             vcpkg-ubuntu24-x64-v1-${{ steps.toolchain.outputs.image }}-
             vcpkg-ubuntu24-x64-v1-
       - name: Prepare toolchain
-        if: needs.metadata.outputs.scope == 'full' || steps.cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential clang ninja-build ncompress pkg-config python3-dev python3-venv
           out/tools/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-      - name: Warm shared dependencies
-        if: needs.metadata.outputs.scope == 'cache' && steps.cache.outputs.cache-hit != 'true'
+      - name: Compile and test; package only for a release tag
+        env:
+          CI_SCOPE: ${{ needs.metadata.outputs.scope }}
         run: |
-          python tools/ci/check_linux.py --stage dependencies --source "$GITHUB_WORKSPACE" \
-            --vcpkg-root "$GITHUB_WORKSPACE/out/tools/vcpkg" \
-            --work "$RUNNER_TEMP/linux" --reports "$RUNNER_TEMP/reports/linux-dependencies"
-      - name: Build, test and export
-        if: needs.metadata.outputs.scope == 'full'
-        run: |
+          args=(--stage tests)
+          if [[ "$CI_SCOPE" == release ]]; then
+            args=(--stage all --delivery "$RUNNER_TEMP/delivery")
+          fi
+          if [[ "$CI_SCOPE" != baseline ]]; then
+            args+=(--test-dependencies "$RUNNER_TEMP/linux-python-dependencies.tar.gz")
+          fi
           python tools/ci/check_linux.py --source "$GITHUB_WORKSPACE" \
             --vcpkg-root "$GITHUB_WORKSPACE/out/tools/vcpkg" \
             --work "$RUNNER_TEMP/linux" --reports "$RUNNER_TEMP/reports/linux-build" \
-            --delivery "$RUNNER_TEMP/delivery"
+            "${args[@]}"
+      - name: Export release installation test inputs
+        if: inputs.release-tag != ''
+        run: |
           tar -czf "$RUNNER_TEMP/linux-delivery.tar.gz" -C "$RUNNER_TEMP/delivery" .
-      - name: Upload Linux test inputs
+      - name: Upload Linux release installation inputs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        if: needs.metadata.outputs.scope == 'full'
+        if: inputs.release-tag != ''
         with:
           name: linux-delivery
           path: ${{ runner.temp }}/linux-delivery.tar.gz
@@ -125,8 +129,18 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 7
+      - name: Upload Linux Python test dependencies
+        if: needs.metadata.outputs.scope != 'baseline'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: linux-python-dependencies
+          path: ${{ runner.temp }}/linux-python-dependencies.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
       - name: Upload diagnostics
-        if: always() && (needs.metadata.outputs.scope == 'full' || steps.cache.outputs.cache-hit != 'true')
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: linux-build-reports
@@ -137,7 +151,7 @@ jobs:
   linux-consumer:
     name: Linux SDK and installed Python API
     needs: [metadata, linux]
-    if: needs.metadata.outputs.scope == 'full'
+    if: needs.metadata.outputs.scope == 'release'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -185,7 +199,7 @@ jobs:
           retention-days: 14
 
   windows:
-    name: ${{ needs.metadata.outputs.scope == 'cache' && 'Windows dependency cache' || format('Windows desktop, SDK and Python {0}', needs.metadata.outputs.baseline-python) }}
+    name: Windows desktop and Python ${{ needs.metadata.outputs.baseline-python }}
     needs: metadata
     if: needs.metadata.outputs.scope != 'docs'
     runs-on: windows-2022
@@ -226,7 +240,6 @@ jobs:
             vcpkg-win2022-release-v2-
       - name: Install dependencies
         id: dependencies
-        if: needs.metadata.outputs.scope == 'full' || steps.cache.outputs.cache-hit != 'true'
         run: |
           & out/tools/vcpkg/bootstrap-vcpkg.bat -disableMetrics
           if ($LASTEXITCODE) { throw 'vcpkg bootstrap failed' }
@@ -246,14 +259,22 @@ jobs:
         with:
           path: ${{ runner.temp }}/vcpkg-binary-cache
           key: ${{ steps.cache.outputs.cache-primary-key }}${{ steps.dependencies.outcome != 'success' && format('-partial-{0}-{1}', github.run_id, github.run_attempt) || '' }}
-      - name: Build and validate desktop, SDK and wheel
-        if: needs.metadata.outputs.scope == 'full'
+      - name: Compile and test; package only for a release tag
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
+          CI_SCOPE: ${{ needs.metadata.outputs.scope }}
         run: |
-          python tools/ci/check_windows.py --dependency-prefix out/dependencies/installed/x64-windows-release `
-            --work "$env:RUNNER_TEMP/windows" --reports "$env:RUNNER_TEMP/reports/windows" `
-            --output "$env:RUNNER_TEMP/assets" --version "$env:VERSION"
+          $checkArgs = @('--dependency-prefix', 'out/dependencies/installed/x64-windows-release',
+            '--work', "$env:RUNNER_TEMP/windows", '--reports', "$env:RUNNER_TEMP/reports/windows",
+            '--version', $env:VERSION)
+          if ($env:CI_SCOPE -eq 'release') {
+            $checkArgs += @('--release', '--output', "$env:RUNNER_TEMP/assets")
+          }
+          if ($env:CI_SCOPE -ne 'baseline') {
+            $checkArgs += @('--test-dependencies', "$env:RUNNER_TEMP/windows-python-dependencies.tar.gz")
+          }
+          python tools/ci/check_windows.py @checkArgs
+          if ($LASTEXITCODE) { throw 'Windows validation failed' }
       - name: Upload Windows release assets
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: inputs.release-tag != ''
@@ -266,7 +287,7 @@ jobs:
           retention-days: 7
       - name: Upload Windows Python test dependencies
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        if: needs.metadata.outputs.scope == 'full'
+        if: needs.metadata.outputs.scope != 'baseline'
         with:
           name: windows-python-dependencies
           path: ${{ runner.temp }}/windows-python-dependencies.tar.gz
@@ -275,7 +296,7 @@ jobs:
           overwrite: true
           retention-days: 7
       - name: Upload diagnostics
-        if: always() && (needs.metadata.outputs.scope == 'full' || steps.cache.outputs.cache-hit != 'true')
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: windows-reports
@@ -289,7 +310,7 @@ jobs:
   python-matrix:
     name: Python ${{ matrix.python }} / ${{ matrix.platform }}
     needs: [metadata, linux, windows]
-    if: needs.metadata.outputs.scope == 'full'
+    if: needs.metadata.outputs.scope == 'full' || needs.metadata.outputs.scope == 'release'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     strategy:
@@ -300,8 +321,8 @@ jobs:
         include:
           - platform: linux
             runner: ubuntu-24.04
-            artifact: linux-delivery
-            archive: linux-delivery.tar.gz
+            artifact: linux-python-dependencies
+            archive: linux-python-dependencies.tar.gz
           - platform: windows
             runner: windows-2022
             artifact: windows-python-dependencies
@@ -317,19 +338,22 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: ${{ runner.temp }}/input
-      - name: Build and test this interpreter's wheel
+      - name: Test Python API; build and install a wheel only for release
         shell: python {0}
         env:
           DEPENDENCY_ARCHIVE: ${{ matrix.archive }}
+          CI_SCOPE: ${{ needs.metadata.outputs.scope }}
         run: |
           import os, pathlib, subprocess, sys, tarfile
           root = pathlib.Path(os.environ['RUNNER_TEMP'])
           with tarfile.open(root / 'input' / os.environ['DEPENDENCY_ARCHIVE']) as archive:
               archive.extractall(root / 'delivery', filter='data')
-          subprocess.run([sys.executable, 'tools/ci/check_python.py',
+          command = [sys.executable, 'tools/ci/check_python.py',
               '--dependency-prefix', str(root / 'delivery/dependencies'),
-              '--work', str(root / 'python'), '--reports', str(root / 'reports'),
-              '--output', str(root / 'assets')], check=True)
+              '--work', str(root / 'python'), '--reports', str(root / 'reports')]
+          if os.environ['CI_SCOPE'] == 'release':
+              command += ['--release', '--output', str(root / 'assets')]
+          subprocess.run(command, check=True)
       - name: Upload Python release wheel
         if: inputs.release-tag != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
