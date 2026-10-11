@@ -14,6 +14,8 @@
 
 纯文档的范围限于根目录 `README.md`、`AGENTS.md` 和 `docs/` 下的 Markdown 文件。其他路径、空差异或无法确定的差异均执行全量检查。分类对比 PR 模拟合并提交与其目标分支父提交，包含 PR 的全部提交以及重命名前后的路径；不能仅凭最后一次提交或文件扩展名跳过测试。
 
+普通 PR 只做验证，不创建 Release，也不上传 `*-release-assets`。为测试解压后的 SDK、已安装 wheel 以及跨平台 Python 矩阵，CI 仍会构建测试用安装包，并在作业之间传递 `linux-delivery` 和 `windows-python-dependencies`；这些是测试输入。诊断日志另行保留。发布附件的整理与上传仅在 `release-tag` 非空的标签流程中执行，最终公开 Release 仍须等待全部检查成功。
+
 PR 使用 GitHub 默认的[模拟合并引用](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)运行。合并后不再完整重跑的前提是合并前已基于最新 `main` 验证；目标分支变化时先更新 PR 并等待新的检查结果。若启用合并队列，需先接入 `merge_group` 事件。
 
 ## 检查范围

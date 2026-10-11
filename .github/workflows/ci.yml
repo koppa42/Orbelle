@@ -115,7 +115,8 @@ jobs:
             --work "$RUNNER_TEMP/linux" --reports "$RUNNER_TEMP/reports/linux-build" \
             --delivery "$RUNNER_TEMP/delivery"
           tar -czf "$RUNNER_TEMP/linux-delivery.tar.gz" -C "$RUNNER_TEMP/delivery" .
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      - name: Upload Linux test inputs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: needs.metadata.outputs.scope == 'full'
         with:
           name: linux-delivery
@@ -156,6 +157,7 @@ jobs:
             --delivery "$RUNNER_TEMP/delivery" --work "$RUNNER_TEMP/consumer" \
             --reports "$RUNNER_TEMP/reports/linux-consumer"
       - name: Prepare release assets
+        if: inputs.release-tag != ''
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
         run: |
@@ -163,7 +165,9 @@ jobs:
             --dependencies "$RUNNER_TEMP/delivery/dependencies" --version "$VERSION" \
             --platform linux-x64 --output "$RUNNER_TEMP/assets"
           cp "$RUNNER_TEMP/delivery/wheels/"*.whl "$RUNNER_TEMP/assets/"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      - name: Upload Linux release assets
+        if: inputs.release-tag != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: linux-release-assets
           path: ${{ runner.temp }}/assets/*
@@ -242,7 +246,7 @@ jobs:
         with:
           path: ${{ runner.temp }}/vcpkg-binary-cache
           key: ${{ steps.cache.outputs.cache-primary-key }}${{ steps.dependencies.outcome != 'success' && format('-partial-{0}-{1}', github.run_id, github.run_attempt) || '' }}
-      - name: Build, test and package
+      - name: Build and validate desktop, SDK and wheel
         if: needs.metadata.outputs.scope == 'full'
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
@@ -250,8 +254,9 @@ jobs:
           python tools/ci/check_windows.py --dependency-prefix out/dependencies/installed/x64-windows-release `
             --work "$env:RUNNER_TEMP/windows" --reports "$env:RUNNER_TEMP/reports/windows" `
             --output "$env:RUNNER_TEMP/assets" --version "$env:VERSION"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        if: needs.metadata.outputs.scope == 'full'
+      - name: Upload Windows release assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: inputs.release-tag != ''
         with:
           name: windows-release-assets
           path: ${{ runner.temp }}/assets/*
@@ -259,7 +264,8 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 7
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      - name: Upload Windows Python test dependencies
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: needs.metadata.outputs.scope == 'full'
         with:
           name: windows-python-dependencies
@@ -324,7 +330,9 @@ jobs:
               '--dependency-prefix', str(root / 'delivery/dependencies'),
               '--work', str(root / 'python'), '--reports', str(root / 'reports'),
               '--output', str(root / 'assets')], check=True)
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      - name: Upload Python release wheel
+        if: inputs.release-tag != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: python-${{ matrix.python }}-${{ matrix.platform }}-release-assets
           path: ${{ runner.temp }}/assets/*.whl
