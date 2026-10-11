@@ -1,6 +1,8 @@
 import math
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import tempfile
+from threading import Event
 import unittest
 
 import orbitforge as of
@@ -13,6 +15,35 @@ TLE = (
 
 
 class PropagatorTests(unittest.TestCase):
+    def test_sgp4_creation_while_parent_tle_is_replaced(self):
+        def renumber(line):
+            line = line[:2] + '00006' + line[7:68]
+            checksum = sum(int(c) if c.isdigit() else int(c == '-') for c in line) % 10
+            return line + str(checksum)
+
+        original, other = of.Tle(*TLE), of.Tle(*(renumber(line) for line in TLE))
+        source = of.OrbitInput()
+        source.tle = original
+        time = of.make_builtin_time_provider()
+        epoch = time.from_utc(original.epoch_utc)
+        expected = of.make_sgp4_session(original, time, 'expected').sample([epoch]).states[0]
+        stop = Event()
+
+        def replace_input():
+            while not stop.is_set():
+                source.tle = other
+                source.tle = original
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            mutation = pool.submit(replace_input)
+            try:
+                for _ in range(100):
+                    session = of.make_sgp4_session(source.tle, time, 'concurrent')
+                    self.assertEqual(session.sample([epoch]).states[0].position_m, expected.position_m)
+            finally:
+                stop.set()
+            mutation.result()
+
     def test_sgp4_teme_reference_and_owned_result(self):
         time = of.make_builtin_time_provider()
         tle = of.Tle(*TLE)

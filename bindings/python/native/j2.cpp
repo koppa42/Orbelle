@@ -69,7 +69,15 @@ void bind_j2(py::module_ &module) {
         .def_property_readonly("period_seconds", [](const core::Tle &tle) {
             return 86400 / core::parse_tle(tle).mean_motion_revolutions_per_day;
         });
-    module.def("make_sgp4_session", &runtime::make_sgp4_session, py::arg("tle"), py::arg("time"),
-               py::arg("object_id"), py::arg("input_revision") = 1,
-               py::call_guard<py::gil_scoped_release>());
+    module.def(
+        "make_sgp4_session",
+        [](const core::Tle &tle, const core::ITimeProvider &time, std::string object_id,
+           std::uint64_t revision) {
+            // OrbitInput.tle can expose a reference to a mutable parent field. Copy
+            // under the GIL before another Python thread can replace those strings.
+            const auto snapshot = tle;
+            py::gil_scoped_release release;
+            return runtime::make_sgp4_session(snapshot, time, std::move(object_id), revision);
+        },
+        py::arg("tle"), py::arg("time"), py::arg("object_id"), py::arg("input_revision") = 1);
 }
