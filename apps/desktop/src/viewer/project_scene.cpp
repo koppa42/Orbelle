@@ -9,7 +9,7 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
     const core::IFrameProvider &frames,
     const std::vector<std::shared_ptr<const core::IEarthOrientationProvider>> &installed_data,
     const std::atomic_bool &cancelled, std::optional<application::Scenario> retained_sessions,
-    const std::optional<std::string> &edited_object) {
+    const std::optional<std::string> &edited_object, const core::ITimeProvider *time) {
     application::validate_project(project);
     std::shared_ptr<const core::IEarthOrientationProvider> eop;
     for (const auto &candidate : installed_data) {
@@ -57,15 +57,17 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
             result->scenario.objects().begin(), result->scenario.objects().end(),
             [&](const auto &s) { return s.provenance().object_id == satellite.orbit.object_id; });
         const bool retained = existing != result->scenario.objects().end();
-        const bool recompute = edited_object && *edited_object == satellite.orbit.object_id;
+        // SGP4 epoch interpretation belongs to this calculation's confirmed time data.
+        const bool recompute = (edited_object && *edited_object == satellite.orbit.object_id) ||
+                               satellite.orbit.propagator == OrbitPropagator::sgp4;
         if (retained && recompute &&
             existing->provenance().input_revision == std::numeric_limits<std::uint64_t>::max())
             throw std::overflow_error("Object input revision exhausted");
-        auto session =
-            retained && !recompute
-                ? *existing
-                : make_orbit_session(satellite.orbit,
-                                     retained ? existing->provenance().input_revision + 1 : 1);
+        auto session = retained && !recompute
+                           ? *existing
+                           : make_orbit_session(
+                                 satellite.orbit,
+                                 retained ? existing->provenance().input_revision + 1 : 1, time);
         auto orbit = prepare_orbit_scene(
             satellite.orbit, session, frames, *eop, cancelled,
             display_cache_interval(satellite.orbit, satellite.display, project.current));

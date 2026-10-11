@@ -188,6 +188,13 @@ def main():
             shutil.copy2(path, target)
         dll_sources.append({'file': path.name, 'source': str(path), 'sha256': digest(target)})
     # Preserve dependency notices, including statically linked libraries and data licenses.
+    repository = Path(__file__).resolve().parents[2]
+    for relative, name in (
+        ('modules/providers/sgp4/third_party/LICENSE', 'SGP4.txt'),
+        ('modules/providers/spice/third_party/SatelliteToolbox-LICENSE.txt', 'SatelliteToolbox.txt'),
+    ):
+        (output / 'notices').mkdir(exist_ok=True)
+        shutil.copy2(repository / relative, output / 'notices' / name)
     for notice in sorted((prefix / 'share').glob('*/copyright')):
         target = output / 'notices' / notice.parent.name / 'copyright'
         target.parent.mkdir(parents=True)

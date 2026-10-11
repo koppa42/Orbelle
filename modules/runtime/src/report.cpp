@@ -141,6 +141,8 @@ std::string report_input_sha256(const application::Project &project) {
         s.model_diameter_m = 1'000'000;
         s.orbit.input_frame = core::FrameId::gcrf;
         s.orbit.step_seconds = 60;
+        if (s.orbit.propagator == OrbitPropagator::sgp4)
+            s.orbit.initial = OrbitInput{}.initial; // Inactive manual draft is not a TLE input.
     }
     const auto bytes = application::encode_project(p);
     return picosha2::hash256_hex_string(bytes);
@@ -218,9 +220,7 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
                 const std::string model =
                     object.station
                         ? "WGS84 fixed"
-                        : (object.satellite->orbit.propagator == OrbitPropagator::two_body
-                               ? "Two body"
-                               : "J2 secular");
+                        : std::string(propagator_name(object.satellite->orbit.propagator));
                 rows.push_back({object.id, object.name, object.kind, model});
             }
         } else if (d.kind == ReportKind::ground_stations) {
@@ -274,7 +274,8 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
             for (const auto &object : selected) {
                 cancelled(cancel);
                 const auto session = object.station ? make_ground_station_session(*object.station)
-                                                    : make_orbit_session(object.satellite->orbit);
+                                                    : make_orbit_session(object.satellite->orbit, 1,
+                                                                         context.time.get());
                 auto next = first;
                 for (std::size_t offset = 0; offset < per_object; offset += 512) {
                     tick();
@@ -299,10 +300,8 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
                         if (state.frame != target_frame) {
                             check(context.eop && context.frames,
                                   "Reference-frame conversion requires confirmed EOP data");
-                            const auto transform = context.frames->gcrf_to_itrf_state(
-                                state.epoch, context.eop->at(state.epoch));
-                            state = target_frame == core::FrameId::itrf ? transform.apply(state)
-                                                                        : transform.inverse(state);
+                            state = core::transform_state(state, target_frame, *context.frames,
+                                                          context.eop->at(state.epoch));
                         }
                         const auto &p = state.position_m, &v = state.velocity_mps;
                         Row row{object.id, object.name, state.epoch,

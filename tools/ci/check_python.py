@@ -73,7 +73,7 @@ def main():
         "import orbitforge, sys; print(orbitforge.__file__); assert orbitforge.__version__ == sys.argv[1]",
         version, env=clean)
     run("python-tests", consumer, "-I", "-m", "unittest", "discover", "-s", source / "bindings/python/tests", "-v", env=clean)
-    for name in ("circular_orbit", "time_frames", "eop_state", "sun_moon", "two_body_scenario"):
+    for name in ("circular_orbit", "time_frames", "eop_state", "sun_moon", "two_body_scenario", "propagators"):
         run(f"example-{name}", consumer, "-I", source / f"examples/python/{name}.py", env=clean)
     (reports / "passed.json").write_text(json.dumps({"passed": True, "python": python_version}), encoding="utf-8")
 

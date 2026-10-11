@@ -5,15 +5,20 @@
 #include "workbench_style.hpp"
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFile>
 #include <QFileDialog>
+#include <QFontDatabase>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QStackedWidget>
@@ -22,6 +27,7 @@
 #include <QVBoxLayout>
 #include <cmath>
 #include <orbitforge/runtime/j2.hpp>
+#include <orbitforge/runtime/j4.hpp>
 
 namespace orbitforge::desktop {
 namespace {
@@ -48,8 +54,10 @@ QFrame *divider() {
 }
 } // namespace
 void OrbitEditor::set_time_provider(std::shared_ptr<const core::ITimeProvider> time) {
+    time_ = time;
     for (auto *field : {epoch_, first_, last_})
         field->set_time_provider(time);
+    update_tle_preview();
 }
 OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(parent) {
     auto *outer = new QHBoxLayout(this);
@@ -158,7 +166,8 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     propagator_ = new QComboBox;
     propagator_->setObjectName("orbitPropagator");
     propagator_->setAccessibleName(QStringLiteral("轨道传播器"));
-    propagator_->addItems({QStringLiteral("二体 · Two Body"), QStringLiteral("J2 · 长期摄动")});
+    propagator_->addItems({QStringLiteral("二体 · Two Body"), QStringLiteral("J2 · 长期摄动"),
+                           QStringLiteral("J4 · 高阶长期摄动"), QStringLiteral("SGP4 · TLE")});
     propagator_row->addWidget(propagator_, 1);
     auto *model_button = new QPushButton(QStringLiteral("模型…"));
     model_button->setObjectName("propagatorDetails");
@@ -167,11 +176,11 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     propagator_row->addWidget(model_button);
     form->addRow(QStringLiteral("传播器"), propagator_row);
     connect(model_button, &QPushButton::clicked, this, &OrbitEditor::open_propagator_details);
-    connect(propagator_, &QComboBox::currentIndexChanged, this, [this](int index) {
-        set_propagator(index == 0 ? OrbitPropagator::two_body : OrbitPropagator::j2_secular);
-    });
+    connect(propagator_, &QComboBox::currentIndexChanged, this,
+            [this](int index) { set_propagator(static_cast<OrbitPropagator>(index)); });
     epoch_ = new EpochEditor;
-    form->addRow(new QLabel(QStringLiteral("初始历元")));
+    epoch_label_ = new QLabel(QStringLiteral("初始历元"));
+    form->addRow(epoch_label_);
     form->addRow(epoch_);
     reference_frame_ = new QComboBox;
     reference_frame_->setObjectName("initialReferenceFrame");
@@ -180,6 +189,13 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     reference_frame_->setToolTip(QStringLiteral("ITRF 使用位置 / 速度；轨道根数在 GCRF 下定义。"));
     form->insertRow(2, QStringLiteral("参考系"), reference_frame_);
     connect(reference_frame_, &QComboBox::currentIndexChanged, this, [this](int index) {
+        if (propagator_kind_ == OrbitPropagator::sgp4)
+            return;
+        if (index == 2) {
+            const QSignalBlocker block(reference_frame_);
+            reference_frame_->setCurrentIndex(input_frame_ == core::FrameId::gcrf ? 0 : 1);
+            return;
+        }
         set_reference_frame(index == 0 ? core::FrameId::gcrf : core::FrameId::itrf);
     });
     state_mode_ = new QComboBox;
@@ -241,6 +257,57 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     }
     state_mode_->setToolTip(QStringLiteral("GCRF 瞬时根数；抛物线轨道使用位置 / 速度。"));
     state_pages_->addWidget(keplerian_page);
+    auto *tle_page = new QWidget;
+    auto *tle_layout = new QVBoxLayout(tle_page);
+    tle_layout->setContentsMargins(0, 0, 0, 0);
+    tle_layout->setSpacing(12);
+    auto *tle_hint = new QLabel(QStringLiteral("粘贴一组两行轨道根数，可带卫星名称。"));
+    tle_hint->setObjectName("hint");
+    tle_hint->setWordWrap(true);
+    tle_layout->addWidget(tle_hint);
+    tle_text_ = new QPlainTextEdit;
+    tle_text_->setObjectName("tleInput");
+    tle_text_->setAccessibleName(QStringLiteral("TLE 两行轨道根数"));
+    tle_text_->setPlaceholderText("1 NNNNN…\n2 NNNNN…");
+    tle_text_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    tle_text_->setLineWrapMode(QPlainTextEdit::NoWrap);
+    tle_text_->setMinimumHeight(92);
+    tle_text_->setMaximumHeight(112);
+    tle_text_->setStyleSheet("font-family: Consolas; font-size: 12px;");
+    tle_layout->addWidget(tle_text_);
+    auto *import_tle = new QPushButton(QStringLiteral("导入 TLE 文件…"));
+    import_tle->setObjectName("importTle");
+    import_tle->setAutoDefault(false);
+    tle_layout->addWidget(import_tle, 0, Qt::AlignLeft);
+    tle_preview_ = new QLabel;
+    tle_preview_->setObjectName("tlePreview");
+    tle_preview_->setWordWrap(true);
+    tle_preview_->setTextFormat(Qt::PlainText);
+    tle_preview_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    tle_layout->addWidget(tle_preview_);
+    tle_layout->addStretch();
+    connect(tle_text_, &QPlainTextEdit::textChanged, this, &OrbitEditor::update_tle_preview);
+    connect(import_tle, &QPushButton::clicked, this, [this] {
+        const auto path =
+            QFileDialog::getOpenFileName(this, QStringLiteral("导入卫星 TLE"), {},
+                                         QStringLiteral("TLE 文件 (*.tle *.txt);;所有文件 (*)"));
+        if (path.isEmpty())
+            return;
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly) || file.size() > 4096) {
+            show_result(QStringLiteral("无法读取文件；请导入仅包含一组 TLE 的文本文件。"), true);
+            return;
+        }
+        const auto previous = tle_text_->toPlainText();
+        tle_text_->setPlainText(QString::fromUtf8(file.readAll()));
+        try {
+            (void)core::parse_tle(read_tle());
+        } catch (const std::exception &error) {
+            tle_text_->setPlainText(previous);
+            show_result(QString::fromUtf8(error.what()), true);
+        }
+    });
+    state_pages_->addWidget(tle_page);
     state_form->addRow(state_pages_);
     connect(state_mode_, &QComboBox::currentIndexChanged, this,
             [this](int mode) { set_state_mode(mode); });
@@ -517,15 +584,28 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     navigation->setCurrentItem(navigation->topLevelItem(0)->child(0));
     set_input(input);
 }
+void OrbitEditor::resizeEvent(QResizeEvent *event) {
+    QWidget::resizeEvent(event);
+    if (fields_ && navigation_)
+        if (auto *columns = qobject_cast<QBoxLayout *>(fields_->layout()))
+            columns->setDirection(width() - navigation_->width() - 48 < 720
+                                      ? QBoxLayout::TopToBottom
+                                      : QBoxLayout::LeftToRight);
+}
 void OrbitEditor::set_input(const OrbitInput &input) {
     const QSignalBlocker state_block(state_mode_), frame_block(reference_frame_),
         propagator_block(propagator_);
     body_ = input.initial.origin;
     propagator_kind_ = input.propagator;
-    input_frame_ = input.input_frame;
-    propagator_->setCurrentIndex(propagator_kind_ == OrbitPropagator::two_body ? 0 : 1);
+    manual_state_ = input.initial;
+    tle_text_->setPlainText(QString::fromStdString(
+        input.tle.line1 + (input.tle.line1.empty() ? "" : "\n") + input.tle.line2));
+    // Reopening a TLE must not transform the inactive manual draft using EOP at
+    // its old epoch. Its canonical state is retained and shown in GCRF if restored.
+    input_frame_ =
+        input.propagator == OrbitPropagator::sgp4 ? core::FrameId::gcrf : input.input_frame;
+    propagator_->setCurrentIndex(static_cast<int>(propagator_kind_));
     reference_frame_->setCurrentIndex(input_frame_ == core::FrameId::gcrf ? 0 : 1);
-    update_state_labels();
     object_->setText(QString::fromStdString(input.object_id));
     epoch_->set_epoch(input.initial.epoch);
     first_->set_epoch(input.first);
@@ -541,9 +621,18 @@ void OrbitEditor::set_input(const OrbitInput &input) {
         }
     state_mode_->setCurrentIndex(state_mode_index_);
     state_pages_->setCurrentIndex(state_mode_index_);
+    update_state_labels();
+    update_tle_preview();
 }
 core::CartesianState OrbitEditor::read_state() const {
+    if (propagator_kind_ == OrbitPropagator::sgp4)
+        return manual_state_;
     if (state_mode_index_ == 1) {
+        if (propagator_kind_ == OrbitPropagator::j4_secular)
+            return runtime::j4_mean_ellipse_state(
+                {epoch_->epoch(), elements_[0]->value(Unit::metre), elements_[1]->value(Unit::one),
+                 elements_[2]->value(Unit::radian), elements_[3]->value(Unit::radian),
+                 elements_[4]->value(Unit::radian), elements_[5]->value(Unit::radian)});
         if (propagator_kind_ == OrbitPropagator::j2_secular)
             return runtime::j2_mean_ellipse_state(
                 {epoch_->epoch(), elements_[0]->value(Unit::metre), elements_[1]->value(Unit::one),
@@ -582,8 +671,11 @@ void OrbitEditor::write_cartesian(const core::CartesianState &state) {
 }
 void OrbitEditor::write_elements(const core::CartesianState &state) {
     std::array<double, 6> values;
-    if (propagator_kind_ == OrbitPropagator::j2_secular) {
-        const auto elements = runtime::j2_mean_ellipse_elements(state);
+    if (propagator_kind_ == OrbitPropagator::j2_secular ||
+        propagator_kind_ == OrbitPropagator::j4_secular) {
+        const auto elements = propagator_kind_ == OrbitPropagator::j4_secular
+                                  ? runtime::j4_mean_ellipse_elements(state)
+                                  : runtime::j2_mean_ellipse_elements(state);
         values = {elements.semi_major_axis_m,         elements.eccentricity,
                   elements.inclination_rad,           elements.raan_rad,
                   elements.argument_of_periapsis_rad, elements.mean_anomaly_rad};
@@ -599,6 +691,8 @@ void OrbitEditor::write_elements(const core::CartesianState &state) {
         elements_[k]->set_value(values[k], element_units[k]);
 }
 void OrbitEditor::set_state_mode(int mode) {
+    if (propagator_kind_ == OrbitPropagator::sgp4)
+        return;
     if (mode == state_mode_index_)
         return;
     try {
@@ -624,6 +718,8 @@ void OrbitEditor::set_state_mode(int mode) {
     }
 }
 void OrbitEditor::set_reference_frame(core::FrameId frame) {
+    if (propagator_kind_ == OrbitPropagator::sgp4)
+        return;
     if (frame == input_frame_)
         return;
     const QSignalBlocker frame_block(reference_frame_), mode_block(state_mode_);
@@ -648,43 +744,120 @@ void OrbitEditor::set_propagator(OrbitPropagator propagator) {
     const auto previous = propagator_kind_;
     const QSignalBlocker block(propagator_);
     try {
-        const auto state = read_state();
+        auto state = manual_state_;
+        if (propagator == OrbitPropagator::sgp4) {
+            try {
+                state = read_state();
+            } catch (const std::exception &) {
+                // An incomplete manual form must not block independent TLE input.
+            }
+        } else {
+            state = read_state();
+        }
         if (propagator == OrbitPropagator::j2_secular)
             (void)runtime::j2_mean_ellipse_elements(state);
+        else if (propagator == OrbitPropagator::j4_secular)
+            (void)runtime::j4_mean_ellipse_elements(state);
+        if (propagator == OrbitPropagator::sgp4)
+            manual_state_ = state;
         propagator_kind_ = propagator;
-        if (state_mode_index_ == 1)
+        if (state_mode_index_ == 1 && propagator != OrbitPropagator::sgp4)
             write_elements(state);
         update_state_labels();
-        show_result(propagator == OrbitPropagator::j2_secular
-                        ? QStringLiteral("以当前椭圆定义 J2 平均根数，不含周期项转换。")
-                        : QStringLiteral("以当前椭圆定义二体初始状态。"));
+        show_result(propagator == OrbitPropagator::sgp4
+                        ? QStringLiteral("使用独立的 TLE 输入；应用后更新轨道。")
+                    : propagator == OrbitPropagator::two_body
+                        ? QStringLiteral("以当前椭圆定义二体初始状态。")
+                        : QStringLiteral("以当前椭圆定义平均根数，不含周期项转换。"));
     } catch (const std::exception &error) {
         propagator_kind_ = previous;
         show_result(QString::fromUtf8(error.what()), true);
     }
-    propagator_->setCurrentIndex(propagator_kind_ == OrbitPropagator::two_body ? 0 : 1);
+    propagator_->setCurrentIndex(static_cast<int>(propagator_kind_));
 }
 void OrbitEditor::update_state_labels() {
-    const bool j2 = propagator_kind_ == OrbitPropagator::j2_secular;
-    state_title_->setText(j2 ? QStringLiteral("初始平均椭圆 · J2") : QStringLiteral("初始状态"));
+    const bool sgp4 = propagator_kind_ == OrbitPropagator::sgp4;
+    const bool j2 = propagator_kind_ == OrbitPropagator::j2_secular ||
+                    propagator_kind_ == OrbitPropagator::j4_secular;
+    const auto model = propagator_kind_ == OrbitPropagator::j4_secular ? "J4" : "J2";
+    state_mode_->setVisible(!sgp4);
+    epoch_->setVisible(!sgp4);
+    epoch_label_->setVisible(!sgp4);
+    reference_frame_->setEnabled(!sgp4);
+    const QSignalBlocker frame_block(reference_frame_);
+    if (sgp4 && reference_frame_->count() == 2)
+        reference_frame_->addItem(QStringLiteral("TEME · TLE 原生"));
+    else if (!sgp4 && reference_frame_->count() == 3)
+        reference_frame_->removeItem(2);
+    reference_frame_->setCurrentIndex(sgp4 ? 2 : input_frame_ == core::FrameId::gcrf ? 0 : 1);
+    state_pages_->setCurrentIndex(sgp4 ? 2 : state_mode_index_);
+    state_title_->setText(sgp4 ? QStringLiteral("两行轨道根数 · TLE")
+                          : j2 ? QStringLiteral("初始平均椭圆 · %1").arg(model)
+                               : QStringLiteral("初始状态"));
     state_mode_->setItemText(0, j2 ? QStringLiteral("平均椭圆位置 / 速度")
                                    : QStringLiteral("位置 / 速度 · Cartesian"));
-    state_mode_->setItemText(1, j2 ? QStringLiteral("J2 平均轨道根数")
+    state_mode_->setItemText(1, j2 ? QStringLiteral("%1 平均轨道根数").arg(model)
                                    : QStringLiteral("经典轨道根数 · 瞬时"));
-    state_mode_->setToolTip(j2 ? QStringLiteral("一阶长期项平均椭圆；位置/速度是辅助开普勒状态，"
+    state_mode_->setToolTip(j2 ? QStringLiteral("长期项平均椭圆；位置/速度是辅助开普勒状态，"
                                                 "不代表瞬时根数或传播轨迹的实际速度。")
                                : QStringLiteral("GCRF 瞬时根数；抛物线轨道使用位置 / 速度。"));
     anomaly_label_->setText(j2 ? QStringLiteral("平近点角 M") : QStringLiteral("真近点角 ν"));
     elements_[5]->set_label(anomaly_label_->text());
     elements_[5]->setObjectName(j2 ? "meanAnomaly" : "trueAnomaly");
 }
+core::Tle OrbitEditor::read_tle() const {
+    const auto text = tle_text_->toPlainText();
+    if (text.size() > 4096)
+        throw std::invalid_argument("请只输入一颗卫星的一组 TLE。");
+    auto lines = text.split('\n', Qt::SkipEmptyParts);
+    for (auto &line : lines)
+        line = line.trimmed();
+    if (lines.size() == 3 && !lines[0].startsWith("1 ") && !lines[0].startsWith("2 "))
+        lines.removeFirst();
+    if (lines.size() != 2)
+        throw std::invalid_argument("请输入完整的两行 TLE，可在前面附一行卫星名称。");
+    return {lines[0].toStdString(), lines[1].toStdString()};
+}
+void OrbitEditor::update_tle_preview() {
+    if (!tle_preview_)
+        return;
+    if (tle_text_->toPlainText().trimmed().isEmpty()) {
+        tle_preview_->setText(QStringLiteral("导入后显示编号、历元与轨道周期。"));
+        return;
+    }
+    try {
+        const auto parsed = core::parse_tle(read_tle());
+        const auto &utc = parsed.epoch_utc;
+        const auto date = QDate(utc.year, utc.month, utc.day).toString("yyyy-MM-dd");
+        const auto clock = QTime(utc.hour, utc.minute, utc.second).toString("HH:mm:ss") + "." +
+                           QString::number(utc.nanosecond).rightJustified(9, '0');
+        QString text = QStringLiteral("编号  %1\n历元  %2 %3 UTC\n周期  %4 min")
+                           .arg(QString::fromStdString(parsed.catalog_id), date, clock)
+                           .arg(1440 / parsed.mean_motion_revolutions_per_day, 0, 'f', 3);
+        if (time_) {
+            const auto epoch = time_->from_utc(utc);
+            const double age = std::max(std::abs(first_->epoch().seconds_since(epoch)),
+                                        std::abs(last_->epoch().seconds_since(epoch))) /
+                               86400;
+            if (age > 14)
+                text +=
+                    QStringLiteral("\n\n场景距 TLE 历元最远 %1 天，建议更换接近场景时段的根数。")
+                        .arg(age, 0, 'f', 1);
+        }
+        tle_preview_->setText(text);
+    } catch (const std::exception &error) {
+        tle_preview_->setText(
+            QStringLiteral("TLE 未就绪：%1").arg(QString::fromUtf8(error.what())));
+    }
+}
 void OrbitEditor::open_propagator_details() {
     try {
         QDialog dialog(this);
         dialog.setObjectName("propagatorDetailsDialog");
-        const bool j2 = propagator_kind_ == OrbitPropagator::j2_secular;
-        dialog.setWindowTitle(j2 ? QStringLiteral("J2 · 模型信息")
-                                 : QStringLiteral("二体 · 模型信息"));
+        const bool j4 = propagator_kind_ == OrbitPropagator::j4_secular;
+        const bool sgp4 = propagator_kind_ == OrbitPropagator::sgp4;
+        const bool j2 = propagator_kind_ == OrbitPropagator::j2_secular || j4;
+        dialog.setWindowTitle(propagator_->currentText() + QStringLiteral(" · 模型信息"));
         dialog.setMinimumWidth(400);
         auto *layout = new QVBoxLayout(&dialog);
         layout->setContentsMargins(20, 18, 20, 16);
@@ -698,18 +871,30 @@ void OrbitEditor::open_propagator_details() {
             text->setTextInteractionFlags(Qt::TextSelectableByMouse);
             form->addRow(label, text);
         };
-        const auto &body = core::central_body(body_);
-        row(QStringLiteral("传播模型"),
-            j2 ? QStringLiteral("一阶 J2 长期项") : QStringLiteral("二体"));
-        row(QStringLiteral("中心天体"), QStringLiteral("地球 · IERS 2003"));
+        const auto &body = j4 ? core::j4_earth() : core::central_body(body_);
+        row(QStringLiteral("传播模型"), sgp4 ? QStringLiteral("SGP4 · 近地 / 深空自动选择")
+                                        : j4 ? QStringLiteral("J2、J2²、J4 长期项")
+                                        : j2 ? QStringLiteral("一阶 J2 长期项")
+                                             : QStringLiteral("二体"));
+        row(QStringLiteral("中心天体"), sgp4 ? QStringLiteral("地球 · WGS72")
+                                        : j4 ? QStringLiteral("地球 · EGM2008")
+                                             : QStringLiteral("地球 · IERS 2003"));
         row(QStringLiteral("引力参数 μ"),
-            QString::number(body.mu.metres_cubed_per_second_squared / 1e9, 'g', 15) +
+            QString::number(sgp4 ? 398600.8 : body.mu.metres_cubed_per_second_squared / 1e9, 'g',
+                            15) +
                 QStringLiteral(" km³/s²"));
-        row(QStringLiteral("传播参考系"), QStringLiteral("GCRF"));
+        row(QStringLiteral("传播参考系"),
+            sgp4 ? QStringLiteral("TEME → GCRF / ITRF") : QStringLiteral("GCRF"));
+        if (sgp4) {
+            row(QStringLiteral("根数输入"), QStringLiteral("一组固定 TLE，含 B* 阻力项"));
+            row(QStringLiteral("使用建议"), QStringLiteral("使用接近分析时段的根数"));
+        }
         if (j2) {
             row(QStringLiteral("参考半径"),
                 QString::number(body.equatorial_radius_m / 1000, 'g', 15) + " km");
             row(QStringLiteral("J2 系数"), QString::number(body.j2, 'g', 15));
+            if (j4)
+                row(QStringLiteral("J4 系数"), QString::number(body.j4, 'g', 15));
             row(QStringLiteral("长期项"), QStringLiteral("Ω、ω、M（全部计入）"));
         }
         layout->addLayout(form);
@@ -747,6 +932,13 @@ void OrbitEditor::submit() {
         input.object_id = object_->text().trimmed().toStdString();
         input.initial = read_state();
         input.propagator = propagator_kind_;
+        if (propagator_kind_ == OrbitPropagator::sgp4) {
+            input.tle = read_tle();
+            const auto parsed = core::parse_tle(input.tle);
+            if (!time_)
+                throw std::invalid_argument("TLE 历元需要已确认的 UTC 数据。");
+            (void)time_->from_utc(parsed.epoch_utc);
+        }
         input.input_frame = input_frame_;
         input.first = first_->epoch();
         input.last = last_->epoch();

@@ -8,6 +8,7 @@ import zlib
 from pathlib import Path
 
 import orbitforge as of
+from project_fixtures import legacy_objects
 
 
 class ReportsTest(unittest.TestCase):
@@ -93,12 +94,14 @@ class ReportsTest(unittest.TestCase):
         self.assertEqual(result.time_sha256, eop.data_info.time_data.sha256)
 
     @staticmethod
-    def rewrite(raw, mutate, version=8):
+    def rewrite(raw, mutate, version=9):
         sections, offset = [], 24
         while offset < len(raw):
             tag, schema, size, _ = struct.unpack_from('<IIQI', raw, offset)
             body = raw[offset + 20:offset + 20 + size]
             offset += 20 + size
+            if version < 9 and tag.to_bytes(4, 'little') == b'OBJS':
+                body, schema = legacy_objects(body), 2
             if version < 8 and tag.to_bytes(4, 'little') == b'STYL':
                 continue
             if tag.to_bytes(4, 'little') == b'RPTS':
@@ -138,7 +141,7 @@ class ReportsTest(unittest.TestCase):
             self.assertEqual(restored.reports, [])
             self.assertEqual(len(restored.ground_stations), 1)
             restored.save(path, overwrite=True)
-            self.assertEqual(struct.unpack_from('<I', path.read_bytes(), 8)[0], 8)
+            self.assertEqual(struct.unpack_from('<I', path.read_bytes(), 8)[0], 9)
 
     def test_limits_fail_before_sampling(self):
         project, definition = self.inputs()
@@ -177,7 +180,7 @@ class ReportsTest(unittest.TestCase):
             path = Path(directory) / 'derived.orbitforge'
             project.save(path)
             raw = path.read_bytes()
-            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 8)
+            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 9)
             self.assertEqual(of.load_project(path).reports[0].kind, of.ReportKind.GEODETIC_POSITION)
             # A v6 container cannot silently accept a newly introduced kind.
             path.write_bytes(self.rewrite(raw, lambda body: body, version=6))

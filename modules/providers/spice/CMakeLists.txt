@@ -23,6 +23,8 @@ foreach(component SDK Python)
         RENAME PicoSHA2.txt COMPONENT ${component})
     install(FILES "${NLOHMANN_JSON_LICENSE_FILE}" DESTINATION "${package_dir}/notices"
         RENAME nlohmann-json.txt COMPONENT ${component})
+    install(FILES third_party/SatelliteToolbox-LICENSE.txt DESTINATION "${package_dir}/notices"
+        RENAME SatelliteToolbox.txt COMPONENT ${component})
     install(DIRECTORY "${PROJECT_SOURCE_DIR}/data/samples/spice/"
         DESTINATION "${package_dir}/data/spice" COMPONENT ${component})
 endforeach()

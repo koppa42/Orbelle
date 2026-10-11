@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import zlib
 import orbitforge as of
+from project_fixtures import legacy_objects
 
 
 class TrackStyleTests(unittest.TestCase):
@@ -20,12 +21,14 @@ class TrackStyleTests(unittest.TestCase):
         return project
 
     @staticmethod
-    def rewrite(raw, mutate, version=8):
+    def rewrite(raw, mutate, version=9):
         sections, offset = [], 24
         while offset < len(raw):
             tag, schema, size, _ = struct.unpack_from('<4sIQI', raw, offset)
             body = raw[offset + 20:offset + 20 + size]
             offset += 20 + size
+            if version < 9 and tag == b'OBJS':
+                body, schema = legacy_objects(body), 2
             if tag == b'STYL':
                 body = mutate(body)
             if body is not None:

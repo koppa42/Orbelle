@@ -7,19 +7,41 @@
 #include <orbitforge/core/frames/state.hpp>
 #include <orbitforge/core/propagation/central_body.hpp>
 #include <orbitforge/core/propagation/ground_station.hpp>
+#include <orbitforge/core/propagation/j4_mean_elements.hpp>
+#include <orbitforge/core/propagation/tle.hpp>
 #include <span>
 #include <vector>
 
 namespace orbitforge::application {
-enum class OrbitPropagator { two_body, j2_secular };
-// Canonical GCRF input. J2 stores the auxiliary mean ellipse, never an
-// osculating state. The standard model always includes all three secular terms.
+enum class OrbitPropagator { two_body, j2_secular, j4_secular, sgp4 };
+[[nodiscard]] inline std::string_view propagator_name(OrbitPropagator propagator) {
+    switch (propagator) {
+    case OrbitPropagator::two_body:
+        return "Two body";
+    case OrbitPropagator::j2_secular:
+        return "J2 secular";
+    case OrbitPropagator::j4_secular:
+        return "J4 secular";
+    case OrbitPropagator::sgp4:
+        return "SGP4 / TLE";
+    }
+    throw std::invalid_argument("Unsupported orbit propagator");
+}
+// Canonical GCRF input. J2/J4 store the auxiliary mean ellipse, not an osculating
+// state. Each standard model includes all three secular terms. SGP4 uses tle.
 struct OrbitInput {
     core::CartesianState initial{
         core::Epoch{0}, core::OriginId::earth, core::FrameId::gcrf, {7e6, 0, 0}, {0, 6200, 5300}};
     OrbitPropagator propagator = OrbitPropagator::two_body;
     core::FrameId input_frame = core::FrameId::gcrf;
+    // SGP4 uses only these two lines for its orbit; initial is the inactive manual draft.
+    // TLE epoch is interpreted with the calculation's explicit time provider.
+    core::Tle tle;
     [[nodiscard]] double mu() const {
+        if (propagator == OrbitPropagator::j4_secular)
+            return core::j4_earth().mu.metres_cubed_per_second_squared;
+        if (propagator == OrbitPropagator::sgp4)
+            return 3.986008e14; // WGS72, matching the TLE propagation model.
         return core::central_body(initial.origin).mu.metres_cubed_per_second_squared;
     }
     std::string object_id = "satellite-1";

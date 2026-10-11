@@ -154,6 +154,7 @@ out/venvs/python-smoke/Scripts/python.exe examples/python/circular_orbit.py
 out/venvs/python-smoke/Scripts/python.exe examples/python/time_frames.py
 out/venvs/python-smoke/Scripts/python.exe examples/python/eop_state.py
 out/venvs/python-smoke/Scripts/python.exe examples/python/sun_moon.py
+out/venvs/python-smoke/Scripts/python.exe examples/python/propagators.py
 out/venvs/python-smoke/Scripts/python.exe tools/validation/compare_examples.py --cpp-example out/build/headless/examples/cpp/Release/orbitforge_example.exe
 ```
 
@@ -305,3 +306,7 @@ Linux 可用相同 preset 加 `-G Ninja` 和 Linux 依赖前缀；单配置生�
 
 当前代码按本机实际使用的精确依赖版本验证；文档站点的最新版本不代表已经升级项目依赖。
 
+
+## 新增预报器
+
+SGP4 的固定来源 C++ 代码随仓库编译，无额外网络依赖；其解析与传播测试包含在现有 CTest 入口。J4 的辅助椭圆转换使用 CSPICE，TEME 变换与 UTC 解释使用 ERFA，因此完整验证采用 `astronomy` 或 `desktop-graphics` 预设。参见[模型说明](../architecture/propagators.md)。

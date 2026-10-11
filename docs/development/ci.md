@@ -10,7 +10,7 @@ GitHub Actions 在每个 Pull Request、`main` 更新及手动运行时执行 CI
 | Linux C++, sanitizers and Python 3.13 | Ubuntu 24.04：完整无界面 C++ 测试、ASan/UBSan、SDK 安装、基准 Python wheel 构建 |
 | Linux SDK and installed Python API | 新 runner，不检出源码；校验交付散列、迁移目录、构建 SDK 消费端、离线安装 wheel，运行 Python API、示例和 C++/Python 对照 |
 | Windows desktop, SDK and Python 3.13 | Windows Server 2022 / VS 2022：完整桌面构建、CTest 与 Qt offscreen 测试、便携包、SDK 与基准 wheel 构建，解压 SDK 后编译消费端，在新虚拟环境中运行 Python API 测试 |
-| Python 3.11 / 3.12 / 3.14 / 3.15 × Windows / Linux | 复用相应平台的原生依赖，分别构建 wheel，在新虚拟环境离线安装后运行 API 测试及五个示例；任一版本失败都阻止发布 |
+| Python 3.11 / 3.12 / 3.14 / 3.15 × Windows / Linux | 复用相应平台的原生依赖，分别构建 wheel，在新虚拟环境离线安装后运行 API 测试及六个示例；任一版本失败都阻止发布 |
 | CI passed | 汇总门槛；任何检查失败、跳过或取消都会失败 |
 
 建议在 GitHub 的 `main` 分支规则中将 **CI passed** 设为必需检查。工作流本身不会修改仓库的分支保护设置。

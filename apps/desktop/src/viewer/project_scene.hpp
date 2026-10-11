@@ -20,5 +20,6 @@ struct PreparedProject {
     const std::vector<std::shared_ptr<const core::IEarthOrientationProvider>> &installed_data,
     const std::atomic_bool &cancelled,
     std::optional<application::Scenario> retained_sessions = std::nullopt,
-    const std::optional<std::string> &edited_object = std::nullopt);
+    const std::optional<std::string> &edited_object = std::nullopt,
+    const core::ITimeProvider *time = nullptr);
 } // namespace orbitforge::desktop

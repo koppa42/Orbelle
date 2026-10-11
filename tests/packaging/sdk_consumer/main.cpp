@@ -4,8 +4,10 @@
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/demo.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
+#include <orbitforge/runtime/j4.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/report.hpp>
+#include <orbitforge/runtime/sgp4.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 int main(int argc, char **argv) {
@@ -60,6 +62,17 @@ int main(int argc, char **argv) {
             return 4;
         }
         const auto time = orbitforge::runtime::make_builtin_time_provider();
+        const orbitforge::core::Tle tle{
+            "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753",
+            "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667"};
+        const auto tle_epoch = time->from_utc(orbitforge::core::parse_tle(tle).epoch_utc);
+        const auto state = orbitforge::runtime::make_sgp4_session(tle, *time, "sdk-sgp4")
+                               .sample(std::array{tle_epoch})
+                               .states()
+                               .front();
+        if (state.frame != orbitforge::core::FrameId::teme ||
+            std::abs(state.position_m[0] - 7022465.29266) > .001)
+            return 20;
         const auto epoch = time->from_utc({2016, 12, 31, 23, 59, 60, 123456789});
         const auto utc = time->to_utc(epoch);
         const auto frames = orbitforge::runtime::make_frame_provider();
@@ -103,6 +116,11 @@ int main(int argc, char **argv) {
         return 10;
     if (orbitforge::runtime::two_body_available()) {
         using namespace orbitforge;
+        const auto j4 =
+            runtime::make_j4_session({core::Epoch{0}, 7e6, .01, .5, .1, .2, .3}, "sdk-j4")
+                .sample(std::array{core::Epoch{0}, core::Epoch{60'000'000'000}});
+        if (j4.states().size() != 2 || !std::isfinite(j4.states()[1].position_m[0]))
+            return 21;
         const core::KeplerianElements elements{core::Epoch{1}, 7e6, 0.1, 0.3, 0.2, 0.4, 0.5};
         const auto converted =
             runtime::to_cartesian(elements, core::GravitationalParameter{3.986004418e14});

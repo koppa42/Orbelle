@@ -261,6 +261,63 @@ core::Matrix3 spin(double angle) {
 }
 class FrameProvider final : public core::IFrameProvider {
   public:
+    core::PositionRotation teme_to_itrf(core::Epoch epoch,
+                                        const core::EarthOrientationSample &eop) const override {
+        validate_eop(epoch, eop);
+        const auto tai = tai_jd(epoch);
+        double day = 0, fraction = 0, polar[3][3]{};
+        if (eraTaiut1(tai.day, tai.fraction, eop.ut1_minus_tai_seconds, &day, &fraction) != 0)
+            throw std::runtime_error("ERFA TAI to UT1 conversion failed");
+        // TEME uses equinox-based GMST82, not ERA or apparent sidereal time.
+        // The pseudo Earth-fixed convention has no TIO locator s'.
+        eraPom00(eop.polar_motion_x_rad, eop.polar_motion_y_rad, 0, polar);
+        return {epoch,
+                core::OriginId::earth,
+                core::FrameId::teme,
+                core::FrameId::itrf,
+                multiply(matrix_value(polar), spin(eraGmst82(day, fraction))),
+                "teme-gmst82-pom00-no-sp-v1",
+                eop.source_id};
+    }
+    core::StateTransform teme_to_itrf_state(core::Epoch epoch,
+                                            const core::EarthOrientationState &eop) const override {
+        auto rotation = teme_to_itrf(epoch, eop.sample);
+        for (double rate :
+             {eop.rates.ut1_minus_tai_seconds_per_second, eop.rates.polar_motion_x_rad_per_second,
+              eop.rates.polar_motion_y_rad_per_second, eop.rates.celestial_pole_dx_rad_per_second,
+              eop.rates.celestial_pole_dy_rad_per_second})
+            if (!std::isfinite(rate) || std::abs(rate) > 0.001)
+                throw std::invalid_argument(
+                    "EOP rates must be finite and at most 0.001 SI units/s");
+        const auto tai = tai_jd(epoch);
+        double day = 0, fraction = 0;
+        eraTaiut1(tai.day, tai.fraction, eop.sample.ut1_minus_tai_seconds, &day, &fraction);
+        const double t = ((day - 2451545.0) + fraction) / 36525;
+        const double omega = (2 * std::numbers::pi / 86400) *
+                             (3155760000.0 + 8640184.812866 + 0.186208 * t - 0.0000186 * t * t) /
+                             (36525 * 86400.0) * (1 + eop.rates.ut1_minus_tai_seconds_per_second);
+        const auto angle = eraGmst82(day, fraction), c = std::cos(angle), s = std::sin(angle);
+        const core::Matrix3 zdot{
+            {{-s * omega, c * omega, 0}, {-c * omega, -s * omega, 0}, {0, 0, 0}}};
+        const auto polar = [&](double dt) {
+            double matrix[3][3]{};
+            eraPom00(eop.sample.polar_motion_x_rad + dt * eop.rates.polar_motion_x_rad_per_second,
+                     eop.sample.polar_motion_y_rad + dt * eop.rates.polar_motion_y_rad_per_second,
+                     0, matrix);
+            return matrix_value(matrix);
+        };
+        const auto p = polar(0), m1 = polar(-1), p1 = polar(1);
+        core::Matrix3 pdot{};
+        for (std::size_t i = 0; i < 3; ++i)
+            for (std::size_t j = 0; j < 3; ++j)
+                pdot[i][j] = (p1[i][j] - m1[i][j]) / 2;
+        auto derivative = multiply(pdot, spin(angle));
+        const auto earth_spin = multiply(p, zdot);
+        for (std::size_t i = 0; i < 3; ++i)
+            for (std::size_t j = 0; j < 3; ++j)
+                derivative[i][j] += earth_spin[i][j];
+        return {std::move(rotation), derivative, "analytic-gmst82-plus-polar-fd2-1s"};
+    }
     core::PositionRotation gcrf_to_itrf(core::Epoch epoch,
                                         const core::EarthOrientationSample &eop) const override {
         validate_eop(epoch, eop);

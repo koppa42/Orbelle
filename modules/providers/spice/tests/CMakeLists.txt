@@ -1,8 +1,9 @@
-add_executable(orbitforge_spice_tests provider_test.cpp two_body_test.cpp j2_test.cpp)
+add_executable(orbitforge_spice_tests provider_test.cpp two_body_test.cpp j2_test.cpp j4_test.cpp)
 target_link_libraries(orbitforge_spice_tests PRIVATE OrbitForge::Spice GTest::gtest_main
     unofficial::cspice::cspice nlohmann_json::nlohmann_json)
 target_include_directories(orbitforge_spice_tests SYSTEM PRIVATE "${PICOSHA2_INCLUDE_DIR}")
 target_compile_definitions(orbitforge_spice_tests PRIVATE
+    ORBITFORGE_J4_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/j4.txt"
     ORBITFORGE_SPICE_SAMPLE="${PROJECT_SOURCE_DIR}/data/samples/spice/de440s_2016_leap/manifest.json"
     ORBITFORGE_SPICE_TEST_DIR="${CMAKE_CURRENT_BINARY_DIR}/fixtures")
 if(ORBITFORGE_WITH_ERFA)

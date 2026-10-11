@@ -17,6 +17,7 @@ if(BUILD_TESTING)
 endif()
 
 add_subdirectory(modules/core)
+add_subdirectory(modules/providers/sgp4)
 if(ORBITFORGE_WITH_ERFA)
     add_subdirectory(modules/providers/erfa)
     add_subdirectory(modules/providers/iers)

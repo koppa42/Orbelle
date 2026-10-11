@@ -104,7 +104,13 @@ void bind_time_frames(py::module_ &module) {
         .def("gcrf_to_itrf", &core::IFrameProvider::gcrf_to_itrf, py::arg("epoch"), py::arg("eop"),
              py::call_guard<py::gil_scoped_release>())
         .def("gcrf_to_itrf_state", &core::IFrameProvider::gcrf_to_itrf_state, py::arg("epoch"),
+             py::arg("eop"), py::call_guard<py::gil_scoped_release>())
+        .def("teme_to_itrf", &core::IFrameProvider::teme_to_itrf, py::arg("epoch"), py::arg("eop"),
+             py::call_guard<py::gil_scoped_release>())
+        .def("teme_to_itrf_state", &core::IFrameProvider::teme_to_itrf_state, py::arg("epoch"),
              py::arg("eop"), py::call_guard<py::gil_scoped_release>());
+    module.def("transform_state", &core::transform_state, py::arg("state"), py::arg("target"),
+               py::arg("frames"), py::arg("eop"), py::call_guard<py::gil_scoped_release>());
     py::class_<core::StateTransform>(module, "StateTransform")
         .def_readonly("rotation", &core::StateTransform::rotation)
         .def_readonly("rotation_rate_per_second", &core::StateTransform::rotation_rate_per_second)

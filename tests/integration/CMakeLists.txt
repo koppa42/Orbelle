@@ -1,4 +1,5 @@
-add_executable(orbitforge_integration_tests runtime_test.cpp scenario_test.cpp project_test.cpp report_test.cpp)
+add_executable(orbitforge_integration_tests runtime_test.cpp scenario_test.cpp project_test.cpp report_test.cpp
+    propagators_test.cpp)
 target_link_libraries(orbitforge_integration_tests PRIVATE OrbitForge::Runtime GTest::gtest_main)
 target_compile_definitions(orbitforge_integration_tests PRIVATE
     ORBITFORGE_REPORT_EOP="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"

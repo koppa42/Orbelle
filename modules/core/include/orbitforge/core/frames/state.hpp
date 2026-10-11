@@ -3,7 +3,7 @@
 #include <orbitforge/core/time/epoch.hpp>
 
 namespace orbitforge::core {
-enum class FrameId { gcrf, itrf, spice_j2000 };
+enum class FrameId { gcrf, itrf, spice_j2000, teme };
 enum class OriginId { earth };
 
 struct CartesianState {

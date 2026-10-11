@@ -196,8 +196,20 @@ void validate_project(const Project &project) {
         check(input.first == project.first && input.last == project.last,
               "Satellite interval must match the project");
         check(input.propagator == OrbitPropagator::two_body ||
-                  input.propagator == OrbitPropagator::j2_secular,
+                  input.propagator == OrbitPropagator::j2_secular ||
+                  input.propagator == OrbitPropagator::j4_secular ||
+                  input.propagator == OrbitPropagator::sgp4,
               "Unsupported project propagator");
+        if (input.propagator == OrbitPropagator::sgp4) {
+            try {
+                (void)core::parse_tle(input.tle);
+            } catch (const std::invalid_argument &error) {
+                throw ProjectError(error.what());
+            }
+        } else {
+            check(input.tle.line1.empty() && input.tle.line2.empty(),
+                  "TLE input is only valid for the SGP4 propagator");
+        }
         check(input.initial.origin == core::OriginId::earth &&
                   input.initial.frame == core::FrameId::gcrf &&
                   (input.input_frame == core::FrameId::gcrf ||
@@ -365,7 +377,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         const auto &input = satellite.orbit;
         objects.text(input.object_id);
         objects.text(satellite.display_name);
-        objects.number(input.propagator == OrbitPropagator::two_body ? 1 : 2, 4);
+        objects.number(static_cast<unsigned>(input.propagator) + 1, 4);
         objects.number(input.input_frame == core::FrameId::gcrf ? 1 : 2, 4);
         objects.epoch(input.initial.epoch);
         for (const auto value : input.initial.position_m)
@@ -382,8 +394,10 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         objects.number(static_cast<unsigned>(satellite.model_kind), 4);
         objects.real(satellite.model_diameter_m);
         objects.text(satellite.model_path);
+        objects.text(input.tle.line1);
+        objects.text(input.tle.line2);
     }
-    payload.section(objects_tag, objects, 2);
+    payload.section(objects_tag, objects, 3);
     Writer styles;
     styles.number(project.satellites.size(), 4);
     for (const auto &satellite : project.satellites) {
@@ -432,7 +446,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
     locked.text(lock.sha256());
     payload.section(lock_tag, locked);
     file.raw(magic);
-    file.number(8, 4);
+    file.number(9, 4);
     file.number(payload.bytes.size());
     file.number(crc32(payload.bytes), 4);
     file.raw(payload.bytes);
@@ -443,7 +457,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     Reader file{bytes};
     check(std::ranges::equal(file.raw(magic.size()), magic), "Not an OrbitForge project file");
     const auto version = file.number(4);
-    check(version >= 1 && version <= 8, "Unsupported OrbitForge project version");
+    check(version >= 1 && version <= 9, "Unsupported OrbitForge project version");
     const auto length = file.number();
     const auto checksum = file.number(4);
     check(length == file.bytes.size(), "Project length mismatch");
@@ -456,8 +470,10 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
                   (version >= 6 && tag == reports_tag) || (version >= 8 && tag == styles_tag),
               "Unsupported project section");
         check(file.number(4) ==
-                  ((tag == objects_tag && version >= 2) || (tag == data_tag && version >= 4) ? 2U
-                                                                                             : 1U),
+                  (tag == objects_tag && version >= 9 ? 3U
+                   : (tag == objects_tag && version >= 2) || (tag == data_tag && version >= 4)
+                       ? 2U
+                       : 1U),
               "Unsupported project section version");
         const auto size = file.number();
         const auto section_crc = file.number(4);
@@ -486,10 +502,10 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         if (version >= 2)
             satellite.display_name = objects.text();
         const auto propagator = objects.number(4), frame = objects.number(4);
-        check(propagator == 1 || propagator == 2, "Unsupported project propagator");
+        check(propagator >= 1 && propagator <= (version >= 9 ? 4U : 2U),
+              "Unsupported project propagator");
         check(frame == 1 || frame == 2, "Unsupported input reference frame");
-        input.propagator =
-            propagator == 1 ? OrbitPropagator::two_body : OrbitPropagator::j2_secular;
+        input.propagator = static_cast<OrbitPropagator>(propagator - 1);
         input.input_frame = frame == 1 ? core::FrameId::gcrf : core::FrameId::itrf;
         input.initial.epoch = objects.epoch();
         for (auto &value : input.initial.position_m)
@@ -508,6 +524,8 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         satellite.model_kind = static_cast<int>(objects.number(4));
         satellite.model_diameter_m = objects.real();
         satellite.model_path = objects.text();
+        if (version >= 9)
+            input.tle = {objects.text(), objects.text()};
         project.satellites.push_back(std::move(satellite));
     }
     objects.done();

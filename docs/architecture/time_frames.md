@@ -76,7 +76,7 @@ GCRF/ITRF 表示地心 GCRS/ITRS 的轴向关系，没有实现特定 ITRF 实�
 
 Runtime 始终公开能力查询 `time_frames_available()`；禁用 Provider 的构建调用相应工厂会抛出明确的错误。Python 绑定通过 Runtime 装配，公开头文件不泄漏 ERFA 类型。当前 Provider 只读、无可变缓存；调用的 ERFA 函数也不访问可变闰秒表。
 
-闰秒表可通过 `load_time_snapshot` 在运行时独立加载；桌面数据中心可联网更新，既有实例保持不变。EOP 通过 `load_eop_snapshot_with_time` 或带 `time_file` 的 DataCatalog 导入绑定对应时间数据。TAI↔TDB 与太阳/月球几何状态已由独立的 [CSPICE Provider](spice.md) 提供；ERFA 的 `julian_date` 仍只接受 TAI/TT。统一数据目录与 EOP／UTC 下载更新已实现；TCB、TEME 以及星历状态到 GCRF 的完整模型转换尚未实现。
+闰秒表可通过 `load_time_snapshot` 在运行时独立加载；桌面数据中心可联网更新，既有实例保持不变。EOP 通过 `load_eop_snapshot_with_time` 或带 `time_file` 的 DataCatalog 导入绑定对应时间数据。TAI↔TDB 与太阳/月球几何状态已由独立的 [CSPICE Provider](spice.md) 提供；ERFA 的 `julian_date` 仍只接受 TAI/TT。统一数据目录与 EOP／UTC 下载更新已实现；TEME 已接入；TCB 及 SPICE 星历状态到 GCRF 的完整模型转换尚未实现。
 
 ## 依据
 
@@ -87,3 +87,7 @@ Runtime 始终公开能力查询 `time_frames_available()`；禁用 Provider 的
 - [IERS 20 C04 格式与变化率说明](https://hpiers.obspm.fr/iers/eop/eopc04/readme)。
 - [IERS Conventions 2010，第 5 章](https://iers-conventions.obspm.fr/content/chapter5/icc5.pdf)。
 - [IERS UT1 与 LOD 关系](https://hpiers.obspm.fr/eop-pc/earthor/ut1lod/UT1.html)。
+
+## TEME
+
+SGP4 输出显式 `FrameId::teme`（of date）。ERFA 的 `teme_to_itrf` / `teme_to_itrf_state` 使用 GMST82 与极移；`core::transform_state` 通过 ITRF 与现有 GCRF 模型连接，包含完整速度项。详见[模型和验证约定](propagators.md#teme-与现有场景)。

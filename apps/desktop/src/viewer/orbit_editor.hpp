@@ -12,6 +12,7 @@ class QComboBox;
 class QCheckBox;
 class QTreeWidget;
 class QStackedWidget;
+class QPlainTextEdit;
 namespace orbitforge::desktop {
 class EpochEditor;
 class QuantityEditor;
@@ -42,12 +43,19 @@ class OrbitEditor final : public QWidget {
     void show_appearance_result(const QString &message, bool error = false);
 
   private:
+    void resizeEvent(QResizeEvent *event) override;
     void refresh_enabled();
     core::CartesianState read_state() const;
     core::CartesianState in_frame(core::CartesianState state, core::FrameId frame) const;
     void write_cartesian(const core::CartesianState &state);
     void write_elements(const core::CartesianState &state);
     void update_state_labels();
+    core::Tle read_tle() const;
+    void update_tle_preview();
+    std::shared_ptr<const core::ITimeProvider> time_;
+    core::CartesianState manual_state_ = OrbitInput{}.initial;
+    QPlainTextEdit *tle_text_ = nullptr;
+    QLabel *tle_preview_ = nullptr, *epoch_label_ = nullptr;
     core::OriginId body_ = core::OriginId::earth;
     core::FrameId input_frame_ = core::FrameId::gcrf;
     OrbitPropagator propagator_kind_ = OrbitPropagator::two_body;
