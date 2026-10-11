@@ -539,7 +539,9 @@ TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
     const auto subpoint = runtime::itrf_to_wgs84(fixed);
     project.ground_stations.push_back(
         {"station", "测控站", {subpoint.longitude_rad, subpoint.latitude_rad, 0}});
-    project.sensors.push_back({"sensor", "观测仪", "satellite-1"});
+    project.sensors.push_back(
+        {"sensor", "观测仪", "satellite-1", 0.7853981633974483,
+         application::SensorPointing::nadir, {}});
     int published = 0;
     ReportDialog dialog(
         project, time,

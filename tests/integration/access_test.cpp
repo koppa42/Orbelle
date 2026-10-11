@@ -116,7 +116,8 @@ TEST(Access, CircularHorizonMatchesAnalyticSolutionAndConeNarrowsWindow) {
     const double horizon = std::acos(6378137.0 / 7e6) / rate;
     EXPECT_NEAR(std::get<core::Epoch>(result.table.rows()[0][3]).seconds_since(seconds(0)), horizon,
                 .001);
-    context.project.sensors.push_back({"sensor", "Nadir", "satellite-1", 10 * pi / 180});
+    context.project.sensors.push_back(
+        {"sensor", "Nadir", "satellite-1", 10 * pi / 180, application::SensorPointing::nadir, {}});
     d.object_ids[1] = "sensor";
     const auto narrow = runtime::generate_report(context, d);
     ASSERT_EQ(narrow.table.rows().size(), 1U);
