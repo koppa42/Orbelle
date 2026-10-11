@@ -66,6 +66,8 @@ Windows/MSVC 示例程序为 `out/build/headless/examples/cpp/Release/orbitforge
 
 数值容限、图形检查和性能测量范围见[验证方法](docs/validation/README.md)。按[构建说明](docs/development/build.md)运行当前版本的检查；每次执行的日志、截图和报告保存在本地 `out/validation/`。
 
+GitHub Actions 自动运行 PR 测试；推送 `vX.Y.Z` 标签后，通过同一套检查再发布 Windows 便携包、Windows/Linux C++ SDK 和 Python wheel。版本更新与发布方法见 [CI 与版本发布](docs/development/ci.md)。
+
 ## 目录
 
 | 目录 | 内容 |

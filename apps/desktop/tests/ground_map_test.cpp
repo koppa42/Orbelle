@@ -22,8 +22,10 @@ class GroundMapTest : public ::testing::Test {
         for (int y = 0; y < image.height(); ++y)
             for (int x = 0; x < image.width(); ++x)
                 image.setPixelColor(x, y, QColor(25 + x / 10, 40 + y / 5, 70 + (x + y) / 12));
-        imagery_ = directory_.filePath("earth.png");
+        // Match the bundled Earth imagery format, including its Qt codec dependency.
+        imagery_ = directory_.filePath("earth.jpg");
         ASSERT_TRUE(image.save(imagery_));
+        ASSERT_FALSE(QImage(imagery_).isNull());
     }
     static GroundMap::Track track() {
         GroundMap::Track result;

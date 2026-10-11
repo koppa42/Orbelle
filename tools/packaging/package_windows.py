@@ -19,6 +19,23 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def find_crt(vc_root, toolset):
+    """VS may ship its default redistributable under a different servicing patch."""
+    redist = vc_root / 'Redist/MSVC'
+    versions = [toolset]
+    default = vc_root / 'Auxiliary/Build/Microsoft.VCRedistVersion.default.txt'
+    if default.is_file():
+        version = default.read_text(encoding='utf-8-sig').strip()
+        if re.fullmatch(r'\d+\.\d+\.\d+(?:\.\d+)?', version):
+            if tuple(map(int, version.split('.')[:2])) >= tuple(map(int, toolset.split('.')[:2])):
+                versions.append(version)
+    for version in versions:
+        roots = list((redist / version / 'x64').glob('Microsoft.VC*.CRT'))
+        if len(roots) == 1:
+            return roots[0]
+    raise RuntimeError('Cannot locate a compatible app-local MSVC runtime from this Visual Studio installation')
+
+
 def validate_output_locations(output, reports):
     """Keep local diagnostics outside the distributable directory."""
     output, reports = output.resolve(), reports.resolve()
@@ -102,6 +119,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--reports', type=Path, required=True)
     parser.add_argument('--verify', action='store_true')
+    parser.add_argument('--version', help='Require the desktop build to have this release version')
     parser.add_argument('--zip', action='store_true', help='Also create a ZIP with one top-level application folder')
     args = parser.parse_args()
     if os.name != 'nt':
@@ -109,13 +127,14 @@ def main():
     build = args.build_dir.resolve(strict=True)
     prefix = args.dependency_prefix.resolve(strict=True)
     cache = (build / 'CMakeCache.txt').read_text(encoding='utf-8')
+    version = re.search(r'^CMAKE_PROJECT_VERSION:[^=]+=(.+)$', cache, re.M).group(1).strip()
+    if args.version and args.version != version:
+        raise ValueError(f'Desktop version {version} differs from requested release {args.version}')
     linker = Path(re.search(r'^CMAKE_LINKER:[^=]+=(.+)$', cache, re.M).group(1))
     dumpbin = linker.with_name('dumpbin.exe').resolve(strict=True)
     vc_root = next(parent for parent in linker.parents if parent.name == 'VC')
     toolset = next(parent.name for parent in linker.parents if parent.parent.name == 'MSVC')
-    crt_roots = list((vc_root / 'Redist/MSVC' / toolset / 'x64').glob('Microsoft.VC*.CRT'))
-    if len(crt_roots) != 1:
-        raise RuntimeError('Cannot locate the compiler-matched app-local MSVC runtime')
+    crt_root = find_crt(vc_root, toolset)
     source = build / 'apps/desktop/Release'
     executable = source / 'orbitforge_desktop.exe'
     if not executable.is_file():
@@ -146,7 +165,7 @@ def main():
             plugins.append(target / path.name)
     # Put redistributables beside the EXE before resolving so System32's optional
     # installations cannot mask a missing application-local C++ runtime/loader.
-    for path in [*crt_roots[0].glob('*.dll'), prefix / 'bin/vulkan-1.dll']:
+    for path in [*crt_root.glob('*.dll'), prefix / 'bin/vulkan-1.dll']:
         shutil.copy2(path, output / path.name)
     (output / 'qt.conf').write_text('[Paths]\nPrefix=.\nPlugins=plugins\n', encoding='utf-8')
     resolver = Path(__file__).with_name('resolve_windows_runtime.cmake').resolve()
@@ -174,7 +193,7 @@ def main():
         target.parent.mkdir(parents=True)
         shutil.copy2(notice, target)
     (output / 'README.txt').write_text(
-        'OrbitForge Windows x64 preview\n\n解压整个文件夹，然后双击 OrbitForge.exe。\n'
+        f'OrbitForge {version} Windows x64\n\n解压整个文件夹，然后双击 OrbitForge.exe。\n'
         '请保留同目录 DLL、plugins 和 resources 文件夹。\n'
         '先新建场景（Ctrl+N），默认UTC今天零点至次日零点，再插入对象（Ctrl+Shift+I）。\n'
         '数据 → 数据中心：统一管理 C04、finals2000A 和 UTC/闰秒，支持完整文件下载、导入与自动更新。\n'

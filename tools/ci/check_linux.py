@@ -235,6 +235,7 @@ class Check:
             shutil.copytree(self.source / directory, self.delivery / directory)
         shutil.copy2(self.source / "tools/validation/compare_examples.py", self.delivery)
         shutil.copy2(self.source / "tools/ci/check_linux.py", self.delivery)
+        shutil.copy2(self.source / "tools/packaging/package_sdk.py", self.delivery)
         shutil.copy2(self.reports / "source-sha256.json", self.delivery)
         (self.delivery / "bin").mkdir()
         shutil.copy2(self.work / "build/release/examples/cpp/orbitforge_example",

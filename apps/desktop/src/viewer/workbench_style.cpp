@@ -371,6 +371,7 @@ void apply_workbench_style(QApplication &app) {
     app.setFont(font);
     QFontDatabase::addApplicationFallbackFontFamily(QChar::Script_Han, "Microsoft YaHei UI");
     app.setWindowIcon(workbench_icon(WorkbenchIcon::orbit, QColor("#a3afff")));
+    // Keep each raw literal below VS 2022's limit; C++ concatenates them unchanged.
     app.setStyleSheet(QStringLiteral(R"QSS(
 QWidget { font-family: "Microsoft YaHei UI"; font-size: 13px; }
 QDialog { background: #1c2333; }
@@ -426,7 +427,8 @@ QToolBar { background: #161c2a; border: 0; spacing: 3px; padding: 3px 8px; }
 QToolBar#commandBar { border-bottom: 1px solid #2e374b; padding: 4px 10px; }
 QToolBar#timelineBar { background: #161c2a; border-top: 1px solid #2e374b; padding: 0; }
 QToolBar::separator { background: #37414f; width: 1px; margin: 4px 8px; }
-QLineEdit, QDateTimeEdit, QDoubleSpinBox, QSpinBox, QComboBox {
+)QSS"
+                                    R"QSS(QLineEdit, QDateTimeEdit, QDoubleSpinBox, QSpinBox, QComboBox {
     background: #161c2a; color: #dce5ef; border: 1px solid #354057;
     border-radius: 5px; padding: 5px 8px; min-height: 20px;
     selection-background-color: #4d5f95; selection-color: #f2f7fc;
@@ -468,7 +470,8 @@ QPushButton#applyOrbit:hover, QPushButton#insertObject:hover, QPushButton[primar
 QPushButton#applyOrbit:disabled, QPushButton#insertObject:disabled, QPushButton[primary="true"]:disabled { background: #2b4158; border-color: #2b4158; color: #98a6c5; }
 QToolButton#transportPlay { background: #343d61; border: 1px solid #7488bd; }
 QToolButton#transportPlay:hover { background: #434f7b; }
-QTabWidget::pane { border: 0; }
+)QSS"
+                                    R"QSS(QTabWidget::pane { border: 0; }
 QTabBar::tab { color: #a0afc2; background: #21293b; min-height: 20px; padding: 6px 12px; border-bottom: 2px solid transparent; }
 QTabBar::tab:selected { color: #daeaff; border-bottom-color: #a3afff; background: #161c2a; }
 QStatusBar { color: #9ba8c1; background: #171e2c; border-top: 1px solid #2e394e; font-size: 11px; }
@@ -523,7 +526,8 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: t
 QLabel[fieldCaption="true"] { color: #9ba8c1; }
 QLabel#eyebrow { color: #b3bdf3; font-size: 11px; font-weight: 600; }
 QLabel#dialogDescription { color: #a1aec7; padding-bottom: 4px; }
-QWidget#dataSidebar { background: #171e2c; border-right: 1px solid #2e374b; }
+)QSS"
+                                    R"QSS(QWidget#dataSidebar { background: #171e2c; border-right: 1px solid #2e374b; }
 QLabel#dataSidebarCaption { color: #8f9db7; padding: 0 12px; font-size: 11px; }
 QTreeWidget#dataInventory { background: transparent; border: 0; outline: 0; padding: 0; }
 QTreeWidget#dataInventory::item { border: 0; padding: 0; }

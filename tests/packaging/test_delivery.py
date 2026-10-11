@@ -20,9 +20,22 @@ def load_tool(name, relative):
 
 windows = load_tool('package_windows', 'tools/packaging/package_windows.py')
 linux = load_tool('check_linux', 'tools/ci/check_linux.py')
+sdk = load_tool('package_sdk', 'tools/packaging/package_sdk.py')
 
 
 class WindowsManifestTests(unittest.TestCase):
+    def test_default_redist_can_have_a_different_servicing_patch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            default = root / 'Auxiliary/Build/Microsoft.VCRedistVersion.default.txt'
+            default.parent.mkdir(parents=True)
+            default.write_text('14.44.35211\n')
+            crt = root / 'Redist/MSVC/14.44.35211/x64/Microsoft.VC143.CRT'
+            crt.mkdir(parents=True)
+            self.assertEqual(windows.find_crt(root, '14.44.35207'), crt)
+            with self.assertRaises(RuntimeError):
+                windows.find_crt(root, '14.51.36231')
+
     def test_distributed_manifest_omits_build_host_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -75,7 +88,8 @@ class LinuxDeliveryTests(unittest.TestCase):
                              'tests/integration/fixtures', 'bindings/python/tests', 'examples/python'):
                 shutil.copytree(ROOT / relative, source / relative,
                                 ignore=shutil.ignore_patterns('__pycache__'))
-            for relative in ('tools/ci/check_linux.py', 'tools/validation/compare_examples.py'):
+            for relative in ('tools/ci/check_linux.py', 'tools/validation/compare_examples.py',
+                             'tools/packaging/package_sdk.py'):
                 target = source / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(ROOT / relative, target)
@@ -116,6 +130,26 @@ class LinuxDeliveryTests(unittest.TestCase):
                 path = relocated / entry['path']
                 self.assertEqual(path.stat().st_size, entry['size'])
                 self.assertEqual(linux.sha256(path), entry['sha256'])
+
+
+class SdkDependencyTests(unittest.TestCase):
+    def test_sdk_copies_only_required_ports_including_their_licenses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prefix = root / 'installed/x64-windows'
+            info = root / 'installed/vcpkg/info'
+            info.mkdir(parents=True)
+            for port in ('erfa', 'cspice', 'sqlite3', 'nlohmann-json', 'picosha2', 'qtbase'):
+                relative = Path('share') / port / 'copyright'
+                path = prefix / relative
+                path.parent.mkdir(parents=True)
+                path.write_text(port)
+                (info / f'{port}_1.0_x64-windows.list').write_text(
+                    'x64-windows/\n' + (Path('x64-windows') / relative).as_posix() + '\n')
+            sdk.copy_dependencies(prefix, root / 'delivery')
+            self.assertFalse((root / 'delivery/share/qtbase').exists())
+            for port in ('erfa', 'cspice', 'sqlite3'):
+                self.assertEqual((root / f'delivery/share/{port}/copyright').read_text(), port)
 
 
 if __name__ == '__main__':
