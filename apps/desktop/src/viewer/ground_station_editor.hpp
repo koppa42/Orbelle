@@ -21,7 +21,7 @@ class GroundStationEditor final : public QDialog {
     void preview();
     application::ProjectGroundStation original_;
     QLineEdit *name_;
-    QuantityEditor *longitude_, *latitude_, *height_;
+    QuantityEditor *longitude_, *latitude_, *height_, *minimum_elevation_;
     QLabel *preview_, *result_;
     QWidget *fields_;
     QPushButton *apply_, *reset_;

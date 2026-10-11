@@ -79,6 +79,17 @@ struct ProjectGroundStation {
     std::string object_id = "ground-station-1";
     std::string display_name;
     core::GroundStationLocation location;
+    double minimum_elevation_rad = 0; // Geodetic horizon, [0, pi/2].
+    [[nodiscard]] const std::string &name() const {
+        return display_name.empty() ? object_id : display_name;
+    }
+};
+enum class SensorPointing { nadir, targeted };
+struct ProjectSensor {
+    std::string object_id = "sensor-1", display_name, parent_satellite_id;
+    double half_angle_rad = 0.7853981633974483;      // Simple conic, (0, pi/2].
+    SensorPointing pointing = SensorPointing::nadir; // Geocentric nadir.
+    std::string target_station_id; // Required for ideal instantaneous targeted pointing.
     [[nodiscard]] const std::string &name() const {
         return display_name.empty() ? object_id : display_name;
     }
@@ -89,6 +100,7 @@ struct Project {
     core::Epoch first, last, current;
     std::vector<ProjectSatellite> satellites;
     std::vector<ProjectGroundStation> ground_stations;
+    std::vector<ProjectSensor> sensors;
     std::vector<ReportDefinition> reports;
     // Provenance of the last calculation, not a requirement to load an old file.
     // The desktop checks current data/policy and requires consent for changes.

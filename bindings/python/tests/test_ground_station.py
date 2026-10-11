@@ -5,7 +5,7 @@ import tempfile
 import unittest
 import zlib
 import orbitforge as of
-from project_fixtures import legacy_objects
+from project_fixtures import legacy_objects, legacy_stations
 
 
 class GroundStationTests(unittest.TestCase):
@@ -64,12 +64,16 @@ class GroundStationTests(unittest.TestCase):
         self.assertEqual(len(project.ground_stations), 1)
 
     @staticmethod
-    def rewrite(raw, change, file_version=9):
+    def rewrite(raw, change, file_version=10):
         chunks, offset = [], 24
         while offset < len(raw):
             tag, version, size, _ = struct.unpack_from('<IIQI', raw, offset)
             body = raw[offset + 20:offset + 20 + size]
             offset += 20 + size
+            if file_version < 10 and tag.to_bytes(4, 'little') == b'SNSR':
+                continue
+            if file_version < 10 and tag.to_bytes(4, 'little') == b'GSTN':
+                body, version = legacy_stations(body), 1
             if file_version < 9 and tag.to_bytes(4, 'little') == b'OBJS':
                 body, version = legacy_objects(body), 2
             if file_version < 8 and tag.to_bytes(4, 'little') == b'STYL':
@@ -107,5 +111,5 @@ class GroundStationTests(unittest.TestCase):
             self.assertEqual(project.ground_stations, [])
             project.add_ground_station(self.make_project().ground_stations[0])
             project.save(path, overwrite=True)
-            self.assertEqual(struct.unpack_from('<I', path.read_bytes(), 8)[0], 9)
+            self.assertEqual(struct.unpack_from('<I', path.read_bytes(), 8)[0], 10)
             self.assertEqual(len(of.load_project(path).ground_stations), 1)

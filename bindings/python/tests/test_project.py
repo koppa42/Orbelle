@@ -98,7 +98,7 @@ class ProjectTests(unittest.TestCase):
             path = Path(directory) / 'bound.orbitforge'
             project.save(path)
             original = path.read_bytes()
-            self.assertEqual(struct.unpack_from('<I', original, 8)[0], 9)
+            self.assertEqual(struct.unpack_from('<I', original, 8)[0], 10)
             def rewrite(tag_to_change, mutate):
                 sections = []
                 offset = 24
@@ -136,7 +136,7 @@ class ProjectTests(unittest.TestCase):
                 tag, version, size, _ = struct.unpack_from('<IIQI', original, offset)
                 body = original[offset + 20:offset + 20 + size]
                 offset += 20 + size
-                if tag.to_bytes(4, 'little') in (b'GSTN', b'RPTS', b'STYL'):
+                if tag.to_bytes(4, 'little') in (b'GSTN', b'RPTS', b'STYL', b'SNSR'):
                     continue
                 if tag.to_bytes(4, 'little') == b'DATA':
                     body, version = body[:-4], 1

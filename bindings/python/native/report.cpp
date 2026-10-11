@@ -1,3 +1,4 @@
+#include <orbitforge/runtime/access.hpp>
 #include <orbitforge/runtime/report.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <pybind11/pybind11.h>
@@ -14,7 +15,62 @@ void bind_reports(py::module_ &module) {
         .value("GROUND_STATIONS", application::ReportKind::ground_stations)
         .value("CLASSICAL_ELEMENTS", application::ReportKind::classical_elements)
         .value("GEODETIC_POSITION", application::ReportKind::geodetic_position)
-        .value("ORBITAL_MOTION", application::ReportKind::orbital_motion);
+        .value("ORBITAL_MOTION", application::ReportKind::orbital_motion)
+        .value("ACCESS_INTERVALS", application::ReportKind::access_intervals)
+        .value("AER", application::ReportKind::aer);
+    py::class_<core::GroundObservation>(module, "GroundObservation")
+        .def_readonly("azimuth_rad", &core::GroundObservation::azimuth_rad)
+        .def_readonly("elevation_rad", &core::GroundObservation::elevation_rad)
+        .def_readonly("range_m", &core::GroundObservation::range_m)
+        .def_readonly("range_rate_mps", &core::GroundObservation::range_rate_mps)
+        .def_readonly("line_of_sight", &core::GroundObservation::line_of_sight);
+    module.def("observe_ground_target", &core::observe_ground_target, py::arg("station"),
+               py::arg("target"));
+    module.def("vector_angle", &core::vector_angle, py::arg("a"), py::arg("b"));
+    py::class_<core::AccessInterval>(module, "AccessInterval")
+        .def_readonly("first", &core::AccessInterval::first)
+        .def_readonly("last", &core::AccessInterval::last)
+        .def_readonly("start_clipped", &core::AccessInterval::start_clipped)
+        .def_readonly("stop_clipped", &core::AccessInterval::stop_clipped);
+    py::class_<runtime::AccessSample>(module, "AccessSample")
+        .def_readonly("epoch", &runtime::AccessSample::epoch)
+        .def_readonly("observation", &runtime::AccessSample::observation)
+        .def_readonly("off_boresight_rad", &runtime::AccessSample::off_boresight_rad)
+        .def_readonly("visible", &runtime::AccessSample::visible);
+    py::class_<runtime::AccessSession>(module, "AccessSession")
+        .def(py::init([](const application::Project &project, std::string station,
+                         std::string target, const std::filesystem::path &eop_manifest,
+                         const std::optional<std::filesystem::path> &time_file) {
+                 runtime::ReportContext context{project, {}, {}, {}};
+                 py::gil_scoped_release release;
+                 context.time = time_file ? runtime::load_time_snapshot(*time_file)
+                                          : runtime::make_builtin_time_provider();
+                 context.frames = runtime::make_frame_provider();
+                 context.eop = runtime::load_eop_snapshot_with_time(eop_manifest, *context.time);
+                 if (context.project.earth_orientation &&
+                     context.project.earth_orientation->extrapolation_days)
+                     context.eop = runtime::with_eop_extrapolation(
+                         context.eop, context.project.earth_orientation->extrapolation_days,
+                         context.time);
+                 return runtime::AccessSession{std::move(context), std::move(station),
+                                               std::move(target)};
+             }),
+             py::arg("project"), py::arg("station_id"), py::arg("target_id"),
+             py::arg("eop_manifest"), py::arg("time_file") = py::none())
+        .def_property_readonly("name", &runtime::AccessSession::name)
+        .def("at", &runtime::AccessSession::at, py::arg("epoch"),
+             py::call_guard<py::gil_scoped_release>())
+        .def(
+            "intervals",
+            [](const runtime::AccessSession &session, core::Epoch first, core::Epoch last,
+               std::int64_t step, std::int64_t tolerance) {
+                py::gil_scoped_release release;
+                return core::find_access_intervals(
+                    first, last, step, [&](core::Epoch epoch) { return session.at(epoch).visible; },
+                    tolerance);
+            },
+            py::arg("first"), py::arg("last"), py::arg("step_nanoseconds") = 1'000'000'000,
+            py::arg("tolerance_nanoseconds") = 1'000'000);
     py::enum_<application::ReportUnits>(module, "ReportUnits")
         .value("SI", application::ReportUnits::si)
         .value("ENGINEERING", application::ReportUnits::engineering);

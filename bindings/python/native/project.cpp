@@ -42,7 +42,21 @@ void bind_project(py::module_ &module) {
         .def_readwrite("object_id", &application::ProjectGroundStation::object_id)
         .def_readwrite("display_name", &application::ProjectGroundStation::display_name)
         .def_readwrite("location", &application::ProjectGroundStation::location)
+        .def_readwrite("minimum_elevation_rad",
+                       &application::ProjectGroundStation::minimum_elevation_rad)
         .def_property_readonly("name", &application::ProjectGroundStation::name);
+    py::enum_<application::SensorPointing>(module, "SensorPointing")
+        .value("NADIR", application::SensorPointing::nadir)
+        .value("TARGETED", application::SensorPointing::targeted);
+    py::class_<application::ProjectSensor>(module, "ProjectSensor")
+        .def(py::init<>())
+        .def_readwrite("object_id", &application::ProjectSensor::object_id)
+        .def_readwrite("display_name", &application::ProjectSensor::display_name)
+        .def_readwrite("parent_satellite_id", &application::ProjectSensor::parent_satellite_id)
+        .def_readwrite("half_angle_rad", &application::ProjectSensor::half_angle_rad)
+        .def_readwrite("pointing", &application::ProjectSensor::pointing)
+        .def_readwrite("target_station_id", &application::ProjectSensor::target_station_id)
+        .def_property_readonly("name", &application::ProjectSensor::name);
     py::enum_<application::OrbitPropagator>(module, "OrbitPropagator")
         .value("TWO_BODY", application::OrbitPropagator::two_body)
         .value("J2_SECULAR", application::OrbitPropagator::j2_secular)
@@ -92,6 +106,7 @@ void bind_project(py::module_ &module) {
         .def_readwrite("current", &application::Project::current)
         .def_readwrite("satellites", &application::Project::satellites)
         .def_readwrite("ground_stations", &application::Project::ground_stations)
+        .def_readwrite("sensors", &application::Project::sensors)
         .def_readwrite("reports", &application::Project::reports)
         .def_readwrite("earth_orientation", &application::Project::earth_orientation)
         .def_property_readonly("data_lock", &application::Project::data_lock)
@@ -117,6 +132,15 @@ void bind_project(py::module_ &module) {
                 project = std::move(candidate);
             },
             py::arg("station"))
+        .def(
+            "add_sensor",
+            [](application::Project &project, application::ProjectSensor sensor) {
+                auto candidate = project;
+                candidate.sensors.push_back(std::move(sensor));
+                application::validate_project(candidate);
+                project = std::move(candidate);
+            },
+            py::arg("sensor"))
         .def(
             "add_satellite",
             [](application::Project &project, application::OrbitInput input,

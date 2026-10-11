@@ -11,13 +11,13 @@
 - 椭球高以 WGS84 椭球面为零，与海拔不同；不自动进行大地水准面、地形或地图拾点换算。
 - 半长轴 6,378,137 m，扁率 1 / 298.257223563。约定与 [ERFA 的 WGS84 参数](https://github.com/liberfa/erfa/blob/master/src/eform.c)及[大地坐标转换接口](https://github.com/liberfa/erfa/blob/master/src/gd2gc.c)一致。
 - `core::GroundStation` 是地心 ITRF 状态提供者，位置固定、ITRF 速度为零，历元保持请求的纳秒值。不含板块运动、固体潮、海潮负荷或站点实测速度。
-- 转换到 GCRF 时必须使用完整 `StateTransform::inverse()`，包含地球旋转的速度项。桌面位置显示只调用位置旋转；显示缓存不能作为未来 Access 分析的输入。
+- 转换到 GCRF 时必须使用完整 `StateTransform::inverse()`，包含地球旋转的速度项。桌面位置显示只调用位置旋转；显示缓存不能作为Access 分析的输入。
 
 三维地球目前使用参考椭球。为使负椭球高的站点能被看到，三维标记使用 `max(椭球高, 100 m)` 的显示位置；拾取与选中环使用相同位置。每个视图独立进行椭球遮挡判断，正面的菱形与选中环作为标注叠加显示，背面的站点不绘制也不能拾取。计算状态、属性预览、二维经纬度和项目文件始终使用原始坐标。这是显示间距，不是地面站的实际高度改写。
 
 ## 场景与文件
 
-`ProjectGroundStation` 保存稳定 ID、显示名称和 `GroundStationLocation`；ID 在卫星与地面站之间也必须唯一。`Project.ground_stations` 保存站点集合；项目 v5 的必需 `GSTN` 段保存精确弧度与米值。v1–v4 项目读取为没有地面站的场景，保存时升级至 v5。
+`ProjectGroundStation` 保存稳定 ID、显示名称、`GroundStationLocation` 和最低仰角；ID 在卫星与地面站之间也必须唯一。`Project.ground_stations` 保存站点集合；项目 v5 的必需 `GSTN` 段保存精确弧度与米值。v1–v4 项目读取为没有地面站的场景，保存时升级至当前 v10（GSTN v2 增加最低仰角，旧版默认 0）。
 
 Runtime 构建固定 ITRF Session，模型标识为 `ground-station-wgs84-fixed-itrf-v1`。同一 Scenario 可同时包含 GCRF 卫星和 ITRF 地面站；每条 `StateSeries` 的参考系必须显式检查后再做相对位置计算。位置编辑增加该站点输入修订；重命名、场景时段编辑以及其他对象的操作保留存续数值 Session。复制使用新 ID 和修订 1，重新从文件打开也从修订 1 开始。
 
@@ -41,6 +41,6 @@ project.save("station.orbitforge")
 
 `ground_stations` 与 `satellites` 一样采用 Python 列表值转换；修改返回的列表或元素后需要把列表赋回项目。`add_ground_station()` 先校验候选值，失败不会修改项目。
 
-当前提供站点对象与科学状态接口；尚未实现卫星过站、方位角/仰角、最低仰角限制、遮挡掩模或 Access 时间窗口。
+已支持卫星过站、AER、最低仰角、椭球遮挡与传感器视场限制，参见[可见性与传感器](access_sensors.md)。尚无地形、方位遮挡掩模、折射和通信链路预算。
 
 数值与文件兼容检查位于 C++ 集成测试和 Python API 测试中，图形交互及便携包检查使用[构建说明](../development/build.md)中的验证入口。

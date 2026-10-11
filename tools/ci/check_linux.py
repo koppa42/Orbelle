@@ -284,7 +284,7 @@ class Check:
                  "import orbitforge; print(orbitforge.__file__)")
         self.run("python-api-tests", python, "-I", "-m", "unittest", "discover", "-v",
                  "-s", delivery / "bindings/python/tests")
-        for name in ("circular_orbit", "time_frames", "eop_state", "sun_moon", "two_body_scenario", "propagators"):
+        for name in ("circular_orbit", "time_frames", "eop_state", "sun_moon", "two_body_scenario", "propagators", "access"):
             self.run(f"python-example-{name}", python, "-I", delivery / f"examples/python/{name}.py")
         self.run("cpp-python-parity", python, "-I", delivery / "compare_examples.py",
                  "--cpp-example", delivery / "bin/orbitforge_example")

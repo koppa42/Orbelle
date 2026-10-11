@@ -6,6 +6,7 @@
 #include <fstream>
 #include <limits>
 #include <map>
+#include <numbers>
 #include <orbitforge/application/project.hpp>
 #include <random>
 #include <set>
@@ -25,7 +26,7 @@ constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
-                        styles_tag = 0x4c595453;
+                        styles_tag = 0x4c595453, sensors_tag = 0x52534e53;
 [[noreturn]] void invalid(const char *message) { throw ProjectError(message); }
 void check(bool condition, const char *message) {
     if (!condition)
@@ -185,7 +186,8 @@ void validate_project(const Project &project) {
           "Invalid project analysis interval");
     check(project.current.tai_nanoseconds() >= first && project.current.tai_nanoseconds() <= last,
           "Project current time is outside its analysis interval");
-    check(project.satellites.size() + project.ground_stations.size() <= max_objects,
+    check(project.satellites.size() + project.ground_stations.size() + project.sensors.size() <=
+              max_objects,
           "Project exceeds 10000 objects");
     std::set<std::string> ids;
     for (const auto &satellite : project.satellites) {
@@ -241,11 +243,39 @@ void validate_project(const Project &project) {
         text_check(station.object_id, true);
         text_check(station.display_name, !station.display_name.empty());
         check(ids.insert(station.object_id).second, "Duplicate project object ID");
+        check(std::isfinite(station.minimum_elevation_rad) && station.minimum_elevation_rad >= 0 &&
+                  station.minimum_elevation_rad <= std::numbers::pi / 2,
+              "Station minimum elevation must be in [0, 90] degrees");
         try {
             (void)core::ground_station_position(station.location);
         } catch (const std::invalid_argument &error) {
             throw ProjectError(error.what());
         }
+    }
+    for (const auto &sensor : project.sensors) {
+        text_check(sensor.object_id, true);
+        text_check(sensor.display_name, !sensor.display_name.empty());
+        text_check(sensor.parent_satellite_id, true);
+        text_check(sensor.target_station_id);
+        check(ids.insert(sensor.object_id).second, "Duplicate project object ID");
+        check(std::ranges::any_of(project.satellites,
+                                  [&](const auto &satellite) {
+                                      return satellite.orbit.object_id ==
+                                             sensor.parent_satellite_id;
+                                  }),
+              "Sensor parent satellite does not exist");
+        check(std::isfinite(sensor.half_angle_rad) && sensor.half_angle_rad > 0 &&
+                  sensor.half_angle_rad <= std::numbers::pi / 2,
+              "Sensor cone half angle must be in (0, 90] degrees");
+        check(sensor.pointing == SensorPointing::nadir ||
+                  sensor.pointing == SensorPointing::targeted,
+              "Unsupported sensor pointing");
+        check(sensor.pointing != SensorPointing::targeted ||
+                  std::ranges::any_of(project.ground_stations,
+                                      [&](const auto &station) {
+                                          return station.object_id == sensor.target_station_id;
+                                      }),
+              "Sensor target ground station does not exist; reassign the sensor first");
     }
     check(project.reports.size() <= 128, "Project exceeds 128 report definitions");
     std::set<std::string> report_ids;
@@ -322,6 +352,7 @@ Project Project::renamed_satellite(const std::string &id, std::string new_name) 
 }
 Project Project::without_satellite(const std::string &id) const {
     auto result = *this;
+    std::erase_if(result.sensors, [&](const auto &s) { return s.parent_satellite_id == id; });
     result.satellites.erase(result.satellites.begin() +
                             static_cast<std::ptrdiff_t>(satellite_index(*this, id)));
     validate_project(result);
@@ -335,6 +366,25 @@ Project Project::with_satellite_copy(const std::string &id, std::string new_id,
     satellite.display_name = std::move(new_name);
     auto result = *this;
     result.satellites.push_back(std::move(satellite));
+    for (const auto &sensor : sensors) {
+        if (sensor.parent_satellite_id != id)
+            continue;
+        auto copy = sensor;
+        copy.parent_satellite_id = result.satellites.back().orbit.object_id;
+        const auto base = copy.parent_satellite_id + "-sensor-";
+        unsigned suffix = 1;
+        do {
+            copy.object_id = base + std::to_string(suffix++);
+        } while (
+            std::ranges::any_of(result.sensors,
+                                [&](const auto &s) { return s.object_id == copy.object_id; }) ||
+            std::ranges::any_of(
+                result.satellites,
+                [&](const auto &s) { return s.orbit.object_id == copy.object_id; }) ||
+            std::ranges::any_of(result.ground_stations,
+                                [&](const auto &s) { return s.object_id == copy.object_id; }));
+        result.sensors.push_back(std::move(copy));
+    }
     validate_project(result);
     return result;
 }
@@ -414,8 +464,20 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         stations.real(station.location.longitude_rad);
         stations.real(station.location.latitude_rad);
         stations.real(station.location.height_m);
+        stations.real(station.minimum_elevation_rad);
     }
-    payload.section(stations_tag, stations);
+    payload.section(stations_tag, stations, 2);
+    Writer sensors;
+    sensors.number(project.sensors.size(), 4);
+    for (const auto &sensor : project.sensors) {
+        sensors.text(sensor.object_id);
+        sensors.text(sensor.display_name);
+        sensors.text(sensor.parent_satellite_id);
+        sensors.real(sensor.half_angle_rad);
+        sensors.number(static_cast<unsigned>(sensor.pointing), 4);
+        sensors.text(sensor.target_station_id);
+    }
+    payload.section(sensors_tag, sensors);
     Writer reports;
     reports.number(project.reports.size(), 4);
     for (const auto &report : project.reports) {
@@ -446,7 +508,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
     locked.text(lock.sha256());
     payload.section(lock_tag, locked);
     file.raw(magic);
-    file.number(9, 4);
+    file.number(10, 4);
     file.number(payload.bytes.size());
     file.number(crc32(payload.bytes), 4);
     file.raw(payload.bytes);
@@ -457,7 +519,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     Reader file{bytes};
     check(std::ranges::equal(file.raw(magic.size()), magic), "Not an OrbitForge project file");
     const auto version = file.number(4);
-    check(version >= 1 && version <= 9, "Unsupported OrbitForge project version");
+    check(version >= 1 && version <= 10, "Unsupported OrbitForge project version");
     const auto length = file.number();
     const auto checksum = file.number(4);
     check(length == file.bytes.size(), "Project length mismatch");
@@ -467,11 +529,13 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         const auto tag = static_cast<std::uint32_t>(file.number(4));
         check(tag == scene_tag || tag == objects_tag || tag == data_tag ||
                   (version >= 3 && tag == lock_tag) || (version >= 5 && tag == stations_tag) ||
-                  (version >= 6 && tag == reports_tag) || (version >= 8 && tag == styles_tag),
+                  (version >= 6 && tag == reports_tag) || (version >= 8 && tag == styles_tag) ||
+                  (version >= 10 && tag == sensors_tag),
               "Unsupported project section");
         check(file.number(4) ==
                   (tag == objects_tag && version >= 9 ? 3U
-                   : (tag == objects_tag && version >= 2) || (tag == data_tag && version >= 4)
+                   : (tag == objects_tag && version >= 2) || (tag == data_tag && version >= 4) ||
+                           (tag == stations_tag && version >= 10)
                        ? 2U
                        : 1U),
               "Unsupported project section version");
@@ -558,9 +622,32 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             station.object_id = stations.text();
             station.display_name = stations.text();
             station.location = {stations.real(), stations.real(), stations.real()};
+            if (version >= 10)
+                station.minimum_elevation_rad = stations.real();
             project.ground_stations.push_back(std::move(station));
         }
         stations.done();
+    }
+    if (version >= 10) {
+        check(sections.contains(sensors_tag), "Missing sensors section");
+        Reader sensors{sections.at(sensors_tag)};
+        const auto sensor_count = sensors.number(4);
+        check(sensor_count + project.satellites.size() + project.ground_stations.size() <=
+                  max_objects,
+              "Project exceeds 10000 objects");
+        for (std::uint64_t i = 0; i < sensor_count; ++i) {
+            ProjectSensor sensor;
+            sensor.object_id = sensors.text();
+            sensor.display_name = sensors.text();
+            sensor.parent_satellite_id = sensors.text();
+            sensor.half_angle_rad = sensors.real();
+            const auto pointing = sensors.number(4);
+            check(pointing <= 1, "Unsupported sensor pointing");
+            sensor.pointing = static_cast<SensorPointing>(pointing);
+            sensor.target_station_id = sensors.text();
+            project.sensors.push_back(std::move(sensor));
+        }
+        sensors.done();
     }
     if (version >= 6) {
         check(sections.contains(reports_tag), "Missing reports section");
@@ -572,7 +659,10 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             report.id = reports.text();
             report.name = reports.text();
             const auto kind = reports.number(4);
-            check(kind <= (version >= 7 ? 6U : 3U), "Unsupported report template");
+            check(kind <= (version >= 10  ? 8U
+                           : version >= 7 ? 6U
+                                          : 3U),
+                  "Unsupported report template");
             report.kind = static_cast<ReportKind>(kind);
             const auto bindings = reports.number(4);
             check(bindings <= max_objects, "Report exceeds 10000 object bindings");

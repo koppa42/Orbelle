@@ -579,6 +579,14 @@ void GroundMap::poll_raster() {
     cancel_raster_.reset();
     update();
 }
+void GroundMap::set_access_link(std::optional<std::pair<std::size_t, std::size_t>> pair,
+                                bool visible) {
+    if (access_pair_ == pair && access_visible_ == visible)
+        return;
+    access_pair_ = pair;
+    access_visible_ = visible;
+    update();
+}
 void GroundMap::paintEvent(QPaintEvent *event) {
     const ProfileScope profile("map_paint_ms");
     const auto plot = plot_rect();
@@ -637,6 +645,13 @@ void GroundMap::paintEvent(QPaintEvent *event) {
             display = &preview_;
         if (display)
             p.drawImage(raster_transform(*display).mapRect(display->bounds), display->image);
+        if (access_visible_ && access_pair_ && access_pair_->first < points_.size() &&
+            access_pair_->second < points_.size()) {
+            p.setPen(QPen(QColor("#87d4c6"), 2, Qt::DashLine));
+            p.drawPath(
+                map_transform().map(ground_path({points_[access_pair_->first].geographic,
+                                                 points_[access_pair_->second].geographic})));
+        }
         for (std::size_t i = 0; i < points_.size(); ++i) {
             const auto point = marker_position(i);
             if (!plot.contains(point))

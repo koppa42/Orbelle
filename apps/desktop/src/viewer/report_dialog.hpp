@@ -19,6 +19,7 @@ class ReportDialog final : public QDialog {
     void select_object(const std::string &id, application::ReportKind kind);
     void update_project(application::Project project,
                         std::shared_ptr<const core::ITimeProvider> time);
+    std::function<void(std::shared_ptr<const runtime::ReportResult>)> result_published;
 
   protected:
     void resizeEvent(QResizeEvent *event) override;

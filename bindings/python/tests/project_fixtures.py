@@ -2,6 +2,23 @@
 import struct
 
 
+def legacy_stations(body):
+    """Downgrade GSTN v2 to v1, discarding the added minimum-elevation field."""
+    count, = struct.unpack_from('<I', body)
+    output = bytearray(body[:4])
+    offset = 4
+    for _ in range(count):
+        begin = offset
+        for _ in range(2):
+            length, = struct.unpack_from('<I', body, offset)
+            offset += 4 + length
+        offset += 24
+        output.extend(body[begin:offset])
+        offset += 8
+    assert offset == len(body)
+    return bytes(output)
+
+
 def legacy_objects(body):
     count, = struct.unpack_from('<I', body)
     output = bytearray(body[:4])

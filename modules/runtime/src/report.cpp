@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <locale>
 #include <numbers>
+#include <orbitforge/runtime/access.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/report.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
@@ -150,10 +151,12 @@ std::string report_input_sha256(const application::Project &project) {
 std::size_t estimate_report_rows(const Project &p, const ReportDefinition &d) {
     validate_project(p);
     validate_report_definition(d);
-    const auto selected = select(p, d);
+    const auto selected = report_is_access(d.kind) ? std::vector<Selection>{} : select(p, d);
+    if (report_is_access(d.kind))
+        validate_access_pair(p, d.object_ids);
     if (d.kind == ReportKind::scenario_summary)
         return 7;
-    check(!selected.empty(), "This report has no compatible objects");
+    check(report_is_access(d.kind) || !selected.empty(), "This report has no compatible objects");
     if (!report_is_sampled(d.kind))
         return selected.size();
     const auto [first, last] = interval(p, d);
@@ -163,9 +166,10 @@ std::size_t estimate_report_rows(const Project &p, const ReportDefinition &d) {
     check(span / step < max_report_rows,
           "Report exceeds 200000 rows; increase the step or shorten the interval");
     const auto count = span / step + 1 + (span % step != 0 ? 1 : 0);
-    check(count <= max_report_rows / selected.size(),
+    const auto objects = report_is_access(d.kind) ? 1 : selected.size();
+    check(count <= max_report_rows / objects,
           "Report exceeds 200000 rows; select fewer objects or increase the step");
-    return static_cast<std::size_t>(count * selected.size());
+    return static_cast<std::size_t>(count * objects);
 }
 ReportResult generate_report(const ReportContext &context, const ReportDefinition &d,
                              const std::atomic_bool *cancel,
@@ -194,13 +198,66 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
     std::vector<Column> columns;
     std::vector<Row> rows;
     rows.reserve(total);
-    const auto selected = select(context.project, d);
+    const auto selected =
+        report_is_access(d.kind) ? std::vector<Selection>{} : select(context.project, d);
     const auto tick = [&] {
         cancelled(cancel);
         if (progress)
             progress(rows.size(), total);
     };
-    if (d.kind == ReportKind::scenario_summary) {
+    if (report_is_access(d.kind)) {
+        AccessSession access{context, d.object_ids[0], d.object_ids[1]};
+        columns = {{"object.id", "Object ID", ""},
+                   {"object.name", "Object", ""},
+                   {"time.epoch", d.kind == ReportKind::aer ? "Time" : "Start", "epoch"}};
+        if (d.kind == ReportKind::access_intervals) {
+            columns.insert(columns.end(), {{"access.stop", "Stop", "epoch"},
+                                           {"access.duration", "Duration", "s"},
+                                           {"access.start_clipped", "Start clipped", ""},
+                                           {"access.stop_clipped", "Stop clipped", ""}});
+            std::size_t completed = 0;
+            const auto intervals = core::find_access_intervals(
+                first, last, d.step_nanoseconds, [&](core::Epoch epoch) {
+                    cancelled(cancel);
+                    completed = std::max(
+                        completed,
+                        static_cast<std::size_t>(ticks_between(first, epoch) /
+                                                 static_cast<std::uint64_t>(d.step_nanoseconds)));
+                    if (progress)
+                        progress(completed, total);
+                    return access.at(epoch).visible;
+                });
+            for (const auto &window : intervals)
+                rows.push_back({d.object_ids[1], access.name(), window.first, window.last,
+                                window.last.seconds_since(window.first),
+                                std::int64_t(window.start_clipped),
+                                std::int64_t(window.stop_clipped)});
+        } else {
+            columns.insert(columns.end(), {{"aer.azimuth", "Azimuth", "rad"},
+                                           {"aer.elevation", "Elevation", "rad"},
+                                           {"aer.range", "Range", "m"},
+                                           {"aer.range_rate", "Range rate", "m/s"},
+                                           {"access.visible", "Visible", ""},
+                                           {"sensor.off_boresight", "Off boresight", "rad"}});
+            auto epoch = first;
+            for (std::size_t i = 0; i < total; ++i) {
+                tick();
+                const auto sample = access.at(epoch);
+                const auto &o = sample.observation;
+                rows.push_back({d.object_ids[1], access.name(), epoch,
+                                o.azimuth_rad ? results::Cell{*o.azimuth_rad} : results::Cell{},
+                                o.elevation_rad, o.range_m, o.range_rate_mps,
+                                std::int64_t(sample.visible),
+                                sample.off_boresight_rad ? results::Cell{*sample.off_boresight_rad}
+                                                         : results::Cell{}});
+                epoch = ticks_between(epoch, last) <= static_cast<std::uint64_t>(d.step_nanoseconds)
+                            ? last
+                            : core::Epoch{epoch.tai_nanoseconds() + d.step_nanoseconds};
+            }
+        }
+        if (progress)
+            progress(total, total);
+    } else if (d.kind == ReportKind::scenario_summary) {
         columns = {{"summary.field", "Property", ""}, {"summary.value", "Value", ""}};
         rows = {{std::string("Scenario"), context.project.name},
                 {std::string("Start"), epoch_text(first, d.time_scale, context.time.get())},
@@ -335,13 +392,15 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
             }
         }
     }
-    tick();
+    cancelled(cancel);
+    if (progress)
+        progress(total, total);
     return {d,
             results::Table{std::move(columns), std::move(rows)},
             report_input_sha256(context.project),
             context.project.data_lock().sha256(),
             context.time ? context.time->data_info().sha256 : "",
-            "builtin-reports-v2",
+            report_is_access(d.kind) ? "geometric-access-wgs84-v1" : "builtin-reports-v2",
             first,
             last,
             context.time};

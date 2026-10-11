@@ -35,6 +35,7 @@ if(ORBITFORGE_WITH_VSG)
         src/viewer/satellite_model.cpp src/viewer/mission_timeline.cpp src/viewer/scenario_dialog.cpp
         src/viewer/insert_object_dialog.cpp src/viewer/insert_object_dialog.hpp
         src/viewer/ground_station_editor.cpp src/viewer/ground_station_editor.hpp
+        src/viewer/sensor_editor.cpp src/viewer/sensor_editor.hpp
         src/viewer/epoch_editor.cpp src/viewer/ground_map.cpp src/viewer/workspace.cpp
         src/viewer/workbench_profile.cpp src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
         src/viewer/startup_splash.cpp src/viewer/startup_splash.hpp
@@ -103,6 +104,8 @@ if(ORBITFORGE_WITH_VSG)
         qt_add_resources(orbitforge_report_ui_tests "report_icons" PREFIX "/orbitforge"
             BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/icons/chevron-down.png)
         target_link_libraries(orbitforge_report_ui_tests PRIVATE OrbitForge::Runtime Qt6::Widgets GTest::gtest_main)
+        target_compile_definitions(orbitforge_report_ui_tests PRIVATE
+            ORBITFORGE_ACCESS_EOP="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json")
         orbitforge_warnings(orbitforge_report_ui_tests)
         orbitforge_copy_runtime_dlls(orbitforge_report_ui_tests)
         gtest_discover_tests(orbitforge_report_ui_tests DISCOVERY_MODE PRE_TEST

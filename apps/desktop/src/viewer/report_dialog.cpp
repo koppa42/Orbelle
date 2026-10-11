@@ -21,6 +21,7 @@
 #include <QListWidget>
 #include <QLocale>
 #include <QMenu>
+#include <QPainter>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QProgressBar>
@@ -47,6 +48,18 @@ namespace orbitforge::desktop {
 namespace {
 using namespace application;
 constexpr auto builtin_count = static_cast<int>(report_kinds.size());
+class ReportTitle final : public QLabel {
+  public:
+    using QLabel::QLabel;
+
+  protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        painter.setPen(palette().color(foregroundRole()));
+        painter.drawText(contentsRect(), Qt::AlignLeft | Qt::AlignVCenter,
+                         fontMetrics().elidedText(text(), Qt::ElideRight, contentsRect().width()));
+    }
+};
 class StepSpinBox final : public QDoubleSpinBox {
   public:
     using QDoubleSpinBox::QDoubleSpinBox;
@@ -80,6 +93,10 @@ QString kind_name(ReportKind kind) {
         return QStringLiteral("经纬高");
     case ReportKind::orbital_motion:
         return QStringLiteral("轨道距离与速率");
+    case ReportKind::access_intervals:
+        return QStringLiteral("可见时段 · Access");
+    case ReportKind::aer:
+        return QStringLiteral("AER · 方位 / 仰角 / 距离");
     }
     return {};
 }
@@ -117,6 +134,15 @@ QString localized(QString value) {
         {"Earth", QStringLiteral("地球")},
         {"Satellite", QStringLiteral("卫星")},
         {"Ground station", QStringLiteral("地面站")},
+        {"Duration", QStringLiteral("持续时间")},
+        {"Start clipped", QStringLiteral("开始于分析边界")},
+        {"Stop clipped", QStringLiteral("结束于分析边界")},
+        {"Azimuth", QStringLiteral("方位角")},
+        {"Elevation", QStringLiteral("仰角")},
+        {"Range", QStringLiteral("斜距")},
+        {"Range rate", QStringLiteral("距离变化率")},
+        {"Visible", QStringLiteral("可见（1 / 0）")},
+        {"Off boresight", QStringLiteral("离轴角")},
         {"Two body", QStringLiteral("二体")},
         {"J2 secular", QStringLiteral("J2 长期项")},
         {"WGS84 fixed", QStringLiteral("WGS84 固定站")}};
@@ -198,10 +224,12 @@ struct ReportDialog::Impl {
     QStackedWidget *result_stack;
     QCheckBox *follow;
     QComboBox *frame, *units, *scale;
+    QComboBox *access_station, *access_target;
+    QWidget *access_pair;
     EpochEditor *first, *last;
     QDoubleSpinBox *step;
     QLabel *status, *estimate, *result_label, *result_title, *scope_label, *scope_detail;
-    QLabel *interval_label, *template_description, *format_title;
+    QLabel *interval_label, *template_description, *format_title, *step_label;
     QPushButton *generate, *export_csv, *cancel, *scope_button, *view_button;
     QToolButton *refresh_button, *config_menu, *result_more;
     QAction *source_button, *copy_button, *store, *update_template, *remove;
@@ -290,6 +318,18 @@ struct ReportDialog::Impl {
         scope_detail = note({}, settings);
         scope_detail->setObjectName("reportScopeDetail");
         config->addWidget(scope_detail);
+        access_pair = new QWidget(settings);
+        auto *pair_form = new QFormLayout(access_pair);
+        pair_form->setContentsMargins(0, 0, 0, 0);
+        pair_form->setVerticalSpacing(12);
+        pair_form->setRowWrapPolicy(QFormLayout::WrapAllRows);
+        access_station = new QComboBox(access_pair);
+        access_station->setObjectName("accessStation");
+        access_target = new QComboBox(access_pair);
+        access_target->setObjectName("accessTarget");
+        pair_form->addRow(QStringLiteral("地面站"), access_station);
+        pair_form->addRow(QStringLiteral("卫星 / 传感器"), access_target);
+        config->addWidget(access_pair);
         auto *template_heading = new QHBoxLayout;
         auto *template_title = new QLabel(QStringLiteral("报告类型"), settings);
         template_title->setObjectName("reportSectionTitle");
@@ -360,7 +400,8 @@ struct ReportDialog::Impl {
         step->setSuffix(QStringLiteral(" 秒"));
         step->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
         step->setToolTip(QStringLiteral("报告独立采样，始终包含起止时刻。"));
-        sampling_form->addRow(QStringLiteral("采样间隔"), step);
+        step_label = new QLabel(QStringLiteral("采样间隔"));
+        sampling_form->addRow(step_label, step);
         frame = new QComboBox(sampling);
         frame->setObjectName("reportFrame");
         frame->addItems({"GCRF", "ITRF"});
@@ -427,7 +468,7 @@ struct ReportDialog::Impl {
         result_layout->setContentsMargins(18, 16, 18, 12);
         result_layout->setSpacing(10);
         auto *result_heading = new QHBoxLayout;
-        result_title = new QLabel(QStringLiteral("报告结果"), result_panel);
+        result_title = new ReportTitle(QStringLiteral("报告结果"), result_panel);
         result_title->setObjectName("reportResultTitle");
         result_title->setTextFormat(Qt::PlainText);
         result_title->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
@@ -608,6 +649,15 @@ struct ReportDialog::Impl {
         });
         for (auto *combo : {frame, units, scale})
             QObject::connect(combo, &QComboBox::currentIndexChanged, owner, [this] { edit(); });
+        for (auto *combo : {access_station, access_target})
+            QObject::connect(combo, &QComboBox::currentIndexChanged, owner, [this] {
+                if (!loading && report_is_access(draft.kind)) {
+                    scope_ids = {access_station->currentData().toString().toStdString(),
+                                 access_target->currentData().toString().toStdString()};
+                    refresh_scope();
+                    edit();
+                }
+            });
         QObject::connect(scale, &QComboBox::currentIndexChanged, owner, [this](int index) {
             first->set_scale(static_cast<CalendarScale>(index));
             last->set_scale(static_cast<CalendarScale>(index));
@@ -678,6 +728,12 @@ struct ReportDialog::Impl {
         refresh_scope();
     }
     bool compatible(ReportKind kind) const {
+        if (report_is_access(kind))
+            return !project.ground_stations.empty() && !project.satellites.empty();
+        if (std::ranges::any_of(project.sensors, [&](const auto &s) {
+                return std::ranges::find(scope_ids, s.object_id) != scope_ids.end();
+            }))
+            return false;
         if (kind == ReportKind::scenario_summary)
             return scope_ids.empty();
         if (report_satellites_only(kind) && !scope_ids.empty())
@@ -698,6 +754,9 @@ struct ReportDialog::Impl {
         bool single_station = false;
         for (const auto &id : scope_ids) {
             QString label = text(id) + QStringLiteral("（已删除）");
+            for (const auto &sensor : project.sensors)
+                if (sensor.object_id == id)
+                    label = text(sensor.name());
             for (const auto &satellite : project.satellites)
                 if (satellite.orbit.object_id == id)
                     label = text(satellite.name());
@@ -867,6 +926,36 @@ struct ReportDialog::Impl {
         layout->addWidget(buttons);
         dialog.exec();
     }
+    void fill_access_pair(bool preserve_missing) {
+        const QSignalBlocker station_guard(access_station), target_guard(access_target);
+        access_station->clear();
+        access_target->clear();
+        for (const auto &station : project.ground_stations)
+            access_station->addItem(text(station.name()), text(station.object_id));
+        for (const auto &satellite : project.satellites) {
+            access_target->addItem(text(satellite.name()), text(satellite.orbit.object_id));
+            for (const auto &sensor : project.sensors)
+                if (sensor.parent_satellite_id == satellite.orbit.object_id)
+                    access_target->addItem(text(satellite.name() + " / " + sensor.name()),
+                                           text(sensor.object_id));
+        }
+        if (preserve_missing && scope_ids.size() == 2) {
+            const auto select = [](QComboBox *combo, const std::string &id) {
+                if (combo->findData(text(id)) < 0)
+                    combo->addItem(text(id) + QStringLiteral("（已删除）"), text(id));
+                combo->setCurrentIndex(combo->findData(text(id)));
+            };
+            select(access_station, scope_ids[0]);
+            select(access_target, scope_ids[1]);
+        } else {
+            for (auto *combo : {access_station, access_target})
+                for (const auto &id : scope_ids)
+                    if (const auto index = combo->findData(text(id)); index >= 0)
+                        combo->setCurrentIndex(index);
+        }
+        scope_ids = {access_station->currentData().toString().toStdString(),
+                     access_target->currentData().toString().toStdString()};
+    }
     void choose(int row) {
         if (row < 0 || loading)
             return;
@@ -883,10 +972,23 @@ struct ReportDialog::Impl {
             draft.first = project.first;
             draft.last = project.last;
             draft.object_ids = scope_ids;
+            if (report_is_access(draft.kind))
+                draft.step_nanoseconds = 1'000'000'000;
         } else {
             draft = project.reports.at(static_cast<std::size_t>(row - builtin_count));
             scope_ids = draft.object_ids;
         }
+        const bool access = report_is_access(draft.kind);
+        step_label->setText(draft.kind == ReportKind::access_intervals
+                                ? QStringLiteral("搜索步长")
+                                : QStringLiteral("采样间隔"));
+        step->setMinimum(access ? .001 : .000000001);
+        access_pair->setVisible(access);
+        scope_label->setVisible(!access);
+        scope_button->setVisible(!access);
+        scope_detail->setVisible(!access);
+        if (access)
+            fill_access_pair(row >= builtin_count);
         follow->setChecked(draft.follow_scenario);
         first->set_epoch(draft.follow_scenario ? project.first : draft.first);
         last->set_epoch(draft.follow_scenario ? project.last : draft.last);
@@ -927,6 +1029,13 @@ struct ReportDialog::Impl {
             template_description->setText(QStringLiteral("地心距离、速率与航迹倾角 · GCRF"));
         if (draft.kind == ReportKind::geodetic_position)
             template_description->setText(QStringLiteral("经度、大地纬度与椭球高 · WGS84"));
+        if (access)
+            template_description->setText(
+                draft.kind == ReportKind::access_intervals
+                    ? QStringLiteral("地球遮挡 · 最低仰角 · 传感器视场\n边界细化至 1 "
+                                     "ms；短窗口请减小搜索步长。")
+                    : QStringLiteral(
+                          "当地北向起算方位角，水平线起算仰角。包含不可见时刻，以 0 / 1 标记。"));
         remove->setEnabled(row >= builtin_count);
         update_template->setEnabled(row >= builtin_count);
         store->setText(row >= builtin_count ? QStringLiteral("另存为模板…")
@@ -938,6 +1047,9 @@ struct ReportDialog::Impl {
         auto d = draft;
         d.object_ids =
             d.kind == ReportKind::scenario_summary ? std::vector<std::string>{} : scope_ids;
+        if (report_is_access(d.kind))
+            d.object_ids = {access_station->currentData().toString().toStdString(),
+                            access_target->currentData().toString().toStdString()};
         d.follow_scenario = follow->isChecked();
         if (report_is_sampled(d.kind) && !d.follow_scenario) {
             d.first = first->epoch();
@@ -962,7 +1074,8 @@ struct ReportDialog::Impl {
             const auto d = definition();
             const auto rows = runtime::estimate_report_rows(project, d);
             estimate->setText(
-                QStringLiteral("预计 %1 行%2")
+                (d.kind == ReportKind::access_intervals ? QStringLiteral("搜索 %1 个时刻%2")
+                                                        : QStringLiteral("预计 %1 行%2"))
                     .arg(static_cast<qulonglong>(rows))
                     .arg(report_is_sampled(d.kind) ? QStringLiteral(" · 含起止时刻") : QString{}));
         } catch (const std::exception &error) {
@@ -1120,10 +1233,14 @@ struct ReportDialog::Impl {
         const QSignalBlocker fields_guard(plot_field), objects_guard(plot_object);
         plot_field->clear();
         plot_object->clear();
-        const bool sampled = report_is_sampled(r.definition.kind);
+        const bool sampled = report_is_sampled(r.definition.kind) &&
+                             r.definition.kind != ReportKind::access_intervals;
         if (sampled) {
             for (std::size_t c = 0; c < r.table.columns().size(); ++c) {
-                if (!r.numeric_value(0, c))
+                bool numeric = false;
+                for (std::size_t row = 0; row < r.table.rows().size() && !numeric; ++row)
+                    numeric = r.numeric_value(row, c).has_value();
+                if (!numeric)
                     continue;
                 const auto &column = r.table.columns()[c];
                 const auto suffix = r.column_unit(c);
@@ -1159,6 +1276,8 @@ struct ReportDialog::Impl {
                 index = plot_field->findData("elements.nu", Qt::UserRole + 1);
             if (index < 0 && r.definition.kind == ReportKind::geodetic_position)
                 index = plot_field->findData("geodetic.height", Qt::UserRole + 1);
+            if (index < 0 && r.definition.kind == ReportKind::aer)
+                index = plot_field->findData("aer.elevation", Qt::UserRole + 1);
             plot_field->setCurrentIndex(std::max(0, index));
             plot_object->setCurrentIndex(std::max(0, plot_object->findData(previous_object)));
         }
@@ -1260,6 +1379,9 @@ struct ReportDialog::Impl {
                 if (cancellation->load())
                     throw runtime::ReportCancelled{};
                 model->publish(result);
+                if (owner->result_published &&
+                    result->input_sha256 == runtime::report_input_sha256(project))
+                    owner->result_published(result);
                 changed = false;
                 table->resizeColumnsToContents();
                 // ID stays available via the source data/CSV; names are more useful in the viewer.
@@ -1309,6 +1431,8 @@ struct ReportDialog::Impl {
         }
         fill_library();
         refresh_scope();
+        if (report_is_access(draft.kind))
+            fill_access_pair(true);
         update_interval();
         update_estimate();
         result_status();

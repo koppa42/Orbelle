@@ -520,5 +520,86 @@ TEST(ReportPlot, AngleWrapDoesNotDrawFalseCrossingAndPixelReductionRetainsPeaks)
     EXPECT_GT(curve_pixels(plot.image(1)), 10); // A one-sample peak survives pixel reduction.
     EXPECT_EQ(data->table.rows().size(), 20000U);
 }
+TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
+    (void)test_app();
+    if (!runtime::two_body_available())
+        GTEST_SKIP();
+    std::shared_ptr<const core::ITimeProvider> time = runtime::make_builtin_time_provider();
+    std::shared_ptr<const core::IEarthOrientationProvider> eop =
+        runtime::load_eop_snapshot(ORBITFORGE_ACCESS_EOP);
+    std::shared_ptr<const core::IFrameProvider> frames = runtime::make_frame_provider();
+    application::Project project{"Access UI", core::Epoch{0}, core::Epoch{120'000'000'000}};
+    project.earth_orientation = eop->data_info();
+    application::ProjectSatellite sat;
+    sat.orbit.first = project.first;
+    sat.orbit.last = project.last;
+    project.satellites.push_back(sat);
+    const auto fixed = core::transform_state(sat.orbit.initial, core::FrameId::itrf, *frames,
+                                             eop->at(project.first));
+    const auto subpoint = runtime::itrf_to_wgs84(fixed);
+    project.ground_stations.push_back(
+        {"station", "测控站", {subpoint.longitude_rad, subpoint.latitude_rad, 0}});
+    project.sensors.push_back({"sensor", "观测仪", "satellite-1"});
+    int published = 0;
+    ReportDialog dialog(
+        project, time,
+        [&](ReportDialog::Ready ready) {
+            ready(runtime::ReportContext{project, time, frames, eop}, {});
+        },
+        [&](auto reports) { project.reports = std::move(reports); }, [](auto) {});
+    dialog.result_published = [&](auto) { ++published; };
+    dialog.show();
+    dialog.select_object("sensor", application::ReportKind::access_intervals);
+    auto *station = dialog.findChild<QComboBox *>("accessStation");
+    auto *target = dialog.findChild<QComboBox *>("accessTarget");
+    auto *generate = dialog.findChild<QPushButton *>("generateReport");
+    EXPECT_EQ(station->currentData().toString(), "station");
+    EXPECT_EQ(target->currentData().toString(), "sensor");
+    EXPECT_TRUE(target->isVisible());
+    EXPECT_FALSE(dialog.findChild<QPushButton *>("reportChangeScope")->isVisible());
+    const auto run = [&] {
+        generate->click();
+        QElapsedTimer timer;
+        timer.start();
+        while (!generate->isEnabled() && timer.elapsed() < 5000) {
+            QCoreApplication::processEvents();
+            QThread::msleep(2);
+        }
+        EXPECT_TRUE(generate->isEnabled());
+    };
+    run();
+    EXPECT_EQ(published, 1);
+    auto *views = dialog.findChild<QTabBar *>("reportViews");
+    EXPECT_FALSE(views->isTabEnabled(1));
+    dialog.findChild<QComboBox *>("reportLibrary")
+        ->setCurrentIndex(static_cast<int>(application::ReportKind::aer));
+    EXPECT_EQ(target->currentData().toString(), "sensor");
+    run();
+    EXPECT_EQ(published, 2);
+    EXPECT_TRUE(views->isTabEnabled(1));
+    EXPECT_GE(
+        dialog.findChild<QComboBox *>("reportPlotField")->findData("aer.azimuth", Qt::UserRole + 1),
+        0);
+    EXPECT_EQ(
+        dialog.findChild<QComboBox *>("reportPlotField")->currentData(Qt::UserRole + 1).toString(),
+        "aer.elevation");
+    const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    if (!capture.isEmpty()) {
+        QDir().mkpath(capture);
+        dialog.resize(1140, 780);
+        views->setCurrentIndex(1);
+        QCoreApplication::processEvents();
+        dialog.grab().save(capture + "/access-aer-wide.png");
+        dialog.resize(420, 700);
+        QCoreApplication::processEvents();
+        dialog.grab().save(capture + "/access-aer-narrow.png");
+    }
+    project.sensors.clear();
+    dialog.update_project(project, time);
+    EXPECT_EQ(target->currentData().toString(), "sensor");
+    EXPECT_TRUE(target->currentText().contains(QStringLiteral("已删除")));
+    run();
+    EXPECT_EQ(published, 2); // Never silently substitutes the parent after deletion.
+}
 } // namespace
 } // namespace orbitforge::desktop

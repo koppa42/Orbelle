@@ -9,6 +9,7 @@
 #include <limits>
 #include <map>
 #include <numbers>
+#include <set>
 
 namespace orbitforge::desktop {
 namespace {
@@ -79,19 +80,25 @@ void ReportPlot::rebuild() {
     time_column_ = static_cast<std::size_t>(time - columns.begin());
     const auto &field = columns[column_].id;
     const bool cyclic = field == "geodetic.longitude" || field == "elements.raan" ||
-                        field == "elements.argp" || field == "elements.nu";
+                        field == "elements.argp" || field == "elements.nu" ||
+                        field == "aer.azimuth";
     const auto half_turn = result_->definition.units == application::ReportUnits::engineering
                                ? 180.0
                                : std::numbers::pi;
     std::map<std::string, std::size_t> indices;
     std::map<std::string, std::size_t> color_indices;
+    std::set<std::string> missing;
     for (std::size_t r = 0; r < result_->table.rows().size(); ++r) {
         const auto &row = result_->table.rows()[r];
         const auto *id = std::get_if<std::string>(&row[0]);
         const auto *epoch = std::get_if<core::Epoch>(&row[time_column_]);
         const auto value = result_->numeric_value(r, column_);
-        if (!id || !epoch || !value)
+        if (!id || !epoch)
             continue;
+        if (!value) {
+            missing.insert(*id);
+            continue;
+        }
         const auto color = color_indices.try_emplace(*id, color_indices.size()).first->second;
         if (!object_.empty() && object_ != *id)
             continue;
@@ -107,7 +114,8 @@ void ReportPlot::rebuild() {
         }
         auto &points = series_[entry->second].points;
         const bool gap =
-            cyclic && !points.empty() && std::abs(points.back().y - *value) > half_turn;
+            missing.erase(*id) != 0 ||
+            (cyclic && !points.empty() && std::abs(points.back().y - *value) > half_turn);
         points.push_back({epoch->seconds_since(result_->first), *value, r, gap});
     }
     full_left_ = 0;
