@@ -66,7 +66,7 @@ Windows/MSVC 示例程序为 `out/build/headless/examples/cpp/Release/orbitforge
 
 数值容限、图形检查和性能测量范围见[验证方法](docs/validation/README.md)。按[构建说明](docs/development/build.md)运行当前版本的检查；每次执行的日志、截图和报告保存在本地 `out/validation/`。
 
-GitHub Actions 对代码 PR 运行两平台测试及 Python 版本矩阵，纯文档 PR 只运行轻量检查；合入 `main` 后验证 C++、桌面和基准 Python，不重复其他 Python 版本。PR 和 `main` 只编译测试需要的程序与扩展，不构建发布包。推送 `vX.Y.Z` 标签后才构建 Windows 便携包、Windows/Linux C++ SDK 和 Python wheel，通过完整测试及安装验证后发布。检查范围、缓存与发布方法见 [CI 与版本发布](docs/development/ci.md)。
+GitHub Actions 对代码 PR 运行两平台测试及 Python 版本矩阵；代码合入 `main` 后验证 C++、桌面和基准 Python，不重复其他 Python 版本。纯文档 PR 和纯文档合并只运行轻量检查。PR 和 `main` 只编译测试需要的程序与扩展，不构建发布包。推送指向已合入 `main` 提交的 `vX.Y.Z` 标签后，才构建 Windows 便携包、Windows/Linux C++ SDK 和 Python wheel，通过完整测试及安装验证后发布；版本标签禁止修改或删除。检查范围、缓存与发布方法见 [CI 与版本发布](docs/development/ci.md)。
 
 ## 参与开发
 

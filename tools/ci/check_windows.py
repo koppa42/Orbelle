@@ -1,11 +1,13 @@
 """Test desktop and Python; build and validate distribution packages only for releases."""
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 import tomllib
 import zipfile
 
@@ -44,10 +46,13 @@ def main():
     def run(name, *command, env=None):
         command = list(map(str, command))
         print(f"[{name}] {command}", flush=True)
+        started = datetime.now(timezone.utc).isoformat()
+        start = time.monotonic()
         with (reports / f"{name}.log").open("w", encoding="utf-8") as log:
             result = subprocess.run(command, cwd=work, env=env or environment,
                                     stdout=log, stderr=subprocess.STDOUT)
-        commands.append({"name": name, "command": command, "exit_code": result.returncode})
+        commands.append({"name": name, "command": command, "exit_code": result.returncode,
+                         "started_utc": started, "elapsed_seconds": time.monotonic() - start})
         (reports / "commands.json").write_text(json.dumps(commands, indent=2), encoding="utf-8")
         if result.returncode:
             print((reports / f"{name}.log").read_text(encoding="utf-8", errors="replace")[-16000:])

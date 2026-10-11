@@ -4,11 +4,12 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[2]
-JOBS = {"metadata", "linux", "linux-consumer", "windows", "python-matrix"}
+JOBS = {"metadata", "linux", "linux-consumer", "windows", "python-linux", "python-windows"}
 REQUIRED = {
     "full": JOBS - {"linux-consumer"},
     "docs": {"metadata"},
@@ -17,7 +18,7 @@ REQUIRED = {
 }
 DESCRIPTIONS = {
     "full": "Native and desktop tests plus every supported Python version; no release packages.",
-    "docs": "Documentation-only PR: version and tooling checks; native builds are skipped.",
+    "docs": "Documentation-only change: workflow, version and tooling checks; native builds are skipped.",
     "baseline": "Main integration tests: native/desktop and baseline Python; no matrix or release packages.",
     "release": "Full tests, release package builds and isolated installation checks.",
 }
@@ -49,10 +50,30 @@ def pull_request_paths(source):
     return [path.decode("utf-8") for path in paths.split(b"\0") if path]
 
 
-def select_scope(event, ref, source=ROOT, release_tag=""):
+def push_paths(source, before, after):
+    # Compare the entire push, not just the last commit. Missing history, new
+    # branches and non-fast-forward updates must keep baseline integration tests.
+    if any(not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha) or not sha.strip("0")
+           for sha in (before, after)) or before == after:
+        raise ValueError("Expected distinct, nonzero push commit IDs")
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source).decode().strip()
+    if head != after:
+        raise ValueError("Checkout does not match the push's after commit")
+    subprocess.run(["git", "merge-base", "--is-ancestor", before, after], cwd=source, check=True)
+    paths = subprocess.check_output(
+        ["git", "diff", "--name-only", "--no-renames", "-z", before, after, "--"], cwd=source)
+    return [path.decode("utf-8") for path in paths.split(b"\0") if path]
+
+
+def select_scope(event, ref, source=ROOT, release_tag="", before="", after=""):
     if release_tag:
         return "release"
     if event == "push" and ref == "refs/heads/main":
+        try:
+            if documentation_only(push_paths(source, before, after)):
+                return "docs"
+        except (OSError, ValueError, subprocess.CalledProcessError) as error:
+            print(f"Cannot classify the push; keeping baseline checks: {error}")
         return "baseline"
     if event == "pull_request":
         try:
@@ -88,9 +109,18 @@ def main():
         print(f"All checks required by scope {scope!r} passed.")
         return
 
+    event = {}
+    if os.environ.get("GITHUB_EVENT_NAME") == "push":
+        try:
+            event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+            if not isinstance(event, dict):
+                event = {}
+        except (KeyError, OSError, ValueError) as error:
+            print(f"Cannot read push event; keeping baseline checks: {error}")
     scope = select_scope(os.environ.get("GITHUB_EVENT_NAME", ""),
                          os.environ.get("GITHUB_REF", ""),
-                         release_tag=os.environ.get("RELEASE_TAG", ""))
+                         release_tag=os.environ.get("RELEASE_TAG", ""),
+                         before=event.get("before", ""), after=event.get("after", ""))
     print(f"CI scope: {scope}. {DESCRIPTIONS[scope]}")
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a", encoding="utf-8") as stream:

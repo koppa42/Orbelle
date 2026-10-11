@@ -90,7 +90,7 @@ class LinuxDeliveryTests(unittest.TestCase):
                              'tests/integration/fixtures', 'bindings/python/tests', 'examples/python'):
                 shutil.copytree(ROOT / relative, source / relative,
                                 ignore=shutil.ignore_patterns('__pycache__'))
-            for relative in ('tools/ci/check_linux.py', 'tools/validation/compare_examples.py',
+            for relative in ('tools/ci/check_linux.py', 'tools/ci/summarize_timings.py', 'tools/validation/compare_examples.py',
                              'tools/packaging/package_sdk.py'):
                 target = source / relative
                 target.parent.mkdir(parents=True, exist_ok=True)

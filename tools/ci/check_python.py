@@ -1,11 +1,13 @@
 """Test one interpreter's native API; build and install wheels only in release mode."""
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 import tomllib
 
 from version import ROOT, check, python_versions
@@ -42,10 +44,13 @@ def main():
     def run(name, *command, env=None):
         command = list(map(str, command))
         print(f"[{name}] {command}", flush=True)
+        started = datetime.now(timezone.utc).isoformat()
+        start = time.monotonic()
         with (reports / f"{name}.log").open("w", encoding="utf-8") as log:
             process = subprocess.run(command, cwd=work, env=env or environment,
                                      stdout=log, stderr=subprocess.STDOUT)
-        records.append({"name": name, "command": command, "exit_code": process.returncode})
+        records.append({"name": name, "command": command, "exit_code": process.returncode,
+                        "started_utc": started, "elapsed_seconds": time.monotonic() - start})
         (reports / "commands.json").write_text(json.dumps(records, indent=2), encoding="utf-8")
         if process.returncode:
             print((reports / f"{name}.log").read_text(encoding="utf-8", errors="replace")[-16000:])

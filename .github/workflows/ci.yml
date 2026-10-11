@@ -43,7 +43,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-          fetch-depth: 2
+          # Push classification needs the whole before..after range; release
+          # verification also needs main and the tag, including older commits.
+          fetch-depth: ${{ github.event_name == 'push' && '0' || '2' }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.13'
@@ -55,6 +57,20 @@ jobs:
           args=()
           if [[ -n "$RELEASE_TAG" ]]; then args+=(--tag "$RELEASE_TAG"); fi
           python tools/ci/version.py --github-output "${args[@]}"
+      - name: Require release commit on main
+        if: inputs.release-tag != ''
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: python tools/ci/verify_release.py --tag "$RELEASE_TAG"
+      - name: Lint GitHub Actions workflows
+        run: |
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
+            --output "$archive"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $archive" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
       - name: Select required checks
         id: plan
         env:
@@ -139,6 +155,10 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 7
+      - name: Summarize command timings
+        if: always()
+        shell: bash
+        run: python tools/ci/summarize_timings.py --reports "$RUNNER_TEMP/reports"
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -189,6 +209,10 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 7
+      - name: Summarize command timings
+        if: always()
+        shell: bash
+        run: python "$RUNNER_TEMP/delivery/summarize_timings.py" --reports "$RUNNER_TEMP/reports"
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -295,6 +319,10 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 7
+      - name: Summarize command timings
+        if: always()
+        shell: bash
+        run: python tools/ci/summarize_timings.py --reports "$RUNNER_TEMP/reports"
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -307,76 +335,30 @@ jobs:
           overwrite: true
           retention-days: 14
 
-  python-matrix:
-    name: Python ${{ matrix.python }} / ${{ matrix.platform }}
-    needs: [metadata, linux, windows]
+  python-linux:
+    name: Linux compatibility
+    needs: [metadata, linux]
     if: needs.metadata.outputs.scope == 'full' || needs.metadata.outputs.scope == 'release'
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ${{ fromJSON(needs.metadata.outputs.python-matrix) }}
-        platform: [linux, windows]
-        include:
-          - platform: linux
-            runner: ubuntu-24.04
-            artifact: linux-python-dependencies
-            archive: linux-python-dependencies.tar.gz
-          - platform: windows
-            runner: windows-2022
-            artifact: windows-python-dependencies
-            archive: windows-python-dependencies.tar.gz
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: ${{ matrix.python }}
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          name: ${{ matrix.artifact }}
-          path: ${{ runner.temp }}/input
-      - name: Test Python API; build and install a wheel only for release
-        shell: python {0}
-        env:
-          DEPENDENCY_ARCHIVE: ${{ matrix.archive }}
-          CI_SCOPE: ${{ needs.metadata.outputs.scope }}
-        run: |
-          import os, pathlib, subprocess, sys, tarfile
-          root = pathlib.Path(os.environ['RUNNER_TEMP'])
-          with tarfile.open(root / 'input' / os.environ['DEPENDENCY_ARCHIVE']) as archive:
-              archive.extractall(root / 'delivery', filter='data')
-          command = [sys.executable, 'tools/ci/check_python.py',
-              '--dependency-prefix', str(root / 'delivery/dependencies'),
-              '--work', str(root / 'python'), '--reports', str(root / 'reports')]
-          if os.environ['CI_SCOPE'] == 'release':
-              command += ['--release', '--output', str(root / 'assets')]
-          subprocess.run(command, check=True)
-      - name: Upload Python release wheel
-        if: inputs.release-tag != ''
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: python-${{ matrix.python }}-${{ matrix.platform }}-release-assets
-          path: ${{ runner.temp }}/assets/*.whl
-          compression-level: 0
-          if-no-files-found: error
-          overwrite: true
-          retention-days: 7
-      - name: Upload diagnostics
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: python-${{ matrix.python }}-${{ matrix.platform }}-reports
-          path: ${{ runner.temp }}/reports
-          overwrite: true
-          retention-days: 14
+    uses: ./.github/workflows/python.yml
+    with:
+      platform: linux
+      python-versions: ${{ needs.metadata.outputs.python-matrix }}
+      release: ${{ inputs.release-tag != '' }}
+
+  python-windows:
+    name: Windows compatibility
+    needs: [metadata, windows]
+    if: needs.metadata.outputs.scope == 'full' || needs.metadata.outputs.scope == 'release'
+    uses: ./.github/workflows/python.yml
+    with:
+      platform: windows
+      python-versions: ${{ needs.metadata.outputs.python-matrix }}
+      release: ${{ inputs.release-tag != '' }}
 
   passed:
     name: CI passed
     if: always()
-    needs: [metadata, linux, linux-consumer, windows, python-matrix]
+    needs: [metadata, linux, linux-consumer, windows, python-linux, python-windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

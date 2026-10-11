@@ -83,7 +83,8 @@ class RequiredChecksTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             plan.check_results("release", results)
         results = self.results("baseline")
-        self.assertEqual(results["python-matrix"]["result"], "skipped")
+        self.assertEqual(results["python-linux"]["result"], "skipped")
+        self.assertEqual(results["python-windows"]["result"], "skipped")
         with self.assertRaises(ValueError):
             plan.check_results("full", results)
 
@@ -136,6 +137,50 @@ class MergeDiffTests(unittest.TestCase):
         self.assertEqual(plan.select_scope("pull_request", "refs/pull/3/merge", self.root), "full")
         self.merge()
         self.assertEqual(plan.select_scope("pull_request", "refs/pull/3/merge", self.root), "docs")
+
+    def push_scope(self, before, after=None):
+        return plan.select_scope("push", "refs/heads/main", self.root,
+                                 before=before, after=after or self.git("rev-parse", "HEAD").decode().strip())
+
+    def test_documentation_push_including_multiple_commits_skips_build(self):
+        before = self.git("rev-parse", "HEAD").decode().strip()
+        (self.root / "README.md").write_text("Updated documentation\n")
+        self.commit("Update docs")
+        (self.root / "AGENTS.md").write_text("Contributor rules\n")
+        self.commit("More docs")
+        self.assertEqual(self.push_scope(before), "docs")
+
+    def test_code_in_earlier_push_commit_still_runs_baseline(self):
+        before = self.git("rev-parse", "HEAD").decode().strip()
+        (self.root / "source.cpp").write_text("int main() { return 1; }\n")
+        self.commit("Change code")
+        (self.root / "README.md").write_text("Only the last commit is docs\n")
+        self.commit("Update docs")
+        self.assertEqual(self.push_scope(before), "baseline")
+
+    def test_push_rename_includes_original_code_path(self):
+        before = self.git("rev-parse", "HEAD").decode().strip()
+        (self.root / "docs").mkdir()
+        (self.root / "source.cpp").rename(self.root / "docs/source.md")
+        self.commit("Move source")
+        self.assertEqual(self.push_scope(before), "baseline")
+
+    def test_invalid_unknown_empty_and_mismatched_push_history_keeps_baseline(self):
+        head = self.git("rev-parse", "HEAD").decode().strip()
+        for before in ("", None, "not-a-sha", "0" * 40, "f" * 40, head):
+            with self.subTest(before=before):
+                self.assertEqual(self.push_scope(before), "baseline")
+        (self.root / "README.md").write_text("New docs\n")
+        self.commit("Update docs")
+        self.assertEqual(self.push_scope(head, after="f" * 40), "baseline")
+        newer = self.git("rev-parse", "HEAD").decode().strip()
+        self.git("checkout", "--quiet", head)
+        self.assertEqual(self.push_scope(newer), "baseline")
+
+    def test_no_effective_changes_keeps_baseline(self):
+        before = self.git("rev-parse", "HEAD").decode().strip()
+        self.git("commit", "--quiet", "--allow-empty", "-m", "Empty commit")
+        self.assertEqual(self.push_scope(before), "baseline")
 
 
 if __name__ == "__main__":
