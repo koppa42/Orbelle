@@ -19,6 +19,28 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def validate_output_locations(output, reports):
+    """Keep local diagnostics outside the distributable directory."""
+    output, reports = output.resolve(), reports.resolve()
+    if output.is_relative_to(reports) or reports.is_relative_to(output):
+        raise ValueError('Package output and local reports must be separate, non-nested directories')
+
+
+def write_package_manifest(output, reports, executable, dll_sources):
+    validate_output_locations(output, reports)
+    entries = [{'path': path.relative_to(output).as_posix(), 'bytes': path.stat().st_size,
+                'sha256': digest(path)} for path in sorted(output.rglob('*')) if path.is_file()]
+    manifest = {'schema': 1, 'created_utc': datetime.now(timezone.utc).isoformat(),
+                'executable_sha256': digest(executable),
+                'dll_sources': [{'file': entry['file'], 'sha256': entry['sha256']}
+                                for entry in dll_sources], 'files': entries}
+    (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+    shutil.copy2(output / 'manifest.json', reports / 'package-manifest.json')
+    (reports / 'dll-sources.json').write_text(
+        json.dumps(dll_sources, indent=2) + '\n', encoding='utf-8')
+    return entries
+
+
 def verify_normal_launch(executable, cwd, environment, reports):
     """Launch with no flags (Explorer-equivalent), and close only our own visible window."""
     user32 = ctypes.WinDLL('user32', use_last_error=True)
@@ -100,6 +122,7 @@ def main():
         raise RuntimeError('Build the Release desktop before packaging')
     output = args.output.resolve()
     reports = args.reports.resolve()
+    validate_output_locations(output, reports)
     archive = output.parent / f'{output.name}.zip'
     if args.zip and archive.exists():
         raise RuntimeError(f'Archive already exists: {archive}')
@@ -153,17 +176,19 @@ def main():
     (output / 'README.txt').write_text(
         'OrbitForge Windows x64 preview\n\n解压整个文件夹，然后双击 OrbitForge.exe。\n'
         '请保留同目录 DLL、plugins 和 resources 文件夹。\n'
-        '先新建场景（Ctrl+N），默认UTC今天零点至次日零点，再插入卫星（Ctrl+Shift+I）。\n'
-        '数据 → 数据中心：统一管理 EOP 版本，可导入、手动下载或设置自动检查/下载。\n'
-        '新版本安装后不自动修改已有场景，需明确选择应用。项目按依赖哈希固定数据。\n'
+        '先新建场景（Ctrl+N），默认UTC今天零点至次日零点，再插入对象（Ctrl+Shift+I）。\n'
+        '数据 → 数据中心：统一管理 C04、finals2000A 和 UTC/闰秒，支持完整文件下载、导入与自动更新。\n'
+        '打开或重新计算时检查当前数据；数据变化须确认后继续，项目记录实际使用的数据哈希。\n'
+        '计算时段须在数据覆盖范围内，EOP 可在数据中心设置有限外推；UTC/闰秒不外推。\n'
         '日期、时间、UTC/TAI/TT合并输入；点击日历图标展开选择器。\n'
         '数值框支持直接输入和键盘微调，轨道支持经典瞬时根数与位置/速度。\n'
-        '传播器可选二体与J2长期摄动，点击“设置…”配置显示步长和J2长期项。\n'
+        '传播器可选二体与J2长期摄动，点击“模型…”查看模型信息；显示步长在轨道页设置。\n'
         '初态支持GCRF/ITRF位置速度，轨道根数在GCRF下定义，μ继承中心天体。\n'
         'J2使用平均椭圆；其输入位置速度是辅助开普勒状态，切换模型不执行瞬时/平均转换。\n'
         '也可从启动页明确选择“打开二体示例”。新场景默认不包含卫星。\n'
         '双击场景树对象或右键“属性”打开工作区标签页；可以弹出或放回。\n'
         '基本分组设置轨道和轨迹范围，二维/三维分组设置显示与模型。\n'
+        '卫星属性可设置轨迹线型、颜色和粗细；对象右键可生成报告与曲线。\n'
         '默认显示一圈，显示步长60秒；跳转后按需补算，默认卫星为点标记。\n'
         '三维默认GCRF惯性系，可切换ITRF；二维为ITRF/WGS84。\n'
         'Ctrl+Space 播放/暂停；Ctrl+0 适配轨道；Ctrl+L 定位卫星；Ctrl+T 跳转时间。\n\n'
@@ -175,13 +200,8 @@ def main():
         'No Python, Qt SDK or development PATH is required to launch the desktop.\n'
         'Earth imagery credit: NASA Goddard Space Flight Center. See resources/earth/NOTICE.txt.\n'
         'The bundled C++ runtime is from Microsoft Visual Studio, used under its redistributable terms.\n'
-        'This is a development preview; P1/P2 acceptance is still in progress.\n', encoding='utf-8')
-    entries = [{'path': path.relative_to(output).as_posix(), 'bytes': path.stat().st_size,
-                'sha256': digest(path)} for path in sorted(output.rglob('*')) if path.is_file()]
-    manifest = {'schema': 1, 'created_utc': datetime.now(timezone.utc).isoformat(),
-                'executable_sha256': digest(executable), 'dll_sources': dll_sources, 'files': entries}
-    (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
-    shutil.copy2(output / 'manifest.json', reports / 'package-manifest.json')
+        'This is a development preview. See the project documentation for supported models and limitations.\n', encoding='utf-8')
+    entries = write_package_manifest(output, reports, executable, dll_sources)
     if args.verify:
         environment = {key: value for key, value in os.environ.items()
                        if not key.upper().startswith(('QT_', 'QML', 'VSG', 'ROCKY', 'GDAL', 'PROJ', 'VK_'))}

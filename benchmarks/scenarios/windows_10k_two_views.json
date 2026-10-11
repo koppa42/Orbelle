@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "status": "workload-defined-performance-not-yet-measured",
+  "status": "workload-defined-performance-not-yet-accepted",
   "name": "windows-10k-two-views",
   "workload": {
     "fixture": "circular-100x100-v1",
@@ -62,7 +62,7 @@
     "selectionFeedbackP95Ms": 100
   },
   "measurementPlan": {
-    "status": "instrumentation-pending",
+    "status": "instrumentation-available-valid-presentation-feedback-required",
     "repeats": 3,
     "warmupSeconds": 10,
     "stablePlaybackSeconds": 60,
@@ -71,7 +71,7 @@
     "frameTiming": "per-view displayed-frame intervals from process-scoped presentation trace; retain dropped/occluded frames and coverage diagnostics",
     "responseTiming": "input timestamp to presentation of frame containing requested epoch/selection; CPU completion is diagnostic only",
     "separate": ["cache-precomputation", "cold-start", "uncached-jump", "CPU-submit", "GPU-execution"],
-    "pending": ["presentation-and-input-correlation", "CPU-GPU-and-memory-sampling", "driver-version-at-run"]
+    "pending": ["valid-presentation-feedback", "three-complete-measurement-runs"]
   }
 }
 

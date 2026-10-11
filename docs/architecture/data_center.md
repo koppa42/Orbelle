@@ -1,6 +1,6 @@
-# 统一数据中心开发方案
+# 统一数据中心
 
-此文记录 2026-10-10 的首版实现及后续方向。已完成 [Scenario 数据锁](scenario_data_lock.md)、SQLite 统一目录、左列表、右详情的数据管理窗口及有限 EOP 外推、IERS finals2000A 全量下载和应用运行期间的自动更新。C04 和 UTC／闰秒同样支持全量下载、独立自动更新及本地原文导入；SPICE、GP/OMM/TLE 尚未接入。
+当前实现包括 [Scenario 数据锁](scenario_data_lock.md)、SQLite 统一目录、左列表、右详情的数据管理窗口及有限 EOP 外推、IERS finals2000A 全量下载和应用运行期间的自动更新。C04 和 UTC／闰秒同样支持全量下载、独立自动更新及本地原文导入；SPICE、GP/OMM/TLE 尚未接入。
 
 ## 管理边界
 

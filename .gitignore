@@ -73,8 +73,12 @@ htmlcov/
 *.profraw
 *.profdata
 
-# Generated validation artifacts; keep reports and screenshots under out/validation/.
-/docs/validation/results/
+# Publish validation methods; keep run reports, screenshots and working notes local.
+/docs/validation/*
+!/docs/validation/README.md
+!/docs/validation/*_protocol.md
+/docs/OrbitForge_*.md
+/apps/desktop/resources/startup/README.md
 *.log
 *.log.*
 

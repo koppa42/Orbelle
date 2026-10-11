@@ -1,8 +1,8 @@
 # Qt / VSG / Rocky 集成约定
 
-图形代码已通过 Windows 单星双视图集成检查，仍处于 P0 阶段。结果见[验证记录](../validation/p0_graphics.md)，验收范围见[图形协议](../validation/p0_graphics_protocol.md)，不能用当前单星示例推定已达到万星性能目标。
+图形工作台在 Qt 中集成 VSG 与 Rocky，数值计算和无界面 SDK 保持独立。窗口生命周期和性能测量范围见[图形验证方法](../validation/p0_graphics_protocol.md)；单星显示成功不代表万星性能达标。
 
-可选 `graphics-benchmark` 构建接入固定万星负载，记录见[万星场景预检](../validation/p0_graphics_10k.md)。场景预检与正式性能测量分别记录。
+可选 `graphics-benchmark` 构建使用[固定万星负载](../../benchmarks/scenarios/windows_10k_two_views.json)。场景预检与正式性能测量分别判断。
 
 ## 模块与坐标
 
@@ -50,7 +50,7 @@ Qt Resize、图像获取时的交换链恢复、呈现失败后的 Resize，以�
 
 ## 万星固定负载
 
-`benchmarks/graphics` 只提供渲染用的确定性圆轨道星座：100 个轨道面、每面 100 个相位。复用 Core 圆轨道解，再旋转到各 GCRF 轨道面；这不是已交付的通用二体传播器。通过原有 ERFA/IERS 路径预生成 0–600 秒的 601 份 ITRF 显示位置；帧间线性插值只用于显示，不向分析状态接口返回插值结果。位置缓存为 144,240,000 字节，构建时间另列。
+`benchmarks/graphics` 只提供渲染用的确定性圆轨道星座：100 个轨道面、每面 100 个相位。复用 Core 圆轨道解，再旋转到各 GCRF 轨道面；它与通用二体传播器的验证范围分开。通过原有 ERFA/IERS 路径预生成 0–600 秒的 601 份 ITRF 显示位置；帧间线性插值只用于显示，不向分析状态接口返回插值结果。位置缓存为 144,240,000 字节，构建时间另列。
 
 场景共用 10,000 点的动态缓冲、100 条各 121 顶点的轨迹及单个选中环。每视图拥有 200 个 `vsg::Text` GPU 布局，字体图集和可共享资源复用。标签使用视图自己的投影和椭球遮挡筛选，按稳定 ID 顺序取前 200 个；固定基准保留重叠标签，未实现产品用的避让布局。椭球遮挡筛选属于显示功能，不是 Access 分析。
 
@@ -58,7 +58,7 @@ VSG 1.1.15 的动态 GPU 文字预分配 64 个字形槽，并严格限制为 1�
 
 Qt 鼠标坐标乘实际 DPR 后进入屏幕空间拾取；8 像素半径内选择最近中心，等距选较小对象索引。选中环随同一显示快照更新，空白点击清除。benchmark 固定相机位置并禁用 Trackball 导航，以免鼠标操作改变测量负载；普通工作台保留相机导航。
 
-`--benchmark-scenario` 只接受代码实现的固定场景清单及其 SHA256，不能把任意 JSON 参数误当成已支持配置。基准可执行文件额外携带固定字体、OFL 许可证和场景清单；这些不进入无界面 SDK/Python 构建。主图形示例仍通过 Application/Runtime；基准星座是独立测试夹具，不替代 P0 端到端案例。
+`--benchmark-scenario` 只接受代码实现的固定场景清单及其 SHA256，不能把任意 JSON 参数误当成已支持配置。基准可执行文件额外携带固定字体、OFL 许可证和场景清单；这些不进入无界面 SDK/Python 构建。主图形示例仍通过 Application/Runtime；基准星座是独立测试夹具，不替代端到端工作台检查。
 
 ## 基准计时与资源采样
 
@@ -74,6 +74,6 @@ Windows 资源采样通过 Vulkan deviceLUID 匹配 DXGI adapter，再从单一 
 
 全部输入已进入最后渲染帧并在两视图成功 present 后，停止 acquire/submit/present，在原有窗口与交换链存活期间仅轮询反馈。完整零时间报告也从 pending 移除，不能靠继续等待补造时间。全部完成即退出；否则达到两秒软截止后停止新反馈查询并记录剩余 ID，截止前的在途调用允许随后完成。GPU 查询仍在既有 device-idle 屏障后收尾。
 
-分析器保留读取旧 schema 2/3 的能力；schema 4 另外要求原始反馈证据自洽及 drain 完成。`timing_valid` 表述呈现反馈质量，`measurements_valid` 同时要求 GPU 和进程资源数据有效，性能验收结论另行给出。当前原始记录、准入边界及未完成项见[呈现反馈与排空验证](../validation/p0_presentation_feedback.md)。
+分析器保留读取旧 schema 2/3 的能力；schema 4 另外要求原始反馈证据自洽及 drain 完成。`timing_valid` 表述呈现反馈质量，`measurements_valid` 同时要求 GPU 和进程资源数据有效，性能验收结论另行给出。原始反馈、缺失样本和准入结果均保存在当次运行报告中；完整性不满足时不得给出正式性能结论。
 
-`--benchmark-output-only-probe` 仅用于短探针对照：只请求 FIRST_PIXEL_OUT，其他负载、轮询及联合校准不变。runner 核对实际请求掩码，应用、runner 和分析器均拒绝把该选项用于正式长测试；旧 schema 也不能绕过诊断限制。当前[阶段组合对照](../validation/p0_output_stage_probe.md)未消除输出时间缺失，默认双阶段采集保持不变。
+`--benchmark-output-only-probe` 仅用于短探针对照：只请求 FIRST_PIXEL_OUT，其他负载、轮询及联合校准不变。runner 核对实际请求掩码，应用、runner 和分析器均拒绝把该选项用于正式长测试；旧 schema 也不能绕过诊断限制。该探针不改变正式测试的默认双阶段采集方式。

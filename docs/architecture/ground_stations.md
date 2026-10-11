@@ -41,6 +41,6 @@ project.save("station.orbitforge")
 
 `ground_stations` 与 `satellites` 一样采用 Python 列表值转换；修改返回的列表或元素后需要把列表赋回项目。`add_ground_station()` 先校验候选值，失败不会修改项目。
 
-本轮只建立站点对象与科学状态接口；尚未实现卫星过站、方位角/仰角、最低仰角限制、遮挡掩模或 Access 时间窗口。
+当前提供站点对象与科学状态接口；尚未实现卫星过站、方位角/仰角、最低仰角限制、遮挡掩模或 Access 时间窗口。
 
-数值、文件兼容、图形交互与便携包验证见[验证记录](../validation/ground_stations_2026_10_10.md)。
+数值与文件兼容检查位于 C++ 集成测试和 Python API 测试中，图形交互及便携包检查使用[构建说明](../development/build.md)中的验证入口。

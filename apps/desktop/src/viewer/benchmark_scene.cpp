@@ -25,7 +25,7 @@ BenchmarkScene::BenchmarkScene(const QString &manifest, const core::IFrameProvid
     // This fixture implements one frozen workload, not arbitrary JSON parameters.
     // Changes require a new reviewed fixture/hash, preventing silently ignored options.
     const QByteArray scenario_hash =
-        "785a954e4cf4498d07100f678c2db809e41ed77b76a161610aaa692a5e6b9f36";
+        "84e4873b4235e182e5c791491d1ffeb72f47fdd74cb2f4d4d9842496c30a0686";
     const auto scenario = QJsonDocument::fromJson(checked_file(manifest, scenario_hash)).object();
     const auto font_path =
         QCoreApplication::applicationDirPath() + "/resources/font/RobotoMono-Regular.ttf";

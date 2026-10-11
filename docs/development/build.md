@@ -1,6 +1,6 @@
 # 构建与测试
 
-从仓库根目录执行命令。当前已验证 Windows 骨架与图形工作台，以及 Ubuntu 24.04 x64 下的完整无界面天文计算模块、SDK 和 Python wheel。Linux 验证通过本地 Docker 执行，尚未配置托管 CI 服务；具体范围见 [Linux 验证记录](../validation/p0_linux_headless.md)。
+从仓库根目录执行命令。Windows 提供桌面工作台、SDK 和 Python 包；Linux 提供无界面构建与交付验证入口，可通过本地 Docker 在隔离目录执行。尚未配置托管 CI，Linux 桌面图形尚未验证。
 
 ## 首次准备
 
@@ -18,7 +18,7 @@ cd OrbitForge
 
 ## 提交范围
 
-Git 保留源码、构建配置、测试与复现脚本、必要的测试输入和运行资源，以及整理后的文档。构建日志、原始 JSON/CSV/XML 报告、自动截图、重复源码快照和发布包属于生成产物，放在已忽略的 `out/validation/`、`out/releases/` 等目录，不复制进 `docs/`，不使用 `git add -f` 绕过忽略规则。提交前检查 `git diff --cached --stat` 和文件列表；验证结论与运行命令写入文档即可。历史产物的本机存放位置见[验证记录说明](../validation/README.md)。
+Git 保留源码、构建配置、测试与复现脚本、必要的测试输入和运行资源，以及当前接口文档和验证方法。构建日志、逐次 JSON/CSV/XML 报告、截图、开发记录、源码副本和发布包放在已忽略的 `out/` 或 `local/`，不复制进 `docs/`，不使用 `git add -f` 绕过忽略规则。提交前检查 `git diff --cached --stat` 和文件列表；数值容限及复现约定见[验证方法](../validation/README.md)。
 
 ## 无界面与 Core
 
@@ -29,13 +29,13 @@ cmake --preset core-only
 cmake --build --preset core-only
 ```
 
-骨架的 Core 只使用 C++20 标准库，既不查找也不下载 Qt、Python、VSG 或 Rocky。完整算法接入前不会为占位目标拉取这些依赖。当前库使用静态链接、位置无关代码，SDK 暂要求精确版本匹配；这不是长期 ABI 承诺。
+Core 只使用 C++20 标准库，既不查找也不下载 Qt、Python、VSG 或 Rocky。当前库使用静态链接、位置无关代码，SDK 暂要求精确版本匹配；这不是长期 ABI 承诺。
 
 Visual Studio 多配置生成器使用预设中的 Release 配置；Linux 等单配置生成器使用 `CMAKE_BUILD_TYPE=Release`。可通过命令行或被忽略的 `CMakeUserPresets.json` 指定本机生成器/工具链，不将开发机绝对路径写入公共预设。
 
 ## GoogleTest 与依赖基线
 
-`vcpkg.json` 固定 registry 基线为 `9b965a116838c6cdcd36bca60d1b81b030c8ab8d`，默认无依赖，按功能启用。此基线已用于本次 GoogleTest 安装；未据此宣称整个图形库组合已验证。
+`vcpkg.json` 固定 registry 基线为 `9b965a116838c6cdcd36bca60d1b81b030c8ab8d`，默认无依赖，按功能启用。各功能所需依赖由 manifest 的 features 和 overlay 指定。
 
 示例中把下载和编译数据都放入仓库的 `out/`：
 
@@ -69,7 +69,7 @@ ctest --preset time-frames
 
 启用 Provider 的配置阶段会检查固定 IERS 原文的 SHA256，校验失败会停止配置。升级仓库内置数据需要同时审核原文、清单、有效期和边界测试，不能只改有效期。Provider 本身只读取显式数据；桌面数据中心另行负责联网下载与自动更新。
 
-ERFA 自带测试可在取得校验匹配的源码后验证：将 `cmake/ports/erfa/CMakeLists.txt` 和 `erfaConfig.cmake.in` 复制到解压根目录，用单独构建目录加 `-DBUILD_TESTING=ON` 配置，再构建并运行 CTest。本轮已运行原版 `t_erfa_c` 和 `t_erfa_c_extra`。
+ERFA 自带测试可在取得校验匹配的源码后验证：将 `cmake/ports/erfa/CMakeLists.txt` 和 `erfaConfig.cmake.in` 复制到解压根目录，用单独构建目录加 `-DBUILD_TESTING=ON` 配置，再构建并运行 CTest。上游测试入口为 `t_erfa_c` 和 `t_erfa_c_extra`。
 
 ## CSPICE 与完整天文基础构建
 
@@ -182,13 +182,13 @@ python -m unittest discover -s tools/data/tests -v
 
 把 `--retrieved-on` 改为所用原文件的实际获取日期。最后日期指 UTC 午夜节点，导入工具拒绝覆盖已有目录；其快照随后可从 C++ 或 Python 的 `load_eop_snapshot` 加载。
 
-独立验证工具需要 Java/Javac（本次使用 21.0.9）以及 `tools/validation/orekit/dependencies.json` 固定的八个 JAR。按清单 URL 获取对应文件到本地 `out/validation/orekit/jars/`；脚本先核验每个 JAR 的 SHA256，再编译和运行 Java 参考程序：
+独立验证工具需要 Java/Javac（已使用版本 21.0.9）以及 `tools/validation/orekit/dependencies.json` 固定的八个 JAR。按清单 URL 获取对应文件到本地 `out/validation/orekit/jars/`；脚本先核验每个 JAR 的 SHA256，再编译和运行 Java 参考程序：
 
 ```powershell
 out/venvs/python-smoke/Scripts/python.exe tools/validation/compare_orekit_frames.py --jar-dir out/validation/orekit/jars --work-dir out/validation/orekit/comparison --manifest data/samples/eop/iers_c04_2016_12_28_2017_01_04/manifest.json
 ```
 
-该命令输出机器可读报告、输入 CSV 与参考矩阵 CSV。Orekit 只作为外部校验工具，不是产品依赖；验证过程不联网、不加载 Orekit 的外部 UTC/EOP 数据。方法、模型对齐和容限见[验收记录](../validation/p0_eop_state.md)。
+该命令输出机器可读报告、输入 CSV 与参考矩阵 CSV。Orekit 只作为外部校验工具，不是产品依赖；验证过程不联网、不加载 Orekit 的外部 UTC/EOP 数据。方法、模型对齐和容限见[验证协议](../validation/p0_eop_state_protocol.md)。
 
 ## 星历样例重建与独立参考验证
 
@@ -200,13 +200,13 @@ out/venvs/python-smoke/Scripts/python.exe tools/validation/compare_orekit_frames
 out/build/astronomy/modules/providers/spice/Release/orbitforge_spice_extract.exe out/research/spice/de440s.bsp out/research/spice/naif0012.tls out/validation/reproduced-de440s.bsp
 ```
 
-独立参考端使用 jplephem 2.24 / NumPy 2.2.6，安装在验证环境，不是产品运行依赖。`tools/validation/spice_reference_dependencies.json` 记录本次从 PyPI 获取的 Python 3.13 / Windows x64 wheel 文件名、版本与 SHA256；下载后先核验再安装。验证工具检查库版本和完整原始 SPK 散列，再读取未经截取的原始 DE440s 进行对照：
+独立参考端使用 jplephem 2.24 / NumPy 2.2.6，安装在验证环境，不是产品运行依赖。`tools/validation/spice_reference_dependencies.json` 记录用于独立参考环境的 Python 3.13 / Windows x64 wheel 文件名、版本与 SHA256；下载后先核验再安装。验证工具检查库版本和完整原始 SPK 散列，再读取未经截取的原始 DE440s 进行对照：
 
 ```powershell
 out/venvs/python-smoke/Scripts/python.exe tools/validation/compare_spice_ephemeris.py --manifest data/samples/spice/de440s_2016_leap/manifest.json --reference-spk out/research/spice/de440s.bsp --work-dir out/validation/spice-jplephem
 ```
 
-该工具输出 `report.json` 和原始参考状态 `reference_states.json`。输入包括窗口端点、均匀采样、闰秒边界和固定种子的纳秒采样。容限及结果见 [CSPICE 验证记录](../validation/p0_spice.md)。
+该工具输出 `report.json` 和原始参考状态 `reference_states.json`。输入包括窗口端点、均匀采样、闰秒边界和固定种子的纳秒采样。容限及输入范围见 [CSPICE 验证协议](../validation/p0_spice_protocol.md)。
 
 ## Qt 工作台骨架
 
@@ -215,7 +215,7 @@ cmake --preset desktop "-DCMAKE_PREFIX_PATH=<Qt安装前缀>"
 cmake --build --preset desktop
 ```
 
-桌面目标需要 Qt 6.8+ Widgets；本次使用已安装的 Qt 6.11.0。manifest 的 `desktop` feature 给出 Qt Widgets 所需依赖，完整图形路径本次验证的版本组合见[图形记录](../validation/p0_graphics.md)。
+桌面目标需要 Qt 6.8+ Widgets。manifest 的 `desktop` feature 提供 Qt Widgets 依赖；完整图形路径的固定版本由 vcpkg 基线与 overlay 管理，模块边界见[图形集成约定](../architecture/graphics.md)。
 
 程序位置：`out/build/desktop/apps/desktop/Release/orbitforge_desktop.exe`。本机运行时需要 Qt DLL 和 platform plugin 可被找到，可在当前进程环境设置 Qt `bin` 与 `plugins` 路径。支持 `-platform offscreen --smoke-test` 自动退出，用于窗口创建和结果填充验证。完整工作台的 Windows 便携打包方式见下文。
 
@@ -245,7 +245,9 @@ python tools/validation/run_graphics_smoke.py --executable out/build/desktop-gra
 python tools/packaging/package_windows.py --build-dir out/build/desktop-graphics --dependency-prefix out/dependencies/installed/x64-windows --output out/releases/OrbitForge-0.1.0-win-x64 --reports out/validation/package-win-x64 --verify --zip
 ```
 
-脚本收集应用程序、运行库、Qt 插件、离线资源及第三方许可，并生成同名 ZIP。`--verify` 在真实 Windows 桌面与 Vulkan GPU 上检查打包结果；运行时使用隔离的数据目录。解压后的入口是 `OrbitForge.exe`。完整参数可用 `python tools/packaging/package_windows.py --help` 查看。
+脚本收集应用程序、运行库、Qt 插件、离线资源及第三方许可，并生成同名 ZIP。`--verify` 在真实 Windows 桌面与 Vulkan GPU 上检查打包结果；运行时使用隔离的数据目录。解压后的入口是 `OrbitForge.exe`。输出与报告必须使用互不包含的新目录。公开 `manifest.json` 只包含包内相对路径、文件名和校验值；本机 DLL 来源路径留在 `--reports` 的 `dll-sources.json`。完整参数可用 `python tools/packaging/package_windows.py --help` 查看。
+
+交付脚本回归测试：`python -m unittest discover -s tests/packaging -p "test_*.py" -v`。
 
 ## 万星双视图场景预检
 
@@ -258,7 +260,7 @@ ctest --preset graphics-benchmark
 python tools/validation/run_graphics_smoke.py --executable out/build/graphics-benchmark/apps/desktop/Release/orbitforge_desktop.exe --dependency-prefix out/dependencies/installed/x64-windows --output out/validation/graphics-10k-first-run --scales 1 --benchmark-scenario benchmarks/scenarios/windows_10k_two_views.json
 ```
 
-该命令是带验证层的固定负载预检，检查 10,000 标记、100 条轨迹、每视图 200 标签、缓存跳转和选中反馈；不输出帧时间达标结论。两个原生交换链必须恰为 1280×720，DPR 无法表示该像素尺寸时明确拒绝，不能用相近分辨率替代。本机 DPR 1.5 对应每视图 853×480 逻辑尺寸。正常播放使用 10 倍仿真时间速度，固定相机；smoke 使用确定性历元和合成 Qt 鼠标事件，不能用其回读等待测量交互延迟。
+该命令是带验证层的固定负载预检，检查 10,000 标记、100 条轨迹、每视图 200 标签、缓存跳转和选中反馈；不输出帧时间达标结论。两个原生交换链必须恰为 1280×720，DPR 无法表示该像素尺寸时明确拒绝，不能用相近分辨率替代。例如 DPR 1.5 时，逻辑尺寸由工具换算并核验实际帧缓冲。正常播放使用 10 倍仿真时间速度，固定相机；smoke 使用确定性历元和合成 Qt 鼠标事件，不能用其回读等待测量交互延迟。
 
 手动检查可使用开发启动器传入两个参数：
 
@@ -266,7 +268,7 @@ python tools/validation/run_graphics_smoke.py --executable out/build/graphics-be
 tools/dev/run-desktop.ps1 -Executable out/build/graphics-benchmark/apps/desktop/Release/orbitforge_desktop.exe -DesktopArguments @('--benchmark-scenario', "$PWD/benchmarks/scenarios/windows_10k_two_views.json")
 ```
 
-冻结负载和采样计划见 `benchmarks/scenarios/windows_10k_two_views.json`。首像素输出的明确呈现 ID 关联、局部时钟校准及 CPU/RAM 采样已接入可选基准；仍有反馈缺失，尚无正式性能结论。计时命令、VSG #2 的 ABI 重建要求与边界见[计时接入记录](../validation/p0_graphics_timing.md)。字体来源和许可证在 `data/samples/fonts/roboto_mono_3_001/`，构建时复制到可执行文件旁的 `resources/font/`。
+冻结负载和采样计划见 `benchmarks/scenarios/windows_10k_two_views.json`。首像素输出的明确呈现 ID 关联、局部时钟校准及 CPU/RAM 采样已接入可选基准；仍有反馈缺失，尚无正式性能结论。计时边界见[图形集成约定](../architecture/graphics.md)。升级 VSG overlay 后须同步重建依赖其 ABI 的 vsgQt、vsgXchange、Rocky 和应用程序。字体来源和许可证在 `data/samples/fonts/roboto_mono_3_001/`，构建时复制到可执行文件旁的 `resources/font/`。
 
 ## 独立计算吞吐量
 
@@ -294,7 +296,7 @@ Linux 可用相同 preset 加 `-G Ninja` 和 Linux 依赖前缀；单配置生�
 
 项目自有 C++ 目标启用较严格警告并默认视警告为错误；第三方目标不继承项目的告警策略。`.clang-format` 和 `.clang-tidy` 记录统一配置。
 
-`ORBITFORGE_ENABLE_SANITIZERS` 提供 GCC/Clang 地址与未定义行为检查入口。Linux GCC 13.3 已通过 ASan/UBSan 和泄漏检查；当前 19 个项目翻译单元（含测试、示例和离线数据工具）均有插桩，第三方静态库未插桩。编译选项传递到消费公开头文件的项目目标，覆盖内联与模板实例化。Windows/MSVC 不会静默忽略此选项，而是明确报错。
+`ORBITFORGE_ENABLE_SANITIZERS` 提供 GCC/Clang 地址与未定义行为检查入口。项目目标及其公开头文件消费端继承插桩选项，第三方静态库不自动插桩。Linux 使用 `linux-sanitizers` 预设；Windows/MSVC 不会静默忽略此选项，而是明确报错。
 
 ## 构建接口资料
 

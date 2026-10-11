@@ -231,7 +231,7 @@ class Check:
         # Only packaging tests, frozen expected values and examples are delivered here.
         # Product headers/libraries come from the install trees above.
         for directory in ("tests/packaging/sdk_consumer", "tests/reference/time_frames",
-                          "bindings/python/tests", "examples/python"):
+                          "tests/integration/fixtures", "bindings/python/tests", "examples/python"):
             shutil.copytree(self.source / directory, self.delivery / directory)
         shutil.copy2(self.source / "tools/validation/compare_examples.py", self.delivery)
         shutil.copy2(self.source / "tools/ci/check_linux.py", self.delivery)

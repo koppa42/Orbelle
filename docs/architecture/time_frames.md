@@ -1,6 +1,6 @@
-# P0 时间与参考系接口
+# 时间与参考系接口
 
-ERFA 2.0.1 与 IERS C04 Provider 通过 Runtime 供 C++ SDK 和独立 Python 包调用。Core 只定义值类型、接口及矩阵应用规则，仍可不带第三方库独立构建。
+ERFA 2.0.1 与 IERS C04 / finals2000A Provider 通过 Runtime 供 C++ SDK 和独立 Python 包调用。Core 只定义值类型、接口及矩阵应用规则，仍可不带第三方库独立构建。
 
 ## 时间表示与范围
 
@@ -36,9 +36,9 @@ GCRF/ITRF 表示地心 GCRS/ITRS 的轴向关系，没有实现特定 ITRF 实�
 
 ## 本地 EOP 快照
 
-`runtime::load_eop_snapshot(manifest_path)` 读取调用者指定的本地清单与同目录数据，返回拥有数据的只读 `IEarthOrientationProvider`。Python 接受 `str` 或 `pathlib.Path`。加载一次后不再访问原文件，原目录移动或文件修改不影响已加载对象；再次加载会重新校验。运行时不联网、不自动寻找替代数据，也不外推。
+`runtime::load_eop_snapshot(manifest_path)` 读取调用者指定的本地清单与同目录数据，返回拥有数据的只读 `IEarthOrientationProvider`。Python 接受 `str` 或 `pathlib.Path`。加载一次后不再访问原文件，原目录移动或文件修改不影响已加载对象；再次加载会重新校验。该加载接口不联网、不自动寻找替代数据，默认严格拒绝越界。数据中心可以显式装配有限外推 Provider，并将策略写入本次计算的数据引用。
 
-格式限定为 IERS **20 C04、0h UTC、dX/dY、21 列**；使用 xp/yp 变化率，故起始日期要求不早于 1984-01-01。数据必须逐日连续、日期/MJD 一致、数值有限、参数处于支持域且不确定度非负。清单和数据最大为 64 KiB、16 MiB；路径不能跳出快照目录。先对读入字节计算 SHA256，再解析同一字节缓冲区。SHA256 用来检查数据一致性，并不证明来源身份。
+支持 IERS **20 C04、0h UTC、dX/dY、21 列**，以及 finals2000A 定宽文件中的 Bulletin A 观测/预测栏。C04 使用 xp/yp 变化率，起始日期要求不早于 1984-01-01；finals2000A 使用相邻节点估计斜率，保留极移、UT1 和天极偏移的预测标志。选定区间必须逐日连续、日期/MJD 一致、数值有限且参数处于支持域，缺失字段不能填零。清单和数据最大为 64 KiB、16 MiB；路径不能跳出快照目录。先对原始字节核验 SHA256，再解析同一缓冲区。SHA256 检查数据一致性，不认证来源。
 
 清单 schema 1 的固定字段如下；额外字段或未知版本直接报错：
 
@@ -46,17 +46,17 @@ GCRF/ITRF 表示地心 GCRS/ITRS 的轴向关系，没有实现特定 ITRF 实�
 |---|---|
 | `schema_version` | 整数字面量 `1` |
 | `snapshot_id` | 非空版本标识 |
-| `format` / `reference_frame` | `iers-20-c04-0h-dxdy` / `ITRF2020` |
+| `format` / `reference_frame` | C04：`iers-20-c04-0h-dxdy` / `ITRF2020`；finals：`iers-finals2000a` / `ITRS` |
 | `data_file` | 同目录文件名，不含路径 |
 | `sha256` | 数据原始字节 SHA256，小写十六进制 |
 | `source_url` / `source_sha256` | 原始下载来源及完整原文件 SHA256；仅作为来源记录 |
 | `retrieved_on` | 获取日期，导入工具要求 ISO 日期 |
 | `first_mjd` / `last_mjd` | 整数 UTC 午夜节点，至少两个；均包含在覆盖区间内 |
-| `interpolation` | `c04-hermite-tai-v1` |
+| `interpolation` | C04：`c04-hermite-tai-v1`；finals：`finals2000a-hermite-tai-v1` |
 
 `tools/data/import_c04.py` 从已有官方文件截取日期窗口，在所有校验通过后创建新快照目录，拒绝覆盖已有目录。加载器会用时间 Provider 校验选中节点，因此实际范围还受闰秒快照限制。`EopDataError` 表示加载/格式问题；`EopCoverageError` 表示查询越界，二者在 Python 中均继承 `ValueError`。
 
-插值自变量是连续 TAI 秒。先在每个节点把 DUT1 换成 UT1−TAI，再进行三次 Hermite 插值。节点 UT1−TAI 斜率取 `−LOD/86400`，xp/yp 斜率来自 C04 的角秒/日字段；dX/dY 使用相邻节点割线估计共享斜率，端点使用单侧割线。实际闰秒日节点间距为 86401 秒。接口 `at(epoch)` 同时返回 `EarthOrientationSample` 和对 TAI 秒求导的 `EarthOrientationRates`。
+两种格式的插值自变量都是连续 TAI 秒。下述变化率规则适用于 C04；finals2000A 的五个分量均使用相邻割线估计节点斜率，预测来源还包含导数所依赖的相邻样本。先在每个节点把 DUT1 换成 UT1−TAI，再进行三次 Hermite 插值。节点 UT1−TAI 斜率取 `−LOD/86400`，xp/yp 斜率来自 C04 的角秒/日字段；dX/dY 使用相邻节点割线估计共享斜率，端点使用单侧割线。实际闰秒日节点间距为 86401 秒。接口 `at(epoch)` 同时返回 `EarthOrientationSample` 和对 TAI 秒求导的 `EarthOrientationRates`。
 
 覆盖范围是首节点至末节点的闭区间，末日只覆盖 **00:00:00 这一节点**。`EopDataInfo` 记录范围、散列、插值版本和所用时间快照。采样 `source_id` 还包含范围与 `subdaily-tides=none`：本实现没有增加日内海潮/天体潮汐 EOP 改正。范围参与来源标识，因为改变端点会改变 dX/dY 的边界斜率。
 
@@ -68,7 +68,7 @@ GCRF/ITRF 表示地心 GCRS/ITRS 的轴向关系，没有实现特定 ITRF 实�
 
 令 `R=P·Z·C`，则 `R_dot=P_dot·Z·C+P·Z_dot·C+P·Z·C_dot`。自转角导数解析计算，包含 UT1−TAI 的斜率。P/C 导数用 1 秒步长的五点中心差分；EOP 在请求点按已提供斜率做局部线性展开，TT 同时变化。差分不在快照范围外查询 EOP，所以两端节点可使用完整状态接口。导数模型 ID 为 `analytic-era-plus-polar-cip-fd4-1s-local-tangent`。
 
-已在半径 ≤42,164 km、速度 ≤8 km/s 的验收样例中比较完整变换位置的时间差分，并用 Orekit 独立天文级数校验。数值结果与限制见[验收记录](../validation/p0_eop_state.md)；不把这组数值容限当成真实地球定向或轨道的绝对精度承诺。
+已在半径 ≤42,164 km、速度 ≤8 km/s 的验收样例中比较完整变换位置的时间差分，并用 Orekit 独立天文级数校验。输入范围、数值容限与比较方法见[验证协议](../validation/p0_eop_state_protocol.md)；不把这组数值容限当成真实地球定向或轨道的绝对精度承诺。
 
 ## 装配与可选构建
 

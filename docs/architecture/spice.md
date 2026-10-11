@@ -6,7 +6,7 @@ Runtime 的 `ephemeris_available()` 查询构建能力，`load_spice_snapshot(ma
 
 `to_tdb(Epoch)` / `from_tdb(TdbTime)` 调用 CSPICE N0067 `unitim`。Epoch 仍为以 **2000-01-01 12:00:00 TAI** 为零点的 int64 纳秒；`TdbTime.seconds_past_j2000` 是以 **2000-01-01 12:00:00 TDB** 为零点的双精度秒。浮点查询时间无法保留 Epoch 的所有纳秒，返回状态仍保留调用者的原始 Epoch。
 
-样例窗口内 TAI/TDB 往返要求 ≤1 µs，实测结果见[验证记录](../validation/p0_spice.md)。远离零点时浮点量化增大，不承诺全 int64 范围相同精度。CSPICE 简化的 TDB−TT 模型也不是纳秒精度模型；本项目另与 ERFA 地心模型比较，在选定日期要求差异 ≤50 µs。这个模型容限与浮点往返容限含义不同。
+样例窗口内 TAI/TDB 往返要求 ≤1 µs，输入范围与比较方法见[验证协议](../validation/p0_spice_protocol.md)。远离零点时浮点量化增大，不承诺全 int64 范围相同精度。CSPICE 简化的 TDB−TT 模型也不是纳秒精度模型；本项目另与 ERFA 地心模型比较，在选定日期要求差异 ≤50 µs。这个模型容限与浮点往返容限含义不同。
 
 LSK 只用于上述均匀时间转换所需常数。UTC↔TAI 继续使用独立版本的 IERS 时间 Provider，不用 LSK 的闰秒表替代它，也不调用 SPICE UTC 字符串解析。
 

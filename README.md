@@ -2,9 +2,9 @@
 
 航天任务分析与仿真平台，提供桌面轨道工作台、C++ SDK 和独立 Python 包，共用一套计算与场景接口。
 
-当前版本为 **0.1.0 开发预览**，正在推进 P1 轨道工作台。P0 仍有验收项待完成，首个产品版本以 P2 轨道与 Access 分析为边界。
+当前版本为 **0.1.0 开发预览**，已提供轨道工作台、数据管理和基础报告，后续将扩展轨道模型与 Access 分析。
 
-[构建与测试](docs/development/build.md) · [工作台使用与设计](docs/architecture/scenario_workbench.md) · [文档导航](docs/README.md) · [验证记录](docs/validation/README.md)
+[构建与测试](docs/development/build.md) · [工作台使用与设计](docs/architecture/scenario_workbench.md) · [文档导航](docs/README.md) · [验证方法](docs/validation/README.md)
 
 ## 已实现
 
@@ -60,11 +60,11 @@ Windows/MSVC 示例程序为 `out/build/headless/examples/cpp/Release/orbitforge
 
 `desktop` 预设是基础 Qt 状态表窗口；完整场景工作台使用 `desktop-graphics`。便携包、wheel 与构建缓存位于本地 `out/`，不随源码克隆分发。
 
-## 验证状态
+## 测试与验证
 
-核心与集成测试使用 GoogleTest / CTest，Python 接口使用 unittest。时间和参考系通过 Orekit 交叉校验，星历通过 jplephem 读取原始 DE440s 对照；固定输入与复现脚本随仓库保存。
+核心与集成测试使用 GoogleTest / CTest，Python 接口使用 unittest。时间和参考系提供 Orekit 交叉校验，星历使用 jplephem 读取原始 DE440s 对照；固定输入与复现脚本随仓库保存。
 
-[最近一次完整桌面验证](docs/validation/satellite_style_2026_10_11.md)：178 项 C++ 测试通过，1 项可选联网测试跳过，67 项 Python 测试通过；真实 Vulkan 图形与便携包交互检查通过。验证范围及已知限制以各项[验证记录](docs/validation/README.md)为准，历史记录不代表后续提交自动通过同一检查。
+数值容限、图形检查和性能测量范围见[验证方法](docs/validation/README.md)。按[构建说明](docs/development/build.md)运行当前版本的检查；每次执行的日志、截图和报告保存在本地 `out/validation/`。
 
 ## 目录
 
@@ -77,7 +77,7 @@ Windows/MSVC 示例程序为 `out/build/headless/examples/cpp/Release/orbitforge
 | `data/` | 必要的离线样例、资源、数据清单与来源说明 |
 | `tests/`、`benchmarks/` | 集成测试、SDK 消费端与计算 / 图形基准 |
 | `cmake/`、`tools/` | 构建配置、vcpkg overlay、导入、验证与打包工具 |
-| `docs/` | 当前设计、开发说明、验证记录及早期方案 |
+| `docs/` | 当前设计、开发说明与验证方法 |
 | `out/`、`local/` | Git 忽略的生成产物与本机数据 |
 
 第三方代码、字体、影像及数据的许可证或来源说明保存在对应资源目录。开发机配置使用 `CMakeUserPresets.json`；提交范围与复现要求见[构建说明](docs/development/build.md)。
