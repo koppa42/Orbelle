@@ -2,6 +2,7 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <limits>
+#include <numbers>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/report.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
@@ -204,7 +205,7 @@ TEST(Reports, SavedDefinitionsRoundTripAndMissingBindingsDoNotPreventProjectLoad
     d.time_scale = application::ReportTimeScale::tt;
     p.reports.push_back(d);
     const auto bytes = application::encode_project(p);
-    EXPECT_EQ(bytes[8], 6);
+    EXPECT_EQ(bytes[8], 7);
     const auto restored = application::decode_project(bytes);
     ASSERT_EQ(restored.reports.size(), 1U);
     EXPECT_EQ(application::encode_project(restored), bytes);
@@ -227,6 +228,139 @@ TEST(Reports, ProvenanceIgnoresPlaybackAndConfigurationButDetectsNumericalChange
     c.project.ground_stations[0].location.height_m = 100;
     EXPECT_EQ(r.input_sha256, hash);
     EXPECT_DOUBLE_EQ(std::get<double>(r.table.rows()[0][4]), 6378137);
+}
+TEST(Reports, DerivedTemplatesUsePhysicalFramesAndPreserveTwoBodyInvariants) {
+    if (!runtime::two_body_available())
+        GTEST_SKIP();
+    auto c = stations(7200'000'000'000);
+    application::ProjectSatellite s;
+    s.orbit.first = c.project.first;
+    s.orbit.last = c.project.last;
+    const auto mu = s.orbit.mu();
+    const core::KeplerianElements input{c.project.first, 8e6, .15, .6, .7, .4, 0};
+    s.orbit.initial = runtime::to_cartesian(input, core::GravitationalParameter{mu});
+    c.project.satellites.push_back(s);
+    auto d = definition(application::ReportKind::classical_elements);
+    d.step_nanoseconds = 137'000'000'000;
+    // Empty selection includes satellites only; an ITRF preference cannot rotate elements.
+    const auto elements = runtime::generate_report(c, d);
+    EXPECT_EQ(elements.table.rows().size(), 54U);
+    for (const auto &row : elements.table.rows()) {
+        EXPECT_EQ(std::get<std::string>(row[0]), s.orbit.object_id);
+        EXPECT_EQ(std::get<std::string>(row[3]), "GCRF");
+        EXPECT_NEAR(std::get<double>(row[4]), input.semi_major_axis_m, 1e-5);
+        EXPECT_NEAR(std::get<double>(row[5]), input.eccentricity, 1e-12);
+        EXPECT_NEAR(std::get<double>(row[6]), input.inclination_rad, 1e-12);
+        EXPECT_NEAR(std::get<double>(row[7]), input.raan_rad, 1e-12);
+        EXPECT_NEAR(std::get<double>(row[8]), input.argument_of_periapsis_rad, 1e-12);
+    }
+    EXPECT_EQ(elements.column_unit(4), "km");
+    EXPECT_NEAR(*elements.numeric_value(0, 4), 8000, 1e-8);
+    EXPECT_EQ(elements.column_unit(6), "deg");
+    EXPECT_NEAR(*elements.numeric_value(0, 6), .6 * 180 / std::numbers::pi, 1e-11);
+    EXPECT_FALSE(elements.numeric_value(0, 2));
+    d.kind = application::ReportKind::orbital_motion;
+    const auto motion = runtime::generate_report(c, d);
+    for (const auto &row : motion.table.rows()) {
+        const auto r = std::get<double>(row[4]), v = std::get<double>(row[5]);
+        const auto radial = std::get<double>(row[6]), transverse = std::get<double>(row[7]);
+        EXPECT_NEAR(v * v / 2 - mu / r, -mu / (2 * input.semi_major_axis_m), 1e-6);
+        EXPECT_NEAR(std::hypot(radial, transverse), v, 1e-8);
+        EXPECT_NEAR(
+            r * transverse,
+            std::sqrt(mu * input.semi_major_axis_m * (1 - input.eccentricity * input.eccentricity)),
+            1e-3);
+        EXPECT_NEAR(std::get<double>(row[8]), std::atan2(radial, transverse), 1e-14);
+    }
+    EXPECT_NEAR(std::get<double>(motion.table.rows()[0][4]), 6.8e6, 1e-6);
+    EXPECT_NEAR(std::get<double>(motion.table.rows()[0][6]), 0, 1e-9);
+    EXPECT_EQ(std::get<core::Epoch>(motion.table.rows().back()[2]), c.project.last);
+    for (auto kind :
+         {application::ReportKind::classical_elements, application::ReportKind::orbital_motion}) {
+        d.kind = kind;
+        d.object_ids = {"station"};
+        EXPECT_THROW((void)runtime::estimate_report_rows(c.project, d), std::invalid_argument);
+    }
+    // The shared element conversion also accepts a non-singular hyperbolic orbit.
+    c.project.satellites[0].orbit.initial = runtime::to_cartesian(
+        {c.project.first, -2e7, 1.5, .4, .3, .2, 0}, core::GravitationalParameter{mu});
+    d.kind = application::ReportKind::classical_elements;
+    d.object_ids.clear();
+    const auto hyperbolic = runtime::generate_report(c, d);
+    EXPECT_NEAR(std::get<double>(hyperbolic.table.rows().back()[4]), -2e7, .001);
+    EXPECT_NEAR(std::get<double>(hyperbolic.table.rows().back()[5]), 1.5, 1e-11);
+}
+TEST(Reports, GeodeticCoordinatesMatchPublishedWgs84ReferenceAndPoleGeometry) {
+    if (!runtime::time_frames_available())
+        GTEST_SKIP();
+    core::CartesianState reference{core::Epoch{0},
+                                   core::OriginId::earth,
+                                   core::FrameId::itrf,
+                                   {-5599000.5577049947, 233011.67223479203, -3040909.4706983363},
+                                   {0, 0, 0}};
+    // ERFA's published t_gd2gc WGS84 vector; invert independently specified coordinates.
+    const auto geo = runtime::itrf_to_wgs84(reference);
+    EXPECT_NEAR(geo.longitude_rad, 3.1, 1e-14);
+    EXPECT_NEAR(geo.latitude_rad, -.5, 1e-14);
+    EXPECT_NEAR(geo.height_m, 2500, 1e-7);
+    reference.position_m = {0, 0, 6356752.314245179 + 400000};
+    const auto pole = runtime::itrf_to_wgs84(reference);
+    EXPECT_NEAR(pole.latitude_rad, std::numbers::pi / 2, 1e-14);
+    EXPECT_NEAR(pole.height_m, 400000, 1e-7);
+    reference.frame = core::FrameId::gcrf;
+    EXPECT_THROW((void)runtime::itrf_to_wgs84(reference), std::invalid_argument);
+    reference.frame = core::FrameId::itrf;
+    reference.position_m = {0, 0, 0};
+    EXPECT_THROW((void)runtime::itrf_to_wgs84(reference), std::invalid_argument);
+    auto c = stations();
+    c.project.ground_stations[0].location = {-std::numbers::pi, .6, -400};
+    auto d = definition(application::ReportKind::geodetic_position);
+    d.frame = core::FrameId::gcrf; // Template fixes ITRF without needing EOP for a fixed station.
+    const auto r = runtime::generate_report(c, d);
+    ASSERT_EQ(r.table.rows().size(), 4U);
+    EXPECT_EQ(std::get<std::string>(r.table.rows()[0][3]), "ITRF");
+    EXPECT_NEAR(*r.numeric_value(0, 4), -180, 1e-12);
+    EXPECT_NEAR(*r.numeric_value(0, 6), -.4, 1e-9);
+    EXPECT_EQ(std::get<core::Epoch>(r.table.rows().back()[2]), c.project.last);
+}
+TEST(Reports, SatelliteGeodeticRequiresConfirmedEopAndNewTemplatesRoundTrip) {
+    if (!runtime::two_body_available() || !runtime::time_frames_available())
+        GTEST_SKIP();
+    auto c = stations(120'000'000'000);
+    c.time = runtime::make_builtin_time_provider();
+    c.frames = runtime::make_frame_provider();
+    c.eop = runtime::load_eop_snapshot(ORBITFORGE_REPORT_EOP);
+    c.project.earth_orientation = c.eop->data_info();
+    const core::CartesianState fixed{c.project.first,
+                                     core::OriginId::earth,
+                                     core::FrameId::itrf,
+                                     {6378137 + 400000.0, 0, 0},
+                                     {0, 7200, 0}};
+    application::ProjectSatellite s;
+    s.orbit.first = c.project.first;
+    s.orbit.last = c.project.last;
+    s.orbit.initial =
+        c.frames->gcrf_to_itrf_state(c.project.first, c.eop->at(c.project.first)).inverse(fixed);
+    c.project.satellites.push_back(s);
+    auto d = definition(application::ReportKind::geodetic_position);
+    d.object_ids = {s.orbit.object_id};
+    d.follow_scenario = false;
+    d.first = d.last = c.project.first;
+    const auto r = runtime::generate_report(c, d);
+    EXPECT_NEAR(std::get<double>(r.table.rows()[0][4]), 0, 1e-12);
+    EXPECT_NEAR(std::get<double>(r.table.rows()[0][5]), 0, 1e-12);
+    EXPECT_NEAR(std::get<double>(r.table.rows()[0][6]), 400000, 1e-6);
+    c.eop.reset();
+    EXPECT_THROW((void)runtime::generate_report(c, d), std::invalid_argument);
+    for (auto kind : application::report_kinds) {
+        d.kind = kind;
+        d.id = "template-" + std::to_string(static_cast<int>(kind));
+        c.project.reports.push_back(d);
+    }
+    const auto encoded = application::encode_project(c.project);
+    const auto restored = application::decode_project(encoded);
+    ASSERT_EQ(restored.reports.size(), application::report_kinds.size());
+    EXPECT_EQ(application::encode_project(restored), encoded);
 }
 TEST(Reports, TablesRejectNonFiniteDataAndMismatchedColumnCounts) {
     EXPECT_THROW(

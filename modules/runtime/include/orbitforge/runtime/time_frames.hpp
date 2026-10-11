@@ -2,10 +2,13 @@
 #include <filesystem>
 #include <memory>
 #include <orbitforge/core/frames/frame_provider.hpp>
+#include <orbitforge/core/frames/geodetic.hpp>
 #include <orbitforge/core/time/time_provider.hpp>
 
 namespace orbitforge::runtime {
 [[nodiscard]] bool time_frames_available() noexcept;
+// ERFA's WGS84 geocentric-to-geodetic conversion. Requires Earth-centred ITRF.
+[[nodiscard]] core::GeodeticPosition itrf_to_wgs84(core::CartesianState state);
 // These factories throw std::runtime_error when ORBITFORGE_WITH_ERFA is disabled.
 [[nodiscard]] std::unique_ptr<core::ITimeProvider> make_builtin_time_provider();
 [[nodiscard]] std::unique_ptr<core::ITimeProvider>

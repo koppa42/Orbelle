@@ -6356,9 +6356,14 @@ class Workbench final : public QMainWindow {
             report_dialog_->findChild<QComboBox *>("reportLibrary")->setCurrentIndex(2);
             report_dialog_->findChild<QComboBox *>("reportFrame")->setCurrentIndex(1);
             report_dialog_->findChild<QDoubleSpinBox *>("reportStep")->setValue(600);
-            report_dialog_->findChild<QLineEdit *>("reportName")
-                ->setText(QStringLiteral("轨道位置报告"));
-            report_dialog_->findChild<QPushButton *>("saveReport")->click();
+            QTimer::singleShot(0, [] {
+                auto *naming = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
+                if (!naming)
+                    throw std::runtime_error("Report template naming did not open");
+                naming->setTextValue(QStringLiteral("轨道位置报告"));
+                naming->accept();
+            });
+            report_dialog_->findChild<QAction *>("saveReport")->trigger();
             require(reports_.size() == 1 && project_dirty_,
                     "Report configuration was not attached to the project");
             smoke_final_frames_ = 0;
@@ -6423,7 +6428,8 @@ class Workbench final : public QMainWindow {
             require(last_project_outcome_ == "opened" && reports_.size() == 1,
                     "Project reopen lost report configurations");
             report_action_->trigger();
-            report_dialog_->findChild<QComboBox *>("reportLibrary")->setCurrentIndex(4);
+            report_dialog_->findChild<QComboBox *>("reportLibrary")
+                ->setCurrentIndex(static_cast<int>(application::report_kinds.size()));
             report_dialog_->findChild<QPushButton *>("generateReport")->click();
             ++orbit_smoke_stage_;
             break;
@@ -6489,7 +6495,14 @@ class Workbench final : public QMainWindow {
                         item->text(0),
                     "Context report did not bind the right-clicked object");
             report_dialog_->findChild<QComboBox *>("reportLibrary")->setCurrentIndex(1);
-            report_dialog_->findChild<QPushButton *>("saveReport")->click();
+            QTimer::singleShot(0, [] {
+                auto *naming = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
+                if (!naming)
+                    throw std::runtime_error("Object template naming did not open");
+                naming->setTextValue(QStringLiteral("对象报告模板"));
+                naming->accept();
+            });
+            report_dialog_->findChild<QAction *>("saveReport")->trigger();
             require(reports_.back().object_ids ==
                         std::vector<std::string>{satellites_.at(1).orbit->input.object_id},
                     "Changing report type widened the object scope");
@@ -6507,6 +6520,32 @@ class Workbench final : public QMainWindow {
                     "Object report included an unselected object");
             save_workbench_image("object-report-results.png");
             record("object-report-context-scope-survives-template-change");
+            auto *library = report_dialog_->findChild<QComboBox *>("reportLibrary");
+            library->setCurrentIndex(
+                library->findData(static_cast<int>(application::ReportKind::classical_elements)));
+            report_dialog_->findChild<QPushButton *>("generateReport")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 131: {
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            auto *views = report_dialog_->findChild<QTabBar *>("reportViews");
+            require(views->isTabEnabled(1), "Classical elements did not expose a graph");
+            views->setCurrentIndex(1);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 132: {
+            auto *plot = report_dialog_->findChild<QWidget *>("reportPlot");
+            require(plot && plot->isVisible() && plot->width() > 200 && plot->height() > 150,
+                    "Report graph is not usable inside the workbench");
+            auto *fields = report_dialog_->findChild<QComboBox *>("reportPlotField");
+            require(fields->count() == 6 &&
+                        fields->currentData(Qt::UserRole + 1).toString() == "elements.nu",
+                    "Classical graph fields or default angle are incorrect");
+            save_workbench_image("report-classical-curves.png");
+            record("report-classical-elements-and-curves");
             workspace_->close_page(report_dialog_);
             workspace_->select_view(0);
             fit_views();
@@ -6514,7 +6553,7 @@ class Workbench final : public QMainWindow {
             ++orbit_smoke_stage_;
             break;
         }
-        case 131:
+        case 133:
             if (++smoke_final_frames_ >= 4)
                 ++orbit_smoke_stage_;
             break;
@@ -6787,7 +6826,7 @@ class Workbench final : public QMainWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 132;
+    static constexpr int orbit_smoke_complete = 134;
     int smoke_final_frames_ = 0;
     std::vector<std::uint8_t> smoke_project_bytes_;
     application::DataLock smoke_data_lock_;

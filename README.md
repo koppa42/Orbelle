@@ -13,11 +13,11 @@
 - 一阶 J2 长期项解析传播：独立的平均根数类型，CSPICE 求解椭圆；支持长期项设置，速度包含进动导数。卫星属性支持二体/J2 切换及 GCRF/ITRF 初态输入，μ 统一读取中心天体。
 - 经典瞬时根数与 Cartesian 转换：CSPICE `conics_c` / `oscltx_c`；输入 a、e、i、Ω、ω、ν，公开 API 使用米和弧度，桌面使用 km 和度。
 - Scenario 场景：先建立统一分析时段，再插入对象；不可变场景版本保存多个 Session，拒绝重复 ID 和过期修订。
-- [地面站](docs/architecture/ground_stations.md)：按 WGS84 经纬度与椭球高插入、编辑，二维/三维显示与选择、复制/删除，项目保存及 Python/C++ 计算接口；当前项目 v6 兼容读取 v1–v5。
+- [地面站](docs/architecture/ground_stations.md)：按 WGS84 经纬度与椭球高插入、编辑，二维/三维显示与选择、复制/删除，项目保存及 Python/C++ 计算接口；当前项目 v7 兼容读取 v1–v6。
 - 场景属性可修改名称和分析时段：保留卫星初始条件与显示设置，统一重建轨迹，当前时刻限制在新范围内；数据变化须确认，覆盖不足、取消或失败保留原场景。C++ / Python 提供相同的设置更新 API。
 - 对象重命名、复制和删除：显示名称与稳定 ID 分离，存续计算修订保留；EOP 快照可从桌面导入、校验、持久保存，打开或重算时确认数据变化，见[对象与数据管理](docs/architecture/object_data_management.md)。
 - `.orbitforge` 项目文件：版本化分段容器、CRC 校验和原子保存；保存二体/J2 输入、对象显示设置与数据版本引用，支持桌面/Python/C++ 互通、保存/另存为/打开及未保存提示。外部模型和 EOP 快照仍为独立依赖，详见[项目文件格式](docs/architecture/project_files.md)。
-- [基础报告](docs/architecture/reports.md)：通过“分析 → 报告”生成场景摘要、对象摘要、GCRF/ITRF 位置与速度、地面站坐标；支持对象绑定、独立时间采样、表格、CSV、数据变更确认和项目 v6 配置保存。桌面与 Python 共用 Runtime。
+- [报告与曲线](docs/architecture/reports.md)：提供摘要、位置速度、地面站坐标、轨道根数、经纬高与轨道速率共七种报告；支持多对象曲线、缩放和时刻定位、CSV/PNG 导出、对象绑定、数据变更确认和项目 v7 模板保存。桌面与 Python 共用 Runtime。
 - Scenario 数据锁：保存 EOP 和时间数据的内容 SHA-256、解释配置及依赖清单总哈希；旧项目可升级，已有场景的数据不会随目录更新自动改变，详见[数据引用契约](docs/architecture/scenario_data_lock.md)。
 - 统一数据中心：左侧“地球定向参数”下分 finals2000A、C04 两个子项。选中父级可在右侧拖动调整计算优先级，选中子级查看获取时间、覆盖范围及最近检查结果。默认 C04 优先，近期及预测时段回退 finals2000A，实际覆盖优先于外推。三种数据均支持自动获取完整文件，支持手动更新、检查频率、下载进度和失败重试。详情分为概览、更新与计算、文件信息，UTC 更新同步重建 EOP 时间依赖。场景打开或计算时检查数据和策略变化并请求确认，哈希用于溯源，详见[数据中心](docs/architecture/data_center.md)。
 - CMake 安装/导出的 C++ SDK、pybind11/scikit-build-core wheel 构建入口。
@@ -83,6 +83,7 @@ C++ SDK 由模块安装生成。Python 构建入口 `pyproject.toml` 放在仓�
 - [基础报告、STK 对照与后续阶段](docs/architecture/reports.md)
 - [报告计算、桌面与便携包验证](docs/validation/reports_2026_10_11.md)
 - [报告单对象范围与左右布局验证](docs/validation/report_ui_2026_10_11.md)
+- [报告曲线、模板交互与界面打磨验证](docs/validation/report_charts_2026_10_11.md)
 - [二体与场景工作台验证记录](docs/validation/p1_two_body_workbench.md)
 - [时间轴交互与便携包验证](docs/validation/timeline_2026_10_09.md)
 - [工作区、视图与按需缓存验证](docs/validation/workspace_views_2026_10_10.md)

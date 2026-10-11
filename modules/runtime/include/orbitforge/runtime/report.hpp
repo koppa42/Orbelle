@@ -2,6 +2,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <orbitforge/application/project.hpp>
 #include <orbitforge/application/scenario.hpp>
 #include <orbitforge/core/frames/frame_provider.hpp>
@@ -21,10 +22,13 @@ struct ReportResult {
     application::ReportDefinition definition;
     results::Table table;
     std::string input_sha256, data_sha256, time_sha256;
-    std::string algorithm = "builtin-reports-v1";
+    std::string algorithm = "builtin-reports-v2";
     core::Epoch first{0}, last{0};
     std::shared_ptr<const core::ITimeProvider> time;
     [[nodiscard]] std::string column_title(std::size_t column) const;
+    [[nodiscard]] std::string column_unit(std::size_t column) const;
+    // Display-unit numeric value shared by tables, CSV and plots; never parses formatted text.
+    [[nodiscard]] std::optional<double> numeric_value(std::size_t row, std::size_t column) const;
     [[nodiscard]] std::string cell_text(std::size_t row, std::size_t column) const;
 };
 class ReportCancelled : public std::runtime_error {

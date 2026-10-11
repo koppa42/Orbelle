@@ -13,6 +13,18 @@
 #include <vector>
 
 namespace orbitforge::providers::erfa {
+core::GeodeticPosition itrf_to_wgs84(core::CartesianState state) {
+    auto &p = state.position_m;
+    if (state.origin != core::OriginId::earth || state.frame != core::FrameId::itrf ||
+        !std::all_of(p.begin(), p.end(), [](double v) { return std::isfinite(v); }) ||
+        std::hypot(p[0], p[1], p[2]) < 1)
+        throw std::invalid_argument(
+            "WGS84 conversion requires a finite Earth-centred ITRF position away from the origin");
+    core::GeodeticPosition result{};
+    if (eraGc2gd(1, p.data(), &result.longitude_rad, &result.latitude_rad, &result.height_m) != 0)
+        throw std::runtime_error("ERFA WGS84 conversion failed");
+    return result;
+}
 namespace {
 constexpr std::int64_t ns_per_second = 1'000'000'000;
 constexpr std::int64_t seconds_per_day = 86'400;

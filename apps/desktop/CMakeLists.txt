@@ -19,7 +19,7 @@ if(ORBITFORGE_WITH_VSG)
     find_package(rocky 1.1.0 EXACT CONFIG REQUIRED)
     find_package(vsgXchange 1.1.13 EXACT CONFIG REQUIRED)
     target_sources(orbitforge_desktop PRIVATE src/viewer/graphics_workbench.cpp
-        src/viewer/report_dialog.cpp
+        src/viewer/report_dialog.cpp src/viewer/report_plot.cpp
         src/viewer/project_scene.cpp src/viewer/eop_catalog.cpp src/viewer/data_center_dialog.cpp
         src/viewer/orbit_scene.cpp src/viewer/orbit_editor.cpp src/viewer/workbench_style.cpp
         src/viewer/satellite_model.cpp src/viewer/mission_timeline.cpp src/viewer/scenario_dialog.cpp
@@ -87,7 +87,9 @@ if(ORBITFORGE_WITH_VSG)
     endif()
     if(BUILD_TESTING AND ORBITFORGE_WITH_ERFA)
         add_executable(orbitforge_report_ui_tests tests/report_dialog_test.cpp
-            src/viewer/report_dialog.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp src/viewer/workspace.cpp)
+            src/viewer/report_dialog.cpp src/viewer/report_plot.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp src/viewer/workspace.cpp)
+        qt_add_resources(orbitforge_report_ui_tests "report_icons" PREFIX "/orbitforge"
+            BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/icons/chevron-down.png)
         target_link_libraries(orbitforge_report_ui_tests PRIVATE OrbitForge::Runtime Qt6::Widgets GTest::gtest_main)
         orbitforge_warnings(orbitforge_report_ui_tests)
         orbitforge_copy_runtime_dlls(orbitforge_report_ui_tests)

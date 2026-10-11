@@ -11,7 +11,10 @@ void bind_reports(py::module_ &module) {
         .value("SCENARIO_SUMMARY", application::ReportKind::scenario_summary)
         .value("OBJECT_SUMMARY", application::ReportKind::object_summary)
         .value("CARTESIAN_STATE", application::ReportKind::cartesian_state)
-        .value("GROUND_STATIONS", application::ReportKind::ground_stations);
+        .value("GROUND_STATIONS", application::ReportKind::ground_stations)
+        .value("CLASSICAL_ELEMENTS", application::ReportKind::classical_elements)
+        .value("GEODETIC_POSITION", application::ReportKind::geodetic_position)
+        .value("ORBITAL_MOTION", application::ReportKind::orbital_motion);
     py::enum_<application::ReportUnits>(module, "ReportUnits")
         .value("SI", application::ReportUnits::si)
         .value("ENGINEERING", application::ReportUnits::engineering);
@@ -53,6 +56,9 @@ void bind_reports(py::module_ &module) {
         .def_readonly("first", &runtime::ReportResult::first)
         .def_readonly("last", &runtime::ReportResult::last)
         .def("column_title", &runtime::ReportResult::column_title, py::arg("column"))
+        .def("column_unit", &runtime::ReportResult::column_unit, py::arg("column"))
+        .def("numeric_value", &runtime::ReportResult::numeric_value, py::arg("row"),
+             py::arg("column"))
         .def("cell_text", &runtime::ReportResult::cell_text, py::arg("row"), py::arg("column"))
         .def(
             "export_csv",

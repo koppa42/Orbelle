@@ -5,7 +5,7 @@
 namespace orbitforge::application {
 void validate_report_definition(const ReportDefinition &d) {
     if (d.id.empty() || d.name.empty() || d.id.size() > 16384 || d.name.size() > 16384 ||
-        d.kind < ReportKind::scenario_summary || d.kind > ReportKind::ground_stations ||
+        d.kind < ReportKind::scenario_summary || d.kind > ReportKind::orbital_motion ||
         d.units < ReportUnits::si || d.units > ReportUnits::engineering ||
         d.time_scale < ReportTimeScale::utc || d.time_scale > ReportTimeScale::tt ||
         (d.frame != core::FrameId::gcrf && d.frame != core::FrameId::itrf) ||

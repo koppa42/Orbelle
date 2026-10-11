@@ -3,9 +3,11 @@
 #include <filesystem>
 #include <memory>
 #include <orbitforge/core/frames/frame_provider.hpp>
+#include <orbitforge/core/frames/geodetic.hpp>
 #include <orbitforge/core/time/time_provider.hpp>
 
 namespace orbitforge::providers::erfa {
+[[nodiscard]] core::GeodeticPosition itrf_to_wgs84(core::CartesianState state);
 [[nodiscard]] std::unique_ptr<core::ITimeProvider> make_builtin_time_provider();
 // IERS Leap_Second.dat; each instance owns an immutable, validated table.
 [[nodiscard]] std::unique_ptr<core::ITimeProvider>

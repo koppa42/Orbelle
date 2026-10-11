@@ -1,5 +1,6 @@
 import csv
 import io
+import math
 import struct
 import tempfile
 import unittest
@@ -92,7 +93,7 @@ class ReportsTest(unittest.TestCase):
         self.assertEqual(result.time_sha256, eop.data_info.time_data.sha256)
 
     @staticmethod
-    def rewrite(raw, mutate, version=6):
+    def rewrite(raw, mutate, version=7):
         sections, offset = [], 24
         while offset < len(raw):
             tag, schema, size, _ = struct.unpack_from('<IIQI', raw, offset)
@@ -105,7 +106,7 @@ class ReportsTest(unittest.TestCase):
         payload = b''.join(sections)
         return raw[:8] + struct.pack('<IQI', version, len(payload), zlib.crc32(payload)) + payload
 
-    def test_v6_roundtrip_v5_upgrade_and_corruption_with_repaired_crcs(self):
+    def test_v7_roundtrip_v5_upgrade_and_corruption_with_repaired_crcs(self):
         project, definition = self.inputs()
         definition.object_ids = ['station']
         definition.follow_scenario = False
@@ -123,6 +124,8 @@ class ReportsTest(unittest.TestCase):
             self.assertEqual(restored.reports[0].time_scale, of.ReportTimeScale.TT)
             restored.save(path, overwrite=True)
             self.assertEqual(path.read_bytes(), raw)
+            path.write_bytes(self.rewrite(raw, lambda body: body, version=6))
+            self.assertEqual(of.load_project(path).reports[0].step_nanoseconds, 1)
             for mutation in (lambda b: None, lambda b: struct.pack('<I', 129) + b[4:],
                              lambda b: b + b'\x00', lambda b: b[:-4] + struct.pack('<I', 3)):
                 path.write_bytes(self.rewrite(raw, mutation))
@@ -133,7 +136,7 @@ class ReportsTest(unittest.TestCase):
             self.assertEqual(restored.reports, [])
             self.assertEqual(len(restored.ground_stations), 1)
             restored.save(path, overwrite=True)
-            self.assertEqual(struct.unpack_from('<I', path.read_bytes(), 8)[0], 6)
+            self.assertEqual(struct.unpack_from('<I', path.read_bytes(), 8)[0], 7)
 
     def test_limits_fail_before_sampling(self):
         project, definition = self.inputs()
@@ -143,6 +146,41 @@ class ReportsTest(unittest.TestCase):
         definition.step_nanoseconds = 0
         with self.assertRaises(ValueError):
             of.estimate_report_rows(project, definition)
+
+    def test_derived_templates_units_and_v7_persistence(self):
+        project, definition = self.inputs()
+        orbit = of.OrbitInput()
+        orbit.first, orbit.last = project.first, project.last
+        orbit.initial = of.to_cartesian(of.KeplerianElements(project.first, 8e6, .1, .5, .6, .7, 0), 3.986004418e14)
+        project.add_satellite(orbit)
+        definition.kind = of.ReportKind.CLASSICAL_ELEMENTS
+        result = of.generate_report(project, definition)
+        self.assertEqual(result.table.row_count, 4)
+        self.assertEqual(result.table.rows[0][3], 'GCRF')
+        self.assertAlmostEqual(result.numeric_value(0, 4), 8000, delta=1e-7)
+        self.assertAlmostEqual(result.numeric_value(0, 6), math.degrees(.5), delta=1e-10)
+        self.assertEqual(result.column_unit(6), 'deg')
+        self.assertIsNone(result.numeric_value(0, 2))
+        definition.kind = of.ReportKind.ORBITAL_MOTION
+        result = of.generate_report(project, definition)
+        self.assertAlmostEqual(result.table.rows[0][4], 7.2e6, delta=1e-6)
+        self.assertAlmostEqual(result.numeric_value(0, 6), 0, delta=1e-9)
+        definition.kind = of.ReportKind.GEODETIC_POSITION
+        definition.object_ids = ['station']
+        result = of.generate_report(project, definition)
+        self.assertEqual(result.table.rows[0][3], 'ITRF')
+        self.assertAlmostEqual(result.numeric_value(0, 6), 0, delta=1e-8)
+        project.reports = [definition]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'derived.orbitforge'
+            project.save(path)
+            raw = path.read_bytes()
+            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 7)
+            self.assertEqual(of.load_project(path).reports[0].kind, of.ReportKind.GEODETIC_POSITION)
+            # A v6 container cannot silently accept a newly introduced kind.
+            path.write_bytes(self.rewrite(raw, lambda body: body, version=6))
+            with self.assertRaises(of.ProjectError):
+                of.load_project(path)
 
 
 if __name__ == '__main__':

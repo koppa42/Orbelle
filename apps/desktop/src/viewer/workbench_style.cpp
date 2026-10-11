@@ -558,13 +558,30 @@ QLabel#reportSectionTitle { color: #a8b7d2; font-size: 12px; font-weight: 600; }
 QLabel#reportScopeLabel { color: #e4e9fa; font-weight: 600; }
 QLabel#reportScopeDetail, QLabel#reportInterval, QLabel#reportEstimate { color: #92a3bd; font-size: 11px; }
 QLabel#reportInterval { font-family: "Consolas"; }
-QLabel#reportResultTitle { color: #e4e9fa; font-size: 14px; font-weight: 600; }
+QLabel#reportResultTitle { color: #e4e9fa; font-size: 18px; font-weight: 600; }
 QLabel#reportResultLabel { color: #a4b3cd; font-size: 11px; }
 QLabel#reportEmptyTitle { color: #b1bdd7; font-size: 18px; }
 QLabel#reportStatus { color: #9daec8; background: #171e2c; border-top: 1px solid #30394e; font-size: 11px; }
 QTableView#reportTable { border: 1px solid #30394e; border-radius: 4px; }
 QWidget#reportHeading QPushButton, QWidget#reportSettings QPushButton { background: transparent; }
 QWidget#reportSettings QComboBox, QWidget#reportSettings QLineEdit, QWidget#reportSettings QDoubleSpinBox { min-height: 18px; }
+QLabel#reportTemplateDescription { color: #899ab6; font-size: 11px; }
+QToolButton#reportConfigMenu { color: #a9b5d9; background: transparent; border: none; padding: 2px 12px 2px 6px; font-size: 11px; }
+QToolButton#reportConfigMenu:hover { color: #dddfff; background: #28334a; border-radius: 4px; }
+QPushButton#reportChangeScope { color: #a9b5d9; border: none; padding: 4px 6px; }
+QPushButton#reportChangeScope:hover { color: #dddfff; background: #28334a; }
+QTabBar#reportViews::tab { color: #92a3bd; background: transparent; border: none; border-radius: 5px; padding: 6px 16px; margin: 2px; min-width: 28px; }
+QTabBar#reportViews::tab:selected { color: #e4e5ff; background: #343e60; }
+QTabBar#reportViews::tab:hover { color: #e4e5ff; background: #29344c; }
+QTabBar#reportViews::tab:disabled { color: #53627d; background: transparent; }
+QToolButton#refreshReport { font-size: 20px; padding: 0px; min-width: 30px; min-height: 30px; border: none; background: transparent; }
+QToolButton#reportResultMenu { font-size: 16px; padding: 2px 6px; border: none; background: transparent; }
+QToolButton#reportResultMenu::menu-indicator { image: none; }
+QPushButton#exportReportCsv { background: #26324a; border: 1px solid #3e4c67; color: #cbd8f4; border-radius: 6px; padding: 6px 14px; }
+QPushButton#exportReportCsv:hover { background: #32415d; border-color: #6676a3; }
+QPushButton#exportReportCsv:disabled { color: #586b86; background: transparent; border-color: #2f394d; }
+QComboBox#reportPlotField, QComboBox#reportPlotObject { background: #202a3b; border: 1px solid #2f3a50; border-radius: 6px; padding: 5px 26px 5px 12px; min-height: 18px; }
+QComboBox#reportPlotField:hover, QComboBox#reportPlotObject:hover { border-color: #6575a0; }
 QWidget#dataFooter { background: #171e2c; border-top: 1px solid #2e374b; }
 QFrame#formSection { background: #20283a; border: 1px solid #2e394e; border-radius: 7px; }
 QFrame#choiceCard { background: #20283a; border: 1px solid #354057; border-radius: 8px; }

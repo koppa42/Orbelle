@@ -418,7 +418,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
     locked.text(lock.sha256());
     payload.section(lock_tag, locked);
     file.raw(magic);
-    file.number(6, 4);
+    file.number(7, 4);
     file.number(payload.bytes.size());
     file.number(crc32(payload.bytes), 4);
     file.raw(payload.bytes);
@@ -429,7 +429,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     Reader file{bytes};
     check(std::ranges::equal(file.raw(magic.size()), magic), "Not an OrbitForge project file");
     const auto version = file.number(4);
-    check(version >= 1 && version <= 6, "Unsupported OrbitForge project version");
+    check(version >= 1 && version <= 7, "Unsupported OrbitForge project version");
     const auto length = file.number();
     const auto checksum = file.number(4);
     check(length == file.bytes.size(), "Project length mismatch");
@@ -521,7 +521,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             report.id = reports.text();
             report.name = reports.text();
             const auto kind = reports.number(4);
-            check(kind <= 3, "Unsupported report template");
+            check(kind <= (version >= 7 ? 6U : 3U), "Unsupported report template");
             report.kind = static_cast<ReportKind>(kind);
             const auto bindings = reports.number(4);
             check(bindings <= max_objects, "Report exceeds 10000 object bindings");

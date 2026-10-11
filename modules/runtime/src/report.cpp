@@ -7,6 +7,8 @@
 #include <numbers>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/report.hpp>
+#include <orbitforge/runtime/time_frames.hpp>
+#include <orbitforge/runtime/two_body.hpp>
 #include <picosha2.h>
 #include <random>
 #include <set>
@@ -45,14 +47,15 @@ std::vector<Selection> select(const Project &project, const ReportDefinition &d)
         for (const auto &s : project.satellites)
             if (wanted(s.orbit.object_id))
                 values.push_back({s.orbit.object_id, s.name(), "Satellite", nullptr, &s});
-    for (const auto &s : project.ground_stations)
-        if (wanted(s.object_id))
-            values.push_back({s.object_id, s.name(), "Ground station", &s});
+    if (!report_satellites_only(d.kind))
+        for (const auto &s : project.ground_stations)
+            if (wanted(s.object_id))
+                values.push_back({s.object_id, s.name(), "Ground station", &s});
     check(remaining.empty(), "A report object is missing or incompatible with this template");
     return values;
 }
 std::pair<core::Epoch, core::Epoch> interval(const Project &p, const ReportDefinition &d) {
-    if (d.kind != ReportKind::cartesian_state || d.follow_scenario)
+    if (!report_is_sampled(d.kind) || d.follow_scenario)
         return {p.first, p.last};
     check(d.first.tai_nanoseconds() >= p.first.tai_nanoseconds() &&
               d.last.tai_nanoseconds() <= p.last.tai_nanoseconds(),
@@ -149,7 +152,7 @@ std::size_t estimate_report_rows(const Project &p, const ReportDefinition &d) {
     if (d.kind == ReportKind::scenario_summary)
         return 7;
     check(!selected.empty(), "This report has no compatible objects");
-    if (d.kind != ReportKind::cartesian_state)
+    if (!report_is_sampled(d.kind))
         return selected.size();
     const auto [first, last] = interval(p, d);
     const auto span = ticks_between(first, last),
@@ -182,7 +185,7 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
               "Report time and EOP providers must use the same UTC data");
     }
     if (d.time_scale == ReportTimeScale::utc &&
-        (d.kind == ReportKind::cartesian_state || d.kind == ReportKind::scenario_summary)) {
+        (report_is_sampled(d.kind) || d.kind == ReportKind::scenario_summary)) {
         (void)epoch_text(first, d.time_scale, context.time.get());
         (void)epoch_text(last, d.time_scale, context.time.get());
     }
@@ -235,14 +238,38 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
                                 location.latitude_rad, location.height_m, p[0], p[1], p[2]});
             }
         } else {
-            columns.insert(columns.end(), {{"time.epoch", "Time", "epoch"},
-                                           {"state.frame", "Frame", ""},
-                                           {"state.x", "X", "m"},
-                                           {"state.y", "Y", "m"},
-                                           {"state.z", "Z", "m"},
-                                           {"state.vx", "Vx", "m/s"},
-                                           {"state.vy", "Vy", "m/s"},
-                                           {"state.vz", "Vz", "m/s"}});
+            // Derived templates have a fixed physical reference frame, independent of the
+            // Cartesian template's frame preference saved in the definition.
+            const auto target_frame = d.kind == ReportKind::geodetic_position ? core::FrameId::itrf
+                                      : report_satellites_only(d.kind)        ? core::FrameId::gcrf
+                                                                              : d.frame;
+            columns.insert(columns.end(),
+                           {{"time.epoch", "Time", "epoch"}, {"state.frame", "Frame", ""}});
+            if (d.kind == ReportKind::classical_elements)
+                columns.insert(columns.end(), {{"elements.a", "Semi-major axis", "m"},
+                                               {"elements.e", "Eccentricity", ""},
+                                               {"elements.i", "Inclination", "rad"},
+                                               {"elements.raan", "RAAN", "rad"},
+                                               {"elements.argp", "Argument of periapsis", "rad"},
+                                               {"elements.nu", "True anomaly", "rad"}});
+            else if (d.kind == ReportKind::geodetic_position)
+                columns.insert(columns.end(), {{"geodetic.longitude", "Longitude", "rad"},
+                                               {"geodetic.latitude", "Geodetic latitude", "rad"},
+                                               {"geodetic.height", "Ellipsoid height", "m"}});
+            else if (d.kind == ReportKind::orbital_motion)
+                columns.insert(columns.end(),
+                               {{"motion.radius", "Geocentric distance", "m"},
+                                {"motion.speed", "Speed", "m/s"},
+                                {"motion.radial_speed", "Radial speed", "m/s"},
+                                {"motion.transverse_speed", "Transverse speed", "m/s"},
+                                {"motion.flight_path_angle", "Flight path angle", "rad"}});
+            else
+                columns.insert(columns.end(), {{"state.x", "X", "m"},
+                                               {"state.y", "Y", "m"},
+                                               {"state.z", "Z", "m"},
+                                               {"state.vx", "Vx", "m/s"},
+                                               {"state.vy", "Vy", "m/s"},
+                                               {"state.vz", "Vz", "m/s"}});
             const auto per_object = total / selected.size();
             for (const auto &object : selected) {
                 cancelled(cancel);
@@ -269,19 +296,41 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
                         auto state = batch.states()[i];
                         check(state.epoch == epochs[i] && state.origin == core::OriginId::earth,
                               "Invalid report state epoch or origin");
-                        if (state.frame != d.frame) {
+                        if (state.frame != target_frame) {
                             check(context.eop && context.frames,
                                   "Reference-frame conversion requires confirmed EOP data");
                             const auto transform = context.frames->gcrf_to_itrf_state(
                                 state.epoch, context.eop->at(state.epoch));
-                            state = d.frame == core::FrameId::itrf ? transform.apply(state)
-                                                                   : transform.inverse(state);
+                            state = target_frame == core::FrameId::itrf ? transform.apply(state)
+                                                                        : transform.inverse(state);
                         }
                         const auto &p = state.position_m, &v = state.velocity_mps;
-                        rows.push_back(
-                            {object.id, object.name, state.epoch,
-                             std::string(d.frame == core::FrameId::gcrf ? "GCRF" : "ITRF"), p[0],
-                             p[1], p[2], v[0], v[1], v[2]});
+                        Row row{object.id, object.name, state.epoch,
+                                std::string(target_frame == core::FrameId::gcrf ? "GCRF" : "ITRF")};
+                        if (d.kind == ReportKind::classical_elements) {
+                            const auto el = to_keplerian(
+                                state, core::GravitationalParameter{object.satellite->orbit.mu()});
+                            row.insert(row.end(),
+                                       {el.semi_major_axis_m, el.eccentricity, el.inclination_rad,
+                                        el.raan_rad, el.argument_of_periapsis_rad,
+                                        el.true_anomaly_rad});
+                        } else if (d.kind == ReportKind::geodetic_position) {
+                            const auto geo = itrf_to_wgs84(state);
+                            row.insert(row.end(),
+                                       {geo.longitude_rad, geo.latitude_rad, geo.height_m});
+                        } else if (d.kind == ReportKind::orbital_motion) {
+                            const auto radius = std::hypot(p[0], p[1], p[2]);
+                            check(radius > 0, "Orbital motion is undefined at the Earth centre");
+                            const auto radial = (p[0] * v[0] + p[1] * v[1] + p[2] * v[2]) / radius;
+                            const auto transverse =
+                                std::hypot(p[1] * v[2] - p[2] * v[1], p[2] * v[0] - p[0] * v[2],
+                                           p[0] * v[1] - p[1] * v[0]) /
+                                radius;
+                            row.insert(row.end(), {radius, std::hypot(v[0], v[1], v[2]), radial,
+                                                   transverse, std::atan2(radial, transverse)});
+                        } else
+                            row.insert(row.end(), {p[0], p[1], p[2], v[0], v[1], v[2]});
+                        rows.push_back(std::move(row));
                     }
                 }
             }
@@ -293,7 +342,7 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
             report_input_sha256(context.project),
             context.project.data_lock().sha256(),
             context.time ? context.time->data_info().sha256 : "",
-            "builtin-reports-v1",
+            "builtin-reports-v2",
             first,
             last,
             context.time};
@@ -303,6 +352,26 @@ std::string ReportResult::column_title(std::size_t index) const {
     const auto suffix = unit(definition, column.unit);
     return column.title + (suffix.empty() ? "" : " (" + suffix + ")");
 }
+std::string ReportResult::column_unit(std::size_t column) const {
+    return unit(definition, table.columns().at(column).unit);
+}
+std::optional<double> ReportResult::numeric_value(std::size_t row, std::size_t column) const {
+    const auto &cell = table.rows().at(row).at(column);
+    if (const auto *integer = std::get_if<std::int64_t>(&cell))
+        return static_cast<double>(*integer);
+    const auto *real = std::get_if<double>(&cell);
+    if (!real)
+        return {};
+    auto value = *real;
+    if (definition.units == ReportUnits::engineering) {
+        const auto &dimension = table.columns().at(column).unit;
+        if (dimension == "m" || dimension == "m/s")
+            value /= 1000;
+        if (dimension == "rad")
+            value *= 180 / std::numbers::pi;
+    }
+    return value;
+}
 std::string ReportResult::cell_text(std::size_t row, std::size_t column) const {
     const auto &cell = table.rows().at(row).at(column);
     if (const auto *text = std::get_if<std::string>(&cell))
@@ -311,18 +380,10 @@ std::string ReportResult::cell_text(std::size_t row, std::size_t column) const {
         return std::to_string(*integer);
     if (const auto *epoch = std::get_if<core::Epoch>(&cell))
         return epoch_text(*epoch, definition.time_scale, time.get());
-    if (const auto *real = std::get_if<double>(&cell)) {
-        auto value = *real;
-        if (definition.units == ReportUnits::engineering) {
-            const auto &dimension = table.columns().at(column).unit;
-            if (dimension == "m" || dimension == "m/s")
-                value /= 1000;
-            if (dimension == "rad")
-                value *= 180 / std::numbers::pi;
-        }
+    if (const auto value = numeric_value(row, column)) {
         std::ostringstream out;
         out.imbue(std::locale::classic());
-        out << std::setprecision(17) << value;
+        out << std::setprecision(17) << *value;
         return out.str();
     }
     return {};

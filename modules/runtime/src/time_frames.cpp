@@ -6,6 +6,14 @@
 #endif
 
 namespace orbitforge::runtime {
+core::GeodeticPosition itrf_to_wgs84(core::CartesianState state) {
+#ifdef ORBITFORGE_HAS_ERFA
+    return providers::erfa::itrf_to_wgs84(state);
+#else
+    (void)state;
+    throw std::runtime_error("WGS84 conversion requires ORBITFORGE_WITH_ERFA=ON");
+#endif
+}
 #ifdef ORBITFORGE_HAS_ERFA
 namespace {
 class LimitedEop final : public core::IEarthOrientationProvider {

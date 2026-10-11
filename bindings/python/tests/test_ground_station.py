@@ -102,5 +102,5 @@ class GroundStationTests(unittest.TestCase):
             self.assertEqual(project.ground_stations, [])
             project.add_ground_station(self.make_project().ground_stations[0])
             project.save(path, overwrite=True)
-            self.assertEqual(struct.unpack_from('<I', path.read_bytes(), 8)[0], 6)
+            self.assertEqual(struct.unpack_from('<I', path.read_bytes(), 8)[0], 7)
             self.assertEqual(len(of.load_project(path).ground_stations), 1)
