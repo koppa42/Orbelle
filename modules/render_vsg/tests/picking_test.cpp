@@ -114,8 +114,8 @@ TEST(DisplayTrack, SharesLivePipelineWithoutRetainingItAfterAllLayersClose) {
         render_vsg::TrackLayer first(samples), second(samples);
         const auto a = first.node().cast<vsg::StateGroup>();
         const auto b = second.node().cast<vsg::StateGroup>();
-        ASSERT_EQ(a->stateCommands.size(), 1);
-        ASSERT_EQ(b->stateCommands.size(), 1);
+        ASSERT_EQ(a->stateCommands.size(), 3);
+        ASSERT_EQ(b->stateCommands.size(), 3);
         EXPECT_EQ(a->stateCommands.front(), b->stateCommands.front());
         EXPECT_NE(a->children.front(), b->children.front());
         pipeline = a->stateCommands.front();
@@ -137,8 +137,45 @@ TEST(DisplayMarkers, UnchangedPositionsDoNotScheduleAnotherBufferUpload) {
     snapshot.markers.front().position_m[0] += 100;
     markers.update(snapshot);
     EXPECT_TRUE(data->differentModifiedCount(previous));
+    data->getModifiedCount(previous);
+    const auto colors = draw->arrays.at(1)->data.cast<vsg::vec3Array>();
+    markers.update(snapshot, std::array<std::uint32_t, 1>{0x123456}, false);
+    EXPECT_FALSE(data->differentModifiedCount(previous));
+    EXPECT_NEAR(colors->at(0).r, 0x12 / 255.0, 1e-7);
+    EXPECT_NEAR(colors->at(0).g, 0x34 / 255.0, 1e-7);
+    EXPECT_NEAR(colors->at(0).b, 0x56 / 255.0, 1e-7);
+    markers.update(snapshot, std::array<std::uint32_t, 1>{0x123456}, true);
+    EXPECT_NEAR(colors->at(0).r, std::pow((0x12 / 255.0 + .055) / 1.055, 2.4), 1e-7);
+    EXPECT_THROW(markers.update(snapshot, std::array<std::uint32_t, 1>{0x1000000}),
+                 std::invalid_argument);
     snapshot.markers.clear();
     markers.update(snapshot);
     EXPECT_EQ(markers.size(), 0);
+}
+TEST(DisplayTrack, AppearanceUpdatesOnlyUniformsAndRejectsInvalidStyle) {
+    const std::vector<visualization::RenderSnapshot> samples{
+        {core::Epoch{0}, core::FrameId::gcrf, core::OriginId::earth, {{"A", {7e6, 0, 0}}}},
+        {core::Epoch{10}, core::FrameId::gcrf, core::OriginId::earth, {{"A", {7e6, 1e3, 0}}}}};
+    render_vsg::TrackLayer track(samples), other(samples);
+    const auto group = track.node().cast<vsg::StateGroup>();
+    const auto original_geometry = group->children.front();
+    const auto binding = group->stateCommands[1].cast<vsg::BindDescriptorSet>();
+    const auto uniform = binding->descriptorSet->descriptors.front()
+                             .cast<vsg::DescriptorBuffer>()
+                             ->bufferInfoList.front()
+                             ->data;
+    vsg::ModifiedCount revision;
+    uniform->getModifiedCount(revision);
+    track.set_appearance(0xe9a2ba, 4, 3, 2);
+    EXPECT_TRUE(uniform->differentModifiedCount(revision));
+    uniform->getModifiedCount(revision);
+    track.set_appearance(0xe9a2ba, 4, 3, 2);
+    EXPECT_FALSE(uniform->differentModifiedCount(revision));
+    EXPECT_EQ(group->children.front(), original_geometry);
+    EXPECT_NE(group->stateCommands[1], other.node().cast<vsg::StateGroup>()->stateCommands[1]);
+    EXPECT_THROW(track.set_appearance(0x1000000, 2, 0), std::invalid_argument);
+    EXPECT_THROW(track.set_appearance(0, 0, 0), std::invalid_argument);
+    EXPECT_THROW(track.set_appearance(0, 2, 4), std::invalid_argument);
+    EXPECT_THROW(track.set_appearance(0, 2, 0, 0), std::invalid_argument);
 }
 } // namespace

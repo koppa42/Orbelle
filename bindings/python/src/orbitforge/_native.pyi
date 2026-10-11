@@ -391,6 +391,12 @@ class OrbitInput:
     last: Epoch
     step_seconds: int
 
+class LineStyle:
+    SOLID: LineStyle
+    DASHED: LineStyle
+    DOTTED: LineStyle
+    DASH_DOT: LineStyle
+
 class OrbitDisplay:
     def __init__(self) -> None: ...
     extent: int
@@ -399,6 +405,9 @@ class OrbitDisplay:
     track_2d: bool
     labels_2d: bool
     track_3d: bool
+    line_color: int
+    line_width: float
+    line_style: LineStyle
 
 class ProjectSatellite:
     display_name: str

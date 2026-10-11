@@ -21,7 +21,7 @@ if(ORBITFORGE_WITH_VSG)
     target_sources(orbitforge_desktop PRIVATE src/viewer/graphics_workbench.cpp
         src/viewer/report_dialog.cpp src/viewer/report_plot.cpp
         src/viewer/project_scene.cpp src/viewer/eop_catalog.cpp src/viewer/data_center_dialog.cpp
-        src/viewer/orbit_scene.cpp src/viewer/orbit_editor.cpp src/viewer/workbench_style.cpp
+        src/viewer/orbit_scene.cpp src/viewer/orbit_editor.cpp src/viewer/track_style_editor.cpp src/viewer/workbench_style.cpp
         src/viewer/satellite_model.cpp src/viewer/mission_timeline.cpp src/viewer/scenario_dialog.cpp
         src/viewer/insert_object_dialog.cpp src/viewer/insert_object_dialog.hpp
         src/viewer/ground_station_editor.cpp src/viewer/ground_station_editor.hpp
@@ -72,8 +72,10 @@ if(ORBITFORGE_WITH_VSG)
         gtest_discover_tests(orbitforge_orbit_scene_tests TEST_PREFIX "desktop." PROPERTIES TIMEOUT 60)
         add_executable(orbitforge_quantity_tests tests/quantity_editor_test.cpp
             src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
-            src/viewer/orbit_editor.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp)
+            src/viewer/orbit_editor.cpp src/viewer/track_style_editor.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp)
         set_target_properties(orbitforge_quantity_tests PROPERTIES AUTOMOC ON)
+        qt_add_resources(orbitforge_quantity_tests "quantity_icons" PREFIX "/orbitforge"
+            BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/icons/chevron-down.png)
         target_compile_definitions(orbitforge_quantity_tests PRIVATE
             ORBITFORGE_TEST_EOP="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json")
         target_link_libraries(orbitforge_quantity_tests PRIVATE

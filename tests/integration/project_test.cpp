@@ -87,6 +87,9 @@ application::Project example() {
         satellite.display.extent = 2;
         satellite.display.past_minutes = 12.345;
         satellite.display.labels_2d = false;
+        satellite.display.line_color = 0xe9a2ba;
+        satellite.display.line_style = application::LineStyle::dash_dot;
+        satellite.display.line_width = 3.25;
         satellite.model_kind = 2;
         satellite.model_path = "模型/satellite.glb";
         project.satellites.push_back(satellite);

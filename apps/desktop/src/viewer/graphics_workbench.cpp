@@ -560,6 +560,9 @@ class Workbench final : public QMainWindow {
                         auto &satellite = satellites_.at(*editor_target_);
                         (void)display_interval(*satellite.orbit, settings, snapshot_.epoch);
                         satellite.display = settings;
+                        satellite.item->setIcon(
+                            0, workbench_icon(WorkbenchIcon::satellite,
+                                              QColor::fromRgb(settings.line_color)));
                         mark_project_dirty();
                         update_satellite();
                         statusBar()->showMessage(QStringLiteral("已应用显示设置，将按需更新轨迹"),
@@ -1750,8 +1753,9 @@ class Workbench final : public QMainWindow {
                         !satellite.name().contains(search->text(), Qt::CaseInsensitive));
                 satellite.item->setToolTip(0, QStringLiteral("ID：%1").arg(
                                                   QString::fromStdString(config.orbit.object_id)));
-                satellite.item->setIcon(
-                    0, workbench_icon(WorkbenchIcon::satellite, QColor("#78a4c9")));
+                satellite.item->setIcon(0,
+                                        workbench_icon(WorkbenchIcon::satellite,
+                                                       QColor::fromRgb(config.display.line_color)));
                 satellites.push_back(std::move(satellite));
             }
             for (const auto &config : candidate->project.ground_stations) {
@@ -2592,6 +2596,11 @@ class Workbench final : public QMainWindow {
             snapshot_.epoch, core::FrameId::itrf, core::OriginId::earth, {}};
         visualization::RenderSnapshot points{
             snapshot_.epoch, snapshot_.frame, snapshot_.origin, {}};
+        std::vector<std::uint32_t> point_colors;
+        const auto format = slots_.empty() || !slots_.front()->window->windowAdapter
+                                ? VK_FORMAT_B8G8R8A8_SRGB
+                                : slots_.front()->window->windowAdapter->surfaceFormat().format;
+        const bool srgb = format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB;
         for (std::size_t i = 0; i < satellites_.size(); ++i) {
             const auto &satellite = satellites_[i];
             const auto &marker = snapshot_.markers.at(i);
@@ -2607,6 +2616,10 @@ class Workbench final : public QMainWindow {
                 display_interval(*satellite.orbit, satellite.display, snapshot_.epoch);
             satellite.fixed_track->set_interval(first, last);
             satellite.inertial_track->set_interval(first, last);
+            for (const auto &track : {satellite.fixed_track, satellite.inertial_track})
+                track->set_appearance(satellite.display.line_color, satellite.display.line_width,
+                                      static_cast<unsigned>(satellite.display.line_style),
+                                      devicePixelRatioF(), srgb);
             satellite.tracks->setAllChildren(false);
             if (satellite.display.track_3d)
                 satellite.tracks->setSingleChildOn(display_frame_ == core::FrameId::gcrf ? 0 : 1);
@@ -2616,10 +2629,12 @@ class Workbench final : public QMainWindow {
                 const auto &r = marker.position_m;
                 satellite.model->matrix = vsg::translate(r[0], r[1], r[2]) * earth_rotation *
                                           vsg::scale(satellite.model_diameter_km * 1000);
-            } else
+            } else {
                 points.markers.push_back(marker);
+                point_colors.push_back(satellite.display.line_color);
+            }
         }
-        markers_->update(points);
+        markers_->update(points, point_colors, srgb);
         for (std::size_t i = 0; i < stations_.size(); ++i) {
             const auto &station = stations_[i].config;
             fixed.markers.push_back(
@@ -2838,7 +2853,8 @@ class Workbench final : public QMainWindow {
                 satellite.item = new QTreeWidgetItem(
                     scenario_item_, {QString::fromStdString(satellite.orbit->input.object_id)});
                 satellite.item->setIcon(
-                    0, workbench_icon(WorkbenchIcon::satellite, QColor("#78a4c9")));
+                    0, workbench_icon(WorkbenchIcon::satellite,
+                                      QColor::fromRgb(satellite.display.line_color)));
                 satellite.item->setToolTip(0, QStringLiteral("双击打开对象属性 · 默认显示为点"));
                 satellites_.push_back(std::move(satellite));
                 scenario_item_->setExpanded(true);
@@ -3720,6 +3736,10 @@ class Workbench final : public QMainWindow {
                 ? *precise_epoch_
                 : core::Epoch((benchmarking_ ? 0 : scenario_->first().tai_nanoseconds()) +
                               static_cast<std::int64_t>(std::llround(seconds_ * 1e9)));
+        if (track_pixel_ratio_ != devicePixelRatioF()) {
+            track_pixel_ratio_ = devicePixelRatioF();
+            satellite_state_dirty_ = true;
+        }
         if (benchmarking_ || satellite_state_dirty_ || snapshot_.epoch != epoch) {
             snapshot_ = sample_frame(epoch);
             update_satellite();
@@ -6557,6 +6577,62 @@ class Workbench final : public QMainWindow {
             if (++smoke_final_frames_ >= 4)
                 ++orbit_smoke_stage_;
             break;
+        case 134: {
+            set_selection(0);
+            open_properties();
+            auto *navigation = editor_->findChild<QTreeWidget *>("propertyNavigation");
+            navigation->setCurrentItem(navigation->topLevelItem(0)->child(1));
+            const auto orbit_before = satellites_.front().orbit;
+            const auto geometry_before = satellites_.front().fixed_track->node();
+            const auto other = satellites_.size() > 1 ? satellites_[1].display : DisplaySettings{};
+            auto settings = satellites_.front().display;
+            settings.track_2d = settings.track_3d = true;
+            editor_->set_display(settings);
+            editor_->findChild<QToolButton *>("trackColor2")->click();
+            editor_->findChild<QComboBox *>("trackLineStyle")->setCurrentIndex(1);
+            editor_->findChild<QDoubleSpinBox *>("trackLineWidth")->setValue(4);
+            editor_->findChild<QPushButton *>("applyDisplay")->click();
+            require(satellites_.front().display.line_color == 0xe9a2ba &&
+                        satellites_.front().display.line_style == application::LineStyle::dashed &&
+                        satellites_.front().display.line_width == 4 && project_dirty_ &&
+                        satellites_.front().orbit == orbit_before &&
+                        satellites_.front().fixed_track->node() == geometry_before &&
+                        (satellites_.size() < 2 || satellites_[1].display == other),
+                    "Track appearance rebuilt the orbit, lost settings or changed another object");
+            save_workbench_image("satellite-style-editor.png");
+            workspace_->close_page(properties_dialog_);
+            workspace_->select_view(0);
+            smoke_final_frames_ = 0;
+            record("satellite-style-applied-without-recomputing-orbit");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 135:
+            if (++smoke_final_frames_ < 4 || !ground_map_->tracks_ready())
+                break;
+            save_workbench_image("satellite-style-globe.png");
+            ground_map_->grab().save(smoke_dir_ + "/satellite-style-map.png");
+            save_project_to(smoke_dir_ + "/satellite-styles.orbitforge");
+            start_project(
+                application::load_project(std::filesystem::path(project_path_.toStdWString())),
+                project_path_);
+            ++orbit_smoke_stage_;
+            break;
+        case 136:
+            require(last_project_outcome_ == "opened" &&
+                        satellites_.front().display.line_color == 0xe9a2ba &&
+                        satellites_.front().display.line_style == application::LineStyle::dashed &&
+                        satellites_.front().display.line_width == 4,
+                    "Project reopen lost satellite track appearance");
+            record("satellite-style-survives-project-reopen");
+            fit_views();
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        case 137:
+            if (++smoke_final_frames_ >= 4)
+                ++orbit_smoke_stage_;
+            break;
         }
     }
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
@@ -6713,13 +6789,42 @@ class Workbench final : public QMainWindow {
                         if (x == 0 || y == 0 || x == pixels.width() - 1 || y == pixels.height() - 1)
                             ++foreground_at_edge;
                     }
-                    // Accept both UNORM and sRGB encodings of the shader's warm yellow.
-                    if (color.red() > 180 && color.green() > 110 &&
+                    // The benchmark retains its fixed marker palette.
+                    if (benchmarking_ && color.red() > 180 && color.green() > 110 &&
                         color.blue() < std::min(color.red(), color.green()) * 0.65)
                         ++marker;
                     if (color.red() > 180 && color.blue() > 140 && color.green() < 120)
                         ++selected_pixels;
                 }
+            if (!benchmarking_) {
+                // Satellite colors are user-defined. Check the actual projected markers,
+                // accepting UNORM and sRGB framebuffer encodings of their configured RGB.
+                for (const auto &point : slots_[i]->pick_candidates) {
+                    if (point.index >= satellites_.size() || satellites_[point.index].model)
+                        continue;
+                    const auto expected =
+                        QColor::fromRgb(satellites_[point.index].display.line_color);
+                    const auto encode = [](double value) {
+                        return qRound(255 * (value <= .0031308
+                                                 ? value * 12.92
+                                                 : 1.055 * std::pow(value, 1 / 2.4) - .055));
+                    };
+                    const QColor srgb(encode(expected.redF()), encode(expected.greenF()),
+                                      encode(expected.blueF()));
+                    const auto close = [](QColor a, QColor b) {
+                        return std::abs(a.red() - b.red()) < 12 &&
+                               std::abs(a.green() - b.green()) < 12 &&
+                               std::abs(a.blue() - b.blue()) < 12;
+                    };
+                    for (int y = std::max(0, qRound(point.y_pixels) - 5);
+                         y < std::min(pixels.height(), qRound(point.y_pixels) + 6); ++y)
+                        for (int x = std::max(0, qRound(point.x_pixels) - 5);
+                             x < std::min(pixels.width(), qRound(point.x_pixels) + 6); ++x)
+                            if (close(pixels.pixelColor(x, y), expected) ||
+                                close(pixels.pixelColor(x, y), srgb))
+                                ++marker;
+                }
+            }
             if (foreground < static_cast<qint64>(pixels.width()) * pixels.height() / 100 ||
                 marker < 6)
                 throw std::runtime_error("Rendered image lacks the globe or satellite marker");
@@ -6772,6 +6877,7 @@ class Workbench final : public QMainWindow {
     bool validation_, stopped_ = false, finished_ = false, playing_ = true;
     bool benchmarking_, requested_time_ = false;
     bool satellite_state_dirty_ = true;
+    double track_pixel_ratio_ = 0;
     std::optional<core::Epoch> time_label_epoch_;
     CalendarScale time_label_scale_ = CalendarScale::utc;
     bool injecting_input_ = false;
@@ -6826,7 +6932,7 @@ class Workbench final : public QMainWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 134;
+    static constexpr int orbit_smoke_complete = 138;
     int smoke_final_frames_ = 0;
     std::vector<std::uint8_t> smoke_project_bytes_;
     application::DataLock smoke_data_lock_;

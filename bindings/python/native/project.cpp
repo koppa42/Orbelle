@@ -55,6 +55,11 @@ void bind_project(py::module_ &module) {
         .def_readwrite("first", &application::OrbitInput::first)
         .def_readwrite("last", &application::OrbitInput::last)
         .def_readwrite("step_seconds", &application::OrbitInput::step_seconds);
+    py::enum_<application::LineStyle>(module, "LineStyle")
+        .value("SOLID", application::LineStyle::solid)
+        .value("DASHED", application::LineStyle::dashed)
+        .value("DOTTED", application::LineStyle::dotted)
+        .value("DASH_DOT", application::LineStyle::dash_dot);
     py::class_<application::OrbitDisplay>(module, "OrbitDisplay")
         .def(py::init<>())
         .def_readwrite("extent", &application::OrbitDisplay::extent)
@@ -62,7 +67,10 @@ void bind_project(py::module_ &module) {
         .def_readwrite("future_minutes", &application::OrbitDisplay::future_minutes)
         .def_readwrite("track_2d", &application::OrbitDisplay::track_2d)
         .def_readwrite("labels_2d", &application::OrbitDisplay::labels_2d)
-        .def_readwrite("track_3d", &application::OrbitDisplay::track_3d);
+        .def_readwrite("track_3d", &application::OrbitDisplay::track_3d)
+        .def_readwrite("line_color", &application::OrbitDisplay::line_color)
+        .def_readwrite("line_width", &application::OrbitDisplay::line_width)
+        .def_readwrite("line_style", &application::OrbitDisplay::line_style);
     py::class_<application::ProjectSatellite>(module, "ProjectSatellite")
         .def(py::init<>())
         .def_readwrite("orbit", &application::ProjectSatellite::orbit)

@@ -97,6 +97,46 @@ class GroundMapTest : public ::testing::Test {
     QTemporaryDir directory_;
     QString imagery_;
 };
+TEST_F(GroundMapTest, TrackStyleChangesRepaintCachedGeometryWithColorWidthAndGaps) {
+    GroundMap map(imagery_);
+    configure(map);
+    map.set_lighting(false);
+    map.set_grid_visible(false);
+    map.set_labels_visible(false);
+    map.set_sun_visible(false);
+    DisplaySettings settings;
+    settings.line_color = 0xff3040;
+    settings.line_width = 1;
+    const auto red_pixels = [&](const QImage &image) {
+        std::size_t count = 0;
+        for (int y = 0; y < image.height(); ++y)
+            for (int x = 0; x < image.width(); ++x) {
+                const auto c = image.pixelColor(x, y);
+                if (c.red() > 180 && c.green() < 100 && c.blue() < 110)
+                    ++count;
+            }
+        return count;
+    };
+    map.set_display(0, settings, core::Epoch{0}, core::Epoch{40});
+    ASSERT_TRUE(settle(map));
+    const auto thin = red_pixels(pixels(map));
+    settings.line_width = 6;
+    map.set_display(0, settings, core::Epoch{0}, core::Epoch{40});
+    ASSERT_TRUE(settle(map));
+    const auto thick = red_pixels(pixels(map));
+    EXPECT_GT(thin, 100u);
+    EXPECT_GT(thick, thin * 3);
+    settings.line_style = application::LineStyle::dotted;
+    map.set_display(0, settings, core::Epoch{0}, core::Epoch{40});
+    ASSERT_TRUE(settle(map));
+    const auto dotted = red_pixels(pixels(map));
+    EXPECT_GT(dotted, thick / 6);
+    EXPECT_LT(dotted, thick * 2 / 3);
+    settings.line_color = 0x73cdee;
+    map.set_display(0, settings, core::Epoch{0}, core::Epoch{40});
+    ASSERT_TRUE(settle(map));
+    EXPECT_EQ(red_pixels(pixels(map)), 0u);
+}
 TEST_F(GroundMapTest, RangeVisibilityReplacementAndSelectionInvalidateTrails) {
     GroundMap map(imagery_);
     configure(map);

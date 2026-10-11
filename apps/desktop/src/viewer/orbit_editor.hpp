@@ -15,6 +15,7 @@ class QStackedWidget;
 namespace orbitforge::desktop {
 class EpochEditor;
 class QuantityEditor;
+class TrackStyleEditor;
 class OrbitEditor final : public QWidget {
   public:
     explicit OrbitEditor(const OrbitInput &input, QWidget *parent = nullptr);
@@ -72,6 +73,7 @@ class OrbitEditor final : public QWidget {
     QPushButton *apply_model_ = nullptr;
     QLabel *model_message_ = nullptr;
     QComboBox *track_extent_ = nullptr;
+    TrackStyleEditor *track_style_ = nullptr;
     QuantityEditor *past_ = nullptr, *future_ = nullptr;
     QCheckBox *track_2d_ = nullptr, *label_2d_ = nullptr, *track_3d_ = nullptr;
     std::vector<QPushButton *> display_buttons_;

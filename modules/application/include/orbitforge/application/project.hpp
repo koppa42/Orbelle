@@ -26,11 +26,16 @@ struct OrbitInput {
     core::Epoch first{0}, last{7'200'000'000'000};
     int step_seconds = 60;
 };
+enum class LineStyle : std::uint32_t { solid, dashed, dotted, dash_dot };
 struct OrbitDisplay {
     // 0 = one period, 1 = scenario, 2 = custom trail/lead.
     int extent = 0;
     double past_minutes = 45, future_minutes = 45;
     bool track_2d = true, labels_2d = true, track_3d = true;
+    // Opaque sRGB, 0xRRGGBB. Width is in logical screen pixels in both views.
+    std::uint32_t line_color = 0x73cdee;
+    double line_width = 1.5;
+    LineStyle line_style = LineStyle::solid;
     bool operator==(const OrbitDisplay &) const = default;
 };
 struct ProjectSatellite {

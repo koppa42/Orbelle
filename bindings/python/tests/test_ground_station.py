@@ -63,12 +63,14 @@ class GroundStationTests(unittest.TestCase):
         self.assertEqual(len(project.ground_stations), 1)
 
     @staticmethod
-    def rewrite(raw, change, file_version=6):
+    def rewrite(raw, change, file_version=8):
         chunks, offset = [], 24
         while offset < len(raw):
             tag, version, size, _ = struct.unpack_from('<IIQI', raw, offset)
             body = raw[offset + 20:offset + 20 + size]
             offset += 20 + size
+            if file_version < 8 and tag.to_bytes(4, 'little') == b'STYL':
+                continue
             if file_version < 6 and tag.to_bytes(4, 'little') == b'RPTS':
                 continue
             if tag.to_bytes(4, 'little') == b'GSTN':
@@ -102,5 +104,5 @@ class GroundStationTests(unittest.TestCase):
             self.assertEqual(project.ground_stations, [])
             project.add_ground_station(self.make_project().ground_stations[0])
             project.save(path, overwrite=True)
-            self.assertEqual(struct.unpack_from('<I', path.read_bytes(), 8)[0], 7)
+            self.assertEqual(struct.unpack_from('<I', path.read_bytes(), 8)[0], 8)
             self.assertEqual(len(of.load_project(path).ground_stations), 1)

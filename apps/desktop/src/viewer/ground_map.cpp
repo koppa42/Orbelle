@@ -1,4 +1,5 @@
 #include "ground_map.hpp"
+#include "track_style_editor.hpp"
 #include "workbench_profile.hpp"
 #include <QKeyEvent>
 #include <QLineF>
@@ -19,7 +20,14 @@ bool draw_track(QPainter &painter, const QPainterPath &path,
     // Independent line primitives avoid the raster stroker's large intersecting
     // polygons. Keep every segment and preserve all antimeridian breaks.
     std::array<QLineF, 256> lines;
-    const auto clip = painter.clipBoundingRect().adjusted(-3, -3, 3, 3);
+    const auto margin = painter.pen().widthF() / 2 + 2;
+    const auto clip = painter.clipBoundingRect().adjusted(-margin, -margin, margin, margin);
+    auto pen = painter.pen();
+    const bool dashed = pen.style() != Qt::SolidLine;
+    double phase = 0;
+    double cycle = 0;
+    for (const auto length : pen.dashPattern())
+        cycle += length * pen.widthF();
     int count = 0;
     QPointF previous;
     for (int i = 0; i < path.elementCount(); ++i) {
@@ -27,17 +35,27 @@ bool draw_track(QPainter &painter, const QPainterPath &path,
             return false;
         const auto element = path.elementAt(i);
         const QPointF point(element.x, element.y);
+        if (element.isMoveTo())
+            phase = 0;
+        const QLineF segment(previous, point);
         const bool outside = (previous.x() < clip.left() && point.x() < clip.left()) ||
                              (previous.x() > clip.right() && point.x() > clip.right()) ||
                              (previous.y() < clip.top() && point.y() < clip.top()) ||
                              (previous.y() > clip.bottom() && point.y() > clip.bottom());
         if (!element.isMoveTo() && !outside) {
-            lines[count++] = QLineF(previous, point);
+            if (dashed) {
+                pen.setDashOffset(phase / pen.widthF());
+                painter.setPen(pen);
+                painter.drawLine(segment);
+            } else
+                lines[count++] = segment;
             if (count == lines.size()) {
                 painter.drawLines(lines.data(), count);
                 count = 0;
             }
         }
+        if (dashed && !element.isMoveTo() && cycle > 0)
+            phase = std::fmod(phase + segment.length(), cycle);
         previous = point;
     }
     if (count)
@@ -168,12 +186,15 @@ void GroundMap::set_selection(std::optional<std::size_t> index) {
 void GroundMap::set_display(std::size_t index, const DisplaySettings &settings, core::Epoch first,
                             core::Epoch last) {
     auto &track = tracks_.at(index);
-    if (track.visible != settings.track_2d)
+    if (track.visible != settings.track_2d || track.display.line_color != settings.line_color ||
+        track.display.line_style != settings.line_style ||
+        track.display.line_width != settings.line_width)
         invalidate_tracks();
     if (track.label != settings.labels_2d)
         update();
     track.visible = settings.track_2d;
     track.label = settings.labels_2d;
+    track.display = settings;
     if (first == last || first.tai_nanoseconds() > track.epochs.back().tai_nanoseconds() ||
         last.tai_nanoseconds() < track.epochs.front().tai_nanoseconds()) {
         if (track.last != 0) {
@@ -418,10 +439,10 @@ void GroundMap::paint_axes(QPainter &p) {
 }
 std::vector<GroundMap::Stroke> GroundMap::strokes() const {
     std::vector<Stroke> result;
-    const QColor colors[] = {QColor("#6cb9d6"), QColor("#dda16d"), QColor("#9bbb88")};
     for (std::size_t i = 0; show_tracks_ && i < tracks_.size(); ++i)
         if (tracks_[i].visible)
-            result.push_back({tracks_[i].path, colors[i % 3], selected_ == i ? 1.2 : 0.9});
+            result.push_back({tracks_[i].path, QColor::fromRgb(tracks_[i].display.line_color),
+                              tracks_[i].display.line_width, tracks_[i].display.line_style});
     return result;
 }
 GroundMap::Raster GroundMap::rasterize(Raster result, const std::vector<Stroke> &strokes,
@@ -446,17 +467,25 @@ GroundMap::Raster GroundMap::rasterize(Raster result, const std::vector<Stroke> 
         }
         const auto path = result.transform.map(stroke.path);
         if (result.preview) {
-            QPen pen(stroke.color);
-            pen.setWidthF(1);
+            QPen pen = track_pen(stroke.color, stroke.width, stroke.style);
             pen.setCosmetic(true);
             p.setPen(pen);
         } else {
-            p.setPen(QPen(QColor(4, 15, 26, 140), 2.8));
+            auto halo = track_pen(QColor(4, 15, 26, 140), stroke.width, stroke.style);
+            const auto dash = halo.dashPattern();
+            halo.setWidthF(stroke.width + 1.5);
+            if (stroke.style != application::LineStyle::solid) {
+                auto pattern = dash;
+                for (auto &length : pattern)
+                    length *= stroke.width / halo.widthF();
+                halo.setDashPattern(pattern);
+            }
+            p.setPen(halo);
             if (!draw_track(p, path, &cancelled)) {
                 result.complete = false;
                 break;
             }
-            p.setPen(QPen(stroke.color, stroke.width));
+            p.setPen(track_pen(stroke.color, stroke.width, stroke.style));
         }
         if (!draw_track(p, path, &cancelled)) {
             result.complete = false;
@@ -615,6 +644,7 @@ void GroundMap::paintEvent(QPaintEvent *event) {
             p.setPen(QPen(QColor("#172d42"), 1.5));
             p.setBrush(selected_ == i              ? QColor("#ffce81")
                        : points_[i].ground_station ? QColor("#87d4c6")
+                       : i < tracks_.size()        ? QColor::fromRgb(tracks_[i].display.line_color)
                                                    : QColor("#d0efff"));
             if (points_[i].ground_station)
                 p.drawPolygon(QPolygonF{point + QPointF(0, -6), point + QPointF(6, 0),

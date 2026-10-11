@@ -30,6 +30,7 @@ class GroundMap final : public QWidget {
         std::vector<core::Epoch> epochs;
         std::size_t first = 0, last = 0;
         bool visible = true, label = true;
+        DisplaySettings display;
     };
     using PreparedTracks = std::vector<Track>;
     explicit GroundMap(const QString &imagery, QWidget *parent = nullptr);
@@ -95,6 +96,7 @@ class GroundMap final : public QWidget {
         QPainterPath path;
         QColor color;
         double width;
+        application::LineStyle style;
     };
     struct Raster {
         QImage image;

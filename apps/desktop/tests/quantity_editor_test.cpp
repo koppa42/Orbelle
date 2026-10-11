@@ -1,16 +1,21 @@
 #include "../src/viewer/orbit_editor.hpp"
 #include "../src/viewer/quantity_editor.hpp"
+#include "../src/viewer/workbench_style.hpp"
 #include <QApplication>
 #include <QCheckBox>
+#include <QColorDialog>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QDoubleSpinBox>
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QMenu>
 #include <QPushButton>
 #include <QTimer>
 #include <QToolButton>
+#include <QTreeWidget>
 #include <cmath>
 #include <gtest/gtest.h>
 #include <numbers>
@@ -242,6 +247,75 @@ TEST_F(QuantityTest, DisplayDurationAndModelDiameterKeepExistingStorageUnits) {
         if (button->text() == QStringLiteral("应用外观"))
             button->click();
     EXPECT_DOUBLE_EQ(applied, 17);
+}
+TEST_F(QuantityTest, TrackStylePreviewApplyCustomColorAndObjectSwitchStayIndependent) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    OrbitEditor editor(OrbitInput{});
+    editor.resize(980, 660);
+    auto *navigation = editor.findChild<QTreeWidget *>("propertyNavigation");
+    navigation->setCurrentItem(navigation->topLevelItem(0)->child(1));
+    DisplaySettings existing;
+    existing.line_color = 0x123456;
+    existing.line_width = 2.5;
+    existing.line_style = application::LineStyle::dash_dot;
+    existing.extent = 2;
+    existing.past_minutes = 12;
+    existing.track_3d = false;
+    editor.set_display(existing);
+    editor.show();
+    QApplication::processEvents();
+    auto *style = editor.findChild<QComboBox *>("trackLineStyle");
+    auto *width = editor.findChild<QDoubleSpinBox *>("trackLineWidth");
+    auto *custom = editor.findChild<QPushButton *>("trackCustomColor");
+    ASSERT_TRUE(style && width && custom);
+    EXPECT_EQ(style->currentIndex(), 3);
+    EXPECT_DOUBLE_EQ(width->value(), 2.5);
+    EXPECT_EQ(width->buttonSymbols(), QAbstractSpinBox::UpDownArrows);
+    EXPECT_TRUE(custom->text().contains("#123456"));
+    std::vector<DisplaySettings> applied;
+    editor.display = [&](DisplaySettings result) { applied.push_back(result); };
+    const auto before = editor.findChild<QWidget *>("trackStylePreview")->grab().toImage();
+    editor.findChild<QToolButton *>("trackColor2")->click();
+    style->setCurrentIndex(1);
+    width->setValue(4);
+    const auto after = editor.findChild<QWidget *>("trackStylePreview")->grab().toImage();
+    EXPECT_NE(before, after);
+    EXPECT_TRUE(applied.empty());
+    editor.findChild<QPushButton *>("applyDisplay")->click();
+    ASSERT_EQ(applied.size(), 1);
+    EXPECT_EQ(applied[0].line_color, 0xe9a2ba);
+    EXPECT_EQ(applied[0].line_style, application::LineStyle::dashed);
+    EXPECT_EQ(applied[0].line_width, 4);
+    EXPECT_EQ(applied[0].past_minutes, 12);
+    EXPECT_FALSE(applied[0].track_3d);
+    const auto capture = qEnvironmentVariable("ORBITFORGE_STYLE_UI_CAPTURE");
+    if (!capture.isEmpty()) {
+        ASSERT_TRUE(QDir{}.mkpath(capture));
+        ASSERT_TRUE(editor.grab().save(capture + "/track-style.png"));
+        editor.resize(910, 400);
+        QApplication::processEvents();
+        ASSERT_TRUE(editor.grab().save(capture + "/track-style-compact.png"));
+    }
+    QTimer::singleShot(0, [] {
+        auto *dialog = qobject_cast<QColorDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        dialog->setCurrentColor(QColor("#abcdef"));
+        dialog->reject();
+    });
+    custom->click();
+    EXPECT_TRUE(custom->text().contains("#E9A2BA"));
+    QTimer::singleShot(0, [] {
+        auto *dialog = qobject_cast<QColorDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        dialog->setCurrentColor(QColor("#abcdef"));
+        dialog->accept();
+    });
+    custom->click();
+    editor.findChild<QPushButton *>("applyDisplay")->click();
+    EXPECT_EQ(applied.back().line_color, 0xabcdef);
+    editor.set_display(existing);
+    editor.findChild<QPushButton *>("applyDisplay")->click();
+    EXPECT_EQ(applied.back(), existing);
 }
 TEST_F(QuantityTest, FrameSwitchAndItrfInputUseFullPositionVelocityTransform) {
     const auto frames = runtime::make_frame_provider();

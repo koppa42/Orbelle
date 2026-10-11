@@ -24,7 +24,8 @@ static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
-                        lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052;
+                        lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
+                        styles_tag = 0x4c595453;
 [[noreturn]] void invalid(const char *message) { throw ProjectError(message); }
 void check(bool condition, const char *message) {
     if (!condition)
@@ -214,6 +215,10 @@ void validate_project(const Project &project) {
                   display.future_minutes <= 10080 &&
                   (display.extent != 2 || display.past_minutes + display.future_minutes > 0),
               "Invalid project track extent");
+        check(display.line_color <= 0xffffff && std::isfinite(display.line_width) &&
+                  display.line_width >= 0.5 && display.line_width <= 8 &&
+                  static_cast<std::uint32_t>(display.line_style) <= 3,
+              "Invalid project track style");
         text_check(satellite.model_path);
         check(satellite.model_kind >= 0 && satellite.model_kind <= 2 &&
                   std::isfinite(satellite.model_diameter_m) && satellite.model_diameter_m > 0 &&
@@ -379,6 +384,15 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         objects.text(satellite.model_path);
     }
     payload.section(objects_tag, objects, 2);
+    Writer styles;
+    styles.number(project.satellites.size(), 4);
+    for (const auto &satellite : project.satellites) {
+        styles.text(satellite.orbit.object_id);
+        styles.number(satellite.display.line_color, 4);
+        styles.number(static_cast<std::uint32_t>(satellite.display.line_style), 4);
+        styles.real(satellite.display.line_width);
+    }
+    payload.section(styles_tag, styles);
     stations.number(project.ground_stations.size(), 4);
     for (const auto &station : project.ground_stations) {
         stations.text(station.object_id);
@@ -418,7 +432,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
     locked.text(lock.sha256());
     payload.section(lock_tag, locked);
     file.raw(magic);
-    file.number(7, 4);
+    file.number(8, 4);
     file.number(payload.bytes.size());
     file.number(crc32(payload.bytes), 4);
     file.raw(payload.bytes);
@@ -429,7 +443,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     Reader file{bytes};
     check(std::ranges::equal(file.raw(magic.size()), magic), "Not an OrbitForge project file");
     const auto version = file.number(4);
-    check(version >= 1 && version <= 7, "Unsupported OrbitForge project version");
+    check(version >= 1 && version <= 8, "Unsupported OrbitForge project version");
     const auto length = file.number();
     const auto checksum = file.number(4);
     check(length == file.bytes.size(), "Project length mismatch");
@@ -439,7 +453,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         const auto tag = static_cast<std::uint32_t>(file.number(4));
         check(tag == scene_tag || tag == objects_tag || tag == data_tag ||
                   (version >= 3 && tag == lock_tag) || (version >= 5 && tag == stations_tag) ||
-                  (version >= 6 && tag == reports_tag),
+                  (version >= 6 && tag == reports_tag) || (version >= 8 && tag == styles_tag),
               "Unsupported project section");
         check(file.number(4) ==
                   ((tag == objects_tag && version >= 2) || (tag == data_tag && version >= 4) ? 2U
@@ -497,6 +511,25 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         project.satellites.push_back(std::move(satellite));
     }
     objects.done();
+    if (version >= 8) {
+        check(sections.contains(styles_tag), "Missing track styles section");
+        Reader styles{sections.at(styles_tag)};
+        check(styles.number(4) == count, "Track styles must match the satellite count");
+        std::map<std::string, OrbitDisplay *> displays;
+        for (auto &satellite : project.satellites)
+            check(displays.emplace(satellite.orbit.object_id, &satellite.display).second,
+                  "Duplicate project object ID");
+        for (std::uint64_t i = 0; i < count; ++i) {
+            const auto found = displays.find(styles.text());
+            check(found != displays.end(), "Unknown or duplicate track style object ID");
+            auto &display = *found->second;
+            display.line_color = static_cast<std::uint32_t>(styles.number(4));
+            display.line_style = static_cast<LineStyle>(styles.number(4));
+            display.line_width = styles.real();
+            displays.erase(found);
+        }
+        styles.done();
+    }
     if (version >= 5) {
         check(sections.contains(stations_tag), "Missing ground stations section");
         Reader stations{sections.at(stations_tag)};

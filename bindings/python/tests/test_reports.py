@@ -93,12 +93,14 @@ class ReportsTest(unittest.TestCase):
         self.assertEqual(result.time_sha256, eop.data_info.time_data.sha256)
 
     @staticmethod
-    def rewrite(raw, mutate, version=7):
+    def rewrite(raw, mutate, version=8):
         sections, offset = [], 24
         while offset < len(raw):
             tag, schema, size, _ = struct.unpack_from('<IIQI', raw, offset)
             body = raw[offset + 20:offset + 20 + size]
             offset += 20 + size
+            if version < 8 and tag.to_bytes(4, 'little') == b'STYL':
+                continue
             if tag.to_bytes(4, 'little') == b'RPTS':
                 body = mutate(body)
             if body is not None:
@@ -106,7 +108,7 @@ class ReportsTest(unittest.TestCase):
         payload = b''.join(sections)
         return raw[:8] + struct.pack('<IQI', version, len(payload), zlib.crc32(payload)) + payload
 
-    def test_v7_roundtrip_v5_upgrade_and_corruption_with_repaired_crcs(self):
+    def test_v8_roundtrip_v5_upgrade_and_corruption_with_repaired_crcs(self):
         project, definition = self.inputs()
         definition.object_ids = ['station']
         definition.follow_scenario = False
@@ -136,7 +138,7 @@ class ReportsTest(unittest.TestCase):
             self.assertEqual(restored.reports, [])
             self.assertEqual(len(restored.ground_stations), 1)
             restored.save(path, overwrite=True)
-            self.assertEqual(struct.unpack_from('<I', path.read_bytes(), 8)[0], 7)
+            self.assertEqual(struct.unpack_from('<I', path.read_bytes(), 8)[0], 8)
 
     def test_limits_fail_before_sampling(self):
         project, definition = self.inputs()
@@ -175,7 +177,7 @@ class ReportsTest(unittest.TestCase):
             path = Path(directory) / 'derived.orbitforge'
             project.save(path)
             raw = path.read_bytes()
-            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 7)
+            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 8)
             self.assertEqual(of.load_project(path).reports[0].kind, of.ReportKind.GEODETIC_POSITION)
             # A v6 container cannot silently accept a newly introduced kind.
             path.write_bytes(self.rewrite(raw, lambda body: body, version=6))

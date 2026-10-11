@@ -1,6 +1,7 @@
 #include "orbit_editor.hpp"
 #include "epoch_editor.hpp"
 #include "quantity_editor.hpp"
+#include "track_style_editor.hpp"
 #include "workbench_style.hpp"
 #include <QCheckBox>
 #include <QComboBox>
@@ -74,14 +75,14 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     };
     const auto page = [](QTreeWidgetItem *group, const QString &name, int index) {
         auto *item = new QTreeWidgetItem(group, {name});
-        const std::array icons{WorkbenchIcon::orbit, WorkbenchIcon::clock, WorkbenchIcon::map,
+        const std::array icons{WorkbenchIcon::orbit, WorkbenchIcon::properties, WorkbenchIcon::map,
                                WorkbenchIcon::satellite};
         item->setIcon(0, workbench_icon(icons.at(static_cast<std::size_t>(index))));
         item->setData(0, Qt::UserRole, index);
     };
     auto *basic = category(QStringLiteral("基本"));
     page(basic, QStringLiteral("轨道"), 0);
-    page(basic, QStringLiteral("轨迹范围"), 1);
+    page(basic, QStringLiteral("轨迹显示"), 1);
     page(category(QStringLiteral("二维视图")), QStringLiteral("显示"), 2);
     page(category(QStringLiteral("三维视图")), QStringLiteral("显示与模型"), 3);
     auto *tabs = new QStackedWidget;
@@ -331,8 +332,8 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         stack->addWidget(error);
         stack->addWidget(apply, 0, Qt::AlignRight);
     };
-    auto *common = display_page(QStringLiteral("轨迹范围"),
-                                QStringLiteral("同时设置二维地面轨迹与三维空间轨迹的显示时段。"));
+    auto *common = display_page(QStringLiteral("轨迹显示"),
+                                QStringLiteral("当前卫星的二维与三维视图共用这些样式与显示范围。"));
     auto *common_form = new QFormLayout;
     common_form->setContentsMargins(0, 0, 0, 0);
     common_form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -366,8 +367,15 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     common_form->setRowVisible(future_, false);
     auto *range_fields = new QWidget;
     range_fields->setObjectName("propertyFields");
-    range_fields->setMaximumWidth(480);
-    range_fields->setLayout(common_form);
+    range_fields->setMaximumWidth(520);
+    auto *range_layout = new QVBoxLayout(range_fields);
+    range_layout->setContentsMargins(0, 0, 4, 0);
+    range_layout->setSpacing(22);
+    track_style_ = new TrackStyleEditor;
+    range_layout->addWidget(track_style_);
+    range_layout->addWidget(divider());
+    range_layout->addLayout(common_form);
+    range_layout->addStretch();
     auto *range_scroll = new QScrollArea;
     range_scroll->setWidgetResizable(true);
     range_scroll->setAlignment(Qt::AlignLeft | Qt::AlignTop);
@@ -795,6 +803,7 @@ void OrbitEditor::show_appearance_result(const QString &message, bool error) {
     model_message_->setVisible(!message.isEmpty());
 }
 void OrbitEditor::set_display(const DisplaySettings &settings) {
+    track_style_->set_settings(settings);
     track_extent_->setCurrentIndex(settings.extent);
     past_->set_value(settings.past_minutes, Unit::minute);
     future_->set_value(settings.future_minutes, Unit::minute);
@@ -804,10 +813,13 @@ void OrbitEditor::set_display(const DisplaySettings &settings) {
 }
 void OrbitEditor::submit_display() {
     try {
-        if (display)
-            display({track_extent_->currentIndex(), past_->value(Unit::minute),
-                     future_->value(Unit::minute), track_2d_->isChecked(), label_2d_->isChecked(),
-                     track_3d_->isChecked()});
+        if (display) {
+            DisplaySettings settings{track_extent_->currentIndex(), past_->value(Unit::minute),
+                                     future_->value(Unit::minute),  track_2d_->isChecked(),
+                                     label_2d_->isChecked(),        track_3d_->isChecked()};
+            track_style_->write_settings(settings);
+            display(settings);
+        }
         for (auto *error : display_messages_)
             error->hide();
     } catch (const std::exception &exception) {
