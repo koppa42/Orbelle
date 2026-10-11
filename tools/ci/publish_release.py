@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import zipfile
 
-from version import ROOT, check
+from version import ROOT, check, python_versions
 
 
 def validate_assets(directory, version):
@@ -16,9 +16,11 @@ def validate_assets(directory, version):
         f"OrbitForge-{version}-win-x64.zip",
         f"OrbitForge-{version}-sdk-win-x64.zip",
         f"OrbitForge-{version}-sdk-linux-x64.tar.gz",
-        f"orbitforge-{version}-cp313-cp313-win_amd64.whl",
-        f"orbitforge-{version}-cp313-cp313-linux_x86_64.whl",
     }
+    for python in python_versions()[1]:
+        tag = "cp" + python.replace(".", "")
+        expected.update(f"orbitforge-{version}-{tag}-{tag}-{platform}.whl"
+                        for platform in ("win_amd64", "linux_x86_64"))
     actual = {p.name for p in directory.iterdir()}
     if actual != expected:
         raise ValueError(f"Release assets differ: missing={expected - actual}, unexpected={actual - expected}")
@@ -59,7 +61,7 @@ def publish(tag, assets, repo, run=subprocess.run):
             "The desktop requires a Vulkan-capable GPU and driver.\n\n"
             "C++ SDKs include headless Runtime/ERFA/IERS/CSPICE/SQLite and their link dependencies. "
             "See README.txt inside the archive.\n\n"
-            "Python wheels: CPython 3.13 x64 on Windows and Ubuntu 24.04. "
+            "Python wheels: CPython " + ", ".join(python_versions()[1]) + " x64 on Windows and Ubuntu 24.04. "
             "The Linux wheel is a native linux_x86_64 build, not a manylinux wheel. "
             "Install the matching file with pip install <wheel>.\n\n"
             "CI checks C++, sanitizers, installed SDK/Python APIs and Qt offscreen tests. "

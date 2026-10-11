@@ -11,6 +11,16 @@ VERSION = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def python_versions(root=ROOT):
+    config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["orbitforge"]["ci"]
+    versions = config["python-versions"]
+    baseline = config["baseline-python"]
+    if (not versions or baseline not in versions or len(set(versions)) != len(versions)
+            or not all(re.fullmatch(r"3\.[1-9][0-9]*", item) for item in versions)):
+        raise ValueError("Invalid Python CI matrix")
+    return baseline, versions
+
+
 def read_versions(root):
     cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8")
     match = re.search(r"project\(OrbitForge\s+VERSION\s+(\S+)", cmake)
@@ -74,6 +84,9 @@ def main():
     if args.github_output:
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
             output.write(f"version={version}\nvcpkg-baseline={baseline}\n")
+            python_baseline, versions = python_versions()
+            extra_versions = [item for item in versions if item != python_baseline]
+            output.write(f"baseline-python={python_baseline}\npython-matrix={json.dumps(extra_versions)}\n")
     print(version)
 
 

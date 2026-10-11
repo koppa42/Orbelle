@@ -13,7 +13,7 @@ def copy_dependencies(prefix, output):
         # The Linux delivery already contains only headless dependencies.
         shutil.copytree(prefix, output, symlinks=True)
         return
-    for port in ("erfa", "cspice", "sqlite3"):
+    for port in ("erfa", "cspice", "sqlite3", "nlohmann-json", "picosha2"):
         lists = list(info.glob(f"{port}_*_{prefix.name}.list"))
         if len(lists) != 1:
             raise ValueError(f"Expected one installed vcpkg file list for {port}")

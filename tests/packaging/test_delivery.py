@@ -139,7 +139,7 @@ class SdkDependencyTests(unittest.TestCase):
             prefix = root / 'installed/x64-windows'
             info = root / 'installed/vcpkg/info'
             info.mkdir(parents=True)
-            for port in ('erfa', 'cspice', 'sqlite3', 'qtbase'):
+            for port in ('erfa', 'cspice', 'sqlite3', 'nlohmann-json', 'picosha2', 'qtbase'):
                 relative = Path('share') / port / 'copyright'
                 path = prefix / relative
                 path.parent.mkdir(parents=True)

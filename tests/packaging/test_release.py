@@ -25,13 +25,16 @@ class ReleaseTests(unittest.TestCase):
                      f"OrbitForge-{self.version}-sdk-win-x64.zip",
                      f"OrbitForge-{self.version}-sdk-linux-x64.tar.gz"):
             (self.assets / name).write_bytes(b"test archive")
-        for platform in ("win_amd64", "linux_x86_64"):
-            with zipfile.ZipFile(self.assets / f"orbitforge-{self.version}-cp313-cp313-{platform}.whl", "w") as wheel:
-                wheel.writestr(f"orbitforge-{self.version}.dist-info/METADATA",
-                               f"Metadata-Version: 2.1\nName: orbitforge\nVersion: {self.version}\n")
+        for python in version.python_versions()[1]:
+            tag = "cp" + python.replace(".", "")
+            for platform in ("win_amd64", "linux_x86_64"):
+                with zipfile.ZipFile(self.assets / f"orbitforge-{self.version}-{tag}-{tag}-{platform}.whl", "w") as wheel:
+                    wheel.writestr(f"orbitforge-{self.version}.dist-info/METADATA",
+                                   f"Metadata-Version: 2.1\nName: orbitforge\nVersion: {self.version}\n")
+        self.asset_count = 3 + 2 * len(version.python_versions()[1])
 
     def test_requires_every_platform_and_rejects_extra_files(self):
-        self.assertEqual(len(publish_release.validate_assets(self.assets, self.version)), 5)
+        self.assertEqual(len(publish_release.validate_assets(self.assets, self.version)), self.asset_count)
         extra = self.assets / "private.log"
         extra.write_text("diagnostic")
         with self.assertRaises(ValueError):
@@ -54,7 +57,7 @@ class ReleaseTests(unittest.TestCase):
             publish_release.publish(self.tag, self.assets, "owner/repo", run)
         self.assertTrue(any("--draft" in command for command in calls))
         self.assertFalse(any("edit" in command for command in calls))
-        self.assertEqual(len((self.assets / "SHA256SUMS").read_text().splitlines()), 5)
+        self.assertEqual(len((self.assets / "SHA256SUMS").read_text().splitlines()), self.asset_count)
 
     def test_existing_draft_resumes_and_publishes_after_inventory_check(self):
         calls = []

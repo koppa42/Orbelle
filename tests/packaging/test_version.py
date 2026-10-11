@@ -43,6 +43,12 @@ class VersionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "disagree"):
             version.check(self.root)
 
+    def test_python_baseline_must_be_in_the_release_matrix(self):
+        path = self.root / "pyproject.toml"
+        path.write_text(path.read_text().replace('baseline-python = "3.13"', 'baseline-python = "3.99"'))
+        with self.assertRaisesRegex(ValueError, "Python CI matrix"):
+            version.python_versions(self.root)
+
 
 if __name__ == "__main__":
     unittest.main()

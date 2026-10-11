@@ -36,6 +36,8 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       vcpkg-baseline: ${{ steps.version.outputs.vcpkg-baseline }}
+      baseline-python: ${{ steps.version.outputs.baseline-python }}
+      python-matrix: ${{ steps.version.outputs.python-matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -57,7 +59,7 @@ jobs:
           python -m unittest discover -s tests/packaging -v
 
   linux:
-    name: Linux C++, sanitizers and wheel
+    name: Linux C++, sanitizers and Python ${{ needs.metadata.outputs.baseline-python }}
     needs: metadata
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -67,7 +69,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: '3.13'
+          python-version: ${{ needs.metadata.outputs.baseline-python }}
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: microsoft/vcpkg
@@ -117,7 +119,7 @@ jobs:
       # Deliberately no source checkout: the delivery must work on its own.
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: '3.13'
+          python-version: ${{ needs.metadata.outputs.baseline-python }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: linux-delivery
@@ -155,7 +157,7 @@ jobs:
           retention-days: 14
 
   windows:
-    name: Windows desktop, SDK and wheel
+    name: Windows desktop, SDK and Python ${{ needs.metadata.outputs.baseline-python }}
     needs: metadata
     runs-on: windows-2025
     timeout-minutes: 180
@@ -168,7 +170,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: '3.13'
+          python-version: ${{ needs.metadata.outputs.baseline-python }}
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: microsoft/vcpkg
@@ -213,6 +215,14 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: windows-python-dependencies
+          path: ${{ runner.temp }}/windows-python-dependencies.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -225,10 +235,70 @@ jobs:
           overwrite: true
           retention-days: 14
 
+  python-matrix:
+    name: Python ${{ matrix.python }} / ${{ matrix.platform }}
+    needs: [metadata, linux, windows]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ${{ fromJSON(needs.metadata.outputs.python-matrix) }}
+        platform: [linux, windows]
+        include:
+          - platform: linux
+            runner: ubuntu-24.04
+            artifact: linux-delivery
+            archive: linux-delivery.tar.gz
+          - platform: windows
+            runner: windows-2025
+            artifact: windows-python-dependencies
+            archive: windows-python-dependencies.tar.gz
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ runner.temp }}/input
+      - name: Build and test this interpreter's wheel
+        shell: python {0}
+        env:
+          DEPENDENCY_ARCHIVE: ${{ matrix.archive }}
+        run: |
+          import os, pathlib, subprocess, sys, tarfile
+          root = pathlib.Path(os.environ['RUNNER_TEMP'])
+          with tarfile.open(root / 'input' / os.environ['DEPENDENCY_ARCHIVE']) as archive:
+              archive.extractall(root / 'delivery', filter='data')
+          subprocess.run([sys.executable, 'tools/ci/check_python.py',
+              '--dependency-prefix', str(root / 'delivery/dependencies'),
+              '--work', str(root / 'python'), '--reports', str(root / 'reports'),
+              '--output', str(root / 'assets')], check=True)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: python-${{ matrix.python }}-${{ matrix.platform }}-release-assets
+          path: ${{ runner.temp }}/assets/*.whl
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: python-${{ matrix.python }}-${{ matrix.platform }}-reports
+          path: ${{ runner.temp }}/reports
+          overwrite: true
+          retention-days: 14
+
   passed:
     name: CI passed
     if: always()
-    needs: [metadata, linux, linux-consumer, windows]
+    needs: [metadata, linux, linux-consumer, windows, python-matrix]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

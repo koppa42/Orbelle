@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tarfile
 import tomllib
 import zipfile
 
@@ -88,6 +89,8 @@ def main():
     with zipfile.ZipFile(output / f"OrbitForge-{args.version}-sdk-win-x64.zip") as archive:
         archive.extractall(relocated)
     installed = relocated / f"OrbitForge-{args.version}-sdk-win-x64"
+    with tarfile.open(output.parent / "windows-python-dependencies.tar.gz", "x:gz") as archive:
+        archive.add(installed / "dependencies", arcname="dependencies")
     clean = dict(environment)
     clean["PATH"] = os.environ["PATH"]
     clean.pop("CMAKE_PREFIX_PATH", None)

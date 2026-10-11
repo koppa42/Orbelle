@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core==0.12.2", "pybind11==3.0.4"]
+requires = ["scikit-build-core==0.12.2", "pybind11==3.1.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -21,6 +21,10 @@ wheel.packages = ["bindings/python/src/orbitforge"]
 install.components = ["Python"]
 build-dir = "out/build/wheel/{wheel_tag}"
 sdist.exclude = ["out", "local", ".git"]
+
+[tool.orbitforge.ci]
+baseline-python = "3.13"
+python-versions = ["3.11", "3.12", "3.13", "3.14", "3.15"]
 
 [tool.scikit-build.cmake.define]
 BUILD_TESTING = "OFF"
