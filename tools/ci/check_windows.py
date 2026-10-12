@@ -1,12 +1,13 @@
-"""Build/test the desktop, then validate the packaged SDK and installed wheel."""
+"""Test desktop and Python; build and validate distribution packages only for releases."""
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
-import tarfile
+import time
 import tomllib
 import zipfile
 
@@ -18,17 +19,22 @@ def main():
     parser.add_argument("--dependency-prefix", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--reports", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--release", action="store_true")
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--test-dependencies", type=Path)
     parser.add_argument("--version", required=True)
     parser.add_argument("--generator", default="Visual Studio 17 2022")
     args = parser.parse_args()
+    if args.release != bool(args.output):
+        parser.error("--release and --output must be supplied together")
     if os.name != "nt":
         parser.error("Windows is required")
     source = Path(__file__).resolve().parents[2]
     check(source, "v" + args.version)
     prefix = args.dependency_prefix.resolve(strict=True)
-    work, reports, output = (p.resolve() for p in (args.work, args.reports, args.output))
-    for path in (work, reports, output):
+    work, reports = (p.resolve() for p in (args.work, args.reports))
+    output = args.output.resolve() if args.output else None
+    for path in (work, reports) + ((output,) if output else ()):
         path.mkdir(parents=True, exist_ok=False)
     environment = dict(os.environ, CMAKE_PREFIX_PATH=str(prefix), CMAKE_GENERATOR=args.generator,
                        CMAKE_GENERATOR_PLATFORM="x64", PYTHONDONTWRITEBYTECODE="1")
@@ -40,10 +46,13 @@ def main():
     def run(name, *command, env=None):
         command = list(map(str, command))
         print(f"[{name}] {command}", flush=True)
+        started = datetime.now(timezone.utc).isoformat()
+        start = time.monotonic()
         with (reports / f"{name}.log").open("w", encoding="utf-8") as log:
             result = subprocess.run(command, cwd=work, env=env or environment,
                                     stdout=log, stderr=subprocess.STDOUT)
-        commands.append({"name": name, "command": command, "exit_code": result.returncode})
+        commands.append({"name": name, "command": command, "exit_code": result.returncode,
+                         "started_utc": started, "elapsed_seconds": time.monotonic() - start})
         (reports / "commands.json").write_text(json.dumps(commands, indent=2), encoding="utf-8")
         if result.returncode:
             print((reports / f"{name}.log").read_text(encoding="utf-8", errors="replace")[-16000:])
@@ -55,6 +64,17 @@ def main():
     run("desktop-build", "cmake", "--build", desktop, "--config", "Release")
     run("desktop-tests", "ctest", "--test-dir", desktop, "-C", "Release", "--output-on-failure",
         "--no-tests=error", "--output-junit", reports / "desktop-tests.xml")
+    if args.test_dependencies:
+        run("export-python-dependencies", sys.executable, source / "tools/ci/export_python_dependencies.py",
+            "--dependency-prefix", prefix, "--output", args.test_dependencies.resolve())
+    if not args.release:
+        run("python-api", sys.executable, source / "tools/ci/check_python.py",
+            "--dependency-prefix", prefix, "--work", work / "python", "--reports", reports / "python",
+            "--cpp-example", desktop / "examples/cpp/Release/orbitforge_example.exe")
+        (reports / "passed.json").write_text(json.dumps({
+            "passed": True, "version": args.version, "release": False,
+        }), encoding="utf-8")
+        return
     # Ordinary hosted runners do not provide the Vulkan GPU needed by --verify.
     run("desktop-package", sys.executable, source / "tools/packaging/package_windows.py",
         "--build-dir", desktop, "--dependency-prefix", prefix,
@@ -89,16 +109,15 @@ def main():
     with zipfile.ZipFile(output / f"OrbitForge-{args.version}-sdk-win-x64.zip") as archive:
         archive.extractall(relocated)
     installed = relocated / f"OrbitForge-{args.version}-sdk-win-x64"
-    with tarfile.open(output.parent / "windows-python-dependencies.tar.gz", "x:gz") as archive:
-        archive.add(installed / "dependencies", arcname="dependencies")
     clean = dict(environment)
     clean["PATH"] = os.environ["PATH"]
     clean.pop("CMAKE_PREFIX_PATH", None)
     clean["ORBITFORGE_DATA_HOME"] = str(work / "user-data")
     sdk_environment = dict(clean, PATH=str(installed / "dependencies/bin") + os.pathsep + clean["PATH"])
     for relative in ("tests/packaging/sdk_consumer", "bindings/python/tests", "tests/integration/fixtures",
-                     "tests/reference/time_frames"):
+                     "tests/reference/time_frames", "examples/python"):
         shutil.copytree(source / relative, relocated / relative)
+    shutil.copy2(source / "tools/validation/compare_examples.py", relocated)
     run("sdk-consumer-configure", "cmake", "-S", relocated / "tests/packaging/sdk_consumer",
         "-B", work / "sdk-consumer", "-G", args.generator, "-A", "x64",
         f"-DCMAKE_PREFIX_PATH={installed};{installed / 'dependencies'}",
@@ -120,7 +139,13 @@ def main():
         "import orbitforge, sys; print(orbitforge.__file__); assert orbitforge.__version__ == sys.argv[1]",
         args.version, env=clean)
     run("python-tests", python, "-I", "-m", "unittest", "discover", "-s", relocated / "bindings/python/tests", "-v", env=clean)
-    (reports / "passed.json").write_text(json.dumps({"passed": True, "version": args.version}), encoding="utf-8")
+    for name in ("circular_orbit", "time_frames", "eop_state", "sun_moon", "two_body_scenario"):
+        run(f"example-{name}", python, "-I", relocated / f"examples/python/{name}.py", env=clean)
+    run("cpp-python-parity", python, "-I", relocated / "compare_examples.py", "--cpp-example",
+        desktop / "examples/cpp/Release/orbitforge_example.exe", env=sdk_environment)
+    (reports / "passed.json").write_text(json.dumps({
+        "passed": True, "version": args.version, "release": True,
+    }), encoding="utf-8")
 
 
 if __name__ == "__main__":

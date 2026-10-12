@@ -1,0 +1,83 @@
+name: Python compatibility
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        type: string
+        required: true
+      python-versions:
+        type: string
+        required: true
+      release:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTHONUTF8: '1'
+  VCPKG_DISABLE_METRICS: '1'
+  VCPKG_MAX_CONCURRENCY: '4'
+  CMAKE_BUILD_PARALLEL_LEVEL: '4'
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }} / ${{ inputs.platform }}
+    runs-on: ${{ inputs.platform == 'linux' && 'ubuntu-24.04' || 'windows-2022' }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ${{ fromJSON(inputs.python-versions) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ${{ inputs.platform }}-python-dependencies
+          path: ${{ runner.temp }}/input
+      - name: Test Python API; build and install a wheel only for release
+        shell: python {0}
+        env:
+          DEPENDENCY_ARCHIVE: ${{ inputs.platform }}-python-dependencies.tar.gz
+          CI_SCOPE: ${{ inputs.release && 'release' || 'full' }}
+        run: |
+          import os, pathlib, subprocess, sys, tarfile
+          root = pathlib.Path(os.environ['RUNNER_TEMP'])
+          with tarfile.open(root / 'input' / os.environ['DEPENDENCY_ARCHIVE']) as archive:
+              archive.extractall(root / 'delivery', filter='data')
+          command = [sys.executable, 'tools/ci/check_python.py',
+              '--dependency-prefix', str(root / 'delivery/dependencies'),
+              '--work', str(root / 'python'), '--reports', str(root / 'reports')]
+          if os.environ['CI_SCOPE'] == 'release':
+              command += ['--release', '--output', str(root / 'assets')]
+          subprocess.run(command, check=True)
+      - name: Upload Python release wheel
+        if: inputs.release
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: python-${{ matrix.python }}-${{ inputs.platform }}-release-assets
+          path: ${{ runner.temp }}/assets/*.whl
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+      - name: Summarize command timings
+        if: always()
+        shell: bash
+        run: python tools/ci/summarize_timings.py --reports "$RUNNER_TEMP/reports"
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: python-${{ matrix.python }}-${{ inputs.platform }}-reports
+          path: ${{ runner.temp }}/reports
+          overwrite: true
+          retention-days: 14
