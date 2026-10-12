@@ -1,96 +1,306 @@
 #include "sensor_editor.hpp"
 #include "quantity_editor.hpp"
 #include "workbench_style.hpp"
+#include <QButtonGroup>
 #include <QComboBox>
-#include <QFormLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPainter>
+#include <QPainterPath>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QScrollArea>
 #include <QVBoxLayout>
+#include <algorithm>
+#include <cmath>
+#include <numbers>
+#include <optional>
 
 namespace orbitforge::desktop {
+// A long satellite name must not widen a docked properties page.
+class SensorParentLabel final : public QLabel {
+  public:
+    explicit SensorParentLabel(QWidget *parent) : QLabel(parent) {
+        setTextFormat(Qt::PlainText);
+        setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        setMinimumWidth(0);
+    }
+    void set_name(const QString &name) {
+        name_ = name;
+        setToolTip(name);
+        setAccessibleName(QStringLiteral("所属卫星：%1").arg(name));
+        update_text();
+    }
+
+  protected:
+    void resizeEvent(QResizeEvent *event) override {
+        QLabel::resizeEvent(event);
+        update_text();
+    }
+
+  private:
+    void update_text() { setText(fontMetrics().elidedText(name_, Qt::ElideRight, width())); }
+    QString name_;
+};
+
+// Intrinsic cone cross-section only: no orbital position or ground coverage is implied.
+class SensorAnglePreview final : public QWidget {
+  public:
+    explicit SensorAnglePreview(QWidget *parent) : QWidget(parent) {
+        setObjectName("sensorAnglePreview");
+        setFixedSize(100, 112);
+        setAccessibleName(QStringLiteral("圆锥视场截面示意"));
+    }
+    void set_angle(std::optional<double> degrees) {
+        degrees_ = degrees;
+        setAccessibleDescription(degrees ? QStringLiteral("半角 %1 度，全角 %2 度")
+                                               .arg(*degrees, 0, 'g', 6)
+                                               .arg(*degrees * 2, 0, 'g', 6)
+                                         : QStringLiteral("请输入有效的视场半角"));
+        update();
+    }
+
+  protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        const QPointF apex(width() / 2.0, 20);
+        constexpr double radius = 64;
+        painter.setPen(QPen(QColor("#476072"), 1, Qt::DashLine));
+        painter.drawLine(apex, QPointF(apex.x(), 87));
+        if (degrees_) {
+            // Fit a true-angle sector even for a 90-degree half-angle.
+            const double extent =
+                std::max(1.0, std::sin(*degrees_ * std::numbers::pi / 180) * radius);
+            const double length = radius * std::min(1.0, (width() / 2.0 - 8) / extent);
+            QPainterPath cone;
+            cone.moveTo(apex);
+            cone.arcTo(QRectF(apex.x() - length, apex.y() - length, length * 2, length * 2),
+                       -90 + *degrees_, -*degrees_ * 2);
+            cone.closeSubpath();
+            painter.setPen(QPen(QColor("#89c9e6"), 1.3));
+            painter.setBrush(QColor(100, 190, 224, 32));
+            painter.drawPath(cone);
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(QColor("#dbadc6"), 1.5));
+            painter.drawArc(QRectF(apex.x() - 25, apex.y() - 25, 50, 50), -90 * 16,
+                            qRound(*degrees_ * 16));
+        }
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor("#c3e4f3"));
+        painter.drawEllipse(apex, 3, 3);
+        painter.setPen(QColor("#8fa7b9"));
+        auto font = painter.font();
+        font.setPixelSize(10);
+        painter.setFont(font);
+        painter.drawText(QRect(0, 92, width(), 18), Qt::AlignCenter, QStringLiteral("圆锥截面"));
+    }
+
+  private:
+    std::optional<double> degrees_;
+};
+
 SensorEditor::SensorEditor(QWidget *parent) : QDialog(parent) {
     setObjectName("sensorProperties");
-    resize(440, 550);
+    setWindowIcon(workbench_icon(WorkbenchIcon::focus));
+    setMinimumWidth(320);
+    resize(480, 640);
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
-    auto *scroll = new QScrollArea;
+    root->setSpacing(0);
+    auto *scroll = new QScrollArea(this);
+    scroll->setObjectName("sensorScroll");
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
+    // The form fits the minimum pane width; only vertical scrolling is useful.
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     auto *body = new QWidget;
+    body->setObjectName("sensorFields");
+    body->setMaximumWidth(660);
     auto *layout = new QVBoxLayout(body);
-    layout->setContentsMargins(24, 24, 24, 24);
+    layout->setContentsMargins(16, 20, 16, 20);
     layout->setSpacing(20);
-    auto *title = new QLabel(QStringLiteral("圆锥传感器"));
-    title->setObjectName("panelTitle");
-    layout->addWidget(title);
-    parent_ = new QLabel;
-    parent_->setWordWrap(true);
-    parent_->setTextFormat(Qt::PlainText);
-    parent_->setObjectName("dialogDescription");
-    layout->addWidget(parent_);
-    auto *card = new QFrame;
-    card->setObjectName("formSection");
-    auto *form = new QFormLayout(card);
-    form->setContentsMargins(16, 16, 16, 16);
-    form->setVerticalSpacing(16);
-    form->setRowWrapPolicy(QFormLayout::WrapAllRows);
-    name_ = new QLineEdit;
+
+    auto *heading = new QHBoxLayout;
+    heading->setSpacing(12);
+    auto *icon = new QLabel(body);
+    icon->setObjectName("sensorBadge");
+    icon->setFixedSize(40, 40);
+    icon->setAlignment(Qt::AlignCenter);
+    icon->setPixmap(workbench_icon(WorkbenchIcon::focus, QColor("#a8d9ee"))
+                        .pixmap(QSize(24, 24), devicePixelRatioF()));
+    auto *heading_text = new QVBoxLayout;
+    heading_text->setSpacing(4);
+    title_ = new QLabel(QStringLiteral("插入传感器"), body);
+    title_->setObjectName("sensorTitle");
+    auto *subtitle = new QLabel(QStringLiteral("圆锥视场 · 卫星载荷"), body);
+    subtitle->setObjectName("sensorCaption");
+    heading_text->addWidget(title_);
+    heading_text->addWidget(subtitle);
+    heading->addWidget(icon);
+    heading->addLayout(heading_text, 1);
+    layout->addLayout(heading);
+
+    auto *parent_row = new QFrame(body);
+    parent_row->setObjectName("sensorParent");
+    auto *parent_layout = new QHBoxLayout(parent_row);
+    parent_layout->setContentsMargins(10, 9, 10, 9);
+    parent_layout->setSpacing(8);
+    auto *parent_icon = new QLabel(parent_row);
+    parent_icon->setPixmap(
+        workbench_icon(WorkbenchIcon::satellite).pixmap(QSize(16, 16), devicePixelRatioF()));
+    auto *parent_caption = new QLabel(QStringLiteral("所属卫星"), parent_row);
+    parent_caption->setObjectName("sensorCaption");
+    parent_ = new SensorParentLabel(parent_row);
+    parent_->setObjectName("sensorParentName");
+    parent_layout->addWidget(parent_icon);
+    parent_layout->addWidget(parent_caption);
+    parent_layout->addWidget(parent_, 1);
+    layout->addWidget(parent_row);
+
+    auto *name_row = new QVBoxLayout;
+    name_row->setSpacing(8);
+    auto *name_label = new QLabel(QStringLiteral("传感器名称"), body);
+    name_ = new QLineEdit(body);
     name_->setObjectName("sensorName");
     name_->setMaxLength(16384);
-    form->addRow(QStringLiteral("名称"), name_);
-    angle_ = new QuantityEditor(Unit::degree);
+    name_->setPlaceholderText(QStringLiteral("例如：对地观测仪"));
+    name_->setClearButtonEnabled(true);
+    name_label->setBuddy(name_);
+    name_row->addWidget(name_label);
+    name_row->addWidget(name_);
+    layout->addLayout(name_row);
+
+    auto *fov = new QFrame(body);
+    fov->setObjectName("sensorFov");
+    auto *fov_layout = new QHBoxLayout(fov);
+    fov_layout->setContentsMargins(12, 12, 12, 12);
+    fov_layout->setSpacing(8);
+    auto *angle_fields = new QVBoxLayout;
+    angle_fields->setSpacing(8);
+    auto *angle_label = new QLabel(QStringLiteral("视场半角"), fov);
+    angle_ = new QuantityEditor(Unit::degree, fov);
     angle_->setObjectName("sensorHalfAngle");
     angle_->set_label(QStringLiteral("视场半角"));
     angle_->set_range(.001, 90, Unit::degree);
-    form->addRow(QStringLiteral("视场半角"), angle_);
-    pointing_ = new QComboBox;
-    pointing_->setObjectName("sensorPointing");
-    pointing_->addItems({QStringLiteral("对地心（Nadir）"), QStringLiteral("跟踪地面站")});
-    form->addRow(QStringLiteral("指向"), pointing_);
-    target_ = new QComboBox;
+    angle_label->setBuddy(angle_->findChild<QLineEdit *>("quantityValue"));
+    full_angle_ = new QLabel(fov);
+    full_angle_->setObjectName("sensorFullAngle");
+    full_angle_->setWordWrap(true);
+    angle_fields->addStretch();
+    angle_fields->addWidget(angle_label);
+    angle_fields->addWidget(angle_);
+    angle_fields->addWidget(full_angle_);
+    angle_fields->addStretch();
+    preview_ = new SensorAnglePreview(fov);
+    fov_layout->addLayout(angle_fields, 1);
+    fov_layout->addWidget(preview_);
+    layout->addWidget(fov);
+
+    auto *pointing_layout = new QVBoxLayout;
+    pointing_layout->setSpacing(8);
+    pointing_layout->addWidget(new QLabel(QStringLiteral("指向方式"), body));
+    auto *choices = new QHBoxLayout;
+    choices->setSpacing(8);
+    pointing_ = new QButtonGroup(this);
+    auto *nadir =
+        new QPushButton(workbench_icon(WorkbenchIcon::earth), QStringLiteral("对地心"), body);
+    auto *targeted = new QPushButton(workbench_icon(WorkbenchIcon::ground_station),
+                                     QStringLiteral("跟踪地面站"), body);
+    nadir->setObjectName("sensorNadir");
+    targeted->setObjectName("sensorTargeted");
+    for (auto *button : {nadir, targeted}) {
+        button->setProperty("sensorChoice", true);
+        button->setCheckable(true);
+        button->setAutoDefault(false);
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        button->setMinimumHeight(40);
+        choices->addWidget(button, 1);
+    }
+    pointing_->addButton(nadir, static_cast<int>(application::SensorPointing::nadir));
+    pointing_->addButton(targeted, static_cast<int>(application::SensorPointing::targeted));
+    pointing_layout->addLayout(choices);
+    pointing_hint_ = new QLabel(body);
+    pointing_hint_->setObjectName("sensorCaption");
+    pointing_hint_->setWordWrap(true);
+    pointing_layout->addWidget(pointing_hint_);
+
+    target_row_ = new QWidget(body);
+    target_row_->setObjectName("sensorTargetRow");
+    auto *target_layout = new QVBoxLayout(target_row_);
+    target_layout->setContentsMargins(0, 8, 0, 0);
+    target_layout->setSpacing(8);
+    auto *target_label = new QLabel(QStringLiteral("目标地面站"), target_row_);
+    target_ = new QComboBox(target_row_);
     target_->setObjectName("sensorTarget");
-    form->addRow(QStringLiteral("跟踪目标"), target_);
-    connect(pointing_, &QComboBox::currentIndexChanged, this,
-            [this, form](int i) { form->setRowVisible(target_, i == 1); });
-    layout->addWidget(card);
-    auto *hint = new QLabel(QStringLiteral(
-        "传感器与卫星同位置，继承父对象的轨道。\n\n"
-        "可见性同时满足地面站约束和圆锥视场。跟踪采用理想瞬时指向，暂不模拟姿态机动与转速限制。"));
-    hint->setObjectName("hint");
-    hint->setWordWrap(true);
-    layout->addWidget(hint);
+    target_->setMinimumWidth(0);
+    target_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    target_->setMinimumContentsLength(12);
+    target_label->setBuddy(target_);
+    target_hint_ = new QLabel(target_row_);
+    target_hint_->setObjectName("sensorTargetHint");
+    target_hint_->setWordWrap(true);
+    target_layout->addWidget(target_label);
+    target_layout->addWidget(target_);
+    target_layout->addWidget(target_hint_);
+    pointing_layout->addWidget(target_row_);
+    layout->addLayout(pointing_layout);
     layout->addStretch();
     scroll->setWidget(body);
     root->addWidget(scroll, 1);
-    error_ = new QLabel;
-    error_->setObjectName("inputError");
+
+    auto *footer = new QFrame(this);
+    footer->setObjectName("sensorFooter");
+    auto *footer_layout = new QVBoxLayout(footer);
+    footer_layout->setContentsMargins(16, 12, 16, 14);
+    footer_layout->setSpacing(10);
+    error_ = new QLabel(footer);
+    error_->setObjectName("sensorError");
     error_->setTextFormat(Qt::PlainText);
     error_->setWordWrap(true);
-    error_->setContentsMargins(24, 0, 24, 0);
-    root->addWidget(error_);
+    footer_layout->addWidget(error_);
     auto *buttons = new QHBoxLayout;
-    buttons->setContentsMargins(24, 8, 24, 20);
-    auto *close = new QPushButton(QStringLiteral("关闭"));
-    connect(close, &QPushButton::clicked, this, &QDialog::close);
-    auto *apply_button = new QPushButton(QStringLiteral("应用"));
-    apply_button->setObjectName("applySensor");
-    apply_button->setProperty("primary", true);
-    connect(apply_button, &QPushButton::clicked, this, [this] {
+    buttons->setSpacing(8);
+    close_ = new QPushButton(QStringLiteral("取消"), footer);
+    close_->setObjectName("closeSensor");
+    close_->setAutoDefault(false);
+    apply_ = new QPushButton(QStringLiteral("插入传感器"), footer);
+    apply_->setObjectName("applySensor");
+    apply_->setProperty("primary", true);
+    apply_->setDefault(true);
+    buttons->addStretch();
+    buttons->addWidget(close_);
+    buttons->addWidget(apply_);
+    footer_layout->addLayout(buttons);
+    root->addWidget(footer);
+
+    connect(close_, &QPushButton::clicked, this, &QDialog::close);
+    connect(apply_, &QPushButton::clicked, this, [this] {
         try {
+            const auto value = sensor();
             if (apply)
-                apply(sensor());
-            error_->clear();
+                apply(value);
+            show_error({});
         } catch (const std::exception &e) {
-            error_->setText(QString::fromUtf8(e.what()));
+            show_error(QString::fromUtf8(e.what()));
         }
     });
-    buttons->addStretch();
-    buttons->addWidget(close);
-    buttons->addWidget(apply_button);
-    root->addLayout(buttons);
+    connect(pointing_, &QButtonGroup::idToggled, this, [this](int, bool checked) {
+        if (checked)
+            update_pointing();
+    });
+    connect(target_, &QComboBox::currentIndexChanged, this, [this] { update_pointing(); });
+    connect(angle_, &QuantityEditor::valueChanged, this, [this] { update_preview(); });
+    connect(angle_, &QuantityEditor::unitChanged, this, [this] { update_preview(); });
+    connect(
+        angle_->findChild<QLineEdit *>("quantityValue"), &QLineEdit::textChanged, this,
+        [this] { update_preview(); }, Qt::QueuedConnection);
+    nadir->setChecked(true);
+    show_error({});
+    update_preview();
 }
+
 void SensorEditor::set_sensor(application::ProjectSensor sensor,
                               const application::Project &project, bool creating) {
     original_ = std::move(sensor);
@@ -99,34 +309,77 @@ void SensorEditor::set_sensor(application::ProjectSensor sensor,
     for (const auto &sat : project.satellites)
         if (sat.orbit.object_id == original_.parent_satellite_id)
             parent_name = QString::fromStdString(sat.name());
-    parent_->setText(QStringLiteral("挂载于 %1").arg(parent_name));
+    parent_->set_name(parent_name);
     angle_->set_value(original_.half_angle_rad, Unit::radian);
     target_->clear();
     for (const auto &station : project.ground_stations)
         target_->addItem(QString::fromStdString(station.name()),
                          QString::fromStdString(station.object_id));
-    if (const int i = target_->findData(QString::fromStdString(original_.target_station_id));
-        i >= 0)
-        target_->setCurrentIndex(i);
-    pointing_->setCurrentIndex(-1);
-    pointing_->setCurrentIndex(static_cast<int>(original_.pointing));
-    error_->clear();
+    if (!original_.target_station_id.empty())
+        target_->setCurrentIndex(
+            target_->findData(QString::fromStdString(original_.target_station_id)));
+    else
+        target_->setCurrentIndex(target_->count() > 0 ? 0 : -1);
+    if (auto *button = pointing_->button(static_cast<int>(original_.pointing)))
+        button->setChecked(true);
+    else
+        throw std::invalid_argument("不支持的传感器指向方式。");
+    title_->setText(creating ? QStringLiteral("插入传感器") : QStringLiteral("传感器属性"));
+    apply_->setText(creating ? QStringLiteral("插入传感器") : QStringLiteral("应用更改"));
+    close_->setText(creating ? QStringLiteral("取消") : QStringLiteral("关闭"));
     setWindowTitle(creating
                        ? QStringLiteral("插入传感器")
                        : QString::fromStdString(original_.name()) + QStringLiteral(" · 传感器"));
+    show_error({});
+    update_pointing();
+    update_preview();
 }
+
+void SensorEditor::update_pointing() {
+    const bool targeted =
+        pointing_->checkedId() == static_cast<int>(application::SensorPointing::targeted);
+    target_row_->setVisible(targeted);
+    pointing_hint_->setText(targeted ? QStringLiteral("始终对准目标地面站，采用理想跟踪。")
+                                     : QStringLiteral("指向地球中心，随父卫星一起运动。"));
+    target_->setEnabled(target_->count() > 0);
+    target_->setPlaceholderText(target_->count() == 0 ? QStringLiteral("暂无可用地面站")
+                                                      : QStringLiteral("请选择目标地面站"));
+    target_hint_->setText(target_->count() == 0
+                              ? QStringLiteral("请先在场景中插入地面站。")
+                              : QStringLiteral("原目标不可用，请重新选择地面站。"));
+    target_hint_->setVisible(target_->currentIndex() < 0);
+}
+
+void SensorEditor::update_preview() {
+    try {
+        const auto degrees = angle_->value(Unit::degree);
+        full_angle_->setText(QStringLiteral("全视场 %1°").arg(degrees * 2, 0, 'g', 6));
+        preview_->set_angle(degrees);
+    } catch (const std::exception &) {
+        full_angle_->setText(QStringLiteral("半角范围 0.001–90°"));
+        preview_->set_angle(std::nullopt);
+    }
+}
+
+void SensorEditor::show_error(const QString &text) {
+    error_->setText(text);
+    error_->setVisible(!text.isEmpty());
+}
+
 application::ProjectSensor SensorEditor::sensor() const {
     auto s = original_;
     s.display_name = name_->text().trimmed().toStdString();
     if (s.display_name.empty())
         throw std::invalid_argument("请输入传感器名称。");
     s.half_angle_rad = angle_->value(Unit::radian);
-    s.pointing = static_cast<application::SensorPointing>(pointing_->currentIndex());
+    s.pointing = static_cast<application::SensorPointing>(pointing_->checkedId());
     s.target_station_id = s.pointing == application::SensorPointing::targeted
                               ? target_->currentData().toString().toStdString()
                               : "";
     if (s.pointing == application::SensorPointing::targeted && s.target_station_id.empty())
-        throw std::invalid_argument("请先插入地面站，再选择跟踪目标。");
+        throw std::invalid_argument(target_->count() == 0
+                                        ? "当前场景没有地面站，请先插入地面站，或选择对地心指向。"
+                                        : "请选择目标地面站。");
     return s;
 }
 } // namespace orbitforge::desktop

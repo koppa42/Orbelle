@@ -19,6 +19,8 @@
 #include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
@@ -102,6 +104,180 @@ TEST_F(QuantityTest, PreparingSensorDoesNotShowTemporaryWindows) {
     QCoreApplication::processEvents();
     EXPECT_FALSE(editor.isVisible());
     EXPECT_TRUE(windows.shown.isEmpty()) << windows.shown.join(", ").toStdString();
+}
+TEST_F(QuantityTest, SensorPointingChoicesKeepTargetDraftAndSubmitStableIds) {
+    application::Project project("Scenario", core::Epoch{0}, core::Epoch{120'000'000'000});
+    project.ground_stations.push_back({"station-a", "Same name", {1.2, 0.6, 350}});
+    project.ground_stations.push_back({"station-b", "Same name", {1.3, 0.7, 100}});
+    application::ProjectSensor sensor;
+    sensor.object_id = "sensor";
+    sensor.parent_satellite_id = "satellite";
+    SensorEditor editor;
+    editor.set_sensor(sensor, project, true);
+    auto *name = editor.findChild<QLineEdit *>("sensorName");
+    auto *angle = editor.findChild<QuantityEditor *>("sensorHalfAngle");
+    auto *nadir = editor.findChild<QPushButton *>("sensorNadir");
+    auto *targeted = editor.findChild<QPushButton *>("sensorTargeted");
+    auto *target = editor.findChild<QComboBox *>("sensorTarget");
+    auto *row = editor.findChild<QWidget *>("sensorTargetRow");
+    auto *submit = editor.findChild<QPushButton *>("applySensor");
+    ASSERT_TRUE(name && angle && nadir && targeted && target && row && submit);
+    EXPECT_TRUE(nadir->isChecked());
+    EXPECT_TRUE(row->isHidden());
+    name->setText(QStringLiteral("  对地观测仪  "));
+    text(*angle)->setText("30");
+    choose(*angle, Unit::radian);
+    // The two stations have identical display names; binding must use the stable ID.
+    targeted->click();
+    target->setCurrentIndex(1);
+    EXPECT_FALSE(nadir->isChecked());
+    EXPECT_FALSE(row->isHidden());
+    EXPECT_EQ(editor.sensor().target_station_id, "station-b");
+    nadir->click();
+    EXPECT_TRUE(row->isHidden());
+    EXPECT_TRUE(editor.sensor().target_station_id.empty());
+    targeted->click();
+    EXPECT_EQ(target->currentData().toString(), "station-b");
+    std::optional<application::ProjectSensor> applied;
+    editor.apply = [&](application::ProjectSensor value) { applied = std::move(value); };
+    submit->click();
+    ASSERT_TRUE(applied);
+    EXPECT_EQ(applied->object_id, sensor.object_id);
+    EXPECT_EQ(applied->parent_satellite_id, sensor.parent_satellite_id);
+    EXPECT_EQ(applied->display_name, "对地观测仪");
+    EXPECT_EQ(applied->pointing, application::SensorPointing::targeted);
+    EXPECT_EQ(applied->target_station_id, "station-b");
+    EXPECT_NEAR(applied->half_angle_rad, std::numbers::pi / 6, 1e-14);
+    editor.set_sensor(*applied, project, false);
+    EXPECT_EQ(angle->unit(), Unit::radian);
+    EXPECT_EQ(target->currentData().toString(), "station-b");
+    EXPECT_EQ(submit->text(), QStringLiteral("应用更改"));
+    applied.reset();
+    name->setText("Unsubmitted draft");
+    editor.findChild<QPushButton *>("closeSensor")->click();
+    EXPECT_FALSE(applied);
+    editor.set_sensor(sensor, project, true);
+    EXPECT_EQ(name->text(), "sensor");
+    EXPECT_TRUE(nadir->isChecked());
+    EXPECT_EQ(submit->text(), QStringLiteral("插入传感器"));
+}
+TEST_F(QuantityTest, SensorRejectsInvalidDraftAndNeverRebindsMissingTarget) {
+    application::Project project("Scenario", core::Epoch{0}, core::Epoch{120'000'000'000});
+    application::ProjectSensor sensor;
+    sensor.object_id = "sensor";
+    sensor.parent_satellite_id = "satellite";
+    sensor.pointing = application::SensorPointing::targeted;
+    sensor.target_station_id = "missing-station";
+    SensorEditor editor;
+    editor.set_sensor(sensor, project, false);
+    auto *target = editor.findChild<QComboBox *>("sensorTarget");
+    auto *submit = editor.findChild<QPushButton *>("applySensor");
+    auto *error = editor.findChild<QLabel *>("sensorError");
+    ASSERT_TRUE(target && submit && error);
+    int applications = 0;
+    editor.apply = [&](application::ProjectSensor) { ++applications; };
+    EXPECT_FALSE(target->isEnabled());
+    submit->click();
+    EXPECT_EQ(applications, 0);
+    EXPECT_FALSE(error->isHidden());
+    EXPECT_TRUE(error->text().contains(QStringLiteral("没有地面站")));
+    project.ground_stations.push_back({"other-station", "Station", {1.2, 0.6, 350}});
+    editor.set_sensor(sensor, project, false);
+    EXPECT_TRUE(error->isHidden());
+    EXPECT_TRUE(target->isEnabled());
+    EXPECT_EQ(target->currentIndex(), -1);
+    submit->click();
+    EXPECT_EQ(applications, 0);
+    target->setCurrentIndex(0);
+    auto *angle = editor.findChild<QuantityEditor *>("sensorHalfAngle");
+    ASSERT_TRUE(angle);
+    text(*angle)->setText("91");
+    submit->click();
+    EXPECT_EQ(applications, 0);
+    text(*angle)->setText("30");
+    auto *name = editor.findChild<QLineEdit *>("sensorName");
+    ASSERT_TRUE(name);
+    name->setText(" ");
+    submit->click();
+    EXPECT_EQ(applications, 0);
+    EXPECT_EQ(error->text(), QStringLiteral("请输入传感器名称。"));
+    name->setText("Sensor");
+    submit->click();
+    EXPECT_EQ(applications, 1);
+    EXPECT_TRUE(error->isHidden());
+}
+TEST_F(QuantityTest, SensorLayoutFitsNarrowPanelsAndKeepsActionsVisible) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    application::Project project("Scenario", core::Epoch{0}, core::Epoch{120'000'000'000});
+    application::ProjectSatellite satellite;
+    satellite.orbit.object_id = "satellite";
+    satellite.display_name = "Aurora-01";
+    project.satellites.push_back(satellite);
+    project.ground_stations.push_back({"station", "Ground Station", {1.2, 0.6, 350}});
+    application::ProjectSensor sensor;
+    sensor.object_id = "sensor";
+    sensor.display_name = "对地观测仪";
+    sensor.parent_satellite_id = "satellite";
+    sensor.half_angle_rad = std::numbers::pi / 6;
+    SensorEditor editor;
+    editor.set_sensor(sensor, project, true);
+    auto *scroll = editor.findChild<QScrollArea *>("sensorScroll");
+    auto *targeted = editor.findChild<QPushButton *>("sensorTargeted");
+    auto *submit = editor.findChild<QPushButton *>("applySensor");
+    auto *angle = editor.findChild<QuantityEditor *>("sensorHalfAngle");
+    auto *full_angle = editor.findChild<QLabel *>("sensorFullAngle");
+    ASSERT_TRUE(scroll && targeted && submit && angle && full_angle);
+    const auto capture = qEnvironmentVariable("ORBITFORGE_SENSOR_UI_CAPTURE");
+    if (!capture.isEmpty())
+        ASSERT_TRUE(QDir{}.mkpath(capture));
+    const auto screenshot = [&](const QString &name) {
+        QApplication::processEvents();
+        if (!capture.isEmpty())
+            EXPECT_TRUE(editor.grab().save(capture + "/" + name + ".png"));
+    };
+    editor.resize(480, 640);
+    editor.show();
+    screenshot("sensor-insert");
+    EXPECT_EQ(full_angle->text(), QStringLiteral("全视场 60°"));
+    targeted->setFocus();
+    QKeyEvent press(QEvent::KeyPress, Qt::Key_Space, Qt::NoModifier);
+    QKeyEvent release(QEvent::KeyRelease, Qt::Key_Space, Qt::NoModifier);
+    QApplication::sendEvent(targeted, &press);
+    QApplication::sendEvent(targeted, &release);
+    EXPECT_TRUE(targeted->isChecked());
+    EXPECT_EQ(editor.sensor().target_station_id, "station");
+    screenshot("sensor-targeted");
+    // Long user names must not force the workspace pane wider.
+    project.satellites[0].display_name = std::string(200, 'A');
+    project.ground_stations[0].display_name = std::string(200, 'S');
+    sensor.pointing = application::SensorPointing::targeted;
+    sensor.target_station_id = "station";
+    editor.set_sensor(sensor, project, false);
+    for (const int width : {320, 480, 640}) {
+        editor.resize(width, 400);
+        QApplication::processEvents();
+        EXPECT_EQ(editor.width(), width);
+        EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+        EXPECT_FALSE(scroll->horizontalScrollBar()->isVisible());
+        EXPECT_LE(scroll->widget()->width(), scroll->viewport()->width());
+        scroll->ensureWidgetVisible(editor.findChild<QComboBox *>("sensorTarget"));
+        QApplication::processEvents();
+        const QRect action_rect(submit->mapTo(&editor, QPoint{}), submit->size());
+        EXPECT_TRUE(editor.rect().contains(action_rect));
+        EXPECT_FALSE(scroll->isAncestorOf(submit));
+        screenshot(QStringLiteral("sensor-narrow-%1").arg(width));
+    }
+    editor.resize(360, 640);
+    text(*angle)->setText("invalid");
+    QApplication::processEvents();
+    EXPECT_EQ(full_angle->text(), QStringLiteral("半角范围 0.001–90°"));
+    submit->click();
+    screenshot("sensor-invalid");
+    project.ground_stations.clear();
+    editor.set_sensor(sensor, project, false);
+    submit->click();
+    screenshot("sensor-no-stations");
+    EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
 }
 TEST_F(QuantityTest, PreparingEpochAndValidationDoesNotShowTemporaryWindows) {
     WindowShowObserver windows;

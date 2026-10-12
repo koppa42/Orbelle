@@ -433,6 +433,8 @@ QTreeWidget::item:selected { background: #294357; color: #e8f6ff; }
 QTreeWidget::item:hover:!selected { background: #233341; }
 QTreeWidget::branch { background: #171e27; }
 QTreeWidget::branch:selected, QTreeWidget::branch:hover { background: #171e27; }
+QTreeWidget#sceneObjects::branch:has-children:closed { image: url(:/orbitforge/icons/chevron-right.png); }
+QTreeWidget#sceneObjects::branch:has-children:open { image: url(:/orbitforge/icons/chevron-down.png); }
 QTreeWidget#insertObjectTypes { background: #171e27; border: 1px solid #313e4c; border-radius: 5px; padding: 4px; }
 QTreeWidget#insertObjectTypes::item { height: 24px; padding: 2px 6px; }
 QDialog#insertObjectsDialog QRadioButton { color: #dce5ef; spacing: 8px; }
@@ -603,6 +605,20 @@ QComboBox#reportPlotField, QComboBox#reportPlotObject { background: #202f3d; bor
 QComboBox#reportPlotField:hover, QComboBox#reportPlotObject:hover { border-color: #718fa9; }
 QWidget#dataFooter { background: #171e27; border-top: 1px solid #313e4c; }
 QFrame#formSection { background: #222c38; border: 1px solid #303d4b; border-radius: 10px; }
+QWidget#sensorFields, QScrollArea#sensorScroll { background: #1b222c; }
+QLabel#sensorTitle { color: #eff6fa; font-size: 18px; font-weight: 600; }
+QLabel#sensorCaption { color: #92a9bb; font-size: 12px; }
+QLabel#sensorBadge { background: #243949; border: 1px solid #355267; border-radius: 12px; }
+QFrame#sensorParent { background: #171f29; border: 1px solid #2a3846; border-radius: 6px; }
+QLabel#sensorParentName { color: #c8dce9; }
+QFrame#sensorFov { background: #1d2b38; border: 1px solid #334a5b; border-radius: 8px; }
+QLabel#sensorFullAngle { color: #aacddd; font-size: 12px; }
+QPushButton[sensorChoice="true"] { background: #171f29; border: 1px solid #364957; border-radius: 6px; padding: 4px 8px; color: #a8becf; }
+QPushButton[sensorChoice="true"]:hover { background: #243747; border-color: #658ca3; }
+QPushButton[sensorChoice="true"]:checked { background: #294357; border-color: #84bddb; color: #e4f5ff; }
+QPushButton[sensorChoice="true"]:focus { border-color: #b4e0f3; }
+QFrame#sensorFooter { background: #171f29; border-top: 1px solid #303e4c; }
+QLabel#sensorTargetHint, QLabel#sensorError { color: #deb6c7; font-size: 12px; }
 QFrame#choiceCard { background: #222c38; border: 1px solid #3a4b5a; border-radius: 8px; }
 QFrame#choiceCard[selected="true"] { background: #294357; border-color: #88b8d4; }
 QFrame#choiceCard QLabel, QFrame#choiceCard QRadioButton { background: transparent; border: 0; }
