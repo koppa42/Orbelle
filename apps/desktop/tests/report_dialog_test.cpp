@@ -1,4 +1,5 @@
 #include "../src/viewer/epoch_editor.hpp"
+#include "../src/viewer/object_selection.hpp"
 #include "../src/viewer/report_dialog.hpp"
 #include "../src/viewer/report_plot.hpp"
 #include "../src/viewer/workbench_style.hpp"
@@ -18,7 +19,6 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
-#include <QListWidget>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPlainTextEdit>
@@ -32,6 +32,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QToolButton>
+#include <QTreeWidget>
 #include <QWheelEvent>
 #include <gtest/gtest.h>
 #include <orbitforge/runtime/time_frames.hpp>
@@ -332,7 +333,7 @@ TEST(ReportDialog, ObjectScopeSurvivesTemplateChangesSavedConfigurationsAndProje
     QTimer::singleShot(0, [] {
         auto *chooser = qobject_cast<QDialog *>(QApplication::activeModalWidget());
         ASSERT_TRUE(chooser);
-        EXPECT_FALSE(chooser->findChild<QCheckBox *>("reportScopeAll")->isChecked());
+        EXPECT_FALSE(chooser->findChild<QCheckBox *>("objectSelectionAll")->isChecked());
         chooser->reject();
     });
     dialog.findChild<QPushButton *>("reportChangeScope")->click();
@@ -340,7 +341,7 @@ TEST(ReportDialog, ObjectScopeSurvivesTemplateChangesSavedConfigurationsAndProje
     QTimer::singleShot(0, [] {
         auto *chooser = qobject_cast<QDialog *>(QApplication::activeModalWidget());
         ASSERT_TRUE(chooser);
-        chooser->findChild<QCheckBox *>("reportScopeAll")->setChecked(true);
+        chooser->findChild<QCheckBox *>("objectSelectionAll")->setChecked(true);
         chooser->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
     });
     dialog.findChild<QPushButton *>("reportChangeScope")->click();
@@ -385,7 +386,7 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
     auto *table = dialog.findChild<QTableView *>("reportTable");
     auto *views = dialog.findChild<QTabBar *>("reportViews");
     auto *fields = dialog.findChild<QComboBox *>("reportPlotField");
-    auto *objects = dialog.findChild<QComboBox *>("reportPlotObject");
+    auto *objects = dialog.findChild<ObjectSelectionField *>("reportPlotObject");
     auto *plot = static_cast<ReportPlot *>(dialog.findChild<QWidget *>("reportPlot"));
     auto *export_button = dialog.findChild<QPushButton *>("exportReportCsv");
     ASSERT_EQ(library->count(), static_cast<int>(application::report_kinds.size()));
@@ -428,12 +429,21 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
     EXPECT_LE(sought->tai_nanoseconds(), project.last.tai_nanoseconds());
     dialog.findChild<QToolButton *>("reportPlotReset")->click();
     EXPECT_EQ(plot->visible_interval(), initial);
-    objects->setCurrentIndex(objects->findData("satellite-1"));
+    QTimer::singleShot(0, [] {
+        auto *chooser = qobject_cast<ObjectSelectionDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(chooser);
+        chooser->findChild<QCheckBox *>("objectSelectionAll")->setChecked(false);
+        auto *tree = chooser->findChild<QTreeWidget *>("objectSelectionTree");
+        ASSERT_EQ(tree->topLevelItemCount(), 2);
+        tree->setCurrentItem(tree->topLevelItem(1));
+        chooser->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    objects->click();
     EXPECT_EQ(plot->series_count(), 1U);
     fields->setCurrentIndex(fields->findData("motion.radial_speed", Qt::UserRole + 1));
     EXPECT_EQ(preparations, 1); // A view change must not restart provider sampling.
     EXPECT_EQ(table->model()->rowCount(), 802);
-    objects->setCurrentIndex(0);
+    objects->set_selection({{}, true});
     fields->setCurrentIndex(0);
     EXPECT_FALSE(dialog.findChild<QLineEdit *>("reportName"));
     EXPECT_FALSE(dialog.findChild<QPushButton *>("saveReport"));
@@ -576,12 +586,24 @@ TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
     dialog.result_published = [&](auto) { ++published; };
     dialog.show();
     dialog.select_object("sensor", application::ReportKind::access_intervals);
-    auto *station = dialog.findChild<QComboBox *>("accessStation");
-    auto *target = dialog.findChild<QComboBox *>("accessTarget");
+    auto *station = dialog.findChild<ObjectSelectionField *>("accessStation");
+    auto *target = dialog.findChild<ObjectSelectionField *>("accessTarget");
     auto *generate = dialog.findChild<QPushButton *>("generateReport");
-    EXPECT_EQ(station->currentData().toString(), "station");
-    EXPECT_EQ(target->currentData().toString(), "sensor");
+    EXPECT_EQ(station->id(), "station");
+    EXPECT_EQ(target->id(), "sensor");
     EXPECT_TRUE(target->isVisible());
+    QTimer::singleShot(0, [] {
+        auto *chooser = qobject_cast<ObjectSelectionDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(chooser);
+        auto *tree = chooser->findChild<QTreeWidget *>("objectSelectionTree");
+        ASSERT_EQ(tree->topLevelItemCount(), 1);
+        ASSERT_EQ(tree->topLevelItem(0)->childCount(), 1);
+        EXPECT_EQ(tree->topLevelItem(0)->child(0)->data(0, Qt::UserRole).toString(), "sensor");
+        tree->setCurrentItem(tree->topLevelItem(0));
+        chooser->reject();
+    });
+    target->click();
+    EXPECT_EQ(target->id(), "sensor");
     EXPECT_FALSE(dialog.findChild<QPushButton *>("reportChangeScope")->isVisible());
     const auto run = [&] {
         generate->click();
@@ -599,7 +621,7 @@ TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
     EXPECT_FALSE(views->isTabEnabled(1));
     dialog.findChild<QComboBox *>("reportLibrary")
         ->setCurrentIndex(static_cast<int>(application::ReportKind::aer));
-    EXPECT_EQ(target->currentData().toString(), "sensor");
+    EXPECT_EQ(target->id(), "sensor");
     run();
     EXPECT_EQ(published, 2);
     EXPECT_TRUE(views->isTabEnabled(1));
@@ -622,8 +644,8 @@ TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
     }
     project.sensors.clear();
     dialog.update_project(project, time);
-    EXPECT_EQ(target->currentData().toString(), "sensor");
-    EXPECT_TRUE(target->currentText().contains(QStringLiteral("已删除")));
+    EXPECT_EQ(target->id(), "sensor");
+    EXPECT_TRUE(target->text().contains(QStringLiteral("已删除")));
     run();
     EXPECT_EQ(published, 2); // Never silently substitutes the parent after deletion.
 }

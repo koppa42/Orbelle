@@ -3,7 +3,6 @@
 #include <functional>
 #include <orbitforge/application/project.hpp>
 class QLineEdit;
-class QComboBox;
 class QLabel;
 class QButtonGroup;
 class QPushButton;
@@ -11,6 +10,7 @@ namespace orbitforge::desktop {
 class QuantityEditor;
 class SensorAnglePreview;
 class SensorParentLabel;
+class ObjectSelectionField;
 class SensorEditor final : public QDialog {
   public:
     explicit SensorEditor(QWidget *parent = nullptr);
@@ -26,7 +26,7 @@ class SensorEditor final : public QDialog {
     application::ProjectSensor original_;
     QLineEdit *name_;
     QButtonGroup *pointing_;
-    QComboBox *target_;
+    ObjectSelectionField *target_;
     QuantityEditor *angle_;
     SensorParentLabel *parent_;
     SensorAnglePreview *preview_;

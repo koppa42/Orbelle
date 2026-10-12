@@ -1,5 +1,6 @@
 #include "report_dialog.hpp"
 #include "epoch_editor.hpp"
+#include "object_selection.hpp"
 #include "report_plot.hpp"
 #include "workbench_style.hpp"
 #include <QAbstractTableModel>
@@ -18,7 +19,6 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
-#include <QListWidget>
 #include <QLocale>
 #include <QMenu>
 #include <QPainter>
@@ -224,7 +224,7 @@ struct ReportDialog::Impl {
     QStackedWidget *result_stack;
     QCheckBox *follow;
     QComboBox *frame, *units, *scale;
-    QComboBox *access_station, *access_target;
+    ObjectSelectionField *access_station, *access_target;
     QWidget *access_pair;
     EpochEditor *first, *last;
     QDoubleSpinBox *step;
@@ -238,7 +238,8 @@ struct ReportDialog::Impl {
     QTabBar *views;
     QWidget *plot_page;
     ReportPlot *plot;
-    QComboBox *plot_field, *plot_object;
+    QComboBox *plot_field;
+    ObjectSelectionField *plot_object;
     QLabel *plot_note;
     ReportModel *model;
     ReportDefinition draft;
@@ -311,7 +312,7 @@ struct ReportDialog::Impl {
         scope_label->setWordWrap(true);
         scope_label->setTextFormat(Qt::PlainText);
         scope_row->addWidget(scope_label, 1);
-        scope_button = new QPushButton(QStringLiteral("更改…"), settings);
+        scope_button = new QPushButton(QStringLiteral("选择对象…"), settings);
         scope_button->setObjectName("reportChangeScope");
         scope_row->addWidget(scope_button);
         config->addLayout(scope_row);
@@ -323,9 +324,13 @@ struct ReportDialog::Impl {
         pair_form->setContentsMargins(0, 0, 0, 0);
         pair_form->setVerticalSpacing(12);
         pair_form->setRowWrapPolicy(QFormLayout::WrapAllRows);
-        access_station = new QComboBox(access_pair);
+        access_station = new ObjectSelectionField(access_pair);
+        access_station->set_options({QStringLiteral("选择可见性分析的地面站"), false, {}});
+        access_station->setAccessibleName(QStringLiteral("可见性分析地面站"));
         access_station->setObjectName("accessStation");
-        access_target = new QComboBox(access_pair);
+        access_target = new ObjectSelectionField(access_pair);
+        access_target->set_options({QStringLiteral("选择可见性分析的卫星或传感器"), false, {}});
+        access_target->setAccessibleName(QStringLiteral("可见性分析目标"));
         access_target->setObjectName("accessTarget");
         pair_form->addRow(QStringLiteral("地面站"), access_station);
         pair_form->addRow(QStringLiteral("卫星 / 传感器"), access_target);
@@ -575,14 +580,12 @@ struct ReportDialog::Impl {
         plot_field = new QComboBox(plot_page);
         plot_field->setObjectName("reportPlotField");
         plot_field->setAccessibleName(QStringLiteral("曲线字段"));
-        plot_object = new QComboBox(plot_page);
+        plot_object = new ObjectSelectionField(plot_page);
         plot_object->setObjectName("reportPlotObject");
         plot_object->setAccessibleName(QStringLiteral("曲线对象"));
-        for (auto *combo : {plot_field, plot_object}) {
-            combo->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-            combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-            combo->setMinimumContentsLength(6);
-        }
+        plot_field->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+        plot_field->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        plot_field->setMinimumContentsLength(6);
         plot_field->setToolTip(QStringLiteral("选择绘制的数值字段"));
         plot_object->setToolTip(QStringLiteral("选择比较全部对象或只看单个对象"));
         plot_tools = new QGridLayout;
@@ -616,9 +619,8 @@ struct ReportDialog::Impl {
                 plot->set_field(static_cast<std::size_t>(plot_field->currentData().toInt()),
                                 plot_field->currentText());
         });
-        QObject::connect(plot_object, &QComboBox::currentIndexChanged, owner, [this] {
-            plot->set_object(plot_object->currentData().toString().toStdString());
-        });
+        QObject::connect(plot_object, &ObjectSelectionField::selectionChanged, owner,
+                         [this] { plot->set_object(plot_object->id()); });
         QObject::connect(views, &QTabBar::currentChanged, owner, [this] { select_view(); });
         split->setStretchFactor(0, 0);
         split->setStretchFactor(1, 1);
@@ -649,11 +651,10 @@ struct ReportDialog::Impl {
         });
         for (auto *combo : {frame, units, scale})
             QObject::connect(combo, &QComboBox::currentIndexChanged, owner, [this] { edit(); });
-        for (auto *combo : {access_station, access_target})
-            QObject::connect(combo, &QComboBox::currentIndexChanged, owner, [this] {
+        for (auto *field : {access_station, access_target})
+            QObject::connect(field, &ObjectSelectionField::selectionChanged, owner, [this] {
                 if (!loading && report_is_access(draft.kind)) {
-                    scope_ids = {access_station->currentData().toString().toStdString(),
-                                 access_target->currentData().toString().toStdString()};
+                    scope_ids = {access_station->id(), access_target->id()};
                     refresh_scope();
                     edit();
                 }
@@ -821,78 +822,19 @@ struct ReportDialog::Impl {
                                 last->findChild<QLineEdit *>("epochValue")->text());
     }
     void choose_scope() {
-        QDialog chooser(owner);
-        chooser.setObjectName("reportScopeDialog");
-        chooser.setWindowTitle(QStringLiteral("选择报告对象"));
-        chooser.resize(440, 480);
-        auto *layout = new QVBoxLayout(&chooser);
-        layout->setContentsMargins(20, 20, 20, 20);
-        layout->setSpacing(12);
-        auto *all = new QCheckBox(QStringLiteral("所有适用对象（包括以后添加的对象）"), &chooser);
-        all->setObjectName("reportScopeAll");
-        all->setChecked(scope_ids.empty());
-        layout->addWidget(all);
-        auto *search = new QLineEdit(&chooser);
-        search->setPlaceholderText(QStringLiteral("查找对象…"));
-        layout->addWidget(search);
-        auto *list = new QListWidget(&chooser);
-        list->setObjectName("reportScopeObjects");
-        layout->addWidget(list, 1);
-        auto remaining = scope_ids;
-        const auto append = [&](const std::string &id, const QString &label, WorkbenchIcon icon) {
-            auto *item = new QListWidgetItem(workbench_icon(icon), label, list);
-            item->setData(Qt::UserRole, text(id));
-            item->setToolTip(text(id));
-            item->setCheckState(std::find(scope_ids.begin(), scope_ids.end(), id) != scope_ids.end()
-                                    ? Qt::Checked
-                                    : Qt::Unchecked);
-            std::erase(remaining, id);
-        };
-        for (const auto &satellite : project.satellites)
-            append(satellite.orbit.object_id, text(satellite.name()), WorkbenchIcon::satellite);
-        for (const auto &station : project.ground_stations)
-            append(station.object_id, text(station.name()), WorkbenchIcon::ground_station);
-        const auto missing = remaining;
-        for (const auto &id : missing)
-            append(id, text(id) + QStringLiteral("（已删除）"), WorkbenchIcon::properties);
-        list->setEnabled(!all->isChecked());
-        search->setEnabled(!all->isChecked());
-        QObject::connect(all, &QCheckBox::toggled, &chooser, [=](bool checked) {
-            list->setEnabled(!checked);
-            search->setEnabled(!checked);
-        });
-        QObject::connect(search, &QLineEdit::textChanged, &chooser, [list](const QString &query) {
-            for (int i = 0; i < list->count(); ++i)
-                list->item(i)->setHidden(
-                    !list->item(i)->text().contains(query, Qt::CaseInsensitive));
-        });
-        auto *error = note({}, &chooser);
-        error->setObjectName("inputError");
-        layout->addWidget(error);
-        auto *buttons =
-            new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &chooser);
-        buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("应用"));
-        buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
-        layout->addWidget(buttons);
-        std::vector<std::string> selected;
-        QObject::connect(buttons, &QDialogButtonBox::rejected, &chooser, &QDialog::reject);
-        QObject::connect(buttons, &QDialogButtonBox::accepted, &chooser, [&] {
-            selected.clear();
-            if (!all->isChecked()) {
-                for (int i = 0; i < list->count(); ++i)
-                    if (list->item(i)->checkState() == Qt::Checked)
-                        selected.push_back(
-                            list->item(i)->data(Qt::UserRole).toString().toStdString());
-                if (selected.empty()) {
-                    error->setText(QStringLiteral("请选择至少一个对象。"));
-                    return;
-                }
-            }
-            chooser.accept();
-        });
+        auto choices =
+            project_object_choices(project, {ObjectKind::satellite, ObjectKind::ground_station});
+        if (draft.kind == ReportKind::ground_stations)
+            choices = project_object_choices(project, {ObjectKind::ground_station});
+        else if (report_satellites_only(draft.kind))
+            choices = project_object_choices(project, {ObjectKind::satellite});
+        ObjectSelectionDialog chooser(std::move(choices),
+                                      {QStringLiteral("选择报告适用对象"), true,
+                                       QStringLiteral("全部适用对象（含以后新增）")},
+                                      {scope_ids, scope_ids.empty()}, owner);
         if (chooser.exec() != QDialog::Accepted)
             return;
-        scope_ids = std::move(selected);
+        scope_ids = chooser.selection().ids;
         refresh_scope();
         if (!compatible(draft.kind)) {
             const auto next = draft.kind == ReportKind::scenario_summary
@@ -928,33 +870,21 @@ struct ReportDialog::Impl {
     }
     void fill_access_pair(bool preserve_missing) {
         const QSignalBlocker station_guard(access_station), target_guard(access_target);
-        access_station->clear();
-        access_target->clear();
-        for (const auto &station : project.ground_stations)
-            access_station->addItem(text(station.name()), text(station.object_id));
-        for (const auto &satellite : project.satellites) {
-            access_target->addItem(text(satellite.name()), text(satellite.orbit.object_id));
-            for (const auto &sensor : project.sensors)
-                if (sensor.parent_satellite_id == satellite.orbit.object_id)
-                    access_target->addItem(text(satellite.name() + " / " + sensor.name()),
-                                           text(sensor.object_id));
-        }
+        access_station->set_objects(project_object_choices(project, {ObjectKind::ground_station}));
+        access_target->set_objects(
+            project_object_choices(project, {ObjectKind::satellite, ObjectKind::sensor}));
         if (preserve_missing && scope_ids.size() == 2) {
-            const auto select = [](QComboBox *combo, const std::string &id) {
-                if (combo->findData(text(id)) < 0)
-                    combo->addItem(text(id) + QStringLiteral("（已删除）"), text(id));
-                combo->setCurrentIndex(combo->findData(text(id)));
-            };
-            select(access_station, scope_ids[0]);
-            select(access_target, scope_ids[1]);
+            access_station->set_id(scope_ids[0]);
+            access_target->set_id(scope_ids[1]);
         } else {
-            for (auto *combo : {access_station, access_target})
+            for (auto *field : {access_station, access_target}) {
+                field->set_id(field->objects().empty() ? "" : field->objects().front().id);
                 for (const auto &id : scope_ids)
-                    if (const auto index = combo->findData(text(id)); index >= 0)
-                        combo->setCurrentIndex(index);
+                    if (field->contains(id))
+                        field->set_id(id);
+            }
         }
-        scope_ids = {access_station->currentData().toString().toStdString(),
-                     access_target->currentData().toString().toStdString()};
+        scope_ids = {access_station->id(), access_target->id()};
     }
     void choose(int row) {
         if (row < 0 || loading)
@@ -1048,8 +978,7 @@ struct ReportDialog::Impl {
         d.object_ids =
             d.kind == ReportKind::scenario_summary ? std::vector<std::string>{} : scope_ids;
         if (report_is_access(d.kind))
-            d.object_ids = {access_station->currentData().toString().toStdString(),
-                            access_target->currentData().toString().toStdString()};
+            d.object_ids = {access_station->id(), access_target->id()};
         d.follow_scenario = follow->isChecked();
         if (report_is_sampled(d.kind) && !d.follow_scenario) {
             d.first = first->epoch();
@@ -1229,10 +1158,11 @@ struct ReportDialog::Impl {
     void prepare_plot() {
         const auto &r = *model->result;
         const auto previous_field = plot_field->currentData(Qt::UserRole + 1).toString();
-        const auto previous_object = plot_object->currentData().toString();
+        const auto previous_object = plot_object->id();
         const QSignalBlocker fields_guard(plot_field), objects_guard(plot_object);
         plot_field->clear();
-        plot_object->clear();
+        plot_object->set_objects({});
+        plot_object->set_id({});
         const bool sampled = report_is_sampled(r.definition.kind) &&
                              r.definition.kind != ReportKind::access_intervals;
         if (sampled) {
@@ -1252,20 +1182,27 @@ struct ReportDialog::Impl {
             // A compact legend remains legible for up to twelve objects. Larger scopes keep
             // their complete table/CSV; the chart explicitly asks the user to choose an object.
             std::map<std::string, std::string> objects;
-            std::map<std::string, int> names;
             for (const auto &row : r.table.rows())
                 objects.try_emplace(std::get<std::string>(row[0]), std::get<std::string>(row[1]));
+            std::map<std::string, ObjectKind> kinds;
+            for (const auto &choice : project_object_choices(project))
+                kinds.emplace(choice.id, choice.kind);
+            std::vector<ObjectChoice> choices;
+            // Result names and IDs belong to the immutable table, even after project edits.
             for (const auto &[id, object_name] : objects)
-                ++names[object_name];
-            if (objects.size() <= 12)
-                plot_object->addItem(QStringLiteral("全部对象（%1）").arg(objects.size()),
-                                     QString{});
-            for (const auto &[id, object_name] : objects) {
-                const bool duplicate_name = names[object_name] > 1;
-                plot_object->addItem(text(object_name) +
-                                         (duplicate_name ? " [" + text(id) + "]" : QString{}),
-                                     text(id));
-            }
+                choices.push_back(
+                    {id, text(object_name), kinds.contains(id) ? kinds.at(id) : ObjectKind::other});
+            plot_object->set_options({QStringLiteral("选择曲线显示对象"), false,
+                                      objects.size() <= 12
+                                          ? QStringLiteral("全部结果对象（%1）").arg(objects.size())
+                                          : QString{}});
+            plot_object->set_objects(std::move(choices));
+            if (plot_object->contains(previous_object))
+                plot_object->set_id(previous_object);
+            else if (objects.size() <= 12)
+                plot_object->set_selection({{}, true});
+            else
+                plot_object->set_id(objects.begin()->first);
             plot_note->setText(
                 objects.size() > 12
                     ? QStringLiteral(
@@ -1279,11 +1216,9 @@ struct ReportDialog::Impl {
             if (index < 0 && r.definition.kind == ReportKind::aer)
                 index = plot_field->findData("aer.elevation", Qt::UserRole + 1);
             plot_field->setCurrentIndex(std::max(0, index));
-            plot_object->setCurrentIndex(std::max(0, plot_object->findData(previous_object)));
         }
         plot->set_result(model->result, static_cast<std::size_t>(plot_field->currentData().toInt()),
-                         plot_field->currentText(),
-                         plot_object->currentData().toString().toStdString());
+                         plot_field->currentText(), plot_object->id());
         views->setTabEnabled(1, sampled);
         if (!sampled)
             views->setCurrentIndex(0);

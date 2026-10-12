@@ -36,6 +36,7 @@ if(ORBITFORGE_WITH_VSG)
         src/viewer/insert_object_dialog.cpp src/viewer/insert_object_dialog.hpp
         src/viewer/ground_station_editor.cpp src/viewer/ground_station_editor.hpp
         src/viewer/sensor_editor.cpp src/viewer/sensor_editor.hpp
+        src/viewer/object_selection.cpp src/viewer/object_selection.hpp
         src/viewer/epoch_editor.cpp src/viewer/ground_map.cpp src/viewer/workspace.cpp
         src/viewer/workbench_profile.cpp src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
         src/viewer/startup_splash.cpp src/viewer/startup_splash.hpp
@@ -48,6 +49,19 @@ if(ORBITFORGE_WITH_VSG)
         ORBITFORGE_ROCKY_VERSION="${rocky_VERSION}"
         ORBITFORGE_VSGQT_VERSION="${vsgQt_VERSION}")
     if(BUILD_TESTING)
+        add_executable(orbitforge_object_selection_tests tests/object_selection_test.cpp
+            src/viewer/object_selection.cpp src/viewer/object_selection.hpp src/viewer/workbench_style.cpp)
+        set_target_properties(orbitforge_object_selection_tests PROPERTIES AUTOMOC ON)
+        qt_add_resources(orbitforge_object_selection_tests "object_selection_icons" PREFIX "/orbitforge"
+            BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+            FILES resources/icons/chevron-down.png resources/icons/chevron-right.png)
+        target_link_libraries(orbitforge_object_selection_tests PRIVATE OrbitForge::Application Qt6::Widgets GTest::gtest_main)
+        orbitforge_warnings(orbitforge_object_selection_tests)
+        orbitforge_copy_runtime_dlls(orbitforge_object_selection_tests)
+        gtest_discover_tests(orbitforge_object_selection_tests DISCOVERY_MODE PRE_TEST
+            TEST_PREFIX "desktop." PROPERTIES TIMEOUT 20
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+            ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbitforge_welcome_tests tests/welcome_page_test.cpp
             src/viewer/welcome_page.cpp src/viewer/workbench_style.cpp)
         qt_add_resources(orbitforge_welcome_tests "welcome_resources" PREFIX "/orbitforge"
@@ -95,10 +109,11 @@ if(ORBITFORGE_WITH_VSG)
         add_executable(orbitforge_quantity_tests tests/quantity_editor_test.cpp
             src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
             src/viewer/ground_station_editor.cpp src/viewer/sensor_editor.cpp
+            src/viewer/object_selection.cpp src/viewer/object_selection.hpp
             src/viewer/orbit_editor.cpp src/viewer/track_style_editor.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp)
         set_target_properties(orbitforge_quantity_tests PROPERTIES AUTOMOC ON)
         qt_add_resources(orbitforge_quantity_tests "quantity_icons" PREFIX "/orbitforge"
-            BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/icons/chevron-down.png)
+            BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/icons/chevron-down.png resources/icons/chevron-right.png)
         target_compile_definitions(orbitforge_quantity_tests PRIVATE
             ORBITFORGE_TEST_EOP="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json")
         target_link_libraries(orbitforge_quantity_tests PRIVATE
@@ -112,9 +127,11 @@ if(ORBITFORGE_WITH_VSG)
     endif()
     if(BUILD_TESTING AND ORBITFORGE_WITH_ERFA)
         add_executable(orbitforge_report_ui_tests tests/report_dialog_test.cpp
-            src/viewer/report_dialog.cpp src/viewer/report_plot.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp src/viewer/workspace.cpp)
+            src/viewer/report_dialog.cpp src/viewer/report_plot.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp src/viewer/workspace.cpp
+            src/viewer/object_selection.cpp src/viewer/object_selection.hpp)
+        set_target_properties(orbitforge_report_ui_tests PROPERTIES AUTOMOC ON)
         qt_add_resources(orbitforge_report_ui_tests "report_icons" PREFIX "/orbitforge"
-            BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/icons/chevron-down.png)
+            BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/icons/chevron-down.png resources/icons/chevron-right.png)
         target_link_libraries(orbitforge_report_ui_tests PRIVATE OrbitForge::Runtime Qt6::Widgets GTest::gtest_main)
         target_compile_definitions(orbitforge_report_ui_tests PRIVATE
             ORBITFORGE_ACCESS_EOP="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json")
