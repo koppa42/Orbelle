@@ -96,7 +96,7 @@ class DataTreeWidget final : public QTreeWidget {
   protected:
     void drawBranches(QPainter *painter, const QRect &rect,
                       const QModelIndex &index) const override {
-        painter->fillRect(rect, QColor("#171e2c"));
+        painter->fillRect(rect, QColor("#171e27"));
         if (!model()->hasChildren(index))
             return;
         painter->save();
@@ -122,16 +122,16 @@ class DataItemDelegate final : public QStyledItemDelegate {
         const auto bounds = option.rect.adjusted(2, 3, -2, -3);
         const bool selected = option.state & QStyle::State_Selected;
         const bool hover = option.state & QStyle::State_MouseOver;
-        painter->setPen(option.state & QStyle::State_HasFocus ? QColor("#a3afff")
+        painter->setPen(option.state & QStyle::State_HasFocus ? QColor("#95cdec")
                                                               : Qt::transparent);
-        painter->setBrush(QColor(selected ? "#303b5d" : hover ? "#252f45" : "#171e2c"));
+        painter->setBrush(QColor(selected ? "#294357" : hover ? "#233341" : "#171e27"));
         painter->drawRoundedRect(bounds, 7, 7);
         const bool child = index.parent().isValid();
         const auto icon = child ? WorkbenchIcon::database
                           : index.data(Qt::UserRole).toInt() == static_cast<int>(DataProduct::utc)
                               ? WorkbenchIcon::clock
                               : WorkbenchIcon::earth;
-        workbench_icon(icon, QColor(selected ? "#c0c9ff" : "#8e9ebb"))
+        workbench_icon(icon, QColor(selected ? "#b6def3" : "#8e9ebb"))
             .paint(painter, QRect(bounds.left() + 12, bounds.top() + 12, 18, 18));
         const auto left = bounds.left() + 40;
         const auto width = bounds.right() - left - 8;
@@ -140,18 +140,18 @@ class DataItemDelegate final : public QStyledItemDelegate {
         title_font.setPixelSize(13);
         title_font.setWeight(QFont::DemiBold);
         painter->setFont(title_font);
-        painter->setPen(QColor(selected ? "#eff2ff" : "#d0d9eb"));
+        painter->setPen(QColor(selected ? "#eff6fa" : "#d0d9eb"));
         painter->drawText(QRect(left, bounds.top() + 8, width, 22), Qt::AlignVCenter,
                           painter->fontMetrics().elidedText(lines.value(0), Qt::ElideRight, width));
         title_font.setPixelSize(11);
         title_font.setWeight(QFont::Normal);
         painter->setFont(title_font);
         painter->setPen(QColor(index.data(Qt::UserRole + 1).toBool() ? "#e6c68b"
-                               : selected                            ? "#b4c2e6"
-                                                                     : "#93a2bd"));
+                               : selected                            ? "#b7d1e3"
+                                                                     : "#a0b6c8"));
         painter->drawText(QRect(left, bounds.top() + 32, width, 17), Qt::AlignVCenter,
                           painter->fontMetrics().elidedText(lines.value(1), Qt::ElideRight, width));
-        painter->setPen(QColor("#98a8c3"));
+        painter->setPen(QColor("#a9c0d0"));
         painter->drawText(QRect(left, bounds.top() + 52, width, 17), Qt::AlignVCenter,
                           painter->fontMetrics().elidedText(lines.value(2), Qt::ElideRight, width));
         painter->restore();
@@ -167,8 +167,8 @@ class PriorityDelegate final : public QStyledItemDelegate {
         const auto bounds = option.rect.adjusted(1, 4, -1, -4);
         const bool selected = option.state & QStyle::State_Selected;
         const bool hover = option.state & QStyle::State_MouseOver;
-        painter->setPen(QColor(selected ? "#8493d1" : "#35425c"));
-        painter->setBrush(QColor(selected ? "#2a3451" : hover ? "#252f45" : "#20283a"));
+        painter->setPen(QColor(selected ? "#91bed6" : "#3a4b5a"));
+        painter->setBrush(QColor(selected ? "#273f50" : hover ? "#233341" : "#222c38"));
         painter->drawRoundedRect(bounds, 8, 8);
         painter->setPen(Qt::NoPen);
         painter->setBrush(QColor("#8e9ebb"));
@@ -180,7 +180,7 @@ class PriorityDelegate final : public QStyledItemDelegate {
         font.setPixelSize(14);
         font.setWeight(QFont::DemiBold);
         painter->setFont(font);
-        painter->setPen(QColor("#aebbf0"));
+        painter->setPen(QColor("#aed4e8"));
         painter->drawText(QRect(bounds.left() + 33, bounds.top(), 24, bounds.height()),
                           Qt::AlignCenter, QString::number(index.row() + 1));
         const auto lines = index.data().toString().split('\n');
@@ -192,7 +192,7 @@ class PriorityDelegate final : public QStyledItemDelegate {
         font.setPixelSize(12);
         font.setWeight(QFont::Normal);
         painter->setFont(font);
-        painter->setPen(QColor("#a1aec7"));
+        painter->setPen(QColor("#aebeca"));
         painter->drawText(QRect(left, bounds.top() + 40, width, 20), Qt::AlignVCenter,
                           painter->fontMetrics().elidedText(lines.value(1), Qt::ElideRight, width));
         painter->restore();

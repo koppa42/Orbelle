@@ -1,6 +1,8 @@
 #pragma once
 #include "display_settings.hpp"
 #include "orbit_scene.hpp"
+#include <QCache>
+#include <QElapsedTimer>
 #include <QImage>
 #include <QPainterPath>
 #include <QTimer>
@@ -109,6 +111,20 @@ class GroundMap final : public QWidget {
         bool complete = true;
         bool preview = false;
     };
+    void paint_base(QPainter &p, const Raster *display);
+    struct BaseKey {
+        QTransform transform;
+        QSize size;
+        double ratio = 1;
+        qint64 background = 0, trails = 0;
+        bool grid = true;
+        QFont font;
+        bool operator==(const BaseKey &) const = default;
+    };
+    BaseKey base_key_;
+    QImage base_image_;
+    QElapsedTimer view_stable_;
+    QCache<QString, QImage> labels_cache_{4096}; // KiB; bounded independently of object count.
     Raster raster_request(double margin = 160) const;
     Raster preview_request() const;
     QTransform raster_transform(const Raster &raster) const;

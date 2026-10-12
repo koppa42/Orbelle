@@ -383,7 +383,7 @@ class Workbench final : public QMainWindow {
                 commands_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
                 auto *symbol = new QLabel;
                 symbol->setPixmap(
-                    workbench_icon(WorkbenchIcon::orbit, QColor("#74b9ee")).pixmap(22, 22));
+                    workbench_icon(WorkbenchIcon::orbit, QColor("#aad5ee")).pixmap(22, 22));
                 commands_->addWidget(symbol);
                 auto *name = new QLabel("OrbitForge");
                 name->setObjectName("brand");

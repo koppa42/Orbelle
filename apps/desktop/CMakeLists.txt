@@ -48,6 +48,17 @@ if(ORBITFORGE_WITH_VSG)
         ORBITFORGE_ROCKY_VERSION="${rocky_VERSION}"
         ORBITFORGE_VSGQT_VERSION="${vsgQt_VERSION}")
     if(BUILD_TESTING)
+        add_executable(orbitforge_welcome_tests tests/welcome_page_test.cpp
+            src/viewer/welcome_page.cpp src/viewer/workbench_style.cpp)
+        qt_add_resources(orbitforge_welcome_tests "welcome_resources" PREFIX "/orbitforge"
+            BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/startup/star-gazing.png)
+        target_link_libraries(orbitforge_welcome_tests PRIVATE Qt6::Widgets GTest::gtest_main)
+        orbitforge_warnings(orbitforge_welcome_tests)
+        orbitforge_copy_runtime_dlls(orbitforge_welcome_tests)
+        gtest_discover_tests(orbitforge_welcome_tests DISCOVERY_MODE PRE_TEST
+            TEST_PREFIX "desktop." PROPERTIES TIMEOUT 10
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+            ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbitforge_data_center_tests tests/data_center_test.cpp src/viewer/eop_catalog.cpp)
         target_compile_definitions(orbitforge_data_center_tests PRIVATE
             ORBITFORGE_TEST_TIME="${PROJECT_SOURCE_DIR}/data/samples/time/iers_leap_seconds_2026_07.dat"

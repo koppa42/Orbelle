@@ -233,15 +233,15 @@ void ReportPlot::layout_plot() {
     }
 }
 void ReportPlot::draw(QPainter &p, bool interaction) const {
-    p.fillRect(rect(), QColor("#171e2c"));
+    p.fillRect(rect(), QColor("#171e27"));
     p.setRenderHint(QPainter::Antialiasing);
     p.setFont(font());
-    p.setPen(QColor("#e4e9fa"));
+    p.setPen(QColor("#e4edf4"));
     const auto fm = fontMetrics();
     p.drawText(QRect(16, 10, width() - 32, 28), Qt::AlignLeft | Qt::AlignVCenter,
                fm.elidedText(label_, Qt::ElideRight, width() - 32));
     if (series_.empty()) {
-        p.setPen(QColor("#92a3bd"));
+        p.setPen(QColor("#a0b6c8"));
         p.drawText(rect(), Qt::AlignCenter, QStringLiteral("此结果没有可绘制的时间序列"));
         return;
     }
@@ -261,9 +261,9 @@ void ReportPlot::draw(QPainter &p, bool interaction) const {
     const auto y_ticks = static_cast<int>(std::round((high_ - low_) / y_step_));
     for (int i = 0; i <= y_ticks; ++i) {
         const auto y = plot_.bottom() - plot_.height() * i / y_ticks;
-        p.setPen(QPen(QColor("#2b354a"), 1));
+        p.setPen(QPen(QColor("#303e4e"), 1));
         p.drawLine(QPointF(plot_.left(), y), QPointF(plot_.right(), y));
-        p.setPen(QColor("#92a3bd"));
+        p.setPen(QColor("#a0b6c8"));
         p.drawText(QRectF(2, y - fm.height() / 2.0, plot_.left() - 10, fm.height()),
                    Qt::AlignRight | Qt::AlignVCenter, axis_number(low_ + y_step_ * i, y_step_));
     }
@@ -276,9 +276,9 @@ void ReportPlot::draw(QPainter &p, bool interaction) const {
             break;
         const auto x =
             plot_.left() + plot_.width() * (value * time_scale - left_) / (right_ - left_);
-        p.setPen(QPen(QColor("#263044"), 1));
+        p.setPen(QPen(QColor("#293746"), 1));
         p.drawLine(QPointF(x, plot_.top()), QPointF(x, plot_.bottom()));
-        p.setPen(QColor("#92a3bd"));
+        p.setPen(QColor("#a0b6c8"));
         const auto align = x - plot_.left() < 30    ? Qt::AlignLeft
                            : plot_.right() - x < 30 ? Qt::AlignRight
                                                     : Qt::AlignHCenter;

@@ -21,6 +21,18 @@
 5. 按 100%、150%、200% 缩放分别运行，记录逻辑尺寸、devicePixelRatio 和实际交换链尺寸。自动缩放测试不代替跨物理显示器移动测试，后者另行记录。
 6. 冷启动、显卡/图形数据缺失、初始化失败和退出路径可定位，不能只有退出码 0 而没有实际呈现。
 
+## 日常工作台交互分析
+
+日常工作台的二维绘制与交互分析使用独立的小规模协议：
+
+```powershell
+python tools/validation/run_workbench_profile.py --executable out/build/desktop-graphics/apps/desktop/Release/orbitforge_desktop.exe --dependency-prefix out/dependencies/installed/x64-windows --output out/validation/workbench-24-before --satellites 24 --scale 1.5
+```
+
+在同一设备、相同采样轨迹、卫星数、窗口大小和实际 DPI 下运行修改前后的 Release 程序，每次使用新的输出目录。可再以96颗卫星比较较密集的场景。计时期间不同时构建、运行测试或启动另一图形任务；记录 `run-info.json` 中的程序散列及 `profile.json` 的实际尺寸和 `device_pixel_ratio`。`--scale` 会与系统缩放相乘，不代表最终 DPI。
+
+比较 `map_paint_ms` 的平均值及 P95，并分别查看平移、播放、缩放和并排播放。`map_background_ms`、`map_composite_ms`、轨迹工作线程耗时用于定位开销；悬停只重绘坐标栏，不应与整幅地图绘制混在一起比较。缩放后的 `map_quality_restored_after_zoom` 必须为真。窗口隐藏、缓存更新、字体和 DPI 变化另做正确性检查。这些是 GUI CPU 计时，不能当作 GPU 帧时间、输入到屏幕延迟或万星验收结果。
+
 ## 性能验收保留项
 
 正式性能负载仍以 `benchmarks/scenarios/windows_10k_two_views.json` 为准：10,000 颗动态卫星，两个各 1280×720 的实际渲染视窗；每视窗固定最多 100 条轨迹、200 个标签。实际轨迹细分、标签规则、地理数据/LOD、采样时长和重复次数须在测量前写入场景清单。
