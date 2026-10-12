@@ -46,6 +46,7 @@ class GroundMap final : public QWidget {
     void set_ground_stations(const std::vector<application::ProjectGroundStation> &stations);
     void set_snapshot(const visualization::RenderSnapshot &snapshot);
     void set_selection(std::optional<std::size_t> index);
+    void set_access_link(std::optional<std::pair<std::size_t, std::size_t>> pair, bool visible);
     void set_display(std::size_t index, const DisplaySettings &settings, core::Epoch first,
                      core::Epoch last);
     void set_sun_direction(const std::array<double, 3> &direction);
@@ -135,6 +136,8 @@ class GroundMap final : public QWidget {
     std::vector<Point> points_;
     std::map<std::string, QString> station_names_;
     std::optional<std::size_t> selected_;
+    std::optional<std::pair<std::size_t, std::size_t>> access_pair_;
+    bool access_visible_ = false;
     core::Epoch epoch_{0};
     double zoom_ = 1;
     QPointF pan_, press_, last_mouse_;

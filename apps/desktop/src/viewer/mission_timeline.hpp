@@ -16,6 +16,7 @@ class MissionTimeline final : public QSlider {
     void set_scale(CalendarScale scale);
     void set_time_provider(std::shared_ptr<const core::ITimeProvider> time);
     void set_show_object_interval(bool show);
+    void set_access_intervals(std::vector<std::pair<qint64, qint64>> intervals, QString label);
     void reset_view();
     void zoom(double factor);
     void center_current();
@@ -54,6 +55,8 @@ class MissionTimeline final : public QSlider {
     double drag_x_ = 0;
     Drag drag_ = Drag::none;
     QString scenario_, object_;
+    QString access_label_;
+    std::vector<std::pair<qint64, qint64>> access_intervals_;
     bool show_object_interval_ = false;
     CalendarScale scale_ = CalendarScale::utc;
     std::shared_ptr<const core::ITimeProvider> time_;

@@ -64,6 +64,21 @@ GroundStationEditor::GroundStationEditor(QWidget *parent) : QDialog(parent) {
     hint->setObjectName("hint");
     hint->setWordWrap(true);
     body->addWidget(hint);
+    auto *constraints = new QFrame;
+    constraints->setObjectName("formSection");
+    auto *constraint_form = new QFormLayout(constraints);
+    constraint_form->setContentsMargins(16, 16, 16, 16);
+    minimum_elevation_ = new QuantityEditor(Unit::degree);
+    minimum_elevation_->setObjectName("stationMinimumElevation");
+    minimum_elevation_->set_label(QStringLiteral("最低仰角"));
+    minimum_elevation_->set_range(0, 90, Unit::degree);
+    constraint_form->addRow(QStringLiteral("最低仰角"), minimum_elevation_);
+    auto *constraint_hint =
+        new QLabel(QStringLiteral("可见性分析同时检查地球遮挡与最低仰角。0° 为当地水平线。"));
+    constraint_hint->setWordWrap(true);
+    constraint_hint->setObjectName("hint");
+    constraint_form->addRow(constraint_hint);
+    body->addWidget(constraints);
     preview_ = new QLabel;
     preview_->setObjectName("stationPositionPreview");
     preview_->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -123,6 +138,7 @@ void GroundStationEditor::set_station(const application::ProjectGroundStation &s
     longitude_->set_value(station.location.longitude_rad, Unit::radian);
     latitude_->set_value(station.location.latitude_rad, Unit::radian);
     height_->set_value(station.location.height_m, Unit::metre);
+    minimum_elevation_->set_value(station.minimum_elevation_rad, Unit::radian);
     apply_->setText(creating ? QStringLiteral("插入地面站") : QStringLiteral("应用"));
     setWindowTitle(creating
                        ? QStringLiteral("插入地面站")
@@ -138,6 +154,7 @@ application::ProjectGroundStation GroundStationEditor::station() const {
     value.location = {longitude_->value(Unit::radian), latitude_->value(Unit::radian),
                       height_->value(Unit::metre)};
     (void)core::ground_station_position(value.location);
+    value.minimum_elevation_rad = minimum_elevation_->value(Unit::radian);
     return value;
 }
 void GroundStationEditor::preview() {

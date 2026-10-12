@@ -9,6 +9,7 @@
 | 场景与工作区 | [场景与属性工作流](architecture/scenario_workbench.md)、[对象与数据管理](architecture/object_data_management.md) |
 | 轨道模型 | [J2 长期项与状态语义](architecture/j2.md)、[二体验证方法](validation/p1_two_body_protocol.md) |
 | 地面站 | [WGS84 地面站与对象生命周期](architecture/ground_stations.md) |
+| 可见性与传感器 | [Access、AER、子传感器、STK 对照与验证](architecture/access_sensors.md) |
 | 项目与数据引用 | [项目文件格式](architecture/project_files.md)、[场景数据一致性](architecture/scenario_data_lock.md) |
 | 数据中心 | [数据类型、下载更新、来源优先级与外推](architecture/data_center.md) |
 | 报告与曲线 | [数据接口、桌面交互、STK 对照及后续阶段](architecture/reports.md) |

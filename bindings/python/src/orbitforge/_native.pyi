@@ -460,6 +460,7 @@ class GroundStationLocation:
     height_m: float
 
 class ProjectGroundStation:
+    minimum_elevation_rad: float
     def __init__(self) -> None: ...
     object_id: str
     display_name: str
@@ -468,6 +469,8 @@ class ProjectGroundStation:
     def name(self) -> str: ...
 
 class Project:
+    sensors: list[ProjectSensor]
+    def add_sensor(self, sensor: ProjectSensor) -> None: ...
     @property
     def data_lock(self) -> DataLock: ...
     def __init__(self, name: str, first: Epoch, last: Epoch) -> None: ...
@@ -564,6 +567,8 @@ class DataCatalog:
 
 
 class ReportKind:
+    ACCESS_INTERVALS: ReportKind
+    AER: ReportKind
     SCENARIO_SUMMARY: ReportKind
     OBJECT_SUMMARY: ReportKind
     CARTESIAN_STATE: ReportKind
@@ -571,6 +576,65 @@ class ReportKind:
     CLASSICAL_ELEMENTS: ReportKind
     GEODETIC_POSITION: ReportKind
     ORBITAL_MOTION: ReportKind
+
+class SensorPointing:
+    NADIR: SensorPointing
+    TARGETED: SensorPointing
+
+class ProjectSensor:
+    object_id: str
+    display_name: str
+    parent_satellite_id: str
+    half_angle_rad: float
+    pointing: SensorPointing
+    target_station_id: str
+    def __init__(self) -> None: ...
+    @property
+    def name(self) -> str: ...
+
+class GroundObservation:
+    @property
+    def azimuth_rad(self) -> float | None: ...
+    @property
+    def elevation_rad(self) -> float: ...
+    @property
+    def range_m(self) -> float: ...
+    @property
+    def range_rate_mps(self) -> float: ...
+    @property
+    def line_of_sight(self) -> bool: ...
+
+class AccessInterval:
+    @property
+    def first(self) -> Epoch: ...
+    @property
+    def last(self) -> Epoch: ...
+    @property
+    def start_clipped(self) -> bool: ...
+    @property
+    def stop_clipped(self) -> bool: ...
+
+class AccessSample:
+    @property
+    def epoch(self) -> Epoch: ...
+    @property
+    def observation(self) -> GroundObservation: ...
+    @property
+    def off_boresight_rad(self) -> float | None: ...
+    @property
+    def visible(self) -> bool: ...
+
+class AccessSession:
+    def __init__(self, project: Project, station_id: str, target_id: str,
+                 eop_manifest: str | PathLike[str], time_file: str | PathLike[str] | None = None) -> None: ...
+    @property
+    def name(self) -> str: ...
+    def at(self, epoch: Epoch) -> AccessSample: ...
+    def intervals(self, first: Epoch, last: Epoch, step_nanoseconds: int = 1_000_000_000,
+                  tolerance_nanoseconds: int = 1_000_000) -> list[AccessInterval]: ...
+
+def observe_ground_target(station: GroundStationLocation, target: CartesianState) -> GroundObservation: ...
+def vector_angle(a: Sequence[float], b: Sequence[float]) -> float: ...
 
 class ReportUnits:
     SI: ReportUnits

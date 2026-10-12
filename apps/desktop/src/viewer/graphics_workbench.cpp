@@ -12,11 +12,15 @@
 #include "report_dialog.hpp"
 #include "satellite_model.hpp"
 #include "scenario_dialog.hpp"
+#include "sensor_editor.hpp"
 #include "startup_splash.hpp"
 #include "welcome_page.hpp"
 #include "workbench_profile.hpp"
 #include "workbench_style.hpp"
 #include "workspace.hpp"
+#include <QUuid>
+#include <numbers>
+#include <orbitforge/runtime/access.hpp>
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
 #include "benchmark_gpu.hpp"
 #include "benchmark_presentation.hpp"
@@ -495,9 +499,20 @@ class Workbench final : public QMainWindow {
                                   QLineEdit::LeadingPosition);
                 search->setClearButtonEnabled(true);
                 connect(search, &QLineEdit::textChanged, objects, [this](const QString &text) {
-                    for (auto &satellite : satellites_)
-                        satellite.item->setHidden(
-                            !satellite.item->text(0).contains(text, Qt::CaseInsensitive));
+                    for (auto &satellite : satellites_) {
+                        const bool parent_match =
+                            satellite.name().contains(text, Qt::CaseInsensitive);
+                        bool child_match = false;
+                        for (int i = 0; i < satellite.item->childCount(); ++i) {
+                            auto *child = satellite.item->child(i);
+                            const bool match = child->text(0).contains(text, Qt::CaseInsensitive);
+                            child->setHidden(!parent_match && !match);
+                            child_match = child_match || match;
+                        }
+                        satellite.item->setHidden(!parent_match && !child_match);
+                        if (child_match && !text.isEmpty())
+                            satellite.item->setExpanded(true);
+                    }
                     for (auto &station : stations_)
                         station.item->setHidden(
                             !station.name().contains(text, Qt::CaseInsensitive));
@@ -595,7 +610,7 @@ class Workbench final : public QMainWindow {
                                     open_scenario_properties();
                                 return;
                             }
-                            set_selection(index);
+                            set_selection(index, false);
                             open_properties();
                         });
                 scene_menu_->addAction(properties);
@@ -922,7 +937,8 @@ class Workbench final : public QMainWindow {
                             const auto index = object_index(item);
                             QMenu menu(this);
                             if (index) {
-                                set_selection(index);
+                                objects->setCurrentItem(item);
+                                set_selection(index, false);
                                 if (properties_action_)
                                     menu.addAction(properties_action_);
                                 menu.addAction(focus);
@@ -930,12 +946,14 @@ class Workbench final : public QMainWindow {
                                 report->setObjectName("openObjectReport");
                                 report->setEnabled(!busy());
                                 const auto report_id =
-                                    selected_station_
+                                    selected_sensor() ? selected_sensor()->object_id
+                                    : selected_station_
                                         ? stations_.at(*selected_station_).config.object_id
                                         : satellites_.at(*selected_).orbit->input.object_id;
                                 const auto report_kind =
-                                    selected_station_ ? application::ReportKind::ground_stations
-                                                      : application::ReportKind::cartesian_state;
+                                    selected_sensor()   ? application::ReportKind::access_intervals
+                                    : selected_station_ ? application::ReportKind::ground_stations
+                                                        : application::ReportKind::cartesian_state;
                                 connect(report, &QAction::triggered, this,
                                         [this, report_id, report_kind] {
                                             show_reports();
@@ -943,6 +961,22 @@ class Workbench final : public QMainWindow {
                                                 report_dialog_->select_object(report_id,
                                                                               report_kind);
                                         });
+                                auto *access = menu.addAction(QStringLiteral("可见性分析…"));
+                                access->setObjectName("openObjectAccess");
+                                access->setEnabled(!busy() && !stations_.empty() &&
+                                                   !satellites_.empty());
+                                connect(access, &QAction::triggered, this, [this, report_id] {
+                                    show_reports();
+                                    report_dialog_->select_object(
+                                        report_id, application::ReportKind::access_intervals);
+                                });
+                                if (selected_ && !selected_sensor()) {
+                                    auto *sensor = menu.addAction(QStringLiteral("插入传感器…"));
+                                    sensor->setObjectName("insertSensor");
+                                    sensor->setEnabled(!busy());
+                                    connect(sensor, &QAction::triggered, this,
+                                            [this] { edit_sensor(true); });
+                                }
                                 menu.addSeparator();
                                 menu.addAction(rename_action_);
                                 menu.addAction(duplicate_action_);
@@ -1328,6 +1362,8 @@ class Workbench final : public QMainWindow {
         const bool idle = !busy();
         if (station_editor_)
             station_editor_->set_busy(!idle);
+        if (sensor_editor_)
+            sensor_editor_->setEnabled(idle);
         for (auto *action : {rename_action_, duplicate_action_, delete_action_})
             if (action)
                 action->setEnabled(selected_marker_index().has_value() && idle);
@@ -1384,6 +1420,8 @@ class Workbench final : public QMainWindow {
             button->setEnabled(selected_marker_index().has_value());
     }
     std::optional<std::size_t> object_index(const QTreeWidgetItem *item) const {
+        if (item && !item->data(0, Qt::UserRole + 17).toString().isEmpty())
+            return object_index(item->parent());
         for (std::size_t i = 0; i < satellites_.size(); ++i)
             if (satellites_[i].item == item)
                 return i;
@@ -1392,24 +1430,108 @@ class Workbench final : public QMainWindow {
                 return satellites_.size() + i;
         return std::nullopt;
     }
+    const application::ProjectSensor *selected_sensor() const {
+        if (!objects_ || !objects_->currentItem())
+            return nullptr;
+        const auto id =
+            objects_->currentItem()->data(0, Qt::UserRole + 17).toString().toStdString();
+        const auto found = std::ranges::find(sensors_, id, &application::ProjectSensor::object_id);
+        return found == sensors_.end() ? nullptr : &*found;
+    }
+    void edit_sensor(bool creating) {
+        if (busy() || !selected_)
+            return;
+        if (!sensor_editor_) {
+            sensor_editor_ = new SensorEditor(this);
+            sensor_editor_->apply = [this](application::ProjectSensor sensor) {
+                if (busy())
+                    throw std::runtime_error("场景正在更新，请稍后重试。");
+                auto p = project_snapshot(project_path_);
+                auto found = std::ranges::find(p.sensors, sensor.object_id,
+                                               &application::ProjectSensor::object_id);
+                if (found == p.sensors.end())
+                    p.sensors.push_back(std::move(sensor));
+                else
+                    *found = std::move(sensor);
+                application::validate_project(p);
+                start_project(std::move(p), project_path_, true, selected_marker_index());
+            };
+        }
+        application::ProjectSensor sensor;
+        if (creating) {
+            sensor.object_id = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+            sensor.display_name = "Sensor " + std::to_string(sensors_.size() + 1);
+            sensor.parent_satellite_id = satellites_[*selected_].orbit->input.object_id;
+        } else {
+            if (!selected_sensor())
+                return;
+            sensor = *selected_sensor();
+        }
+        sensor_editor_->set_sensor(std::move(sensor), project_snapshot(project_path_), creating);
+        workspace_->open(sensor_editor_);
+    }
+    void clear_access_display() {
+        access_session_.reset();
+        access_ids_.clear();
+        access_hash_.clear();
+        if (timeline_)
+            timeline_->set_access_intervals({}, {});
+        if (ground_map_)
+            ground_map_->set_access_link({}, false);
+    }
+    void update_access_display() {
+        if (!access_session_)
+            return;
+        const auto station = std::ranges::find_if(
+            stations_, [&](const auto &s) { return s.config.object_id == access_ids_[0]; });
+        auto parent = access_ids_[1];
+        const auto sensor =
+            std::ranges::find(sensors_, parent, &application::ProjectSensor::object_id);
+        if (sensor != sensors_.end())
+            parent = sensor->parent_satellite_id;
+        const auto satellite = std::ranges::find_if(
+            satellites_, [&](const auto &s) { return s.orbit->input.object_id == parent; });
+        if (station == stations_.end() || satellite == satellites_.end()) {
+            clear_access_display();
+            return;
+        }
+        try {
+            const bool visible = access_session_->at(snapshot_.epoch).visible;
+            ground_map_->set_access_link(
+                std::pair{satellites_.size() +
+                              static_cast<std::size_t>(station - stations_.begin()),
+                          static_cast<std::size_t>(satellite - satellites_.begin())},
+                visible);
+        } catch (const std::exception &error) {
+            clear_access_display();
+            statusBar()->showMessage(
+                QStringLiteral("可见性联动已停止：%1").arg(QString::fromUtf8(error.what())), 6000);
+        }
+    }
     std::optional<std::size_t> selected_marker_index() const {
         return selected_station_
                    ? std::optional<std::size_t>{satellites_.size() + *selected_station_}
                    : selected_;
     }
     QString selected_name() const {
+        if (const auto *sensor = selected_sensor())
+            return QString::fromStdString(sensor->name());
         return selected_           ? satellites_.at(*selected_).name()
                : selected_station_ ? stations_.at(*selected_station_).name()
                                    : QString{};
     }
     bool object_id_exists(const std::string &id) const {
-        return std::any_of(satellites_.begin(), satellites_.end(),
+        return std::ranges::any_of(sensors_, [&](const auto &s) { return s.object_id == id; }) ||
+               std::any_of(satellites_.begin(), satellites_.end(),
                            [&](const auto &s) { return s.orbit->input.object_id == id; }) ||
                std::any_of(stations_.begin(), stations_.end(),
                            [&](const auto &s) { return s.config.object_id == id; });
     }
     void mark_project_dirty(bool dirty = true) {
         project_dirty_ = dirty;
+        if (access_session_ && scenario_ &&
+            runtime::report_input_sha256(project_snapshot(project_path_)) != access_hash_)
+            clear_access_display();
         if (report_dialog_ && scenario_)
             report_dialog_->update_project(project_snapshot(project_path_), active_time());
         if (scenario_) {
@@ -1446,6 +1568,7 @@ class Workbench final : public QMainWindow {
         for (const auto &station : stations_)
             project.ground_stations.push_back(station.config);
         project.reports = reports_;
+        project.sensors = sensors_;
         return project;
     }
     runtime::ReportContext report_context() const {
@@ -1493,10 +1616,31 @@ class Workbench final : public QMainWindow {
                     seek_epoch(epoch);
                 },
                 this);
+            report_dialog_->result_published =
+                [this](std::shared_ptr<const runtime::ReportResult> result) {
+                    clear_access_display();
+                    if (!application::report_is_access(result->definition.kind))
+                        return;
+                    const auto &ids = result->definition.object_ids;
+                    access_session_.emplace(report_context(), ids[0], ids[1]);
+                    access_hash_ = result->input_sha256;
+                    access_ids_ = ids;
+                    std::vector<std::pair<qint64, qint64>> windows;
+                    if (result->definition.kind == application::ReportKind::access_intervals) {
+                        for (const auto &row : result->table.rows())
+                            windows.emplace_back(
+                                std::get<core::Epoch>(row[2]).tai_nanoseconds() / 1'000'000,
+                                std::get<core::Epoch>(row[3]).tai_nanoseconds() / 1'000'000);
+                        timeline_->set_access_intervals(
+                            std::move(windows), QString::fromStdString(access_session_->name()));
+                    }
+                    update_access_display();
+                };
         }
         workspace_->open(report_dialog_, false);
     }
     void close_reports() {
+        clear_access_display();
         if (report_dialog_) {
             workspace_->close_page(report_dialog_);
             delete report_dialog_;
@@ -1757,6 +1901,20 @@ class Workbench final : public QMainWindow {
                                                        QColor::fromRgb(config.display.line_color)));
                 satellites.push_back(std::move(satellite));
             }
+            for (const auto &sensor : candidate->project.sensors) {
+                auto parent = std::ranges::find_if(satellites, [&](const auto &sat) {
+                    return sat.orbit->input.object_id == sensor.parent_satellite_id;
+                });
+                auto *item =
+                    new QTreeWidgetItem(parent->item, {QString::fromStdString(sensor.name())});
+                item->setData(0, Qt::UserRole + 17, QString::fromStdString(sensor.object_id));
+                item->setIcon(0, workbench_icon(WorkbenchIcon::focus, QColor("#b4a8e8")));
+                item->setToolTip(0,
+                                 QStringLiteral("圆锥传感器 · %1°\nID：%2")
+                                     .arg(sensor.half_angle_rad * 180 / std::numbers::pi, 0, 'g', 5)
+                                     .arg(QString::fromStdString(sensor.object_id)));
+                parent->item->setExpanded(true);
+            }
             for (const auto &config : candidate->project.ground_stations) {
                 Station station{config};
                 station.item = new QTreeWidgetItem(root.get(), {station.name()});
@@ -1788,6 +1946,10 @@ class Workbench final : public QMainWindow {
                 scenario_properties_->close();
             satellites_ = std::move(satellites);
             stations_ = std::move(stations);
+            sensors_ = candidate->project.sensors;
+            clear_access_display();
+            if (sensor_editor_)
+                sensor_editor_->close();
             if (station_editor_)
                 station_editor_->close();
             scenario_ = std::move(candidate->scenario);
@@ -1895,6 +2057,16 @@ class Workbench final : public QMainWindow {
         update_actions();
     }
     void rename_selected_to(const QString &name) {
+        if (!busy() && selected_sensor()) {
+            auto p = project_snapshot(project_path_);
+            auto &s = *std::ranges::find(p.sensors, selected_sensor()->object_id,
+                                         &application::ProjectSensor::object_id);
+            s.display_name = name.trimmed().toStdString();
+            if (s.display_name.empty())
+                throw std::invalid_argument("请输入传感器名称。");
+            start_project(std::move(p), project_path_, true, selected_marker_index());
+            return;
+        }
         if (!busy() && selected_station_) {
             const auto &station = stations_.at(*selected_station_).config;
             start_project(
@@ -1940,6 +2112,15 @@ class Workbench final : public QMainWindow {
         if (busy() || !selected_marker_index())
             return;
         try {
+            if (selected_sensor()) {
+                auto p = project_snapshot(project_path_);
+                auto s = *selected_sensor();
+                s.display_name = s.name() + " 副本";
+                s.object_id = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+                p.sensors.push_back(std::move(s));
+                start_project(std::move(p), project_path_, true, selected_marker_index());
+                return;
+            }
             const auto project = project_snapshot(project_path_);
             if (selected_station_) {
                 const auto &source = project.ground_stations.at(*selected_station_);
@@ -1977,6 +2158,13 @@ class Workbench final : public QMainWindow {
             return;
         try {
             const auto current = project_snapshot(project_path_);
+            if (selected_sensor()) {
+                auto p = current;
+                const auto id = selected_sensor()->object_id;
+                std::erase_if(p.sensors, [&](const auto &s) { return s.object_id == id; });
+                start_project(std::move(p), project_path_, true, selected_marker_index());
+                return;
+            }
             auto project =
                 selected_station_
                     ? current.without_ground_station(
@@ -2063,6 +2251,10 @@ class Workbench final : public QMainWindow {
             properties_dialog_->close();
         satellites_.clear();
         stations_.clear();
+        sensors_.clear();
+        clear_access_display();
+        if (sensor_editor_)
+            sensor_editor_->close();
         close_reports();
         if (station_editor_)
             station_editor_->close();
@@ -2192,7 +2384,8 @@ class Workbench final : public QMainWindow {
                     if (found == project.ground_stations.end())
                         throw std::invalid_argument("地面站已不存在，请重新选择对象。");
                     index = static_cast<std::size_t>(found - project.ground_stations.begin());
-                    if (found->location == value.location && found->name() == value.name()) {
+                    if (found->location == value.location && found->name() == value.name() &&
+                        found->minimum_elevation_rad == value.minimum_elevation_rad) {
                         station_editor_->show_result(QStringLiteral("参数未改变。"));
                         return;
                     }
@@ -2305,6 +2498,10 @@ class Workbench final : public QMainWindow {
             set_playing(resume);
     }
     void open_properties() {
+        if (selected_sensor() && !busy()) {
+            edit_sensor(false);
+            return;
+        }
         if (selected_station_ && !busy()) {
             configure_station_editor(stations_.at(*selected_station_).config, false);
             workspace_->open(station_editor_);
@@ -2641,6 +2838,7 @@ class Workbench final : public QMainWindow {
         }
         if (ground_map_)
             ground_map_->set_snapshot(fixed);
+        update_access_display();
         globe_->set_illumination(sun_direction_, lighting_action_->isChecked());
         satellite_state_dirty_ = false;
     }
@@ -6634,6 +6832,116 @@ class Workbench final : public QMainWindow {
             if (++smoke_final_frames_ >= 4)
                 ++orbit_smoke_stage_;
             break;
+        case 138: {
+            auto p = project_snapshot(project_path_);
+            require(!p.satellites.empty(), "Access smoke requires a satellite");
+            if (p.ground_stations.empty())
+                p.ground_stations.push_back({"access-station", "测控站", {}});
+            const std::array epochs{p.first};
+            const auto state = core::transform_state(
+                runtime::make_orbit_session(p.satellites[0].orbit, 1, active_time().get())
+                    .sample(epochs)
+                    .states()[0],
+                core::FrameId::itrf, *frames_, eop_->at(p.first));
+            const auto location = runtime::itrf_to_wgs84(state);
+            p.ground_stations[0].location = {location.longitude_rad, location.latitude_rad, 0};
+            p.ground_stations[0].minimum_elevation_rad = 5 * std::numbers::pi / 180;
+            start_project(std::move(p), project_path_, true, 0);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 139:
+            if (project_candidate_.valid())
+                break;
+            set_selection(0);
+            edit_sensor(true);
+            sensor_editor_->findChild<QLineEdit *>("sensorName")
+                ->setText(QStringLiteral("对地观测仪"));
+            sensor_editor_->findChild<QuantityEditor *>("sensorHalfAngle")
+                ->set_value(20, Unit::degree);
+            save_workbench_image("sensor-editor.png");
+            sensor_editor_->findChild<QPushButton *>("applySensor")->click();
+            ++orbit_smoke_stage_;
+            break;
+        case 140: {
+            if (project_candidate_.valid())
+                break;
+            require(sensors_.size() == 1 && satellites_[0].item->childCount() == 1,
+                    "Sensor was not attached to its satellite");
+            objects_->setCurrentItem(satellites_[0].item->child(0));
+            open_properties();
+            require(selected_sensor() && workspace_->current_document() == sensor_editor_,
+                    "Sensor properties opened the parent");
+            sensor_editor_->findChild<QLineEdit *>("sensorName")->setText("Discarded draft");
+            sensor_editor_->close();
+            require(sensors_[0].name() != "Discarded draft",
+                    "Closing sensor editor applied a draft");
+            record("sensor-child-properties-and-cancel");
+            show_reports();
+            report_dialog_->select_object(sensors_[0].object_id,
+                                          application::ReportKind::access_intervals);
+            report_dialog_->findChild<QCheckBox *>("reportFollowScenario")->setChecked(false);
+            static_cast<EpochEditor *>(report_dialog_->findChild<QWidget *>("reportFirst"))
+                ->set_epoch(scenario_->first());
+            static_cast<EpochEditor *>(report_dialog_->findChild<QWidget *>("reportLast"))
+                ->set_epoch(core::Epoch{scenario_->first().tai_nanoseconds() + 600'000'000'000});
+            report_dialog_->findChild<QPushButton *>("generateReport")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 141: {
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            auto *table = report_dialog_->findChild<QTableView *>("reportTable");
+            require(table->model()->rowCount() > 0 && access_session_.has_value(),
+                    "Access report produced no overhead pass");
+            const auto index = table->model()->index(0, 2);
+            table->doubleClicked(index);
+            record("access-windows-timeline-and-seek");
+            save_workbench_image("access-windows.png");
+            report_dialog_->findChild<QComboBox *>("reportLibrary")
+                ->setCurrentIndex(static_cast<int>(application::ReportKind::aer));
+            report_dialog_->findChild<QDoubleSpinBox *>("reportStep")->setValue(10);
+            report_dialog_->findChild<QCheckBox *>("reportFollowScenario")->setChecked(false);
+            static_cast<EpochEditor *>(report_dialog_->findChild<QWidget *>("reportFirst"))
+                ->set_epoch(scenario_->first());
+            static_cast<EpochEditor *>(report_dialog_->findChild<QWidget *>("reportLast"))
+                ->set_epoch(core::Epoch{scenario_->first().tai_nanoseconds() + 600'000'000'000});
+            report_dialog_->findChild<QPushButton *>("generateReport")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 142:
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            require(snapshot_.epoch == scenario_->first() &&
+                        ground_map_->epoch() == scenario_->first(),
+                    "Access result seek did not reach both scene and map");
+            require(report_dialog_->findChild<QTableView *>("reportTable")->model()->rowCount() > 1,
+                    "AER report was not generated");
+            report_dialog_->findChild<QTabBar *>("reportViews")->setCurrentIndex(1);
+            record("aer-sensor-curve");
+            save_workbench_image("access-aer.png");
+            save_project_to(smoke_dir_ + "/access-sensors.orbitforge");
+            start_project(application::load_project(std::filesystem::path(
+                              (smoke_dir_ + "/access-sensors.orbitforge").toStdWString())),
+                          smoke_dir_ + "/access-sensors.orbitforge");
+            ++orbit_smoke_stage_;
+            break;
+        case 143:
+            if (project_candidate_.valid())
+                break;
+            require(sensors_.size() == 1 && satellites_[0].item->childCount() == 1 &&
+                        std::abs(sensors_[0].half_angle_rad - 20 * std::numbers::pi / 180) < 1e-12,
+                    "Reopening lost sensor configuration");
+            record("sensor-project-reopen");
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        case 144:
+            if (++smoke_final_frames_ >= 4)
+                ++orbit_smoke_stage_;
+            break;
         }
     }
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
@@ -6906,6 +7214,11 @@ class Workbench final : public QMainWindow {
     QPushButton *cancel_project_button_ = nullptr;
     std::vector<Satellite> satellites_;
     std::vector<Station> stations_;
+    SensorEditor *sensor_editor_ = nullptr;
+    std::vector<application::ProjectSensor> sensors_;
+    std::optional<runtime::AccessSession> access_session_;
+    std::vector<std::string> access_ids_;
+    std::string access_hash_;
     GroundStationEditor *station_editor_ = nullptr;
     std::optional<std::string> station_editor_target_;
     std::optional<std::size_t> selected_station_;
@@ -6933,7 +7246,7 @@ class Workbench final : public QMainWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 138;
+    static constexpr int orbit_smoke_complete = 145;
     int smoke_final_frames_ = 0;
     std::vector<std::uint8_t> smoke_project_bytes_;
     application::DataLock smoke_data_lock_;

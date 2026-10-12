@@ -80,7 +80,17 @@ MissionTimeline::MissionTimeline(QWidget *parent)
         update();
     });
 }
-QSize MissionTimeline::sizeHint() const { return {720, show_object_interval_ ? 144 : 118}; }
+QSize MissionTimeline::sizeHint() const {
+    return {720, (show_object_interval_ ? 144 : 118) + (access_label_.isEmpty() ? 0 : 26)};
+}
+void MissionTimeline::set_access_intervals(std::vector<std::pair<qint64, qint64>> intervals,
+                                           QString label) {
+    access_intervals_ = std::move(intervals);
+    access_label_ = std::move(label);
+    setMinimumHeight(sizeHint().height());
+    updateGeometry();
+    update();
+}
 double MissionTimeline::track_left() const { return width() < 900 ? 154.0 : 190.0; }
 QRectF MissionTimeline::overview_rect() const {
     return {track_left(), 23, std::max(1.0, width() - 18.0 - track_left()), 13};
@@ -337,6 +347,28 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
                    QStringLiteral("选择卫星查看传播区间"));
     }
     p.setPen(QPen(cursor_color, 1.5));
+    if (!access_label_.isEmpty()) {
+        const double y = show_object_interval_ ? 143 : 117;
+        p.setPen(QColor("#87d4c6"));
+        p.drawText(QRectF(16, y, left - 32, 18), Qt::AlignVCenter,
+                   fontMetrics().elidedText(QStringLiteral("可见 · ") + access_label_,
+                                            Qt::ElideRight, static_cast<int>(left - 32)));
+        p.save();
+        p.setClipRect(QRectF(left, y, detail.width(), 18));
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor("#528f89"));
+        for (const auto &[begin, end] : access_intervals_)
+            p.drawRoundedRect(QRectF(position_at(begin), y + 2,
+                                     std::max(2.0, position_at(end) - position_at(begin)), 14),
+                              3, 3);
+        if (access_intervals_.empty()) {
+            p.setPen(QColor("#8c9eb4"));
+            p.drawText(QRectF(left + 9, y, detail.width() - 18, 18), Qt::AlignVCenter,
+                       QStringLiteral("无可见时段"));
+        }
+        p.restore();
+        p.setPen(QPen(cursor_color, 1.5));
+    }
     p.setBrush(cursor_color);
     if (current_ >= view_first_ && current_ <= view_last_) {
         const auto x = position_at(current_);

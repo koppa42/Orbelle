@@ -12,15 +12,21 @@ enum class ReportKind {
     ground_stations,
     classical_elements,
     geodetic_position,
-    orbital_motion
+    orbital_motion,
+    access_intervals,
+    aer
 };
 inline constexpr std::array report_kinds{
     ReportKind::scenario_summary, ReportKind::object_summary,     ReportKind::cartesian_state,
     ReportKind::ground_stations,  ReportKind::classical_elements, ReportKind::geodetic_position,
-    ReportKind::orbital_motion};
+    ReportKind::orbital_motion,   ReportKind::access_intervals,   ReportKind::aer};
+[[nodiscard]] constexpr bool report_is_access(ReportKind kind) {
+    return kind == ReportKind::access_intervals || kind == ReportKind::aer;
+}
 [[nodiscard]] constexpr bool report_is_sampled(ReportKind kind) {
     return kind == ReportKind::cartesian_state || kind == ReportKind::classical_elements ||
-           kind == ReportKind::geodetic_position || kind == ReportKind::orbital_motion;
+           kind == ReportKind::geodetic_position || kind == ReportKind::orbital_motion ||
+           report_is_access(kind);
 }
 [[nodiscard]] constexpr bool report_satellites_only(ReportKind kind) {
     return kind == ReportKind::classical_elements || kind == ReportKind::orbital_motion;
@@ -29,6 +35,7 @@ enum class ReportUnits { si, engineering };
 enum class ReportTimeScale { utc, tai, tt };
 // Stable built-in template IDs. Object IDs are bindings, never display names.
 // An empty binding means all compatible objects, including objects inserted later.
+// Access/AER instead require exactly [ground station ID, satellite or sensor ID].
 struct ReportDefinition {
     std::string id, name;
     ReportKind kind = ReportKind::cartesian_state;

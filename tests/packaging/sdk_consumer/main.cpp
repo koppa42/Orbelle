@@ -1,6 +1,7 @@
 #include <cmath>
 #include <iostream>
 #include <orbitforge/application/scenario.hpp>
+#include <orbitforge/runtime/access.hpp>
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/demo.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
@@ -11,6 +12,15 @@
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 int main(int argc, char **argv) {
+    const auto observation =
+        orbitforge::core::observe_ground_target({}, {orbitforge::core::Epoch{0},
+                                                     orbitforge::core::OriginId::earth,
+                                                     orbitforge::core::FrameId::itrf,
+                                                     {6379137, 0, 0},
+                                                     {2, 0, 0}});
+    if (!observation.line_of_sight || observation.range_m != 1000 ||
+        observation.range_rate_mps != 2)
+        return 24;
     const orbitforge::application::Project project("SDK project", orbitforge::core::Epoch{123},
                                                    orbitforge::core::Epoch{10'000'000'123});
     const auto restored =

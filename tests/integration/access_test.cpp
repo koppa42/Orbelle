@@ -1,0 +1,190 @@
+#include <cmath>
+#include <gtest/gtest.h>
+#include <limits>
+#include <numbers>
+#include <orbitforge/runtime/access.hpp>
+#include <orbitforge/runtime/project.hpp>
+#include <orbitforge/runtime/time_frames.hpp>
+#include <orbitforge/runtime/two_body.hpp>
+
+using namespace orbitforge;
+namespace {
+constexpr double pi = std::numbers::pi;
+core::Epoch seconds(double value) {
+    return core::Epoch{static_cast<std::int64_t>(std::llround(value * 1e9))};
+}
+class IdentityFrames final : public core::IFrameProvider {
+    core::PositionRotation gcrf_to_itrf(core::Epoch epoch,
+                                        const core::EarthOrientationSample &) const override {
+        return {epoch,
+                core::OriginId::earth,
+                core::FrameId::gcrf,
+                core::FrameId::itrf,
+                {{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}},
+                "Test inertial Earth",
+                "test"};
+    }
+    core::StateTransform gcrf_to_itrf_state(core::Epoch epoch,
+                                            const core::EarthOrientationState &eop) const override {
+        return {gcrf_to_itrf(epoch, eop.sample), {}, "Test zero rotation"};
+    }
+};
+runtime::ReportContext circular() {
+    application::Project p{"Access", seconds(0), seconds(5000)};
+    application::ProjectSatellite sat;
+    sat.orbit.first = p.first;
+    sat.orbit.last = p.last;
+    sat.orbit.initial = {p.first,
+                         core::OriginId::earth,
+                         core::FrameId::gcrf,
+                         {7e6, 0, 0},
+                         {0, std::sqrt(sat.orbit.mu() / 7e6), 0}};
+    p.satellites.push_back(sat);
+    p.ground_stations.push_back({"station", "Equator", {0, 0, 0}});
+    auto eop = runtime::load_eop_snapshot(ORBITFORGE_REPORT_EOP);
+    p.earth_orientation = eop->data_info();
+    return {p, runtime::make_builtin_time_provider(), std::make_shared<IdentityFrames>(),
+            std::move(eop)};
+}
+application::ReportDefinition report(application::ReportKind kind) {
+    application::ReportDefinition d;
+    d.id = d.name = "access";
+    d.kind = kind;
+    d.object_ids = {"station", "satellite-1"};
+    d.step_nanoseconds = 10'000'000'000;
+    return d;
+}
+} // namespace
+TEST(Access, EnuAnglesRangeRateAndEllipsoidOcclusion) {
+    core::CartesianState state{
+        seconds(0), core::OriginId::earth, core::FrameId::itrf, {6378137 + 1000, 0, 0}, {12, 3, 4}};
+    auto result = core::observe_ground_target({}, state);
+    EXPECT_FALSE(result.azimuth_rad);
+    EXPECT_NEAR(result.elevation_rad, pi / 2, 1e-14);
+    EXPECT_DOUBLE_EQ(result.range_m, 1000);
+    EXPECT_DOUBLE_EQ(result.range_rate_mps, 12);
+    EXPECT_TRUE(result.line_of_sight);
+    state.position_m = {6378137, 1000, 1000};
+    result = core::observe_ground_target({}, state);
+    ASSERT_TRUE(result.azimuth_rad);
+    EXPECT_NEAR(*result.azimuth_rad, pi / 4, 1e-14);
+    EXPECT_NEAR(result.elevation_rad, 0, 1e-14);
+    EXPECT_TRUE(result.line_of_sight);
+    state.position_m = {-7e6, 0, 0};
+    EXPECT_FALSE(core::observe_ground_target({}, state).line_of_sight);
+    state.position_m = {7e6, 0, 0};
+    EXPECT_FALSE(core::observe_ground_target({0, 0, -100}, state).line_of_sight);
+    state.frame = core::FrameId::gcrf;
+    EXPECT_THROW((void)core::observe_ground_target({}, state), std::invalid_argument);
+    EXPECT_NEAR(core::vector_angle({1, 0, 0}, {0, 1, 0}), pi / 2, 1e-14);
+    EXPECT_THROW((void)core::vector_angle({0, 0, 0}, {1, 0, 0}), std::invalid_argument);
+}
+TEST(Access, RefinesTransitionsClipsEdgesAndDocumentsDiscoveryLimit) {
+    const auto windows =
+        core::find_access_intervals(seconds(-1), seconds(20), 3'000'000'000, [](core::Epoch t) {
+            const auto s = t.seconds_since(seconds(0));
+            return s < 2.123456 || s > 7.654321;
+        });
+    ASSERT_EQ(windows.size(), 2U);
+    EXPECT_TRUE(windows[0].start_clipped);
+    EXPECT_NEAR(windows[0].last.seconds_since(seconds(0)), 2.123456, .001);
+    EXPECT_NEAR(windows[1].first.seconds_since(seconds(0)), 7.654321, .001);
+    EXPECT_TRUE(windows[1].stop_clipped);
+    EXPECT_TRUE(
+        core::find_access_intervals(seconds(0), seconds(10), 10'000'000'000, [](core::Epoch t) {
+            auto s = t.seconds_since(seconds(0));
+            return s > 3 && s < 4;
+        }).empty());
+    EXPECT_THROW(
+        (void)core::find_access_intervals(seconds(0), seconds(10), 0, [](auto) { return true; }),
+        std::invalid_argument);
+    EXPECT_THROW(
+        (void)core::find_access_intervals(seconds(0), seconds(10), 1, [](auto) { return true; }),
+        std::invalid_argument);
+    EXPECT_TRUE(core::find_access_intervals(seconds(0), seconds(0), 1'000'000, [](auto) {
+                    return true;
+                }).empty());
+}
+TEST(Access, CircularHorizonMatchesAnalyticSolutionAndConeNarrowsWindow) {
+    if (!runtime::time_frames_available() || !runtime::two_body_available())
+        GTEST_SKIP();
+    auto context = circular();
+    auto d = report(application::ReportKind::access_intervals);
+    const auto result = runtime::generate_report(context, d);
+    ASSERT_EQ(result.table.rows().size(), 1U);
+    const double rate = std::sqrt(context.project.satellites[0].orbit.mu() / std::pow(7e6, 3));
+    const double horizon = std::acos(6378137.0 / 7e6) / rate;
+    EXPECT_NEAR(std::get<core::Epoch>(result.table.rows()[0][3]).seconds_since(seconds(0)), horizon,
+                .001);
+    context.project.sensors.push_back(
+        {"sensor", "Nadir", "satellite-1", 10 * pi / 180, application::SensorPointing::nadir, {}});
+    d.object_ids[1] = "sensor";
+    const auto narrow = runtime::generate_report(context, d);
+    ASSERT_EQ(narrow.table.rows().size(), 1U);
+    const double cone = 10 * pi / 180;
+    const double central_angle = std::asin(7e6 / 6378137.0 * std::sin(cone)) - cone;
+    EXPECT_NEAR(std::get<double>(narrow.table.rows()[0][4]), central_angle / rate, .001);
+    context.project.sensors[0].pointing = application::SensorPointing::targeted;
+    context.project.sensors[0].target_station_id = "station";
+    const auto tracking = runtime::generate_report(context, d);
+    ASSERT_EQ(tracking.table.rows().size(), 1U);
+    EXPECT_DOUBLE_EQ(std::get<double>(tracking.table.rows()[0][4]),
+                     std::get<double>(result.table.rows()[0][4]));
+}
+TEST(Access, SnapshotValidationAerAndCancellation) {
+    if (!runtime::time_frames_available() || !runtime::two_body_available())
+        GTEST_SKIP();
+    auto context = circular();
+    runtime::AccessSession access{context, "station", "satellite-1"};
+    context.project.ground_stations[0].minimum_elevation_rad = pi / 2;
+    EXPECT_TRUE(access.at(seconds(10)).visible); // Owns the original snapshot.
+    EXPECT_THROW((void)access.at(seconds(-1)), std::out_of_range);
+    auto d = report(application::ReportKind::aer);
+    d.follow_scenario = false;
+    d.first = seconds(0);
+    d.last = seconds(10);
+    const auto result = runtime::generate_report(context, d);
+    ASSERT_EQ(result.table.rows().size(), 2U);
+    EXPECT_TRUE(std::holds_alternative<std::monostate>(result.table.rows()[0][3]));
+    EXPECT_EQ(std::get<std::int64_t>(result.table.rows()[1][7]), 0);
+    std::atomic_bool cancelled{true};
+    EXPECT_THROW((void)runtime::generate_report(context, d, &cancelled), runtime::ReportCancelled);
+    context.eop.reset();
+    EXPECT_THROW((void)runtime::generate_report(context, d), std::invalid_argument);
+}
+TEST(Access, RangeRateIncludesRotatingEarthAndProvidersMustMatch) {
+    if (!runtime::time_frames_available() || !runtime::two_body_available())
+        GTEST_SKIP();
+    auto context = circular();
+    context.frames = runtime::make_frame_provider();
+    runtime::AccessSession access{context, "station", "satellite-1"};
+    const auto sample = access.at(seconds(100));
+    const double derivative = (access.at(seconds(100.01)).observation.range_m -
+                               access.at(seconds(99.99)).observation.range_m) /
+                              .02;
+    // Central difference over 20 ms: < 1 mm/s including Earth's rotation.
+    EXPECT_NEAR(sample.observation.range_rate_mps, derivative, .001);
+    context.project.earth_orientation->sha256[0] =
+        context.project.earth_orientation->sha256[0] == '0' ? '1' : '0';
+    EXPECT_THROW((runtime::AccessSession{context, "station", "satellite-1"}),
+                 std::invalid_argument);
+}
+TEST(Access, SensorPersistenceCopyDeletionAndReferenceValidation) {
+    application::Project p{"Sensor", seconds(0), seconds(7200)};
+    p.satellites.push_back({});
+    p.ground_stations.push_back({"station", "Station", {}, .2});
+    p.sensors.push_back(
+        {"sensor", "Cone", "satellite-1", .1, application::SensorPointing::targeted, "station"});
+    auto decoded = application::decode_project(application::encode_project(p));
+    ASSERT_EQ(decoded.sensors.size(), 1U);
+    EXPECT_EQ(decoded.sensors[0].target_station_id, "station");
+    EXPECT_DOUBLE_EQ(decoded.ground_stations[0].minimum_elevation_rad, .2);
+    EXPECT_THROW((void)p.without_ground_station("station"), application::ProjectError);
+    EXPECT_TRUE(p.without_satellite("satellite-1").sensors.empty());
+    auto copy = p.with_satellite_copy("satellite-1", "copy", "Copy");
+    ASSERT_EQ(copy.sensors.size(), 2U);
+    EXPECT_EQ(copy.sensors[1].parent_satellite_id, "copy");
+    EXPECT_NE(copy.sensors[1].object_id, "sensor");
+    decoded.sensors[0].parent_satellite_id = "missing";
+    EXPECT_THROW(application::validate_project(decoded), application::ProjectError);
+}

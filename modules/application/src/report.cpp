@@ -5,7 +5,7 @@
 namespace orbitforge::application {
 void validate_report_definition(const ReportDefinition &d) {
     if (d.id.empty() || d.name.empty() || d.id.size() > 16384 || d.name.size() > 16384 ||
-        d.kind < ReportKind::scenario_summary || d.kind > ReportKind::orbital_motion ||
+        d.kind < ReportKind::scenario_summary || d.kind > ReportKind::aer ||
         d.units < ReportUnits::si || d.units > ReportUnits::engineering ||
         d.time_scale < ReportTimeScale::utc || d.time_scale > ReportTimeScale::tt ||
         (d.frame != core::FrameId::gcrf && d.frame != core::FrameId::itrf) ||
@@ -13,6 +13,8 @@ void validate_report_definition(const ReportDefinition &d) {
         (!d.follow_scenario && d.first.tai_nanoseconds() > d.last.tai_nanoseconds()) ||
         d.object_ids.size() > 10000)
         throw std::invalid_argument("Invalid report definition");
+    if (report_is_access(d.kind) && (d.object_ids.size() != 2 || d.step_nanoseconds < 1'000'000))
+        throw std::invalid_argument("Access requires a station/target pair and step >= 1 ms");
     std::set<std::string> ids;
     for (const auto &id : d.object_ids)
         if (id.empty() || id.size() > 16384 || !ids.insert(id).second)
