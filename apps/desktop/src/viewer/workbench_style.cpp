@@ -433,6 +433,8 @@ QTreeWidget::item:selected { background: #294357; color: #e8f6ff; }
 QTreeWidget::item:hover:!selected { background: #233341; }
 QTreeWidget::branch { background: #171e27; }
 QTreeWidget::branch:selected, QTreeWidget::branch:hover { background: #171e27; }
+QTreeWidget#sceneObjects::branch:has-children:closed { image: url(:/orbitforge/icons/chevron-right.png); }
+QTreeWidget#sceneObjects::branch:has-children:open { image: url(:/orbitforge/icons/chevron-down.png); }
 QTreeWidget#insertObjectTypes { background: #171e27; border: 1px solid #313e4c; border-radius: 5px; padding: 4px; }
 QTreeWidget#insertObjectTypes::item { height: 24px; padding: 2px 6px; }
 QDialog#insertObjectsDialog QRadioButton { color: #dce5ef; spacing: 8px; }
