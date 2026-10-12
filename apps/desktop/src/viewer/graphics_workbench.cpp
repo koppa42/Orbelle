@@ -71,6 +71,7 @@
 #include <QResizeEvent>
 #include <QScreen>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QSpinBox>
@@ -1475,7 +1476,7 @@ class Workbench final : public QMainWindow {
             sensor = *selected_sensor();
         }
         sensor_editor_->set_sensor(std::move(sensor), project_snapshot(project_path_), creating);
-        workspace_->open(sensor_editor_);
+        workspace_->open(sensor_editor_, false);
     }
     void clear_access_display() {
         access_session_.reset();
@@ -6883,19 +6884,40 @@ class Workbench final : public QMainWindow {
             ++orbit_smoke_stage_;
             break;
         }
-        case 139:
+        case 139: {
             if (project_candidate_.valid())
                 break;
-            set_selection(0);
-            edit_sensor(true);
-            sensor_editor_->findChild<QLineEdit *>("sensorName")
-                ->setText(QStringLiteral("对地观测仪"));
-            sensor_editor_->findChild<QuantityEditor *>("sensorHalfAngle")
-                ->set_value(20, Unit::degree);
+            if (!sensor_editor_ || workspace_->current_document() != sensor_editor_) {
+                set_selection(0);
+                edit_sensor(true);
+                sensor_editor_->findChild<QLineEdit *>("sensorName")
+                    ->setText(QStringLiteral("对地观测仪"));
+                sensor_editor_->findChild<QuantityEditor *>("sensorHalfAngle")
+                    ->set_value(20, Unit::degree);
+                // Inspect the embedded layout on the next frame, after resize events settle.
+                break;
+            }
+            auto *scroll = sensor_editor_->findChild<QScrollArea *>("sensorScroll");
+            auto *submit = sensor_editor_->findChild<QPushButton *>("applySensor");
+            require(scroll && submit && scroll->horizontalScrollBar()->maximum() == 0,
+                    "Embedded sensor editor requires horizontal scrolling");
+            require(sensor_editor_->rect().contains(
+                        QRect(submit->mapTo(sensor_editor_, QPoint{}), submit->size())),
+                    "Sensor action is clipped in the workspace");
             save_workbench_image("sensor-editor.png");
-            sensor_editor_->findChild<QPushButton *>("applySensor")->click();
+            const auto scroll_details =
+                "Sensor horizontal scrollbar is visible after layout: maximum=" +
+                std::to_string(scroll->horizontalScrollBar()->maximum()) +
+                ", viewport=" + std::to_string(scroll->viewport()->width()) +
+                ", contents=" + std::to_string(scroll->widget()->width());
+            require(!scroll->horizontalScrollBar()->isVisible(), scroll_details.c_str());
+            require(scroll->widget()->width() <= scroll->viewport()->width(),
+                    "Sensor form is wider than its workspace viewport");
+            record("sensor-editor-embedded-layout");
+            submit->click();
             ++orbit_smoke_stage_;
             break;
+        }
         case 140: {
             if (project_candidate_.valid())
                 break;
