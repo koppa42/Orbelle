@@ -1,4 +1,5 @@
 #include "eop_catalog.hpp"
+#include "responsive_layout.hpp"
 #include "workbench_spin_box.hpp"
 #include "workbench_style.hpp"
 #include <QCheckBox>
@@ -28,17 +29,6 @@
 
 namespace orbitforge::desktop {
 namespace {
-class DataCenterWindow final : public QDialog {
-  public:
-    using QDialog::QDialog;
-
-  protected:
-    void resizeEvent(QResizeEvent *event) override {
-        QDialog::resizeEvent(event);
-        if (auto *sidebar = findChild<QWidget *>("dataSidebar"))
-            sidebar->setFixedWidth(std::clamp(width() / 4, 220, 258));
-    }
-};
 QString installation_text(const DataInventoryItem &item) {
     switch (item.installation) {
     case DataInstallation::missing:
@@ -200,13 +190,14 @@ class PriorityDelegate final : public QStyledItemDelegate {
 };
 } // namespace
 void show_data_center(QWidget *parent, EopCatalog &catalog) {
-    DataCenterWindow dialog(parent);
+    QDialog dialog(parent);
     dialog.setObjectName("eopDataDialog");
     dialog.setWindowTitle(QStringLiteral("数据中心"));
     dialog.setWindowIcon(workbench_icon(WorkbenchIcon::database));
     dialog.resize(
         QSize(1020, 720).boundedTo(dialog.screen()->availableGeometry().size() - QSize(48, 72)));
     dialog.setSizeGripEnabled(true);
+    dialog.setMinimumSize(360, 360);
     auto *layout = new QVBoxLayout(&dialog);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
@@ -215,10 +206,18 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     heading->setSpacing(6);
     auto *heading_title = new QLabel(QStringLiteral("数据中心"));
     heading_title->setObjectName("panelTitle");
-    heading->addWidget(heading_title);
+    auto *heading_row = new QHBoxLayout;
+    heading_row->addWidget(heading_title, 1);
+    auto *back = new QPushButton(QStringLiteral("数据列表"), &dialog);
+    back->setObjectName("dataBackToList");
+    back->setIcon(workbench_icon(WorkbenchIcon::database));
+    back->hide();
+    heading_row->addWidget(back);
+    heading->addLayout(heading_row);
     auto *description =
         new QLabel(QStringLiteral("管理计算数据，查看下载时间、覆盖范围与更新结果。"));
     description->setObjectName("dialogDescription");
+    description->setWordWrap(true);
     heading->addWidget(description);
     layout->addLayout(heading);
     auto *panels = new QHBoxLayout;
@@ -238,7 +237,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     list->setItemDelegate(new DataItemDelegate(list));
     list->setMouseTracking(true);
     list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    list->setMinimumHeight(280);
+    list->setMinimumHeight(100);
     list->setSelectionMode(QAbstractItemView::SingleSelection);
     list->setHeaderHidden(true);
     list->setIndentation(16);
@@ -261,6 +260,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     sidebar_layout->addWidget(inventory_note);
     panels->addWidget(sidebar);
     auto *panel = new QWidget;
+    panel->setObjectName("dataDetailPanel");
+    panel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
     auto *detail_layout = new QVBoxLayout(panel);
     detail_layout->setContentsMargins(30, 26, 30, 24);
     detail_layout->setSpacing(18);
@@ -273,6 +274,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     data_heading->addWidget(title, 1);
     auto *state = new QLabel;
     state->setObjectName("dataStatus");
+    state->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
     data_heading->addWidget(state, 0, Qt::AlignVCenter);
     detail_layout->addLayout(data_heading);
     auto *data_description = new QLabel;
@@ -387,6 +389,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     acquired->setToolTip(QStringLiteral("本地时间"));
     checked->setToolTip(QStringLiteral("本地时间"));
     overview_layout->addWidget(facts);
+    responsive_form(form, 520);
     auto *note = new QLabel;
     note->setObjectName("dataNote");
     note->setWordWrap(true);
@@ -511,6 +514,35 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     close->setMinimumWidth(88);
     footer->addWidget(close);
     layout->addWidget(footer_panel);
+    responsive_columns(acquisition, actions, 520);
+    responsive_columns(automatic_row, automatic_layout, 380);
+    bool narrow = false, showing_details = false;
+    const auto show_panels = [&] {
+        sidebar->setVisible(!narrow || !showing_details);
+        panel->setVisible(!narrow || showing_details);
+        back->setVisible(narrow && showing_details);
+        description->setVisible(!narrow || !showing_details);
+    };
+    new WidthObserver(&dialog, [&, mode = WidthMode{}](int width) mutable {
+        narrow = mode.narrow(width, 760);
+        sidebar->setMinimumWidth(narrow ? 0 : std::clamp(width / 4, 220, 258));
+        sidebar->setMaximumWidth(narrow ? QWIDGETSIZE_MAX : sidebar->minimumWidth());
+        detail_layout->setContentsMargins(narrow ? 18 : 30, narrow ? 18 : 26, narrow ? 18 : 30, 24);
+        show_panels();
+    });
+    QObject::connect(back, &QPushButton::clicked, &dialog, [&] {
+        showing_details = false;
+        show_panels();
+        list->setFocus();
+    });
+    const auto open_details = [&] {
+        showing_details = true;
+        show_panels();
+        if (narrow)
+            back->setFocus();
+    };
+    QObject::connect(list, &QTreeWidget::itemClicked, &dialog, open_details);
+    QObject::connect(list, &QTreeWidget::itemActivated, &dialog, open_details);
     auto entries = catalog.inventory();
     QString operation_error;
     bool syncing_priority = false;

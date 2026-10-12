@@ -89,6 +89,80 @@ TEST_F(QuantityTest, PreparingGroundStationDoesNotShowTemporaryWindows) {
     EXPECT_FALSE(editor.isVisible());
     EXPECT_TRUE(windows.shown.isEmpty()) << windows.shown.join(", ").toStdString();
 }
+TEST_F(QuantityTest, ResponsivePropertiesPreserveDraftsAndKeepFieldsInsideViewport) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    OrbitEditor editor(OrbitInput{});
+    editor.resize(1120, 620);
+    editor.show();
+    auto *selector = editor.findChild<QComboBox *>("propertyPageSelector");
+    auto *navigation = editor.findChild<QTreeWidget *>("propertyNavigation");
+    auto *state = editor.findChild<QComboBox *>("stateRepresentation");
+    ASSERT_TRUE(selector && navigation && state);
+    state->setCurrentIndex(1);
+    auto &axis = field(editor, "semiMajorAxis");
+    text(axis)->setText("7123.456");
+    editor.findChild<QComboBox *>("trackExtent")->setCurrentIndex(2);
+    text(field(editor, "pastDuration"))->setText("37.5");
+    const auto settle = [] {
+        for (int i = 0; i < 12; ++i)
+            QCoreApplication::processEvents();
+    };
+    const auto capture = qEnvironmentVariable("ORBITFORGE_RESPONSIVE_UI_CAPTURE");
+    if (!capture.isEmpty())
+        ASSERT_TRUE(QDir().mkpath(capture));
+    for (int width : {1120, 320, 560, 840, 320, 1120}) {
+        const int page = selector->currentIndex();
+        editor.resize(width, 620);
+        settle();
+        EXPECT_EQ(editor.width(), width);
+        EXPECT_EQ(selector->currentIndex(), page);
+        EXPECT_EQ(selector->isVisible(), width < 680);
+        EXPECT_EQ(navigation->isVisible(), width >= 680);
+        for (int index = 0; index < 4; ++index) {
+            selector->setCurrentIndex(index);
+            settle();
+            EXPECT_EQ(navigation->currentItem()->data(0, Qt::UserRole).toInt(), index);
+            for (auto *scroll : editor.findChildren<QScrollArea *>())
+                if (scroll->isVisible()) {
+                    EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0)
+                        << "width=" << width << ", page=" << index;
+                    EXPECT_LE(scroll->widget()->width(), scroll->viewport()->width())
+                        << "width=" << width << ", page=" << index;
+                }
+            if (!capture.isEmpty() && (width == 320 || width == 1120))
+                EXPECT_TRUE(editor.grab().save(
+                    capture + QString("/properties-%1-%2.png").arg(width).arg(index)));
+        }
+        EXPECT_EQ(text(axis)->text(), "7123.456");
+        EXPECT_EQ(text(field(editor, "pastDuration"))->text(), "37.5");
+    }
+    editor.set_create_mode(true);
+    editor.resize(320, 480);
+    settle();
+    EXPECT_EQ(selector->currentIndex(), 0);
+    EXPECT_FALSE(selector->isEnabled());
+    EXPECT_TRUE(editor.findChild<QPushButton *>("applyOrbit")->isVisible());
+    editor.set_create_mode(false);
+    EXPECT_TRUE(selector->isEnabled());
+
+    GroundStationEditor station;
+    station.set_station({"station", "Station", {1.2, 0.6, 350}}, true);
+    station.findChild<QLineEdit *>("stationName")->setText(QStringLiteral("未应用的站点名称"));
+    station.show();
+    for (int width : {480, 320, 640, 320}) {
+        station.resize(width, 520);
+        settle();
+        EXPECT_EQ(station.width(), width);
+        auto *scroll = station.findChild<QScrollArea *>("groundStationScroll");
+        EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+        auto *submit = station.findChild<QPushButton *>("applyGroundStation");
+        EXPECT_TRUE(station.rect().contains(submit->mapTo(&station, submit->rect().bottomRight())));
+        EXPECT_EQ(station.findChild<QLineEdit *>("stationName")->text(),
+                  QStringLiteral("未应用的站点名称"));
+        if (!capture.isEmpty())
+            EXPECT_TRUE(station.grab().save(capture + QString("/station-%1.png").arg(width)));
+    }
+}
 TEST_F(QuantityTest, PreparingSensorDoesNotShowTemporaryWindows) {
     WindowShowObserver windows;
     application::Project project("Scenario", core::Epoch{0}, core::Epoch{120'000'000'000});

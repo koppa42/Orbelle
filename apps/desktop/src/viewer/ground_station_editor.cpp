@@ -1,5 +1,6 @@
 #include "ground_station_editor.hpp"
 #include "quantity_editor.hpp"
+#include "responsive_layout.hpp"
 #include "workbench_style.hpp"
 #include <QFormLayout>
 #include <QLabel>
@@ -13,9 +14,12 @@ GroundStationEditor::GroundStationEditor(QWidget *parent) : QDialog(parent) {
     setObjectName("groundStationProperties");
     setWindowIcon(workbench_icon(WorkbenchIcon::ground_station));
     resize(480, 620);
+    setMinimumSize(320, 280);
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     auto *scroll = new QScrollArea;
+    scroll->setObjectName("groundStationScroll");
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     fields_ = new QWidget;
@@ -79,6 +83,8 @@ GroundStationEditor::GroundStationEditor(QWidget *parent) : QDialog(parent) {
     constraint_hint->setObjectName("hint");
     constraint_form->addRow(constraint_hint);
     body->addWidget(constraints);
+    responsive_form(form);
+    responsive_form(constraint_form);
     preview_ = new QLabel;
     preview_->setObjectName("stationPositionPreview");
     preview_->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -108,9 +114,23 @@ GroundStationEditor::GroundStationEditor(QWidget *parent) : QDialog(parent) {
     buttons->addWidget(reset_);
     buttons->addStretch();
     buttons->addWidget(close);
-    buttons->addWidget(apply_);
     footer_layout->addLayout(buttons);
+    footer_layout->addWidget(apply_);
     layout->addWidget(footer);
+    new WidthObserver(footer, [this, buttons, footer_layout, mode = WidthMode{},
+                               previous = true](int width) mutable {
+        const bool narrow = mode.narrow(width, 380);
+        if (narrow == previous)
+            return;
+        previous = narrow;
+        if (narrow) {
+            buttons->removeWidget(apply_);
+            footer_layout->addWidget(apply_);
+        } else {
+            footer_layout->removeWidget(apply_);
+            buttons->addWidget(apply_);
+        }
+    });
     connect(close, &QPushButton::clicked, this, &QDialog::close);
     connect(reset_, &QPushButton::clicked, this,
             [this] { set_station(original_, apply_->text() == QStringLiteral("插入地面站")); });

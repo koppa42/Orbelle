@@ -43,7 +43,6 @@ class OrbitEditor final : public QWidget {
     void show_appearance_result(const QString &message, bool error = false);
 
   private:
-    void resizeEvent(QResizeEvent *event) override;
     void refresh_enabled();
     core::CartesianState read_state() const;
     core::CartesianState in_frame(core::CartesianState state, core::FrameId frame) const;
@@ -61,6 +60,7 @@ class OrbitEditor final : public QWidget {
     OrbitPropagator propagator_kind_ = OrbitPropagator::two_body;
     bool create_mode_ = false, orbit_busy_ = false, model_busy_ = false;
     QTreeWidget *navigation_ = nullptr;
+    QComboBox *compact_navigation_ = nullptr;
     QLineEdit *object_ = nullptr;
     QComboBox *propagator_ = nullptr, *reference_frame_ = nullptr;
     QLabel *anomaly_label_ = nullptr, *state_title_ = nullptr;
