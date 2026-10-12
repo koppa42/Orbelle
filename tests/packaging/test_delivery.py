@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
+import tarfile
 import tempfile
 import unittest
 
@@ -21,6 +22,7 @@ def load_tool(name, relative):
 windows = load_tool('package_windows', 'tools/packaging/package_windows.py')
 linux = load_tool('check_linux', 'tools/ci/check_linux.py')
 sdk = load_tool('package_sdk', 'tools/packaging/package_sdk.py')
+python_dependencies = load_tool('export_python_dependencies', 'tools/ci/export_python_dependencies.py')
 
 
 class WindowsManifestTests(unittest.TestCase):
@@ -88,7 +90,7 @@ class LinuxDeliveryTests(unittest.TestCase):
                              'tests/integration/fixtures', 'bindings/python/tests', 'examples/python'):
                 shutil.copytree(ROOT / relative, source / relative,
                                 ignore=shutil.ignore_patterns('__pycache__'))
-            for relative in ('tools/ci/check_linux.py', 'tools/validation/compare_examples.py',
+            for relative in ('tools/ci/check_linux.py', 'tools/ci/summarize_timings.py', 'tools/validation/compare_examples.py',
                              'tools/packaging/package_sdk.py'):
                 target = source / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -150,6 +152,20 @@ class SdkDependencyTests(unittest.TestCase):
             self.assertFalse((root / 'delivery/share/qtbase').exists())
             for port in ('erfa', 'cspice', 'sqlite3'):
                 self.assertEqual((root / f'delivery/share/{port}/copyright').read_text(), port)
+            # Matrix jobs receive third-party dependencies, never an OrbitForge SDK or wheel.
+            (prefix / 'orbitforge.whl').write_bytes(b'not a dependency')
+            archive = root / 'python-dependencies.tar.gz'
+            python_dependencies.export(prefix, archive)
+            with tarfile.open(archive) as bundle:
+                files = {entry.name for entry in bundle.getmembers() if entry.isfile()}
+                self.assertEqual(files, {
+                    f'dependencies/share/{port}/copyright'
+                    for port in ('erfa', 'cspice', 'sqlite3', 'nlohmann-json', 'picosha2')
+                })
+            original = archive.read_bytes()
+            with self.assertRaises(FileExistsError):
+                python_dependencies.export(prefix, archive)
+            self.assertEqual(archive.read_bytes(), original)
 
 
 if __name__ == '__main__':
