@@ -106,6 +106,7 @@ GroundMap::GroundMap(const QString &imagery, QWidget *parent) : QWidget(parent),
     setMinimumSize(160, 100);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
+    setAttribute(Qt::WA_OpaquePaintEvent);
     setAccessibleName(QStringLiteral("二维地面轨迹，滚轮缩放、拖动平移、点击选择对象、Home 复位"));
 }
 GroundMap::~GroundMap() {
@@ -181,7 +182,7 @@ void GroundMap::set_selection(std::optional<std::size_t> index) {
     if (selected_ == index)
         return;
     selected_ = index;
-    invalidate_tracks(false);
+    update();
 }
 void GroundMap::set_display(std::size_t index, const DisplaySettings &settings, core::Epoch first,
                             core::Epoch last) {
@@ -522,8 +523,10 @@ GroundMap::Raster GroundMap::preview_request() const {
     return request;
 }
 void GroundMap::allocate_raster(Raster &raster, QImage::Format format) {
-    raster.image = QImage(QSize(qCeil(raster.bounds.width() * raster.ratio),
-                                qCeil(raster.bounds.height() * raster.ratio)),
+    // Request bounds have already been aligned to physical pixels. A second ceil
+    // can add a pixel due to floating-point roundoff at fractional DPI.
+    raster.image = QImage(QSize(qRound(raster.bounds.width() * raster.ratio),
+                                qRound(raster.bounds.height() * raster.ratio)),
                           format);
     if (raster.image.isNull())
         throw std::bad_alloc();
@@ -587,6 +590,28 @@ void GroundMap::set_access_link(std::optional<std::pair<std::size_t, std::size_t
     access_visible_ = visible;
     update();
 }
+void GroundMap::paint_base(QPainter &p, const Raster *display) {
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setRenderHint(QPainter::SmoothPixmapTransform);
+    p.fillRect(rect(), QColor("#080f18"));
+    p.save();
+    p.setClipRect(plot_rect());
+    const auto draw = [&](const Raster &raster) {
+        const auto transform = raster_transform(raster);
+        const auto bounds = transform.mapRect(raster.bounds);
+        // Preserve the native pixel size when a cached layer only translates.
+        if (qFuzzyCompare(transform.m11(), 1.0))
+            p.drawImage(bounds.topLeft(), raster.image);
+        else
+            p.drawImage(bounds, raster.image);
+    };
+    draw(background_);
+    paint_grid(p);
+    if (display)
+        draw(*display);
+    p.restore();
+    paint_axes(p);
+}
 void GroundMap::paintEvent(QPaintEvent *event) {
     const ProfileScope profile("map_paint_ms");
     const auto plot = plot_rect();
@@ -630,12 +655,9 @@ void GroundMap::paintEvent(QPaintEvent *event) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     p.setRenderHint(QPainter::SmoothPixmapTransform);
-    p.fillRect(rect(), QColor("#080f18"));
-    if (!footer_only) {
-        p.save();
-        p.setClipRect(plot);
-        p.drawImage(raster_transform(background_).mapRect(background_.bounds), background_.image);
-        paint_grid(p);
+    if (footer_only)
+        p.fillRect(event->rect(), QColor("#080f18"));
+    else {
         // Reproject a complete cached image during zooming, only while its coverage
         // includes the whole viewport. A new exact-scale image still replaces it.
         const Raster *display = nullptr;
@@ -643,8 +665,43 @@ void GroundMap::paintEvent(QPaintEvent *event) {
             display = &trails_;
         else if (!preview_.image.isNull() && preview_.revision == geometry_revision_)
             display = &preview_;
-        if (display)
-            p.drawImage(raster_transform(*display).mapRect(display->bounds), display->image);
+        const BaseKey key{map_transform(),
+                          size(),
+                          devicePixelRatioF(),
+                          background_.image.cacheKey(),
+                          display ? display->image.cacheKey() : 0,
+                          grid_,
+                          font()};
+        const bool stable_view = key.transform == base_key_.transform &&
+                                 key.size == base_key_.size && key.ratio == base_key_.ratio;
+        if (!stable_view)
+            view_stable_.start();
+        if (!stable_view || !view_stable_.isValid() || view_stable_.elapsed() < 100) {
+            // During dragging/zooming draw directly; avoid allocating an extra image
+            // for a viewport that may only be shown once.
+            base_image_ = {};
+            paint_base(p, display);
+        } else {
+            if (base_image_.isNull() || key != base_key_) {
+                const ProfileScope compose("map_composite_ms");
+                const QSize pixels(static_cast<int>(std::ceil(width() * key.ratio)),
+                                   static_cast<int>(std::ceil(height() * key.ratio)));
+                if (base_image_.size() != pixels) {
+                    base_image_ = QImage(pixels, QImage::Format_RGB32);
+                    base_image_.setDevicePixelRatio(key.ratio);
+                }
+                QPainter cache(&base_image_);
+                cache.setFont(font());
+                paint_base(cache, display);
+            }
+            p.drawImage(QPointF(0, 0), base_image_);
+        }
+        base_key_ = key;
+        p.setFont(font());
+        p.save();
+        p.setClipRect(plot);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        const auto label_context = font().toString() + '/' + QString::number(devicePixelRatioF());
         if (access_visible_ && access_pair_ && access_pair_->first < points_.size() &&
             access_pair_->second < points_.size()) {
             p.setPen(QPen(QColor("#87d4c6"), 2, Qt::DashLine));
@@ -679,14 +736,38 @@ void GroundMap::paintEvent(QPaintEvent *event) {
             const QRectF label(std::clamp(point.x() + 12, plot.left(), plot.right() - label_width),
                                std::clamp(point.y() - 12, plot.top(), plot.bottom() - 22),
                                label_width, 22);
-            p.setPen(Qt::NoPen);
-            p.setBrush(QColor(13, 32, 49, 215));
-            p.drawRoundedRect(label, 3, 3);
-            p.setPen(QColor("#d9e9f6"));
-            p.drawText(label, Qt::AlignCenter, name);
+            const auto ratio = devicePixelRatioF();
+            const QPointF label_origin(std::round(label.x() * ratio) / ratio,
+                                       std::round(label.y() * ratio) / ratio);
+            const auto label_key = label_context + '/' + name;
+            auto *image = labels_cache_.object(label_key);
+            if (!image) {
+                auto prepared = std::make_unique<QImage>(
+                    QSize(static_cast<int>(std::ceil(label.width() * ratio)),
+                          static_cast<int>(std::ceil(label.height() * ratio))),
+                    QImage::Format_ARGB32_Premultiplied);
+                prepared->setDevicePixelRatio(ratio);
+                prepared->fill(Qt::transparent);
+                {
+                    QPainter text(prepared.get());
+                    text.setRenderHint(QPainter::Antialiasing);
+                    text.setFont(font());
+                    text.setPen(Qt::NoPen);
+                    text.setBrush(QColor(13, 32, 49, 215));
+                    const QRectF bounds(QPointF(0, 0), label.size());
+                    text.drawRoundedRect(bounds, 3, 3);
+                    text.setPen(QColor("#d9e9f6"));
+                    text.drawText(bounds, Qt::AlignCenter, name);
+                }
+                image = prepared.get();
+                const auto cost = static_cast<int>((image->sizeInBytes() + 1023) / 1024);
+                // An unusually wide label can exceed the cache; still draw it once.
+                p.drawImage(label_origin, *image);
+                labels_cache_.insert(label_key, prepared.release(), cost);
+            } else
+                p.drawImage(label_origin, *image);
         }
         p.restore();
-        paint_axes(p);
     }
     p.setFont(font());
     p.setPen(QColor("#92aac2"));

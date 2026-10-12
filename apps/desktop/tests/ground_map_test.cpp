@@ -74,16 +74,22 @@ class GroundMapTest : public ::testing::Test {
     static void expect_same_pixels(const QImage &a, const QImage &b) {
         ASSERT_EQ(a.size(), b.size());
         int maximum = 0;
+        double total = 0;
         for (int y = 0; y < a.height(); ++y)
             for (int x = 0; x < a.width(); ++x) {
                 const auto p = a.pixelColor(x, y), q = b.pixelColor(x, y);
-                maximum =
-                    std::max({maximum, std::abs(p.red() - q.red()), std::abs(p.green() - q.green()),
+                const int difference =
+                    std::max({std::abs(p.red() - q.red()), std::abs(p.green() - q.green()),
                               std::abs(p.blue() - q.blue())});
+                maximum = std::max(maximum, difference);
+                total += difference;
             }
-        // Translating cached pixels versus rasterizing translated coordinates can
-        // differ by rounding at the antialiased edge (2/255 per channel).
-        EXPECT_LE(maximum, 2);
+        // Halo, stroke and image composition each quantize to 8-bit channels.
+        // At DPR 1.5 the original renderer already differs by 3/255 at two edge
+        // pixels when translating a cached path versus rasterizing it afresh.
+        // Also bound the mean so a widespread tint or stale layer cannot pass.
+        EXPECT_LE(maximum, 3);
+        EXPECT_LE(total / (a.width() * a.height()), 0.01);
     }
     static void pan(GroundMap &map) {
         QMouseEvent press(QEvent::MouseButtonPress, QPointF(300, 180), QPointF(300, 180),
@@ -139,7 +145,7 @@ TEST_F(GroundMapTest, TrackStyleChangesRepaintCachedGeometryWithColorWidthAndGap
     ASSERT_TRUE(settle(map));
     EXPECT_EQ(red_pixels(pixels(map)), 0u);
 }
-TEST_F(GroundMapTest, RangeVisibilityReplacementAndSelectionInvalidateTrails) {
+TEST_F(GroundMapTest, RangeVisibilityReplacementAndSelectionRepaint) {
     GroundMap map(imagery_);
     configure(map);
     const auto full = pixels(map);
@@ -157,9 +163,48 @@ TEST_F(GroundMapTest, RangeVisibilityReplacementAndSelectionInvalidateTrails) {
     map.replace_track(0, track());
     EXPECT_EQ(pixels(map), full);
     map.set_selection(0);
+    EXPECT_TRUE(map.tracks_ready()); // Selection only changes the moving marker overlay.
     EXPECT_NE(pixels(map), full);
     map.set_selection(std::nullopt);
     EXPECT_EQ(pixels(map), full);
+}
+TEST_F(GroundMapTest, ComposedMapMatchesDirectRenderingAfterLayerAndOverlayChanges) {
+    GroundMap cached(imagery_);
+    configure(cached);
+    (void)pixels(cached);
+    QThread::msleep(110); // The settled viewport starts composing after a zoom/drag burst.
+    (void)pixels(cached);
+    for (int stage = 0; stage < 8; ++stage) {
+        GroundMap fresh(imagery_);
+        configure(fresh);
+        const auto change = [stage](GroundMap &map) {
+            map.set_grid_visible(stage % 2 == 0);
+            map.set_lighting(stage % 3 == 0);
+            map.set_sun_visible(stage % 2 != 0);
+            map.set_sun_direction(stage % 2 ? std::array<double, 3>{0, 1, 0}
+                                            : std::array<double, 3>{1, 0, 0});
+            map.set_labels_visible(stage % 3 != 0);
+            map.set_selection(stage % 2 ? std::optional<std::size_t>(0) : std::nullopt);
+            map.set_name(0, stage % 2 ? QStringLiteral("观测卫星") : QStringLiteral("Satellite"));
+            map.set_snapshot({core::Epoch{stage},
+                              core::FrameId::itrf,
+                              core::OriginId::earth,
+                              {{"Satellite", {7e6, stage * 1e6, 0}}, {"Station", {0, 7e6, 0}}}});
+            map.set_access_link(std::pair<std::size_t, std::size_t>{0, 1}, stage % 2 == 0);
+            DisplaySettings style;
+            style.line_width = 1 + stage % 4;
+            style.line_color = stage % 2 ? 0x73cdee : 0xff3040;
+            map.set_display(0, style, core::Epoch{0}, core::Epoch{40});
+            auto font = map.font();
+            font.setPixelSize(12 + stage);
+            map.setFont(font);
+        };
+        change(cached);
+        change(fresh);
+        const auto direct = pixels(fresh);
+        expect_same_pixels(pixels(cached), direct);
+        expect_same_pixels(pixels(cached), direct);
+    }
 }
 TEST_F(GroundMapTest, CachedPanAndResizeMatchFreshRendering) {
     GroundMap cached(imagery_), fresh(imagery_);

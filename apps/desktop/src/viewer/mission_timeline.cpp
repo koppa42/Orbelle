@@ -223,12 +223,12 @@ std::vector<qint64> MissionTimeline::ruler_ticks() const {
 void MissionTimeline::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
-    p.fillRect(rect(), QColor("#161d2c"));
+    p.fillRect(rect(), QColor("#171e27"));
     const auto overview = overview_rect();
     const auto detail = detail_rect();
     const auto left = detail.left(), right = detail.right();
-    p.fillRect(QRectF(0, 0, left - 10, height()), QColor("#1c2537"));
-    p.setPen(QColor("#303b52"));
+    p.fillRect(QRectF(0, 0, left - 10, height()), QColor("#1d2a35"));
+    p.setPen(QColor("#2f4250"));
     p.drawLine(QPointF(0, 41), QPointF(width(), 41));
     p.drawLine(QPointF(left - 10, 0), QPointF(left - 10, height()));
 
@@ -250,16 +250,16 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
                full_time(first_, scale_, *time_).left(20));
     p.drawText(QRectF(left + detail.width() / 2, 1, detail.width() / 2, 18),
                Qt::AlignRight | Qt::AlignVCenter, full_time(last_, scale_, *time_).left(20));
-    p.fillRect(overview, QColor("#101721"));
-    p.setPen(QColor("#2b3b4d"));
+    p.fillRect(overview, QColor("#121820"));
+    p.setPen(QColor("#314b5d"));
     for (int i = 0; i <= 24; ++i) {
         const auto x = left + overview.width() * i / 24;
         p.drawLine(QPointF(x, overview.top()), QPointF(x, overview.bottom()));
     }
     const double a = position_at(view_first_, true), b = position_at(view_last_, true);
     p.fillRect(QRectF(a, overview.top(), std::max(2.0, b - a), overview.height()),
-               QColor("#353f62"));
-    p.setPen(QPen(QColor("#8798da"), 1));
+               QColor("#294659"));
+    p.setPen(QPen(QColor("#8eb6ca"), 1));
     p.setBrush(Qt::NoBrush);
     p.drawRect(QRectF(a, overview.top(), std::max(2.0, b - a), overview.height()));
     if (b - a >= 18) {
@@ -286,7 +286,7 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
     const auto ticks = ruler_ticks();
     // Five subdivisions per major SI interval, with calendar-aligned major ticks.
     for (std::size_t i = 1; i < ticks.size(); ++i) {
-        p.setPen(QColor("#40536a"));
+        p.setPen(QColor("#415f74"));
         for (int part = 1; part < 5; ++part) {
             const auto epoch = ticks[i - 1] + (ticks[i] - ticks[i - 1]) * part / 5;
             const auto x = position_at(epoch);
@@ -296,7 +296,7 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
     const double label_width = step < 1000 ? 84 : 62;
     for (const auto epoch : ticks) {
         const auto x = position_at(epoch);
-        p.setPen(QColor("#263445"));
+        p.setPen(QColor("#2b3c4c"));
         p.drawLine(QPointF(x, 86), QPointF(x, 139));
         p.setPen(QColor("#5c7690"));
         p.drawLine(QPointF(x, 78), QPointF(x, 86));
@@ -335,8 +335,8 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
         p.setPen(QColor("#b4cfe6"));
         p.drawText(QRectF(left + 9, y, detail.width() - 18, 18), Qt::AlignVCenter, caption);
     };
-    track(91, scenario_, QStringLiteral("场景分析区间"), scenario_icon, QColor("#303a59"),
-          QColor("#576a9b"));
+    track(91, scenario_, QStringLiteral("场景分析区间"), scenario_icon, QColor("#294254"),
+          QColor("#648fa6"));
     if (show_object_interval_ && !object_.isEmpty())
         track(117, object_, QStringLiteral("轨道传播"), satellite_icon, QColor("#233e49"),
               QColor("#4e8090"));
@@ -382,7 +382,7 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
                                 QPointF(x + direction * 6, 89)});
     }
     if (hasFocus()) {
-        p.setPen(QPen(QColor("#74b9ee"), 1));
+        p.setPen(QPen(QColor("#e0a7ce"), 1));
         p.drawLine(QPointF(left, height() - 2), QPointF(right, height() - 2));
     }
 }
