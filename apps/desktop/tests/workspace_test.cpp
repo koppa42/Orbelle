@@ -77,6 +77,9 @@ TEST_F(WorkspaceTest, SwitchingDetachingAndClosingPreserveDocumentDraft) {
     workspace.detach_page(document);
     EXPECT_TRUE(workspace.is_floating(document));
     EXPECT_TRUE(field->isVisible());
+    document->window()->resize(320, 400);
+    QCoreApplication::processEvents();
+    EXPECT_EQ(document->window()->width(), 320);
     field->setText("changed in window");
     workspace.dock_page(document);
     EXPECT_FALSE(workspace.is_floating(document));
@@ -84,12 +87,48 @@ TEST_F(WorkspaceTest, SwitchingDetachingAndClosingPreserveDocumentDraft) {
     EXPECT_EQ(field->text(), "changed in window");
     document->setWindowTitle("Satellite1 · Properties");
     EXPECT_EQ(workspace.findChild<QTabBar *>()->tabText(2), "Satellite1 · Properties");
+    EXPECT_EQ(workspace.findChild<QTabBar *>()->tabToolTip(2), "Satellite1 · Properties");
     document->close();
     EXPECT_FALSE(workspace.contains(document));
     EXPECT_EQ(workspace.findChild<QTabBar *>()->currentIndex(), 1);
     workspace.open(document);
     EXPECT_EQ(field->text(), "changed in window");
     EXPECT_EQ(workspace.findChild<QTabBar *>()->count(), 3);
+}
+TEST_F(WorkspaceTest, NarrowSplitRespectsActiveDocumentWithoutWideningHiddenViews) {
+    Workspace workspace;
+    auto *view = new QWidget;
+    workspace.add_view(view, "3D", {});
+    auto *document = new QDialog;
+    document->setWindowTitle("Properties");
+    document->setMinimumWidth(320);
+    auto *layout = new QVBoxLayout(document);
+    auto *draft = new QLineEdit("unapplied draft");
+    layout->addWidget(draft);
+    workspace.resize(1000, 560);
+    workspace.show();
+    workspace.open(document, false);
+    workspace.split_page(document, view, Qt::RightEdge);
+    workspace.resize(600, 440);
+    for (int i = 0; i < 5; ++i)
+        QCoreApplication::processEvents();
+    EXPECT_EQ(workspace.width(), 600);
+    EXPECT_GE(document->width(), 320);
+    EXPECT_TRUE(document->parentWidget()->rect().contains(document->geometry()));
+    EXPECT_TRUE(workspace.rect().contains(draft->mapTo(&workspace, draft->rect().bottomRight())));
+    workspace.merge_page(document, view);
+    workspace.select_view(0);
+    for (int i = 0; i < 5; ++i)
+        QCoreApplication::processEvents();
+    workspace.resize(360, 440);
+    QCoreApplication::processEvents();
+    EXPECT_EQ(workspace.width(), 360);
+    EXPECT_FALSE(document->isVisible());
+    EXPECT_TRUE(view->isVisible());
+    workspace.open(document, false);
+    QCoreApplication::processEvents();
+    EXPECT_EQ(draft->text(), "unapplied draft");
+    EXPECT_TRUE(document->parentWidget()->rect().contains(document->geometry()));
 }
 TEST_F(WorkspaceTest, MultiplePanelsAndFloatingWindowCloseStayIndependent) {
     Workspace workspace;

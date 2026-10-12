@@ -2,6 +2,7 @@
 #include "epoch_editor.hpp"
 #include "object_selection.hpp"
 #include "report_plot.hpp"
+#include "responsive_layout.hpp"
 #include "workbench_style.hpp"
 #include <QAbstractTableModel>
 #include <QAction>
@@ -250,6 +251,8 @@ struct ReportDialog::Impl {
     std::shared_ptr<std::atomic_size_t> completed;
     bool waiting = false, loading = false, changed = false;
     bool compact = false, wide_settings = true, narrow_settings = true;
+    WidthMode panel_mode;
+    QList<int> wide_sizes{330, 790};
     std::size_t expected = 0;
     std::uint64_t request = 0;
 
@@ -260,6 +263,7 @@ struct ReportDialog::Impl {
         owner->setObjectName("reportDialog");
         owner->setWindowTitle(QStringLiteral("报告"));
         owner->setWindowIcon(workbench_icon(WorkbenchIcon::properties));
+        owner->setMinimumSize(320, 320);
         owner->resize(1120, 740);
         auto *root = new QVBoxLayout(owner);
         root->setSizeConstraint(QLayout::SetNoConstraint);
@@ -290,6 +294,7 @@ struct ReportDialog::Impl {
         auto *scroll = new QScrollArea(settings_panel);
         scroll->setObjectName("reportSettingsScroll");
         scroll->setWidgetResizable(true);
+        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         scroll->setFrameShape(QFrame::NoFrame);
         panel_layout->addWidget(scroll, 1);
         settings = new QWidget(scroll);
@@ -468,6 +473,7 @@ struct ReportDialog::Impl {
         actions_layout->addWidget(cancel);
         panel_layout->addWidget(actions);
         result_panel = new QWidget(split);
+        result_panel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         result_panel->setObjectName("reportResultPanel");
         auto *result_layout = new QVBoxLayout(result_panel);
         result_layout->setContentsMargins(18, 16, 18, 12);
@@ -601,6 +607,19 @@ struct ReportDialog::Impl {
         reset_plot->setToolTip(QStringLiteral("还原完整范围（Home）"));
         reset_plot->setAccessibleName(QStringLiteral("还原曲线范围"));
         plot_tools->addWidget(reset_plot, 0, 2);
+        new WidthObserver(
+            plot_page, [this, mode = WidthMode{}, previous = false](int width) mutable {
+                const bool small = mode.narrow(width, 500);
+                if (small == previous)
+                    return;
+                previous = small;
+                plot_tools->removeWidget(plot_field);
+                plot_tools->removeWidget(plot_object);
+                plot_tools->removeWidget(reset_plot);
+                plot_tools->addWidget(plot_field, 0, 0, 1, small ? 2 : 1);
+                plot_tools->addWidget(plot_object, small ? 1 : 0, small ? 0 : 1, 1, small ? 2 : 1);
+                plot_tools->addWidget(reset_plot, 0, 2);
+            });
         plot_layout->addLayout(plot_tools);
         plot = new ReportPlot(plot_page);
         plot->seek = [this](core::Epoch epoch) {
@@ -625,6 +644,10 @@ struct ReportDialog::Impl {
         split->setStretchFactor(0, 0);
         split->setStretchFactor(1, 1);
         split->setSizes({330, 790});
+        QObject::connect(split, &QSplitter::splitterMoved, owner, [this] {
+            if (!compact && wide_settings)
+                wide_sizes = split->sizes();
+        });
         progress = new QProgressBar(owner);
         progress->setObjectName("reportProgress");
         progress->setMaximumHeight(4);
@@ -790,20 +813,15 @@ struct ReportDialog::Impl {
         }
     }
     void adapt(int width) {
-        compact = width < 800;
+        const bool was_compact = compact;
+        const bool settings_hidden = settings_panel->isHidden();
+        compact = panel_mode.narrow(width, 800);
         settings_panel->setMinimumWidth(compact ? 0 : 290);
         settings_panel->setMaximumWidth(compact ? QWIDGETSIZE_MAX : 380);
         settings_panel->setVisible(compact ? narrow_settings : wide_settings);
         result_panel->setVisible(!compact || !narrow_settings);
-        const bool small_plot =
-            (compact ? width : width - (wide_settings ? settings_panel->width() : 0)) < 540;
-        plot_tools->removeWidget(plot_field);
-        plot_tools->removeWidget(plot_object);
-        plot_tools->removeWidget(reset_plot);
-        plot_tools->addWidget(plot_field, 0, 0, 1, small_plot ? 2 : 1);
-        plot_tools->addWidget(plot_object, small_plot ? 1 : 0, small_plot ? 0 : 1, 1,
-                              small_plot ? 2 : 1);
-        plot_tools->addWidget(reset_plot, 0, 2);
+        if (!compact && wide_settings && (was_compact || settings_hidden))
+            split->setSizes(wide_sizes);
         view_button->setText(
             compact ? (narrow_settings ? QStringLiteral("查看结果") : QStringLiteral("编辑设置"))
                     : (wide_settings ? QStringLiteral("收起设置") : QStringLiteral("展开设置")));

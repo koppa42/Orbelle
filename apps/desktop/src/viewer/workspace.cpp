@@ -161,6 +161,8 @@ Workspace::Pane *Workspace::make_pane(QDialog *window) {
     pane->tabs->setSelectionBehaviorOnRemove(QTabBar::SelectPreviousTab);
     pane->tabs->setDrawBase(false);
     pane->tabs->setUsesScrollButtons(true);
+    pane->tabs->setElideMode(Qt::ElideRight);
+    pane->tabs->setMinimumWidth(0);
     pane->tabs->setIconSize(QSize(16, 16));
     bar->addWidget(pane->tabs, 1);
     auto *detach = new QToolButton;
@@ -174,7 +176,7 @@ Workspace::Pane *Workspace::make_pane(QDialog *window) {
     bar->addWidget(detach);
     layout->addWidget(heading);
     pane->stack = new QStackedWidget;
-    pane->stack->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Ignored);
+    pane->stack->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
     auto *empty = new QLabel(QStringLiteral("暂无打开的页面"));
     empty->setObjectName("muted");
     empty->setAlignment(Qt::AlignCenter);
@@ -255,6 +257,7 @@ void Workspace::append(Page &page, Pane *pane, int insertion) {
     const int tab = pane->tabs->insertTab(insertion < 0 ? pane->tabs->count() : insertion,
                                           page.icon, page.title);
     pane->tabs->setTabData(tab, QVariant::fromValue(reinterpret_cast<quintptr>(&page)));
+    pane->tabs->setTabToolTip(tab, page.title);
     auto *close = new QToolButton;
     close->setIcon(workbench_icon(WorkbenchIcon::close));
     close->setFixedSize(20, 20);
@@ -294,6 +297,11 @@ void Workspace::activate(Page &page) {
         if (pane->tabs->tabData(i).value<quintptr>() == reinterpret_cast<quintptr>(&page))
             pane->tabs->setCurrentIndex(i);
     pane->stack->setCurrentWidget(page.host);
+    // The splitter must respect the active document's usable width. Hidden pages
+    // should neither widen a view pane nor allow a document to be clipped inside it.
+    pane->setMinimumWidth(qobject_cast<QDialog *>(page.content.data())
+                              ? std::max(320, page.host->minimumWidth())
+                              : 200);
     page.host->show();
     page.content->show();
     if (pane->window) {
@@ -306,8 +314,10 @@ void Workspace::update_title(Page &page) {
     page.title = page.content->windowTitle();
     if (auto *pane = page.pane) {
         for (int i = 0; i < pane->tabs->count(); ++i)
-            if (pane->tabs->tabData(i).value<quintptr>() == reinterpret_cast<quintptr>(&page))
+            if (pane->tabs->tabData(i).value<quintptr>() == reinterpret_cast<quintptr>(&page)) {
                 pane->tabs->setTabText(i, page.title);
+                pane->tabs->setTabToolTip(i, page.title);
+            }
         if (pane->window && current(pane) == &page)
             pane->window->setWindowTitle(page.title);
     }
@@ -444,7 +454,7 @@ void Workspace::detach_page(QWidget *content) {
         return;
     auto *window = new QDialog(this, Qt::Window);
     window->setAttribute(Qt::WA_QuitOnClose, false);
-    window->setMinimumSize(480, 320);
+    window->setMinimumSize(320, 320);
     auto *layout = new QVBoxLayout(window);
     layout->setContentsMargins(0, 0, 0, 0);
     auto *pane = make_pane(window);

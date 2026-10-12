@@ -10,6 +10,7 @@
 #include "project_scene.hpp"
 #include "quantity_editor.hpp"
 #include "report_dialog.hpp"
+#include "responsive_layout.hpp"
 #include "satellite_model.hpp"
 #include "scenario_dialog.hpp"
 #include "sensor_editor.hpp"
@@ -383,6 +384,11 @@ class Workbench final : public QMainWindow {
                 commands_->setFixedHeight(44);
                 commands_->setIconSize(QSize(18, 18));
                 commands_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+                new WidthObserver(commands_, [this, mode = WidthMode{}](int width) mutable {
+                    commands_->setToolButtonStyle(mode.narrow(width, 900)
+                                                      ? Qt::ToolButtonIconOnly
+                                                      : Qt::ToolButtonTextBesideIcon);
+                });
                 auto *symbol = new QLabel;
                 symbol->setPixmap(
                     workbench_icon(WorkbenchIcon::orbit, QColor("#aad5ee")).pixmap(22, 22));
@@ -536,7 +542,7 @@ class Workbench final : public QMainWindow {
                 properties_dialog_->setWindowTitle(QStringLiteral("对象属性"));
                 properties_dialog_->resize(
                     980, std::min(660, screen()->availableGeometry().height() - 100));
-                properties_dialog_->setMinimumSize(910, 240);
+                properties_dialog_->setMinimumSize(320, 280);
                 auto *dialog_layout = new QVBoxLayout(properties_dialog_);
                 dialog_layout->setSizeConstraint(QLayout::SetNoConstraint);
                 dialog_layout->setContentsMargins(0, 0, 0, 0);
@@ -647,11 +653,19 @@ class Workbench final : public QMainWindow {
                 toolbar->setObjectName("timelineBar");
                 auto *timeline = new QWidget;
                 timeline->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+                // Keep the toolbar's cached single-row hint from blocking the narrow layout.
+                timeline->setMinimumWidth(560);
                 auto *layout = new QVBoxLayout(timeline);
                 layout->setContentsMargins(0, 0, 0, 0);
                 layout->setSpacing(0);
-                auto *controls = new QHBoxLayout;
-                controls->setContentsMargins(10, 4, 10, 4);
+                auto *control_panel = new QWidget;
+                control_panel->setObjectName("timelineControls");
+                auto *control_rows = new QHBoxLayout(control_panel);
+                control_rows->setContentsMargins(10, 4, 10, 4);
+                control_rows->setSpacing(4);
+                auto *transport = new QHBoxLayout;
+                auto *controls = transport;
+                controls->setContentsMargins(0, 0, 0, 0);
                 controls->setSpacing(4);
                 auto *heading = new QLabel(QStringLiteral("时间轴"));
                 heading->setObjectName("timelineTitle");
@@ -815,6 +829,11 @@ class Workbench final : public QMainWindow {
                     controls->addWidget(button);
                 }
                 controls->addStretch();
+                control_rows->addLayout(transport, 1);
+                controls = new QHBoxLayout;
+                controls->setContentsMargins(0, 0, 0, 0);
+                controls->setSpacing(4);
+                controls->addStretch();
                 time_label_ = new QToolButton;
                 time_label_->setObjectName("timeReadout");
                 time_label_->setDefaultAction(jump);
@@ -858,9 +877,11 @@ class Workbench final : public QMainWindow {
                     collapse->setAccessibleName(collapse->toolTip());
                 });
                 controls->addWidget(collapse);
-                layout->addLayout(controls);
+                control_rows->addLayout(controls);
+                layout->addWidget(control_panel);
                 layout->addWidget(timeline_);
                 toolbar->addWidget(timeline);
+                responsive_columns(timeline, control_rows, 1000);
                 auto *credit = new QLabel("NASA Blue Marble");
                 credit->setObjectName("hint");
                 statusBar()->addPermanentWidget(credit);
@@ -2349,7 +2370,7 @@ class Workbench final : public QMainWindow {
         editor_->submit();
         properties_dialog_->close();
     }
-    void show_properties_dialog() { workspace_->open(properties_dialog_); }
+    void show_properties_dialog() { workspace_->open(properties_dialog_, false); }
     void show_insert_objects() {
         if (!scenario_ || !editor_ || busy())
             return;
@@ -2459,7 +2480,7 @@ class Workbench final : public QMainWindow {
             station_editor_->close();
             station_editor_->apply(station);
         } else
-            workspace_->open(station_editor_);
+            workspace_->open(station_editor_, false);
     }
     void set_playing(bool value) {
         playing_ = value;
@@ -2537,7 +2558,7 @@ class Workbench final : public QMainWindow {
         }
         if (selected_station_ && !busy()) {
             configure_station_editor(stations_.at(*selected_station_).config, false);
-            workspace_->open(station_editor_);
+            workspace_->open(station_editor_, false);
             return;
         }
         if (!selected_ && scenario_ && objects_->currentItem() == scenario_item_) {
@@ -3381,9 +3402,13 @@ class Workbench final : public QMainWindow {
     QWidget *make_view_controls(std::optional<std::size_t> slot) {
         auto *header = new QWidget;
         header->setObjectName("viewHeading");
-        header->setFixedHeight(34);
-        auto *bar = new QHBoxLayout(header);
-        bar->setContentsMargins(10, 3, 6, 3);
+        header->setMinimumHeight(34);
+        header->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        auto *rows = new QHBoxLayout(header);
+        rows->setContentsMargins(10, 3, 6, 3);
+        rows->setSpacing(3);
+        auto *bar = new QHBoxLayout;
+        bar->setContentsMargins(0, 0, 0, 0);
         bar->setSpacing(3);
         auto *title = new QLabel(slot ? QStringLiteral("地球") : QStringLiteral("地面 · WGS84"));
         title->setObjectName("viewTitle");
@@ -3400,7 +3425,11 @@ class Workbench final : public QMainWindow {
             frame_choices_.push_back(choice);
             bar->addWidget(choice);
         }
-        bar->addSpacing(10);
+        rows->addLayout(bar);
+        bar = new QHBoxLayout;
+        bar->setContentsMargins(0, 0, 0, 0);
+        bar->setSpacing(3);
+        rows->addLayout(bar, 1);
         const auto button = [&](WorkbenchIcon icon, const QString &text, auto command) {
             auto *control = new QToolButton;
             control->setIcon(workbench_icon(icon));
@@ -3478,6 +3507,7 @@ class Workbench final : public QMainWindow {
         display->setMenu(settings);
         display->setPopupMode(QToolButton::InstantPopup);
         bar->addWidget(display);
+        responsive_columns(header, rows, 420);
         return header;
     }
     void build_slot(bool secondary) {
@@ -5135,7 +5165,7 @@ class Workbench final : public QMainWindow {
                         editor_->findChild<QuantityEditor *>("displayStep")->value(Unit::second) ==
                             45,
                     "Switching to a view tab discarded the property draft");
-            workspace_->open(properties_dialog_);
+            workspace_->open(properties_dialog_, false);
             ++orbit_smoke_stage_;
             break;
         case 48: {
@@ -7085,6 +7115,78 @@ class Workbench final : public QMainWindow {
             ++orbit_smoke_stage_;
             break;
         case 150:
+            if (++smoke_final_frames_ < 4)
+                return;
+            smoke_responsive_size_ = size();
+            sensor_editor_->close();
+            slots_[1]->dock->hide();
+            smoke_set_view_layout(0);
+            set_selection(0);
+            open_properties();
+            editor_->findChild<QComboBox *>("propertyPageSelector")->setCurrentIndex(0);
+            editor_->findChild<QuantityEditor *>("displayStep")->set_value(17, Unit::second);
+            smoke_cache_ = orbit_;
+            workspace_->split_page(properties_dialog_, view_panel_, Qt::RightEdge);
+            resize(880, 700);
+            smoke_wait_frame_ = frame_count_ + 4;
+            ++orbit_smoke_stage_;
+            break;
+        case 151:
+            if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
+                return;
+            save_workbench_image("responsive-workbench.png");
+            require(
+                width() <= 880 &&
+                    editor_->findChild<QComboBox *>("propertyPageSelector")->isVisible() &&
+                    commands_->toolButtonStyle() == Qt::ToolButtonIconOnly &&
+                    findChild<QWidget *>("timelineControls")->height() > 50 &&
+                    action_in_workspace("applyOrbit"),
+                qPrintable(
+                    QString("Narrow workbench: width=%1, propertyWidth=%2, compactNavigation=%3, "
+                            "iconStyle=%4, controlsHeight=%5, applyVisible=%6")
+                        .arg(width())
+                        .arg(editor_->width())
+                        .arg(editor_->findChild<QComboBox *>("propertyPageSelector")->isVisible())
+                        .arg(commands_->toolButtonStyle())
+                        .arg(findChild<QWidget *>("timelineControls")->height())
+                        .arg(action_in_workspace("applyOrbit"))));
+            require(orbit_ == smoke_cache_, "Resizing the workspace recalculated the orbit");
+            record("responsive-workbench-and-native-view-resize");
+            workspace_->detach_page(properties_dialog_);
+            properties_dialog_->window()->resize(360, 520);
+            ++orbit_smoke_stage_;
+            break;
+        case 152:
+            require(properties_dialog_->window()->width() == 360 &&
+                        editor_->findChild<QComboBox *>("propertyPageSelector")->isVisible() &&
+                        editor_->findChild<QuantityEditor *>("displayStep")->value(Unit::second) ==
+                            17,
+                    "Narrow floating properties lost the draft or retained a fixed width");
+            require(properties_dialog_->window()->grab().save(
+                        smoke_dir_ + "/responsive-floating-properties.png"),
+                    "Cannot capture narrow floating properties");
+            record("responsive-floating-properties-preserve-draft");
+            workspace_->dock_page(properties_dialog_);
+            resize(smoke_responsive_size_);
+            slots_[1]->dock->show();
+            smoke_wait_frame_ = frame_count_ + 4;
+            ++orbit_smoke_stage_;
+            break;
+        case 153:
+            if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
+                return;
+            require(orbit_ == smoke_cache_ &&
+                        editor_->findChild<QuantityEditor *>("displayStep")->value(Unit::second) ==
+                            17,
+                    "Restoring the workspace discarded the draft or recalculated the orbit");
+            record("responsive-workbench-restore-preserves-state");
+            editor_->findChild<QuantityEditor *>("displayStep")->set_value(60, Unit::second);
+            properties_dialog_->close();
+            smoke_set_view_layout(0);
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        case 154:
             if (++smoke_final_frames_ >= 4)
                 ++orbit_smoke_stage_;
             break;
@@ -7393,7 +7495,7 @@ class Workbench final : public QMainWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 151;
+    static constexpr int orbit_smoke_complete = 155;
     int smoke_final_frames_ = 0;
     std::vector<std::uint8_t> smoke_project_bytes_;
     application::DataLock smoke_data_lock_;
@@ -7430,6 +7532,7 @@ class Workbench final : public QMainWindow {
     int model_kind_ = 0, pending_model_kind_ = 0;
     double model_diameter_km_ = 1000, pending_model_diameter_km_ = 1000;
     int orbit_smoke_stage_ = 0;
+    QSize smoke_responsive_size_;
     bool orbit_capture_ = false, fit_pending_ = false;
     std::unique_ptr<core::IFrameProvider> frames_;
     std::shared_ptr<const core::IEarthOrientationProvider> eop_, eop_history_, eop_current_;

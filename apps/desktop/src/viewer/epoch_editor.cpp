@@ -154,7 +154,7 @@ EpochEditor::EpochEditor(QWidget *parent, std::shared_ptr<const core::ITimeProvi
     value_ = new QLineEdit;
     value_->installEventFilter(this);
     value_->setObjectName("epochValue");
-    value_->setMinimumWidth(265);
+    value_->setMinimumWidth(180);
     value_->setAccessibleName(QStringLiteral("历元，日期、时间和 UTC / TAI / TT"));
     value_->setPlaceholderText("yyyy-MM-dd HH:mm:ss UTC");
     value_->setToolTip(QStringLiteral("可直接输入或粘贴完整历元，支持 UTC / TAI / TT 和小数秒。"));
@@ -245,7 +245,6 @@ void EpochEditor::set_range(core::Epoch first, core::Epoch last) {
 }
 void EpochEditor::set_read_only(bool value) {
     value_->setReadOnly(value);
-    value_->setMinimumWidth(value ? 246 : 265);
     value_->parentWidget()->setProperty("readOnly", value);
     value_->parentWidget()->style()->unpolish(value_->parentWidget());
     value_->parentWidget()->style()->polish(value_->parentWidget());

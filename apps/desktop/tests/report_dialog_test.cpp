@@ -25,6 +25,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSplitter>
 #include <QStandardItemModel>
 #include <QTabBar>
 #include <QTableView>
@@ -101,6 +102,7 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
         [&](auto reports) { project.reports = std::move(reports); },
         [&](core::Epoch epoch) { sought = epoch; });
     dialog.show();
+    dialog.resize(1120, 740); // Establish the wide case after native DPI negotiation on show.
     auto *library = dialog.findChild<QComboBox *>("reportLibrary");
     auto *generate = dialog.findChild<QPushButton *>("generateReport");
     auto *cancel = dialog.findChild<QPushButton *>("cancelReport");
@@ -381,6 +383,7 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
         [&](auto reports) { project.reports = std::move(reports); },
         [&](core::Epoch epoch) { sought = epoch; });
     dialog.show();
+    dialog.resize(1120, 740);
     auto *library = dialog.findChild<QComboBox *>("reportLibrary");
     auto *generate = dialog.findChild<QPushButton *>("generateReport");
     auto *table = dialog.findChild<QTableView *>("reportTable");
@@ -477,6 +480,44 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
         }
     };
     capture("curves");
+    auto *split = dialog.findChild<QSplitter *>("reportSplit");
+    ASSERT_TRUE(split);
+    split->setSizes({370, 746});
+    split->splitterMoved(split->sizes().front(), 1);
+    const auto wide_sizes = split->sizes();
+    const auto selected_field = fields->currentData();
+    const auto selected_object = objects->id();
+    const auto interval_before_resize = plot->visible_interval();
+    const int preparations_before_resize = preparations;
+    for (int width : {360, 780, 1120, 360, 1120}) {
+        dialog.resize(width, 740);
+        for (int i = 0; i < 8; ++i)
+            QCoreApplication::processEvents();
+        EXPECT_EQ(dialog.width(), width);
+        EXPECT_EQ(fields->currentData(), selected_field);
+        EXPECT_EQ(objects->id(), selected_object);
+        EXPECT_EQ(plot->visible_interval(), interval_before_resize);
+        EXPECT_EQ(table->model()->rowCount(), 802);
+        EXPECT_EQ(preparations, preparations_before_resize);
+        EXPECT_TRUE(plot->isVisible());
+        EXPECT_TRUE(fields->parentWidget()->rect().contains(
+            fields->mapTo(fields->parentWidget(), fields->rect().bottomRight())));
+        if (width == 1120)
+            EXPECT_NEAR(split->sizes().front(), wide_sizes.front(), 2);
+    }
+    // Dragging the splitter changes plot width without resizing the dialog.
+    dialog.resize(860, 740);
+    split->setSizes({380, 476});
+    for (int i = 0; i < 8; ++i)
+        QCoreApplication::processEvents();
+    EXPECT_GT(objects->y(), fields->y());
+    split->setSizes({290, 566});
+    for (int i = 0; i < 8; ++i)
+        QCoreApplication::processEvents();
+    EXPECT_EQ(objects->geometry().center().y(), fields->geometry().center().y());
+    dialog.resize(1120, 740);
+    for (int i = 0; i < 8; ++i)
+        QCoreApplication::processEvents();
     QTemporaryDir output;
     ASSERT_TRUE(output.isValid());
     const auto file = output.filePath("comparison.png");

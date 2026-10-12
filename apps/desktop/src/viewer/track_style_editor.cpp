@@ -1,4 +1,5 @@
 #include "track_style_editor.hpp"
+#include "responsive_layout.hpp"
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -67,6 +68,8 @@ class Preview final : public QWidget {
 } // namespace
 TrackStyleEditor::TrackStyleEditor(QWidget *parent) : QWidget(parent) {
     setObjectName("trackStyleEditor");
+    // Let the viewport allocate a narrow width before the controls reflow.
+    setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     auto *layout = new QGridLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setHorizontalSpacing(16);
@@ -99,12 +102,14 @@ TrackStyleEditor::TrackStyleEditor(QWidget *parent) : QWidget(parent) {
         swatches_.push_back(swatch);
     }
     palette->addStretch();
+    auto *color_row = new QHBoxLayout;
+    color_row->addLayout(palette, 1);
     custom_ = new QPushButton;
     custom_->setObjectName("trackCustomColor");
     custom_->setMinimumWidth(124);
     custom_->setToolTip(QStringLiteral("选择自定义颜色"));
     custom_->setAccessibleName(QStringLiteral("自定义轨迹颜色"));
-    palette->addWidget(custom_);
+    color_row->addWidget(custom_, 0, Qt::AlignLeft);
     connect(custom_, &QPushButton::clicked, this, [this] {
         QColorDialog dialog(color_, this);
         dialog.setObjectName("trackColorDialog");
@@ -113,7 +118,8 @@ TrackStyleEditor::TrackStyleEditor(QWidget *parent) : QWidget(parent) {
         if (dialog.exec() == QDialog::Accepted)
             set_color(dialog.selectedColor());
     });
-    layout->addLayout(palette, 2, 0, 1, 2);
+    layout->addLayout(color_row, 2, 0, 1, 2);
+    responsive_columns(this, color_row, 400);
     auto *style_label = new QLabel(QStringLiteral("线型"));
     auto *width_label = new QLabel(QStringLiteral("粗细"));
     layout->addWidget(style_label, 3, 0);
@@ -150,6 +156,21 @@ TrackStyleEditor::TrackStyleEditor(QWidget *parent) : QWidget(parent) {
     layout->addWidget(width_, 4, 1);
     layout->setColumnStretch(0, 3);
     layout->setColumnStretch(1, 2);
+    new WidthObserver(this, [layout, style_label, width_label, this, mode = WidthMode{},
+                             previous = false](int width) mutable {
+        const bool narrow = mode.narrow(width, 360);
+        if (narrow == previous)
+            return;
+        previous = narrow;
+        for (auto *widget :
+             {static_cast<QWidget *>(style_label), static_cast<QWidget *>(width_label),
+              static_cast<QWidget *>(style_), static_cast<QWidget *>(width_)})
+            layout->removeWidget(widget);
+        layout->addWidget(style_label, 3, 0, 1, narrow ? 2 : 1);
+        layout->addWidget(style_, 4, 0, 1, narrow ? 2 : 1);
+        layout->addWidget(width_label, narrow ? 5 : 3, narrow ? 0 : 1, 1, narrow ? 2 : 1);
+        layout->addWidget(width_, narrow ? 6 : 4, narrow ? 0 : 1, 1, narrow ? 2 : 1);
+    });
     connect(style_, &QComboBox::currentIndexChanged, this, [this] { refresh_preview(); });
     connect(width_, &QDoubleSpinBox::valueChanged, this, [this] { refresh_preview(); });
     set_settings({});

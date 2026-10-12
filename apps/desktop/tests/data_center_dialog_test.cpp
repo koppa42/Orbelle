@@ -17,6 +17,7 @@
 #include <QScreen>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSpinBox>
 #include <QTabWidget>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -139,6 +140,11 @@ TEST(DataCenterDialog, GroupedSourcesKeepDownloadStateAndPriorityIndependent) {
     std::optional<qint64> downloaded_at;
     QElapsedTimer elapsed;
     elapsed.start();
+    // This case exercises the side-by-side layout even on Qt's 800px offscreen display.
+    QTimer::singleShot(0, [] {
+        if (auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget()))
+            dialog->resize(1020, dialog->height());
+    });
     QTimer timer;
     QObject::connect(&timer, &QTimer::timeout, [&] {
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
@@ -336,6 +342,118 @@ TEST(DataCenterDialog, GroupedSourcesKeepDownloadStateAndPriorityIndependent) {
     timer.start(25);
     show_data_center(nullptr, catalog);
     EXPECT_EQ(stage, 7);
+}
+TEST(DataCenterDialog, ResponsiveNavigationPreservesSelectionSettingsAndDownload) {
+    (void)test_app();
+    QTemporaryDir temporary;
+    ASSERT_TRUE(temporary.isValid());
+    const auto root = std::filesystem::path(temporary.path().toStdWString());
+    QFile file(QString::fromStdWString(
+        (std::filesystem::path(ORBITFORGE_TEST_FINALS).parent_path() / "finals2000A.data")
+            .wstring()));
+    ASSERT_TRUE(file.open(QIODevice::ReadOnly));
+    DownloadServer server(file.readAll());
+    EopCatalog catalog(root / "data", {ORBITFORGE_TEST_FINALS}, {}, false);
+    QTimer timeout;
+    QObject::connect(&timeout, &QTimer::timeout, [] {
+        ADD_FAILURE() << "Responsive data center test timed out";
+        if (auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget()))
+            dialog->reject();
+    });
+    timeout.start(5000);
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        const auto settle = [] {
+            for (int i = 0; i < 12; ++i)
+                QCoreApplication::processEvents();
+        };
+        const auto capture = [&](const QString &name) {
+            settle();
+            for (auto *scroll : dialog->findChildren<QScrollArea *>())
+                if (scroll->isVisible())
+                    EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0) << name.toStdString();
+            const auto output = qEnvironmentVariable("ORBITFORGE_RESPONSIVE_UI_CAPTURE");
+            if (!output.isEmpty()) {
+                ASSERT_TRUE(QDir().mkpath(output));
+                EXPECT_TRUE(dialog->grab().save(output + "/data-" + name + ".png"));
+            }
+        };
+        auto *list = dialog->findChild<QTreeWidget *>("dataInventory");
+        auto *panel = dialog->findChild<QWidget *>("dataDetailPanel");
+        auto *pages = dialog->findChild<QTabWidget *>("dataPages");
+        auto *back = dialog->findChild<QPushButton *>("dataBackToList");
+        ASSERT_TRUE(list && panel && pages && back);
+        auto *finals = list->topLevelItem(0)->child(0);
+        list->setCurrentItem(finals);
+        pages->setCurrentIndex(1);
+        auto *automatic = dialog->findChild<QCheckBox *>("dataAutoUpdate");
+        auto *days = dialog->findChild<QSpinBox *>("eopExtrapolationDays");
+        automatic->setChecked(false);
+        dialog->findChild<QCheckBox *>("allowEopExtrapolation")->setChecked(true);
+        days->setValue(5);
+        dialog->resize(360, 620);
+        settle();
+        EXPECT_EQ(dialog->width(), 360);
+        EXPECT_TRUE(list->isVisible());
+        EXPECT_FALSE(panel->isVisible());
+        capture("narrow-list");
+        // Keyboard activation must offer the same navigation as clicking a row.
+        list->itemActivated(finals, 0);
+        settle();
+        EXPECT_TRUE(panel->isVisible());
+        EXPECT_FALSE(list->isVisible());
+        EXPECT_TRUE(back->isVisible());
+        EXPECT_EQ(pages->currentIndex(), 1);
+        EXPECT_FALSE(automatic->isChecked());
+        EXPECT_EQ(days->value(), 5);
+        capture("narrow-settings");
+        pages->setCurrentIndex(2);
+        capture("narrow-file");
+        back->click();
+        EXPECT_TRUE(list->isVisible());
+        EXPECT_EQ(list->currentItem(), finals);
+        list->itemClicked(finals, 0);
+        EXPECT_EQ(pages->currentIndex(), 2);
+        for (int width : {1020, 360, 780, 1020}) {
+            dialog->resize(width, 620);
+            settle();
+            EXPECT_EQ(dialog->width(), width);
+            EXPECT_EQ(list->currentItem(), finals);
+            EXPECT_EQ(pages->currentIndex(), 2);
+            EXPECT_TRUE(panel->isVisible());
+            EXPECT_EQ(list->isVisible(), width >= 800);
+        }
+        capture("wide-file");
+        pages->setCurrentIndex(0);
+        catalog.start_download(server.url());
+        QElapsedTimer elapsed;
+        elapsed.start();
+        while (catalog.received_bytes() == 0 && elapsed.elapsed() < 1500)
+            QCoreApplication::processEvents();
+        EXPECT_GT(catalog.received_bytes(), 0);
+        dialog->resize(360, 620);
+        settle();
+        // Refresh the download UI through its normal timer before checking the actions.
+        auto *cancel = dialog->findChild<QPushButton *>("cancelEopDownload");
+        while (!cancel->isVisible() && elapsed.elapsed() < 2500)
+            QCoreApplication::processEvents();
+        EXPECT_TRUE(catalog.downloading());
+        EXPECT_TRUE(cancel->isVisible());
+        auto *overview = qobject_cast<QScrollArea *>(pages->widget(0));
+        settle();
+        overview->ensureWidgetVisible(cancel);
+        capture("narrow-download");
+        EXPECT_TRUE(overview->viewport()->rect().contains(
+            cancel->mapTo(overview->viewport(), cancel->rect().bottomRight())));
+        cancel->click();
+        while (catalog.downloading() && elapsed.elapsed() < 3000)
+            QCoreApplication::processEvents();
+        EXPECT_FALSE(catalog.downloading());
+        EXPECT_EQ(catalog.update_status().state, DataUpdateState::cancelled);
+        dialog->reject();
+    });
+    show_data_center(nullptr, catalog);
 }
 } // namespace
 } // namespace orbitforge::desktop
