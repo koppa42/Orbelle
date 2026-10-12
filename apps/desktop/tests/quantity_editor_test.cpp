@@ -1,5 +1,6 @@
 #include "../src/viewer/epoch_editor.hpp"
 #include "../src/viewer/ground_station_editor.hpp"
+#include "../src/viewer/object_selection.hpp"
 #include "../src/viewer/orbit_editor.hpp"
 #include "../src/viewer/quantity_editor.hpp"
 #include "../src/viewer/sensor_editor.hpp"
@@ -118,7 +119,7 @@ TEST_F(QuantityTest, SensorPointingChoicesKeepTargetDraftAndSubmitStableIds) {
     auto *angle = editor.findChild<QuantityEditor *>("sensorHalfAngle");
     auto *nadir = editor.findChild<QPushButton *>("sensorNadir");
     auto *targeted = editor.findChild<QPushButton *>("sensorTargeted");
-    auto *target = editor.findChild<QComboBox *>("sensorTarget");
+    auto *target = editor.findChild<ObjectSelectionField *>("sensorTarget");
     auto *row = editor.findChild<QWidget *>("sensorTargetRow");
     auto *submit = editor.findChild<QPushButton *>("applySensor");
     ASSERT_TRUE(name && angle && nadir && targeted && target && row && submit);
@@ -129,7 +130,16 @@ TEST_F(QuantityTest, SensorPointingChoicesKeepTargetDraftAndSubmitStableIds) {
     choose(*angle, Unit::radian);
     // The two stations have identical display names; binding must use the stable ID.
     targeted->click();
-    target->setCurrentIndex(1);
+    QTimer::singleShot(0, [] {
+        auto *chooser = qobject_cast<ObjectSelectionDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(chooser);
+        chooser->findChild<QLineEdit *>("objectSelectionSearch")->setText("station-b");
+        auto *objects = chooser->findChild<QTreeWidget *>("objectSelectionTree");
+        ASSERT_EQ(objects->topLevelItemCount(), 2);
+        objects->setCurrentItem(objects->topLevelItem(1));
+        chooser->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    target->click();
     EXPECT_FALSE(nadir->isChecked());
     EXPECT_FALSE(row->isHidden());
     EXPECT_EQ(editor.sensor().target_station_id, "station-b");
@@ -137,7 +147,7 @@ TEST_F(QuantityTest, SensorPointingChoicesKeepTargetDraftAndSubmitStableIds) {
     EXPECT_TRUE(row->isHidden());
     EXPECT_TRUE(editor.sensor().target_station_id.empty());
     targeted->click();
-    EXPECT_EQ(target->currentData().toString(), "station-b");
+    EXPECT_EQ(target->id(), "station-b");
     std::optional<application::ProjectSensor> applied;
     editor.apply = [&](application::ProjectSensor value) { applied = std::move(value); };
     submit->click();
@@ -150,7 +160,7 @@ TEST_F(QuantityTest, SensorPointingChoicesKeepTargetDraftAndSubmitStableIds) {
     EXPECT_NEAR(applied->half_angle_rad, std::numbers::pi / 6, 1e-14);
     editor.set_sensor(*applied, project, false);
     EXPECT_EQ(angle->unit(), Unit::radian);
-    EXPECT_EQ(target->currentData().toString(), "station-b");
+    EXPECT_EQ(target->id(), "station-b");
     EXPECT_EQ(submit->text(), QStringLiteral("应用更改"));
     applied.reset();
     name->setText("Unsubmitted draft");
@@ -170,13 +180,13 @@ TEST_F(QuantityTest, SensorRejectsInvalidDraftAndNeverRebindsMissingTarget) {
     sensor.target_station_id = "missing-station";
     SensorEditor editor;
     editor.set_sensor(sensor, project, false);
-    auto *target = editor.findChild<QComboBox *>("sensorTarget");
+    auto *target = editor.findChild<ObjectSelectionField *>("sensorTarget");
     auto *submit = editor.findChild<QPushButton *>("applySensor");
     auto *error = editor.findChild<QLabel *>("sensorError");
     ASSERT_TRUE(target && submit && error);
     int applications = 0;
     editor.apply = [&](application::ProjectSensor) { ++applications; };
-    EXPECT_FALSE(target->isEnabled());
+    EXPECT_TRUE(target->objects().empty());
     submit->click();
     EXPECT_EQ(applications, 0);
     EXPECT_FALSE(error->isHidden());
@@ -185,10 +195,11 @@ TEST_F(QuantityTest, SensorRejectsInvalidDraftAndNeverRebindsMissingTarget) {
     editor.set_sensor(sensor, project, false);
     EXPECT_TRUE(error->isHidden());
     EXPECT_TRUE(target->isEnabled());
-    EXPECT_EQ(target->currentIndex(), -1);
+    EXPECT_EQ(target->id(), "missing-station");
+    EXPECT_FALSE(target->contains(target->id()));
     submit->click();
     EXPECT_EQ(applications, 0);
-    target->setCurrentIndex(0);
+    target->set_id("other-station");
     auto *angle = editor.findChild<QuantityEditor *>("sensorHalfAngle");
     ASSERT_TRUE(angle);
     text(*angle)->setText("91");
@@ -260,7 +271,7 @@ TEST_F(QuantityTest, SensorLayoutFitsNarrowPanelsAndKeepsActionsVisible) {
         EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
         EXPECT_FALSE(scroll->horizontalScrollBar()->isVisible());
         EXPECT_LE(scroll->widget()->width(), scroll->viewport()->width());
-        scroll->ensureWidgetVisible(editor.findChild<QComboBox *>("sensorTarget"));
+        scroll->ensureWidgetVisible(editor.findChild<ObjectSelectionField *>("sensorTarget"));
         QApplication::processEvents();
         const QRect action_rect(submit->mapTo(&editor, QPoint{}), submit->size());
         EXPECT_TRUE(editor.rect().contains(action_rect));

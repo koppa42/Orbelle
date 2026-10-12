@@ -1,8 +1,8 @@
 #include "sensor_editor.hpp"
+#include "object_selection.hpp"
 #include "quantity_editor.hpp"
 #include "workbench_style.hpp"
 #include <QButtonGroup>
-#include <QComboBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPainter>
@@ -232,11 +232,10 @@ SensorEditor::SensorEditor(QWidget *parent) : QDialog(parent) {
     target_layout->setContentsMargins(0, 8, 0, 0);
     target_layout->setSpacing(8);
     auto *target_label = new QLabel(QStringLiteral("目标地面站"), target_row_);
-    target_ = new QComboBox(target_row_);
+    target_ = new ObjectSelectionField(target_row_);
     target_->setObjectName("sensorTarget");
-    target_->setMinimumWidth(0);
-    target_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    target_->setMinimumContentsLength(12);
+    target_->set_options({QStringLiteral("选择传感器跟踪的地面站"), false, {}});
+    target_->setAccessibleName(QStringLiteral("目标地面站"));
     target_label->setBuddy(target_);
     target_hint_ = new QLabel(target_row_);
     target_hint_->setObjectName("sensorTargetHint");
@@ -290,7 +289,7 @@ SensorEditor::SensorEditor(QWidget *parent) : QDialog(parent) {
         if (checked)
             update_pointing();
     });
-    connect(target_, &QComboBox::currentIndexChanged, this, [this] { update_pointing(); });
+    connect(target_, &ObjectSelectionField::selectionChanged, this, [this] { update_pointing(); });
     connect(angle_, &QuantityEditor::valueChanged, this, [this] { update_preview(); });
     connect(angle_, &QuantityEditor::unitChanged, this, [this] { update_preview(); });
     connect(
@@ -311,15 +310,12 @@ void SensorEditor::set_sensor(application::ProjectSensor sensor,
             parent_name = QString::fromStdString(sat.name());
     parent_->set_name(parent_name);
     angle_->set_value(original_.half_angle_rad, Unit::radian);
-    target_->clear();
-    for (const auto &station : project.ground_stations)
-        target_->addItem(QString::fromStdString(station.name()),
-                         QString::fromStdString(station.object_id));
+    target_->set_objects(project_object_choices(project, {ObjectKind::ground_station}));
     if (!original_.target_station_id.empty())
-        target_->setCurrentIndex(
-            target_->findData(QString::fromStdString(original_.target_station_id)));
+        target_->set_id(original_.target_station_id);
     else
-        target_->setCurrentIndex(target_->count() > 0 ? 0 : -1);
+        target_->set_id(
+            project.ground_stations.empty() ? "" : project.ground_stations.front().object_id);
     if (auto *button = pointing_->button(static_cast<int>(original_.pointing)))
         button->setChecked(true);
     else
@@ -341,13 +337,10 @@ void SensorEditor::update_pointing() {
     target_row_->setVisible(targeted);
     pointing_hint_->setText(targeted ? QStringLiteral("始终对准目标地面站，采用理想跟踪。")
                                      : QStringLiteral("指向地球中心，随父卫星一起运动。"));
-    target_->setEnabled(target_->count() > 0);
-    target_->setPlaceholderText(target_->count() == 0 ? QStringLiteral("暂无可用地面站")
-                                                      : QStringLiteral("请选择目标地面站"));
-    target_hint_->setText(target_->count() == 0
+    target_hint_->setText(target_->objects().empty()
                               ? QStringLiteral("请先在场景中插入地面站。")
                               : QStringLiteral("原目标不可用，请重新选择地面站。"));
-    target_hint_->setVisible(target_->currentIndex() < 0);
+    target_hint_->setVisible(!target_->contains(target_->id()));
 }
 
 void SensorEditor::update_preview() {
@@ -373,11 +366,10 @@ application::ProjectSensor SensorEditor::sensor() const {
         throw std::invalid_argument("请输入传感器名称。");
     s.half_angle_rad = angle_->value(Unit::radian);
     s.pointing = static_cast<application::SensorPointing>(pointing_->checkedId());
-    s.target_station_id = s.pointing == application::SensorPointing::targeted
-                              ? target_->currentData().toString().toStdString()
-                              : "";
-    if (s.pointing == application::SensorPointing::targeted && s.target_station_id.empty())
-        throw std::invalid_argument(target_->count() == 0
+    s.target_station_id = s.pointing == application::SensorPointing::targeted ? target_->id() : "";
+    if (s.pointing == application::SensorPointing::targeted &&
+        !target_->contains(s.target_station_id))
+        throw std::invalid_argument(target_->objects().empty()
                                         ? "当前场景没有地面站，请先插入地面站，或选择对地心指向。"
                                         : "请选择目标地面站。");
     return s;

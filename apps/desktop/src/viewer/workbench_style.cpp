@@ -601,8 +601,8 @@ QToolButton#reportResultMenu::menu-indicator { image: none; }
 QPushButton#exportReportCsv { background: #263a4b; border: 1px solid #445e73; color: #c7e0ef; border-radius: 6px; padding: 6px 14px; }
 QPushButton#exportReportCsv:hover { background: #32526a; border-color: #779eb8; }
 QPushButton#exportReportCsv:disabled { color: #586b86; background: transparent; border-color: #2f394d; }
-QComboBox#reportPlotField, QComboBox#reportPlotObject { background: #202f3d; border: 1px solid #354c60; border-radius: 6px; padding: 5px 26px 5px 12px; min-height: 18px; }
-QComboBox#reportPlotField:hover, QComboBox#reportPlotObject:hover { border-color: #718fa9; }
+QComboBox#reportPlotField { background: #202f3d; border: 1px solid #354c60; border-radius: 6px; padding: 5px 26px 5px 12px; min-height: 18px; }
+QComboBox#reportPlotField:hover { border-color: #718fa9; }
 QWidget#dataFooter { background: #171e27; border-top: 1px solid #313e4c; }
 QFrame#formSection { background: #222c38; border: 1px solid #303d4b; border-radius: 10px; }
 QWidget#sensorFields, QScrollArea#sensorScroll { background: #1b222c; }
@@ -632,6 +632,18 @@ QLabel#inputError { padding: 4px 0; }
 QLineEdit#scenarioDataHash { font-family: "Consolas"; font-size: 12px; }
 QLabel#orbitResult, QLabel#modelResult { color: #aebeca; }
 QToolTip { background: #151c25; color: #c7d7e9; border: 1px solid #465c76; padding: 6px; }
+)QSS"
+        R"QSS(QPushButton[objectSelector="true"] { background: #151c25; border: 1px solid #3a4b5a; border-radius: 5px; text-align: left; padding: 6px 10px; min-height: 20px; }
+QPushButton[objectSelector="true"]:hover { background: #223646; border-color: #83b9d6; }
+QPushButton[objectSelector="true"]:focus { border-color: #b4e0f3; }
+QPushButton[objectSelector="true"]:disabled { color: #6e7990; border-color: #303d4b; }
+QTreeWidget#objectSelectionTree { background: #171f29; border: 1px solid #334a5b; border-radius: 6px; outline: 0; padding: 4px; }
+QTreeWidget#objectSelectionTree::item { height: 24px; padding: 3px 6px; border: 0; border-radius: 0; }
+QTreeWidget#objectSelectionTree::branch { background: #171f29; }
+QTreeWidget#objectSelectionTree::branch:closed:has-children { image: url(:/orbitforge/icons/chevron-right.png); }
+QTreeWidget#objectSelectionTree::branch:open:has-children { image: url(:/orbitforge/icons/chevron-down.png); }
+QLabel#objectSelectionPurpose, QLabel#objectSelectionDetails, QLabel#objectSelectionCount { color: #9fb6c8; font-size: 12px; }
+QLabel#objectSelectionEmpty { color: #a9becf; background: transparent; padding: 20px; }
 )QSS"));
 }
 } // namespace orbitforge::desktop
