@@ -1,5 +1,6 @@
 #include "../src/viewer/eop_catalog.hpp"
 #include "../src/viewer/workbench_style.hpp"
+#include "window_show_observer.hpp"
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -26,6 +27,14 @@
 
 namespace orbitforge::desktop {
 namespace {
+QApplication &test_app() {
+    static int argc = 1;
+    static char name[] = "data_center_ui_test";
+    static char *argv[] = {name, nullptr};
+    static QApplication app(argc, argv);
+    apply_workbench_style(app);
+    return app;
+}
 class DownloadServer : public QTcpServer {
   public:
     QByteArray body;
@@ -71,12 +80,37 @@ class DownloadServer : public QTcpServer {
         return QUrl(QStringLiteral("http://127.0.0.1:%1/finals").arg(serverPort()));
     }
 };
+TEST(DataCenterDialog, LoadingWarningsStayInsideTheDialog) {
+    (void)test_app();
+    QTemporaryDir temporary;
+    ASSERT_TRUE(temporary.isValid());
+    ASSERT_TRUE(QDir().mkpath(temporary.path() + "/legacy/" + QString(64, 'a')));
+    const auto root = std::filesystem::path(temporary.path().toStdWString());
+    // An incomplete legacy snapshot should produce a visible, inline warning.
+    EopCatalog catalog(root / "data", {ORBITFORGE_TEST_FINALS}, root / "legacy", false);
+    ASSERT_FALSE(catalog.warnings().isEmpty());
+    WindowShowObserver windows;
+    bool inspected = false;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_NE(dialog, nullptr);
+        bool found = false;
+        for (auto *label : dialog->findChildren<QLabel *>("inputError"))
+            if (label->text() == catalog.warnings().join('\n')) {
+                EXPECT_TRUE(label->isVisible());
+                EXPECT_FALSE(label->isWindow());
+                found = true;
+            }
+        EXPECT_TRUE(found);
+        inspected = true;
+        dialog->reject();
+    });
+    show_data_center(nullptr, catalog);
+    EXPECT_TRUE(inspected);
+    EXPECT_EQ(windows.shown.join(", ").toStdString(), "QDialog:eopDataDialog");
+}
 TEST(DataCenterDialog, GroupedSourcesKeepDownloadStateAndPriorityIndependent) {
-    static int argc = 1;
-    static char name[] = "data_center_ui_test";
-    static char *argv[] = {name, nullptr};
-    static QApplication app(argc, argv);
-    apply_workbench_style(app);
+    (void)test_app();
     QTemporaryDir temporary;
     ASSERT_TRUE(temporary.isValid());
     const auto root = std::filesystem::path(temporary.path().toStdWString());
