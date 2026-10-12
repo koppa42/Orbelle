@@ -77,6 +77,29 @@ class WelcomeArtwork final : public QWidget {
   private:
     QPixmap artwork_;
 };
+
+class WelcomeFooter final : public QWidget {
+  public:
+    WelcomeFooter() {
+        auto *caption = new QLabel(QStringLiteral("星夜相伴 · 探索有据"));
+        caption->setObjectName("welcomeCaption");
+        auto *shortcuts = new QLabel(QStringLiteral("Ctrl+N 新建  /  Ctrl+O 打开"));
+        shortcuts->setObjectName("welcomeCaption");
+        layout_ = new QBoxLayout(QBoxLayout::LeftToRight, this);
+        layout_->setContentsMargins(0, 0, 0, 0);
+        layout_->setSpacing(8);
+        layout_->addWidget(caption, 1);
+        layout_->addWidget(shortcuts, 0, Qt::AlignRight);
+    }
+
+  protected:
+    void resizeEvent(QResizeEvent *) override {
+        layout_->setDirection(width() < 620 ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
+    }
+
+  private:
+    QBoxLayout *layout_ = nullptr;
+};
 } // namespace
 
 QWidget *make_welcome_page(QAction *create, QAction *open, QAction *example) {
@@ -147,18 +170,7 @@ QWidget *make_welcome_page(QAction *create, QAction *open, QAction *example) {
     hero_layout->addWidget(copy, 1);
     hero_layout->addStretch(1);
     stack->addWidget(hero);
-    auto *footer = new QHBoxLayout;
-    auto *caption = new QLabel(QStringLiteral("星夜相伴 · 探索有据"));
-    caption->setObjectName("welcomeCaption");
-    caption->setWordWrap(true);
-    footer->addWidget(caption);
-    footer->addStretch();
-    auto *shortcuts = new QLabel(QStringLiteral("Ctrl+N 新建  /  Ctrl+O 打开"));
-    shortcuts->setObjectName("welcomeCaption");
-    shortcuts->setWordWrap(true);
-    shortcuts->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    footer->addWidget(shortcuts);
-    stack->addLayout(footer);
+    stack->addWidget(new WelcomeFooter);
     auto *center = new QHBoxLayout;
     center->addStretch();
     center->addWidget(content, 100);
