@@ -67,13 +67,15 @@ Windows/MSVC 示例程序为 `out/build/headless/examples/cpp/Release/orbitforge
 
 数值容限、图形检查和性能测量范围见[验证方法](docs/validation/README.md)。按[构建说明](docs/development/build.md)运行当前版本的检查；每次执行的日志、截图和报告保存在本地 `out/validation/`。
 
-GitHub Actions 自动运行 PR 测试；推送 `vX.Y.Z` 标签后，通过同一套检查再发布 Windows 便携包、Windows/Linux C++ SDK 和 Python wheel。版本更新与发布方法见 [CI 与版本发布](docs/development/ci.md)。
+GitHub Actions 对代码 PR 运行两平台测试及 Python 版本矩阵；代码合入 `main` 后验证 C++、桌面和基准 Python，不重复其他 Python 版本。纯文档 PR 和纯文档合并只运行轻量检查。PR 和 `main` 只编译测试需要的程序与扩展，不构建发布包。推送指向已合入 `main` 提交的 `vX.Y.Z` 标签后，才构建 Windows 便携包、Windows/Linux C++ SDK 和 Python wheel，通过完整测试及安装验证后发布；版本标签禁止修改或删除。检查范围、缓存与发布方法见 [CI 与版本发布](docs/development/ci.md)。
 
 ## 参与开发
 
 参与编码、测试和评审前，请阅读[开发者规范](docs/development/requirements.md)，了解模块职责、接口与数值计算约定、数据和后台任务处理、验证方法及 PR 要求。
 
-从最新 `main` 创建主题分支，围绕明确目标组织改动，并同步相关测试、文档和示例。提交 PR 时说明解决的问题、最终行为和实际验证结果；本地按改动范围运行必要检查，Python 日常验证使用 3.13，其他受支持版本交由 CI 验证。
+**所有改动必须通过 PR，禁止直接推送 `main`**，文档、CI 和依赖更新也不例外。从最新 `main` 创建主题分支，围绕明确目标组织改动，并同步相关测试、文档和示例。推送主题分支后创建 PR；提交与推送不代表授权合并。
+
+提交 PR 时说明解决的问题、最终行为和实际验证结果；合并前更新到最新目标分支，确认当前提交的 `CI passed` 通过，再由维护者确认合并。本地按改动范围运行必要检查，Python 日常验证使用 3.13，其他受支持版本交由 CI 验证。
 
 ## 目录
 

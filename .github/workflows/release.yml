@@ -28,6 +28,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Recheck release commit before publication
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python tools/ci/verify_release.py --tag "$RELEASE_TAG"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: '*-release-assets'

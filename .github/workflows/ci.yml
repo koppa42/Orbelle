@@ -38,10 +38,14 @@ jobs:
       vcpkg-baseline: ${{ steps.version.outputs.vcpkg-baseline }}
       baseline-python: ${{ steps.version.outputs.baseline-python }}
       python-matrix: ${{ steps.version.outputs.python-matrix }}
+      scope: ${{ steps.plan.outputs.scope }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          # Push classification needs the whole before..after range; release
+          # verification also needs main and the tag, including older commits.
+          fetch-depth: ${{ github.event_name == 'push' && '0' || '2' }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.13'
@@ -53,6 +57,25 @@ jobs:
           args=()
           if [[ -n "$RELEASE_TAG" ]]; then args+=(--tag "$RELEASE_TAG"); fi
           python tools/ci/version.py --github-output "${args[@]}"
+      - name: Require release commit on main
+        if: inputs.release-tag != ''
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: python tools/ci/verify_release.py --tag "$RELEASE_TAG"
+      - name: Lint GitHub Actions workflows
+        run: |
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
+            --output "$archive"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $archive" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
+      - name: Select required checks
+        id: plan
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: python tools/ci/plan_ci.py plan
       - name: Test data and delivery tools
         run: |
           python -m unittest discover -s tools/data/tests -v
@@ -61,6 +84,7 @@ jobs:
   linux:
     name: Linux C++, sanitizers and Python ${{ needs.metadata.outputs.baseline-python }}
     needs: metadata
+    if: needs.metadata.outputs.scope != 'docs'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -70,6 +94,9 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ needs.metadata.outputs.baseline-python }}
+      - name: Identify runner image
+        id: toolchain
+        run: echo "image=$ImageVersion" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: microsoft/vcpkg
@@ -77,23 +104,40 @@ jobs:
           path: out/tools/vcpkg
           persist-credentials: false
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache
         with:
           path: ${{ runner.temp }}/linux/dependencies/binary-cache
-          key: vcpkg-ubuntu24-x64-v1-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/ports/**') }}
-          restore-keys: vcpkg-ubuntu24-x64-v1-
+          key: vcpkg-ubuntu24-x64-v1-${{ steps.toolchain.outputs.image }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/ports/**', 'tools/ci/check_linux.py') }}
+          restore-keys: |
+            vcpkg-ubuntu24-x64-v1-${{ steps.toolchain.outputs.image }}-
+            vcpkg-ubuntu24-x64-v1-
       - name: Prepare toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential clang ninja-build ncompress pkg-config python3-dev python3-venv
           out/tools/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-      - name: Build, test and export
+      - name: Compile and test; package only for a release tag
+        env:
+          CI_SCOPE: ${{ needs.metadata.outputs.scope }}
         run: |
+          args=(--stage tests)
+          if [[ "$CI_SCOPE" == release ]]; then
+            args=(--stage all --delivery "$RUNNER_TEMP/delivery")
+          fi
+          if [[ "$CI_SCOPE" != baseline ]]; then
+            args+=(--test-dependencies "$RUNNER_TEMP/linux-python-dependencies.tar.gz")
+          fi
           python tools/ci/check_linux.py --source "$GITHUB_WORKSPACE" \
             --vcpkg-root "$GITHUB_WORKSPACE/out/tools/vcpkg" \
             --work "$RUNNER_TEMP/linux" --reports "$RUNNER_TEMP/reports/linux-build" \
-            --delivery "$RUNNER_TEMP/delivery"
+            "${args[@]}"
+      - name: Export release installation test inputs
+        if: inputs.release-tag != ''
+        run: |
           tar -czf "$RUNNER_TEMP/linux-delivery.tar.gz" -C "$RUNNER_TEMP/delivery" .
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      - name: Upload Linux release installation inputs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: inputs.release-tag != ''
         with:
           name: linux-delivery
           path: ${{ runner.temp }}/linux-delivery.tar.gz
@@ -101,6 +145,20 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 7
+      - name: Upload Linux Python test dependencies
+        if: needs.metadata.outputs.scope != 'baseline'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: linux-python-dependencies
+          path: ${{ runner.temp }}/linux-python-dependencies.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+      - name: Summarize command timings
+        if: always()
+        shell: bash
+        run: python tools/ci/summarize_timings.py --reports "$RUNNER_TEMP/reports"
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -113,6 +171,7 @@ jobs:
   linux-consumer:
     name: Linux SDK and installed Python API
     needs: [metadata, linux]
+    if: needs.metadata.outputs.scope == 'release'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -132,6 +191,7 @@ jobs:
             --delivery "$RUNNER_TEMP/delivery" --work "$RUNNER_TEMP/consumer" \
             --reports "$RUNNER_TEMP/reports/linux-consumer"
       - name: Prepare release assets
+        if: inputs.release-tag != ''
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
         run: |
@@ -139,7 +199,9 @@ jobs:
             --dependencies "$RUNNER_TEMP/delivery/dependencies" --version "$VERSION" \
             --platform linux-x64 --output "$RUNNER_TEMP/assets"
           cp "$RUNNER_TEMP/delivery/wheels/"*.whl "$RUNNER_TEMP/assets/"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      - name: Upload Linux release assets
+        if: inputs.release-tag != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: linux-release-assets
           path: ${{ runner.temp }}/assets/*
@@ -147,6 +209,10 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 7
+      - name: Summarize command timings
+        if: always()
+        shell: bash
+        run: python "$RUNNER_TEMP/delivery/summarize_timings.py" --reports "$RUNNER_TEMP/reports"
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -157,8 +223,9 @@ jobs:
           retention-days: 14
 
   windows:
-    name: Windows desktop, SDK and Python ${{ needs.metadata.outputs.baseline-python }}
+    name: Windows desktop and Python ${{ needs.metadata.outputs.baseline-python }}
     needs: metadata
+    if: needs.metadata.outputs.scope != 'docs'
     runs-on: windows-2022
     timeout-minutes: 180
     defaults:
@@ -216,14 +283,25 @@ jobs:
         with:
           path: ${{ runner.temp }}/vcpkg-binary-cache
           key: ${{ steps.cache.outputs.cache-primary-key }}${{ steps.dependencies.outcome != 'success' && format('-partial-{0}-{1}', github.run_id, github.run_attempt) || '' }}
-      - name: Build, test and package
+      - name: Compile and test; package only for a release tag
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
+          CI_SCOPE: ${{ needs.metadata.outputs.scope }}
         run: |
-          python tools/ci/check_windows.py --dependency-prefix out/dependencies/installed/x64-windows-release `
-            --work "$env:RUNNER_TEMP/windows" --reports "$env:RUNNER_TEMP/reports/windows" `
-            --output "$env:RUNNER_TEMP/assets" --version "$env:VERSION"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+          $checkArgs = @('--dependency-prefix', 'out/dependencies/installed/x64-windows-release',
+            '--work', "$env:RUNNER_TEMP/windows", '--reports', "$env:RUNNER_TEMP/reports/windows",
+            '--version', $env:VERSION)
+          if ($env:CI_SCOPE -eq 'release') {
+            $checkArgs += @('--release', '--output', "$env:RUNNER_TEMP/assets")
+          }
+          if ($env:CI_SCOPE -ne 'baseline') {
+            $checkArgs += @('--test-dependencies', "$env:RUNNER_TEMP/windows-python-dependencies.tar.gz")
+          }
+          python tools/ci/check_windows.py @checkArgs
+          if ($LASTEXITCODE) { throw 'Windows validation failed' }
+      - name: Upload Windows release assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: inputs.release-tag != ''
         with:
           name: windows-release-assets
           path: ${{ runner.temp }}/assets/*
@@ -231,7 +309,9 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 7
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      - name: Upload Windows Python test dependencies
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: needs.metadata.outputs.scope != 'baseline'
         with:
           name: windows-python-dependencies
           path: ${{ runner.temp }}/windows-python-dependencies.tar.gz
@@ -239,6 +319,10 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 7
+      - name: Summarize command timings
+        if: always()
+        shell: bash
+        run: python tools/ci/summarize_timings.py --reports "$RUNNER_TEMP/reports"
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -251,75 +335,38 @@ jobs:
           overwrite: true
           retention-days: 14
 
-  python-matrix:
-    name: Python ${{ matrix.python }} / ${{ matrix.platform }}
-    needs: [metadata, linux, windows]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ${{ fromJSON(needs.metadata.outputs.python-matrix) }}
-        platform: [linux, windows]
-        include:
-          - platform: linux
-            runner: ubuntu-24.04
-            artifact: linux-delivery
-            archive: linux-delivery.tar.gz
-          - platform: windows
-            runner: windows-2022
-            artifact: windows-python-dependencies
-            archive: windows-python-dependencies.tar.gz
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: ${{ matrix.python }}
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          name: ${{ matrix.artifact }}
-          path: ${{ runner.temp }}/input
-      - name: Build and test this interpreter's wheel
-        shell: python {0}
-        env:
-          DEPENDENCY_ARCHIVE: ${{ matrix.archive }}
-        run: |
-          import os, pathlib, subprocess, sys, tarfile
-          root = pathlib.Path(os.environ['RUNNER_TEMP'])
-          with tarfile.open(root / 'input' / os.environ['DEPENDENCY_ARCHIVE']) as archive:
-              archive.extractall(root / 'delivery', filter='data')
-          subprocess.run([sys.executable, 'tools/ci/check_python.py',
-              '--dependency-prefix', str(root / 'delivery/dependencies'),
-              '--work', str(root / 'python'), '--reports', str(root / 'reports'),
-              '--output', str(root / 'assets')], check=True)
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: python-${{ matrix.python }}-${{ matrix.platform }}-release-assets
-          path: ${{ runner.temp }}/assets/*.whl
-          compression-level: 0
-          if-no-files-found: error
-          overwrite: true
-          retention-days: 7
-      - name: Upload diagnostics
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: python-${{ matrix.python }}-${{ matrix.platform }}-reports
-          path: ${{ runner.temp }}/reports
-          overwrite: true
-          retention-days: 14
+  python-linux:
+    name: Linux compatibility
+    needs: [metadata, linux]
+    if: needs.metadata.outputs.scope == 'full' || needs.metadata.outputs.scope == 'release'
+    uses: ./.github/workflows/python.yml
+    with:
+      platform: linux
+      python-versions: ${{ needs.metadata.outputs.python-matrix }}
+      release: ${{ inputs.release-tag != '' }}
+
+  python-windows:
+    name: Windows compatibility
+    needs: [metadata, windows]
+    if: needs.metadata.outputs.scope == 'full' || needs.metadata.outputs.scope == 'release'
+    uses: ./.github/workflows/python.yml
+    with:
+      platform: windows
+      python-versions: ${{ needs.metadata.outputs.python-matrix }}
+      release: ${{ inputs.release-tag != '' }}
 
   passed:
     name: CI passed
     if: always()
-    needs: [metadata, linux, linux-consumer, windows, python-matrix]
+    needs: [metadata, linux, linux-consumer, windows, python-linux, python-windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Require every check
         env:
+          CI_SCOPE: ${{ needs.metadata.outputs.scope }}
           RESULTS: ${{ toJSON(needs) }}
-        run: |
-          python3 -c 'import json, os; results=json.loads(os.environ["RESULTS"]); assert all(job["result"] == "success" for job in results.values()), results'
+        run: python3 tools/ci/plan_ci.py check
