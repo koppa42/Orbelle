@@ -7,8 +7,9 @@
 #include <orbitforge/runtime/project.hpp>
 
 namespace orbitforge::desktop {
-application::Session make_orbit_session(const OrbitInput &input, std::uint64_t revision) {
-    return runtime::make_orbit_session(input, revision);
+application::Session make_orbit_session(const OrbitInput &input, std::uint64_t revision,
+                                        const core::ITimeProvider *time) {
+    return runtime::make_orbit_session(input, revision, time);
 }
 std::shared_ptr<const OrbitScene>
 prepare_orbit_scene(OrbitInput input, application::Session session,
@@ -46,9 +47,36 @@ prepare_orbit_scene(OrbitInput input, application::Session session,
     std::vector<core::CartesianState> inertial_states;
     double min_radius = std::numeric_limits<double>::infinity(), max_radius = 0;
     for (auto ns = first;;) {
-        auto inertial = sample(core::Epoch{ns});
-        auto state =
-            frames.gcrf_to_itrf_state(inertial.epoch, eop.at(inertial.epoch)).apply(inertial);
+        auto native = sample(core::Epoch{ns});
+        if (input.propagator == OrbitPropagator::sgp4 && analysis_last - analysis_first >= 4) {
+            // The conventional SGP4 velocity is not exactly the derivative of its
+            // approximate position solution. Preserve it in Session/reports, but use
+            // position tangents for the display-only Hermite cache. All stencil queries
+            // remain inside the analysis interval (including endpoints near decay).
+            const auto h =
+                std::min<std::int64_t>(125'000'000, (analysis_last - analysis_first) / 4);
+            const double seconds = static_cast<double>(h) * 1e-9;
+            const bool left = ns - analysis_first < h, right = analysis_last - ns < h;
+            if (left || right) {
+                const auto direction = left ? 1 : -1;
+                const auto a = sample(core::Epoch{ns + direction * h});
+                const auto b = sample(core::Epoch{ns + direction * 2 * h});
+                for (std::size_t k = 0; k < 3; ++k)
+                    native.velocity_mps[k] =
+                        direction *
+                        (-3 * native.position_m[k] + 4 * a.position_m[k] - b.position_m[k]) /
+                        (2 * seconds);
+            } else {
+                const auto a = sample(core::Epoch{ns - h}), b = sample(core::Epoch{ns + h});
+                for (std::size_t k = 0; k < 3; ++k)
+                    native.velocity_mps[k] = (b.position_m[k] - a.position_m[k]) / (2 * seconds);
+            }
+        }
+        const auto orientation = eop.at(native.epoch);
+        auto state = core::transform_state(native, core::FrameId::itrf, frames, orientation);
+        auto inertial = native.frame == core::FrameId::gcrf
+                            ? native
+                            : frames.gcrf_to_itrf_state(native.epoch, orientation).inverse(state);
         inertial_states.push_back(inertial);
         const auto &r = state.position_m;
         const auto radius = std::hypot(r[0], r[1], r[2]);
@@ -60,7 +88,9 @@ prepare_orbit_scene(OrbitInput input, application::Session session,
         // The bounded duration above makes the subtraction safe.
         ns += std::min(step, last - ns);
     }
-    const auto provenance = session.sample(std::array{input.first}).provenance();
+    auto provenance = session.provenance();
+    if (input.propagator == OrbitPropagator::sgp4)
+        provenance.algorithm += ";display-position-tangent-fd2-0.125s";
     visualization::StateTrack track{results::StateSeries{provenance, std::move(states)}};
     visualization::StateTrack inertial_track{
         results::StateSeries{provenance, std::move(inertial_states)}};
@@ -71,20 +101,28 @@ prepare_orbit_scene(OrbitInput input, application::Session session,
         const auto a = nodes[i - 1].epoch.tai_nanoseconds(), b = nodes[i].epoch.tai_nanoseconds();
         for (const auto numerator : {1, 2, 3}) {
             const core::Epoch epoch{a + (b - a) * numerator / 4};
-            const auto direct = sample(epoch);
+            const auto native = sample(epoch);
+            const auto orientation = eop.at(epoch);
+            auto direct_position = native.position_m;
+            if (native.frame == core::FrameId::teme) {
+                const auto fixed_position = frames.teme_to_itrf(epoch, orientation.sample)
+                                                .apply_position(native.position_m);
+                direct_position =
+                    frames.gcrf_to_itrf(epoch, orientation.sample).inverse_position(fixed_position);
+            }
             const auto interpolated = track.sample(epoch).markers.front().position_m;
             // Quarter-segment validation needs positions, not the costly R-dot velocity
             // transform. Cache nodes still use the full state transform for Hermite tangents.
             const auto r =
-                frames.gcrf_to_itrf(epoch, eop.at(epoch).sample).apply_position(direct.position_m);
+                frames.gcrf_to_itrf(epoch, orientation.sample).apply_position(direct_position);
             const auto error =
                 std::hypot(r[0] - interpolated[0], r[1] - interpolated[1], r[2] - interpolated[2]);
             max_error = std::max(max_error, error);
             const auto inertial_interpolated =
                 inertial_track.sample(epoch).markers.front().position_m;
-            const auto inertial_error = std::hypot(direct.position_m[0] - inertial_interpolated[0],
-                                                   direct.position_m[1] - inertial_interpolated[1],
-                                                   direct.position_m[2] - inertial_interpolated[2]);
+            const auto inertial_error = std::hypot(direct_position[0] - inertial_interpolated[0],
+                                                   direct_position[1] - inertial_interpolated[1],
+                                                   direct_position[2] - inertial_interpolated[2]);
             max_inertial_error = std::max(max_inertial_error, inertial_error);
             if (error > 1 || inertial_error > 1)
                 throw std::runtime_error(

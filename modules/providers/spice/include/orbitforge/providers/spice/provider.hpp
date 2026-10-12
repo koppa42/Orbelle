@@ -4,6 +4,7 @@
 #include <orbitforge/core/ephemeris/ephemeris_provider.hpp>
 #include <orbitforge/core/propagation/central_body.hpp>
 #include <orbitforge/core/propagation/j2_mean_elements.hpp>
+#include <orbitforge/core/propagation/j4_mean_elements.hpp>
 #include <orbitforge/core/propagation/keplerian_elements.hpp>
 #include <orbitforge/core/propagation/state_provider.hpp>
 #include <orbitforge/core/units/quantities.hpp>
@@ -29,4 +30,6 @@ make_two_body(core::CartesianState initial, core::GravitationalParameter mu);
 [[nodiscard]] std::shared_ptr<const core::IStateProvider> make_j2(core::J2MeanElements initial,
                                                                   const core::CentralBody &body,
                                                                   core::J2SecularOptions options);
+[[nodiscard]] std::shared_ptr<const core::IStateProvider>
+make_j4(core::J4MeanElements initial, const core::CentralBody &body = core::j4_earth());
 } // namespace orbitforge::providers::spice

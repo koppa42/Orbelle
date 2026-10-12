@@ -1,4 +1,6 @@
 #include <orbitforge/runtime/j2.hpp>
+#include <orbitforge/runtime/j4.hpp>
+#include <orbitforge/runtime/sgp4.hpp>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -12,6 +14,7 @@ void bind_j2(py::module_ &module) {
             [](const core::CentralBody &body) { return body.mu.metres_cubed_per_second_squared; })
         .def_readonly("equatorial_radius_m", &core::CentralBody::equatorial_radius_m)
         .def_readonly("j2", &core::CentralBody::j2)
+        .def_readonly("j4", &core::CentralBody::j4)
         .def_property_readonly(
             "model", [](const core::CentralBody &body) { return std::string(body.model); });
     module.def("central_body", &core::central_body, py::arg("origin") = core::OriginId::earth,
@@ -46,4 +49,35 @@ void bind_j2(py::module_ &module) {
         py::arg("initial"), py::arg("object_id"), py::arg("options") = core::J2SecularOptions{},
         py::arg("input_revision") = 1, py::arg("body") = core::OriginId::earth,
         py::call_guard<py::gil_scoped_release>());
+    module.attr("J4MeanElements") = module.attr("J2MeanElements");
+    module.def("j4_earth", &core::j4_earth, py::return_value_policy::copy);
+    module.def("j4_mean_ellipse_state", &runtime::j4_mean_ellipse_state, py::arg("elements"),
+               py::call_guard<py::gil_scoped_release>());
+    module.def("j4_mean_ellipse_elements", &runtime::j4_mean_ellipse_elements,
+               py::arg("auxiliary_state"), py::call_guard<py::gil_scoped_release>());
+    module.def("make_j4_session", &runtime::make_j4_session, py::arg("initial"),
+               py::arg("object_id"), py::arg("input_revision") = 1,
+               py::call_guard<py::gil_scoped_release>());
+    py::class_<core::Tle>(module, "Tle")
+        .def(py::init<std::string, std::string>(), py::arg("line1"), py::arg("line2"))
+        .def_readonly("line1", &core::Tle::line1)
+        .def_readonly("line2", &core::Tle::line2)
+        .def_property_readonly("epoch_utc",
+                               [](const core::Tle &tle) { return core::parse_tle(tle).epoch_utc; })
+        .def_property_readonly("catalog_id",
+                               [](const core::Tle &tle) { return core::parse_tle(tle).catalog_id; })
+        .def_property_readonly("period_seconds", [](const core::Tle &tle) {
+            return 86400 / core::parse_tle(tle).mean_motion_revolutions_per_day;
+        });
+    module.def(
+        "make_sgp4_session",
+        [](const core::Tle &tle, const core::ITimeProvider &time, std::string object_id,
+           std::uint64_t revision) {
+            // OrbitInput.tle can expose a reference to a mutable parent field. Copy
+            // under the GIL before another Python thread can replace those strings.
+            const auto snapshot = tle;
+            py::gil_scoped_release release;
+            return runtime::make_sgp4_session(snapshot, time, std::move(object_id), revision);
+        },
+        py::arg("tle"), py::arg("time"), py::arg("object_id"), py::arg("input_revision") = 1);
 }

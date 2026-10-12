@@ -47,4 +47,25 @@ CartesianState StateTransform::inverse(const CartesianState &state) const {
     return {state.epoch, state.origin, rotation.from, position,
             rotation.inverse_position(velocity)};
 }
+CartesianState transform_state(const CartesianState &state, FrameId target,
+                               const IFrameProvider &frames, const EarthOrientationState &eop) {
+    const auto supported = [](FrameId frame) {
+        return frame == FrameId::gcrf || frame == FrameId::itrf || frame == FrameId::teme;
+    };
+    if (!supported(state.frame) || !supported(target) || state.origin != OriginId::earth ||
+        state.epoch != eop.sample.epoch)
+        throw std::invalid_argument("Unsupported reference frame, origin or EOP epoch");
+    if (state.frame == target)
+        return state;
+    auto fixed = state;
+    if (state.frame == FrameId::gcrf)
+        fixed = frames.gcrf_to_itrf_state(state.epoch, eop).apply(state);
+    else if (state.frame == FrameId::teme)
+        fixed = frames.teme_to_itrf_state(state.epoch, eop).apply(state);
+    if (target == FrameId::gcrf)
+        return frames.gcrf_to_itrf_state(state.epoch, eop).inverse(fixed);
+    if (target == FrameId::teme)
+        return frames.teme_to_itrf_state(state.epoch, eop).inverse(fixed);
+    return fixed;
+}
 } // namespace orbitforge::core

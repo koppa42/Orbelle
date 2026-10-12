@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import zlib
 import orbitforge as of
+from project_fixtures import legacy_objects
 
 
 class ProjectTests(unittest.TestCase):
@@ -97,7 +98,7 @@ class ProjectTests(unittest.TestCase):
             path = Path(directory) / 'bound.orbitforge'
             project.save(path)
             original = path.read_bytes()
-            self.assertEqual(struct.unpack_from('<I', original, 8)[0], 8)
+            self.assertEqual(struct.unpack_from('<I', original, 8)[0], 9)
             def rewrite(tag_to_change, mutate):
                 sections = []
                 offset = 24
@@ -139,6 +140,8 @@ class ProjectTests(unittest.TestCase):
                     continue
                 if tag.to_bytes(4, 'little') == b'DATA':
                     body, version = body[:-4], 1
+                if tag.to_bytes(4, 'little') == b'OBJS':
+                    body, version = legacy_objects(body), 2
                 sections.append(struct.pack('<IIQI', tag, version, len(body), zlib.crc32(body)) + body)
             payload = b''.join(sections)
             path.write_bytes(original[:8] + struct.pack('<IQI', 3, len(payload), zlib.crc32(payload)) + payload)

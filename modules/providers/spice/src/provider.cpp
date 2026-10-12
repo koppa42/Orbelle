@@ -657,7 +657,8 @@ std::array<double, 3> cross(const std::array<double, 3> &a, const std::array<dou
 }
 class J2Secular final : public core::IStateProvider {
   public:
-    J2Secular(core::J2MeanElements initial, core::CentralBody body, core::J2SecularOptions options)
+    J2Secular(core::J2MeanElements initial, core::CentralBody body, core::J2SecularOptions options,
+              bool fourth_order = false)
         : initial_(initial), body_(body) {
         validate_j2(initial_, body_);
         const double a = initial_.semi_major_axis_m, e = initial_.eccentricity;
@@ -669,6 +670,37 @@ class J2Secular final : public core::IStateProvider {
         mean_rate_ = n_ + (options.mean_motion_correction
                                ? 0.75 * factor * std::sqrt((1 - e) * (1 + e)) * (3 * c * c - 1)
                                : 0);
+        if (fourth_order) {
+            if (!std::isfinite(body.j4) || std::abs(body.j4) > 0.01)
+                throw std::invalid_argument("Invalid J4 gravity coefficient");
+            // Kozai secular J2, J2^2 and J4 equations. Adapted from the MIT-licensed
+            // SatelliteToolboxPropagators.jl; see third_party/SatelliteToolbox-LICENSE.txt.
+            // Keep the published node-term sign; do not fit it to a particular STK version.
+            const double e2 = e * e, beta2 = (1 - e) * (1 + e), beta = std::sqrt(beta2);
+            const double s2 = std::pow(std::sin(initial.inclination_rad), 2), s4 = s2 * s2;
+            const double rp2 = std::pow(body.equatorial_radius_m / p, 2), rp4 = rp2 * rp2;
+            const double j22 = body.j2 * body.j2;
+            mean_rate_ =
+                n_ * (1 + 0.75 * body.j2 * rp2 * beta * (2 - 3 * s2) +
+                      (3.0 / 128) * j22 * rp4 * beta *
+                          (120 + 64 * beta - 40 * beta2 + (-240 - 192 * beta + 40 * beta2) * s2 +
+                           (105 + 144 * beta + 25 * beta2) * s4) -
+                      (45.0 / 128) * body.j4 * rp4 * beta * e2 * (-8 + 40 * s2 - 35 * s4));
+            const double k2 = mean_rate_ * body.j2 * rp2;
+            const double k22 = mean_rate_ * j22 * rp4, n22 = n_ * j22 * rp4;
+            const double k4 = n_ * body.j4 * rp4;
+            node_rate_ =
+                -1.5 * k2 * c +
+                (3.0 / 32) * k22 * c * (-36 - 4 * e2 + 48 * beta + (40 - 5 * e2 - 72 * beta) * s2) +
+                (15.0 / 32) * k4 * c * (8 + 12 * e2 - (14 + 21 * e2) * s2);
+            apsis_rate_ =
+                0.75 * k2 * (4 - 5 * s2) +
+                (3.0 / 128) * k22 *
+                    (384 + 96 * e2 - 384 * beta + (-824 - 116 * e2 + 1056 * beta) * s2 +
+                     (430 - 5 * e2 - 720 * beta) * s4) -
+                (15.0 / 16) * n22 * e2 * std::pow(c, 4) -
+                (15.0 / 128) * k4 * (64 + 72 * e2 - (248 + 252 * e2) * s2 + (196 + 189 * e2) * s4);
+        }
         if (!(n_ > 0) || !std::isfinite(n_) || !(mean_rate_ > 0))
             throw std::invalid_argument("J2 mean motion is outside the numerical domain");
         (void)state_at(initial_.epoch);
@@ -765,5 +797,9 @@ std::shared_ptr<const core::IStateProvider> make_j2(core::J2MeanElements initial
                                                     const core::CentralBody &body,
                                                     core::J2SecularOptions options) {
     return std::make_shared<J2Secular>(initial, body, options);
+}
+std::shared_ptr<const core::IStateProvider> make_j4(core::J4MeanElements initial,
+                                                    const core::CentralBody &body) {
+    return std::make_shared<J2Secular>(initial, body, core::J2SecularOptions{}, true);
 }
 } // namespace orbitforge::providers::spice

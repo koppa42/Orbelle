@@ -37,5 +37,18 @@ class IFrameProvider {
     gcrf_to_itrf(Epoch epoch, const EarthOrientationSample &eop) const = 0;
     [[nodiscard]] virtual StateTransform
     gcrf_to_itrf_state(Epoch epoch, const EarthOrientationState &eop) const = 0;
+    // TEME of date: GMST82 to the pseudo Earth-fixed frame, then polar motion.
+    [[nodiscard]] virtual PositionRotation teme_to_itrf(Epoch,
+                                                        const EarthOrientationSample &) const {
+        throw std::logic_error("This frame provider does not support TEME");
+    }
+    [[nodiscard]] virtual StateTransform teme_to_itrf_state(Epoch,
+                                                            const EarthOrientationState &) const {
+        throw std::logic_error("This frame provider does not support TEME");
+    }
 };
+// Explicit routing through ITRF, including rotation-rate velocity terms. Never aliases TEME/GCRF.
+[[nodiscard]] CartesianState transform_state(const CartesianState &state, FrameId target,
+                                             const IFrameProvider &frames,
+                                             const EarthOrientationState &eop);
 } // namespace orbitforge::core

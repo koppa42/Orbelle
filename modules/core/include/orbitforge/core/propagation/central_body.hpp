@@ -11,6 +11,7 @@ struct CentralBody {
     double equatorial_radius_m;
     double j2;
     std::string_view model;
+    double j4 = 0;
 };
 // Fixed nominal constants from IERS Conventions 2003, Table 1.1.
 // The dynamical reference radius is independent of the display's WGS84 ellipsoid.

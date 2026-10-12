@@ -1291,14 +1291,11 @@ class Workbench final : public QMainWindow {
                                              .sample(epoch)
                                              .markers.front());
             else {
-                auto position =
-                    satellite.orbit->session.sample(std::array{epoch}).states().front().position_m;
-                if (display_frame_ == core::FrameId::itrf) {
-                    if (!rotation)
-                        rotation = frames_->gcrf_to_itrf(epoch, eop_->at(epoch).sample);
-                    position = rotation->apply_position(position);
-                }
-                result.markers.push_back({satellite.orbit->input.object_id, position});
+                const auto native =
+                    satellite.orbit->session.sample(std::array{epoch}).states().front();
+                const auto state =
+                    core::transform_state(native, display_frame_, *frames_, eop_->at(epoch));
+                result.markers.push_back({satellite.orbit->input.object_id, state.position_m});
             }
         }
         for (const auto &station : stations_) {
@@ -1699,13 +1696,15 @@ class Workbench final : public QMainWindow {
         // completes while the confirmation dialog is open.
         std::vector<EopCatalog::Provider> installed_data{next_data};
         const auto retained = editing ? scenario_ : std::nullopt;
+        const auto calculation_time = time_for(next_data->data_info().time_data);
         project_candidate_ = std::async(
             std::launch::async,
             [this, project = std::move(project),
              source = std::filesystem::path(pending_project_path_.toStdWString()), installed_data,
-             retained, edited_object, cancel = project_cancellation_]() mutable {
+             retained, edited_object, calculation_time, cancel = project_cancellation_]() mutable {
                 return prepare_project_scene(std::move(project), source, *frames_, installed_data,
-                                             *cancel, retained, edited_object);
+                                             *cancel, retained, edited_object,
+                                             calculation_time.get());
             });
         update_actions();
         statusBar()->showMessage(editing ? QStringLiteral("正在更新场景并准备轨迹…")
@@ -2795,9 +2794,11 @@ class Workbench final : public QMainWindow {
             editor_target_ ? satellites_.at(*editor_target_).display : DisplaySettings{};
         const auto cache = display_cache_interval(input, settings, scenario_->first());
         const auto eop = eop_;
+        const auto calculation_time = time_for(eop->data_info().time_data);
         candidate_ = std::async(std::launch::async, [this, input = std::move(input), revision,
-                                                     cache, eop, cancel = cancellation_] {
-            auto session = make_orbit_session(input, revision);
+                                                     cache, eop, calculation_time,
+                                                     cancel = cancellation_] {
+            auto session = make_orbit_session(input, revision, calculation_time.get());
             return prepare_orbit_scene(input, std::move(session), *frames_, *eop, *cancel, cache);
         });
         editor_->set_busy(true);

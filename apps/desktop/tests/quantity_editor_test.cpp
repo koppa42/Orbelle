@@ -10,8 +10,10 @@
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTimer>
 #include <QToolButton>
@@ -20,6 +22,7 @@
 #include <gtest/gtest.h>
 #include <numbers>
 #include <orbitforge/runtime/j2.hpp>
+#include <orbitforge/runtime/j4.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 
@@ -431,5 +434,71 @@ TEST_F(QuantityTest, J2MeanAnomalyAndReadOnlyModelDetailsPreserveDraft) {
     editor.submit();
     EXPECT_EQ(submitted->propagator, OrbitPropagator::two_body);
     EXPECT_EQ(submitted->step_seconds, 30);
+}
+
+TEST_F(QuantityTest, J4AndTleEditingKeepSeparateDraftsAndRejectInvalidInput) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    OrbitEditor editor(OrbitInput{});
+    editor.set_time_provider(runtime::make_builtin_time_provider());
+    editor.set_propagator(OrbitPropagator::j4_secular);
+    field(editor, "meanAnomaly").set_value(45, Unit::degree);
+    std::optional<OrbitInput> submitted;
+    editor.apply = [&](OrbitInput value) { submitted = std::move(value); };
+    editor.submit();
+    ASSERT_TRUE(submitted);
+    EXPECT_EQ(submitted->propagator, OrbitPropagator::j4_secular);
+    EXPECT_NEAR(runtime::j4_mean_ellipse_elements(submitted->initial).mean_anomaly_rad,
+                std::numbers::pi / 4, 1e-10);
+    const auto manual = submitted->initial;
+    editor.set_propagator(OrbitPropagator::sgp4);
+    auto *input = editor.findChild<QPlainTextEdit *>("tleInput");
+    ASSERT_NE(input, nullptr);
+    EXPECT_TRUE(editor.findChild<QComboBox *>("stateRepresentation")->isHidden());
+    EXPECT_FALSE(editor.findChild<QComboBox *>("initialReferenceFrame")->isEnabled());
+    submitted.reset();
+    input->setPlainText("incomplete");
+    editor.submit();
+    EXPECT_FALSE(submitted);
+    input->setPlainText("VANGUARD\n"
+                        "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753\n"
+                        "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667");
+    editor.submit();
+    ASSERT_TRUE(submitted);
+    EXPECT_EQ(submitted->propagator, OrbitPropagator::sgp4);
+    EXPECT_EQ(submitted->tle.line1.size(), 69U);
+    EXPECT_EQ(submitted->initial.position_m, manual.position_m);
+    const auto saved = *submitted;
+    auto fixed_draft = saved;
+    fixed_draft.input_frame = core::FrameId::itrf;
+    editor.transform_state = [](core::CartesianState, core::FrameId) -> core::CartesianState {
+        throw std::runtime_error("Inactive draft epoch is outside current EOP coverage");
+    };
+    EXPECT_NO_THROW(editor.set_input(fixed_draft));
+    editor.submit();
+    EXPECT_EQ(submitted->tle, saved.tle);
+    EXPECT_EQ(submitted->initial.position_m, saved.initial.position_m);
+    editor.set_propagator(OrbitPropagator::j4_secular);
+    EXPECT_FALSE(editor.findChild<QComboBox *>("stateRepresentation")->isHidden());
+    editor.submit();
+    EXPECT_TRUE(submitted->tle.line1.empty());
+    EXPECT_NEAR(runtime::j4_mean_ellipse_elements(submitted->initial).mean_anomaly_rad,
+                std::numbers::pi / 4, 1e-10);
+    editor.set_propagator(OrbitPropagator::sgp4);
+    EXPECT_TRUE(input->toPlainText().contains("00005"));
+    const auto capture = qEnvironmentVariable("ORBITFORGE_PROPAGATOR_UI_CAPTURE");
+    if (!capture.isEmpty()) {
+        ASSERT_TRUE(QDir{}.mkpath(capture));
+        editor.resize(1120, 720);
+        editor.show();
+        QApplication::processEvents();
+        ASSERT_TRUE(editor.grab().save(capture + "/sgp4-wide.png"));
+        editor.resize(840, 560);
+        QApplication::processEvents();
+        ASSERT_TRUE(editor.grab().save(capture + "/sgp4-compact.png"));
+        editor.resize(1120, 720);
+        editor.set_propagator(OrbitPropagator::j4_secular);
+        QApplication::processEvents();
+        ASSERT_TRUE(editor.grab().save(capture + "/j4-wide.png"));
+    }
 }
 } // namespace orbitforge::desktop

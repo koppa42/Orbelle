@@ -25,7 +25,8 @@ PYBIND11_MODULE(_native, module) {
     py::enum_<core::FrameId>(module, "FrameId")
         .value("GCRF", core::FrameId::gcrf)
         .value("ITRF", core::FrameId::itrf)
-        .value("SPICE_J2000", core::FrameId::spice_j2000);
+        .value("SPICE_J2000", core::FrameId::spice_j2000)
+        .value("TEME", core::FrameId::teme);
     py::enum_<core::OriginId>(module, "OriginId").value("EARTH", core::OriginId::earth);
     py::class_<core::CartesianState>(module, "CartesianState")
         .def(py::init<core::Epoch, core::OriginId, core::FrameId, std::array<double, 3>,

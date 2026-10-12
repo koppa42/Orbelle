@@ -19,7 +19,9 @@ display_interval(const OrbitInput &input, const DisplaySettings &settings, core:
             std::hypot(state.velocity_mps[0], state.velocity_mps[1], state.velocity_mps[2]);
         const double reciprocal_a = 2 / r - v * v / input.mu();
         const double period =
-            reciprocal_a > 0
+            input.propagator == OrbitPropagator::sgp4
+                ? 86400 / core::parse_tle(input.tle).mean_motion_revolutions_per_day
+            : reciprocal_a > 0
                 ? 2 * std::numbers::pi / std::sqrt(input.mu() * std::pow(reciprocal_a, 3))
                 : 3600;
         const auto span = std::min(static_cast<double>(last - first), period * 1e9);

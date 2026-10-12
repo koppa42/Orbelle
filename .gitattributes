@@ -9,3 +9,7 @@
 /data/samples/spice/**/manifest.json -text
 /data/samples/fonts/** -text
 /benchmarks/scenarios/windows_10k_two_views.json -text
+# Preserve pinned upstream source bytes, including its original whitespace.
+/modules/providers/sgp4/third_party/SGP4.cpp -text whitespace=-blank-at-eol,-blank-at-eof
+/modules/providers/sgp4/third_party/SGP4.h -text whitespace=-blank-at-eol,-blank-at-eof
+/tests/reference/propagators/*.txt text eol=lf

@@ -45,12 +45,15 @@ void bind_project(py::module_ &module) {
         .def_property_readonly("name", &application::ProjectGroundStation::name);
     py::enum_<application::OrbitPropagator>(module, "OrbitPropagator")
         .value("TWO_BODY", application::OrbitPropagator::two_body)
-        .value("J2_SECULAR", application::OrbitPropagator::j2_secular);
+        .value("J2_SECULAR", application::OrbitPropagator::j2_secular)
+        .value("J4_SECULAR", application::OrbitPropagator::j4_secular)
+        .value("SGP4", application::OrbitPropagator::sgp4);
     py::class_<application::OrbitInput>(module, "OrbitInput")
         .def(py::init<>())
         .def_readwrite("initial", &application::OrbitInput::initial)
         .def_readwrite("propagator", &application::OrbitInput::propagator)
         .def_readwrite("input_frame", &application::OrbitInput::input_frame)
+        .def_readwrite("tle", &application::OrbitInput::tle)
         .def_readwrite("object_id", &application::OrbitInput::object_id)
         .def_readwrite("first", &application::OrbitInput::first)
         .def_readwrite("last", &application::OrbitInput::last)
@@ -129,12 +132,14 @@ void bind_project(py::module_ &module) {
                 project = std::move(candidate);
             },
             py::arg("input"), py::arg("display") = application::OrbitDisplay{})
-        .def("to_scenario",
-             [](const application::Project &project) {
-                 auto snapshot = project;
-                 py::gil_scoped_release release;
-                 return runtime::make_project_scenario(snapshot);
-             })
+        .def(
+            "to_scenario",
+            [](const application::Project &project, const core::ITimeProvider *time) {
+                auto snapshot = project;
+                py::gil_scoped_release release;
+                return runtime::make_project_scenario(snapshot, time);
+            },
+            py::arg("time") = nullptr)
         .def(
             "save",
             [](const application::Project &project, const std::filesystem::path &path,
