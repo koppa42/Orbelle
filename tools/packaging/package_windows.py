@@ -79,8 +79,7 @@ def verify_normal_launch(executable, cwd, environment, reports):
             if pid.value == process.pid and user32.IsWindowVisible(window):
                 title = ctypes.create_unicode_buffer(512)
                 user32.GetWindowTextW(window, title, len(title))
-                # Native 3D windows briefly appear as "OrbitForge" before Qt embeds them.
-                # Only the fully constructed workbench has this startup caption prefix.
+                # Identify the completed workbench, not the splash, for a graceful close.
                 if title.value.startswith('OrbitForge  |  '):
                     windows.append((window, title.value))
             return True

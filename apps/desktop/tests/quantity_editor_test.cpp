@@ -9,12 +9,14 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QEvent>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QStringList>
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
@@ -27,6 +29,25 @@
 #include <orbitforge/runtime/two_body.hpp>
 
 namespace orbitforge::desktop {
+namespace {
+class WindowShowObserver final : public QObject {
+  public:
+    WindowShowObserver() { qApp->installEventFilter(this); }
+    ~WindowShowObserver() override { qApp->removeEventFilter(this); }
+    QStringList shown;
+
+  protected:
+    bool eventFilter(QObject *object, QEvent *event) override {
+        if (event->type() == QEvent::Show) {
+            auto *widget = qobject_cast<QWidget *>(object);
+            if (widget && widget->isWindow())
+                shown.append(QString::fromLatin1(widget->metaObject()->className()) + ":" +
+                             widget->objectName());
+        }
+        return false;
+    }
+};
+} // namespace
 class QuantityTest : public ::testing::Test {
   protected:
     void SetUp() override {
@@ -54,6 +75,23 @@ class QuantityTest : public ::testing::Test {
         return *result;
     }
 };
+TEST_F(QuantityTest, ConstructingFieldsDoesNotShowTemporaryWindows) {
+    WindowShowObserver windows;
+    for (const auto unit : {Unit::one, Unit::kilometre, Unit::kilometres_per_second, Unit::degree,
+                            Unit::second, Unit::kilometres_cubed_per_second_squared}) {
+        QuantityEditor editor(unit);
+        EXPECT_FALSE(editor.isVisible());
+        QCoreApplication::processEvents();
+    }
+    EXPECT_TRUE(windows.shown.isEmpty()) << windows.shown.join(", ").toStdString();
+}
+TEST_F(QuantityTest, PreparingOrbitPropertiesDoesNotShowTemporaryWindows) {
+    WindowShowObserver windows;
+    OrbitEditor editor(OrbitInput{});
+    QCoreApplication::processEvents();
+    EXPECT_FALSE(editor.isVisible());
+    EXPECT_TRUE(windows.shown.isEmpty()) << windows.shown.join(", ").toStdString();
+}
 TEST_F(QuantityTest, ConvertsCompatibleDimensionsAndRejectsInvalidConversions) {
     EXPECT_DOUBLE_EQ(convert_quantity(7000, Unit::kilometre, Unit::metre), 7e6);
     EXPECT_DOUBLE_EQ(convert_quantity(7.5, Unit::kilometres_per_second, Unit::metres_per_second),
