@@ -3,6 +3,7 @@
 #include "../src/viewer/report_plot.hpp"
 #include "../src/viewer/workbench_style.hpp"
 #include "../src/viewer/workspace.hpp"
+#include "window_show_observer.hpp"
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -54,6 +55,29 @@ void save_template(ReportDialog &dialog, const QString &name) {
         naming->accept();
     });
     dialog.findChild<QAction *>("saveReport")->trigger();
+}
+TEST(ReportDialog, PreparingTemplatesAndDockingDoesNotShowTemporaryWindows) {
+    (void)test_app();
+    WindowShowObserver windows;
+    Workspace workspace;
+    application::Project project("Scenario", core::Epoch{0}, core::Epoch{120'000'000'000});
+    project.ground_stations.push_back({"station", "Station", {1.2, 0.6, 350}});
+    ReportDialog dialog(
+        project, runtime::make_builtin_time_provider(), [](ReportDialog::Ready) {}, [](auto) {},
+        [](core::Epoch) {});
+    auto *library = dialog.findChild<QComboBox *>("reportLibrary");
+    ASSERT_NE(library, nullptr);
+    for (int i = 0; i < library->count(); ++i) {
+        library->setCurrentIndex(i);
+        auto *follow = dialog.findChild<QCheckBox *>("reportFollowScenario");
+        ASSERT_NE(follow, nullptr);
+        follow->setChecked(false);
+        follow->setChecked(true);
+    }
+    workspace.open(&dialog, false);
+    QCoreApplication::processEvents();
+    EXPECT_FALSE(dialog.isVisible());
+    EXPECT_TRUE(windows.shown.isEmpty()) << windows.shown.join(", ").toStdString();
 }
 TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
     (void)test_app();

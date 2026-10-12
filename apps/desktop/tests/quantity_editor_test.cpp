@@ -1,6 +1,10 @@
+#include "../src/viewer/epoch_editor.hpp"
+#include "../src/viewer/ground_station_editor.hpp"
 #include "../src/viewer/orbit_editor.hpp"
 #include "../src/viewer/quantity_editor.hpp"
+#include "../src/viewer/sensor_editor.hpp"
 #include "../src/viewer/workbench_style.hpp"
+#include "window_show_observer.hpp"
 #include <QApplication>
 #include <QCheckBox>
 #include <QColorDialog>
@@ -54,6 +58,62 @@ class QuantityTest : public ::testing::Test {
         return *result;
     }
 };
+TEST_F(QuantityTest, ConstructingFieldsDoesNotShowTemporaryWindows) {
+    WindowShowObserver windows;
+    for (const auto unit : {Unit::one, Unit::kilometre, Unit::kilometres_per_second, Unit::degree,
+                            Unit::second, Unit::kilometres_cubed_per_second_squared}) {
+        QuantityEditor editor(unit);
+        EXPECT_FALSE(editor.isVisible());
+        QCoreApplication::processEvents();
+    }
+    EXPECT_TRUE(windows.shown.isEmpty()) << windows.shown.join(", ").toStdString();
+}
+TEST_F(QuantityTest, PreparingOrbitPropertiesDoesNotShowTemporaryWindows) {
+    WindowShowObserver windows;
+    OrbitEditor editor(OrbitInput{});
+    QCoreApplication::processEvents();
+    EXPECT_FALSE(editor.isVisible());
+    EXPECT_TRUE(windows.shown.isEmpty()) << windows.shown.join(", ").toStdString();
+}
+TEST_F(QuantityTest, PreparingGroundStationDoesNotShowTemporaryWindows) {
+    WindowShowObserver windows;
+    GroundStationEditor editor;
+    editor.set_station({"station", "Station", {1.2, 0.6, 350}}, true);
+    editor.set_busy(true);
+    editor.set_busy(false);
+    editor.show_result("Invalid position");
+    QCoreApplication::processEvents();
+    EXPECT_FALSE(editor.isVisible());
+    EXPECT_TRUE(windows.shown.isEmpty()) << windows.shown.join(", ").toStdString();
+}
+TEST_F(QuantityTest, PreparingSensorDoesNotShowTemporaryWindows) {
+    WindowShowObserver windows;
+    application::Project project("Scenario", core::Epoch{0}, core::Epoch{120'000'000'000});
+    project.ground_stations.push_back({"station", "Station", {1.2, 0.6, 350}});
+    application::ProjectSensor sensor;
+    sensor.object_id = "sensor";
+    sensor.parent_satellite_id = "satellite";
+    sensor.half_angle_rad = 0.2;
+    SensorEditor editor;
+    editor.set_sensor(sensor, project, true);
+    sensor.pointing = application::SensorPointing::targeted;
+    sensor.target_station_id = "station";
+    editor.set_sensor(sensor, project, false);
+    QCoreApplication::processEvents();
+    EXPECT_FALSE(editor.isVisible());
+    EXPECT_TRUE(windows.shown.isEmpty()) << windows.shown.join(", ").toStdString();
+}
+TEST_F(QuantityTest, PreparingEpochAndValidationDoesNotShowTemporaryWindows) {
+    WindowShowObserver windows;
+    EpochEditor editor;
+    editor.set_read_only(true);
+    editor.set_read_only(false);
+    editor.findChild<QLineEdit *>("epochValue")->setText("invalid epoch");
+    editor.set_scale(CalendarScale::tt);
+    QCoreApplication::processEvents();
+    EXPECT_FALSE(editor.isVisible());
+    EXPECT_TRUE(windows.shown.isEmpty()) << windows.shown.join(", ").toStdString();
+}
 TEST_F(QuantityTest, ConvertsCompatibleDimensionsAndRejectsInvalidConversions) {
     EXPECT_DOUBLE_EQ(convert_quantity(7000, Unit::kilometre, Unit::metre), 7e6);
     EXPECT_DOUBLE_EQ(convert_quantity(7.5, Unit::kilometres_per_second, Unit::metres_per_second),

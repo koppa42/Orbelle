@@ -94,6 +94,7 @@ if(ORBITFORGE_WITH_VSG)
         gtest_discover_tests(orbitforge_orbit_scene_tests TEST_PREFIX "desktop." PROPERTIES TIMEOUT 60)
         add_executable(orbitforge_quantity_tests tests/quantity_editor_test.cpp
             src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
+            src/viewer/ground_station_editor.cpp src/viewer/sensor_editor.cpp
             src/viewer/orbit_editor.cpp src/viewer/track_style_editor.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp)
         set_target_properties(orbitforge_quantity_tests PROPERTIES AUTOMOC ON)
         qt_add_resources(orbitforge_quantity_tests "quantity_icons" PREFIX "/orbitforge"

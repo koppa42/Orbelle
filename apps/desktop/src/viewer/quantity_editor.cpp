@@ -90,7 +90,9 @@ QuantityEditor::QuantityEditor(Unit display_unit, QWidget *parent)
     input_->setMinimumWidth(0);
     input_->setFrame(false);
     row->addWidget(input_, 1);
-    unit_button_ = new QToolButton;
+    // Visibility is configured before layout insertion; an unparented button would show
+    // as a top-level window while the surrounding editor is still being constructed.
+    unit_button_ = new QToolButton(this);
     unit_button_->setObjectName("quantityUnit");
     unit_button_->setPopupMode(QToolButton::InstantPopup);
     unit_button_->setFocusPolicy(Qt::StrongFocus);

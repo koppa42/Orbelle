@@ -484,7 +484,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     technical->setTextInteractionFlags(Qt::TextSelectableByMouse);
     file_layout->addWidget(technical);
     file_layout->addStretch();
-    auto *warnings = new QLabel(catalog.warnings().join('\n'));
+    auto *warnings = new QLabel(catalog.warnings().join('\n'), &dialog);
     warnings->setObjectName("inputError");
     warnings->setContentsMargins(24, 8, 24, 8);
     warnings->setTextFormat(Qt::PlainText);
