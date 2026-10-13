@@ -35,12 +35,13 @@ from . import objects, orbits, sensors, units
 from ._project import (
     Project, load_project, AccessSession, generate_report, estimate_report_rows, report_input_sha256,
 )
-from ._native import DataSnapshot, DataChange, AnalysisCapabilityError, AnalysisRecord, AnalysisStatus
-from ._analysis import Analysis, AnalysisPlan, ProjectOpenPlan, DataChangedError, Trajectory, EpochColumn, VectorColumn
+from ._native import DataSnapshot, DataChange, AnalysisCapabilityError, AnalysisCancelled, AnalysisRecord, AnalysisStatus, AccessProvenance
+from ._analysis import Analysis, AnalysisPlan, ProjectOpenPlan, DataChangedError, Trajectory, EpochColumn, VectorColumn, AccessWindow, AccessWindows
 
 __all__ = [
     "Analysis", "AnalysisPlan", "ProjectOpenPlan", "AnalysisRecord", "AnalysisStatus", "DataSnapshot", "DataChange", "DataChangedError",
-    "AnalysisCapabilityError", "Trajectory", "EpochColumn", "VectorColumn",
+    "AnalysisCapabilityError", "AnalysisCancelled", "Trajectory", "EpochColumn", "VectorColumn",
+    "AccessWindow", "AccessWindows", "AccessProvenance",
     "ProjectData", "load_project_data", "ObjectNotFoundError", "RevisionConflictError", "EditClosedError",
     "ChangeSet", "Wgs84Location", "OrbitStyle", "objects", "orbits", "sensors", "units",
     "CartesianState", "Epoch", "FrameId", "OriginId", "Provenance", "Scenario", "Session",

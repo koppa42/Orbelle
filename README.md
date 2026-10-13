@@ -63,7 +63,7 @@ Windows/MSVC 示例程序为 `out/build/headless/examples/cpp/Release/orbitforge
 
 Python 对象统一通过 `project.objects` 创建，支持带类型的对象句柄、属性赋值、关键字 `update()` 和 `with project.edit():` 原子编辑。用法及旧接口迁移见[对象编辑 API](docs/architecture/object_editing.md)；完整后续路线见[统一 API 与数据驱动设计](docs/architecture/object_api_design.md)。
 
-`project.prepare()` 捕获固定分析输入，支持 `analysis.state(sat, at=...)`、`analysis.states(sat, step=u.s(30))` 和直接 CSV 导出；数据变化通过固定准备计划确认，NumPy/pandas 为可选适配。参见[分析 API](docs/architecture/analysis_api.md)及[可运行示例](examples/python/analysis.py)。
+`project.prepare()` 捕获固定分析输入，支持 `analysis.state(sat, at=...)`、`analysis.states(sat, step=u.s(30))`、`analysis.access(station, sensor, search_step=u.s(1))` 和直接 CSV 导出；可见区间查询需准备 UTC/EOP 数据。数据变化通过固定准备计划确认，NumPy/pandas 为可选适配。参见[分析 API](docs/architecture/analysis_api.md)、[状态示例](examples/python/analysis.py)及[可见区间示例](examples/python/access.py)。
 
 ## 测试与验证
 

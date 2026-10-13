@@ -154,6 +154,37 @@ NumPy 数值列始终为 `(N, 3)`，包括 `(0, 3)` 和 `(1, 3)`；时间列为 
 
 CSV 使用精确的整数 `epoch_tai_ns`、标明 SI 单位的状态列以及原点和参考系列，复用现有报告格式化与原子发布实现，不重新计算。默认拒绝覆盖；明确使用 `overwrite=True` 才替换已有目标。空结果仍写完整表头。
 
+## 可见区间查询
+
+```python
+analysis = project.prepare(data=data)  # DataSnapshot 或 DataCatalog，需覆盖区间的 UTC/EOP
+windows = analysis.access(station, sensor, search_step=u.s(1))
+# 第二个对象也可直接传卫星；传感器还会施加圆锥视场和指向约束。
+for window in windows:
+    print(window.start, window.end, window.duration.nanoseconds / 1e9)
+windows.to_csv("access.csv")
+# windows.to_pandas()                 # 可选 pandas，返回独立副本
+```
+
+`AccessWindows` 支持遍历、`len()`、正负下标及切片（返回元组）；每个 `AccessWindow` 提供 `start`、`end`、精确 `Duration` 和 `start_clipped` / `end_clipped`。截断标记表示窗口在查询边界仍可见，而非已求得实际进入/离开时刻。孤立的零时长接触不形成窗口；`first == last` 返回带完整查询信息的空集合。
+
+查询复用准备时已创建的父卫星传播器、UTC/EOP 和参考系转换，统一在 ITRF 中判断 WGS84 椭球遮挡、地面站最低仰角、传感器视场及指向。支持现有二体、J2、J4、SGP4；指向仍为地心下视或理想瞬时跟踪，不增加地形、折射、光行时、姿态或转动速率模型。与原有 Access/报告共享几何实现。
+
+| 参数 | 约定 |
+| --- | --- |
+| `search_step` | 必填的正 `Duration`，固定发现网格含精确终点，最多 200000 个网格点 |
+| `boundary_tolerance` | 默认 `u.ms(1)`，必须为正且不超过 `search_step`，用于二分细化已发现的边界 |
+| `first` / `last` | 可选子区间，默认整个分析区间；必须有序并位于准备区间内 |
+| `cancelled` | 可选无参数、返回 `bool` 的函数，例如 `threading.Event().is_set`；查询开始、每次求值（含边界细化）及返回前检查 |
+
+短于发现步长的窗口或间隙仍可能遗漏；减小边界容限不能弥补遗漏。返回的非截断边界在可见一侧，距离发现的转换不超过细化容限；这项容限不是轨道或物理模型的准确度保证。取消抛出 `AnalysisCancelled`，回调异常原样传播，均不返回部分结果。计算阶段释放 Python GIL，只在调用 Python 取消函数时重新获取；这是同步查询，不是后台任务调度器。
+
+对象归属、类型和存在性从固定快照检查。原对象删除后旧句柄仍可用于旧分析；跨项目句柄和准备后新增的对象被拒绝。缺少 UTC/EOP 抛出 `AnalysisCapabilityError`，不会隐式联网补齐。`AccessWindows` 独立持有窗口及来源，项目、分析和原始文件释放后仍可读取或导出。
+
+`first`、`last`、`search_step`、`boundary_tolerance` 记录实际查询参数。`provenance` 包含站点/目标 ID 和捕获名称、输入修订、输入/数据哈希及算法标识；`input_sha256`、`data_sha256` 也可直接读取。输入哈希采用现有物理输入编码，仅纳入分析区间、被查询站点及其最低仰角、目标卫星、目标传感器与其跟踪站位置。其他对象、名称、样式、非活动轨道草稿及另一个跟踪站的最低仰角不参与；查询子区间、步长和容限另由上述参数记录。数据哈希包含实际选定的 UTC/EOP 与有效策略。
+
+CSV 列为 `station_id,target_id,start_tai_ns,end_tai_ns,duration_ns,duration_s,start_clipped,end_clipped`。历元原点为 `2000-01-01 12:00:00 TAI`，纳秒列为精确整数，秒列为浮点便利值，截断列为 0/1。空结果保留表头，默认拒绝覆盖并复用报告的原子写入。pandas 使用同名列，纳秒列为 `int64`、截断列为 `bool`，查询与来源元数据保存在 `attrs`。
+
 ## C++ 入口与验证
 
 ```cpp
@@ -172,14 +203,21 @@ orbitforge::runtime::DataCatalog catalog{"local/shared-data"};
 auto earth_fixed = orbitforge::runtime::prepare(document, catalog);
 auto state = earth_fixed.state(satellite, document.snapshot().project->first,
                                orbitforge::core::FrameId::itrf);
+auto windows = earth_fixed.access(station, sensor, {.search_step = 1s});
+for (const auto &window : windows.windows()) {
+    auto exact_duration = window.duration();  // std::chrono::nanoseconds
+}
+orbitforge::runtime::export_access_csv(windows, "access.csv");
 ```
 
 Runtime 位于 Application 之上，分析不让对象模型反向依赖 Provider。`ProjectSnapshot` 保留进程内项目范围；`snapshot.read(ref)` 从该修订读取对象，原对象删除后仍有效。C++ 的 `AnalysisPlan` 和 `DataChangedError::plan()` 与 Python 确认行为一致。
 
 C++ 打开使用 `ProjectOpenPlan(path, data)` / `runtime::open_project(path, data)`；`OpenDataChangedError::plan()` 返回对应打开计划，确认后调用 `plan.open(true)`。纯输入保存使用 `document.save(path)`。所有文件校验、数据确认及保存规则由共享 C++ 实现，Python 仅包装入口和异常计划。
 
-分析构建和查询可在 Python 释放 GIL 后运行。当前为同步状态查询接口，尚未提供通用任务取消、`analysis.access()`、新的报告模板或桌面缓存发布；原有 Access/报告入口继续可用。后续按[整体设计](object_api_design.md)逐批迁移。
+分析构建和查询可在 Python 释放 GIL 后运行。当前提供同步状态和可见区间查询；Access 支持取消回调，尚未提供通用任务系统、新的报告模板或桌面缓存发布。原有 Access/报告入口继续可用，后续按[整体设计](object_api_design.md)逐批迁移。
 
 验证包括 C++ `Analysis.*`、Python `test_analysis.py`、现有传播/时间/哈希回归，以及安装后的 SDK 消费端。覆盖文件移除后的资源存活、同 ID 跨项目拒绝、旧结果存活、确认计划过期、有限外推、UTC 失效、整数极限附近采样、CSV 覆盖保护及可选数组适配。可运行示例见 [analysis.py](../../examples/python/analysis.py)。
 
 目录选源由 C++ `CatalogAnalysis.*`、Python `test_catalog_analysis.py` 和桌面数据中心回归共同验证：覆盖优先级、外推上限加 1 ns、损坏的当前文件、UTC/EOP 跨进程原子更新、确认期间切换数据及安装后的 SDK 入口。示例可使用 `analysis.py --data <目录>` 验证 ITRF 输出。
+
+Access 由 `AnalysisAccess.*`、`AccessResults.*`、Python `test_analysis_access.py` 和安装后的 SDK 消费端验证；共享几何继续通过 `Access.*` 的解析圆轨道地平线/圆锥窗口案例。覆盖报告结果一致性、跟踪目标依赖、边界截断、步长上限、取消、原文件移除、对象归属、CSV 与可选 pandas。可运行示例为 [access.py](../../examples/python/access.py)。当前没有新增 STK 同输入数值对比数据，不据此声明与 STK 精度等价。

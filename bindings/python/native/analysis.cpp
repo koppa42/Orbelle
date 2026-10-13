@@ -10,6 +10,8 @@ void bind_analysis(py::module_ &module) {
     module.attr("MAX_ANALYSIS_SAMPLES") = runtime::max_analysis_samples;
     py::register_exception<runtime::AnalysisCapabilityError>(module, "AnalysisCapabilityError",
                                                              PyExc_RuntimeError);
+    py::register_exception<runtime::AnalysisCancelled>(module, "AnalysisCancelled",
+                                                       PyExc_RuntimeError);
     auto data_changed = py::register_exception<runtime::DataChangedError>(
         module, "DataChangedError", PyExc_RuntimeError);
     py::register_exception<runtime::OpenDataChangedError>(module, "OpenDataChangedError",
@@ -72,6 +74,43 @@ void bind_analysis(py::module_ &module) {
         .def("__len__", [](const results::Trajectory &value) { return value.states().size(); })
         .def("to_csv", &runtime::export_trajectory_csv, py::arg("path"),
              py::arg("overwrite") = false, py::call_guard<py::gil_scoped_release>());
+    py::class_<results::AccessWindow>(module, "AccessWindow")
+        .def_property_readonly("start", &results::AccessWindow::start)
+        .def_property_readonly("end", &results::AccessWindow::end)
+        .def_property_readonly(
+            "duration_nanoseconds",
+            [](const results::AccessWindow &window) { return window.duration().count(); })
+        .def_property_readonly("start_clipped", &results::AccessWindow::start_clipped)
+        .def_property_readonly("end_clipped", &results::AccessWindow::end_clipped);
+    py::class_<results::AccessProvenance>(module, "AccessProvenance")
+        .def_readonly("station_id", &results::AccessProvenance::station_id)
+        .def_readonly("station_name", &results::AccessProvenance::station_name)
+        .def_readonly("target_id", &results::AccessProvenance::target_id)
+        .def_readonly("target_name", &results::AccessProvenance::target_name)
+        .def_readonly("input_revision", &results::AccessProvenance::input_revision)
+        .def_readonly("input_sha256", &results::AccessProvenance::input_sha256)
+        .def_readonly("data_sha256", &results::AccessProvenance::data_sha256)
+        .def_readonly("algorithm", &results::AccessProvenance::algorithm);
+    py::class_<results::AccessWindows>(module, "AccessWindows")
+        .def_property_readonly("windows", &results::AccessWindows::windows)
+        .def("__len__", [](const results::AccessWindows &value) { return value.windows().size(); })
+        .def("window", [](const results::AccessWindows &value,
+                          std::size_t index) { return value.windows().at(index); })
+        .def_property_readonly("provenance", &results::AccessWindows::provenance,
+                               py::return_value_policy::copy)
+        .def_property_readonly(
+            "first", [](const results::AccessWindows &value) { return value.query().first; })
+        .def_property_readonly(
+            "last", [](const results::AccessWindows &value) { return value.query().last; })
+        .def_property_readonly(
+            "search_step_nanoseconds",
+            [](const results::AccessWindows &value) { return value.query().search_step.count(); })
+        .def_property_readonly("boundary_tolerance_nanoseconds",
+                               [](const results::AccessWindows &value) {
+                                   return value.query().boundary_tolerance.count();
+                               })
+        .def("to_csv", &runtime::export_access_csv, py::arg("path"), py::arg("overwrite") = false,
+             py::call_guard<py::gil_scoped_release>());
     py::class_<runtime::DataChange>(module, "DataChange")
         .def_readonly("role", &runtime::DataChange::role)
         .def_readonly("recorded", &runtime::DataChange::recorded)
@@ -98,7 +137,35 @@ void bind_analysis(py::module_ &module) {
             },
             py::arg("object"), py::arg("step_nanoseconds"), py::arg("frame"),
             py::arg("first") = py::none(), py::arg("last") = py::none(),
-            py::call_guard<py::gil_scoped_release>());
+            py::call_guard<py::gil_scoped_release>())
+        .def(
+            "access",
+            [](const runtime::Analysis &analysis, const application::ObjectRef &station,
+               const application::ObjectRef &target, std::int64_t step, std::int64_t tolerance,
+               std::optional<core::Epoch> first, std::optional<core::Epoch> last,
+               const py::object &cancelled) {
+                std::function<bool()> check;
+                if (!cancelled.is_none()) {
+                    if (!PyCallable_Check(cancelled.ptr()))
+                        throw py::type_error("cancelled must be callable or None");
+                    check = [&] {
+                        py::gil_scoped_acquire acquire;
+                        const auto value = cancelled();
+                        if (!py::isinstance<py::bool_>(value))
+                            throw py::type_error("cancelled must return bool");
+                        return value.cast<bool>();
+                    };
+                }
+                py::gil_scoped_release release;
+                return analysis.access(station, target,
+                                       {std::chrono::nanoseconds{step},
+                                        std::chrono::nanoseconds{tolerance}, first, last},
+                                       check);
+            },
+            py::arg("station"), py::arg("target"), py::kw_only(),
+            py::arg("search_step_nanoseconds"),
+            py::arg("boundary_tolerance_nanoseconds") = 1'000'000, py::arg("first") = py::none(),
+            py::arg("last") = py::none(), py::arg("cancelled") = py::none());
     py::class_<runtime::ProjectOpenPlan>(module, "ProjectOpenPlan")
         .def(py::init<const std::filesystem::path &, const runtime::DataCatalog &>(),
              py::arg("path"), py::arg("data"), py::call_guard<py::gil_scoped_release>())

@@ -4,10 +4,11 @@ from dataclasses import dataclass
 from itertools import islice
 from importlib import import_module
 from os import PathLike
-from typing import TYPE_CHECKING, Any, Iterable, Iterator
+from operator import index as integer_index
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, overload
 from . import _native as n
 from ._values import require
-from .objects import ObjectHandle, SatelliteHandle, GroundStationHandle
+from .objects import ObjectHandle, SatelliteHandle, GroundStationHandle, SensorHandle
 from .units import Duration
 
 if TYPE_CHECKING:
@@ -129,6 +130,119 @@ class Trajectory:
         return table
 
 
+@dataclass(frozen=True)
+class AccessWindow:
+    """A positive-duration visible interval; clipped boundaries are query limits."""
+    _native: n.AccessWindow
+
+    @property
+    def start(self) -> n.Epoch:
+        return self._native.start
+
+    @property
+    def end(self) -> n.Epoch:
+        return self._native.end
+
+    @property
+    def duration(self) -> Duration:
+        return Duration(self._native.duration_nanoseconds)
+
+    @property
+    def start_clipped(self) -> bool:
+        return self._native.start_clipped
+
+    @property
+    def end_clipped(self) -> bool:
+        return self._native.end_clipped
+
+
+@dataclass(frozen=True)
+class AccessWindows:
+    """Owned access results, query settings and provenance; export never recomputes."""
+    _native: n.AccessWindows
+
+    def __len__(self) -> int:
+        return len(self._native)
+
+    def __iter__(self) -> Iterator[AccessWindow]:
+        return (AccessWindow(window) for window in self._native.windows)
+
+    @overload
+    def __getitem__(self, index: int) -> AccessWindow: ...
+    @overload
+    def __getitem__(self, index: slice) -> tuple[AccessWindow, ...]: ...
+    def __getitem__(self, index: int | slice) -> AccessWindow | tuple[AccessWindow, ...]:
+        if isinstance(index, slice):
+            return tuple(self[i] for i in range(*index.indices(len(self))))
+        offset = integer_index(index)
+        if offset < 0:
+            offset += len(self)
+        if not 0 <= offset < len(self):
+            raise IndexError("Access window index out of range")
+        return AccessWindow(self._native.window(offset))
+
+    @property
+    def provenance(self) -> n.AccessProvenance:
+        return self._native.provenance
+
+    @property
+    def first(self) -> n.Epoch:
+        return self._native.first
+
+    @property
+    def last(self) -> n.Epoch:
+        return self._native.last
+
+    @property
+    def search_step(self) -> Duration:
+        return Duration(self._native.search_step_nanoseconds)
+
+    @property
+    def boundary_tolerance(self) -> Duration:
+        return Duration(self._native.boundary_tolerance_nanoseconds)
+
+    @property
+    def input_sha256(self) -> str:
+        return self.provenance.input_sha256
+
+    @property
+    def data_sha256(self) -> str:
+        return self.provenance.data_sha256
+
+    def to_csv(self, path: str | PathLike[str], *, overwrite: bool = False) -> None:
+        """Atomically export IDs, exact TAI ns bounds/duration, seconds and clip flags (0/1)."""
+        self._native.to_csv(path, require(overwrite, bool, "overwrite"))
+
+    def to_pandas(self) -> Any:
+        """Return an independent DataFrame with exact integer TAI ns and metadata."""
+        try:
+            pd = import_module("pandas")
+        except ImportError as error:
+            raise ImportError("DataFrame conversion requires pandas; install it with `pip install pandas`") from error
+        windows = tuple(self)
+        provenance = self.provenance
+        table = pd.DataFrame({
+            "station_id": pd.Series([provenance.station_id] * len(self), dtype="str"),
+            "target_id": pd.Series([provenance.target_id] * len(self), dtype="str"),
+            "start_tai_ns": pd.Series([w.start.tai_nanoseconds for w in windows], dtype="int64"),
+            "end_tai_ns": pd.Series([w.end.tai_nanoseconds for w in windows], dtype="int64"),
+            "duration_ns": pd.Series([w.duration.nanoseconds for w in windows], dtype="int64"),
+            "duration_s": pd.Series([w.duration.nanoseconds / 1e9 for w in windows], dtype="float64"),
+            "start_clipped": pd.Series([w.start_clipped for w in windows], dtype="bool"),
+            "end_clipped": pd.Series([w.end_clipped for w in windows], dtype="bool"),
+        }, copy=True)
+        table.attrs = {
+            "epoch_origin": "2000-01-01T12:00:00 TAI", "time_scale": "TAI",
+            "first_tai_ns": self.first.tai_nanoseconds, "last_tai_ns": self.last.tai_nanoseconds,
+            "search_step_ns": self.search_step.nanoseconds,
+            "boundary_tolerance_ns": self.boundary_tolerance.nanoseconds,
+            **{name: getattr(provenance, name) for name in (
+                "station_id", "station_name", "target_id", "target_name", "input_revision",
+                "input_sha256", "data_sha256", "algorithm")},
+        }
+        return table
+
+
 class DataChangedError(RuntimeError):
     """The pinned plan requires an explicit decision about changed data."""
     def __init__(self, plan: AnalysisPlan | ProjectOpenPlan) -> None:
@@ -214,6 +328,33 @@ class Analysis:
               frame: n.FrameId = n.FrameId.GCRF) -> n.CartesianState:
         return self._native.state(require(object, ObjectHandle, "object")._ref,
                                   require(at, n.Epoch, "at"), require(frame, n.FrameId, "frame"))
+
+    def access(self, station: GroundStationHandle, target: SatelliteHandle | SensorHandle, *,
+               search_step: Duration, boundary_tolerance: Duration = Duration(1_000_000),
+               first: n.Epoch | None = None, last: n.Epoch | None = None,
+               cancelled: Callable[[], bool] | None = None) -> AccessWindows:
+        """Search this snapshot using station elevation/LOS and optional sensor FOV.
+
+        UTC/EOP data must be selected at prepare(). A fixed discovery grid can
+        miss windows or gaps shorter than search_step. Boundary tolerance only
+        refines discovered transitions. Cancellation raises AnalysisCancelled;
+        no partial results are returned. A zero-length query returns no windows.
+        """
+        require(station, GroundStationHandle, "station")
+        if not isinstance(target, (SatelliteHandle, SensorHandle)):
+            raise TypeError("target must be a SatelliteHandle or SensorHandle")
+        require(search_step, Duration, "search_step")
+        require(boundary_tolerance, Duration, "boundary_tolerance")
+        if first is not None:
+            require(first, n.Epoch, "first")
+        if last is not None:
+            require(last, n.Epoch, "last")
+        if cancelled is not None and not callable(cancelled):
+            raise TypeError("cancelled must be callable or None")
+        return AccessWindows(self._native.access(
+            station._ref, target._ref, search_step_nanoseconds=search_step.nanoseconds,
+            boundary_tolerance_nanoseconds=boundary_tolerance.nanoseconds,
+            first=first, last=last, cancelled=cancelled))
 
     def states(self, object: SatelliteHandle | GroundStationHandle, *,
                step: Duration | None = None, times: Iterable[n.Epoch] | None = None,

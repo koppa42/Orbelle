@@ -1,30 +1,24 @@
+#include "access_geometry.hpp"
 #include <algorithm>
 #include <orbitforge/runtime/access.hpp>
 #include <orbitforge/runtime/project.hpp>
 
 namespace orbitforge::runtime {
-namespace {
-struct Pair {
-    application::ProjectGroundStation station;
-    application::ProjectSatellite satellite;
-    std::optional<application::ProjectSensor> sensor;
-    core::GroundStationLocation pointing_target;
-};
-Pair resolve(const application::Project &project, const std::vector<std::string> &ids) {
+detail::AccessGeometry::AccessGeometry(const application::Project &project,
+                                       const std::vector<std::string> &ids) {
     if (ids.size() != 2)
         throw std::invalid_argument(
             "Access requires one ground station and one satellite or sensor");
-    Pair pair;
-    const auto station = std::ranges::find(project.ground_stations, ids[0],
-                                           &application::ProjectGroundStation::object_id);
-    if (station == project.ground_stations.end())
+    const auto found_station = std::ranges::find(project.ground_stations, ids[0],
+                                                 &application::ProjectGroundStation::object_id);
+    if (found_station == project.ground_stations.end())
         throw std::invalid_argument("Access ground station is missing");
-    pair.station = *station;
+    station = *found_station;
     std::string parent = ids[1];
-    const auto sensor =
+    const auto found_sensor =
         std::ranges::find(project.sensors, ids[1], &application::ProjectSensor::object_id);
-    if (sensor != project.sensors.end()) {
-        pair.sensor = *sensor;
+    if (found_sensor != project.sensors.end()) {
+        sensor = *found_sensor;
         parent = sensor->parent_satellite_id;
         if (sensor->pointing == application::SensorPointing::targeted) {
             const auto target =
@@ -32,26 +26,60 @@ Pair resolve(const application::Project &project, const std::vector<std::string>
                                   &application::ProjectGroundStation::object_id);
             if (target == project.ground_stations.end())
                 throw std::invalid_argument("Sensor pointing target is missing");
-            pair.pointing_target = target->location;
+            pointing_target = *target;
         }
     }
-    const auto satellite = std::ranges::find_if(
+    const auto found_satellite = std::ranges::find_if(
         project.satellites, [&](const auto &s) { return s.orbit.object_id == parent; });
-    if (satellite == project.satellites.end())
+    if (found_satellite == project.satellites.end())
         throw std::invalid_argument("Access satellite or sensor is missing");
-    pair.satellite = *satellite;
-    return pair;
+    satellite = *found_satellite;
 }
-} // namespace
+AccessSample detail::AccessGeometry::at(const core::CartesianState &state) const {
+    const auto observation = core::observe_ground_target(station.location, state);
+    bool visible =
+        observation.line_of_sight && observation.elevation_rad >= station.minimum_elevation_rad;
+    std::optional<double> off_boresight;
+    if (sensor) {
+        std::array<double, 3> axis{}, direction{}, target_position{};
+        const auto station_position = core::ground_station_position(station.location);
+        if (pointing_target)
+            target_position = core::ground_station_position(pointing_target->location);
+        for (std::size_t i = 0; i < 3; ++i) {
+            axis[i] = target_position[i] - state.position_m[i];
+            direction[i] = station_position[i] - state.position_m[i];
+        }
+        off_boresight = core::vector_angle(axis, direction);
+        visible = visible && *off_boresight <= sensor->half_angle_rad;
+    }
+    return {state.epoch, observation, off_boresight, visible};
+}
+std::string detail::AccessGeometry::target_name() const {
+    return sensor ? sensor->name() : satellite.name();
+}
+application::Project detail::AccessGeometry::numerical_inputs(core::Epoch first,
+                                                              core::Epoch last) const {
+    application::Project inputs{"analysis-access-input-v1", first, last};
+    inputs.satellites.push_back(satellite);
+    inputs.ground_stations.push_back(station);
+    if (sensor)
+        inputs.sensors.push_back(*sensor);
+    if (pointing_target && pointing_target->object_id != station.object_id) {
+        inputs.ground_stations.push_back(*pointing_target);
+        // Pointing uses the other station's position, not its elevation constraint.
+        inputs.ground_stations.back().minimum_elevation_rad = 0;
+    }
+    return inputs;
+}
 void validate_access_pair(const application::Project &project,
                           const std::vector<std::string> &ids) {
-    (void)resolve(project, ids);
+    (void)detail::AccessGeometry{project, ids};
 }
 struct AccessSession::Impl {
     ReportContext context;
-    Pair pair;
+    detail::AccessGeometry pair;
     application::Session orbit;
-    Impl(ReportContext c, Pair p)
+    Impl(ReportContext c, detail::AccessGeometry p)
         : context(std::move(c)), pair(std::move(p)),
           orbit(make_orbit_session(pair.satellite.orbit, 1, context.time.get())) {}
 };
@@ -63,7 +91,7 @@ AccessSession::AccessSession(ReportContext context, std::string station, std::st
                                             context.eop->data_info()) ||
         context.time->data_info().sha256 != context.eop->data_info().time_data.sha256)
         throw std::invalid_argument("Access providers differ from the confirmed project data");
-    auto pair = resolve(context.project, {station, target});
+    auto pair = detail::AccessGeometry{context.project, {station, target}};
     impl_ = std::make_shared<Impl>(std::move(context), std::move(pair));
 }
 AccessSample AccessSession::at(core::Epoch epoch) const {
@@ -74,28 +102,9 @@ AccessSample AccessSession::at(core::Epoch epoch) const {
     const std::array epochs{epoch};
     const auto state = core::transform_state(impl_->orbit.sample(epochs).states().front(),
                                              core::FrameId::itrf, *c.frames, c.eop->at(epoch));
-    const auto &pair = impl_->pair;
-    const auto observation = core::observe_ground_target(pair.station.location, state);
-    bool visible = observation.line_of_sight &&
-                   observation.elevation_rad >= pair.station.minimum_elevation_rad;
-    std::optional<double> off_boresight;
-    if (pair.sensor) {
-        std::array<double, 3> axis{}, direction{};
-        const auto station = core::ground_station_position(pair.station.location);
-        const auto target = core::ground_station_position(pair.pointing_target);
-        for (std::size_t i = 0; i < 3; ++i) {
-            axis[i] =
-                (pair.sensor->pointing == application::SensorPointing::targeted ? target[i] : 0) -
-                state.position_m[i];
-            direction[i] = station[i] - state.position_m[i];
-        }
-        off_boresight = core::vector_angle(axis, direction);
-        visible = visible && *off_boresight <= pair.sensor->half_angle_rad;
-    }
-    return {epoch, observation, off_boresight, visible};
+    return impl_->pair.at(state);
 }
 std::string AccessSession::name() const {
-    return impl_->pair.station.name() + " → " +
-           (impl_->pair.sensor ? impl_->pair.sensor->name() : impl_->pair.satellite.name());
+    return impl_->pair.station.name() + " → " + impl_->pair.target_name();
 }
 } // namespace orbitforge::runtime

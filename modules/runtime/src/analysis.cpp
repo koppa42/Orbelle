@@ -1,3 +1,4 @@
+#include "access_geometry.hpp"
 #include <algorithm>
 #include <map>
 #include <orbitforge/runtime/analysis.hpp>
@@ -204,6 +205,54 @@ results::Trajectory Analysis::states(const ObjectRef &ref, std::chrono::nanoseco
     }
     return states(ref, epochs, frame);
 }
+results::AccessWindows Analysis::access(const ObjectRef &station, const ObjectRef &target,
+                                        const AccessOptions &options,
+                                        const std::function<bool()> &cancelled) const {
+    const auto check_cancelled = [&] {
+        if (cancelled && cancelled())
+            throw AnalysisCancelled{};
+    };
+    check_cancelled();
+    // Resolve against the captured document, including scope and object kind.
+    (void)snapshot().read(station);
+    (void)snapshot().read(target);
+    if (station.kind() != ObjectKind::ground_station ||
+        (target.kind() != ObjectKind::satellite && target.kind() != ObjectKind::sensor))
+        throw std::invalid_argument("Access requires a ground station and a satellite or sensor");
+    if (!data().time() || !data().eop() || !data().frames())
+        throw AnalysisCapabilityError("Prepare with UTC and EOP data to query access");
+    const auto &p = *snapshot().project;
+    const auto first = options.first.value_or(p.first), last = options.last.value_or(p.last);
+    check_epoch(p, first);
+    check_epoch(p, last);
+    const detail::AccessGeometry geometry{p, {station.id(), target.id()}};
+    const auto &entry = impl_->entries.at(geometry.satellite.orbit.object_id);
+    const auto intervals = core::find_access_intervals(
+        first, last, options.search_step.count(),
+        [&](core::Epoch epoch) {
+            check_cancelled();
+            const auto state = core::transform_state(
+                entry.session.sample(std::array{epoch}).states().front(), core::FrameId::itrf,
+                *data().frames(), data().eop()->at(epoch));
+            return geometry.at(state).visible;
+        },
+        options.boundary_tolerance.count());
+    std::vector<results::AccessWindow> windows;
+    windows.reserve(intervals.size());
+    for (const auto &interval : intervals)
+        windows.emplace_back(interval.first, interval.last, interval.start_clipped,
+                             interval.stop_clipped);
+    const auto algorithm =
+        entry.session.sample(std::span<const core::Epoch>{}).provenance().algorithm +
+        ";frames=state-frame-routing-v1;geometric-access-wgs84-v1;"
+        "fixed-grid-bisection-v1";
+    check_cancelled();
+    return {std::move(windows),
+            {first, last, options.search_step, options.boundary_tolerance},
+            {station.id(), geometry.station.name(), target.id(), geometry.target_name(),
+             snapshot().revision, analysis_input_sha256(geometry.numerical_inputs(p.first, p.last)),
+             data().data_lock().sha256(), algorithm}};
+}
 DataChangedError::DataChangedError(AnalysisPlan plan)
     : std::runtime_error("Selected calculation data differ from the project's recorded data"),
       plan_(std::make_shared<const AnalysisPlan>(std::move(plan))) {}
@@ -328,6 +377,35 @@ void export_trajectory_csv(const results::Trajectory &result, const std::filesys
                               core::Epoch{0},
                               core::Epoch{0},
                               {}};
+    export_report_csv(report, path, overwrite);
+}
+void export_access_csv(const results::AccessWindows &result, const std::filesystem::path &path,
+                       bool overwrite) {
+    const auto &provenance = result.provenance();
+    std::vector<results::Row> rows;
+    rows.reserve(result.windows().size());
+    for (const auto &window : result.windows())
+        rows.push_back({provenance.station_id, provenance.target_id,
+                        window.start().tai_nanoseconds(), window.end().tai_nanoseconds(),
+                        window.duration().count(),
+                        std::chrono::duration<double>(window.duration()).count(),
+                        static_cast<std::int64_t>(window.start_clipped()),
+                        static_cast<std::int64_t>(window.end_clipped())});
+    results::Table table{{{"station_id", "station_id", ""},
+                          {"target_id", "target_id", ""},
+                          {"start_tai_ns", "start_tai_ns", ""},
+                          {"end_tai_ns", "end_tai_ns", ""},
+                          {"duration_ns", "duration_ns", ""},
+                          {"duration_s", "duration_s", ""},
+                          {"start_clipped", "start_clipped", ""},
+                          {"end_clipped", "end_clipped", ""}},
+                         std::move(rows)};
+    ReportDefinition definition;
+    definition.units = ReportUnits::si;
+    const ReportResult report{
+        definition, std::move(table),     provenance.input_sha256, provenance.data_sha256,
+        "",         provenance.algorithm, result.query().first,    result.query().last,
+        {}};
     export_report_csv(report, path, overwrite);
 }
 } // namespace orbitforge::runtime
