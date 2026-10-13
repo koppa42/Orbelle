@@ -82,6 +82,8 @@ project.unsubscribe(token)
 
 ## C++ 应用层入口
 
+普通 SDK 使用 [C++ 项目门面](cpp_api.md)的 `of::Project` 与 `of::objects`，编辑命令、引用和事务直接复用下列应用层实现。以下入口供需要显式管理底层文档的适配层使用。
+
 ```cpp
 #include <orbitforge/application/project_document.hpp>
 

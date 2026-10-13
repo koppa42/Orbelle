@@ -20,3 +20,7 @@ endif()
 add_test(NAME installed_sdk COMMAND sdk_consumer "${ORBITFORGE_EOP_MANIFEST}"
     "${ORBITFORGE_SPICE_MANIFEST}" "${CMAKE_CURRENT_BINARY_DIR}/spice-workspace")
 
+add_executable(sdk_project_api project_api.cpp)
+target_link_libraries(sdk_project_api PRIVATE OrbitForge::Runtime)
+add_test(NAME installed_project_api COMMAND sdk_project_api "${CMAKE_CURRENT_BINARY_DIR}/project-api.orbitforge")
+

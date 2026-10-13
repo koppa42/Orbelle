@@ -40,38 +40,38 @@ class ObjectRef {
 namespace objects {
 struct Satellite {
     std::string name;
-    OrbitInput orbit;
-    OrbitDisplay display;
+    OrbitInput orbit = {};
+    OrbitDisplay display = {};
 };
 struct GroundStation {
     std::string name;
-    core::GroundStationLocation location;
+    core::GroundStationLocation location = {};
     double minimum_elevation_rad = 0;
 };
 // A complete pointing value: null target means geocentric nadir.
 struct Pointing {
-    std::optional<ObjectRef> target;
+    std::optional<ObjectRef> target = {};
 };
 struct Sensor {
     std::string name;
     ObjectRef parent;
     double half_angle_rad = 0.7853981633974483;
-    Pointing pointing;
+    Pointing pointing = {};
 };
 struct SatelliteUpdate {
-    std::optional<std::string> name;
-    std::optional<OrbitInput> orbit;
-    std::optional<OrbitDisplay> display;
+    std::optional<std::string> name = {};
+    std::optional<OrbitInput> orbit = {};
+    std::optional<OrbitDisplay> display = {};
 };
 struct GroundStationUpdate {
-    std::optional<std::string> name;
-    std::optional<core::GroundStationLocation> location;
-    std::optional<double> minimum_elevation_rad;
+    std::optional<std::string> name = {};
+    std::optional<core::GroundStationLocation> location = {};
+    std::optional<double> minimum_elevation_rad = {};
 };
 struct SensorUpdate {
-    std::optional<std::string> name;
-    std::optional<double> half_angle_rad;
-    std::optional<Pointing> pointing;
+    std::optional<std::string> name = {};
+    std::optional<double> half_angle_rad = {};
+    std::optional<Pointing> pointing = {};
 };
 } // namespace objects
 

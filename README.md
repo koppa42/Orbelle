@@ -55,7 +55,7 @@ Windows/MSVC 示例程序为 `out/build/headless/examples/cpp/Release/orbitforge
 | --- | --- |
 | Windows 二维 / 三维工作台 | `desktop-graphics` 预设；构建后执行 `pwsh tools/dev/run-desktop.ps1` |
 | ERFA / IERS / CSPICE 无界面计算 | `astronomy` 预设 |
-| C++ SDK | CMake 安装目标；示例见 `tests/packaging/sdk_consumer/` |
+| C++ SDK | CMake 安装目标；[统一项目 API](docs/architecture/cpp_api.md)与[可运行示例](examples/cpp/project_analysis.cpp) |
 | Python 包 | 根目录 `pyproject.toml`；需要天文计算依赖及 SQLite |
 | Linux 构建与交付验证 | `linux-astronomy`、`linux-sanitizers` 预设及 `tools/ci/check_linux.py` |
 | Windows 便携包 | `tools/packaging/package_windows.py` |
@@ -63,6 +63,8 @@ Windows/MSVC 示例程序为 `out/build/headless/examples/cpp/Release/orbitforge
 `desktop` 预设是基础 Qt 状态表窗口；完整场景工作台使用 `desktop-graphics`。便携包、wheel 与构建缓存位于本地 `out/`，不随源码克隆分发。
 
 Python 对象统一通过 `project.objects` 创建，支持带类型的对象句柄、属性赋值、关键字 `update()` 和 `with project.edit():` 原子编辑。用法及旧接口迁移见[对象编辑 API](docs/architecture/object_editing.md)；完整后续路线见[统一 API 与数据驱动设计](docs/architecture/object_api_design.md)。
+
+C++ 包含 `<orbitforge/orbitforge.hpp>`，通过 `of::Project` 的 `objects()`、`prepare()`、`save()` 与 `Project::open()` 完成相同流程；创建对象使用 `of::objects::Satellite` 等配置值，事务显式提交。参见 [C++ 项目 API](docs/architecture/cpp_api.md)。
 
 `project.prepare()` 捕获固定分析输入，提供状态、可见区间、AER 和九类内置报告查询：`analysis.states(sat, step=u.s(30))`、`analysis.access(station, sensor, search_step=u.s(1))`、`analysis.aer(station, sensor, step=u.s(10))`、`analysis.report(of.ReportKind.CARTESIAN_STATE, objects=[sat], step=u.s(30))`。可见区间与 AER 需准备 UTC/EOP 数据；数据变化通过固定计划确认。结果可直接导出 CSV，NumPy/pandas 为可选适配。参见[分析 API](docs/architecture/analysis_api.md)、[状态示例](examples/python/analysis.py)及[可见区间、AER 与报告示例](examples/python/access.py)。
 
