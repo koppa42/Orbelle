@@ -1,6 +1,6 @@
 # 固定输入的分析 API
 
-本批次在[对象编辑 API](object_editing.md)之上接入共享 C++ Runtime 分析入口。Python 使用 `project.prepare()`，C++ 使用 `runtime::prepare(document, data)`。准备时捕获已提交对象、区间、传播器和显式选择的数据；后续对象修改、删除、文件替换或目录释放不会改变已有分析。
+在[对象编辑 API](object_editing.md)之上提供共享 C++ Runtime 分析入口。Python 和 [C++ 项目门面](cpp_api.md)均使用 `project.prepare()`，C++ 适配层也可使用 `runtime::prepare(document, data)`。准备时捕获已提交对象、区间、传播器和显式选择的数据；后续对象修改、删除、文件替换或目录释放不会改变已有分析。
 
 ## Python 状态查询
 
@@ -30,7 +30,7 @@ project.objects.remove(sat)
 original = analysis.state(sat, at=of.Epoch(0))
 ```
 
-状态包含历元、地心原点、参考系、米和米每秒数值。二体、J2、J4 和 SGP4 复用现有传播器；地面站使用 WGS84 固定 ITRF 模型。当前 `state()` / `states()` 接受卫星和地面站，传感器位置查询其父卫星。GCRF 是 Python 查询的显式默认值，SGP4 原生输出为 TEME，地面站原生输出为 ITRF；跨参考系查询必须准备 EOP 数据，绝不把 TEME 当成 GCRF。
+状态包含历元、地心原点、参考系、米和米每秒数值。二体、J2、J4 和 SGP4 复用现有传播器；地面站使用 WGS84 固定 ITRF 模型。当前 `state()` / `states()` 接受卫星和地面站；需要传感器位置时，调用方应传入其父卫星引用，直接传传感器会报能力错误。GCRF 是 Python 查询的显式默认值，SGP4 原生输出为 TEME，地面站原生输出为 ITRF；跨参考系查询必须准备 EOP 数据，绝不把 TEME 当成 GCRF。
 
 | 参数或行为 | 约定 |
 | --- | --- |

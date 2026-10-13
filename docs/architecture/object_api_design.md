@@ -1,6 +1,6 @@
 # OrbitForge 对象 API 与数据驱动设计
 
-**状态：分阶段实施中。** 公共对象管理、事务、变更通知与 Python 易用接口见[对象编辑 API](object_editing.md)；分析快照、准备确认计划及目录按时段选源见[分析 API](analysis_api.md)。本文仍定义完整目标；C++ 顶层门面、桌面计划接入和描述表等未完成部分不能直接用于当前 0.1.0 包。
+**状态：分阶段实施中。** 公共对象管理、事务、变更通知与 Python 易用接口见[对象编辑 API](object_editing.md)；分析快照、准备确认计划及目录按时段选源见[分析 API](analysis_api.md)。本文仍定义完整目标；C++ 顶层门面已实现，见 [C++ 项目 API](cpp_api.md)；强类型轨道配置、桌面计划接入和描述表等未完成部分不能直接用于当前 0.1.0 包。
 
 重构以 `project.objects` 为统一对象入口，使 Python、C++ SDK 和桌面共享对象模型、校验、事务与变更通知。计算通过固定输入的 `Analysis` 显式执行；界面根据对象能力和变更依赖更新，避免把纯显示修改当成轨道输入变化。
 
@@ -275,75 +275,28 @@ project.save("observation.orbitforge", analysis=analysis)
 
 ## C++ 使用示例
 
-C++ 提供不依赖 Qt 的聚合头文件，采用与 Python 对应的配置和操作。可变项目显式管理编辑；不可变分析和结果持有自身依赖，不依赖局部配置变量的生命周期。
+C++ 已提供不依赖 Qt 的聚合头文件和 `of::Project`。以下为当前可用接口，创建方式与 Python 项目构造器一致，候选事务仍须显式提交。
 
 ```cpp
 #include <orbitforge/orbitforge.hpp>
-
 namespace of = orbitforge;
-namespace u = of::units;
+using namespace std::chrono_literals;
 
 int main() {
-    auto data = of::DataCatalog::open("local/data").snapshot();
-    auto t0 = data.time().parse_utc("2026-10-01T00:00:00Z");
-
-    auto project = of::Project::create({
-        .name = "Observation Demo",
-        .interval = of::Interval{t0, t0 + u::h(2)},
-    });
-
-    auto initial = of::orbits::Keplerian{
-        .epoch = t0,
-        .frame = of::Frame::gcrf,
-        .semi_major_axis = u::km(7000),
-        .eccentricity = 0.001,
-        .inclination = u::deg(53),
-        .raan = u::deg(0),
-        .argument_of_periapsis = u::deg(0),
-        .true_anomaly = u::deg(0),
-    };
-
+    of::Project project{"Observation", of::Epoch{0}, of::Epoch{120'000'000'000}};
     auto edit = project.edit();
-
-    auto satellite = edit.objects().create(of::objects::Satellite{
-        .name = "Observer",
-        .orbit = of::orbits::TwoBody{.initial = initial},
-    });
-
-    auto station = edit.objects().create(of::objects::GroundStation{
-        .name = "Hong Kong",
-        .location = of::Wgs84Location{
-            .longitude = u::deg(114.2),
-            .latitude = u::deg(22.3),
-            .ellipsoid_height = u::m(350),
-        },
-        .minimum_elevation = u::deg(5),
-    });
-
-    auto sensor = edit.objects().create(of::objects::Sensor{
-        .name = "Camera",
-        .parent = satellite,
-        .field_of_view = of::sensors::Cone{.half_angle = u::deg(20)},
-        .pointing = of::sensors::Pointing::track(station),
-    });
-
+    auto satellite = edit.objects().create(of::objects::Satellite{"Observer", {}, {}});
+    auto sensor = edit.objects().create(of::objects::Sensor{"Camera", satellite, 0.2, {}});
     edit.commit();
 
-    auto analysis = project.prepare(data);
-    auto trajectory = analysis.states(satellite, {
-        .step = u::s(30),
-        .frame = of::Frame::gcrf,
-    });
-    auto windows = analysis.access(station, sensor, {
-        .search_step = u::s(1),
-        .boundary_tolerance = u::ms(1),
-    });
-
+    auto analysis = project.prepare();
+    auto trajectory = analysis.states(satellite, 30s, of::FrameId::gcrf);
     project.save("observation.orbitforge", analysis);
+    auto reopened = of::Project::open("observation.orbitforge");
 }
 ```
 
-这两个示例描述同一份场景输入和查询，后续作为跨语言行为对照的基础。绑定、类型声明、SDK 消费端和示例应随接口实现一起更新。
+C++ `objects::Satellite` 当前接受 `OrbitInput`，位置、速度、角度使用明确的 SI 字段；时长使用 `std::chrono`。此前设想的 `of::orbits`、`of::units` 和强类型视场配置仍属后续设计。完整当前签名、对象身份、目录选择及确认规则见 [C++ 项目 API](cpp_api.md)。Python 继续使用关键字参数与单位值；两端复用同一文档、校验、分析和持久化实现，不要求逐字对应的语法。
 
 ## Python 参数与结果约定
 
@@ -503,7 +456,7 @@ C++20 与 Python 使用一致的错误分类：参数与物理输入错误、对
 
 ## 文件与 API 迁移
 
-当前 `.orbitforge` 仅读写 v12，包含仅 UTC 的来源及分析准备记录；v1–v11 及未知版本明确拒绝。开发阶段不承诺旧文件兼容，不维护迁移分支，不让旧存储结构约束新 API；结构或语义改变时递增格式版本并整体更新当前实现。API 版本与文件格式分别演进。对象事务、固定分析、目录选源、检查后打开/保存、`analysis.access()` / `aer()` 和内置报告查询已实现，当前入口见[分析 API](analysis_api.md)；查询/报告模板分离与显式对象范围已落地；统一 C++ 顶层门面、桌面计划接入继续按阶段推进。
+当前 `.orbitforge` 仅读写 v12，包含仅 UTC 的来源及分析准备记录；v1–v11 及未知版本明确拒绝。开发阶段不承诺旧文件兼容，不维护迁移分支，不让旧存储结构约束新 API；结构或语义改变时递增格式版本并整体更新当前实现。API 版本与文件格式分别演进。对象事务、固定分析、目录选源、检查后打开/保存、`analysis.access()` / `aer()` 和内置报告查询已实现，当前入口见[分析 API](analysis_api.md)；查询/报告模板分离与显式对象范围已落地；统一 C++ 顶层门面已落地；C++ 强类型配置、桌面计划接入继续按阶段推进。
 
 - 保留稳定 ID、所属和目标引用、名称、显示设置、时间精度、轨道输入及数据来源信息。
 - 保留瞬时根数、平均根数和 TLE 的物理含义；SGP4 的非活动手工草稿不得误作计算输入。
