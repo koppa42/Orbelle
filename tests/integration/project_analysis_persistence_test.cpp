@@ -146,7 +146,11 @@ TEST_F(ProjectPersistence, FingerprintCoversPhysicalInputsButNotAppearanceReport
     ProjectSatellite satellite;
     satellite.orbit.last = original.last;
     original.satellites.push_back(satellite);
-    original.sensors.push_back({"sensor", "Sensor", satellite.orbit.object_id});
+    ProjectSensor sensor;
+    sensor.object_id = "sensor";
+    sensor.display_name = "Sensor";
+    sensor.parent_satellite_id = satellite.orbit.object_id;
+    original.sensors.push_back(sensor);
     const auto hash = analysis_input_sha256(original);
     auto changed = original;
     changed.name = "Title";
