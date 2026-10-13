@@ -49,6 +49,7 @@ void bind_project_document(py::module_ &module) {
         .def_readwrite("half_angle_rad", &objects::SensorUpdate::half_angle_rad)
         .def_readwrite("pointing", &objects::SensorUpdate::pointing);
     py::class_<ProjectSnapshot>(module, "ProjectSnapshot")
+        .def("read", &ProjectSnapshot::read, py::arg("object"))
         .def_readonly("revision", &ProjectSnapshot::revision)
         .def_property_readonly("name", [](const ProjectSnapshot &s) { return s.project->name; })
         .def_property_readonly("first", [](const ProjectSnapshot &s) { return s.project->first; })

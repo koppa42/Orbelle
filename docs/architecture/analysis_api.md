@@ -185,6 +185,56 @@ windows.to_csv("access.csv")
 
 CSV 列为 `station_id,target_id,start_tai_ns,end_tai_ns,duration_ns,duration_s,start_clipped,end_clipped`。历元原点为 `2000-01-01 12:00:00 TAI`，纳秒列为精确整数，秒列为浮点便利值，截断列为 0/1。空结果保留表头，默认拒绝覆盖并复用报告的原子写入。pandas 使用同名列，纳秒列为 `int64`、截断列为 `bool`，查询与来源元数据保存在 `attrs`。
 
+## AER 观测序列
+
+```python
+aer = analysis.aer(station, sensor, step=u.s(10))
+# 第二个对象可直接传卫星；指定时刻也支持乱序、重复项及空集合。
+selected = analysis.aer(station, sat, times=[analysis.last, analysis.first])
+print(aer[0].range_m, aer[0].range_rate_mps, aer[0].visible)
+aer.to_csv("aer.csv")
+elevation_deg = aer.elevation.to_numpy(unit="deg")  # 可选 numpy
+table = aer.to_pandas()                           # 可选 pandas
+```
+
+`AerSeries` 独立保存每个请求历元的观测，不按可见性过滤。步长、子区间、精确终点、显式时刻顺序、最多 200000 个样本及对象范围与 `states()` 一致。`first == last` 返回一个样本；空 `times` 返回带来源信息的空序列。支持遍历、正负下标、切片和取消回调。
+
+几何基于站点 WGS84 本地东、北、天坐标：方位角从北向东为正，仰角相对当地水平面，距离及距离变化率来自包含地球自转速度转换的 ITRF 状态。`line_of_sight` 只表示椭球遮挡检查；`visible` 还包含站点最低仰角和传感器视场。查询需准备 UTC/EOP，与 `access()` 共用观测计算及相关输入哈希，不含大气折射、地形或光行时。
+
+| 访问方式 | 内容 |
+| --- | --- |
+| `aer.epoch.tai_nanoseconds` | 精确 TAI 整数纳秒元组 |
+| `aer.azimuth`、`elevation`、`off_boresight` | `ScalarColumn`，原始单位 rad；NumPy 可转 deg |
+| `aer.range`、`range_rate` | `ScalarColumn`，原始单位 m、m/s；NumPy 可转 km、km/s |
+| `column.values` | 数值或 `None` 的元组，NumPy 副本形状始终为 `(N,)` |
+| `aer.line_of_sight`、`visible` | 布尔元组 |
+| `aer[i]` | `AerSample`，提供 `epoch`、带 `_rad` / `_m` / `_mps` 后缀的 SI 标量和两个布尔值 |
+
+天顶/天底方位角未定义时为 `None`；卫星目标没有离轴角，同样为 `None`。CSV 保留空单元格，NumPy/pandas 使用 NaN，不填零。CSV 包含站点/目标 ID、精确 `epoch_tai_ns`、SI 列和 0/1 标记，默认拒绝覆盖。pandas 中历元为 int64、数值为 float64、标记为 bool，`attrs` 保留坐标约定、名称、修订和哈希。转换与导出均不重新计算。
+
+## 从同一分析生成报告
+
+```python
+state_report = analysis.report(
+    of.ReportKind.CARTESIAN_STATE, objects=[sat], step=u.s(30),
+    frame=of.FrameId.GCRF, units=of.ReportUnits.ENGINEERING,
+    time_scale=of.ReportTimeScale.TAI,
+)
+aer_report = analysis.report(of.ReportKind.AER, station=station, target=sensor, step=u.s(10))
+summary = analysis.report(of.ReportKind.OBJECT_SUMMARY, objects=sat)
+state_report.export_csv("states-report.csv")
+```
+
+支持现有九类内置报告：场景摘要、对象摘要、地面站、笛卡尔状态、经典轨道根数、地理坐标、轨道运动、可见区间和 AER。前三类无需步长；其余显式提供 `step`，可用 `first` / `last` 限定子区间。派生报告使用各自的物理参考系，与桌面规则一致。
+
+Python 直接接收对象句柄，不需要构造 `ReportDefinition` 或填写 ID、名称。普通报告必须显式指定单个对象或对象集合，空集合报错，不扩展为全部对象；场景摘要不接受对象筛选。Access/AER 使用明确的 `station` / `target` 参数。选择按分析快照验证，当前已删除的旧对象仍可查询，其他项目或准备后新增的对象报错。
+
+返回现有 `ReportResult`，可读取 `table`、`column_title()`、`numeric_value()`、`cell_text()`，并沿用原子 CSV 导出。默认工程显示单位（km、km/s、deg）及 TAI；指定 UTC 必须在准备时提供 UTC 数据，不会隐式读取当前目录。表内数据仍为 SI，显示转换只影响格式化接口。报告保存 `input_revision` 和数据身份；输入哈希沿用报告语义，包含捕获的项目及对象名称，与 `AerSeries` / `AccessWindows` 仅相关物理输入的哈希用途不同。
+
+`cancelled=callable` 必须返回 bool，取消抛出 `AnalysisCancelled`；`progress(done, total)` 提供同步进度，两者均可省略。即使在完成进度回调中取消，也不返回结果；回调异常传回调用方。生成时固定报告配置，回调修改原配置或当前项目不影响本次计算。报告查询不重建传播器、不重新读取数据文件，也不写入项目的已保存报告配置。
+
+本次复用内置模板与共享表格引擎，尚未实现自由选列的模板系统。桌面原有 `generate_report()` 入口仍可独立使用，只为选中对象创建传播会话；C++ `Analysis::report(ReportDefinition)` 保留既有定义的选择语义，空 `object_ids` 在普通报告中仍表示全部兼容对象。该存储语义后续随显式选择模式统一调整，当前项目格式仍为 v11，未增加旧格式兼容路径。
+
 ## C++ 入口与验证
 
 ```cpp
@@ -208,16 +258,29 @@ for (const auto &window : windows.windows()) {
     auto exact_duration = window.duration();  // std::chrono::nanoseconds
 }
 orbitforge::runtime::export_access_csv(windows, "access.csv");
+
+auto aer = earth_fixed.aer(station, sensor, 10s);
+orbitforge::runtime::export_aer_csv(aer, "aer.csv");
+orbitforge::application::ReportDefinition definition;
+definition.id = "aer";
+definition.name = "AER";
+definition.kind = orbitforge::application::ReportKind::aer;
+definition.object_ids = {station.id(), sensor.id()};
+definition.step_nanoseconds = 10'000'000'000;
+auto report = earth_fixed.report(definition);
+orbitforge::runtime::export_report_csv(report, "aer-report.csv");
 ```
 
 Runtime 位于 Application 之上，分析不让对象模型反向依赖 Provider。`ProjectSnapshot` 保留进程内项目范围；`snapshot.read(ref)` 从该修订读取对象，原对象删除后仍有效。C++ 的 `AnalysisPlan` 和 `DataChangedError::plan()` 与 Python 确认行为一致。
 
 C++ 打开使用 `ProjectOpenPlan(path, data)` / `runtime::open_project(path, data)`；`OpenDataChangedError::plan()` 返回对应打开计划，确认后调用 `plan.open(true)`。纯输入保存使用 `document.save(path)`。所有文件校验、数据确认及保存规则由共享 C++ 实现，Python 仅包装入口和异常计划。
 
-分析构建和查询可在 Python 释放 GIL 后运行。当前提供同步状态和可见区间查询；Access 支持取消回调，尚未提供通用任务系统、新的报告模板或桌面缓存发布。原有 Access/报告入口继续可用，后续按[整体设计](object_api_design.md)逐批迁移。
+分析构建和查询可在 Python 释放 GIL 后运行，回调期间重新持有 GIL。当前提供同步状态、可见区间、AER 和内置报告查询；Access、AER、报告支持取消回调，尚未提供通用任务系统、自由报告模板或桌面缓存发布。后续按[整体设计](object_api_design.md)逐批迁移。
 
 验证包括 C++ `Analysis.*`、Python `test_analysis.py`、现有传播/时间/哈希回归，以及安装后的 SDK 消费端。覆盖文件移除后的资源存活、同 ID 跨项目拒绝、旧结果存活、确认计划过期、有限外推、UTC 失效、整数极限附近采样、CSV 覆盖保护及可选数组适配。可运行示例见 [analysis.py](../../examples/python/analysis.py)。
 
 目录选源由 C++ `CatalogAnalysis.*`、Python `test_catalog_analysis.py` 和桌面数据中心回归共同验证：覆盖优先级、外推上限加 1 ns、损坏的当前文件、UTC/EOP 跨进程原子更新、确认期间切换数据及安装后的 SDK 入口。示例可使用 `analysis.py --data <目录>` 验证 ITRF 输出。
 
 Access 由 `AnalysisAccess.*`、`AccessResults.*`、Python `test_analysis_access.py` 和安装后的 SDK 消费端验证；共享几何继续通过 `Access.*` 的解析圆轨道地平线/圆锥窗口案例。覆盖报告结果一致性、跟踪目标依赖、边界截断、步长上限、取消、原文件移除、对象归属、CSV 与可选 pandas。可运行示例为 [access.py](../../examples/python/access.py)。当前没有新增 STK 同输入数值对比数据，不据此声明与 STK 精度等价。
+
+AER 与统一报告还由 `test_analysis_aer_reports.py` 和 `AnalysisAccess.*` 验证：九类报告与原入口数值一致、ITRF 观测及距离数值差分、精确采样、不可见样本、对象删除与源文件移除、完成回调取消、明确对象选择、可选数组转换和已安装 SDK。`access.py` 同时演示 AER 和报告入口。

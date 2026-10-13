@@ -4,7 +4,9 @@
 #include <orbitforge/application/project_document.hpp>
 #include <orbitforge/core/frames/frame_provider.hpp>
 #include <orbitforge/results/access_windows.hpp>
+#include <orbitforge/results/aer_series.hpp>
 #include <orbitforge/results/trajectory.hpp>
+#include <orbitforge/runtime/report.hpp>
 
 namespace orbitforge::runtime {
 class DataCatalog;
@@ -78,6 +80,20 @@ class Analysis {
                                                 const application::ObjectRef &target,
                                                 const AccessOptions &options,
                                                 const std::function<bool()> &cancelled = {}) const;
+    // Samples all requested epochs, including when the target is not visible.
+    [[nodiscard]] results::AerSeries aer(const application::ObjectRef &station,
+                                         const application::ObjectRef &target,
+                                         std::span<const core::Epoch> times,
+                                         const std::function<bool()> &cancelled = {}) const;
+    [[nodiscard]] results::AerSeries
+    aer(const application::ObjectRef &station, const application::ObjectRef &target,
+        std::chrono::nanoseconds step, std::optional<core::Epoch> first = {},
+        std::optional<core::Epoch> last = {}, const std::function<bool()> &cancelled = {}) const;
+    // Existing report templates, evaluated against this captured project and its data.
+    [[nodiscard]] ReportResult
+    report(const application::ReportDefinition &definition,
+           const std::function<bool()> &cancelled = {},
+           const std::function<void(std::size_t, std::size_t)> &progress = {}) const;
 
   private:
     struct Impl;
@@ -156,4 +172,6 @@ void export_trajectory_csv(const results::Trajectory &result, const std::filesys
                            bool overwrite = false);
 void export_access_csv(const results::AccessWindows &result, const std::filesystem::path &path,
                        bool overwrite = false);
+void export_aer_csv(const results::AerSeries &result, const std::filesystem::path &path,
+                    bool overwrite = false);
 } // namespace orbitforge::runtime

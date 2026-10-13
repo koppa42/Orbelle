@@ -207,3 +207,150 @@ TEST(AccessResults, DurationUsesExactNanosecondsAndRejectsOverflow) {
     EXPECT_THROW((results::AccessWindows{{window}, {core::Epoch{0}, core::Epoch{1}, 1s, 1ms}, {}}),
                  std::invalid_argument);
 }
+TEST_F(AnalysisAccess, AerMatchesItrfGeometryAndRangeDerivative) {
+    const auto &s = *scene;
+    const auto analysis = runtime::prepare(s.document, s.data);
+    const std::array times{core::Epoch{100'000'000'003}, core::Epoch{0},
+                           core::Epoch{100'000'000'003}};
+    const auto result = analysis.aer(s.station, s.satellite, times);
+    ASSERT_EQ(result.samples().size(), times.size());
+    for (std::size_t i = 0; i < times.size(); ++i) {
+        const auto &sample = result.samples()[i];
+        const auto reference = core::observe_ground_target(
+            s.location(), analysis.state(s.satellite, times[i], core::FrameId::itrf));
+        EXPECT_EQ(sample.epoch, times[i]);
+        EXPECT_EQ(sample.observation.azimuth_rad, reference.azimuth_rad);
+        EXPECT_DOUBLE_EQ(sample.observation.elevation_rad, reference.elevation_rad);
+        EXPECT_DOUBLE_EQ(sample.observation.range_m, reference.range_m);
+        EXPECT_DOUBLE_EQ(sample.observation.range_rate_mps, reference.range_rate_mps);
+        EXPECT_EQ(sample.observation.line_of_sight, reference.line_of_sight);
+        EXPECT_FALSE(sample.off_boresight_rad.has_value());
+        EXPECT_EQ(sample.visible, reference.line_of_sight && reference.elevation_rad >= 0);
+    }
+    const std::array derivative_times{core::Epoch{999'990'000'000}, core::Epoch{1'000'000'000'000},
+                                      core::Epoch{1'000'010'000'000}};
+    const auto derivative = analysis.aer(s.station, s.satellite, derivative_times);
+    const auto &values = derivative.samples();
+    EXPECT_NEAR(values[1].observation.range_rate_mps,
+                (values[2].observation.range_m - values[0].observation.range_m) / .02, .01);
+    const auto access = analysis.access(s.station, s.satellite, {10s});
+    EXPECT_EQ(result.provenance().input_sha256, access.provenance().input_sha256);
+    EXPECT_EQ(result.provenance().data_sha256, access.provenance().data_sha256);
+    EXPECT_EQ(result.provenance().input_revision, analysis.snapshot().revision);
+}
+TEST_F(AnalysisAccess, AerSamplingBoundsAndCancellation) {
+    const auto &s = *scene;
+    const auto analysis = runtime::prepare(s.document, s.data);
+    const auto sampled =
+        analysis.aer(s.station, s.sensor, 10s, core::Epoch{3}, core::Epoch{10'000'000'007});
+    ASSERT_EQ(sampled.samples().size(), 3);
+    EXPECT_EQ(sampled.samples()[0].epoch, core::Epoch{3});
+    EXPECT_EQ(sampled.samples()[1].epoch, core::Epoch{10'000'000'003});
+    EXPECT_EQ(sampled.samples()[2].epoch, core::Epoch{10'000'000'007});
+    EXPECT_TRUE(sampled.samples()[0].off_boresight_rad.has_value());
+    EXPECT_EQ(
+        analysis.aer(s.station, s.sensor, 1s, core::Epoch{0}, core::Epoch{0}).samples().size(), 1);
+    const auto empty = analysis.aer(s.station, s.sensor, std::span<const core::Epoch>{});
+    EXPECT_TRUE(empty.samples().empty());
+    EXPECT_EQ(empty.provenance().input_sha256, sampled.provenance().input_sha256);
+    EXPECT_THROW((void)analysis.aer(s.station, s.sensor, 0ns), std::invalid_argument);
+    EXPECT_THROW((void)analysis.aer(s.station, s.sensor, 1ns), std::invalid_argument);
+    EXPECT_THROW((void)analysis.aer(s.station, s.sensor, std::array{core::Epoch{-1}}),
+                 std::out_of_range);
+    EXPECT_THROW((void)analysis.aer(s.satellite, s.sensor, 10s), std::invalid_argument);
+    EXPECT_THROW((void)runtime::prepare(s.document).aer(s.station, s.sensor, 10s),
+                 runtime::AnalysisCapabilityError);
+    std::size_t checks = 0;
+    EXPECT_THROW(
+        (void)analysis.aer(s.station, s.sensor, 10s, {}, {}, [&] { return ++checks == 5; }),
+        runtime::AnalysisCancelled);
+    EXPECT_EQ(checks, 5);
+}
+TEST_F(AnalysisAccess, AllReportTemplatesMatchExistingEngine) {
+    const auto &s = *scene;
+    const auto analysis = runtime::prepare(s.document, s.data);
+    auto p = *analysis.snapshot().project;
+    p.earth_orientation = s.data.eop()->data_info();
+    const runtime::ReportContext context{p, s.data.time(), s.data.frames(), s.data.eop()};
+    for (const auto kind : {app::ReportKind::scenario_summary, app::ReportKind::object_summary,
+                            app::ReportKind::cartesian_state, app::ReportKind::ground_stations,
+                            app::ReportKind::classical_elements, app::ReportKind::geodetic_position,
+                            app::ReportKind::orbital_motion, app::ReportKind::access_intervals,
+                            app::ReportKind::aer}) {
+        SCOPED_TRACE(static_cast<int>(kind));
+        app::ReportDefinition definition;
+        definition.id = "query";
+        definition.name = "Report";
+        definition.kind = kind;
+        definition.step_nanoseconds = 10'000'000'000;
+        if (app::report_is_access(kind))
+            definition.object_ids = {s.station.id(), s.sensor.id()};
+        const auto expected = runtime::generate_report(context, definition);
+        const auto actual = analysis.report(definition);
+        EXPECT_EQ(actual.table.rows(), expected.table.rows());
+        ASSERT_EQ(actual.table.columns().size(), expected.table.columns().size());
+        for (std::size_t c = 0; c < actual.table.columns().size(); ++c) {
+            EXPECT_EQ(actual.table.columns()[c].id, expected.table.columns()[c].id);
+            EXPECT_EQ(actual.column_title(c), expected.column_title(c));
+        }
+        EXPECT_EQ(actual.input_sha256, expected.input_sha256);
+        EXPECT_EQ(actual.data_sha256, s.data.data_lock().sha256());
+        EXPECT_EQ(actual.input_revision, analysis.snapshot().revision);
+        if (kind == app::ReportKind::aer) {
+            const auto aer = analysis.aer(s.station, s.sensor, 10s);
+            ASSERT_EQ(actual.table.rows().size(), aer.samples().size());
+            for (std::size_t i = 0; i < aer.samples().size(); ++i) {
+                EXPECT_DOUBLE_EQ(std::get<double>(actual.table.rows()[i][5]),
+                                 aer.samples()[i].observation.range_m);
+                EXPECT_EQ(std::get<std::int64_t>(actual.table.rows()[i][7]),
+                          aer.samples()[i].visible);
+            }
+        }
+    }
+}
+TEST_F(AnalysisAccess, ReportsAndAerKeepDeletedObjectsAndCaptureBeforeCallbacks) {
+    auto &s = *scene;
+    const auto analysis = runtime::prepare(s.document, s.data);
+    app::ReportDefinition definition;
+    definition.id = "query";
+    definition.name = "Original";
+    definition.kind = app::ReportKind::aer;
+    definition.object_ids = {s.station.id(), s.sensor.id()};
+    const auto report = analysis.report(definition);
+    const auto aer = analysis.aer(s.station, s.sensor, 60s);
+    const auto modified = analysis.report(definition, {}, [&](auto, auto) {
+        definition.name = "Changed";
+        definition.object_ids.clear();
+    });
+    EXPECT_EQ(modified.definition.name, "Original");
+    EXPECT_EQ(modified.table.rows(), report.table.rows());
+    s.document.objects().remove(s.satellite);
+    const auto repeated = analysis.report(report.definition);
+    EXPECT_EQ(repeated.table.rows(), report.table.rows());
+    const auto repeat_aer = analysis.aer(s.station, s.sensor, 60s);
+    ASSERT_EQ(repeat_aer.samples().size(), aer.samples().size());
+    EXPECT_EQ(repeat_aer.samples().back().observation.range_m,
+              aer.samples().back().observation.range_m);
+    // Cancellation at the completion callback must still prevent result publication.
+    bool cancel = false;
+    EXPECT_THROW((void)analysis.report(
+                     report.definition, [&] { return cancel; },
+                     [&](auto current, auto total) { cancel = current == total; }),
+                 runtime::AnalysisCancelled);
+}
+TEST_F(AnalysisAccess, ReportsNeedOnlyTheirActualCapabilities) {
+    const auto &s = *scene;
+    const auto analysis = runtime::prepare(s.document);
+    app::ReportDefinition d;
+    d.id = "native";
+    d.name = "Native state";
+    d.object_ids = {s.satellite.id()};
+    EXPECT_THROW((void)analysis.report(d), runtime::AnalysisCapabilityError); // UTC is explicit.
+    d.time_scale = app::ReportTimeScale::tai;
+    EXPECT_NO_THROW((void)analysis.report(d));
+    d.frame = core::FrameId::itrf;
+    EXPECT_THROW((void)analysis.report(d), runtime::AnalysisCapabilityError);
+    d.kind = app::ReportKind::ground_stations;
+    d.object_ids = {s.station.id()};
+    EXPECT_NO_THROW((void)analysis.report(d));
+}

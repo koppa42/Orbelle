@@ -30,6 +30,8 @@ struct ReportResult {
     // Display-unit numeric value shared by tables, CSV and plots; never parses formatted text.
     [[nodiscard]] std::optional<double> numeric_value(std::size_t row, std::size_t column) const;
     [[nodiscard]] std::string cell_text(std::size_t row, std::size_t column) const;
+    // Captured document revision for Analysis queries; zero for standalone legacy contexts.
+    std::uint64_t input_revision = 0;
 };
 class ReportCancelled : public std::runtime_error {
   public:

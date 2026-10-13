@@ -6,6 +6,32 @@
 
 namespace py = pybind11;
 using namespace orbitforge;
+namespace {
+// The Python callable remains owned by the binding's argument until the GIL is restored.
+std::function<bool()> cancellation(const py::object &callback) {
+    if (callback.is_none())
+        return {};
+    if (!PyCallable_Check(callback.ptr()))
+        throw py::type_error("cancelled must be callable or None");
+    return [&callback] {
+        py::gil_scoped_acquire acquire;
+        const auto value = callback();
+        if (!py::isinstance<py::bool_>(value))
+            throw py::type_error("cancelled must return bool");
+        return value.cast<bool>();
+    };
+}
+std::function<void(std::size_t, std::size_t)> progress_callback(const py::object &callback) {
+    if (callback.is_none())
+        return {};
+    if (!PyCallable_Check(callback.ptr()))
+        throw py::type_error("progress must be callable or None");
+    return [&callback](std::size_t current, std::size_t total) {
+        py::gil_scoped_acquire acquire;
+        callback(current, total);
+    };
+}
+} // namespace
 void bind_analysis(py::module_ &module) {
     module.attr("MAX_ANALYSIS_SAMPLES") = runtime::max_analysis_samples;
     py::register_exception<runtime::AnalysisCapabilityError>(module, "AnalysisCapabilityError",
@@ -115,6 +141,15 @@ void bind_analysis(py::module_ &module) {
         .def_readonly("role", &runtime::DataChange::role)
         .def_readonly("recorded", &runtime::DataChange::recorded)
         .def_readonly("selected", &runtime::DataChange::selected);
+    py::class_<results::AerSeries>(module, "AerSeries")
+        .def_property_readonly("samples", &results::AerSeries::samples)
+        .def("sample", [](const results::AerSeries &value,
+                          std::size_t index) { return value.samples().at(index); })
+        .def("__len__", [](const results::AerSeries &value) { return value.samples().size(); })
+        .def_property_readonly("provenance", &results::AerSeries::provenance,
+                               py::return_value_policy::copy)
+        .def("to_csv", &runtime::export_aer_csv, py::arg("path"), py::arg("overwrite") = false,
+             py::call_guard<py::gil_scoped_release>());
     py::class_<runtime::Analysis>(module, "Analysis")
         .def_property_readonly("snapshot", &runtime::Analysis::snapshot,
                                py::return_value_policy::copy)
@@ -144,18 +179,7 @@ void bind_analysis(py::module_ &module) {
                const application::ObjectRef &target, std::int64_t step, std::int64_t tolerance,
                std::optional<core::Epoch> first, std::optional<core::Epoch> last,
                const py::object &cancelled) {
-                std::function<bool()> check;
-                if (!cancelled.is_none()) {
-                    if (!PyCallable_Check(cancelled.ptr()))
-                        throw py::type_error("cancelled must be callable or None");
-                    check = [&] {
-                        py::gil_scoped_acquire acquire;
-                        const auto value = cancelled();
-                        if (!py::isinstance<py::bool_>(value))
-                            throw py::type_error("cancelled must return bool");
-                        return value.cast<bool>();
-                    };
-                }
+                const auto check = cancellation(cancelled);
                 py::gil_scoped_release release;
                 return analysis.access(station, target,
                                        {std::chrono::nanoseconds{step},
@@ -165,7 +189,44 @@ void bind_analysis(py::module_ &module) {
             py::arg("station"), py::arg("target"), py::kw_only(),
             py::arg("search_step_nanoseconds"),
             py::arg("boundary_tolerance_nanoseconds") = 1'000'000, py::arg("first") = py::none(),
-            py::arg("last") = py::none(), py::arg("cancelled") = py::none());
+            py::arg("last") = py::none(), py::arg("cancelled") = py::none())
+        .def(
+            "aer_at",
+            [](const runtime::Analysis &analysis, const application::ObjectRef &station,
+               const application::ObjectRef &target, const std::vector<core::Epoch> &times,
+               const py::object &cancelled) {
+                const auto check = cancellation(cancelled);
+                py::gil_scoped_release release;
+                return analysis.aer(station, target, times, check);
+            },
+            py::arg("station"), py::arg("target"), py::arg("times"),
+            py::arg("cancelled") = py::none())
+        .def(
+            "aer_step",
+            [](const runtime::Analysis &analysis, const application::ObjectRef &station,
+               const application::ObjectRef &target, std::int64_t step,
+               std::optional<core::Epoch> first, std::optional<core::Epoch> last,
+               const py::object &cancelled) {
+                const auto check = cancellation(cancelled);
+                py::gil_scoped_release release;
+                return analysis.aer(station, target, std::chrono::nanoseconds{step}, first, last,
+                                    check);
+            },
+            py::arg("station"), py::arg("target"), py::arg("step_nanoseconds"),
+            py::arg("first") = py::none(), py::arg("last") = py::none(),
+            py::arg("cancelled") = py::none())
+        .def(
+            "report",
+            [](const runtime::Analysis &analysis, const application::ReportDefinition &definition,
+               const py::object &cancelled, const py::object &progress) {
+                const auto captured = definition;
+                const auto check = cancellation(cancelled);
+                const auto notify = progress_callback(progress);
+                py::gil_scoped_release release;
+                return analysis.report(captured, check, notify);
+            },
+            py::arg("definition"), py::arg("cancelled") = py::none(),
+            py::arg("progress") = py::none());
     py::class_<runtime::ProjectOpenPlan>(module, "ProjectOpenPlan")
         .def(py::init<const std::filesystem::path &, const runtime::DataCatalog &>(),
              py::arg("path"), py::arg("data"), py::call_guard<py::gil_scoped_release>())
