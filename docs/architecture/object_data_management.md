@@ -42,17 +42,17 @@ Runtime 的 `DataCatalog` 调用 IERS Provider 校验清单、SHA-256、覆盖�
 
 ## 公共 API
 
-`Project.renamed_satellite(id, name)`、`Project.with_satellite_copy(id, new_id, name)` 和 `Project.without_satellite(id)` 返回新值，失败不修改原值。`Scenario.without_object(id)` 返回新场景修订，存续 Session 和旧读者保持有效。
+Python 通过 `project.objects` 管理对象，属性赋值和关键字更新进入公共事务层。C++ 文件值 `application::Project` 保留原有值操作，新的编辑入口为 `application::ProjectDocument`，详见[对象编辑 API](object_editing.md)。`Scenario.without_object(id)` 返回新场景修订，存续 Session 和旧读者保持有效。
 
 ```python
 from pathlib import Path
 import orbitforge as of
 
 project = of.load_project('mission.orbitforge')
-object_id = project.satellites[0].orbit.object_id
-project = project.renamed_satellite(object_id, '观测卫星')
-project = project.with_satellite_copy(object_id, 'observer-copy', '观测卫星 副本')
-project = project.without_satellite('observer-copy')
+satellite = project.objects.find(type=of.objects.Satellite)[0]
+satellite.name = '观测卫星'
+copy = project.objects.duplicate(satellite, name='观测卫星 副本')
+project.objects.remove(copy)
 
 catalog = of.DataCatalog(Path('data/shared-store'))
 installed = catalog.install_eop('snapshot/manifest.json')

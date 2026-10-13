@@ -61,6 +61,8 @@ Windows/MSVC 示例程序为 `out/build/headless/examples/cpp/Release/orbitforge
 
 `desktop` 预设是基础 Qt 状态表窗口；完整场景工作台使用 `desktop-graphics`。便携包、wheel 与构建缓存位于本地 `out/`，不随源码克隆分发。
 
+Python 对象统一通过 `project.objects` 创建，支持带类型的对象句柄、属性赋值、关键字 `update()` 和 `with project.edit():` 原子编辑。用法及旧接口迁移见[对象编辑 API](docs/architecture/object_editing.md)；完整后续路线见[统一 API 与数据驱动设计](docs/architecture/object_api_design.md)。
+
 ## 测试与验证
 
 核心与集成测试使用 GoogleTest / CTest，Python 接口使用 unittest。时间和参考系提供 Orekit 交叉校验，星历使用 jplephem 读取原始 DE440s 对照；固定输入与复现脚本随仓库保存。

@@ -8,10 +8,9 @@ from pathlib import Path
 import orbitforge as of
 
 project = of.Project('Python → OrbitForge', of.Epoch(0), of.Epoch(7_200_000_000_000))
-for name, kind in [('TwoBody', of.OrbitPropagator.TWO_BODY), ('J2', of.OrbitPropagator.J2_SECULAR)]:
-    orbit = of.OrbitInput()
-    orbit.object_id = name
-    orbit.propagator = kind
-    project.add_satellite(orbit)
+with project.edit():
+    project.objects.satellite('TwoBody', orbit=of.orbits.TwoBody(initial=of.OrbitInput().initial))
+    project.objects.satellite('J2', orbit=of.orbits.J2(initial=of.J2MeanElements(
+        project.first, 7e6, 0.001, 0.9, 0, 0, 0)))
 project.save(Path(sys.argv[1]))
-print(f'Saved {len(project.satellites)} satellites to {sys.argv[1]}')
+print(f'Saved {len(project.objects)} satellites to {sys.argv[1]}')

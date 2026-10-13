@@ -179,7 +179,7 @@ DataLock Project::data_lock() const {
         throw ProjectError(error.what());
     }
 }
-void validate_project(const Project &project) {
+void validate_project(const Project &project, bool relationships) {
     text_check(project.name, true);
     const auto first = project.first.tai_nanoseconds(), last = project.last.tai_nanoseconds();
     check(first < last && project.last.seconds_since(project.first) < 9e9,
@@ -258,7 +258,7 @@ void validate_project(const Project &project) {
         text_check(sensor.parent_satellite_id, true);
         text_check(sensor.target_station_id);
         check(ids.insert(sensor.object_id).second, "Duplicate project object ID");
-        check(std::ranges::any_of(project.satellites,
+        check(!relationships || std::ranges::any_of(project.satellites,
                                   [&](const auto &satellite) {
                                       return satellite.orbit.object_id ==
                                              sensor.parent_satellite_id;
@@ -270,7 +270,7 @@ void validate_project(const Project &project) {
         check(sensor.pointing == SensorPointing::nadir ||
                   sensor.pointing == SensorPointing::targeted,
               "Unsupported sensor pointing");
-        check(sensor.pointing != SensorPointing::targeted ||
+        check(!relationships || sensor.pointing != SensorPointing::targeted ||
                   std::ranges::any_of(project.ground_stations,
                                       [&](const auto &station) {
                                           return station.object_id == sensor.target_station_id;

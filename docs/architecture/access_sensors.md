@@ -30,7 +30,7 @@
 
 ## 对象与持久化
 
-`Project.sensors` 保存独立稳定 ID、名称、父卫星 ID、半角、指向模式和目标地面站 ID。ID 在卫星、地面站、传感器之间全局唯一；总上限 10000。传感器是分析组件，不额外产生 Scenario 的轨道 Session 或重复的卫星位置标记。
+文件层 `application::Project.sensors`（Python `ProjectData.sensors`）保存独立稳定 ID、名称、父卫星 ID、半角、指向模式和目标地面站 ID。ID 在卫星、地面站、传感器之间全局唯一；总上限 10000。传感器是分析组件，不额外产生 Scenario 的轨道 Session 或重复的卫星位置标记。
 
 复制卫星同时复制子传感器并生成新 ID；删除卫星同时删除子传感器。传感器可单独重命名、复制和删除。被 Targeted 传感器引用的站点不能直接删除，须先修改指向或删除传感器。无效父对象、目标、非有限半角和重复 ID 均在发布／保存前拒绝。
 
@@ -38,7 +38,7 @@
 
 ## SDK 与 Python
 
-公共入口：`core/propagation/access.hpp`、`runtime/access.hpp` 以及原有 `generate_report`。Python 提供 `ProjectSensor`、`SensorPointing`、`AccessSession`、`AccessSample`、`AccessInterval` 和 `observe_ground_target`。`Project.add_sensor()` 在候选项目上校验，失败不修改原值；列表属性按值转换，修改后需要赋回。
+公共入口：`core/propagation/access.hpp`、`runtime/access.hpp` 以及原有 `generate_report`。Python 使用 `project.objects.sensor()` 创建句柄，`sensor.update()` 原子修改视场与指向；`AccessSession`、`AccessSample`、`AccessInterval` 和 `observe_ground_target` 延续原计算接口。文件层的 `ProjectSensor` 与 `SensorPointing` 保留为低层值；新脚本用法见[对象编辑 API](object_editing.md)。
 
 可运行示例见 [access.py](../../examples/python/access.py)。Access／AER 报告的 `object_ids` 必须恰为 `[地面站 ID, 卫星或传感器 ID]`，不接受空列表代表“全部”。
 

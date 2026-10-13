@@ -17,7 +17,7 @@
 
 ## 场景与文件
 
-`ProjectGroundStation` 保存稳定 ID、显示名称、`GroundStationLocation` 和最低仰角；ID 在卫星与地面站之间也必须唯一。`Project.ground_stations` 保存站点集合；项目 v5 的必需 `GSTN` 段保存精确弧度与米值。v1–v4 项目读取为没有地面站的场景，保存时升级至当前 v10（GSTN v2 增加最低仰角，旧版默认 0）。
+`ProjectGroundStation` 保存稳定 ID、显示名称、`GroundStationLocation` 和最低仰角；ID 在卫星与地面站之间也必须唯一。文件层 `application::Project.ground_stations`（Python `ProjectData.ground_stations`）保存站点集合；项目 v5 的必需 `GSTN` 段保存精确弧度与米值。v1–v4 项目读取为没有地面站的场景，保存时升级至当前 v10（GSTN v2 增加最低仰角，旧版默认 0）。
 
 Runtime 构建固定 ITRF Session，模型标识为 `ground-station-wgs84-fixed-itrf-v1`。同一 Scenario 可同时包含 GCRF 卫星和 ITRF 地面站；每条 `StateSeries` 的参考系必须显式检查后再做相对位置计算。位置编辑增加该站点输入修订；重命名、场景时段编辑以及其他对象的操作保留存续数值 Session。复制使用新 ID 和修订 1，重新从文件打开也从修订 1 开始。
 
@@ -26,20 +26,17 @@ Runtime 构建固定 ITRF Session，模型标识为 `ground-station-wgs84-fixed-
 Python 示例：
 
 ```python
-import math
 import orbitforge as of
+from orbitforge import units as u
 
 project = of.Project("观测任务", of.Epoch(0), of.Epoch(7_200_000_000_000))
-station = of.ProjectGroundStation()
-station.object_id = "station-1"
-station.display_name = "示例地面站"
-station.location = of.GroundStationLocation(math.radians(114.2), math.radians(22.3), 350)
-project.add_ground_station(station)
+station = project.objects.ground_station("示例地面站", location=of.Wgs84Location(
+    longitude=u.deg(114.2), latitude=u.deg(22.3), ellipsoid_height=u.m(350)))
 states = project.to_scenario().sample([project.first, project.last])[0]  # ITRF
 project.save("station.orbitforge")
 ```
 
-`ground_stations` 与 `satellites` 一样采用 Python 列表值转换；修改返回的列表或元素后需要把列表赋回项目。`add_ground_station()` 先校验候选值，失败不会修改项目。
+Python 普通脚本通过 `project.objects` 和站点句柄修改，例如 `station.minimum_elevation = u.deg(5)`；多对象原子修改使用 `with project.edit():`。文件层可变值保留为 `ProjectData`，详见[对象编辑 API](object_editing.md)。
 
 已支持卫星过站、AER、最低仰角、椭球遮挡与传感器视场限制，参见[可见性与传感器](access_sensors.md)。尚无地形、方位遮挡掩模、折射和通信链路预算。
 

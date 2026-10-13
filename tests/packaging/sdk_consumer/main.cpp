@@ -1,6 +1,7 @@
 #include <cmath>
 #include <iostream>
 #include <orbitforge/application/scenario.hpp>
+#include <orbitforge/application/project_document.hpp>
 #include <orbitforge/runtime/access.hpp>
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/demo.hpp>
@@ -12,6 +13,19 @@
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 int main(int argc, char **argv) {
+    namespace app = orbitforge::application;
+    app::ProjectDocument document{app::Project{"SDK objects", orbitforge::core::Epoch{0},
+                                             orbitforge::core::Epoch{60'000'000'000}}};
+    auto edit = document.edit();
+    auto objects = edit.objects();
+    const auto satellite_ref = objects.create(app::objects::Satellite{"Observer", {}, {}});
+    const auto sensor_ref = objects.create(app::objects::Sensor{"Camera", satellite_ref, 0.2, {}});
+    edit.commit();
+    const auto fixed = document.snapshot();
+    document.objects().update(sensor_ref, app::objects::SensorUpdate{"Narrow", 0.1, {}});
+    if (fixed.project->sensors[0].name() != "Camera" || document.snapshot().revision != 2 ||
+        document.objects().children(satellite_ref).size() != 1)
+        return 25;
     const auto observation =
         orbitforge::core::observe_ground_target({}, {orbitforge::core::Epoch{0},
                                                      orbitforge::core::OriginId::earth,

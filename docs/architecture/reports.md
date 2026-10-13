@@ -65,8 +65,8 @@ from pathlib import Path
 import orbitforge as of
 
 project = of.Project("Mission", of.Epoch(0), of.Epoch(120_000_000_000))
-orbit = of.OrbitInput()
-project.add_satellite(orbit)
+satellite = project.objects.satellite("Observer", orbit=of.orbits.TwoBody(
+    initial=of.OrbitInput().initial))
 
 report = of.ReportDefinition()
 report.id = "satellite-state"
@@ -81,11 +81,11 @@ result = of.generate_report(project, report)
 # 原始数值为 SI；输出格式由 report.units 控制。
 print(result.table.columns[4].unit, result.table.rows[0][4])
 result.export_csv(Path("state.csv"))
-project.reports = [report]
+project.set_reports([report])
 project.save("mission.orbitforge")
 ```
 
-ITRF/GCRF 转换须显式提供 `eop_manifest`，并将对应 `data_info` 绑定到 `project.earth_orientation`；如果项目使用外部 UTC 文件，传入匹配的 `time_file`。运行时拒绝与项目记录不一致的数据，不自动联网或代替用户确认。默认使用内置 UTC 数据。输入在释放 Python GIL 前复制，生成和导出期间释放 GIL；Python 结果暴露只读数据及配置副本。`Project.reports` 与其他项目列表一样，修改列表后须整体赋回。
+ITRF/GCRF 转换须显式提供 `eop_manifest`，并将对应 `data_info` 绑定到 `project.earth_orientation`；如果项目使用外部 UTC 文件，传入匹配的 `time_file`。运行时拒绝与项目记录不一致的数据，不自动联网或代替用户确认。默认使用内置 UTC 数据。输入在释放 Python GIL 前复制，生成和导出期间释放 GIL；Python 结果暴露只读数据及配置副本。报告定义通过 `project.set_reports()` 整体校验并提交，读取已有配置可显式取得 `project.to_data().reports` 副本。
 
 ## 后续阶段
 
