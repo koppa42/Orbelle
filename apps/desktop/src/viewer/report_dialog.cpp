@@ -2,6 +2,7 @@
 #include "epoch_editor.hpp"
 #include "object_selection.hpp"
 #include "report_plot.hpp"
+#include "report_selection.hpp"
 #include "responsive_layout.hpp"
 #include "workbench_style.hpp"
 #include <QAbstractTableModel>
@@ -33,7 +34,8 @@
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QStackedWidget>
-#include <QStandardItemModel>
+#include <QStyleOptionButton>
+#include <QStylePainter>
 #include <QTabBar>
 #include <QTableView>
 #include <QTimer>
@@ -49,6 +51,25 @@ namespace orbitforge::desktop {
 namespace {
 using namespace application;
 constexpr auto builtin_count = static_cast<int>(report_kinds.size());
+class ReportSelectionButton final : public QPushButton {
+  public:
+    using QPushButton::QPushButton;
+    QSize sizeHint() const override { return {240, QPushButton::sizeHint().height()}; }
+    QSize minimumSizeHint() const override {
+        return {120, QPushButton::minimumSizeHint().height()};
+    }
+
+  protected:
+    void paintEvent(QPaintEvent *) override {
+        QStyleOptionButton option;
+        initStyleOption(&option);
+        option.text = fontMetrics().elidedText(text(), Qt::ElideRight, std::max(0, width() - 70));
+        QStylePainter painter(this);
+        painter.drawControl(QStyle::CE_PushButton, option);
+        painter.drawText(QRect(width() - 28, 0, 20, height()), Qt::AlignCenter,
+                         QStringLiteral("…"));
+    }
+};
 class ReportTitle final : public QLabel {
   public:
     using QLabel::QLabel;
@@ -216,7 +237,8 @@ struct ReportDialog::Impl {
     Save save;
     std::function<void(core::Epoch)> seek;
     std::shared_ptr<const core::ITimeProvider> time;
-    QComboBox *library;
+    QPushButton *library;
+    QPointer<ReportSelectionDialog> report_chooser;
     QWidget *settings, *sampling, *custom_times, *settings_panel, *result_panel;
     QWidget *units_field, *scale_field, *frame_field;
     QGridLayout *plot_tools;
@@ -362,10 +384,12 @@ struct ReportDialog::Impl {
         template_heading->addWidget(config_menu);
         config->addSpacing(14);
         config->addLayout(template_heading);
-        library = new QComboBox(settings);
+        library = new ReportSelectionButton(settings);
         library->setObjectName("reportLibrary");
-        library->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-        library->setMinimumContentsLength(12);
+        library->setProperty("objectSelector", true);
+        library->setAutoDefault(false);
+        library->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        library->setAccessibleName(QStringLiteral("选择报告"));
         config->addWidget(library);
         template_description = note({}, settings);
         template_description->setObjectName("reportTemplateDescription");
@@ -658,8 +682,7 @@ struct ReportDialog::Impl {
         status->setObjectName("reportStatus");
         status->setContentsMargins(18, 7, 18, 7);
         root->addWidget(status);
-        QObject::connect(library, &QComboBox::currentIndexChanged, owner,
-                         [this](int row) { choose(row); });
+        QObject::connect(library, &QPushButton::clicked, owner, [this] { choose_report(); });
         QObject::connect(scope_button, &QPushButton::clicked, owner, [this] { choose_scope(); });
         QObject::connect(view_button, &QPushButton::clicked, owner, [this] {
             if (compact)
@@ -734,22 +757,112 @@ struct ReportDialog::Impl {
             cancellation->store(true);
     }
     void fill_library() {
-        const int previous = library->currentIndex();
-        QSignalBlocker guard(library);
-        library->clear();
-        for (auto kind : report_kinds)
-            library->addItem(kind_name(kind), static_cast<int>(kind));
-        int selected = previous >= 0 && previous < builtin_count ? static_cast<int>(draft.kind) : 0;
-        for (const auto &definition : project.reports) {
-            library->addItem(workbench_icon(WorkbenchIcon::save),
-                             QStringLiteral("模板 · %1").arg(text(definition.name)),
-                             text(definition.id));
-            library->setItemData(library->count() - 1, kind_name(definition.kind), Qt::ToolTipRole);
-            if (definition.id == draft.id)
-                selected = library->count() - 1;
-        }
-        library->setCurrentIndex(selected);
+        const bool saved = std::ranges::any_of(
+            project.reports, [this](const auto &definition) { return definition.id == draft.id; });
+        library->setText(saved ? text(draft.name) : kind_name(draft.kind));
+        library->setIcon(workbench_icon(saved ? WorkbenchIcon::save : WorkbenchIcon::properties));
+        library->setToolTip(library->text() + QStringLiteral("\n选择报告…"));
+        library->setAccessibleDescription(library->toolTip());
+        remove->setEnabled(saved);
+        update_template->setEnabled(saved);
+        store->setText(saved ? QStringLiteral("另存为模板…") : QStringLiteral("保存为模板…"));
         refresh_scope();
+    }
+    QString report_scope(const std::vector<std::string> &ids) const {
+        if (ids.empty())
+            return QStringLiteral("整个场景中的适用对象");
+        QStringList names;
+        const auto objects = project_object_choices(project);
+        for (const auto &id : ids) {
+            const auto found = std::ranges::find(objects, id, &ObjectChoice::id);
+            names << (found == objects.end() ? text(id) + QStringLiteral("（已删除）")
+                                             : found->path);
+        }
+        return names.join(QStringLiteral("、"));
+    }
+    std::vector<ReportChoice> report_choices() const {
+        const auto description = [](ReportKind kind) -> QString {
+            switch (kind) {
+            case ReportKind::scenario_summary:
+                return QStringLiteral("场景时段、对象数量与中心天体。\n输出：属性表");
+            case ReportKind::object_summary:
+                return QStringLiteral("对象名称、类型与计算模型。\n输出：对象表");
+            case ReportKind::cartesian_state:
+                return QStringLiteral(
+                    "按指定间隔输出位置与速度，可选 GCRF 或 ITRF。\n输出：时间序列表、曲线");
+            case ReportKind::ground_stations:
+                return QStringLiteral("WGS84 经度、大地纬度、椭球高与 ITRF 坐标。\n输出：站点表");
+            case ReportKind::classical_elements:
+                return QStringLiteral("由 GCRF 状态换算瞬时六根数；J2 / J4 "
+                                      "结果不是平均根数。\n输出：时间序列表、曲线");
+            case ReportKind::geodetic_position:
+                return QStringLiteral(
+                    "ITRF / WGS84 "
+                    "经度、大地纬度和椭球高。高度不表示离地距离。\n输出：时间序列表、曲线");
+            case ReportKind::orbital_motion:
+                return QStringLiteral(
+                    "GCRF 地心距离、总速率、径向与横向速率、航迹倾角。\n输出：时间序列表、曲线");
+            case ReportKind::access_intervals:
+                return QStringLiteral(
+                    "地面站与卫星 / "
+                    "传感器的可见时段，考虑地球遮挡、最低仰角与传感器视场。\n输出：时间区间表");
+            case ReportKind::aer:
+                return QStringLiteral(
+                    "地面站观测目标的方位角、仰角、斜距与可见标记。\n输出：时间序列表、曲线");
+            }
+            return {};
+        };
+        std::vector<ReportChoice> choices;
+        for (auto kind : report_kinds)
+            choices.push_back(
+                {QStringLiteral("builtin:%1").arg(static_cast<int>(kind)), kind_name(kind),
+                 kind_name(kind), description(kind),
+                 report_is_access(kind)
+                     ? QStringLiteral("地面站 → 卫星 / 传感器；保留当前对象，随后选择配对对象")
+                     : report_scope(scope_ids),
+                 false, compatible(kind) ? QString{} : QStringLiteral("不适用于当前对象范围")});
+        for (const auto &definition : project.reports) {
+            QString warning;
+            const auto objects = project_object_choices(project);
+            for (const auto &id : definition.object_ids)
+                if (std::ranges::find(objects, id, &ObjectChoice::id) == objects.end())
+                    warning =
+                        QStringLiteral("\n绑定的对象已删除；载入后需重新选择对象，才能生成报告。");
+            choices.push_back(
+                {"template:" + text(definition.id),
+                 text(definition.name),
+                 kind_name(definition.kind),
+                 description(definition.kind) +
+                     QStringLiteral("\n\n使用此模板会恢复其对象范围、时间和格式设置。") + warning,
+                 report_scope(definition.object_ids),
+                 true,
+                 {}});
+        }
+        return choices;
+    }
+    void choose_report() {
+        const auto choices = report_choices();
+        const auto saved_key = "template:" + text(draft.id);
+        const bool saved =
+            std::ranges::find(choices, saved_key, &ReportChoice::key) != choices.end();
+        ReportSelectionDialog chooser(
+            choices,
+            saved ? saved_key : QStringLiteral("builtin:%1").arg(static_cast<int>(draft.kind)),
+            owner);
+        report_chooser = &chooser;
+        const auto accepted = chooser.exec() == QDialog::Accepted;
+        report_chooser = nullptr;
+        if (!accepted)
+            return;
+        // Resolve against the current project: it may have changed while the window was open.
+        const auto current = report_choices();
+        const auto found = std::ranges::find(current, chooser.selection(), &ReportChoice::key);
+        if (found == current.end() || !found->unavailable_reason.isEmpty())
+            return;
+        const int row = static_cast<int>(std::distance(current.begin(), found));
+        if ((saved && found->key == saved_key) || (!saved && row == static_cast<int>(draft.kind)))
+            return;
+        choose(row);
     }
     bool compatible(ReportKind kind) const {
         if (report_is_access(kind))
@@ -804,13 +917,8 @@ struct ReportDialog::Impl {
         owner->setWindowTitle(scope_ids.size() == 1
                                   ? QStringLiteral("报告 · %1").arg(labels.front())
                                   : QStringLiteral("报告"));
-        auto *items = qobject_cast<QStandardItemModel *>(library->model());
-        for (int i = 0; items && i < builtin_count; ++i) {
-            const bool enabled = compatible(static_cast<ReportKind>(i));
-            items->item(i)->setEnabled(enabled);
-            items->item(i)->setToolTip(enabled ? QString{}
-                                               : QStringLiteral("不适用于当前对象范围"));
-        }
+        if (report_chooser)
+            report_chooser->set_choices(report_choices());
     }
     void adapt(int width) {
         const bool was_compact = compact;
@@ -910,8 +1018,6 @@ struct ReportDialog::Impl {
         if (row < builtin_count && !compatible(static_cast<ReportKind>(row)))
             return;
         loading = true;
-        const QSignalBlocker guard(library);
-        library->setCurrentIndex(row);
         if (row < builtin_count) {
             draft = {};
             draft.id = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
@@ -988,6 +1094,7 @@ struct ReportDialog::Impl {
         update_template->setEnabled(row >= builtin_count);
         store->setText(row >= builtin_count ? QStringLiteral("另存为模板…")
                                             : QStringLiteral("保存为模板…"));
+        fill_library();
         loading = false;
         edit();
     }

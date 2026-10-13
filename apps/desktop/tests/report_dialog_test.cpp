@@ -2,6 +2,7 @@
 #include "../src/viewer/object_selection.hpp"
 #include "../src/viewer/report_dialog.hpp"
 #include "../src/viewer/report_plot.hpp"
+#include "../src/viewer/report_selection.hpp"
 #include "../src/viewer/workbench_style.hpp"
 #include "../src/viewer/workspace.hpp"
 #include "window_show_observer.hpp"
@@ -26,7 +27,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSplitter>
-#include <QStandardItemModel>
+#include <QListWidget>
 #include <QTabBar>
 #include <QTableView>
 #include <QTemporaryDir>
@@ -58,6 +59,36 @@ void save_template(ReportDialog &dialog, const QString &name) {
     });
     dialog.findChild<QAction *>("saveReport")->trigger();
 }
+void choose_report(ReportDialog &dialog, int row) {
+    QTimer::singleShot(0, [row] {
+        auto *chooser = QApplication::activeModalWidget();
+        ASSERT_TRUE(chooser);
+        auto *list = chooser->findChild<QListWidget *>("reportSelectionList");
+        ASSERT_TRUE(list);
+        ASSERT_LT(row, list->count());
+        list->setCurrentRow(row);
+        auto *confirm = chooser->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok);
+        EXPECT_TRUE(confirm->isEnabled());
+        if (confirm->isEnabled())
+            confirm->click();
+        else
+            qobject_cast<QDialog *>(chooser)->reject();
+    });
+    dialog.findChild<QPushButton *>("reportLibrary")->click();
+}
+bool report_available(ReportDialog &dialog, int row) {
+    bool available = false;
+    QTimer::singleShot(0, [&] {
+        auto *chooser = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(chooser);
+        chooser->findChild<QListWidget *>("reportSelectionList")->setCurrentRow(row);
+        available =
+            chooser->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->isEnabled();
+        chooser->reject();
+    });
+    dialog.findChild<QPushButton *>("reportLibrary")->click();
+    return available;
+}
 TEST(ReportDialog, PreparingTemplatesAndDockingDoesNotShowTemporaryWindows) {
     (void)test_app();
     WindowShowObserver windows;
@@ -67,10 +98,10 @@ TEST(ReportDialog, PreparingTemplatesAndDockingDoesNotShowTemporaryWindows) {
     ReportDialog dialog(
         project, runtime::make_builtin_time_provider(), [](ReportDialog::Ready) {}, [](auto) {},
         [](core::Epoch) {});
-    auto *library = dialog.findChild<QComboBox *>("reportLibrary");
+    auto *library = dialog.findChild<QPushButton *>("reportLibrary");
     ASSERT_NE(library, nullptr);
-    for (int i = 0; i < library->count(); ++i) {
-        library->setCurrentIndex(i);
+    for (auto kind : application::report_kinds) {
+        dialog.select_object("station", kind);
         auto *follow = dialog.findChild<QCheckBox *>("reportFollowScenario");
         ASSERT_NE(follow, nullptr);
         follow->setChecked(false);
@@ -103,7 +134,7 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
         [&](core::Epoch epoch) { sought = epoch; });
     dialog.show();
     dialog.resize(1120, 740); // Establish the wide case after native DPI negotiation on show.
-    auto *library = dialog.findChild<QComboBox *>("reportLibrary");
+    auto *library = dialog.findChild<QPushButton *>("reportLibrary");
     auto *generate = dialog.findChild<QPushButton *>("generateReport");
     auto *cancel = dialog.findChild<QPushButton *>("cancelReport");
     auto *table = dialog.findChild<QTableView *>("reportTable");
@@ -137,7 +168,7 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
             EXPECT_GT(table->height(), 250);
         }
     };
-    library->setCurrentIndex(2);
+    choose_report(dialog, 2);
     dialog.findChild<QComboBox *>("reportFrame")->setCurrentIndex(1);
     capture("configuration");
     dialog.findChild<QCheckBox *>("reportFollowScenario")->setChecked(false);
@@ -161,6 +192,16 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
     ASSERT_TRUE(sought);
     EXPECT_EQ(sought->tai_nanoseconds(), 60'000'000'000);
     capture("results");
+    const auto result_label = dialog.findChild<QLabel *>("reportResultLabel")->text();
+    QTimer::singleShot(0, [] {
+        auto *chooser = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(chooser);
+        chooser->findChild<QListWidget *>("reportSelectionList")->setCurrentRow(3);
+        chooser->reject();
+    });
+    library->click();
+    EXPECT_EQ(table->model()->rowCount(), 4);
+    EXPECT_EQ(dialog.findChild<QLabel *>("reportResultLabel")->text(), result_label);
     table->selectRow(0);
     dialog.findChild<QAction *>("copyReportRows")->trigger();
     EXPECT_TRUE(QApplication::clipboard()->text().contains(QStringLiteral("沿海站")));
@@ -224,7 +265,7 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
     EXPECT_FALSE(pending);
     EXPECT_TRUE(generate->isEnabled());
     EXPECT_EQ(table->model()->rowCount(), 4);
-    library->setCurrentIndex(3);
+    choose_report(dialog, 3);
     generate->click();
     ASSERT_TRUE(pending);
     pending(runtime::ReportContext{project, time, {}, {}}, {});
@@ -232,8 +273,8 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
     wait();
     EXPECT_EQ(table->model()->rowCount(), 1);
     capture("ground-stations");
-    library->setCurrentIndex(static_cast<int>(application::report_kinds.size()));
-    EXPECT_TRUE(library->currentText().contains(QStringLiteral("沿海站位置")));
+    choose_report(dialog, static_cast<int>(application::report_kinds.size()));
+    EXPECT_TRUE(library->text().contains(QStringLiteral("沿海站位置")));
     dialog.findChild<QAction *>("deleteReport")->trigger();
     EXPECT_TRUE(project.reports.empty());
     dialog.select_object("station", application::ReportKind::ground_stations);
@@ -272,7 +313,6 @@ TEST(ReportDialog, ObjectScopeSurvivesTemplateChangesSavedConfigurationsAndProje
         [&](auto reports) { project.reports = std::move(reports); }, [](auto) {});
     dialog.show();
     dialog.select_object("east", application::ReportKind::ground_stations);
-    auto *library = dialog.findChild<QComboBox *>("reportLibrary");
     auto *generate = dialog.findChild<QPushButton *>("generateReport");
     auto *table = dialog.findChild<QTableView *>("reportTable");
     auto *scope = dialog.findChild<QLabel *>("reportScopeLabel");
@@ -287,12 +327,12 @@ TEST(ReportDialog, ObjectScopeSurvivesTemplateChangesSavedConfigurationsAndProje
         EXPECT_TRUE(generate->isEnabled());
     };
     EXPECT_EQ(scope->text(), QStringLiteral("东站"));
-    EXPECT_FALSE(qobject_cast<QStandardItemModel *>(library->model())->item(0)->isEnabled());
-    library->setCurrentIndex(1);
+    EXPECT_FALSE(report_available(dialog, 0));
+    choose_report(dialog, 1);
     run();
     ASSERT_EQ(table->model()->rowCount(), 1);
     EXPECT_EQ(table->model()->data(table->model()->index(0, 0)).toString(), "east");
-    library->setCurrentIndex(2);
+    choose_report(dialog, 2);
     dialog.findChild<QComboBox *>("reportFrame")->setCurrentIndex(1);
     run();
     ASSERT_EQ(table->model()->rowCount(), 3);
@@ -309,18 +349,18 @@ TEST(ReportDialog, ObjectScopeSurvivesTemplateChangesSavedConfigurationsAndProje
     project = application::decode_project(application::encode_project(project));
     project.ground_stations.push_back({"north", "北站", {1.3, 0.8, 300}});
     dialog.update_project(project, time);
-    library->setCurrentIndex(3);
+    choose_report(dialog, 3);
     run();
     ASSERT_EQ(table->model()->rowCount(), 1);
     EXPECT_EQ(table->model()->data(table->model()->index(0, 0)).toString(), "east");
     // A new context replaces the old object, even while reusing an existing report page.
     dialog.select_object("west", application::ReportKind::ground_stations);
-    library->setCurrentIndex(1);
+    choose_report(dialog, 1);
     run();
     ASSERT_EQ(table->model()->rowCount(), 1);
     EXPECT_EQ(table->model()->data(table->model()->index(0, 0)).toString(), "west");
     // Loading a saved configuration explicitly restores its own scope.
-    library->setCurrentIndex(static_cast<int>(application::report_kinds.size()));
+    choose_report(dialog, static_cast<int>(application::report_kinds.size()));
     run();
     EXPECT_EQ(scope->text(), QStringLiteral("东站"));
     ASSERT_EQ(table->model()->rowCount(), 3);
@@ -347,13 +387,13 @@ TEST(ReportDialog, ObjectScopeSurvivesTemplateChangesSavedConfigurationsAndProje
         chooser->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
     });
     dialog.findChild<QPushButton *>("reportChangeScope")->click();
-    library->setCurrentIndex(1);
+    choose_report(dialog, 1);
     run();
     EXPECT_EQ(table->model()->rowCount(), 3);
     EXPECT_EQ(scope->text(), QStringLiteral("整个场景"));
     // A satellite context does not offer a ground-station-only template.
     dialog.select_object(satellite.orbit.object_id, application::ReportKind::cartesian_state);
-    EXPECT_FALSE(qobject_cast<QStandardItemModel *>(library->model())->item(3)->isEnabled());
+    EXPECT_FALSE(report_available(dialog, 3));
 }
 TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
     (void)test_app();
@@ -384,7 +424,7 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
         [&](core::Epoch epoch) { sought = epoch; });
     dialog.show();
     dialog.resize(1120, 740);
-    auto *library = dialog.findChild<QComboBox *>("reportLibrary");
+    auto *library = dialog.findChild<QPushButton *>("reportLibrary");
     auto *generate = dialog.findChild<QPushButton *>("generateReport");
     auto *table = dialog.findChild<QTableView *>("reportTable");
     auto *views = dialog.findChild<QTabBar *>("reportViews");
@@ -392,7 +432,8 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
     auto *objects = dialog.findChild<ObjectSelectionField *>("reportPlotObject");
     auto *plot = static_cast<ReportPlot *>(dialog.findChild<QWidget *>("reportPlot"));
     auto *export_button = dialog.findChild<QPushButton *>("exportReportCsv");
-    ASSERT_EQ(library->count(), static_cast<int>(application::report_kinds.size()));
+    ASSERT_NE(library, nullptr);
+    EXPECT_EQ(dialog.findChild<QComboBox *>("reportLibrary"), nullptr);
     EXPECT_FALSE(views->isTabEnabled(1));
     const auto run = [&] {
         generate->click();
@@ -406,8 +447,7 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
         ASSERT_TRUE(
             dialog.findChild<QLabel *>("reportStatus")->text().contains(QStringLiteral("已生成")));
     };
-    library->setCurrentIndex(
-        library->findData(static_cast<int>(application::ReportKind::orbital_motion)));
+    choose_report(dialog, static_cast<int>(application::ReportKind::orbital_motion));
     run();
     ASSERT_EQ(table->model()->rowCount(), 802);
     ASSERT_TRUE(views->isTabEnabled(1));
@@ -541,17 +581,128 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
         dialog.rect().contains(export_button->mapTo(&dialog, export_button->rect().bottomRight())));
     capture("curves-narrow");
     dialog.resize(1120, 740);
-    library->setCurrentIndex(
-        library->findData(static_cast<int>(application::ReportKind::classical_elements)));
+    choose_report(dialog, static_cast<int>(application::ReportKind::classical_elements));
     run();
     EXPECT_EQ(fields->currentData(Qt::UserRole + 1).toString(), "elements.nu");
     capture("elements-curves");
     // A summary remains a table; a stale curve must not masquerade as the new result.
-    library->setCurrentIndex(0);
+    choose_report(dialog, 0);
     run();
     EXPECT_FALSE(views->isTabEnabled(1));
     EXPECT_EQ(views->currentIndex(), 0);
     EXPECT_TRUE(table->isVisible());
+}
+TEST(ReportSelection, SearchSourcesStableKeysAndDeletedChoices) {
+    (void)test_app();
+    std::vector<ReportChoice> choices{
+        {"builtin:0", QStringLiteral("场景摘要"), QStringLiteral("摘要"),
+         QStringLiteral("场景时段与对象数量"), QStringLiteral("当前对象"), false,
+         QStringLiteral("不适用于当前对象范围")},
+        {"builtin:2", QStringLiteral("位置与速度"), QStringLiteral("时间序列"),
+         QStringLiteral("GCRF 或 ITRF"), QStringLiteral("卫星")}};
+    for (int i = 0; i < 200; ++i)
+        choices.push_back({QString("template:%1").arg(i),
+                           QStringLiteral("同名模板"),
+                           QStringLiteral("位置与速度"),
+                           QStringLiteral("时间序列表与曲线"),
+                           QStringLiteral("卫星 %1").arg(i),
+                           true,
+                           {}});
+    ReportSelectionDialog dialog(choices, "template:100");
+    dialog.show();
+    auto *list = dialog.findChild<QListWidget *>("reportSelectionList");
+    auto *search = dialog.findChild<QLineEdit *>("reportSelectionSearch");
+    auto *source = dialog.findChild<QTabBar *>("reportSelectionSource");
+    auto *confirm = dialog.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok);
+    EXPECT_EQ(dialog.selection(), "template:100");
+    list->setCurrentRow(0);
+    EXPECT_FALSE(confirm->isEnabled());
+    EXPECT_TRUE(dialog.findChild<QLabel *>("reportSelectionWarning")->isVisible());
+    search->setText("gcrf");
+    EXPECT_EQ(dialog.selection(), QString{});
+    EXPECT_FALSE(confirm->isEnabled());
+    EXPECT_FALSE(list->item(1)->isHidden());
+    EXPECT_TRUE(list->item(0)->isHidden());
+    list->setCurrentRow(1);
+    source->setCurrentIndex(2);
+    EXPECT_FALSE(confirm->isEnabled());
+    EXPECT_TRUE(dialog.findChild<QLabel *>("reportSelectionEmpty")->isVisible());
+    search->clear();
+    EXPECT_TRUE(list->item(1)->isHidden());
+    list->setCurrentRow(102);
+    std::reverse(choices.begin(), choices.end());
+    dialog.set_choices(choices);
+    EXPECT_EQ(dialog.selection(), "template:100");
+    EXPECT_TRUE(confirm->isEnabled());
+    std::erase_if(choices, [](const auto &choice) { return choice.key == "template:100"; });
+    dialog.set_choices(choices);
+    EXPECT_TRUE(dialog.selection().isEmpty());
+    EXPECT_FALSE(confirm->isEnabled());
+    dialog.accept();
+    EXPECT_TRUE(dialog.isVisible());
+    dialog.reject();
+}
+TEST(ReportDialog, ReportChoiceCancellationSameSelectionAndLiveTemplateUpdates) {
+    (void)test_app();
+    const std::shared_ptr<const core::ITimeProvider> time = runtime::make_builtin_time_provider();
+    application::Project project("报告选择", core::Epoch{0}, core::Epoch{120'000'000'000});
+    project.ground_stations.push_back({"east", "东站", {1.2, 0.6, 350}});
+    project.ground_stations.push_back({"west", "西站", {1.3, 0.6, 350}});
+    for (const auto *id : {"east", "west"}) {
+        application::ReportDefinition definition;
+        definition.id = id;
+        definition.name = "同名模板";
+        definition.object_ids = {id};
+        definition.kind = application::ReportKind::cartesian_state;
+        definition.frame = core::FrameId::itrf;
+        project.reports.push_back(definition);
+    }
+    ReportDialog dialog(project, time, [](ReportDialog::Ready) {}, [](auto) {}, [](auto) {});
+    dialog.show();
+    dialog.select_object("east", application::ReportKind::cartesian_state);
+    auto *step = dialog.findChild<QDoubleSpinBox *>("reportStep");
+    auto *button = dialog.findChild<QPushButton *>("reportLibrary");
+    step->setValue(17.5);
+    QTimer::singleShot(0, [&] {
+        auto *chooser = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(chooser);
+        chooser->findChild<QListWidget *>("reportSelectionList")->setCurrentRow(3);
+        QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        QApplication::sendEvent(chooser, &escape);
+    });
+    button->click();
+    EXPECT_EQ(step->value(), 17.5);
+    choose_report(dialog, static_cast<int>(application::ReportKind::cartesian_state));
+    EXPECT_EQ(step->value(), 17.5);
+    QTimer::singleShot(0, [&] {
+        auto *chooser = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(chooser);
+        auto *list = chooser->findChild<QListWidget *>("reportSelectionList");
+        list->setCurrentRow(static_cast<int>(application::report_kinds.size()) + 1);
+        std::reverse(project.reports.begin(), project.reports.end());
+        dialog.update_project(project, time);
+        EXPECT_EQ(list->currentItem()->data(Qt::UserRole).toString(), "template:west");
+        const auto directory = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+        if (!directory.isEmpty()) {
+            QDir().mkpath(directory);
+            chooser->resize(780, 540);
+            QCoreApplication::processEvents();
+            EXPECT_TRUE(chooser->grab().save(directory + "/report-selector-wide.png"));
+            chooser->resize(360, 540);
+            QCoreApplication::processEvents();
+            QCoreApplication::processEvents();
+            EXPECT_TRUE(list->viewport()->rect().contains(list->visualItemRect(list->currentItem())));
+            EXPECT_EQ(chooser->findChild<QSplitter *>("reportSelectionSplit")->orientation(),
+                      Qt::Vertical);
+            EXPECT_TRUE(chooser->grab().save(directory + "/report-selector-narrow.png"));
+            for (auto *scroll : chooser->findChildren<QScrollArea *>())
+                EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+        }
+        chooser->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    button->click();
+    EXPECT_EQ(dialog.findChild<QLabel *>("reportScopeLabel")->text(), QStringLiteral("西站"));
+    EXPECT_EQ(step->value(), 60);
 }
 TEST(ReportPlot, AngleWrapDoesNotDrawFalseCrossingAndPixelReductionRetainsPeaks) {
     (void)test_app();
@@ -660,8 +811,7 @@ TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
     EXPECT_EQ(published, 1);
     auto *views = dialog.findChild<QTabBar *>("reportViews");
     EXPECT_FALSE(views->isTabEnabled(1));
-    dialog.findChild<QComboBox *>("reportLibrary")
-        ->setCurrentIndex(static_cast<int>(application::ReportKind::aer));
+    choose_report(dialog, static_cast<int>(application::ReportKind::aer));
     EXPECT_EQ(target->id(), "sensor");
     run();
     EXPECT_EQ(published, 2);
