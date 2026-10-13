@@ -24,14 +24,14 @@ from ._native import (
     DataReference, DataLock,
     DataCatalog, CatalogSnapshot, DataAcquisition, EopProduct, data_catalog_available,
     ReportKind, ReportUnits, ReportTimeScale, ReportDefinition, ReportColumn, ReportTable,
-    ReportResult,
+    ReportResult, ReportScope, ReportQuery, ReportTemplate, ReportColumnSpec,
 )
 
 # Low-level mutable values remain available for file/runtime integrations.
 # Ordinary scripts use the shared, transactional Project facade below.
 from ._native import ObjectNotFoundError, RevisionConflictError, EditClosedError, ChangeSet
 from ._values import Wgs84Location, OrbitStyle
-from . import objects, orbits, sensors, units
+from . import objects, orbits, sensors, units, reports
 from ._project import (
     Project, load_project, AccessSession, generate_report, estimate_report_rows, report_input_sha256,
 )

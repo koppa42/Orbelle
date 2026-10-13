@@ -32,9 +32,9 @@ class AccessTests(unittest.TestCase):
         session = of.AccessSession(p, 'station', 'sensor', EOP)
         d = of.ReportDefinition()
         d.id = d.name = 'aer'
-        d.kind = of.ReportKind.AER
-        d.object_ids = ['station', 'sensor']
-        d.step_nanoseconds = 60_000_000_000
+        d.query.kind = of.ReportKind.AER
+        d.query.object_ids = ['station', 'sensor']
+        d.query.step_nanoseconds = 60_000_000_000
         result = of.generate_report(p, d, EOP)
         self.assertEqual(result.table.row_count, 11)
         for row in result.table.rows:
@@ -52,11 +52,11 @@ class AccessTests(unittest.TestCase):
             csv = Path(directory) / 'aer.csv'
             result.export_csv(csv)
             self.assertIn('Range (km)', csv.read_text(encoding='utf-8-sig'))
-        d.kind = of.ReportKind.ACCESS_INTERVALS
+        d.query.kind = of.ReportKind.ACCESS_INTERVALS
         intervals = of.generate_report(self.inputs(), d, EOP)
-        self.assertEqual(intervals.table.row_count, len(session.intervals(p.first, p.last, d.step_nanoseconds)))
+        self.assertEqual(intervals.table.row_count, len(session.intervals(p.first, p.last, d.query.step_nanoseconds)))
         with self.assertRaises(ValueError):
-            d.object_ids = ['sensor']
+            d.query.object_ids = ['sensor']
             of.generate_report(p, d, EOP)
 
     def test_geometry_and_sensor_reference_validation(self):

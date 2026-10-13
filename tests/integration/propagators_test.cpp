@@ -73,7 +73,7 @@ TEST(Propagators, NewModelsRoundTripAndReportsUseConvertedStates) {
     project.satellites.push_back(satellite);
     const auto bytes = application::encode_project(project);
     const auto restored = application::decode_project(bytes);
-    EXPECT_EQ(bytes[8], 11);
+    EXPECT_EQ(bytes[8], 12);
     EXPECT_EQ(application::encode_project(restored), bytes);
     EXPECT_EQ(restored.satellites[0].orbit.tle, tle);
     const auto scenario = runtime::make_project_scenario(restored, time.get());
@@ -81,12 +81,12 @@ TEST(Propagators, NewModelsRoundTripAndReportsUseConvertedStates) {
     application::ReportDefinition d;
     d.id = "states";
     d.name = "States";
-    d.object_ids = {"tle"};
-    d.step_nanoseconds = 600'000'000'000;
+    d.query.object_ids = {"tle"};
+    d.query.step_nanoseconds = 600'000'000'000;
     const auto native =
         runtime::make_sgp4_session(tle, *time, "tle").sample(std::array{first}).states()[0];
     for (auto frame : {core::FrameId::gcrf, core::FrameId::itrf}) {
-        d.frame = frame;
+        d.query.frame = frame;
         const auto report = runtime::generate_report({restored, time, frames, eop}, d);
         const auto expected = core::transform_state(native, frame, *frames, eop->at(first));
         for (std::size_t i = 0; i < 3; ++i) {

@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <orbitforge/core/frames/state.hpp>
+#include <orbitforge/results/table.hpp>
 #include <string>
 #include <vector>
 
@@ -33,20 +34,39 @@ inline constexpr std::array report_kinds{
 }
 enum class ReportUnits { si, engineering };
 enum class ReportTimeScale { utc, tai, tt };
-// Stable built-in template IDs. Object IDs are bindings, never display names.
-// An empty binding means all compatible objects, including objects inserted later.
-// Access/AER instead require exactly [ground station ID, satellite or sensor ID].
-struct ReportDefinition {
-    std::string id, name;
+enum class ReportScope { objects, all_compatible };
+// Object IDs are bindings, never display names. All-object selection is explicit.
+// Access/AER require exactly [ground station ID, satellite or sensor ID].
+struct ReportQuery {
     ReportKind kind = ReportKind::cartesian_state;
+    ReportScope scope = ReportScope::objects;
     std::vector<std::string> object_ids;
     bool follow_scenario = true;
     core::Epoch first{0}, last{0};
     std::int64_t step_nanoseconds = 60'000'000'000;
     // Used by Cartesian state only. Elements/motion fix GCRF; geodetic fixes ITRF/WGS84.
     core::FrameId frame = core::FrameId::gcrf;
+    bool operator==(const ReportQuery &) const = default;
+};
+struct ReportColumnSpec {
+    std::string field, unit, title;
+    bool operator==(const ReportColumnSpec &) const = default;
+};
+struct ReportTemplate {
+    // Empty means the complete schema. Empty unit/title uses the field default.
+    std::vector<ReportColumnSpec> columns;
     ReportUnits units = ReportUnits::engineering;
     ReportTimeScale time_scale = ReportTimeScale::utc;
+    bool operator==(const ReportTemplate &) const = default;
 };
+struct ReportDefinition {
+    std::string id, name;
+    ReportQuery query;
+    ReportTemplate format;
+};
+[[nodiscard]] std::vector<results::Column> report_columns(ReportKind kind);
+[[nodiscard]] bool report_uses_utc(const ReportTemplate &format, ReportKind kind);
+void validate_report_query(const ReportQuery &query);
+void validate_report_template(const ReportTemplate &format, ReportKind kind);
 void validate_report_definition(const ReportDefinition &definition);
 } // namespace orbitforge::application

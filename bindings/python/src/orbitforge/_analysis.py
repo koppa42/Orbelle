@@ -8,6 +8,7 @@ from os import PathLike
 from operator import index as integer_index
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, overload
 from . import _native as n
+from . import reports
 from ._values import require
 from .objects import ObjectHandle, SatelliteHandle, GroundStationHandle, SensorHandle
 from .units import Duration
@@ -507,19 +508,21 @@ class Analysis:
         return AerSeries(self._native.aer_at(station._ref, target._ref, epochs, cancelled))
 
     def report(self, kind: n.ReportKind, *,
-               objects: ObjectHandle | Iterable[ObjectHandle] | None = None,
+               objects: ObjectHandle | Iterable[ObjectHandle] | n.ReportScope | None = None,
                station: GroundStationHandle | None = None,
                target: SatelliteHandle | SensorHandle | None = None,
                step: Duration | None = None,
                first: n.Epoch | None = None, last: n.Epoch | None = None,
                frame: n.FrameId = n.FrameId.GCRF,
-               units: n.ReportUnits = n.ReportUnits.ENGINEERING,
-               time_scale: n.ReportTimeScale = n.ReportTimeScale.TAI,
+               units: n.ReportUnits | None = None,
+               time_scale: n.ReportTimeScale | None = None,
+               template: reports.Template | None = None,
                cancelled: Callable[[], bool] | None = None,
                progress: Callable[[int, int], None] | None = None) -> n.ReportResult:
         """Generate a built-in report from this snapshot, with no file/data rereads.
 
-        Select objects explicitly, or station/target for AER and access reports.
+        Select objects explicitly (reports.ALL for all compatible objects), or
+        station/target for AER and access reports. A template controls presentation.
         SCENARIO_SUMMARY needs no selection. Sampled reports require step. TAI is
         the default display scale; UTC requires data selected when preparing.
         """
@@ -541,6 +544,8 @@ class Analysis:
                 if objects is not None:
                     raise TypeError("SCENARIO_SUMMARY describes the project; omit objects")
                 selection = ()
+            elif isinstance(objects, n.ReportScope) and objects == reports.ALL:
+                selection = ()
             else:
                 if objects is None:
                     raise TypeError("Select report objects explicitly")
@@ -558,17 +563,27 @@ class Analysis:
         definition = n.ReportDefinition()
         definition.id = "analysis-" + kind.name.lower().replace("_", "-")
         definition.name = kind.name.replace("_", " ").title()
-        definition.kind = kind
-        definition.object_ids = ids
-        definition.frame = require(frame, n.FrameId, "frame")
-        definition.units = require(units, n.ReportUnits, "units")
-        definition.time_scale = require(time_scale, n.ReportTimeScale, "time_scale")
+        definition.query.kind = kind
+        definition.query.scope = (n.ReportScope.ALL_COMPATIBLE
+                                  if isinstance(objects, n.ReportScope) and objects == reports.ALL
+                                  else n.ReportScope.OBJECTS)
+        definition.query.object_ids = ids
+        definition.query.frame = require(frame, n.FrameId, "frame")
+        if template is not None:
+            if units is not None or time_scale is not None:
+                raise TypeError("Set units/time_scale in template when supplying a template")
+            require(template, reports.Template, "template")
+        else:
+            template = reports.Template(
+                units=n.ReportUnits.ENGINEERING if units is None else units,
+                time_scale=n.ReportTimeScale.TAI if time_scale is None else time_scale)
+        definition.format = template._to_native()
         if sampled:
-            definition.step_nanoseconds = require(step, Duration, "step").nanoseconds
+            definition.query.step_nanoseconds = require(step, Duration, "step").nanoseconds
             if first is not None or last is not None:
-                definition.follow_scenario = False
-                definition.first = snapshot.first if first is None else require(first, n.Epoch, "first")
-                definition.last = snapshot.last if last is None else require(last, n.Epoch, "last")
+                definition.query.follow_scenario = False
+                definition.query.first = snapshot.first if first is None else require(first, n.Epoch, "first")
+                definition.query.last = snapshot.last if last is None else require(last, n.Epoch, "last")
         elif step is not None or first is not None or last is not None:
             raise TypeError("Static reports do not use step or first/last")
         return self._native.report(definition, cancelled, progress)

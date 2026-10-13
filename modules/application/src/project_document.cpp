@@ -596,7 +596,7 @@ RemovalPlan ObjectManager::plan_remove(const ObjectRef &ref) const {
             result.blocking_sensors.push_back(s.object_id);
     }
     for (const auto &r : snap.project->reports)
-        if (std::ranges::any_of(r.object_ids, [&](const auto &id) {
+        if (std::ranges::any_of(r.query.object_ids, [&](const auto &id) {
                 return std::ranges::find(result.removed, id) != result.removed.end();
             }))
             result.affected_reports.push_back(r.id);

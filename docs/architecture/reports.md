@@ -28,7 +28,7 @@
 
 所有时间序列报告可跟随场景范围或使用场景以内的自定义区间。步长是整数纳秒，包含起点和终点；不整除时额外保留精确终点，最后一段较短。允许单时刻查询。每个对象的行连续排列，顺序采用项目的卫星、地面站顺序。
 
-报告类型旁的“模板”菜单提供保存、更新和删除；选择“保存为模板…”时才输入名称。保存把定义加入当前项目并标记未保存；再保存项目后写入磁盘。项目 v11 保留配置，不保存数据表；开发阶段只读写当前格式，不兼容旧项目版本。取消生成或生成失败保留上次结果；切换配置也不会默默替换已有结果。结果页显示所对应的报告名称，场景输入改变后提示重新生成。双击含历元的行可定位场景时间。
+报告类型旁的“模板”菜单提供保存、更新和删除；选择“保存为模板…”时才输入名称。保存把定义加入当前项目并标记未保存；再保存项目后写入磁盘。项目 v12 保留配置，不保存数据表；开发阶段只读写当前格式，不兼容旧项目版本。取消生成或生成失败保留上次结果；改变查询仍保留上次结果并提示重新生成；仅修改显示单位或时间系统，且查询与场景输入未变时，直接复用已有结果。格式应用失败保留原结果。结果页显示所对应的报告名称，场景输入改变后提示重新生成。双击含历元的行可定位场景时间。
 
 Access / AER 使用明确的地面站与目标对象对，参见[可见性与传感器](access_sensors.md)。Access 输出区间并联动时间轴，不显示区间端点之间的数值折线；AER 输出时间序列与可见标志。
 
@@ -44,7 +44,7 @@ Access / AER 使用明确的地面站与目标对象对，参见[可见性与传
 
 ## 计算与数据一致性
 
-Application 提供 `ReportDefinition`，Results 提供 `Table`（列 ID、名称、基础单位和有类型单元格），Runtime 提供 `ReportContext`、`generate_report` 和 `export_report_csv`。报告直接由输入重建所选对象的 Session 并采样，不读取显示轨迹 `StateTrack`，显示步长与地图插值不影响结果。卫星和地面站的跨参考系计算使用完整状态变换，包含地球旋转引起的速度。
+Application 提供 `ReportQuery`、`ReportTemplate` 和组合两者的 `ReportDefinition`，以及共享字段定义 `report_columns(kind)`。Results 提供不可变共享存储的 `Table`（列 ID、名称、基础单位和有类型单元格），Runtime 提供 `ReportContext`、`generate_report` 和 `export_report_csv`。报告直接由输入重建所选对象的 Session 并采样，不读取显示轨迹 `StateTrack`，显示步长与地图插值不影响结果。卫星和地面站的跨参考系计算使用完整状态变换，包含地球旋转引起的速度。
 
 桌面每次生成前检查当前数据是否覆盖完整场景，以及数据身份/外推策略是否与已确认场景一致。变化时沿用场景的数据确认流程：取消则不生成；同意后先重建场景，成功后自动继续报告。一次报告捕获项目、时间/EOP Provider 的共享不可变版本，下载或后续场景编辑不改变运行中的输入。覆盖不足或 UTC 过期不会静默外推；有限 EOP 外推仍由数据中心控制。
 
@@ -60,38 +60,58 @@ Application 提供 `ReportDefinition`，Results 提供 `Table`（列 ID、名称
 
 CSV 使用 UTF-8 BOM、逗号分隔、双引号转义和 CRLF 行结束符，支持中文、逗号、引号和名称内换行。先写入同目录临时文件，成功后原子发布；默认不覆盖，桌面覆盖须通过文件选择器确认。取消/发布前失败保留旧文件。CSV 只包含表格，不插入哈希前言；本次溯源信息可在来源窗口和 Python 结果对象中读取，暂不自动导出元数据附属文件。
 
+## 查询与呈现
+
+`ReportQuery` 只描述查询类型、对象范围、区间、步长和参考系；`ReportTemplate` 描述显示列、顺序、逐列单位/标题及默认单位和时间系统。`ReportDefinition{id, name, query, format}` 用于保存配置。Python、C++ 和桌面使用同一套字段定义、校验与文件结构。空对象集合不再隐含全选；普通查询需绑定对象，或显式使用 `ReportScope::all_compatible`（Python `of.reports.ALL`）。全选始终在捕获的分析/项目范围内生效。
+
+生成时保留完整原始 SI 表。`ReportResult::with_template()` / Python `Template.apply()` 返回新呈现，可以重新显示先前隐藏的字段；不创建传播器、不读取数据文件、不重新采样。单元格数值仍是 SI，历元仍为精确 `Epoch`；显示值通过 `numeric_value()`、`cell_text()`、CSV 和绘图一致转换。单位覆盖只影响对应列；场景摘要的起止时刻也保留类型，可重新选择时间系统。实际显示 UTC 时才检查已捕获的 UTC 数据；不含时间列的表不因默认 UTC 而强制加载数据。
+
+桌面现有单位和时间系统控件可以立即应用；保存的自定义列在加载、生成和再次保存时保留。绘图按字段 ID 寻找对象与时间，缺少 `object.id`、`object.name`、`time.epoch` 或数值列时不可绘图，表格和 CSV 仍可用。可见性时间轴使用完整原始区间，不受显示列影响。桌面暂未新增自由选列编辑器。
+
 ## Python
 
 ```python
-from pathlib import Path
 import orbitforge as of
+from orbitforge import units as u
 
-project = of.Project("Mission", of.Epoch(0), of.Epoch(120_000_000_000))
-satellite = project.objects.satellite("Observer", orbit=of.orbits.TwoBody(
-    initial=of.OrbitInput().initial))
-
-report = of.ReportDefinition()
-report.id = "satellite-state"
-report.name = "轨道位置"
-report.kind = of.ReportKind.CARTESIAN_STATE
-report.frame = of.FrameId.GCRF
-report.step_nanoseconds = 30_000_000_000
-report.time_scale = of.ReportTimeScale.UTC
-
-print(of.estimate_report_rows(project, report))
-result = of.generate_report(project, report)
-# 原始数值为 SI；输出格式由 report.units 控制。
-print(result.table.columns[4].unit, result.table.rows[0][4])
-result.export_csv(Path("state.csv"))
-project.set_reports([report])
+# analysis 已由 project.prepare() 捕获，satellite 为项目对象句柄。
+template = of.reports.Template([
+    "time.epoch",
+    of.reports.Column("state.x", unit="km", title="X"),
+    of.reports.Column("state.vx", unit="m/s"),
+])
+result = analysis.report(of.ReportKind.CARTESIAN_STATE, objects=satellite,
+                         step=u.s(30), template=template)
+result.export_csv("state.csv")
+# 恢复完整字段并改成 SI，不重新计算。
+si = of.reports.Template(units=of.ReportUnits.SI).apply(result)
+print(si.numeric_value(0, 4))
+project.set_reports([result.definition])
 project.save("mission.orbitforge")
 ```
 
-ITRF/GCRF 转换须显式提供 `eop_manifest`，并将对应 `data_info` 绑定到 `project.earth_orientation`；如果项目使用外部 UTC 文件，传入匹配的 `time_file`。运行时拒绝与项目记录不一致的数据，不自动联网或代替用户确认。默认使用内置 UTC 数据。输入在释放 Python GIL 前复制，生成和导出期间释放 GIL；Python 结果暴露只读数据及配置副本。报告定义通过 `project.set_reports()` 整体校验并提交，读取已有配置可显式取得 `project.to_data().reports` 副本。
+省略模板仍可使用 `units=`、`time_scale=` 便利参数；提供模板时两者须写入模板，避免重复配置。Python 默认工程单位与 TAI，`columns=None` 使用完整字段，显式空列表报错。`of.reports.fields(kind)` 返回字段 ID、默认标题和原始维度。`Template` / `Column` 为不可变配置值，`Template.apply()` 目前接受 `ReportResult`，其他类型结果继续使用各自的导出/数组方法。保存配置通过 `project.set_reports()` 整体校验并提交，读取可用 `project.to_data().reports` 副本。完整可运行示例见 [report_templates.py](../../examples/python/report_templates.py)。
+
+## C++
+
+```cpp
+namespace app = orbitforge::application;
+app::ReportQuery query;
+query.kind = app::ReportKind::aer;
+query.object_ids = {station.id(), sensor.id()};
+query.step_nanoseconds = 10'000'000'000;
+app::ReportTemplate format;
+format.time_scale = app::ReportTimeScale::tai;
+format.columns = {{"time.epoch", "TAI", ""}, {"aer.range", "km", "Slant range"}};
+auto report = analysis.report(query, format);
+auto full = report.with_template(app::ReportTemplate{.time_scale = app::ReportTimeScale::tai});
+```
+
+C++ 的原生模板默认 UTC；无 UTC 数据时显式选 TAI/TT。独立 `generate_report(context, definition)` 与 `Analysis::report(query, format)` 共用引擎；前者从捕获项目创建会话，后者复用准备好的会话。Python 原生绑定在释放 GIL 前复制输入配置；结果返回拥有完整来源的不可变表和配置副本。
 
 ## 后续阶段
 
-1. 自选字段与顺序、逐字段单位、跨项目模板库；显示单位调整复用结果，不重复采样。
+1. 桌面自由选列编辑器、跨项目模板库和对其他类型结果的模板适配。
 2. 扩展现有 Access 的约束、自适应事件搜索与区间汇总；明确区分采样最大值与连续区间极值。
 3. 文档排版与 HTML/PDF，元数据随导出保存，批量生成和大结果存储。
 

@@ -1650,15 +1650,18 @@ class Workbench final : public QMainWindow {
             report_dialog_->result_published =
                 [this](std::shared_ptr<const runtime::ReportResult> result) {
                     clear_access_display();
-                    if (!application::report_is_access(result->definition.kind))
+                    if (!application::report_is_access(result->definition.query.kind))
                         return;
-                    const auto &ids = result->definition.object_ids;
+                    const auto &ids = result->definition.query.object_ids;
                     access_session_.emplace(report_context(), ids[0], ids[1]);
                     access_hash_ = result->input_sha256;
                     access_ids_ = ids;
                     std::vector<std::pair<qint64, qint64>> windows;
-                    if (result->definition.kind == application::ReportKind::access_intervals) {
-                        for (const auto &row : result->table.rows())
+                    if (result->definition.query.kind ==
+                        application::ReportKind::access_intervals) {
+                        const auto &source =
+                            result->source_table ? *result->source_table : result->table;
+                        for (const auto &row : source.rows())
                             windows.emplace_back(
                                 std::get<core::Epoch>(row[2]).tai_nanoseconds() / 1'000'000,
                                 std::get<core::Epoch>(row[3]).tai_nanoseconds() / 1'000'000);
@@ -6741,7 +6744,7 @@ class Workbench final : public QMainWindow {
             const auto restored =
                 application::load_project(std::filesystem::path(project_path_.toStdWString()));
             require(restored.reports.size() == 1 &&
-                        restored.reports[0].step_nanoseconds == 600'000'000'000,
+                        restored.reports[0].query.step_nanoseconds == 600'000'000'000,
                     "Saved report configuration lost its sampling interval");
             start_project(restored, project_path_);
             record("reports-workspace-generate-csv-stale-and-project-save");
@@ -6826,7 +6829,7 @@ class Workbench final : public QMainWindow {
                 naming->accept();
             });
             report_dialog_->findChild<QAction *>("saveReport")->trigger();
-            require(reports_.back().object_ids ==
+            require(reports_.back().query.object_ids ==
                         std::vector<std::string>{satellites_.at(1).orbit->input.object_id},
                     "Changing report type widened the object scope");
             report_dialog_->findChild<QPushButton *>("generateReport")->click();

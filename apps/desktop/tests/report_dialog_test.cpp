@@ -215,9 +215,9 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
     save_template(dialog, QStringLiteral("沿海站位置"));
     ASSERT_EQ(project.reports.size(), 1U);
     EXPECT_EQ(project.reports[0].name, "沿海站位置");
-    EXPECT_TRUE(project.reports[0].object_ids.empty());
+    EXPECT_TRUE(project.reports[0].query.object_ids.empty());
     const auto saved = application::decode_project(application::encode_project(project));
-    EXPECT_EQ(saved.reports[0].frame, core::FrameId::itrf);
+    EXPECT_EQ(saved.reports[0].query.frame, core::FrameId::itrf);
     QTimer::singleShot(0, [&] {
         auto *source = qobject_cast<QDialog *>(QApplication::activeModalWidget());
         ASSERT_TRUE(source);
@@ -280,7 +280,7 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
     dialog.select_object("station", application::ReportKind::ground_stations);
     save_template(dialog, QStringLiteral("站点模板副本"));
     ASSERT_EQ(project.reports.size(), 1U);
-    EXPECT_EQ(project.reports[0].object_ids, std::vector<std::string>{"station"});
+    EXPECT_EQ(project.reports[0].query.object_ids, std::vector<std::string>{"station"});
     const auto original_id = project.reports[0].id;
     save_template(dialog, QStringLiteral("站点模板副本"));
     ASSERT_EQ(project.reports.size(), 2U);
@@ -345,7 +345,7 @@ TEST(ReportDialog, ObjectScopeSurvivesTemplateChangesSavedConfigurationsAndProje
     }
     save_template(dialog, QStringLiteral("对象模板"));
     ASSERT_EQ(project.reports.size(), 1U);
-    EXPECT_EQ(project.reports[0].object_ids, std::vector<std::string>{"east"});
+    EXPECT_EQ(project.reports[0].query.object_ids, std::vector<std::string>{"east"});
     project = application::decode_project(application::encode_project(project));
     project.ground_stations.push_back({"north", "北站", {1.3, 0.8, 300}});
     dialog.update_project(project, time);
@@ -504,7 +504,7 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
     dialog.findChild<QAction *>("updateReport")->trigger();
     ASSERT_EQ(project.reports.size(), 1U);
     EXPECT_EQ(project.reports[0].id, saved_id);
-    EXPECT_EQ(project.reports[0].step_nanoseconds, 120'000'000'000);
+    EXPECT_EQ(project.reports[0].query.step_nanoseconds, 120'000'000'000);
     EXPECT_EQ(preparations, 1);
     // Return to matching settings for the gallery capture; saving never regenerates the data.
     dialog.findChild<QDoubleSpinBox *>("reportStep")->setValue(60);
@@ -673,9 +673,9 @@ TEST(ReportDialog, ReportChoiceCancellationSameSelectionAndLiveTemplateUpdates) 
         application::ReportDefinition definition;
         definition.id = id;
         definition.name = "同名模板";
-        definition.object_ids = {id};
-        definition.kind = application::ReportKind::cartesian_state;
-        definition.frame = core::FrameId::itrf;
+        definition.query.object_ids = {id};
+        definition.query.kind = application::ReportKind::cartesian_state;
+        definition.query.frame = core::FrameId::itrf;
         project.reports.push_back(definition);
     }
     ReportDialog dialog(project, time, [](ReportDialog::Ready) {}, [](auto) {}, [](auto) {});
@@ -753,7 +753,7 @@ TEST(ReportPlot, AngleWrapDoesNotDrawFalseCrossingAndPixelReductionRetainsPeaks)
     application::ReportDefinition d;
     d.id = "test";
     d.name = "test";
-    d.time_scale = application::ReportTimeScale::tai;
+    d.format.time_scale = application::ReportTimeScale::tai;
     std::vector<results::Column> columns{{"object.id", "ID", ""},
                                          {"object.name", "Object", ""},
                                          {"time.epoch", "Time", "epoch"},
@@ -883,6 +883,65 @@ TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
     EXPECT_TRUE(target->text().contains(QStringLiteral("已删除")));
     run();
     EXPECT_EQ(published, 2); // Never silently substitutes the parent after deletion.
+}
+TEST(ReportDialog, TemplateUnitsReuseResultsAndReorderedFieldsKeepPlotsAndSelection) {
+    (void)test_app();
+    std::shared_ptr<const core::ITimeProvider> time = runtime::make_builtin_time_provider();
+    application::Project project("Templates", core::Epoch{0}, core::Epoch{120'000'000'000});
+    project.ground_stations.push_back({"station", "Station", {0, 0, 0}});
+    application::ReportDefinition definition;
+    definition.id = "custom";
+    definition.name = "Custom";
+    definition.query.object_ids = {"station"};
+    definition.query.frame = core::FrameId::itrf;
+    definition.format.time_scale = application::ReportTimeScale::tai;
+    definition.format.columns = {{"state.x", "", "Distance"},
+                                 {"time.epoch", "", ""},
+                                 {"object.name", "", ""},
+                                 {"object.id", "", ""}};
+    project.reports.push_back(definition);
+    int preparations = 0;
+    std::shared_ptr<const runtime::ReportResult> published;
+    ReportDialog dialog(
+        project, time,
+        [&](ReportDialog::Ready ready) {
+            ++preparations;
+            ready(runtime::ReportContext{project, time, {}, {}}, {});
+        },
+        [](auto) {}, [](auto) {});
+    dialog.result_published = [&](auto result) { published = std::move(result); };
+    choose_report(dialog, 9);
+    auto *generate = dialog.findChild<QPushButton *>("generateReport");
+    auto *table = dialog.findChild<QTableView *>("reportTable");
+    generate->click();
+    QElapsedTimer timer;
+    timer.start();
+    while (!generate->isEnabled() && timer.elapsed() < 10000) {
+        QCoreApplication::processEvents();
+        QThread::msleep(2);
+    }
+    ASSERT_TRUE(published);
+    EXPECT_EQ(preparations, 1);
+    EXPECT_FALSE(table->isColumnHidden(0));
+    EXPECT_FALSE(table->isColumnHidden(3));
+    EXPECT_EQ(table->model()->columnCount(), 4);
+    const auto original = published;
+    dialog.findChild<QComboBox *>("reportUnits")->setCurrentIndex(1);
+    EXPECT_EQ(preparations, 1);
+    EXPECT_DOUBLE_EQ(table->model()->data(table->model()->index(0, 0)).toString().toDouble(),
+                     6378137);
+    EXPECT_EQ(published->input_sha256, original->input_sha256);
+    EXPECT_EQ(published->source_table->rows(), original->source_table->rows());
+    EXPECT_TRUE(table->model()->headerData(0, Qt::Horizontal).toString().contains("(m)"));
+    EXPECT_EQ(published, original); // Formatting does not republish the scenario's access result.
+    EXPECT_EQ(original->column_unit(0), "km");
+    auto *plot = static_cast<ReportPlot *>(dialog.findChild<QWidget *>("reportPlot"));
+    EXPECT_FALSE(plot->image(1).isNull());
+    project.ground_stations[0].location.height_m = 100;
+    dialog.update_project(project, time);
+    dialog.findChild<QComboBox *>("reportUnits")->setCurrentIndex(0);
+    EXPECT_TRUE(table->model()->headerData(0, Qt::Horizontal).toString().contains("(m)"));
+    EXPECT_EQ(preparations, 1);
 }
 } // namespace
 } // namespace orbitforge::desktop

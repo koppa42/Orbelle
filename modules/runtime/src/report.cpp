@@ -37,15 +37,15 @@ void cancelled(const std::atomic_bool *value) {
 using Selection = detail::ReportObject;
 std::vector<Selection> select(const Project &project, const ReportDefinition &d) {
     std::vector<Selection> values;
-    std::set<std::string> remaining(d.object_ids.begin(), d.object_ids.end());
+    std::set<std::string> remaining(d.query.object_ids.begin(), d.query.object_ids.end());
     const auto wanted = [&](const std::string &id) {
-        return d.object_ids.empty() || remaining.erase(id) != 0;
+        return d.query.scope == ReportScope::all_compatible || remaining.erase(id) != 0;
     };
-    if (d.kind != ReportKind::ground_stations)
+    if (d.query.kind != ReportKind::ground_stations)
         for (const auto &s : project.satellites)
             if (wanted(s.orbit.object_id))
                 values.push_back({s.orbit.object_id, s.name(), "Satellite", nullptr, &s});
-    if (!report_satellites_only(d.kind))
+    if (!report_satellites_only(d.query.kind))
         for (const auto &s : project.ground_stations)
             if (wanted(s.object_id))
                 values.push_back({s.object_id, s.name(), "Ground station", &s});
@@ -53,12 +53,12 @@ std::vector<Selection> select(const Project &project, const ReportDefinition &d)
     return values;
 }
 std::pair<core::Epoch, core::Epoch> interval(const Project &p, const ReportDefinition &d) {
-    if (!report_is_sampled(d.kind) || d.follow_scenario)
+    if (!report_is_sampled(d.query.kind) || d.query.follow_scenario)
         return {p.first, p.last};
-    check(d.first.tai_nanoseconds() >= p.first.tai_nanoseconds() &&
-              d.last.tai_nanoseconds() <= p.last.tai_nanoseconds(),
+    check(d.query.first.tai_nanoseconds() >= p.first.tai_nanoseconds() &&
+              d.query.last.tai_nanoseconds() <= p.last.tai_nanoseconds(),
           "Report interval is outside the scenario");
-    return {d.first, d.last};
+    return {d.query.first, d.query.last};
 }
 std::uint64_t ticks_between(core::Epoch first, core::Epoch last) {
     return static_cast<std::uint64_t>(last.tai_nanoseconds()) -
@@ -105,10 +105,10 @@ std::string epoch_text(core::Epoch epoch, ReportTimeScale scale, const core::ITi
 }
 std::string unit(const ReportDefinition &d, std::string value) {
     if (value == "epoch")
-        return d.time_scale == ReportTimeScale::utc   ? "UTC"
-               : d.time_scale == ReportTimeScale::tai ? "TAI"
-                                                      : "TT";
-    if (d.units == ReportUnits::engineering) {
+        return d.format.time_scale == ReportTimeScale::utc   ? "UTC"
+               : d.format.time_scale == ReportTimeScale::tai ? "TAI"
+                                                             : "TT";
+    if (d.format.units == ReportUnits::engineering) {
         if (value == "m")
             return "km";
         if (value == "m/s")
@@ -148,22 +148,23 @@ std::string report_input_sha256(const application::Project &project) {
 std::size_t estimate_report_rows(const Project &p, const ReportDefinition &d) {
     validate_project(p);
     validate_report_definition(d);
-    const auto selected = report_is_access(d.kind) ? std::vector<Selection>{} : select(p, d);
-    if (report_is_access(d.kind))
-        validate_access_pair(p, d.object_ids);
-    if (d.kind == ReportKind::scenario_summary)
+    const auto selected = report_is_access(d.query.kind) ? std::vector<Selection>{} : select(p, d);
+    if (report_is_access(d.query.kind))
+        validate_access_pair(p, d.query.object_ids);
+    if (d.query.kind == ReportKind::scenario_summary)
         return 7;
-    check(report_is_access(d.kind) || !selected.empty(), "This report has no compatible objects");
-    if (!report_is_sampled(d.kind))
+    check(report_is_access(d.query.kind) || !selected.empty(),
+          "This report has no compatible objects");
+    if (!report_is_sampled(d.query.kind))
         return selected.size();
     const auto [first, last] = interval(p, d);
     const auto span = ticks_between(first, last),
-               step = static_cast<std::uint64_t>(d.step_nanoseconds);
+               step = static_cast<std::uint64_t>(d.query.step_nanoseconds);
     // Include start and exact stop, appending one shorter final interval when necessary.
     check(span / step < max_report_rows,
           "Report exceeds 200000 rows; increase the step or shorten the interval");
     const auto count = span / step + 1 + (span % step != 0 ? 1 : 0);
-    const auto objects = report_is_access(d.kind) ? 1 : selected.size();
+    const auto objects = report_is_access(d.query.kind) ? 1 : selected.size();
     check(count <= max_report_rows / objects,
           "Report exceeds 200000 rows; select fewer objects or increase the step");
     return static_cast<std::size_t>(count * objects);
@@ -192,6 +193,10 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
     execution.check_cancelled();
     const auto total = estimate_report_rows(context.project, d);
     const auto [first, last] = interval(context.project, d);
+    if (report_uses_utc(d.format, d.query.kind)) {
+        (void)epoch_text(first, ReportTimeScale::utc, context.time.get());
+        (void)epoch_text(last, ReportTimeScale::utc, context.time.get());
+    }
     if (context.project.earth_orientation && context.time)
         check(context.time->data_info().sha256 ==
                   context.project.earth_orientation->time_data.sha256,
@@ -205,89 +210,68 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                   context.time->data_info().sha256 == context.eop->data_info().time_data.sha256,
               "Report time and EOP providers must use the same UTC data");
     }
-    if (d.time_scale == ReportTimeScale::utc &&
-        (report_is_sampled(d.kind) || d.kind == ReportKind::scenario_summary)) {
-        (void)epoch_text(first, d.time_scale, context.time.get());
-        (void)epoch_text(last, d.time_scale, context.time.get());
-    }
-    std::vector<Column> columns;
+    auto columns = report_columns(d.query.kind);
     std::vector<Row> rows;
     rows.reserve(total);
     const auto selected =
-        report_is_access(d.kind) ? std::vector<Selection>{} : select(context.project, d);
+        report_is_access(d.query.kind) ? std::vector<Selection>{} : select(context.project, d);
     const auto tick = [&] {
         execution.check_cancelled();
         if (progress)
             progress(rows.size(), total);
         execution.check_cancelled();
     };
-    if (report_is_access(d.kind)) {
-        const auto access = execution.access(d.object_ids);
-        columns = {{"object.id", "Object ID", ""},
-                   {"object.name", "Object", ""},
-                   {"time.epoch", d.kind == ReportKind::aer ? "Time" : "Start", "epoch"}};
-        if (d.kind == ReportKind::access_intervals) {
-            columns.insert(columns.end(), {{"access.stop", "Stop", "epoch"},
-                                           {"access.duration", "Duration", "s"},
-                                           {"access.start_clipped", "Start clipped", ""},
-                                           {"access.stop_clipped", "Stop clipped", ""}});
+    if (report_is_access(d.query.kind)) {
+        const auto access = execution.access(d.query.object_ids);
+        if (d.query.kind == ReportKind::access_intervals) {
             std::size_t completed = 0;
             const auto intervals = core::find_access_intervals(
-                first, last, d.step_nanoseconds, [&](core::Epoch epoch) {
+                first, last, d.query.step_nanoseconds, [&](core::Epoch epoch) {
                     execution.check_cancelled();
-                    completed = std::max(
-                        completed,
-                        static_cast<std::size_t>(ticks_between(first, epoch) /
-                                                 static_cast<std::uint64_t>(d.step_nanoseconds)));
+                    completed = std::max(completed,
+                                         static_cast<std::size_t>(
+                                             ticks_between(first, epoch) /
+                                             static_cast<std::uint64_t>(d.query.step_nanoseconds)));
                     if (progress)
                         progress(completed, total);
                     execution.check_cancelled();
                     return access.at(epoch).visible;
                 });
             for (const auto &window : intervals)
-                rows.push_back({d.object_ids[1], access.name, window.first, window.last,
+                rows.push_back({d.query.object_ids[1], access.name, window.first, window.last,
                                 window.last.seconds_since(window.first),
                                 std::int64_t(window.start_clipped),
                                 std::int64_t(window.stop_clipped)});
         } else {
-            columns.insert(columns.end(), {{"aer.azimuth", "Azimuth", "rad"},
-                                           {"aer.elevation", "Elevation", "rad"},
-                                           {"aer.range", "Range", "m"},
-                                           {"aer.range_rate", "Range rate", "m/s"},
-                                           {"access.visible", "Visible", ""},
-                                           {"sensor.off_boresight", "Off boresight", "rad"}});
             auto epoch = first;
             for (std::size_t i = 0; i < total; ++i) {
                 tick();
                 const auto sample = access.at(epoch);
                 const auto &o = sample.observation;
-                rows.push_back({d.object_ids[1], access.name, epoch,
+                rows.push_back({d.query.object_ids[1], access.name, epoch,
                                 o.azimuth_rad ? results::Cell{*o.azimuth_rad} : results::Cell{},
                                 o.elevation_rad, o.range_m, o.range_rate_mps,
                                 std::int64_t(sample.visible),
                                 sample.off_boresight_rad ? results::Cell{*sample.off_boresight_rad}
                                                          : results::Cell{}});
-                epoch = ticks_between(epoch, last) <= static_cast<std::uint64_t>(d.step_nanoseconds)
+                epoch = ticks_between(epoch, last) <=
+                                static_cast<std::uint64_t>(d.query.step_nanoseconds)
                             ? last
-                            : core::Epoch{epoch.tai_nanoseconds() + d.step_nanoseconds};
+                            : core::Epoch{epoch.tai_nanoseconds() + d.query.step_nanoseconds};
             }
         }
-    } else if (d.kind == ReportKind::scenario_summary) {
-        columns = {{"summary.field", "Property", ""}, {"summary.value", "Value", ""}};
+    } else if (d.query.kind == ReportKind::scenario_summary) {
         rows = {{std::string("Scenario"), context.project.name},
-                {std::string("Start"), epoch_text(first, d.time_scale, context.time.get())},
-                {std::string("Stop"), epoch_text(last, d.time_scale, context.time.get())},
-                {std::string("Time scale"), unit(d, "epoch")},
+                {std::string("Start"), first},
+                {std::string("Stop"), last},
+                {std::string("Time scale"), std::string("TAI")},
                 {std::string("Satellites"),
                  static_cast<std::int64_t>(context.project.satellites.size())},
                 {std::string("Ground stations"),
                  static_cast<std::int64_t>(context.project.ground_stations.size())},
                 {std::string("Central body"), std::string("Earth")}};
     } else {
-        columns = {{"object.id", "Object ID", ""}, {"object.name", "Object", ""}};
-        if (d.kind == ReportKind::object_summary) {
-            columns.push_back({"object.type", "Type", ""});
-            columns.push_back({"object.model", "Model", ""});
+        if (d.query.kind == ReportKind::object_summary) {
             for (const auto &object : selected) {
                 const std::string model =
                     object.station
@@ -295,13 +279,7 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                         : std::string(propagator_name(object.satellite->orbit.propagator));
                 rows.push_back({object.id, object.name, object.kind, model});
             }
-        } else if (d.kind == ReportKind::ground_stations) {
-            columns.insert(columns.end(), {{"station.longitude", "Longitude", "rad"},
-                                           {"station.latitude", "Geodetic latitude", "rad"},
-                                           {"station.height", "Ellipsoid height", "m"},
-                                           {"state.x", "ITRF X", "m"},
-                                           {"state.y", "ITRF Y", "m"},
-                                           {"state.z", "ITRF Z", "m"}});
+        } else if (d.query.kind == ReportKind::ground_stations) {
             for (const auto &object : selected) {
                 execution.check_cancelled();
                 const auto &location = object.station->location;
@@ -312,36 +290,10 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
         } else {
             // Derived templates have a fixed physical reference frame, independent of the
             // Cartesian template's frame preference saved in the definition.
-            const auto target_frame = d.kind == ReportKind::geodetic_position ? core::FrameId::itrf
-                                      : report_satellites_only(d.kind)        ? core::FrameId::gcrf
-                                                                              : d.frame;
-            columns.insert(columns.end(),
-                           {{"time.epoch", "Time", "epoch"}, {"state.frame", "Frame", ""}});
-            if (d.kind == ReportKind::classical_elements)
-                columns.insert(columns.end(), {{"elements.a", "Semi-major axis", "m"},
-                                               {"elements.e", "Eccentricity", ""},
-                                               {"elements.i", "Inclination", "rad"},
-                                               {"elements.raan", "RAAN", "rad"},
-                                               {"elements.argp", "Argument of periapsis", "rad"},
-                                               {"elements.nu", "True anomaly", "rad"}});
-            else if (d.kind == ReportKind::geodetic_position)
-                columns.insert(columns.end(), {{"geodetic.longitude", "Longitude", "rad"},
-                                               {"geodetic.latitude", "Geodetic latitude", "rad"},
-                                               {"geodetic.height", "Ellipsoid height", "m"}});
-            else if (d.kind == ReportKind::orbital_motion)
-                columns.insert(columns.end(),
-                               {{"motion.radius", "Geocentric distance", "m"},
-                                {"motion.speed", "Speed", "m/s"},
-                                {"motion.radial_speed", "Radial speed", "m/s"},
-                                {"motion.transverse_speed", "Transverse speed", "m/s"},
-                                {"motion.flight_path_angle", "Flight path angle", "rad"}});
-            else
-                columns.insert(columns.end(), {{"state.x", "X", "m"},
-                                               {"state.y", "Y", "m"},
-                                               {"state.z", "Z", "m"},
-                                               {"state.vx", "Vx", "m/s"},
-                                               {"state.vy", "Vy", "m/s"},
-                                               {"state.vz", "Vz", "m/s"}});
+            const auto target_frame = d.query.kind == ReportKind::geodetic_position
+                                          ? core::FrameId::itrf
+                                      : report_satellites_only(d.query.kind) ? core::FrameId::gcrf
+                                                                             : d.query.frame;
             const auto per_object = total / selected.size();
             for (const auto &object : selected) {
                 execution.check_cancelled();
@@ -354,10 +306,10 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                     for (std::size_t i = 0; i < count; ++i) {
                         epochs.push_back(next);
                         if (ticks_between(next, last) <=
-                            static_cast<std::uint64_t>(d.step_nanoseconds))
+                            static_cast<std::uint64_t>(d.query.step_nanoseconds))
                             next = last;
                         else
-                            next = core::Epoch{next.tai_nanoseconds() + d.step_nanoseconds};
+                            next = core::Epoch{next.tai_nanoseconds() + d.query.step_nanoseconds};
                     }
                     const auto batch = session.sample(epochs);
                     check(batch.states().size() == epochs.size(),
@@ -376,18 +328,18 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                         const auto &p = state.position_m, &v = state.velocity_mps;
                         Row row{object.id, object.name, state.epoch,
                                 std::string(target_frame == core::FrameId::gcrf ? "GCRF" : "ITRF")};
-                        if (d.kind == ReportKind::classical_elements) {
+                        if (d.query.kind == ReportKind::classical_elements) {
                             const auto el = to_keplerian(
                                 state, core::GravitationalParameter{object.satellite->orbit.mu()});
                             row.insert(row.end(),
                                        {el.semi_major_axis_m, el.eccentricity, el.inclination_rad,
                                         el.raan_rad, el.argument_of_periapsis_rad,
                                         el.true_anomaly_rad});
-                        } else if (d.kind == ReportKind::geodetic_position) {
+                        } else if (d.query.kind == ReportKind::geodetic_position) {
                             const auto geo = itrf_to_wgs84(state);
                             row.insert(row.end(),
                                        {geo.longitude_rad, geo.latitude_rad, geo.height_m});
-                        } else if (d.kind == ReportKind::orbital_motion) {
+                        } else if (d.query.kind == ReportKind::orbital_motion) {
                             const auto radius = std::hypot(p[0], p[1], p[2]);
                             check(radius > 0, "Orbital motion is undefined at the Earth centre");
                             const auto radial = (p[0] * v[0] + p[1] * v[1] + p[2] * v[2]) / radius;
@@ -409,23 +361,84 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
     if (progress)
         progress(total, total);
     execution.check_cancelled();
-    return {d,
-            results::Table{std::move(columns), std::move(rows)},
-            report_input_sha256(context.project),
-            context.project.data_lock().sha256(),
-            context.time ? context.time->data_info().sha256 : "",
-            report_is_access(d.kind) ? "geometric-access-wgs84-v1" : "builtin-reports-v2",
-            first,
-            last,
-            context.time};
+    ReportResult result{d,
+                        results::Table{std::move(columns), std::move(rows)},
+                        report_input_sha256(context.project),
+                        context.project.data_lock().sha256(),
+                        context.time ? context.time->data_info().sha256 : "",
+                        report_is_access(d.query.kind) ? "geometric-access-wgs84-v1"
+                                                       : "builtin-reports-v2",
+                        first,
+                        last,
+                        context.time};
+    auto formatted = result.with_template(d.format);
+    execution.check_cancelled();
+    return formatted;
+}
+ReportResult ReportResult::with_template(const ReportTemplate &format) const {
+    validate_report_template(format, definition.query.kind);
+    auto result = *this;
+    result.definition.format = format;
+    result.source_table =
+        source_table ? source_table : std::make_shared<const results::Table>(table);
+    const auto &source = *result.source_table;
+    if (format.columns.empty()) {
+        result.table = source;
+    } else {
+        std::vector<Column> columns;
+        std::vector<std::size_t> indices;
+        bool unchanged = format.columns.size() == source.columns().size();
+        for (const auto &spec : format.columns) {
+            const auto field = std::ranges::find(source.columns(), spec.field, &Column::id);
+            check(field != source.columns().end(), "Report source does not contain this field");
+            const auto index = static_cast<std::size_t>(field - source.columns().begin());
+            unchanged = unchanged && index == indices.size() &&
+                        (spec.title.empty() || spec.title == field->title);
+            indices.push_back(index);
+            columns.push_back(*field);
+            if (!spec.title.empty())
+                columns.back().title = spec.title;
+        }
+        if (unchanged) {
+            result.table = source;
+        } else {
+            std::vector<Row> rows;
+            rows.reserve(source.rows().size());
+            for (const auto &original : source.rows()) {
+                Row row;
+                row.reserve(indices.size());
+                for (auto index : indices)
+                    row.push_back(original[index]);
+                rows.push_back(std::move(row));
+            }
+            result.table = results::Table{std::move(columns), std::move(rows)};
+        }
+    }
+    // Check UTC availability at publication, before any cells are rendered.
+    for (std::size_t c = 0; c < result.table.columns().size(); ++c) {
+        const auto &field = result.table.columns()[c];
+        const bool epoch =
+            field.unit == "epoch" ||
+            (field.id == "summary.value" && definition.query.kind == ReportKind::scenario_summary);
+        const bool utc = field.unit == "epoch" ? result.column_unit(c) == "UTC"
+                                               : format.time_scale == ReportTimeScale::utc;
+        if (epoch && utc) {
+            (void)epoch_text(first, ReportTimeScale::utc, time.get());
+            (void)epoch_text(last, ReportTimeScale::utc, time.get());
+        }
+    }
+    return result;
 }
 std::string ReportResult::column_title(std::size_t index) const {
     const auto &column = table.columns().at(index);
-    const auto suffix = unit(definition, column.unit);
+    const auto suffix = column_unit(index);
     return column.title + (suffix.empty() ? "" : " (" + suffix + ")");
 }
 std::string ReportResult::column_unit(std::size_t column) const {
-    return unit(definition, table.columns().at(column).unit);
+    const auto &field = table.columns().at(column);
+    const auto &specs = definition.format.columns;
+    const auto spec = std::ranges::find(specs, field.id, &ReportColumnSpec::field);
+    return spec != specs.end() && !spec->unit.empty() ? spec->unit : unit(definition, field.unit);
 }
 std::optional<double> ReportResult::numeric_value(std::size_t row, std::size_t column) const {
     const auto &cell = table.rows().at(row).at(column);
@@ -435,23 +448,32 @@ std::optional<double> ReportResult::numeric_value(std::size_t row, std::size_t c
     if (!real)
         return {};
     auto value = *real;
-    if (definition.units == ReportUnits::engineering) {
-        const auto &dimension = table.columns().at(column).unit;
-        if (dimension == "m" || dimension == "m/s")
-            value /= 1000;
-        if (dimension == "rad")
-            value *= 180 / std::numbers::pi;
-    }
+    const auto display_unit = column_unit(column);
+    const auto &dimension = table.columns().at(column).unit;
+    if ((dimension == "m" && display_unit == "km") ||
+        (dimension == "m/s" && display_unit == "km/s"))
+        value /= 1000;
+    if (dimension == "rad" && display_unit == "deg")
+        value *= 180 / std::numbers::pi;
     return value;
 }
 std::string ReportResult::cell_text(std::size_t row, std::size_t column) const {
     const auto &cell = table.rows().at(row).at(column);
+    if (definition.query.kind == ReportKind::scenario_summary && row == 3 &&
+        table.columns().at(column).id == "summary.value")
+        return unit(definition, "epoch");
     if (const auto *text = std::get_if<std::string>(&cell))
         return *text;
     if (const auto *integer = std::get_if<std::int64_t>(&cell))
         return std::to_string(*integer);
-    if (const auto *epoch = std::get_if<core::Epoch>(&cell))
-        return epoch_text(*epoch, definition.time_scale, time.get());
+    if (const auto *epoch = std::get_if<core::Epoch>(&cell)) {
+        const auto display_unit = column_unit(column);
+        const auto scale = display_unit == "UTC"   ? ReportTimeScale::utc
+                           : display_unit == "TAI" ? ReportTimeScale::tai
+                           : display_unit == "TT"  ? ReportTimeScale::tt
+                                                   : definition.format.time_scale;
+        return epoch_text(*epoch, scale, time.get());
+    }
     if (const auto value = numeric_value(row, column)) {
         std::ostringstream out;
         out.imbue(std::locale::classic());

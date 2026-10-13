@@ -32,6 +32,9 @@ struct ReportResult {
     [[nodiscard]] std::string cell_text(std::size_t row, std::size_t column) const;
     // Captured document revision for Analysis queries; zero for standalone legacy contexts.
     std::uint64_t input_revision = 0;
+    // Canonical SI table retained so a later template can restore omitted fields.
+    std::shared_ptr<const results::Table> source_table = {};
+    [[nodiscard]] ReportResult with_template(const application::ReportTemplate &format) const;
 };
 class ReportCancelled : public std::runtime_error {
   public:

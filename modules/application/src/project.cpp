@@ -25,7 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 11;
+constexpr std::uint32_t project_version = 12;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -47,7 +47,7 @@ constexpr std::array section_schemas{
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
     SectionSchema{sensors_tag, 1, "Missing sensors section"},
-    SectionSchema{reports_tag, 1, "Missing reports section"},
+    SectionSchema{reports_tag, 2, "Missing reports section"},
     SectionSchema{data_tag, 2, nullptr},
     SectionSchema{time_tag, 1, nullptr},
     SectionSchema{analysis_tag, 1, nullptr},
@@ -372,8 +372,13 @@ void validate_project(const Project &project, bool relationships) {
         text_check(report.id, true);
         text_check(report.name, true);
         check(report_ids.insert(report.id).second, "Duplicate report ID");
-        for (const auto &id : report.object_ids)
+        for (const auto &id : report.query.object_ids)
             text_check(id, true);
+        for (const auto &column : report.format.columns) {
+            text_check(column.field, true);
+            text_check(column.unit);
+            text_check(column.title);
+        }
         try {
             validate_report_definition(report);
         } catch (const std::invalid_argument &error) {
@@ -584,17 +589,24 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
     for (const auto &report : project.reports) {
         reports.text(report.id);
         reports.text(report.name);
-        reports.number(static_cast<unsigned>(report.kind), 4);
-        reports.number(report.object_ids.size(), 4);
-        for (const auto &id : report.object_ids)
+        reports.number(static_cast<unsigned>(report.query.kind), 4);
+        reports.number(static_cast<unsigned>(report.query.scope), 4);
+        reports.number(report.query.object_ids.size(), 4);
+        for (const auto &id : report.query.object_ids)
             reports.text(id);
-        reports.number(report.follow_scenario, 1);
-        reports.epoch(report.first);
-        reports.epoch(report.last);
-        reports.number(static_cast<std::uint64_t>(report.step_nanoseconds));
-        reports.number(report.frame == core::FrameId::gcrf ? 1 : 2, 4);
-        reports.number(static_cast<unsigned>(report.units), 4);
-        reports.number(static_cast<unsigned>(report.time_scale), 4);
+        reports.number(report.query.follow_scenario, 1);
+        reports.epoch(report.query.first);
+        reports.epoch(report.query.last);
+        reports.number(static_cast<std::uint64_t>(report.query.step_nanoseconds));
+        reports.number(report.query.frame == core::FrameId::gcrf ? 1 : 2, 4);
+        reports.number(static_cast<unsigned>(report.format.units), 4);
+        reports.number(static_cast<unsigned>(report.format.time_scale), 4);
+        reports.number(report.format.columns.size(), 4);
+        for (const auto &column : report.format.columns) {
+            reports.text(column.field);
+            reports.text(column.unit);
+            reports.text(column.title);
+        }
     }
     payload.section(reports_tag, reports);
     if (project.earth_orientation) {
@@ -762,24 +774,31 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             report.name = reports.text();
             const auto kind = reports.number(4);
             check(kind <= 8, "Unsupported report template");
-            report.kind = static_cast<ReportKind>(kind);
+            report.query.kind = static_cast<ReportKind>(kind);
+            const auto scope = reports.number(4);
+            check(scope <= 1, "Unsupported report scope");
+            report.query.scope = static_cast<ReportScope>(scope);
             const auto bindings = reports.number(4);
             check(bindings <= max_objects, "Report exceeds 10000 object bindings");
             for (std::uint64_t j = 0; j < bindings; ++j)
-                report.object_ids.push_back(reports.text());
-            report.follow_scenario = reports.boolean();
-            report.first = reports.epoch();
-            report.last = reports.epoch();
+                report.query.object_ids.push_back(reports.text());
+            report.query.follow_scenario = reports.boolean();
+            report.query.first = reports.epoch();
+            report.query.last = reports.epoch();
             const auto step = reports.number();
             check(step >= 1 && step <= 86400ULL * 1'000'000'000, "Invalid report step");
-            report.step_nanoseconds = static_cast<std::int64_t>(step);
+            report.query.step_nanoseconds = static_cast<std::int64_t>(step);
             const auto frame = reports.number(4), units = reports.number(4),
                        scale = reports.number(4);
             check((frame == 1 || frame == 2) && units <= 1 && scale <= 2,
                   "Unsupported report format");
-            report.frame = frame == 1 ? core::FrameId::gcrf : core::FrameId::itrf;
-            report.units = static_cast<ReportUnits>(units);
-            report.time_scale = static_cast<ReportTimeScale>(scale);
+            report.query.frame = frame == 1 ? core::FrameId::gcrf : core::FrameId::itrf;
+            report.format.units = static_cast<ReportUnits>(units);
+            report.format.time_scale = static_cast<ReportTimeScale>(scale);
+            const auto columns = reports.number(4);
+            check(columns <= 64, "Report exceeds 64 display columns");
+            for (std::uint64_t j = 0; j < columns; ++j)
+                report.format.columns.push_back({reports.text(), reports.text(), reports.text()});
             project.reports.push_back(std::move(report));
         }
         reports.done();

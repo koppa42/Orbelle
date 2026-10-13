@@ -131,7 +131,7 @@ except of.DataChangedError as error:
 
 文件和文档共同遵守原子发布：候选校验、项目身份与修订检查通过后写入文件，成功后才更新内存来源、修订和已保存标记并通知观察者。覆盖默认关闭。写入失败或修订冲突不修改两者；观察者在保存成功后再次编辑，项目仍正确显示未保存。
 
-开发预览阶段只读写当前 `.orbitforge` v11；所有打开入口（包括 `load_project_data()`）在解析内容前拒绝非当前版本，并给出实际与支持的版本。没有旧格式迁移或缺字段补默认值的读取路径；输入项目仍可以不包含可选的分析准备记录。详见[项目文件](project_files.md)。
+开发预览阶段只读写当前 `.orbitforge` v12；所有打开入口（包括 `load_project_data()`）在解析内容前拒绝非当前版本，并给出实际与支持的版本。没有旧格式迁移或缺字段补默认值的读取路径；输入项目仍可以不包含可选的分析准备记录。详见[项目文件](project_files.md)。
 
 `Project.plan_open(path, data=...)` 固定解析后的文件和已验证资源；`name`、`data`、`data_changes` 可供确认界面读取。直接 `Project.open()` 和 `of.load_project()` 使用同一流程。已有来源依赖必须提供相应当前数据；不传数据只适合没有 UTC / EOP 依赖的原生坐标计算项目，SGP4 仍须显式提供 UTC。需要仅检查或导入原始输入而不准备计算时，使用 `load_project_data()`，再按需 `Project.from_data()`。
 
@@ -227,13 +227,13 @@ state_report.export_csv("states-report.csv")
 
 支持现有九类内置报告：场景摘要、对象摘要、地面站、笛卡尔状态、经典轨道根数、地理坐标、轨道运动、可见区间和 AER。前三类无需步长；其余显式提供 `step`，可用 `first` / `last` 限定子区间。派生报告使用各自的物理参考系，与桌面规则一致。
 
-Python 直接接收对象句柄，不需要构造 `ReportDefinition` 或填写 ID、名称。普通报告必须显式指定单个对象或对象集合，空集合报错，不扩展为全部对象；场景摘要不接受对象筛选。Access/AER 使用明确的 `station` / `target` 参数。选择按分析快照验证，当前已删除的旧对象仍可查询，其他项目或准备后新增的对象报错。
+Python 直接接收对象句柄，不需要构造 `ReportDefinition` 或填写 ID、名称。普通报告必须显式指定单个对象、对象集合或 `of.reports.ALL`；空集合报错，不扩展为全部对象；场景摘要不接受对象筛选。Access/AER 使用明确的 `station` / `target` 参数。选择按分析快照验证，当前已删除的旧对象仍可查询，其他项目或准备后新增的对象报错。
 
 返回现有 `ReportResult`，可读取 `table`、`column_title()`、`numeric_value()`、`cell_text()`，并沿用原子 CSV 导出。默认工程显示单位（km、km/s、deg）及 TAI；指定 UTC 必须在准备时提供 UTC 数据，不会隐式读取当前目录。表内数据仍为 SI，显示转换只影响格式化接口。报告保存 `input_revision` 和数据身份；输入哈希沿用报告语义，包含捕获的项目及对象名称，与 `AerSeries` / `AccessWindows` 仅相关物理输入的哈希用途不同。
 
 `cancelled=callable` 必须返回 bool，取消抛出 `AnalysisCancelled`；`progress(done, total)` 提供同步进度，两者均可省略。即使在完成进度回调中取消，也不返回结果；回调异常传回调用方。生成时固定报告配置，回调修改原配置或当前项目不影响本次计算。报告查询不重建传播器、不重新读取数据文件，也不写入项目的已保存报告配置。
 
-本次复用内置模板与共享表格引擎，尚未实现自由选列的模板系统。桌面原有 `generate_report()` 入口仍可独立使用，只为选中对象创建传播会话；C++ `Analysis::report(ReportDefinition)` 保留既有定义的选择语义，空 `object_ids` 在普通报告中仍表示全部兼容对象。该存储语义后续随显式选择模式统一调整，当前项目格式仍为 v11，未增加旧格式兼容路径。
+报告查询与显示已拆为 `ReportQuery` / `ReportTemplate`。Python 可传 `template=of.reports.Template([...])`，或生成后用 `template.apply(result)` 重排列、切换单位和时间系统，不重新计算。C++ 支持 `Analysis::report(query, format)` 和 `ReportResult::with_template(format)`。原始 SI 表始终保留，可恢复被隐藏的列；逐列单位优先于默认单位。详见[报告](reports.md)。项目当前为 v12（RPTS v2），保存显式选择模式及显示模板；不增加旧格式兼容路径。
 
 ## C++ 入口与验证
 
@@ -261,13 +261,14 @@ orbitforge::runtime::export_access_csv(windows, "access.csv");
 
 auto aer = earth_fixed.aer(station, sensor, 10s);
 orbitforge::runtime::export_aer_csv(aer, "aer.csv");
-orbitforge::application::ReportDefinition definition;
-definition.id = "aer";
-definition.name = "AER";
-definition.kind = orbitforge::application::ReportKind::aer;
-definition.object_ids = {station.id(), sensor.id()};
-definition.step_nanoseconds = 10'000'000'000;
-auto report = earth_fixed.report(definition);
+orbitforge::application::ReportQuery query;
+query.kind = orbitforge::application::ReportKind::aer;
+query.object_ids = {station.id(), sensor.id()};
+query.step_nanoseconds = 10'000'000'000;
+orbitforge::application::ReportTemplate format;
+format.time_scale = orbitforge::application::ReportTimeScale::tai;
+format.columns = {{"time.epoch", "TAI", ""}, {"aer.range", "km", "Range"}};
+auto report = earth_fixed.report(query, format);
 orbitforge::runtime::export_report_csv(report, "aer-report.csv");
 ```
 
@@ -275,7 +276,7 @@ Runtime 位于 Application 之上，分析不让对象模型反向依赖 Provide
 
 C++ 打开使用 `ProjectOpenPlan(path, data)` / `runtime::open_project(path, data)`；`OpenDataChangedError::plan()` 返回对应打开计划，确认后调用 `plan.open(true)`。纯输入保存使用 `document.save(path)`。所有文件校验、数据确认及保存规则由共享 C++ 实现，Python 仅包装入口和异常计划。
 
-分析构建和查询可在 Python 释放 GIL 后运行，回调期间重新持有 GIL。当前提供同步状态、可见区间、AER 和内置报告查询；Access、AER、报告支持取消回调，尚未提供通用任务系统、自由报告模板或桌面缓存发布。后续按[整体设计](object_api_design.md)逐批迁移。
+分析构建和查询可在 Python 释放 GIL 后运行，回调期间重新持有 GIL。当前提供同步状态、可见区间、AER 和内置报告查询；Access、AER、报告支持取消回调，已提供字段选择与可复用显示模板；尚未提供通用任务系统、桌面自由选列编辑器或完整的 Analysis 桌面接入。后续按[整体设计](object_api_design.md)逐批迁移。
 
 验证包括 C++ `Analysis.*`、Python `test_analysis.py`、现有传播/时间/哈希回归，以及安装后的 SDK 消费端。覆盖文件移除后的资源存活、同 ID 跨项目拒绝、旧结果存活、确认计划过期、有限外推、UTC 失效、整数极限附近采样、CSV 覆盖保护及可选数组适配。可运行示例见 [analysis.py](../../examples/python/analysis.py)。
 
@@ -284,3 +285,5 @@ C++ 打开使用 `ProjectOpenPlan(path, data)` / `runtime::open_project(path, da
 Access 由 `AnalysisAccess.*`、`AccessResults.*`、Python `test_analysis_access.py` 和安装后的 SDK 消费端验证；共享几何继续通过 `Access.*` 的解析圆轨道地平线/圆锥窗口案例。覆盖报告结果一致性、跟踪目标依赖、边界截断、步长上限、取消、原文件移除、对象归属、CSV 与可选 pandas。可运行示例为 [access.py](../../examples/python/access.py)。当前没有新增 STK 同输入数值对比数据，不据此声明与 STK 精度等价。
 
 AER 与统一报告还由 `test_analysis_aer_reports.py` 和 `AnalysisAccess.*` 验证：九类报告与原入口数值一致、ITRF 观测及距离数值差分、精确采样、不可见样本、对象删除与源文件移除、完成回调取消、明确对象选择、可选数组转换和已安装 SDK。`access.py` 同时演示 AER 和报告入口。
+
+报告模板由 `Reports.*`、`ReportDialog.TemplateUnitsReuseResultsAndReorderedFieldsKeepPlotsAndSelection`、Python `test_report_templates.py` 和安装后的 SDK 验证；覆盖逐列单位、重排与恢复字段、显式全选、UTC 按需校验、失效输入不自动重算，以及 v12 独立二进制样本精确往返。
