@@ -46,10 +46,16 @@
 #include <cmath>
 #include <future>
 #include <map>
+#include <orbitforge/project.hpp>
 
 namespace orbitforge::desktop {
 namespace {
 using namespace application;
+bool same_time(const std::shared_ptr<const core::ITimeProvider> &a,
+               const std::shared_ptr<const core::ITimeProvider> &b) {
+    return a && b ? time_data_lock(a->data_info()) == time_data_lock(b->data_info())
+                  : bool(a) == bool(b);
+}
 constexpr auto builtin_count = static_cast<int>(report_kinds.size());
 class ReportSelectionButton final : public QPushButton {
   public:
@@ -232,7 +238,7 @@ QLabel *note(const QString &value, QWidget *parent) {
 
 struct ReportDialog::Impl {
     ReportDialog *owner;
-    Project project;
+    application::Project project;
     Prepare prepare;
     Save save;
     std::function<void(core::Epoch)> seek;
@@ -268,7 +274,13 @@ struct ReportDialog::Impl {
     ReportDefinition draft;
     std::vector<std::string> scope_ids;
     bool all_objects = true;
-    std::future<runtime::ReportResult> job;
+    struct GeneratedReport {
+        runtime::Analysis analysis;
+        runtime::ReportResult report;
+    };
+    std::future<GeneratedReport> job;
+    std::optional<runtime::Analysis> result_analysis;
+    std::uint64_t input_generation = 0, job_generation = 0;
     std::future<void> export_job;
     std::shared_ptr<std::atomic_bool> cancellation;
     std::shared_ptr<std::atomic_size_t> completed;
@@ -279,8 +291,9 @@ struct ReportDialog::Impl {
     std::size_t expected = 0;
     std::uint64_t request = 0;
 
-    Impl(ReportDialog *parent, Project input, std::shared_ptr<const core::ITimeProvider> clock,
-         Prepare preflight, Save persist, std::function<void(core::Epoch)> jump)
+    Impl(ReportDialog *parent, application::Project input,
+         std::shared_ptr<const core::ITimeProvider> clock, Prepare preflight, Save persist,
+         std::function<void(core::Epoch)> jump)
         : owner(parent), project(std::move(input)), prepare(std::move(preflight)),
           save(std::move(persist)), seek(std::move(jump)), time(std::move(clock)) {
         owner->setObjectName("reportDialog");
@@ -1171,8 +1184,7 @@ struct ReportDialog::Impl {
             try {
                 const auto d = definition();
                 if (d.query == model->result->definition.query &&
-                    d.id == model->result->definition.id &&
-                    model->result->input_sha256 == runtime::report_input_sha256(project)) {
+                    d.id == model->result->definition.id && result_is_current()) {
                     auto result = std::make_shared<runtime::ReportResult>(
                         model->result->with_template(d.format));
                     result->definition = d;
@@ -1188,9 +1200,8 @@ struct ReportDialog::Impl {
     }
     void publish(std::shared_ptr<runtime::ReportResult> result, bool new_calculation = true) {
         model->publish(result);
-        if (new_calculation && owner->result_published &&
-            result->input_sha256 == runtime::report_input_sha256(project))
-            owner->result_published(result);
+        if (new_calculation && owner->result_published && result_is_current())
+            owner->result_published(result, *result_analysis);
         changed = false;
         table->resizeColumnsToContents();
         for (std::size_t c = 0; c < result->table.columns().size(); ++c)
@@ -1214,11 +1225,19 @@ struct ReportDialog::Impl {
             estimate->setText(QString::fromUtf8(error.what()));
         }
     }
+    bool result_is_current() const {
+        // The report hash also records its actual resources, including a newly selected
+        // time table. Compare the captured document and providers with the live inputs.
+        return result_analysis &&
+               runtime::report_input_sha256(*result_analysis->snapshot().project) ==
+                   runtime::report_input_sha256(project) &&
+               same_time(result_analysis->data().time(), time);
+    }
     void result_status() {
         if (!model->result)
             return;
         const auto &r = *model->result;
-        const bool stale = r.input_sha256 != runtime::report_input_sha256(project);
+        const bool stale = !result_is_current();
         result_title->setText(text(r.definition.name));
         result_title->setToolTip(text(r.definition.name));
         result_label->setText(QStringLiteral("%1 行%2")
@@ -1257,8 +1276,7 @@ struct ReportDialog::Impl {
             progress->setRange(0, 0);
             status->setText(QStringLiteral("正在检查场景数据…"));
             const QPointer<ReportDialog> guard(owner);
-            prepare([guard, ticket, d](std::optional<runtime::ReportContext> context,
-                                       QString error) {
+            prepare([guard, ticket, d](std::optional<ReportInput> context, QString error) {
                 if (!guard)
                     return;
                 auto &self = *guard->impl_;
@@ -1271,6 +1289,16 @@ struct ReportDialog::Impl {
                     return;
                 }
                 try {
+                    if (runtime::report_input_sha256(context->project) !=
+                            runtime::report_input_sha256(self.project) ||
+                        !same_time(context->data.time(), self.time)) {
+                        self.set_busy(false);
+                        self.status->setText(
+                            QStringLiteral("场景在准备期间已变化，请重新生成；上次结果保留。"));
+                        return;
+                    }
+                    self.expected = runtime::estimate_report_rows(context->project, d);
+                    self.job_generation = self.input_generation;
                     self.cancellation = std::make_shared<std::atomic_bool>(false);
                     self.completed = std::make_shared<std::atomic_size_t>(0);
                     self.progress->setRange(0, static_cast<int>(self.expected));
@@ -1278,10 +1306,16 @@ struct ReportDialog::Impl {
                     self.status->setText(QStringLiteral("正在生成报告…"));
                     self.job = std::async(std::launch::async, [snapshot = std::move(*context), d,
                                                                cancel = self.cancellation,
-                                                               count = self.completed] {
-                        return runtime::generate_report(
-                            snapshot, d, cancel.get(),
+                                                               count = self.completed]() mutable {
+                        if (cancel->load())
+                            throw runtime::AnalysisCancelled{};
+                        const auto captured_project =
+                            orbitforge::Project::from_data(std::move(snapshot.project));
+                        auto analysis = captured_project.prepare(snapshot.data);
+                        auto result = analysis.report(
+                            d, [cancel] { return cancel->load(); },
                             [count](std::size_t current, std::size_t) { count->store(current); });
+                        return GeneratedReport{std::move(analysis), std::move(result)};
                     });
                 } catch (const std::exception &failure) {
                     self.set_busy(false);
@@ -1521,19 +1555,27 @@ struct ReportDialog::Impl {
             if (job.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
                 return;
             try {
-                auto result = std::make_shared<runtime::ReportResult>(job.get());
+                auto generated = job.get();
                 if (cancellation->load())
-                    throw runtime::ReportCancelled{};
-                publish(result);
-                narrow_settings = false;
-                adapt(owner->width());
-                status->setText(QStringLiteral("报告已生成。"));
+                    throw runtime::AnalysisCancelled{};
+                if (job_generation == input_generation) {
+                    result_analysis = std::move(generated.analysis);
+                    publish(std::make_shared<runtime::ReportResult>(std::move(generated.report)));
+                    narrow_settings = false;
+                    adapt(owner->width());
+                    status->setText(QStringLiteral("报告已生成。"));
+                }
+            } catch (const runtime::AnalysisCancelled &) {
+                status->setText(QStringLiteral("已取消；上次结果保留。"));
             } catch (const runtime::ReportCancelled &) {
                 status->setText(QStringLiteral("已取消；上次结果保留。"));
             } catch (const std::exception &error) {
                 status->setText(QStringLiteral("生成失败；上次结果保留。%1")
                                     .arg(QString::fromUtf8(error.what())));
             }
+            if (job_generation != input_generation)
+                status->setText(
+                    QStringLiteral("场景已变化，未发布过期报告；上次结果保留。请重新生成。"));
             set_busy(false);
         }
         if (export_job.valid() &&
@@ -1550,10 +1592,16 @@ struct ReportDialog::Impl {
             set_busy(false);
         }
     }
-    void update(Project next, std::shared_ptr<const core::ITimeProvider> clock) {
+    void update(application::Project next, std::shared_ptr<const core::ITimeProvider> clock) {
         try {
             draft = definition();
         } catch (const std::exception &) {
+        }
+        if (runtime::report_input_sha256(project) != runtime::report_input_sha256(next) ||
+            !same_time(time, clock)) {
+            ++input_generation;
+            if (job.valid() && cancellation)
+                cancellation->store(true);
         }
         project = std::move(next);
         time = std::move(clock);
@@ -1572,9 +1620,9 @@ struct ReportDialog::Impl {
         result_status();
     }
 };
-ReportDialog::ReportDialog(Project project, std::shared_ptr<const core::ITimeProvider> time,
-                           Prepare prepare, Save save, std::function<void(core::Epoch)> seek,
-                           QWidget *parent)
+ReportDialog::ReportDialog(application::Project project,
+                           std::shared_ptr<const core::ITimeProvider> time, Prepare prepare,
+                           Save save, std::function<void(core::Epoch)> seek, QWidget *parent)
     : QDialog(parent),
       impl_(std::make_unique<Impl>(this, std::move(project), std::move(time), std::move(prepare),
                                    std::move(save), std::move(seek))) {}
@@ -1598,7 +1646,7 @@ void ReportDialog::resizeEvent(QResizeEvent *event) {
     if (impl_)
         impl_->adapt(event->size().width());
 }
-void ReportDialog::update_project(Project project,
+void ReportDialog::update_project(application::Project project,
                                   std::shared_ptr<const core::ITimeProvider> time) {
     impl_->update(std::move(project), std::move(time));
 }

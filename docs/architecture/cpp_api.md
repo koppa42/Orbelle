@@ -73,6 +73,8 @@ auto aer = analysis.aer(station, sensor, 10s);
 
 也可以用 `DataSnapshot::load(eop_manifest, time_file, extrapolation_days)` 加载固定资源，或者使用 `DataSnapshot::builtin_time()` 进行仅需 UTC 的计算。目录选源、覆盖检查、外推和错误规则见[分析 API](analysis_api.md)；这些操作不联网。
 
+已有 Provider 的 C++ 适配层可调用 `DataSnapshot::from_providers(time, frames, eop)`，参数为 `shared_ptr<const ...>`。快照保留原实例和资源所有权，不重新加载文件；调用方须保证 Provider 不可变且支持并发读取。允许全部为空、仅时间、完整三件套；缺项或 EOP 与时间表身份不一致时抛出 `std::invalid_argument`，准备分析时另行检查完整时段覆盖与数据变化。这个底层适配入口仅提供给 C++；Python 继续通过目录、文件或内置时间表创建快照。
+
 | 场景 | 入口 | 数据变化时的异常及后续操作 |
 | --- | --- | --- |
 | 准备分析 | `project.prepare(data)` | `of::DataChangedError`；取得 `error.plan()` |
@@ -92,4 +94,4 @@ add_executable(mission main.cpp)
 target_link_libraries(mission PRIVATE OrbitForge::Runtime)
 ```
 
-组件层的 `application::ProjectDocument` 与 `runtime::prepare()` 继续作为适配层入口，门面没有第二套校验、计算或持久化实现。桌面仍有独立的对象应用、场景准备和报告上下文流程，下一阶段接入同一文档与计划；本轮未改动桌面交互。
+组件层的 `application::ProjectDocument` 与 `runtime::prepare()` 继续作为适配层入口，门面没有第二套校验、计算或持久化实现。桌面报告已通过 `Project::from_data()` 捕获已发布场景，在后台准备 `Analysis` 并生成结果；地图可见性联动使用该分析捕获的资源。工作台的对象应用与图形场景准备仍需进一步接入同一文档、事务和计划，当前报告捕获的文档修订不代表整个工作台的编辑次数。

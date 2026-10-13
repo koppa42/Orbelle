@@ -22,7 +22,76 @@ auto epochs(const results::Trajectory &result) {
         ticks.push_back(s.epoch.tai_nanoseconds());
     return ticks;
 }
+class MismatchedEop final : public core::IEarthOrientationProvider {
+  public:
+    explicit MismatchedEop(std::shared_ptr<const core::IEarthOrientationProvider> source)
+        : source_(std::move(source)), info_(source_->data_info()) {
+        info_.time_data.sha256 = std::string(64, 'a');
+    }
+    core::EarthOrientationState at(core::Epoch epoch) const override { return source_->at(epoch); }
+    const core::EopDataInfo &data_info() const noexcept override { return info_; }
+
+  private:
+    std::shared_ptr<const core::IEarthOrientationProvider> source_;
+    core::EopDataInfo info_;
+};
 } // namespace
+TEST(Analysis, ProviderSnapshotRetainsExactResourcesThroughAnalysisLifetime) {
+    if (!runtime::time_frames_available()) {
+        GTEST_SKIP();
+    }
+    std::weak_ptr<const core::ITimeProvider> time;
+    std::weak_ptr<const core::IFrameProvider> frames;
+    std::weak_ptr<const core::IEarthOrientationProvider> eop;
+    {
+        runtime::DataSnapshot captured;
+        {
+            const auto source = runtime::DataSnapshot::load(ORBITFORGE_REPORT_EOP, {}, 2);
+            time = source.time();
+            frames = source.frames();
+            eop = source.eop();
+            captured =
+                runtime::DataSnapshot::from_providers(source.time(), source.frames(), source.eop());
+            EXPECT_EQ(captured.data_lock(), source.data_lock());
+        }
+        EXPECT_EQ(captured.time(), time.lock());
+        EXPECT_EQ(captured.frames(), frames.lock());
+        EXPECT_EQ(captured.eop(), eop.lock());
+        auto document = project();
+        const auto ref = station(document);
+        const auto analysis = runtime::prepare(document, captured);
+        captured = {};
+        EXPECT_FALSE(time.expired());
+        EXPECT_FALSE(frames.expired());
+        EXPECT_FALSE(eop.expired());
+        EXPECT_EQ(analysis.data().eop()->data_info().extrapolation_days, 2);
+        EXPECT_EQ(analysis.state(ref, core::Epoch{0}, core::FrameId::gcrf).frame,
+                  core::FrameId::gcrf);
+    }
+    EXPECT_TRUE(time.expired());
+    EXPECT_TRUE(frames.expired());
+    EXPECT_TRUE(eop.expired());
+}
+TEST(Analysis, ProviderSnapshotRejectsIncompleteAndMismatchedResources) {
+    if (!runtime::time_frames_available()) {
+        GTEST_SKIP();
+    }
+    const auto source = runtime::DataSnapshot::load(ORBITFORGE_REPORT_EOP);
+    const auto time_only = runtime::DataSnapshot::from_providers(source.time());
+    EXPECT_EQ(time_only.data_lock(), app::time_data_lock(source.time()->data_info()));
+    EXPECT_FALSE(time_only.eop());
+    EXPECT_FALSE(time_only.frames());
+    EXPECT_EQ(runtime::DataSnapshot::from_providers({}).data_lock(), app::DataLock{});
+    EXPECT_THROW((void)runtime::DataSnapshot::from_providers(source.time(), source.frames()),
+                 std::invalid_argument);
+    EXPECT_THROW((void)runtime::DataSnapshot::from_providers(source.time(), {}, source.eop()),
+                 std::invalid_argument);
+    EXPECT_THROW((void)runtime::DataSnapshot::from_providers({}, source.frames(), source.eop()),
+                 std::invalid_argument);
+    EXPECT_THROW((void)runtime::DataSnapshot::from_providers(
+                     source.time(), source.frames(), std::make_shared<MismatchedEop>(source.eop())),
+                 std::invalid_argument);
+}
 TEST(Analysis, ExactSamplingIncludingEndAtEpochLimits) {
     auto document = project();
     const auto ref = station(document);

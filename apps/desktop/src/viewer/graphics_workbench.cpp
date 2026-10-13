@@ -70,6 +70,7 @@
 #include <QPushButton>
 #include <QRadioButton>
 #include <QResizeEvent>
+#include <QScopedValueRollback>
 #include <QScreen>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -1602,9 +1603,9 @@ class Workbench final : public QMainWindow {
         project.sensors = sensors_;
         return project;
     }
-    runtime::ReportContext report_context() const {
-        return {project_snapshot(project_path_), active_time(), runtime::make_frame_provider(),
-                eop_};
+    ReportInput report_input() const {
+        return {project_snapshot(project_path_),
+                runtime::DataSnapshot::from_providers(active_time(), frames_, eop_)};
     }
     void show_reports() {
         if (!scenario_ || busy())
@@ -1624,11 +1625,11 @@ class Workbench final : public QMainWindow {
                             application::eop_data_lock(current->data_info())) {
                             if (start_project(project_snapshot(project_path_), project_path_, true,
                                               selected_marker_index()))
-                                pending_report_context_ = std::move(done);
+                                pending_report_input_ = std::move(done);
                             else
                                 done({}, QStringLiteral("未生成报告；场景数据未更新。"));
                         } else
-                            done(report_context(), {});
+                            done(report_input(), {});
                     } catch (const std::exception &error) {
                         done({}, QString::fromUtf8(error.what()));
                     }
@@ -1648,13 +1649,19 @@ class Workbench final : public QMainWindow {
                 },
                 this);
             report_dialog_->result_published =
-                [this](std::shared_ptr<const runtime::ReportResult> result) {
+                [this](std::shared_ptr<const runtime::ReportResult> result,
+                       const runtime::Analysis &analysis) {
                     clear_access_display();
                     if (!application::report_is_access(result->definition.query.kind))
                         return;
                     const auto &ids = result->definition.query.object_ids;
-                    access_session_.emplace(report_context(), ids[0], ids[1]);
-                    access_hash_ = result->input_sha256;
+                    // The map/timeline session uses the same confirmed resources as the report.
+                    const auto &data = analysis.data();
+                    access_session_.emplace(runtime::ReportContext{*analysis.snapshot().project,
+                                                                   data.time(), data.frames(),
+                                                                   data.eop()},
+                                            ids[0], ids[1]);
+                    access_hash_ = runtime::report_input_sha256(*analysis.snapshot().project);
                     access_ids_ = ids;
                     std::vector<std::pair<qint64, qint64>> windows;
                     if (result->definition.query.kind ==
@@ -2107,11 +2114,11 @@ class Workbench final : public QMainWindow {
             }
         if (station_editor_ && last_project_outcome_ != "opened")
             station_editor_->show_result(QStringLiteral("未应用，原场景保留。请调整后重试。"));
-        if (pending_report_context_) {
-            auto done = std::move(pending_report_context_);
-            pending_report_context_ = {};
+        if (pending_report_input_) {
+            auto done = std::move(pending_report_input_);
+            pending_report_input_ = {};
             if (last_project_outcome_ == "opened")
-                done(report_context(), {});
+                done(report_input(), {});
             else
                 done({}, QStringLiteral("未生成报告；场景更新未完成，上次结果保留。"));
         }
@@ -4494,9 +4501,12 @@ class Workbench final : public QMainWindow {
         }
     }
     void orbit_smoke_step() {
-        if (smoke_bootstrap_ != 3 || frame_count_ < 24 || busy() ||
+        if (orbit_smoke_step_active_ || smoke_bootstrap_ != 3 || frame_count_ < 24 || busy() ||
             orbit_smoke_stage_ == orbit_smoke_complete)
             return;
+        // Menus and modal dialogs run nested event loops. A frame arriving there
+        // must not execute this same validation step recursively.
+        const QScopedValueRollback step_guard(orbit_smoke_step_active_, true);
         const auto require = [](bool condition, const char *message) {
             if (!condition)
                 throw std::runtime_error(message);
@@ -7497,7 +7507,7 @@ class Workbench final : public QMainWindow {
     QAction *report_action_ = nullptr;
     ReportDialog *report_dialog_ = nullptr;
     std::vector<application::ReportDefinition> reports_;
-    ReportDialog::Ready pending_report_context_;
+    ReportDialog::Ready pending_report_input_;
     std::unique_ptr<EopCatalog> eop_catalog_;
     mutable std::shared_ptr<const core::ITimeProvider> active_time_;
     bool project_edit_ = false, project_orbit_edit_ = false, project_settings_edit_ = false;
@@ -7575,9 +7585,10 @@ class Workbench final : public QMainWindow {
     int model_kind_ = 0, pending_model_kind_ = 0;
     double model_diameter_km_ = 1000, pending_model_diameter_km_ = 1000;
     int orbit_smoke_stage_ = 0;
+    bool orbit_smoke_step_active_ = false;
     QSize smoke_responsive_size_;
     bool orbit_capture_ = false, fit_pending_ = false;
-    std::unique_ptr<core::IFrameProvider> frames_;
+    std::shared_ptr<const core::IFrameProvider> frames_;
     std::shared_ptr<const core::IEarthOrientationProvider> eop_, eop_history_, eop_current_;
     vsg::ref_ptr<vsgQt::Viewer> viewer_;
     vsg::ref_ptr<vsg::Device> shared_device_ref_;

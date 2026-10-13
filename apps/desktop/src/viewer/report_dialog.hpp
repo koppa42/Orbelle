@@ -3,12 +3,18 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <orbitforge/runtime/report.hpp>
+#include <orbitforge/runtime/analysis.hpp>
 
 namespace orbitforge::desktop {
+// A value copy of published inputs and owning, already confirmed providers.
+// Project/Analysis preparation runs on the report worker, not the GUI thread.
+struct ReportInput {
+    application::Project project;
+    runtime::DataSnapshot data;
+};
 class ReportDialog final : public QDialog {
   public:
-    using Ready = std::function<void(std::optional<runtime::ReportContext>, QString)>;
+    using Ready = std::function<void(std::optional<ReportInput>, QString)>;
     using Prepare = std::function<void(Ready)>;
     using Save = std::function<void(std::vector<application::ReportDefinition>)>;
     ReportDialog(application::Project project, std::shared_ptr<const core::ITimeProvider> time,
@@ -19,7 +25,8 @@ class ReportDialog final : public QDialog {
     void select_object(const std::string &id, application::ReportKind kind);
     void update_project(application::Project project,
                         std::shared_ptr<const core::ITimeProvider> time);
-    std::function<void(std::shared_ptr<const runtime::ReportResult>)> result_published;
+    std::function<void(std::shared_ptr<const runtime::ReportResult>, const runtime::Analysis &)>
+        result_published;
 
   protected:
     void resizeEvent(QResizeEvent *event) override;

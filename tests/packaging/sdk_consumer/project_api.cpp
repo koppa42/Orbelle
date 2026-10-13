@@ -12,7 +12,7 @@ int main(int argc, char **argv) {
     const auto station = edit.objects().create(
         of::objects::GroundStation{.name = "Station", .location = {0, 0, 100}});
     edit.commit();
-    const auto analysis = project.prepare();
+    const auto analysis = project.prepare(of::DataSnapshot::from_providers({}));
     const auto trajectory = analysis.states(station, 30s, of::FrameId::itrf);
     const auto report = analysis.report(
         {.kind = of::ReportKind::cartesian_state,
