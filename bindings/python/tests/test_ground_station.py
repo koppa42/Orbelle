@@ -3,10 +3,9 @@ import math
 import struct
 import tempfile
 import unittest
-import zlib
-# Native value/format compatibility tests; public editing is in test_objects.py.
+# Native value/format tests; public editing is in test_objects.py.
 from orbitforge import _native as of
-from project_fixtures import legacy_objects, legacy_stations
+from project_format import rewrite_section
 
 
 class GroundStationTests(unittest.TestCase):
@@ -64,30 +63,6 @@ class GroundStationTests(unittest.TestCase):
                 project.add_ground_station(station)
         self.assertEqual(len(project.ground_stations), 1)
 
-    @staticmethod
-    def rewrite(raw, change, file_version=10):
-        chunks, offset = [], 24
-        while offset < len(raw):
-            tag, version, size, _ = struct.unpack_from('<IIQI', raw, offset)
-            body = raw[offset + 20:offset + 20 + size]
-            offset += 20 + size
-            if file_version < 10 and tag.to_bytes(4, 'little') == b'SNSR':
-                continue
-            if file_version < 10 and tag.to_bytes(4, 'little') == b'GSTN':
-                body, version = legacy_stations(body), 1
-            if file_version < 9 and tag.to_bytes(4, 'little') == b'OBJS':
-                body, version = legacy_objects(body), 2
-            if file_version < 8 and tag.to_bytes(4, 'little') == b'STYL':
-                continue
-            if file_version < 6 and tag.to_bytes(4, 'little') == b'RPTS':
-                continue
-            if tag.to_bytes(4, 'little') == b'GSTN':
-                body = change(body)
-            if body is not None:
-                chunks.append(struct.pack('<IIQI', tag, version, len(body), zlib.crc32(body)) + body)
-        payload = b''.join(chunks)
-        return raw[:8] + struct.pack('<IQI', file_version, len(payload), zlib.crc32(payload)) + payload
-
     def test_station_section_is_required_and_validated_even_with_correct_crcs(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'invalid.orbitforge'
@@ -97,20 +72,6 @@ class GroundStationTests(unittest.TestCase):
                            lambda body: body[:-8] + struct.pack('<d', math.nan),
                            lambda body: struct.pack('<I', 10001) + body[4:],
                            lambda body: body + b'\x00'):
-                path.write_bytes(self.rewrite(raw, mutate))
+                path.write_bytes(rewrite_section(raw, b"GSTN", mutate))
                 with self.assertRaises(of.ProjectError):
                     of.load_project(path)
-
-    def test_v4_project_without_station_section_still_loads_and_upgrades(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'legacy.orbitforge'
-            empty = of.Project('Legacy', of.Epoch(0), of.Epoch(1))
-            empty.save(path)
-            raw = path.read_bytes()
-            path.write_bytes(self.rewrite(raw, lambda body: None, file_version=4))
-            project = of.load_project(path)
-            self.assertEqual(project.ground_stations, [])
-            project.add_ground_station(self.make_project().ground_stations[0])
-            project.save(path, overwrite=True)
-            self.assertEqual(struct.unpack_from('<I', path.read_bytes(), 8)[0], 11)
-            self.assertEqual(len(of.load_project(path).ground_stations), 1)

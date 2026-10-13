@@ -81,11 +81,11 @@ class WindowsManifestTests(unittest.TestCase):
 
 
 class LinuxDeliveryTests(unittest.TestCase):
-    def test_export_keeps_project_compatibility_fixtures_after_source_removal(self):
+    def test_export_keeps_current_project_fixture_after_source_removal(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / 'source'
-            # Use the actual compatibility files and their actual Python consumer.
+            # Use the fixed current-format input and its actual Python consumer.
             for relative in ('tests/packaging/sdk_consumer', 'tests/reference/time_frames',
                              'tests/integration/fixtures', 'bindings/python/tests', 'examples/python'):
                 shutil.copytree(ROOT / relative, source / relative,
@@ -97,7 +97,7 @@ class LinuxDeliveryTests(unittest.TestCase):
                 shutil.copy2(ROOT / relative, target)
             expected = {path.name: path.read_bytes()
                         for path in (source / 'tests/integration/fixtures').glob('*.orbitforge')}
-            self.assertIn('project-v1.orbitforge', expected)
+            self.assertEqual(set(expected), {'project-current.orbitforge'})
             args = argparse.Namespace(source=source, work=root / 'work',
                                       reports=root / 'reports', delivery=root / 'delivery', jobs=1)
             check = linux.Check(args)
@@ -119,14 +119,14 @@ class LinuxDeliveryTests(unittest.TestCase):
             shutil.move(check.delivery, relocated)
             shutil.rmtree(source)
 
-            # This is the same location used by the exported test_project.py.
-            consumer = relocated / 'bindings/python/tests/test_project.py'
+            # This is the same location used by the exported test_project_format.py.
+            consumer = relocated / 'bindings/python/tests/test_project_format.py'
             fixture_dir = consumer.parents[3] / 'tests/integration/fixtures'
             self.assertTrue(consumer.is_file())
             for name, contents in expected.items():
                 self.assertEqual((fixture_dir / name).read_bytes(), contents)
             entries = json.loads((relocated / 'manifest.json').read_text())
-            self.assertIn('tests/integration/fixtures/project-v1.orbitforge',
+            self.assertIn('tests/integration/fixtures/project-current.orbitforge',
                           {entry['path'] for entry in entries})
             for entry in entries:
                 path = relocated / entry['path']

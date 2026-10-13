@@ -269,11 +269,13 @@ class ObjectEditingTest(unittest.TestCase):
         self.assertEqual(project.current.tai_nanoseconds, 100)
         self.assertEqual(project.to_data().satellites[0].orbit.last.tai_nanoseconds, 1000)
 
-    def test_legacy_ids_preserved_and_native_values_detached(self):
-        path = Path(__file__).resolve().parents[3] / "tests/integration/fixtures/project-v1.orbitforge"
+    def test_saved_ids_preserved_and_native_values_detached(self):
+        path = Path(__file__).resolve().parents[3] / "tests/integration/fixtures/project-current.orbitforge"
         raw = of.load_project_data(path)
         project = of.Project.open(path)
-        self.assertEqual([obj.id for obj in project.objects], [s.orbit.object_id for s in raw.satellites])
+        self.assertEqual({obj.id for obj in project.objects},
+                         {"satellite-a", "satellite-b", "station-a", "sensor-a"})
+        self.assertEqual(project.objects["sensor-a"].parent, project.objects["satellite-a"])
         project.objects[next(iter(project.objects)).id].name = "New name"
         self.assertNotEqual(raw.satellites[0].name, "New name")
 

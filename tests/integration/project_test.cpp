@@ -291,15 +291,29 @@ TEST(Project, ObjectEditsPreserveIdentityAndDoNotMutatePreviousSnapshots) {
     EXPECT_THROW((void)original.with_satellite_copy("TwoBody", "长期项", "copy"),
                  application::ProjectError);
 }
-TEST(Project, VersionOneFilesRetainIdsAndAcquireNamesOnlyWhenEdited) {
-    const auto old = application::load_project(ORBITFORGE_PROJECT_V1);
-    ASSERT_EQ(old.satellites.size(), 2U);
-    EXPECT_TRUE(old.satellites[0].display_name.empty());
-    EXPECT_EQ(old.satellites[0].name(), old.satellites[0].orbit.object_id);
-    const auto updated = application::decode_project(application::encode_project(old));
-    EXPECT_EQ(updated.satellites[0].orbit.initial.position_m,
-              old.satellites[0].orbit.initial.position_m);
-    EXPECT_EQ(updated.current, old.current);
+TEST(Project, CurrentSchemaFixturePreservesInputsRelationshipsAndExactEncoding) {
+    const auto project = application::load_project(ORBITFORGE_PROJECT_CURRENT);
+    ASSERT_EQ(project.satellites.size(), 2U);
+    EXPECT_EQ(project.name, "Schema fixture");
+    EXPECT_EQ(project.satellites[0].orbit.object_id, "satellite-a");
+    EXPECT_EQ(project.satellites[0].display_name, "观测卫星 A");
+    EXPECT_EQ(project.satellites[0].orbit.initial.position_m,
+              (std::array<double, 3>{7000000, 0, 0}));
+    EXPECT_EQ(project.satellites[0].display.line_style, application::LineStyle::dash_dot);
+    EXPECT_EQ(project.satellites[0].display.line_width, 3.25);
+    EXPECT_EQ(project.satellites[1].orbit.propagator, application::OrbitPropagator::j2_secular);
+    ASSERT_EQ(project.ground_stations.size(), 1U);
+    EXPECT_EQ(project.ground_stations[0].minimum_elevation_rad, 0.2);
+    ASSERT_EQ(project.sensors.size(), 1U);
+    EXPECT_EQ(project.sensors[0].parent_satellite_id, "satellite-a");
+    EXPECT_EQ(project.sensors[0].target_station_id, "station-a");
+    EXPECT_EQ(project.sensors[0].pointing, application::SensorPointing::targeted);
+    ASSERT_EQ(project.reports.size(), 1U);
+    EXPECT_EQ(project.reports[0].object_ids, (std::vector<std::string>{"station-a", "sensor-a"}));
+    EXPECT_EQ(project.analysis_status(), application::AnalysisStatus::unrecorded);
+    std::ifstream input(ORBITFORGE_PROJECT_CURRENT, std::ios::binary);
+    const std::vector<std::uint8_t> fixture(std::istreambuf_iterator<char>{input}, {});
+    EXPECT_EQ(application::encode_project(project), fixture);
 }
 TEST(Project, DataLockPinsFilesInterpretationCoverageAndTransitiveTimeDependency) {
     const auto project = example();
@@ -347,16 +361,24 @@ TEST(Project, DataLocksHaveStableCanonicalOrderAndRejectDuplicateRoles) {
     reversed.front().content_sha256 = "not-a-hash";
     EXPECT_THROW((void)application::DataLock(reversed), std::invalid_argument);
 }
-TEST(Project, VersionTwoFilesUpgradeNamesAndDataReferencesWithoutChangingInputs) {
-    const auto old = application::load_project(ORBITFORGE_PROJECT_V2);
-    ASSERT_EQ(old.satellites.size(), 2U);
-    EXPECT_EQ(old.satellites[0].display_name, "观测卫星 A");
-    EXPECT_EQ(old.data_lock().references().size(), 2U);
-    const auto updated = application::decode_project(application::encode_project(old));
-    EXPECT_EQ(updated.data_lock(), old.data_lock());
-    EXPECT_EQ(updated.satellites[0].orbit.initial.position_m,
-              old.satellites[0].orbit.initial.position_m);
-    EXPECT_EQ(updated.current, old.current);
+TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
+    const auto bytes = application::encode_project(example());
+    for (std::uint32_t version = 0; version <= 12; ++version) {
+        if (version == 11)
+            continue;
+        SCOPED_TRACE(version);
+        auto unsupported = bytes;
+        for (unsigned i = 0; i < 4; ++i)
+            unsupported[8 + i] = static_cast<std::uint8_t>(version >> (8 * i));
+        try {
+            (void)application::decode_project(unsupported);
+            FAIL() << "Unsupported version was accepted";
+        } catch (const application::ProjectError &error) {
+            EXPECT_NE(std::string(error.what()).find("version " + std::to_string(version) + ";"),
+                      std::string::npos);
+            EXPECT_NE(std::string(error.what()).find("reads only version 11"), std::string::npos);
+        }
+    }
 }
 TEST(Project, ExtrapolationPolicyRoundTripsAndParticipatesInProvenanceWithoutExtendingRawCoverage) {
     auto project = example();

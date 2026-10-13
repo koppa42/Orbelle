@@ -3,10 +3,9 @@ import math
 import struct
 import tempfile
 import unittest
-import zlib
-# Native value/format compatibility tests; public editing is in test_objects.py.
+# Native value/format tests; public editing is in test_objects.py.
 from orbitforge import _native as of
-from project_fixtures import legacy_objects, legacy_stations
+from project_format import rewrite_section
 
 
 class TrackStyleTests(unittest.TestCase):
@@ -20,26 +19,6 @@ class TrackStyleTests(unittest.TestCase):
         display.line_width = 3.25
         project.add_satellite(orbit, display)
         return project
-
-    @staticmethod
-    def rewrite(raw, mutate, version=10):
-        sections, offset = [], 24
-        while offset < len(raw):
-            tag, schema, size, _ = struct.unpack_from('<4sIQI', raw, offset)
-            body = raw[offset + 20:offset + 20 + size]
-            offset += 20 + size
-            if version < 10 and tag == b'SNSR':
-                continue
-            if version < 10 and tag == b'GSTN':
-                body, schema = legacy_stations(body), 1
-            if version < 9 and tag == b'OBJS':
-                body, schema = legacy_objects(body), 2
-            if tag == b'STYL':
-                body = mutate(body)
-            if body is not None:
-                sections.append(struct.pack('<4sIQI', tag, schema, len(body), zlib.crc32(body)) + body)
-        payload = b''.join(sections)
-        return raw[:8] + struct.pack('<IQI', version, len(payload), zlib.crc32(payload)) + payload
 
     def test_styles_roundtrip_copy_and_do_not_change_numerical_results_or_report_hash(self):
         project = self.project()
@@ -71,17 +50,11 @@ class TrackStyleTests(unittest.TestCase):
             self.assertEqual(a.position_m, b.position_m)
             self.assertEqual(a.velocity_mps, b.velocity_mps)
 
-    def test_legacy_defaults_and_style_integrity_even_after_repairing_crcs(self):
+    def test_style_integrity_even_after_repairing_crcs(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'styles.orbitforge'
             self.project().save(path)
             raw = path.read_bytes()
-            # v7 had the same object records but no STYL section.
-            path.write_bytes(self.rewrite(raw, lambda body: None, version=7))
-            display = of.load_project(path).satellites[0].display
-            self.assertEqual(display.line_color, 0x73CDEE)
-            self.assertEqual(display.line_width, 1.5)
-            self.assertEqual(display.line_style, of.LineStyle.SOLID)
             for mutate in (
                 lambda b: None,
                 lambda b: struct.pack('<I', 2) + b[4:],
@@ -93,7 +66,7 @@ class TrackStyleTests(unittest.TestCase):
                 lambda b: b.replace(b'satellite-1', b'unknown-id1'),
                 lambda b: b + b'\0',
             ):
-                path.write_bytes(self.rewrite(raw, mutate))
+                path.write_bytes(rewrite_section(raw, b"STYL", mutate))
                 with self.assertRaises(of.ProjectError):
                     of.load_project(path)
 
