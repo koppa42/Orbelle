@@ -89,6 +89,154 @@ bool report_available(ReportDialog &dialog, int row) {
     dialog.findChild<QPushButton *>("reportLibrary")->click();
     return available;
 }
+void wait_for_report(ReportDialog &dialog) {
+    const auto *generate = dialog.findChild<QPushButton *>("generateReport");
+    QElapsedTimer timer;
+    timer.start();
+    while (!generate->isEnabled() && timer.elapsed() < 5000) {
+        QCoreApplication::processEvents();
+        QThread::msleep(2);
+    }
+    ASSERT_TRUE(generate->isEnabled());
+}
+TEST(ReportDialog, StalePreparationGenerationAndCancellationPreservePublishedResult) {
+    (void)test_app();
+    const auto data = runtime::DataSnapshot::builtin_time();
+    application::Project project("Fixed inputs", core::Epoch{0}, core::Epoch{120'000'000'000});
+    project.ground_stations.push_back({"station", "Station", {0, 0, 0}});
+    ReportDialog::Ready pending;
+    ReportDialog dialog(
+        project, data.time(), [&](auto ready) { pending = std::move(ready); }, [](auto) {},
+        [](auto) {});
+    int publications = 0;
+    dialog.result_published = [&](auto result, const runtime::Analysis &analysis) {
+        ++publications;
+        EXPECT_EQ(result->input_revision, analysis.snapshot().revision);
+        EXPECT_EQ(analysis.data().time(), data.time());
+        EXPECT_EQ(analysis.snapshot().project->ground_stations[0].location.height_m, 0);
+    };
+    dialog.select_object("station", application::ReportKind::cartesian_state);
+    dialog.findChild<QComboBox *>("reportFrame")->setCurrentIndex(1);
+    auto *generate = dialog.findChild<QPushButton *>("generateReport");
+    auto *table = dialog.findChild<QTableView *>("reportTable");
+    auto *status = dialog.findChild<QLabel *>("reportStatus");
+    const auto release = [&](application::Project input) {
+        ASSERT_TRUE(pending);
+        auto ready = std::move(pending);
+        pending = {};
+        ready(ReportInput{std::move(input), data}, {});
+    };
+    generate->click();
+    release(project);
+    wait_for_report(dialog);
+    ASSERT_EQ(publications, 1);
+    ASSERT_EQ(table->model()->rowCount(), 3);
+    const auto original = table->model()->data(table->model()->index(0, 3));
+
+    // Reject a delayed preflight callback carrying an older scene.
+    generate->click();
+    auto changed = project;
+    changed.ground_stations[0].location.height_m = 400;
+    dialog.update_project(changed, data.time());
+    release(project);
+    EXPECT_TRUE(generate->isEnabled());
+    EXPECT_TRUE(status->text().contains(QStringLiteral("准备期间已变化")));
+    EXPECT_EQ(publications, 1);
+    dialog.update_project(project, data.time());
+
+    // Even changing inputs and then restoring them cannot revive an old job.
+    // No GUI polling occurs between starting the worker and the two changes.
+    generate->click();
+    release(project);
+    dialog.update_project(changed, data.time());
+    dialog.update_project(project, data.time());
+    wait_for_report(dialog);
+    EXPECT_EQ(publications, 1);
+    EXPECT_TRUE(status->text().contains(QStringLiteral("未发布过期报告")));
+    EXPECT_EQ(table->model()->data(table->model()->index(0, 3)), original);
+
+    generate->click();
+    release(project);
+    dialog.findChild<QPushButton *>("cancelReport")->click();
+    wait_for_report(dialog);
+    EXPECT_EQ(publications, 1);
+    EXPECT_TRUE(status->text().contains(QStringLiteral("已取消")));
+    EXPECT_EQ(table->model()->rowCount(), 3);
+
+    // Playback does not change computation inputs and must not discard a report.
+    generate->click();
+    release(project);
+    project.current = core::Epoch{1};
+    dialog.update_project(project, data.time());
+    wait_for_report(dialog);
+    EXPECT_EQ(publications, 2);
+
+    generate->click();
+    release(project);
+    project.ground_stations.clear();
+    dialog.update_project(project, data.time());
+    wait_for_report(dialog);
+    EXPECT_EQ(publications, 2);
+    EXPECT_TRUE(status->text().contains(QStringLiteral("未发布过期报告")));
+    EXPECT_EQ(table->model()->rowCount(), 3);
+}
+TEST(ReportDialog, AnalysisDoesNotSilentlyAcceptChangedDataAndUsesConfirmedPreflight) {
+    (void)test_app();
+    auto data = runtime::DataSnapshot::load(ORBITFORGE_ACCESS_EOP);
+    application::Project project("Confirmed data", core::Epoch{0}, core::Epoch{120'000'000'000});
+    project.earth_orientation = data.eop()->data_info();
+    project.ground_stations.push_back({"station", "Station", {0, 0, 0}});
+    ReportDialog::Ready pending;
+    ReportDialog dialog(
+        project, data.time(), [&](auto ready) { pending = std::move(ready); }, [](auto) {},
+        [](auto) {});
+    int publications = 0;
+    dialog.result_published = [&](auto, const runtime::Analysis &analysis) {
+        ++publications;
+        EXPECT_EQ(analysis.data().eop(), data.eop());
+        EXPECT_EQ(analysis.data().data_lock(), project.data_lock());
+    };
+    dialog.select_object("station", application::ReportKind::cartesian_state);
+    auto *generate = dialog.findChild<QPushButton *>("generateReport");
+    const auto release = [&] {
+        ASSERT_TRUE(pending);
+        auto ready = std::move(pending);
+        pending = {};
+        ready(ReportInput{project, data}, {});
+        wait_for_report(dialog);
+    };
+    generate->click();
+    release();
+    ASSERT_EQ(publications, 1);
+    data = runtime::DataSnapshot::load(ORBITFORGE_ACCESS_EOP, {}, 2);
+    generate->click();
+    release();
+    EXPECT_EQ(publications, 1);
+    EXPECT_TRUE(
+        dialog.findChild<QLabel *>("reportStatus")->text().contains(QStringLiteral("失败")));
+    EXPECT_EQ(dialog.findChild<QTableView *>("reportTable")->model()->rowCount(), 3);
+
+    generate->click();
+    // The workbench publishes the approved scene before returning the preflight.
+    project.earth_orientation = data.eop()->data_info();
+    dialog.update_project(project, data.time());
+    release();
+    EXPECT_EQ(publications, 2);
+}
+TEST(ReportDialog, LatePreflightAfterWindowDestructionIsIgnored) {
+    (void)test_app();
+    const auto data = runtime::DataSnapshot::builtin_time();
+    application::Project project("Closed report", core::Epoch{0}, core::Epoch{10});
+    ReportDialog::Ready pending;
+    {
+        ReportDialog dialog(
+            project, data.time(), [&](auto ready) { pending = std::move(ready); }, [](auto) {},
+            [](auto) {});
+        dialog.findChild<QPushButton *>("generateReport")->click();
+        ASSERT_TRUE(pending);
+    }
+    EXPECT_NO_THROW(pending(ReportInput{project, data}, {}));
+}
 TEST(ReportDialog, PreparingTemplatesAndDockingDoesNotShowTemporaryWindows) {
     (void)test_app();
     WindowShowObserver windows;
@@ -180,7 +328,7 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
     generate->click();
     ASSERT_TRUE(pending);
     EXPECT_FALSE(generate->isEnabled());
-    pending(runtime::ReportContext{project, time, {}, {}}, {});
+    pending(ReportInput{project, runtime::DataSnapshot::from_providers(time)}, {});
     pending = {};
     wait();
     ASSERT_EQ(table->model()->rowCount(), 4);
@@ -239,7 +387,7 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
     generate->click();
     ASSERT_TRUE(pending);
     cancel->click();
-    pending(runtime::ReportContext{project, time, {}, {}}, {});
+    pending(ReportInput{project, runtime::DataSnapshot::from_providers(time)}, {});
     pending = {};
     EXPECT_TRUE(generate->isEnabled());
     EXPECT_EQ(table->model()->rowCount(), 4);
@@ -253,7 +401,7 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
     dialog.findChild<QComboBox *>("reportFrame")->setCurrentIndex(0);
     generate->click();
     ASSERT_TRUE(pending);
-    pending(runtime::ReportContext{project, time, {}, {}}, {});
+    pending(ReportInput{project, runtime::DataSnapshot::from_providers(time)}, {});
     pending = {};
     wait();
     EXPECT_EQ(table->model()->rowCount(), 4);
@@ -268,7 +416,7 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
     choose_report(dialog, 3);
     generate->click();
     ASSERT_TRUE(pending);
-    pending(runtime::ReportContext{project, time, {}, {}}, {});
+    pending(ReportInput{project, runtime::DataSnapshot::from_providers(time)}, {});
     pending = {};
     wait();
     EXPECT_EQ(table->model()->rowCount(), 1);
@@ -308,7 +456,7 @@ TEST(ReportDialog, ObjectScopeSurvivesTemplateChangesSavedConfigurationsAndProje
     ReportDialog dialog(
         project, time,
         [&](ReportDialog::Ready ready) {
-            ready(runtime::ReportContext{project, time, {}, {}}, {});
+            ready(ReportInput{project, runtime::DataSnapshot::from_providers(time)}, {});
         },
         [&](auto reports) { project.reports = std::move(reports); }, [](auto) {});
     dialog.show();
@@ -418,7 +566,7 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
         project, time,
         [&](ReportDialog::Ready ready) {
             ++preparations;
-            ready(runtime::ReportContext{project, time, {}, {}}, {});
+            ready(ReportInput{project, runtime::DataSnapshot::from_providers(time)}, {});
         },
         [&](auto reports) { project.reports = std::move(reports); },
         [&](core::Epoch epoch) { sought = epoch; });
@@ -816,10 +964,11 @@ TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
     ReportDialog dialog(
         project, time,
         [&](ReportDialog::Ready ready) {
-            ready(runtime::ReportContext{project, time, frames, eop}, {});
+            ready(ReportInput{project, runtime::DataSnapshot::from_providers(time, frames, eop)},
+                  {});
         },
         [&](auto reports) { project.reports = std::move(reports); }, [](auto) {});
-    dialog.result_published = [&](auto) { ++published; };
+    dialog.result_published = [&](auto, const auto &) { ++published; };
     dialog.show();
     dialog.select_object("sensor", application::ReportKind::access_intervals);
     auto *station = dialog.findChild<ObjectSelectionField *>("accessStation");
@@ -906,10 +1055,14 @@ TEST(ReportDialog, TemplateUnitsReuseResultsAndReorderedFieldsKeepPlotsAndSelect
         project, time,
         [&](ReportDialog::Ready ready) {
             ++preparations;
-            ready(runtime::ReportContext{project, time, {}, {}}, {});
+            ready(ReportInput{project, runtime::DataSnapshot::from_providers(time)}, {});
         },
         [](auto) {}, [](auto) {});
-    dialog.result_published = [&](auto result) { published = std::move(result); };
+    dialog.result_published = [&](auto result, const runtime::Analysis &analysis) {
+        EXPECT_EQ(result->input_revision, analysis.snapshot().revision);
+        EXPECT_EQ(analysis.data().time(), time);
+        published = std::move(result);
+    };
     choose_report(dialog, 9);
     auto *generate = dialog.findChild<QPushButton *>("generateReport");
     auto *table = dialog.findChild<QTableView *>("reportTable");

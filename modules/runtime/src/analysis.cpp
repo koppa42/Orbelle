@@ -85,6 +85,12 @@ DataSnapshot::DataSnapshot(std::shared_ptr<const core::ITimeProvider> time,
     }
 }
 DataSnapshot DataSnapshot::builtin_time() { return DataSnapshot{make_builtin_time_provider()}; }
+DataSnapshot
+DataSnapshot::from_providers(std::shared_ptr<const core::ITimeProvider> time,
+                             std::shared_ptr<const core::IFrameProvider> frames,
+                             std::shared_ptr<const core::IEarthOrientationProvider> eop) {
+    return DataSnapshot{std::move(time), std::move(frames), std::move(eop)};
+}
 DataSnapshot DataSnapshot::load(const std::filesystem::path &manifest,
                                 const std::filesystem::path &time_file, int days) {
     if (manifest.empty() && time_file.empty())

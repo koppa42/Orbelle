@@ -29,6 +29,15 @@ class DataSnapshot {
   public:
     DataSnapshot() = default;
     [[nodiscard]] static DataSnapshot builtin_time();
+    // C++ adapter entry point for already loaded, immutable providers. Retains
+    // shared ownership; never reloads files. Providers must stay immutable and
+    // support concurrent reads. EOP and time must identify the same UTC resource.
+    // Empty, time-only and full triples are valid. Incomplete triples or different
+    // UTC identities throw invalid_argument; Analysis preparation checks coverage.
+    [[nodiscard]] static DataSnapshot
+    from_providers(std::shared_ptr<const core::ITimeProvider> time,
+                   std::shared_ptr<const core::IFrameProvider> frames = {},
+                   std::shared_ptr<const core::IEarthOrientationProvider> eop = {});
     // An EOP file uses the explicit time_file, or the built-in time table when omitted.
     // At least one path is required. Both files are parsed now, never reopened by Analysis.
     [[nodiscard]] static DataSnapshot load(const std::filesystem::path &eop_manifest = {},
