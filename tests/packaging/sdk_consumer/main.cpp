@@ -44,9 +44,10 @@ int main(int argc, char **argv) {
     report_project.ground_stations.push_back({"station", "SDK station", {0, 0, 0}});
     orbitforge::application::ReportDefinition report;
     report.id = "sdk-report";
+    report.query.scope = orbitforge::application::ReportScope::all_compatible;
     report.name = "SDK report";
-    report.frame = orbitforge::core::FrameId::itrf;
-    report.time_scale = orbitforge::application::ReportTimeScale::tai;
+    report.query.frame = orbitforge::core::FrameId::itrf;
+    report.format.time_scale = orbitforge::application::ReportTimeScale::tai;
     const auto table = orbitforge::runtime::generate_report({report_project, {}, {}, {}}, report);
     if (table.table.rows().size() != 2 || std::get<double>(table.table.rows()[0][4]) != 6378137)
         return 18;
@@ -130,9 +131,9 @@ int main(int argc, char **argv) {
             app::ReportDefinition definition;
             definition.id = "sdk-aer";
             definition.name = "AER";
-            definition.kind = app::ReportKind::aer;
-            definition.object_ids = {station.id(), sensor.id()};
-            definition.step_nanoseconds = 1'000'000'000;
+            definition.query.kind = app::ReportKind::aer;
+            definition.query.object_ids = {station.id(), sensor.id()};
+            definition.query.step_nanoseconds = 1'000'000'000;
             const auto report = analysis.report(definition);
             if (aer.samples().size() != 12 || report.table.rows().size() != 12 ||
                 aer.samples().back().epoch != access_project.snapshot().project->last ||
@@ -142,6 +143,15 @@ int main(int argc, char **argv) {
                 return 30;
             runtime::export_aer_csv(aer, "sdk-aer.csv", true);
             runtime::export_report_csv(report, "sdk-report.csv", true);
+            app::ReportTemplate format;
+            format.time_scale = app::ReportTimeScale::tai;
+            format.columns = {{"aer.range", "km", "Range"}, {"time.epoch", "TAI", ""}};
+            const auto formatted = analysis.report(definition.query, format);
+            const auto restored = formatted.with_template(definition.format);
+            if (formatted.table.columns().size() != 2 || formatted.column_unit(0) != "km" ||
+                restored.table.rows() != report.table.rows() ||
+                formatted.input_revision != report.input_revision)
+                return 31;
         }
         if (orbitforge::runtime::data_catalog_available()) {
             orbitforge::runtime::DataCatalog catalog("sdk-data-catalog");

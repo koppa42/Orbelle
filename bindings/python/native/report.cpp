@@ -78,19 +78,37 @@ void bind_reports(py::module_ &module) {
         .value("UTC", application::ReportTimeScale::utc)
         .value("TAI", application::ReportTimeScale::tai)
         .value("TT", application::ReportTimeScale::tt);
+    py::enum_<application::ReportScope>(module, "ReportScope")
+        .value("OBJECTS", application::ReportScope::objects)
+        .value("ALL_COMPATIBLE", application::ReportScope::all_compatible);
+    py::class_<application::ReportQuery>(module, "ReportQuery")
+        .def(py::init<>())
+        .def_readwrite("kind", &application::ReportQuery::kind)
+        .def_readwrite("scope", &application::ReportQuery::scope)
+        .def_readwrite("object_ids", &application::ReportQuery::object_ids)
+        .def_readwrite("follow_scenario", &application::ReportQuery::follow_scenario)
+        .def_readwrite("first", &application::ReportQuery::first)
+        .def_readwrite("last", &application::ReportQuery::last)
+        .def_readwrite("step_nanoseconds", &application::ReportQuery::step_nanoseconds)
+        .def_readwrite("frame", &application::ReportQuery::frame);
+    py::class_<application::ReportColumnSpec>(module, "ReportColumnSpec")
+        .def(py::init<std::string, std::string, std::string>(), py::arg("field"),
+             py::arg("unit") = "", py::arg("title") = "")
+        .def_readwrite("field", &application::ReportColumnSpec::field)
+        .def_readwrite("unit", &application::ReportColumnSpec::unit)
+        .def_readwrite("title", &application::ReportColumnSpec::title);
+    py::class_<application::ReportTemplate>(module, "ReportTemplate")
+        .def(py::init<>())
+        .def_readwrite("columns", &application::ReportTemplate::columns)
+        .def_readwrite("units", &application::ReportTemplate::units)
+        .def_readwrite("time_scale", &application::ReportTemplate::time_scale);
     py::class_<application::ReportDefinition>(module, "ReportDefinition")
         .def(py::init<>())
         .def_readwrite("id", &application::ReportDefinition::id)
         .def_readwrite("name", &application::ReportDefinition::name)
-        .def_readwrite("kind", &application::ReportDefinition::kind)
-        .def_readwrite("object_ids", &application::ReportDefinition::object_ids)
-        .def_readwrite("follow_scenario", &application::ReportDefinition::follow_scenario)
-        .def_readwrite("first", &application::ReportDefinition::first)
-        .def_readwrite("last", &application::ReportDefinition::last)
-        .def_readwrite("step_nanoseconds", &application::ReportDefinition::step_nanoseconds)
-        .def_readwrite("frame", &application::ReportDefinition::frame)
-        .def_readwrite("units", &application::ReportDefinition::units)
-        .def_readwrite("time_scale", &application::ReportDefinition::time_scale);
+        .def_readwrite("query", &application::ReportDefinition::query)
+        .def_readwrite("format", &application::ReportDefinition::format);
+    module.def("report_columns", &application::report_columns, py::arg("kind"));
     py::class_<results::Column>(module, "ReportColumn")
         .def_readonly("id", &results::Column::id)
         .def_readonly("title", &results::Column::title)
@@ -117,6 +135,14 @@ void bind_reports(py::module_ &module) {
         .def("numeric_value", &runtime::ReportResult::numeric_value, py::arg("row"),
              py::arg("column"))
         .def("cell_text", &runtime::ReportResult::cell_text, py::arg("row"), py::arg("column"))
+        .def(
+            "with_template",
+            [](const runtime::ReportResult &result, const application::ReportTemplate &format) {
+                const auto captured = format;
+                py::gil_scoped_release release;
+                return result.with_template(captured);
+            },
+            py::arg("format"))
         .def(
             "export_csv",
             [](const runtime::ReportResult &r, const std::filesystem::path &path, bool overwrite) {

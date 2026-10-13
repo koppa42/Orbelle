@@ -21,10 +21,11 @@ definition(application::ReportKind kind = application::ReportKind::cartesian_sta
     application::ReportDefinition d;
     d.id = "report-a";
     d.name = "报告";
-    d.kind = kind;
-    d.frame = core::FrameId::itrf;
-    d.time_scale = application::ReportTimeScale::tai;
-    d.step_nanoseconds = 1'000'000'000;
+    d.query.kind = kind;
+    d.query.scope = application::ReportScope::all_compatible;
+    d.query.frame = core::FrameId::itrf;
+    d.format.time_scale = application::ReportTimeScale::tai;
+    d.query.step_nanoseconds = 1'000'000'000;
     return d;
 }
 std::string read(const std::filesystem::path &path) {
@@ -44,12 +45,12 @@ TEST(Reports, SamplesIntegerNanosecondsAndIncludesExactStopOnce) {
         EXPECT_DOUBLE_EQ(std::get<double>(result.table.rows()[i][7]), 0);
     }
     EXPECT_EQ(result.cell_text(3, 2), "2000-01-01T12:00:02.000000001");
-    d.follow_scenario = false;
-    d.first = core::Epoch{1};
-    d.last = core::Epoch{1};
+    d.query.follow_scenario = false;
+    d.query.first = core::Epoch{1};
+    d.query.last = core::Epoch{1};
     EXPECT_EQ(runtime::generate_report(c, d).table.rows().size(), 1U);
-    d.first = c.project.first;
-    d.last = core::Epoch{2'000'000'000};
+    d.query.first = c.project.first;
+    d.query.last = core::Epoch{2'000'000'000};
     EXPECT_EQ(runtime::generate_report(c, d).table.rows().size(), 3U);
 }
 TEST(Reports, StaticTemplatesHaveTypedValuesAndDoNotRequireOrbitLibraries) {
@@ -77,9 +78,10 @@ TEST(Reports, IndependentScientificSamplesMatchSessionRegardlessOfDisplayStep) {
     satellite.orbit.step_seconds = 60;
     c.project.satellites.push_back(satellite);
     auto d = definition();
-    d.frame = core::FrameId::gcrf;
-    d.object_ids = {satellite.orbit.object_id};
-    d.step_nanoseconds = 13'000'000'001;
+    d.query.frame = core::FrameId::gcrf;
+    d.query.scope = application::ReportScope::objects;
+    d.query.object_ids = {satellite.orbit.object_id};
+    d.query.step_nanoseconds = 13'000'000'001;
     const auto result = runtime::generate_report(c, d);
     const auto session = runtime::make_orbit_session(satellite.orbit);
     for (const auto &row : result.table.rows()) {
@@ -102,7 +104,7 @@ TEST(Reports, FrameConversionRetainsEarthRotationVelocityAndConfirmedData) {
     c.eop = runtime::load_eop_snapshot(ORBITFORGE_REPORT_EOP);
     c.project.earth_orientation = c.eop->data_info();
     auto d = definition();
-    d.frame = core::FrameId::gcrf;
+    d.query.frame = core::FrameId::gcrf;
     const auto result = runtime::generate_report(c, d);
     const auto fixed =
         core::GroundStation(c.project.ground_stations[0].location).state_at(c.project.first);
@@ -133,29 +135,31 @@ TEST(Reports, UtcLeapSecondTaiAndTtFormattingPreserveEpoch) {
     c.project = c.project.with_settings("Leap", c.time->from_utc({2016, 12, 31, 23, 59, 59, 0}),
                                         c.time->from_utc({2017, 1, 1, 0, 0, 0, 0}));
     auto d = definition();
-    d.time_scale = application::ReportTimeScale::utc;
+    d.format.time_scale = application::ReportTimeScale::utc;
     auto r = runtime::generate_report(c, d);
     ASSERT_EQ(r.table.rows().size(), 3U);
     EXPECT_EQ(r.cell_text(1, 2), "2016-12-31T23:59:60.000000000Z");
     EXPECT_EQ(r.cell_text(2, 2), "2017-01-01T00:00:00.000000000Z");
-    d.time_scale = application::ReportTimeScale::tt;
+    d.format.time_scale = application::ReportTimeScale::tt;
     r = runtime::generate_report(stations(), d);
     EXPECT_EQ(r.cell_text(0, 2), "2000-01-01T12:00:32.184000000");
 }
 TEST(Reports, RejectsMissingObjectsIncompatibleBindingsInvalidRangesAndExcessRows) {
     auto c = stations();
     auto d = definition();
-    d.object_ids = {"missing"};
+    d.query.scope = application::ReportScope::objects;
+    d.query.object_ids = {"missing"};
     EXPECT_THROW((void)runtime::generate_report(c, d), std::invalid_argument);
-    d.object_ids.clear();
-    d.follow_scenario = false;
-    d.first = core::Epoch{-1};
-    d.last = c.project.last;
+    d.query.object_ids.clear();
+    d.query.scope = application::ReportScope::all_compatible;
+    d.query.follow_scenario = false;
+    d.query.first = core::Epoch{-1};
+    d.query.last = c.project.last;
     EXPECT_THROW((void)runtime::estimate_report_rows(c.project, d), std::invalid_argument);
-    d.follow_scenario = true;
-    d.step_nanoseconds = 1;
+    d.query.follow_scenario = true;
+    d.query.step_nanoseconds = 1;
     EXPECT_THROW((void)runtime::estimate_report_rows(c.project, d), std::invalid_argument);
-    d.step_nanoseconds = 0;
+    d.query.step_nanoseconds = 0;
     EXPECT_THROW((void)runtime::estimate_report_rows(c.project, d), std::invalid_argument);
     d = definition();
     c.project.ground_stations.clear();
@@ -197,19 +201,20 @@ TEST(Reports, CsvQuotesUnicodeAndPreservesExistingFilesOnFailureAndCancellation)
 TEST(Reports, SavedDefinitionsRoundTripAndMissingBindingsDoNotPreventProjectLoading) {
     auto p = stations().project;
     auto d = definition();
-    d.object_ids = {"deleted-station"};
-    d.follow_scenario = false;
-    d.first = core::Epoch{17};
-    d.last = core::Epoch{19};
-    d.step_nanoseconds = 3;
-    d.time_scale = application::ReportTimeScale::tt;
+    d.query.scope = application::ReportScope::objects;
+    d.query.object_ids = {"deleted-station"};
+    d.query.follow_scenario = false;
+    d.query.first = core::Epoch{17};
+    d.query.last = core::Epoch{19};
+    d.query.step_nanoseconds = 3;
+    d.format.time_scale = application::ReportTimeScale::tt;
     p.reports.push_back(d);
     const auto bytes = application::encode_project(p);
-    EXPECT_EQ(bytes[8], 11);
+    EXPECT_EQ(bytes[8], 12);
     const auto restored = application::decode_project(bytes);
     ASSERT_EQ(restored.reports.size(), 1U);
     EXPECT_EQ(application::encode_project(restored), bytes);
-    EXPECT_EQ(restored.reports[0].object_ids, d.object_ids);
+    EXPECT_EQ(restored.reports[0].query.object_ids, d.query.object_ids);
     EXPECT_THROW((void)runtime::estimate_report_rows(restored, restored.reports[0]),
                  std::invalid_argument);
     p.reports.push_back(d);
@@ -241,7 +246,7 @@ TEST(Reports, DerivedTemplatesUsePhysicalFramesAndPreserveTwoBodyInvariants) {
     s.orbit.initial = runtime::to_cartesian(input, core::GravitationalParameter{mu});
     c.project.satellites.push_back(s);
     auto d = definition(application::ReportKind::classical_elements);
-    d.step_nanoseconds = 137'000'000'000;
+    d.query.step_nanoseconds = 137'000'000'000;
     // Empty selection includes satellites only; an ITRF preference cannot rotate elements.
     const auto elements = runtime::generate_report(c, d);
     EXPECT_EQ(elements.table.rows().size(), 54U);
@@ -259,7 +264,7 @@ TEST(Reports, DerivedTemplatesUsePhysicalFramesAndPreserveTwoBodyInvariants) {
     EXPECT_EQ(elements.column_unit(6), "deg");
     EXPECT_NEAR(*elements.numeric_value(0, 6), .6 * 180 / std::numbers::pi, 1e-11);
     EXPECT_FALSE(elements.numeric_value(0, 2));
-    d.kind = application::ReportKind::orbital_motion;
+    d.query.kind = application::ReportKind::orbital_motion;
     const auto motion = runtime::generate_report(c, d);
     for (const auto &row : motion.table.rows()) {
         const auto r = std::get<double>(row[4]), v = std::get<double>(row[5]);
@@ -277,15 +282,17 @@ TEST(Reports, DerivedTemplatesUsePhysicalFramesAndPreserveTwoBodyInvariants) {
     EXPECT_EQ(std::get<core::Epoch>(motion.table.rows().back()[2]), c.project.last);
     for (auto kind :
          {application::ReportKind::classical_elements, application::ReportKind::orbital_motion}) {
-        d.kind = kind;
-        d.object_ids = {"station"};
+        d.query.kind = kind;
+        d.query.scope = application::ReportScope::objects;
+        d.query.object_ids = {"station"};
         EXPECT_THROW((void)runtime::estimate_report_rows(c.project, d), std::invalid_argument);
     }
     // The shared element conversion also accepts a non-singular hyperbolic orbit.
     c.project.satellites[0].orbit.initial = runtime::to_cartesian(
         {c.project.first, -2e7, 1.5, .4, .3, .2, 0}, core::GravitationalParameter{mu});
-    d.kind = application::ReportKind::classical_elements;
-    d.object_ids.clear();
+    d.query.kind = application::ReportKind::classical_elements;
+    d.query.object_ids.clear();
+    d.query.scope = application::ReportScope::all_compatible;
     const auto hyperbolic = runtime::generate_report(c, d);
     EXPECT_NEAR(std::get<double>(hyperbolic.table.rows().back()[4]), -2e7, .001);
     EXPECT_NEAR(std::get<double>(hyperbolic.table.rows().back()[5]), 1.5, 1e-11);
@@ -315,7 +322,8 @@ TEST(Reports, GeodeticCoordinatesMatchPublishedWgs84ReferenceAndPoleGeometry) {
     auto c = stations();
     c.project.ground_stations[0].location = {-std::numbers::pi, .6, -400};
     auto d = definition(application::ReportKind::geodetic_position);
-    d.frame = core::FrameId::gcrf; // Template fixes ITRF without needing EOP for a fixed station.
+    d.query.frame =
+        core::FrameId::gcrf; // Template fixes ITRF without needing EOP for a fixed station.
     const auto r = runtime::generate_report(c, d);
     ASSERT_EQ(r.table.rows().size(), 4U);
     EXPECT_EQ(std::get<std::string>(r.table.rows()[0][3]), "ITRF");
@@ -343,9 +351,10 @@ TEST(Reports, SatelliteGeodeticRequiresConfirmedEopAndNewTemplatesRoundTrip) {
         c.frames->gcrf_to_itrf_state(c.project.first, c.eop->at(c.project.first)).inverse(fixed);
     c.project.satellites.push_back(s);
     auto d = definition(application::ReportKind::geodetic_position);
-    d.object_ids = {s.orbit.object_id};
-    d.follow_scenario = false;
-    d.first = d.last = c.project.first;
+    d.query.scope = application::ReportScope::objects;
+    d.query.object_ids = {s.orbit.object_id};
+    d.query.follow_scenario = false;
+    d.query.first = d.query.last = c.project.first;
     const auto r = runtime::generate_report(c, d);
     EXPECT_NEAR(std::get<double>(r.table.rows()[0][4]), 0, 1e-12);
     EXPECT_NEAR(std::get<double>(r.table.rows()[0][5]), 0, 1e-12);
@@ -353,9 +362,13 @@ TEST(Reports, SatelliteGeodeticRequiresConfirmedEopAndNewTemplatesRoundTrip) {
     c.eop.reset();
     EXPECT_THROW((void)runtime::generate_report(c, d), std::invalid_argument);
     for (auto kind : application::report_kinds) {
-        d.kind = kind;
-        if (application::report_is_access(kind))
-            d.object_ids = {"station", "satellite-1"};
+        d.query.kind = kind;
+        d.query.scope = application::ReportScope::all_compatible;
+        d.query.object_ids.clear();
+        if (application::report_is_access(kind)) {
+            d.query.scope = application::ReportScope::objects;
+            d.query.object_ids = {"station", "satellite-1"};
+        }
         d.id = "template-" + std::to_string(static_cast<int>(kind));
         c.project.reports.push_back(d);
     }
@@ -371,4 +384,83 @@ TEST(Reports, TablesRejectNonFiniteDataAndMismatchedColumnCounts) {
     EXPECT_THROW((void)(results::Table{{{"x", "X", "m"}}, {{1.0, 2.0}}}), std::invalid_argument);
     EXPECT_THROW((void)(results::Table{{{"x", "X", "m"}, {"x", "Y", "m"}}, {}}),
                  std::invalid_argument);
+}
+TEST(Reports, TemplatesReorderConvertAndRestoreCapturedFieldsWithoutRecalculation) {
+    auto context = stations();
+    auto d = definition();
+    const auto original = runtime::generate_report(context, d);
+    auto format = d.format;
+    format.columns = {{"state.x", "km", "距离"}, {"time.epoch", "TT", ""}};
+    const auto projected = original.with_template(format);
+    ASSERT_EQ(projected.table.columns().size(), 2U);
+    EXPECT_EQ(projected.column_title(0), "距离 (km)");
+    EXPECT_DOUBLE_EQ(std::get<double>(projected.table.rows()[0][0]), 6378137);
+    EXPECT_DOUBLE_EQ(*projected.numeric_value(0, 0), 6378.137);
+    EXPECT_EQ(projected.cell_text(0, 1), "2000-01-01T12:00:32.184000000");
+    context.project.ground_stations.clear();
+    format.columns = {};
+    format.units = application::ReportUnits::si;
+    const auto restored = projected.with_template(format);
+    EXPECT_EQ(restored.table.rows(), original.table.rows());
+    EXPECT_EQ(restored.input_sha256, original.input_sha256);
+    EXPECT_EQ(restored.input_revision, original.input_revision);
+    EXPECT_EQ(restored.data_sha256, original.data_sha256);
+    EXPECT_EQ(restored.algorithm, original.algorithm);
+    EXPECT_EQ(restored.column_unit(4), "m");
+    EXPECT_EQ(original.column_unit(4), "km");
+}
+TEST(Reports, InvalidTemplatesFailBeforeEvaluationAndKeepOriginalResult) {
+    auto d = definition();
+    const auto result = runtime::generate_report(stations(), d);
+    for (const auto &columns : std::vector<std::vector<application::ReportColumnSpec>>{
+             {{"missing", "", ""}},
+             {{"state.x", "deg", ""}},
+             {{"state.x", "m", ""}, {"state.x", "km", ""}},
+             {{"time.epoch", "epoch", ""}}}) {
+        d.format.columns = columns;
+        bool evaluated = false;
+        EXPECT_THROW((void)runtime::generate_report(stations(), d, nullptr,
+                                                    [&](auto, auto) { evaluated = true; }),
+                     std::invalid_argument);
+        EXPECT_FALSE(evaluated);
+        EXPECT_THROW((void)result.with_template(d.format), std::invalid_argument);
+    }
+    EXPECT_EQ(result.table.columns().size(), 10U);
+}
+TEST(Reports, EmptyObjectSelectionNeverMeansAllAndExplicitAllIncludesNewObjects) {
+    auto context = stations();
+    auto d = definition();
+    d.query.scope = application::ReportScope::objects;
+    EXPECT_THROW((void)runtime::generate_report(context, d), std::invalid_argument);
+    d.query.scope = application::ReportScope::all_compatible;
+    d.query.kind = application::ReportKind::object_summary;
+    EXPECT_EQ(runtime::generate_report(context, d).table.rows().size(), 1U);
+    context.project.ground_stations.push_back({"second", "Second", {0, 0, 0}});
+    EXPECT_EQ(runtime::generate_report(context, d).table.rows().size(), 2U);
+    d.query.object_ids = {"station"};
+    EXPECT_THROW((void)runtime::generate_report(context, d), std::invalid_argument);
+}
+TEST(Reports, DisplayedTimeFieldsAloneDetermineUtcRequirement) {
+    auto d = definition();
+    d.format.time_scale = application::ReportTimeScale::utc;
+    d.format.columns = {{"state.x", "m", ""}};
+    const auto result = runtime::generate_report(stations(), d);
+    d.format.columns = {{"time.epoch", "TAI", ""}};
+    const auto tai = result.with_template(d.format);
+    EXPECT_EQ(tai.cell_text(0, 0), "2000-01-01T12:00:00.000000000");
+    d.format.columns = {{"time.epoch", "UTC", ""}};
+    EXPECT_THROW((void)result.with_template(d.format), std::invalid_argument);
+    EXPECT_DOUBLE_EQ(*result.numeric_value(0, 0), 6378137);
+}
+TEST(Reports, ScenarioSummaryRetainsTypedEpochsAcrossTimeScaleChanges) {
+    const auto original =
+        runtime::generate_report(stations(), definition(application::ReportKind::scenario_summary));
+    EXPECT_EQ(std::get<core::Epoch>(original.table.rows()[1][1]), core::Epoch{0});
+    auto format = original.definition.format;
+    format.time_scale = application::ReportTimeScale::tt;
+    format.columns = {{"summary.value", "", ""}};
+    const auto tt = original.with_template(format);
+    EXPECT_EQ(tt.cell_text(1, 0), "2000-01-01T12:00:32.184000000");
+    EXPECT_EQ(tt.cell_text(3, 0), "TT");
+    EXPECT_EQ(original.cell_text(3, 1), "TAI");
 }

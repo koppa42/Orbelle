@@ -20,10 +20,11 @@ class ReportsTest(unittest.TestCase):
         project.add_ground_station(station)
         definition = of.ReportDefinition()
         definition.id = 'report-a'
+        definition.query.scope = of.ReportScope.ALL_COMPATIBLE
         definition.name = '位置报告'
-        definition.frame = of.FrameId.ITRF
-        definition.step_nanoseconds = 1_000_000_000
-        definition.time_scale = of.ReportTimeScale.TAI
+        definition.query.frame = of.FrameId.ITRF
+        definition.query.step_nanoseconds = 1_000_000_000
+        definition.format.time_scale = of.ReportTimeScale.TAI
         return project, definition
 
     def test_typed_samples_csv_and_immutable_result(self):
@@ -64,9 +65,10 @@ class ReportsTest(unittest.TestCase):
         for kind, count in ((of.ReportKind.SCENARIO_SUMMARY, 7),
                             (of.ReportKind.OBJECT_SUMMARY, 1),
                             (of.ReportKind.GROUND_STATIONS, 1)):
-            definition.kind = kind
+            definition.query.kind = kind
             self.assertEqual(of.generate_report(project, definition).table.row_count, count)
-        definition.object_ids = ['missing']
+        definition.query.scope = of.ReportScope.OBJECTS
+        definition.query.object_ids = ['missing']
         with self.assertRaisesRegex(ValueError, 'missing'):
             of.generate_report(project, definition)
         project.reports = [definition]
@@ -74,14 +76,14 @@ class ReportsTest(unittest.TestCase):
             path = Path(directory) / 'report.orbitforge'
             project.save(path)
             restored = of.load_project(path)
-            self.assertEqual(restored.reports[0].object_ids, ['missing'])
+            self.assertEqual(restored.reports[0].query.object_ids, ['missing'])
 
     def test_frame_conversion_uses_explicit_matching_eop(self):
         project, definition = self.inputs()
         manifest = Path(of.__file__).parent / 'data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json'
         eop = of.load_eop_snapshot(manifest)
         project.earth_orientation = eop.data_info
-        definition.frame = of.FrameId.GCRF
+        definition.query.frame = of.FrameId.GCRF
         with self.assertRaisesRegex(ValueError, 'requires confirmed EOP'):
             of.generate_report(project, definition)
         result = of.generate_report(project, definition, eop_manifest=manifest)
@@ -95,20 +97,21 @@ class ReportsTest(unittest.TestCase):
 
     def test_roundtrip_and_corruption_with_repaired_crcs(self):
         project, definition = self.inputs()
-        definition.object_ids = ['station']
-        definition.follow_scenario = False
-        definition.first, definition.last = of.Epoch(17), of.Epoch(19)
-        definition.step_nanoseconds = 1
-        definition.time_scale = of.ReportTimeScale.TT
+        definition.query.scope = of.ReportScope.OBJECTS
+        definition.query.object_ids = ['station']
+        definition.query.follow_scenario = False
+        definition.query.first, definition.query.last = of.Epoch(17), of.Epoch(19)
+        definition.query.step_nanoseconds = 1
+        definition.format.time_scale = of.ReportTimeScale.TT
         project.reports = [definition]
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'reports.orbitforge'
             project.save(path)
             raw = path.read_bytes()
             restored = of.load_project(path)
-            self.assertEqual(restored.reports[0].step_nanoseconds, 1)
-            self.assertEqual(restored.reports[0].first.tai_nanoseconds, 17)
-            self.assertEqual(restored.reports[0].time_scale, of.ReportTimeScale.TT)
+            self.assertEqual(restored.reports[0].query.step_nanoseconds, 1)
+            self.assertEqual(restored.reports[0].query.first.tai_nanoseconds, 17)
+            self.assertEqual(restored.reports[0].format.time_scale, of.ReportTimeScale.TT)
             restored.save(path, overwrite=True)
             self.assertEqual(path.read_bytes(), raw)
             for mutation in (lambda b: None, lambda b: struct.pack('<I', 129) + b[4:],
@@ -119,10 +122,10 @@ class ReportsTest(unittest.TestCase):
 
     def test_limits_fail_before_sampling(self):
         project, definition = self.inputs()
-        definition.step_nanoseconds = 1
+        definition.query.step_nanoseconds = 1
         with self.assertRaisesRegex(ValueError, '200000'):
             of.generate_report(project, definition)
-        definition.step_nanoseconds = 0
+        definition.query.step_nanoseconds = 0
         with self.assertRaises(ValueError):
             of.estimate_report_rows(project, definition)
 
@@ -132,7 +135,7 @@ class ReportsTest(unittest.TestCase):
         orbit.first, orbit.last = project.first, project.last
         orbit.initial = of.to_cartesian(of.KeplerianElements(project.first, 8e6, .1, .5, .6, .7, 0), 3.986004418e14)
         project.add_satellite(orbit)
-        definition.kind = of.ReportKind.CLASSICAL_ELEMENTS
+        definition.query.kind = of.ReportKind.CLASSICAL_ELEMENTS
         result = of.generate_report(project, definition)
         self.assertEqual(result.table.row_count, 4)
         self.assertEqual(result.table.rows[0][3], 'GCRF')
@@ -140,12 +143,13 @@ class ReportsTest(unittest.TestCase):
         self.assertAlmostEqual(result.numeric_value(0, 6), math.degrees(.5), delta=1e-10)
         self.assertEqual(result.column_unit(6), 'deg')
         self.assertIsNone(result.numeric_value(0, 2))
-        definition.kind = of.ReportKind.ORBITAL_MOTION
+        definition.query.kind = of.ReportKind.ORBITAL_MOTION
         result = of.generate_report(project, definition)
         self.assertAlmostEqual(result.table.rows[0][4], 7.2e6, delta=1e-6)
         self.assertAlmostEqual(result.numeric_value(0, 6), 0, delta=1e-9)
-        definition.kind = of.ReportKind.GEODETIC_POSITION
-        definition.object_ids = ['station']
+        definition.query.kind = of.ReportKind.GEODETIC_POSITION
+        definition.query.scope = of.ReportScope.OBJECTS
+        definition.query.object_ids = ['station']
         result = of.generate_report(project, definition)
         self.assertEqual(result.table.rows[0][3], 'ITRF')
         self.assertAlmostEqual(result.numeric_value(0, 6), 0, delta=1e-8)
@@ -154,8 +158,8 @@ class ReportsTest(unittest.TestCase):
             path = Path(directory) / 'derived.orbitforge'
             project.save(path)
             raw = path.read_bytes()
-            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 11)
-            self.assertEqual(of.load_project(path).reports[0].kind, of.ReportKind.GEODETIC_POSITION)
+            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 12)
+            self.assertEqual(of.load_project(path).reports[0].query.kind, of.ReportKind.GEODETIC_POSITION)
 
 
 if __name__ == '__main__':

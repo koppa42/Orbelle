@@ -985,19 +985,41 @@ class ReportTimeScale:
     TAI: ReportTimeScale
     TT: ReportTimeScale
 
-class ReportDefinition:
+class ReportScope:
+    OBJECTS: ReportScope
+    ALL_COMPATIBLE: ReportScope
+
+class ReportQuery:
     def __init__(self) -> None: ...
-    id: str
-    name: str
     kind: ReportKind
+    scope: ReportScope
     object_ids: list[str]
     follow_scenario: bool
     first: Epoch
     last: Epoch
     step_nanoseconds: int
     frame: FrameId
+
+class ReportColumnSpec:
+    def __init__(self, field: str, unit: str = "", title: str = "") -> None: ...
+    field: str
+    unit: str
+    title: str
+
+class ReportTemplate:
+    def __init__(self) -> None: ...
+    columns: list[ReportColumnSpec]
     units: ReportUnits
     time_scale: ReportTimeScale
+
+class ReportDefinition:
+    def __init__(self) -> None: ...
+    id: str
+    name: str
+    query: ReportQuery
+    format: ReportTemplate
+
+def report_columns(kind: ReportKind) -> list[ReportColumn]: ...
 
 class ReportColumn:
     @property
@@ -1034,6 +1056,7 @@ class ReportResult:
     def first(self) -> Epoch: ...
     @property
     def last(self) -> Epoch: ...
+    def with_template(self, format: ReportTemplate) -> ReportResult: ...
     def column_title(self, column: int) -> str: ...
     def column_unit(self, column: int) -> str: ...
     def numeric_value(self, row: int, column: int) -> float | None: ...

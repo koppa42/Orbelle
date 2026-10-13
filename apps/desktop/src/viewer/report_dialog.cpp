@@ -267,6 +267,7 @@ struct ReportDialog::Impl {
     ReportModel *model;
     ReportDefinition draft;
     std::vector<std::string> scope_ids;
+    bool all_objects = true;
     std::future<runtime::ReportResult> job;
     std::future<void> export_job;
     std::shared_ptr<std::atomic_bool> cancellation;
@@ -699,8 +700,9 @@ struct ReportDialog::Impl {
             QObject::connect(combo, &QComboBox::currentIndexChanged, owner, [this] { edit(); });
         for (auto *field : {access_station, access_target})
             QObject::connect(field, &ObjectSelectionField::selectionChanged, owner, [this] {
-                if (!loading && report_is_access(draft.kind)) {
+                if (!loading && report_is_access(draft.query.kind)) {
                     scope_ids = {access_station->id(), access_target->id()};
+                    all_objects = false;
                     refresh_scope();
                     edit();
                 }
@@ -759,7 +761,7 @@ struct ReportDialog::Impl {
     void fill_library() {
         const bool saved = std::ranges::any_of(
             project.reports, [this](const auto &definition) { return definition.id == draft.id; });
-        library->setText(saved ? text(draft.name) : kind_name(draft.kind));
+        library->setText(saved ? text(draft.name) : kind_name(draft.query.kind));
         library->setIcon(workbench_icon(saved ? WorkbenchIcon::save : WorkbenchIcon::properties));
         library->setToolTip(library->text() + QStringLiteral("\n选择报告…"));
         library->setAccessibleDescription(library->toolTip());
@@ -768,8 +770,8 @@ struct ReportDialog::Impl {
         store->setText(saved ? QStringLiteral("另存为模板…") : QStringLiteral("保存为模板…"));
         refresh_scope();
     }
-    QString report_scope(const std::vector<std::string> &ids) const {
-        if (ids.empty())
+    QString report_scope(const std::vector<std::string> &ids, bool all) const {
+        if (all)
             return QStringLiteral("整个场景中的适用对象");
         QStringList names;
         const auto objects = project_object_choices(project);
@@ -848,7 +850,7 @@ struct ReportDialog::Impl {
                  description(kind),
                  report_is_access(kind)
                      ? QStringLiteral("地面站 → 卫星 / 传感器；保留当前对象，随后选择配对对象")
-                     : report_scope(scope_ids),
+                     : report_scope(scope_ids, all_objects),
                  false,
                  compatible(kind) ? QString{} : QStringLiteral("不适用于当前对象范围"),
                  output(kind),
@@ -857,21 +859,22 @@ struct ReportDialog::Impl {
         for (const auto &definition : project.reports) {
             QString warning;
             const auto objects = project_object_choices(project);
-            for (const auto &id : definition.object_ids)
+            for (const auto &id : definition.query.object_ids)
                 if (std::ranges::find(objects, id, &ObjectChoice::id) == objects.end())
                     warning =
                         QStringLiteral("\n绑定的对象已删除；载入后需重新选择对象，才能生成报告。");
             choices.push_back(
                 {"template:" + text(definition.id),
                  text(definition.name),
-                 kind_name(definition.kind),
-                 description(definition.kind),
-                 report_scope(definition.object_ids),
+                 kind_name(definition.query.kind),
+                 description(definition.query.kind),
+                 report_scope(definition.query.object_ids,
+                              definition.query.scope == ReportScope::all_compatible),
                  true,
                  {},
-                 output(definition.kind),
+                 output(definition.query.kind),
                  QStringLiteral("载入模板将恢复已保存的对象、时间和格式设置。") + warning,
-                 icon(definition.kind)});
+                 icon(definition.query.kind)});
         }
         return choices;
     }
@@ -882,7 +885,8 @@ struct ReportDialog::Impl {
             std::ranges::find(choices, saved_key, &ReportChoice::key) != choices.end();
         ReportSelectionDialog chooser(
             choices,
-            saved ? saved_key : QStringLiteral("builtin:%1").arg(static_cast<int>(draft.kind)),
+            saved ? saved_key
+                  : QStringLiteral("builtin:%1").arg(static_cast<int>(draft.query.kind)),
             owner);
         report_chooser = &chooser;
         const auto accepted = chooser.exec() == QDialog::Accepted;
@@ -895,7 +899,8 @@ struct ReportDialog::Impl {
         if (found == current.end() || !found->unavailable_reason.isEmpty())
             return;
         const int row = static_cast<int>(std::distance(current.begin(), found));
-        if ((saved && found->key == saved_key) || (!saved && row == static_cast<int>(draft.kind)))
+        if ((saved && found->key == saved_key) ||
+            (!saved && row == static_cast<int>(draft.query.kind)))
             return;
         choose(row);
     }
@@ -907,14 +912,14 @@ struct ReportDialog::Impl {
             }))
             return false;
         if (kind == ReportKind::scenario_summary)
-            return scope_ids.empty();
-        if (report_satellites_only(kind) && !scope_ids.empty())
+            return all_objects;
+        if (report_satellites_only(kind) && !all_objects)
             return std::all_of(scope_ids.begin(), scope_ids.end(), [&](const auto &id) {
                 return std::any_of(
                     project.satellites.begin(), project.satellites.end(),
                     [&](const auto &satellite) { return satellite.orbit.object_id == id; });
             });
-        if (kind != ReportKind::ground_stations || scope_ids.empty())
+        if (kind != ReportKind::ground_stations || all_objects)
             return true;
         return std::all_of(scope_ids.begin(), scope_ids.end(), [&](const auto &id) {
             return std::any_of(project.ground_stations.begin(), project.ground_stations.end(),
@@ -939,13 +944,13 @@ struct ReportDialog::Impl {
                 }
             labels << label;
         }
-        scope_label->setText(scope_ids.empty() ? QStringLiteral("整个场景")
+        scope_label->setText(all_objects ? QStringLiteral("整个场景")
                              : labels.size() == 1
                                  ? labels.front()
                                  : QStringLiteral("已选 %1 个对象").arg(labels.size()));
         scope_label->setToolTip(labels.join('\n'));
         scope_detail->setText(
-            scope_ids.empty() ? QStringLiteral("包含当前和以后添加的适用对象")
+            all_objects ? QStringLiteral("包含当前和以后添加的适用对象")
             : labels.size() == 1
                 ? (single_station ? QStringLiteral("仅此地面站") : QStringLiteral("仅此对象"))
                 : QStringLiteral("仅使用指定对象，不自动添加新对象"));
@@ -985,20 +990,21 @@ struct ReportDialog::Impl {
     void choose_scope() {
         auto choices =
             project_object_choices(project, {ObjectKind::satellite, ObjectKind::ground_station});
-        if (draft.kind == ReportKind::ground_stations)
+        if (draft.query.kind == ReportKind::ground_stations)
             choices = project_object_choices(project, {ObjectKind::ground_station});
-        else if (report_satellites_only(draft.kind))
+        else if (report_satellites_only(draft.query.kind))
             choices = project_object_choices(project, {ObjectKind::satellite});
         ObjectSelectionDialog chooser(std::move(choices),
                                       {QStringLiteral("选择报告适用对象"), true,
                                        QStringLiteral("全部适用对象（含以后新增）")},
-                                      {scope_ids, scope_ids.empty()}, owner);
+                                      {scope_ids, all_objects}, owner);
         if (chooser.exec() != QDialog::Accepted)
             return;
         scope_ids = chooser.selection().ids;
+        all_objects = chooser.selection().all;
         refresh_scope();
-        if (!compatible(draft.kind)) {
-            const auto next = draft.kind == ReportKind::scenario_summary
+        if (!compatible(draft.query.kind)) {
+            const auto next = draft.query.kind == ReportKind::scenario_summary
                                   ? ReportKind::object_summary
                                   : ReportKind::cartesian_state;
             choose(static_cast<int>(next));
@@ -1046,6 +1052,7 @@ struct ReportDialog::Impl {
             }
         }
         scope_ids = {access_station->id(), access_target->id()};
+        all_objects = false;
     }
     void choose(int row) {
         if (row < 0 || loading)
@@ -1056,19 +1063,20 @@ struct ReportDialog::Impl {
         if (row < builtin_count) {
             draft = {};
             draft.id = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
-            draft.kind = static_cast<ReportKind>(row);
-            draft.name = kind_name(draft.kind).toStdString();
-            draft.first = project.first;
-            draft.last = project.last;
-            draft.object_ids = scope_ids;
-            if (report_is_access(draft.kind))
-                draft.step_nanoseconds = 1'000'000'000;
+            draft.query.kind = static_cast<ReportKind>(row);
+            draft.name = kind_name(draft.query.kind).toStdString();
+            draft.query.first = project.first;
+            draft.query.last = project.last;
+            draft.query.object_ids = scope_ids;
+            if (report_is_access(draft.query.kind))
+                draft.query.step_nanoseconds = 1'000'000'000;
         } else {
             draft = project.reports.at(static_cast<std::size_t>(row - builtin_count));
-            scope_ids = draft.object_ids;
+            scope_ids = draft.query.object_ids;
+            all_objects = draft.query.scope == ReportScope::all_compatible;
         }
-        const bool access = report_is_access(draft.kind);
-        step_label->setText(draft.kind == ReportKind::access_intervals
+        const bool access = report_is_access(draft.query.kind);
+        step_label->setText(draft.query.kind == ReportKind::access_intervals
                                 ? QStringLiteral("搜索步长")
                                 : QStringLiteral("采样间隔"));
         step->setMinimum(access ? .001 : .000000001);
@@ -1078,49 +1086,51 @@ struct ReportDialog::Impl {
         scope_detail->setVisible(!access);
         if (access)
             fill_access_pair(row >= builtin_count);
-        follow->setChecked(draft.follow_scenario);
-        first->set_epoch(draft.follow_scenario ? project.first : draft.first);
-        last->set_epoch(draft.follow_scenario ? project.last : draft.last);
-        step->setValue(static_cast<double>(draft.step_nanoseconds) / 1e9);
-        frame->setCurrentIndex(draft.frame == core::FrameId::gcrf ? 0 : 1);
-        if (draft.kind == ReportKind::geodetic_position)
+        follow->setChecked(draft.query.follow_scenario);
+        first->set_epoch(draft.query.follow_scenario ? project.first : draft.query.first);
+        last->set_epoch(draft.query.follow_scenario ? project.last : draft.query.last);
+        step->setValue(static_cast<double>(draft.query.step_nanoseconds) / 1e9);
+        frame->setCurrentIndex(draft.query.frame == core::FrameId::gcrf ? 0 : 1);
+        if (draft.query.kind == ReportKind::geodetic_position)
             frame->setCurrentIndex(1);
-        if (report_satellites_only(draft.kind))
+        if (report_satellites_only(draft.query.kind))
             frame->setCurrentIndex(0);
-        frame_field->setVisible(draft.kind == ReportKind::cartesian_state);
-        units->setCurrentIndex(draft.units == ReportUnits::engineering ? 0 : 1);
-        scale->setCurrentIndex(static_cast<int>(draft.time_scale));
+        frame_field->setVisible(draft.query.kind == ReportKind::cartesian_state);
+        units->setCurrentIndex(draft.format.units == ReportUnits::engineering ? 0 : 1);
+        scale->setCurrentIndex(static_cast<int>(draft.format.time_scale));
         update_interval();
         refresh_scope();
-        sampling->setVisible(report_is_sampled(draft.kind));
-        units_field->setVisible(report_is_sampled(draft.kind) ||
-                                draft.kind == ReportKind::ground_stations);
-        scale_field->setVisible(report_is_sampled(draft.kind) ||
-                                draft.kind == ReportKind::scenario_summary);
-        format_title->setVisible(draft.kind != ReportKind::object_summary);
+        sampling->setVisible(report_is_sampled(draft.query.kind));
+        units_field->setVisible(report_is_sampled(draft.query.kind) ||
+                                draft.query.kind == ReportKind::ground_stations);
+        scale_field->setVisible(report_is_sampled(draft.query.kind) ||
+                                draft.query.kind == ReportKind::scenario_summary);
+        format_title->setVisible(draft.query.kind != ReportKind::object_summary);
         template_description->setText(
-            draft.kind == ReportKind::scenario_summary
+            draft.query.kind == ReportKind::scenario_summary
                 ? QStringLiteral("场景时段、对象数量与中心天体")
-            : draft.kind == ReportKind::object_summary  ? QStringLiteral("对象名称、类型与计算模型")
-            : draft.kind == ReportKind::cartesian_state ? QStringLiteral("按指定间隔输出位置与速度")
-            : draft.kind == ReportKind::classical_elements
+            : draft.query.kind == ReportKind::object_summary
+                ? QStringLiteral("对象名称、类型与计算模型")
+            : draft.query.kind == ReportKind::cartesian_state
+                ? QStringLiteral("按指定间隔输出位置与速度")
+            : draft.query.kind == ReportKind::classical_elements
                 ? QStringLiteral("GCRF 状态换算的瞬时根数；圆轨道 / 赤道轨道的奇异角采用约定值。J2 "
                                  "结果不是平均根数。")
-            : draft.kind == ReportKind::geodetic_position
+            : draft.query.kind == ReportKind::geodetic_position
                 ? QStringLiteral("ITRF / WGS84 经度、大地纬度和椭球高；高度不表示离地距离。")
-            : draft.kind == ReportKind::orbital_motion
+            : draft.query.kind == ReportKind::orbital_motion
                 ? QStringLiteral("GCRF 地心距离、总速率、径向 / 横向速率与航迹倾角；径向向外为正。")
                 : QStringLiteral("WGS84 经纬度、高度与 ITRF 坐标"));
         template_description->setToolTip(template_description->text());
-        if (draft.kind == ReportKind::classical_elements)
+        if (draft.query.kind == ReportKind::classical_elements)
             template_description->setText(QStringLiteral("瞬时六根数 · GCRF"));
-        if (draft.kind == ReportKind::orbital_motion)
+        if (draft.query.kind == ReportKind::orbital_motion)
             template_description->setText(QStringLiteral("地心距离、速率与航迹倾角 · GCRF"));
-        if (draft.kind == ReportKind::geodetic_position)
+        if (draft.query.kind == ReportKind::geodetic_position)
             template_description->setText(QStringLiteral("经度、大地纬度与椭球高 · WGS84"));
         if (access)
             template_description->setText(
-                draft.kind == ReportKind::access_intervals
+                draft.query.kind == ReportKind::access_intervals
                     ? QStringLiteral("地球遮挡 · 最低仰角 · 传感器视场\n边界细化至 1 "
                                      "ms；短窗口请减小搜索步长。")
                     : QStringLiteral(
@@ -1135,19 +1145,20 @@ struct ReportDialog::Impl {
     }
     ReportDefinition definition() const {
         auto d = draft;
-        d.object_ids =
-            d.kind == ReportKind::scenario_summary ? std::vector<std::string>{} : scope_ids;
-        if (report_is_access(d.kind))
-            d.object_ids = {access_station->id(), access_target->id()};
-        d.follow_scenario = follow->isChecked();
-        if (report_is_sampled(d.kind) && !d.follow_scenario) {
-            d.first = first->epoch();
-            d.last = last->epoch();
+        d.query.object_ids =
+            d.query.kind == ReportKind::scenario_summary ? std::vector<std::string>{} : scope_ids;
+        d.query.scope = all_objects ? ReportScope::all_compatible : ReportScope::objects;
+        if (report_is_access(d.query.kind))
+            d.query.object_ids = {access_station->id(), access_target->id()};
+        d.query.follow_scenario = follow->isChecked();
+        if (report_is_sampled(d.query.kind) && !d.query.follow_scenario) {
+            d.query.first = first->epoch();
+            d.query.last = last->epoch();
         }
-        d.step_nanoseconds = static_cast<std::int64_t>(std::llround(step->value() * 1e9));
-        d.frame = frame->currentIndex() == 0 ? core::FrameId::gcrf : core::FrameId::itrf;
-        d.units = units->currentIndex() == 0 ? ReportUnits::engineering : ReportUnits::si;
-        d.time_scale = static_cast<ReportTimeScale>(scale->currentIndex());
+        d.query.step_nanoseconds = static_cast<std::int64_t>(std::llround(step->value() * 1e9));
+        d.query.frame = frame->currentIndex() == 0 ? core::FrameId::gcrf : core::FrameId::itrf;
+        d.format.units = units->currentIndex() == 0 ? ReportUnits::engineering : ReportUnits::si;
+        d.format.time_scale = static_cast<ReportTimeScale>(scale->currentIndex());
         validate_report_definition(d);
         return d;
     }
@@ -1156,17 +1167,49 @@ struct ReportDialog::Impl {
             return;
         changed = true;
         update_estimate();
+        if (model->result && !job.valid() && !waiting) {
+            try {
+                const auto d = definition();
+                if (d.query == model->result->definition.query &&
+                    d.id == model->result->definition.id &&
+                    model->result->input_sha256 == runtime::report_input_sha256(project)) {
+                    auto result = std::make_shared<runtime::ReportResult>(
+                        model->result->with_template(d.format));
+                    result->definition = d;
+                    publish(result, false);
+                    status->setText(QStringLiteral("显示格式已更新。"));
+                }
+            } catch (const std::exception &error) {
+                status->setText(
+                    QStringLiteral("无法应用显示格式：%1").arg(QString::fromUtf8(error.what())));
+            }
+        }
         result_status();
+    }
+    void publish(std::shared_ptr<runtime::ReportResult> result, bool new_calculation = true) {
+        model->publish(result);
+        if (new_calculation && owner->result_published &&
+            result->input_sha256 == runtime::report_input_sha256(project))
+            owner->result_published(result);
+        changed = false;
+        table->resizeColumnsToContents();
+        for (std::size_t c = 0; c < result->table.columns().size(); ++c)
+            table->setColumnHidden(static_cast<int>(c),
+                                   result->definition.format.columns.empty() &&
+                                       result->table.columns()[c].id == "object.id");
+        result_status();
+        prepare_plot();
     }
     void update_estimate() {
         try {
             const auto d = definition();
             const auto rows = runtime::estimate_report_rows(project, d);
             estimate->setText(
-                (d.kind == ReportKind::access_intervals ? QStringLiteral("搜索 %1 个时刻%2")
-                                                        : QStringLiteral("预计 %1 行%2"))
+                (d.query.kind == ReportKind::access_intervals ? QStringLiteral("搜索 %1 个时刻%2")
+                                                              : QStringLiteral("预计 %1 行%2"))
                     .arg(static_cast<qulonglong>(rows))
-                    .arg(report_is_sampled(d.kind) ? QStringLiteral(" · 含起止时刻") : QString{}));
+                    .arg(report_is_sampled(d.query.kind) ? QStringLiteral(" · 含起止时刻")
+                                                         : QString{}));
         } catch (const std::exception &error) {
             estimate->setText(QString::fromUtf8(error.what()));
         }
@@ -1298,8 +1341,8 @@ struct ReportDialog::Impl {
             save(reports);
             project.reports = std::move(reports);
             fill_library();
-            choose(
-                static_cast<int>(compatible(draft.kind) ? draft.kind : ReportKind::object_summary));
+            choose(static_cast<int>(compatible(draft.query.kind) ? draft.query.kind
+                                                                 : ReportKind::object_summary));
             status->setText(QStringLiteral("已删除配置；保存项目后写入磁盘。"));
         } catch (const std::exception &error) {
             status->setText(QString::fromUtf8(error.what()));
@@ -1323,8 +1366,15 @@ struct ReportDialog::Impl {
         plot_field->clear();
         plot_object->set_objects({});
         plot_object->set_id({});
-        const bool sampled = report_is_sampled(r.definition.kind) &&
-                             r.definition.kind != ReportKind::access_intervals;
+        const auto &columns = r.table.columns();
+        const auto id_column = std::ranges::find(columns, "object.id", &results::Column::id);
+        const auto name_column = std::ranges::find(columns, "object.name", &results::Column::id);
+        const bool sampled =
+            report_is_sampled(r.definition.query.kind) &&
+            r.definition.query.kind != ReportKind::access_intervals && id_column != columns.end() &&
+            name_column != columns.end() &&
+            std::ranges::find(columns, "time.epoch", &results::Column::id) != columns.end() &&
+            !r.table.rows().empty();
         if (sampled) {
             for (std::size_t c = 0; c < r.table.columns().size(); ++c) {
                 bool numeric = false;
@@ -1343,7 +1393,8 @@ struct ReportDialog::Impl {
             // their complete table/CSV; the chart explicitly asks the user to choose an object.
             std::map<std::string, std::string> objects;
             for (const auto &row : r.table.rows())
-                objects.try_emplace(std::get<std::string>(row[0]), std::get<std::string>(row[1]));
+                objects.try_emplace(std::get<std::string>(row[id_column - columns.begin()]),
+                                    std::get<std::string>(row[name_column - columns.begin()]));
             std::map<std::string, ObjectKind> kinds;
             for (const auto &choice : project_object_choices(project))
                 kinds.emplace(choice.id, choice.kind);
@@ -1369,18 +1420,18 @@ struct ReportDialog::Impl {
                           "对象超过 12 个，选择单个查看或在左侧缩小范围。滚轮缩放，双击定位时刻。")
                     : QStringLiteral("滚轮 / 框选缩放 · 右键还原 · 双击采样点定位场景时刻"));
             auto index = plot_field->findData(previous_field, Qt::UserRole + 1);
-            if (index < 0 && r.definition.kind == ReportKind::classical_elements)
+            if (index < 0 && r.definition.query.kind == ReportKind::classical_elements)
                 index = plot_field->findData("elements.nu", Qt::UserRole + 1);
-            if (index < 0 && r.definition.kind == ReportKind::geodetic_position)
+            if (index < 0 && r.definition.query.kind == ReportKind::geodetic_position)
                 index = plot_field->findData("geodetic.height", Qt::UserRole + 1);
-            if (index < 0 && r.definition.kind == ReportKind::aer)
+            if (index < 0 && r.definition.query.kind == ReportKind::aer)
                 index = plot_field->findData("aer.elevation", Qt::UserRole + 1);
             plot_field->setCurrentIndex(std::max(0, index));
         }
         plot->set_result(model->result, static_cast<std::size_t>(plot_field->currentData().toInt()),
                          plot_field->currentText(), plot_object->id());
-        views->setTabEnabled(1, sampled);
-        if (!sampled)
+        views->setTabEnabled(1, sampled && plot_field->count() > 0);
+        if (!views->isTabEnabled(1))
             views->setCurrentIndex(0);
         select_view();
     }
@@ -1473,19 +1524,7 @@ struct ReportDialog::Impl {
                 auto result = std::make_shared<runtime::ReportResult>(job.get());
                 if (cancellation->load())
                     throw runtime::ReportCancelled{};
-                model->publish(result);
-                if (owner->result_published &&
-                    result->input_sha256 == runtime::report_input_sha256(project))
-                    owner->result_published(result);
-                changed = false;
-                table->resizeColumnsToContents();
-                // ID stays available via the source data/CSV; names are more useful in the viewer.
-                if (result->table.columns().front().id == "object.id")
-                    table->setColumnHidden(0, true);
-                else
-                    table->setColumnHidden(0, false);
-                result_status();
-                prepare_plot();
+                publish(result);
                 narrow_settings = false;
                 adapt(owner->width());
                 status->setText(QStringLiteral("报告已生成。"));
@@ -1526,7 +1565,7 @@ struct ReportDialog::Impl {
         }
         fill_library();
         refresh_scope();
-        if (report_is_access(draft.kind))
+        if (report_is_access(draft.query.kind))
             fill_access_pair(true);
         update_interval();
         update_estimate();
@@ -1547,6 +1586,7 @@ void ReportDialog::select_object(const std::string &id, application::ReportKind 
         return;
     }
     self.scope_ids = {id};
+    self.all_objects = false;
     self.refresh_scope();
     self.choose(static_cast<int>(self.compatible(kind) ? kind : ReportKind::object_summary));
     self.narrow_settings = true;

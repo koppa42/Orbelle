@@ -309,7 +309,13 @@ TEST(Project, CurrentSchemaFixturePreservesInputsRelationshipsAndExactEncoding) 
     EXPECT_EQ(project.sensors[0].target_station_id, "station-a");
     EXPECT_EQ(project.sensors[0].pointing, application::SensorPointing::targeted);
     ASSERT_EQ(project.reports.size(), 1U);
-    EXPECT_EQ(project.reports[0].object_ids, (std::vector<std::string>{"station-a", "sensor-a"}));
+    EXPECT_EQ(project.reports[0].query.object_ids,
+              (std::vector<std::string>{"station-a", "sensor-a"}));
+    EXPECT_EQ(project.reports[0].query.scope, application::ReportScope::objects);
+    ASSERT_EQ(project.reports[0].format.columns.size(), 3U);
+    EXPECT_EQ(project.reports[0].format.columns[2].field, "aer.range");
+    EXPECT_EQ(project.reports[0].format.columns[2].unit, "km");
+    EXPECT_EQ(project.reports[0].format.columns[2].title, "Slant range");
     EXPECT_EQ(project.analysis_status(), application::AnalysisStatus::unrecorded);
     std::ifstream input(ORBITFORGE_PROJECT_CURRENT, std::ios::binary);
     const std::vector<std::uint8_t> fixture(std::istreambuf_iterator<char>{input}, {});
@@ -363,8 +369,8 @@ TEST(Project, DataLocksHaveStableCanonicalOrderAndRejectDuplicateRoles) {
 }
 TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
     const auto bytes = application::encode_project(example());
-    for (std::uint32_t version = 0; version <= 12; ++version) {
-        if (version == 11)
+    for (std::uint32_t version = 0; version <= 13; ++version) {
+        if (version == 12)
             continue;
         SCOPED_TRACE(version);
         auto unsupported = bytes;
@@ -376,7 +382,7 @@ TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
         } catch (const application::ProjectError &error) {
             EXPECT_NE(std::string(error.what()).find("version " + std::to_string(version) + ";"),
                       std::string::npos);
-            EXPECT_NE(std::string(error.what()).find("reads only version 11"), std::string::npos);
+            EXPECT_NE(std::string(error.what()).find("reads only version 12"), std::string::npos);
         }
     }
 }

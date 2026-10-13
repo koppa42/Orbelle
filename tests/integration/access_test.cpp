@@ -49,9 +49,9 @@ runtime::ReportContext circular() {
 application::ReportDefinition report(application::ReportKind kind) {
     application::ReportDefinition d;
     d.id = d.name = "access";
-    d.kind = kind;
-    d.object_ids = {"station", "satellite-1"};
-    d.step_nanoseconds = 10'000'000'000;
+    d.query.kind = kind;
+    d.query.object_ids = {"station", "satellite-1"};
+    d.query.step_nanoseconds = 10'000'000'000;
     return d;
 }
 } // namespace
@@ -118,7 +118,7 @@ TEST(Access, CircularHorizonMatchesAnalyticSolutionAndConeNarrowsWindow) {
                 .001);
     context.project.sensors.push_back(
         {"sensor", "Nadir", "satellite-1", 10 * pi / 180, application::SensorPointing::nadir, {}});
-    d.object_ids[1] = "sensor";
+    d.query.object_ids[1] = "sensor";
     const auto narrow = runtime::generate_report(context, d);
     ASSERT_EQ(narrow.table.rows().size(), 1U);
     const double cone = 10 * pi / 180;
@@ -140,9 +140,9 @@ TEST(Access, SnapshotValidationAerAndCancellation) {
     EXPECT_TRUE(access.at(seconds(10)).visible); // Owns the original snapshot.
     EXPECT_THROW((void)access.at(seconds(-1)), std::out_of_range);
     auto d = report(application::ReportKind::aer);
-    d.follow_scenario = false;
-    d.first = seconds(0);
-    d.last = seconds(10);
+    d.query.follow_scenario = false;
+    d.query.first = seconds(0);
+    d.query.last = seconds(10);
     const auto result = runtime::generate_report(context, d);
     ASSERT_EQ(result.table.rows().size(), 2U);
     EXPECT_TRUE(std::holds_alternative<std::monostate>(result.table.rows()[0][3]));

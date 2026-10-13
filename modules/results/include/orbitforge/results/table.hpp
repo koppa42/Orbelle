@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <memory>
 #include <orbitforge/core/time/epoch.hpp>
 #include <string>
 #include <variant>
@@ -15,11 +16,14 @@ using Row = std::vector<Cell>;
 class Table {
   public:
     Table(std::vector<Column> columns, std::vector<Row> rows);
-    [[nodiscard]] const std::vector<Column> &columns() const noexcept { return columns_; }
-    [[nodiscard]] const std::vector<Row> &rows() const noexcept { return rows_; }
+    [[nodiscard]] const std::vector<Column> &columns() const noexcept { return storage_->columns; }
+    [[nodiscard]] const std::vector<Row> &rows() const noexcept { return storage_->rows; }
 
   private:
-    std::vector<Column> columns_;
-    std::vector<Row> rows_;
+    struct Storage {
+        std::vector<Column> columns;
+        std::vector<Row> rows;
+    };
+    std::shared_ptr<const Storage> storage_;
 };
 } // namespace orbitforge::results

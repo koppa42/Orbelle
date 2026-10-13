@@ -281,10 +281,12 @@ TEST_F(AnalysisAccess, AllReportTemplatesMatchExistingEngine) {
         app::ReportDefinition definition;
         definition.id = "query";
         definition.name = "Report";
-        definition.kind = kind;
-        definition.step_nanoseconds = 10'000'000'000;
+        definition.query.kind = kind;
+        definition.query.scope = app::report_is_access(kind) ? app::ReportScope::objects
+                                                             : app::ReportScope::all_compatible;
+        definition.query.step_nanoseconds = 10'000'000'000;
         if (app::report_is_access(kind))
-            definition.object_ids = {s.station.id(), s.sensor.id()};
+            definition.query.object_ids = {s.station.id(), s.sensor.id()};
         const auto expected = runtime::generate_report(context, definition);
         const auto actual = analysis.report(definition);
         EXPECT_EQ(actual.table.rows(), expected.table.rows());
@@ -314,13 +316,13 @@ TEST_F(AnalysisAccess, ReportsAndAerKeepDeletedObjectsAndCaptureBeforeCallbacks)
     app::ReportDefinition definition;
     definition.id = "query";
     definition.name = "Original";
-    definition.kind = app::ReportKind::aer;
-    definition.object_ids = {s.station.id(), s.sensor.id()};
+    definition.query.kind = app::ReportKind::aer;
+    definition.query.object_ids = {s.station.id(), s.sensor.id()};
     const auto report = analysis.report(definition);
     const auto aer = analysis.aer(s.station, s.sensor, 60s);
     const auto modified = analysis.report(definition, {}, [&](auto, auto) {
         definition.name = "Changed";
-        definition.object_ids.clear();
+        definition.query.object_ids.clear();
     });
     EXPECT_EQ(modified.definition.name, "Original");
     EXPECT_EQ(modified.table.rows(), report.table.rows());
@@ -344,13 +346,13 @@ TEST_F(AnalysisAccess, ReportsNeedOnlyTheirActualCapabilities) {
     app::ReportDefinition d;
     d.id = "native";
     d.name = "Native state";
-    d.object_ids = {s.satellite.id()};
+    d.query.object_ids = {s.satellite.id()};
     EXPECT_THROW((void)analysis.report(d), runtime::AnalysisCapabilityError); // UTC is explicit.
-    d.time_scale = app::ReportTimeScale::tai;
+    d.format.time_scale = app::ReportTimeScale::tai;
     EXPECT_NO_THROW((void)analysis.report(d));
-    d.frame = core::FrameId::itrf;
+    d.query.frame = core::FrameId::itrf;
     EXPECT_THROW((void)analysis.report(d), runtime::AnalysisCapabilityError);
-    d.kind = app::ReportKind::ground_stations;
-    d.object_ids = {s.station.id()};
+    d.query.kind = app::ReportKind::ground_stations;
+    d.query.object_ids = {s.station.id()};
     EXPECT_NO_THROW((void)analysis.report(d));
 }

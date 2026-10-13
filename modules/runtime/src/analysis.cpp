@@ -305,6 +305,12 @@ results::AerSeries Analysis::aer(const ObjectRef &station, const ObjectRef &targ
     const auto epochs = sample_epochs(*snapshot().project, step, first, last);
     return aer(station, target, epochs, cancelled);
 }
+ReportResult Analysis::report(const application::ReportQuery &query,
+                              const application::ReportTemplate &format,
+                              const std::function<bool()> &cancelled,
+                              const std::function<void(std::size_t, std::size_t)> &progress) const {
+    return report(ReportDefinition{"query", "Report", query, format}, cancelled, progress);
+}
 ReportResult Analysis::report(const ReportDefinition &definition,
                               const std::function<bool()> &cancelled,
                               const std::function<void(std::size_t, std::size_t)> &progress) const {
@@ -313,8 +319,7 @@ ReportResult Analysis::report(const ReportDefinition &definition,
     check_cancelled(cancelled);
     ReportContext context{*snapshot().project, data().time(), data().frames(), data().eop()};
     record_data(context.project, data());
-    if (captured.time_scale == ReportTimeScale::utc && !data().time() &&
-        (report_is_sampled(captured.kind) || captured.kind == ReportKind::scenario_summary))
+    if (!data().time() && report_uses_utc(captured.format, captured.query.kind))
         throw AnalysisCapabilityError("Prepare with UTC data for a UTC report, or select TAI/TT");
     const detail::ReportExecution execution{
         [&](const detail::ReportObject &object, core::FrameId frame) {
@@ -450,7 +455,7 @@ void export_trajectory_csv(const results::Trajectory &result, const std::filesys
                           {"frame", "frame", ""}},
                          std::move(rows)};
     ReportDefinition definition;
-    definition.units = ReportUnits::si;
+    definition.format.units = ReportUnits::si;
     const ReportResult report{definition,
                               std::move(table),
                               result.input_sha256(),
@@ -484,7 +489,7 @@ void export_access_csv(const results::AccessWindows &result, const std::filesyst
                           {"end_clipped", "end_clipped", ""}},
                          std::move(rows)};
     ReportDefinition definition;
-    definition.units = ReportUnits::si;
+    definition.format.units = ReportUnits::si;
     const ReportResult report{
         definition, std::move(table),     provenance.input_sha256, provenance.data_sha256,
         "",         provenance.algorithm, result.query().first,    result.query().last,
@@ -516,7 +521,7 @@ void export_aer_csv(const results::AerSeries &result, const std::filesystem::pat
                           {"off_boresight", "off_boresight", "rad"}},
                          std::move(rows)};
     ReportDefinition definition;
-    definition.units = ReportUnits::si;
+    definition.format.units = ReportUnits::si;
     const ReportResult report{definition, std::move(table), p.input_sha256, p.data_sha256,
                               "",         p.algorithm,      core::Epoch{0}, core::Epoch{0},
                               {},         p.input_revision};

@@ -164,7 +164,7 @@ class ObjectEditingTest(unittest.TestCase):
     def test_duplicate_cascade_reparent_and_soft_report_bindings(self):
         project, satellite, station, sensor = make_project()
         definition = of.ReportDefinition()
-        definition.id, definition.name, definition.object_ids = "report", "Report", [sensor.id]
+        definition.id, definition.name, definition.query.object_ids = "report", "Report", [sensor.id]
         project.set_reports([definition])
         plan = project.objects.plan_remove(station)
         self.assertEqual(plan.blocking_sensors, [sensor.id])
@@ -181,7 +181,7 @@ class ObjectEditingTest(unittest.TestCase):
         plan = project.objects.plan_remove(copy)
         self.assertEqual(plan.affected_reports, ["report"])
         project.objects.remove(copy)
-        self.assertEqual(project.to_data().reports[0].object_ids, [sensor.id])
+        self.assertEqual(project.to_data().reports[0].query.object_ids, [sensor.id])
         self.assertIsNone(project.objects.get(child.id))
 
     def test_observers_see_published_state_and_may_edit(self):
@@ -243,8 +243,8 @@ class ObjectEditingTest(unittest.TestCase):
             self.assertEqual(expected[0].states[0].position_m, actual[0].states[0].position_m)
             definition = of.ReportDefinition()
             definition.id, definition.name = "summary", "Summary"
-            definition.kind = of.ReportKind.OBJECT_SUMMARY
-            definition.object_ids = [satellite.id]
+            definition.query.kind = of.ReportKind.OBJECT_SUMMARY
+            definition.query.object_ids = [satellite.id]
             report = of.generate_report(loaded, definition)
             self.assertGreater(report.table.row_count, 0)
             sensor.name = "Unsaved"

@@ -73,7 +73,9 @@ void ReportPlot::rebuild() {
     const auto &columns = result_->table.columns();
     const auto time = std::find_if(columns.begin(), columns.end(),
                                    [](const auto &c) { return c.id == "time.epoch"; });
-    if (time == columns.end()) {
+    const auto id_column = std::ranges::find(columns, "object.id", &results::Column::id);
+    const auto name_column = std::ranges::find(columns, "object.name", &results::Column::id);
+    if (time == columns.end() || id_column == columns.end() || name_column == columns.end()) {
         update();
         return;
     }
@@ -82,15 +84,13 @@ void ReportPlot::rebuild() {
     const bool cyclic = field == "geodetic.longitude" || field == "elements.raan" ||
                         field == "elements.argp" || field == "elements.nu" ||
                         field == "aer.azimuth";
-    const auto half_turn = result_->definition.units == application::ReportUnits::engineering
-                               ? 180.0
-                               : std::numbers::pi;
+    const auto half_turn = result_->column_unit(column_) == "deg" ? 180.0 : std::numbers::pi;
     std::map<std::string, std::size_t> indices;
     std::map<std::string, std::size_t> color_indices;
     std::set<std::string> missing;
     for (std::size_t r = 0; r < result_->table.rows().size(); ++r) {
         const auto &row = result_->table.rows()[r];
-        const auto *id = std::get_if<std::string>(&row[0]);
+        const auto *id = std::get_if<std::string>(&row[id_column - columns.begin()]);
         const auto *epoch = std::get_if<core::Epoch>(&row[time_column_]);
         const auto value = result_->numeric_value(r, column_);
         if (!id || !epoch)
@@ -104,7 +104,7 @@ void ReportPlot::rebuild() {
             continue;
         const auto [entry, inserted] = indices.try_emplace(*id, series_.size());
         if (inserted) {
-            auto label = str(std::get<std::string>(row[1]));
+            auto label = str(std::get<std::string>(row[name_column - columns.begin()]));
             // Stable IDs disambiguate objects with identical names in the legend and hover text.
             const bool duplicate = std::any_of(series_.begin(), series_.end(),
                                                [&](const auto &s) { return s.label == label; });

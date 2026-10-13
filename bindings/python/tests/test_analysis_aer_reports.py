@@ -195,7 +195,7 @@ class AnalysisReportTests(unittest.TestCase):
         self.assertEqual(report.numeric_value(0, 4), 7000)
         self.assertEqual(report.column_unit(4), "km")
         self.assertEqual(report.table.rows[-1][2].tai_nanoseconds, 3)
-        self.assertEqual(report.definition.object_ids, [sat.id])
+        self.assertEqual(report.definition.query.object_ids, [sat.id])
         with tempfile.TemporaryDirectory() as directory:
             report.export_csv(Path(directory) / "report.csv")
 
@@ -225,7 +225,7 @@ class AnalysisReportTests(unittest.TestCase):
         project, station, sat, _, _ = scene()
         analysis = project.prepare()
         report = analysis.report(of.ReportKind.CARTESIAN_STATE, objects=sat, step=u.s(60))
-        self.assertEqual(report.definition.time_scale, of.ReportTimeScale.TAI)
+        self.assertEqual(report.definition.format.time_scale, of.ReportTimeScale.TAI)
         with self.assertRaises(of.AnalysisCapabilityError):
             analysis.report(of.ReportKind.CARTESIAN_STATE, objects=sat, step=u.s(60), time_scale=of.ReportTimeScale.UTC)
         with self.assertRaises(of.AnalysisCapabilityError):
