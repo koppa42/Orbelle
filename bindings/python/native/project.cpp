@@ -97,6 +97,13 @@ void bind_project(py::module_ &module) {
         .def_readwrite("model_kind", &application::ProjectSatellite::model_kind)
         .def_readwrite("model_diameter_m", &application::ProjectSatellite::model_diameter_m)
         .def_readwrite("model_path", &application::ProjectSatellite::model_path);
+    py::enum_<application::AnalysisStatus>(module, "AnalysisStatus")
+        .value("UNRECORDED", application::AnalysisStatus::unrecorded)
+        .value("CURRENT", application::AnalysisStatus::current)
+        .value("STALE", application::AnalysisStatus::stale);
+    py::class_<application::AnalysisRecord>(module, "AnalysisRecord")
+        .def_readonly("input_sha256", &application::AnalysisRecord::input_sha256)
+        .def_readonly("data_sha256", &application::AnalysisRecord::data_sha256);
     py::class_<application::Project>(module, "Project")
         .def(py::init<std::string, core::Epoch, core::Epoch>(), py::arg("name"), py::arg("first"),
              py::arg("last"))
@@ -109,6 +116,9 @@ void bind_project(py::module_ &module) {
         .def_readwrite("sensors", &application::Project::sensors)
         .def_readwrite("reports", &application::Project::reports)
         .def_readwrite("earth_orientation", &application::Project::earth_orientation)
+        .def_readwrite("time_data", &application::Project::time_data)
+        .def_readwrite("analysis_record", &application::Project::analysis_record)
+        .def_property_readonly("analysis_status", &application::Project::analysis_status)
         .def_property_readonly("data_lock", &application::Project::data_lock)
         .def("with_settings", &application::Project::with_settings, py::arg("name"),
              py::arg("first"), py::arg("last"))

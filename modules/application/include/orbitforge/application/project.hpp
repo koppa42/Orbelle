@@ -94,6 +94,12 @@ struct ProjectSensor {
         return display_name.empty() ? object_id : display_name;
     }
 };
+// A successfully prepared analysis, not a cache of calculated results.
+struct AnalysisRecord {
+    std::string input_sha256, data_sha256;
+    bool operator==(const AnalysisRecord &) const = default;
+};
+enum class AnalysisStatus { unrecorded, current, stale };
 struct Project {
     Project(std::string name, core::Epoch first, core::Epoch last);
     std::string name;
@@ -105,6 +111,11 @@ struct Project {
     // Provenance of the last calculation, not a requirement to load an old file.
     // The desktop checks current data/policy and requires consent for changes.
     std::optional<core::EopDataInfo> earth_orientation;
+    // Standalone UTC provenance when EOP is absent. EOP carries its own UTC identity.
+    std::optional<core::TimeDataInfo> time_data;
+    std::optional<AnalysisRecord> analysis_record;
+    [[nodiscard]] std::optional<core::TimeDataInfo> time_data_info() const;
+    [[nodiscard]] AnalysisStatus analysis_status() const;
     [[nodiscard]] DataLock data_lock() const;
     // Updates all object analysis bounds, preserving initial epochs and display settings.
     // Current time is clamped to the new interval. Attached data must cover it;
@@ -127,6 +138,9 @@ class ProjectError : public std::runtime_error {
 // Editors may temporarily leave references unresolved in a private candidate.
 // Published projects and files must always validate with relationships enabled.
 void validate_project(const Project &project, bool relationships = true);
+// Physical inputs, stable IDs and relationships; excludes names, appearance,
+// reports, playback time, inactive orbit drafts and data provenance.
+[[nodiscard]] std::string analysis_input_sha256(const Project &project);
 [[nodiscard]] bool matching_project_data(const core::EopDataInfo &a, const core::EopDataInfo &b);
 // Versioned, little-endian .orbitforge container. No Qt or provider dependency.
 [[nodiscard]] std::vector<std::uint8_t> encode_project(const Project &project);

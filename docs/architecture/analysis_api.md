@@ -108,7 +108,32 @@ except of.DataChangedError as error:
 
 上例中的接受调用应放在应用的确认分支内。库本身不弹窗、不联网、不替调用方同意更新。接受仅影响这次调用；计划不会记住“以后都同意”。如果项目修订已变化，计划抛出 `RevisionConflictError`，需要重新生成。Python 编辑上下文内不能准备分析；已生成的旧分析仍可查询。
 
-`plan_prepare(data=catalog)` 与直接传入快照使用同一确认流程，固定选源时对应的项目修订。准备成功不修改项目来源记录，不把计算结果写回项目。`plan_open()`、`save(..., analysis=...)` 和桌面接入新的准备计划尚待完成；普通 `Project.open()` 仍只读取保存的输入和来源信息。
+`plan_prepare(data=catalog)` 与直接传入快照使用同一确认流程，固定选源时对应的项目修订。准备成功不修改项目来源记录，不把计算结果写回项目。
+
+## 保存与重新打开
+
+```python
+analysis = project.prepare(data=data)
+project.save("mission.orbitforge", analysis=analysis)
+
+# 相同数据直接打开；数据变化时由应用取得确认。
+try:
+    restored = of.Project.open("mission.orbitforge", data=data)
+except of.DataChangedError as error:
+    plan = error.plan
+    # 展示 plan.data_changes；仅在用户明确同意的分支执行：
+    restored = plan.open(accept_data_changes=True)
+```
+
+`save(..., analysis=analysis)` 保存当前已提交输入、样式和报告定义，同时记录该分析固定的 UTC / EOP 来源与策略、整个项目的物理输入哈希和数据锁哈希。它不保存结果缓存，也不声称已经执行过所有查询。分析必须属于这个项目，且物理输入仍一致；允许改名、调整样式、显示步长、播放时间和报告配置。修改轨道、分析区间、站点坐标或最低仰角、传感器视场或引用关系后，保存旧分析抛出 `RevisionConflictError`。同稳定 ID 的另一个项目也不能借用该分析。
+
+`project.analysis_record` 返回只读的准备记录；`project.analysis_status` 为 `UNRECORDED`、`CURRENT` 或 `STALE`，由记录与当前输入、数据身份比较得出。输入哈希使用独立的 `orbitforge-analysis-input-v1` 编码，不等同于单对象轨迹的输入哈希。裸 `save(path)` 只保存现状，不创造准备记录，也不把过期记录改成当前；单纯 `prepare()` 仍不改写项目。更改传播模型的解释规则时须同步升级这份哈希编码的版本。
+
+文件和文档共同遵守原子发布：候选校验、项目身份与修订检查通过后写入文件，成功后才更新内存来源、修订和已保存标记并通知观察者。覆盖默认关闭。写入失败或修订冲突不修改两者；观察者在保存成功后再次编辑，项目仍正确显示未保存。
+
+`Project.plan_open(path, data=...)` 固定解析后的文件和已验证资源；`name`、`data`、`data_changes` 可供确认界面读取。直接 `Project.open()` 和 `of.load_project()` 使用同一流程。已有来源依赖必须提供相应当前数据；不传数据只适合没有 UTC / EOP 依赖的原生坐标计算项目，SGP4 仍须显式提供 UTC。需要仅检查或导入原始输入而不准备计算时，使用 `load_project_data()`，再按需 `Project.from_data()`。
+
+文件、目录或当前数据指针在确认期间变化，不影响该计划；每次 `plan.open()` 返回独立项目，接受决定不保存为后续自动同意。缺失依赖、覆盖不足和 UTC 失效在创建计划时即报错，不能用确认参数绕过。数据相同时新打开的项目不标记未保存；接受不同来源后更新来源并标记未保存，旧准备记录按哈希判断是否过期。打开不自动写回原文件，也不自动刷新旧准备记录；以新分析显式保存后才更新它。桌面接入新计划仍属后续工作。
 
 ## 结果与导出
 
@@ -138,6 +163,8 @@ using namespace std::chrono_literals;
 auto analysis = orbitforge::runtime::prepare(document);
 auto trajectory = analysis.states(satellite, 30s, orbitforge::core::FrameId::gcrf);
 orbitforge::runtime::export_trajectory_csv(trajectory, "trajectory.csv");
+orbitforge::runtime::save_project(document, "mission.orbitforge", analysis);
+auto restored = orbitforge::runtime::open_project("mission.orbitforge");
 
 orbitforge::runtime::DataCatalog catalog{"local/shared-data"};
 auto earth_fixed = orbitforge::runtime::prepare(document, catalog);
@@ -146,6 +173,8 @@ auto state = earth_fixed.state(satellite, document.snapshot().project->first,
 ```
 
 Runtime 位于 Application 之上，分析不让对象模型反向依赖 Provider。`ProjectSnapshot` 保留进程内项目范围；`snapshot.read(ref)` 从该修订读取对象，原对象删除后仍有效。C++ 的 `AnalysisPlan` 和 `DataChangedError::plan()` 与 Python 确认行为一致。
+
+C++ 打开使用 `ProjectOpenPlan(path, data)` / `runtime::open_project(path, data)`；`OpenDataChangedError::plan()` 返回对应打开计划，确认后调用 `plan.open(true)`。纯输入保存使用 `document.save(path)`。所有文件校验、数据确认及保存规则由共享 C++ 实现，Python 仅包装入口和异常计划。
 
 分析构建和查询可在 Python 释放 GIL 后运行。当前为同步状态查询接口，尚未提供通用任务取消、`analysis.access()`、新的报告模板或桌面缓存发布；原有 Access/报告入口继续可用。后续按[整体设计](object_api_design.md)逐批迁移。
 

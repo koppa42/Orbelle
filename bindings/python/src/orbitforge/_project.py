@@ -9,7 +9,7 @@ import weakref
 from . import _native as n
 from ._values import UNSET, Unset, require
 from .objects import ObjectCollection
-from ._analysis import Analysis, AnalysisPlan
+from ._analysis import Analysis, AnalysisPlan, ProjectOpenPlan
 
 
 def _owner() -> tuple[int, object]:
@@ -67,7 +67,10 @@ class Project:
         self._initialize(n.Project(require(name, str, "name"), first, last))
 
     def _initialize(self, data: n.Project) -> None:
-        self._document = n.ProjectDocument(data)
+        self._initialize_document(n.ProjectDocument(data))
+
+    def _initialize_document(self, document: n.ProjectDocument) -> None:
+        self._document = document
         self._route: ContextVar[ProjectEdit | None] = ContextVar("orbitforge_project_edit", default=None)
         self._objects = ObjectCollection(self)
         self._observers: dict[int, Callable[[n.ChangeSet], None]] = {}
@@ -80,9 +83,25 @@ class Project:
         return result
 
     @classmethod
-    def open(cls, path: str | PathLike[str]) -> Project:
-        """Read the stored input and provenance, without replacing external data."""
-        return cls.from_data(n.load_project(path))
+    def _from_document(cls, document: n.ProjectDocument) -> Project:
+        result = cls.__new__(cls)
+        result._initialize_document(document)
+        return result
+
+    @classmethod
+    def plan_open(cls, path: str | PathLike[str], *,
+                  data: n.DataSnapshot | n.DataCatalog | None = None) -> ProjectOpenPlan:
+        """Read and validate once. Recorded dependencies require explicit current data."""
+        if data is not None and not isinstance(data, (n.DataSnapshot, n.DataCatalog)):
+            raise TypeError("data must be a DataSnapshot or DataCatalog")
+        selected = n.DataSnapshot() if data is None else data
+        return ProjectOpenPlan(n.ProjectOpenPlan(path, selected), cls)
+
+    @classmethod
+    def open(cls, path: str | PathLike[str], *,
+             data: n.DataSnapshot | n.DataCatalog | None = None) -> Project:
+        """Open with checked data; changed identities raise DataChangedError with its plan."""
+        return cls.plan_open(path, data=data).open()
 
     def _active_edit(self) -> n.ProjectEdit | None:
         context = self._route.get()
@@ -182,6 +201,19 @@ class Project:
     def data_lock(self) -> n.DataLock:
         return self._snapshot().data_lock
 
+    @property
+    def time_info(self) -> n.TimeDataInfo | None:
+        return self._snapshot().time_info
+
+    @property
+    def analysis_record(self) -> n.AnalysisRecord | None:
+        return self._snapshot().analysis_record
+
+    @property
+    def analysis_status(self) -> n.AnalysisStatus:
+        """Whether a saved preparation record matches the current inputs and data."""
+        return self._snapshot().analysis_status
+
     def set_reports(self, definitions: list[n.ReportDefinition]) -> None:
         """Copy and replace stored report definitions in one validated edit."""
         self._change(lambda edit: edit.reports(definitions))
@@ -215,12 +247,17 @@ class Project:
         """Prepare fixed inputs. Changed recorded data raises DataChangedError with its plan."""
         return self.plan_prepare(data=data).prepare()
 
-    def save(self, path: str | PathLike[str], overwrite: bool = False) -> None:
+    def save(self, path: str | PathLike[str], overwrite: bool = False, *,
+             analysis: Analysis | None = None) -> None:
+        """Atomically save inputs, optionally recording a matching prepared analysis."""
         if self._active_edit() is not None:
             raise RuntimeError("Finish the project edit before saving or calculating")
-        snapshot = self._document.snapshot()
-        snapshot.project.save(path, overwrite)
-        self._document.mark_saved(snapshot.revision)
+        require(overwrite, bool, "overwrite")
+        if analysis is None:
+            self._document.save(path, overwrite)
+        else:
+            require(analysis, Analysis, "analysis")
+            n.save_analysis_project(self._document, path, analysis._native, overwrite)
 
     def subscribe(self, observer: Callable[[n.ChangeSet], None]) -> int:
         """Observe successful commits; retain the token to unsubscribe later.
@@ -254,8 +291,9 @@ class Project:
         return f"Project(name={snapshot.name!r}, revision={snapshot.revision})"
 
 
-def load_project(path: str | PathLike[str]) -> Project:
-    return Project.open(path)
+def load_project(path: str | PathLike[str], *,
+                 data: n.DataSnapshot | n.DataCatalog | None = None) -> Project:
+    return Project.open(path, data=data)
 
 
 def _data(project: Project | n.Project) -> n.Project:

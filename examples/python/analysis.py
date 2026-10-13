@@ -9,6 +9,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--csv", type=Path, help="Export owned results; refuses an existing file")
     parser.add_argument("--data", type=Path, help="Select current local catalog data for ITRF output; never downloads")
+    parser.add_argument("--project", type=Path, help="Save inputs with this analysis's data provenance; refuses an existing file")
     args = parser.parse_args()
     project = of.Project("Observation", of.Epoch(0), of.Epoch(300_000_000_000))
     satellite = project.objects.satellite("Observer", orbit=of.orbits.TwoBody(
@@ -17,7 +18,8 @@ def main() -> None:
             inclination=u.deg(53), raan=u.deg(0), argument_of_periapsis=u.deg(0),
         ),
     ))
-    analysis = project.prepare(data=of.DataCatalog(args.data) if args.data else None)
+    data = of.DataCatalog(args.data) if args.data else None
+    analysis = project.prepare(data=data)
     frame = of.FrameId.ITRF if args.data else of.FrameId.GCRF
     trajectory = analysis.states(satellite, step=u.s(40), frame=frame)
     # A later edit does not rename or alter the earlier analysis.
@@ -27,6 +29,10 @@ def main() -> None:
     print("Initial position (m):", trajectory.position.values[0])
     if args.csv:
         trajectory.to_csv(args.csv)
+    if args.project:
+        project.save(args.project, analysis=analysis)
+        reopened = of.Project.open(args.project, data=data)
+        print("Reopened:", reopened.name, reopened.analysis_status.name)
 
 
 if __name__ == "__main__":

@@ -149,6 +149,8 @@ class ProjectEdit {
                   std::optional<core::Epoch> last = {}, std::optional<core::Epoch> current = {});
     // Metadata bridge while data/report editing migrates to the new facade.
     void earth_orientation(std::optional<core::EopDataInfo> data);
+    void analysis_data(std::optional<core::EopDataInfo> eop, std::optional<core::TimeDataInfo> time,
+                       std::optional<AnalysisRecord> record);
     void reports(std::vector<ReportDefinition> reports);
     // Closes the edit on success, validation failure or revision conflict.
     void commit();
@@ -171,6 +173,11 @@ class ProjectDocument {
     [[nodiscard]] bool dirty() const;
     // Only mark the exact revision that was successfully saved.
     void mark_saved(std::uint64_t revision);
+    void save(const std::filesystem::path &path, bool overwrite = false) const;
+    // Atomically save and publish a validated candidate from this document's
+    // current revision. Conflicts and file failures publish no document change.
+    void save(const std::filesystem::path &path, const ProjectSnapshot &candidate,
+              bool overwrite = false) const;
     // Ordered, synchronous post-publication delivery; callbacks may edit again.
     // Throwing observers are isolated and reported by observer_errors().
     [[nodiscard]] std::uint64_t subscribe(std::function<void(const ChangeSet &)> observer);

@@ -196,6 +196,64 @@ void ProjectDocument::mark_saved(std::uint64_t revision) {
         throw ProjectError("Cannot mark a future revision saved");
     state_->saved_revision = revision;
 }
+void ProjectDocument::save(const std::filesystem::path &path, bool overwrite) const {
+    save(path, snapshot(), overwrite);
+}
+void ProjectDocument::save(const std::filesystem::path &path, const ProjectSnapshot &candidate,
+                           bool overwrite) const {
+    const auto before = snapshot();
+    if (candidate.scope != before.scope || candidate.revision != before.revision ||
+        !candidate.project)
+        throw RevisionConflictError(
+            "Save candidate does not match this project's current revision");
+    // Callers may have built the candidate from a mutable shared_ptr. Never
+    // publish an alias that they could mutate after this operation returns.
+    const auto owned = std::make_shared<const Project>(*candidate.project);
+    validate_project(*owned);
+    const bool changed = encode_project(*before.project) != encode_project(*owned);
+    const auto revision = before.revision + (changed ? 1 : 0);
+    ChangeSet changes{
+        before.revision, revision, {}, {}, {}, false, before, {revision, owned, before.scope}};
+    if (changed) {
+        diff_objects(before.project->satellites, owned->satellites, changes);
+        diff_objects(before.project->ground_stations, owned->ground_stations, changes);
+        diff_objects(before.project->sensors, owned->sensors, changes);
+        changes.settings_changed = metadata_bytes(*before.project) != metadata_bytes(*owned);
+    }
+    detail::DocumentState::Notification pending{std::move(changes), {}};
+    bool dispatch = false;
+    {
+        std::lock_guard lock(state_->mutex);
+        if (state_->revision != before.revision)
+            throw RevisionConflictError("Project changed while preparing the save; retry saving");
+        if (changed) {
+            for (const auto &[token, observer] : state_->observers) {
+                (void)token;
+                pending.observers.push_back(observer);
+            }
+            // Allocate notification storage before publishing the file. No allocation
+            // or user code may fail between file publication and document publication.
+            state_->pending.push_back(std::move(pending));
+        }
+        try {
+            save_project(path, *owned, overwrite);
+        } catch (...) {
+            if (changed) {
+                pending = std::move(state_->pending.back());
+                state_->pending.pop_back();
+            }
+            throw;
+        }
+        state_->project = owned;
+        state_->revision = state_->saved_revision = revision;
+        if (changed) {
+            dispatch = !state_->notifying;
+            state_->notifying = true;
+        }
+    }
+    if (dispatch)
+        notify(state_);
+}
 std::uint64_t ProjectDocument::subscribe(std::function<void(const ChangeSet &)> observer) {
     if (!observer)
         throw ProjectError("Project observer must be callable");
@@ -261,6 +319,15 @@ void ProjectEdit::settings(std::optional<std::string> name, std::optional<core::
 }
 void ProjectEdit::earth_orientation(std::optional<core::EopDataInfo> data) {
     objects().mutate([&](Project &next) { next.earth_orientation = std::move(data); });
+}
+void ProjectEdit::analysis_data(std::optional<core::EopDataInfo> eop,
+                                std::optional<core::TimeDataInfo> time,
+                                std::optional<AnalysisRecord> record) {
+    objects().mutate([&](Project &next) {
+        next.earth_orientation = std::move(eop);
+        next.time_data = std::move(time);
+        next.analysis_record = std::move(record);
+    });
 }
 void ProjectEdit::reports(std::vector<ReportDefinition> reports) {
     objects().mutate([&](Project &next) { next.reports = std::move(reports); });

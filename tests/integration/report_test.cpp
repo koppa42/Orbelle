@@ -205,7 +205,7 @@ TEST(Reports, SavedDefinitionsRoundTripAndMissingBindingsDoNotPreventProjectLoad
     d.time_scale = application::ReportTimeScale::tt;
     p.reports.push_back(d);
     const auto bytes = application::encode_project(p);
-    EXPECT_EQ(bytes[8], 10);
+    EXPECT_EQ(bytes[8], 11);
     const auto restored = application::decode_project(bytes);
     ASSERT_EQ(restored.reports.size(), 1U);
     EXPECT_EQ(application::encode_project(restored), bytes);

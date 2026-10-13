@@ -32,8 +32,10 @@ application::Session make_orbit_session(const application::OrbitInput &input,
 application::Scenario make_project_scenario(const application::Project &project,
                                             const core::ITimeProvider *time) {
     application::validate_project(project);
-    if (time && project.earth_orientation &&
-        time->data_info().sha256 != project.earth_orientation->time_data.sha256 &&
+    const auto recorded_time = project.time_data_info();
+    if (time && recorded_time &&
+        application::time_data_lock(time->data_info()) !=
+            application::time_data_lock(*recorded_time) &&
         std::any_of(project.satellites.begin(), project.satellites.end(),
                     [](const auto &satellite) {
                         return satellite.orbit.propagator == application::OrbitPropagator::sgp4;
