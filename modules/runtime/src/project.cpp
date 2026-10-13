@@ -2,6 +2,7 @@
 #include <orbitforge/runtime/hpop.hpp>
 #include <orbitforge/runtime/j2.hpp>
 #include <orbitforge/runtime/j4.hpp>
+#include <orbitforge/runtime/mission.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/sgp4.hpp>
 
@@ -15,6 +16,14 @@ application::Session make_orbit_session(const application::OrbitInput &input,
                                         std::uint64_t revision, const core::ITimeProvider *time,
                                         core::HpopEnvironment environment) {
     const auto &body = core::central_body(input.initial.origin);
+    if (input.uses_eop_force()) {
+        if (!environment.eop || !environment.frames)
+            throw std::invalid_argument("HPOP spherical gravity requires selected EOP data");
+        for (auto epoch : {input.initial.epoch, input.first, input.last})
+            if (!core::eop_covers(environment.eop->data_info(), epoch))
+                throw core::EopCoverageError("HPOP needs EOP covering the entire integration "
+                                             "interval, including the initial epoch");
+    }
     switch (input.propagator) {
     case application::OrbitPropagator::two_body:
         return make_two_body_session(input.initial, body.mu, input.object_id, revision);
@@ -29,16 +38,11 @@ application::Session make_orbit_session(const application::OrbitInput &input,
                 "SGP4 requires an explicit time provider for the TLE epoch");
         return make_sgp4_session(input.tle, *time, input.object_id, revision);
     case application::OrbitPropagator::hpop:
-        if (input.hpop.gravity_degree > 0) {
-            if (!environment.eop || !environment.frames)
-                throw std::invalid_argument("HPOP spherical gravity requires selected EOP data");
-            for (auto epoch : {input.initial.epoch, input.first, input.last})
-                if (!core::eop_covers(environment.eop->data_info(), epoch))
-                    throw core::EopCoverageError("HPOP needs EOP covering the entire integration "
-                                                 "interval, including the initial epoch");
-        }
         return make_hpop_session(input.initial, input.hpop, std::move(environment), input.object_id,
                                  revision);
+    case application::OrbitPropagator::mission:
+        return make_mission_session(input.initial, input.mission, input.hpop,
+                                    std::move(environment), input.object_id, revision);
     }
     throw std::invalid_argument("Unsupported orbit propagator");
 }

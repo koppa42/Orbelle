@@ -18,6 +18,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -824,6 +825,84 @@ TEST_F(QuantityTest, J4AndTleEditingKeepSeparateDraftsAndRejectInvalidInput) {
         QApplication::processEvents();
         ASSERT_TRUE(editor.grab().save(capture + "/j4-wide.png"));
     }
+}
+TEST_F(QuantityTest, MissionEditorValidatesSequencePreservesDraftAndCancelsWithoutApplying) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    OrbitEditor editor(OrbitInput{});
+    editor.resize(1100, 760);
+    editor.show();
+    editor.set_propagator(OrbitPropagator::mission);
+    std::optional<OrbitInput> submitted;
+    editor.apply = [&](OrbitInput input) { submitted = std::move(input); };
+    const auto capture = qEnvironmentVariable("ORBITFORGE_MISSION_UI_CAPTURE");
+    QTimer::singleShot(0, &editor, [&] {
+        auto *dialog = editor.findChild<QDialog *>("missionEditorDialog");
+        ASSERT_NE(dialog, nullptr);
+        auto *list = dialog->findChild<QListWidget *>("missionSegments");
+        ASSERT_EQ(list->count(), 1);
+        auto *duration = dialog->findChild<QuantityEditor *>("missionCoastDuration");
+        duration->set_value(600, Unit::second);
+        dialog->findChild<QPushButton *>("missionAddImpulse")->click();
+        dialog->findChild<QLineEdit *>("missionSegmentName")->setText(QStringLiteral("升轨点火"));
+        dialog->findChild<QuantityEditor *>("missionDeltaV0")
+            ->set_value(120, Unit::metres_per_second);
+        dialog->findChild<QComboBox *>("missionManeuverFrame")->setCurrentIndex(1);
+        dialog->findChild<QPushButton *>("missionMoveUp")->click();
+        EXPECT_EQ(list->currentRow(), 0);
+        dialog->findChild<QPushButton *>("missionMoveDown")->click();
+        EXPECT_EQ(list->currentRow(), 1);
+        dialog->findChild<QPushButton *>("missionAddCoast")->click();
+        auto *ok = dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok);
+        ok->click();
+        EXPECT_TRUE(dialog->isVisible());
+        EXPECT_TRUE(dialog->findChild<QLabel *>("errorText")->isVisible());
+        text(*duration)->setText("unfinished");
+        list->setCurrentRow(1);
+        EXPECT_EQ(list->currentRow(), 2);
+        duration->set_value(6600, Unit::second);
+        list->setCurrentRow(1);
+        EXPECT_EQ(list->currentRow(), 1);
+        if (!capture.isEmpty()) {
+            ASSERT_TRUE(QDir{}.mkpath(capture));
+            const auto settled = [] {
+                QEventLoop loop;
+                QTimer::singleShot(80, &loop, &QEventLoop::quit);
+                loop.exec();
+            };
+            settled();
+            EXPECT_TRUE(dialog->grab().save(capture + "/mission-wide.png"));
+            dialog->resize(440, 760);
+            settled();
+            EXPECT_TRUE(dialog->grab().save(capture + "/mission-narrow.png"));
+            for (auto *scroll : dialog->findChildren<QScrollArea *>())
+                EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+            EXPECT_TRUE(ok->isVisible());
+            dialog->resize(900, 690);
+            settled();
+            EXPECT_DOUBLE_EQ(dialog->findChild<QuantityEditor *>("missionDeltaV0")
+                                 ->value(Unit::metres_per_second),
+                             120);
+        }
+        ok->click();
+    });
+    editor.open_propagator_details();
+    EXPECT_FALSE(submitted);
+    editor.submit();
+    ASSERT_TRUE(submitted);
+    ASSERT_EQ(submitted->mission.segments.size(), 3U);
+    EXPECT_EQ(submitted->mission.segments[1].delta_v_mps[0], 120);
+    const auto saved = *submitted;
+    editor.set_input(saved);
+    QTimer::singleShot(0, &editor, [&] {
+        auto *dialog = editor.findChild<QDialog *>("missionEditorDialog");
+        ASSERT_NE(dialog, nullptr);
+        EXPECT_EQ(dialog->findChild<QListWidget *>("missionSegments")->count(), 3);
+        dialog->findChild<QPushButton *>("missionRemove")->click();
+        dialog->reject();
+    });
+    editor.open_propagator_details();
+    editor.submit();
+    EXPECT_EQ(submitted->mission, saved.mission);
 }
 TEST_F(QuantityTest, HpopSettingsValidateCancelAndRoundTripWithoutApplyingTheOrbit) {
     OrbitInput input;

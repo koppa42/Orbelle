@@ -149,14 +149,13 @@ struct Analysis::Impl {
             numerical.satellites.back().display_name.clear();
             if (input.propagator != OrbitPropagator::sgp4)
                 numerical.satellites.back().orbit.tle = {}; // Inactive TLE draft is not an input.
-            entries.emplace(
-                input.object_id,
-                Entry{make_orbit_session(input, snapshot.revision, data.time().get(),
-                                         {data.frames(), data.eop()}),
-                      input.propagator == OrbitPropagator::sgp4 ? core::FrameId::teme
-                                                                : core::FrameId::gcrf,
-                      satellite.name(), report_input_sha256(numerical),
-                      input.propagator == OrbitPropagator::hpop && input.hpop.gravity_degree > 0});
+            entries.emplace(input.object_id,
+                            Entry{make_orbit_session(input, snapshot.revision, data.time().get(),
+                                                     {data.frames(), data.eop()}),
+                                  input.propagator == OrbitPropagator::sgp4 ? core::FrameId::teme
+                                                                            : core::FrameId::gcrf,
+                                  satellite.name(), report_input_sha256(numerical),
+                                  input.uses_eop_force()});
         }
         for (const auto &station : p.ground_stations) {
             Project numerical{"analysis-state-input-v1", p.first, p.last};
@@ -260,6 +259,20 @@ results::Trajectory Analysis::states(const ObjectRef &ref, std::chrono::nanoseco
     (void)impl_->entry(ref, frame);
     const auto epochs = sample_epochs(*snapshot().project, step, first, last);
     return states(ref, epochs, frame);
+}
+results::ManeuverSeries Analysis::maneuvers(const ObjectRef &ref,
+                                            const std::function<bool()> &cancelled) const {
+    check_cancelled(cancelled);
+    (void)snapshot().read(ref);
+    if (ref.kind() != ObjectKind::satellite)
+        throw AnalysisCapabilityError("Maneuver queries require a satellite");
+    const auto &entry = impl_->entries.at(ref.id());
+    const auto &project = *snapshot().project;
+    auto events =
+        entry.session.maneuvers(project.first, project.last, [&] { check_cancelled(cancelled); });
+    check_cancelled(cancelled);
+    return {std::move(events), entry.session.provenance(), entry.input_sha256,
+            impl_->dependency_hash(entry, entry.frame)};
 }
 results::AccessWindows Analysis::access(const ObjectRef &station, const ObjectRef &target,
                                         const AccessOptions &options,

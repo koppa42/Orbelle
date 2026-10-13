@@ -14,7 +14,7 @@
 #include <vector>
 
 namespace orbitforge::application {
-enum class OrbitPropagator { two_body, j2_secular, j4_secular, sgp4, hpop };
+enum class OrbitPropagator { two_body, j2_secular, j4_secular, sgp4, hpop, mission };
 [[nodiscard]] inline std::string_view propagator_name(OrbitPropagator propagator) {
     switch (propagator) {
     case OrbitPropagator::two_body:
@@ -27,6 +27,8 @@ enum class OrbitPropagator { two_body, j2_secular, j4_secular, sgp4, hpop };
         return "SGP4 / TLE";
     case OrbitPropagator::hpop:
         return "HPOP / numerical";
+    case OrbitPropagator::mission:
+        return "Mission sequence";
     }
     throw std::invalid_argument("Unsupported orbit propagator");
 }
@@ -41,8 +43,15 @@ struct OrbitInput {
     // TLE epoch is interpreted with the calculation's explicit time provider.
     core::Tle tle;
     core::HpopOptions hpop;
+    core::MissionPlan mission;
+    [[nodiscard]] bool uses_hpop() const {
+        return propagator == OrbitPropagator::hpop ||
+               (propagator == OrbitPropagator::mission &&
+                mission.coast_model == core::MissionCoastModel::hpop);
+    }
+    [[nodiscard]] bool uses_eop_force() const { return uses_hpop() && hpop.gravity_degree > 0; }
     [[nodiscard]] double mu() const {
-        if (propagator == OrbitPropagator::hpop)
+        if (uses_hpop())
             return core::egm96_mu;
         if (propagator == OrbitPropagator::j4_secular)
             return core::j4_earth().mu.metres_cubed_per_second_squared;

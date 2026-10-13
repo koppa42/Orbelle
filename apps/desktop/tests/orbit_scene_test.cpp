@@ -6,6 +6,36 @@
 #include <orbitforge/runtime/two_body.hpp>
 
 namespace orbitforge::desktop {
+TEST(OrbitPreparation, MissionBurnsKeepSeparateTangentsOnAndOffTheDisplayGrid) {
+    const auto time = runtime::make_builtin_time_provider();
+    const auto frames = runtime::make_frame_provider();
+    const auto eop = runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+    for (auto offset : {300'000'000'000LL, 301'234'567'890LL}) {
+        OrbitInput input;
+        input.first = time->from_utc({2026, 10, 9, 0, 0, 0, 0});
+        input.last = core::Epoch{input.first.tai_nanoseconds() + 1200'000'000'000LL};
+        input.initial.epoch = input.first;
+        input.propagator = OrbitPropagator::mission;
+        input.mission.segments = {
+            core::MissionSegment::coast(std::chrono::nanoseconds{offset}),
+            core::MissionSegment::impulse({250, 20, -30}),
+            core::MissionSegment::coast(std::chrono::nanoseconds{1200'000'000'000LL - offset})};
+        const auto session = make_orbit_session(input, 1);
+        const auto orbit =
+            prepare_orbit_scene(input, session, *frames, *eop, std::atomic_bool{false});
+        EXPECT_LT(orbit->max_inertial_check_error_m, 1);
+        EXPECT_LT(orbit->max_check_error_m, 1);
+        const auto &nodes = orbit->inertial_track.samples().states();
+        const auto burn = input.first.tai_nanoseconds() + offset;
+        for (auto at : {burn - 1, burn}) {
+            const auto found = std::ranges::find_if(
+                nodes, [at](const auto &state) { return state.epoch.tai_nanoseconds() == at; });
+            ASSERT_NE(found, nodes.end());
+            EXPECT_EQ(found->velocity_mps,
+                      session.sample(std::array{core::Epoch{at}}).states()[0].velocity_mps);
+        }
+    }
+}
 TEST(OrbitPreparation, J4Sgp4AndHpopBuildGcrfAndItrfCachesFromTheirNativeModels) {
     const auto time = runtime::make_builtin_time_provider();
     const std::shared_ptr<const core::IFrameProvider> frames = runtime::make_frame_provider();

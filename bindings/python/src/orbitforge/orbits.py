@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Literal
 from . import _native as n
 from . import units as u
+from . import missions
 from ._values import require
 
 
@@ -94,13 +95,19 @@ class Orbit:
     tle: n.Tle = n.Tle("", "")
     step_seconds: int = 60
     hpop: HpopSettings = HpopSettings()
+    mission: missions.Plan = missions.Plan()
 
     def _native(self) -> n.OrbitInput:
         value = n.OrbitInput()
         value.initial = require(self.initial, Cartesian, "initial")._native()
         value.propagator, value.input_frame = self.propagator, self.input_frame
         value.tle, value.step_seconds = self.tle, self.step_seconds
-        if self.propagator == n.OrbitPropagator.HPOP:
+        if self.propagator == n.OrbitPropagator.MISSION:
+            value.mission = require(self.mission, missions.Plan, "mission")._native()
+            value.mission.end_epoch(self.initial.epoch)
+        if self.propagator == n.OrbitPropagator.HPOP or (
+            self.propagator == n.OrbitPropagator.MISSION and self.mission.propagation == "hpop"
+        ):
             value.hpop = require(self.hpop, HpopSettings, "hpop")._native()
         return value
 
@@ -110,7 +117,7 @@ class Orbit:
         require(value, n.OrbitInput, "orbit")
         return cls(Cartesian._read(value.initial), value.propagator, value.input_frame,
                    n.Tle(value.tle.line1, value.tle.line2), value.step_seconds,
-                   HpopSettings._read(value.hpop))
+                   HpopSettings._read(value.hpop), missions.Plan._read(value.mission))
 
 
 def TwoBody(*, initial: Keplerian | Cartesian | n.CartesianState) -> Orbit:
@@ -119,6 +126,26 @@ def TwoBody(*, initial: Keplerian | Cartesian | n.CartesianState) -> Orbit:
     elif isinstance(initial, n.CartesianState):
         initial = Cartesian._read(initial)
     return Orbit(require(initial, Cartesian, "initial"))
+
+
+def Mission(*, initial: Keplerian | Cartesian | n.CartesianState,
+            segments: tuple[missions.Coast | missions.Impulse, ...] | list[missions.Coast | missions.Impulse],
+            propagation: Literal["two_body", "hpop"] = "two_body",
+            hpop: HpopSettings = HpopSettings()) -> Orbit:
+    """Forward coast/impulse sequence covering the whole scenario; exact burns are post-burn.
+
+    Example: segments=[Coast(u.s(600)), Impulse((100, 0, 0)), Coast(u.s(6600))].
+    Impulses use SI m/s, default VNC axes. No finite thrust or automatic targeting.
+    """
+    plan = missions.Plan(tuple(segments), propagation)
+    if isinstance(initial, Keplerian):
+        initial = initial._cartesian(mu=3.986004415e14 if propagation == "hpop" else None)
+    elif isinstance(initial, n.CartesianState):
+        initial = Cartesian._read(initial)
+    orbit = Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.MISSION,
+                  hpop=hpop, mission=plan)
+    orbit._native()
+    return orbit
 
 
 def J2(*, initial: n.J2MeanElements) -> Orbit:

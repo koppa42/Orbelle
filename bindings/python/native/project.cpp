@@ -62,7 +62,35 @@ void bind_project(py::module_ &module) {
         .value("J2_SECULAR", application::OrbitPropagator::j2_secular)
         .value("J4_SECULAR", application::OrbitPropagator::j4_secular)
         .value("SGP4", application::OrbitPropagator::sgp4)
-        .value("HPOP", application::OrbitPropagator::hpop);
+        .value("HPOP", application::OrbitPropagator::hpop)
+        .value("MISSION", application::OrbitPropagator::mission);
+    py::enum_<core::MissionSegmentKind>(module, "MissionSegmentKind")
+        .value("COAST", core::MissionSegmentKind::coast)
+        .value("IMPULSE", core::MissionSegmentKind::impulse);
+    py::enum_<core::MissionCoastModel>(module, "MissionCoastModel")
+        .value("TWO_BODY", core::MissionCoastModel::two_body)
+        .value("HPOP", core::MissionCoastModel::hpop);
+    py::enum_<core::ManeuverFrame>(module, "ManeuverFrame")
+        .value("GCRF", core::ManeuverFrame::gcrf)
+        .value("VNC", core::ManeuverFrame::vnc)
+        .value("LVLH", core::ManeuverFrame::lvlh);
+    py::class_<core::MissionSegment>(module, "MissionSegment")
+        .def(py::init<>())
+        .def_readwrite("kind", &core::MissionSegment::kind)
+        .def_readwrite("name", &core::MissionSegment::name)
+        .def_readwrite("duration_nanoseconds", &core::MissionSegment::duration_nanoseconds)
+        .def_readwrite("delta_v_mps", &core::MissionSegment::delta_v_mps)
+        .def_readwrite("frame", &core::MissionSegment::frame);
+    py::class_<core::MissionPlan>(module, "MissionPlan")
+        .def(py::init<>())
+        .def_readwrite("coast_model", &core::MissionPlan::coast_model)
+        .def_readwrite("segments", &core::MissionPlan::segments)
+        .def(
+            "end_epoch",
+            [](const core::MissionPlan &plan, core::Epoch initial) {
+                return core::validate_mission(initial, plan);
+            },
+            py::arg("initial"));
     py::enum_<core::HpopIntegrator>(module, "HpopIntegrator")
         .value("RKF78", core::HpopIntegrator::rkf78)
         .value("RK4", core::HpopIntegrator::rk4);
@@ -86,6 +114,7 @@ void bind_project(py::module_ &module) {
         .def_readwrite("input_frame", &application::OrbitInput::input_frame)
         .def_readwrite("tle", &application::OrbitInput::tle)
         .def_readwrite("hpop", &application::OrbitInput::hpop)
+        .def_readwrite("mission", &application::OrbitInput::mission)
         .def_readwrite("object_id", &application::OrbitInput::object_id)
         .def_readwrite("first", &application::OrbitInput::first)
         .def_readwrite("last", &application::OrbitInput::last)

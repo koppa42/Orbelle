@@ -25,10 +25,10 @@ PR 使用 GitHub 默认的[模拟合并引用](https://docs.github.com/en/action
 | 检查 | 内容 |
 | --- | --- |
 | Versions and tooling | actionlint 工作流静态检查；CMake、Python、vcpkg 版本一致性；数据导入、CI 规划、交付与发布脚本测试；标签提交归属检查 |
-| Linux C++, sanitizers and Python 3.13 | Ubuntu 24.04：无界面 C++ 测试、ASan/UBSan、Python API、七个示例和 C++/Python 对照；标签流程额外构建 SDK 和基准 wheel |
+| Linux C++, sanitizers and Python 3.13 | Ubuntu 24.04：无界面 C++ 测试、ASan/UBSan、Python API、九个示例和 C++/Python 对照；标签流程额外构建 SDK 和基准 wheel |
 | Linux SDK and installed Python API | 仅标签流程：新 runner 不检出源码，校验交付散列、迁移 SDK、离线安装 wheel，运行消费端、API、示例和 C++/Python 对照 |
 | Windows desktop and Python 3.13 | Windows Server 2022 / VS 2022：桌面编译、CTest 与 Qt offscreen、Python API 及示例；标签流程额外构建便携包、SDK 和基准 wheel，验证 SDK 解压迁移及 wheel 安装 |
-| Python 3.11 / 3.12 / 3.14 / 3.15 × Windows / Linux | PR、手动及标签流程执行；复用相应平台的原生依赖，编译各解释器扩展，运行 API 测试及七个示例；标签流程改为构建、安装 wheel 后测试 |
+| Python 3.11 / 3.12 / 3.14 / 3.15 × Windows / Linux | PR、手动及标签流程执行；复用相应平台的原生依赖，编译各解释器扩展，运行 API 测试及九个示例；标签流程改为构建、安装 wheel 后测试 |
 | CI passed | 按本次范围检查全部预期作业；应执行的作业失败、取消或意外跳过都会失败，仅允许该范围明确计划的跳过 |
 
 GitHub 的 `main` 分支规则应要求通过 PR 合并、**CI passed** 成功，并要求分支合并前保持最新；禁用绕过和强制推送。仓库中的规范和工作流不会自动修改 GitHub 分支保护设置。

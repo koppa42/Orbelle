@@ -51,4 +51,22 @@ int main(int argc, char **argv) {
     if (numerical_file.to_data().satellites.at(0).orbit.hpop != numerical.hpop)
         return 6;
     std::filesystem::remove(path);
+    of::OrbitInput mission;
+    mission.propagator = of::OrbitPropagator::mission;
+    mission.hpop.gravity_degree = mission.hpop.gravity_order = 0;
+    mission.mission = {of::MissionCoastModel::hpop,
+                       {of::MissionSegment::coast(60s),
+                        of::MissionSegment::impulse({10, 0, 0}, of::ManeuverFrame::vnc, "Burn"),
+                        of::MissionSegment::coast(60s)}};
+    const auto spacecraft =
+        reopened.objects().create(of::objects::Satellite{.name = "Mission", .orbit = mission});
+    const auto mission_analysis = reopened.prepare();
+    const auto maneuvers = mission_analysis.maneuvers(spacecraft);
+    if (maneuvers.events().size() != 1 || maneuvers.events()[0].cumulative_delta_v_mps != 10 ||
+        mission_analysis.states(spacecraft, 30s, of::FrameId::gcrf).states().size() != 5)
+        return 7;
+    reopened.save(path, mission_analysis, true);
+    if (of::Project::open(path).to_data().satellites.back().orbit.mission != mission.mission)
+        return 8;
+    std::filesystem::remove(path);
 }

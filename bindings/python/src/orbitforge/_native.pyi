@@ -187,6 +187,7 @@ class AerSeries:
     def to_csv(self, path: str | PathLike[str], overwrite: bool = False) -> None: ...
 
 class Analysis:
+    def maneuvers(self, satellite: ObjectRef, cancelled: Callable[[], bool] | None = None) -> ManeuverSeries: ...
     @property
     def snapshot(self) -> ProjectSnapshot: ...
     @property
@@ -736,6 +737,59 @@ class OrbitPropagator:
     J4_SECULAR: OrbitPropagator
     SGP4: OrbitPropagator
     HPOP: OrbitPropagator
+    MISSION: OrbitPropagator
+
+class MissionSegmentKind:
+    COAST: MissionSegmentKind
+    IMPULSE: MissionSegmentKind
+
+class MissionCoastModel:
+    TWO_BODY: MissionCoastModel
+    HPOP: MissionCoastModel
+
+class ManeuverFrame:
+    GCRF: ManeuverFrame
+    VNC: ManeuverFrame
+    LVLH: ManeuverFrame
+
+class MissionSegment:
+    def __init__(self) -> None: ...
+    kind: MissionSegmentKind
+    name: str
+    duration_nanoseconds: int
+    delta_v_mps: Sequence[float]
+    frame: ManeuverFrame
+
+class MissionPlan:
+    def __init__(self) -> None: ...
+    coast_model: MissionCoastModel
+    segments: Sequence[MissionSegment]
+    def end_epoch(self, initial: Epoch) -> Epoch: ...
+
+class ManeuverEvent:
+    @property
+    def segment_index(self) -> int: ...
+    @property
+    def name(self) -> str: ...
+    @property
+    def before(self) -> CartesianState: ...
+    @property
+    def after(self) -> CartesianState: ...
+    @property
+    def delta_v_gcrf_mps(self) -> Sequence[float]: ...
+    @property
+    def cumulative_delta_v_mps(self) -> float: ...
+
+class ManeuverSeries:
+    @property
+    def events(self) -> list[ManeuverEvent]: ...
+    @property
+    def provenance(self) -> Provenance: ...
+    @property
+    def input_sha256(self) -> str: ...
+    @property
+    def data_sha256(self) -> str: ...
+    def __len__(self) -> int: ...
 
 class HpopIntegrator:
     RKF78: HpopIntegrator
@@ -762,6 +816,7 @@ class OrbitInput:
     input_frame: FrameId
     tle: Tle
     hpop: HpopOptions
+    mission: MissionPlan
     object_id: str
     first: Epoch
     last: Epoch

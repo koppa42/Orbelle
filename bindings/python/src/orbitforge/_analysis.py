@@ -453,6 +453,15 @@ class AnalysisPlan:
 class Analysis:
     _native: n.Analysis
 
+    def maneuvers(self, satellite: SatelliteHandle, *,
+                  cancelled: Callable[[], bool] | None = None) -> n.ManeuverSeries:
+        """Burns inside this scenario, with GCRF pre/post states and cumulative delta-v.
+
+        Non-mission satellites return an empty series. Results own their data and provenance.
+        Cumulative delta-v includes preceding burns when the initial epoch is before the scenario.
+        """
+        return self._native.maneuvers(require(satellite, SatelliteHandle, "satellite")._ref, cancelled)
+
     @property
     def revision(self) -> int:
         return self._native.snapshot.revision

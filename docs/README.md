@@ -11,6 +11,7 @@
 | C++ 项目 API | [聚合头文件、对象所有权、数据确认与安装后链接](architecture/cpp_api.md) |
 | 分析 API | [固定输入、数据确认、状态查询与导出](architecture/analysis_api.md) |
 | 轨道模型 | [J2 长期项与状态语义](architecture/j2.md)、[二体验证方法](validation/p1_two_body_protocol.md) |
+| 机动规划 | [任务序列与脉冲机动](architecture/missions.md)、[验证协议](validation/mission_protocol.md) |
 | 地面站 | [WGS84 地面站与对象生命周期](architecture/ground_stations.md) |
 | 可见性与传感器 | [Access、AER、子传感器、STK 对照与验证](architecture/access_sensors.md) |
 | 项目与数据引用 | [项目文件格式](architecture/project_files.md)、[场景数据一致性](architecture/scenario_data_lock.md) |

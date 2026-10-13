@@ -19,25 +19,29 @@ class ProjectFormatTests(unittest.TestCase):
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 13)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 14)
         self.path.write_bytes(self.raw)
         project = of.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
         self.assertEqual(project.objects["satellite-b"].orbit.hpop.max_step_seconds, 45)
+        plan = project.objects["satellite-b"].orbit.mission
+        self.assertEqual(plan.propagation, "hpop")
+        self.assertEqual(plan.segments[0].duration.nanoseconds, 200_000_000_001)
+        self.assertEqual(plan.segments[1].delta_v_mps, (12, -3, .5))
         self.assertEqual(project.objects["sensor-a"].parent, project.objects["satellite-a"])
         self.assertEqual(project.analysis_status, of.AnalysisStatus.UNRECORDED)
         project.save(self.path, overwrite=True)
         self.assertEqual(self.path.read_bytes(), self.raw)
 
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(13), 14, 0xFFFFFFFF):
+        for version in (*range(14), 15, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (of.load_project_data, of.load_project,
                                  of.Project.open, of.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 13"):
+                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 14"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 
@@ -64,6 +68,24 @@ class ProjectFormatTests(unittest.TestCase):
         project = of.Project.open(self.path)
         project.save(self.path, overwrite=True)
         self.assertEqual(self.path.read_bytes(), self.raw)
+
+    def test_mission_fields_are_rejected_even_after_repairing_crcs(self):
+        sections = read_sections(self.raw)
+        objects = next(body for tag, _, body in sections if tag == b"OBJS")
+        marker = struct.pack("<III", 1, 3, 0) + struct.pack("<I", 5) + b"Drift"
+        start = objects.index(marker)
+        # Offsets follow the independently assembled fixture, not the native writer.
+        cases = ((0, "I", 2), (4, "I", 0), (4, "I", 257), (8, "I", 2),
+                 (21, "q", -1), (21, "q", 1), (42, "I", 3), (46, "d", float("nan")))
+        for offset, fmt, value in cases:
+            body = bytearray(objects)
+            struct.pack_into("<" + fmt, body, start + offset, value)
+            altered = [(tag, version, body if tag == b"OBJS" else original)
+                       for tag, version, original in sections]
+            with self.subTest(offset=offset, value=value):
+                self.path.write_bytes(with_sections(self.raw, altered))
+                with self.assertRaises(of.ProjectError):
+                    of.load_project_data(self.path)
 
 
 if __name__ == "__main__":
