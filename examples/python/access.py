@@ -1,4 +1,4 @@
-"""Geometric station-to-sensor Access, using the packaged historical EOP sample."""
+"""Station-to-sensor access, AER and reports from one fixed analysis."""
 from pathlib import Path
 import orbitforge as of
 from orbitforge import units as u
@@ -24,3 +24,15 @@ for window in windows:
 print(f"{len(windows)} windows; data SHA-256: {windows.data_sha256}")
 # windows.to_csv("access.csv")       # Export these results without recomputing.
 # table = windows.to_pandas()        # Optional pandas, with exact TAI nanoseconds.
+
+aer = analysis.aer(station, sensor, step=u.s(30))
+print(f"{len(aer)} AER samples; first range: {aer[0].range_m / 1000:.3f} km")
+assert aer.epoch.tai_nanoseconds[-1] == project.last.tai_nanoseconds
+# aer.to_csv("aer.csv")
+# elevation_deg = aer.elevation.to_numpy(unit="deg")  # Optional numpy.
+
+report = analysis.report(of.ReportKind.AER, station=station, target=sensor, step=u.s(30))
+assert report.table.row_count == len(aer)
+assert report.input_revision == analysis.revision
+print(f"Report: {report.column_title(5)} = {report.cell_text(0, 5)}")
+# report.export_csv("aer-report.csv")  # Display units and time scale, no recomputation.

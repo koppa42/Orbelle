@@ -1,3 +1,4 @@
+#include "report_execution.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -33,11 +34,7 @@ void cancelled(const std::atomic_bool *value) {
     if (value && value->load())
         throw ReportCancelled{};
 }
-struct Selection {
-    std::string id, name, kind;
-    const ProjectGroundStation *station = nullptr;
-    const ProjectSatellite *satellite = nullptr;
-};
+using Selection = detail::ReportObject;
 std::vector<Selection> select(const Project &project, const ReportDefinition &d) {
     std::vector<Selection> values;
     std::set<std::string> remaining(d.object_ids.begin(), d.object_ids.end());
@@ -174,7 +171,25 @@ std::size_t estimate_report_rows(const Project &p, const ReportDefinition &d) {
 ReportResult generate_report(const ReportContext &context, const ReportDefinition &d,
                              const std::atomic_bool *cancel,
                              const std::function<void(std::size_t, std::size_t)> &progress) {
-    cancelled(cancel);
+    const detail::ReportExecution execution{
+        [&](const detail::ReportObject &object, core::FrameId) {
+            return object.station
+                       ? make_ground_station_session(*object.station)
+                       : make_orbit_session(object.satellite->orbit, 1, context.time.get());
+        },
+        [&](const std::vector<std::string> &ids) {
+            AccessSession session{context, ids[0], ids[1]};
+            return detail::ReportAccess{session.name(),
+                                        [session](core::Epoch epoch) { return session.at(epoch); }};
+        },
+        [&] { cancelled(cancel); }};
+    return detail::generate_report(context, d, execution, progress);
+}
+ReportResult
+detail::generate_report(const ReportContext &context, const ReportDefinition &d,
+                        const ReportExecution &execution,
+                        const std::function<void(std::size_t, std::size_t)> &progress) {
+    execution.check_cancelled();
     const auto total = estimate_report_rows(context.project, d);
     const auto [first, last] = interval(context.project, d);
     if (context.project.earth_orientation && context.time)
@@ -201,12 +216,13 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
     const auto selected =
         report_is_access(d.kind) ? std::vector<Selection>{} : select(context.project, d);
     const auto tick = [&] {
-        cancelled(cancel);
+        execution.check_cancelled();
         if (progress)
             progress(rows.size(), total);
+        execution.check_cancelled();
     };
     if (report_is_access(d.kind)) {
-        AccessSession access{context, d.object_ids[0], d.object_ids[1]};
+        const auto access = execution.access(d.object_ids);
         columns = {{"object.id", "Object ID", ""},
                    {"object.name", "Object", ""},
                    {"time.epoch", d.kind == ReportKind::aer ? "Time" : "Start", "epoch"}};
@@ -218,17 +234,18 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
             std::size_t completed = 0;
             const auto intervals = core::find_access_intervals(
                 first, last, d.step_nanoseconds, [&](core::Epoch epoch) {
-                    cancelled(cancel);
+                    execution.check_cancelled();
                     completed = std::max(
                         completed,
                         static_cast<std::size_t>(ticks_between(first, epoch) /
                                                  static_cast<std::uint64_t>(d.step_nanoseconds)));
                     if (progress)
                         progress(completed, total);
+                    execution.check_cancelled();
                     return access.at(epoch).visible;
                 });
             for (const auto &window : intervals)
-                rows.push_back({d.object_ids[1], access.name(), window.first, window.last,
+                rows.push_back({d.object_ids[1], access.name, window.first, window.last,
                                 window.last.seconds_since(window.first),
                                 std::int64_t(window.start_clipped),
                                 std::int64_t(window.stop_clipped)});
@@ -244,7 +261,7 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
                 tick();
                 const auto sample = access.at(epoch);
                 const auto &o = sample.observation;
-                rows.push_back({d.object_ids[1], access.name(), epoch,
+                rows.push_back({d.object_ids[1], access.name, epoch,
                                 o.azimuth_rad ? results::Cell{*o.azimuth_rad} : results::Cell{},
                                 o.elevation_rad, o.range_m, o.range_rate_mps,
                                 std::int64_t(sample.visible),
@@ -255,8 +272,6 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
                             : core::Epoch{epoch.tai_nanoseconds() + d.step_nanoseconds};
             }
         }
-        if (progress)
-            progress(total, total);
     } else if (d.kind == ReportKind::scenario_summary) {
         columns = {{"summary.field", "Property", ""}, {"summary.value", "Value", ""}};
         rows = {{std::string("Scenario"), context.project.name},
@@ -288,7 +303,7 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
                                            {"state.y", "ITRF Y", "m"},
                                            {"state.z", "ITRF Z", "m"}});
             for (const auto &object : selected) {
-                cancelled(cancel);
+                execution.check_cancelled();
                 const auto &location = object.station->location;
                 const auto p = core::ground_station_position(location);
                 rows.push_back({object.id, object.name, location.longitude_rad,
@@ -329,10 +344,8 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
                                                {"state.vz", "Vz", "m/s"}});
             const auto per_object = total / selected.size();
             for (const auto &object : selected) {
-                cancelled(cancel);
-                const auto session = object.station ? make_ground_station_session(*object.station)
-                                                    : make_orbit_session(object.satellite->orbit, 1,
-                                                                         context.time.get());
+                execution.check_cancelled();
+                const auto session = execution.session(object, target_frame);
                 auto next = first;
                 for (std::size_t offset = 0; offset < per_object; offset += 512) {
                     tick();
@@ -350,7 +363,7 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
                     check(batch.states().size() == epochs.size(),
                           "State provider returned the wrong row count");
                     for (std::size_t i = 0; i < epochs.size(); ++i) {
-                        cancelled(cancel);
+                        execution.check_cancelled();
                         auto state = batch.states()[i];
                         check(state.epoch == epochs[i] && state.origin == core::OriginId::earth,
                               "Invalid report state epoch or origin");
@@ -392,9 +405,10 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
             }
         }
     }
-    cancelled(cancel);
+    execution.check_cancelled();
     if (progress)
         progress(total, total);
+    execution.check_cancelled();
     return {d,
             results::Table{std::move(columns), std::move(rows)},
             report_input_sha256(context.project),

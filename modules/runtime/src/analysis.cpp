@@ -1,4 +1,5 @@
 #include "access_geometry.hpp"
+#include "report_execution.hpp"
 #include <algorithm>
 #include <map>
 #include <orbitforge/runtime/analysis.hpp>
@@ -23,6 +24,37 @@ void check_frame(core::FrameId frame) {
 std::uint64_t distance(core::Epoch first, core::Epoch last) {
     return static_cast<std::uint64_t>(last.tai_nanoseconds()) -
            static_cast<std::uint64_t>(first.tai_nanoseconds());
+}
+void record_data(Project &project, const DataSnapshot &data);
+void check_cancelled(const std::function<bool()> &cancelled) {
+    if (cancelled && cancelled())
+        throw AnalysisCancelled{};
+}
+std::vector<core::Epoch> sample_epochs(const Project &p, std::chrono::nanoseconds step,
+                                       std::optional<core::Epoch> first,
+                                       std::optional<core::Epoch> last) {
+    const auto begin = first.value_or(p.first), end = last.value_or(p.last);
+    check_epoch(p, begin);
+    check_epoch(p, end);
+    if (step.count() <= 0 || begin.tai_nanoseconds() > end.tai_nanoseconds())
+        throw std::invalid_argument("Sampling needs a positive step and an ordered subinterval");
+    const auto span = distance(begin, end), stride = static_cast<std::uint64_t>(step.count());
+    if (span / stride >= max_analysis_samples)
+        throw std::invalid_argument(
+            "Query exceeds 200000 samples; increase step or shorten interval");
+    const auto count = span / stride + 1 + (span % stride != 0 ? 1 : 0);
+    if (count > max_analysis_samples)
+        throw std::invalid_argument(
+            "Query exceeds 200000 samples; increase step or shorten interval");
+    std::vector<core::Epoch> epochs;
+    epochs.reserve(static_cast<std::size_t>(count));
+    for (auto at = begin;;) {
+        epochs.push_back(at);
+        if (at == end)
+            break;
+        at = distance(at, end) <= stride ? end : core::Epoch{at.tai_nanoseconds() + step.count()};
+    }
+    return epochs;
 }
 std::string frame_name(core::FrameId frame) {
     switch (frame) {
@@ -147,6 +179,40 @@ struct Analysis::Impl {
             return time_data_lock(data.time()->data_info()).sha256();
         return DataLock{}.sha256();
     }
+    detail::AccessGeometry geometry(const std::vector<std::string> &ids) const {
+        detail::AccessGeometry pair{*snapshot.project, ids};
+        if (!data.time() || !data.eop() || !data.frames())
+            throw AnalysisCapabilityError("Prepare with UTC and EOP data to query access or AER");
+        return pair;
+    }
+    detail::AccessGeometry geometry(const ObjectRef &station, const ObjectRef &target) const {
+        (void)snapshot.read(station);
+        (void)snapshot.read(target);
+        if (station.kind() != ObjectKind::ground_station ||
+            (target.kind() != ObjectKind::satellite && target.kind() != ObjectKind::sensor))
+            throw std::invalid_argument(
+                "Access/AER requires a ground station and a satellite or sensor");
+        return geometry({station.id(), target.id()});
+    }
+    results::AerSample observe(const detail::AccessGeometry &pair, core::Epoch epoch) const {
+        const auto &session = entries.at(pair.satellite.orbit.object_id).session;
+        const auto state =
+            core::transform_state(session.sample(std::array{epoch}).states().front(),
+                                  core::FrameId::itrf, *data.frames(), data.eop()->at(epoch));
+        return pair.at(state);
+    }
+    results::AccessProvenance provenance(const detail::AccessGeometry &pair) const {
+        const auto &p = *snapshot.project;
+        return {pair.station.object_id,
+                pair.station.name(),
+                pair.sensor ? pair.sensor->object_id : pair.satellite.orbit.object_id,
+                pair.target_name(),
+                snapshot.revision,
+                analysis_input_sha256(pair.numerical_inputs(p.first, p.last)),
+                data.data_lock().sha256(),
+                entries.at(pair.satellite.orbit.object_id).session.provenance().algorithm +
+                    ";frames=state-frame-routing-v1;geometric-access-wgs84-v1"};
+    }
 };
 Analysis::Analysis(ProjectSnapshot snapshot, DataSnapshot data)
     : impl_(std::make_shared<const Impl>(std::move(snapshot), std::move(data))) {}
@@ -181,60 +247,23 @@ results::Trajectory Analysis::states(const ObjectRef &ref, std::chrono::nanoseco
                                      core::FrameId frame, std::optional<core::Epoch> first,
                                      std::optional<core::Epoch> last) const {
     (void)impl_->entry(ref, frame);
-    const auto &p = *snapshot().project;
-    const auto begin = first.value_or(p.first), end = last.value_or(p.last);
-    check_epoch(p, begin);
-    check_epoch(p, end);
-    if (step.count() <= 0 || begin.tai_nanoseconds() > end.tai_nanoseconds())
-        throw std::invalid_argument("Sampling needs a positive step and an ordered subinterval");
-    const auto span = distance(begin, end), stride = static_cast<std::uint64_t>(step.count());
-    if (span / stride >= max_analysis_samples)
-        throw std::invalid_argument(
-            "State query exceeds 200000 samples; increase step or shorten interval");
-    const auto count = span / stride + 1 + (span % stride != 0 ? 1 : 0);
-    if (count > max_analysis_samples)
-        throw std::invalid_argument(
-            "State query exceeds 200000 samples; increase step or shorten interval");
-    std::vector<core::Epoch> epochs;
-    epochs.reserve(static_cast<std::size_t>(count));
-    for (auto at = begin;;) {
-        epochs.push_back(at);
-        if (at == end)
-            break;
-        at = distance(at, end) <= stride ? end : core::Epoch{at.tai_nanoseconds() + step.count()};
-    }
+    const auto epochs = sample_epochs(*snapshot().project, step, first, last);
     return states(ref, epochs, frame);
 }
 results::AccessWindows Analysis::access(const ObjectRef &station, const ObjectRef &target,
                                         const AccessOptions &options,
                                         const std::function<bool()> &cancelled) const {
-    const auto check_cancelled = [&] {
-        if (cancelled && cancelled())
-            throw AnalysisCancelled{};
-    };
-    check_cancelled();
-    // Resolve against the captured document, including scope and object kind.
-    (void)snapshot().read(station);
-    (void)snapshot().read(target);
-    if (station.kind() != ObjectKind::ground_station ||
-        (target.kind() != ObjectKind::satellite && target.kind() != ObjectKind::sensor))
-        throw std::invalid_argument("Access requires a ground station and a satellite or sensor");
-    if (!data().time() || !data().eop() || !data().frames())
-        throw AnalysisCapabilityError("Prepare with UTC and EOP data to query access");
+    check_cancelled(cancelled);
+    const auto geometry = impl_->geometry(station, target);
     const auto &p = *snapshot().project;
     const auto first = options.first.value_or(p.first), last = options.last.value_or(p.last);
     check_epoch(p, first);
     check_epoch(p, last);
-    const detail::AccessGeometry geometry{p, {station.id(), target.id()}};
-    const auto &entry = impl_->entries.at(geometry.satellite.orbit.object_id);
     const auto intervals = core::find_access_intervals(
         first, last, options.search_step.count(),
         [&](core::Epoch epoch) {
-            check_cancelled();
-            const auto state = core::transform_state(
-                entry.session.sample(std::array{epoch}).states().front(), core::FrameId::itrf,
-                *data().frames(), data().eop()->at(epoch));
-            return geometry.at(state).visible;
+            check_cancelled(cancelled);
+            return impl_->observe(geometry, epoch).visible;
         },
         options.boundary_tolerance.count());
     std::vector<results::AccessWindow> windows;
@@ -242,16 +271,70 @@ results::AccessWindows Analysis::access(const ObjectRef &station, const ObjectRe
     for (const auto &interval : intervals)
         windows.emplace_back(interval.first, interval.last, interval.start_clipped,
                              interval.stop_clipped);
-    const auto algorithm =
-        entry.session.sample(std::span<const core::Epoch>{}).provenance().algorithm +
-        ";frames=state-frame-routing-v1;geometric-access-wgs84-v1;"
-        "fixed-grid-bisection-v1";
-    check_cancelled();
+    auto provenance = impl_->provenance(geometry);
+    provenance.algorithm += ";fixed-grid-bisection-v1";
+    check_cancelled(cancelled);
     return {std::move(windows),
             {first, last, options.search_step, options.boundary_tolerance},
-            {station.id(), geometry.station.name(), target.id(), geometry.target_name(),
-             snapshot().revision, analysis_input_sha256(geometry.numerical_inputs(p.first, p.last)),
-             data().data_lock().sha256(), algorithm}};
+            std::move(provenance)};
+}
+results::AerSeries Analysis::aer(const ObjectRef &station, const ObjectRef &target,
+                                 std::span<const core::Epoch> times,
+                                 const std::function<bool()> &cancelled) const {
+    check_cancelled(cancelled);
+    const auto geometry = impl_->geometry(station, target);
+    if (times.size() > max_analysis_samples)
+        throw std::invalid_argument("AER query exceeds 200000 samples; split the query");
+    for (auto epoch : times)
+        check_epoch(*snapshot().project, epoch);
+    std::vector<results::AerSample> samples;
+    samples.reserve(times.size());
+    for (auto epoch : times) {
+        check_cancelled(cancelled);
+        samples.push_back(impl_->observe(geometry, epoch));
+    }
+    auto provenance = impl_->provenance(geometry);
+    check_cancelled(cancelled);
+    return {std::move(samples), std::move(provenance)};
+}
+results::AerSeries Analysis::aer(const ObjectRef &station, const ObjectRef &target,
+                                 std::chrono::nanoseconds step, std::optional<core::Epoch> first,
+                                 std::optional<core::Epoch> last,
+                                 const std::function<bool()> &cancelled) const {
+    check_cancelled(cancelled);
+    const auto epochs = sample_epochs(*snapshot().project, step, first, last);
+    return aer(station, target, epochs, cancelled);
+}
+ReportResult Analysis::report(const ReportDefinition &definition,
+                              const std::function<bool()> &cancelled,
+                              const std::function<void(std::size_t, std::size_t)> &progress) const {
+    // A callback may edit a caller-owned definition; capture it before the first callback.
+    const auto captured = definition;
+    check_cancelled(cancelled);
+    ReportContext context{*snapshot().project, data().time(), data().frames(), data().eop()};
+    record_data(context.project, data());
+    if (captured.time_scale == ReportTimeScale::utc && !data().time() &&
+        (report_is_sampled(captured.kind) || captured.kind == ReportKind::scenario_summary))
+        throw AnalysisCapabilityError("Prepare with UTC data for a UTC report, or select TAI/TT");
+    const detail::ReportExecution execution{
+        [&](const detail::ReportObject &object, core::FrameId frame) {
+            const auto &entry = impl_->entries.at(object.id);
+            if (entry.frame != frame && !data().frames())
+                throw AnalysisCapabilityError("Prepare with EOP data to convert reference frames");
+            return entry.session;
+        },
+        [&](const std::vector<std::string> &ids) {
+            auto pair = impl_->geometry(ids);
+            auto name = pair.station.name() + " → " + pair.target_name();
+            return detail::ReportAccess{std::move(name),
+                                        [&, pair = std::move(pair)](core::Epoch epoch) {
+                                            return impl_->observe(pair, epoch);
+                                        }};
+        },
+        [&] { check_cancelled(cancelled); }};
+    auto result = detail::generate_report(context, captured, execution, progress);
+    result.input_revision = snapshot().revision;
+    return result;
 }
 DataChangedError::DataChangedError(AnalysisPlan plan)
     : std::runtime_error("Selected calculation data differ from the project's recorded data"),
@@ -406,6 +489,37 @@ void export_access_csv(const results::AccessWindows &result, const std::filesyst
         definition, std::move(table),     provenance.input_sha256, provenance.data_sha256,
         "",         provenance.algorithm, result.query().first,    result.query().last,
         {}};
+    export_report_csv(report, path, overwrite);
+}
+void export_aer_csv(const results::AerSeries &result, const std::filesystem::path &path,
+                    bool overwrite) {
+    const auto &p = result.provenance();
+    std::vector<results::Row> rows;
+    rows.reserve(result.samples().size());
+    for (const auto &s : result.samples()) {
+        const auto &o = s.observation;
+        rows.push_back(
+            {p.station_id, p.target_id, s.epoch.tai_nanoseconds(),
+             o.azimuth_rad ? results::Cell{*o.azimuth_rad} : results::Cell{}, o.elevation_rad,
+             o.range_m, o.range_rate_mps, std::int64_t(o.line_of_sight), std::int64_t(s.visible),
+             s.off_boresight_rad ? results::Cell{*s.off_boresight_rad} : results::Cell{}});
+    }
+    results::Table table{{{"station_id", "station_id", ""},
+                          {"target_id", "target_id", ""},
+                          {"epoch_tai_ns", "epoch_tai_ns", ""},
+                          {"azimuth", "azimuth", "rad"},
+                          {"elevation", "elevation", "rad"},
+                          {"range", "range", "m"},
+                          {"range_rate", "range_rate", "m/s"},
+                          {"line_of_sight", "line_of_sight", ""},
+                          {"visible", "visible", ""},
+                          {"off_boresight", "off_boresight", "rad"}},
+                         std::move(rows)};
+    ReportDefinition definition;
+    definition.units = ReportUnits::si;
+    const ReportResult report{definition, std::move(table), p.input_sha256, p.data_sha256,
+                              "",         p.algorithm,      core::Epoch{0}, core::Epoch{0},
+                              {},         p.input_revision};
     export_report_csv(report, path, overwrite);
 }
 } // namespace orbitforge::runtime

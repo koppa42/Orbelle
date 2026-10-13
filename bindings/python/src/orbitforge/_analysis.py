@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from itertools import islice
 from importlib import import_module
+from math import pi
 from os import PathLike
 from operator import index as integer_index
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, overload
@@ -58,6 +59,27 @@ class EpochColumn:
 
     def to_numpy(self) -> Any:
         return _numpy().array(self.tai_nanoseconds, dtype="int64", copy=True)
+
+
+@dataclass(frozen=True, slots=True)
+class ScalarColumn:
+    """Owned SI scalars; undefined values become NaN only in NumPy/pandas copies."""
+    values: tuple[float | None, ...]
+    unit: str
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+    def __iter__(self) -> Iterator[float | None]:
+        return iter(self.values)
+
+    def to_numpy(self, *, unit: str | None = None) -> Any:
+        target = self.unit if unit is None else unit
+        factors = {"m": {"m": 1, "km": 0.001}, "m/s": {"m/s": 1, "km/s": 0.001},
+                   "rad": {"rad": 1, "deg": 180 / pi}}
+        if target not in factors[self.unit]:
+            raise ValueError(f"Cannot convert {self.unit} to {target!r}")
+        return _numpy().array(self.values, dtype="float64", copy=True) * factors[self.unit][target]
 
 
 @dataclass(frozen=True)
@@ -243,6 +265,128 @@ class AccessWindows:
         return table
 
 
+@dataclass(frozen=True)
+class AerSample:
+    """One station-local observation in SI units, including invisible targets."""
+    epoch: n.Epoch
+    azimuth_rad: float | None
+    elevation_rad: float
+    range_m: float
+    range_rate_mps: float
+    off_boresight_rad: float | None
+    line_of_sight: bool
+    visible: bool
+
+    @classmethod
+    def _from_native(cls, sample: n.AccessSample) -> AerSample:
+        o = sample.observation
+        return cls(sample.epoch, o.azimuth_rad, o.elevation_rad, o.range_m, o.range_rate_mps,
+                   sample.off_boresight_rad, o.line_of_sight, sample.visible)
+
+
+@dataclass(frozen=True)
+class AerSeries:
+    """Owned AER values in requested order; no visibility filtering or live object reads."""
+    _native: n.AerSeries
+
+    def __len__(self) -> int:
+        return len(self._native)
+
+    def __iter__(self) -> Iterator[AerSample]:
+        return (AerSample._from_native(sample) for sample in self._native.samples)
+
+    @overload
+    def __getitem__(self, index: int) -> AerSample: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> tuple[AerSample, ...]: ...
+
+    def __getitem__(self, index: int | slice) -> AerSample | tuple[AerSample, ...]:
+        if isinstance(index, slice):
+            return tuple(self[i] for i in range(*index.indices(len(self))))
+        offset = integer_index(index)
+        if offset < 0:
+            offset += len(self)
+        if not 0 <= offset < len(self):
+            raise IndexError("AER sample index out of range")
+        return AerSample._from_native(self._native.sample(offset))
+
+    @property
+    def epoch(self) -> EpochColumn:
+        return EpochColumn(tuple(s.epoch.tai_nanoseconds for s in self))
+
+    @property
+    def azimuth(self) -> ScalarColumn:
+        return ScalarColumn(tuple(s.azimuth_rad for s in self), "rad")
+
+    @property
+    def elevation(self) -> ScalarColumn:
+        return ScalarColumn(tuple(s.elevation_rad for s in self), "rad")
+
+    @property
+    def range(self) -> ScalarColumn:
+        return ScalarColumn(tuple(s.range_m for s in self), "m")
+
+    @property
+    def range_rate(self) -> ScalarColumn:
+        return ScalarColumn(tuple(s.range_rate_mps for s in self), "m/s")
+
+    @property
+    def off_boresight(self) -> ScalarColumn:
+        return ScalarColumn(tuple(s.off_boresight_rad for s in self), "rad")
+
+    @property
+    def line_of_sight(self) -> tuple[bool, ...]:
+        return tuple(s.line_of_sight for s in self)
+
+    @property
+    def visible(self) -> tuple[bool, ...]:
+        return tuple(s.visible for s in self)
+
+    @property
+    def provenance(self) -> n.AccessProvenance:
+        return self._native.provenance
+
+    @property
+    def input_sha256(self) -> str:
+        return self.provenance.input_sha256
+
+    @property
+    def data_sha256(self) -> str:
+        return self.provenance.data_sha256
+
+    def to_csv(self, path: str | PathLike[str], *, overwrite: bool = False) -> None:
+        """Atomic SI CSV; exact epoch_tai_ns, blank undefined angles, boolean flags as 0/1."""
+        self._native.to_csv(path, require(overwrite, bool, "overwrite"))
+
+    def to_pandas(self) -> Any:
+        """Independent columns with int64 epochs, float64 SI values and bool flags."""
+        try:
+            pd = import_module("pandas")
+        except ImportError as error:
+            raise ImportError("DataFrame conversion requires pandas; install it with `pip install pandas`") from error
+        samples = tuple(self)
+        provenance = self.provenance
+        columns = {
+            "station_id": pd.Series([provenance.station_id] * len(self), dtype="str"),
+            "target_id": pd.Series([provenance.target_id] * len(self), dtype="str"),
+            "epoch_tai_ns": pd.Series([s.epoch.tai_nanoseconds for s in samples], dtype="int64"),
+        }
+        for name in ("azimuth_rad", "elevation_rad", "range_m", "range_rate_mps", "off_boresight_rad"):
+            columns[name] = pd.Series([getattr(s, name) for s in samples], dtype="float64")
+        for name in ("line_of_sight", "visible"):
+            columns[name] = pd.Series([getattr(s, name) for s in samples], dtype="bool")
+        table = pd.DataFrame(columns, copy=True)
+        table.attrs = {
+            "epoch_origin": "2000-01-01T12:00:00 TAI", "time_scale": "TAI",
+            "frame": "WGS84 station-local ENU", "units": "SI",
+            **{name: getattr(provenance, name) for name in (
+                "station_id", "station_name", "target_id", "target_name", "input_revision",
+                "input_sha256", "data_sha256", "algorithm")},
+        }
+        return table
+
+
 class DataChangedError(RuntimeError):
     """The pinned plan requires an explicit decision about changed data."""
     def __init__(self, plan: AnalysisPlan | ProjectOpenPlan) -> None:
@@ -328,6 +472,106 @@ class Analysis:
               frame: n.FrameId = n.FrameId.GCRF) -> n.CartesianState:
         return self._native.state(require(object, ObjectHandle, "object")._ref,
                                   require(at, n.Epoch, "at"), require(frame, n.FrameId, "frame"))
+
+    def aer(self, station: GroundStationHandle, target: SatelliteHandle | SensorHandle, *,
+            step: Duration | None = None, times: Iterable[n.Epoch] | None = None,
+            first: n.Epoch | None = None, last: n.Epoch | None = None,
+            cancelled: Callable[[], bool] | None = None) -> AerSeries:
+        """Sample station-local AER with fixed UTC/EOP data. Specify step or exact times.
+
+        A positive step includes both endpoints; explicit times preserve order/duplicates.
+        Visibility uses line of sight, station minimum elevation and optional sensor FOV.
+        Undefined azimuth/off-boresight remains None. Cancellation never returns partial data.
+        """
+        require(station, GroundStationHandle, "station")
+        if not isinstance(target, (SatelliteHandle, SensorHandle)):
+            raise TypeError("target must be a SatelliteHandle or SensorHandle")
+        if (step is None) == (times is None):
+            raise TypeError("Specify exactly one of step or times")
+        if step is not None:
+            require(step, Duration, "step")
+            if first is not None:
+                require(first, n.Epoch, "first")
+            if last is not None:
+                require(last, n.Epoch, "last")
+            return AerSeries(self._native.aer_step(station._ref, target._ref, step.nanoseconds,
+                                                   first, last, cancelled))
+        if first is not None or last is not None:
+            raise TypeError("first/last are only used with step; times gives exact query epochs")
+        assert times is not None
+        epochs = tuple(islice(times, n.MAX_ANALYSIS_SAMPLES + 1))
+        if len(epochs) > n.MAX_ANALYSIS_SAMPLES:
+            raise ValueError("AER query exceeds 200000 samples; split the query")
+        for epoch in epochs:
+            require(epoch, n.Epoch, "times item")
+        return AerSeries(self._native.aer_at(station._ref, target._ref, epochs, cancelled))
+
+    def report(self, kind: n.ReportKind, *,
+               objects: ObjectHandle | Iterable[ObjectHandle] | None = None,
+               station: GroundStationHandle | None = None,
+               target: SatelliteHandle | SensorHandle | None = None,
+               step: Duration | None = None,
+               first: n.Epoch | None = None, last: n.Epoch | None = None,
+               frame: n.FrameId = n.FrameId.GCRF,
+               units: n.ReportUnits = n.ReportUnits.ENGINEERING,
+               time_scale: n.ReportTimeScale = n.ReportTimeScale.TAI,
+               cancelled: Callable[[], bool] | None = None,
+               progress: Callable[[int, int], None] | None = None) -> n.ReportResult:
+        """Generate a built-in report from this snapshot, with no file/data rereads.
+
+        Select objects explicitly, or station/target for AER and access reports.
+        SCENARIO_SUMMARY needs no selection. Sampled reports require step. TAI is
+        the default display scale; UTC requires data selected when preparing.
+        """
+        require(kind, n.ReportKind, "kind")
+        access = kind in (n.ReportKind.AER, n.ReportKind.ACCESS_INTERVALS)
+        sampled = kind not in (n.ReportKind.SCENARIO_SUMMARY, n.ReportKind.OBJECT_SUMMARY,
+                               n.ReportKind.GROUND_STATIONS)
+        if access:
+            if objects is not None:
+                raise TypeError("AER/access reports select station and target, not objects")
+            require(station, GroundStationHandle, "station")
+            if not isinstance(target, (SatelliteHandle, SensorHandle)):
+                raise TypeError("target must be a SatelliteHandle or SensorHandle")
+            selection = (station, target)
+        else:
+            if station is not None or target is not None:
+                raise TypeError("station/target are only used by AER/access reports")
+            if kind == n.ReportKind.SCENARIO_SUMMARY:
+                if objects is not None:
+                    raise TypeError("SCENARIO_SUMMARY describes the project; omit objects")
+                selection = ()
+            else:
+                if objects is None:
+                    raise TypeError("Select report objects explicitly")
+                selection = (objects,) if isinstance(objects, ObjectHandle) else tuple(islice(objects, 10001))
+                if not selection:
+                    raise ValueError("Select at least one report object")
+                if len(selection) > 10000:
+                    raise ValueError("Report selection exceeds 10000 objects")
+        snapshot = self._native.snapshot
+        ids = []
+        for object in selection:
+            ref = require(object, ObjectHandle, "objects item")._ref
+            snapshot.read(ref)  # Captured scope/existence; a deleted live handle still works.
+            ids.append(ref.id)
+        definition = n.ReportDefinition()
+        definition.id = "analysis-" + kind.name.lower().replace("_", "-")
+        definition.name = kind.name.replace("_", " ").title()
+        definition.kind = kind
+        definition.object_ids = ids
+        definition.frame = require(frame, n.FrameId, "frame")
+        definition.units = require(units, n.ReportUnits, "units")
+        definition.time_scale = require(time_scale, n.ReportTimeScale, "time_scale")
+        if sampled:
+            definition.step_nanoseconds = require(step, Duration, "step").nanoseconds
+            if first is not None or last is not None:
+                definition.follow_scenario = False
+                definition.first = snapshot.first if first is None else require(first, n.Epoch, "first")
+                definition.last = snapshot.last if last is None else require(last, n.Epoch, "last")
+        elif step is not None or first is not None or last is not None:
+            raise TypeError("Static reports do not use step or first/last")
+        return self._native.report(definition, cancelled, progress)
 
     def access(self, station: GroundStationHandle, target: SatelliteHandle | SensorHandle, *,
                search_step: Duration, boundary_tolerance: Duration = Duration(1_000_000),

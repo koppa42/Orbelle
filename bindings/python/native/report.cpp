@@ -106,6 +106,7 @@ void bind_reports(py::module_ &module) {
                                [](const runtime::ReportResult &r) { return r.definition; })
         .def_readonly("table", &runtime::ReportResult::table)
         .def_readonly("input_sha256", &runtime::ReportResult::input_sha256)
+        .def_readonly("input_revision", &runtime::ReportResult::input_revision)
         .def_readonly("data_sha256", &runtime::ReportResult::data_sha256)
         .def_readonly("time_sha256", &runtime::ReportResult::time_sha256)
         .def_readonly("algorithm", &runtime::ReportResult::algorithm)

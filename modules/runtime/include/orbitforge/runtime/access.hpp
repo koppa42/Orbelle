@@ -1,14 +1,10 @@
 #pragma once
 #include <orbitforge/core/propagation/access.hpp>
+#include <orbitforge/results/aer_series.hpp>
 #include <orbitforge/runtime/report.hpp>
 
 namespace orbitforge::runtime {
-struct AccessSample {
-    core::Epoch epoch;
-    core::GroundObservation observation;
-    std::optional<double> off_boresight_rad; // Only for a sensor target.
-    bool visible;
-};
+using AccessSample = results::AerSample;
 void validate_access_pair(const application::Project &project,
                           const std::vector<std::string> &object_ids);
 // Immutable calculation snapshot. Sensor is co-located with its satellite, with

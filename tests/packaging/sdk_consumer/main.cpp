@@ -119,13 +119,29 @@ int main(int argc, char **argv) {
                 "Station", {std::atan2(r[1], r[0]), std::atan2(r[2], std::hypot(r[0], r[1])), 0}});
             const auto sensor = access_project.objects().create(
                 app::objects::Sensor{"Tracking", satellite, .1, {station}});
-            const auto access =
-                runtime::prepare(access_project, data).access(station, sensor, {.search_step = 1s});
+            const auto analysis = runtime::prepare(access_project, data);
+            const auto access = analysis.access(station, sensor, {.search_step = 1s});
             if (access.windows().size() != 1 ||
                 access.windows()[0].duration() != 10'000'000'003ns ||
                 access.provenance().target_id != sensor.id())
                 return 29;
             runtime::export_access_csv(access, "sdk-access.csv", true);
+            const auto aer = analysis.aer(station, sensor, 1s);
+            app::ReportDefinition definition;
+            definition.id = "sdk-aer";
+            definition.name = "AER";
+            definition.kind = app::ReportKind::aer;
+            definition.object_ids = {station.id(), sensor.id()};
+            definition.step_nanoseconds = 1'000'000'000;
+            const auto report = analysis.report(definition);
+            if (aer.samples().size() != 12 || report.table.rows().size() != 12 ||
+                aer.samples().back().epoch != access_project.snapshot().project->last ||
+                report.input_revision != analysis.snapshot().revision ||
+                !aer.samples().front().off_boresight_rad ||
+                std::get<double>(report.table.rows()[0][5]) != aer.samples()[0].observation.range_m)
+                return 30;
+            runtime::export_aer_csv(aer, "sdk-aer.csv", true);
+            runtime::export_report_csv(report, "sdk-report.csv", true);
         }
         if (orbitforge::runtime::data_catalog_available()) {
             orbitforge::runtime::DataCatalog catalog("sdk-data-catalog");

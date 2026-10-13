@@ -105,7 +105,9 @@ if(ORBITFORGE_WITH_VSG)
             ORBITFORGE_TEST_EOP="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json")
         orbitforge_warnings(orbitforge_orbit_scene_tests)
         orbitforge_copy_runtime_dlls(orbitforge_orbit_scene_tests)
-        gtest_discover_tests(orbitforge_orbit_scene_tests TEST_PREFIX "desktop." PROPERTIES TIMEOUT 60)
+        # Discover after the build: Windows cold starts can exceed 5 s under compiler load.
+        gtest_discover_tests(orbitforge_orbit_scene_tests DISCOVERY_MODE PRE_TEST
+            DISCOVERY_TIMEOUT 30 TEST_PREFIX "desktop." PROPERTIES TIMEOUT 60)
         add_executable(orbitforge_quantity_tests tests/quantity_editor_test.cpp
             src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
             src/viewer/ground_station_editor.cpp src/viewer/sensor_editor.cpp
