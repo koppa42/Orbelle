@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <map>
 #include <orbitforge/runtime/analysis.hpp>
+#include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/report.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
@@ -207,7 +208,15 @@ DataChangedError::DataChangedError(AnalysisPlan plan)
     : std::runtime_error("Selected calculation data differ from the project's recorded data"),
       plan_(std::make_shared<const AnalysisPlan>(std::move(plan))) {}
 AnalysisPlan::AnalysisPlan(const ProjectDocument &project, DataSnapshot data)
-    : owner_(project), analysis_(project.snapshot(), std::move(data)) {
+    : AnalysisPlan(project, Analysis{project.snapshot(), std::move(data)}) {}
+AnalysisPlan::AnalysisPlan(const ProjectDocument &project, const DataCatalog &catalog)
+    : AnalysisPlan(project, [&] {
+          const auto captured = project.snapshot();
+          return Analysis{captured,
+                          catalog.snapshot(captured.project->first, captured.project->last)};
+      }()) {}
+AnalysisPlan::AnalysisPlan(const ProjectDocument &project, Analysis analysis)
+    : owner_(project), analysis_(std::move(analysis)) {
     const auto recorded = snapshot().project->data_lock();
     for (const auto &selected : analysis_.data().data_lock().references()) {
         const auto previous =
@@ -226,6 +235,9 @@ Analysis AnalysisPlan::prepare(bool accept) const {
 }
 Analysis prepare(const ProjectDocument &project, DataSnapshot data) {
     return AnalysisPlan{project, std::move(data)}.prepare();
+}
+Analysis prepare(const ProjectDocument &project, const DataCatalog &catalog) {
+    return AnalysisPlan{project, catalog}.prepare();
 }
 void export_trajectory_csv(const results::Trajectory &result, const std::filesystem::path &path,
                            bool overwrite) {

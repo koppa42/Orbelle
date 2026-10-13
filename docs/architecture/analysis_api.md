@@ -47,10 +47,35 @@ original = analysis.state(sat, at=of.Epoch(0))
 
 ## 数据与确认计划
 
+推荐从已经安装数据的目录准备分析，Python 和 C++ 与桌面共用完整覆盖优先、来源优先级和有限外推的选择规则：
+
+```python
+catalog = of.DataCatalog("local/shared-data")
+analysis = project.prepare(data=catalog)
+trajectory = analysis.states(sat, step=u.s(30), frame=of.FrameId.ITRF)
+
+# 可选：显式修改这个目录的共享策略，之后的准备才会使用。
+catalog.preferred_eop = of.EopProduct.C04
+catalog.set_extrapolation_days(of.EopProduct.C04, 3)  # 0 关闭；最多 30 天
+
+# 也可以提前取得固定资源，传给一个或多个分析。
+data = catalog.snapshot(project.first, project.last)
+analysis = project.prepare(data=data)
+```
+
+目录路径由调用方显式提供；选源不联网、不读取其他目录、不更改当前文件指针。默认 C04 优先；先按优先级找完整覆盖整个区间的当前来源，全部不足时再考虑各来源允许的外推，不拼接两份文件。原始数据已经覆盖时不会启用外推，因此未使用的外推设置不改变计算哈希。`catalog.snapshot()` 允许单历元区间，反向区间报错；分析项目仍遵守自身的时段约束。
+
+选源在一次 SQLite 读取中捕获当前 UTC、EOP 指针、优先级、外推策略和旧目录兼容索引，然后校验并完整加载资源。其他进程发布新数据、目录对象释放或文件随后移除，都不会改变已有快照或确认计划。当前 UTC 缺失、损坏或失效时明确报错；仅目录尚未选择 UTC 时使用内置表。当前 EOP 文件失效时可选择另一个可用来源，并通过 `data.selection_notes` 说明；有显式当前指针时不会回退到该产品的旧缓存。没有当前指针的旧目录按有效获取记录 / 插入顺序选择每种产品的当前候选。覆盖不足的错误包含所需 TAI 纳秒区间、候选原始范围、外推天数及失效原因。
+
+低层 `install_eop()` / `import_c04()` / `import_finals()` 只安装资源。需要从脚本指定刚安装的文件时，使用 `catalog.activate_eop(entry.lock_sha256)`；它检查该文件的 UTC 依赖后更新相应当前指针，不改下载记录和正在运行的分析。桌面下载与导入继续通过原有校验和发布流程管理当前文件。`preferred_eop` 与 `set_extrapolation_days()` 使用数据中心的同一组目录设置。
+
 无外部时间依赖的原生状态查询不需要 EOP、联网或图形资源。SGP4 显式选择时间表：
 
 ```python
 analysis = project.prepare(data=of.DataSnapshot.builtin_time())
+# 只需要目录当前时间表时，不要求安装 EOP：
+data = catalog.snapshot(project.first, project.last, earth_orientation=False)
+analysis = project.prepare(data=data)
 ```
 
 参考系转换显式加载本机文件：
@@ -83,7 +108,7 @@ except of.DataChangedError as error:
 
 上例中的接受调用应放在应用的确认分支内。库本身不弹窗、不联网、不替调用方同意更新。接受仅影响这次调用；计划不会记住“以后都同意”。如果项目修订已变化，计划抛出 `RevisionConflictError`，需要重新生成。Python 编辑上下文内不能准备分析；已生成的旧分析仍可查询。
 
-准备成功不修改项目来源记录，不把计算结果写回项目。数据中心当前数据的自动选择、`plan_open()`、`save(..., analysis=...)` 和桌面确认流程尚待接入；普通 `Project.open()` 仍只读取保存的输入和来源信息。
+`plan_prepare(data=catalog)` 与直接传入快照使用同一确认流程，固定选源时对应的项目修订。准备成功不修改项目来源记录，不把计算结果写回项目。`plan_open()`、`save(..., analysis=...)` 和桌面接入新的准备计划尚待完成；普通 `Project.open()` 仍只读取保存的输入和来源信息。
 
 ## 结果与导出
 
@@ -106,12 +131,18 @@ CSV 使用精确的整数 `epoch_tai_ns`、标明 SI 单位的状态列以及原
 
 ```cpp
 #include <orbitforge/runtime/analysis.hpp>
+#include <orbitforge/runtime/data_catalog.hpp>
 using namespace std::chrono_literals;
 
 // document 为 application::ProjectDocument，satellite 是其 ObjectRef。
 auto analysis = orbitforge::runtime::prepare(document);
 auto trajectory = analysis.states(satellite, 30s, orbitforge::core::FrameId::gcrf);
 orbitforge::runtime::export_trajectory_csv(trajectory, "trajectory.csv");
+
+orbitforge::runtime::DataCatalog catalog{"local/shared-data"};
+auto earth_fixed = orbitforge::runtime::prepare(document, catalog);
+auto state = earth_fixed.state(satellite, document.snapshot().project->first,
+                               orbitforge::core::FrameId::itrf);
 ```
 
 Runtime 位于 Application 之上，分析不让对象模型反向依赖 Provider。`ProjectSnapshot` 保留进程内项目范围；`snapshot.read(ref)` 从该修订读取对象，原对象删除后仍有效。C++ 的 `AnalysisPlan` 和 `DataChangedError::plan()` 与 Python 确认行为一致。
@@ -119,3 +150,5 @@ Runtime 位于 Application 之上，分析不让对象模型反向依赖 Provide
 分析构建和查询可在 Python 释放 GIL 后运行。当前为同步状态查询接口，尚未提供通用任务取消、`analysis.access()`、新的报告模板或桌面缓存发布；原有 Access/报告入口继续可用。后续按[整体设计](object_api_design.md)逐批迁移。
 
 验证包括 C++ `Analysis.*`、Python `test_analysis.py`、现有传播/时间/哈希回归，以及安装后的 SDK 消费端。覆盖文件移除后的资源存活、同 ID 跨项目拒绝、旧结果存活、确认计划过期、有限外推、UTC 失效、整数极限附近采样、CSV 覆盖保护及可选数组适配。可运行示例见 [analysis.py](../../examples/python/analysis.py)。
+
+目录选源由 C++ `CatalogAnalysis.*`、Python `test_catalog_analysis.py` 和桌面数据中心回归共同验证：覆盖优先级、外推上限加 1 ns、损坏的当前文件、UTC/EOP 跨进程原子更新、确认期间切换数据及安装后的 SDK 入口。示例可使用 `analysis.py --data <目录>` 验证 ITRF 输出。

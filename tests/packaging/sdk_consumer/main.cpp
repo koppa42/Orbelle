@@ -109,6 +109,16 @@ int main(int argc, char **argv) {
             if (entry.lock_sha256 != lock.sha256() ||
                 catalog.resolve_eop(lock)->data_info().id != eop->data_info().id)
                 return 17;
+            catalog.activate_eop(entry.lock_sha256);
+            catalog.set_preferred_eop(orbitforge::runtime::EopProduct::c04);
+            catalog.set_extrapolation_days(orbitforge::runtime::EopProduct::c04, 3);
+            const auto selected = catalog.snapshot(entry.first, entry.last);
+            app::ProjectDocument analysis_project{
+                app::Project{"SDK catalog", entry.first, entry.last}};
+            if (selected.data_lock() != lock ||
+                selected.eop()->data_info().extrapolation_days != 0 ||
+                orbitforge::runtime::prepare(analysis_project, catalog).data().data_lock() != lock)
+                return 27;
         }
         const auto transform = frames->gcrf_to_itrf_state(epoch, eop->at(epoch));
         if (utc.second != 60 || utc.nanosecond != 123456789 ||

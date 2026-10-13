@@ -55,9 +55,9 @@ QString download_error(const QNetworkReply &reply, int http) {
         return QStringLiteral("下载连接中断，请检查网络后重试。");
     }
 }
-const char *extrapolation_key(const core::EopDataInfo &info) {
-    return info.interpolation.starts_with("finals2000a") ? "extrapolation-finals2000a-days"
-                                                         : "extrapolation-c04-days";
+runtime::EopProduct eop_product(const core::EopDataInfo &info) {
+    return info.interpolation.starts_with("finals2000a") ? runtime::EopProduct::finals2000a
+                                                         : runtime::EopProduct::c04;
 }
 } // namespace
 EopCatalog::EopCatalog(std::filesystem::path store, std::vector<std::filesystem::path> bundled,
@@ -366,15 +366,16 @@ void EopCatalog::refresh_current(std::optional<std::size_t> acquired) {
     ++revision_;
 }
 DataProduct EopCatalog::preferred_product() const {
-    return data_.setting("eop-preferred-product") == "finals2000a" ? DataProduct::finals2000a
-                                                                   : DataProduct::c04;
+    return data_.preferred_eop() == runtime::EopProduct::finals2000a ? DataProduct::finals2000a
+                                                                     : DataProduct::c04;
 }
 void EopCatalog::set_preferred_product(DataProduct product) {
     if (product != DataProduct::finals2000a && product != DataProduct::c04)
         throw std::invalid_argument("EOP priority must be finals2000A or C04");
     if (product == preferred_product())
         return;
-    data_.set_setting("eop-preferred-product", product == DataProduct::c04 ? "c04" : "finals2000a");
+    data_.set_preferred_eop(product == DataProduct::c04 ? runtime::EopProduct::c04
+                                                        : runtime::EopProduct::finals2000a);
     refresh_current();
 }
 bool EopCatalog::automatic_updates(DataProduct product) const {
@@ -397,42 +398,26 @@ void EopCatalog::set_update_interval_hours(int hours, DataProduct product) {
     ++revision_;
 }
 int EopCatalog::extrapolation_days(std::size_t index) const {
-    bool valid = false;
-    const auto days =
-        QString::fromStdString(data_.setting(extrapolation_key(providers_.at(index)->data_info())))
-            .toInt(&valid);
-    return valid && days >= 0 && days <= core::max_eop_extrapolation_days ? days : 0;
+    return data_.extrapolation_days(eop_product(providers_.at(index)->data_info()));
 }
 void EopCatalog::set_extrapolation_days(std::size_t index, int days) {
-    if (days < 0 || days > core::max_eop_extrapolation_days)
-        throw std::invalid_argument("EOP extrapolation limit must be 0..30 days");
-    data_.set_setting(extrapolation_key(providers_.at(index)->data_info()), std::to_string(days));
+    data_.set_extrapolation_days(eop_product(providers_.at(index)->data_info()), days);
     ++revision_;
 }
 EopCatalog::Provider EopCatalog::for_interval(core::Epoch first, core::Epoch last) const {
     if (first.tai_nanoseconds() >= last.tai_nanoseconds())
         throw std::invalid_argument("结束时间必须晚于开始时间。");
-    const auto &time = time_;
-    (void)time->to_utc(first);
-    (void)time->to_utc(last);
-    // Real file coverage always wins over an extrapolated alternative.
-    for (const auto index : current_) {
-        const auto &provider = providers_.at(index);
-        if (core::eop_covers(provider->data_info(), first) &&
-            core::eop_covers(provider->data_info(), last))
-            return provider;
+    std::vector<runtime::EopCandidate> candidates;
+    for (const auto index : current_)
+        candidates.push_back({providers_.at(index), extrapolation_days(index)});
+    try {
+        return runtime::select_eop_for_interval(candidates, first, last, time_);
+    } catch (const core::EopCoverageError &error) {
+        throw core::EopCoverageError(
+            std::string("所选时段超出当前 EOP "
+                        "数据覆盖及允许的外推范围，请在数据中心更新数据或调整外推设置。\n") +
+            error.what());
     }
-    for (const auto index : current_) {
-        const auto days = extrapolation_days(index);
-        if (days == 0)
-            continue;
-        auto info = providers_.at(index)->data_info();
-        info.extrapolation_days = days;
-        if (core::eop_covers(info, first) && core::eop_covers(info, last))
-            return runtime::with_eop_extrapolation(providers_.at(index), days, time_);
-    }
-    throw core::EopCoverageError(
-        "所选时段超出当前 EOP 数据覆盖及允许的外推范围，请在数据中心更新数据或调整外推设置。");
 }
 void EopCatalog::import_raw(const std::filesystem::path &source, DataProduct product) {
     if (downloading())

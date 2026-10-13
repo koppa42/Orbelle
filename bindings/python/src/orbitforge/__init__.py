@@ -22,7 +22,7 @@ from ._native import (
     ProjectSensor, SensorPointing, GroundObservation, AccessSample, AccessInterval,
     observe_ground_target, vector_angle,
     DataReference, DataLock,
-    DataCatalog, CatalogSnapshot, DataAcquisition, data_catalog_available,
+    DataCatalog, CatalogSnapshot, DataAcquisition, EopProduct, data_catalog_available,
     ReportKind, ReportUnits, ReportTimeScale, ReportDefinition, ReportColumn, ReportTable,
     ReportResult,
 )
@@ -64,7 +64,7 @@ __all__ = [
     "ProjectSensor", "SensorPointing", "GroundObservation", "AccessSample", "AccessSession", "AccessInterval",
     "observe_ground_target", "vector_angle",
     "DataReference", "DataLock",
-    "DataCatalog", "CatalogSnapshot", "DataAcquisition", "data_catalog_available",
+    "DataCatalog", "CatalogSnapshot", "DataAcquisition", "EopProduct", "data_catalog_available",
     "ReportKind", "ReportUnits", "ReportTimeScale", "ReportDefinition", "ReportColumn", "ReportTable",
     "ReportResult", "estimate_report_rows", "report_input_sha256", "generate_report",
 ]

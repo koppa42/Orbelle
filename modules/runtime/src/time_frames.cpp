@@ -1,3 +1,4 @@
+#include <orbitforge/application/data_lock.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <stdexcept>
 #ifdef ORBITFORGE_HAS_ERFA
@@ -6,6 +7,45 @@
 #endif
 
 namespace orbitforge::runtime {
+std::shared_ptr<const core::IEarthOrientationProvider>
+select_eop_for_interval(std::span<const EopCandidate> candidates, core::Epoch first,
+                        core::Epoch last, std::shared_ptr<const core::ITimeProvider> time) {
+    if (first.tai_nanoseconds() > last.tai_nanoseconds() || !time)
+        throw std::invalid_argument("EOP selection requires an ordered interval and UTC data");
+    (void)time->to_utc(first);
+    (void)time->to_utc(last);
+    std::string diagnostic = "Required EOP interval (TAI ns): [" +
+                             std::to_string(first.tai_nanoseconds()) + ", " +
+                             std::to_string(last.tai_nanoseconds()) + "]";
+    for (const auto &candidate : candidates) {
+        if (!candidate.provider || candidate.extrapolation_days < 0 ||
+            candidate.extrapolation_days > core::max_eop_extrapolation_days)
+            throw std::invalid_argument(
+                "EOP candidate requires a provider and 0..30 extrapolation days");
+        const auto &info = candidate.provider->data_info();
+        if (info.extrapolation_days != 0 || application::time_data_lock(info.time_data) !=
+                                                application::time_data_lock(time->data_info()))
+            throw std::invalid_argument(
+                "EOP selection requires original data with matching UTC identity");
+        diagnostic += "\n" + info.id + ": original [" +
+                      std::to_string(info.first_epoch.tai_nanoseconds()) + ", " +
+                      std::to_string(info.last_epoch.tai_nanoseconds()) +
+                      "]; extrapolation days=" + std::to_string(candidate.extrapolation_days);
+    }
+    for (const auto &candidate : candidates)
+        if (core::eop_covers(candidate.provider->data_info(), first) &&
+            core::eop_covers(candidate.provider->data_info(), last))
+            return candidate.provider;
+    for (const auto &candidate : candidates) {
+        auto info = candidate.provider->data_info();
+        info.extrapolation_days = candidate.extrapolation_days;
+        if (candidate.extrapolation_days && core::eop_covers(info, first) &&
+            core::eop_covers(info, last))
+            return with_eop_extrapolation(candidate.provider, candidate.extrapolation_days, time);
+    }
+    throw core::EopCoverageError(diagnostic + "\nNo current source covers the entire interval. "
+                                              "Update data or review extrapolation settings.");
+}
 core::GeodeticPosition itrf_to_wgs84(core::CartesianState state) {
 #ifdef ORBITFORGE_HAS_ERFA
     return providers::erfa::itrf_to_wgs84(state);

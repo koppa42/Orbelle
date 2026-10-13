@@ -6,6 +6,9 @@ namespace py = pybind11;
 using namespace orbitforge;
 void bind_data_catalog(py::module_ &module) {
     module.def("data_catalog_available", &runtime::data_catalog_available);
+    py::enum_<runtime::EopProduct>(module, "EopProduct")
+        .value("C04", runtime::EopProduct::c04)
+        .value("FINALS2000A", runtime::EopProduct::finals2000a);
     py::enum_<runtime::DataAcquisition>(module, "DataAcquisition")
         .value("unknown", runtime::DataAcquisition::unknown)
         .value("bundled", runtime::DataAcquisition::bundled)
@@ -24,6 +27,16 @@ void bind_data_catalog(py::module_ &module) {
     py::class_<runtime::DataCatalog>(module, "DataCatalog")
         .def(py::init<std::filesystem::path>(), py::arg("root"))
         .def_property_readonly("root", &runtime::DataCatalog::root)
+        .def("snapshot", &runtime::DataCatalog::snapshot, py::arg("first"), py::arg("last"),
+             py::kw_only(), py::arg("earth_orientation") = true,
+             py::call_guard<py::gil_scoped_release>())
+        .def_property("preferred_eop", &runtime::DataCatalog::preferred_eop,
+                      &runtime::DataCatalog::set_preferred_eop)
+        .def("extrapolation_days", &runtime::DataCatalog::extrapolation_days, py::arg("product"))
+        .def("set_extrapolation_days", &runtime::DataCatalog::set_extrapolation_days,
+             py::arg("product"), py::arg("days"))
+        .def("activate_eop", &runtime::DataCatalog::activate_eop, py::arg("lock_sha256"),
+             py::call_guard<py::gil_scoped_release>())
         .def_property_readonly("snapshots", &runtime::DataCatalog::snapshots)
         .def("record_acquisition", &runtime::DataCatalog::record_acquisition,
              py::arg("lock_sha256"), py::arg("acquisition"), py::arg("acquired_at") = std::nullopt)
@@ -42,5 +55,6 @@ void bind_data_catalog(py::module_ &module) {
         .def("load_eop", &runtime::DataCatalog::load_eop, py::arg("lock_sha256"),
              py::call_guard<py::gil_scoped_release>())
         .def("setting", &runtime::DataCatalog::setting)
-        .def("set_setting", &runtime::DataCatalog::set_setting);
+        .def("set_setting", &runtime::DataCatalog::set_setting)
+        .def("set_settings", &runtime::DataCatalog::set_settings, py::arg("values"));
 }

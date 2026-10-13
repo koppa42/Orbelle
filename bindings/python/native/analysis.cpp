@@ -1,4 +1,5 @@
 #include <orbitforge/runtime/analysis.hpp>
+#include <orbitforge/runtime/data_catalog.hpp>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl/filesystem.h>
@@ -13,6 +14,7 @@ void bind_analysis(py::module_ &module) {
                                                       PyExc_RuntimeError);
     py::class_<runtime::DataSnapshot>(module, "DataSnapshot")
         .def(py::init<>())
+        .def_property_readonly("selection_notes", &runtime::DataSnapshot::selection_notes)
         .def_static("builtin_time", &runtime::DataSnapshot::builtin_time,
                     py::call_guard<py::gil_scoped_release>())
         .def_static("load", &runtime::DataSnapshot::load, py::kw_only(),
@@ -93,6 +95,8 @@ void bind_analysis(py::module_ &module) {
             py::arg("first") = py::none(), py::arg("last") = py::none(),
             py::call_guard<py::gil_scoped_release>());
     py::class_<runtime::AnalysisPlan>(module, "AnalysisPlan")
+        .def(py::init<const application::ProjectDocument &, const runtime::DataCatalog &>(),
+             py::arg("project"), py::arg("data"), py::call_guard<py::gil_scoped_release>())
         .def(py::init<const application::ProjectDocument &, runtime::DataSnapshot>(),
              py::arg("project"), py::arg("data") = runtime::DataSnapshot{},
              py::call_guard<py::gil_scoped_release>())
