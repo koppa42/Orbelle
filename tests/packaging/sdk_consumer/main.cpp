@@ -102,6 +102,31 @@ int main(int argc, char **argv) {
         const auto utc = time->to_utc(epoch);
         const auto frames = orbitforge::runtime::make_frame_provider();
         const auto eop = orbitforge::runtime::load_eop_snapshot(argv[1]);
+        if (orbitforge::runtime::two_body_available()) {
+            using namespace orbitforge;
+            using namespace std::chrono_literals;
+            app::ProjectDocument access_project{app::Project{
+                "SDK access", epoch, core::Epoch{epoch.tai_nanoseconds() + 10'000'000'003}}};
+            app::OrbitInput input;
+            input.initial.epoch = epoch;
+            const auto satellite =
+                access_project.objects().create(app::objects::Satellite{"Orbiter", input, {}});
+            const auto data = runtime::DataSnapshot::load(argv[1]);
+            const auto r = runtime::prepare(access_project, data)
+                               .state(satellite, epoch, core::FrameId::itrf)
+                               .position_m;
+            const auto station = access_project.objects().create(app::objects::GroundStation{
+                "Station", {std::atan2(r[1], r[0]), std::atan2(r[2], std::hypot(r[0], r[1])), 0}});
+            const auto sensor = access_project.objects().create(
+                app::objects::Sensor{"Tracking", satellite, .1, {station}});
+            const auto access =
+                runtime::prepare(access_project, data).access(station, sensor, {.search_step = 1s});
+            if (access.windows().size() != 1 ||
+                access.windows()[0].duration() != 10'000'000'003ns ||
+                access.provenance().target_id != sensor.id())
+                return 29;
+            runtime::export_access_csv(access, "sdk-access.csv", true);
+        }
         if (orbitforge::runtime::data_catalog_available()) {
             orbitforge::runtime::DataCatalog catalog("sdk-data-catalog");
             const auto entry = catalog.install_eop(argv[1]);

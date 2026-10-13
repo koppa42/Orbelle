@@ -1,13 +1,24 @@
 #pragma once
 #include <chrono>
+#include <functional>
 #include <orbitforge/application/project_document.hpp>
 #include <orbitforge/core/frames/frame_provider.hpp>
+#include <orbitforge/results/access_windows.hpp>
 #include <orbitforge/results/trajectory.hpp>
 
 namespace orbitforge::runtime {
 class DataCatalog;
 class AnalysisCapabilityError : public std::runtime_error {
     using std::runtime_error::runtime_error;
+};
+class AnalysisCancelled : public std::runtime_error {
+  public:
+    AnalysisCancelled() : std::runtime_error("Analysis query cancelled") {}
+};
+struct AccessOptions {
+    std::chrono::nanoseconds search_step;
+    std::chrono::nanoseconds boundary_tolerance{1'000'000};
+    std::optional<core::Epoch> first = {}, last = {};
 };
 
 // Already selected, immutable resources. No directory lookup or network during queries.
@@ -60,6 +71,13 @@ class Analysis {
                                              std::chrono::nanoseconds step, core::FrameId frame,
                                              std::optional<core::Epoch> first = {},
                                              std::optional<core::Epoch> last = {}) const;
+    // Station -> satellite/sensor. Reuses prepared sessions and selected UTC/EOP data.
+    // Fixed discovery grid; windows/gaps shorter than search_step may be missed.
+    // Checks cancelled at each evaluation (including refinement); never returns partial results.
+    [[nodiscard]] results::AccessWindows access(const application::ObjectRef &station,
+                                                const application::ObjectRef &target,
+                                                const AccessOptions &options,
+                                                const std::function<bool()> &cancelled = {}) const;
 
   private:
     struct Impl;
@@ -136,4 +154,6 @@ class OpenDataChangedError : public std::runtime_error {
 // Shares the report CSV formatter and atomic publisher, without any recomputation.
 void export_trajectory_csv(const results::Trajectory &result, const std::filesystem::path &path,
                            bool overwrite = false);
+void export_access_csv(const results::AccessWindows &result, const std::filesystem::path &path,
+                       bool overwrite = false);
 } // namespace orbitforge::runtime
