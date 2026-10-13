@@ -146,7 +146,7 @@ class ReportsTest(unittest.TestCase):
             self.assertEqual(restored.reports, [])
             self.assertEqual(len(restored.ground_stations), 1)
             restored.save(path, overwrite=True)
-            self.assertEqual(struct.unpack_from('<I', path.read_bytes(), 8)[0], 10)
+            self.assertEqual(struct.unpack_from('<I', path.read_bytes(), 8)[0], 11)
 
     def test_limits_fail_before_sampling(self):
         project, definition = self.inputs()
@@ -185,7 +185,7 @@ class ReportsTest(unittest.TestCase):
             path = Path(directory) / 'derived.orbitforge'
             project.save(path)
             raw = path.read_bytes()
-            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 10)
+            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 11)
             self.assertEqual(of.load_project(path).reports[0].kind, of.ReportKind.GEODETIC_POSITION)
             # A v6 container cannot silently accept a newly introduced kind.
             path.write_bytes(self.rewrite(raw, lambda body: body, version=6))

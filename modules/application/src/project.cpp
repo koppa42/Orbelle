@@ -8,6 +8,7 @@
 #include <map>
 #include <numbers>
 #include <orbitforge/application/project.hpp>
+#include <picosha2.h>
 #include <random>
 #include <set>
 #include <system_error>
@@ -26,7 +27,8 @@ constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
-                        styles_tag = 0x4c595453, sensors_tag = 0x52534e53;
+                        styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
+                        analysis_tag = 0x594c4e41;
 [[noreturn]] void invalid(const char *message) { throw ProjectError(message); }
 void check(bool condition, const char *message) {
     if (!condition)
@@ -174,10 +176,74 @@ Project::Project(std::string project_name, core::Epoch begin, core::Epoch end)
     : name(std::move(project_name)), first(begin), last(end), current(begin) {}
 DataLock Project::data_lock() const {
     try {
-        return earth_orientation ? eop_data_lock(*earth_orientation) : DataLock{};
+        return earth_orientation ? eop_data_lock(*earth_orientation)
+               : time_data       ? time_data_lock(*time_data)
+                                 : DataLock{};
     } catch (const std::invalid_argument &error) {
         throw ProjectError(error.what());
     }
+}
+std::optional<core::TimeDataInfo> Project::time_data_info() const {
+    return earth_orientation ? std::optional{earth_orientation->time_data} : time_data;
+}
+AnalysisStatus Project::analysis_status() const {
+    if (!analysis_record)
+        return AnalysisStatus::unrecorded;
+    return analysis_record->input_sha256 == analysis_input_sha256(*this) &&
+                   analysis_record->data_sha256 == data_lock().sha256()
+               ? AnalysisStatus::current
+               : AnalysisStatus::stale;
+}
+std::string analysis_input_sha256(const Project &project) {
+    Writer out;
+    out.text("orbitforge-analysis-input-v1");
+    out.epoch(project.first);
+    out.epoch(project.last);
+    // Collection order is presentation, not a physical dependency.
+    std::map<std::string, const ProjectSatellite *> satellites;
+    for (const auto &s : project.satellites)
+        satellites.emplace(s.orbit.object_id, &s);
+    out.number(satellites.size(), 4);
+    for (const auto &[id, satellite] : satellites) {
+        const auto &orbit = satellite->orbit;
+        out.text(id);
+        out.number(static_cast<unsigned>(orbit.propagator), 4);
+        if (orbit.propagator == OrbitPropagator::sgp4) {
+            out.text(orbit.tle.line1);
+            out.text(orbit.tle.line2);
+        } else {
+            out.epoch(orbit.initial.epoch);
+            out.number(static_cast<unsigned>(orbit.initial.origin), 4);
+            out.number(static_cast<unsigned>(orbit.initial.frame), 4);
+            for (const auto value : orbit.initial.position_m)
+                out.real(value);
+            for (const auto value : orbit.initial.velocity_mps)
+                out.real(value);
+        }
+    }
+    std::map<std::string, const ProjectGroundStation *> stations;
+    for (const auto &s : project.ground_stations)
+        stations.emplace(s.object_id, &s);
+    out.number(stations.size(), 4);
+    for (const auto &[id, s] : stations) {
+        out.text(id);
+        out.real(s->location.longitude_rad);
+        out.real(s->location.latitude_rad);
+        out.real(s->location.height_m);
+        out.real(s->minimum_elevation_rad);
+    }
+    std::map<std::string, const ProjectSensor *> sensors;
+    for (const auto &s : project.sensors)
+        sensors.emplace(s.object_id, &s);
+    out.number(sensors.size(), 4);
+    for (const auto &[id, s] : sensors) {
+        out.text(id);
+        out.text(s->parent_satellite_id);
+        out.real(s->half_angle_rad);
+        out.number(static_cast<unsigned>(s->pointing), 4);
+        out.text(s->pointing == SensorPointing::targeted ? s->target_station_id : "");
+    }
+    return picosha2::hash256_hex_string(out.bytes);
 }
 void validate_project(const Project &project, bool relationships) {
     text_check(project.name, true);
@@ -291,6 +357,18 @@ void validate_project(const Project &project, bool relationships) {
             throw ProjectError(error.what());
         }
     }
+    if (project.time_data) {
+        const auto &data = *project.time_data;
+        text_check(data.id, true);
+        text_check(data.source_url);
+        check(hash_valid(data.sha256), "Invalid time data SHA256");
+        check(data.utc_valid_from_mjd >= 0 && data.utc_valid_until_mjd > data.utc_valid_from_mjd,
+              "Invalid time data validity interval");
+    }
+    if (project.analysis_record)
+        check(hash_valid(project.analysis_record->input_sha256) &&
+                  hash_valid(project.analysis_record->data_sha256),
+              "Invalid analysis record SHA256");
     if (project.earth_orientation) {
         const auto &data = *project.earth_orientation;
         for (const auto *value :
@@ -502,13 +580,28 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         data.number(static_cast<unsigned>(project.earth_orientation->extrapolation_days), 4);
         payload.section(data_tag, data, 2);
     }
+    if (project.time_data) {
+        Writer time;
+        time.text(project.time_data->id);
+        time.text(project.time_data->sha256);
+        time.text(project.time_data->source_url);
+        time.number(static_cast<unsigned>(project.time_data->utc_valid_from_mjd), 4);
+        time.number(static_cast<unsigned>(project.time_data->utc_valid_until_mjd), 4);
+        payload.section(time_tag, time);
+    }
+    if (project.analysis_record) {
+        Writer analysis;
+        analysis.text(project.analysis_record->input_sha256);
+        analysis.text(project.analysis_record->data_sha256);
+        payload.section(analysis_tag, analysis);
+    }
     const auto lock = project.data_lock();
     Writer locked;
     locked.raw(lock.canonical_bytes());
     locked.text(lock.sha256());
     payload.section(lock_tag, locked);
     file.raw(magic);
-    file.number(10, 4);
+    file.number(11, 4);
     file.number(payload.bytes.size());
     file.number(crc32(payload.bytes), 4);
     file.raw(payload.bytes);
@@ -519,7 +612,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     Reader file{bytes};
     check(std::ranges::equal(file.raw(magic.size()), magic), "Not an OrbitForge project file");
     const auto version = file.number(4);
-    check(version >= 1 && version <= 10, "Unsupported OrbitForge project version");
+    check(version >= 1 && version <= 11, "Unsupported OrbitForge project version");
     const auto length = file.number();
     const auto checksum = file.number(4);
     check(length == file.bytes.size(), "Project length mismatch");
@@ -530,7 +623,8 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         check(tag == scene_tag || tag == objects_tag || tag == data_tag ||
                   (version >= 3 && tag == lock_tag) || (version >= 5 && tag == stations_tag) ||
                   (version >= 6 && tag == reports_tag) || (version >= 8 && tag == styles_tag) ||
-                  (version >= 10 && tag == sensors_tag),
+                  (version >= 10 && tag == sensors_tag) ||
+                  (version >= 11 && (tag == time_tag || tag == analysis_tag)),
               "Unsupported project section");
         check(file.number(4) ==
                   (tag == objects_tag && version >= 9 ? 3U
@@ -694,6 +788,22 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             project.earth_orientation->extrapolation_days = static_cast<int>(days);
         }
         data.done();
+    }
+    if (sections.contains(time_tag)) {
+        Reader time{sections.at(time_tag)};
+        core::TimeDataInfo info{time.text(), time.text(), time.text(), 0, 0};
+        const auto from = time.number(4), until = time.number(4);
+        check(from <= std::numeric_limits<int>::max() && until <= std::numeric_limits<int>::max(),
+              "Invalid time data validity interval");
+        info.utc_valid_from_mjd = static_cast<int>(from);
+        info.utc_valid_until_mjd = static_cast<int>(until);
+        project.time_data = std::move(info);
+        time.done();
+    }
+    if (sections.contains(analysis_tag)) {
+        Reader analysis{sections.at(analysis_tag)};
+        project.analysis_record = AnalysisRecord{analysis.text(), analysis.text()};
+        analysis.done();
     }
     validate_project(project);
     if (version >= 3) {

@@ -10,8 +10,13 @@ void bind_analysis(py::module_ &module) {
     module.attr("MAX_ANALYSIS_SAMPLES") = runtime::max_analysis_samples;
     py::register_exception<runtime::AnalysisCapabilityError>(module, "AnalysisCapabilityError",
                                                              PyExc_RuntimeError);
-    py::register_exception<runtime::DataChangedError>(module, "DataChangedError",
-                                                      PyExc_RuntimeError);
+    auto data_changed = py::register_exception<runtime::DataChangedError>(
+        module, "DataChangedError", PyExc_RuntimeError);
+    py::register_exception<runtime::OpenDataChangedError>(module, "OpenDataChangedError",
+                                                          data_changed.ptr());
+    module.def("save_analysis_project", &runtime::save_project, py::arg("project"), py::arg("path"),
+               py::arg("analysis"), py::arg("overwrite") = false,
+               py::call_guard<py::gil_scoped_release>());
     py::class_<runtime::DataSnapshot>(module, "DataSnapshot")
         .def(py::init<>())
         .def_property_readonly("selection_notes", &runtime::DataSnapshot::selection_notes)
@@ -94,6 +99,19 @@ void bind_analysis(py::module_ &module) {
             py::arg("object"), py::arg("step_nanoseconds"), py::arg("frame"),
             py::arg("first") = py::none(), py::arg("last") = py::none(),
             py::call_guard<py::gil_scoped_release>());
+    py::class_<runtime::ProjectOpenPlan>(module, "ProjectOpenPlan")
+        .def(py::init<const std::filesystem::path &, const runtime::DataCatalog &>(),
+             py::arg("path"), py::arg("data"), py::call_guard<py::gil_scoped_release>())
+        .def(py::init<const std::filesystem::path &, runtime::DataSnapshot>(), py::arg("path"),
+             py::arg("data") = runtime::DataSnapshot{}, py::call_guard<py::gil_scoped_release>())
+        .def_property_readonly("snapshot", &runtime::ProjectOpenPlan::snapshot,
+                               py::return_value_policy::copy)
+        .def_property_readonly("data", &runtime::ProjectOpenPlan::data,
+                               py::return_value_policy::copy)
+        .def_property_readonly("data_changes", &runtime::ProjectOpenPlan::data_changes,
+                               py::return_value_policy::copy)
+        .def("open", &runtime::ProjectOpenPlan::open, py::arg("accept_data_changes") = false,
+             py::call_guard<py::gil_scoped_release>());
     py::class_<runtime::AnalysisPlan>(module, "AnalysisPlan")
         .def(py::init<const application::ProjectDocument &, const runtime::DataCatalog &>(),
              py::arg("project"), py::arg("data"), py::call_guard<py::gil_scoped_release>())

@@ -239,6 +239,66 @@ Analysis prepare(const ProjectDocument &project, DataSnapshot data) {
 Analysis prepare(const ProjectDocument &project, const DataCatalog &catalog) {
     return AnalysisPlan{project, catalog}.prepare();
 }
+namespace {
+void record_data(Project &project, const DataSnapshot &data) {
+    project.earth_orientation = data.eop() ? std::optional{data.eop()->data_info()} : std::nullopt;
+    project.time_data =
+        !data.eop() && data.time() ? std::optional{data.time()->data_info()} : std::nullopt;
+}
+} // namespace
+void save_project(const ProjectDocument &project, const std::filesystem::path &path,
+                  const Analysis &analysis, bool overwrite) {
+    auto candidate = project.snapshot();
+    if (candidate.scope != analysis.snapshot().scope)
+        throw ProjectError("Analysis belongs to another project");
+    const auto hash = analysis_input_sha256(*candidate.project);
+    if (hash != analysis_input_sha256(*analysis.snapshot().project))
+        throw RevisionConflictError(
+            "Calculation inputs changed; prepare a new analysis before saving it");
+    auto saved = std::make_shared<Project>(*candidate.project);
+    record_data(*saved, analysis.data());
+    saved->analysis_record = AnalysisRecord{hash, analysis.data().data_lock().sha256()};
+    candidate.project = std::move(saved);
+    project.save(path, candidate, overwrite);
+}
+ProjectOpenPlan::ProjectOpenPlan(const std::filesystem::path &path, DataSnapshot data)
+    : ProjectOpenPlan(
+          AnalysisPlan{ProjectDocument{application::load_project(path)}, std::move(data)}) {}
+ProjectOpenPlan::ProjectOpenPlan(const std::filesystem::path &path, const DataCatalog &catalog)
+    : ProjectOpenPlan(AnalysisPlan{ProjectDocument{application::load_project(path)}, catalog}) {}
+ProjectOpenPlan::ProjectOpenPlan(AnalysisPlan plan) : plan_(std::move(plan)) {
+    const auto &stored = *snapshot().project;
+    if (stored.earth_orientation && !data().eop())
+        throw AnalysisCapabilityError(
+            "Opening this project requires EOP data; supply data=DataCatalog or DataSnapshot");
+    if (stored.time_data_info() && !data().time())
+        throw AnalysisCapabilityError(
+            "Opening this project requires UTC data; supply data=DataCatalog or DataSnapshot");
+}
+ProjectDocument ProjectOpenPlan::open(bool accept) const {
+    if (!accept && !data_changes().empty())
+        throw OpenDataChangedError{*this};
+    (void)plan_.prepare(accept);
+    ProjectDocument result{*snapshot().project};
+    if (snapshot().project->data_lock() != data().data_lock()) {
+        auto selected = *snapshot().project;
+        record_data(selected, data());
+        auto edit = result.edit();
+        edit.analysis_data(selected.earth_orientation, selected.time_data,
+                           selected.analysis_record);
+        edit.commit();
+    }
+    return result;
+}
+OpenDataChangedError::OpenDataChangedError(ProjectOpenPlan plan)
+    : std::runtime_error("Selected calculation data differ from the project's recorded data"),
+      plan_(std::make_shared<const ProjectOpenPlan>(std::move(plan))) {}
+ProjectDocument open_project(const std::filesystem::path &path, DataSnapshot data) {
+    return ProjectOpenPlan{path, std::move(data)}.open();
+}
+ProjectDocument open_project(const std::filesystem::path &path, const DataCatalog &catalog) {
+    return ProjectOpenPlan{path, catalog}.open();
+}
 void export_trajectory_csv(const results::Trajectory &result, const std::filesystem::path &path,
                            bool overwrite) {
     std::vector<results::Row> rows;

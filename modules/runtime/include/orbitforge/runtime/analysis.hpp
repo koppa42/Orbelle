@@ -101,6 +101,38 @@ class AnalysisPlan {
 [[nodiscard]] Analysis prepare(const application::ProjectDocument &project, DataSnapshot data = {});
 [[nodiscard]] Analysis prepare(const application::ProjectDocument &project,
                                const DataCatalog &catalog);
+// Save the current inputs with the supplied analysis's exact data provenance.
+// Names/appearance may change; physical inputs and project identity must match.
+void save_project(const application::ProjectDocument &project, const std::filesystem::path &path,
+                  const Analysis &analysis, bool overwrite = false);
+
+class ProjectOpenPlan {
+  public:
+    ProjectOpenPlan(const std::filesystem::path &path, DataSnapshot data = {});
+    ProjectOpenPlan(const std::filesystem::path &path, const DataCatalog &catalog);
+    [[nodiscard]] const auto &data_changes() const { return plan_.data_changes(); }
+    [[nodiscard]] const auto &data() const { return plan_.data(); }
+    [[nodiscard]] const auto &snapshot() const { return plan_.snapshot(); }
+    // Each call returns an independent document. Files/catalogs are not reopened.
+    // Changed data marks the new document dirty; no results are persisted implicitly.
+    [[nodiscard]] application::ProjectDocument open(bool accept_data_changes = false) const;
+
+  private:
+    explicit ProjectOpenPlan(AnalysisPlan plan);
+    AnalysisPlan plan_;
+};
+class OpenDataChangedError : public std::runtime_error {
+  public:
+    explicit OpenDataChangedError(ProjectOpenPlan plan);
+    [[nodiscard]] const ProjectOpenPlan &plan() const { return *plan_; }
+
+  private:
+    std::shared_ptr<const ProjectOpenPlan> plan_;
+};
+[[nodiscard]] application::ProjectDocument open_project(const std::filesystem::path &path,
+                                                        DataSnapshot data = {});
+[[nodiscard]] application::ProjectDocument open_project(const std::filesystem::path &path,
+                                                        const DataCatalog &catalog);
 // Shares the report CSV formatter and atomic publisher, without any recomputation.
 void export_trajectory_csv(const results::Trajectory &result, const std::filesystem::path &path,
                            bool overwrite = false);

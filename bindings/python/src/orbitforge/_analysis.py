@@ -131,10 +131,36 @@ class Trajectory:
 
 class DataChangedError(RuntimeError):
     """The pinned plan requires an explicit decision about changed data."""
-    def __init__(self, plan: AnalysisPlan) -> None:
+    def __init__(self, plan: AnalysisPlan | ProjectOpenPlan) -> None:
         self.plan = plan
         super().__init__("Selected calculation data differ from the project's recorded data; "
                          "inspect error.plan.data_changes before explicitly accepting its plan")
+
+
+@dataclass(frozen=True)
+class ProjectOpenPlan:
+    """Parsed file and selected data held in memory until the caller decides."""
+    _native: n.ProjectOpenPlan
+    _project_type: type[Project]
+
+    @property
+    def name(self) -> str:
+        return self._native.snapshot.name
+
+    @property
+    def data(self) -> n.DataSnapshot:
+        return self._native.data
+
+    @property
+    def data_changes(self) -> tuple[n.DataChange, ...]:
+        return tuple(self._native.data_changes)
+
+    def open(self, *, accept_data_changes: bool = False) -> Project:
+        require(accept_data_changes, bool, "accept_data_changes")
+        try:
+            return self._project_type._from_document(self._native.open(accept_data_changes))
+        except n.DataChangedError:
+            raise DataChangedError(self) from None
 
 
 @dataclass(frozen=True)

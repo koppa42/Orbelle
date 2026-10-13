@@ -1,4 +1,4 @@
-# OrbitForge 项目文件 v10
+# OrbitForge 项目文件 v11
 
 `.orbitforge` 是由 Application 模块读写的单文件、分段二进制容器。桌面、Python wheel 和 C++ SDK 使用相同实现。此版本保存可重建场景的输入，不保存 Provider 指针、GPU 资源或显示轨迹缓存。采用独立格式是为了精确保存纳秒整数和浮点输入，并允许以后为结果引用、其他对象和资源增加有版本的段。
 
@@ -14,7 +14,7 @@
 
 EOP 来源记录包含快照 ID、SHA256、参考系、插值版本、覆盖区间，以及其依赖的时间数据 ID、SHA256 和 UTC 有效期。这些字段描述上次计算，不强制桌面安装同一旧文件。桌面打开或重算先比较当前数据及实际使用的外推策略，不一致时请求确认；同意后重建并标记未保存，取消则不打开或重算。保存时更新来源记录。覆盖不足时提供数据中心入口，保留原场景。通过“数据 → 数据中心”查看数据、获取时间和有效期，导入或下载当前文件，详见[数据中心](data_center.md)。
 
-v2 增加独立的对象显示名称，重命名不改变稳定 ID、计算输入或 Session 修订。v3 增加必需的 LOCK 段，保存 Scenario 的依赖清单与总 SHA-256，覆盖 EOP、其依赖的时间数据和解释配置。v4 在 DATA 段增加有限外推天数，原始覆盖范围不变，方法和天数纳入数据身份。v5 增加固定 WGS84 地面站的 GSTN 段。v6 增加报告配置 RPTS 段。v7 增加三种派生报告的模板 ID，RPTS 字段结构不变；v6 容器仍只接受原来的 0–3 类型。v8 增加 STYL 段，按稳定对象 ID 保存每颗卫星的轨迹样式。v9 在 OBJS 中增加 J4、SGP4 类型及原始 TLE。v10 增加 SNSR 子传感器段、GSTN v2 最低仰角，以及 Access / AER 报告类型。读取兼容 v1–v9；旧文件没有显示名称时显示其 ID，来源身份从原 DATA 信息推导。保存统一写为 v10，旧版程序明确拒绝未知版本。删除、复制和采用当前 EOP 时保留未编辑二体/J2/J4 对象的 Session 修订；SGP4 在项目重建时使用已确认的时间数据重新初始化。从文件重新打开仍从新修订开始。
+v2 增加独立的对象显示名称，重命名不改变稳定 ID、计算输入或 Session 修订。v3 增加必需的 LOCK 段，保存 Scenario 的依赖清单与总 SHA-256，覆盖 EOP、其依赖的时间数据和解释配置。v4 在 DATA 段增加有限外推天数，原始覆盖范围不变，方法和天数纳入数据身份。v5 增加固定 WGS84 地面站的 GSTN 段。v6 增加报告配置 RPTS 段。v7 增加三种派生报告的模板 ID，RPTS 字段结构不变；v6 容器仍只接受原来的 0–3 类型。v8 增加 STYL 段，按稳定对象 ID 保存每颗卫星的轨迹样式。v9 在 OBJS 中增加 J4、SGP4 类型及原始 TLE。v10 增加 SNSR 子传感器段、GSTN v2 最低仰角，以及 Access / AER 报告类型。v11 增加独立 UTC 来源 TIME 段和分析准备记录 ANLY 段。读取兼容 v1–v11；旧文件没有显示名称时显示其 ID，来源身份从原 DATA 信息推导。保存统一写为 v11，旧版程序明确拒绝未知版本。删除、复制和采用当前 EOP 时保留未编辑二体/J2/J4 对象的 Session 修订；SGP4 在项目重建时使用已确认的时间数据重新初始化。从文件重新打开仍从新修订开始。
 
 外部三维模型按项目所在目录保存相对路径，跨盘时保留绝对路径；另存为会重新计算路径。模型及其纹理、外部缓冲文件仍需随项目另行保留，当前容器不嵌入资源，也不提供外部模型内容版本校验。模型缺失时拒绝打开，不静默改成点标记。内置示意模型无此文件依赖。
 
@@ -24,14 +24,14 @@ v2 增加独立的对象显示名称，重命名不改变稳定 ID、计算输�
 
 文件头共 24 字节：
 
-| 字段 | 类型 | v10 值或含义 |
+| 字段 | 类型 | v11 值或含义 |
 | --- | --- | --- |
 | magic | 8 bytes | `ORBFPRJ` 后跟 LF，即 `4f 52 42 46 50 52 4a 0a` |
-| format_version | u32 | 10（读取也接受 1–9） |
+| format_version | u32 | 11（读取也接受 1–10） |
 | payload_length | u64 | 后续全部段的总字节数 |
 | payload_crc32 | u32 | 后续全部段的 CRC-32/ISO-HDLC |
 
-每个段由 `tag:u32, version:u32, length:u64, crc32:u32, body:length bytes` 组成；校验覆盖 body。tag 的四个小端字节直接组成 ASCII 名称。v1 段版本均为 1；v2–v8 的 OBJS 段版本为 2，v9–v10 的 OBJS 为 3；v4–v10 DATA 为 2，旧版 DATA 为 1；SCNE / LOCK / RPTS / STYL / SNSR 为 1；GSTN 在 v5–v9 为 1、v10 为 2。SCNE 和 OBJS 必须各出现一次，DATA 可选且最多一次，v3–v10 中 LOCK 必须出现一次。v5–v10 中 GSTN 必须出现一次，v1–v4 不接受 GSTN。v6–v10 中 RPTS 必须出现一次，旧版不接受 RPTS。v8–v10 中 STYL 必须出现一次，旧版不接受 STYL。v10 中 SNSR 必须出现一次，旧版不接受 SNSR。顺序不影响读取，写入顺序固定为 SCNE、OBJS、STYL、GSTN、SNSR、RPTS、可选 DATA、LOCK。未知文件版本、段版本、未知段、重复段和多余字节均拒绝，避免旧程序丢弃新字段后重新保存。
+每个段由 `tag:u32, version:u32, length:u64, crc32:u32, body:length bytes` 组成；校验覆盖 body。tag 的四个小端字节直接组成 ASCII 名称。v1 段版本均为 1；v2–v8 的 OBJS 段版本为 2，v9–v11 的 OBJS 为 3；v4–v11 DATA 为 2，旧版 DATA 为 1；SCNE / LOCK / RPTS / STYL / SNSR 为 1；GSTN 在 v5–v9 为 1、v10–v11 为 2。SCNE 和 OBJS 必须各出现一次，DATA 可选且最多一次，v3–v11 中 LOCK 必须出现一次。v5–v11 中 GSTN 必须出现一次，v1–v4 不接受 GSTN。v6–v11 中 RPTS 必须出现一次，旧版不接受 RPTS。v8–v11 中 STYL 必须出现一次，旧版不接受 STYL。v10–v11 中 SNSR 必须出现一次，旧版不接受 SNSR。v11 的 TIME、ANLY 均可选且最多一次，段版本为 1；v1–v10 不接受这两个段。顺序不影响读取，写入顺序固定为 SCNE、OBJS、STYL、GSTN、SNSR、RPTS、可选 DATA、可选 TIME、可选 ANLY、LOCK。未知文件版本、段版本、未知段、重复段和多余字节均拒绝，避免旧程序丢弃新字段后重新保存。
 
 | 段 | body 字段顺序 |
 | --- | --- |
@@ -42,15 +42,17 @@ v2 增加独立的对象显示名称，重命名不改变稳定 ID、计算输�
 | SNSR | 传感器数 u32；每条为 ID、名称、父卫星 ID 各 string；圆锥半角 f64（rad）；指向 u32（0 对地心，1 跟踪站点）；目标站点 ID string |
 | RPTS | 报告数 u32（最多 128）；随后依次为下述报告配置 |
 | DATA | EOP ID、SHA256、来源 URL、参考系、插值版本各 string；覆盖 first、last 各 epoch；时间数据 ID、SHA256、来源 URL 各 string；UTC 有效 MJD 起点、终点各 u32；v4 追加外推天数 u32（0 禁止，1–30 为端点线性外推上限） |
+| TIME | 独立 UTC 数据的 ID、SHA256、来源 URL 各 string；有效 MJD 起点、终点各 u32（非负且起点小于终点，最大为 int32 正值）；EOP 存在时使用 DATA 自带的 UTC 身份，TIME 仅作非活动的独立 UTC 记录 |
+| ANLY | 准备时的项目物理输入 SHA256 string、数据锁 SHA256 string；均为 64 位小写十六进制；没有此段表示未记录分析准备 |
 | LOCK | [数据锁规范编码](scenario_data_lock.md)；随后是清单总 SHA-256 string |
 
-卫星记录字段依次为：ID string；显示名称 string（v2–v10，空字符串表示使用 ID）；传播器 u32（1 二体，2 标准一阶 J2 长期项，v9 新增 3 J4 长期项、4 SGP4）；编辑参考系 u32（1 GCRF，2 ITRF）；初始历元 epoch；三分量位置和三分量速度各 f64（m、m/s）；显示步长 u32（s）；轨迹范围 u32（0 一圈、1 场景、2 自定义）；前后时长各 f64（min）；二维轨迹、二维名称、三维轨迹各 u8 boolean；模型类别 u32（0 点、1 内置、2 外部）；模型尺寸 f64（m）；模型路径 string；v9 追加 TLE line1、line2 各 string（非 SGP4 必须为空）。
+卫星记录字段依次为：ID string；显示名称 string（v2–v11，空字符串表示使用 ID）；传播器 u32（1 二体，2 标准一阶 J2 长期项，v9 新增 3 J4 长期项、4 SGP4）；编辑参考系 u32（1 GCRF，2 ITRF）；初始历元 epoch；三分量位置和三分量速度各 f64（m、m/s）；显示步长 u32（s）；轨迹范围 u32（0 一圈、1 场景、2 自定义）；前后时长各 f64（min）；二维轨迹、二维名称、三维轨迹各 u8 boolean；模型类别 u32（0 点、1 内置、2 外部）；模型尺寸 f64（m）；模型路径 string；v9 追加 TLE line1、line2 各 string（非 SGP4 必须为空）。
 
 报告记录字段依次为：ID string；名称 string；模板 u32（0 场景摘要、1 对象摘要、2 位置与速度、3 地面站坐标、4 经典轨道根数、5 经纬高、6 轨道距离与速率，v10 新增 7 可见时段、8 AER）；绑定对象数 u32（最多 10000）及 ID strings（普通报告中 0 表示所有适用对象；Access / AER 必须恰为地面站 ID、卫星或传感器 ID 两项）；跟随场景 u8 boolean；自定义 first、last 各 epoch；步长 u64（1–86400000000000 ns）；坐标系 u32（1 GCRF、2 ITRF，仅 Cartesian 模板使用；根数与速率固定 GCRF，经纬高固定 ITRF/WGS84）；单位 u32（0 SI、1 工程）；时间系统 u32（0 UTC、1 TAI、2 TT）。报告 ID 必须唯一；允许保留已删除对象的绑定或超出新场景范围的自定义区间，生成时明确报错，不妨碍打开项目。旧项目没有报告配置。生成结果不写入项目，需重新生成或导出 CSV。详见[报告](reports.md)。
 
 二体/J2 的持久化初态均为地心 GCRF，中心天体常数保持 `earth-iers2003-v1`。v9 的 J4 初态为 EGM2008 平均椭圆的辅助 GCRF 状态；SGP4 以两行 TLE 为唯一轨道输入，传统 initial/frame 字段仅保留非活动的手动输入草稿，不参与 SGP4 计算或报告输入哈希。SGP4 重建时必须显式注入时间 Provider 解释 TLE 历元，详见[预报器](propagators.md)。SCNE 中的旧模型 ID 仍表示二体/J2 默认常数，不覆盖新模型的固定常数。二体初态为瞬时 Cartesian 状态，J2 初态为平均椭圆的辅助 Cartesian 状态；J2 重建时同时启用全部三个长期项。编辑参考系仅用于恢复输入控件的表示，不能把持久化 GCRF 数值解释为 ITRF。模型定义发生不兼容变化时必须变更文件/段版本，或引入明确迁移。
 
-读取上限为 64 MiB、10000 个对象（卫星、地面站与传感器合计）、每个字符串 16384 字节、64 个数据引用。检查长度后才分配和读取；拒绝非有限数、重复 ID、不一致的场景区间、非法显示选项及超出数据原始覆盖及记录的有限外推范围的引用。地面站角度与高度按模型支持范围校验；旧项目缺少 GSTN 表示没有地面站。v1–v3 默认禁止外推。v1–v7 没有 STYL，卫星样式默认浅蓝色 `0x73CDEE`、1.5 逻辑像素实线。v3–v10 还检查 LOCK 总哈希及其与 DATA 的一致性；即使重新计算了 CRC，缺失或不一致的 LOCK 仍拒绝。v1–v9 没有传感器、最低仰角默认 0；传感器必须引用存在的卫星，跟踪模式还须引用存在的地面站。轨道物理有效性由 Runtime 在重建 Session 时继续验证。CRC 和 SHA-256 用于完整性与版本核验，不是来源签名或安全认证。
+读取上限为 64 MiB、10000 个对象（卫星、地面站与传感器合计）、每个字符串 16384 字节、64 个数据引用。检查长度后才分配和读取；拒绝非有限数、重复 ID、不一致的场景区间、非法显示选项及超出数据原始覆盖及记录的有限外推范围的引用。地面站角度与高度按模型支持范围校验；旧项目缺少 GSTN 表示没有地面站。v1–v3 默认禁止外推。v1–v7 没有 STYL，卫星样式默认浅蓝色 `0x73CDEE`、1.5 逻辑像素实线。v3–v11 还检查 LOCK 总哈希及其与活动来源（优先 DATA，否则 TIME，否则空锁）的一致性；即使重新计算了 CRC，缺失或不一致的 LOCK 仍拒绝。v1–v9 没有传感器、最低仰角默认 0；传感器必须引用存在的卫星，跟踪模式还须引用存在的地面站。轨道物理有效性由 Runtime 在重建 Session 时继续验证。CRC 和 SHA-256 用于完整性与版本核验，不是来源签名或安全认证。
 
 ## 卫星轨迹样式
 
@@ -62,7 +64,9 @@ v2 增加独立的对象显示名称，重命名不改变稳定 ID、计算输�
 
 先在内存中完成校验与编码，再在目标目录下创建独占临时目录，写入并刷新临时文件，最后原子发布到目标路径。Windows 使用 MoveFileExW，POSIX 使用 rename（覆盖）或 link（不覆盖）。失败会清理本次临时文件；发布前的失败保留已有目标。此处承诺原子替换，不声称对所有网络文件系统或断电场景具备事务持久性保证。
 
-C++ 文件层保留 `application::Project`、`save_project/load_project`、`runtime::make_project_scenario`。Python `Project`、`load_project` 使用事务门面，对象通过 `project.objects` 管理；显式低层交换使用 `ProjectData`、`load_project_data`，迁移见[对象编辑 API](object_editing.md)。Python 保存默认拒绝覆盖，传入 `overwrite=True` 才替换已有文件。
+ANLY 的输入哈希采用独立 `orbitforge-analysis-input-v1` 编码：固定分析时段，按稳定 ID 排序记录卫星的活动传播器输入、站点坐标与最低仰角，以及传感器的视场、所属与指向关系。排除名称、外观、显示步长、播放时间、报告配置及非活动轨道草稿。ANLY 与当前输入或数据锁不符表示旧准备记录已过期，不是文件损坏；无 ANLY 不推断为已计算。准备记录不包含查询结果，不证明已经执行所有查询。旧文件迁移不伪造准备记录。
+
+C++ 文件层保留 `application::Project`、`save_project/load_project`、`runtime::make_project_scenario`。Python `Project`、`load_project` 使用事务门面，对象通过 `project.objects` 管理；显式低层交换使用 `ProjectData`、`load_project_data`，迁移见[对象编辑 API](object_editing.md)。Python `Project.open(path, data=...)` 检查当前数据，变化通过固定的计划确认；`save(path, analysis=...)` 校验项目归属与物理输入，保存精确来源和准备记录，成功后才更新内存。仅读取输入用 `load_project_data()`。详见[分析 API](analysis_api.md)。Python 保存默认拒绝覆盖，传入 `overwrite=True` 才替换已有文件。
 
 ```python
 from pathlib import Path

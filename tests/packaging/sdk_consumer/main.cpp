@@ -119,6 +119,14 @@ int main(int argc, char **argv) {
                 selected.eop()->data_info().extrapolation_days != 0 ||
                 orbitforge::runtime::prepare(analysis_project, catalog).data().data_lock() != lock)
                 return 27;
+            const auto prepared = orbitforge::runtime::prepare(analysis_project, catalog);
+            orbitforge::runtime::save_project(analysis_project, "sdk-analysis.orbitforge", prepared,
+                                              true);
+            const orbitforge::runtime::ProjectOpenPlan opening{"sdk-analysis.orbitforge", catalog};
+            const auto reopened = opening.open();
+            if (reopened.dirty() || reopened.snapshot().project->data_lock() != lock ||
+                reopened.snapshot().project->analysis_status() != app::AnalysisStatus::current)
+                return 28;
         }
         const auto transform = frames->gcrf_to_itrf_state(epoch, eop->at(epoch));
         if (utc.second != 60 || utc.nanosecond != 123456789 ||

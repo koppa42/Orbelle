@@ -3,6 +3,7 @@
 #include <pybind11/operators.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl/filesystem.h>
 
 namespace py = pybind11;
 using namespace orbitforge::application;
@@ -59,6 +60,13 @@ void bind_project_document(py::module_ &module) {
             [](const ProjectSnapshot &s) { return s.project->earth_orientation; })
         .def_property_readonly("data_lock",
                                [](const ProjectSnapshot &s) { return s.project->data_lock(); })
+        .def_property_readonly("time_info",
+                               [](const ProjectSnapshot &s) { return s.project->time_data_info(); })
+        .def_property_readonly("analysis_record",
+                               [](const ProjectSnapshot &s) { return s.project->analysis_record; })
+        .def_property_readonly(
+            "analysis_status",
+            [](const ProjectSnapshot &s) { return s.project->analysis_status(); })
         .def_property_readonly("project", [](const ProjectSnapshot &s) { return *s.project; });
     py::class_<ObjectChange>(module, "ObjectChange")
         .def_readonly("id", &ObjectChange::id)
@@ -114,6 +122,11 @@ void bind_project_document(py::module_ &module) {
         .def("edit", &ProjectDocument::edit)
         .def_property_readonly("dirty", &ProjectDocument::dirty)
         .def("mark_saved", &ProjectDocument::mark_saved, py::arg("revision"))
+        .def("save",
+             py::overload_cast<const std::filesystem::path &, bool>(&ProjectDocument::save,
+                                                                    py::const_),
+             py::arg("path"), py::arg("overwrite") = false,
+             py::call_guard<py::gil_scoped_release>())
         .def(
             "subscribe",
             [](ProjectDocument &project, py::function observer) {

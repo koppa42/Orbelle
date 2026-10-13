@@ -1577,6 +1577,8 @@ class Workbench final : public QMainWindow {
         application::Project project{scenario_->name(), scenario_->first(), scenario_->last()};
         project.current = snapshot_.epoch;
         project.earth_orientation = eop_->data_info();
+        project.time_data = standalone_time_data_;
+        project.analysis_record = analysis_record_;
         if (project.data_lock() != scenario_->data_lock())
             throw application::ProjectError(
                 "Scenario data lock does not match its active providers");
@@ -1813,7 +1815,7 @@ class Workbench final : public QMainWindow {
             show_data_coverage(first, last);
             return false;
         }
-        if (project.earth_orientation &&
+        if (!project.data_lock().references().empty() &&
             project.data_lock() != application::eop_data_lock(next_data->data_info())) {
             QMessageBox message(
                 QMessageBox::Question, QStringLiteral("场景数据已变化"),
@@ -1990,6 +1992,8 @@ class Workbench final : public QMainWindow {
             if (!project_edit_)
                 close_reports();
             reports_ = candidate->project.reports;
+            standalone_time_data_ = candidate->project.time_data;
+            analysis_record_ = candidate->project.analysis_record;
             time_label_epoch_.reset();
             sun_epoch_.reset();
             editor_target_.reset();
@@ -2341,6 +2345,8 @@ class Workbench final : public QMainWindow {
         workspace_label_->setToolTip(workspace_label_->text());
         setWindowTitle(QString::fromStdString(scenario_->name()) + QStringLiteral(" · OrbitForge"));
         project_path_.clear();
+        standalone_time_data_.reset();
+        analysis_record_.reset();
         mark_project_dirty();
         set_selection(std::nullopt);
         set_playing(false);
@@ -4492,6 +4498,33 @@ class Workbench final : public QMainWindow {
             if (!condition)
                 throw std::runtime_error(message);
         };
+        const auto choose_report = [this, require](const QString &key) {
+            auto *button = report_dialog_->findChild<QPushButton *>("reportLibrary");
+            require(button != nullptr, "Report selection button is missing");
+            bool selected = false;
+            QTimer::singleShot(0, this, [&] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                if (!dialog)
+                    return;
+                auto *list = dialog->findChild<QListWidget *>("reportSelectionList");
+                auto *confirm = dialog->findChild<QPushButton *>("reportSelectionConfirm");
+                if (list && confirm)
+                    for (int i = 0; i < list->count(); ++i)
+                        if (list->item(i)->data(Qt::UserRole).toString() == key) {
+                            list->setCurrentRow(i);
+                            if (confirm->isEnabled()) {
+                                selected = true;
+                                confirm->click();
+                                return;
+                            }
+                        }
+                dialog->reject();
+            });
+            timer_.stop();
+            button->click();
+            timer_.start();
+            require(selected, "Report selection window did not accept the requested choice");
+        };
         const auto record = [&](const char *kind) {
             interaction_report_.append(QJsonObject{
                 {"kind", kind},
@@ -5610,6 +5643,10 @@ class Workbench final : public QMainWindow {
             snapshot_ = sample_frame(epoch);
             update_satellite();
             const auto path = smoke_dir_ + QStringLiteral("/项目.orbitforge");
+            const auto recorded = project_snapshot(path);
+            analysis_record_ = application::AnalysisRecord{
+                application::analysis_input_sha256(recorded), recorded.data_lock().sha256()};
+            standalone_time_data_ = eop_->data_info().time_data;
             save_project_to(path);
             require(!project_dirty_, "Successful save did not clear the modified marker");
             smoke_project_bytes_ = application::encode_project(project_snapshot(path));
@@ -5629,6 +5666,10 @@ class Workbench final : public QMainWindow {
             require(application::encode_project(project_snapshot(project_path_)) ==
                         smoke_project_bytes_,
                     "Desktop project roundtrip changed its persisted inputs");
+            require(analysis_record_ && standalone_time_data_ &&
+                        project_snapshot(project_path_).analysis_status() ==
+                            application::AnalysisStatus::current,
+                    "Desktop project roundtrip lost API analysis provenance");
             record("project-save-open-two-body-j2-display-nanoseconds");
             save_workbench_image("project-restored.png");
             smoke_cache_ = orbit_;
@@ -6636,7 +6677,7 @@ class Workbench final : public QMainWindow {
             report_action_->trigger();
             require(report_dialog_ && workspace_->contains(report_dialog_),
                     "Report did not open in the workspace");
-            report_dialog_->findChild<QComboBox *>("reportLibrary")->setCurrentIndex(2);
+            choose_report("builtin:2");
             report_dialog_->findChild<QComboBox *>("reportFrame")->setCurrentIndex(1);
             report_dialog_->findChild<QDoubleSpinBox *>("reportStep")->setValue(600);
             QTimer::singleShot(0, [] {
@@ -6711,8 +6752,7 @@ class Workbench final : public QMainWindow {
             require(last_project_outcome_ == "opened" && reports_.size() == 1,
                     "Project reopen lost report configurations");
             report_action_->trigger();
-            report_dialog_->findChild<QComboBox *>("reportLibrary")
-                ->setCurrentIndex(static_cast<int>(application::report_kinds.size()));
+            choose_report("template:" + QString::fromStdString(reports_.front().id));
             report_dialog_->findChild<QPushButton *>("generateReport")->click();
             ++orbit_smoke_stage_;
             break;
@@ -6777,7 +6817,7 @@ class Workbench final : public QMainWindow {
             require(report_dialog_->findChild<QLabel *>("reportScopeLabel")->text() ==
                         item->text(0),
                     "Context report did not bind the right-clicked object");
-            report_dialog_->findChild<QComboBox *>("reportLibrary")->setCurrentIndex(1);
+            choose_report("builtin:1");
             QTimer::singleShot(0, [] {
                 auto *naming = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
                 if (!naming)
@@ -6803,9 +6843,8 @@ class Workbench final : public QMainWindow {
                     "Object report included an unselected object");
             save_workbench_image("object-report-results.png");
             record("object-report-context-scope-survives-template-change");
-            auto *library = report_dialog_->findChild<QComboBox *>("reportLibrary");
-            library->setCurrentIndex(
-                library->findData(static_cast<int>(application::ReportKind::classical_elements)));
+            choose_report(QStringLiteral("builtin:%1").arg(
+                static_cast<int>(application::ReportKind::classical_elements)));
             report_dialog_->findChild<QPushButton *>("generateReport")->click();
             ++orbit_smoke_stage_;
             break;
@@ -6991,8 +7030,7 @@ class Workbench final : public QMainWindow {
             table->doubleClicked(index);
             record("access-windows-timeline-and-seek");
             save_workbench_image("access-windows.png");
-            report_dialog_->findChild<QComboBox *>("reportLibrary")
-                ->setCurrentIndex(static_cast<int>(application::ReportKind::aer));
+            choose_report(QStringLiteral("builtin:%1").arg(static_cast<int>(application::ReportKind::aer)));
             report_dialog_->findChild<QDoubleSpinBox *>("reportStep")->setValue(10);
             report_dialog_->findChild<QCheckBox *>("reportFollowScenario")->setChecked(false);
             static_cast<EpochEditor *>(report_dialog_->findChild<QWidget *>("reportFirst"))
@@ -7445,6 +7483,8 @@ class Workbench final : public QMainWindow {
     QString project_path_, pending_project_path_, last_project_outcome_;
     bool project_dirty_ = false;
     application::DataLock project_recorded_data_;
+    std::optional<core::TimeDataInfo> standalone_time_data_;
+    std::optional<application::AnalysisRecord> analysis_record_;
     std::optional<core::Epoch> precise_epoch_;
     std::shared_ptr<std::atomic_bool> project_cancellation_;
     std::future<std::shared_ptr<PreparedProject>> project_candidate_;
