@@ -74,7 +74,7 @@ TEST(HpopProject, PreparedSessionsDriveReportsAccessAndRetainForceDependencies) 
     const auto report = analysis.report({.kind = ReportKind::cartesian_state,
                                          .object_ids = {satellite.id()},
                                          .frame = FrameId::gcrf},
-                                        {.time_scale = ReportTimeScale::tai});
+                                        {.columns = {}, .time_scale = ReportTimeScale::tai});
     EXPECT_FALSE(report.table.rows().empty());
     const auto station = project.objects().get("station");
     EXPECT_EQ(analysis.aer(station, satellite, times).samples().size(), 3U);
@@ -82,7 +82,7 @@ TEST(HpopProject, PreparedSessionsDriveReportsAccessAndRetainForceDependencies) 
     EXPECT_THROW((void)analysis.report({.kind = ReportKind::cartesian_state,
                                         .object_ids = {satellite.id()},
                                         .frame = FrameId::gcrf},
-                                       {.time_scale = ReportTimeScale::tai},
+                                       {.columns = {}, .time_scale = ReportTimeScale::tai},
                                        [&] { return ++calls > 5; }),
                  runtime::AnalysisCancelled);
     EXPECT_NO_THROW((void)analysis.state(satellite, core::Epoch{0}, core::FrameId::gcrf));
