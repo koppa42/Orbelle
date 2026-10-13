@@ -1,5 +1,7 @@
 #pragma once
+#include "workbench_style.hpp"
 #include <QDialog>
+#include <QList>
 #include <QString>
 #include <vector>
 
@@ -7,6 +9,7 @@ class QLabel;
 class QLineEdit;
 class QListWidget;
 class QPushButton;
+class QScrollArea;
 class QSplitter;
 class QTabBar;
 
@@ -15,6 +18,8 @@ struct ReportChoice {
     QString key, name, kind, description, scope;
     bool saved = false;
     QString unavailable_reason;
+    QString output, note;
+    WorkbenchIcon icon = WorkbenchIcon::properties;
 };
 
 // The choice remains a draft until accepted. Keys survive renames, reordering and deletion.
@@ -37,7 +42,10 @@ class ReportSelectionDialog final : public QDialog {
     QTabBar *source_;
     QListWidget *list_;
     QSplitter *split_ = nullptr;
+    QScrollArea *preview_scroll_;
+    QList<int> wide_sizes_, narrow_sizes_;
     QLabel *title_, *category_, *description_, *scope_, *warning_, *count_, *empty_;
+    QLabel *symbol_, *output_, *note_, *output_heading_, *scope_heading_;
     QPushButton *confirm_;
 };
 } // namespace orbitforge::desktop

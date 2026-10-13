@@ -784,43 +784,76 @@ struct ReportDialog::Impl {
         const auto description = [](ReportKind kind) -> QString {
             switch (kind) {
             case ReportKind::scenario_summary:
-                return QStringLiteral("场景时段、对象数量与中心天体。\n输出：属性表");
+                return QStringLiteral("场景时段、对象数量与中心天体。");
             case ReportKind::object_summary:
-                return QStringLiteral("对象名称、类型与计算模型。\n输出：对象表");
+                return QStringLiteral("对象名称、类型与计算模型。");
             case ReportKind::cartesian_state:
-                return QStringLiteral(
-                    "按指定间隔输出位置与速度，可选 GCRF 或 ITRF。\n输出：时间序列表、曲线");
+                return QStringLiteral("按指定间隔输出位置与速度，可选 GCRF 或 ITRF。");
             case ReportKind::ground_stations:
-                return QStringLiteral("WGS84 经度、大地纬度、椭球高与 ITRF 坐标。\n输出：站点表");
+                return QStringLiteral("WGS84 经度、大地纬度、椭球高与 ITRF 坐标。");
             case ReportKind::classical_elements:
                 return QStringLiteral("由 GCRF 状态换算瞬时六根数；J2 / J4 "
-                                      "结果不是平均根数。\n输出：时间序列表、曲线");
+                                      "结果不是平均根数。");
             case ReportKind::geodetic_position:
-                return QStringLiteral(
-                    "ITRF / WGS84 "
-                    "经度、大地纬度和椭球高。高度不表示离地距离。\n输出：时间序列表、曲线");
+                return QStringLiteral("ITRF / WGS84 "
+                                      "经度、大地纬度和椭球高。高度不表示离地距离。");
             case ReportKind::orbital_motion:
-                return QStringLiteral(
-                    "GCRF 地心距离、总速率、径向与横向速率、航迹倾角。\n输出：时间序列表、曲线");
+                return QStringLiteral("GCRF 地心距离、总速率、径向与横向速率、航迹倾角。");
             case ReportKind::access_intervals:
-                return QStringLiteral(
-                    "地面站与卫星 / "
-                    "传感器的可见时段，考虑地球遮挡、最低仰角与传感器视场。\n输出：时间区间表");
+                return QStringLiteral("地面站与卫星 / "
+                                      "传感器的可见时段，考虑地球遮挡、最低仰角与传感器视场。");
             case ReportKind::aer:
-                return QStringLiteral(
-                    "地面站观测目标的方位角、仰角、斜距与可见标记。\n输出：时间序列表、曲线");
+                return QStringLiteral("地面站观测目标的方位角、仰角、斜距与可见标记。");
             }
             return {};
+        };
+        const auto output = [](ReportKind kind) -> QString {
+            switch (kind) {
+            case ReportKind::scenario_summary:
+                return QStringLiteral("属性表");
+            case ReportKind::object_summary:
+                return QStringLiteral("对象表");
+            case ReportKind::ground_stations:
+                return QStringLiteral("站点坐标表");
+            case ReportKind::access_intervals:
+                return QStringLiteral("可见时间区间表");
+            default:
+                return QStringLiteral("时间序列 · 表格与曲线");
+            }
+        };
+        const auto icon = [](ReportKind kind) {
+            switch (kind) {
+            case ReportKind::scenario_summary:
+                return WorkbenchIcon::earth;
+            case ReportKind::object_summary:
+                return WorkbenchIcon::satellite;
+            case ReportKind::ground_stations:
+                return WorkbenchIcon::ground_station;
+            case ReportKind::geodetic_position:
+                return WorkbenchIcon::map;
+            case ReportKind::access_intervals:
+                return WorkbenchIcon::clock;
+            case ReportKind::aer:
+                return WorkbenchIcon::focus;
+            default:
+                return WorkbenchIcon::orbit;
+            }
         };
         std::vector<ReportChoice> choices;
         for (auto kind : report_kinds)
             choices.push_back(
-                {QStringLiteral("builtin:%1").arg(static_cast<int>(kind)), kind_name(kind),
-                 kind_name(kind), description(kind),
+                {QStringLiteral("builtin:%1").arg(static_cast<int>(kind)),
+                 kind_name(kind),
+                 kind_name(kind),
+                 description(kind),
                  report_is_access(kind)
                      ? QStringLiteral("地面站 → 卫星 / 传感器；保留当前对象，随后选择配对对象")
                      : report_scope(scope_ids),
-                 false, compatible(kind) ? QString{} : QStringLiteral("不适用于当前对象范围")});
+                 false,
+                 compatible(kind) ? QString{} : QStringLiteral("不适用于当前对象范围"),
+                 output(kind),
+                 {},
+                 icon(kind)});
         for (const auto &definition : project.reports) {
             QString warning;
             const auto objects = project_object_choices(project);
@@ -832,11 +865,13 @@ struct ReportDialog::Impl {
                 {"template:" + text(definition.id),
                  text(definition.name),
                  kind_name(definition.kind),
-                 description(definition.kind) +
-                     QStringLiteral("\n\n使用此模板会恢复其对象范围、时间和格式设置。") + warning,
+                 description(definition.kind),
                  report_scope(definition.object_ids),
                  true,
-                 {}});
+                 {},
+                 output(definition.kind),
+                 QStringLiteral("载入模板将恢复已保存的对象、时间和格式设置。") + warning,
+                 icon(definition.kind)});
         }
         return choices;
     }

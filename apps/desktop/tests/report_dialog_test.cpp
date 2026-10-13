@@ -630,10 +630,31 @@ TEST(ReportSelection, SearchSourcesStableKeysAndDeletedChoices) {
     search->clear();
     EXPECT_TRUE(list->item(1)->isHidden());
     list->setCurrentRow(102);
+    EXPECT_TRUE(list->currentItem()
+                    ->data(Qt::AccessibleDescriptionRole)
+                    .toString()
+                    .contains(QStringLiteral("卫星 100")));
+    list->setFocus();
+    QKeyEvent down(QEvent::KeyPress, Qt::Key_Down, Qt::NoModifier);
+    QApplication::sendEvent(list, &down);
+    EXPECT_EQ(dialog.selection(), "template:101");
+    list->setCurrentRow(102);
     std::reverse(choices.begin(), choices.end());
     dialog.set_choices(choices);
     EXPECT_EQ(dialog.selection(), "template:100");
     EXPECT_TRUE(confirm->isEnabled());
+    auto &long_name = *std::ranges::find(choices, QString("template:100"), &ReportChoice::key);
+    long_name.name = QStringLiteral("沿海观测任务 / 卫星位置与速度的自定义报告 · ").repeated(8);
+    dialog.set_choices(choices);
+    dialog.resize(360, 540);
+    QCoreApplication::processEvents();
+    for (auto *scroll : dialog.findChildren<QScrollArea *>())
+        EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+    const auto directory = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    if (!directory.isEmpty()) {
+        QDir().mkpath(directory);
+        EXPECT_TRUE(dialog.grab().save(directory + "/report-selector-long-name.png"));
+    }
     std::erase_if(choices, [](const auto &choice) { return choice.key == "template:100"; });
     dialog.set_choices(choices);
     EXPECT_TRUE(dialog.selection().isEmpty());
@@ -685,18 +706,41 @@ TEST(ReportDialog, ReportChoiceCancellationSameSelectionAndLiveTemplateUpdates) 
         const auto directory = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
         if (!directory.isEmpty()) {
             QDir().mkpath(directory);
+            const auto capture = [&](const QString &name) {
+                QCoreApplication::processEvents();
+                EXPECT_TRUE(chooser->grab().save(directory + "/" + name + ".png"));
+            };
+            list->setCurrentRow(static_cast<int>(application::ReportKind::cartesian_state));
+            chooser->resize(840, 580);
+            capture("report-selector-builtin");
+            list->setCurrentRow(0);
+            capture("report-selector-unavailable");
+            auto *search = chooser->findChild<QLineEdit *>("reportSelectionSearch");
+            search->setText("no matching report");
+            capture("report-selector-empty");
+            search->clear();
+            list->setCurrentRow(static_cast<int>(application::report_kinds.size()));
             chooser->resize(780, 540);
             QCoreApplication::processEvents();
             EXPECT_TRUE(chooser->grab().save(directory + "/report-selector-wide.png"));
             chooser->resize(360, 540);
             QCoreApplication::processEvents();
             QCoreApplication::processEvents();
-            EXPECT_TRUE(list->viewport()->rect().contains(list->visualItemRect(list->currentItem())));
+            EXPECT_TRUE(
+                list->viewport()->rect().contains(list->visualItemRect(list->currentItem())));
             EXPECT_EQ(chooser->findChild<QSplitter *>("reportSelectionSplit")->orientation(),
                       Qt::Vertical);
             EXPECT_TRUE(chooser->grab().save(directory + "/report-selector-narrow.png"));
             for (auto *scroll : chooser->findChildren<QScrollArea *>())
                 EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+            chooser->resize(360, 440);
+            capture("report-selector-minimum");
+            const auto *confirm =
+                chooser->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok);
+            EXPECT_TRUE(
+                chooser->rect().contains(confirm->mapTo(chooser, confirm->rect().bottomRight())));
+            chooser->resize(840, 580);
+            capture("report-selector-restored");
         }
         chooser->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
     });
