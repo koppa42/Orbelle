@@ -4,12 +4,11 @@ import math
 import struct
 import tempfile
 import unittest
-import zlib
 from pathlib import Path
 
-# Native value/format compatibility tests; public editing is in test_objects.py.
+# Native value/format tests; public editing is in test_objects.py.
 from orbitforge import _native as of
-from project_fixtures import legacy_objects, legacy_stations
+from project_format import rewrite_section
 
 
 class ReportsTest(unittest.TestCase):
@@ -94,29 +93,7 @@ class ReportsTest(unittest.TestCase):
         self.assertEqual(result.data_sha256, project.data_lock.sha256)
         self.assertEqual(result.time_sha256, eop.data_info.time_data.sha256)
 
-    @staticmethod
-    def rewrite(raw, mutate, version=10):
-        sections, offset = [], 24
-        while offset < len(raw):
-            tag, schema, size, _ = struct.unpack_from('<IIQI', raw, offset)
-            body = raw[offset + 20:offset + 20 + size]
-            offset += 20 + size
-            if version < 10 and tag.to_bytes(4, 'little') == b'SNSR':
-                continue
-            if version < 10 and tag.to_bytes(4, 'little') == b'GSTN':
-                body, schema = legacy_stations(body), 1
-            if version < 9 and tag.to_bytes(4, 'little') == b'OBJS':
-                body, schema = legacy_objects(body), 2
-            if version < 8 and tag.to_bytes(4, 'little') == b'STYL':
-                continue
-            if tag.to_bytes(4, 'little') == b'RPTS':
-                body = mutate(body)
-            if body is not None:
-                sections.append(struct.pack('<IIQI', tag, schema, len(body), zlib.crc32(body)) + body)
-        payload = b''.join(sections)
-        return raw[:8] + struct.pack('<IQI', version, len(payload), zlib.crc32(payload)) + payload
-
-    def test_v8_roundtrip_v5_upgrade_and_corruption_with_repaired_crcs(self):
+    def test_roundtrip_and_corruption_with_repaired_crcs(self):
         project, definition = self.inputs()
         definition.object_ids = ['station']
         definition.follow_scenario = False
@@ -134,19 +111,11 @@ class ReportsTest(unittest.TestCase):
             self.assertEqual(restored.reports[0].time_scale, of.ReportTimeScale.TT)
             restored.save(path, overwrite=True)
             self.assertEqual(path.read_bytes(), raw)
-            path.write_bytes(self.rewrite(raw, lambda body: body, version=6))
-            self.assertEqual(of.load_project(path).reports[0].step_nanoseconds, 1)
             for mutation in (lambda b: None, lambda b: struct.pack('<I', 129) + b[4:],
                              lambda b: b + b'\x00', lambda b: b[:-4] + struct.pack('<I', 3)):
-                path.write_bytes(self.rewrite(raw, mutation))
+                path.write_bytes(rewrite_section(raw, b"RPTS", mutation))
                 with self.assertRaises(of.ProjectError):
                     of.load_project(path)
-            path.write_bytes(self.rewrite(raw, lambda b: None, version=5))
-            restored = of.load_project(path)
-            self.assertEqual(restored.reports, [])
-            self.assertEqual(len(restored.ground_stations), 1)
-            restored.save(path, overwrite=True)
-            self.assertEqual(struct.unpack_from('<I', path.read_bytes(), 8)[0], 11)
 
     def test_limits_fail_before_sampling(self):
         project, definition = self.inputs()
@@ -157,7 +126,7 @@ class ReportsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             of.estimate_report_rows(project, definition)
 
-    def test_derived_templates_units_and_v7_persistence(self):
+    def test_derived_templates_units_and_persistence(self):
         project, definition = self.inputs()
         orbit = of.OrbitInput()
         orbit.first, orbit.last = project.first, project.last
@@ -187,10 +156,6 @@ class ReportsTest(unittest.TestCase):
             raw = path.read_bytes()
             self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 11)
             self.assertEqual(of.load_project(path).reports[0].kind, of.ReportKind.GEODETIC_POSITION)
-            # A v6 container cannot silently accept a newly introduced kind.
-            path.write_bytes(self.rewrite(raw, lambda body: body, version=6))
-            with self.assertRaises(of.ProjectError):
-                of.load_project(path)
 
 
 if __name__ == '__main__':

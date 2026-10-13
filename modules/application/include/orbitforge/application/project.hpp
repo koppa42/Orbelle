@@ -62,7 +62,7 @@ struct OrbitDisplay {
 };
 struct ProjectSatellite {
     OrbitInput orbit;
-    // Empty means use the stable object ID (including projects written by v1).
+    // Empty means use the stable object ID.
     std::string display_name;
     [[nodiscard]] const std::string &name() const {
         return display_name.empty() ? orbit.object_id : display_name;

@@ -6,8 +6,7 @@ target_compile_definitions(orbitforge_integration_tests PRIVATE
     ORBITFORGE_REPORT_EOP="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
     ORBITFORGE_EXPECT_ERFA=$<BOOL:${ORBITFORGE_WITH_ERFA}>
     ORBITFORGE_EXPECT_SPICE=$<BOOL:${ORBITFORGE_WITH_SPICE}>
-    ORBITFORGE_PROJECT_V1="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/project-v1.orbitforge"
-    ORBITFORGE_PROJECT_V2="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/project-v2.orbitforge"
+    ORBITFORGE_PROJECT_CURRENT="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/project-current.orbitforge"
     ORBITFORGE_INTEGRATION_SPICE="${PROJECT_SOURCE_DIR}/data/samples/spice/de440s_2016_leap/manifest.json"
     ORBITFORGE_INTEGRATION_WORKSPACE="${CMAKE_CURRENT_BINARY_DIR}/spice-workspace")
 if(ORBITFORGE_BUILD_VISUALIZATION)

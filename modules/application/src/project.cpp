@@ -25,6 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
+constexpr std::uint32_t project_version = 11;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -33,6 +34,28 @@ constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_t
 void check(bool condition, const char *message) {
     if (!condition)
         invalid(message);
+}
+struct SectionSchema {
+    std::uint32_t tag;
+    unsigned version;
+    const char *missing_error;
+};
+// One current schema, shared by the reader and writer. Null means an optional section.
+constexpr std::array section_schemas{
+    SectionSchema{scene_tag, 1, "Missing scene section"},
+    SectionSchema{objects_tag, 3, "Missing satellites section"},
+    SectionSchema{styles_tag, 1, "Missing track styles section"},
+    SectionSchema{stations_tag, 2, "Missing ground stations section"},
+    SectionSchema{sensors_tag, 1, "Missing sensors section"},
+    SectionSchema{reports_tag, 1, "Missing reports section"},
+    SectionSchema{data_tag, 2, nullptr},
+    SectionSchema{time_tag, 1, nullptr},
+    SectionSchema{analysis_tag, 1, nullptr},
+    SectionSchema{lock_tag, 1, "Missing scenario data lock"}};
+const SectionSchema &section_schema(std::uint32_t tag) {
+    const auto found = std::ranges::find(section_schemas, tag, &SectionSchema::tag);
+    check(found != section_schemas.end(), "Unsupported project section");
+    return *found;
 }
 bool valid_utf8(const std::string &text) {
     for (std::size_t i = 0; i < text.size();) {
@@ -109,9 +132,9 @@ struct Writer {
     }
     void epoch(core::Epoch value) { number(std::bit_cast<std::uint64_t>(value.tai_nanoseconds())); }
     void real(double value) { number(std::bit_cast<std::uint64_t>(value)); }
-    void section(std::uint32_t tag, const Writer &data, unsigned version = 1) {
+    void section(std::uint32_t tag, const Writer &data) {
         number(tag, 4);
-        number(version, 4);
+        number(section_schema(tag).version, 4);
         number(data.bytes.size());
         number(crc32(data.bytes), 4);
         raw(data.bytes);
@@ -525,7 +548,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         objects.text(input.tle.line1);
         objects.text(input.tle.line2);
     }
-    payload.section(objects_tag, objects, 3);
+    payload.section(objects_tag, objects);
     Writer styles;
     styles.number(project.satellites.size(), 4);
     for (const auto &satellite : project.satellites) {
@@ -544,7 +567,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         stations.real(station.location.height_m);
         stations.real(station.minimum_elevation_rad);
     }
-    payload.section(stations_tag, stations, 2);
+    payload.section(stations_tag, stations);
     Writer sensors;
     sensors.number(project.sensors.size(), 4);
     for (const auto &sensor : project.sensors) {
@@ -578,7 +601,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         Writer data;
         write_data(data, *project.earth_orientation);
         data.number(static_cast<unsigned>(project.earth_orientation->extrapolation_days), 4);
-        payload.section(data_tag, data, 2);
+        payload.section(data_tag, data);
     }
     if (project.time_data) {
         Writer time;
@@ -601,7 +624,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
     locked.text(lock.sha256());
     payload.section(lock_tag, locked);
     file.raw(magic);
-    file.number(11, 4);
+    file.number(project_version, 4);
     file.number(payload.bytes.size());
     file.number(crc32(payload.bytes), 4);
     file.raw(payload.bytes);
@@ -612,7 +635,10 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     Reader file{bytes};
     check(std::ranges::equal(file.raw(magic.size()), magic), "Not an OrbitForge project file");
     const auto version = file.number(4);
-    check(version >= 1 && version <= 11, "Unsupported OrbitForge project version");
+    if (version != project_version)
+        throw ProjectError("Unsupported OrbitForge project version " + std::to_string(version) +
+                           "; this build reads only version " + std::to_string(project_version) +
+                           ". Use a matching OrbitForge build or recreate the project.");
     const auto length = file.number();
     const auto checksum = file.number(4);
     check(length == file.bytes.size(), "Project length mismatch");
@@ -620,19 +646,8 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     std::map<std::uint32_t, std::span<const std::uint8_t>> sections;
     while (!file.bytes.empty()) {
         const auto tag = static_cast<std::uint32_t>(file.number(4));
-        check(tag == scene_tag || tag == objects_tag || tag == data_tag ||
-                  (version >= 3 && tag == lock_tag) || (version >= 5 && tag == stations_tag) ||
-                  (version >= 6 && tag == reports_tag) || (version >= 8 && tag == styles_tag) ||
-                  (version >= 10 && tag == sensors_tag) ||
-                  (version >= 11 && (tag == time_tag || tag == analysis_tag)),
-              "Unsupported project section");
-        check(file.number(4) ==
-                  (tag == objects_tag && version >= 9 ? 3U
-                   : (tag == objects_tag && version >= 2) || (tag == data_tag && version >= 4) ||
-                           (tag == stations_tag && version >= 10)
-                       ? 2U
-                       : 1U),
-              "Unsupported project section version");
+        const auto &schema = section_schema(tag);
+        check(file.number(4) == schema.version, "Unsupported project section version");
         const auto size = file.number();
         const auto section_crc = file.number(4);
         check(size <= file.bytes.size(), "Truncated project section");
@@ -640,8 +655,9 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         check(crc32(section) == section_crc, "Project section checksum mismatch");
         check(sections.emplace(tag, section).second, "Duplicate project section");
     }
-    check(sections.contains(scene_tag) && sections.contains(objects_tag),
-          "Missing project section");
+    for (const auto &schema : section_schemas)
+        if (schema.missing_error)
+            check(sections.contains(schema.tag), schema.missing_error);
     Reader scene{sections.at(scene_tag)};
     const auto name = scene.text();
     const auto first = scene.epoch(), last = scene.epoch();
@@ -657,11 +673,9 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         ProjectSatellite satellite;
         auto &input = satellite.orbit;
         input.object_id = objects.text();
-        if (version >= 2)
-            satellite.display_name = objects.text();
+        satellite.display_name = objects.text();
         const auto propagator = objects.number(4), frame = objects.number(4);
-        check(propagator >= 1 && propagator <= (version >= 9 ? 4U : 2U),
-              "Unsupported project propagator");
+        check(propagator >= 1 && propagator <= 4, "Unsupported project propagator");
         check(frame == 1 || frame == 2, "Unsupported input reference frame");
         input.propagator = static_cast<OrbitPropagator>(propagator - 1);
         input.input_frame = frame == 1 ? core::FrameId::gcrf : core::FrameId::itrf;
@@ -682,13 +696,11 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         satellite.model_kind = static_cast<int>(objects.number(4));
         satellite.model_diameter_m = objects.real();
         satellite.model_path = objects.text();
-        if (version >= 9)
-            input.tle = {objects.text(), objects.text()};
+        input.tle = {objects.text(), objects.text()};
         project.satellites.push_back(std::move(satellite));
     }
     objects.done();
-    if (version >= 8) {
-        check(sections.contains(styles_tag), "Missing track styles section");
+    {
         Reader styles{sections.at(styles_tag)};
         check(styles.number(4) == count, "Track styles must match the satellite count");
         std::map<std::string, OrbitDisplay *> displays;
@@ -706,8 +718,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         }
         styles.done();
     }
-    if (version >= 5) {
-        check(sections.contains(stations_tag), "Missing ground stations section");
+    {
         Reader stations{sections.at(stations_tag)};
         const auto station_count = stations.number(4);
         check(station_count + count <= max_objects, "Project exceeds 10000 objects");
@@ -716,14 +727,12 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             station.object_id = stations.text();
             station.display_name = stations.text();
             station.location = {stations.real(), stations.real(), stations.real()};
-            if (version >= 10)
-                station.minimum_elevation_rad = stations.real();
+            station.minimum_elevation_rad = stations.real();
             project.ground_stations.push_back(std::move(station));
         }
         stations.done();
     }
-    if (version >= 10) {
-        check(sections.contains(sensors_tag), "Missing sensors section");
+    {
         Reader sensors{sections.at(sensors_tag)};
         const auto sensor_count = sensors.number(4);
         check(sensor_count + project.satellites.size() + project.ground_stations.size() <=
@@ -743,8 +752,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         }
         sensors.done();
     }
-    if (version >= 6) {
-        check(sections.contains(reports_tag), "Missing reports section");
+    {
         Reader reports{sections.at(reports_tag)};
         const auto report_count = reports.number(4);
         check(report_count <= 128, "Project exceeds 128 report definitions");
@@ -753,10 +761,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             report.id = reports.text();
             report.name = reports.text();
             const auto kind = reports.number(4);
-            check(kind <= (version >= 10  ? 8U
-                           : version >= 7 ? 6U
-                                          : 3U),
-                  "Unsupported report template");
+            check(kind <= 8, "Unsupported report template");
             report.kind = static_cast<ReportKind>(kind);
             const auto bindings = reports.number(4);
             check(bindings <= max_objects, "Report exceeds 10000 object bindings");
@@ -782,11 +787,9 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     if (sections.contains(data_tag)) {
         Reader data{sections.at(data_tag)};
         project.earth_orientation = read_data(data);
-        if (version >= 4) {
-            const auto days = data.number(4);
-            check(days <= core::max_eop_extrapolation_days, "Invalid EOP extrapolation limit");
-            project.earth_orientation->extrapolation_days = static_cast<int>(days);
-        }
+        const auto days = data.number(4);
+        check(days <= core::max_eop_extrapolation_days, "Invalid EOP extrapolation limit");
+        project.earth_orientation->extrapolation_days = static_cast<int>(days);
         data.done();
     }
     if (sections.contains(time_tag)) {
@@ -806,8 +809,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         analysis.done();
     }
     validate_project(project);
-    if (version >= 3) {
-        check(sections.contains(lock_tag), "Missing scenario data lock");
+    {
         Reader locked{sections.at(lock_tag)};
         check(locked.text() == "orbitforge-data-lock-v1", "Unsupported data lock encoding");
         const auto reference_count = locked.number(4);

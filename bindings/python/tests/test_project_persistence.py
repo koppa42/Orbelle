@@ -2,10 +2,10 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
-import zlib
 
 import orbitforge as of
 from orbitforge import units as u
+from project_format import rewrite_section
 
 EOP = Path(of.__file__).parent / "data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
 
@@ -155,46 +155,24 @@ class ProjectPersistenceTests(unittest.TestCase):
         state = opened.prepare(data=data).state(opened.objects[satellite.id], at=first, frame=of.FrameId.TEME)
         self.assertEqual(state.position_m, analysis.state(satellite, at=first, frame=of.FrameId.TEME).position_m)
 
-    def test_version_eleven_roundtrip_legacy_ten_and_integrity(self):
+    def test_current_format_roundtrip_and_integrity(self):
         self.project.save(self.path, analysis=self.project.prepare(data=of.DataSnapshot.builtin_time()))
         original = self.path.read_bytes()
         self.assertEqual(struct.unpack_from("<I", original, 8)[0], 11)
         raw = of.load_project_data(self.path)
         raw.save(self.path, overwrite=True)
         self.assertEqual(self.path.read_bytes(), original)
-        sections, offset = {}, 24
-        while offset < len(original):
-            tag, version, size, crc = struct.unpack_from("<4sIQI", original, offset)
-            body = original[offset + 20:offset + 20 + size]
-            sections[tag] = (version, body)
-            offset += 20 + size
-
-        def publish(version, changes):
-            payload = b""
-            for tag, (section_version, body) in sections.items():
-                body = changes.get(tag, body)
-                if body is not None:
-                    payload += struct.pack("<4sIQI", tag, section_version, len(body), zlib.crc32(body)) + body
-            self.path.write_bytes(original[:8] + struct.pack("<IQI", version, len(payload), zlib.crc32(payload)) + payload)
-
-        # A v10 reader must not silently discard the new optional sections.
-        publish(10, {})
-        with self.assertRaises(of.ProjectError):
-            of.load_project_data(self.path)
         # Repaired CRCs still cannot make a missing TIME agree with LOCK.
-        publish(11, {b"TIME": None})
+        self.path.write_bytes(rewrite_section(original, b"TIME", lambda body: None))
         with self.assertRaises(of.ProjectError):
             of.load_project_data(self.path)
-        publish(11, {b"ANLY": sections[b"ANLY"][1] + b"trailing"})
+        self.path.write_bytes(rewrite_section(original, b"ANLY", lambda body: body + b"trailing"))
         with self.assertRaises(of.ProjectError):
             of.load_project_data(self.path)
         self.project.save(self.path, overwrite=True)
-        # Genuine v10-compatible inputs have neither new section nor UTC lock.
-        plain = of.Project("Legacy", of.Epoch(0), of.Epoch(100))
+        # Input-only projects remain valid, without fabricating an analysis record.
+        plain = of.Project("Inputs", of.Epoch(0), of.Epoch(100))
         plain.save(self.path, overwrite=True)
-        legacy = bytearray(self.path.read_bytes())
-        struct.pack_into("<I", legacy, 8, 10)
-        self.path.write_bytes(legacy)
         self.assertEqual(of.Project.open(self.path).analysis_status, of.AnalysisStatus.UNRECORDED)
 
 

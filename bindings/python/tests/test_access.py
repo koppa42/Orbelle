@@ -1,13 +1,10 @@
 import math
 from pathlib import Path
-import struct
 import tempfile
 import unittest
-import zlib
 
-# Native value/format compatibility tests; public editing is in test_objects.py.
+# Native value/format tests; public editing is in test_objects.py.
 from orbitforge import _native as of
-from project_fixtures import legacy_stations
 
 EOP = Path(of.__file__).parent / 'data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json'
 
@@ -80,29 +77,23 @@ class AccessTests(unittest.TestCase):
         p.sensors = sensors
         self.assertNotEqual(of.report_input_sha256(p), old_hash)
 
-    def test_v10_roundtrip_and_real_v9_layout_upgrade(self):
+    def test_sensor_and_station_constraints_roundtrip(self):
         p = self.inputs()
+        stations = p.ground_stations
+        stations[0].minimum_elevation_rad = 0.2
+        p.ground_stations = stations
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'sensors.orbitforge'
             p.save(path)
             restored = of.load_project(path)
             self.assertEqual(restored.sensors[0].target_station_id, 'station')
+            self.assertEqual(restored.sensors[0].parent_satellite_id, 'satellite-1')
+            self.assertEqual(restored.sensors[0].pointing, of.SensorPointing.TARGETED)
+            self.assertEqual(restored.sensors[0].half_angle_rad, p.sensors[0].half_angle_rad)
+            self.assertEqual(restored.ground_stations[0].minimum_elevation_rad, 0.2)
             raw = path.read_bytes()
-            sections, offset = [], 24
-            while offset < len(raw):
-                tag, schema, size, _ = struct.unpack_from('<4sIQI', raw, offset)
-                body = raw[offset + 20:offset + 20 + size]
-                offset += 20 + size
-                if tag == b'SNSR':
-                    continue
-                if tag == b'GSTN':
-                    body, schema = legacy_stations(body), 1
-                sections.append(struct.pack('<4sIQI', tag, schema, len(body), zlib.crc32(body)) + body)
-            payload = b''.join(sections)
-            path.write_bytes(raw[:8] + struct.pack('<IQI', 9, len(payload), zlib.crc32(payload)) + payload)
-            restored = of.load_project(path)
-            self.assertEqual(restored.sensors, [])
-            self.assertEqual(restored.ground_stations[0].minimum_elevation_rad, 0)
+            restored.save(path, overwrite=True)
+            self.assertEqual(path.read_bytes(), raw)
 
 
 if __name__ == '__main__':
