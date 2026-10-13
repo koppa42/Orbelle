@@ -28,4 +28,5 @@ class DataLock {
     std::string sha256_;
 };
 [[nodiscard]] DataLock eop_data_lock(const core::EopDataInfo &info);
+[[nodiscard]] DataLock time_data_lock(const core::TimeDataInfo &info);
 } // namespace orbitforge::application

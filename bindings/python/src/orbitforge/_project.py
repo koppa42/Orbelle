@@ -9,6 +9,7 @@ import weakref
 from . import _native as n
 from ._values import UNSET, Unset, require
 from .objects import ObjectCollection
+from ._analysis import Analysis, AnalysisPlan
 
 
 def _owner() -> tuple[int, object]:
@@ -200,6 +201,17 @@ class Project:
 
     def to_scenario(self, time: n.TimeProvider | None = None) -> n.Scenario:
         return self._calculation_data().to_scenario(time)
+
+    def plan_prepare(self, *, data: n.DataSnapshot | None = None) -> AnalysisPlan:
+        """Pin committed inputs and selected providers; validate before any consent."""
+        if self._active_edit() is not None:
+            raise RuntimeError("Finish the project edit before preparing an analysis")
+        selected = n.DataSnapshot() if data is None else require(data, n.DataSnapshot, "data")
+        return AnalysisPlan(n.AnalysisPlan(self._document, selected), self)
+
+    def prepare(self, *, data: n.DataSnapshot | None = None) -> Analysis:
+        """Prepare fixed inputs. Changed recorded data raises DataChangedError with its plan."""
+        return self.plan_prepare(data=data).prepare()
 
     def save(self, path: str | PathLike[str], overwrite: bool = False) -> None:
         if self._active_edit() is not None:

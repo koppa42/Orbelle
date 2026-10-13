@@ -34,6 +34,7 @@ class ObjectRef {
     std::string id_;
     ObjectKind kind_;
     friend class ObjectManager;
+    friend struct ProjectSnapshot;
 };
 
 namespace objects {
@@ -78,6 +79,10 @@ using ObjectState = std::variant<ProjectSatellite, ProjectGroundStation, Project
 struct ProjectSnapshot {
     std::uint64_t revision;
     std::shared_ptr<const Project> project;
+    // Process-local document identity, never persisted or part of an input hash.
+    std::uint64_t scope = 0;
+    [[nodiscard]] bool owns(const ObjectRef &ref) const noexcept { return scope == ref.scope_; }
+    [[nodiscard]] ObjectState read(const ObjectRef &ref) const;
 };
 struct ObjectChange {
     std::string id;

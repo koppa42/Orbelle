@@ -8,6 +8,7 @@
 | --- | --- |
 | 场景与工作区 | [场景与属性工作流](architecture/scenario_workbench.md)、[对象与数据管理](architecture/object_data_management.md) |
 | 对象 API | [Python 对象句柄、公共 C++ 事务与迁移](architecture/object_editing.md) |
+| 分析 API | [固定输入、数据确认、状态查询与导出](architecture/analysis_api.md) |
 | 轨道模型 | [J2 长期项与状态语义](architecture/j2.md)、[二体验证方法](validation/p1_two_body_protocol.md) |
 | 地面站 | [WGS84 地面站与对象生命周期](architecture/ground_stations.md) |
 | 可见性与传感器 | [Access、AER、子传感器、STK 对照与验证](architecture/access_sensors.md) |

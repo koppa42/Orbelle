@@ -66,18 +66,24 @@ std::vector<std::uint8_t> DataLock::canonical_bytes() const {
     }
     return std::move(result.bytes);
 }
-DataLock eop_data_lock(const core::EopDataInfo &info) {
-    const auto &time = info.time_data;
-    check(valid_hash(time.sha256) && valid_hash(info.sha256), "Invalid data content SHA256");
-    check(time.utc_valid_from_mjd >= 0 && time.utc_valid_from_mjd < time.utc_valid_until_mjd &&
-              info.first_epoch.tai_nanoseconds() < info.last_epoch.tai_nanoseconds(),
-          "Invalid data-reference coverage");
+DataLock time_data_lock(const core::TimeDataInfo &time) {
+    check(valid_hash(time.sha256), "Invalid time content SHA256");
+    check(time.utc_valid_from_mjd >= 0 && time.utc_valid_from_mjd < time.utc_valid_until_mjd,
+          "Invalid time-reference coverage");
     constexpr auto time_version = "orbitforge-utc-tai-v1";
     Canonical time_config;
     time_config.text(time_version);
     time_config.integer(static_cast<std::uint32_t>(time.utc_valid_from_mjd), 4);
     time_config.integer(static_cast<std::uint32_t>(time.utc_valid_until_mjd), 4);
     DataReference time_ref{"utc-time", time.id, time.sha256, time_version, time_config.digest()};
+    return DataLock({std::move(time_ref)});
+}
+DataLock eop_data_lock(const core::EopDataInfo &info) {
+    check(valid_hash(info.sha256), "Invalid EOP content SHA256");
+    check(info.first_epoch.tai_nanoseconds() < info.last_epoch.tai_nanoseconds(),
+          "Invalid data-reference coverage");
+    const auto time_lock = time_data_lock(info.time_data);
+    auto time_ref = time_lock.references().front();
 
     const auto eop_version =
         info.extrapolation_days == 0 ? "orbitforge-eop-reader-v1" : "orbitforge-eop-reader-v2";
@@ -96,7 +102,7 @@ DataLock eop_data_lock(const core::EopDataInfo &info) {
         eop_config.integer(static_cast<unsigned>(info.extrapolation_days), 4);
     }
     // Include the complete time dependency identity, not just its display ID.
-    eop_config.text(DataLock({time_ref}).sha256());
+    eop_config.text(time_lock.sha256());
     DataReference eop_ref{"earth-orientation", info.id, info.sha256, eop_version,
                           eop_config.digest()};
     return DataLock({std::move(eop_ref), std::move(time_ref)});

@@ -1,8 +1,9 @@
 #include <cmath>
 #include <iostream>
-#include <orbitforge/application/scenario.hpp>
 #include <orbitforge/application/project_document.hpp>
+#include <orbitforge/application/scenario.hpp>
 #include <orbitforge/runtime/access.hpp>
+#include <orbitforge/runtime/analysis.hpp>
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/demo.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
@@ -15,7 +16,7 @@
 int main(int argc, char **argv) {
     namespace app = orbitforge::application;
     app::ProjectDocument document{app::Project{"SDK objects", orbitforge::core::Epoch{0},
-                                             orbitforge::core::Epoch{60'000'000'000}}};
+                                               orbitforge::core::Epoch{60'000'000'000}}};
     auto edit = document.edit();
     auto objects = edit.objects();
     const auto satellite_ref = objects.create(app::objects::Satellite{"Observer", {}, {}});
@@ -140,6 +141,14 @@ int main(int argc, char **argv) {
         return 10;
     if (orbitforge::runtime::two_body_available()) {
         using namespace orbitforge;
+        const auto analysis = runtime::prepare(document);
+        const auto trajectory =
+            analysis.states(satellite_ref, std::chrono::seconds{40}, core::FrameId::gcrf);
+        document.objects().remove(satellite_ref);
+        if (trajectory.states().size() != 3 ||
+            trajectory.states().back().epoch != document.snapshot().project->last ||
+            analysis.state(satellite_ref, core::Epoch{0}, core::FrameId::gcrf).position_m[0] != 7e6)
+            return 26;
         const auto j4 =
             runtime::make_j4_session({core::Epoch{0}, 7e6, .01, .5, .1, .2, .3}, "sdk-j4")
                 .sample(std::array{core::Epoch{0}, core::Epoch{60'000'000'000}});

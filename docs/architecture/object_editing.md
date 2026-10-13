@@ -1,6 +1,6 @@
 # 对象编辑 API
 
-本接口实现[统一对象 API 设计](object_api_design.md)中的对象管理与事务阶段。Python 的 `Project` 已使用公共 C++ `application::ProjectDocument` 管理修改；桌面仍使用原工作流，后续接入同一变更通知。`Analysis`、数据确认计划、Qt 模型适配和描述表驱动的属性页仍待实施。
+本接口实现[统一对象 API 设计](object_api_design.md)中的对象管理与事务阶段。Python 的 `Project` 已使用公共 C++ `application::ProjectDocument` 管理修改；桌面仍使用原工作流，后续接入同一变更通知。[固定输入分析与准备计划](analysis_api.md)已接入，Qt 模型适配和描述表驱动的属性页仍待实施。
 
 ## Python 常用操作
 
@@ -107,8 +107,8 @@ project.objects().update(sensor, app::objects::SensorUpdate{.half_angle_rad = 0.
 
 Python `of.Project` 和 `of.load_project()` 现在返回事务门面。旧的可变项目值改名为 `of.ProjectData`，文件层入口为 `of.load_project_data()`；原生文件格式回归测试继续验证这些低层值。需要与旧集成交换时使用 `Project.from_data(data)` 和 `project.to_data()`，两者均复制，修改副本不会回写项目。
 
-普通脚本不再修改 `project.satellites` 等列表。通过句柄操作对象；保存报告配置使用 `project.set_reports(definitions)`，读取旧配置可从显式 `to_data()` 副本取得。`project.earth_orientation = ...` 继续接受已明确选定的数据元信息，`None` 清空；新数据自动选择与确认计划仍属于后续阶段。
+普通脚本不再修改 `project.satellites` 等列表。通过句柄操作对象；保存报告配置使用 `project.set_reports(definitions)`，读取旧配置可从显式 `to_data()` 副本取得。`project.earth_orientation = ...` 继续接受已明确选定的数据元信息，`None` 清空；`plan_prepare(data=...)` 已提供所选数据的确认计划，目录自动选择仍待接入。
 
-`Project.open()` 此阶段只读取文件内的输入和来源记录，不下载或替换资源。`to_scenario(time=...)`、`generate_report(project, ...)` 和 `AccessSession(project, ...)` 对新门面捕获已提交输入，继续执行已有计算与数据匹配规则；不是完整的 `Analysis` API。文件仍为 v10，可读取 v1–v10；不因接口变化升级文件版本。
+`Project.open()` 此阶段只读取文件内的输入和来源记录，不下载或替换资源。状态查询优先使用 `project.prepare()` 返回的 `Analysis`；`to_scenario(time=...)`、`generate_report(project, ...)` 和 `AccessSession(project, ...)` 继续捕获已提交输入，执行已有计算与数据匹配规则。文件仍为 v10，可读取 v1–v10；不因接口变化升级文件版本。
 
 完整示例见 [可见性分析](../../examples/python/access.py)和[保存项目](../../examples/python/save_project.py)。验证入口为 C++ `ProjectDocument.*` 集成测试、Python `test_objects.py`、原生文件与计算回归测试，以及安装后的 SDK 消费端。
