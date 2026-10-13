@@ -5,6 +5,7 @@
 #include <orbitforge/results/trajectory.hpp>
 
 namespace orbitforge::runtime {
+class DataCatalog;
 class AnalysisCapabilityError : public std::runtime_error {
     using std::runtime_error::runtime_error;
 };
@@ -24,6 +25,10 @@ class DataSnapshot {
     [[nodiscard]] const auto &frames() const { return frames_; }
     [[nodiscard]] const auto &eop() const { return eop_; }
     [[nodiscard]] const application::DataLock &data_lock() const { return lock_; }
+    // Catalog diagnostics do not participate in the calculation identity.
+    [[nodiscard]] const std::vector<std::string> &selection_notes() const {
+        return selection_notes_;
+    }
 
   private:
     explicit DataSnapshot(std::shared_ptr<const core::ITimeProvider> time,
@@ -33,6 +38,8 @@ class DataSnapshot {
     std::shared_ptr<const core::IFrameProvider> frames_;
     std::shared_ptr<const core::IEarthOrientationProvider> eop_;
     application::DataLock lock_;
+    std::vector<std::string> selection_notes_;
+    friend class DataCatalog;
 };
 
 inline constexpr std::size_t max_analysis_samples = 200000;
@@ -77,6 +84,7 @@ class DataChangedError : public std::runtime_error {
 class AnalysisPlan {
   public:
     AnalysisPlan(const application::ProjectDocument &project, DataSnapshot data = {});
+    AnalysisPlan(const application::ProjectDocument &project, const DataCatalog &catalog);
     [[nodiscard]] const std::vector<DataChange> &data_changes() const { return changes_; }
     [[nodiscard]] const application::ProjectSnapshot &snapshot() const {
         return analysis_.snapshot();
@@ -85,11 +93,14 @@ class AnalysisPlan {
     [[nodiscard]] Analysis prepare(bool accept_data_changes = false) const;
 
   private:
+    AnalysisPlan(const application::ProjectDocument &project, Analysis analysis);
     application::ProjectDocument owner_;
     Analysis analysis_;
     std::vector<DataChange> changes_;
 };
 [[nodiscard]] Analysis prepare(const application::ProjectDocument &project, DataSnapshot data = {});
+[[nodiscard]] Analysis prepare(const application::ProjectDocument &project,
+                               const DataCatalog &catalog);
 // Shares the report CSV formatter and atomic publisher, without any recomputation.
 void export_trajectory_csv(const results::Trajectory &result, const std::filesystem::path &path,
                            bool overwrite = false);

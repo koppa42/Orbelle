@@ -90,12 +90,15 @@ IERS 文件内已有预测属于文件数据；越过完整有效样本范围后
 
 ## Python 示例
 
+已经安装数据的目录可直接用于 `project.prepare(data=catalog)`；C++ 对应 `runtime::prepare(document, catalog)`。接口按整个项目时段读取当前来源、优先级和外推设置，数据变化仍需明确确认；同一次分析持有固定资源。按需提前调用 `catalog.snapshot(first, last)`，或使用 `earth_orientation=False` 只选择时间表。契约与错误处理见[分析 API](analysis_api.md)。
+
 ```python
 import orbitforge as of
 
 catalog = of.DataCatalog('local/shared-data')
 entry = catalog.install_eop('snapshot/manifest.json')
 catalog.record_acquisition(entry.lock_sha256, of.DataAcquisition.imported)
+catalog.activate_eop(entry.lock_sha256)  # 安装后显式指定当前文件，旧分析不受影响
 # 也可直接安装完整原文件，自动推导可计算范围，不需要手工准备清单：
 # entry = catalog.import_finals('finals2000A.all',
 #     'https://datacenter.iers.org/data/9/finals2000A.all', '2026-10-10')
@@ -103,7 +106,7 @@ project = of.load_project('mission.orbitforge')
 provider = catalog.load_eop(entry.lock_sha256)
 project.earth_orientation = provider.data_info  # 记录本次实际使用的数据
 print(catalog.snapshots[0].acquired_at_unix_seconds)
-# 无界面调用者显式选择策略；不读取桌面设置：
+# 直接加载文件仍使用显式策略；不读取目录设置：
 limited = of.load_eop_snapshot(entry.manifest, extrapolation_days=3)
 project.earth_orientation = limited.data_info
 ```

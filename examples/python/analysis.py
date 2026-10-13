@@ -8,6 +8,7 @@ from orbitforge import units as u
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--csv", type=Path, help="Export owned results; refuses an existing file")
+    parser.add_argument("--data", type=Path, help="Select current local catalog data for ITRF output; never downloads")
     args = parser.parse_args()
     project = of.Project("Observation", of.Epoch(0), of.Epoch(300_000_000_000))
     satellite = project.objects.satellite("Observer", orbit=of.orbits.TwoBody(
@@ -16,8 +17,9 @@ def main() -> None:
             inclination=u.deg(53), raan=u.deg(0), argument_of_periapsis=u.deg(0),
         ),
     ))
-    analysis = project.prepare()
-    trajectory = analysis.states(satellite, step=u.s(40), frame=of.FrameId.GCRF)
+    analysis = project.prepare(data=of.DataCatalog(args.data) if args.data else None)
+    frame = of.FrameId.ITRF if args.data else of.FrameId.GCRF
+    trajectory = analysis.states(satellite, step=u.s(40), frame=frame)
     # A later edit does not rename or alter the earlier analysis.
     satellite.name = "Updated name"
     print(f"{trajectory.object_name}: {len(trajectory)} states, {trajectory.frame.name}")

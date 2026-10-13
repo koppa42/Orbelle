@@ -202,14 +202,16 @@ class Project:
     def to_scenario(self, time: n.TimeProvider | None = None) -> n.Scenario:
         return self._calculation_data().to_scenario(time)
 
-    def plan_prepare(self, *, data: n.DataSnapshot | None = None) -> AnalysisPlan:
+    def plan_prepare(self, *, data: n.DataSnapshot | n.DataCatalog | None = None) -> AnalysisPlan:
         """Pin committed inputs and selected providers; validate before any consent."""
         if self._active_edit() is not None:
             raise RuntimeError("Finish the project edit before preparing an analysis")
-        selected = n.DataSnapshot() if data is None else require(data, n.DataSnapshot, "data")
+        if data is not None and not isinstance(data, (n.DataSnapshot, n.DataCatalog)):
+            raise TypeError("data must be a DataSnapshot or DataCatalog")
+        selected = n.DataSnapshot() if data is None else data
         return AnalysisPlan(n.AnalysisPlan(self._document, selected), self)
 
-    def prepare(self, *, data: n.DataSnapshot | None = None) -> Analysis:
+    def prepare(self, *, data: n.DataSnapshot | n.DataCatalog | None = None) -> Analysis:
         """Prepare fixed inputs. Changed recorded data raises DataChangedError with its plan."""
         return self.plan_prepare(data=data).prepare()
 

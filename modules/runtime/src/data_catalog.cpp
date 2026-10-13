@@ -1,6 +1,54 @@
+#include <charconv>
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <stdexcept>
+#include <string_view>
+
+namespace orbitforge::runtime {
+namespace {
+const char *product_name(EopProduct product) {
+    switch (product) {
+    case EopProduct::c04:
+        return "c04";
+    case EopProduct::finals2000a:
+        return "finals2000a";
+    }
+    throw std::invalid_argument("Unknown EOP product");
+}
+std::string extrapolation_key(EopProduct product) {
+    return std::string("extrapolation-") + product_name(product) + "-days";
+}
+int parse_extrapolation(std::string_view value) {
+    const auto first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string_view::npos)
+        return 0;
+    value = value.substr(first, value.find_last_not_of(" \t\r\n") - first + 1);
+    if (value.starts_with('+'))
+        value.remove_prefix(1);
+    int days = 0;
+    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), days);
+    return parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size() && days >= 0 &&
+                   days <= core::max_eop_extrapolation_days
+               ? days
+               : 0;
+}
+} // namespace
+EopProduct DataCatalog::preferred_eop() const {
+    return setting("eop-preferred-product") == "finals2000a" ? EopProduct::finals2000a
+                                                             : EopProduct::c04;
+}
+void DataCatalog::set_preferred_eop(EopProduct product) {
+    set_setting("eop-preferred-product", product_name(product));
+}
+int DataCatalog::extrapolation_days(EopProduct product) const {
+    return parse_extrapolation(setting(extrapolation_key(product)));
+}
+void DataCatalog::set_extrapolation_days(EopProduct product, int days) {
+    if (days < 0 || days > core::max_eop_extrapolation_days)
+        throw std::invalid_argument("EOP extrapolation limit must be 0..30 days");
+    set_setting(extrapolation_key(product), std::to_string(days));
+}
+} // namespace orbitforge::runtime
 
 #ifdef ORBITFORGE_HAS_DATA_CATALOG
 #include <algorithm>
@@ -131,7 +179,9 @@ void sql(sqlite3 *db, const char *command) {
 }
 struct Transaction {
     sqlite3 *db;
-    explicit Transaction(sqlite3 *connection) : db(connection) { sql(db, "BEGIN IMMEDIATE"); }
+    explicit Transaction(sqlite3 *connection, bool write = true) : db(connection) {
+        sql(db, write ? "BEGIN IMMEDIATE" : "BEGIN");
+    }
     ~Transaction() { sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr); }
     void commit() { sql(db, "COMMIT"); }
 };
@@ -272,6 +322,114 @@ DataCatalog::DataCatalog(std::filesystem::path root) : impl_(std::make_unique<Im
 }
 DataCatalog::~DataCatalog() = default;
 const std::filesystem::path &DataCatalog::root() const noexcept { return impl_->root; }
+void DataCatalog::activate_eop(const std::string &key) {
+    std::lock_guard guard(impl_->mutex);
+    Transaction transaction(impl_->db);
+    const auto provider = load_eop(key);
+    const auto utc = setting("current-utc");
+    const auto time =
+        utc.empty() ? make_builtin_time_provider() : load_time_snapshot(time_file(utc));
+    check(application::time_data_lock(provider->data_info().time_data) ==
+              application::time_data_lock(time->data_info()),
+          "Cannot activate EOP with a different UTC dependency; install it with the current UTC "
+          "file");
+    const auto product = provider->data_info().interpolation.starts_with("finals2000a")
+                             ? EopProduct::finals2000a
+                             : EopProduct::c04;
+    set_setting(std::string("current-") + product_name(product), key);
+    transaction.commit();
+}
+DataSnapshot DataCatalog::snapshot(core::Epoch first, core::Epoch last,
+                                   bool earth_orientation) const {
+    if (first.tai_nanoseconds() > last.tai_nanoseconds())
+        throw std::invalid_argument("Data selection requires first <= last");
+    std::lock_guard guard(impl_->mutex);
+    std::map<std::string, std::string> settings;
+    std::vector<CatalogSnapshot> entries;
+    {
+        // One SQLite read snapshot prevents mixing pointers from different UTC/EOP updates.
+        // Release it before parsing immutable files so other processes can publish updates.
+        Transaction transaction(impl_->db, false);
+        Statement rows(impl_->db, "SELECT key,value FROM settings");
+        while (rows.next())
+            settings.emplace(rows.text(0), rows.text(1));
+        if (earth_orientation)
+            entries = snapshots();
+        transaction.commit();
+    }
+    const auto utc = settings["current-utc"];
+    std::shared_ptr<const core::ITimeProvider> time =
+        utc.empty() ? make_builtin_time_provider() : load_time_snapshot(time_file(utc));
+    check(utc.empty() || time->data_info().sha256 == utc, "Current UTC content identity mismatch");
+    (void)time->to_utc(first);
+    (void)time->to_utc(last);
+    if (!earth_orientation)
+        return DataSnapshot{std::move(time)};
+    std::vector<std::string> notes;
+    std::map<EopProduct, std::shared_ptr<const core::IEarthOrientationProvider>> current;
+    const auto load = [&](const std::string &key) {
+        std::shared_ptr<const core::IEarthOrientationProvider> provider = load_eop(key);
+        check(application::time_data_lock(provider->data_info().time_data) ==
+                  application::time_data_lock(time->data_info()),
+              "Current EOP uses a different UTC dependency");
+        return provider;
+    };
+    const auto product_of = [](const core::IEarthOrientationProvider &provider) {
+        return provider.data_info().interpolation.starts_with("finals2000a")
+                   ? EopProduct::finals2000a
+                   : EopProduct::c04;
+    };
+    for (const auto product : {EopProduct::c04, EopProduct::finals2000a}) {
+        const auto key = settings[std::string("current-") + product_name(product)];
+        if (key.empty())
+            continue;
+        try {
+            auto provider = load(key);
+            check(product_of(*provider) == product,
+                  "Current EOP pointer refers to a different product");
+            current[product] = std::move(provider);
+        } catch (const std::exception &error) {
+            notes.push_back(std::string(product_name(product)) + ": " + error.what());
+        }
+    }
+    // Legacy catalogs without current pointers use the latest valid receipt/insertion per product.
+    // A broken explicit pointer never causes an implicit rollback to that product's older file.
+    if (settings["current-c04"].empty() || settings["current-finals2000a"].empty())
+        for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
+            try {
+                auto provider = load(it->lock_sha256);
+                const auto product = product_of(*provider);
+                if (settings[std::string("current-") + product_name(product)].empty() &&
+                    !current.contains(product))
+                    current[product] = std::move(provider);
+            } catch (const std::exception &error) {
+                notes.push_back(it->snapshot_id + ": " + error.what());
+            }
+        }
+    std::vector<EopCandidate> candidates;
+    const auto preferred = settings["eop-preferred-product"] == "finals2000a"
+                               ? EopProduct::finals2000a
+                               : EopProduct::c04;
+    for (const auto product :
+         {preferred, preferred == EopProduct::c04 ? EopProduct::finals2000a : EopProduct::c04}) {
+        if (const auto found = current.find(product); found != current.end())
+            candidates.push_back(
+                {found->second, parse_extrapolation(settings[extrapolation_key(product)])});
+        else
+            notes.push_back(std::string(product_name(product)) + ": no usable current data");
+    }
+    try {
+        auto eop = select_eop_for_interval(candidates, first, last, time);
+        DataSnapshot result{std::move(time), make_frame_provider(), std::move(eop)};
+        result.selection_notes_ = std::move(notes);
+        return result;
+    } catch (const core::EopCoverageError &error) {
+        std::string message = error.what();
+        for (const auto &note : notes)
+            message += "\n" + note;
+        throw core::EopCoverageError(message);
+    }
+}
 CatalogSnapshot DataCatalog::install_eop(const std::filesystem::path &manifest_path,
                                          const std::filesystem::path &time_file) {
     std::lock_guard guard(impl_->mutex);
@@ -580,6 +738,8 @@ namespace {
 bool data_catalog_available() noexcept { return false; }
 DataCatalog::DataCatalog(std::filesystem::path) { unavailable(); }
 DataCatalog::~DataCatalog() = default;
+DataSnapshot DataCatalog::snapshot(core::Epoch, core::Epoch, bool) const { unavailable(); }
+void DataCatalog::activate_eop(const std::string &) { unavailable(); }
 const std::filesystem::path &DataCatalog::root() const noexcept { return impl_->root; }
 CatalogSnapshot DataCatalog::install_eop(const std::filesystem::path &,
                                          const std::filesystem::path &) {

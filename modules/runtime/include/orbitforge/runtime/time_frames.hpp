@@ -4,8 +4,17 @@
 #include <orbitforge/core/frames/frame_provider.hpp>
 #include <orbitforge/core/frames/geodetic.hpp>
 #include <orbitforge/core/time/time_provider.hpp>
+#include <span>
 
 namespace orbitforge::runtime {
+struct EopCandidate {
+    std::shared_ptr<const core::IEarthOrientationProvider> provider;
+    int extrapolation_days = 0;
+};
+// Candidates are already loaded and ordered by preference. Shared by catalog and desktop.
+[[nodiscard]] std::shared_ptr<const core::IEarthOrientationProvider>
+select_eop_for_interval(std::span<const EopCandidate> candidates, core::Epoch first,
+                        core::Epoch last, std::shared_ptr<const core::ITimeProvider> time);
 [[nodiscard]] bool time_frames_available() noexcept;
 // ERFA's WGS84 geocentric-to-geodetic conversion. Requires Earth-centred ITRF.
 [[nodiscard]] core::GeodeticPosition itrf_to_wgs84(core::CartesianState state);

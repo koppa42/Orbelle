@@ -5,11 +5,13 @@
 #include <memory>
 #include <optional>
 #include <orbitforge/application/data_lock.hpp>
+#include <orbitforge/runtime/analysis.hpp>
 #include <string>
 #include <vector>
 
 namespace orbitforge::runtime {
 enum class DataAcquisition { unknown, bundled, imported, downloaded };
+enum class EopProduct { c04, finals2000a };
 struct CatalogSnapshot {
     std::string lock_sha256;
     std::string snapshot_id;
@@ -29,6 +31,17 @@ class DataCatalog {
     DataCatalog(const DataCatalog &) = delete;
     DataCatalog &operator=(const DataCatalog &) = delete;
     [[nodiscard]] const std::filesystem::path &root() const noexcept;
+    // Reads a coherent local catalog view; never downloads or changes current pointers.
+    // Full coverage wins over extrapolation, then preferred_eop() orders the sources.
+    [[nodiscard]] DataSnapshot snapshot(core::Epoch first, core::Epoch last,
+                                        bool earth_orientation = true) const;
+    [[nodiscard]] EopProduct preferred_eop() const;
+    void set_preferred_eop(EopProduct product);
+    [[nodiscard]] int extrapolation_days(EopProduct product) const;
+    void set_extrapolation_days(EopProduct product, int days);
+    // Explicit activation is independent of installation and preserves receipt metadata.
+    // Rejects an EOP resource whose UTC dependency differs from the catalog's current UTC.
+    void activate_eop(const std::string &lock_sha256);
     CatalogSnapshot install_eop(const std::filesystem::path &manifest,
                                 const std::filesystem::path &time_file = {});
     // Installs the entire original file. Coverage is the complete daily prefix
