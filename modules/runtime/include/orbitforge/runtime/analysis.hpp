@@ -1,0 +1,96 @@
+#pragma once
+#include <chrono>
+#include <orbitforge/application/project_document.hpp>
+#include <orbitforge/core/frames/frame_provider.hpp>
+#include <orbitforge/results/trajectory.hpp>
+
+namespace orbitforge::runtime {
+class AnalysisCapabilityError : public std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+// Already selected, immutable resources. No directory lookup or network during queries.
+// Loaders fully own their parsed bytes and the built-in frame model.
+class DataSnapshot {
+  public:
+    DataSnapshot() = default;
+    [[nodiscard]] static DataSnapshot builtin_time();
+    // An EOP file uses the explicit time_file, or the built-in time table when omitted.
+    // At least one path is required. Both files are parsed now, never reopened by Analysis.
+    [[nodiscard]] static DataSnapshot load(const std::filesystem::path &eop_manifest = {},
+                                           const std::filesystem::path &time_file = {},
+                                           int extrapolation_days = 0);
+    [[nodiscard]] const auto &time() const { return time_; }
+    [[nodiscard]] const auto &frames() const { return frames_; }
+    [[nodiscard]] const auto &eop() const { return eop_; }
+    [[nodiscard]] const application::DataLock &data_lock() const { return lock_; }
+
+  private:
+    explicit DataSnapshot(std::shared_ptr<const core::ITimeProvider> time,
+                          std::shared_ptr<const core::IFrameProvider> frames = {},
+                          std::shared_ptr<const core::IEarthOrientationProvider> eop = {});
+    std::shared_ptr<const core::ITimeProvider> time_;
+    std::shared_ptr<const core::IFrameProvider> frames_;
+    std::shared_ptr<const core::IEarthOrientationProvider> eop_;
+    application::DataLock lock_;
+};
+
+inline constexpr std::size_t max_analysis_samples = 200000;
+class AnalysisPlan;
+class Analysis {
+  public:
+    [[nodiscard]] const application::ProjectSnapshot &snapshot() const;
+    [[nodiscard]] const DataSnapshot &data() const;
+    [[nodiscard]] core::CartesianState state(const application::ObjectRef &object, core::Epoch at,
+                                             core::FrameId frame) const;
+    // Explicit queries preserve order and duplicates, and accept an empty span.
+    [[nodiscard]] results::Trajectory states(const application::ObjectRef &object,
+                                             std::span<const core::Epoch> times,
+                                             core::FrameId frame) const;
+    // Positive, exact TAI step. Includes both endpoints, also when not evenly divisible.
+    // A single-epoch subinterval is valid. The safety limit is checked before allocation.
+    [[nodiscard]] results::Trajectory states(const application::ObjectRef &object,
+                                             std::chrono::nanoseconds step, core::FrameId frame,
+                                             std::optional<core::Epoch> first = {},
+                                             std::optional<core::Epoch> last = {}) const;
+
+  private:
+    struct Impl;
+    std::shared_ptr<const Impl> impl_;
+    Analysis(application::ProjectSnapshot snapshot, DataSnapshot data);
+    friend class AnalysisPlan;
+};
+struct DataChange {
+    std::string role;
+    application::DataReference recorded, selected;
+};
+class DataChangedError : public std::runtime_error {
+  public:
+    explicit DataChangedError(AnalysisPlan plan);
+    [[nodiscard]] const AnalysisPlan &plan() const { return *plan_; }
+
+  private:
+    std::shared_ptr<const AnalysisPlan> plan_;
+};
+// Preparing a plan validates its exact resources and creates its immutable sessions.
+// Accepting a data change never bypasses coverage/format/revision validation.
+class AnalysisPlan {
+  public:
+    AnalysisPlan(const application::ProjectDocument &project, DataSnapshot data = {});
+    [[nodiscard]] const std::vector<DataChange> &data_changes() const { return changes_; }
+    [[nodiscard]] const application::ProjectSnapshot &snapshot() const {
+        return analysis_.snapshot();
+    }
+    [[nodiscard]] const DataSnapshot &data() const { return analysis_.data(); }
+    [[nodiscard]] Analysis prepare(bool accept_data_changes = false) const;
+
+  private:
+    application::ProjectDocument owner_;
+    Analysis analysis_;
+    std::vector<DataChange> changes_;
+};
+[[nodiscard]] Analysis prepare(const application::ProjectDocument &project, DataSnapshot data = {});
+// Shares the report CSV formatter and atomic publisher, without any recomputation.
+void export_trajectory_csv(const results::Trajectory &result, const std::filesystem::path &path,
+                           bool overwrite = false);
+} // namespace orbitforge::runtime

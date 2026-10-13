@@ -177,7 +177,14 @@ ProjectDocument::ProjectDocument(Project project)
 }
 ProjectSnapshot ProjectDocument::snapshot() const {
     std::lock_guard lock(state_->mutex);
-    return {state_->revision, state_->project};
+    return {state_->revision, state_->project, state_->scope};
+}
+ObjectState ProjectSnapshot::read(const ObjectRef &ref) const {
+    if (!owns(ref))
+        throw ProjectError("Object '" + ref.id() + "' belongs to another project");
+    if (!project)
+        throw ProjectError("Missing project snapshot");
+    return read_object(*project, ref.id(), ref.kind());
 }
 bool ProjectDocument::dirty() const {
     std::lock_guard lock(state_->mutex);
@@ -216,7 +223,7 @@ std::vector<std::string> ProjectDocument::observer_errors() const {
 ProjectEdit::ProjectEdit(std::shared_ptr<detail::DocumentState> state)
     : state_(std::move(state)), edit_(std::make_shared<detail::EditState>()) {
     std::lock_guard lock(state_->mutex);
-    edit_->base = {state_->revision, state_->project};
+    edit_->base = {state_->revision, state_->project, state_->scope};
     edit_->candidate = state_->project;
 }
 ProjectEdit::~ProjectEdit() { discard(); }
@@ -230,7 +237,7 @@ ObjectManager ProjectEdit::objects() const {
 }
 ProjectSnapshot ProjectEdit::snapshot() const {
     require_open(*edit_);
-    return {edit_->base.revision, edit_->candidate};
+    return {edit_->base.revision, edit_->candidate, state_->scope};
 }
 void ProjectEdit::settings(std::optional<std::string> name, std::optional<core::Epoch> first,
                            std::optional<core::Epoch> last, std::optional<core::Epoch> current) {
@@ -272,7 +279,7 @@ void ProjectEdit::commit() {
                       {},
                       false,
                       edit_->base,
-                      {edit_->base.revision + (changed ? 1 : 0), edit_->candidate}};
+                      {edit_->base.revision + (changed ? 1 : 0), edit_->candidate, state_->scope}};
     if (changed) {
         diff_objects(before.satellites, after.satellites, changes);
         diff_objects(before.ground_stations, after.ground_stations, changes);
@@ -304,10 +311,10 @@ void ProjectEdit::commit() {
 ProjectSnapshot ObjectManager::snapshot() const {
     if (edit_) {
         require_open(*edit_);
-        return {edit_->base.revision, edit_->candidate};
+        return {edit_->base.revision, edit_->candidate, state_->scope};
     }
     std::lock_guard lock(state_->mutex);
-    return {state_->revision, state_->project};
+    return {state_->revision, state_->project, state_->scope};
 }
 void ObjectManager::check_ref(const ObjectRef &ref, const Project &project,
                               std::optional<ObjectKind> kind) const {

@@ -15,6 +15,7 @@ void bind_project_document(py::module_ &module);
 void bind_data_lock(py::module_ &module);
 void bind_data_catalog(py::module_ &module);
 void bind_reports(py::module_ &module);
+void bind_analysis(py::module_ &module);
 
 PYBIND11_MODULE(_native, module) {
     module.doc() = "OrbitForge P0 native API. Time is explicit TAI, positions are metres.";
@@ -128,4 +129,5 @@ PYBIND11_MODULE(_native, module) {
     bind_project(module);
     bind_project_document(module);
     bind_data_catalog(module);
+    bind_analysis(module);
 }
