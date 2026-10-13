@@ -10,7 +10,8 @@ import tempfile
 import time
 import unittest
 
-import orbitforge as of
+# Native value/format compatibility tests; public editing is in test_objects.py.
+from orbitforge import _native as of
 
 SAMPLES = Path(of.__file__).parent / 'data/eop'
 C04 = SAMPLES / 'iers_c04_2000_01_01_2000_01_02'

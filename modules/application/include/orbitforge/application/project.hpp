@@ -124,7 +124,9 @@ class ProjectError : public std::runtime_error {
   public:
     using std::runtime_error::runtime_error;
 };
-void validate_project(const Project &project);
+// Editors may temporarily leave references unresolved in a private candidate.
+// Published projects and files must always validate with relationships enabled.
+void validate_project(const Project &project, bool relationships = true);
 [[nodiscard]] bool matching_project_data(const core::EopDataInfo &a, const core::EopDataInfo &b);
 // Versioned, little-endian .orbitforge container. No Qt or provider dependency.
 [[nodiscard]] std::vector<std::uint8_t> encode_project(const Project &project);

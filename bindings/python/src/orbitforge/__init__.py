@@ -1,4 +1,4 @@
-"""P0 API; Epoch zero is 2000-01-01 12:00:00 TAI. UTC conversion is explicit."""
+"""OrbitForge API; Epoch zero is 2000-01-01 12:00:00 TAI. UTC conversion is explicit."""
 from ._native import (
     CartesianState, Epoch, FrameId, OriginId, Provenance, Scenario, Session, StateSeries,
     __version__, demo_epochs, make_circular_demo_session,
@@ -16,17 +16,29 @@ from ._native import (
     j2_mean_ellipse_state, j2_mean_ellipse_elements, make_j2_session,
     J4MeanElements, j4_earth, j4_mean_ellipse_state, j4_mean_ellipse_elements, make_j4_session,
     Tle, make_sgp4_session, transform_state,
-    Project, ProjectSatellite, ProjectError, OrbitInput, OrbitDisplay, OrbitPropagator, load_project,
+    Project as ProjectData, ProjectSatellite, ProjectError, OrbitInput, OrbitDisplay, OrbitPropagator,
+    load_project as load_project_data,
     ProjectGroundStation, GroundStationLocation, LineStyle,
-    ProjectSensor, SensorPointing, GroundObservation, AccessSample, AccessSession, AccessInterval,
+    ProjectSensor, SensorPointing, GroundObservation, AccessSample, AccessInterval,
     observe_ground_target, vector_angle,
     DataReference, DataLock,
     DataCatalog, CatalogSnapshot, DataAcquisition, data_catalog_available,
     ReportKind, ReportUnits, ReportTimeScale, ReportDefinition, ReportColumn, ReportTable,
-    ReportResult, estimate_report_rows, report_input_sha256, generate_report,
+    ReportResult,
+)
+
+# Low-level mutable values remain available for file/runtime integrations.
+# Ordinary scripts use the shared, transactional Project facade below.
+from ._native import ObjectNotFoundError, RevisionConflictError, EditClosedError, ChangeSet
+from ._values import Wgs84Location, OrbitStyle
+from . import objects, orbits, sensors, units
+from ._project import (
+    Project, load_project, AccessSession, generate_report, estimate_report_rows, report_input_sha256,
 )
 
 __all__ = [
+    "ProjectData", "load_project_data", "ObjectNotFoundError", "RevisionConflictError", "EditClosedError",
+    "ChangeSet", "Wgs84Location", "OrbitStyle", "objects", "orbits", "sensors", "units",
     "CartesianState", "Epoch", "FrameId", "OriginId", "Provenance", "Scenario", "Session",
     "StateSeries", "__version__", "demo_epochs", "make_circular_demo_session",
     "EarthOrientationSample", "FrameProvider", "JulianDate", "PositionRotation",

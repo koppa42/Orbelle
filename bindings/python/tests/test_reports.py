@@ -7,7 +7,8 @@ import unittest
 import zlib
 from pathlib import Path
 
-import orbitforge as of
+# Native value/format compatibility tests; public editing is in test_objects.py.
+from orbitforge import _native as of
 from project_fixtures import legacy_objects, legacy_stations
 
 

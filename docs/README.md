@@ -7,6 +7,7 @@
 | 主题 | 文档 |
 | --- | --- |
 | 场景与工作区 | [场景与属性工作流](architecture/scenario_workbench.md)、[对象与数据管理](architecture/object_data_management.md) |
+| 对象 API | [Python 对象句柄、公共 C++ 事务与迁移](architecture/object_editing.md) |
 | 轨道模型 | [J2 长期项与状态语义](architecture/j2.md)、[二体验证方法](validation/p1_two_body_protocol.md) |
 | 地面站 | [WGS84 地面站与对象生命周期](architecture/ground_stations.md) |
 | 可见性与传感器 | [Access、AER、子传感器、STK 对照与验证](architecture/access_sensors.md) |
@@ -17,6 +18,10 @@
 | 星历 | [CSPICE 内核、时间与并发约定](architecture/spice.md) |
 | 图形 | [二维 / 三维集成、渲染与资源生命周期](architecture/graphics.md) |
 | 模块边界 | [基础类型与接口契约](architecture/p0_contracts.md) |
+
+## 重构路线
+
+- [统一对象 API 与数据驱动设计](architecture/object_api_design.md)：Python / C++ 接口、对象事务、分析快照、界面联动与迁移路线；对象编辑阶段已实现，计算与桌面适配按阶段推进。
 
 ## 开发与验证
 

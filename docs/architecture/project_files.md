@@ -56,31 +56,30 @@ v2 增加独立的对象显示名称，重命名不改变稳定 ID、计算输�
 
 卫星属性 → 基本 → 轨迹显示：提供六种预设色、自定义 RGB 颜色、四种线型、0.5–8 px 粗细与实时预览，点击“应用显示设置”后更新视图。颜色同时用于卫星点标记；三维模型的材质保持原定义。二维、三维轨迹共用样式，缩放不改变屏幕线宽，按显示器 DPI 换算。选中对象保留独立的选择标记，线宽不随选择变化。
 
-样式变化仅刷新绘制，不触发物理传播，也不改变报告的计算输入哈希。复制卫星继承样式后可独立修改。Python 中通过 `OrbitDisplay.line_color`、`line_width` 和 `line_style` 设置，例如 `display.line_style = of.LineStyle.DASHED`；新增卫星可传入 `project.add_satellite(orbit, display)`。
+样式变化仅刷新绘制，不触发物理传播，也不改变报告的计算输入哈希。复制卫星继承样式后可独立修改。Python 通过不可变 `OrbitStyle` 设置，例如 `satellite.display = of.OrbitStyle(line_style=of.LineStyle.DASHED)`；新增卫星在 `project.objects.satellite()` 中传入 `display=`。
 
 ## 保存和恢复
 
 先在内存中完成校验与编码，再在目标目录下创建独占临时目录，写入并刷新临时文件，最后原子发布到目标路径。Windows 使用 MoveFileExW，POSIX 使用 rename（覆盖）或 link（不覆盖）。失败会清理本次临时文件；发布前的失败保留已有目标。此处承诺原子替换，不声称对所有网络文件系统或断电场景具备事务持久性保证。
 
-C++：`application::Project`、`save_project/load_project`、`runtime::make_project_scenario`。Python 地面站 API 见[地面站](ground_stations.md)。Python：`Project`、`OrbitInput`、`OrbitDisplay`、`ProjectSatellite`、`load_project`。Python 保存默认拒绝覆盖，传入 `overwrite=True` 才替换已有文件。`Project.satellites` 使用列表值转换，修改已有对象后应把列表赋回；`add_satellite()` 自动继承项目时段并拒绝重复 ID。
+C++ 文件层保留 `application::Project`、`save_project/load_project`、`runtime::make_project_scenario`。Python `Project`、`load_project` 使用事务门面，对象通过 `project.objects` 管理；显式低层交换使用 `ProjectData`、`load_project_data`，迁移见[对象编辑 API](object_editing.md)。Python 保存默认拒绝覆盖，传入 `overwrite=True` 才替换已有文件。
 
 ```python
 from pathlib import Path
 import orbitforge as of
 
 project = of.Project("Mission", of.Epoch(0), of.Epoch(7_200_000_000_000))
-orbit = of.OrbitInput()
-orbit.object_id = "Satellite1"
-project.add_satellite(orbit)
+satellite = project.objects.satellite("Satellite1", orbit=of.orbits.TwoBody(
+    initial=of.OrbitInput().initial))
 project.save(Path("mission.orbitforge"))
 
 restored = of.load_project("mission.orbitforge")
 states = restored.to_scenario().sample([restored.first, restored.last])
 
-# 返回新项目值；同步所有对象的分析范围，保留初始条件。
-adjusted = restored.with_settings("Mission · revised", of.Epoch(1_000_000_000),
-                                  of.Epoch(3_600_000_000_000))
-adjusted.save("mission-revised.orbitforge")
+# 一次提交项目设置；同步对象分析范围，保留初始条件。
+restored.update(name="Mission · revised", first=of.Epoch(1_000_000_000),
+                last=of.Epoch(3_600_000_000_000))
+restored.save("mission-revised.orbitforge")
 ```
 
 上述历史时段与桌面附带的 2000 年示例 EOP 匹配。完整双传播器示例见 `examples/python/save_project.py`。无界面传播只使用轨道输入，不隐式加载 EOP 或外部模型；桌面打开才验证这些显示依赖。
