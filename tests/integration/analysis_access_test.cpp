@@ -66,8 +66,9 @@ TEST_F(AnalysisAccess, MatchesReportsAndSensorConstraints) {
                       w.end().tai_nanoseconds() - w.start().tai_nanoseconds());
             EXPECT_TRUE(legacy.at(w.start()).visible);
             EXPECT_TRUE(legacy.at(w.end()).visible);
-            if (!w.end_clipped())
+            if (!w.end_clipped()) {
                 EXPECT_FALSE(legacy.at(core::Epoch{w.end().tai_nanoseconds() + 1'000'000}).visible);
+            }
         }
         EXPECT_EQ(actual.provenance().target_id, target.id());
         EXPECT_EQ(actual.provenance().data_sha256, s.data.data_lock().sha256());
