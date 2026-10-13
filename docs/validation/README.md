@@ -7,6 +7,7 @@
 | EOP 与完整状态变换 | [数据覆盖、导数与独立交叉校验](p0_eop_state_protocol.md) |
 | CSPICE | [时间、几何星历与内核生命周期](p0_spice_protocol.md) |
 | 通用二体 | [解析性质、边界与误差](p1_two_body_protocol.md) |
+| HPOP | [静态球谐重力、独立数值参考、API 与 UI](hpop_protocol.md) |
 | 计算吞吐量 | [固定工作负载与计时边界](p0_compute_protocol.md) |
 | 图形与性能 | [窗口生命周期、固定万星负载与呈现测量](p0_graphics_protocol.md) |
 

@@ -6,17 +6,18 @@
 namespace orbitforge::desktop {
 std::shared_ptr<PreparedProject> prepare_project_scene(
     application::Project project, const std::filesystem::path &path,
-    const core::IFrameProvider &frames,
+    std::shared_ptr<const core::IFrameProvider> frames,
     const std::vector<std::shared_ptr<const core::IEarthOrientationProvider>> &installed_data,
     const std::atomic_bool &cancelled, std::optional<application::Scenario> retained_sessions,
     const std::optional<std::string> &edited_object, const core::ITimeProvider *time) {
     application::validate_project(project);
+    const auto [data_first, data_last] = application::calculation_data_interval(project);
     std::shared_ptr<const core::IEarthOrientationProvider> eop;
     for (const auto &candidate : installed_data) {
         if (!candidate)
             continue;
         const auto &info = candidate->data_info();
-        if (core::eop_covers(info, project.first) && core::eop_covers(info, project.last)) {
+        if (core::eop_covers(info, data_first) && core::eop_covers(info, data_last)) {
             eop = candidate;
             break;
         }
@@ -59,17 +60,19 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
         const bool retained = existing != result->scenario.objects().end();
         // SGP4 epoch interpretation belongs to this calculation's confirmed time data.
         const bool recompute = (edited_object && *edited_object == satellite.orbit.object_id) ||
-                               satellite.orbit.propagator == OrbitPropagator::sgp4;
+                               satellite.orbit.propagator == OrbitPropagator::sgp4 ||
+                               satellite.orbit.propagator == OrbitPropagator::hpop;
         if (retained && recompute &&
             existing->provenance().input_revision == std::numeric_limits<std::uint64_t>::max())
             throw std::overflow_error("Object input revision exhausted");
-        auto session = retained && !recompute
-                           ? *existing
-                           : make_orbit_session(
-                                 satellite.orbit,
-                                 retained ? existing->provenance().input_revision + 1 : 1, time);
+        auto session =
+            retained && !recompute
+                ? *existing
+                : make_orbit_session(satellite.orbit,
+                                     retained ? existing->provenance().input_revision + 1 : 1, time,
+                                     {frames, eop});
         auto orbit = prepare_orbit_scene(
-            satellite.orbit, session, frames, *eop, cancelled,
+            satellite.orbit, session, *frames, *eop, cancelled,
             display_cache_interval(satellite.orbit, satellite.display, project.current));
         vsg::ref_ptr<vsg::MatrixTransform> model;
         if (satellite.model_kind != 0) {

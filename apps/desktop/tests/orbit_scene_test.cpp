@@ -6,11 +6,12 @@
 #include <orbitforge/runtime/two_body.hpp>
 
 namespace orbitforge::desktop {
-TEST(OrbitPreparation, J4AndSgp4BuildGcrfAndItrfCachesFromTheirNativeModels) {
+TEST(OrbitPreparation, J4Sgp4AndHpopBuildGcrfAndItrfCachesFromTheirNativeModels) {
     const auto time = runtime::make_builtin_time_provider();
-    const auto frames = runtime::make_frame_provider();
-    const auto eop = runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
-    for (auto model : {OrbitPropagator::j4_secular, OrbitPropagator::sgp4}) {
+    const std::shared_ptr<const core::IFrameProvider> frames = runtime::make_frame_provider();
+    const std::shared_ptr<const core::IEarthOrientationProvider> eop =
+        runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+    for (auto model : {OrbitPropagator::j4_secular, OrbitPropagator::sgp4, OrbitPropagator::hpop}) {
         OrbitInput input;
         input.first = time->from_utc({2026, 10, 9, 0, 0, 0, 0});
         input.last = time->from_utc({2026, 10, 10, 0, 0, 0, 0});
@@ -19,7 +20,7 @@ TEST(OrbitPreparation, J4AndSgp4BuildGcrfAndItrfCachesFromTheirNativeModels) {
         if (model == OrbitPropagator::sgp4)
             input.tle = {"1 00005U 58002B   26282.00000000  .00000023  00000-0  28098-4 0  4755",
                          "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667"};
-        const auto session = make_orbit_session(input, 1, time.get());
+        const auto session = make_orbit_session(input, 1, time.get(), {frames, eop});
         const auto orbit =
             prepare_orbit_scene(input, session, *frames, *eop, std::atomic_bool{false},
                                 display_cache_interval(input, {}, input.first));

@@ -98,7 +98,7 @@ class ProjectTests(unittest.TestCase):
             path = Path(directory) / 'bound.orbitforge'
             project.save(path)
             original = path.read_bytes()
-            self.assertEqual(struct.unpack_from('<I', original, 8)[0], 12)
+            self.assertEqual(struct.unpack_from('<I', original, 8)[0], 13)
             def rewrite(tag_to_change, mutate):
                 path.write_bytes(rewrite_section(original, tag_to_change, mutate))
 

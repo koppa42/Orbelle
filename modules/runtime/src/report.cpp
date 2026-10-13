@@ -141,6 +141,20 @@ std::string report_input_sha256(const application::Project &project) {
         s.orbit.step_seconds = 60;
         if (s.orbit.propagator == OrbitPropagator::sgp4)
             s.orbit.initial = OrbitInput{}.initial; // Inactive manual draft is not a TLE input.
+        if (s.orbit.propagator == OrbitPropagator::hpop) {
+            // Persist both integrators' drafts, but identify only the active calculation.
+            auto &options = s.orbit.hpop;
+            if (options.integrator == core::HpopIntegrator::rk4) {
+                const core::HpopOptions defaults;
+                options.relative_tolerance = defaults.relative_tolerance;
+                options.position_tolerance_m = defaults.position_tolerance_m;
+                options.velocity_tolerance_mps = defaults.velocity_tolerance_mps;
+                options.min_step_seconds = defaults.min_step_seconds;
+                options.max_step_seconds = defaults.max_step_seconds;
+            } else {
+                options.fixed_step_seconds = core::HpopOptions{}.fixed_step_seconds;
+            }
+        }
     }
     const auto bytes = application::encode_project(p);
     return picosha2::hash256_hex_string(bytes);
@@ -176,12 +190,15 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
         [&](const detail::ReportObject &object, core::FrameId) {
             return object.station
                        ? make_ground_station_session(*object.station)
-                       : make_orbit_session(object.satellite->orbit, 1, context.time.get());
+                       : make_orbit_session(object.satellite->orbit, 1, context.time.get(),
+                                            {context.frames, context.eop});
         },
         [&](const std::vector<std::string> &ids) {
             AccessSession session{context, ids[0], ids[1]};
-            return detail::ReportAccess{session.name(),
-                                        [session](core::Epoch epoch) { return session.at(epoch); }};
+            return detail::ReportAccess{session.name(), [session, cancel](core::Epoch epoch) {
+                                            return session.at(epoch,
+                                                              [cancel] { cancelled(cancel); });
+                                        }};
         },
         [&] { cancelled(cancel); }};
     return detail::generate_report(context, d, execution, progress);
@@ -311,7 +328,7 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                         else
                             next = core::Epoch{next.tai_nanoseconds() + d.query.step_nanoseconds};
                     }
-                    const auto batch = session.sample(epochs);
+                    const auto batch = session.sample(epochs, execution.check_cancelled);
                     check(batch.states().size() == epochs.size(),
                           "State provider returned the wrong row count");
                     for (std::size_t i = 0; i < epochs.size(); ++i) {

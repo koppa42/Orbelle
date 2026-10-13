@@ -37,7 +37,7 @@ Visualization 将采样结果转换为独立显示快照，并校验历元、原
 
 `CircularTwoBody` 是贯通接口的解析案例：地心 GCRF XY 平面，初始位置为 +X、速度为 +Y，半径与中心引力参数恒定。运行时基础示例采用 r=7,000,000 m、μ=3.986004418e14 m³/s²，从零历元每隔 60 s 查询一次，共 6 点；无需外部数据。
 
-通用二体与一阶 J2 长期项由独立的 Runtime 工厂提供。二体支持 Cartesian / 经典瞬时根数转换，J2 使用初始平均椭圆；两者的输入含义不同，见[场景工作台](scenario_workbench.md)与 [J2 契约](j2.md)。已加入 J4 与 SGP4/TLE（见[预报器](propagators.md)）；参考系和时间转换仍须校验各自外部数据。地面站与子传感器的几何可见性见[Access 契约](access_sensors.md)。
+通用二体与一阶 J2 长期项由独立的 Runtime 工厂提供。二体支持 Cartesian / 经典瞬时根数转换，J2 使用初始平均椭圆；两者的输入含义不同，见[场景工作台](scenario_workbench.md)与 [J2 契约](j2.md)。已加入 J4、SGP4/TLE 和 HPOP 数值积分（见[预报器](propagators.md)）；参考系和时间转换仍须校验各自外部数据。地面站与子传感器的几何可见性见[Access 契约](access_sensors.md)。
 
 ## API 稳定性
 

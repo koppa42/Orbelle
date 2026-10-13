@@ -35,5 +35,20 @@ int main(int argc, char **argv) {
                                                   reopened.first(), of::FrameId::itrf);
     if (current.position_m != trajectory.states().front().position_m)
         return 4;
+    of::OrbitInput numerical;
+    numerical.propagator = of::OrbitPropagator::hpop;
+    numerical.hpop.gravity_degree = numerical.hpop.gravity_order = 0;
+    numerical.hpop.integrator = of::HpopIntegrator::rkf78;
+    const auto satellite =
+        reopened.objects().create(of::objects::Satellite{.name = "HPOP", .orbit = numerical});
+    const auto numerical_analysis = reopened.prepare();
+    const auto numerical_result = numerical_analysis.states(satellite, 30s, of::FrameId::gcrf);
+    if (numerical_result.states().size() != 5 ||
+        numerical_result.provenance().algorithm.find("hpop-cowell") == std::string::npos)
+        return 5;
+    reopened.save(path, numerical_analysis, true);
+    auto numerical_file = of::Project::open(path);
+    if (numerical_file.to_data().satellites.at(0).orbit.hpop != numerical.hpop)
+        return 6;
     std::filesystem::remove(path);
 }

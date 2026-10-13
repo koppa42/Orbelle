@@ -30,7 +30,7 @@ project.objects.remove(sat)
 original = analysis.state(sat, at=of.Epoch(0))
 ```
 
-状态包含历元、地心原点、参考系、米和米每秒数值。二体、J2、J4 和 SGP4 复用现有传播器；地面站使用 WGS84 固定 ITRF 模型。当前 `state()` / `states()` 接受卫星和地面站；需要传感器位置时，调用方应传入其父卫星引用，直接传传感器会报能力错误。GCRF 是 Python 查询的显式默认值，SGP4 原生输出为 TEME，地面站原生输出为 ITRF；跨参考系查询必须准备 EOP 数据，绝不把 TEME 当成 GCRF。
+状态包含历元、地心原点、参考系、米和米每秒数值。二体、J2、J4、SGP4 和 HPOP 复用共用传播器；地面站使用 WGS84 固定 ITRF 模型。当前 `state()` / `states()` 接受卫星和地面站；需要传感器位置时，调用方应传入其父卫星引用，直接传传感器会报能力错误。GCRF 是 Python 查询的显式默认值，SGP4 原生输出为 TEME，地面站原生输出为 ITRF；跨参考系查询必须准备 EOP 数据，HPOP 的非中心引力在 GCRF 查询中也依赖 EOP，绝不把 TEME 当成 GCRF。
 
 | 参数或行为 | 约定 |
 | --- | --- |
@@ -131,7 +131,7 @@ except of.DataChangedError as error:
 
 文件和文档共同遵守原子发布：候选校验、项目身份与修订检查通过后写入文件，成功后才更新内存来源、修订和已保存标记并通知观察者。覆盖默认关闭。写入失败或修订冲突不修改两者；观察者在保存成功后再次编辑，项目仍正确显示未保存。
 
-开发预览阶段只读写当前 `.orbitforge` v12；所有打开入口（包括 `load_project_data()`）在解析内容前拒绝非当前版本，并给出实际与支持的版本。没有旧格式迁移或缺字段补默认值的读取路径；输入项目仍可以不包含可选的分析准备记录。详见[项目文件](project_files.md)。
+开发预览阶段只读写当前 `.orbitforge` v13；所有打开入口（包括 `load_project_data()`）在解析内容前拒绝非当前版本，并给出实际与支持的版本。没有旧格式迁移或缺字段补默认值的读取路径；输入项目仍可以不包含可选的分析准备记录。详见[项目文件](project_files.md)。
 
 `Project.plan_open(path, data=...)` 固定解析后的文件和已验证资源；`name`、`data`、`data_changes` 可供确认界面读取。直接 `Project.open()` 和 `of.load_project()` 使用同一流程。已有来源依赖必须提供相应当前数据；不传数据只适合没有 UTC / EOP 依赖的原生坐标计算项目，SGP4 仍须显式提供 UTC。需要仅检查或导入原始输入而不准备计算时，使用 `load_project_data()`，再按需 `Project.from_data()`。
 
@@ -139,7 +139,7 @@ except of.DataChangedError as error:
 
 ## 结果与导出
 
-`Trajectory` 独立持有结果，分析或项目释放后仍有效。名称和修订来自准备时的快照。`input_sha256` 记录对应对象状态输入及分析区间，排除名称、样式、无关对象及地面站最低仰角；`data_sha256` 仅记录该状态查询实际使用的依赖。未转换的二体/J2/J4 GCRF 状态和固定站点 ITRF 状态使用空数据锁，SGP4 TEME 依赖时间表，跨参考系状态依赖时间与 EOP。
+`Trajectory` 独立持有结果，分析或项目释放后仍有效。名称和修订来自准备时的快照。`input_sha256` 记录对应对象状态输入及分析区间，排除名称、样式、无关对象及地面站最低仰角；`data_sha256` 仅记录该状态查询实际使用的依赖。未转换的二体/J2/J4、HPOP 点质量 GCRF 状态和固定站点 ITRF 状态使用空数据锁，SGP4 TEME 依赖时间表，HPOP 非中心引力及跨参考系状态依赖时间与 EOP。HPOP 的 EOP 必须同时覆盖初始历元与分析时段。
 
 ```python
 len(trajectory)                              # 样本数
@@ -168,7 +168,7 @@ windows.to_csv("access.csv")
 
 `AccessWindows` 支持遍历、`len()`、正负下标及切片（返回元组）；每个 `AccessWindow` 提供 `start`、`end`、精确 `Duration` 和 `start_clipped` / `end_clipped`。截断标记表示窗口在查询边界仍可见，而非已求得实际进入/离开时刻。孤立的零时长接触不形成窗口；`first == last` 返回带完整查询信息的空集合。
 
-查询复用准备时已创建的父卫星传播器、UTC/EOP 和参考系转换，统一在 ITRF 中判断 WGS84 椭球遮挡、地面站最低仰角、传感器视场及指向。支持现有二体、J2、J4、SGP4；指向仍为地心下视或理想瞬时跟踪，不增加地形、折射、光行时、姿态或转动速率模型。与原有 Access/报告共享几何实现。
+查询复用准备时已创建的父卫星传播器、UTC/EOP 和参考系转换，统一在 ITRF 中判断 WGS84 椭球遮挡、地面站最低仰角、传感器视场及指向。支持现有二体、J2、J4、SGP4、HPOP；指向仍为地心下视或理想瞬时跟踪，不增加地形、折射、光行时、姿态或转动速率模型。与原有 Access/报告共享几何实现。
 
 | 参数 | 约定 |
 | --- | --- |
@@ -233,7 +233,7 @@ Python 直接接收对象句柄，不需要构造 `ReportDefinition` 或填写 I
 
 `cancelled=callable` 必须返回 bool，取消抛出 `AnalysisCancelled`；`progress(done, total)` 提供同步进度，两者均可省略。即使在完成进度回调中取消，也不返回结果；回调异常传回调用方。生成时固定报告配置，回调修改原配置或当前项目不影响本次计算。报告查询不重建传播器、不重新读取数据文件，也不写入项目的已保存报告配置。
 
-报告查询与显示已拆为 `ReportQuery` / `ReportTemplate`。Python 可传 `template=of.reports.Template([...])`，或生成后用 `template.apply(result)` 重排列、切换单位和时间系统，不重新计算。C++ 支持 `Analysis::report(query, format)` 和 `ReportResult::with_template(format)`。原始 SI 表始终保留，可恢复被隐藏的列；逐列单位优先于默认单位。详见[报告](reports.md)。项目当前为 v12（RPTS v2），保存显式选择模式及显示模板；不增加旧格式兼容路径。
+报告查询与显示已拆为 `ReportQuery` / `ReportTemplate`。Python 可传 `template=of.reports.Template([...])`，或生成后用 `template.apply(result)` 重排列、切换单位和时间系统，不重新计算。C++ 支持 `Analysis::report(query, format)` 和 `ReportResult::with_template(format)`。原始 SI 表始终保留，可恢复被隐藏的列；逐列单位优先于默认单位。详见[报告](reports.md)。项目当前为 v13（RPTS v2），保存显式选择模式及显示模板；不增加旧格式兼容路径。
 
 ## C++ 入口与验证
 
@@ -286,4 +286,4 @@ Access 由 `AnalysisAccess.*`、`AccessResults.*`、Python `test_analysis_access
 
 AER 与统一报告还由 `test_analysis_aer_reports.py` 和 `AnalysisAccess.*` 验证：九类报告与原入口数值一致、ITRF 观测及距离数值差分、精确采样、不可见样本、对象删除与源文件移除、完成回调取消、明确对象选择、可选数组转换和已安装 SDK。`access.py` 同时演示 AER 和报告入口。
 
-报告模板由 `Reports.*`、`ReportDialog.TemplateUnitsReuseResultsAndReorderedFieldsKeepPlotsAndSelection`、Python `test_report_templates.py` 和安装后的 SDK 验证；覆盖逐列单位、重排与恢复字段、显式全选、UTC 按需校验、失效输入不自动重算，以及 v12 独立二进制样本精确往返。
+报告模板由 `Reports.*`、`ReportDialog.TemplateUnitsReuseResultsAndReorderedFieldsKeepPlotsAndSelection`、Python `test_report_templates.py` 和安装后的 SDK 验证；覆盖逐列单位、重排与恢复字段、显式全选、UTC 按需校验、失效输入不自动重算，以及 v13 独立二进制样本精确往返。

@@ -7,13 +7,14 @@
 #include <orbitforge/core/frames/state.hpp>
 #include <orbitforge/core/propagation/central_body.hpp>
 #include <orbitforge/core/propagation/ground_station.hpp>
+#include <orbitforge/core/propagation/hpop.hpp>
 #include <orbitforge/core/propagation/j4_mean_elements.hpp>
 #include <orbitforge/core/propagation/tle.hpp>
 #include <span>
 #include <vector>
 
 namespace orbitforge::application {
-enum class OrbitPropagator { two_body, j2_secular, j4_secular, sgp4 };
+enum class OrbitPropagator { two_body, j2_secular, j4_secular, sgp4, hpop };
 [[nodiscard]] inline std::string_view propagator_name(OrbitPropagator propagator) {
     switch (propagator) {
     case OrbitPropagator::two_body:
@@ -24,6 +25,8 @@ enum class OrbitPropagator { two_body, j2_secular, j4_secular, sgp4 };
         return "J4 secular";
     case OrbitPropagator::sgp4:
         return "SGP4 / TLE";
+    case OrbitPropagator::hpop:
+        return "HPOP / numerical";
     }
     throw std::invalid_argument("Unsupported orbit propagator");
 }
@@ -37,7 +40,10 @@ struct OrbitInput {
     // SGP4 uses only these two lines for its orbit; initial is the inactive manual draft.
     // TLE epoch is interpreted with the calculation's explicit time provider.
     core::Tle tle;
+    core::HpopOptions hpop;
     [[nodiscard]] double mu() const {
+        if (propagator == OrbitPropagator::hpop)
+            return core::egm96_mu;
         if (propagator == OrbitPropagator::j4_secular)
             return core::j4_earth().mu.metres_cubed_per_second_squared;
         if (propagator == OrbitPropagator::sgp4)
@@ -138,6 +144,8 @@ class ProjectError : public std::runtime_error {
 // Editors may temporarily leave references unresolved in a private candidate.
 // Published projects and files must always validate with relationships enabled.
 void validate_project(const Project &project, bool relationships = true);
+// Includes the path from each noncentral HPOP initial epoch to the scenario.
+[[nodiscard]] std::pair<core::Epoch, core::Epoch> calculation_data_interval(const Project &project);
 // Physical inputs, stable IDs and relationships; excludes names, appearance,
 // reports, playback time, inactive orbit drafts and data provenance.
 [[nodiscard]] std::string analysis_input_sha256(const Project &project);

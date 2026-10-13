@@ -9,7 +9,8 @@ namespace orbitforge::application {
 class Session {
   public:
     Session(std::shared_ptr<const core::IStateProvider> provider, results::Provenance provenance);
-    [[nodiscard]] results::StateSeries sample(std::span<const core::Epoch> epochs) const;
+    [[nodiscard]] results::StateSeries sample(std::span<const core::Epoch> epochs,
+                                              const std::function<void()> &checkpoint = {}) const;
     [[nodiscard]] const results::Provenance &provenance() const noexcept { return provenance_; }
 
   private:

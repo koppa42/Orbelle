@@ -58,8 +58,12 @@ void bind_reports(py::module_ &module) {
              py::arg("project"), py::arg("station_id"), py::arg("target_id"),
              py::arg("eop_manifest"), py::arg("time_file") = py::none())
         .def_property_readonly("name", &runtime::AccessSession::name)
-        .def("at", &runtime::AccessSession::at, py::arg("epoch"),
-             py::call_guard<py::gil_scoped_release>())
+        .def(
+            "at",
+            [](const runtime::AccessSession &session, core::Epoch epoch) {
+                return session.at(epoch);
+            },
+            py::arg("epoch"), py::call_guard<py::gil_scoped_release>())
         .def(
             "intervals",
             [](const runtime::AccessSession &session, core::Epoch first, core::Epoch last,

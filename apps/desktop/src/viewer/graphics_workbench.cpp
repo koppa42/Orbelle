@@ -1619,8 +1619,9 @@ class Workbench final : public QMainWindow {
                             done({}, QStringLiteral("场景正在更新，请完成后再生成报告。"));
                             return;
                         }
-                        const auto current =
-                            data_for_interval(scenario_->first(), scenario_->last());
+                        const auto [data_first, data_last] =
+                            application::calculation_data_interval(project_snapshot(project_path_));
+                        const auto current = data_for_interval(data_first, data_last);
                         if (scenario_->data_lock() !=
                             application::eop_data_lock(current->data_info())) {
                             if (start_project(project_snapshot(project_path_), project_path_, true,
@@ -1817,12 +1818,16 @@ class Workbench final : public QMainWindow {
         // remains available for consent even when its coverage cannot span the new interval.
         if (settings)
             application::validate_project(application::Project{settings->name, first, last});
+        auto data_input = project;
+        data_input.first = first;
+        data_input.last = last;
+        const auto [data_first, data_last] = application::calculation_data_interval(data_input);
         EopCatalog::Provider next_data;
         try {
-            next_data = data_for_interval(first, last);
+            next_data = data_for_interval(data_first, data_last);
         } catch (const std::out_of_range &) {
             last_project_outcome_ = "rejected";
-            show_data_coverage(first, last);
+            show_data_coverage(data_first, data_last);
             return false;
         }
         if (!project.data_lock().references().empty() &&
@@ -1831,7 +1836,7 @@ class Workbench final : public QMainWindow {
                 QMessageBox::Question, QStringLiteral("场景数据已变化"),
                 QStringLiteral("当前数据或使用策略与此场景上次计算不一致。\n是否使用当前数据更新场"
                                "景并继续？\n%1\n\n取消将保留当前场景，不打开或重新计算。")
-                    .arg(extrapolation_description(next_data->data_info(), first, last)),
+                    .arg(extrapolation_description(next_data->data_info(), data_first, data_last)),
                 QMessageBox::Yes | QMessageBox::Cancel, this);
             message.setObjectName("dataChangeDialog");
             message.button(QMessageBox::Yes)->setText(QStringLiteral("使用当前数据"));
@@ -1891,7 +1896,7 @@ class Workbench final : public QMainWindow {
             [this, project = std::move(project),
              source = std::filesystem::path(pending_project_path_.toStdWString()), installed_data,
              retained, edited_object, calculation_time, cancel = project_cancellation_]() mutable {
-                return prepare_project_scene(std::move(project), source, *frames_, installed_data,
+                return prepare_project_scene(std::move(project), source, frames_, installed_data,
                                              *cancel, retained, edited_object,
                                              calculation_time.get());
             });
@@ -3019,8 +3024,19 @@ class Workbench final : public QMainWindow {
             editor_->show_result(QStringLiteral("对象 ID 已存在，请使用其他名称。"), true);
             return;
         }
+        auto data_first = input.first;
+        auto data_last = input.last;
         try {
-            const auto current_data = data_for_interval(input.first, input.last);
+            auto data_input = project_snapshot(project_path_);
+            if (editor_target_)
+                data_input.satellites.at(*editor_target_).orbit = input;
+            else {
+                application::ProjectSatellite added;
+                added.orbit = input;
+                data_input.satellites.push_back(std::move(added));
+            }
+            std::tie(data_first, data_last) = application::calculation_data_interval(data_input);
+            const auto current_data = data_for_interval(data_first, data_last);
             if (!application::matching_project_data(current_data->data_info(), eop_->data_info())) {
                 // Publish all tracks and their provider together, never mix EOP revisions.
                 auto project = project_snapshot(project_path_);
@@ -3044,7 +3060,7 @@ class Workbench final : public QMainWindow {
             }
         } catch (const std::out_of_range &) {
             last_orbit_outcome_ = "rejected";
-            show_data_coverage(input.first, input.last);
+            show_data_coverage(data_first, data_last);
             editor_->show_result(QStringLiteral("数据覆盖不足；原场景保留。"), true);
             return;
         } catch (const std::exception &error) {
@@ -3066,7 +3082,8 @@ class Workbench final : public QMainWindow {
         candidate_ = std::async(std::launch::async, [this, input = std::move(input), revision,
                                                      cache, eop, calculation_time,
                                                      cancel = cancellation_] {
-            auto session = make_orbit_session(input, revision, calculation_time.get());
+            auto session =
+                make_orbit_session(input, revision, calculation_time.get(), {frames_, eop});
             return prepare_orbit_scene(input, std::move(session), *frames_, *eop, *cancel, cache);
         });
         editor_->set_busy(true);

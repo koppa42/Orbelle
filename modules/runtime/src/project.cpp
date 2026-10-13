@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <orbitforge/runtime/hpop.hpp>
 #include <orbitforge/runtime/j2.hpp>
 #include <orbitforge/runtime/j4.hpp>
 #include <orbitforge/runtime/project.hpp>
@@ -11,7 +12,8 @@ application::Session make_ground_station_session(const application::ProjectGroun
             {station.object_id, revision, "ground-station-wgs84-fixed-itrf-v1"}};
 }
 application::Session make_orbit_session(const application::OrbitInput &input,
-                                        std::uint64_t revision, const core::ITimeProvider *time) {
+                                        std::uint64_t revision, const core::ITimeProvider *time,
+                                        core::HpopEnvironment environment) {
     const auto &body = core::central_body(input.initial.origin);
     switch (input.propagator) {
     case application::OrbitPropagator::two_body:
@@ -26,11 +28,23 @@ application::Session make_orbit_session(const application::OrbitInput &input,
             throw std::invalid_argument(
                 "SGP4 requires an explicit time provider for the TLE epoch");
         return make_sgp4_session(input.tle, *time, input.object_id, revision);
+    case application::OrbitPropagator::hpop:
+        if (input.hpop.gravity_degree > 0) {
+            if (!environment.eop || !environment.frames)
+                throw std::invalid_argument("HPOP spherical gravity requires selected EOP data");
+            for (auto epoch : {input.initial.epoch, input.first, input.last})
+                if (!core::eop_covers(environment.eop->data_info(), epoch))
+                    throw core::EopCoverageError("HPOP needs EOP covering the entire integration "
+                                                 "interval, including the initial epoch");
+        }
+        return make_hpop_session(input.initial, input.hpop, std::move(environment), input.object_id,
+                                 revision);
     }
     throw std::invalid_argument("Unsupported orbit propagator");
 }
 application::Scenario make_project_scenario(const application::Project &project,
-                                            const core::ITimeProvider *time) {
+                                            const core::ITimeProvider *time,
+                                            core::HpopEnvironment environment) {
     application::validate_project(project);
     const auto recorded_time = project.time_data_info();
     if (time && recorded_time &&
@@ -42,9 +56,13 @@ application::Scenario make_project_scenario(const application::Project &project,
                     }))
         throw application::ProjectError("SGP4 time data differs from the project's confirmed data");
     application::Scenario result{project.name, project.first, project.last};
+    if (environment.eop && project.earth_orientation &&
+        !application::matching_project_data(environment.eop->data_info(),
+                                            *project.earth_orientation))
+        throw application::ProjectError("HPOP EOP data differs from the project's confirmed data");
     result = result.with_data_lock(project.data_lock());
     for (const auto &satellite : project.satellites)
-        result = result.with_object(make_orbit_session(satellite.orbit, 1, time));
+        result = result.with_object(make_orbit_session(satellite.orbit, 1, time, environment));
     for (const auto &station : project.ground_stations)
         result = result.with_object(make_ground_station_session(station));
     return result;

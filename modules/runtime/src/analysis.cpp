@@ -115,6 +115,7 @@ struct Analysis::Impl {
         Session session;
         core::FrameId frame;
         std::string name, input_sha256;
+        bool force_uses_eop = false;
     };
     ProjectSnapshot snapshot;
     DataSnapshot data;
@@ -148,11 +149,14 @@ struct Analysis::Impl {
             numerical.satellites.back().display_name.clear();
             if (input.propagator != OrbitPropagator::sgp4)
                 numerical.satellites.back().orbit.tle = {}; // Inactive TLE draft is not an input.
-            entries.emplace(input.object_id,
-                            Entry{make_orbit_session(input, snapshot.revision, data.time().get()),
-                                  input.propagator == OrbitPropagator::sgp4 ? core::FrameId::teme
-                                                                            : core::FrameId::gcrf,
-                                  satellite.name(), report_input_sha256(numerical)});
+            entries.emplace(
+                input.object_id,
+                Entry{make_orbit_session(input, snapshot.revision, data.time().get(),
+                                         {data.frames(), data.eop()}),
+                      input.propagator == OrbitPropagator::sgp4 ? core::FrameId::teme
+                                                                : core::FrameId::gcrf,
+                      satellite.name(), report_input_sha256(numerical),
+                      input.propagator == OrbitPropagator::hpop && input.hpop.gravity_degree > 0});
         }
         for (const auto &station : p.ground_stations) {
             Project numerical{"analysis-state-input-v1", p.first, p.last};
@@ -179,7 +183,7 @@ struct Analysis::Impl {
         return it->second;
     }
     std::string dependency_hash(const Entry &entry, core::FrameId target) const {
-        if (target != entry.frame)
+        if (target != entry.frame || entry.force_uses_eop)
             return data.data_lock().sha256();
         if (entry.frame == core::FrameId::teme)
             return time_data_lock(data.time()->data_info()).sha256();
@@ -200,11 +204,12 @@ struct Analysis::Impl {
                 "Access/AER requires a ground station and a satellite or sensor");
         return geometry({station.id(), target.id()});
     }
-    results::AerSample observe(const detail::AccessGeometry &pair, core::Epoch epoch) const {
+    results::AerSample observe(const detail::AccessGeometry &pair, core::Epoch epoch,
+                               const std::function<bool()> &cancelled = {}) const {
         const auto &session = entries.at(pair.satellite.orbit.object_id).session;
-        const auto state =
-            core::transform_state(session.sample(std::array{epoch}).states().front(),
-                                  core::FrameId::itrf, *data.frames(), data.eop()->at(epoch));
+        const auto state = core::transform_state(
+            session.sample(std::array{epoch}, [&] { check_cancelled(cancelled); }).states().front(),
+            core::FrameId::itrf, *data.frames(), data.eop()->at(epoch));
         return pair.at(state);
     }
     results::AccessProvenance provenance(const detail::AccessGeometry &pair) const {
@@ -269,7 +274,7 @@ results::AccessWindows Analysis::access(const ObjectRef &station, const ObjectRe
         first, last, options.search_step.count(),
         [&](core::Epoch epoch) {
             check_cancelled(cancelled);
-            return impl_->observe(geometry, epoch).visible;
+            return impl_->observe(geometry, epoch, cancelled).visible;
         },
         options.boundary_tolerance.count());
     std::vector<results::AccessWindow> windows;
@@ -297,7 +302,7 @@ results::AerSeries Analysis::aer(const ObjectRef &station, const ObjectRef &targ
     samples.reserve(times.size());
     for (auto epoch : times) {
         check_cancelled(cancelled);
-        samples.push_back(impl_->observe(geometry, epoch));
+        samples.push_back(impl_->observe(geometry, epoch, cancelled));
     }
     auto provenance = impl_->provenance(geometry);
     check_cancelled(cancelled);
@@ -339,7 +344,7 @@ ReportResult Analysis::report(const ReportDefinition &definition,
             auto name = pair.station.name() + " → " + pair.target_name();
             return detail::ReportAccess{std::move(name),
                                         [&, pair = std::move(pair)](core::Epoch epoch) {
-                                            return impl_->observe(pair, epoch);
+                                            return impl_->observe(pair, epoch, cancelled);
                                         }};
         },
         [&] { check_cancelled(cancelled); }};
@@ -355,8 +360,8 @@ AnalysisPlan::AnalysisPlan(const ProjectDocument &project, DataSnapshot data)
 AnalysisPlan::AnalysisPlan(const ProjectDocument &project, const DataCatalog &catalog)
     : AnalysisPlan(project, [&] {
           const auto captured = project.snapshot();
-          return Analysis{captured,
-                          catalog.snapshot(captured.project->first, captured.project->last)};
+          const auto [first, last] = calculation_data_interval(*captured.project);
+          return Analysis{captured, catalog.snapshot(first, last)};
       }()) {}
 AnalysisPlan::AnalysisPlan(const ProjectDocument &project, Analysis analysis)
     : owner_(project), analysis_(std::move(analysis)) {

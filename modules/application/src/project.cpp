@@ -25,7 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 12;
+constexpr std::uint32_t project_version = 13;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -43,7 +43,7 @@ struct SectionSchema {
 // One current schema, shared by the reader and writer. Null means an optional section.
 constexpr std::array section_schemas{
     SectionSchema{scene_tag, 1, "Missing scene section"},
-    SectionSchema{objects_tag, 3, "Missing satellites section"},
+    SectionSchema{objects_tag, 4, "Missing satellites section"},
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
     SectionSchema{sensors_tag, 1, "Missing sensors section"},
@@ -231,6 +231,23 @@ std::string analysis_input_sha256(const Project &project) {
         const auto &orbit = satellite->orbit;
         out.text(id);
         out.number(static_cast<unsigned>(orbit.propagator), 4);
+        if (orbit.propagator == OrbitPropagator::hpop) {
+            const auto &o = orbit.hpop;
+            out.text(std::string(core::egm96_model_id()));
+            out.number(static_cast<unsigned>(o.gravity_degree), 4);
+            out.number(static_cast<unsigned>(o.gravity_order), 4);
+            out.number(static_cast<unsigned>(o.integrator), 4);
+            out.real(o.minimum_altitude_m);
+            if (o.integrator == core::HpopIntegrator::rk4) {
+                out.real(o.fixed_step_seconds);
+            } else {
+                out.real(o.relative_tolerance);
+                out.real(o.position_tolerance_m);
+                out.real(o.velocity_tolerance_mps);
+                out.real(o.min_step_seconds);
+                out.real(o.max_step_seconds);
+            }
+        }
         if (orbit.propagator == OrbitPropagator::sgp4) {
             out.text(orbit.tle.line1);
             out.text(orbit.tle.line2);
@@ -268,6 +285,19 @@ std::string analysis_input_sha256(const Project &project) {
     }
     return picosha2::hash256_hex_string(out.bytes);
 }
+std::pair<core::Epoch, core::Epoch> calculation_data_interval(const Project &project) {
+    auto first = project.first, last = project.last;
+    for (const auto &satellite : project.satellites) {
+        const auto &input = satellite.orbit;
+        if (input.propagator != OrbitPropagator::hpop || input.hpop.gravity_degree == 0)
+            continue;
+        if (input.initial.epoch.tai_nanoseconds() < first.tai_nanoseconds())
+            first = input.initial.epoch;
+        if (input.initial.epoch.tai_nanoseconds() > last.tai_nanoseconds())
+            last = input.initial.epoch;
+    }
+    return {first, last};
+}
 void validate_project(const Project &project, bool relationships) {
     text_check(project.name, true);
     const auto first = project.first.tai_nanoseconds(), last = project.last.tai_nanoseconds();
@@ -289,7 +319,8 @@ void validate_project(const Project &project, bool relationships) {
         check(input.propagator == OrbitPropagator::two_body ||
                   input.propagator == OrbitPropagator::j2_secular ||
                   input.propagator == OrbitPropagator::j4_secular ||
-                  input.propagator == OrbitPropagator::sgp4,
+                  input.propagator == OrbitPropagator::sgp4 ||
+                  input.propagator == OrbitPropagator::hpop,
               "Unsupported project propagator");
         if (input.propagator == OrbitPropagator::sgp4) {
             try {
@@ -311,6 +342,18 @@ void validate_project(const Project &project, bool relationships) {
         for (const auto value : input.initial.velocity_mps)
             check(std::isfinite(value), "Nonfinite project velocity");
         check(input.step_seconds >= 1 && input.step_seconds <= 60, "Invalid display step");
+        if (input.propagator == OrbitPropagator::hpop) {
+            try {
+                core::validate_hpop_options(input.hpop);
+            } catch (const std::invalid_argument &error) {
+                throw ProjectError(error.what());
+            }
+            check(std::abs(input.first.seconds_since(input.initial.epoch)) <=
+                          core::hpop_max_duration_seconds &&
+                      std::abs(input.last.seconds_since(input.initial.epoch)) <=
+                          core::hpop_max_duration_seconds,
+                  "HPOP analysis must stay within 366 days of the initial epoch");
+        }
         const auto &display = satellite.display;
         check(display.extent >= 0 && display.extent <= 2 && std::isfinite(display.past_minutes) &&
                   std::isfinite(display.future_minutes) && display.past_minutes >= 0 &&
@@ -552,6 +595,16 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         objects.text(satellite.model_path);
         objects.text(input.tle.line1);
         objects.text(input.tle.line2);
+        if (input.propagator == OrbitPropagator::hpop) {
+            const auto &o = input.hpop;
+            objects.number(static_cast<unsigned>(o.gravity_degree), 4);
+            objects.number(static_cast<unsigned>(o.gravity_order), 4);
+            objects.number(static_cast<unsigned>(o.integrator), 4);
+            for (double v : {o.relative_tolerance, o.position_tolerance_m, o.velocity_tolerance_mps,
+                             o.min_step_seconds, o.max_step_seconds, o.fixed_step_seconds,
+                             o.minimum_altitude_m})
+                objects.real(v);
+        }
     }
     payload.section(objects_tag, objects);
     Writer styles;
@@ -687,7 +740,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         input.object_id = objects.text();
         satellite.display_name = objects.text();
         const auto propagator = objects.number(4), frame = objects.number(4);
-        check(propagator >= 1 && propagator <= 4, "Unsupported project propagator");
+        check(propagator >= 1 && propagator <= 5, "Unsupported project propagator");
         check(frame == 1 || frame == 2, "Unsupported input reference frame");
         input.propagator = static_cast<OrbitPropagator>(propagator - 1);
         input.input_frame = frame == 1 ? core::FrameId::gcrf : core::FrameId::itrf;
@@ -709,6 +762,21 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         satellite.model_diameter_m = objects.real();
         satellite.model_path = objects.text();
         input.tle = {objects.text(), objects.text()};
+        if (input.propagator == OrbitPropagator::hpop) {
+            auto &o = input.hpop;
+            o.gravity_degree = static_cast<int>(objects.number(4));
+            o.gravity_order = static_cast<int>(objects.number(4));
+            const auto integrator = objects.number(4);
+            check(integrator <= 1, "Unsupported HPOP integrator");
+            o.integrator = static_cast<core::HpopIntegrator>(integrator);
+            o.relative_tolerance = objects.real();
+            o.position_tolerance_m = objects.real();
+            o.velocity_tolerance_mps = objects.real();
+            o.min_step_seconds = objects.real();
+            o.max_step_seconds = objects.real();
+            o.fixed_step_seconds = objects.real();
+            o.minimum_altitude_m = objects.real();
+        }
         project.satellites.push_back(std::move(satellite));
     }
     objects.done();
