@@ -137,11 +137,65 @@ class SrpSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class DragSettings:
+    """Spherical drag relative to co-rotating ITRF atmosphere; SI except F10.7 in sfu.
+
+    JR supports 90..2500 km; NRLMSISE-00 gtd7d supports 0..1000 km.
+    Manual flux/Kp values are constants; Kp is converted to Ap for NRLMSISE.
+    Optional NRLMSISE low atmosphere blends over [90 km, 90 km + blending_range].
+    Height is exact WGS84 geodetic. Apparent Sun means received geocentric LT+S.
+    No winds, space-weather files or STK approximate height are implied.
+    """
+    enabled: bool = False
+    cd: float = 2.2
+    area_mass_ratio_m2_per_kg: float = 0.02
+    atmosphere: Literal["jacchia_roberts", "nrlmsise00"] = "jacchia_roberts"
+    low_altitude_model: Literal["none", "nrlmsise00"] = "none"
+    blending_range_m: float = 30000.0
+    f107: float = 150.0
+    f107_average: float = 150.0
+    kp: float = 3.0
+    use_apparent_sun_position: bool = False
+
+    def __post_init__(self) -> None:
+        for name in ("enabled", "use_apparent_sun_position"):
+            if not isinstance(getattr(self, name), bool):
+                raise TypeError(f"{name} requires bool")
+        self._native()
+
+    def _native(self) -> n.DragOptions:
+        models = {"jacchia_roberts": n.AtmosphereModel.JACCHIA_ROBERTS,
+                  "nrlmsise00": n.AtmosphereModel.NRLMSISE00}
+        lower = {"none": n.LowAltitudeDensityModel.NONE,
+                 "nrlmsise00": n.LowAltitudeDensityModel.NRLMSISE00}
+        if self.atmosphere not in models or self.low_altitude_model not in lower:
+            raise ValueError("Unknown atmospheric density model")
+        value = n.DragOptions()
+        for name in self.__dataclass_fields__:
+            if name not in ("atmosphere", "low_altitude_model"):
+                setattr(value, name, getattr(self, name))
+        value.atmosphere = models[self.atmosphere]
+        value.low_altitude_model = lower[self.low_altitude_model]
+        value.validate()
+        return value
+
+    @classmethod
+    def _read(cls, value: n.DragOptions) -> "DragSettings":
+        fields = {name: getattr(value, name) for name in cls.__dataclass_fields__
+                  if name not in ("atmosphere", "low_altitude_model")}
+        fields["atmosphere"] = ("jacchia_roberts" if value.atmosphere == n.AtmosphereModel.JACCHIA_ROBERTS
+                                else "nrlmsise00")
+        fields["low_altitude_model"] = ("none" if value.low_altitude_model == n.LowAltitudeDensityModel.NONE
+                                       else "nrlmsise00")
+        return cls(**fields)
+
+
+@dataclass(frozen=True, slots=True)
 class HpopSettings:
     """Static file or built-in gravity and Cowell integration with local error tolerances.
 
     Optional third-body gravity and spherical SRP use explicitly selected DE440s ephemerides.
-    No drag or tides in this release. Noncentral gravity requires
+    Spherical drag requires UTC/EOP and Sun ephemerides. No tides in this release. Noncentral gravity requires
     explicitly selected EOP covering the entire integration path, including initial epoch.
     gravity_model selects a catalog/DataSnapshot ID (empty: built-in EGM96, up to 20).
     File models support degrees through 360. gravity_mu must match the selected file's
@@ -163,9 +217,11 @@ class HpopSettings:
     ephemeris: str = "de440s"
     body_gravity: tuple[ThirdBodySettings, ...] = ()
     srp: SrpSettings = field(default_factory=SrpSettings)
+    drag: DragSettings = field(default_factory=DragSettings)
 
     def __post_init__(self) -> None:
         require(self.srp, SrpSettings, "srp")
+        require(self.drag, DragSettings, "drag")
         bodies = tuple(self.third_bodies)
         if any(body not in THIRD_BODY_NAMES for body in bodies) or len(set(bodies)) != len(bodies):
             raise ValueError("third_bodies accepts solar-system body names, each at most once")
@@ -185,7 +241,7 @@ class HpopSettings:
         if self.integrator not in ("rkf78", "rk4"):
             raise ValueError("integrator must be 'rkf78' or 'rk4'")
         for name in self.__dataclass_fields__:
-            if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp"):
+            if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp", "drag"):
                 setattr(value, name, getattr(self, name))
         rows = list(value.third_bodies)
         for item in self.body_gravity:
@@ -195,6 +251,7 @@ class HpopSettings:
         value.third_bodies = rows
         value.ephemeris_model = self.ephemeris
         value.srp = self.srp._native()
+        value.drag = self.drag._native()
         value.integrator = n.HpopIntegrator.RKF78 if self.integrator == "rkf78" else n.HpopIntegrator.RK4
         value.validate()
         return value
@@ -202,7 +259,7 @@ class HpopSettings:
     @classmethod
     def _read(cls, value: n.HpopOptions) -> "HpopSettings":
         fields = {name: getattr(value, name) for name in cls.__dataclass_fields__
-                  if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp")}
+                  if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp", "drag")}
         rows = value.third_bodies
         fields["third_bodies"] = tuple(b for b, row in zip(THIRD_BODY_NAMES, rows) if row.enabled)
         sources = {n.ThirdBodyGravitySource.JPL_DE: "jpl_de",
@@ -214,6 +271,7 @@ class HpopSettings:
                                       row.user_mu is not None or row.cb is not None)
         fields["ephemeris"] = value.ephemeris_model
         fields["srp"] = SrpSettings._read(value.srp)
+        fields["drag"] = DragSettings._read(value.drag)
         return cls(**fields, integrator="rkf78" if value.integrator == n.HpopIntegrator.RKF78 else "rk4")
 
 
@@ -304,7 +362,8 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          velocity_tolerance_mps: float = 1e-6, minimum_altitude_m: float = 0,
          third_bodies: tuple[str, ...] = (), ephemeris: str = "de440s",
          sun_mu: float | None = None, moon_mu: float | None = None,
-         body_gravity: tuple[ThirdBodySettings, ...] = (), srp: SrpSettings | None = None) -> Orbit:
+         body_gravity: tuple[ThirdBodySettings, ...] = (), srp: SrpSettings | None = None,
+         drag: DragSettings | None = None) -> Orbit:
     """Cowell orbit with static gravity, third bodies, spherical SRP, RKF78 or RK4.
 
     Built-in EGM96 supports up to degree 20; installed gravity files up to 360.
@@ -325,6 +384,7 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
         relative_tolerance, position_tolerance_m, velocity_tolerance_mps,
         min_step_seconds, max_step_seconds, fixed_step_seconds, minimum_altitude_m,
         gravity_model.lower(), gravity_mu, third_bodies, ephemeris, tuple(body_gravity) + overrides,
-        SrpSettings() if srp is None else require(srp, SrpSettings, "srp"))
+        SrpSettings() if srp is None else require(srp, SrpSettings, "srp"),
+        DragSettings() if drag is None else require(drag, DragSettings, "drag"))
     settings._native()  # Fail at construction, before changing a project.
     return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)

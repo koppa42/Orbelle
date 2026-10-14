@@ -91,6 +91,7 @@ class LinuxDeliveryTests(unittest.TestCase):
             source = root / 'source'
             # Use the fixed current-format input and its actual Python consumer.
             for relative in ('tests/packaging/sdk_consumer', 'tests/reference/time_frames',
+                             'tests/reference/propagators',
                              'tests/integration/fixtures', 'bindings/python/tests', 'examples/python',
                              'data/samples/eop', 'data/samples/time', 'data/samples/spice'):
                 shutil.copytree(ROOT / relative, source / relative,

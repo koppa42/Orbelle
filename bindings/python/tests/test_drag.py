@@ -1,0 +1,108 @@
+"""Density references, shared drag configuration, retained UTC and immutable results."""
+import json
+import math
+import tempfile
+import unittest
+from dataclasses import FrozenInstanceError, replace
+from pathlib import Path
+
+import orbitforge as of
+from orbitforge import units as u
+
+ROOT = Path(__file__).resolve().parents[3]
+EOP = Path(of.__file__).parent / "data/eop/iers_c04_2016_12_28_2017_01_04/manifest.json"
+SPICE = ROOT / "data/samples/spice/de440s_2016_leap/manifest.json"
+
+
+class DragTests(unittest.TestCase):
+    def test_settings_ranges_and_independent_density_grid(self):
+        settings = of.orbits.DragSettings(enabled=True, atmosphere="nrlmsise00")
+        with self.assertRaises(FrozenInstanceError):
+            settings.cd = 3
+        for kwargs in ({"enabled": 1}, {"use_apparent_sun_position": "true"},
+                       {"cd": float("inf")}, {"area_mass_ratio_m2_per_kg": -1},
+                       {"atmosphere": "unknown"}, {"kp": -1}, {"kp": 9.1}, {"f107": 0}):
+            with self.assertRaises((TypeError, ValueError)):
+                of.orbits.DragSettings(**kwargs)
+        self.assertEqual(of.kp_to_ap(3), 15)
+        for model, name in ((of.AtmosphereModel.JACCHIA_ROBERTS, "jacchia_roberts.txt"),
+                            (of.AtmosphereModel.NRLMSISE00, "nrlmsise00.txt")):
+            rows = [line.split() for line in (ROOT / "tests/reference/propagators" / name)
+                    .read_text().splitlines() if line and not line.startswith("#")]
+            for row in rows[::37]:
+                values = list(map(float, row))
+                year, month, day = map(int, values[:3])
+                second = int(values[3])
+                hour, minute, sec = (23, 59, 60) if second == 86400 else (
+                    second // 3600, second % 3600 // 60, second % 60)
+                inputs = of.AtmosphereInput()
+                inputs.utc = of.UtcDateTime(year, month, day, hour, minute, sec)
+                inputs.geodetic = (values[6], values[5], values[4])
+                inputs.solar_hour_angle_rad, inputs.sun_declination_rad = values[7:9]
+                inputs.f107, inputs.f107_average, inputs.kp = values[9:12]
+                actual = of.evaluate_atmosphere(model, inputs)
+                self.assertAlmostEqual(actual.density_kg_m3 / values[12], 1, delta=2e-10)
+
+    def test_disabled_drafts_roundtrip_without_data_and_do_not_change_identity(self):
+        project = of.Project("Drag drafts", of.Epoch(0), of.Epoch(600 * 10**9))
+        drag = of.orbits.DragSettings(cd=2.3, f107=170, kp=4.3, use_apparent_sun_position=True,
+                                     atmosphere="nrlmsise00", low_altitude_model="nrlmsise00")
+        orbit = of.orbits.Hpop(initial=of.orbits.Cartesian(of.Epoch(0), (6778137, 0, 0), (0, 6300, 4300)),
+                              gravity_degree=0, drag=drag)
+        sat = project.objects.satellite("Sat", orbit=orbit)
+        before = project.prepare().states(sat, step=u.s(60))
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "drag.orbitforge"
+            project.save(path)
+            reopened = of.Project.open(path)
+            self.assertEqual(reopened.objects[sat.id].orbit.hpop.drag, drag)
+        sat.orbit = replace(orbit, hpop=replace(orbit.hpop, drag=replace(drag, cd=2.9, kp=8)))
+        after = project.prepare().states(sat, step=u.s(60))
+        self.assertEqual(after.input_sha256, before.input_sha256)
+        self.assertEqual(after.position.values, before.position.values)
+
+    @unittest.skipUnless(of.ephemeris_available() and of.time_frames_available(), "requires CSPICE/ERFA")
+    def test_drag_only_uses_eop_utc_and_sun_and_survives_report_save_edit_and_reopen(self):
+        metadata = json.loads(SPICE.read_text())
+        first = of.Epoch(metadata["first_tai_ns"] + 3600 * 10**9)
+        last = of.Epoch(first.tai_nanoseconds + 1200 * 10**9)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            provider = of.load_spice_snapshot(SPICE, root / "direct")
+            with self.assertRaises(of.EphemerisCoverageError):
+                provider.validate_apparent_sun_interval(of.Epoch(metadata["first_tai_ns"]), first)
+            apparent = provider.apparent_sun_from_earth(first)
+            geometric = provider.geometric_state(10, 399, first).position_m
+            self.assertGreater(math.dist(apparent, geometric), 1e6)
+            time_only = of.DataSnapshot.builtin_time().with_ephemeris("de440s", SPICE, root / "runtime")
+            data = of.DataSnapshot.load(eop_manifest=EOP).with_ephemeris("de440s", SPICE, root / "runtime")
+            project = of.Project("Drag", first, last)
+            orbit = of.orbits.Hpop(initial=of.orbits.Cartesian(first, (6778137, 0, 0), (0, 6300, 4300)),
+                                  gravity_degree=0,
+                                  drag=of.orbits.DragSettings(enabled=True, use_apparent_sun_position=True))
+            sat = project.objects.satellite("Sat", orbit=orbit)
+            with self.assertRaises((of.AnalysisCapabilityError, ValueError)):
+                project.prepare(data=time_only)
+            analysis = project.prepare(data=data)
+            before = analysis.states(sat, step=u.s(60))
+            report = analysis.report(of.ReportKind.CARTESIAN_STATE, objects=sat, step=u.s(60),
+                                     units=of.ReportUnits.SI, time_scale=of.ReportTimeScale.TAI)
+            self.assertEqual(tuple(report.table.rows[-1][4:7]), before.position.values[-1])
+            path = root / "drag.orbitforge"
+            project.save(path, analysis=analysis)
+            restored = of.Project.open(path, data=data)
+            self.assertEqual(restored.objects[sat.id].orbit.hpop.drag, orbit.hpop.drag)
+            self.assertEqual(restored.prepare(data=data).states(restored.objects[sat.id], step=u.s(60))
+                             .position.values, before.position.values)
+            for change in ({"cd": 2.8}, {"f107": 220}, {"kp": 7},
+                           {"atmosphere": "nrlmsise00"}, {"use_apparent_sun_position": False}):
+                sat.orbit = replace(orbit, hpop=replace(orbit.hpop, drag=replace(orbit.hpop.drag, **change)))
+                changed = project.prepare(data=data).states(sat, step=u.s(60))
+                self.assertNotEqual(changed.input_sha256, before.input_sha256)
+                self.assertNotEqual(changed.position.values[-1], before.position.values[-1])
+            self.assertEqual(analysis.states(sat, step=u.s(60)).position.values, before.position.values)
+            del analysis, data, time_only, restored, provider
+
+
+if __name__ == "__main__":
+    unittest.main()

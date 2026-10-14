@@ -14,6 +14,7 @@ def stage_validation_inputs(source: Path, destination: Path):
     # Python package or C++ implementation that must come from the installation.
     for relative in (
         "tests/packaging/sdk_consumer", "tests/reference/time_frames",
+        "tests/reference/propagators",
         "tests/integration/fixtures", "bindings/python/tests", "examples/python",
         "data/samples/eop", "data/samples/time", "data/samples/spice",
     ):

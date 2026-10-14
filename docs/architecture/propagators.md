@@ -28,7 +28,7 @@
 | 自适应容差 | 相对 1e-12，位置绝对 1e-3 m，速度绝对 1e-6 m/s | 分量误差尺度为 `atol + rtol × max(abs(old), abs(new))`；是局部数值误差，不是预报精度 |
 | 步长 | RKF78 默认 0.001–60 s；RK4 默认 10 s | 输出采样间隔独立；RK4 不作误差控制 |
 | 停止条件 | 最低地心高度（默认 0 m）、无法满足容差、非有限状态、资源上限 | 高度相对所选重力模型参考球面，不是大地高；不作再入事件定位 |
-| 其他摄动 | 尚未计入大气阻力、光压、相对论和潮汐；脉冲机动使用任务序列 | STK 的完整力模型更多，不能据本阶段宣称长期 LEO/GEO 预报精度等价 |
+| 其他摄动 | 已计入球形阻力及光压；尚未计入相对论和潮汐；脉冲机动使用任务序列 | STK 的完整力模型更多，不能据本阶段宣称长期 LEO/GEO 预报精度等价 |
 
 EGM96 取自 [ICGEM 原始系数](https://icgem.gfz.de/getmodel/gfc/971b0a3b49a497910aad23cd85e066d4cd9af0aeafe7ce6301a696bed8570be3/EGM96.gfc)，完整文件 SHA-256 为 `5247a9e9c316dd2c8f8fd491d53be0e163cb5cb3676b021754240cc9e44cb43b`；使用 μ = 3.986004415e14 m³/s²、R = 6378136.3 m，参考 Lemoine et al., [NASA/TP-1998-206861](https://ntrs.nasa.gov/citations/19980218814)。`tools/data/import_egm96.py` 校验完整文件后提取 2–20 阶完全归一化系数，生成编译期表；正常构建和运行不联网。模型 ID 为 `egm96-static-tide-free-20-v1`，系数随程序固定。
 
@@ -50,7 +50,7 @@ trajectory = analysis.states(satellite, step=u.s(30))
 
 RK4 使用 `integrator="rk4", fixed_step_seconds=10`；点质量使用 `gravity_degree=0`，无需 EOP。`satellite.orbit.hpop` 是不可变 `HpopSettings`，可用 `dataclasses.replace` 修改后将新 `Orbit` 赋回 `satellite.orbit`；旧分析继续持有旧参数与数据。完整示例见 `examples/python/propagators.py`。
 
-C++ 设置 `OrbitInput.propagator = OrbitPropagator::hpop`、`OrbitInput.hpop`（`HpopOptions`），通过 `Project::prepare(data)` 查询。低层工厂 `runtime::make_hpop_session(initial, options, environment, id)` 持有不可变 Frame/EOP、重力和星历 Provider 的共享所有权。核心只依赖标准库；Runtime 的 DE440s 装配需要 CSPICE。桌面选择 HPOP 后，“配置…”外层为力模型、积分器、协方差；力模型内分引力、阻力、太阳辐射压、其他四页。引力页将中心天体引力与第三体引力放在同一滚动页面；第三体区域用 Name / Use / Source / GM 四列表格配置日月、七颗行星及冥王星，支持搜索和独立的 Cb file / JPL DE / User Specified 来源。光压页提供球形模型、独立 Cr 与面积质量比、三种阴影模式、地球／月球分配及等效大气高度；太阳位置当前为几何位置。最低停止高度放在积分器页。阻力、其他模型与协方差尚未实现，页面只显示能力状态，不提供可保存为已启用的开关。切换内外页、调整窗口或单位不重建输入；校验失败返回相应页并定位字段。保存设置仅改变属性草稿，“应用轨道”才计算并发布。参数随项目 v18 保存。
+C++ 设置 `OrbitInput.propagator = OrbitPropagator::hpop`、`OrbitInput.hpop`（`HpopOptions`），通过 `Project::prepare(data)` 查询。低层工厂 `runtime::make_hpop_session(initial, options, environment, id)` 持有不可变 UTC、Frame/EOP、重力和星历 Provider 的共享所有权。核心只依赖标准库；Runtime 的 DE440s 装配需要 CSPICE。桌面选择 HPOP 后，“配置…”外层为力模型、积分器、协方差；力模型内分引力、阻力、太阳辐射压、其他四页。引力页将中心天体引力与第三体引力放在同一滚动页面；第三体区域用 Name / Use / Source / GM 四列表格配置日月、七颗行星及冥王星，支持搜索和独立的 Cb file / JPL DE / User Specified 来源。光压页提供球形模型、独立 Cr 与面积质量比、三种阴影模式、地球／月球分配及等效大气高度；太阳位置当前为几何位置。最低停止高度放在积分器页。阻力页提供球形 Cd/面积质量比、JR/NRLMSISE-00、手动 F10.7/Kp、低空拼接和视太阳，详见[阻力契约](atmospheric_drag.md)。其他模型与协方差尚未实现，页面只显示能力状态，不提供可保存为已启用的开关。切换内外页、调整窗口或单位不重建输入；校验失败返回相应页并定位字段。保存设置仅改变属性草稿，“应用轨道”才计算并发布。参数随项目 v19 保存。
 
 独立回归使用 Orekit 13.1.2 Holmes–Featherstone 重力和 Hipparchus 4.0.2 DP853：五类轨道 × 三组阶次 × ±6000 s/±1 天共 60 个状态，检查位置每分量 0.15 m、速度 0.15 mm/s、初始加速度 5e-13 m/s²。参考刻意采用静态同轴重力系，隔离球谐与积分；真实 EOP 路由另由集成测试验证。尚无同配置 STK 导出数据直接对照，见 [HPOP 验证](../validation/hpop_protocol.md)。后续按完整截图清单接光压、空间天气、大气、潮汐、附加力、积分高级选项和协方差；未实现的力不提供无效开关。
 

@@ -489,10 +489,102 @@ bool edit_hpop_settings(
         note(status, scope);
         note(form, QStringLiteral("当前传播不包含此项，暂不可启用。"));
     };
-    pending(
-        force_tabs, QStringLiteral("阻力"), "hpopDragPage",
-        QStringLiteral("大气阻力模型尚未接入 HPOP。"),
-        QStringLiteral("球形阻力、Cd 与面积质量比、大气密度、空间天气及低空拼接将集中在此配置。"));
+    auto *drag_page = page(force_tabs, QStringLiteral("阻力"), "hpopDragPage");
+    auto *drag_use = new QCheckBox(QStringLiteral("使用大气阻力 Use Drag"));
+    drag_use->setObjectName("hpopUseDrag");
+    drag_use->setChecked(options.drag.enabled);
+    drag_page->addRow(drag_use);
+    auto *drag_model = section(drag_page, QStringLiteral("球形阻力模型"), "hpopDragModelSection");
+    auto *drag_type = new QComboBox;
+    drag_type->setObjectName("hpopDragType");
+    drag_type->addItem(QStringLiteral("Spherical · 球形"));
+    drag_model->addRow(QStringLiteral("类型"), drag_type);
+    auto *drag_cd = quantity(drag_model, QStringLiteral("阻力系数 Cd"), "hpopDragCd", Unit::one,
+                             options.drag.cd, -100, 100);
+    auto *drag_area =
+        quantity(drag_model, QStringLiteral("面积 / 质量"), "hpopDragAreaMassRatio",
+                 Unit::square_metres_per_kilogram, options.drag.area_mass_ratio_m2_per_kg, 0, 9999);
+    auto *drag_density = section(drag_page, QStringLiteral("大气密度"), "hpopDragDensitySection");
+    auto *density_model = new QComboBox;
+    density_model->setObjectName("hpopDragDensityModel");
+    density_model->addItems({QStringLiteral("Jacchia–Roberts"), QStringLiteral("NRLMSISE-00")});
+    density_model->setCurrentIndex(static_cast<int>(options.drag.atmosphere));
+    drag_density->addRow(QStringLiteral("密度模型"), density_model);
+    auto *low_density = new QComboBox;
+    low_density->setObjectName("hpopDragLowAltitudeModel");
+    low_density->addItems({QStringLiteral("None · 关闭"), QStringLiteral("NRLMSISE-00")});
+    low_density->setCurrentIndex(static_cast<int>(options.drag.low_altitude_model));
+    drag_density->addRow(QStringLiteral("低空密度模型"), low_density);
+    auto *drag_blend = quantity(drag_density, QStringLiteral("拼接范围"), "hpopDragBlendingRange",
+                                Unit::metre, options.drag.blending_range_m, 0, 1000000);
+    drag_blend->set_unit(Unit::kilometre);
+    note(drag_density,
+         QStringLiteral("Jacchia–Roberts：90–2500 km；NRLMSISE-00：0–1000 km。"
+                        "低空模型在 90 km 以上的指定范围内平滑拼接；高度使用 WGS84 精确大地高。"));
+    auto *drag_weather =
+        section(drag_page, QStringLiteral("太阳通量 / 地磁"), "hpopDragWeatherSection");
+    auto *drag_weather_source = new QComboBox;
+    drag_weather_source->setObjectName("hpopDragWeatherSource");
+    drag_weather_source->addItem(QStringLiteral("Enter Manually · 手动常量"));
+    drag_weather->addRow(QStringLiteral("输入来源"), drag_weather_source);
+    auto *drag_f107 = quantity(drag_weather, QStringLiteral("日 F10.7 (sfu)"), "hpopDragF107",
+                               Unit::one, options.drag.f107, 1e-9, 1000);
+    auto *drag_average =
+        quantity(drag_weather, QStringLiteral("平均 F10.7 (sfu)"), "hpopDragF107Average", Unit::one,
+                 options.drag.f107_average, 1e-9, 1000);
+    auto *drag_kp = quantity(drag_weather, QStringLiteral("地磁指数 Kp"), "hpopDragKp", Unit::one,
+                             options.drag.kp, 0, 9);
+    note(drag_weather,
+         QStringLiteral("通量与 Kp 在传播期间保持所填常量。NRLMSISE-00 将 Kp 转换为每日 Ap，"
+                        "包含异常氧的阻力有效密度。天气文件与历史 Ap 模式尚未接入。"));
+    auto *drag_sun = section(drag_page, QStringLiteral("太阳位置与计算数据"), "hpopDragSunSection");
+    auto *drag_apparent = new QCheckBox(QStringLiteral("使用地心视太阳位置 (LT+S)"));
+    drag_apparent->setObjectName("hpopDragApparentSun");
+    drag_apparent->setChecked(options.drag.use_apparent_sun_position);
+    drag_sun->addRow(drag_apparent);
+    auto *drag_resource = new QLabel;
+    drag_resource->setObjectName("hpopDragEphemerisStatus");
+    drag_resource->setWordWrap(true);
+    drag_sun->addRow(drag_resource);
+    const auto refresh_drag_resource = [&] {
+        const bool available = std::any_of(
+            installed_ephemerides.begin(), installed_ephemerides.end(),
+            [&](const auto &entry) { return entry.selection == options.ephemeris_model; });
+        drag_resource->setText(available
+                                   ? QStringLiteral("位置星历：%1")
+                                         .arg(QString::fromStdString(options.ephemeris_model))
+                                   : QStringLiteral("所选太阳位置星历未就绪，请在数据中心准备。"));
+    };
+    refresh_drag_resource();
+    auto *drag_manage = new QPushButton(QStringLiteral("管理太阳系星历…"));
+    drag_manage->setObjectName("hpopDragManageEphemerides");
+    drag_manage->setVisible(static_cast<bool>(manage_ephemerides));
+    drag_sun->addRow(drag_manage);
+    std::function<void()> refresh_srp_resource;
+    QObject::connect(drag_manage, &QPushButton::clicked, &dialog, [&] {
+        if (manage_ephemerides) {
+            installed_ephemerides = manage_ephemerides();
+            refresh_ephemeris();
+            refresh_drag_resource();
+            if (refresh_srp_resource)
+                refresh_srp_resource();
+        }
+    });
+    note(drag_sun, QStringLiteral("阻力需要覆盖传播区间的 UTC、EOP 和太阳星历。启用视太阳后，星历"
+                                  "还须覆盖起点之前 600 秒；关闭时使用几何太阳。"));
+    const auto update_drag = [&] {
+        const bool enabled = drag_use->isChecked();
+        for (auto *form : {drag_model, drag_density, drag_weather, drag_sun})
+            form->parentWidget()->setEnabled(enabled);
+        const bool jr = density_model->currentIndex() == 0;
+        low_density->setEnabled(enabled && jr);
+        drag_blend->setEnabled(enabled && jr && low_density->currentIndex() == 1);
+        refresh_drag_resource();
+    };
+    QObject::connect(drag_use, &QCheckBox::toggled, &dialog, update_drag);
+    QObject::connect(density_model, &QComboBox::currentIndexChanged, &dialog, update_drag);
+    QObject::connect(low_density, &QComboBox::currentIndexChanged, &dialog, update_drag);
+    update_drag();
     auto *srp_page = page(force_tabs, QStringLiteral("太阳辐射压"), "hpopSrpPage");
     auto *srp_use = new QCheckBox(QStringLiteral("使用太阳辐射压 Use SRP"));
     srp_use->setObjectName("hpopUseSrp");
@@ -538,7 +630,7 @@ bool edit_hpop_settings(
     srp_resource->setObjectName("hpopSrpEphemerisStatus");
     srp_resource->setWordWrap(true);
     srp_sun->addRow(srp_resource);
-    const auto refresh_srp_resource = [&] {
+    refresh_srp_resource = [&] {
         const bool ready = std::any_of(
             installed_ephemerides.begin(), installed_ephemerides.end(),
             [&](const auto &entry) { return entry.selection == options.ephemeris_model; });
@@ -554,6 +646,7 @@ bool edit_hpop_settings(
     srp_sun->addRow(srp_manage);
     QObject::connect(srp_manage, &QPushButton::clicked, manage, &QToolButton::click);
     QObject::connect(manage, &QToolButton::clicked, &dialog, refresh_srp_resource);
+    QObject::connect(manage, &QToolButton::clicked, &dialog, refresh_drag_resource);
     refresh_srp_resource();
     auto *srp_pressure =
         quantity(srp_sun, QStringLiteral("参考距离处光压"), "hpopSrpPressure", Unit::pascal,
@@ -763,6 +856,7 @@ bool edit_hpop_settings(
             installed_ephemerides = data->data().ephemerides();
             refresh_ephemeris();
             refresh_srp_resource();
+            refresh_drag_resource();
             refresh_models();
             update_gravity();
         }
@@ -826,6 +920,42 @@ bool edit_hpop_settings(
             }
             candidate.gravity_degree = model->currentIndex() != 1 ? degree->value() : 0;
             candidate.gravity_order = model->currentIndex() != 1 ? order->value() : 0;
+            validation_force_page = 1;
+            auto &drag = candidate.drag;
+            drag.enabled = drag_use->isChecked();
+            drag.atmosphere = static_cast<core::AtmosphereModel>(density_model->currentIndex());
+            drag.low_altitude_model =
+                static_cast<core::LowAltitudeDensityModel>(low_density->currentIndex());
+            drag.use_apparent_sun_position = drag_apparent->isChecked();
+            const auto drag_value = [&](QuantityEditor *field, Unit unit, double &value,
+                                        bool used) {
+                if (used)
+                    value = read(field, unit);
+                else {
+                    try {
+                        value = field->value(unit);
+                    } catch (const std::exception &) {
+                    }
+                }
+            };
+            drag_value(drag_cd, Unit::one, drag.cd, drag.enabled);
+            drag_value(drag_area, Unit::square_metres_per_kilogram, drag.area_mass_ratio_m2_per_kg,
+                       drag.enabled);
+            drag_value(drag_f107, Unit::one, drag.f107, drag.enabled);
+            drag_value(drag_average, Unit::one, drag.f107_average, drag.enabled);
+            drag_value(drag_kp, Unit::one, drag.kp, drag.enabled);
+            const bool blend = drag.enabled &&
+                               drag.atmosphere == core::AtmosphereModel::jacchia_roberts &&
+                               drag.low_altitude_model == core::LowAltitudeDensityModel::nrlmsise00;
+            drag_value(drag_blend, Unit::metre, drag.blending_range_m, blend);
+            validation_field = blend ? static_cast<QWidget *>(drag_blend) : drag_use;
+            core::validate_drag_options(drag);
+            if (drag.enabled && !std::any_of(installed_ephemerides.begin(),
+                                             installed_ephemerides.end(), [&](const auto &entry) {
+                                                 return entry.selection ==
+                                                        candidate.ephemeris_model;
+                                             }))
+                throw std::runtime_error("大气阻力需要太阳位置星历，请先在数据中心准备。");
             validation_force_page = 2;
             auto &srp = candidate.srp;
             srp.enabled = srp_use->isChecked();
@@ -882,9 +1012,10 @@ bool edit_hpop_settings(
         } catch (const std::exception &e) {
             tabs->setCurrentIndex(validation_page);
             auto *scroll = dialog.findChild<QScrollArea *>(
-                validation_page == 0
-                    ? (validation_force_page == 2 ? "hpopSrpPage" : "hpopGravityPage")
-                    : "hpopIntegratorPage");
+                validation_page == 0 ? (validation_force_page == 2   ? "hpopSrpPage"
+                                        : validation_force_page == 1 ? "hpopDragPage"
+                                                                     : "hpopGravityPage")
+                                     : "hpopIntegratorPage");
             if (validation_page == 0) {
                 force_tabs->setCurrentIndex(validation_force_page);
                 if (validation_body) {

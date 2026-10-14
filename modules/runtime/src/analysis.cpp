@@ -124,7 +124,7 @@ core::HpopEnvironment DataSnapshot::force_environment(const OrbitInput &input) c
                 "'; download/import it in Data Center or supply it in DataSnapshot");
         model = it->second;
     }
-    return {frames_, eop_, std::move(model), std::move(ephemeris)};
+    return {frames_, eop_, std::move(model), std::move(ephemeris), time_};
 }
 DataSnapshot
 DataSnapshot::with_ephemeris(const std::string &selection,

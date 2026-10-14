@@ -3,8 +3,8 @@
 #include "epoch_editor.hpp"
 #include "ground_map.hpp"
 #include "ground_station_editor.hpp"
-#include "insert_object_dialog.hpp"
 #include "initial_data_setup.hpp"
+#include "insert_object_dialog.hpp"
 #include "mission_timeline.hpp"
 #include "orbit_editor.hpp"
 #include "orbit_scene.hpp"
@@ -2003,8 +2003,8 @@ class Workbench final : public QMainWindow {
                     gravity.emplace(file.selection, std::move(model));
                 }
                 return prepare_project_scene(std::move(project), source, frames_, installed_data,
-                                             *cancel, retained, edited_object,
-                                             calculation_time.get(), gravity, ephemerides);
+                                             *cancel, retained, edited_object, calculation_time,
+                                             gravity, ephemerides);
             });
         update_actions();
         statusBar()->showMessage(editing ? QStringLiteral("正在更新场景并准备轨迹…")

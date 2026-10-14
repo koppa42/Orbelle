@@ -306,6 +306,15 @@ TEST(Project, CurrentSchemaFixturePreservesInputsRelationshipsAndExactEncoding) 
     EXPECT_FALSE(project.satellites[1].orbit.hpop.srp.enabled);
     EXPECT_EQ(project.satellites[1].orbit.hpop.srp.cr, 1.25);
     EXPECT_EQ(project.satellites[1].orbit.hpop.srp.atmospheric_altitude_m, 23000);
+    const auto &drag = project.satellites[1].orbit.hpop.drag;
+    EXPECT_FALSE(drag.enabled);
+    EXPECT_EQ(drag.cd, 2.3);
+    EXPECT_EQ(drag.atmosphere, core::AtmosphereModel::nrlmsise00);
+    EXPECT_EQ(drag.low_altitude_model, core::LowAltitudeDensityModel::nrlmsise00);
+    EXPECT_EQ(drag.blending_range_m, 42000);
+    EXPECT_EQ(drag.f107, 170);
+    EXPECT_EQ(drag.kp, 4.3);
+    EXPECT_TRUE(drag.use_apparent_sun_position);
     EXPECT_EQ(project.satellites[1].orbit.hpop.max_step_seconds, 45);
     EXPECT_EQ(project.satellites[1].orbit.hpop.minimum_altitude_m, 1000);
     const auto &mission = project.satellites[1].orbit.mission;
@@ -380,8 +389,8 @@ TEST(Project, DataLocksHaveStableCanonicalOrderAndRejectDuplicateRoles) {
 }
 TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
     const auto bytes = application::encode_project(example());
-    for (std::uint32_t version = 0; version <= 19; ++version) {
-        if (version == 18)
+    for (std::uint32_t version = 0; version <= 20; ++version) {
+        if (version == 19)
             continue;
         SCOPED_TRACE(version);
         auto unsupported = bytes;
@@ -393,7 +402,7 @@ TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
         } catch (const application::ProjectError &error) {
             EXPECT_NE(std::string(error.what()).find("version " + std::to_string(version) + ";"),
                       std::string::npos);
-            EXPECT_NE(std::string(error.what()).find("reads only version 18"), std::string::npos);
+            EXPECT_NE(std::string(error.what()).find("reads only version 19"), std::string::npos);
         }
     }
 }

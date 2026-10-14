@@ -62,6 +62,15 @@ class IEphemerisProvider {
     geometric_states(std::int32_t target, std::int32_t observer,
                      std::span<const Epoch> epochs) const = 0;
     [[nodiscard]] virtual const EphemerisDataInfo &data_info() const noexcept = 0;
+    // Optional received apparent Sun from Earth's centre, including one-way light
+    // time and stellar aberration (CSPICE LT+S), in the provider's ICRF/J2000 axes.
+    // The certified interval includes the earlier epochs needed by light time.
+    [[nodiscard]] virtual std::array<double, 3> apparent_sun_from_earth(Epoch) const {
+        throw EphemerisDataError("This ephemeris does not support apparent Sun positions");
+    }
+    virtual void validate_apparent_sun_interval(Epoch, Epoch) const {
+        throw EphemerisDataError("This ephemeris cannot certify apparent Sun coverage");
+    }
     // Validate continuous DE-style Earth/target segment chains, including inertial
     // axes and centres. Providers that cannot certify this must reject HPOP use.
     virtual void validate_earth_gravity_interval(Epoch, Epoch,

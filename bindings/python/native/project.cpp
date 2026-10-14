@@ -98,6 +98,60 @@ void bind_project(py::module_ &module) {
         .value("NONE", core::SrpShadowModel::none)
         .value("CYLINDRICAL", core::SrpShadowModel::cylindrical)
         .value("DUAL_CONE", core::SrpShadowModel::dual_cone);
+    py::enum_<core::AtmosphereModel>(module, "AtmosphereModel")
+        .value("JACCHIA_ROBERTS", core::AtmosphereModel::jacchia_roberts)
+        .value("NRLMSISE00", core::AtmosphereModel::nrlmsise00);
+    py::enum_<core::LowAltitudeDensityModel>(module, "LowAltitudeDensityModel")
+        .value("NONE", core::LowAltitudeDensityModel::none)
+        .value("NRLMSISE00", core::LowAltitudeDensityModel::nrlmsise00);
+    py::class_<core::DragOptions>(module, "DragOptions")
+        .def(py::init<>())
+        .def_readwrite("enabled", &core::DragOptions::enabled)
+        .def_readwrite("cd", &core::DragOptions::cd)
+        .def_readwrite("area_mass_ratio_m2_per_kg", &core::DragOptions::area_mass_ratio_m2_per_kg)
+        .def_readwrite("atmosphere", &core::DragOptions::atmosphere)
+        .def_readwrite("low_altitude_model", &core::DragOptions::low_altitude_model)
+        .def_readwrite("blending_range_m", &core::DragOptions::blending_range_m)
+        .def_readwrite("f107", &core::DragOptions::f107)
+        .def_readwrite("f107_average", &core::DragOptions::f107_average)
+        .def_readwrite("kp", &core::DragOptions::kp)
+        .def_readwrite("use_apparent_sun_position", &core::DragOptions::use_apparent_sun_position)
+        .def("validate", &core::validate_drag_options);
+    py::class_<core::AtmosphereInput>(module, "AtmosphereInput")
+        .def(py::init<>())
+        .def_readwrite("utc", &core::AtmosphereInput::utc)
+        .def_property(
+            "geodetic",
+            [](const core::AtmosphereInput &input) {
+                return std::array{input.geodetic.longitude_rad, input.geodetic.latitude_rad,
+                                  input.geodetic.height_m};
+            },
+            [](core::AtmosphereInput &input, const std::array<double, 3> &position) {
+                input.geodetic = {position[0], position[1], position[2]};
+            })
+        .def_readwrite("solar_hour_angle_rad", &core::AtmosphereInput::solar_hour_angle_rad)
+        .def_readwrite("sun_declination_rad", &core::AtmosphereInput::sun_declination_rad)
+        .def_readwrite("f107", &core::AtmosphereInput::f107)
+        .def_readwrite("f107_average", &core::AtmosphereInput::f107_average)
+        .def_readwrite("kp", &core::AtmosphereInput::kp);
+    py::class_<core::AtmosphereEvaluation>(module, "AtmosphereEvaluation")
+        .def_readonly("density_kg_m3", &core::AtmosphereEvaluation::density_kg_m3)
+        .def_readonly("temperature_k", &core::AtmosphereEvaluation::temperature_k)
+        .def_readonly("exospheric_temperature_k",
+                      &core::AtmosphereEvaluation::exospheric_temperature_k);
+    py::class_<core::DragEvaluation>(module, "DragEvaluation")
+        .def_readonly("acceleration_itrf_mps2", &core::DragEvaluation::acceleration_itrf_mps2)
+        .def_readonly("density_kg_m3", &core::DragEvaluation::density_kg_m3)
+        .def_property_readonly("geodetic", [](const core::DragEvaluation &result) {
+            return std::array{result.geodetic.longitude_rad, result.geodetic.latitude_rad,
+                              result.geodetic.height_m};
+        });
+    module.def("evaluate_atmosphere", &core::evaluate_atmosphere, py::arg("model"),
+               py::arg("input"));
+    module.def("evaluate_drag", &core::evaluate_drag, py::arg("position_itrf_m"),
+               py::arg("velocity_itrf_mps"), py::arg("sun_itrf_m"), py::arg("utc"),
+               py::arg("options"));
+    module.def("kp_to_ap", &core::kp_to_ap, py::arg("kp"));
     py::class_<core::SrpOptions>(module, "SrpOptions")
         .def(py::init<>())
         .def_readwrite("enabled", &core::SrpOptions::enabled)
@@ -151,6 +205,7 @@ void bind_project(py::module_ &module) {
         .def_readwrite("gravity_mu", &core::HpopOptions::gravity_mu)
         .def_readwrite("third_bodies", &core::HpopOptions::third_bodies)
         .def_readwrite("srp", &core::HpopOptions::srp)
+        .def_readwrite("drag", &core::HpopOptions::drag)
         .def_readwrite("ephemeris_model", &core::HpopOptions::ephemeris_model)
         .def_readwrite("gravity_degree", &core::HpopOptions::gravity_degree)
         .def_readwrite("gravity_order", &core::HpopOptions::gravity_order)

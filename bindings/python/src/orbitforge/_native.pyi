@@ -497,6 +497,8 @@ class EphemerisCoverageError(ValueError): ...
 class EphemerisQueryError(RuntimeError): ...
 
 class EphemerisProvider:
+    def apparent_sun_from_earth(self, epoch: Epoch) -> list[float]: ...
+    def validate_apparent_sun_interval(self, first: Epoch, last: Epoch) -> None: ...
     def to_tdb(self, epoch: Epoch) -> TdbTime: ...
     def from_tdb(self, time: TdbTime) -> Epoch: ...
     def geometric_state(self, target_naif_id: int, observer_naif_id: int, epoch: Epoch) -> EphemerisState: ...
@@ -835,6 +837,59 @@ class ThirdBodyGravity:
 
 def load_cb_gravity(path: str | Path, body: ThirdBody, mu_scale: float = 1.0) -> CbGravity: ...
 
+class AtmosphereModel:
+    JACCHIA_ROBERTS: AtmosphereModel
+    NRLMSISE00: AtmosphereModel
+
+class LowAltitudeDensityModel:
+    NONE: LowAltitudeDensityModel
+    NRLMSISE00: LowAltitudeDensityModel
+
+class DragOptions:
+    def __init__(self) -> None: ...
+    enabled: bool
+    cd: float
+    area_mass_ratio_m2_per_kg: float
+    atmosphere: AtmosphereModel
+    low_altitude_model: LowAltitudeDensityModel
+    blending_range_m: float
+    f107: float
+    f107_average: float
+    kp: float
+    use_apparent_sun_position: bool
+    def validate(self) -> None: ...
+
+class AtmosphereInput:
+    def __init__(self) -> None: ...
+    utc: UtcDateTime
+    geodetic: Sequence[float]  # longitude_rad, latitude_rad, height_m
+    solar_hour_angle_rad: float
+    sun_declination_rad: float
+    f107: float
+    f107_average: float
+    kp: float
+
+class AtmosphereEvaluation:
+    @property
+    def density_kg_m3(self) -> float: ...
+    @property
+    def temperature_k(self) -> float: ...
+    @property
+    def exospheric_temperature_k(self) -> float: ...
+
+class DragEvaluation:
+    @property
+    def acceleration_itrf_mps2(self) -> list[float]: ...
+    @property
+    def density_kg_m3(self) -> float: ...
+    @property
+    def geodetic(self) -> list[float]: ...
+
+def kp_to_ap(kp: float) -> float: ...
+def evaluate_atmosphere(model: AtmosphereModel, input: AtmosphereInput) -> AtmosphereEvaluation: ...
+def evaluate_drag(position_itrf_m: Sequence[float], velocity_itrf_mps: Sequence[float],
+                  sun_itrf_m: Sequence[float], utc: UtcDateTime, options: DragOptions) -> DragEvaluation: ...
+
 class SrpShadowModel:
     NONE: SrpShadowModel
     CYLINDRICAL: SrpShadowModel
@@ -870,6 +925,7 @@ class HpopOptions:
     gravity_mu: float
     third_bodies: list[ThirdBodyGravity]
     srp: SrpOptions
+    drag: DragOptions
     ephemeris_model: str
     def __init__(self) -> None: ...
     gravity_degree: int

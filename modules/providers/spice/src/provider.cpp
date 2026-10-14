@@ -289,6 +289,25 @@ class Snapshot final : public core::IEphemerisProvider {
         return result;
     }
     const core::EphemerisDataInfo &data_info() const noexcept override { return info_; }
+    std::array<double, 3> apparent_sun_from_earth(core::Epoch epoch) const override {
+        check_epoch(epoch);
+        constexpr std::int64_t margin = 600000000000;
+        if (epoch.tai_nanoseconds() < std::numeric_limits<std::int64_t>::min() + margin)
+            throw core::EphemerisCoverageError("Apparent Sun margin exceeds Epoch range");
+        check_epoch(core::Epoch{epoch.tai_nanoseconds() - margin});
+        std::scoped_lock guard(engine().mutex);
+        activate();
+        return state_unlocked(10, 399, epoch, "LT+S").position_m;
+    }
+    void validate_apparent_sun_interval(core::Epoch first, core::Epoch last) const override {
+        // DE440 Earth/Sun distances stay below 1.02 AU: a conservative 600 s
+        // reception margin certifies all light-time and observer-state queries.
+        constexpr std::int64_t margin = 600000000000;
+        if (first.tai_nanoseconds() < std::numeric_limits<std::int64_t>::min() + margin)
+            throw core::EphemerisCoverageError("Apparent Sun margin exceeds Epoch range");
+        const std::array<std::int32_t, 1> sun{10};
+        validate_earth_gravity_interval(core::Epoch{first.tai_nanoseconds() - margin}, last, sun);
+    }
     void validate_earth_gravity_interval(core::Epoch first, core::Epoch last,
                                          std::span<const std::int32_t> targets) const override {
         check_epoch(first);
@@ -434,11 +453,11 @@ class Snapshot final : public core::IEphemerisProvider {
         return {et};
     }
     core::EphemerisState state_unlocked(std::int32_t target, std::int32_t observer,
-                                        core::Epoch epoch) const {
+                                        core::Epoch epoch, const char *correction = "NONE") const {
         static_assert(sizeof(SpiceInt) == sizeof(std::int32_t));
         const auto tdb = tdb_unlocked(epoch);
         double state[6]{}, light_time = 0;
-        spkez_c(target, tdb.seconds_past_j2000, "J2000", "NONE", observer, state, &light_time);
+        spkez_c(target, tdb.seconds_past_j2000, "J2000", correction, observer, state, &light_time);
         check_spice();
         for (auto &value : state) {
             value *= 1000; // CSPICE km and km/s -> public SI units.

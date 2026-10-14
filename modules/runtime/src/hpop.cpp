@@ -15,7 +15,7 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
                                        : options.gravity_model) +
         ";degree=" + std::to_string(options.gravity_degree) +
         ";order=" + std::to_string(options.gravity_order);
-    if (options.gravity_degree > 0 && environment.eop)
+    if ((options.gravity_degree > 0 || options.drag.enabled) && environment.eop)
         algorithm += ";data=" + application::eop_data_lock(environment.eop->data_info()).sha256();
     if (!options.gravity_model.empty() && environment.gravity)
         algorithm += ";gravity=" +
@@ -50,6 +50,20 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
                << ";reference-distance=" << o.reference_distance_m
                << ";sun-radius=" << o.sun_radius_m << ";earth-radius=" << o.earth_radius_m
                << ";moon-radius=" << o.moon_radius_m;
+        algorithm += config.str();
+    }
+    if (options.drag.enabled) {
+        const auto d = core::effective_drag_options(options.drag);
+        std::ostringstream config;
+        config.imbue(std::locale::classic());
+        config << std::hexfloat << ";drag=spherical-corotating-itrf-exact-wgs84-v1"
+               << ";atmosphere=" << static_cast<int>(d.atmosphere)
+               << ";density-kernel=jr-gmat-c9b78bd;nrlmsise00-orekit-13.1.2-gtd7d"
+               << ";cd=" << d.cd << ";drag-area-mass=" << d.area_mass_ratio_m2_per_kg
+               << ";low-altitude=" << static_cast<int>(d.low_altitude_model)
+               << ";blend=" << d.blending_range_m << ";weather=manual-daily;f107=" << d.f107
+               << ";f107-average=" << d.f107_average << ";kp=" << d.kp
+               << ";sun=" << (d.use_apparent_sun_position ? "earth-LT+S" : "NONE");
         algorithm += config.str();
     }
     if (options.uses_ephemeris() && environment.ephemeris) {

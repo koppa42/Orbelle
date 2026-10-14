@@ -3,6 +3,7 @@
 #include <optional>
 #include <orbitforge/core/time/epoch.hpp>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -46,6 +47,14 @@ class IThirdBodyEphemeris {
   public:
     virtual ~IThirdBodyEphemeris() = default;
     [[nodiscard]] virtual std::array<double, 3> position(ThirdBody body, Epoch epoch) const = 0;
+    // Optional geocentric apparent Sun: received light, LT+S in the same ICRF axes.
+    // Unsupported providers fail explicitly; geometric forces continue to use position().
+    [[nodiscard]] virtual std::array<double, 3> apparent_sun_from_earth(Epoch) const {
+        throw std::invalid_argument("This ephemeris does not support the apparent Sun");
+    }
+    virtual void validate_apparent_sun_interval(Epoch, Epoch) const {
+        throw std::invalid_argument("This ephemeris cannot certify apparent Sun coverage");
+    }
     virtual void validate_interval(Epoch first, Epoch last,
                                    std::span<const ThirdBody> bodies) const = 0;
     void validate_interval(Epoch first, Epoch last, bool sun, bool moon) const {

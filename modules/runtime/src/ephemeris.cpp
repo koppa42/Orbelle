@@ -107,6 +107,12 @@ class ThirdBodyEphemeris final : public core::IThirdBodyEphemeris {
             throw core::EphemerisDataError("DE440 force ephemeris returned unexpected axes");
         return state.position_m;
     }
+    std::array<double, 3> apparent_sun_from_earth(core::Epoch at) const override {
+        return source_->apparent_sun_from_earth(at);
+    }
+    void validate_apparent_sun_interval(core::Epoch first, core::Epoch last) const override {
+        source_->validate_apparent_sun_interval(first, last);
+    }
     void validate_interval(core::Epoch first, core::Epoch last,
                            std::span<const core::ThirdBody> bodies) const override {
         if (first.tai_nanoseconds() < info_.first.tai_nanoseconds() ||

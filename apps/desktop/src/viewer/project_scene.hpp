@@ -23,7 +23,7 @@ struct PreparedProject {
     const std::atomic_bool &cancelled,
     std::optional<application::Scenario> retained_sessions = std::nullopt,
     const std::optional<std::string> &edited_object = std::nullopt,
-    const core::ITimeProvider *time = nullptr,
+    std::shared_ptr<const core::ITimeProvider> time = {},
     const std::map<std::string, std::shared_ptr<const core::GravityModel>> &gravity = {},
     const std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> &ephemerides =
         {});

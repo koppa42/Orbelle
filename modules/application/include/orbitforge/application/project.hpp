@@ -49,7 +49,9 @@ struct OrbitInput {
                (propagator == OrbitPropagator::mission &&
                 mission.coast_model == core::MissionCoastModel::hpop);
     }
-    [[nodiscard]] bool uses_eop_force() const { return uses_hpop() && hpop.gravity_degree > 0; }
+    [[nodiscard]] bool uses_eop_force() const {
+        return uses_hpop() && (hpop.gravity_degree > 0 || hpop.drag.enabled);
+    }
     [[nodiscard]] double mu() const {
         if (uses_hpop())
             return hpop.gravity_mu;

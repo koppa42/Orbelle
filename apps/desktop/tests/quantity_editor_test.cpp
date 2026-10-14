@@ -1382,6 +1382,9 @@ TEST_F(QuantityTest, HpopNestedPagesPreserveDraftsAndKeepUnavailableModelsInacti
             if (index == 2) {
                 EXPECT_FALSE(dialog->findChild<QCheckBox *>("hpopUseSrp")->isChecked());
                 EXPECT_FALSE(dialog->findChild<QuantityEditor *>("hpopSrpCr")->isEnabled());
+            } else if (index == 1) {
+                EXPECT_FALSE(dialog->findChild<QCheckBox *>("hpopUseDrag")->isChecked());
+                EXPECT_FALSE(dialog->findChild<QuantityEditor *>("hpopDragCd")->isEnabled());
             } else {
                 EXPECT_TRUE(forces->currentWidget()->findChildren<QCheckBox *>().isEmpty());
                 EXPECT_TRUE(forces->currentWidget()->findChild<QLabel *>("hpopPendingBadge"));
@@ -1589,6 +1592,126 @@ TEST_F(QuantityTest, HpopSrpInvalidFieldAndMissingEphemerisReturnToSrpWithoutCom
             dialog->findChild<QLabel *>("errorText")->text().contains(QStringLiteral("星历")));
         use->setChecked(false);
         cr->setText("invalid"); // Inactive invalid text must not destroy the last valid draft.
+        accept->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr));
+    EXPECT_EQ(options, saved);
+}
+
+TEST_F(QuantityTest, HpopDragUnitsModelsResizeSaveReopenAndCancel) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    core::HpopOptions options;
+    runtime::CatalogEphemeris entry;
+    entry.selection = "de440s";
+    entry.info.first = core::Epoch{0};
+    entry.info.last = core::Epoch{86400000000000};
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *forces = dialog->findChild<QTabWidget *>("hpopForceModelTabs");
+        forces->setCurrentIndex(1);
+        auto *use = dialog->findChild<QCheckBox *>("hpopUseDrag");
+        auto *area = dialog->findChild<QuantityEditor *>("hpopDragAreaMassRatio");
+        auto *blend = dialog->findChild<QuantityEditor *>("hpopDragBlendingRange");
+        auto *model = dialog->findChild<QComboBox *>("hpopDragDensityModel");
+        auto *low = dialog->findChild<QComboBox *>("hpopDragLowAltitudeModel");
+        EXPECT_FALSE(area->isEnabled());
+        use->setChecked(true);
+        area->set_unit(Unit::square_centimetres_per_gram);
+        area->findChild<QLineEdit *>("quantityValue")->setText("0.3");
+        low->setCurrentIndex(1);
+        EXPECT_TRUE(blend->isEnabled());
+        blend->set_value(42, Unit::kilometre);
+        model->setCurrentIndex(1);
+        EXPECT_FALSE(low->isEnabled());
+        EXPECT_FALSE(blend->isEnabled());
+        model->setCurrentIndex(0);
+        EXPECT_EQ(low->currentIndex(), 1);
+        EXPECT_EQ(blend->value(Unit::metre), 42000);
+        dialog->findChild<QuantityEditor *>("hpopDragCd")->set_value(2.7, Unit::one);
+        dialog->findChild<QuantityEditor *>("hpopDragF107")->set_value(180, Unit::one);
+        dialog->findChild<QuantityEditor *>("hpopDragF107Average")->set_value(160, Unit::one);
+        dialog->findChild<QuantityEditor *>("hpopDragKp")->set_value(4.3, Unit::one);
+        dialog->findChild<QCheckBox *>("hpopDragApparentSun")->setChecked(true);
+        EXPECT_FALSE(dialog->findChild<QLabel *>("hpopDragEphemerisStatus")
+                         ->text()
+                         .contains(QStringLiteral("已安装")));
+        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        std::cout << "HPOP drag device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
+        for (int width : {720, 430}) {
+            dialog->resize(width, width == 720 ? 700 : 620);
+            QEventLoop settled;
+            QTimer::singleShot(60, &settled, &QEventLoop::quit);
+            settled.exec();
+            EXPECT_EQ(area, dialog->findChild<QuantityEditor *>("hpopDragAreaMassRatio"));
+            EXPECT_EQ(area->findChild<QLineEdit *>("quantityValue")->text(), "0.3");
+            auto *buttons = dialog->findChild<QDialogButtonBox *>();
+            EXPECT_TRUE(dialog->rect().contains(buttons->geometry()));
+            if (!capture.isEmpty()) {
+                EXPECT_TRUE(QDir{}.mkpath(capture));
+                auto *scroll = dialog->findChild<QScrollArea *>("hpopDragPage");
+                scroll->verticalScrollBar()->setValue(0);
+                QApplication::processEvents();
+                EXPECT_TRUE(dialog->grab().save(capture + QString("/hpop-drag-%1.png").arg(width)));
+                scroll->ensureWidgetVisible(dialog->findChild<QCheckBox *>("hpopDragApparentSun"));
+                QApplication::processEvents();
+                EXPECT_TRUE(
+                    dialog->grab().save(capture + QString("/hpop-drag-data-%1.png").arg(width)));
+            }
+        }
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr, {}, {entry}));
+    EXPECT_TRUE(options.drag.enabled);
+    EXPECT_EQ(options.drag.cd, 2.7);
+    EXPECT_NEAR(options.drag.area_mass_ratio_m2_per_kg, .03, 1e-16);
+    EXPECT_EQ(options.drag.blending_range_m, 42000);
+    EXPECT_EQ(options.drag.f107, 180);
+    EXPECT_EQ(options.drag.f107_average, 160);
+    EXPECT_EQ(options.drag.kp, 4.3);
+    EXPECT_TRUE(options.drag.use_apparent_sun_position);
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        EXPECT_TRUE(dialog->findChild<QCheckBox *>("hpopUseDrag")->isChecked());
+        EXPECT_EQ(dialog->findChild<QuantityEditor *>("hpopDragF107")->value(Unit::one), 180);
+        dialog->findChild<QCheckBox *>("hpopUseDrag")->setChecked(false);
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr, {}, {entry}));
+    EXPECT_EQ(options, saved);
+}
+
+TEST_F(QuantityTest, HpopDragErrorsReturnToDragAndDoNotCommitInvalidOrMissingData) {
+    core::HpopOptions options;
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *outer = dialog->findChild<QTabWidget *>("hpopSettingsTabs");
+        auto *forces = dialog->findChild<QTabWidget *>("hpopForceModelTabs");
+        auto *kp = dialog->findChild<QuantityEditor *>("hpopDragKp")
+                       ->findChild<QLineEdit *>("quantityValue");
+        auto *use = dialog->findChild<QCheckBox *>("hpopUseDrag");
+        auto *accept = dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok);
+        use->setChecked(true);
+        kp->setText("10");
+        outer->setCurrentIndex(2);
+        accept->click();
+        EXPECT_EQ(options, saved);
+        EXPECT_TRUE(dialog->isVisible());
+        EXPECT_EQ(outer->currentIndex(), 0);
+        EXPECT_EQ(forces->currentIndex(), 1);
+        kp->setText("3");
+        outer->setCurrentIndex(2);
+        accept->click();
+        EXPECT_EQ(options, saved);
+        EXPECT_EQ(forces->currentIndex(), 1);
+        EXPECT_TRUE(
+            dialog->findChild<QLabel *>("errorText")->text().contains(QStringLiteral("星历")));
+        use->setChecked(false);
+        kp->setText("invalid");
         accept->click();
     });
     EXPECT_TRUE(edit_hpop_settings(options, nullptr));

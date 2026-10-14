@@ -2,6 +2,7 @@
 #include <memory>
 #include <optional>
 #include <orbitforge/core/frames/frame_provider.hpp>
+#include <orbitforge/core/propagation/atmospheric_drag.hpp>
 #include <orbitforge/core/propagation/gravity.hpp>
 #include <orbitforge/core/propagation/solar_radiation_pressure.hpp>
 #include <orbitforge/core/propagation/state_provider.hpp>
@@ -25,6 +26,7 @@ struct HpopOptions {
     std::string ephemeris_model = "de440s";
     std::array<ThirdBodyGravity, third_body_count> third_bodies{};
     SrpOptions srp;
+    DragOptions drag;
     [[nodiscard]] ThirdBodyGravity &third_body(ThirdBody body) {
         return third_bodies.at(static_cast<std::size_t>(body));
     }
@@ -44,11 +46,13 @@ struct HpopOptions {
                 return true;
         return false;
     }
-    [[nodiscard]] bool uses_ephemeris() const { return uses_third_bodies() || srp.enabled; }
+    [[nodiscard]] bool uses_ephemeris() const {
+        return uses_third_bodies() || srp.enabled || drag.enabled;
+    }
     [[nodiscard]] std::vector<ThirdBody> required_ephemeris_bodies() const {
         std::vector<ThirdBody> result;
         for (auto body : third_body_list)
-            if (third_body(body).enabled ||
+            if (third_body(body).enabled || (drag.enabled && body == ThirdBody::sun) ||
                 (srp.enabled &&
                  (body == ThirdBody::sun || (body == ThirdBody::moon && srp.moon_shadow &&
                                              srp.shadow_model != SrpShadowModel::none))))
@@ -77,6 +81,8 @@ struct HpopEnvironment {
     std::shared_ptr<const IEarthOrientationProvider> eop;
     std::shared_ptr<const GravityModel> gravity{};
     std::shared_ptr<const IThirdBodyEphemeris> ephemeris{};
+    // UTC epoch and day-of-year for atmosphere models. Must match the EOP time identity.
+    std::shared_ptr<const ITimeProvider> time{};
 };
 // Cowell equations in GCRF, TAI seconds. Initial state is osculating, not mean elements.
 // Deterministic checkpoints are independent of query order and output sampling.

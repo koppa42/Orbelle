@@ -1,10 +1,11 @@
 #include <fstream>
+#include <iostream>
 #include <orbitforge/orbitforge.hpp>
 
 namespace of = orbitforge;
 using namespace std::chrono_literals;
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv) try {
     if (argc != 2)
         return 1;
     const std::filesystem::path path{argv[1]};
@@ -93,4 +94,7 @@ int main(int argc, char **argv) {
         return 10;
     std::filesystem::remove(path);
     std::filesystem::remove(gravity_file);
+} catch (const std::exception &error) {
+    std::cerr << "Installed project API failed: " << error.what() << '\n';
+    return 11;
 }

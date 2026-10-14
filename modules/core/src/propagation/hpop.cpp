@@ -93,6 +93,22 @@ class Hpop final : public IStateProvider {
             for (int i = 0; i < 3; ++i)
                 acceleration[i] += force.acceleration_mps2[i];
         }
+        if (options_.drag.enabled) {
+            const auto epoch = epoch_at(t);
+            const auto transform =
+                environment_.frames->gcrf_to_itrf_state(epoch, environment_.eop->at(epoch));
+            const auto fixed =
+                transform.apply({epoch, OriginId::earth, FrameId::gcrf, r, {s[3], s[4], s[5]}});
+            const auto sun = options_.drag.use_apparent_sun_position
+                                 ? environment_.ephemeris->apparent_sun_from_earth(epoch)
+                                 : environment_.ephemeris->position(ThirdBody::sun, epoch);
+            const auto force = evaluate_drag(fixed.position_m, fixed.velocity_mps,
+                                             transform.rotation.apply_position(sun),
+                                             environment_.time->to_utc(epoch), options_.drag);
+            const auto inertial = transform.rotation.inverse_position(force.acceleration_itrf_mps2);
+            for (int i = 0; i < 3; ++i)
+                acceleration[i] += inertial[i];
+        }
         return {s[3], s[4], s[5], acceleration[0], acceleration[1], acceleration[2]};
     }
     State rk4(double t, const State &s, double h) const {
@@ -182,10 +198,12 @@ class Hpop final : public IStateProvider {
         validate_hpop_options(options_);
         if (options_.uses_ephemeris()) {
             if (!environment_.ephemeris)
-                throw std::invalid_argument(
-                    "Third-body gravity and SRP require selected ephemeris data");
+                throw std::invalid_argument("Enabled HPOP forces require selected ephemeris data");
             environment_.ephemeris->validate_interval(initial.epoch, initial.epoch,
                                                       options_.required_ephemeris_bodies());
+            if (options_.drag.enabled && options_.drag.use_apparent_sun_position)
+                environment_.ephemeris->validate_apparent_sun_interval(initial.epoch,
+                                                                       initial.epoch);
         }
         if (options_.gravity_model.empty())
             environment_.gravity = builtin_egm96();
@@ -197,11 +215,20 @@ class Hpop final : public IStateProvider {
                 "HPOP gravity GM differs from the selected file; update model settings");
         if (initial.origin != OriginId::earth || initial.frame != FrameId::gcrf)
             throw std::invalid_argument("HPOP requires an Earth-centered GCRF initial state");
-        if (options.gravity_degree > 0 && (!environment_.eop || !environment_.frames))
+        if ((options.gravity_degree > 0 || options.drag.enabled) &&
+            (!environment_.eop || !environment_.frames))
             throw std::invalid_argument(
-                "HPOP spherical gravity requires explicit EOP and frame providers");
-        if (options.gravity_degree > 0 && !eop_covers(environment_.eop->data_info(), initial.epoch))
+                "HPOP noncentral gravity and drag require explicit EOP and frame providers");
+        if ((options.gravity_degree > 0 || options.drag.enabled) &&
+            !eop_covers(environment_.eop->data_info(), initial.epoch))
             throw EopCoverageError("HPOP initial epoch is outside selected EOP coverage");
+        if (options.drag.enabled) {
+            if (!environment_.time || environment_.time->data_info().sha256 !=
+                                          environment_.eop->data_info().time_data.sha256)
+                throw std::invalid_argument(
+                    "Atmospheric drag requires the EOP's confirmed UTC provider");
+            (void)environment_.time->to_utc(initial.epoch);
+        }
         State value{};
         for (std::size_t i = 0; i < 3; ++i) {
             value[i] = initial.position_m[i];
@@ -224,9 +251,15 @@ class Hpop final : public IStateProvider {
             environment_.ephemeris->validate_interval(t < 0 ? epoch : initial_.epoch,
                                                       t < 0 ? initial_.epoch : epoch,
                                                       options_.required_ephemeris_bodies());
-        if (options_.gravity_degree > 0 && !eop_covers(environment_.eop->data_info(), epoch))
+        if (options_.drag.enabled && options_.drag.use_apparent_sun_position)
+            environment_.ephemeris->validate_apparent_sun_interval(t < 0 ? epoch : initial_.epoch,
+                                                                   t < 0 ? initial_.epoch : epoch);
+        if ((options_.gravity_degree > 0 || options_.drag.enabled) &&
+            !eop_covers(environment_.eop->data_info(), epoch))
             throw EopCoverageError(
                 "HPOP integration requires EOP covering the initial and query epochs");
+        if (options_.drag.enabled)
+            (void)environment_.time->to_utc(epoch);
         const double sign = t < 0 ? -1 : 1;
         const auto index = static_cast<std::size_t>(std::floor(std::abs(t) / checkpoint_seconds));
         State value;
@@ -256,6 +289,7 @@ class Hpop final : public IStateProvider {
 } // namespace
 void validate_hpop_options(const HpopOptions &o) {
     validate_srp_options(o.srp);
+    validate_drag_options(o.drag);
     if (o.gravity_model.size() > 64 ||
         !std::all_of(o.gravity_model.begin(), o.gravity_model.end(), [](char ch) {
             return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-';

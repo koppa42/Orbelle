@@ -86,7 +86,7 @@ auto aer = analysis.aer(station, sensor, 10s);
 
 上述 `data` 可以是 `DataSnapshot` 或 `DataCatalog`。只有调用方取得本次明确同意后，才对同一计划调用 `prepare(true)` 或 `open(true)`；拒绝则丢弃计划。类型区分准备和打开两个结果，`OpenDataChangedError::plan().open(true)` 返回公开的 `of::Project`。接受不会变成以后自动同意的设置，也不会重新读取磁盘。计划创建时已经校验资源与覆盖，错误不能通过接受参数绕过。
 
-`save(path)` 保存当前已提交输入，`save(path, analysis)` 另外记录匹配的分析来源。分析必须属于同一文档且物理输入仍一致；改名、样式与报告修改不使分析失效。文件已存在时默认报错；允许覆盖需显式传 `true`。写入失败不改变原文件、内存来源或已保存标记。文件使用当前 v18，包含 HPOP 配置。
+`save(path)` 保存当前已提交输入，`save(path, analysis)` 另外记录匹配的分析来源。分析必须属于同一文档且物理输入仍一致；改名、样式与报告修改不使分析失效。文件已存在时默认报错；允许覆盖需显式传 `true`。写入失败不改变原文件、内存来源或已保存标记。文件使用当前 v19，包含 HPOP 配置。
 
 ## 安装后链接
 
@@ -97,3 +97,5 @@ target_link_libraries(mission PRIVATE OrbitForge::Runtime)
 ```
 
 组件层的 `application::ProjectDocument` 与 `runtime::prepare()` 继续作为适配层入口，门面没有第二套校验、计算或持久化实现。桌面报告已通过 `Project::from_data()` 捕获已发布场景，在后台准备 `Analysis` 并生成结果；地图可见性联动使用该分析捕获的资源。工作台的对象应用与图形场景准备仍需进一步接入同一文档、事务和计划，当前报告捕获的文档修订不代表整个工作台的编辑次数。
+
+大气阻力通过 `HpopOptions.drag` 接入，低层 `evaluate_atmosphere` / `evaluate_drag` 使用 SI 输入；实际 HPOP 同时保留 UTC/EOP/Sun。模型、跨接口和独立参考见[阻力契约](../architecture/atmospheric_drag.md)及[阻力验证](../validation/atmospheric_drag_protocol.md)。

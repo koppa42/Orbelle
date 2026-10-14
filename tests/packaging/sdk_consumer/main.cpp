@@ -13,7 +13,18 @@
 #include <orbitforge/runtime/sgp4.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
-int main(int argc, char **argv) {
+int main(int argc, char **argv) try {
+    orbitforge::core::DragOptions drag;
+    drag.enabled = true;
+    drag.atmosphere = orbitforge::core::AtmosphereModel::nrlmsise00;
+    orbitforge::core::AtmosphereInput atmosphere;
+    atmosphere.geodetic.height_m = 400000;
+    const auto density = orbitforge::core::evaluate_atmosphere(drag.atmosphere, atmosphere);
+    const auto force = orbitforge::core::evaluate_drag({6778137, 0, 0}, {0, 7500, 0},
+                                                       {149597870700, 0, 0}, atmosphere.utc, drag);
+    if (!std::isfinite(density.density_kg_m3) || density.density_kg_m3 <= 0 ||
+        force.acceleration_itrf_mps2[1] >= 0 || orbitforge::core::kp_to_ap(3) != 15)
+        return 29;
     namespace app = orbitforge::application;
     app::ProjectDocument document{app::Project{"SDK objects", orbitforge::core::Epoch{0},
                                                orbitforge::core::Epoch{60'000'000'000}}};
@@ -278,4 +289,7 @@ int main(int argc, char **argv) {
             return 17;
     }
     std::cout << "Installed SDK consumer passed\n";
+} catch (const std::exception &error) {
+    std::cerr << "Installed SDK consumer failed: " << error.what() << '\n';
+    return 30;
 }

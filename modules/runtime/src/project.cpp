@@ -20,21 +20,30 @@ application::Session make_orbit_session(const application::OrbitInput &input,
     const auto &body = core::central_body(input.initial.origin);
     if (input.uses_hpop() && input.hpop.uses_ephemeris()) {
         if (!environment.ephemeris)
-            throw core::EphemerisDataError("HPOP third-body gravity or SRP requires an ephemeris");
+            throw core::EphemerisDataError("Enabled HPOP forces require an ephemeris");
         const auto first = core::Epoch{
             std::min(input.initial.epoch.tai_nanoseconds(), input.first.tai_nanoseconds())};
         const auto last = core::Epoch{
             std::max(input.initial.epoch.tai_nanoseconds(), input.last.tai_nanoseconds())};
         environment.ephemeris->validate_interval(first, last,
                                                  input.hpop.required_ephemeris_bodies());
+        if (input.hpop.drag.enabled && input.hpop.drag.use_apparent_sun_position)
+            environment.ephemeris->validate_apparent_sun_interval(first, last);
     }
     if (input.uses_eop_force()) {
         if (!environment.eop || !environment.frames)
-            throw std::invalid_argument("HPOP spherical gravity requires selected EOP data");
+            throw std::invalid_argument(
+                "HPOP noncentral gravity or drag requires selected EOP data");
         for (auto epoch : {input.initial.epoch, input.first, input.last})
             if (!core::eop_covers(environment.eop->data_info(), epoch))
                 throw core::EopCoverageError("HPOP needs EOP covering the entire integration "
                                              "interval, including the initial epoch");
+        if (input.hpop.drag.enabled) {
+            if (!environment.time)
+                throw std::invalid_argument("HPOP drag requires a retained UTC provider");
+            for (auto epoch : {input.initial.epoch, input.first, input.last})
+                (void)environment.time->to_utc(epoch);
+        }
     }
     switch (input.propagator) {
     case application::OrbitPropagator::two_body:

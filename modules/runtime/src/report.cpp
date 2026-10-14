@@ -132,6 +132,7 @@ void csv_field(std::ostream &out, const std::string &value) {
 } // namespace
 core::HpopEnvironment ReportContext::force_environment(const application::OrbitInput &input) const {
     core::HpopEnvironment environment{frames, eop};
+    environment.time = time;
     if (!input.uses_hpop())
         return environment;
     if (!input.hpop.gravity_model.empty()) {
@@ -181,6 +182,7 @@ std::string report_input_sha256(const application::Project &project) {
                 }
             }
             options.srp = core::effective_srp_options(options.srp);
+            options.drag = core::effective_drag_options(options.drag);
             if (!options.uses_ephemeris())
                 options.ephemeris_model = core::HpopOptions{}.ephemeris_model;
             if (options.integrator == core::HpopIntegrator::rk4) {

@@ -25,7 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 18;
+constexpr std::uint32_t project_version = 19;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -43,7 +43,7 @@ struct SectionSchema {
 // One current schema, shared by the reader and writer. Null means an optional section.
 constexpr std::array section_schemas{
     SectionSchema{scene_tag, 1, "Missing scene section"},
-    SectionSchema{objects_tag, 9, "Missing satellites section"},
+    SectionSchema{objects_tag, 10, "Missing satellites section"},
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
     SectionSchema{sensors_tag, 1, "Missing sensors section"},
@@ -202,6 +202,34 @@ core::SrpOptions read_srp(Reader &in) {
     o.moon_radius_m = in.real();
     return o;
 }
+void write_drag(Writer &out, const core::DragOptions &d, bool draft = true) {
+    out.number(d.enabled, 1);
+    if (!draft && !d.enabled)
+        return;
+    out.real(d.cd);
+    out.real(d.area_mass_ratio_m2_per_kg);
+    out.number(static_cast<unsigned>(d.atmosphere), 4);
+    out.number(static_cast<unsigned>(d.low_altitude_model), 4);
+    for (double value : {d.blending_range_m, d.f107, d.f107_average, d.kp})
+        out.real(value);
+    out.number(d.use_apparent_sun_position, 1);
+}
+core::DragOptions read_drag(Reader &in) {
+    core::DragOptions d;
+    d.enabled = in.boolean();
+    d.cd = in.real();
+    d.area_mass_ratio_m2_per_kg = in.real();
+    const auto model = in.number(4), lower = in.number(4);
+    check(model <= 1 && lower <= 1, "Unsupported atmospheric density model");
+    d.atmosphere = static_cast<core::AtmosphereModel>(model);
+    d.low_altitude_model = static_cast<core::LowAltitudeDensityModel>(lower);
+    d.blending_range_m = in.real();
+    d.f107 = in.real();
+    d.f107_average = in.real();
+    d.kp = in.real();
+    d.use_apparent_sun_position = in.boolean();
+    return d;
+}
 void write_mission(Writer &out, const core::MissionPlan &plan, bool names = true) {
     out.number(static_cast<unsigned>(plan.coast_model), 4);
     out.number(plan.segments.size(), 4);
@@ -325,6 +353,7 @@ std::string analysis_input_sha256(const Project &project) {
                 }
             }
             write_srp(out, core::effective_srp_options(o.srp), false);
+            write_drag(out, core::effective_drag_options(o.drag), false);
             if (o.uses_ephemeris())
                 out.text(o.ephemeris_model);
             out.number(static_cast<unsigned>(o.gravity_degree), 4);
@@ -737,6 +766,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
                              o.minimum_altitude_m})
                 objects.real(v);
             write_srp(objects, o.srp);
+            write_drag(objects, o.drag);
         }
     }
     payload.section(objects_tag, objects);
@@ -929,6 +959,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             o.fixed_step_seconds = objects.real();
             o.minimum_altitude_m = objects.real();
             o.srp = read_srp(objects);
+            o.drag = read_drag(objects);
         }
         project.satellites.push_back(std::move(satellite));
     }

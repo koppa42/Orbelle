@@ -11,7 +11,8 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
     std::shared_ptr<const core::IFrameProvider> frames,
     const std::vector<std::shared_ptr<const core::IEarthOrientationProvider>> &installed_data,
     const std::atomic_bool &cancelled, std::optional<application::Scenario> retained_sessions,
-    const std::optional<std::string> &edited_object, const core::ITimeProvider *time,
+    const std::optional<std::string> &edited_object,
+    std::shared_ptr<const core::ITimeProvider> time,
     const std::map<std::string, std::shared_ptr<const core::GravityModel>> &gravity,
     const std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> &ephemerides) {
     application::validate_project(project);
@@ -86,14 +87,16 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
             retained && !recompute
                 ? *existing
                 : make_orbit_session(satellite.orbit,
-                                     retained ? existing->provenance().input_revision + 1 : 1, time,
+                                     retained ? existing->provenance().input_revision + 1 : 1,
+                                     time.get(),
                                      {frames, eop,
                                       gravity.contains(satellite.orbit.hpop.gravity_model)
                                           ? gravity.at(satellite.orbit.hpop.gravity_model)
                                           : nullptr,
                                       ephemerides.contains(satellite.orbit.hpop.ephemeris_model)
                                           ? ephemerides.at(satellite.orbit.hpop.ephemeris_model)
-                                          : nullptr});
+                                          : nullptr,
+                                      time});
         auto orbit = prepare_orbit_scene(
             satellite.orbit, session, *frames, *eop, cancelled,
             display_cache_interval(satellite.orbit, satellite.display, project.current));
