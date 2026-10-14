@@ -118,7 +118,7 @@ TEST(Spice, ThirdBodyCoverageRejectsInteriorGapsAndChecksEveryRequiredChain) {
     spice_ok();
     const double coefficients[]{10000, 0, 0, 0, 1000, 0, 0, 0, 2000, 0, 0, 0};
     for (int body : {3, 10, 399, 301}) {
-        for (const auto interval : {std::pair{-3600., -100.}, std::pair{100., 3600.}}) {
+        for (const auto &interval : {std::pair{-3600., -100.}, std::pair{100., 3600.}}) {
             spkw02_c(handle, body, body < 11 ? 0 : 3, "J2000", interval.first, interval.second,
                      "synthetic segment", interval.second - interval.first, 1, 3, coefficients,
                      interval.first);
