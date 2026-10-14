@@ -258,6 +258,12 @@ int main(int argc, char **argv) {
         options.gravity_degree = options.gravity_order = 0;
         options.third_body(orbitforge::core::ThirdBody::sun).enabled =
             options.third_body(orbitforge::core::ThirdBody::moon).enabled = true;
+        options.srp.enabled = true;
+        options.srp.cr = 1.2;
+        const auto full_light = orbitforge::core::evaluate_srp(
+            {7e6, 0, 0}, {149597870700, 0, 0}, options.srp, std::array{0., 384400000., 0.});
+        if (full_light.lighting_ratio != 1 || full_light.acceleration_mps2[0] >= 0)
+            return 28;
         const orbitforge::core::CartesianState initial{epoch,
                                                        orbitforge::core::OriginId::earth,
                                                        orbitforge::core::FrameId::gcrf,

@@ -39,7 +39,12 @@ constexpr std::array definitions{
     Definition{Unit::metres_cubed_per_second_squared, Unit::metres_cubed_per_second_squared, 1,
                "m³/s²", "米³每秒²"},
     Definition{Unit::kilometres_cubed_per_second_squared, Unit::metres_cubed_per_second_squared,
-               1e9, "km³/s²", "千米³每秒²"}};
+               1e9, "km³/s²", "千米³每秒²"},
+    Definition{Unit::square_metres_per_kilogram, Unit::square_metres_per_kilogram, 1, "m²/kg",
+               "平方米每千克"},
+    Definition{Unit::square_centimetres_per_gram, Unit::square_metres_per_kilogram, 0.1, "cm²/g",
+               "平方厘米每克"},
+    Definition{Unit::pascal, Unit::pascal, 1, "Pa", "帕斯卡（N/m²）"}};
 const Definition &definition(Unit unit) {
     const auto found = std::find_if(definitions.begin(), definitions.end(),
                                     [unit](const auto &item) { return item.unit == unit; });

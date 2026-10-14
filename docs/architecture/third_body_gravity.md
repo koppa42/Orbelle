@@ -20,7 +20,7 @@ STK 来源语义依据[HPOP Gravity](https://help.agi.com/stk/Content/hpop/hpopG
 
 Cb 导入只读取 GM 子集：逐行 `Gm value`、`SystemGm value`（也接受 `key = value`、D 指数和 `#` 注释）。文件名必须匹配所选天体；拒绝重复字段、非有限或非正数、二进制及大于 1 MiB 的输入。单位由调用方显式指定，默认 m³/s²；km³/s² 使用比例 1e9。火星及外行星要求 SystemGm，避免把行星中心 GM 与系统质心位置混用。日月和内行星要求 Gm；除作为地球父天体的太阳使用 Gm 外，存在 SystemGm 时优先采用系统值。其他记录不会用于引力计算。
 
-导入成功后捕获 GM、文件名、天体和原文哈希作为配置快照，关闭窗口或导入失败保留原设置；计算不读取外部文件。项目 v17 保存十条来源与草稿，重开不依赖原 Cb 路径。输入身份只包含启用天体、实际来源及所用 GM / 哈希；改变未活动草稿不使分析或报告失效。
+导入成功后捕获 GM、文件名、天体和原文哈希作为配置快照，关闭窗口或导入失败保留原设置；计算不读取外部文件。项目 v18 保存十条来源与草稿，重开不依赖原 Cb 路径。输入身份只包含启用天体、实际来源及所用 GM / 哈希；改变未活动草稿不使分析或报告失效。
 
 C++ 使用 `options.third_body(core::ThirdBody::jupiter)` 设置 `enabled`、`source`、`user_mu` 或 `cb`，通过 `runtime::load_cb_gravity(path, body, mu_scale)` 捕获文件常数。
 

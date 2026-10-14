@@ -18,14 +18,15 @@ application::Session make_orbit_session(const application::OrbitInput &input,
                                         std::uint64_t revision, const core::ITimeProvider *time,
                                         core::HpopEnvironment environment) {
     const auto &body = core::central_body(input.initial.origin);
-    if (input.uses_hpop() && input.hpop.uses_third_bodies()) {
+    if (input.uses_hpop() && input.hpop.uses_ephemeris()) {
         if (!environment.ephemeris)
-            throw core::EphemerisDataError("Third-body gravity requires an ephemeris");
+            throw core::EphemerisDataError("HPOP third-body gravity or SRP requires an ephemeris");
         const auto first = core::Epoch{
             std::min(input.initial.epoch.tai_nanoseconds(), input.first.tai_nanoseconds())};
         const auto last = core::Epoch{
             std::max(input.initial.epoch.tai_nanoseconds(), input.last.tai_nanoseconds())};
-        environment.ephemeris->validate_interval(first, last, input.hpop.enabled_third_bodies());
+        environment.ephemeris->validate_interval(first, last,
+                                                 input.hpop.required_ephemeris_bodies());
     }
     if (input.uses_eop_force()) {
         if (!environment.eop || !environment.frames)
@@ -78,7 +79,7 @@ application::Scenario make_project_scenario(const application::Project &project,
     result = result.with_data_lock(project.data_lock());
     for (const auto &satellite : project.satellites) {
         const auto &input = satellite.orbit;
-        if (input.uses_hpop() && input.hpop.uses_third_bodies()) {
+        if (input.uses_hpop() && input.hpop.uses_ephemeris()) {
             if (!environment.ephemeris)
                 throw application::ProjectError("Missing selected ephemeris");
             validate_ephemeris_reference(project.force_data, input.hpop.ephemeris_model,

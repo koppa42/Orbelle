@@ -862,6 +862,7 @@ void OrbitEditor::update_state_labels() {
         (hpop_.uses_third_bodies()
              ? QStringLiteral(" + %1 个第三体").arg(hpop_.enabled_third_bodies().size())
              : QString{}) +
+        (hpop_.srp.enabled ? QStringLiteral(" + 太阳辐射压") : QString{}) +
         (hpop_.integrator == core::HpopIntegrator::rkf78 ? QStringLiteral(" · RKF78 自适应")
                                                          : QStringLiteral(" · RK4 固定步长")));
     if (propagator_kind_ == OrbitPropagator::mission) {

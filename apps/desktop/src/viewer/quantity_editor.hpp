@@ -21,7 +21,10 @@ enum class Unit {
     hour,
     day,
     metres_cubed_per_second_squared,
-    kilometres_cubed_per_second_squared
+    kilometres_cubed_per_second_squared,
+    square_metres_per_kilogram,
+    square_centimetres_per_gram,
+    pascal
 };
 QString unit_symbol(Unit unit);
 std::vector<Unit> compatible_units(Unit unit);

@@ -1653,7 +1653,7 @@ class Workbench final : public QMainWindow {
         const auto installed = eop_catalog_->data().ephemerides();
         for (const auto &satellite : project.satellites) {
             const auto &input = satellite.orbit;
-            if (!input.uses_hpop() || !input.hpop.uses_third_bodies())
+            if (!input.uses_hpop() || !input.hpop.uses_ephemeris())
                 continue;
             const auto &id = input.hpop.ephemeris_model;
             if (std::any_of(result.begin(), result.end(),
@@ -3150,7 +3150,7 @@ class Workbench final : public QMainWindow {
             if (!application::matching_project_data(current_data->data_info(), eop_->data_info()) ||
                 !gravity_.empty() || !ephemerides_.empty() ||
                 (input.uses_hpop() &&
-                 (!input.hpop.gravity_model.empty() || input.hpop.uses_third_bodies()))) {
+                 (!input.hpop.gravity_model.empty() || input.hpop.uses_ephemeris()))) {
                 // Publish all tracks and their provider together, never mix EOP revisions.
                 auto project = project_snapshot(project_path_);
                 const auto id = input.object_id;

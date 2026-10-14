@@ -35,8 +35,26 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
             if (settings.source == core::ThirdBodyGravitySource::cb_file)
                 config << ";cb=" << settings.cb->content_sha256;
         }
+        algorithm += config.str();
+    }
+    if (options.srp.enabled) {
+        const auto o = core::effective_srp_options(options.srp);
+        std::ostringstream config;
+        config.imbue(std::locale::classic());
+        config << std::hexfloat << ";srp=spherical-geometric-uniform-angular-union-v1"
+               << ";shadow=" << static_cast<int>(o.shadow_model)
+               << ";earth-shadow=" << o.earth_shadow << ";moon-shadow=" << o.moon_shadow
+               << ";cr=" << o.cr << ";area-mass=" << o.area_mass_ratio_m2_per_kg
+               << ";atmosphere-height=" << o.atmospheric_altitude_m
+               << ";pressure=" << o.pressure_at_reference_pa
+               << ";reference-distance=" << o.reference_distance_m
+               << ";sun-radius=" << o.sun_radius_m << ";earth-radius=" << o.earth_radius_m
+               << ";moon-radius=" << o.moon_radius_m;
+        algorithm += config.str();
+    }
+    if (options.uses_ephemeris() && environment.ephemeris) {
         algorithm +=
-            config.str() + ";ephemeris=" +
+            ";ephemeris=" +
             application::DataLock(
                 {ephemeris_reference(options.ephemeris_model, environment.ephemeris->data_info())})
                 .sha256();

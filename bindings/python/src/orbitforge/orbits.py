@@ -1,5 +1,5 @@
 """Immutable orbit inputs. Mean elements remain distinct from osculating ones."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 from . import _native as n
 from . import units as u
@@ -87,11 +87,61 @@ def load_cb_gravity(path, body: str, *, mu_scale: float = 1.0) -> n.CbGravity:
 
 
 @dataclass(frozen=True, slots=True)
+class SrpSettings:
+    """Spherical SRP using geometric DE440s positions and spherical Earth/Moon shadows.
+
+    All quantities are SI. Dual cone integrates the uniform apparent solar disk;
+    Earth/Moon occultations use their union. No light-time, ellipsoidal limb or STK
+    boundary mitigation is implied. Disabled drafts are retained but do not affect results.
+    """
+    enabled: bool = False
+    cr: float = 1.0
+    area_mass_ratio_m2_per_kg: float = 0.02
+    shadow_model: Literal["none", "cylindrical", "dual_cone"] = "dual_cone"
+    earth_shadow: bool = True
+    moon_shadow: bool = True
+    atmospheric_altitude_m: float = 0.0
+    pressure_at_reference_pa: float = 4.56e-6
+    reference_distance_m: float = 149597870700.0
+    sun_radius_m: float = 695700000.0
+    earth_radius_m: float = 6378137.0
+    moon_radius_m: float = 1737400.0
+
+    def __post_init__(self) -> None:
+        for name in ("enabled", "earth_shadow", "moon_shadow"):
+            if not isinstance(getattr(self, name), bool):
+                raise TypeError(f"{name} requires bool")
+        self._native()
+
+    def _native(self) -> n.SrpOptions:
+        shadows = {"none": n.SrpShadowModel.NONE,
+                   "cylindrical": n.SrpShadowModel.CYLINDRICAL,
+                   "dual_cone": n.SrpShadowModel.DUAL_CONE}
+        if self.shadow_model not in shadows:
+            raise ValueError("Unknown SRP shadow model")
+        value = n.SrpOptions()
+        for name in self.__dataclass_fields__:
+            if name != "shadow_model":
+                setattr(value, name, getattr(self, name))
+        value.shadow_model = shadows[self.shadow_model]
+        value.validate()
+        return value
+
+    @classmethod
+    def _read(cls, value: n.SrpOptions) -> "SrpSettings":
+        shadows = {n.SrpShadowModel.NONE: "none", n.SrpShadowModel.CYLINDRICAL: "cylindrical",
+                   n.SrpShadowModel.DUAL_CONE: "dual_cone"}
+        fields = {name: getattr(value, name) for name in cls.__dataclass_fields__
+                  if name != "shadow_model"}
+        return cls(**fields, shadow_model=shadows[value.shadow_model])
+
+
+@dataclass(frozen=True, slots=True)
 class HpopSettings:
     """Static file or built-in gravity and Cowell integration with local error tolerances.
 
-    Optional solar-system third-body gravity uses an explicitly selected DE440s ephemeris. No drag,
-    SRP or tides in this release. Noncentral gravity requires
+    Optional third-body gravity and spherical SRP use explicitly selected DE440s ephemerides.
+    No drag or tides in this release. Noncentral gravity requires
     explicitly selected EOP covering the entire integration path, including initial epoch.
     gravity_model selects a catalog/DataSnapshot ID (empty: built-in EGM96, up to 20).
     File models support degrees through 360. gravity_mu must match the selected file's
@@ -112,8 +162,10 @@ class HpopSettings:
     third_bodies: tuple[str, ...] = ()
     ephemeris: str = "de440s"
     body_gravity: tuple[ThirdBodySettings, ...] = ()
+    srp: SrpSettings = field(default_factory=SrpSettings)
 
     def __post_init__(self) -> None:
+        require(self.srp, SrpSettings, "srp")
         bodies = tuple(self.third_bodies)
         if any(body not in THIRD_BODY_NAMES for body in bodies) or len(set(bodies)) != len(bodies):
             raise ValueError("third_bodies accepts solar-system body names, each at most once")
@@ -133,7 +185,7 @@ class HpopSettings:
         if self.integrator not in ("rkf78", "rk4"):
             raise ValueError("integrator must be 'rkf78' or 'rk4'")
         for name in self.__dataclass_fields__:
-            if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity"):
+            if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp"):
                 setattr(value, name, getattr(self, name))
         rows = list(value.third_bodies)
         for item in self.body_gravity:
@@ -142,6 +194,7 @@ class HpopSettings:
             row.enabled = name in self.third_bodies
         value.third_bodies = rows
         value.ephemeris_model = self.ephemeris
+        value.srp = self.srp._native()
         value.integrator = n.HpopIntegrator.RKF78 if self.integrator == "rkf78" else n.HpopIntegrator.RK4
         value.validate()
         return value
@@ -149,7 +202,7 @@ class HpopSettings:
     @classmethod
     def _read(cls, value: n.HpopOptions) -> "HpopSettings":
         fields = {name: getattr(value, name) for name in cls.__dataclass_fields__
-                  if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity")}
+                  if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp")}
         rows = value.third_bodies
         fields["third_bodies"] = tuple(b for b, row in zip(THIRD_BODY_NAMES, rows) if row.enabled)
         sources = {n.ThirdBodyGravitySource.JPL_DE: "jpl_de",
@@ -160,6 +213,7 @@ class HpopSettings:
                                       if row.source != n.ThirdBodyGravitySource.JPL_DE or
                                       row.user_mu is not None or row.cb is not None)
         fields["ephemeris"] = value.ephemeris_model
+        fields["srp"] = SrpSettings._read(value.srp)
         return cls(**fields, integrator="rkf78" if value.integrator == n.HpopIntegrator.RKF78 else "rk4")
 
 
@@ -250,8 +304,8 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          velocity_tolerance_mps: float = 1e-6, minimum_altitude_m: float = 0,
          third_bodies: tuple[str, ...] = (), ephemeris: str = "de440s",
          sun_mu: float | None = None, moon_mu: float | None = None,
-         body_gravity: tuple[ThirdBodySettings, ...] = ()) -> Orbit:
-    """Cowell orbit with static gravity, solar-system third bodies, RKF78 or RK4.
+         body_gravity: tuple[ThirdBodySettings, ...] = (), srp: SrpSettings | None = None) -> Orbit:
+    """Cowell orbit with static gravity, third bodies, spherical SRP, RKF78 or RK4.
 
     Built-in EGM96 supports up to degree 20; installed gravity files up to 360.
     third_bodies=("sun", "moon") requires explicitly supplied DE440s ephemerides.
@@ -270,6 +324,7 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
         gravity_degree, gravity_degree if gravity_order is None else gravity_order, integrator,
         relative_tolerance, position_tolerance_m, velocity_tolerance_mps,
         min_step_seconds, max_step_seconds, fixed_step_seconds, minimum_altitude_m,
-        gravity_model.lower(), gravity_mu, third_bodies, ephemeris, tuple(body_gravity) + overrides)
+        gravity_model.lower(), gravity_mu, third_bodies, ephemeris, tuple(body_gravity) + overrides,
+        SrpSettings() if srp is None else require(srp, SrpSettings, "srp"))
     settings._native()  # Fail at construction, before changing a project.
     return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)

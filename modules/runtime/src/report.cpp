@@ -141,7 +141,7 @@ core::HpopEnvironment ReportContext::force_environment(const application::OrbitI
                                    found->second->info());
         environment.gravity = found->second;
     }
-    if (input.hpop.uses_third_bodies()) {
+    if (input.hpop.uses_ephemeris()) {
         const auto found = ephemerides.find(input.hpop.ephemeris_model);
         check(found != ephemerides.end() && found->second, "Missing selected ephemeris provider");
         validate_ephemeris_reference(project.force_data, input.hpop.ephemeris_model,
@@ -180,7 +180,8 @@ std::string report_input_sha256(const application::Project &project) {
                         body.cb->name = "Cb file"; // Display name is not a calculation input.
                 }
             }
-            if (!options.uses_third_bodies())
+            options.srp = core::effective_srp_options(options.srp);
+            if (!options.uses_ephemeris())
                 options.ephemeris_model = core::HpopOptions{}.ephemeris_model;
             if (options.integrator == core::HpopIntegrator::rk4) {
                 const core::HpopOptions defaults;

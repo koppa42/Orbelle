@@ -94,6 +94,30 @@ void bind_project(py::module_ &module) {
     py::enum_<core::HpopIntegrator>(module, "HpopIntegrator")
         .value("RKF78", core::HpopIntegrator::rkf78)
         .value("RK4", core::HpopIntegrator::rk4);
+    py::enum_<core::SrpShadowModel>(module, "SrpShadowModel")
+        .value("NONE", core::SrpShadowModel::none)
+        .value("CYLINDRICAL", core::SrpShadowModel::cylindrical)
+        .value("DUAL_CONE", core::SrpShadowModel::dual_cone);
+    py::class_<core::SrpOptions>(module, "SrpOptions")
+        .def(py::init<>())
+        .def_readwrite("enabled", &core::SrpOptions::enabled)
+        .def_readwrite("cr", &core::SrpOptions::cr)
+        .def_readwrite("area_mass_ratio_m2_per_kg", &core::SrpOptions::area_mass_ratio_m2_per_kg)
+        .def_readwrite("shadow_model", &core::SrpOptions::shadow_model)
+        .def_readwrite("earth_shadow", &core::SrpOptions::earth_shadow)
+        .def_readwrite("moon_shadow", &core::SrpOptions::moon_shadow)
+        .def_readwrite("atmospheric_altitude_m", &core::SrpOptions::atmospheric_altitude_m)
+        .def_readwrite("pressure_at_reference_pa", &core::SrpOptions::pressure_at_reference_pa)
+        .def_readwrite("reference_distance_m", &core::SrpOptions::reference_distance_m)
+        .def_readwrite("sun_radius_m", &core::SrpOptions::sun_radius_m)
+        .def_readwrite("earth_radius_m", &core::SrpOptions::earth_radius_m)
+        .def_readwrite("moon_radius_m", &core::SrpOptions::moon_radius_m)
+        .def("validate", &core::validate_srp_options);
+    py::class_<core::SrpEvaluation>(module, "SrpEvaluation")
+        .def_readonly("acceleration_mps2", &core::SrpEvaluation::acceleration_mps2)
+        .def_readonly("lighting_ratio", &core::SrpEvaluation::lighting_ratio);
+    module.def("evaluate_srp", &core::evaluate_srp, py::arg("satellite_m"), py::arg("sun_m"),
+               py::arg("options"), py::arg("moon_m") = std::nullopt);
     py::enum_<core::ThirdBody>(module, "ThirdBody")
         .value("SUN", core::ThirdBody::sun)
         .value("MOON", core::ThirdBody::moon)
@@ -126,6 +150,7 @@ void bind_project(py::module_ &module) {
         .def_readwrite("gravity_model", &core::HpopOptions::gravity_model)
         .def_readwrite("gravity_mu", &core::HpopOptions::gravity_mu)
         .def_readwrite("third_bodies", &core::HpopOptions::third_bodies)
+        .def_readwrite("srp", &core::HpopOptions::srp)
         .def_readwrite("ephemeris_model", &core::HpopOptions::ephemeris_model)
         .def_readwrite("gravity_degree", &core::HpopOptions::gravity_degree)
         .def_readwrite("gravity_order", &core::HpopOptions::gravity_order)

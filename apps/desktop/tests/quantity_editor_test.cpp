@@ -43,6 +43,7 @@
 #include <QTreeWidget>
 #include <cmath>
 #include <gtest/gtest.h>
+#include <iostream>
 #include <numbers>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/j2.hpp>
@@ -1378,8 +1379,13 @@ TEST_F(QuantityTest, HpopNestedPagesPreserveDraftsAndKeepUnavailableModelsInacti
         screenshot("hpop-gravity");
         for (int index = 1; index < 4; ++index) {
             forces->setCurrentIndex(index);
-            EXPECT_TRUE(forces->currentWidget()->findChildren<QCheckBox *>().isEmpty());
-            EXPECT_TRUE(forces->currentWidget()->findChild<QLabel *>("hpopPendingBadge"));
+            if (index == 2) {
+                EXPECT_FALSE(dialog->findChild<QCheckBox *>("hpopUseSrp")->isChecked());
+                EXPECT_FALSE(dialog->findChild<QuantityEditor *>("hpopSrpCr")->isEnabled());
+            } else {
+                EXPECT_TRUE(forces->currentWidget()->findChildren<QCheckBox *>().isEmpty());
+                EXPECT_TRUE(forces->currentWidget()->findChild<QLabel *>("hpopPendingBadge"));
+            }
             screenshot(QStringLiteral("hpop-force-%1").arg(index));
         }
         outer->setCurrentIndex(2);
@@ -1468,6 +1474,127 @@ void settle_hpop_catalog(EopCatalog &catalog) {
     settled.exec();
 }
 } // namespace
+TEST_F(QuantityTest, HpopSrpUnitsShadowAssignmentsResizeAndCancelPreserveExactDrafts) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    core::HpopOptions options;
+    options.srp.reference_distance_m = 149597870700.12347;
+    const auto exact_distance = options.srp.reference_distance_m;
+    runtime::CatalogEphemeris entry;
+    entry.selection = "de440s";
+    entry.info.first = core::Epoch{0};
+    entry.info.last = core::Epoch{86400000000000};
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *outer = dialog->findChild<QTabWidget *>("hpopSettingsTabs");
+        auto *forces = dialog->findChild<QTabWidget *>("hpopForceModelTabs");
+        forces->setCurrentIndex(2);
+        auto *use = dialog->findChild<QCheckBox *>("hpopUseSrp");
+        auto *area = dialog->findChild<QuantityEditor *>("hpopSrpAreaMassRatio");
+        auto *altitude = dialog->findChild<QuantityEditor *>("hpopSrpAtmosphericAltitude");
+        auto *shadow = dialog->findChild<QComboBox *>("hpopSrpShadowModel");
+        auto *earth = dialog->findChild<QCheckBox *>("hpopSrpEarthShadow");
+        auto *moon = dialog->findChild<QCheckBox *>("hpopSrpMoonShadow");
+        use->setChecked(true);
+        area->set_unit(Unit::square_centimetres_per_gram);
+        area->findChild<QLineEdit *>("quantityValue")->setText("0.3");
+        altitude->set_unit(Unit::kilometre);
+        altitude->set_value(23, Unit::kilometre);
+        shadow->setCurrentIndex(0);
+        EXPECT_FALSE(earth->isEnabled());
+        EXPECT_FALSE(moon->isEnabled());
+        EXPECT_FALSE(altitude->isEnabled());
+        shadow->setCurrentIndex(2);
+        moon->setChecked(false);
+        EXPECT_TRUE(altitude->isEnabled());
+        EXPECT_FALSE(dialog->findChild<QuantityEditor *>("hpopSrpMoonRadius")->isEnabled());
+        EXPECT_FALSE(dialog->findChild<QLabel *>("hpopSrpEphemerisStatus")
+                         ->text()
+                         .contains(QStringLiteral("已安装")));
+        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        std::cout << "HPOP SRP device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
+        for (int width : {720, 430}) {
+            dialog->resize(width, width == 720 ? 700 : 620);
+            QEventLoop settled;
+            QTimer::singleShot(60, &settled, &QEventLoop::quit);
+            settled.exec();
+            EXPECT_EQ(area, dialog->findChild<QuantityEditor *>("hpopSrpAreaMassRatio"));
+            EXPECT_EQ(area->findChild<QLineEdit *>("quantityValue")->text(), "0.3");
+            EXPECT_NEAR(area->value(Unit::square_metres_per_kilogram), .03, 1e-16);
+            auto *buttons = dialog->findChild<QDialogButtonBox *>();
+            EXPECT_TRUE(dialog->rect().contains(buttons->geometry()));
+            if (!capture.isEmpty()) {
+                EXPECT_TRUE(QDir{}.mkpath(capture));
+                EXPECT_TRUE(dialog->grab().save(capture + QString("/hpop-srp-%1.png").arg(width)));
+                auto *scroll = dialog->findChild<QScrollArea *>("hpopSrpPage");
+                scroll->ensureWidgetVisible(
+                    dialog->findChild<QuantityEditor *>("hpopSrpMoonRadius"));
+                QApplication::processEvents();
+                EXPECT_TRUE(
+                    dialog->grab().save(capture + QString("/hpop-srp-data-%1.png").arg(width)));
+                scroll->verticalScrollBar()->setValue(0);
+            }
+        }
+        outer->setCurrentIndex(1);
+        outer->setCurrentIndex(0);
+        EXPECT_EQ(forces->currentIndex(), 2);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr, {}, {entry}));
+    EXPECT_TRUE(options.srp.enabled);
+    EXPECT_NEAR(options.srp.area_mass_ratio_m2_per_kg, .03, 1e-16);
+    EXPECT_EQ(options.srp.atmospheric_altitude_m, 23000);
+    EXPECT_FALSE(options.srp.moon_shadow);
+    EXPECT_EQ(options.srp.reference_distance_m, exact_distance);
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        EXPECT_TRUE(dialog->findChild<QCheckBox *>("hpopUseSrp")->isChecked());
+        dialog->findChild<QCheckBox *>("hpopUseSrp")->setChecked(false);
+        dialog->findChild<QuantityEditor *>("hpopSrpCr")->set_value(2, Unit::one);
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr, {}, {entry}));
+    EXPECT_EQ(options, saved);
+}
+
+TEST_F(QuantityTest, HpopSrpInvalidFieldAndMissingEphemerisReturnToSrpWithoutCommitting) {
+    core::HpopOptions options;
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *outer = dialog->findChild<QTabWidget *>("hpopSettingsTabs");
+        auto *forces = dialog->findChild<QTabWidget *>("hpopForceModelTabs");
+        auto *cr = dialog->findChild<QuantityEditor *>("hpopSrpCr")
+                       ->findChild<QLineEdit *>("quantityValue");
+        auto *use = dialog->findChild<QCheckBox *>("hpopUseSrp");
+        auto *accept = dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok);
+        use->setChecked(true);
+        cr->setText("101");
+        outer->setCurrentIndex(2);
+        accept->click();
+        EXPECT_EQ(options, saved);
+        EXPECT_TRUE(dialog->isVisible());
+        EXPECT_EQ(outer->currentIndex(), 0);
+        EXPECT_EQ(forces->currentIndex(), 2);
+        cr->setText("1.7");
+        outer->setCurrentIndex(2);
+        accept->click();
+        EXPECT_EQ(options, saved);
+        EXPECT_EQ(outer->currentIndex(), 0);
+        EXPECT_EQ(forces->currentIndex(), 2);
+        EXPECT_TRUE(
+            dialog->findChild<QLabel *>("errorText")->text().contains(QStringLiteral("星历")));
+        use->setChecked(false);
+        cr->setText("invalid"); // Inactive invalid text must not destroy the last valid draft.
+        accept->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr));
+    EXPECT_EQ(options, saved);
+}
+
 TEST_F(QuantityTest, HpopNewDesktopDefaultsUseEgm2008AndKeepExplicitModelChoices) {
     OrbitEditor editor(OrbitInput{});
     runtime::CatalogGravity entry;

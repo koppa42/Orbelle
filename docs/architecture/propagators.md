@@ -8,7 +8,7 @@
 | J2 secular | 平均椭圆，含平近点角 M | GCRF | 一阶长期趋势 |
 | J4 secular | 平均椭圆，含平近点角 M | GCRF | 含 J2、J2²、J4 的长期趋势 |
 | SGP4 | 一组固定的 TLE，两行各 69 个 ASCII 字符 | TEME of date | 与 TLE 配套的近地/深空预报 |
-| HPOP（初版） | GCRF 瞬时位置/速度或经典根数；力模型与积分设置 | GCRF | 静态球谐与可选太阳系第三体引力下的数值传播 |
+| HPOP（开发中） | GCRF 瞬时位置/速度或经典根数；力模型与积分设置 | GCRF | 静态球谐、可选太阳系第三体引力与球形太阳辐射压的数值传播 |
 
 此分工参考 [STK 预报器说明](https://help.agi.com/stk/12.7.1/Content/stk/vehSat_orbitProp_choose.htm)。新增模型不改变已有二体/J2 的模型常数或算法。
 
@@ -16,7 +16,7 @@
 
 ## HPOP
 
-当前支持静态重力与太阳系第三体数值传播。通用地球轨道所需的完整力模型、积分高级能力与协方差目标见 [HPOP 与 STK 的对照及重构要求](hpop_alignment.md)；其中规划能力尚未进入本节的已实现范围。
+当前支持静态重力、太阳系第三体与[球形太阳辐射压](solar_radiation_pressure.md)数值传播。通用地球轨道所需的完整力模型、积分高级能力与协方差目标见 [HPOP 与 STK 的对照及重构要求](hpop_alignment.md)；其中规划能力尚未进入本节的已实现范围。
 
 参考 STK 的[力模型分层](https://help.agi.com/stk/Content/hpop/hpopForceMods.htm)和[积分设置](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)，在 GCRF 中以连续 TAI 秒积分 Cowell 六维方程。输入为瞬时状态，不能把 J2/J4 平均根数当作等价瞬时初值。当前支持：
 
@@ -50,7 +50,7 @@ trajectory = analysis.states(satellite, step=u.s(30))
 
 RK4 使用 `integrator="rk4", fixed_step_seconds=10`；点质量使用 `gravity_degree=0`，无需 EOP。`satellite.orbit.hpop` 是不可变 `HpopSettings`，可用 `dataclasses.replace` 修改后将新 `Orbit` 赋回 `satellite.orbit`；旧分析继续持有旧参数与数据。完整示例见 `examples/python/propagators.py`。
 
-C++ 设置 `OrbitInput.propagator = OrbitPropagator::hpop`、`OrbitInput.hpop`（`HpopOptions`），通过 `Project::prepare(data)` 查询。低层工厂 `runtime::make_hpop_session(initial, options, environment, id)` 持有不可变 Frame/EOP、重力和第三体 Provider 的共享所有权。核心与不启用第三体的点质量模式无需 CSPICE。桌面选择 HPOP 后，“配置…”外层为力模型、积分器、协方差；力模型内分引力、阻力、太阳辐射压、其他四页。引力页将中心天体引力与第三体引力放在同一滚动页面；第三体区域用 Name / Use / Source / GM 四列表格配置日月、七颗行星及冥王星，支持搜索和独立的 Cb file / JPL DE / User Specified 来源。最低停止高度放在积分器页。阻力、太阳辐射压、其他模型与协方差尚未实现，页面只显示能力状态，不提供可保存为已启用的开关。切换内外页、调整窗口或单位不重建输入；校验失败返回相应页并定位字段。保存设置仅改变属性草稿，“应用轨道”才计算并发布。参数随项目 v17 保存。
+C++ 设置 `OrbitInput.propagator = OrbitPropagator::hpop`、`OrbitInput.hpop`（`HpopOptions`），通过 `Project::prepare(data)` 查询。低层工厂 `runtime::make_hpop_session(initial, options, environment, id)` 持有不可变 Frame/EOP、重力和星历 Provider 的共享所有权。核心只依赖标准库；Runtime 的 DE440s 装配需要 CSPICE。桌面选择 HPOP 后，“配置…”外层为力模型、积分器、协方差；力模型内分引力、阻力、太阳辐射压、其他四页。引力页将中心天体引力与第三体引力放在同一滚动页面；第三体区域用 Name / Use / Source / GM 四列表格配置日月、七颗行星及冥王星，支持搜索和独立的 Cb file / JPL DE / User Specified 来源。光压页提供球形模型、独立 Cr 与面积质量比、三种阴影模式、地球／月球分配及等效大气高度；太阳位置当前为几何位置。最低停止高度放在积分器页。阻力、其他模型与协方差尚未实现，页面只显示能力状态，不提供可保存为已启用的开关。切换内外页、调整窗口或单位不重建输入；校验失败返回相应页并定位字段。保存设置仅改变属性草稿，“应用轨道”才计算并发布。参数随项目 v18 保存。
 
 独立回归使用 Orekit 13.1.2 Holmes–Featherstone 重力和 Hipparchus 4.0.2 DP853：五类轨道 × 三组阶次 × ±6000 s/±1 天共 60 个状态，检查位置每分量 0.15 m、速度 0.15 mm/s、初始加速度 5e-13 m/s²。参考刻意采用静态同轴重力系，隔离球谐与积分；真实 EOP 路由另由集成测试验证。尚无同配置 STK 导出数据直接对照，见 [HPOP 验证](../validation/hpop_protocol.md)。后续按完整截图清单接光压、空间天气、大气、潮汐、附加力、积分高级选项和协方差；未实现的力不提供无效开关。
 

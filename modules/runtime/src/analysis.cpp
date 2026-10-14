@@ -109,7 +109,7 @@ DataSnapshot DataSnapshot::with_gravity_file(const std::string &selection,
 core::HpopEnvironment DataSnapshot::force_environment(const OrbitInput &input) const {
     std::shared_ptr<const core::GravityModel> model;
     std::shared_ptr<const core::IThirdBodyEphemeris> ephemeris;
-    if (input.uses_hpop() && input.hpop.uses_third_bodies()) {
+    if (input.uses_hpop() && input.hpop.uses_ephemeris()) {
         const auto found = ephemerides_.find(input.hpop.ephemeris_model);
         if (found == ephemerides_.end())
             throw AnalysisCapabilityError("Missing ephemeris '" + input.hpop.ephemeris_model +
@@ -220,7 +220,7 @@ struct Analysis::Impl {
                                   satellite.name(), report_input_sha256(numerical),
                                   input.uses_eop_force() ||
                                       (input.uses_hpop() && (!input.hpop.gravity_model.empty() ||
-                                                             input.hpop.uses_third_bodies()))});
+                                                             input.hpop.uses_ephemeris()))});
         }
         for (const auto &station : p.ground_stations) {
             Project numerical{"analysis-state-input-v1", p.first, p.last};
@@ -443,7 +443,7 @@ AnalysisPlan::AnalysisPlan(const ProjectDocument &project, const DataCatalog &ca
           auto data = catalog.snapshot(first, last);
           for (const auto &satellite : captured.project->satellites) {
               const auto &input = satellite.orbit;
-              if (input.uses_hpop() && input.hpop.uses_third_bodies() &&
+              if (input.uses_hpop() && input.hpop.uses_ephemeris() &&
                   !data.ephemerides().contains(input.hpop.ephemeris_model))
                   data = data.with_ephemeris(input.hpop.ephemeris_model,
                                              catalog.load_ephemeris(input.hpop.ephemeris_model));

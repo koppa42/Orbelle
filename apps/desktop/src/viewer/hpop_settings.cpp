@@ -42,7 +42,7 @@ bool edit_hpop_settings(
             std::error_code error;
             return !std::filesystem::is_regular_file(entry.file, error);
         });
-    auto installed_ephemerides = ephemerides;
+    auto installed_ephemerides = data ? data->data().ephemerides() : ephemerides;
     QDialog dialog(parent);
     dialog.setObjectName("hpopSettingsDialog");
     dialog.setWindowTitle(QStringLiteral("HPOP · 数值传播"));
@@ -493,10 +493,108 @@ bool edit_hpop_settings(
         force_tabs, QStringLiteral("阻力"), "hpopDragPage",
         QStringLiteral("大气阻力模型尚未接入 HPOP。"),
         QStringLiteral("球形阻力、Cd 与面积质量比、大气密度、空间天气及低空拼接将集中在此配置。"));
-    pending(
-        force_tabs, QStringLiteral("太阳辐射压"), "hpopSrpPage",
-        QStringLiteral("太阳辐射压及阴影模型尚未接入 HPOP。"),
-        QStringLiteral("球形模型、Cr 与面积质量比、阴影、太阳位置方法及遮挡天体将集中在此配置。"));
+    auto *srp_page = page(force_tabs, QStringLiteral("太阳辐射压"), "hpopSrpPage");
+    auto *srp_use = new QCheckBox(QStringLiteral("使用太阳辐射压 Use SRP"));
+    srp_use->setObjectName("hpopUseSrp");
+    srp_use->setChecked(options.srp.enabled);
+    srp_page->addRow(srp_use);
+    auto *srp_model = section(srp_page, QStringLiteral("球形光压模型"), "hpopSrpModelSection");
+    auto *srp_type = new QComboBox;
+    srp_type->setObjectName("hpopSrpType");
+    srp_type->addItem(QStringLiteral("Spherical · 球形"));
+    srp_model->addRow(QStringLiteral("类型"), srp_type);
+    auto *srp_cr = quantity(srp_model, QStringLiteral("光压系数 Cr"), "hpopSrpCr", Unit::one,
+                            options.srp.cr, -100, 100);
+    auto *srp_area =
+        quantity(srp_model, QStringLiteral("面积 / 质量"), "hpopSrpAreaMassRatio",
+                 Unit::square_metres_per_kilogram, options.srp.area_mass_ratio_m2_per_kg, 0, 9999);
+    auto *srp_shadow_section = section(srp_page, QStringLiteral("阴影"), "hpopSrpShadowSection");
+    auto *srp_shadow = new QComboBox;
+    srp_shadow->setObjectName("hpopSrpShadowModel");
+    srp_shadow->addItems({QStringLiteral("None · 无阴影"), QStringLiteral("Cylindrical · 圆柱"),
+                          QStringLiteral("Dual Cone · 双锥")});
+    srp_shadow->setCurrentIndex(static_cast<int>(options.srp.shadow_model));
+    srp_shadow_section->addRow(QStringLiteral("阴影模型"), srp_shadow);
+    auto *srp_earth = new QCheckBox(QStringLiteral("地球 Earth"));
+    srp_earth->setObjectName("hpopSrpEarthShadow");
+    srp_earth->setChecked(options.srp.earth_shadow);
+    auto *srp_moon = new QCheckBox(QStringLiteral("月球 Moon"));
+    srp_moon->setObjectName("hpopSrpMoonShadow");
+    srp_moon->setChecked(options.srp.moon_shadow);
+    srp_shadow_section->addRow(QStringLiteral("遮挡天体"), srp_earth);
+    srp_shadow_section->addRow(srp_moon);
+    auto *srp_altitude = quantity(
+        srp_shadow_section, QStringLiteral("地球大气等效高度"), "hpopSrpAtmosphericAltitude",
+        Unit::metre, options.srp.atmospheric_altitude_m, 0, std::numeric_limits<double>::max());
+    note(srp_shadow_section, QStringLiteral("双锥按日面可见比例缩放光压，包含半影、本影与环食。"
+                                            "地月遮挡按并集计算。当前采用球形轮廓；大气高度增加"
+                                            "地球遮挡半径，不计算折射或衰减。"));
+    auto *srp_sun = section(srp_page, QStringLiteral("太阳位置与模型常数"), "hpopSrpSunSection");
+    auto *srp_sun_method = new QComboBox;
+    srp_sun_method->setObjectName("hpopSrpSunMethod");
+    srp_sun_method->addItem(QStringLiteral("True · 几何位置"));
+    srp_sun->addRow(QStringLiteral("太阳位置方法"), srp_sun_method);
+    auto *srp_resource = new QLabel;
+    srp_resource->setObjectName("hpopSrpEphemerisStatus");
+    srp_resource->setWordWrap(true);
+    srp_sun->addRow(srp_resource);
+    const auto refresh_srp_resource = [&] {
+        const bool ready = std::any_of(
+            installed_ephemerides.begin(), installed_ephemerides.end(),
+            [&](const auto &entry) { return entry.selection == options.ephemeris_model; });
+        srp_resource->setText(
+            ready ? QStringLiteral("位置星历：%1 · 太阳方向使用几何位置")
+                        .arg(QString::fromStdString(options.ephemeris_model))
+                  : QStringLiteral("缺少所选位置星历：%1，请在数据中心准备太阳/月球位置数据。")
+                        .arg(QString::fromStdString(options.ephemeris_model)));
+    };
+    auto *srp_manage = new QPushButton(QStringLiteral("在数据中心管理星历"));
+    srp_manage->setObjectName("hpopSrpManageEphemerides");
+    srp_manage->setVisible(static_cast<bool>(manage_ephemerides));
+    srp_sun->addRow(srp_manage);
+    QObject::connect(srp_manage, &QPushButton::clicked, manage, &QToolButton::click);
+    QObject::connect(manage, &QToolButton::clicked, &dialog, refresh_srp_resource);
+    refresh_srp_resource();
+    auto *srp_pressure =
+        quantity(srp_sun, QStringLiteral("参考距离处光压"), "hpopSrpPressure", Unit::pascal,
+                 options.srp.pressure_at_reference_pa, std::numeric_limits<double>::min(),
+                 std::numeric_limits<double>::max());
+    auto *srp_distance =
+        quantity(srp_sun, QStringLiteral("光压参考距离"), "hpopSrpReferenceDistance", Unit::metre,
+                 options.srp.reference_distance_m, std::numeric_limits<double>::min(),
+                 std::numeric_limits<double>::max());
+    auto *srp_sun_radius =
+        quantity(srp_sun, QStringLiteral("太阳半径"), "hpopSrpSunRadius", Unit::metre,
+                 options.srp.sun_radius_m, std::numeric_limits<double>::min(),
+                 std::numeric_limits<double>::max());
+    auto *srp_earth_radius =
+        quantity(srp_sun, QStringLiteral("地球球面半径"), "hpopSrpEarthRadius", Unit::metre,
+                 options.srp.earth_radius_m, std::numeric_limits<double>::min(),
+                 std::numeric_limits<double>::max());
+    auto *srp_moon_radius =
+        quantity(srp_sun, QStringLiteral("月球球面半径"), "hpopSrpMoonRadius", Unit::metre,
+                 options.srp.moon_radius_m, std::numeric_limits<double>::min(),
+                 std::numeric_limits<double>::max());
+    for (auto *field : {srp_distance, srp_sun_radius, srp_earth_radius, srp_moon_radius})
+        field->set_unit(Unit::kilometre);
+    note(srp_page, QStringLiteral("视太阳位置、椭球轮廓与 STK Boundary Mitigation 尚未实现。"
+                                  "阴影边界附近应检查减小最大步长后的轨迹收敛。"));
+    const auto update_srp = [&] {
+        const bool enabled = srp_use->isChecked(), shadows = srp_shadow->currentIndex() != 0;
+        srp_model->parentWidget()->setEnabled(enabled);
+        srp_shadow_section->parentWidget()->setEnabled(enabled);
+        srp_sun->parentWidget()->setEnabled(enabled);
+        srp_earth->setEnabled(shadows);
+        srp_moon->setEnabled(shadows);
+        srp_altitude->setEnabled(shadows && srp_earth->isChecked());
+        srp_earth_radius->setEnabled(shadows && srp_earth->isChecked());
+        srp_moon_radius->setEnabled(shadows && srp_moon->isChecked());
+    };
+    QObject::connect(srp_use, &QCheckBox::toggled, &dialog, update_srp);
+    QObject::connect(srp_shadow, &QComboBox::currentIndexChanged, &dialog, update_srp);
+    QObject::connect(srp_earth, &QCheckBox::toggled, &dialog, update_srp);
+    QObject::connect(srp_moon, &QCheckBox::toggled, &dialog, update_srp);
+    update_srp();
     pending(force_tabs, QStringLiteral("其他"), "hpopAdditionalPage",
             QStringLiteral("附加力模型尚未接入 HPOP。"),
             QStringLiteral("地球反照与热辐射、相对论、卫星质量及自定义力模型将集中在此配置。"));
@@ -662,6 +760,9 @@ bool edit_hpop_settings(
         if (data && data->revision() != catalog_revision) {
             catalog_revision = data->revision();
             installed_models = data->data().gravity_models();
+            installed_ephemerides = data->data().ephemerides();
+            refresh_ephemeris();
+            refresh_srp_resource();
             refresh_models();
             update_gravity();
         }
@@ -679,6 +780,7 @@ bool edit_hpop_settings(
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
         int validation_page = 0;
+        int validation_force_page = 0;
         std::optional<core::ThirdBody> validation_body;
         QWidget *validation_field = model;
         const auto read = [&](QuantityEditor *field, Unit unit) {
@@ -724,6 +826,41 @@ bool edit_hpop_settings(
             }
             candidate.gravity_degree = model->currentIndex() != 1 ? degree->value() : 0;
             candidate.gravity_order = model->currentIndex() != 1 ? order->value() : 0;
+            validation_force_page = 2;
+            auto &srp = candidate.srp;
+            srp.enabled = srp_use->isChecked();
+            srp.shadow_model = static_cast<core::SrpShadowModel>(srp_shadow->currentIndex());
+            srp.earth_shadow = srp_earth->isChecked();
+            srp.moon_shadow = srp_moon->isChecked();
+            const auto srp_value = [&](QuantityEditor *field, Unit unit, double &value, bool used) {
+                if (used)
+                    value = read(field, unit);
+                else {
+                    try {
+                        value = field->value(unit);
+                    } catch (const std::exception &) {
+                    }
+                }
+            };
+            srp_value(srp_cr, Unit::one, srp.cr, srp.enabled);
+            srp_value(srp_area, Unit::square_metres_per_kilogram, srp.area_mass_ratio_m2_per_kg,
+                      srp.enabled);
+            srp_value(srp_pressure, Unit::pascal, srp.pressure_at_reference_pa, srp.enabled);
+            srp_value(srp_distance, Unit::metre, srp.reference_distance_m, srp.enabled);
+            srp_value(srp_sun_radius, Unit::metre, srp.sun_radius_m, srp.enabled);
+            const bool shadows = srp.enabled && srp.shadow_model != core::SrpShadowModel::none;
+            srp_value(srp_altitude, Unit::metre, srp.atmospheric_altitude_m,
+                      shadows && srp.earth_shadow);
+            srp_value(srp_earth_radius, Unit::metre, srp.earth_radius_m,
+                      shadows && srp.earth_shadow);
+            srp_value(srp_moon_radius, Unit::metre, srp.moon_radius_m, shadows && srp.moon_shadow);
+            validation_field = srp_use;
+            core::validate_srp_options(srp);
+            if (srp.enabled && !std::any_of(installed_ephemerides.begin(),
+                                            installed_ephemerides.end(), [&](const auto &entry) {
+                                                return entry.selection == candidate.ephemeris_model;
+                                            }))
+                throw std::runtime_error("太阳辐射压需要所选位置星历，请先在数据中心准备。");
             candidate.integrator = method->currentIndex() == 0 ? core::HpopIntegrator::rkf78
                                                                : core::HpopIntegrator::rk4;
             validation_page = 1;
@@ -745,9 +882,11 @@ bool edit_hpop_settings(
         } catch (const std::exception &e) {
             tabs->setCurrentIndex(validation_page);
             auto *scroll = dialog.findChild<QScrollArea *>(
-                validation_page == 0 ? "hpopGravityPage" : "hpopIntegratorPage");
+                validation_page == 0
+                    ? (validation_force_page == 2 ? "hpopSrpPage" : "hpopGravityPage")
+                    : "hpopIntegratorPage");
             if (validation_page == 0) {
-                force_tabs->setCurrentIndex(0);
+                force_tabs->setCurrentIndex(validation_force_page);
                 if (validation_body) {
                     search->clear();
                     const auto row = static_cast<int>(*validation_body);

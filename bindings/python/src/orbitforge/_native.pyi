@@ -835,10 +835,41 @@ class ThirdBodyGravity:
 
 def load_cb_gravity(path: str | Path, body: ThirdBody, mu_scale: float = 1.0) -> CbGravity: ...
 
+class SrpShadowModel:
+    NONE: SrpShadowModel
+    CYLINDRICAL: SrpShadowModel
+    DUAL_CONE: SrpShadowModel
+
+class SrpOptions:
+    def __init__(self) -> None: ...
+    enabled: bool
+    cr: float
+    area_mass_ratio_m2_per_kg: float
+    shadow_model: SrpShadowModel
+    earth_shadow: bool
+    moon_shadow: bool
+    atmospheric_altitude_m: float
+    pressure_at_reference_pa: float
+    reference_distance_m: float
+    sun_radius_m: float
+    earth_radius_m: float
+    moon_radius_m: float
+    def validate(self) -> None: ...
+
+class SrpEvaluation:
+    @property
+    def acceleration_mps2(self) -> list[float]: ...
+    @property
+    def lighting_ratio(self) -> float: ...
+
+def evaluate_srp(satellite_m: Sequence[float], sun_m: Sequence[float], options: SrpOptions,
+                 moon_m: Sequence[float] | None = None) -> SrpEvaluation: ...
+
 class HpopOptions:
     gravity_model: str
     gravity_mu: float
     third_bodies: list[ThirdBodyGravity]
+    srp: SrpOptions
     ephemeris_model: str
     def __init__(self) -> None: ...
     gravity_degree: int

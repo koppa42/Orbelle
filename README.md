@@ -27,7 +27,7 @@
 
 图形桌面首次启动自动准备 UTC / 闰秒表、完整 C04 与 finals2000A、EGM2008，以及启用 CSPICE 时的 DE440s。准备窗口支持进度、失败重试、导入官方文件和取消退出；已完成的文件保留，后续启动只补齐缺失项。新建 HPOP 默认使用 EGM2008、21×21，当前文件重力计算支持最高 360×360。
 
-尚未实现 OMM / 在线卫星目录、通用事件分析、覆盖分析、HDF5 结果存储或通用分析任务系统。HPOP 支持地球静态引力与可选太阳系第三体引力，数据中心可下载 EGM2008 / EGM96 / DE440s 或导入相应文件；阻力、光压、潮汐、附加力及协方差按[完整对齐清单](docs/architecture/hpop_alignment.md)继续推进。J2/J4 使用长期项平均根数，SGP4 使用固定 TLE（见[预报器说明](docs/architecture/propagators.md)）。时间与参考系尚无日内 EOP 潮汐改正。万星图形场景已有验证入口，尚未完成正式性能验收。
+尚未实现 OMM / 在线卫星目录、通用事件分析、覆盖分析、HDF5 结果存储或通用分析任务系统。HPOP 支持地球静态引力、可选太阳系第三体引力及[球形太阳辐射压／球面地月阴影](docs/architecture/solar_radiation_pressure.md)，数据中心可下载 EGM2008 / EGM96 / DE440s 或导入相应文件；阻力、光压高级设置、潮汐、附加力及协方差按[完整对齐清单](docs/architecture/hpop_alignment.md)继续推进。J2/J4 使用长期项平均根数，SGP4 使用固定 TLE（见[预报器说明](docs/architecture/propagators.md)）。时间与参考系尚无日内 EOP 潮汐改正。万星图形场景已有验证入口，尚未完成正式性能验收。
 
 ## 获取与构建
 

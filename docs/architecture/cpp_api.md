@@ -41,6 +41,8 @@ int main() {
 
 可运行示例为 [`examples/cpp/project_analysis.cpp`](../../examples/cpp/project_analysis.cpp)，启用 CSPICE 时生成 `orbitforge_project_example`。独立安装验证 [`sdk_consumer/project_api.cpp`](../../tests/packaging/sdk_consumer/project_api.cpp) 仅包含聚合头文件，通过地面站 ITRF 状态完成编辑、查询、报告、保存与重开；这条基础流程不依赖天文库。
 
+HPOP 的球形太阳辐射压使用 `OrbitInput.hpop.srp`（`core::SrpOptions`）；无阴影、圆柱和双锥枚举为 `core::SrpShadowModel`。Cr、面积质量比、半径、光压与参考距离均为 SI，详见[光压契约](solar_radiation_pressure.md)。即使所有第三体引力关闭，启用光压仍须通过 `DataSnapshot` 提供太阳星历；月球遮挡启用时还须月球。分析、报告和保存时捕获同一不可变数据身份，低层几何检查可直接调用 `core::evaluate_srp`。
+
 ## 项目与对象的所有权
 
 | 操作 | 语义 |
@@ -84,7 +86,7 @@ auto aer = analysis.aer(station, sensor, 10s);
 
 上述 `data` 可以是 `DataSnapshot` 或 `DataCatalog`。只有调用方取得本次明确同意后，才对同一计划调用 `prepare(true)` 或 `open(true)`；拒绝则丢弃计划。类型区分准备和打开两个结果，`OpenDataChangedError::plan().open(true)` 返回公开的 `of::Project`。接受不会变成以后自动同意的设置，也不会重新读取磁盘。计划创建时已经校验资源与覆盖，错误不能通过接受参数绕过。
 
-`save(path)` 保存当前已提交输入，`save(path, analysis)` 另外记录匹配的分析来源。分析必须属于同一文档且物理输入仍一致；改名、样式与报告修改不使分析失效。文件已存在时默认报错；允许覆盖需显式传 `true`。写入失败不改变原文件、内存来源或已保存标记。文件使用当前 v17，包含 HPOP 配置。
+`save(path)` 保存当前已提交输入，`save(path, analysis)` 另外记录匹配的分析来源。分析必须属于同一文档且物理输入仍一致；改名、样式与报告修改不使分析失效。文件已存在时默认报错；允许覆盖需显式传 `true`。写入失败不改变原文件、内存来源或已保存标记。文件使用当前 v18，包含 HPOP 配置。
 
 ## 安装后链接
 

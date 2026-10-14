@@ -83,6 +83,16 @@ class Hpop final : public IStateProvider {
                 if (options_.third_body(body).enabled)
                     add(body, third_body_mu(options_.third_body(body), body, info));
         }
+        if (options_.srp.enabled) {
+            const auto epoch = epoch_at(t);
+            std::optional<std::array<double, 3>> moon;
+            if (options_.srp.moon_shadow && options_.srp.shadow_model != SrpShadowModel::none)
+                moon = environment_.ephemeris->position(ThirdBody::moon, epoch);
+            const auto force = evaluate_srp(
+                r, environment_.ephemeris->position(ThirdBody::sun, epoch), options_.srp, moon);
+            for (int i = 0; i < 3; ++i)
+                acceleration[i] += force.acceleration_mps2[i];
+        }
         return {s[3], s[4], s[5], acceleration[0], acceleration[1], acceleration[2]};
     }
     State rk4(double t, const State &s, double h) const {
@@ -170,11 +180,12 @@ class Hpop final : public IStateProvider {
     Hpop(CartesianState initial, HpopOptions options, HpopEnvironment environment)
         : initial_(initial), options_(options), environment_(std::move(environment)) {
         validate_hpop_options(options_);
-        if (options_.uses_third_bodies()) {
+        if (options_.uses_ephemeris()) {
             if (!environment_.ephemeris)
-                throw std::invalid_argument("Third-body gravity requires selected ephemeris data");
+                throw std::invalid_argument(
+                    "Third-body gravity and SRP require selected ephemeris data");
             environment_.ephemeris->validate_interval(initial.epoch, initial.epoch,
-                                                      options_.enabled_third_bodies());
+                                                      options_.required_ephemeris_bodies());
         }
         if (options_.gravity_model.empty())
             environment_.gravity = builtin_egm96();
@@ -209,10 +220,10 @@ class Hpop final : public IStateProvider {
             throw PropagationError("HPOP query exceeds 366 days from the initial epoch");
         if (epoch == initial_.epoch)
             return initial_;
-        if (options_.uses_third_bodies())
+        if (options_.uses_ephemeris())
             environment_.ephemeris->validate_interval(t < 0 ? epoch : initial_.epoch,
                                                       t < 0 ? initial_.epoch : epoch,
-                                                      options_.enabled_third_bodies());
+                                                      options_.required_ephemeris_bodies());
         if (options_.gravity_degree > 0 && !eop_covers(environment_.eop->data_info(), epoch))
             throw EopCoverageError(
                 "HPOP integration requires EOP covering the initial and query epochs");
@@ -244,6 +255,7 @@ class Hpop final : public IStateProvider {
 };
 } // namespace
 void validate_hpop_options(const HpopOptions &o) {
+    validate_srp_options(o.srp);
     if (o.gravity_model.size() > 64 ||
         !std::all_of(o.gravity_model.begin(), o.gravity_model.end(), [](char ch) {
             return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-';

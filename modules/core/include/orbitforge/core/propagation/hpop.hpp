@@ -3,6 +3,7 @@
 #include <optional>
 #include <orbitforge/core/frames/frame_provider.hpp>
 #include <orbitforge/core/propagation/gravity.hpp>
+#include <orbitforge/core/propagation/solar_radiation_pressure.hpp>
 #include <orbitforge/core/propagation/state_provider.hpp>
 #include <orbitforge/core/propagation/third_body.hpp>
 #include <string_view>
@@ -23,6 +24,7 @@ struct HpopOptions {
     double gravity_mu = egm96_mu;
     std::string ephemeris_model = "de440s";
     std::array<ThirdBodyGravity, third_body_count> third_bodies{};
+    SrpOptions srp;
     [[nodiscard]] ThirdBodyGravity &third_body(ThirdBody body) {
         return third_bodies.at(static_cast<std::size_t>(body));
     }
@@ -41,6 +43,17 @@ struct HpopOptions {
             if (body.enabled)
                 return true;
         return false;
+    }
+    [[nodiscard]] bool uses_ephemeris() const { return uses_third_bodies() || srp.enabled; }
+    [[nodiscard]] std::vector<ThirdBody> required_ephemeris_bodies() const {
+        std::vector<ThirdBody> result;
+        for (auto body : third_body_list)
+            if (third_body(body).enabled ||
+                (srp.enabled &&
+                 (body == ThirdBody::sun || (body == ThirdBody::moon && srp.moon_shadow &&
+                                             srp.shadow_model != SrpShadowModel::none))))
+                result.push_back(body);
+        return result;
     }
     // 0/0 selects the chosen model's monopole. File models support up to 360x360.
     int gravity_degree = 8, gravity_order = 8;

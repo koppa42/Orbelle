@@ -27,3 +27,22 @@ Positions, velocities, and accelerations are GCRF SI; elapsed time is TAI from
 Epoch(0). See `docs/validation/hpop_protocol.md` for reproduction and tolerances.
 Real DE440s routing/coverage has separate integration tests; these values do not
 claim a same-configuration STK comparison.
+
+`srp.txt` contains 24 independent Orekit 13.1.2 SolarRadiationPressure + DP853
+cases from `tools/validation/orekit/OrbitForgeSrpReference.java`: point-mass Earth,
+spherical Earth eclipse, explicit moving geometric Sun, LEO/GEO, both time
+directions, Cr/A/m variations and a 23 km atmospheric radius increment. DP853
+uses a 1 s maximum step, 1e-8 m / 1e-11 m/s absolute and 1e-14 relative tolerances;
+eclipse events use a 60 s check interval and 1e-8 s threshold. Solar radius is
+695700000 m. Columns contain initial acceleration and final GCRF SI state.
+This isolates force and propagation from real ephemerides, Earth shape and
+apparent-Sun conventions. Full parameter and test tolerances are in the protocol.
+
+`srp_geometry.txt` contains 182 deterministic clipped-union circle areas from
+`tools/validation/generate_srp_geometry_reference.py`. It integrates vertical
+cross-sections using adaptive Simpson quadrature after a sine substitution,
+independently of the production boundary-arc integration. Coordinates and
+radii are in units of the apparent solar radius; output is the lighting ratio.
+Cases include identical, contained, tangent, disjoint, annular and simultaneous
+Earth/Moon disks, with occultor radii up to 300 solar radii. Neither generator
+imports OrbitForge or calls the production force implementation.
