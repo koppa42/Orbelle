@@ -8,8 +8,44 @@
 | J2 secular | 平均椭圆，含平近点角 M | GCRF | 一阶长期趋势 |
 | J4 secular | 平均椭圆，含平近点角 M | GCRF | 含 J2、J2²、J4 的长期趋势 |
 | SGP4 | 一组固定的 TLE，两行各 69 个 ASCII 字符 | TEME of date | 与 TLE 配套的近地/深空预报 |
+| HPOP（初版） | GCRF 瞬时位置/速度或经典根数；力模型与积分设置 | GCRF | 地球静态球谐重力下的数值传播与对照分析 |
 
 此分工参考 [STK 预报器说明](https://help.agi.com/stk/12.7.1/Content/stk/vehSat_orbitProp_choose.htm)。新增模型不改变已有二体/J2 的模型常数或算法。
+
+## HPOP
+
+参考 STK 的[力模型分层](https://help.agi.com/stk/Content/hpop/hpopForceMods.htm)和[积分设置](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)，在 GCRF 中以连续 TAI 秒积分 Cowell 六维方程。输入为瞬时状态，不能把 J2/J4 平均根数当作等价瞬时初值。当前支持：
+
+| 配置 | 实现与默认值 | 边界 |
+| --- | --- | --- |
+| 地球引力 | 静态 tide-free EGM96，默认 8×8；Degree 2–20、Order 0–Degree；0/0 为点质量 | 没有外部重力文件、系数时变、固体潮或海潮 |
+| 积分器 | RKF78 自适应；RK4 固定步长 | 尚无 VOP、RK89、Gauss–Jackson、Bulirsch–Stoer |
+| 自适应容差 | 相对 1e-12，位置绝对 1e-3 m，速度绝对 1e-6 m/s | 分量误差尺度为 `atol + rtol × max(abs(old), abs(new))`；是局部数值误差，不是预报精度 |
+| 步长 | RKF78 默认 0.001–60 s；RK4 默认 10 s | 输出采样间隔独立；RK4 不作误差控制 |
+| 停止条件 | 最低地心高度（默认 0 m）、无法满足容差、非有限状态、资源上限 | 高度相对 EGM96 参考球面，不是大地高；不作再入事件定位 |
+| 其他摄动 | 尚未计入日月引力、大气阻力、光压、相对论和机动 | STK 的完整力模型更多，不能据本阶段宣称长期 LEO/GEO 预报精度等价 |
+
+EGM96 取自 [ICGEM 原始系数](https://icgem.gfz.de/getmodel/gfc/971b0a3b49a497910aad23cd85e066d4cd9af0aeafe7ce6301a696bed8570be3/EGM96.gfc)，完整文件 SHA-256 为 `5247a9e9c316dd2c8f8fd491d53be0e163cb5cb3676b021754240cc9e44cb43b`；使用 μ = 3.986004415e14 m³/s²、R = 6378136.3 m，参考 Lemoine et al., [NASA/TP-1998-206861](https://ntrs.nasa.gov/citations/19980218814)。`tools/data/import_egm96.py` 校验完整文件后提取 2–20 阶完全归一化系数，生成编译期表；正常构建和运行不联网。模型 ID 为 `egm96-static-tide-free-20-v1`，系数随程序固定。
+
+球谐势采用 Cartesian 实心球谐递推，以解析一阶自动微分求梯度，避免极点经纬度除零及差分误差。每次力评估使用当前分析持有的 EOP 将位置旋转到 ITRF，计算引力后旋回 GCRF；惯性方程不另加离心或科里奥利项。即使输出 GCRF，非中心重力也必须有 EOP，其哈希进入结果来源。数据必须覆盖初始历元到场景时段的整个积分路径；目录选源和桌面准备均按该范围检查，计算中不换源或联网。
+
+RKF78 系数来自 Fehlberg [NASA TR R-287](https://ntrs.nasa.gov/citations/19680027281)，推进八阶解，以嵌入七阶解估计误差；不宣称逐位复现 STK 的控制器。从初始历元向前后独立建立完整 300 s 计算段，余段单独积分；改变采样、乱序、重复和并发查询不改变结果。共享缓存加锁，取消保留已完成段，不发布部分结果。每次查询最多 200000 次积分尝试，距离初始历元最多 366 天；这是资源边界，不是精度保证。显示插值不参与科学查询。
+
+```python
+satellite = project.objects.satellite("Numerical", orbit=of.orbits.Hpop(
+    initial=of.orbits.Keplerian(epoch, u.km(7000), 0.01, u.deg(98.5)),
+    gravity_degree=8,             # 省略 gravity_order 时与 degree 相同
+    max_step_seconds=60,
+))
+analysis = project.prepare(data=data)  # 显式 DataSnapshot 或 DataCatalog
+trajectory = analysis.states(satellite, step=u.s(30))
+```
+
+RK4 使用 `integrator="rk4", fixed_step_seconds=10`；点质量使用 `gravity_degree=0`，无需 EOP。`satellite.orbit.hpop` 是不可变 `HpopSettings`，可用 `dataclasses.replace` 修改后将新 `Orbit` 赋回 `satellite.orbit`；旧分析继续持有旧参数与数据。完整示例见 `examples/python/propagators.py`。
+
+C++ 设置 `OrbitInput.propagator = OrbitPropagator::hpop`、`OrbitInput.hpop`（`HpopOptions`），通过 `Project::prepare(data)` 查询。低层工厂 `runtime::make_hpop_session(initial, options, environment, id)` 持有不可变 Frame/EOP Provider 的共享所有权。核心与点质量模式无需 CSPICE。桌面选择 HPOP 后，“配置…”分为力模型与积分两页；保存设置仅改变属性草稿，“应用轨道”才计算并发布。参数随项目 v13 保存。
+
+独立回归使用 Orekit 13.1.2 Holmes–Featherstone 重力和 Hipparchus 4.0.2 DP853：五类轨道 × 三组阶次 × ±6000 s/±1 天共 60 个状态，检查位置每分量 0.15 m、速度 0.15 mm/s、初始加速度 5e-13 m/s²。参考刻意采用静态同轴重力系，隔离球谐与积分；真实 EOP 路由另由集成测试验证。尚无同配置 STK 导出数据直接对照，见 [HPOP 验证](../validation/hpop_protocol.md)。后续优先接日月星历、第三体引力与光压，再接空间天气和大气模型；未实现的力不提供无效开关。
 
 ## J4
 
@@ -35,7 +71,7 @@
 
 桌面选择 SGP4 后显示独立的粘贴/文件导入界面，可带一行卫星名称；拒绝含多组 TLE 的文件，导入失败保留当前草稿。显示编号、UTC 历元和名义周期。场景距离历元超过 14 天时提醒检查根数时效，这是交互提示，不是精度保证或模型硬有效期。切换预报器不把普通椭圆伪装成 TLE；原手动输入作为非活动草稿保留。重开 TLE 属性时，手动草稿以保存的 GCRF 状态恢复，不要求旧草稿历元仍有 EOP 覆盖。
 
-当前尚不包含 OMM、多组 TLE 的自动选择、在线卫星目录或 TLE 拟合。下一阶段可先增加 OMM 与目录导入，再扩展外部星历；数值积分、力模型和机动应走独立的数值预报器路线，不能把它们命名为已对齐 STK HPOP。
+当前尚不包含 OMM、多组 TLE 的自动选择、在线卫星目录或 TLE 拟合。数值力模型由独立 HPOP 路线推进；机动尚未实现。
 
 ## TEME 与现有场景
 

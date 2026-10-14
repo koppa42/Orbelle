@@ -19,24 +19,25 @@ class ProjectFormatTests(unittest.TestCase):
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 12)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 13)
         self.path.write_bytes(self.raw)
         project = of.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
+        self.assertEqual(project.objects["satellite-b"].orbit.hpop.max_step_seconds, 45)
         self.assertEqual(project.objects["sensor-a"].parent, project.objects["satellite-a"])
         self.assertEqual(project.analysis_status, of.AnalysisStatus.UNRECORDED)
         project.save(self.path, overwrite=True)
         self.assertEqual(self.path.read_bytes(), self.raw)
 
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(12), 13, 0xFFFFFFFF):
+        for version in (*range(13), 14, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (of.load_project_data, of.load_project,
                                  of.Project.open, of.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 12"):
+                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 13"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 

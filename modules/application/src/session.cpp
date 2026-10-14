@@ -12,11 +12,12 @@ Session::Session(std::shared_ptr<const core::IStateProvider> provider,
         throw std::invalid_argument("Result provenance must identify the object and algorithm");
     }
 }
-results::StateSeries Session::sample(std::span<const core::Epoch> epochs) const {
+results::StateSeries Session::sample(std::span<const core::Epoch> epochs,
+                                     const std::function<void()> &checkpoint) const {
     std::vector<core::CartesianState> states;
     states.reserve(epochs.size());
     for (const auto epoch : epochs) {
-        states.push_back(provider_->state_at(epoch));
+        states.push_back(provider_->state_at(epoch, checkpoint));
     }
     return {provenance_, std::move(states)};
 }

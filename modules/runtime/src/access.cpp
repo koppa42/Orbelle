@@ -81,7 +81,8 @@ struct AccessSession::Impl {
     application::Session orbit;
     Impl(ReportContext c, detail::AccessGeometry p)
         : context(std::move(c)), pair(std::move(p)),
-          orbit(make_orbit_session(pair.satellite.orbit, 1, context.time.get())) {}
+          orbit(make_orbit_session(pair.satellite.orbit, 1, context.time.get(),
+                                   {context.frames, context.eop})) {}
 };
 AccessSession::AccessSession(ReportContext context, std::string station, std::string target) {
     application::validate_project(context.project);
@@ -94,14 +95,15 @@ AccessSession::AccessSession(ReportContext context, std::string station, std::st
     auto pair = detail::AccessGeometry{context.project, {station, target}};
     impl_ = std::make_shared<Impl>(std::move(context), std::move(pair));
 }
-AccessSample AccessSession::at(core::Epoch epoch) const {
+AccessSample AccessSession::at(core::Epoch epoch, const std::function<void()> &checkpoint) const {
     const auto &c = impl_->context;
     if (epoch.tai_nanoseconds() < c.project.first.tai_nanoseconds() ||
         epoch.tai_nanoseconds() > c.project.last.tai_nanoseconds())
         throw std::out_of_range("Access epoch is outside the scenario");
     const std::array epochs{epoch};
-    const auto state = core::transform_state(impl_->orbit.sample(epochs).states().front(),
-                                             core::FrameId::itrf, *c.frames, c.eop->at(epoch));
+    const auto state =
+        core::transform_state(impl_->orbit.sample(epochs, checkpoint).states().front(),
+                              core::FrameId::itrf, *c.frames, c.eop->at(epoch));
     return impl_->pair.at(state);
 }
 std::string AccessSession::name() const {

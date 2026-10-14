@@ -8,8 +8,9 @@
 
 namespace orbitforge::desktop {
 application::Session make_orbit_session(const OrbitInput &input, std::uint64_t revision,
-                                        const core::ITimeProvider *time) {
-    return runtime::make_orbit_session(input, revision, time);
+                                        const core::ITimeProvider *time,
+                                        core::HpopEnvironment environment) {
+    return runtime::make_orbit_session(input, revision, time, std::move(environment));
 }
 std::shared_ptr<const OrbitScene>
 prepare_orbit_scene(OrbitInput input, application::Session session,
@@ -40,7 +41,7 @@ prepare_orbit_scene(OrbitInput input, application::Session session,
         throw std::invalid_argument("Display cache exceeds 10001 nodes; shorten the interval");
     const auto sample = [&](core::Epoch epoch) {
         check_cancel();
-        const auto result = session.sample(std::array{epoch});
+        const auto result = session.sample(std::array{epoch}, check_cancel);
         return result.states().front();
     };
     std::vector<core::CartesianState> states;

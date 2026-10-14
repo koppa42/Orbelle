@@ -735,6 +735,25 @@ class OrbitPropagator:
     J2_SECULAR: OrbitPropagator
     J4_SECULAR: OrbitPropagator
     SGP4: OrbitPropagator
+    HPOP: OrbitPropagator
+
+class HpopIntegrator:
+    RKF78: HpopIntegrator
+    RK4: HpopIntegrator
+
+class HpopOptions:
+    def __init__(self) -> None: ...
+    gravity_degree: int
+    gravity_order: int
+    integrator: HpopIntegrator
+    relative_tolerance: float
+    position_tolerance_m: float
+    velocity_tolerance_mps: float
+    min_step_seconds: float
+    max_step_seconds: float
+    fixed_step_seconds: float
+    minimum_altitude_m: float
+    def validate(self) -> None: ...
 
 class OrbitInput:
     def __init__(self) -> None: ...
@@ -742,6 +761,7 @@ class OrbitInput:
     propagator: OrbitPropagator
     input_frame: FrameId
     tle: Tle
+    hpop: HpopOptions
     object_id: str
     first: Epoch
     last: Epoch

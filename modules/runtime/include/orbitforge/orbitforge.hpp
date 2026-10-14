@@ -20,6 +20,8 @@ using application::ReportUnits;
 using core::CartesianState;
 using core::FrameId;
 using core::GroundStationLocation;
+using core::HpopIntegrator;
+using core::HpopOptions;
 using core::OriginId;
 using results::AccessWindows;
 using results::AerSeries;

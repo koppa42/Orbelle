@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include <orbitforge/core/propagation/access.hpp>
 #include <orbitforge/results/aer_series.hpp>
 #include <orbitforge/runtime/report.hpp>
@@ -12,7 +13,9 @@ void validate_access_pair(const application::Project &project,
 class AccessSession {
   public:
     AccessSession(ReportContext context, std::string station_id, std::string target_id);
-    [[nodiscard]] AccessSample at(core::Epoch epoch) const;
+    // The checkpoint also runs within numerical integration; throwing cancels the query.
+    [[nodiscard]] AccessSample at(core::Epoch epoch,
+                                  const std::function<void()> &checkpoint = {}) const;
     [[nodiscard]] std::string name() const;
 
   private:

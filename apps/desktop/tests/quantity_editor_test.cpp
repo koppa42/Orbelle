@@ -14,6 +14,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QEventLoop>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -22,6 +23,8 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSpinBox>
+#include <QTabWidget>
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
@@ -820,6 +823,78 @@ TEST_F(QuantityTest, J4AndTleEditingKeepSeparateDraftsAndRejectInvalidInput) {
         editor.set_propagator(OrbitPropagator::j4_secular);
         QApplication::processEvents();
         ASSERT_TRUE(editor.grab().save(capture + "/j4-wide.png"));
+    }
+}
+TEST_F(QuantityTest, HpopSettingsValidateCancelAndRoundTripWithoutApplyingTheOrbit) {
+    OrbitInput input;
+    input.propagator = OrbitPropagator::hpop;
+    OrbitEditor editor(input);
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    editor.resize(1100, 740);
+    editor.show();
+    std::optional<OrbitInput> submitted;
+    editor.apply = [&](OrbitInput value) { submitted = std::move(value); };
+    const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+    QTimer::singleShot(0, &editor, [&] {
+        auto *dialog = editor.findChild<QDialog *>("hpopSettingsDialog");
+        ASSERT_NE(dialog, nullptr);
+        auto *degree = dialog->findChild<QSpinBox *>("hpopGravityDegree");
+        auto *order = dialog->findChild<QSpinBox *>("hpopGravityOrder");
+        auto *tabs = dialog->findChild<QTabWidget *>();
+        ASSERT_NE(degree, nullptr);
+        ASSERT_NE(order, nullptr);
+        degree->setValue(4);
+        EXPECT_EQ(order->value(), 4);
+        if (!capture.isEmpty()) {
+            ASSERT_TRUE(QDir{}.mkpath(capture));
+            QApplication::processEvents();
+            EXPECT_TRUE(dialog->grab().save(capture + "/hpop-forces.png"));
+            tabs->setCurrentIndex(1);
+            QApplication::processEvents();
+            EXPECT_TRUE(dialog->grab().save(capture + "/hpop-integration.png"));
+            dialog->resize(400, 460);
+            QApplication::processEvents();
+            EXPECT_TRUE(dialog->grab().save(capture + "/hpop-compact.png"));
+        }
+        auto *minimum = dialog->findChild<QuantityEditor *>("hpopMinStep");
+        auto *maximum = dialog->findChild<QuantityEditor *>("hpopMaxStep");
+        minimum->set_value(50, Unit::second);
+        maximum->set_value(10, Unit::second);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        EXPECT_TRUE(dialog->isVisible());
+        EXPECT_TRUE(dialog->findChild<QLabel *>("errorText")->isVisible());
+        minimum->set_value(.01, Unit::second);
+        maximum->set_value(30, Unit::second);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    editor.open_propagator_details();
+    EXPECT_FALSE(submitted);
+    editor.submit();
+    ASSERT_TRUE(submitted);
+    EXPECT_EQ(submitted->hpop.gravity_degree, 4);
+    EXPECT_EQ(submitted->hpop.gravity_order, 4);
+    EXPECT_EQ(submitted->hpop.max_step_seconds, 30);
+    const auto saved = *submitted;
+    editor.set_input(saved);
+    QTimer::singleShot(0, &editor, [&] {
+        auto *dialog = editor.findChild<QDialog *>("hpopSettingsDialog");
+        ASSERT_NE(dialog, nullptr);
+        EXPECT_EQ(dialog->findChild<QSpinBox *>("hpopGravityDegree")->value(), 4);
+        dialog->findChild<QComboBox *>("hpopIntegrator")->setCurrentIndex(1);
+        dialog->reject();
+    });
+    editor.open_propagator_details();
+    editor.submit();
+    EXPECT_EQ(submitted->hpop, saved.hpop);
+    EXPECT_NEAR(submitted->initial.position_m[0], saved.initial.position_m[0], 1e-7);
+    if (!capture.isEmpty()) {
+        QApplication::processEvents();
+        EXPECT_TRUE(editor.grab().save(capture + "/hpop-editor-wide.png"));
+        editor.resize(760, 540);
+        QEventLoop settled;
+        QTimer::singleShot(50, &settled, &QEventLoop::quit);
+        settled.exec(); // Allow queued responsive layouts to settle before the capture.
+        EXPECT_TRUE(editor.grab().save(capture + "/hpop-editor-compact.png"));
     }
 }
 } // namespace orbitforge::desktop

@@ -13,7 +13,8 @@ using application::OrbitInput;
 using application::OrbitPropagator;
 [[nodiscard]] application::Session make_orbit_session(const OrbitInput &input,
                                                       std::uint64_t revision = 1,
-                                                      const core::ITimeProvider *time = nullptr);
+                                                      const core::ITimeProvider *time = nullptr,
+                                                      core::HpopEnvironment environment = {});
 struct OrbitScene {
     OrbitInput input;
     application::Session session;

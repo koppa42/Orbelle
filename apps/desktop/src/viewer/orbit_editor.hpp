@@ -58,6 +58,9 @@ class OrbitEditor final : public QWidget {
     core::OriginId body_ = core::OriginId::earth;
     core::FrameId input_frame_ = core::FrameId::gcrf;
     OrbitPropagator propagator_kind_ = OrbitPropagator::two_body;
+    core::HpopOptions hpop_;
+    QLabel *hpop_summary_ = nullptr;
+    QPushButton *model_button_ = nullptr;
     bool create_mode_ = false, orbit_busy_ = false, model_busy_ = false;
     QTreeWidget *navigation_ = nullptr;
     QComboBox *compact_navigation_ = nullptr;
