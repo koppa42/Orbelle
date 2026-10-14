@@ -148,7 +148,7 @@ vcpkg install --x-manifest-root=. --x-install-root=out/dependencies/installed --
 $env:CMAKE_PREFIX_PATH = "$PWD/out/dependencies/installed/x64-windows"
 python -m pip wheel . --no-deps --wheel-dir out/dist
 python -m venv out/venvs/python-smoke
-out/venvs/python-smoke/Scripts/python.exe -m pip install --no-index --find-links out/dist orbitforge==0.1.0
+out/venvs/python-smoke/Scripts/python.exe -m pip install --no-index --find-links out/dist orbitforge==0.2.0
 out/venvs/python-smoke/Scripts/python.exe -m unittest discover -s bindings/python/tests -v
 out/venvs/python-smoke/Scripts/python.exe examples/python/circular_orbit.py
 out/venvs/python-smoke/Scripts/python.exe examples/python/time_frames.py
@@ -164,9 +164,9 @@ out/venvs/python-smoke/Scripts/python.exe tools/validation/compare_examples.py -
 
 Python wheel 只安装 `Python` CMake component，不携带 C++ SDK 和桌面文件。绑定使用与 C++ 一致的静态核心库、ERFA 和 CSPICE，携带对应许可证、时间数据原文、EOP/SPICE 历史快照及清单。计算与快照加载释放 GIL；CSPICE 的加载、时间转换、批量查询和错误清理另由同一个 C++ 互斥锁串行执行。释放 GIL 不表示 CSPICE 可以并行计算。
 
-若复用已装有 0.1.0 的测试环境，应对新生成的 wheel 使用 `pip install --no-index --no-deps --force-reinstall <wheel路径>`，否则相同开发版本号可能仍指向旧包。
+若复用已装有相同版本的测试环境，应对新生成的 wheel 使用 `pip install --no-index --no-deps --force-reinstall <wheel路径>`，否则可能仍使用旧构建。
 
-源码要求 Python 3.11+；当前实际验证 Windows Python 3.13 和 Ubuntu 24.04 Python 3.12，其他版本并未形成发布兼容承诺。
+源码要求 Python 3.11+；CI 和发布流程验证 Windows / Linux 的 Python 3.11–3.15，本地日常开发只需使用 Python 3.13。平台与发布包范围见 [CI 与版本发布](ci.md)。
 
 ## EOP 导入与独立参考验证
 
@@ -243,7 +243,7 @@ python tools/validation/run_graphics_smoke.py --executable out/build/desktop-gra
 完成 `desktop-graphics` 的 Release 构建后，使用全新的输出目录打包：
 
 ```powershell
-python tools/packaging/package_windows.py --build-dir out/build/desktop-graphics --dependency-prefix out/dependencies/installed/x64-windows --output out/releases/OrbitForge-0.1.0-win-x64 --reports out/validation/package-win-x64 --verify --zip
+python tools/packaging/package_windows.py --build-dir out/build/desktop-graphics --dependency-prefix out/dependencies/installed/x64-windows --output out/releases/OrbitForge-0.2.0-win-x64 --reports out/validation/package-win-x64 --verify --zip
 ```
 
 脚本收集应用程序、运行库、Qt 插件、离线资源及第三方许可，并生成同名 ZIP。`--verify` 在真实 Windows 桌面与 Vulkan GPU 上检查打包结果；运行时使用隔离的数据目录。解压后的入口是 `OrbitForge.exe`。输出与报告必须使用互不包含的新目录。公开 `manifest.json` 只包含包内相对路径、文件名和校验值；本机 DLL 来源路径留在 `--reports` 的 `dll-sources.json`。完整参数可用 `python tools/packaging/package_windows.py --help` 查看。
