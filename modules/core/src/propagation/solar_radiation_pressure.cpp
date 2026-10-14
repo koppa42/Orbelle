@@ -98,7 +98,17 @@ double covered_area(std::span<const Disk> occultors) {
             edge_storage[edge_count++] = angle(direction + opening);
         }
         auto edges = std::span{edge_storage}.first(edge_count);
-        std::sort(edges.begin(), edges.end());
+        // At most six endpoints: direct insertion keeps the small stack buffer bounded
+        // and avoids generic std::sort's larger insertion-sort threshold on GCC 13.
+        for (std::size_t k = 1; k < edges.size(); ++k) {
+            const double value = edges[k];
+            auto position = k;
+            while (position > 0 && edges[position - 1] > value) {
+                edges[position] = edges[position - 1];
+                --position;
+            }
+            edges[position] = value;
+        }
         for (std::size_t k = 1; k < edges.size(); ++k) {
             const double start = edges[k - 1], end = edges[k], middle = (start + end) / 2;
             const double x = circle.x + circle.radius * std::cos(middle);
