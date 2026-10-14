@@ -243,7 +243,7 @@ int main(int argc, char **argv) {
         if (argc != 4) {
             return 8;
         }
-        const auto provider = orbitforge::runtime::load_spice_snapshot(argv[2], argv[3]);
+        auto provider = orbitforge::runtime::load_spice_snapshot(argv[2], argv[3]);
         const auto epoch = provider->data_info().first_epoch;
         const auto moon = provider->geometric_state(301, 399, epoch);
         const auto range = std::hypot(moon.position_m[0], moon.position_m[1], moon.position_m[2]);
@@ -253,6 +253,22 @@ int main(int argc, char **argv) {
             std::abs(provider->from_tdb(provider->to_tdb(epoch)).seconds_since(epoch)) > 1e-6) {
             return 9;
         }
+        auto ephemeris = orbitforge::runtime::make_third_body_ephemeris(std::move(provider));
+        orbitforge::core::HpopOptions options;
+        options.gravity_degree = options.gravity_order = 0;
+        options.sun_gravity = options.moon_gravity = true;
+        const orbitforge::core::CartesianState initial{epoch,
+                                                       orbitforge::core::OriginId::earth,
+                                                       orbitforge::core::FrameId::gcrf,
+                                                       {7e6, 0, 0},
+                                                       {0, 6200, 5300}};
+        const auto numerical =
+            orbitforge::core::make_hpop(initial, options, {nullptr, nullptr, nullptr, ephemeris});
+        const auto state =
+            numerical->state_at(orbitforge::core::Epoch{epoch.tai_nanoseconds() + 60'000'000'000});
+        if (!std::isfinite(state.position_m[0]) || state.position_m == initial.position_m ||
+            ephemeris->data_info().sun_mu != orbitforge::runtime::de440_sun_mu)
+            return 17;
     }
     std::cout << "Installed SDK consumer passed\n";
 }

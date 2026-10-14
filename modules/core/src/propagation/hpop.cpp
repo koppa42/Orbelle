@@ -70,6 +70,20 @@ class Hpop final : public IStateProvider {
             acceleration = rotation.inverse_position(environment_.gravity->acceleration(
                 rotation.apply_position(r), options_.gravity_degree, options_.gravity_order));
         }
+        if (options_.uses_third_bodies()) {
+            const auto epoch = epoch_at(t);
+            const auto &info = environment_.ephemeris->data_info();
+            const auto add = [&](ThirdBody body, double mu) {
+                const auto force =
+                    third_body_acceleration(r, environment_.ephemeris->position(body, epoch), mu);
+                for (int i = 0; i < 3; ++i)
+                    acceleration[i] += force[i];
+            };
+            if (options_.sun_gravity)
+                add(ThirdBody::sun, options_.sun_mu.value_or(info.sun_mu));
+            if (options_.moon_gravity)
+                add(ThirdBody::moon, options_.moon_mu.value_or(info.moon_mu));
+        }
         return {s[3], s[4], s[5], acceleration[0], acceleration[1], acceleration[2]};
     }
     State rk4(double t, const State &s, double h) const {
@@ -157,6 +171,12 @@ class Hpop final : public IStateProvider {
     Hpop(CartesianState initial, HpopOptions options, HpopEnvironment environment)
         : initial_(initial), options_(options), environment_(std::move(environment)) {
         validate_hpop_options(options_);
+        if (options_.uses_third_bodies()) {
+            if (!environment_.ephemeris)
+                throw std::invalid_argument("Sun/Moon gravity requires selected ephemeris data");
+            environment_.ephemeris->validate_interval(initial.epoch, initial.epoch,
+                                                      options_.sun_gravity, options_.moon_gravity);
+        }
         if (options_.gravity_model.empty())
             environment_.gravity = builtin_egm96();
         if (!environment_.gravity)
@@ -190,6 +210,10 @@ class Hpop final : public IStateProvider {
             throw PropagationError("HPOP query exceeds 366 days from the initial epoch");
         if (epoch == initial_.epoch)
             return initial_;
+        if (options_.uses_third_bodies())
+            environment_.ephemeris->validate_interval(t < 0 ? epoch : initial_.epoch,
+                                                      t < 0 ? initial_.epoch : epoch,
+                                                      options_.sun_gravity, options_.moon_gravity);
         if (options_.gravity_degree > 0 && !eop_covers(environment_.eop->data_info(), epoch))
             throw EopCoverageError(
                 "HPOP integration requires EOP covering the initial and query epochs");
@@ -227,6 +251,15 @@ void validate_hpop_options(const HpopOptions &o) {
         }))
         throw std::invalid_argument("Invalid gravity model selection");
     positive(o.gravity_mu, "Gravity GM must be finite and positive");
+    if (o.ephemeris_model.empty() || o.ephemeris_model.size() > 64 ||
+        !std::all_of(o.ephemeris_model.begin(), o.ephemeris_model.end(), [](char ch) {
+            return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-';
+        }))
+        throw std::invalid_argument("Invalid ephemeris model selection");
+    if (o.sun_mu)
+        positive(*o.sun_mu, "Sun GM must be finite and positive");
+    if (o.moon_mu)
+        positive(*o.moon_mu, "Moon GM must be finite and positive");
     const int limit = o.gravity_model.empty() ? egm96_max_degree : gravity_max_degree;
     if (o.gravity_degree < 0 || o.gravity_degree == 1 || o.gravity_degree > limit ||
         o.gravity_order < 0 || o.gravity_order > o.gravity_degree)

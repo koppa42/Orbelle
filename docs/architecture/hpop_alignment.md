@@ -1,6 +1,8 @@
 # HPOP 与 STK 的对照及重构要求
 
-本文定义 OrbitForge 通用地球轨道数值传播的目标契约与验收顺序。已落地的首个增量是静态重力资源：数据中心下载 EGM2008 / EGM96、导入外部文件、最高 360 阶归一化计算，以及桌面、C++、Python、项目引用的贯通。其他目标按下文阶段推进；当前已实现范围以[预报器](propagators.md#hpop)为准。
+本文定义 OrbitForge 通用地球轨道数值传播的目标契约与验收顺序。维护者提供的六张截图中，所有设置项均为完整实现范围，包括未勾选、灰显和通过子窗口进入的设置；不能仅实现截图当前启用的组合。交付可以分增量，功能范围不能因此缩减。
+
+当前已实现静态重力资源与日月引力：数据中心下载 EGM2008 / EGM96 / DE440s、导入外部静态重力文件，最高 360 阶重力计算及日月差分引力，贯通桌面、C++、Python 和项目数据引用。其余目标按下文逐项验收；当前能力以[预报器](propagators.md#hpop)为准，不能把本增量称为完整 HPOP。
 
 对照依据是 STK 13.1 官方帮助，以及维护者提供的 Gravity、Drag、SRP、Additional、Integrator、Covariance 六个设置页面。截图中的参数是一组参考配置，不据此推定所有 STK 版本的出厂默认值。HPOP 的公开接口和模型说明可供对照，不能据此声称复现了其内部源码、步长控制器或全部精度特性。
 
@@ -34,9 +36,51 @@
 | Integrator | RKF7(8)，VOP 关闭；相对误差 1e-13，步长 1–86400 s；Lagrange 7 阶插值；时间正则化关闭；固定步长输出开启；停止高度 10 km |
 | Covariance | Compute Covariance 关闭；页面仍应能表达初始矩阵、参考系、独立重力截断和 consider 参数 |
 
-首个增量已支持 EGM2008 和 21 阶，但仍不能完整表达这组配置：缺少潮汐、日月、阻力及光压；最大自适应步长限制为 3600 s；无科学插值和协方差配置。重构不能只把数值上限放宽，必须随相应模型和收敛验证一起交付。
+当前已支持 EGM2008、21 阶及日月引力，但仍不能完整表达这组配置：缺少潮汐、Cb 常数文件、阻力及光压；最大自适应步长限制为 3600 s；无科学插值和协方差配置。重构不能只把数值上限放宽，必须随相应模型和收敛验证一起交付。
 
 截图未提供初始状态、分析时段、实际重力系数文件、Cb 常数文件、星历、EOP 与参考轨迹，因此它是配置参照，而非数值真值。正式比较应从实际场景导出精确参数和资源，不用截图中显示的舍入数值代替它们。
+
+### 六页逐项验收清单
+
+“部分”表示已有真实能力，但还不满足该项完整要求；“待实现”不是取消范围。每行完成均须有计算语义、资源依赖、API、项目往返、UI、独立参考和失败路径，不能仅增加控件或枚举。插件的目标是 OrbitForge 自定义力模型接口，不承诺直接加载 STK 的 COM 二进制插件。
+
+| 页面 | 必须支持的项目 | 当前状态与验收重点 |
+| --- | --- | --- |
+| Gravity | 重力文件；Maximum Degree / Order | 部分：EGM2008 / EGM96 / 外部静态文件、最高 360 阶；文件范围与计算范围分开显示 |
+| Gravity | Include Secular Variations | 待实现：系数参考历元、长期变化率与时间单位；开启后力值随历元改变 |
+| Gravity | 固体潮模式，含 Permanent tide only | 待实现：永久潮、完整固体潮与资源潮汐系统一致，不重复叠加 |
+| Gravity | Truncate to Gravity Field Size；Time Dependent Terms；Min. Amplitude | 待实现：截断、频率项和幅度阈值各自进入模型及来源身份 |
+| Gravity | Use Ocean Tides；独立 Degree / Order；Min. Amplitude | 待实现：海潮文件统一管理；分潮、阶次与筛选实际生效 |
+| Gravity | 第三体 Name / Use / Source / Gravity Value | 部分：Sun / Moon、DE440 GM 或手动 GM；仍须行星选择、Cb 常数文件及相应中心/质心约定 |
+| Drag | Use Drag；Spherical；Cd；Area/Mass Ratio | 待实现：与大气相对的速度、方向、单位及面积质量比 |
+| Drag | Atmospheric Density，含 Jacchia–Roberts | 待实现：Jacchia–Roberts 为必需模型；另支持 NRLMSISE-00，分别做密度参考验证 |
+| Drag | Low Altitude Density；Blending Range | 待实现：低空模型可选关闭；启用后在指定范围连续拼接 |
+| Drag | Solar Flux/GeoMag 来源；Daily / Average F10.7；Kp | 待实现：手动与数据中心文件；Kp/Ap 转换、历史窗口、预报范围和缺值错误 |
+| Drag | Use Approximate Altitude；Use Apparent Sun Position | 待实现：独立定义高度近似与太阳位置方法，开关改变实际密度输入 |
+| SRP | Use SRP；Spherical；Cr；Area/Mass | 待实现：距离平方缩放；与阻力的面积质量比独立 |
+| SRP | Shadow Model，含 Dual Cone | 待实现：全照、半影、本影、环食；对照几何与事件时刻 |
+| SRP | Use Boundary Mitigation | 待实现：可复核的边界算法、标识及步长收敛，不能声称复刻未公开内部算法 |
+| SRP | Method to Compute Sun，含 Apparent To True CB | 待实现：光行时与观测点约定，检查额外查询时段 |
+| SRP | Atmospheric Altitude；Eclipsing Central Bodies 增删 | 待实现：地球/月球及可选遮挡体、等效半径、多体遮挡并集 |
+| Additional | Albedo；Thermal；Ck；Area/Mass；Ground Reflection Model | 待实现：各自开关、地表反射/发射率资源、可见地表积分 |
+| Additional | Relativistic Accelerations；Satellite Mass | 待实现：明确相对论项与质量用途；不覆盖球形模型显式给定的面积质量比 |
+| Additional | Use Plugin；Plugin 选择；Plugin Settings | 待实现：注册、具名设置、生命周期、加速度及偏导契约、可复现配置和错误隔离 |
+| Additional | Advanced 子窗口 | 待实现：继续逐项核对官方高级设置；须与力模型版本和数值含义对应，不能放一个空入口 |
+| Integrator | Integration 方法 | 部分：RK4、RKF78；仍须 RKV8(9)、Bulirsch–Stoer、Gauss–Jackson 的独立实现和收敛验证 |
+| Integrator | VOP；Predictor Corrector Scheme | 待实现：通用变量方程、Full/Pseudo Correction、有效组合及机动后重启 |
+| Integrator | Fixed/Relative Error；Tolerance；Min/Max Step | 部分：RK4 固定、RKF78 混合绝对/相对控制；需对齐各方法语义并验证截图 1–86400 s 范围 |
+| Integrator | Interpolation 方法；Order；VOP μ | 待实现：Lagrange、Hermite、VOP；误差、位置速度一致性及禁止跨脉冲插值 |
+| Integrator | Allow PosVel Covariance Interpolation | 待实现：协方差传播完成后验证插值、对称性与半正定性 |
+| Integrator | Time Regularization；Exponent；Steps Per Orbit | 待实现：正则化时间变换及高偏心轨道、正反向和边界事件 |
+| Integrator | Report Ephemeris on a Fixed Time Step | 部分：已有独立固定网格查询；仍须明确可选内部节点输出，与积分及插值契约联动 |
+| Integrator | Do not propagate below altitude | 已有按力评估停止的参考球面地心高度；STK 比较须核对其高度参考面 |
+| Covariance | Compute Covariance；6×6 初始矩阵 | 待实现：变分方程、单位、对称性和正定性政策；关闭不影响确定性轨迹 |
+| Covariance | Frame；Representation | 待实现：J2000/TOD/LVLH/Frenet，Cartesian 及适用的 FG 表示；完整 Jacobian |
+| Covariance | 独立 Gravity Degree / Order | 待实现：仅变分方程截断，不能改变名义轨迹 |
+| Covariance | Include Consider Analysis；Use / Value / x,y,z,vx,vy,vz | 待实现：Drag、SRP、OutGasTimeConstant、OutGasMagnitude、ThrustX/Y/Z 的参数定义、敏感度、参数方差及状态交叉协方差 |
+| Covariance | Include Consider Cross Correlation；Row/Column/Value；Add/Remove | 待实现：参数间协方差、联合矩阵校验及输出来源 |
+
+OutGas 与 Thrust 参数必须有对应的名义加速度和偏导定义，不能只存名称或向矩阵添加任意噪声。高级窗口、模型下拉选项的进一步细分须继续依据官方说明和可获得的实际配置核对；核对未完成时保持待实现，不推定已支持。
 
 ## 2. 对齐标准
 
@@ -188,7 +232,7 @@ C++ 共享同一份具名强类型定义，Python 不要求创建 `Update` 包�
 | D：积分高级能力 | 其余积分器、VOP、时间正则化、科学插值和事件诊断 | 阶数与容差收敛、正反向、偏心轨道、阴影边界、机动重启及性能基准通过 |
 | E：不确定度 | STM、状态协方差、坐标变换、参数敏感度和 consider analysis | 有限差分参考、协方差性质、跨坐标系、机动跳变与独立结果比较通过 |
 
-每个阶段都以可用的计算、数据、API、持久化、桌面和验证闭环交付，不先放一整套可点击但不生效的设置。阶段 A 中的静态重力资源已完成；配置解耦与星历接入仍待完成。阶段 B 是“常用完整力环境”的最低门槛；完成 B 仍不代表潮汐、全部积分器和协方差已与 STK 全面对齐。
+每个阶段都以可用的计算、数据、API、持久化、桌面和验证闭环交付，不先放一整套可点击但不生效的设置。阶段 A 中的静态重力资源和 DE440s 星历接入已完成，阶段 B 已实现日月引力；配置解耦、阻力/天气和光压为后续增量。阶段 B 是“常用完整力环境”的最低门槛；完成 B 仍不代表潮汐、全部积分器和协方差已与 STK 全面对齐。完整验收以本文件逐项清单全部通过为准。
 
 ### 数值比较
 

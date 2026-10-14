@@ -119,7 +119,9 @@ class MissionEditor final : public QDialog {
     core::HpopOptions hpop;
     MissionEditor(core::MissionPlan draft, core::HpopOptions options, core::Epoch initial,
                   core::Epoch scenario_first, core::Epoch scenario_last, QWidget *parent,
-                  const std::vector<runtime::CatalogGravity> &models)
+                  const std::vector<runtime::CatalogGravity> &models,
+                  const std::vector<runtime::CatalogEphemeris> &ephemerides,
+                  const std::function<std::vector<runtime::CatalogEphemeris>()> &manage_ephemerides)
         : QDialog(parent), plan(std::move(draft)), hpop(options), initial_(initial),
           first_(scenario_first), last_(scenario_last) {
         setObjectName("missionEditorDialog");
@@ -149,7 +151,9 @@ class MissionEditor final : public QDialog {
         model_row->addWidget(settings);
         outer->addLayout(model_row);
         connect(settings, &QPushButton::clicked, this,
-                [this, models] { edit_hpop_settings(hpop, this, models); });
+                [this, models, ephemerides, manage_ephemerides] {
+                    edit_hpop_settings(hpop, this, models, ephemerides, manage_ephemerides);
+                });
         connect(model_, &QComboBox::currentIndexChanged, this, [this, settings](int index) {
             plan.coast_model =
                 index == 0 ? core::MissionCoastModel::two_body : core::MissionCoastModel::hpop;
@@ -673,10 +677,14 @@ class MissionEditor final : public QDialog {
     }
 };
 } // namespace
-bool edit_mission(core::MissionPlan &plan, core::HpopOptions &hpop, core::Epoch initial,
-                  core::Epoch scenario_first, core::Epoch scenario_last, QWidget *parent,
-                  const std::vector<runtime::CatalogGravity> &models) {
-    MissionEditor dialog(plan, hpop, initial, scenario_first, scenario_last, parent, models);
+bool edit_mission(
+    core::MissionPlan &plan, core::HpopOptions &hpop, core::Epoch initial,
+    core::Epoch scenario_first, core::Epoch scenario_last, QWidget *parent,
+    const std::vector<runtime::CatalogGravity> &models,
+    const std::vector<runtime::CatalogEphemeris> &ephemerides,
+    const std::function<std::vector<runtime::CatalogEphemeris>()> &manage_ephemerides) {
+    MissionEditor dialog(plan, hpop, initial, scenario_first, scenario_last, parent, models,
+                         ephemerides, manage_ephemerides);
     if (dialog.exec() != QDialog::Accepted)
         return false;
     plan = std::move(dialog.plan);

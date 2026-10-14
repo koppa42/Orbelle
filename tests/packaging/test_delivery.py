@@ -92,7 +92,7 @@ class LinuxDeliveryTests(unittest.TestCase):
             # Use the fixed current-format input and its actual Python consumer.
             for relative in ('tests/packaging/sdk_consumer', 'tests/reference/time_frames',
                              'tests/integration/fixtures', 'bindings/python/tests', 'examples/python',
-                             'data/samples/eop', 'data/samples/time'):
+                             'data/samples/eop', 'data/samples/time', 'data/samples/spice'):
                 shutil.copytree(ROOT / relative, source / relative,
                                 ignore=shutil.ignore_patterns('__pycache__'))
             for relative in ('tools/ci/check_linux.py', 'tools/ci/validation_inputs.py',
@@ -109,6 +109,8 @@ class LinuxDeliveryTests(unittest.TestCase):
                     'data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json',
                     'data/samples/eop/iers_c04_2000_01_01_2000_01_02/eop.c04',
                     'data/samples/time/iers_leap_seconds_2026_07.dat',
+                    'data/samples/spice/de440s_2016_leap/manifest.json',
+                    'data/samples/spice/de440s_2016_leap/orbitforge_de440s_2016_leap.bsp',
                 )
             }
             args = argparse.Namespace(source=source, work=root / 'work',

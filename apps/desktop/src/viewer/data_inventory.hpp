@@ -6,11 +6,15 @@
 #include <orbitforge/runtime/data_catalog.hpp>
 
 namespace orbitforge::desktop {
-enum class DataProduct { finals2000a, c04, utc, egm2008, egm96, custom_gravity };
-inline constexpr std::array all_data_products{
-    DataProduct::finals2000a, DataProduct::c04,   DataProduct::utc,
-    DataProduct::egm2008,     DataProduct::egm96, DataProduct::custom_gravity};
-inline bool gravity_product(DataProduct p) { return p >= DataProduct::egm2008; }
+enum class DataProduct { finals2000a, c04, utc, egm2008, egm96, custom_gravity, de440s };
+inline constexpr std::array all_data_products{DataProduct::finals2000a, DataProduct::c04,
+                                              DataProduct::utc,         DataProduct::egm2008,
+                                              DataProduct::egm96,       DataProduct::custom_gravity,
+                                              DataProduct::de440s};
+inline bool gravity_product(DataProduct p) {
+    return p >= DataProduct::egm2008 && p <= DataProduct::custom_gravity;
+}
+inline bool force_product(DataProduct p) { return gravity_product(p) || p == DataProduct::de440s; }
 inline std::string gravity_selection(DataProduct p) {
     return p == DataProduct::egm2008 ? "egm2008" : p == DataProduct::egm96 ? "egm96" : "custom";
 }
@@ -51,5 +55,6 @@ struct DataInventoryItem {
     std::filesystem::path file;
     std::optional<std::uintmax_t> file_size;
     std::optional<core::GravityInfo> gravity;
+    std::optional<core::ThirdBodyDataInfo> ephemeris;
 };
 } // namespace orbitforge::desktop

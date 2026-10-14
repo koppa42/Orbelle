@@ -1,8 +1,10 @@
 #pragma once
 #include <memory>
+#include <optional>
 #include <orbitforge/core/frames/frame_provider.hpp>
 #include <orbitforge/core/propagation/gravity.hpp>
 #include <orbitforge/core/propagation/state_provider.hpp>
+#include <orbitforge/core/propagation/third_body.hpp>
 #include <string_view>
 
 namespace orbitforge::core {
@@ -18,6 +20,11 @@ struct HpopOptions {
     // Selected resource's GM, also used when converting initial osculating elements.
     // Resource preparation verifies this value against the file; it cannot override it.
     double gravity_mu = egm96_mu;
+    bool sun_gravity = false, moon_gravity = false;
+    std::string ephemeris_model = "de440s";
+    // Empty uses the ephemeris solution's constants; overrides are SI m^3/s^2.
+    std::optional<double> sun_mu{}, moon_mu{};
+    [[nodiscard]] bool uses_third_bodies() const { return sun_gravity || moon_gravity; }
     // 0/0 selects the chosen model's monopole. File models support up to 360x360.
     int gravity_degree = 8, gravity_order = 8;
     HpopIntegrator integrator = HpopIntegrator::rkf78;
@@ -39,6 +46,7 @@ struct HpopEnvironment {
     std::shared_ptr<const IFrameProvider> frames;
     std::shared_ptr<const IEarthOrientationProvider> eop;
     std::shared_ptr<const GravityModel> gravity{};
+    std::shared_ptr<const IThirdBodyEphemeris> ephemeris{};
 };
 // Cowell equations in GCRF, TAI seconds. Initial state is osculating, not mean elements.
 // Deterministic checkpoints are independent of query order and output sampling.

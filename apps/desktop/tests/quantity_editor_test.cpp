@@ -1092,7 +1092,7 @@ TEST_F(QuantityTest, HpopSettingsValidateCancelAndRoundTripWithoutApplyingTheOrb
             ASSERT_TRUE(QDir{}.mkpath(capture));
             QApplication::processEvents();
             EXPECT_TRUE(dialog->grab().save(capture + "/hpop-forces.png"));
-            tabs->setCurrentIndex(1);
+            tabs->setCurrentIndex(2);
             QApplication::processEvents();
             EXPECT_TRUE(dialog->grab().save(capture + "/hpop-integration.png"));
             dialog->resize(400, 460);
@@ -1170,5 +1170,87 @@ TEST_F(QuantityTest, HpopUsesInstalledGravityLimitsAndPersistsSelectedModel) {
     });
     EXPECT_FALSE(edit_hpop_settings(options, nullptr));
     EXPECT_EQ(options.gravity_model, "egm2008");
+}
+TEST_F(QuantityTest, HpopThirdBodiesPreserveDraftsAndValidateManualConstants) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    core::HpopOptions options;
+    bool managed = false;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *tabs = dialog->findChild<QTabWidget *>("hpopSettingsTabs");
+        ASSERT_TRUE(tabs);
+        tabs->setCurrentIndex(1);
+        auto *sun = dialog->findChild<QCheckBox *>("hpopSunGravity");
+        auto *moon = dialog->findChild<QCheckBox *>("hpopMoonGravity");
+        auto *source = dialog->findChild<QComboBox *>("hpopSunSource");
+        auto *quantity = dialog->findChild<QuantityEditor *>("hpopSunMu");
+        auto *mu = quantity->findChild<QLineEdit *>("quantityValue");
+        ASSERT_TRUE(sun && moon && source && mu);
+        EXPECT_EQ(source->currentIndex(), 0);
+        EXPECT_EQ(dialog->findChild<QComboBox *>("hpopMoonSource")->currentIndex(), 0);
+        EXPECT_FALSE(options.sun_mu || options.moon_mu);
+        EXPECT_FALSE(source->isEnabled());
+        sun->setChecked(true);
+        moon->setChecked(true);
+        EXPECT_TRUE(mu->isReadOnly());
+        const auto constant = quantity->value(Unit::metres_cubed_per_second_squared);
+        QKeyEvent up(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
+        QApplication::sendEvent(mu, &up);
+        EXPECT_EQ(quantity->value(Unit::metres_cubed_per_second_squared), constant);
+        quantity->set_unit(Unit::metres_cubed_per_second_squared);
+        EXPECT_EQ(quantity->value(Unit::metres_cubed_per_second_squared), constant);
+        quantity->set_unit(Unit::kilometres_cubed_per_second_squared);
+        source->setCurrentIndex(1);
+        mu->setText("1.3271244e11");
+        source->setCurrentIndex(0);
+        EXPECT_TRUE(mu->isReadOnly());
+        source->setCurrentIndex(1);
+        EXPECT_EQ(mu->text(), QStringLiteral("1.3271244e11"));
+        dialog->findChild<QToolButton *>("hpopManageEphemerides")->click();
+        EXPECT_TRUE(managed);
+        EXPECT_EQ(mu->text(), QStringLiteral("1.3271244e11"));
+        EXPECT_TRUE(dialog->findChild<QLabel *>("hpopEphemerisStatus")->text().contains("2000"));
+        const auto output = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        if (!output.isEmpty()) {
+            source->setCurrentIndex(0); // Preview the normal, automatic-GM configuration.
+            QDir{}.mkpath(output);
+            QApplication::processEvents();
+            EXPECT_TRUE(dialog->grab().save(output + "/third-body-wide.png"));
+            dialog->resize(460, 680);
+            QEventLoop settled;
+            QTimer::singleShot(60, &settled, &QEventLoop::quit);
+            settled.exec();
+            EXPECT_TRUE(dialog->grab().save(output + "/third-body-compact.png"));
+            source->setCurrentIndex(1);
+        }
+        mu->setText("0");
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        EXPECT_TRUE(dialog->isVisible());
+        mu->setText("1.3271244e11");
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr, {}, {}, [&] {
+        managed = true;
+        runtime::CatalogEphemeris entry;
+        entry.selection = "de440s";
+        entry.info.first = core::Epoch{0};
+        entry.info.last = core::Epoch{86400000000000};
+        return std::vector{entry};
+    }));
+    EXPECT_TRUE(options.sun_gravity && options.moon_gravity);
+    ASSERT_TRUE(options.sun_mu);
+    EXPECT_EQ(*options.sun_mu, 1.3271244e20);
+    EXPECT_FALSE(options.moon_mu);
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        EXPECT_TRUE(dialog->findChild<QCheckBox *>("hpopSunGravity")->isChecked());
+        dialog->findChild<QCheckBox *>("hpopMoonGravity")->setChecked(false);
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr));
+    EXPECT_EQ(options, saved);
 }
 } // namespace orbitforge::desktop

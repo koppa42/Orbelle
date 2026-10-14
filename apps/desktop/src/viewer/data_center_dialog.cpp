@@ -43,6 +43,8 @@ QString product_name(DataProduct p) {
         return QStringLiteral("EGM96");
     case DataProduct::custom_gravity:
         return QStringLiteral("外部重力场");
+    case DataProduct::de440s:
+        return QStringLiteral("DE440s");
     }
     return {};
 }
@@ -158,9 +160,6 @@ class DataItemDelegate final : public QStyledItemDelegate {
                                                                      : "#a0b6c8"));
         painter->drawText(QRect(left, bounds.top() + 32, width, 17), Qt::AlignVCenter,
                           painter->fontMetrics().elidedText(lines.value(1), Qt::ElideRight, width));
-        painter->setPen(QColor("#a9c0d0"));
-        painter->drawText(QRect(left, bounds.top() + 52, width, 17), Qt::AlignVCenter,
-                          painter->fontMetrics().elidedText(lines.value(2), Qt::ElideRight, width));
         painter->restore();
     }
 };
@@ -206,7 +205,7 @@ class PriorityDelegate final : public QStyledItemDelegate {
     }
 };
 } // namespace
-void show_data_center(QWidget *parent, EopCatalog &catalog) {
+void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataProduct> initial) {
     QDialog dialog(parent);
     dialog.setObjectName("eopDataDialog");
     dialog.setWindowTitle(QStringLiteral("数据中心"));
@@ -263,7 +262,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     const auto add_source = [&](DataProduct product, QTreeWidgetItem *parent) {
         auto *item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(list);
         item->setData(0, Qt::UserRole, static_cast<int>(product));
-        item->setSizeHint(0, QSize(0, 80));
+        item->setSizeHint(0, QSize(0, 62));
         return item;
     };
     auto *finals_node = add_source(DataProduct::finals2000a, eop_node);
@@ -271,11 +270,16 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     auto *utc_node = add_source(DataProduct::utc, nullptr);
     auto *gravity_node =
         new QTreeWidgetItem(list, {QStringLiteral("地球重力场\n模型文件与计算资源")});
-    gravity_node->setSizeHint(0, QSize(0, 62));
+    gravity_node->setSizeHint(0, QSize(0, 54));
     auto *egm2008_node = add_source(DataProduct::egm2008, gravity_node);
     auto *egm96_node = add_source(DataProduct::egm96, gravity_node);
     auto *custom_node = add_source(DataProduct::custom_gravity, gravity_node);
     gravity_node->setExpanded(true);
+    auto *ephemeris_node =
+        new QTreeWidgetItem(list, {QStringLiteral("太阳系星历\n第三体引力数据")});
+    ephemeris_node->setSizeHint(0, QSize(0, 54));
+    auto *de440s_node = add_source(DataProduct::de440s, ephemeris_node);
+    ephemeris_node->setExpanded(true);
     eop_node->setExpanded(true);
     list->setCurrentItem(eop_node);
     sidebar_layout->addWidget(list, 1);
@@ -420,7 +424,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     acquired->setToolTip(QStringLiteral("本地时间"));
     checked->setToolTip(QStringLiteral("本地时间"));
     overview_layout->addWidget(facts);
-    responsive_form(form, 520);
+    responsive_form(form, 380);
     auto *note = new QLabel;
     note->setObjectName("dataNote");
     note->setWordWrap(true);
@@ -545,7 +549,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     close->setMinimumWidth(88);
     footer->addWidget(close);
     layout->addWidget(footer_panel);
-    responsive_columns(acquisition, actions, 520);
+    responsive_columns(acquisition, actions, 380);
     responsive_columns(automatic_row, automatic_layout, 380);
     bool narrow = false, showing_details = false;
     const auto show_panels = [&] {
@@ -578,7 +582,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     QString operation_error;
     bool syncing_priority = false;
     const auto selected = [&]() -> std::optional<DataProduct> {
-        return list->currentItem() == eop_node || list->currentItem() == gravity_node
+        return list->currentItem() == eop_node || list->currentItem() == gravity_node ||
+                       list->currentItem() == ephemeris_node
                    ? std::nullopt
                    : std::optional{static_cast<DataProduct>(
                          list->currentItem()->data(0, Qt::UserRole).toInt())};
@@ -592,7 +597,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     };
     const auto update_details = [&] {
         const bool group = !selected();
-        gravity_summary->setVisible(list->currentItem() == gravity_node);
+        gravity_summary->setVisible(list->currentItem() == gravity_node ||
+                                    list->currentItem() == ephemeris_node);
         priority_scroll->setVisible(group);
         pages->setVisible(!group);
         state->setVisible(!group);
@@ -600,7 +606,21 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
         note->setVisible(!group);
         technical->setVisible(!group);
         if (group) {
+            if (list->currentItem() == ephemeris_node) {
+                priority_scroll->hide();
+                title->setText(QStringLiteral("太阳系星历"));
+                data_description->setText(
+                    QStringLiteral("统一管理 HPOP 使用的太阳、月球位置数据。"));
+                gravity_summary->setText(QStringLiteral(
+                    "JPL DE440s\n\n完整文件约 32 MiB，安装后支持 1850—2150 年的日月引力计算。"
+                    "\n\n选择左侧 DE440s 下载或导入文件，然后在 HPOP 的第三体引力页启用相应天体。"
+                    "\n\n星历覆盖不使用外推。每次计算固定数据内容，更新后重新计算需确认。"));
+                return;
+            }
             if (list->currentItem() == gravity_node) {
+                gravity_summary->setText(QStringLiteral(
+                    "EGM2008 / EGM96\n\n下载完整球谐系数文件，或导入 GFC / GRV 重力场。"
+                    "\n\n在 HPOP 中选择模型与阶次；每次计算固定所选数据。静态模型无固定有效期。"));
                 priority_scroll->hide();
                 title->setText(QStringLiteral("地球重力场"));
                 data_description->setText(QStringLiteral(
@@ -618,6 +638,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
         const auto &item = selected_item();
         const bool is_time = item.product == DataProduct::utc;
         const bool is_gravity = gravity_product(item.product);
+        const bool is_ephemeris = item.product == DataProduct::de440s;
         acquisition->show();
         policy_title->setVisible(item.extrapolation);
         extrapolation->setVisible(item.extrapolation);
@@ -647,12 +668,13 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
             limit_caption->setEnabled(limit > 0);
         }
         title->setText(product_name(item.product));
-        data_description->setText(is_gravity
-                                      ? QStringLiteral("地球静态球谐重力场 · HPOP / 机动滑行共用")
-                                  : is_time ? QStringLiteral("UTC、TAI 与 TT 之间的时间转换")
-                                  : item.product == DataProduct::finals2000a
-                                      ? QStringLiteral("快速观测与预测 · 适用于近期和未来时段")
-                                      : QStringLiteral("综合参考序列 · 历史时段的默认首选"));
+        data_description->setText(
+            is_gravity     ? QStringLiteral("地球静态球谐重力场 · HPOP / 机动滑行共用")
+            : is_ephemeris ? QStringLiteral("JPL 行星星历 · 太阳与月球第三体引力")
+            : is_time      ? QStringLiteral("UTC、TAI 与 TT 之间的时间转换")
+            : item.product == DataProduct::finals2000a
+                ? QStringLiteral("快速观测与预测 · 适用于近期和未来时段")
+                : QStringLiteral("综合参考序列 · 历史时段的默认首选"));
         state->setText(installation_text(item));
         state->setProperty("tone", item.installation == DataInstallation::bundled_sample ||
                                            item.installation == DataInstallation::missing
@@ -667,8 +689,9 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
                               ? QStringLiteral("尚未下载或导入")
                               : QStringLiteral("未记录（已有本地文件）"));
         qobject_cast<QLabel *>(form->labelForField(first))
-            ->setText(is_gravity ? QStringLiteral("文件阶次 / 计算上限")
-                                 : QStringLiteral("覆盖起点（UTC）"));
+            ->setText(is_gravity     ? QStringLiteral("文件阶次 / 计算上限")
+                      : is_ephemeris ? QStringLiteral("覆盖起点（TAI）")
+                                     : QStringLiteral("覆盖起点（UTC）"));
         first->setText(is_gravity ? (item.gravity ? QStringLiteral("%1 × %2 / 360 × 360")
                                                         .arg(item.gravity->degree)
                                                         .arg(item.gravity->order)
@@ -679,9 +702,10 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
                            : coverage_time(item.last) +
                                  (item.exclusive_end ? QStringLiteral("\n不含当日") : QString{}));
         qobject_cast<QLabel *>(form->labelForField(until))
-            ->setText(is_gravity ? QStringLiteral("有效期")
-                      : is_time  ? QStringLiteral("有效截止（UTC）")
-                                 : QStringLiteral("覆盖截止（UTC）"));
+            ->setText(is_gravity     ? QStringLiteral("有效期")
+                      : is_ephemeris ? QStringLiteral("覆盖截止（TAI）")
+                      : is_time      ? QStringLiteral("有效截止（UTC）")
+                                     : QStringLiteral("覆盖截止（UTC）"));
         if (is_gravity)
             note->setText(
                 item.gravity ? QStringLiteral("%1 · %2\nGM = %3 m³/s² · 参考半径 %4 "
@@ -694,6 +718,11 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
                     ? QStringLiteral(
                           "官方完整文件约 240 MiB，下载后在后台校验。静态模型默认不自动下载。")
                     : QStringLiteral("导入或下载完整重力场后，可在 HPOP 中选择模型与阶次。"));
+        else if (is_ephemeris)
+            note->setText(
+                QStringLiteral("完整 DE440s 约 32 MiB · NAIF 官方文件\n"
+                               "HPOP 使用地心几何位置与 DE440 配套 GM；太阳、月球可独立启用。"
+                               "覆盖为可计算时段，静态星历不按下载日期到期，也不作外推。"));
         else if (is_time)
             note->setText(QDateTime::currentDateTimeUtc() >= item.last
                               ? QStringLiteral("闰秒数据已到期，请检查更新后再计算后续时段。")
@@ -786,7 +815,10 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     });
     QObject::connect(raw, &QPushButton::clicked, &dialog, [&] {
         const auto file = QFileDialog::getOpenFileName(
-            &dialog, QStringLiteral("导入 %1 文件").arg(title->text()));
+            &dialog, QStringLiteral("导入 %1 文件").arg(title->text()), {},
+            *selected() == DataProduct::de440s ? QStringLiteral("DE440s 星历 (de440s.bsp *.bsp)")
+            : gravity_product(*selected()) ? QStringLiteral("重力场 (*.gfc *.grv);;所有文件 (*)")
+                                           : QStringLiteral("所有文件 (*)"));
         if (file.isEmpty())
             return;
         operation_error.clear();
@@ -841,8 +873,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
             seen_day = today;
         }
         const bool busy = catalog.downloading();
-        for (auto *node :
-             {finals_node, c04_node, utc_node, egm2008_node, egm96_node, custom_node}) {
+        for (auto *node : {finals_node, c04_node, utc_node, egm2008_node, egm96_node, custom_node,
+                           de440s_node}) {
             const auto &entry =
                 inventory_item(static_cast<DataProduct>(node->data(0, Qt::UserRole).toInt()));
             const auto name = product_name(entry.product);
@@ -965,6 +997,15 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     QObject::connect(&timer, &QTimer::timeout, &dialog, refresh);
     timer.start(150);
     refresh();
+    if (initial) {
+        for (auto *node :
+             {finals_node, c04_node, utc_node, egm2008_node, egm96_node, custom_node, de440s_node})
+            if (node->data(0, Qt::UserRole).toInt() == static_cast<int>(*initial)) {
+                list->setCurrentItem(node);
+                list->itemActivated(node, 0);
+                break;
+            }
+    }
     dialog.exec();
 }
 } // namespace orbitforge::desktop

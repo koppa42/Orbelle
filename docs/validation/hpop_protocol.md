@@ -33,10 +33,27 @@ java -cp "out/validation/hpop;$classpath" OrbitForgeGravityReference
 
 官方文件另做完整下载与原文校验；不把数百 MiB 文件提交仓库或作为普通 CI 的联网依赖。可选 `DataCenterTest.LiveOfficialGravityDownload` 通过 `ORBITFORGE_LIVE_GRAVITY=egm2008` 或 `egm96` 执行真实 Qt 下载、全量安装及再次检查；未设置时跳过。桌面离线测试覆盖后台导入和失败保留、重力分组、静态有效期、360 阶计算上限与未安装模型错误。截图入口沿用 `ORBITFORGE_DATA_UI_CAPTURE` 和 `ORBITFORGE_HPOP_UI_CAPTURE`。
 
+## 日月引力与星历
+
+`tests/reference/propagators/third_body.txt` 是独立 Orekit 13.1.2 `ThirdBodyAttraction` / Hipparchus 4.0.2 DP853 的 32 组输出。生成器 `tools/validation/orekit/OrbitForgeThirdBodyReference.java` 使用显式定义的移动太阳/月球、点质量地球，隔离差分引力和积分的实现；不依赖 OrbitForge 力值或 STK 输出。
+
+覆盖太阳单独、月球单独、组合、两者 GM 覆盖四种情况，LEO / GEO 初值及 ±6000 s / ±86400 s。参考每分量容限：初始第三体加速度 3e-18 m/s²，传播位置 2 mm、速度 2 µm/s。生产积分在此对照使用收紧的容差，具体数值固定在 `third_body_test.cpp`；不把该回归精度宣称为真实预报精度。另测毫米位移的潮汐极限、地心零差分、奇点、非法 GM、禁用无查询、取消后重用及覆盖先于力评估失败。
+
+```powershell
+javac -cp $classpath -d out/validation/hpop tools/validation/orekit/OrbitForgeThirdBodyReference.java
+java -cp "out/validation/hpop;$classpath" OrbitForgeThirdBodyReference
+```
+
+真实 SPICE 路由另用仓库内 DE440s 衍生片段检查位置、数据身份、保存/重开与原分析不受文件更新影响。构造两个不相连的 SPK 时间段，验证端点各自可查询也不能通过整段覆盖检查。统一覆盖约束含初始状态至全部输出的传播路径；不接受星历外推。
+
+可选 `DataCenterTest.LiveOfficialEphemerisDownloadAndRecheckRetainCurrentData` 由 `ORBITFORGE_LIVE_DE440S=1` 启用：完整官方文件下载、哈希和目标链校验、再次条件请求、错误替换保留已安装文件。不将 32 MiB 原文加入仓库，也不让普通 CI 依赖联网。运行 Qt 网络验证需加载对应 TLS 插件。
+
+桌面用 `QuantityTest.HpopThirdBodiesPreserveDraftsAndValidateManualConstants` 检查 GM 配套/手动切换、只读常数的单位转换、数据中心返回后保留草稿、非法值及取消；`DataCenterDialog.EphemerisGroupAndDetailsRemainReadableAtCompactWidth` 检查分组、窄窗和下载入口。沿用上述截图环境变量，并在真实主题、可显示中文的字体及不同 DPI 下检查。
+
 ## 集成与交付
 
 - `HpopProject.*`：真实 ERFA/IERS 帧转换、原生 GCRF 的 EOP 身份、报告/AER 复用、初始历元覆盖与取消。
-- `test_hpop.py`：Python 易用入口、不可变配置、Keplerian 的模型 μ、输出网格无关性、编辑前验证、准备结果独立和 v15 保存/打开。
+- `test_hpop.py`：Python 易用入口、不可变配置、Keplerian 的模型 μ、输出网格无关性、编辑前验证、准备结果独立和 v16 保存/打开。
 - `project-current.orbitforge`：独立二进制固定输入中的 HPOP 参数精确往返；非当前版本拒绝。
 - 安装后的 SDK 消费端：通过公共头文件创建 HPOP、查询并保存/重开，不依赖源码路径。
 - `QuantityTest.HpopSettingsValidateCancelAndRoundTripWithoutApplyingTheOrbit`：配置草稿、阶次约束、错误校验、取消和重开；可用 `ORBITFORGE_HPOP_UI_CAPTURE` 输出宽/窄窗口截图，配合 DPI 设置检查。

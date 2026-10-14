@@ -42,6 +42,8 @@ class QuantityEditor final : public QFrame {
     // Optional physical resolution, e.g. whole seconds; zero disables quantization.
     void set_quantum(double quantum, Unit unit);
     void set_label(const QString &label);
+    // A published constant can still be displayed in another compatible unit.
+    void set_read_only(bool value);
 
   signals:
     // SI value (or dimensionless), only emitted for a valid physical value change.

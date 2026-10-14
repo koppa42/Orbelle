@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
 #include <orbitforge/runtime/hpop.hpp>
 #include <orbitforge/runtime/j2.hpp>
@@ -17,6 +18,16 @@ application::Session make_orbit_session(const application::OrbitInput &input,
                                         std::uint64_t revision, const core::ITimeProvider *time,
                                         core::HpopEnvironment environment) {
     const auto &body = core::central_body(input.initial.origin);
+    if (input.uses_hpop() && input.hpop.uses_third_bodies()) {
+        if (!environment.ephemeris)
+            throw core::EphemerisDataError("Sun/Moon gravity requires an ephemeris");
+        const auto first = core::Epoch{
+            std::min(input.initial.epoch.tai_nanoseconds(), input.first.tai_nanoseconds())};
+        const auto last = core::Epoch{
+            std::max(input.initial.epoch.tai_nanoseconds(), input.last.tai_nanoseconds())};
+        environment.ephemeris->validate_interval(first, last, input.hpop.sun_gravity,
+                                                 input.hpop.moon_gravity);
+    }
     if (input.uses_eop_force()) {
         if (!environment.eop || !environment.frames)
             throw std::invalid_argument("HPOP spherical gravity requires selected EOP data");
@@ -68,6 +79,12 @@ application::Scenario make_project_scenario(const application::Project &project,
     result = result.with_data_lock(project.data_lock());
     for (const auto &satellite : project.satellites) {
         const auto &input = satellite.orbit;
+        if (input.uses_hpop() && input.hpop.uses_third_bodies()) {
+            if (!environment.ephemeris)
+                throw application::ProjectError("Missing selected ephemeris");
+            validate_ephemeris_reference(project.force_data, input.hpop.ephemeris_model,
+                                         environment.ephemeris->data_info());
+        }
         if (input.uses_hpop() && !input.hpop.gravity_model.empty()) {
             if (!environment.gravity)
                 throw application::ProjectError("Missing selected gravity provider");

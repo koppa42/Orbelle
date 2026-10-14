@@ -2,6 +2,8 @@
 #include "satellite_model.hpp"
 #include <algorithm>
 #include <limits>
+#include <orbitforge/runtime/ephemeris.hpp>
+#include <orbitforge/runtime/gravity.hpp>
 
 namespace orbitforge::desktop {
 std::shared_ptr<PreparedProject> prepare_project_scene(
@@ -10,7 +12,8 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
     const std::vector<std::shared_ptr<const core::IEarthOrientationProvider>> &installed_data,
     const std::atomic_bool &cancelled, std::optional<application::Scenario> retained_sessions,
     const std::optional<std::string> &edited_object, const core::ITimeProvider *time,
-    const std::map<std::string, std::shared_ptr<const core::GravityModel>> &gravity) {
+    const std::map<std::string, std::shared_ptr<const core::GravityModel>> &gravity,
+    const std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> &ephemerides) {
     application::validate_project(project);
     const auto [data_first, data_last] = application::calculation_data_interval(project);
     std::shared_ptr<const core::IEarthOrientationProvider> eop;
@@ -53,9 +56,20 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
                         {}});
     result->scenario = result->scenario.with_data_lock(project.data_lock());
     result->gravity = gravity;
+    result->ephemerides = ephemerides;
     for (auto &satellite : result->project.satellites) {
         if (cancelled.load())
             throw OrbitCancelled{};
+        const auto &input = satellite.orbit;
+        if (input.uses_hpop() && !input.hpop.gravity_model.empty() &&
+            gravity.contains(input.hpop.gravity_model))
+            runtime::validate_gravity_reference(project.force_data, input.hpop.gravity_model,
+                                                gravity.at(input.hpop.gravity_model)->info());
+        if (input.uses_hpop() && input.hpop.uses_third_bodies() &&
+            ephemerides.contains(input.hpop.ephemeris_model))
+            runtime::validate_ephemeris_reference(
+                project.force_data, input.hpop.ephemeris_model,
+                ephemerides.at(input.hpop.ephemeris_model)->data_info());
         const auto existing = std::find_if(
             result->scenario.objects().begin(), result->scenario.objects().end(),
             [&](const auto &s) { return s.provenance().object_id == satellite.orbit.object_id; });
@@ -76,6 +90,9 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
                                      {frames, eop,
                                       gravity.contains(satellite.orbit.hpop.gravity_model)
                                           ? gravity.at(satellite.orbit.hpop.gravity_model)
+                                          : nullptr,
+                                      ephemerides.contains(satellite.orbit.hpop.ephemeris_model)
+                                          ? ephemerides.at(satellite.orbit.hpop.ephemeris_model)
                                           : nullptr});
         auto orbit = prepare_orbit_scene(
             satellite.orbit, session, *frames, *eop, cancelled,

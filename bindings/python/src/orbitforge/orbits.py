@@ -55,7 +55,8 @@ class Keplerian:
 class HpopSettings:
     """Static file or built-in gravity and Cowell integration with local error tolerances.
 
-    No drag, third bodies, SRP or tides in this release. Noncentral gravity requires
+    Optional Sun/Moon gravity uses an explicitly selected DE440s ephemeris. No drag,
+    SRP or tides in this release. Noncentral gravity requires
     explicitly selected EOP covering the entire integration path, including initial epoch.
     gravity_model selects a catalog/DataSnapshot ID (empty: built-in EGM96, up to 20).
     File models support degrees through 360. gravity_mu must match the selected file's
@@ -73,21 +74,38 @@ class HpopSettings:
     minimum_altitude_m: float = 0
     gravity_model: str = ""
     gravity_mu: float = 3.986004415e14
+    third_bodies: tuple[Literal["sun", "moon"], ...] = ()
+    ephemeris: str = "de440s"
+    sun_mu: float | None = None
+    moon_mu: float | None = None
+
+    def __post_init__(self) -> None:
+        bodies = tuple(self.third_bodies)
+        if any(body not in ("sun", "moon") for body in bodies) or len(set(bodies)) != len(bodies):
+            raise ValueError("third_bodies accepts 'sun' and 'moon', each at most once")
+        object.__setattr__(self, "third_bodies", tuple(b for b in ("sun", "moon") if b in bodies))
 
     def _native(self) -> n.HpopOptions:
         value = n.HpopOptions()
         if self.integrator not in ("rkf78", "rk4"):
             raise ValueError("integrator must be 'rkf78' or 'rk4'")
         for name in self.__dataclass_fields__:
-            if name != "integrator":
+            if name not in ("integrator", "third_bodies", "ephemeris"):
                 setattr(value, name, getattr(self, name))
+        value.sun_gravity = "sun" in self.third_bodies
+        value.moon_gravity = "moon" in self.third_bodies
+        value.ephemeris_model = self.ephemeris
         value.integrator = n.HpopIntegrator.RKF78 if self.integrator == "rkf78" else n.HpopIntegrator.RK4
         value.validate()
         return value
 
     @classmethod
     def _read(cls, value: n.HpopOptions) -> "HpopSettings":
-        fields = {name: getattr(value, name) for name in cls.__dataclass_fields__ if name != "integrator"}
+        fields = {name: getattr(value, name) for name in cls.__dataclass_fields__
+                  if name not in ("integrator", "third_bodies", "ephemeris")}
+        fields["third_bodies"] = tuple(b for b, enabled in (
+            ("sun", value.sun_gravity), ("moon", value.moon_gravity)) if enabled)
+        fields["ephemeris"] = value.ephemeris_model
         return cls(**fields, integrator="rkf78" if value.integrator == n.HpopIntegrator.RKF78 else "rk4")
 
 
@@ -175,8 +193,14 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          integrator: Literal["rkf78", "rk4"] = "rkf78", max_step_seconds: float = 60,
          min_step_seconds: float = 0.001, fixed_step_seconds: float = 10,
          relative_tolerance: float = 1e-12, position_tolerance_m: float = 1e-3,
-         velocity_tolerance_mps: float = 1e-6, minimum_altitude_m: float = 0) -> Orbit:
-    """Numerical orbit with EGM96 (0/0 point mass or degree 2..20), RKF78 or RK4.
+         velocity_tolerance_mps: float = 1e-6, minimum_altitude_m: float = 0,
+         third_bodies: tuple[Literal["sun", "moon"], ...] = (), ephemeris: str = "de440s",
+         sun_mu: float | None = None, moon_mu: float | None = None) -> Orbit:
+    """Cowell orbit with static gravity, optional Sun/Moon attraction, RKF78 or RK4.
+
+    Built-in EGM96 supports up to degree 20; installed gravity files up to 360.
+    third_bodies=("sun", "moon") requires explicitly supplied DE440s ephemerides.
+    sun_mu and moon_mu are optional overrides in m^3/s^2; None uses DE440 constants.
 
     Output sampling is set on analysis.states(), independently of integration steps.
     Omitted gravity_order uses gravity_degree; order=0 retains only zonal terms.
@@ -189,6 +213,6 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
         gravity_degree, gravity_degree if gravity_order is None else gravity_order, integrator,
         relative_tolerance, position_tolerance_m, velocity_tolerance_mps,
         min_step_seconds, max_step_seconds, fixed_step_seconds, minimum_altitude_m,
-        gravity_model.lower(), gravity_mu)
+        gravity_model.lower(), gravity_mu, third_bodies, ephemeris, sun_mu, moon_mu)
     settings._native()  # Fail at construction, before changing a project.
     return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)

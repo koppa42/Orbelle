@@ -55,7 +55,7 @@ Runtime 的 `DataCatalog` 不依赖 Qt，提供目录查询、EOP 安装、final
 
 来源详情分为“概览”“更新与计算”“文件信息”三页。概览只放获取时间、计算覆盖／有效截止、最近检查和下载／导入操作；自动检查频率与有限外推放在设置页，来源、路径、大小、哈希及清单导入放在文件页。切换来源回到概览。三种数据均可联网下载、更新及原文导入，各自保存检查状态和偏好；UTC 不提供 EOP 优先级或外推。没有历史版本列表或应用到场景按钮。
 
-EOP 与 UTC 的自动下载与更新默认开启，也负责首次完整文件获取；已有用户关闭的偏好仍被尊重。启动后延迟 1.5 秒检查一次，此后仅在应用运行期间每分钟检查是否到期；每次调度依次考虑 UTC、finals2000A、C04 及已启用自动更新的重力产品，串行执行到期下载，不增加常驻服务。默认距上次尝试 24 小时，可在界面选择 6 小时、24 小时或 7 天，底层支持 1–168 小时。用户可关闭自动更新或随时手动下载。关闭窗口后下载继续，退出应用会中止；失败后的自动重试遵循相同间隔。
+EOP 与 UTC 的自动下载与更新默认开启，也负责首次完整文件获取；已有用户关闭的偏好仍被尊重。启动后延迟 1.5 秒检查一次，此后仅在应用运行期间每分钟检查是否到期；每次调度依次考虑 UTC、finals2000A、C04 及已启用自动更新的重力和星历产品，串行执行到期下载，不增加常驻服务。默认距上次尝试 24 小时，可在界面选择 6 小时、24 小时或 7 天，底层支持 1–168 小时。用户可关闭自动更新或随时手动下载。关闭窗口后下载继续，退出应用会中止；失败后的自动重试遵循相同间隔。
 
 `DataUpdateStatus` 单独记录尚未检查、检查中、下载中、已更新、无新内容、失败、取消、中断，以及更换本地文件后待检查。`finals-update-record`、`c04-update-record`、`utc-update-record` 分别以带 schema 的结构化记录存入 SQLite settings，包含尝试时间、最后成功检查时间、被检查文件的 SHA-256 和结果。重启遇到未完成状态显示“上次下载未完成”；旧目录只有自由文本状态时不推断曾成功检查。失败、取消和 304 不改下载时间，失败/取消也不改最后成功检查时间。进度条使用服务器提供的总大小；总大小未知时显示活动进度与实际接收字节数。
 
@@ -95,6 +95,38 @@ project.save("gravity.orbitforge", analysis=analysis)
 
 此示例显式使用本地文件，EOP 必须覆盖示例时段。外部模型 GM 与轨道配置不符时需要重新选择模型、核对输入；不会仅通过接受新哈希静默改变初始根数的物理含义。系数更新沿用项目打开／重算的确认流程，运行中结果保持原资源。
 
+## 太阳系星历与日月引力
+
+左侧“太阳系星历”下管理 DE440s，右侧沿用概览、更新与计算、文件信息三页。来源为 [NAIF 官方 DE440s](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp)，完整文件约 32 MiB，原文 SHA-256 为 `c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2`。提供手动下载、导入本地完整 BSP、条件更新、进度及取消；自动下载默认关闭，可主动开启。上限 64 MiB，总时限 30 分钟，下载和校验在后台完成。
+
+本产品可计算覆盖为 **1850-01-01 00:00:00 TAI 至 2150-01-01 00:00:00 TAI**，是官方文件实际 SPK 覆盖内的保守区间。界面明确标注 TAI；历史或未来几何查询不依赖尚不存在的 UTC 闰秒表。将历元作为 UTC 输入、输出，或使用 EOP 时，仍分别遵守时间表和 EOP 的覆盖约束。DE440s 不按下载日期失效，也不允许通过 EOP 的外推设置延长星历覆盖。
+
+安装过程校验原文哈希及完整目标链的连续覆盖，生成带时间转换常数的清单，再原子发布到 `ephemerides/<manifest SHA-256>/`。SQLite 收据 `ephemeris/de440s` 记录获取方式、获取时间与可用范围；`DataCatalog.ephemerides()` 读取元数据，`load_ephemeris("de440s")` 校验清单、文件与只读运行副本。当前天体是太阳/月球；全文件保留，不将其余行星系数的存在宣称为已支持对应 HPOP 开关。
+
+HPOP 使用地心几何位置（无光行时/像差），通过专用 ICRF 轴适配器求差分引力。配套 GM 为太阳 `1.3271244004127942e20`、月球 `4.9028001184575496e12` m³/s²，来自 [NAIF DE440 常数](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/gm_de440.tpc)。每个天体也可手动设置 GM，与位置星历分别记录。这里不构造或重标记一个相对论 GCRF 状态；时标使用 CSPICE 的均匀时间转换模型。有关轴约定见 [NAIF Frames](https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/req/frames.html)。
+
+Python 显式装配本地文件的最小示例（点质量地球隔离 EOP 依赖；球谐地球还需覆盖全积分时段的 EOP）：
+
+```python
+import orbitforge as of
+from orbitforge import units as u
+
+catalog = of.DataCatalog("local/data")
+entry = catalog.install_de440s("de440s.bsp")  # 显式本地安装，不隐式联网
+data = of.DataSnapshot.builtin_time().with_ephemeris(
+    entry.selection, entry.manifest, "local/ephemeris-runtime")
+project = of.Project("Sun and Moon", of.Epoch(0), of.Epoch(86400 * 10**9))
+sat = project.objects.satellite("Sat", orbit=of.orbits.Hpop(
+    initial=of.orbits.Keplerian(of.Epoch(0), u.km(42164), 0, u.deg(15)),
+    gravity_degree=0, third_bodies=("sun", "moon")))
+analysis = project.prepare(data=data)
+project.save("sun-moon.orbitforge", analysis=analysis)
+```
+
+C++ 可用 `catalog.load_ephemeris("de440s")` 装配 `DataSnapshot::with_ephemeris()`，或设置 `HpopEnvironment::ephemeris` 后调用 `make_hpop()`；`HpopOptions::sun_gravity` / `moon_gravity` 为开关，`sun_mu` / `moon_mu` 为可选 SI 覆盖值。桌面、项目报告和任务序列 HPOP 滑行复用同一实现。
+
+项目 v16 记录 `ephemeris/<选择 ID>` 的清单内容与解释哈希，解释包含几何位置、轴、GM 常数集及 CSPICE 版本；下载时间和本机路径不参与身份。数据变化先确认，拒绝则停止打开或重算。覆盖检查包含初始状态到查询/场景的完整积分路径，检查内部空洞，不仅检查两个端点。运行中的分析持有不可变资源。
+
 ## 覆盖不足与有限外推
 
 覆盖不足时列出场景需要的时段、每种当前数据的原始范围及外推上限，并提供“打开数据中心”和“取消”。用户下载、导入或修改设置后重试；不静默缩短场景，不绕过 UTC 有效期。
@@ -113,7 +145,7 @@ IERS 文件内已有预测属于文件数据；越过完整有效样本范围后
 2. **已完成：** SQLite 目录、文件去重、获取记录、按类型显示当前数据、旧目录迁移；打开或重算时检查数据变化并确认，哈希记录计算来源与外推策略。
 3. **已完成：** finals2000A 全文件适配器、原文件导入、手动更新、HTTP 条件更新、取消与失败重试。C04 全量文件适配器、原文与已有清单导入也已完成。
 4. **已完成：** 三种数据的自动检查／下载、按实例加载的 UTC Provider、UTC 更新后 EOP 重新解释和原子激活。
-5. SPICE 和轨道目录适配器；按实际需求增加结果复现、项目依赖包和缓存清理。
+5. **已完成：** 静态重力场与 DE440s 的联网下载、目录管理、HPOP、API 和项目引用。后续增加天气、潮汐及地表辐射资源；按实际需求增加结果复现、项目依赖包和缓存清理。
 
 各增量都保留离线使用能力。验收重点是身份可核验、一次计算的数据一致、更新可取消，以及任何下载或应用失败都保留已有可用文件和活动场景。
 

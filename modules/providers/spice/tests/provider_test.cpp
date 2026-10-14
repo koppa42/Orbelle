@@ -109,6 +109,39 @@ TEST(Spice, AnalyticSpkHasExplicitUnitsAxesAndVelocityScale) {
     }
 }
 
+TEST(Spice, ThirdBodyCoverageRejectsInteriorGapsAndChecksEveryRequiredChain) {
+    Fixture input;
+    const auto file = input.root / "third.bsp";
+    std::filesystem::remove(file);
+    SpiceInt handle = 0;
+    spkopn_c(file.string().c_str(), "synthetic DE chains with interior gap", 0, &handle);
+    spice_ok();
+    const double coefficients[]{10000, 0, 0, 0, 1000, 0, 0, 0, 2000, 0, 0, 0};
+    for (int body : {3, 10, 399, 301}) {
+        for (const auto interval : {std::pair{-3600., -100.}, std::pair{100., 3600.}}) {
+            spkw02_c(handle, body, body < 11 ? 0 : 3, "J2000", interval.first, interval.second,
+                     "synthetic segment", interval.second - interval.first, 1, 3, coefficients,
+                     interval.first);
+            spice_ok();
+        }
+    }
+    spkcls_c(handle);
+    spice_ok();
+    input.document["kernels"][1] = input.kernel("third.bsp", "SPK");
+    input.save();
+    const auto provider = input.load();
+    const core::Epoch before{-1000000000000}, after{1000000000000};
+    EXPECT_NO_THROW((void)provider->geometric_state(10, 399, before));
+    EXPECT_NO_THROW((void)provider->geometric_state(10, 399, after));
+    EXPECT_THROW(provider->validate_earth_gravity_interval(before, after, true, true),
+                 core::EphemerisCoverageError);
+    EXPECT_NO_THROW(provider->validate_earth_gravity_interval(after, after, true, true));
+    EXPECT_NO_THROW(
+        provider->validate_earth_gravity_interval(core::Epoch{200000000000}, after, false, true));
+    EXPECT_THROW(provider->validate_earth_gravity_interval(after, before, true, true),
+                 core::EphemerisCoverageError);
+}
+
 TEST(Spice, TaiTdbRoundTripAndEpochZeroAreCorrect) {
     Fixture input;
     const auto provider = input.load();

@@ -854,6 +854,8 @@ void OrbitEditor::update_state_labels() {
                                                     : QString::fromStdString(hpop_.gravity_model))
                    .arg(hpop_.gravity_degree)
                    .arg(hpop_.gravity_order)) +
+        (hpop_.sun_gravity ? QStringLiteral(" + 太阳") : QString{}) +
+        (hpop_.moon_gravity ? QStringLiteral(" + 月球") : QString{}) +
         (hpop_.integrator == core::HpopIntegrator::rkf78 ? QStringLiteral(" · RKF78 自适应")
                                                          : QStringLiteral(" · RK4 固定步长")));
     if (propagator_kind_ == OrbitPropagator::mission) {
@@ -951,7 +953,9 @@ void OrbitEditor::open_propagator_details() {
             const auto state = read_state();
             if (edit_mission(mission_, hpop_, state.epoch, first_->epoch(), last_->epoch(), this,
                              gravity_models ? gravity_models()
-                                            : std::vector<runtime::CatalogGravity>{})) {
+                                            : std::vector<runtime::CatalogGravity>{},
+                             ephemerides ? ephemerides() : std::vector<runtime::CatalogEphemeris>{},
+                             manage_ephemerides)) {
                 if (state_mode_index_ == 1)
                     write_elements(state);
                 update_state_labels();
@@ -962,9 +966,11 @@ void OrbitEditor::open_propagator_details() {
         return;
     }
     if (propagator_kind_ == OrbitPropagator::hpop) {
-        if (edit_hpop_settings(hpop_, this,
-                               gravity_models ? gravity_models()
-                                              : std::vector<runtime::CatalogGravity>{}))
+        if (edit_hpop_settings(
+                hpop_, this,
+                gravity_models ? gravity_models() : std::vector<runtime::CatalogGravity>{},
+                ephemerides ? ephemerides() : std::vector<runtime::CatalogEphemeris>{},
+                manage_ephemerides))
             update_state_labels();
         return;
     }

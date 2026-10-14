@@ -230,6 +230,7 @@ void QuantityEditor::render() {
     input_->setToolTip({});
     refresh_style();
 }
+void QuantityEditor::set_read_only(bool value) { input_->setReadOnly(value); }
 void QuantityEditor::validate_text() {
     bool invalid = false;
     try {
@@ -257,6 +258,8 @@ bool QuantityEditor::eventFilter(QObject *object, QEvent *event) {
     if (object == input_ && event->type() == QEvent::KeyPress) {
         const auto key = static_cast<QKeyEvent *>(event)->key();
         if (key == Qt::Key_Up || key == Qt::Key_Down) {
+            if (input_->isReadOnly())
+                return true;
             try {
                 set_value(base_value() + (key == Qt::Key_Up ? step_ : -step_), base_unit_);
             } catch (const std::exception &) {

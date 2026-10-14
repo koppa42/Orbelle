@@ -7,6 +7,7 @@
 #include <locale>
 #include <numbers>
 #include <orbitforge/runtime/access.hpp>
+#include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/report.hpp>
@@ -130,12 +131,24 @@ void csv_field(std::ostream &out, const std::string &value) {
 }
 } // namespace
 core::HpopEnvironment ReportContext::force_environment(const application::OrbitInput &input) const {
-    if (!input.uses_hpop() || input.hpop.gravity_model.empty())
-        return {frames, eop};
-    const auto found = gravity.find(input.hpop.gravity_model);
-    check(found != gravity.end() && found->second, "Missing selected gravity provider");
-    validate_gravity_reference(project.force_data, input.hpop.gravity_model, found->second->info());
-    return {frames, eop, found->second};
+    core::HpopEnvironment environment{frames, eop};
+    if (!input.uses_hpop())
+        return environment;
+    if (!input.hpop.gravity_model.empty()) {
+        const auto found = gravity.find(input.hpop.gravity_model);
+        check(found != gravity.end() && found->second, "Missing selected gravity provider");
+        validate_gravity_reference(project.force_data, input.hpop.gravity_model,
+                                   found->second->info());
+        environment.gravity = found->second;
+    }
+    if (input.hpop.uses_third_bodies()) {
+        const auto found = ephemerides.find(input.hpop.ephemeris_model);
+        check(found != ephemerides.end() && found->second, "Missing selected ephemeris provider");
+        validate_ephemeris_reference(project.force_data, input.hpop.ephemeris_model,
+                                     found->second->data_info());
+        environment.ephemeris = found->second;
+    }
+    return environment;
 }
 std::string report_input_sha256(const application::Project &project) {
     auto p = project;
@@ -155,6 +168,12 @@ std::string report_input_sha256(const application::Project &project) {
         if (s.orbit.uses_hpop()) {
             // Persist both integrators' drafts, but identify only the active calculation.
             auto &options = s.orbit.hpop;
+            if (!options.sun_gravity)
+                options.sun_mu.reset();
+            if (!options.moon_gravity)
+                options.moon_mu.reset();
+            if (!options.uses_third_bodies())
+                options.ephemeris_model = core::HpopOptions{}.ephemeris_model;
             if (options.integrator == core::HpopIntegrator::rk4) {
                 const core::HpopOptions defaults;
                 options.relative_tolerance = defaults.relative_tolerance;

@@ -16,3 +16,14 @@ independently of CSPICE and the production rotation-cross-product implementation
 Columns are elapsed TAI seconds, GCRF metres and metres/second; epoch is `Epoch(0)`.
 Input: a=7000000 m, e=.01, i=98.5°, Ω=25°, ω=70°, M=10°; EGM2008 constants.
 This is a formula/transcription regression, not a direct STK comparison.
+
+`third_body.txt` contains 32 independent Orekit 13.1.2 / Hipparchus 4.0.2
+ThirdBodyAttraction + DP853 reference cases. The generator is
+`tools/validation/orekit/OrbitForgeThirdBodyReference.java`; dependency hashes are
+in its sibling `dependencies.json`. Explicit moving synthetic geocentric bodies
+isolate differential gravity from SPICE. Cases cover Sun, Moon, both, and GM
+overrides; LEO/GEO initial states; and positive/negative 6000 s and 86400 s.
+Positions, velocities, and accelerations are GCRF SI; elapsed time is TAI from
+Epoch(0). See `docs/validation/hpop_protocol.md` for reproduction and tolerances.
+Real DE440s routing/coverage has separate integration tests; these values do not
+claim a same-configuration STK comparison.

@@ -23,7 +23,7 @@ from ._native import (
     ProjectSensor, SensorPointing, GroundObservation, AccessSample, AccessInterval,
     observe_ground_target, vector_angle,
     DataReference, DataLock,
-    DataCatalog, CatalogSnapshot, CatalogGravity, GravityInfo, DataAcquisition, EopProduct, data_catalog_available,
+    DataCatalog, CatalogSnapshot, CatalogGravity, GravityInfo, CatalogEphemeris, ThirdBodyDataInfo, DataAcquisition, EopProduct, data_catalog_available,
     ReportKind, ReportUnits, ReportTimeScale, ReportDefinition, ReportColumn, ReportTable,
     ReportResult, ReportScope, ReportQuery, ReportTemplate, ReportColumnSpec,
 )
@@ -44,7 +44,7 @@ from ._analysis import (
 )
 
 __all__ = [
-    "CatalogGravity", "GravityInfo",
+    "CatalogGravity", "GravityInfo", "CatalogEphemeris", "ThirdBodyDataInfo",
     "Analysis", "AnalysisPlan", "ProjectOpenPlan", "AnalysisRecord", "AnalysisStatus", "DataSnapshot", "DataChange", "DataChangedError",
     "AnalysisCapabilityError", "AnalysisCancelled", "Trajectory", "EpochColumn", "VectorColumn",
     "AccessWindow", "AccessWindows", "AccessProvenance",

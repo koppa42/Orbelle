@@ -25,6 +25,7 @@ class OrbitEditor final : public QWidget {
     std::function<void(OrbitInput)> apply;
     std::function<void()> cancel;
     std::function<std::vector<runtime::CatalogGravity>()> gravity_models;
+    std::function<std::vector<runtime::CatalogEphemeris>()> ephemerides, manage_ephemerides;
     std::function<void()> close_requested;
     std::function<void(int, QString, double)> appearance;
     std::function<void(DisplaySettings)> display;

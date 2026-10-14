@@ -5,6 +5,21 @@
 namespace py = pybind11;
 using namespace orbitforge;
 void bind_data_catalog(py::module_ &module) {
+    py::class_<core::ThirdBodyDataInfo>(module, "ThirdBodyDataInfo")
+        .def_readonly("model", &core::ThirdBodyDataInfo::model)
+        .def_readonly("content_sha256", &core::ThirdBodyDataInfo::content_sha256)
+        .def_readonly("interpretation_version", &core::ThirdBodyDataInfo::interpretation_version)
+        .def_readonly("first", &core::ThirdBodyDataInfo::first)
+        .def_readonly("last", &core::ThirdBodyDataInfo::last)
+        .def_readonly("sun_mu", &core::ThirdBodyDataInfo::sun_mu)
+        .def_readonly("moon_mu", &core::ThirdBodyDataInfo::moon_mu);
+    py::class_<runtime::CatalogEphemeris>(module, "CatalogEphemeris")
+        .def_readonly("selection", &runtime::CatalogEphemeris::selection)
+        .def_readonly("info", &runtime::CatalogEphemeris::info)
+        .def_readonly("manifest", &runtime::CatalogEphemeris::manifest)
+        .def_readonly("acquisition", &runtime::CatalogEphemeris::acquisition)
+        .def_readonly("acquired_at_unix_seconds",
+                      &runtime::CatalogEphemeris::acquired_at_unix_seconds);
     py::class_<core::GravityInfo>(module, "GravityInfo")
         .def_readonly("model", &core::GravityInfo::model)
         .def_readonly("sha256", &core::GravityInfo::sha256)
@@ -44,6 +59,13 @@ void bind_data_catalog(py::module_ &module) {
         .def(py::init<std::filesystem::path>(), py::arg("root"))
         .def_property_readonly("root", &runtime::DataCatalog::root)
         .def_property_readonly("gravity_models", &runtime::DataCatalog::gravity_models)
+        .def_property_readonly("ephemerides", &runtime::DataCatalog::ephemerides)
+        .def(
+            "install_de440s",
+            [](runtime::DataCatalog &catalog, const std::filesystem::path &file) {
+                return catalog.install_de440s(file);
+            },
+            py::arg("file"), py::call_guard<py::gil_scoped_release>())
         .def(
             "install_gravity",
             [](runtime::DataCatalog &catalog, const std::filesystem::path &file,

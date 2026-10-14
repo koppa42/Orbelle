@@ -288,6 +288,81 @@ class Snapshot final : public core::IEphemerisProvider {
         return result;
     }
     const core::EphemerisDataInfo &data_info() const noexcept override { return info_; }
+    void validate_earth_gravity_interval(core::Epoch first, core::Epoch last, bool sun,
+                                         bool moon) const override {
+        check_epoch(first);
+        check_epoch(last);
+        if (first.tai_nanoseconds() > last.tai_nanoseconds())
+            throw core::EphemerisCoverageError("Invalid ephemeris interval");
+        std::scoped_lock guard(engine().mutex);
+        activate();
+        const double begin = tdb_unlocked(first).seconds_past_j2000;
+        const double end = tdb_unlocked(last).seconds_past_j2000;
+        // DE4xx chains: 10->0, 3->0, 399->3 and 301->3. Inspect every segment,
+        // not just endpoint queries, so internal gaps or overriding frames fail early.
+        constexpr std::array ids{3, 10, 399, 301};
+        constexpr std::array centres{0, 0, 3, 3};
+        std::array<std::vector<std::pair<double, double>>, 4> coverage;
+        for (std::size_t k = 0; k < copies_->paths.size(); ++k) {
+            if (info_.kernels[k].kind != "SPK")
+                continue;
+            SpiceInt handle = 0;
+            dafopr_c(copies_->paths[k].string().c_str(), &handle);
+            check_spice();
+            try {
+                dafbfs_c(handle);
+                check_spice();
+                SpiceBoolean found = SPICEFALSE;
+                daffna_c(&found);
+                check_spice();
+                while (found) {
+                    SpiceDouble summary[5]{}, dc[2]{};
+                    SpiceInt ic[6]{};
+                    dafgs_c(summary);
+                    dafus_c(summary, 2, 6, dc, ic);
+                    check_spice();
+                    for (std::size_t i = 0; i < ids.size(); ++i) {
+                        if (ic[0] != ids[i] || !(i == 3 ? moon : i == 2 ? sun || moon : sun))
+                            continue;
+                        if (ic[1] != centres[i] || ic[2] != 1)
+                            throw core::EphemerisDataError(
+                                "HPOP requires DE-style ICRF-aligned Earth/Sun/Moon chains");
+                        coverage[i].emplace_back(dc[0], dc[1]);
+                    }
+                    daffna_c(&found);
+                    check_spice();
+                }
+                dafcls_c(handle);
+                check_spice();
+            } catch (...) {
+                reset_c();
+                dafcls_c(handle);
+                reset_c();
+                throw;
+            }
+        }
+        for (std::size_t i = 0; i < ids.size(); ++i) {
+            if (!(i == 3 ? moon : i == 2 ? sun || moon : sun))
+                continue;
+            auto &intervals = coverage[i];
+            std::sort(intervals.begin(), intervals.end());
+            double covered = begin;
+            bool matched = false;
+            for (const auto &[a, b] : intervals) {
+                if (a > covered)
+                    break;
+                if (b >= covered) {
+                    matched = true;
+                    covered = b;
+                }
+                if (matched && covered >= end)
+                    break;
+            }
+            if (!matched || covered < end)
+                throw core::EphemerisCoverageError("Sun/Moon ephemeris has a gap or does not cover "
+                                                   "the complete integration interval");
+        }
+    }
 
   private:
     void check_epoch(core::Epoch epoch) const {

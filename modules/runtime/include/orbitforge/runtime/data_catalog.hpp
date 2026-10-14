@@ -19,6 +19,13 @@ struct CatalogGravity {
     DataAcquisition acquisition = DataAcquisition::unknown;
     std::int64_t acquired_at_unix_seconds = 0;
 };
+struct CatalogEphemeris {
+    std::string selection;
+    core::ThirdBodyDataInfo info;
+    std::filesystem::path manifest;
+    DataAcquisition acquisition = DataAcquisition::unknown;
+    std::int64_t acquired_at_unix_seconds = 0;
+};
 struct CatalogSnapshot {
     std::string lock_sha256;
     std::string snapshot_id;
@@ -47,6 +54,13 @@ class DataCatalog {
     [[nodiscard]] std::vector<CatalogGravity> gravity_models() const;
     [[nodiscard]] std::shared_ptr<const core::GravityModel>
     load_gravity(const std::string &selection) const;
+    // Install the complete pinned DE440s SPK with owned uniform-time constants.
+    CatalogEphemeris install_de440s(const std::filesystem::path &spk,
+                                    DataAcquisition acquisition = DataAcquisition::imported,
+                                    const std::function<void()> &checkpoint = {});
+    [[nodiscard]] std::vector<CatalogEphemeris> ephemerides() const;
+    [[nodiscard]] std::shared_ptr<const core::IThirdBodyEphemeris>
+    load_ephemeris(const std::string &selection) const;
     // Reads a coherent local catalog view; never downloads or changes current pointers.
     // Full coverage wins over extrapolation, then preferred_eop() orders the sources.
     [[nodiscard]] DataSnapshot snapshot(core::Epoch first, core::Epoch last,

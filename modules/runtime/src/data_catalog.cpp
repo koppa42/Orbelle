@@ -1,5 +1,6 @@
 #include <charconv>
 #include <orbitforge/runtime/data_catalog.hpp>
+#include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <stdexcept>
@@ -281,7 +282,8 @@ bool data_catalog_available() noexcept { return true; }
 DataCatalog::DataCatalog(std::filesystem::path root) : impl_(std::make_unique<Impl>()) {
     std::filesystem::create_directories(root);
     impl_->root = std::filesystem::canonical(root);
-    for (const auto &part : {"snapshots", "blobs/sha256", "staging", "time", "gravity"})
+    for (const auto &part :
+         {"snapshots", "blobs/sha256", "staging", "time", "gravity", "ephemerides", "runtime"})
         std::filesystem::create_directories(impl_->root / part);
     check(sqlite3_open_v2(utf8(impl_->root / "catalog.sqlite").c_str(), &impl_->db,
                           SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
@@ -323,6 +325,133 @@ DataCatalog::DataCatalog(std::filesystem::path root) : impl_(std::make_unique<Im
 }
 DataCatalog::~DataCatalog() = default;
 const std::filesystem::path &DataCatalog::root() const noexcept { return impl_->root; }
+CatalogEphemeris DataCatalog::install_de440s(const std::filesystem::path &spk,
+                                             DataAcquisition acquisition,
+                                             const std::function<void()> &checkpoint) {
+    if (!ephemeris_available())
+        throw core::EphemerisDataError("This build does not include CSPICE");
+    Stage stage(impl_->root / "staging");
+    const auto file = stage.path / "de440s.bsp";
+    std::ifstream input(spk, std::ios::binary);
+    check(input.is_open(), "Cannot open DE440s file");
+    std::ofstream output(file, std::ios::binary);
+    picosha2::hash256_one_by_one hash;
+    std::array<char, 65536> bytes{};
+    std::size_t size = 0;
+    while (input) {
+        if (checkpoint)
+            checkpoint();
+        input.read(bytes.data(), bytes.size());
+        const auto count = input.gcount();
+        size += static_cast<std::size_t>(count);
+        check(size <= 64U * 1024 * 1024, "DE440s file exceeds 64 MiB");
+        hash.process(bytes.begin(), bytes.begin() + count);
+        output.write(bytes.data(), count);
+        check(static_cast<bool>(output), "Cannot stage DE440s file");
+    }
+    check(input.eof() && !input.bad(), "Cannot read DE440s file");
+    output.close();
+    check(static_cast<bool>(output), "Cannot close DE440s file");
+    hash.finish();
+    check(picosha2::get_hash_hex_string(hash) == de440s_sha256,
+          "DE440s checksum mismatch; select the complete official de440s.bsp");
+    // NAIF uniform-time model only. UTC leap seconds remain an independent resource.
+    const std::string lsk = "KPL/LSK\n\\begindata\nDELTET/DELTA_T_A = 32.184\n"
+                            "DELTET/K = 1.657D-3\nDELTET/EB = 1.671D-2\nDELTET/M = ( 6.239996D0 "
+                            "1.99096871D-7 )\n\\begintext\n";
+    write(stage.path / "uniform-time.tls", lsk);
+    const auto tai = [](int year) {
+        const auto days = std::chrono::sys_days{std::chrono::year{year} / 1 / 1} -
+                          std::chrono::sys_days{std::chrono::year{2000} / 1 / 1};
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(days - std::chrono::hours{12})
+            .count();
+    };
+    const auto lsk_hash = picosha2::hash256_hex_string(lsk);
+    const Json manifest{
+        {"schema_version", 1},
+        {"snapshot_id", "de440s-1850-2150-v1"},
+        {"model", "DE440s; ICRF axes; geometric Earth/Sun/Moon"},
+        {"first_tai_ns", tai(1850)},
+        {"last_tai_ns", tai(2150)},
+        {"kernels",
+         Json::array({{{"file", "uniform-time.tls"},
+                       {"kind", "LSK"},
+                       {"sha256", lsk_hash},
+                       {"source_url",
+                        "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls"},
+                       {"source_sha256",
+                        "678e32bdb5a744117a467cd9601cd6b373f0e9bc9bbde1371d5eee39600a039b"},
+                       {"producer", "OrbitForge; NAIF uniform-time constants only"}},
+                      {{"file", "de440s.bsp"},
+                       {"kind", "SPK"},
+                       {"sha256", de440s_sha256},
+                       {"source_url", de440s_url},
+                       {"source_sha256", de440s_sha256},
+                       {"producer", "JPL / NAIF"}}})}};
+    write(stage.path / "manifest.json", manifest.dump(2));
+    const auto resource = make_third_body_ephemeris(
+        load_spice_snapshot(stage.path / "manifest.json", impl_->root / "runtime"));
+    const auto info = resource->data_info();
+    resource->validate_interval(info.first, info.last, true, true);
+    const auto acquired = std::chrono::duration_cast<std::chrono::seconds>(
+                              std::chrono::system_clock::now().time_since_epoch())
+                              .count();
+    const auto target = impl_->root / "ephemerides" / info.content_sha256;
+    const Json record{{"schema", 1},
+                      {"model", info.model},
+                      {"sha256", info.content_sha256},
+                      {"interpretation", info.interpretation_version},
+                      {"first", info.first.tai_nanoseconds()},
+                      {"last", info.last.tai_nanoseconds()},
+                      {"sun_mu", info.sun_mu},
+                      {"moon_mu", info.moon_mu},
+                      {"acquisition", static_cast<int>(acquisition)},
+                      {"acquired_at", acquired}};
+    std::lock_guard guard(impl_->mutex);
+    Transaction transaction(impl_->db);
+    if (checkpoint)
+        checkpoint();
+    if (std::filesystem::exists(target)) {
+        const auto existing =
+            load_spice_snapshot(target / "manifest.json", impl_->root / "runtime");
+        check(existing->data_info().manifest_sha256 == info.content_sha256,
+              "Installed ephemeris is damaged");
+    } else
+        publish(stage.path, target);
+    set_setting("ephemeris/de440s", record.dump());
+    transaction.commit();
+    return {"de440s", info, target / "manifest.json", acquisition, acquired};
+}
+std::vector<CatalogEphemeris> DataCatalog::ephemerides() const {
+    const auto value = setting("ephemeris/de440s");
+    if (value.empty())
+        return {};
+    const auto r = Json::parse(value);
+    check(r.at("schema") == 1 && hash_valid(r.at("sha256")), "Invalid ephemeris receipt");
+    core::ThirdBodyDataInfo info{r.at("model"),
+                                 r.at("sha256"),
+                                 r.at("interpretation"),
+                                 core::Epoch{r.at("first").get<std::int64_t>()},
+                                 core::Epoch{r.at("last").get<std::int64_t>()},
+                                 r.at("sun_mu"),
+                                 r.at("moon_mu")};
+    return {{"de440s", info, impl_->root / "ephemerides" / info.content_sha256 / "manifest.json",
+             static_cast<DataAcquisition>(r.at("acquisition").get<int>()), r.at("acquired_at")}};
+}
+std::shared_ptr<const core::IThirdBodyEphemeris>
+DataCatalog::load_ephemeris(const std::string &selection) const {
+    const auto entries = ephemerides();
+    const auto found = std::ranges::find(entries, selection, &CatalogEphemeris::selection);
+    check(found != entries.end(), "Ephemeris is missing; download DE440s in Data Center");
+    check(std::filesystem::canonical(found->manifest).parent_path().parent_path() ==
+              impl_->root / "ephemerides",
+          "Ephemeris resolves outside its catalog directory");
+    const auto provider =
+        make_third_body_ephemeris(load_spice_snapshot(found->manifest, impl_->root / "runtime"));
+    check(provider->data_info().content_sha256 == found->info.content_sha256,
+          "Ephemeris manifest SHA256 mismatch");
+    return provider;
+}
 CatalogGravity DataCatalog::install_gravity(const std::filesystem::path &source,
                                             const std::string &selection, const std::string &url,
                                             DataAcquisition acquisition,
@@ -838,6 +967,15 @@ namespace {
 [[noreturn]] void unavailable() { throw std::runtime_error("Data catalog support is not enabled"); }
 } // namespace
 bool data_catalog_available() noexcept { return false; }
+CatalogEphemeris DataCatalog::install_de440s(const std::filesystem::path &, DataAcquisition,
+                                             const std::function<void()> &) {
+    unavailable();
+}
+std::vector<CatalogEphemeris> DataCatalog::ephemerides() const { unavailable(); }
+std::shared_ptr<const core::IThirdBodyEphemeris>
+DataCatalog::load_ephemeris(const std::string &) const {
+    unavailable();
+}
 CatalogGravity DataCatalog::install_gravity(const std::filesystem::path &, const std::string &,
                                             const std::string &, DataAcquisition,
                                             const std::function<void()> &) {

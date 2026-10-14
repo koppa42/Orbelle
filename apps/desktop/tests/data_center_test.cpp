@@ -766,5 +766,63 @@ TEST_F(DataCenterTest, LiveOfficialGravityDownload) {
     ASSERT_FALSE(catalog.downloading());
     EXPECT_EQ(catalog.update_status(product).state, DataUpdateState::unchanged);
 }
+TEST_F(DataCenterTest, EphemerisDownloadRejectsWrongContentAndCanBeCancelled) {
+    EopCatalog catalog(root() / "data", {}, {}, false);
+    EXPECT_FALSE(catalog.automatic_updates(DataProduct::de440s));
+    EXPECT_FALSE(catalog.has_full_download(DataProduct::de440s));
+    EXPECT_TRUE(
+        catalog.inventory().at(static_cast<std::size_t>(DataProduct::de440s)).online_updates);
+    Server server("invalid SPK data");
+    catalog.start_download(server.url(), DataProduct::de440s);
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(DataProduct::de440s).state, DataUpdateState::failed);
+    EXPECT_TRUE(catalog.data().ephemerides().empty());
+    catalog.start_download(server.url(), DataProduct::de440s);
+    catalog.cancel_download();
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(DataProduct::de440s).state, DataUpdateState::cancelled);
+    EXPECT_TRUE(catalog.data().ephemerides().empty());
+    catalog.set_automatic_updates(true, DataProduct::de440s);
+    catalog.set_update_interval_hours(168, DataProduct::de440s);
+    EopCatalog reopened(root() / "data", {}, {}, false);
+    EXPECT_TRUE(reopened.automatic_updates(DataProduct::de440s));
+    EXPECT_EQ(reopened.update_interval_hours(DataProduct::de440s), 168);
+}
+TEST_F(DataCenterTest, LiveOfficialEphemerisDownloadAndRecheckRetainCurrentData) {
+    if (qEnvironmentVariableIsEmpty("ORBITFORGE_LIVE_DE440S"))
+        GTEST_SKIP();
+    EopCatalog catalog(root() / "data", {}, {}, false);
+    catalog.start_download({}, DataProduct::de440s);
+    QElapsedTimer timer;
+    timer.start();
+    while (catalog.downloading() && timer.elapsed() < 300000)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    ASSERT_FALSE(catalog.downloading());
+    ASSERT_EQ(catalog.update_status(DataProduct::de440s).state, DataUpdateState::updated)
+        << catalog.status().toStdString();
+    ASSERT_TRUE(catalog.has_full_download(DataProduct::de440s));
+    const auto item = catalog.inventory().at(static_cast<std::size_t>(DataProduct::de440s));
+    EXPECT_EQ(item.first.date(), QDate(1850, 1, 1));
+    EXPECT_EQ(item.last.date(), QDate(2150, 1, 1));
+    EXPECT_GT(*item.file_size, 30000000U);
+    auto provider = catalog.data().load_ephemeris("de440s");
+    const auto position = provider->position(core::ThirdBody::sun, core::Epoch{0});
+    catalog.start_download({}, DataProduct::de440s);
+    timer.restart();
+    while (catalog.downloading() && timer.elapsed() < 300000)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    ASSERT_FALSE(catalog.downloading());
+    EXPECT_EQ(catalog.update_status(DataProduct::de440s).state, DataUpdateState::unchanged);
+    EXPECT_EQ(provider->position(core::ThirdBody::sun, core::Epoch{0}), position);
+    Server invalid("truncated replacement");
+    catalog.start_download(invalid.url(), DataProduct::de440s);
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(DataProduct::de440s).state, DataUpdateState::failed);
+    EXPECT_EQ(catalog.inventory().at(static_cast<std::size_t>(DataProduct::de440s)).sha256,
+              item.sha256);
+    EXPECT_EQ(
+        catalog.data().load_ephemeris("de440s")->position(core::ThirdBody::sun, core::Epoch{0}),
+        position);
+}
 } // namespace
 } // namespace orbitforge::desktop

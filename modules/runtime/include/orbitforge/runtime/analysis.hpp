@@ -53,6 +53,13 @@ class DataSnapshot {
     [[nodiscard]] DataSnapshot with_gravity_file(const std::string &selection,
                                                  const std::filesystem::path &file) const;
     [[nodiscard]] const auto &gravity_models() const { return gravity_; }
+    [[nodiscard]] DataSnapshot
+    with_ephemeris(const std::string &selection,
+                   std::shared_ptr<const core::IThirdBodyEphemeris> ephemeris) const;
+    [[nodiscard]] DataSnapshot with_ephemeris_file(const std::string &selection,
+                                                   const std::filesystem::path &manifest,
+                                                   const std::filesystem::path &workspace) const;
+    [[nodiscard]] const auto &ephemerides() const { return ephemerides_; }
     [[nodiscard]] core::HpopEnvironment
     force_environment(const application::OrbitInput &input) const;
     [[nodiscard]] const application::DataLock &data_lock() const { return lock_; }
@@ -69,6 +76,7 @@ class DataSnapshot {
     std::shared_ptr<const core::IFrameProvider> frames_;
     std::shared_ptr<const core::IEarthOrientationProvider> eop_;
     std::map<std::string, std::shared_ptr<const core::GravityModel>> gravity_;
+    std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> ephemerides_;
     application::DataLock lock_;
     std::vector<std::string> selection_notes_;
     friend class DataCatalog;

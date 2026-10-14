@@ -4,6 +4,7 @@
 #include <map>
 #include <orbitforge/runtime/analysis.hpp>
 #include <orbitforge/runtime/data_catalog.hpp>
+#include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/report.hpp>
@@ -107,6 +108,14 @@ DataSnapshot DataSnapshot::with_gravity_file(const std::string &selection,
 }
 core::HpopEnvironment DataSnapshot::force_environment(const OrbitInput &input) const {
     std::shared_ptr<const core::GravityModel> model;
+    std::shared_ptr<const core::IThirdBodyEphemeris> ephemeris;
+    if (input.uses_hpop() && input.hpop.uses_third_bodies()) {
+        const auto found = ephemerides_.find(input.hpop.ephemeris_model);
+        if (found == ephemerides_.end())
+            throw AnalysisCapabilityError("Missing ephemeris '" + input.hpop.ephemeris_model +
+                                          "'; download it in Data Center or supply a DataSnapshot");
+        ephemeris = found->second;
+    }
     if (input.uses_hpop() && !input.hpop.gravity_model.empty()) {
         const auto it = gravity_.find(input.hpop.gravity_model);
         if (it == gravity_.end())
@@ -115,7 +124,29 @@ core::HpopEnvironment DataSnapshot::force_environment(const OrbitInput &input) c
                 "'; download/import it in Data Center or supply it in DataSnapshot");
         model = it->second;
     }
-    return {frames_, eop_, std::move(model)};
+    return {frames_, eop_, std::move(model), std::move(ephemeris)};
+}
+DataSnapshot
+DataSnapshot::with_ephemeris(const std::string &selection,
+                             std::shared_ptr<const core::IThirdBodyEphemeris> ephemeris) const {
+    if (!ephemeris || selection.empty())
+        throw std::invalid_argument("Ephemeris requires an ID and provider");
+    auto result = *this;
+    const auto ref = ephemeris_reference(selection, ephemeris->data_info());
+    std::vector<DataReference> refs;
+    for (const auto &current : lock_.references())
+        if (current.role != ref.role)
+            refs.push_back(current);
+    refs.push_back(ref);
+    result.lock_ = DataLock{std::move(refs)};
+    result.ephemerides_[selection] = std::move(ephemeris);
+    return result;
+}
+DataSnapshot DataSnapshot::with_ephemeris_file(const std::string &selection,
+                                               const std::filesystem::path &manifest,
+                                               const std::filesystem::path &workspace) const {
+    return with_ephemeris(selection,
+                          make_third_body_ephemeris(load_spice_snapshot(manifest, workspace)));
 }
 DataSnapshot
 DataSnapshot::from_providers(std::shared_ptr<const core::ITimeProvider> time,
@@ -188,7 +219,8 @@ struct Analysis::Impl {
                                                                             : core::FrameId::gcrf,
                                   satellite.name(), report_input_sha256(numerical),
                                   input.uses_eop_force() ||
-                                      (input.uses_hpop() && !input.hpop.gravity_model.empty())});
+                                      (input.uses_hpop() && (!input.hpop.gravity_model.empty() ||
+                                                             input.hpop.uses_third_bodies()))});
         }
         for (const auto &station : p.ground_stations) {
             Project numerical{"analysis-state-input-v1", p.first, p.last};
@@ -374,8 +406,8 @@ ReportResult Analysis::report(const ReportDefinition &definition,
     // A callback may edit a caller-owned definition; capture it before the first callback.
     const auto captured = definition;
     check_cancelled(cancelled);
-    ReportContext context{*snapshot().project, data().time(), data().frames(), data().eop(),
-                          data().gravity_models()};
+    ReportContext context{*snapshot().project, data().time(),           data().frames(),
+                          data().eop(),        data().gravity_models(), data().ephemerides()};
     record_data(context.project, data());
     if (!data().time() && report_uses_utc(captured.format, captured.query.kind))
         throw AnalysisCapabilityError("Prepare with UTC data for a UTC report, or select TAI/TT");
@@ -411,6 +443,10 @@ AnalysisPlan::AnalysisPlan(const ProjectDocument &project, const DataCatalog &ca
           auto data = catalog.snapshot(first, last);
           for (const auto &satellite : captured.project->satellites) {
               const auto &input = satellite.orbit;
+              if (input.uses_hpop() && input.hpop.uses_third_bodies() &&
+                  !data.ephemerides().contains(input.hpop.ephemeris_model))
+                  data = data.with_ephemeris(input.hpop.ephemeris_model,
+                                             catalog.load_ephemeris(input.hpop.ephemeris_model));
               if (input.uses_hpop() && !input.hpop.gravity_model.empty() &&
                   !data.gravity_models().contains(input.hpop.gravity_model))
                   data = data.with_gravity(input.hpop.gravity_model,
@@ -449,7 +485,7 @@ void record_data(Project &project, const DataSnapshot &data) {
         !data.eop() && data.time() ? std::optional{data.time()->data_info()} : std::nullopt;
     project.force_data.clear();
     for (const auto &ref : data.data_lock().references())
-        if (ref.role.starts_with("gravity/"))
+        if (ref.role.starts_with("gravity/") || ref.role.starts_with("ephemeris/"))
             project.force_data.push_back(ref);
 }
 } // namespace
