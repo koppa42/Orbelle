@@ -15,7 +15,7 @@ namespace orbitforge::desktop {
 namespace {
 class WelcomeArtwork final : public QWidget {
   public:
-    WelcomeArtwork() : artwork_(":/orbitforge/startup/star-gazing.png") {
+    WelcomeArtwork() : artwork_(":/orbitforge/artwork/orbital-welcome.png") {
         setMinimumHeight(460);
         setMaximumHeight(540);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -47,8 +47,8 @@ class WelcomeArtwork final : public QWidget {
                 std::max(width() / double(artwork_.width()), height() / double(artwork_.height()));
             const QSizeF source_size(width() / scale, height() / scale);
             const QRectF source((artwork_.width() - source_size.width()) * 0.78,
-                                (artwork_.height() - source_size.height()) / 2, source_size.width(),
-                                source_size.height());
+                                (artwork_.height() - source_size.height()) * 0.15,
+                                source_size.width(), source_size.height());
             painter.drawPixmap(bounds, artwork_, source);
         }
         QLinearGradient shade(0, 0, width(), 0);
