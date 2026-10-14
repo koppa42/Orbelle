@@ -409,6 +409,21 @@ QLabel#sectionTitle { color: #bad2e1; font-size: 13px; font-weight: 600; padding
 QLabel#panelTitle { color: #eff6fa; font-size: 20px; font-weight: 600; }
 QLabel#panelDescription { color: #9fb2c1; font-size: 12px; }
 QLabel#hint { color: #9fb2c1; font-size: 12px; }
+QListWidget#missionSegments { background: transparent; border: 0; padding: 0; outline: 0; }
+QScrollArea#missionParameters { background: #1d2b38; border: 1px solid #304658; border-radius: 8px; }
+QScrollArea#missionParameters > QWidget, QWidget#missionParameterFields { background: transparent; }
+QTabBar#missionNavigation::tab { background: transparent; color: #8fa7bb; border: 0; border-bottom: 2px solid transparent; padding: 7px 14px; }
+QTabBar#missionNavigation::tab:selected { color: #b9e1f3; border-bottom-color: #8bc6e2; }
+QTabBar#missionNavigation::tab:hover:!selected { background: #21303e; }
+QTabBar#missionNavigation::tab:disabled { color: #617589; }
+QLabel#missionSegmentTiming { color: #a7c8dd; font-family: "Consolas", "Microsoft YaHei UI"; font-size: 12px; }
+QLabel#missionImpulseMagnitude { color: #ddb5cc; font-family: "Consolas", "Microsoft YaHei UI"; font-size: 12px; padding: 4px 0; }
+QLabel#missionEmpty { color: #9fb2c1; font-size: 12px; }
+QFrame#missionStatus { background: #17212c; border: 1px solid #2d4050; border-radius: 7px; }
+QLabel#missionSummary { color: #d6e7f1; font-family: "Consolas", "Microsoft YaHei UI"; font-size: 12px; }
+QLabel#missionCoverage { color: #9bb7c8; font-family: "Consolas", "Microsoft YaHei UI"; font-size: 11px; }
+QLabel#missionCoverage[warning="true"] { color: #e1b4cc; }
+QDialog#missionEditorDialog QLabel#errorText { color: #e1b4cc; font-size: 12px; }
 QToolButton#timeReadout { color: #e9b975; font-family: "Consolas"; font-size: 13px; padding: 4px 8px; }
 QLabel#timelineTitle { color: #bad2e1; font-weight: 600; }
 QToolBar#timelineBar QToolButton { padding: 3px; }

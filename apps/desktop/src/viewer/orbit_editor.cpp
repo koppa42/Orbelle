@@ -856,10 +856,16 @@ void OrbitEditor::update_state_labels() {
         model_button_->setText(QStringLiteral("规划…"));
         model_button_->setToolTip(QStringLiteral("编辑滑行与脉冲机动序列"));
         hpop_summary_->setVisible(true);
+        double total_delta_v = 0;
+        for (const auto &segment : mission_.segments)
+            if (segment.kind == core::MissionSegmentKind::impulse)
+                total_delta_v += std::hypot(segment.delta_v_mps[0], segment.delta_v_mps[1],
+                                            segment.delta_v_mps[2]);
         hpop_summary_->setText(
-            QStringLiteral("%1 段 · %2 滑行")
+            QStringLiteral("%1 段 · %2 滑行 · Δv %3 m/s")
                 .arg(mission_.segments.size())
-                .arg(uses_hpop() ? QStringLiteral("HPOP") : QStringLiteral("二体")));
+                .arg(uses_hpop() ? QStringLiteral("HPOP") : QStringLiteral("二体"))
+                .arg(total_delta_v, 0, 'g', 8));
     }
     const bool sgp4 = propagator_kind_ == OrbitPropagator::sgp4;
     const bool j2 = propagator_kind_ == OrbitPropagator::j2_secular ||
