@@ -1,6 +1,7 @@
 #include "orbit_editor.hpp"
 #include "epoch_editor.hpp"
 #include "hpop_settings.hpp"
+#include "mission_editor.hpp"
 #include "quantity_editor.hpp"
 #include "responsive_layout.hpp"
 #include "track_style_editor.hpp"
@@ -200,7 +201,8 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     propagator_->setMinimumContentsLength(8);
     propagator_->addItems({QStringLiteral("二体 · Two Body"), QStringLiteral("J2 · 长期摄动"),
                            QStringLiteral("J4 · 高阶长期摄动"), QStringLiteral("SGP4 · TLE"),
-                           QStringLiteral("HPOP · 数值传播")});
+                           QStringLiteral("HPOP · 数值传播"),
+                           QStringLiteral("任务序列 · 机动规划")});
     propagator_row->addWidget(propagator_, 1);
     auto *model_button = new QPushButton(QStringLiteral("模型…"));
     model_button_ = model_button;
@@ -646,6 +648,7 @@ void OrbitEditor::set_input(const OrbitInput &input) {
     body_ = input.initial.origin;
     propagator_kind_ = input.propagator;
     hpop_ = input.hpop;
+    mission_ = input.mission;
     manual_state_ = input.initial;
     tle_text_->setPlainText(QString::fromStdString(
         input.tle.line1 + (input.tle.line1.empty() ? "" : "\n") + input.tle.line2));
@@ -692,8 +695,8 @@ core::CartesianState OrbitEditor::read_state() const {
             {epoch_->epoch(), elements_[0]->value(Unit::metre), elements_[1]->value(Unit::one),
              elements_[2]->value(Unit::radian), elements_[3]->value(Unit::radian),
              elements_[4]->value(Unit::radian), elements_[5]->value(Unit::radian)},
-            propagator_kind_ == OrbitPropagator::hpop ? core::GravitationalParameter{core::egm96_mu}
-                                                      : core::central_body(body_).mu);
+            uses_hpop() ? core::GravitationalParameter{core::egm96_mu}
+                        : core::central_body(body_).mu);
     }
     core::CartesianState state{epoch_->epoch(), body_, input_frame_, {}, {}};
     for (std::size_t k = 0; k < 3; ++k) {
@@ -731,9 +734,8 @@ void OrbitEditor::write_elements(const core::CartesianState &state) {
                   elements.argument_of_periapsis_rad, elements.mean_anomaly_rad};
     } else {
         const auto elements =
-            runtime::to_keplerian(state, propagator_kind_ == OrbitPropagator::hpop
-                                             ? core::GravitationalParameter{core::egm96_mu}
-                                             : core::central_body(body_).mu);
+            runtime::to_keplerian(state, uses_hpop() ? core::GravitationalParameter{core::egm96_mu}
+                                                     : core::central_body(body_).mu);
         values = {elements.semi_major_axis_m,         elements.eccentricity,
                   elements.inclination_rad,           elements.raan_rad,
                   elements.argument_of_periapsis_rad, elements.true_anomaly_rad};
@@ -814,6 +816,12 @@ void OrbitEditor::set_propagator(OrbitPropagator propagator) {
         if (propagator == OrbitPropagator::sgp4)
             manual_state_ = state;
         propagator_kind_ = propagator;
+        if (propagator == OrbitPropagator::mission && mission_.segments.empty()) {
+            const double seconds = last_->epoch().seconds_since(state.epoch);
+            if (seconds > 0 && seconds <= core::hpop_max_duration_seconds)
+                mission_.segments.push_back(core::MissionSegment::coast(std::chrono::nanoseconds{
+                    last_->epoch().tai_nanoseconds() - state.epoch.tai_nanoseconds()}));
+        }
         if (state_mode_index_ == 1 && propagator != OrbitPropagator::sgp4)
             write_elements(state);
         update_state_labels();
@@ -823,6 +831,8 @@ void OrbitEditor::set_propagator(OrbitPropagator propagator) {
                         ? QStringLiteral("以当前椭圆定义二体初始状态。")
                     : propagator == OrbitPropagator::hpop
                         ? QStringLiteral("以当前状态作为瞬时初值；可在配置中调整引力与积分设置。")
+                    : propagator == OrbitPropagator::mission
+                        ? QStringLiteral("以当前状态作为任务起点；点击规划添加滑行段与脉冲机动。")
                         : QStringLiteral("以当前椭圆定义平均根数，不含周期项转换。"));
     } catch (const std::exception &error) {
         propagator_kind_ = previous;
@@ -842,6 +852,21 @@ void OrbitEditor::update_state_labels() {
              : QStringLiteral("EGM96 %1 × %2").arg(hpop_.gravity_degree).arg(hpop_.gravity_order)) +
         (hpop_.integrator == core::HpopIntegrator::rkf78 ? QStringLiteral(" · RKF78 自适应")
                                                          : QStringLiteral(" · RK4 固定步长")));
+    if (propagator_kind_ == OrbitPropagator::mission) {
+        model_button_->setText(QStringLiteral("规划…"));
+        model_button_->setToolTip(QStringLiteral("编辑滑行与脉冲机动序列"));
+        hpop_summary_->setVisible(true);
+        double total_delta_v = 0;
+        for (const auto &segment : mission_.segments)
+            if (segment.kind == core::MissionSegmentKind::impulse)
+                total_delta_v += std::hypot(segment.delta_v_mps[0], segment.delta_v_mps[1],
+                                            segment.delta_v_mps[2]);
+        hpop_summary_->setText(
+            QStringLiteral("%1 段 · %2 滑行 · Δv %3 m/s")
+                .arg(mission_.segments.size())
+                .arg(uses_hpop() ? QStringLiteral("HPOP") : QStringLiteral("二体"))
+                .arg(total_delta_v, 0, 'g', 8));
+    }
     const bool sgp4 = propagator_kind_ == OrbitPropagator::sgp4;
     const bool j2 = propagator_kind_ == OrbitPropagator::j2_secular ||
                     propagator_kind_ == OrbitPropagator::j4_secular;
@@ -917,6 +942,19 @@ void OrbitEditor::update_tle_preview() {
     }
 }
 void OrbitEditor::open_propagator_details() {
+    if (propagator_kind_ == OrbitPropagator::mission) {
+        try {
+            const auto state = read_state();
+            if (edit_mission(mission_, hpop_, state.epoch, first_->epoch(), last_->epoch(), this)) {
+                if (state_mode_index_ == 1)
+                    write_elements(state);
+                update_state_labels();
+            }
+        } catch (const std::exception &error) {
+            show_result(QString::fromUtf8(error.what()), true);
+        }
+        return;
+    }
     if (propagator_kind_ == OrbitPropagator::hpop) {
         if (edit_hpop_settings(hpop_, this))
             update_state_labels();
@@ -1005,6 +1043,7 @@ void OrbitEditor::submit() {
         input.initial = read_state();
         input.propagator = propagator_kind_;
         input.hpop = hpop_;
+        input.mission = mission_;
         if (propagator_kind_ == OrbitPropagator::sgp4) {
             input.tle = read_tle();
             const auto parsed = core::parse_tle(input.tle);

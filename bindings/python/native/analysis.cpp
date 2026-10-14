@@ -150,7 +150,30 @@ void bind_analysis(py::module_ &module) {
                                py::return_value_policy::copy)
         .def("to_csv", &runtime::export_aer_csv, py::arg("path"), py::arg("overwrite") = false,
              py::call_guard<py::gil_scoped_release>());
+    py::class_<core::ManeuverEvent>(module, "ManeuverEvent")
+        .def_readonly("segment_index", &core::ManeuverEvent::segment_index)
+        .def_readonly("name", &core::ManeuverEvent::name)
+        .def_readonly("before", &core::ManeuverEvent::before)
+        .def_readonly("after", &core::ManeuverEvent::after)
+        .def_readonly("delta_v_gcrf_mps", &core::ManeuverEvent::delta_v_gcrf_mps)
+        .def_readonly("cumulative_delta_v_mps", &core::ManeuverEvent::cumulative_delta_v_mps);
+    py::class_<results::ManeuverSeries>(module, "ManeuverSeries")
+        .def_property_readonly("events", &results::ManeuverSeries::events)
+        .def_property_readonly("provenance", &results::ManeuverSeries::provenance,
+                               py::return_value_policy::copy)
+        .def_property_readonly("input_sha256", &results::ManeuverSeries::input_sha256)
+        .def_property_readonly("data_sha256", &results::ManeuverSeries::data_sha256)
+        .def("__len__", [](const results::ManeuverSeries &value) { return value.events().size(); });
     py::class_<runtime::Analysis>(module, "Analysis")
+        .def(
+            "maneuvers",
+            [](const runtime::Analysis &analysis, const application::ObjectRef &ref,
+               const py::object &cancelled) {
+                const auto check = cancellation(cancelled);
+                py::gil_scoped_release release;
+                return analysis.maneuvers(ref, check);
+            },
+            py::arg("satellite"), py::arg("cancelled") = py::none())
         .def_property_readonly("snapshot", &runtime::Analysis::snapshot,
                                py::return_value_policy::copy)
         .def_property_readonly("data", &runtime::Analysis::data, py::return_value_policy::copy)

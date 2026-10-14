@@ -141,7 +141,9 @@ std::string report_input_sha256(const application::Project &project) {
         s.orbit.step_seconds = 60;
         if (s.orbit.propagator == OrbitPropagator::sgp4)
             s.orbit.initial = OrbitInput{}.initial; // Inactive manual draft is not a TLE input.
-        if (s.orbit.propagator == OrbitPropagator::hpop) {
+        for (auto &segment : s.orbit.mission.segments)
+            segment.name.clear();
+        if (s.orbit.uses_hpop()) {
             // Persist both integrators' drafts, but identify only the active calculation.
             auto &options = s.orbit.hpop;
             if (options.integrator == core::HpopIntegrator::rk4) {

@@ -12,6 +12,8 @@
 
 此分工参考 [STK 预报器说明](https://help.agi.com/stk/12.7.1/Content/stk/vehSat_orbitProp_choose.htm)。新增模型不改变已有二体/J2 的模型常数或算法。
 
+机动轨道可选[任务序列](missions.md)：从初始状态按顺序执行滑行和脉冲，滑行使用二体或 HPOP。任务向前定义，区间内支持任意顺序查询；点火时刻返回机动后状态。当前不包含有限推力和自动目标求解。
+
 ## HPOP
 
 参考 STK 的[力模型分层](https://help.agi.com/stk/Content/hpop/hpopForceMods.htm)和[积分设置](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)，在 GCRF 中以连续 TAI 秒积分 Cowell 六维方程。输入为瞬时状态，不能把 J2/J4 平均根数当作等价瞬时初值。当前支持：
@@ -43,7 +45,7 @@ trajectory = analysis.states(satellite, step=u.s(30))
 
 RK4 使用 `integrator="rk4", fixed_step_seconds=10`；点质量使用 `gravity_degree=0`，无需 EOP。`satellite.orbit.hpop` 是不可变 `HpopSettings`，可用 `dataclasses.replace` 修改后将新 `Orbit` 赋回 `satellite.orbit`；旧分析继续持有旧参数与数据。完整示例见 `examples/python/propagators.py`。
 
-C++ 设置 `OrbitInput.propagator = OrbitPropagator::hpop`、`OrbitInput.hpop`（`HpopOptions`），通过 `Project::prepare(data)` 查询。低层工厂 `runtime::make_hpop_session(initial, options, environment, id)` 持有不可变 Frame/EOP Provider 的共享所有权。核心与点质量模式无需 CSPICE。桌面选择 HPOP 后，“配置…”分为力模型与积分两页；保存设置仅改变属性草稿，“应用轨道”才计算并发布。参数随项目 v13 保存。
+C++ 设置 `OrbitInput.propagator = OrbitPropagator::hpop`、`OrbitInput.hpop`（`HpopOptions`），通过 `Project::prepare(data)` 查询。低层工厂 `runtime::make_hpop_session(initial, options, environment, id)` 持有不可变 Frame/EOP Provider 的共享所有权。核心与点质量模式无需 CSPICE。桌面选择 HPOP 后，“配置…”分为力模型与积分两页；保存设置仅改变属性草稿，“应用轨道”才计算并发布。参数随项目 v14 保存。
 
 独立回归使用 Orekit 13.1.2 Holmes–Featherstone 重力和 Hipparchus 4.0.2 DP853：五类轨道 × 三组阶次 × ±6000 s/±1 天共 60 个状态，检查位置每分量 0.15 m、速度 0.15 mm/s、初始加速度 5e-13 m/s²。参考刻意采用静态同轴重力系，隔离球谐与积分；真实 EOP 路由另由集成测试验证。尚无同配置 STK 导出数据直接对照，见 [HPOP 验证](../validation/hpop_protocol.md)。后续优先接日月星历、第三体引力与光压，再接空间天气和大气模型；未实现的力不提供无效开关。
 

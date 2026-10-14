@@ -25,7 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 13;
+constexpr std::uint32_t project_version = 14;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -43,7 +43,7 @@ struct SectionSchema {
 // One current schema, shared by the reader and writer. Null means an optional section.
 constexpr std::array section_schemas{
     SectionSchema{scene_tag, 1, "Missing scene section"},
-    SectionSchema{objects_tag, 4, "Missing satellites section"},
+    SectionSchema{objects_tag, 5, "Missing satellites section"},
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
     SectionSchema{sensors_tag, 1, "Missing sensors section"},
@@ -172,6 +172,46 @@ struct Reader {
     }
     void done() const { check(bytes.empty(), "Unexpected trailing project data"); }
 };
+void write_mission(Writer &out, const core::MissionPlan &plan, bool names = true) {
+    out.number(static_cast<unsigned>(plan.coast_model), 4);
+    out.number(plan.segments.size(), 4);
+    for (const auto &segment : plan.segments) {
+        out.number(static_cast<unsigned>(segment.kind), 4);
+        out.text(names ? segment.name : "");
+        if (segment.kind == core::MissionSegmentKind::coast) {
+            out.number(static_cast<std::uint64_t>(segment.duration_nanoseconds));
+        } else {
+            out.number(static_cast<unsigned>(segment.frame), 4);
+            for (auto component : segment.delta_v_mps)
+                out.real(component);
+        }
+    }
+}
+core::MissionPlan read_mission(Reader &in) {
+    core::MissionPlan result;
+    const auto model = in.number(4), count = in.number(4);
+    check(model <= 1, "Unsupported mission coast model");
+    check(count > 0 && count <= 256, "A mission requires 1..256 segments");
+    result.coast_model = static_cast<core::MissionCoastModel>(model);
+    for (std::uint64_t i = 0; i < count; ++i) {
+        core::MissionSegment segment;
+        const auto kind = in.number(4);
+        check(kind <= 1, "Unsupported mission segment kind");
+        segment.kind = static_cast<core::MissionSegmentKind>(kind);
+        segment.name = in.text();
+        if (segment.kind == core::MissionSegmentKind::coast) {
+            segment.duration_nanoseconds = std::bit_cast<std::int64_t>(in.number());
+        } else {
+            const auto frame = in.number(4);
+            check(frame <= 2, "Unsupported maneuver reference axes");
+            segment.frame = static_cast<core::ManeuverFrame>(frame);
+            for (auto &component : segment.delta_v_mps)
+                component = in.real();
+        }
+        result.segments.push_back(std::move(segment));
+    }
+    return result;
+}
 void write_data(Writer &out, const core::EopDataInfo &data) {
     out.text(data.id);
     out.text(data.sha256);
@@ -231,7 +271,9 @@ std::string analysis_input_sha256(const Project &project) {
         const auto &orbit = satellite->orbit;
         out.text(id);
         out.number(static_cast<unsigned>(orbit.propagator), 4);
-        if (orbit.propagator == OrbitPropagator::hpop) {
+        if (orbit.propagator == OrbitPropagator::mission)
+            write_mission(out, orbit.mission, false);
+        if (orbit.uses_hpop()) {
             const auto &o = orbit.hpop;
             out.text(std::string(core::egm96_model_id()));
             out.number(static_cast<unsigned>(o.gravity_degree), 4);
@@ -289,7 +331,7 @@ std::pair<core::Epoch, core::Epoch> calculation_data_interval(const Project &pro
     auto first = project.first, last = project.last;
     for (const auto &satellite : project.satellites) {
         const auto &input = satellite.orbit;
-        if (input.propagator != OrbitPropagator::hpop || input.hpop.gravity_degree == 0)
+        if (!input.uses_eop_force())
             continue;
         if (input.initial.epoch.tai_nanoseconds() < first.tai_nanoseconds())
             first = input.initial.epoch;
@@ -320,7 +362,8 @@ void validate_project(const Project &project, bool relationships) {
                   input.propagator == OrbitPropagator::j2_secular ||
                   input.propagator == OrbitPropagator::j4_secular ||
                   input.propagator == OrbitPropagator::sgp4 ||
-                  input.propagator == OrbitPropagator::hpop,
+                  input.propagator == OrbitPropagator::hpop ||
+                  input.propagator == OrbitPropagator::mission,
               "Unsupported project propagator");
         if (input.propagator == OrbitPropagator::sgp4) {
             try {
@@ -342,7 +385,19 @@ void validate_project(const Project &project, bool relationships) {
         for (const auto value : input.initial.velocity_mps)
             check(std::isfinite(value), "Nonfinite project velocity");
         check(input.step_seconds >= 1 && input.step_seconds <= 60, "Invalid display step");
-        if (input.propagator == OrbitPropagator::hpop) {
+        if (input.propagator == OrbitPropagator::mission) {
+            try {
+                const auto end = core::validate_mission(input.initial.epoch, input.mission);
+                check(input.initial.epoch.tai_nanoseconds() <= first &&
+                          end.tai_nanoseconds() >= last,
+                      "Mission sequence must cover the scenario; extend its coast segments");
+                for (const auto &segment : input.mission.segments)
+                    text_check(segment.name);
+            } catch (const std::invalid_argument &error) {
+                throw ProjectError(error.what());
+            }
+        }
+        if (input.uses_hpop()) {
             try {
                 core::validate_hpop_options(input.hpop);
             } catch (const std::invalid_argument &error) {
@@ -595,7 +650,9 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         objects.text(satellite.model_path);
         objects.text(input.tle.line1);
         objects.text(input.tle.line2);
-        if (input.propagator == OrbitPropagator::hpop) {
+        if (input.propagator == OrbitPropagator::mission)
+            write_mission(objects, input.mission);
+        if (input.uses_hpop()) {
             const auto &o = input.hpop;
             objects.number(static_cast<unsigned>(o.gravity_degree), 4);
             objects.number(static_cast<unsigned>(o.gravity_order), 4);
@@ -740,7 +797,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         input.object_id = objects.text();
         satellite.display_name = objects.text();
         const auto propagator = objects.number(4), frame = objects.number(4);
-        check(propagator >= 1 && propagator <= 5, "Unsupported project propagator");
+        check(propagator >= 1 && propagator <= 6, "Unsupported project propagator");
         check(frame == 1 || frame == 2, "Unsupported input reference frame");
         input.propagator = static_cast<OrbitPropagator>(propagator - 1);
         input.input_frame = frame == 1 ? core::FrameId::gcrf : core::FrameId::itrf;
@@ -762,7 +819,9 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         satellite.model_diameter_m = objects.real();
         satellite.model_path = objects.text();
         input.tle = {objects.text(), objects.text()};
-        if (input.propagator == OrbitPropagator::hpop) {
+        if (input.propagator == OrbitPropagator::mission)
+            input.mission = read_mission(objects);
+        if (input.uses_hpop()) {
             auto &o = input.hpop;
             o.gravity_degree = static_cast<int>(objects.number(4));
             o.gravity_order = static_cast<int>(objects.number(4));

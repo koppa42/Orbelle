@@ -61,7 +61,8 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
         // SGP4 epoch interpretation belongs to this calculation's confirmed time data.
         const bool recompute = (edited_object && *edited_object == satellite.orbit.object_id) ||
                                satellite.orbit.propagator == OrbitPropagator::sgp4 ||
-                               satellite.orbit.propagator == OrbitPropagator::hpop;
+                               satellite.orbit.propagator == OrbitPropagator::hpop ||
+                               satellite.orbit.propagator == OrbitPropagator::mission;
         if (retained && recompute &&
             existing->provenance().input_revision == std::numeric_limits<std::uint64_t>::max())
             throw std::overflow_error("Object input revision exhausted");

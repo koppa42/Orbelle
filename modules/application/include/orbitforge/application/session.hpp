@@ -12,6 +12,14 @@ class Session {
     [[nodiscard]] results::StateSeries sample(std::span<const core::Epoch> epochs,
                                               const std::function<void()> &checkpoint = {}) const;
     [[nodiscard]] const results::Provenance &provenance() const noexcept { return provenance_; }
+    [[nodiscard]] std::vector<core::Epoch> discontinuities() const {
+        return provider_->discontinuities();
+    }
+    [[nodiscard]] std::vector<core::ManeuverEvent>
+    maneuvers(core::Epoch first, core::Epoch last,
+              const std::function<void()> &checkpoint = {}) const {
+        return provider_->maneuvers(first, last, checkpoint);
+    }
 
   private:
     std::shared_ptr<const core::IStateProvider> provider_;

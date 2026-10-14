@@ -59,6 +59,12 @@ class OrbitEditor final : public QWidget {
     core::FrameId input_frame_ = core::FrameId::gcrf;
     OrbitPropagator propagator_kind_ = OrbitPropagator::two_body;
     core::HpopOptions hpop_;
+    core::MissionPlan mission_;
+    [[nodiscard]] bool uses_hpop() const {
+        return propagator_kind_ == OrbitPropagator::hpop ||
+               (propagator_kind_ == OrbitPropagator::mission &&
+                mission_.coast_model == core::MissionCoastModel::hpop);
+    }
     QLabel *hpop_summary_ = nullptr;
     QPushButton *model_button_ = nullptr;
     bool create_mode_ = false, orbit_busy_ = false, model_busy_ = false;

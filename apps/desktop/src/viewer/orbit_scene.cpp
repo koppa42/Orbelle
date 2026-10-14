@@ -47,7 +47,29 @@ prepare_orbit_scene(OrbitInput input, application::Session session,
     std::vector<core::CartesianState> states;
     std::vector<core::CartesianState> inertial_states;
     double min_radius = std::numeric_limits<double>::infinity(), max_radius = 0;
+    std::vector<std::int64_t> epochs;
     for (auto ns = first;;) {
+        epochs.push_back(ns);
+        if (ns == last)
+            break;
+        ns += std::min(step, last - ns);
+    }
+    // Adjacent TAI nanoseconds straddle an impulse: no representable query can
+    // interpolate across the velocity discontinuity. Both smooth arcs retain
+    // their own endpoint tangents, including for a burn off the display grid.
+    for (const auto epoch : session.discontinuities()) {
+        const auto ns = epoch.tai_nanoseconds();
+        if (ns >= first && ns <= last) {
+            if (ns > first)
+                epochs.push_back(ns - 1);
+            epochs.push_back(ns);
+        }
+    }
+    std::ranges::sort(epochs);
+    epochs.erase(std::unique(epochs.begin(), epochs.end()), epochs.end());
+    if (epochs.size() > 10001)
+        throw std::invalid_argument("Display cache including maneuvers exceeds 10001 nodes");
+    for (const auto ns : epochs) {
         auto native = sample(core::Epoch{ns});
         if (input.propagator == OrbitPropagator::sgp4 && analysis_last - analysis_first >= 4) {
             // The conventional SGP4 velocity is not exactly the derivative of its
@@ -84,10 +106,6 @@ prepare_orbit_scene(OrbitInput input, application::Session session,
         min_radius = std::min(min_radius, radius);
         max_radius = std::max(max_radius, radius);
         states.push_back(std::move(state));
-        if (ns == last)
-            break;
-        // The bounded duration above makes the subtraction safe.
-        ns += std::min(step, last - ns);
     }
     auto provenance = session.provenance();
     if (input.propagator == OrbitPropagator::sgp4)

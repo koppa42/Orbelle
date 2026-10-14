@@ -5,6 +5,7 @@
 #include <orbitforge/core/frames/frame_provider.hpp>
 #include <orbitforge/results/access_windows.hpp>
 #include <orbitforge/results/aer_series.hpp>
+#include <orbitforge/results/maneuver_series.hpp>
 #include <orbitforge/results/trajectory.hpp>
 #include <orbitforge/runtime/report.hpp>
 
@@ -68,6 +69,9 @@ inline constexpr std::size_t max_analysis_samples = 200000;
 class AnalysisPlan;
 class Analysis {
   public:
+    [[nodiscard]] results::ManeuverSeries
+    maneuvers(const application::ObjectRef &satellite,
+              const std::function<bool()> &cancelled = {}) const;
     [[nodiscard]] const application::ProjectSnapshot &snapshot() const;
     [[nodiscard]] const DataSnapshot &data() const;
     [[nodiscard]] core::CartesianState state(const application::ObjectRef &object, core::Epoch at,

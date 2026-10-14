@@ -32,7 +32,8 @@ from ._native import (
 # Ordinary scripts use the shared, transactional Project facade below.
 from ._native import ObjectNotFoundError, RevisionConflictError, EditClosedError, ChangeSet
 from ._values import Wgs84Location, OrbitStyle
-from . import objects, orbits, sensors, units, reports
+from . import objects, orbits, sensors, units, reports, missions
+from ._native import ManeuverEvent, ManeuverSeries
 from ._project import (
     Project, load_project, AccessSession, generate_report, estimate_report_rows, report_input_sha256,
 )
@@ -66,7 +67,7 @@ __all__ = [
     "J4MeanElements", "j4_earth", "j4_mean_ellipse_state", "j4_mean_ellipse_elements", "make_j4_session",
     "Tle", "make_sgp4_session", "transform_state",
     "Project", "ProjectSatellite", "ProjectError", "OrbitInput", "OrbitDisplay", "OrbitPropagator", "load_project",
-    "HpopOptions", "HpopIntegrator",
+    "HpopOptions", "HpopIntegrator", "missions", "ManeuverEvent", "ManeuverSeries",
     "ProjectGroundStation", "GroundStationLocation", "LineStyle",
     "ProjectSensor", "SensorPointing", "GroundObservation", "AccessSample", "AccessSession", "AccessInterval",
     "observe_ground_target", "vector_angle",
