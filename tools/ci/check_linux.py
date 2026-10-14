@@ -19,6 +19,8 @@ import time
 import tomllib
 import uuid
 
+from validation_inputs import PYTHON_EXAMPLES, stage_validation_inputs
+
 
 def sha256(path):
     with path.open("rb") as stream:
@@ -238,13 +240,9 @@ class Check:
         shutil.copytree(sdk, self.delivery / "sdk")
         shutil.copytree(self.prefix, self.delivery / "dependencies", symlinks=True)
         shutil.copytree(wheels, self.delivery / "wheels")
-        # Only packaging tests, frozen expected values and examples are delivered here.
-        # Product headers/libraries come from the install trees above.
-        for directory in ("tests/packaging/sdk_consumer", "tests/reference/time_frames",
-                          "tests/integration/fixtures", "bindings/python/tests", "examples/python"):
-            shutil.copytree(self.source / directory, self.delivery / directory)
-        shutil.copy2(self.source / "tools/validation/compare_examples.py", self.delivery)
+        stage_validation_inputs(self.source, self.delivery)
         shutil.copy2(self.source / "tools/ci/check_linux.py", self.delivery)
+        shutil.copy2(self.source / "tools/ci/validation_inputs.py", self.delivery)
         shutil.copy2(self.source / "tools/ci/summarize_timings.py", self.delivery)
         shutil.copy2(self.source / "tools/packaging/package_sdk.py", self.delivery)
         shutil.copy2(self.reports / "source-sha256.json", self.delivery)
@@ -295,7 +293,7 @@ class Check:
                  "import orbitforge; print(orbitforge.__file__)")
         self.run("python-api-tests", python, "-I", "-m", "unittest", "discover", "-v",
                  "-s", delivery / "bindings/python/tests")
-        for name in ("circular_orbit", "time_frames", "eop_state", "sun_moon", "two_body_scenario", "propagators", "access"):
+        for name in PYTHON_EXAMPLES:
             self.run(f"python-example-{name}", python, "-I", delivery / f"examples/python/{name}.py")
         self.run("cpp-python-parity", python, "-I", delivery / "compare_examples.py",
                  "--cpp-example", delivery / "bin/orbitforge_example")

@@ -11,6 +11,7 @@ import time
 import tomllib
 
 from version import ROOT, check, python_versions
+from validation_inputs import PYTHON_EXAMPLES, stage_validation_inputs
 
 
 def main():
@@ -57,6 +58,8 @@ def main():
             process.check_returncode()
 
     source = ROOT
+    inputs = work / "test-inputs"
+    stage_validation_inputs(source, inputs)
     if args.release:
         # Only the wheel backend walks the source tree; exclude local caches from it.
         source = work / "source"
@@ -104,11 +107,11 @@ def main():
     run("python-version", consumer, "-I", "-c",
         "import orbitforge, sys; print(orbitforge.__file__); assert orbitforge.__version__ == sys.argv[1]",
         version, env=clean)
-    run("python-tests", consumer, "-I", "-m", "unittest", "discover", "-s", source / "bindings/python/tests", "-v", env=clean)
-    for name in ("circular_orbit", "time_frames", "eop_state", "sun_moon", "two_body_scenario", "propagators", "access", "report_templates", "mission"):
-        run(f"example-{name}", consumer, "-I", source / f"examples/python/{name}.py", env=clean)
+    run("python-tests", consumer, "-I", "-m", "unittest", "discover", "-s", inputs / "bindings/python/tests", "-v", env=clean)
+    for name in PYTHON_EXAMPLES:
+        run(f"example-{name}", consumer, "-I", inputs / f"examples/python/{name}.py", env=clean)
     if args.cpp_example:
-        run("cpp-python-parity", consumer, "-I", source / "tools/validation/compare_examples.py",
+        run("cpp-python-parity", consumer, "-I", inputs / "compare_examples.py",
             "--cpp-example", args.cpp_example.resolve(), env=clean)
     (reports / "passed.json").write_text(json.dumps({
         "passed": True, "python": python_version, "release": args.release,

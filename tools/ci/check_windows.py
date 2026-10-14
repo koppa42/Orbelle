@@ -12,6 +12,7 @@ import tomllib
 import zipfile
 
 from version import check
+from validation_inputs import PYTHON_EXAMPLES, stage_validation_inputs
 
 
 def main():
@@ -114,10 +115,7 @@ def main():
     clean.pop("CMAKE_PREFIX_PATH", None)
     clean["ORBITFORGE_DATA_HOME"] = str(work / "user-data")
     sdk_environment = dict(clean, PATH=str(installed / "dependencies/bin") + os.pathsep + clean["PATH"])
-    for relative in ("tests/packaging/sdk_consumer", "bindings/python/tests", "tests/integration/fixtures",
-                     "tests/reference/time_frames", "examples/python"):
-        shutil.copytree(source / relative, relocated / relative)
-    shutil.copy2(source / "tools/validation/compare_examples.py", relocated)
+    stage_validation_inputs(source, relocated)
     run("sdk-consumer-configure", "cmake", "-S", relocated / "tests/packaging/sdk_consumer",
         "-B", work / "sdk-consumer", "-G", args.generator, "-A", "x64",
         f"-DCMAKE_PREFIX_PATH={installed};{installed / 'dependencies'}",
@@ -139,7 +137,7 @@ def main():
         "import orbitforge, sys; print(orbitforge.__file__); assert orbitforge.__version__ == sys.argv[1]",
         args.version, env=clean)
     run("python-tests", python, "-I", "-m", "unittest", "discover", "-s", relocated / "bindings/python/tests", "-v", env=clean)
-    for name in ("circular_orbit", "time_frames", "eop_state", "sun_moon", "two_body_scenario"):
+    for name in PYTHON_EXAMPLES:
         run(f"example-{name}", python, "-I", relocated / f"examples/python/{name}.py", env=clean)
     run("cpp-python-parity", python, "-I", relocated / "compare_examples.py", "--cpp-example",
         desktop / "examples/cpp/Release/orbitforge_example.exe", env=sdk_environment)

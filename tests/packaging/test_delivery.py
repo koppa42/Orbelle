@@ -4,9 +4,12 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -15,7 +18,8 @@ ROOT = Path(__file__).resolve().parents[2]
 def load_tool(name, relative):
     spec = importlib.util.spec_from_file_location(name, ROOT / relative)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    with patch.object(sys, 'path', [str(ROOT / 'tools/ci'), *sys.path]):
+        spec.loader.exec_module(module)
     return module
 
 
@@ -81,16 +85,18 @@ class WindowsManifestTests(unittest.TestCase):
 
 
 class LinuxDeliveryTests(unittest.TestCase):
-    def test_export_keeps_current_project_fixture_after_source_removal(self):
+    def test_export_keeps_test_fixtures_after_source_removal(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / 'source'
             # Use the fixed current-format input and its actual Python consumer.
             for relative in ('tests/packaging/sdk_consumer', 'tests/reference/time_frames',
-                             'tests/integration/fixtures', 'bindings/python/tests', 'examples/python'):
+                             'tests/integration/fixtures', 'bindings/python/tests', 'examples/python',
+                             'data/samples/eop', 'data/samples/time'):
                 shutil.copytree(ROOT / relative, source / relative,
                                 ignore=shutil.ignore_patterns('__pycache__'))
-            for relative in ('tools/ci/check_linux.py', 'tools/ci/summarize_timings.py', 'tools/validation/compare_examples.py',
+            for relative in ('tools/ci/check_linux.py', 'tools/ci/validation_inputs.py',
+                             'tools/ci/summarize_timings.py', 'tools/validation/compare_examples.py',
                              'tools/packaging/package_sdk.py'):
                 target = source / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -98,6 +104,13 @@ class LinuxDeliveryTests(unittest.TestCase):
             expected = {path.name: path.read_bytes()
                         for path in (source / 'tests/integration/fixtures').glob('*.orbitforge')}
             self.assertEqual(set(expected), {'project-current.orbitforge'})
+            data_inputs = {
+                relative: (source / relative).read_bytes() for relative in (
+                    'data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json',
+                    'data/samples/eop/iers_c04_2000_01_01_2000_01_02/eop.c04',
+                    'data/samples/time/iers_leap_seconds_2026_07.dat',
+                )
+            }
             args = argparse.Namespace(source=source, work=root / 'work',
                                       reports=root / 'reports', delivery=root / 'delivery', jobs=1)
             check = linux.Check(args)
@@ -125,9 +138,21 @@ class LinuxDeliveryTests(unittest.TestCase):
             self.assertTrue(consumer.is_file())
             for name, contents in expected.items():
                 self.assertEqual((fixture_dir / name).read_bytes(), contents)
+            analysis_test = relocated / 'bindings/python/tests/test_analysis.py'
+            self.assertTrue(analysis_test.is_file())
+            for relative, contents in data_inputs.items():
+                self.assertEqual((analysis_test.parents[3] / relative).read_bytes(), contents)
+            self.assertFalse((relocated / 'bindings/python/src').exists())
+            self.assertFalse((relocated / 'modules').exists())
+            # The exported runner must also import its helpers after relocation.
+            result = subprocess.run(
+                [sys.executable, '-E', '-s', str(relocated / 'check_linux.py'), '--help'],
+                cwd=relocated, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout)
             entries = json.loads((relocated / 'manifest.json').read_text())
             self.assertIn('tests/integration/fixtures/project-current.orbitforge',
                           {entry['path'] for entry in entries})
+            self.assertTrue(data_inputs.keys() <= {entry['path'] for entry in entries})
             for entry in entries:
                 path = relocated / entry['path']
                 self.assertEqual(path.stat().st_size, entry['size'])

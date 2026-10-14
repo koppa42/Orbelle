@@ -16,6 +16,8 @@
 
 测试需要先编译 C++ 和 Python 原生扩展，但不需要创建可分发的安装包。普通 PR 和 `main` 不生成桌面 ZIP、SDK 发布归档或 wheel，不创建 Release，也不上传 `*-release-assets`。Python 测试按 `pyproject.toml` 的相同功能配置直接使用 CMake 编译扩展，将扩展及配套 Python 文件放入独立虚拟环境，再运行 API 测试与示例。wheel 元数据、打包布局和安装行为另由标签流程验证。
 
+PR、`main` 与发布安装验证通过 `tools/ci/validation_inputs.py` 整理相同的独立测试目录，包含 Python 测试、九个示例、SDK 消费端、固定参考值、项目文件样例及测试使用的 EOP / 闰秒数据。测试目录保留相对路径，但不复制 Python 包源码或 C++ 实现；计算能力必须来自被测安装。普通 Python CI 也从此目录运行，提前发现发布验证输入遗漏。
+
 PR 的 `linux-python-dependencies` 和 `windows-python-dependencies` 仅供其他 Python 版本复用已编译依赖，内容不包括 OrbitForge 安装包。诊断日志另行保留。标签流程还传递 `linux-delivery`，供没有源码检出的新 runner 验证 SDK 和 wheel，然后整理发布附件。
 
 PR 使用 GitHub 默认的[模拟合并引用](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)运行。合并后在实际 `main` 提交上执行基准测试，同时更新可供后续 PR 使用的依赖缓存。多版本兼容性在合并前完成；目标分支变化时先更新 PR 并等待新的检查结果。若启用合并队列，需先接入 `merge_group` 事件。

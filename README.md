@@ -2,7 +2,7 @@
 
 航天任务分析与仿真平台，提供桌面轨道工作台、C++ SDK 和独立 Python 包，共用一套计算与场景接口。
 
-当前版本为 **0.2.0 开发预览**，已提供轨道工作台、数据管理和基础报告，支持地面站可见性、卫星子传感器分析、HPOP 数值传播及脉冲机动序列，后续将扩展摄动力模型与覆盖分析。
+当前版本为 **0.2.1 开发预览**，已提供轨道工作台、数据管理和基础报告，支持地面站可见性、卫星子传感器分析、HPOP 数值传播及脉冲机动序列，后续将扩展摄动力模型与覆盖分析。
 
 [构建与测试](docs/development/build.md) · [工作台使用与设计](docs/architecture/scenario_workbench.md) · [开发者规范](docs/development/requirements.md) · [文档导航](docs/README.md) · [验证方法](docs/validation/README.md)
 
