@@ -277,8 +277,9 @@ TEST(AtmosphericDrag, RelativeVelocityDirectionAreaAndLowAltitudeBlendActuallyAf
             evaluate_drag({6378137 + altitude, 0, 0}, v, sun, {2000, 1, 1, 12, 0, 0, 0}, options);
         EXPECT_GT(value.density_kg_m3, 0);
         if (previous > 0 &&
-            (altitude == 90000 || altitude == 90001 || altitude == 120000 || altitude == 120001))
+            (altitude == 90000 || altitude == 90001 || altitude == 120000 || altitude == 120001)) {
             EXPECT_LT(std::abs(value.density_kg_m3 / previous - 1), .001);
+        }
         previous = value.density_kg_m3;
     }
 }
