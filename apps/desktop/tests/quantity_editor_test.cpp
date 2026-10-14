@@ -1,5 +1,6 @@
 #include "../src/viewer/epoch_editor.hpp"
 #include "../src/viewer/ground_station_editor.hpp"
+#include "../src/viewer/hpop_settings.hpp"
 #include "../src/viewer/mission_editor.hpp"
 #include "../src/viewer/object_selection.hpp"
 #include "../src/viewer/orbit_editor.hpp"
@@ -1138,5 +1139,36 @@ TEST_F(QuantityTest, HpopSettingsValidateCancelAndRoundTripWithoutApplyingTheOrb
         settled.exec(); // Allow queued responsive layouts to settle before the capture.
         EXPECT_TRUE(editor.grab().save(capture + "/hpop-editor-compact.png"));
     }
+}
+TEST_F(QuantityTest, HpopUsesInstalledGravityLimitsAndPersistsSelectedModel) {
+    core::HpopOptions options;
+    runtime::CatalogGravity entry;
+    entry.selection = "egm2008";
+    entry.info = {"EGM2008", {}, {}, "tide_free", core::egm96_mu, core::egm96_radius_m, 2190, 2190};
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *model = dialog->findChild<QComboBox *>("hpopGravityModel");
+        model->setCurrentIndex(model->findData(QStringLiteral("egm2008")));
+        auto *degree = dialog->findChild<QSpinBox *>("hpopGravityDegree");
+        EXPECT_EQ(degree->maximum(), 360);
+        degree->setValue(21);
+        dialog->findChild<QSpinBox *>("hpopGravityOrder")->setValue(21);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr, {entry}));
+    EXPECT_EQ(options.gravity_model, "egm2008");
+    EXPECT_EQ(options.gravity_degree, 21);
+    EXPECT_EQ(options.gravity_order, 21);
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        EXPECT_TRUE(dialog->isVisible());
+        EXPECT_TRUE(dialog->findChild<QLabel *>("errorText")->isVisible());
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr));
+    EXPECT_EQ(options.gravity_model, "egm2008");
 }
 } // namespace orbitforge::desktop

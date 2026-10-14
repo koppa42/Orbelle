@@ -22,6 +22,7 @@
 #include <QUuid>
 #include <numbers>
 #include <orbitforge/runtime/access.hpp>
+#include <orbitforge/runtime/gravity.hpp>
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
 #include "benchmark_gpu.hpp"
 #include "benchmark_presentation.hpp"
@@ -520,6 +521,7 @@ class Workbench final : public QMainWindow {
                 object_dock->setMinimumWidth(200);
             if (!benchmarking_ && runtime::two_body_available()) {
                 editor_ = new OrbitEditor(OrbitInput{});
+                editor_->gravity_models = [this] { return eop_catalog_->data().gravity_models(); };
                 editor_->transform_state = [this](core::CartesianState state, core::FrameId frame) {
                     if (state.frame == frame)
                         return state;
@@ -1580,6 +1582,9 @@ class Workbench final : public QMainWindow {
         project.earth_orientation = eop_->data_info();
         project.time_data = standalone_time_data_;
         project.analysis_record = analysis_record_;
+        for (const auto &ref : scenario_->data_lock().references())
+            if (ref.role.starts_with("gravity/"))
+                project.force_data.push_back(ref);
         if (project.data_lock() != scenario_->data_lock())
             throw application::ProjectError(
                 "Scenario data lock does not match its active providers");
@@ -1603,9 +1608,41 @@ class Workbench final : public QMainWindow {
         project.sensors = sensors_;
         return project;
     }
+    std::vector<runtime::CatalogGravity>
+    selected_gravity(const application::Project &project) const {
+        std::vector<runtime::CatalogGravity> result;
+        const auto installed = eop_catalog_->data().gravity_models();
+        for (const auto &satellite : project.satellites) {
+            const auto &input = satellite.orbit;
+            if (!input.uses_hpop() || input.hpop.gravity_model.empty())
+                continue;
+            if (std::any_of(result.begin(), result.end(),
+                            [&](const auto &v) { return v.selection == input.hpop.gravity_model; }))
+                continue;
+            const auto found = std::find_if(installed.begin(), installed.end(), [&](const auto &v) {
+                return v.selection == input.hpop.gravity_model;
+            });
+            if (found == installed.end())
+                throw std::runtime_error("缺少重力场文件，请在数据中心下载或导入：" +
+                                         input.hpop.gravity_model);
+            result.push_back(*found);
+        }
+        return result;
+    }
+    application::DataLock selected_data_lock(const application::Project &project,
+                                             const core::EopDataInfo &eop) const {
+        const auto base = application::eop_data_lock(eop);
+        std::vector<application::DataReference> refs(base.references().begin(),
+                                                     base.references().end());
+        for (const auto &model : selected_gravity(project))
+            refs.push_back(runtime::gravity_reference(model.selection, model.info));
+        return application::DataLock{std::move(refs)};
+    }
     ReportInput report_input() const {
-        return {project_snapshot(project_path_),
-                runtime::DataSnapshot::from_providers(active_time(), frames_, eop_)};
+        auto resources = runtime::DataSnapshot::from_providers(active_time(), frames_, eop_);
+        for (const auto &[id, model] : gravity_)
+            resources = resources.with_gravity(id, model);
+        return {project_snapshot(project_path_), std::move(resources)};
     }
     void show_reports() {
         if (!scenario_ || busy())
@@ -1623,7 +1660,8 @@ class Workbench final : public QMainWindow {
                             application::calculation_data_interval(project_snapshot(project_path_));
                         const auto current = data_for_interval(data_first, data_last);
                         if (scenario_->data_lock() !=
-                            application::eop_data_lock(current->data_info())) {
+                            selected_data_lock(project_snapshot(project_path_),
+                                               current->data_info())) {
                             if (start_project(project_snapshot(project_path_), project_path_, true,
                                               selected_marker_index()))
                                 pending_report_input_ = std::move(done);
@@ -1658,10 +1696,10 @@ class Workbench final : public QMainWindow {
                     const auto &ids = result->definition.query.object_ids;
                     // The map/timeline session uses the same confirmed resources as the report.
                     const auto &data = analysis.data();
-                    access_session_.emplace(runtime::ReportContext{*analysis.snapshot().project,
-                                                                   data.time(), data.frames(),
-                                                                   data.eop()},
-                                            ids[0], ids[1]);
+                    access_session_.emplace(
+                        runtime::ReportContext{*analysis.snapshot().project, data.time(),
+                                               data.frames(), data.eop(), data.gravity_models()},
+                        ids[0], ids[1]);
                     access_hash_ = runtime::report_input_sha256(*analysis.snapshot().project);
                     access_ids_ = ids;
                     std::vector<std::pair<qint64, qint64>> windows;
@@ -1830,8 +1868,9 @@ class Workbench final : public QMainWindow {
             show_data_coverage(data_first, data_last);
             return false;
         }
-        if (!project.data_lock().references().empty() &&
-            project.data_lock() != application::eop_data_lock(next_data->data_info())) {
+        const auto gravity_files = selected_gravity(project);
+        const auto selected_lock = selected_data_lock(project, next_data->data_info());
+        if (!project.data_lock().references().empty() && project.data_lock() != selected_lock) {
             QMessageBox message(
                 QMessageBox::Question, QStringLiteral("场景数据已变化"),
                 QStringLiteral("当前数据或使用策略与此场景上次计算不一致。\n是否使用当前数据更新场"
@@ -1841,17 +1880,18 @@ class Workbench final : public QMainWindow {
             message.setObjectName("dataChangeDialog");
             message.button(QMessageBox::Yes)->setText(QStringLiteral("使用当前数据"));
             message.setDefaultButton(QMessageBox::Cancel);
-            message.setDetailedText(
-                QStringLiteral("上次数据：%1\n当前数据：%2")
-                    .arg(QString::fromStdString(project.data_lock().sha256()),
-                         QString::fromStdString(
-                             application::eop_data_lock(next_data->data_info()).sha256())));
+            message.setDetailedText(QStringLiteral("上次数据：%1\n当前数据：%2")
+                                        .arg(QString::fromStdString(project.data_lock().sha256()),
+                                             QString::fromStdString(selected_lock.sha256())));
             if (message.exec() != QMessageBox::Yes) {
                 last_project_outcome_ = "cancelled";
                 return false;
             }
         }
         const auto recorded_data = project.data_lock();
+        project.force_data.clear();
+        for (const auto &file : gravity_files)
+            project.force_data.push_back(runtime::gravity_reference(file.selection, file.info));
         if (settings) {
             project.earth_orientation = next_data->data_info();
             project = project.with_settings(settings->name, first, last);
@@ -1895,10 +1935,21 @@ class Workbench final : public QMainWindow {
             std::launch::async,
             [this, project = std::move(project),
              source = std::filesystem::path(pending_project_path_.toStdWString()), installed_data,
-             retained, edited_object, calculation_time, cancel = project_cancellation_]() mutable {
+             retained, edited_object, calculation_time, gravity_files,
+             cancel = project_cancellation_]() mutable {
+                std::map<std::string, std::shared_ptr<const core::GravityModel>> gravity;
+                for (const auto &file : gravity_files) {
+                    auto model = runtime::load_gravity(file.file, file.info.source_url, [cancel] {
+                        if (*cancel)
+                            throw OrbitCancelled{};
+                    });
+                    if (model->info().sha256 != file.info.sha256)
+                        throw std::runtime_error("Gravity file content changed after selection");
+                    gravity.emplace(file.selection, std::move(model));
+                }
                 return prepare_project_scene(std::move(project), source, frames_, installed_data,
                                              *cancel, retained, edited_object,
-                                             calculation_time.get());
+                                             calculation_time.get(), gravity);
             });
         update_actions();
         statusBar()->showMessage(editing ? QStringLiteral("正在更新场景并准备轨迹…")
@@ -2004,6 +2055,7 @@ class Workbench final : public QMainWindow {
                 station_editor_->close();
             scenario_ = std::move(candidate->scenario);
             eop_ = candidate->eop;
+            gravity_ = candidate->gravity;
             if (!project_edit_)
                 close_reports();
             reports_ = candidate->project.reports;
@@ -2346,6 +2398,7 @@ class Workbench final : public QMainWindow {
         object_item_ = nullptr;
         scenario_ = std::move(next);
         eop_ = next_eop;
+        gravity_.clear();
         time_label_epoch_.reset();
         scenario_ = scenario_->with_data_lock(application::eop_data_lock(eop_->data_info()));
         scenario_item_ = new QTreeWidgetItem(objects_, {QString::fromStdString(scenario_->name())});
@@ -3037,7 +3090,8 @@ class Workbench final : public QMainWindow {
             }
             std::tie(data_first, data_last) = application::calculation_data_interval(data_input);
             const auto current_data = data_for_interval(data_first, data_last);
-            if (!application::matching_project_data(current_data->data_info(), eop_->data_info())) {
+            if (!application::matching_project_data(current_data->data_info(), eop_->data_info()) ||
+                !gravity_.empty() || (input.uses_hpop() && !input.hpop.gravity_model.empty())) {
                 // Publish all tracks and their provider together, never mix EOP revisions.
                 auto project = project_snapshot(project_path_);
                 const auto id = input.object_id;
@@ -5921,7 +5975,7 @@ class Workbench final : public QMainWindow {
                 auto *priority = dialog->findChild<QListWidget *>("eopSourcePriority");
                 auto *pages = dialog->findChild<QTabWidget *>("dataPages");
                 require(pages && details && automatic && automatic->isChecked() && inventory &&
-                            inventory->topLevelItemCount() == 2 && priority &&
+                            inventory->topLevelItemCount() == 3 && priority &&
                             inventory->topLevelItem(0)->childCount() == 2 &&
                             priority->isVisible() &&
                             !dialog->findChild<QComboBox *>("eopSnapshots") &&
@@ -6014,7 +6068,7 @@ class Workbench final : public QMainWindow {
                     eop_->data_info().interpolation.starts_with("finals2000a") ? 0 : 1;
                 const auto imported =
                     eop_catalog_->inventory()[static_cast<std::size_t>(imported_row)];
-                require(inventory->topLevelItemCount() == 2 &&
+                require(inventory->topLevelItemCount() == 3 &&
                             inventory->currentItem() == group->child(imported_row) &&
                             imported.provider_index == 2 && imported.acquired_at &&
                             imported.acquisition == runtime::DataAcquisition::imported &&
@@ -6873,8 +6927,8 @@ class Workbench final : public QMainWindow {
                     "Object report included an unselected object");
             save_workbench_image("object-report-results.png");
             record("object-report-context-scope-survives-template-change");
-            choose_report(QStringLiteral("builtin:%1").arg(
-                static_cast<int>(application::ReportKind::classical_elements)));
+            choose_report(QStringLiteral("builtin:%1")
+                              .arg(static_cast<int>(application::ReportKind::classical_elements)));
             report_dialog_->findChild<QPushButton *>("generateReport")->click();
             ++orbit_smoke_stage_;
             break;
@@ -7060,7 +7114,8 @@ class Workbench final : public QMainWindow {
             table->doubleClicked(index);
             record("access-windows-timeline-and-seek");
             save_workbench_image("access-windows.png");
-            choose_report(QStringLiteral("builtin:%1").arg(static_cast<int>(application::ReportKind::aer)));
+            choose_report(
+                QStringLiteral("builtin:%1").arg(static_cast<int>(application::ReportKind::aer)));
             report_dialog_->findChild<QDoubleSpinBox *>("reportStep")->setValue(10);
             report_dialog_->findChild<QCheckBox *>("reportFollowScenario")->setChecked(false);
             static_cast<EpochEditor *>(report_dialog_->findChild<QWidget *>("reportFirst"))
@@ -7526,6 +7581,7 @@ class Workbench final : public QMainWindow {
     std::vector<application::ReportDefinition> reports_;
     ReportDialog::Ready pending_report_input_;
     std::unique_ptr<EopCatalog> eop_catalog_;
+    std::map<std::string, std::shared_ptr<const core::GravityModel>> gravity_;
     mutable std::shared_ptr<const core::ITimeProvider> active_time_;
     bool project_edit_ = false, project_orbit_edit_ = false, project_settings_edit_ = false;
     std::optional<std::size_t> pending_project_selection_;

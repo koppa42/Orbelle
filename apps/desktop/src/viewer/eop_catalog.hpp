@@ -7,6 +7,8 @@
 #include <QTemporaryFile>
 #include <QTimer>
 #include <array>
+#include <atomic>
+#include <future>
 #include <optional>
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
@@ -47,7 +49,7 @@ class EopCatalog : public QObject {
     void cancel_download();
     void check_updates_if_due(qint64 now, QUrl source = {});
     [[nodiscard]] bool has_full_download(DataProduct product = DataProduct::finals2000a) const;
-    [[nodiscard]] bool downloading() const { return reply_ != nullptr; }
+    [[nodiscard]] bool downloading() const { return reply_ != nullptr || gravity_job_.valid(); }
     [[nodiscard]] DataProduct active_product() const { return active_product_; }
     [[nodiscard]] const QString &status() const { return status_; }
     [[nodiscard]] qint64 received_bytes() const { return received_; }
@@ -67,6 +69,8 @@ class EopCatalog : public QObject {
         return updates_[static_cast<std::size_t>(product)];
     }
     void save_update_status();
+    void start_gravity_install(const std::filesystem::path &file, DataProduct product,
+                               const std::string &url, runtime::DataAcquisition acquisition);
     std::filesystem::path store_;
     runtime::DataCatalog data_;
     std::vector<Provider> providers_;
@@ -80,7 +84,11 @@ class EopCatalog : public QObject {
     QString status_;
     qint64 received_ = 0;
     qint64 total_ = -1;
-    std::array<DataUpdateStatus, 3> updates_;
+    std::array<DataUpdateStatus, all_data_products.size()> updates_;
+    std::future<runtime::CatalogGravity> gravity_job_;
+    std::shared_ptr<std::atomic_bool> gravity_cancel_;
+    QTimer gravity_poll_;
+    std::map<std::string, std::string> gravity_response_;
     DataProduct active_product_ = DataProduct::finals2000a;
     std::shared_ptr<const core::ITimeProvider> time_;
     std::filesystem::path time_file_;

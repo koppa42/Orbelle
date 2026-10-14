@@ -695,7 +695,7 @@ core::CartesianState OrbitEditor::read_state() const {
             {epoch_->epoch(), elements_[0]->value(Unit::metre), elements_[1]->value(Unit::one),
              elements_[2]->value(Unit::radian), elements_[3]->value(Unit::radian),
              elements_[4]->value(Unit::radian), elements_[5]->value(Unit::radian)},
-            uses_hpop() ? core::GravitationalParameter{core::egm96_mu}
+            uses_hpop() ? core::GravitationalParameter{hpop_.gravity_mu}
                         : core::central_body(body_).mu);
     }
     core::CartesianState state{epoch_->epoch(), body_, input_frame_, {}, {}};
@@ -733,9 +733,9 @@ void OrbitEditor::write_elements(const core::CartesianState &state) {
                   elements.inclination_rad,           elements.raan_rad,
                   elements.argument_of_periapsis_rad, elements.mean_anomaly_rad};
     } else {
-        const auto elements =
-            runtime::to_keplerian(state, uses_hpop() ? core::GravitationalParameter{core::egm96_mu}
-                                                     : core::central_body(body_).mu);
+        const auto elements = runtime::to_keplerian(
+            state, uses_hpop() ? core::GravitationalParameter{hpop_.gravity_mu}
+                               : core::central_body(body_).mu);
         values = {elements.semi_major_axis_m,         elements.eccentricity,
                   elements.inclination_rad,           elements.raan_rad,
                   elements.argument_of_periapsis_rad, elements.true_anomaly_rad};
@@ -849,7 +849,11 @@ void OrbitEditor::update_state_labels() {
     hpop_summary_->setText(
         (hpop_.gravity_degree == 0
              ? QStringLiteral("点质量")
-             : QStringLiteral("EGM96 %1 × %2").arg(hpop_.gravity_degree).arg(hpop_.gravity_order)) +
+             : QStringLiteral("%1 %2 × %3")
+                   .arg(hpop_.gravity_model.empty() ? QStringLiteral("EGM96 内置")
+                                                    : QString::fromStdString(hpop_.gravity_model))
+                   .arg(hpop_.gravity_degree)
+                   .arg(hpop_.gravity_order)) +
         (hpop_.integrator == core::HpopIntegrator::rkf78 ? QStringLiteral(" · RKF78 自适应")
                                                          : QStringLiteral(" · RK4 固定步长")));
     if (propagator_kind_ == OrbitPropagator::mission) {
@@ -945,7 +949,9 @@ void OrbitEditor::open_propagator_details() {
     if (propagator_kind_ == OrbitPropagator::mission) {
         try {
             const auto state = read_state();
-            if (edit_mission(mission_, hpop_, state.epoch, first_->epoch(), last_->epoch(), this)) {
+            if (edit_mission(mission_, hpop_, state.epoch, first_->epoch(), last_->epoch(), this,
+                             gravity_models ? gravity_models()
+                                            : std::vector<runtime::CatalogGravity>{})) {
                 if (state_mode_index_ == 1)
                     write_elements(state);
                 update_state_labels();
@@ -956,7 +962,9 @@ void OrbitEditor::open_propagator_details() {
         return;
     }
     if (propagator_kind_ == OrbitPropagator::hpop) {
-        if (edit_hpop_settings(hpop_, this))
+        if (edit_hpop_settings(hpop_, this,
+                               gravity_models ? gravity_models()
+                                              : std::vector<runtime::CatalogGravity>{}))
             update_state_labels();
         return;
     }

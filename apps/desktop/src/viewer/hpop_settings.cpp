@@ -14,7 +14,8 @@
 #include <limits>
 
 namespace orbitforge::desktop {
-bool edit_hpop_settings(core::HpopOptions &options, QWidget *parent) {
+bool edit_hpop_settings(core::HpopOptions &options, QWidget *parent,
+                        const std::vector<runtime::CatalogGravity> &models) {
     QDialog dialog(parent);
     dialog.setObjectName("hpopSettingsDialog");
     dialog.setWindowTitle(QStringLiteral("HPOP · 数值传播"));
@@ -54,11 +55,23 @@ bool edit_hpop_settings(core::HpopOptions &options, QWidget *parent) {
     auto *model = new QComboBox;
     model->setObjectName("hpopGravityModel");
     model->addItems({QStringLiteral("EGM96 · 球谐重力"), QStringLiteral("点质量 · 对照计算")});
+    model->setItemText(0, QStringLiteral("EGM96 · 内置 20 × 20"));
+    model->setItemData(0, QString{});
+    model->setItemData(1, QString{});
+    for (const auto &entry : models)
+        model->addItem(QString::fromStdString(entry.info.model) + QStringLiteral(" · 数据中心"),
+                       QString::fromStdString(entry.selection));
     model->setCurrentIndex(options.gravity_degree == 0 ? 1 : 0);
+    if (!options.gravity_model.empty()) {
+        const auto id = QString::fromStdString(options.gravity_model);
+        if (model->findData(id) < 0)
+            model->addItem(id + QStringLiteral(" · 未安装"), id);
+        model->setCurrentIndex(model->findData(id));
+    }
     gravity->addRow(QStringLiteral("地球引力"), model);
     auto *degree = new QSpinBox;
     degree->setObjectName("hpopGravityDegree");
-    degree->setRange(2, core::egm96_max_degree);
+    degree->setRange(2, core::gravity_max_degree);
     degree->setValue(std::max(2, options.gravity_degree));
     auto *order = new QSpinBox;
     order->setObjectName("hpopGravityOrder");
@@ -69,13 +82,20 @@ bool edit_hpop_settings(core::HpopOptions &options, QWidget *parent) {
     QObject::connect(degree, &QSpinBox::valueChanged, &dialog,
                      [order](int value) { order->setMaximum(value); });
     const auto update_gravity = [=] {
-        degree->setEnabled(model->currentIndex() == 0);
-        order->setEnabled(model->currentIndex() == 0);
+        degree->setEnabled(model->currentIndex() != 1);
+        order->setEnabled(model->currentIndex() != 1);
+        int limit = core::egm96_max_degree;
+        for (const auto &entry : models)
+            if (entry.selection == model->currentData().toString().toStdString())
+                limit = std::min(entry.info.degree, core::gravity_max_degree);
+        degree->setMaximum(limit);
+        order->setMaximum(degree->value());
     };
     QObject::connect(model, &QComboBox::currentIndexChanged, &dialog, update_gravity);
     update_gravity();
-    note(gravity, QStringLiteral("默认 8 × 8；最高 20 × 20。Order 为 0 "
-                                 "时只保留带谐项。球谐重力需要覆盖完整积分时段的地球定向数据。"));
+    note(gravity,
+         QStringLiteral("在数据中心下载 EGM2008 / EGM96，或导入外部重力文件。文件模型计算支持最高 "
+                        "360 × 360；内置示例最高 20 × 20。Order 为 0 时只保留带谐项。"));
     const auto quantity = [](QFormLayout *form, const QString &label, const char *id, Unit unit,
                              double value, double low, double high) {
         auto *field = new QuantityEditor(unit);
@@ -89,7 +109,7 @@ bool edit_hpop_settings(core::HpopOptions &options, QWidget *parent) {
     auto *altitude =
         quantity(gravity, QStringLiteral("最低地心高度"), "hpopMinimumAltitude", Unit::metre,
                  options.minimum_altitude_m, 0, std::numeric_limits<double>::max());
-    note(gravity, QStringLiteral("高度相对 EGM96 参考球面；积分中低于此高度会停止并报错。"));
+    note(gravity, QStringLiteral("高度相对所选重力场参考球面；积分中低于此高度会停止并报错。"));
     note(gravity,
          QStringLiteral("当前计入地球静态引力。日月引力、大气阻力、太阳光压与潮汐尚未计入。"));
     auto *integration = page(QStringLiteral("积分设置"));
@@ -141,8 +161,21 @@ bool edit_hpop_settings(core::HpopOptions &options, QWidget *parent) {
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
         try {
             auto candidate = options;
-            candidate.gravity_degree = model->currentIndex() == 0 ? degree->value() : 0;
-            candidate.gravity_order = model->currentIndex() == 0 ? order->value() : 0;
+            candidate.gravity_model = model->currentData().toString().toStdString();
+            candidate.gravity_mu = core::egm96_mu;
+            if (!candidate.gravity_model.empty()) {
+                const auto found =
+                    std::find_if(models.begin(), models.end(), [&](const auto &entry) {
+                        return entry.selection == candidate.gravity_model;
+                    });
+                if (found == models.end())
+                    throw std::runtime_error("请先在数据中心下载或导入所选重力场。");
+                candidate.gravity_mu = found->info.mu;
+                if (order->value() > found->info.order)
+                    throw std::runtime_error("所选 Order 超出重力文件的可用范围。");
+            }
+            candidate.gravity_degree = model->currentIndex() != 1 ? degree->value() : 0;
+            candidate.gravity_order = model->currentIndex() != 1 ? order->value() : 0;
             candidate.integrator = method->currentIndex() == 0 ? core::HpopIntegrator::rkf78
                                                                : core::HpopIntegrator::rk4;
             candidate.minimum_altitude_m = altitude->value(Unit::metre);

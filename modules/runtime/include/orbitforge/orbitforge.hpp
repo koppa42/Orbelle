@@ -1,6 +1,7 @@
 #pragma once
 // Everyday SDK entry point. Link OrbitForge::Runtime; no Qt or Python dependency.
 #include <orbitforge/project.hpp>
+#include <orbitforge/runtime/gravity.hpp>
 
 namespace orbitforge {
 using application::DataLock;

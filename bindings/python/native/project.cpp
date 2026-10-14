@@ -96,6 +96,8 @@ void bind_project(py::module_ &module) {
         .value("RK4", core::HpopIntegrator::rk4);
     py::class_<core::HpopOptions>(module, "HpopOptions")
         .def(py::init<>())
+        .def_readwrite("gravity_model", &core::HpopOptions::gravity_model)
+        .def_readwrite("gravity_mu", &core::HpopOptions::gravity_mu)
         .def_readwrite("gravity_degree", &core::HpopOptions::gravity_degree)
         .def_readwrite("gravity_order", &core::HpopOptions::gravity_order)
         .def_readwrite("integrator", &core::HpopOptions::integrator)
@@ -164,6 +166,7 @@ void bind_project(py::module_ &module) {
         .def_readwrite("reports", &application::Project::reports)
         .def_readwrite("earth_orientation", &application::Project::earth_orientation)
         .def_readwrite("time_data", &application::Project::time_data)
+        .def_readwrite("force_data", &application::Project::force_data)
         .def_readwrite("analysis_record", &application::Project::analysis_record)
         .def_property_readonly("analysis_status", &application::Project::analysis_status)
         .def_property_readonly("data_lock", &application::Project::data_lock)

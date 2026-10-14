@@ -118,7 +118,8 @@ class MissionEditor final : public QDialog {
     core::MissionPlan plan;
     core::HpopOptions hpop;
     MissionEditor(core::MissionPlan draft, core::HpopOptions options, core::Epoch initial,
-                  core::Epoch scenario_first, core::Epoch scenario_last, QWidget *parent)
+                  core::Epoch scenario_first, core::Epoch scenario_last, QWidget *parent,
+                  const std::vector<runtime::CatalogGravity> &models)
         : QDialog(parent), plan(std::move(draft)), hpop(options), initial_(initial),
           first_(scenario_first), last_(scenario_last) {
         setObjectName("missionEditorDialog");
@@ -147,7 +148,8 @@ class MissionEditor final : public QDialog {
         settings->setEnabled(model_->currentIndex() == 1);
         model_row->addWidget(settings);
         outer->addLayout(model_row);
-        connect(settings, &QPushButton::clicked, this, [this] { edit_hpop_settings(hpop, this); });
+        connect(settings, &QPushButton::clicked, this,
+                [this, models] { edit_hpop_settings(hpop, this, models); });
         connect(model_, &QComboBox::currentIndexChanged, this, [this, settings](int index) {
             plan.coast_model =
                 index == 0 ? core::MissionCoastModel::two_body : core::MissionCoastModel::hpop;
@@ -672,8 +674,9 @@ class MissionEditor final : public QDialog {
 };
 } // namespace
 bool edit_mission(core::MissionPlan &plan, core::HpopOptions &hpop, core::Epoch initial,
-                  core::Epoch scenario_first, core::Epoch scenario_last, QWidget *parent) {
-    MissionEditor dialog(plan, hpop, initial, scenario_first, scenario_last, parent);
+                  core::Epoch scenario_first, core::Epoch scenario_last, QWidget *parent,
+                  const std::vector<runtime::CatalogGravity> &models) {
+    MissionEditor dialog(plan, hpop, initial, scenario_first, scenario_last, parent, models);
     if (dialog.exec() != QDialog::Accepted)
         return false;
     plan = std::move(dialog.plan);

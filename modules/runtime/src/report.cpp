@@ -7,6 +7,7 @@
 #include <locale>
 #include <numbers>
 #include <orbitforge/runtime/access.hpp>
+#include <orbitforge/runtime/gravity.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/report.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
@@ -128,6 +129,14 @@ void csv_field(std::ostream &out, const std::string &value) {
     out << '"';
 }
 } // namespace
+core::HpopEnvironment ReportContext::force_environment(const application::OrbitInput &input) const {
+    if (!input.uses_hpop() || input.hpop.gravity_model.empty())
+        return {frames, eop};
+    const auto found = gravity.find(input.hpop.gravity_model);
+    check(found != gravity.end() && found->second, "Missing selected gravity provider");
+    validate_gravity_reference(project.force_data, input.hpop.gravity_model, found->second->info());
+    return {frames, eop, found->second};
+}
 std::string report_input_sha256(const application::Project &project) {
     auto p = project;
     p.reports.clear();
@@ -193,7 +202,7 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
             return object.station
                        ? make_ground_station_session(*object.station)
                        : make_orbit_session(object.satellite->orbit, 1, context.time.get(),
-                                            {context.frames, context.eop});
+                                            context.force_environment(object.satellite->orbit));
         },
         [&](const std::vector<std::string> &ids) {
             AccessSession session{context, ids[0], ids[1]};

@@ -12,6 +12,13 @@
 namespace orbitforge::runtime {
 enum class DataAcquisition { unknown, bundled, imported, downloaded };
 enum class EopProduct { c04, finals2000a };
+struct CatalogGravity {
+    std::string selection;
+    core::GravityInfo info;
+    std::filesystem::path file;
+    DataAcquisition acquisition = DataAcquisition::unknown;
+    std::int64_t acquired_at_unix_seconds = 0;
+};
 struct CatalogSnapshot {
     std::string lock_sha256;
     std::string snapshot_id;
@@ -31,6 +38,15 @@ class DataCatalog {
     DataCatalog(const DataCatalog &) = delete;
     DataCatalog &operator=(const DataCatalog &) = delete;
     [[nodiscard]] const std::filesystem::path &root() const noexcept;
+    // Validate the complete file before atomically replacing this model's current receipt.
+    // Static fields have no expiry. Failed/cancelled installs retain the previous selection.
+    CatalogGravity install_gravity(const std::filesystem::path &source,
+                                   const std::string &selection, const std::string &source_url = {},
+                                   DataAcquisition acquisition = DataAcquisition::imported,
+                                   const std::function<void()> &checkpoint = {});
+    [[nodiscard]] std::vector<CatalogGravity> gravity_models() const;
+    [[nodiscard]] std::shared_ptr<const core::GravityModel>
+    load_gravity(const std::string &selection) const;
     // Reads a coherent local catalog view; never downloads or changes current pointers.
     // Full coverage wins over extrapolation, then preferred_eop() orders the sources.
     [[nodiscard]] DataSnapshot snapshot(core::Epoch first, core::Epoch last,

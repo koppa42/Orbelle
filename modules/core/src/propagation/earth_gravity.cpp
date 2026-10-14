@@ -29,41 +29,73 @@ Jet operator*(const Jet &a, const Jet &b) {
     return r;
 }
 Jet operator*(double a, const Jet &b) { return Jet{a} * b; }
-struct Coefficient {
-    int degree, order;
-    double c, s;
-};
+using Coefficient = GravityCoefficient;
 // Fully normalized coefficients. Generated from the pinned ICGEM EGM96 source;
 // see tools/data/import_egm96.py and docs/architecture/propagators.md.
 #include "egm96_coefficients.inc"
-using Coefficients = std::array<std::array<std::array<double, 2>, 21>, 21>;
-const Coefficients &unnormalized() {
-    static const auto values = [] {
-        Coefficients result{};
-        result[0][0][0] = 1;
-        for (const auto &v : egm96_coefficients) {
-            // Pbar_nm = sqrt((2-delta_m0)(2n+1)(n-m)!/(n+m)!) P_nm.
-            double ratio = 1;
-            for (int k = v.degree - v.order + 1; k <= v.degree + v.order; ++k)
-                ratio /= k;
-            const double scale = std::sqrt((v.order == 0 ? 1 : 2) * (2 * v.degree + 1) * ratio);
-            result[v.degree][v.order] = {scale * v.c, scale * v.s};
-        }
-        return result;
-    }();
-    return values;
-}
+std::size_t index(int n, int m) { return static_cast<std::size_t>(n * (n + 1) / 2 + m); }
 } // namespace
 std::string_view egm96_model_id() noexcept { return "egm96-static-tide-free-20-v1"; }
-std::array<double, 3> egm96_acceleration(const std::array<double, 3> &r, int degree, int order) {
-    if (degree < 0 || degree == 1 || degree > egm96_max_degree || order < 0 || order > degree)
-        throw std::invalid_argument("EGM96 requires degree 0 or 2..20 and order 0..degree");
+std::shared_ptr<const GravityModel> builtin_egm96() {
+    static const auto model = std::make_shared<const GravityModel>(
+        GravityInfo{"EGM96 (built-in 20x20)",
+                    "5247a9e9c316dd2c8f8fd491d53be0e163cb5cb3676b021754240cc9e44cb43b",
+                    {},
+                    "tide_free",
+                    egm96_mu,
+                    egm96_radius_m,
+                    20,
+                    20},
+        std::vector<GravityCoefficient>(std::begin(egm96_coefficients),
+                                        std::end(egm96_coefficients)));
+    return model;
+}
+GravityModel::GravityModel(GravityInfo info, const std::vector<GravityCoefficient> &coefficients)
+    : info_(std::move(info)) {
+    if (!std::isfinite(info_.mu) || info_.mu <= 0 || !std::isfinite(info_.radius_m) ||
+        info_.radius_m <= 0 || info_.degree < 2 || info_.degree > 2190 || info_.order < 0 ||
+        info_.order > info_.degree || info_.model.empty() ||
+        (info_.tide_system != "tide_free" && info_.tide_system != "zero_tide" &&
+         info_.tide_system != "mean_tide"))
+        throw std::invalid_argument("Invalid static Earth gravity metadata");
+    const int degree = std::min(info_.degree, gravity_max_degree);
+    terms_.resize(index(degree + 1, 0));
+    std::vector<bool> seen(terms_.size());
+    terms_[0].c = 1;
+    for (const auto &v : coefficients) {
+        if (v.degree < 0 || v.degree > info_.degree || v.order < 0 ||
+            v.order > std::min(v.degree, info_.order) || !std::isfinite(v.c) || !std::isfinite(v.s))
+            throw std::invalid_argument("Invalid gravity coefficient");
+        if (v.degree > degree)
+            continue;
+        const auto i = index(v.degree, v.order);
+        if (seen[i] || (v.degree == 0 && (v.c != 1 || v.s != 0)) ||
+            (v.degree == 1 && (v.c != 0 || v.s != 0)) || (v.order == 0 && v.s != 0))
+            throw std::invalid_argument("Duplicate or non-geocentric gravity coefficient");
+        seen[i] = true;
+        terms_[i].c = v.c;
+        terms_[i].s = v.s;
+    }
+    for (int m = 0; m <= degree; ++m)
+        for (int n = m + 1; n <= degree; ++n) {
+            auto &term = terms_[index(n, m)];
+            term.a = std::sqrt((4.0 * n * n - 1) / (n * n - m * m));
+            if (n >= m + 2)
+                term.b = std::sqrt((2.0 * n + 1) * ((n - 1.0) * (n - 1) - m * m) /
+                                   ((2.0 * n - 3) * (n * n - m * m)));
+        }
+}
+std::array<double, 3> GravityModel::acceleration(const std::array<double, 3> &r, int degree,
+                                                 int order) const {
+    if (degree < 0 || degree == 1 || degree > std::min(info_.degree, gravity_max_degree) ||
+        order < 0 || order > std::min(degree, info_.order))
+        throw std::invalid_argument("Gravity truncation exceeds the model or computation limit");
     const double radius = std::hypot(r[0], r[1], r[2]);
     if (!std::isfinite(radius) || radius <= 0)
         throw PropagationError("Gravity requires a finite, nonzero position");
     const double inverse2 = 1 / (radius * radius);
     if (degree == 0) {
-        const double factor = -egm96_mu * inverse2 / radius;
+        const double factor = -info_.mu * inverse2 / radius;
         return {factor * r[0], factor * r[1], factor * r[2]};
     }
     Jet inv2{inverse2}, invr{1 / radius};
@@ -71,37 +103,43 @@ std::array<double, 3> egm96_acceleration(const std::array<double, 3> &r, int deg
         inv2.gradient[i] = -2 * r[i] * inverse2 * inverse2;
         invr.gradient[i] = -r[i] * inverse2 / radius;
     }
-    const auto x = egm96_radius_m * (Jet{r[0], {1, 0, 0}} * inv2);
-    const auto y = egm96_radius_m * (Jet{r[1], {0, 1, 0}} * inv2);
-    const auto z = egm96_radius_m * (Jet{r[2], {0, 0, 1}} * inv2);
-    const auto rho = (egm96_radius_m * egm96_radius_m) * inv2;
-    std::array<std::array<Jet, 21>, 21> v{}, w{};
-    v[0][0] = egm96_radius_m * invr;
+    const auto x = info_.radius_m * (Jet{r[0], {1, 0, 0}} * inv2);
+    const auto y = info_.radius_m * (Jet{r[1], {0, 1, 0}} * inv2);
+    const auto z = info_.radius_m * (Jet{r[2], {0, 0, 1}} * inv2);
+    const auto rho = (info_.radius_m * info_.radius_m) * inv2;
+    Jet diagonal_v = info_.radius_m * invr, diagonal_w{}, potential{};
+    // Fully normalized Cartesian solid harmonics. O(1) recurrence workspace;
+    // no factorials or unnormalized intermediate values at high degree/poles.
     for (int m = 0; m <= order; ++m) {
         if (m > 0) {
-            v[m][m] = (2.0 * m - 1) * (x * v[m - 1][m - 1] - y * w[m - 1][m - 1]);
-            w[m][m] = (2.0 * m - 1) * (x * w[m - 1][m - 1] + y * v[m - 1][m - 1]);
+            const double scale = m == 1 ? std::sqrt(3.0) : std::sqrt((2.0 * m + 1) / (2.0 * m));
+            const auto next_v = scale * (x * diagonal_v - y * diagonal_w);
+            diagonal_w = scale * (x * diagonal_w + y * diagonal_v);
+            diagonal_v = next_v;
         }
-        for (int n = m + 1; n <= degree; ++n) {
-            const double a = (2.0 * n - 1) / (n - m);
-            v[n][m] = a * (z * v[n - 1][m]);
-            w[n][m] = a * (z * w[n - 1][m]);
-            if (n >= m + 2) {
-                const double b = (n + m - 1.0) / (n - m);
-                v[n][m] = v[n][m] - b * (rho * v[n - 2][m]);
-                w[n][m] = w[n][m] - b * (rho * w[n - 2][m]);
+        Jet v = diagonal_v, w = diagonal_w, previous_v{}, previous_w{};
+        for (int n = m; n <= degree; ++n) {
+            const auto &term = terms_[index(n, m)];
+            if (n > m) {
+                const auto next_v = term.a * (z * v) - term.b * (rho * previous_v);
+                const auto next_w = term.a * (z * w) - term.b * (rho * previous_w);
+                previous_v = v;
+                previous_w = w;
+                v = next_v;
+                w = next_w;
             }
+            potential = potential + term.c * v + term.s * w;
         }
     }
-    Jet potential = v[0][0];
-    const auto &coefficients = unnormalized();
-    for (int n = 2; n <= degree; ++n)
-        for (int m = 0; m <= std::min(n, order); ++m)
-            potential =
-                potential + coefficients[n][m][0] * v[n][m] + coefficients[n][m][1] * w[n][m];
     auto acceleration = potential.gradient;
-    for (auto &component : acceleration)
-        component *= egm96_mu / egm96_radius_m;
+    for (auto &component : acceleration) {
+        component *= info_.mu / info_.radius_m;
+        if (!std::isfinite(component))
+            throw PropagationError("Gravity acceleration is not finite at this position");
+    }
     return acceleration;
+}
+std::array<double, 3> egm96_acceleration(const std::array<double, 3> &r, int degree, int order) {
+    return builtin_egm96()->acceleration(r, degree, order);
 }
 } // namespace orbitforge::core

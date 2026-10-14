@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <orbitforge/runtime/gravity.hpp>
 #include <orbitforge/runtime/hpop.hpp>
 #include <orbitforge/runtime/j2.hpp>
 #include <orbitforge/runtime/j4.hpp>
@@ -65,8 +66,16 @@ application::Scenario make_project_scenario(const application::Project &project,
                                             *project.earth_orientation))
         throw application::ProjectError("HPOP EOP data differs from the project's confirmed data");
     result = result.with_data_lock(project.data_lock());
-    for (const auto &satellite : project.satellites)
+    for (const auto &satellite : project.satellites) {
+        const auto &input = satellite.orbit;
+        if (input.uses_hpop() && !input.hpop.gravity_model.empty()) {
+            if (!environment.gravity)
+                throw application::ProjectError("Missing selected gravity provider");
+            validate_gravity_reference(project.force_data, input.hpop.gravity_model,
+                                       environment.gravity->info());
+        }
         result = result.with_object(make_orbit_session(satellite.orbit, 1, time, environment));
+    }
     for (const auto &station : project.ground_stations)
         result = result.with_object(make_ground_station_session(station));
     return result;

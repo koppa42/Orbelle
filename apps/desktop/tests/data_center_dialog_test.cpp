@@ -170,7 +170,7 @@ TEST(DataCenterDialog, GroupedSourcesKeepDownloadStateAndPriorityIndependent) {
         auto *status = dialog->findChild<QLabel *>("dataCenterStatus");
         ASSERT_TRUE(list && priority && checked && badge && progress && cancel && download &&
                     status);
-        ASSERT_EQ(list->topLevelItemCount(), 2);
+        ASSERT_EQ(list->topLevelItemCount(), 3);
         auto *group = list->topLevelItem(0);
         ASSERT_EQ(group->childCount(), 2);
         auto *finals = group->child(0);
@@ -454,6 +454,48 @@ TEST(DataCenterDialog, ResponsiveNavigationPreservesSelectionSettingsAndDownload
         dialog->reject();
     });
     show_data_center(nullptr, catalog);
+}
+TEST(DataCenterDialog, GravityHasItsOwnGroupAndStaticValidityWithoutImplicitDownloads) {
+    (void)test_app();
+    QTemporaryDir temporary;
+    EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
+    bool inspected = false;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_NE(dialog, nullptr);
+        auto *tree = dialog->findChild<QTreeWidget *>("dataInventory");
+        ASSERT_EQ(tree->topLevelItemCount(), 3);
+        auto *gravity = tree->topLevelItem(2);
+        ASSERT_EQ(gravity->childCount(), 3);
+        tree->setCurrentItem(gravity->child(0));
+        dialog->resize(1020, 720);
+        QApplication::processEvents();
+        EXPECT_EQ(dialog->findChild<QLabel *>("dataName")->text(), QStringLiteral("EGM2008"));
+        EXPECT_FALSE(dialog->findChild<QCheckBox *>("dataAutoUpdate")->isChecked());
+        EXPECT_TRUE(dialog->findChild<QPushButton *>("downloadEop")->isVisible());
+        bool static_validity = false;
+        for (const auto *label : dialog->findChildren<QLabel *>())
+            static_validity |= label->text() == QStringLiteral("无固定有效期");
+        EXPECT_TRUE(static_validity);
+        const auto output = qEnvironmentVariable("ORBITFORGE_DATA_UI_CAPTURE");
+        if (!output.isEmpty()) {
+            QDir{}.mkpath(output);
+            EXPECT_TRUE(dialog->grab().save(output + "/gravity-download.png"));
+            dialog->resize(500, 660);
+            tree->itemActivated(gravity->child(0), 0);
+            QEventLoop settled;
+            QTimer::singleShot(60, &settled, &QEventLoop::quit);
+            settled.exec();
+            EXPECT_TRUE(dialog->findChild<QLabel *>("dataName")->isVisible());
+            EXPECT_TRUE(dialog->findChild<QPushButton *>("downloadEop")->isVisible());
+            EXPECT_TRUE(dialog->grab().save(output + "/gravity-compact.png"));
+        }
+        EXPECT_FALSE(catalog.downloading());
+        inspected = true;
+        dialog->reject();
+    });
+    show_data_center(nullptr, catalog);
+    EXPECT_TRUE(inspected);
 }
 } // namespace
 } // namespace orbitforge::desktop

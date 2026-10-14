@@ -4,6 +4,7 @@
 #include <QWidget>
 #include <functional>
 #include <orbitforge/core/time/time_provider.hpp>
+#include <orbitforge/runtime/data_catalog.hpp>
 
 class QLabel;
 class QLineEdit;
@@ -23,6 +24,7 @@ class OrbitEditor final : public QWidget {
     void set_time_provider(std::shared_ptr<const core::ITimeProvider> time);
     std::function<void(OrbitInput)> apply;
     std::function<void()> cancel;
+    std::function<std::vector<runtime::CatalogGravity>()> gravity_models;
     std::function<void()> close_requested;
     std::function<void(int, QString, double)> appearance;
     std::function<void(DisplaySettings)> display;

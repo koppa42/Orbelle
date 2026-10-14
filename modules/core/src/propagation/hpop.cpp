@@ -57,16 +57,17 @@ class Hpop final : public IStateProvider {
             if (!std::isfinite(value))
                 throw PropagationError("HPOP encountered a nonfinite state");
         const std::array r{s[0], s[1], s[2]};
-        if (std::hypot(r[0], r[1], r[2]) <= egm96_radius_m + options_.minimum_altitude_m)
+        if (std::hypot(r[0], r[1], r[2]) <=
+            environment_.gravity->info().radius_m + options_.minimum_altitude_m)
             throw PropagationError("HPOP reached its minimum geocentric altitude");
         std::array<double, 3> acceleration;
         if (options_.gravity_degree == 0) {
-            acceleration = egm96_acceleration(r, 0, 0);
+            acceleration = environment_.gravity->acceleration(r, 0, 0);
         } else {
             const auto epoch = epoch_at(t);
             const auto rotation =
                 environment_.frames->gcrf_to_itrf(epoch, environment_.eop->at(epoch).sample);
-            acceleration = rotation.inverse_position(egm96_acceleration(
+            acceleration = rotation.inverse_position(environment_.gravity->acceleration(
                 rotation.apply_position(r), options_.gravity_degree, options_.gravity_order));
         }
         return {s[3], s[4], s[5], acceleration[0], acceleration[1], acceleration[2]};
@@ -156,6 +157,14 @@ class Hpop final : public IStateProvider {
     Hpop(CartesianState initial, HpopOptions options, HpopEnvironment environment)
         : initial_(initial), options_(options), environment_(std::move(environment)) {
         validate_hpop_options(options_);
+        if (options_.gravity_model.empty())
+            environment_.gravity = builtin_egm96();
+        if (!environment_.gravity)
+            throw std::invalid_argument(
+                "Selected gravity model is missing; download or import it in Data Center");
+        if (environment_.gravity->info().mu != options_.gravity_mu)
+            throw std::invalid_argument(
+                "HPOP gravity GM differs from the selected file; update model settings");
         if (initial.origin != OriginId::earth || initial.frame != FrameId::gcrf)
             throw std::invalid_argument("HPOP requires an Earth-centered GCRF initial state");
         if (options.gravity_degree > 0 && (!environment_.eop || !environment_.frames))
@@ -212,10 +221,17 @@ class Hpop final : public IStateProvider {
 };
 } // namespace
 void validate_hpop_options(const HpopOptions &o) {
-    if (o.gravity_degree < 0 || o.gravity_degree == 1 || o.gravity_degree > egm96_max_degree ||
+    if (o.gravity_model.size() > 64 ||
+        !std::all_of(o.gravity_model.begin(), o.gravity_model.end(), [](char ch) {
+            return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-';
+        }))
+        throw std::invalid_argument("Invalid gravity model selection");
+    positive(o.gravity_mu, "Gravity GM must be finite and positive");
+    const int limit = o.gravity_model.empty() ? egm96_max_degree : gravity_max_degree;
+    if (o.gravity_degree < 0 || o.gravity_degree == 1 || o.gravity_degree > limit ||
         o.gravity_order < 0 || o.gravity_order > o.gravity_degree)
         throw std::invalid_argument(
-            "HPOP gravity degree must be 0 or 2..20; order must be 0..degree");
+            "HPOP gravity degree must be 0 or 2..model limit; order must be 0..degree");
     if (o.integrator != HpopIntegrator::rkf78 && o.integrator != HpopIntegrator::rk4)
         throw std::invalid_argument("Unsupported HPOP integrator");
     positive(o.position_tolerance_m, "HPOP position tolerance must be finite and positive");

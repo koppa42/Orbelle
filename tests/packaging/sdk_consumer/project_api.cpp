@@ -1,3 +1,4 @@
+#include <fstream>
 #include <orbitforge/orbitforge.hpp>
 
 namespace of = orbitforge;
@@ -69,4 +70,27 @@ int main(int argc, char **argv) {
     if (of::Project::open(path).to_data().satellites.back().orbit.mission != mission.mission)
         return 8;
     std::filesystem::remove(path);
+    const auto gravity_file = path.parent_path() / "sdk-gravity.grv";
+    {
+        std::ofstream file(gravity_file);
+        file << "stk.v.6.0\nModel SDK\nDegree 2\nOrder 2\nGm 3.986004415e14\n"
+                "RefDistance 6378136.3\nNormalized Yes\nIncludesPermTide No\n"
+                "BEGIN Coefficients\n2 0 -4.84165371736e-4 0\nEND Coefficients\n";
+    }
+    const auto resource = of::runtime::load_gravity(gravity_file);
+    if (resource->info().degree != 2 || resource->info().sha256.size() != 64)
+        return 9;
+    numerical.hpop.gravity_model = "custom";
+    auto gravity_edit = reopened.edit();
+    gravity_edit.objects().update(satellite, of::objects::SatelliteUpdate{.orbit = numerical});
+    gravity_edit.commit();
+    const auto data = of::DataSnapshot::from_providers({}).with_gravity("custom", resource);
+    const auto file_analysis = reopened.prepare(data);
+    reopened.save(path, file_analysis, true);
+    const auto file_project = of::Project::open(path, data);
+    if (file_project.to_data().force_data.size() != 1 ||
+        file_analysis.states(satellite, 30s, of::FrameId::gcrf).states().size() != 5)
+        return 10;
+    std::filesystem::remove(path);
+    std::filesystem::remove(gravity_file);
 }

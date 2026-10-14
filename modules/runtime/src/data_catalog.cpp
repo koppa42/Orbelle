@@ -1,5 +1,6 @@
 #include <charconv>
 #include <orbitforge/runtime/data_catalog.hpp>
+#include <orbitforge/runtime/gravity.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <stdexcept>
 #include <string_view>
@@ -280,7 +281,7 @@ bool data_catalog_available() noexcept { return true; }
 DataCatalog::DataCatalog(std::filesystem::path root) : impl_(std::make_unique<Impl>()) {
     std::filesystem::create_directories(root);
     impl_->root = std::filesystem::canonical(root);
-    for (const auto &part : {"snapshots", "blobs/sha256", "staging", "time"})
+    for (const auto &part : {"snapshots", "blobs/sha256", "staging", "time", "gravity"})
         std::filesystem::create_directories(impl_->root / part);
     check(sqlite3_open_v2(utf8(impl_->root / "catalog.sqlite").c_str(), &impl_->db,
                           SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
@@ -322,6 +323,107 @@ DataCatalog::DataCatalog(std::filesystem::path root) : impl_(std::make_unique<Im
 }
 DataCatalog::~DataCatalog() = default;
 const std::filesystem::path &DataCatalog::root() const noexcept { return impl_->root; }
+CatalogGravity DataCatalog::install_gravity(const std::filesystem::path &source,
+                                            const std::string &selection, const std::string &url,
+                                            DataAcquisition acquisition,
+                                            const std::function<void()> &checkpoint) {
+    check(!selection.empty() && selection.size() <= 64 &&
+              std::all_of(selection.begin(), selection.end(),
+                          [](char c) {
+                              return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-';
+                          }),
+          "Invalid gravity selection ID");
+    Stage stage(impl_->root / "staging");
+    const auto pending = stage.path / "gravity.dat";
+    // Own a stable copy before validation; never parse a file that can be replaced by import.
+    std::ifstream input(source, std::ios::binary);
+    check(input.is_open(), "Cannot open gravity source");
+    std::ofstream output(pending, std::ios::binary);
+    std::array<char, 65536> buffer{};
+    std::size_t total = 0;
+    while (input) {
+        if (checkpoint)
+            checkpoint();
+        input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        total += static_cast<std::size_t>(input.gcount());
+        check(total <= 512U * 1024 * 1024, "Gravity file exceeds 512 MiB");
+        output.write(buffer.data(), input.gcount());
+        check(static_cast<bool>(output), "Cannot stage gravity file");
+    }
+    check(input.eof() && !input.bad(), "Cannot read gravity source");
+    output.close();
+    check(static_cast<bool>(output), "Cannot close staged gravity file");
+    const auto model = runtime::load_gravity(pending, url, checkpoint);
+    const auto &info = model->info();
+    if (selection == "egm96" || selection == "egm2008") {
+        check(info.model == (selection == "egm96" ? "EGM96" : "EGM2008"),
+              "Gravity model does not match the selected product");
+        // Official static products are pinned to their full original bytes. Local/custom
+        // variants belong under a separate ID, not under the official product's identity.
+        check(info.sha256 ==
+                  (selection == "egm96"
+                       ? "5247a9e9c316dd2c8f8fd491d53be0e163cb5cb3676b021754240cc9e44cb43b"
+                       : "ab5b524da073e63b5bdceb7ca47a0de07a26dd44a1c5798f39fc98dc80af70fd"),
+              "Official gravity file checksum mismatch; import modified models as custom data");
+    }
+    const auto target = impl_->root / "gravity" / (info.sha256 + ".dat");
+    const auto acquired = std::chrono::duration_cast<std::chrono::seconds>(
+                              std::chrono::system_clock::now().time_since_epoch())
+                              .count();
+    const Json record{{"schema", 1},
+                      {"model", info.model},
+                      {"sha256", info.sha256},
+                      {"source_url", url},
+                      {"tide_system", info.tide_system},
+                      {"mu", info.mu},
+                      {"radius_m", info.radius_m},
+                      {"degree", info.degree},
+                      {"order", info.order},
+                      {"acquisition", static_cast<int>(acquisition)},
+                      {"acquired_at", acquired}};
+    std::lock_guard guard(impl_->mutex);
+    Transaction transaction(impl_->db);
+    if (checkpoint)
+        checkpoint();
+    if (std::filesystem::exists(target))
+        check(runtime::load_gravity(target, url, checkpoint)->info().sha256 == info.sha256,
+              "Existing gravity resource is damaged");
+    else
+        publish(pending, target);
+    set_setting("gravity/" + selection, record.dump());
+    transaction.commit();
+    return {selection, info, target, acquisition, acquired};
+}
+std::vector<CatalogGravity> DataCatalog::gravity_models() const {
+    std::lock_guard guard(impl_->mutex);
+    Statement rows(impl_->db,
+                   "SELECT key,value FROM settings WHERE key LIKE 'gravity/%' ORDER BY key");
+    std::vector<CatalogGravity> result;
+    while (rows.next()) {
+        const auto key = reinterpret_cast<const char *>(sqlite3_column_text(rows.value, 0));
+        const auto r =
+            Json::parse(reinterpret_cast<const char *>(sqlite3_column_text(rows.value, 1)));
+        check(r.at("schema") == 1 && hash_valid(r.at("sha256")), "Invalid gravity receipt");
+        core::GravityInfo info{r.at("model"),       r.at("sha256"), r.at("source_url"),
+                               r.at("tide_system"), r.at("mu"),     r.at("radius_m"),
+                               r.at("degree"),      r.at("order")};
+        result.push_back(
+            {std::string(key).substr(8), info, impl_->root / "gravity" / (info.sha256 + ".dat"),
+             static_cast<DataAcquisition>(r.at("acquisition").get<int>()), r.at("acquired_at")});
+    }
+    return result;
+}
+std::shared_ptr<const core::GravityModel>
+DataCatalog::load_gravity(const std::string &selection) const {
+    const auto models = gravity_models();
+    const auto it = std::find_if(models.begin(), models.end(),
+                                 [&](const auto &v) { return v.selection == selection; });
+    check(it != models.end(),
+          "Gravity model is not installed; download or import it in Data Center");
+    const auto model = runtime::load_gravity(it->file, it->info.source_url);
+    check(model->info().sha256 == it->info.sha256, "Gravity content SHA256 mismatch");
+    return model;
+}
 void DataCatalog::activate_eop(const std::string &key) {
     std::lock_guard guard(impl_->mutex);
     Transaction transaction(impl_->db);
@@ -736,6 +838,15 @@ namespace {
 [[noreturn]] void unavailable() { throw std::runtime_error("Data catalog support is not enabled"); }
 } // namespace
 bool data_catalog_available() noexcept { return false; }
+CatalogGravity DataCatalog::install_gravity(const std::filesystem::path &, const std::string &,
+                                            const std::string &, DataAcquisition,
+                                            const std::function<void()> &) {
+    unavailable();
+}
+std::vector<CatalogGravity> DataCatalog::gravity_models() const { unavailable(); }
+std::shared_ptr<const core::GravityModel> DataCatalog::load_gravity(const std::string &) const {
+    unavailable();
+}
 DataCatalog::DataCatalog(std::filesystem::path) { unavailable(); }
 DataCatalog::~DataCatalog() = default;
 DataSnapshot DataCatalog::snapshot(core::Epoch, core::Epoch, bool) const { unavailable(); }

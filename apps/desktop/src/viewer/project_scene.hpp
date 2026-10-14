@@ -11,6 +11,7 @@ struct PreparedProject {
     std::vector<std::shared_ptr<const OrbitScene>> orbits;
     std::vector<vsg::ref_ptr<vsg::MatrixTransform>> models;
     GroundMap::PreparedTracks ground_tracks;
+    std::map<std::string, std::shared_ptr<const core::GravityModel>> gravity{};
 };
 // Preparation selects current data covering the interval; saved hashes are provenance.
 // Inputs and providers are captured for the whole calculation, leaving the live workbench intact.
@@ -21,5 +22,6 @@ struct PreparedProject {
     const std::atomic_bool &cancelled,
     std::optional<application::Scenario> retained_sessions = std::nullopt,
     const std::optional<std::string> &edited_object = std::nullopt,
-    const core::ITimeProvider *time = nullptr);
+    const core::ITimeProvider *time = nullptr,
+    const std::map<std::string, std::shared_ptr<const core::GravityModel>> &gravity = {});
 } // namespace orbitforge::desktop

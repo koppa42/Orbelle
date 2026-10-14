@@ -4,6 +4,7 @@
 #include <map>
 #include <orbitforge/runtime/analysis.hpp>
 #include <orbitforge/runtime/data_catalog.hpp>
+#include <orbitforge/runtime/gravity.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/report.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
@@ -85,6 +86,37 @@ DataSnapshot::DataSnapshot(std::shared_ptr<const core::ITimeProvider> time,
     }
 }
 DataSnapshot DataSnapshot::builtin_time() { return DataSnapshot{make_builtin_time_provider()}; }
+DataSnapshot DataSnapshot::with_gravity(const std::string &selection,
+                                        std::shared_ptr<const core::GravityModel> model) const {
+    if (!model || selection.empty())
+        throw std::invalid_argument("Gravity requires a selection ID and a model");
+    auto result = *this;
+    const auto ref = gravity_reference(selection, model->info());
+    std::vector<DataReference> refs;
+    for (const auto &existing : lock_.references())
+        if (existing.role != ref.role)
+            refs.push_back(existing);
+    refs.push_back(ref);
+    result.lock_ = DataLock{std::move(refs)};
+    result.gravity_[selection] = std::move(model);
+    return result;
+}
+DataSnapshot DataSnapshot::with_gravity_file(const std::string &selection,
+                                             const std::filesystem::path &file) const {
+    return with_gravity(selection, load_gravity(file));
+}
+core::HpopEnvironment DataSnapshot::force_environment(const OrbitInput &input) const {
+    std::shared_ptr<const core::GravityModel> model;
+    if (input.uses_hpop() && !input.hpop.gravity_model.empty()) {
+        const auto it = gravity_.find(input.hpop.gravity_model);
+        if (it == gravity_.end())
+            throw AnalysisCapabilityError(
+                "Missing gravity model '" + input.hpop.gravity_model +
+                "'; download/import it in Data Center or supply it in DataSnapshot");
+        model = it->second;
+    }
+    return {frames_, eop_, std::move(model)};
+}
 DataSnapshot
 DataSnapshot::from_providers(std::shared_ptr<const core::ITimeProvider> time,
                              std::shared_ptr<const core::IFrameProvider> frames,
@@ -151,11 +183,12 @@ struct Analysis::Impl {
                 numerical.satellites.back().orbit.tle = {}; // Inactive TLE draft is not an input.
             entries.emplace(input.object_id,
                             Entry{make_orbit_session(input, snapshot.revision, data.time().get(),
-                                                     {data.frames(), data.eop()}),
+                                                     data.force_environment(input)),
                                   input.propagator == OrbitPropagator::sgp4 ? core::FrameId::teme
                                                                             : core::FrameId::gcrf,
                                   satellite.name(), report_input_sha256(numerical),
-                                  input.uses_eop_force()});
+                                  input.uses_eop_force() ||
+                                      (input.uses_hpop() && !input.hpop.gravity_model.empty())});
         }
         for (const auto &station : p.ground_stations) {
             Project numerical{"analysis-state-input-v1", p.first, p.last};
@@ -341,7 +374,8 @@ ReportResult Analysis::report(const ReportDefinition &definition,
     // A callback may edit a caller-owned definition; capture it before the first callback.
     const auto captured = definition;
     check_cancelled(cancelled);
-    ReportContext context{*snapshot().project, data().time(), data().frames(), data().eop()};
+    ReportContext context{*snapshot().project, data().time(), data().frames(), data().eop(),
+                          data().gravity_models()};
     record_data(context.project, data());
     if (!data().time() && report_uses_utc(captured.format, captured.query.kind))
         throw AnalysisCapabilityError("Prepare with UTC data for a UTC report, or select TAI/TT");
@@ -374,7 +408,15 @@ AnalysisPlan::AnalysisPlan(const ProjectDocument &project, const DataCatalog &ca
     : AnalysisPlan(project, [&] {
           const auto captured = project.snapshot();
           const auto [first, last] = calculation_data_interval(*captured.project);
-          return Analysis{captured, catalog.snapshot(first, last)};
+          auto data = catalog.snapshot(first, last);
+          for (const auto &satellite : captured.project->satellites) {
+              const auto &input = satellite.orbit;
+              if (input.uses_hpop() && !input.hpop.gravity_model.empty() &&
+                  !data.gravity_models().contains(input.hpop.gravity_model))
+                  data = data.with_gravity(input.hpop.gravity_model,
+                                           catalog.load_gravity(input.hpop.gravity_model));
+          }
+          return Analysis{captured, std::move(data)};
       }()) {}
 AnalysisPlan::AnalysisPlan(const ProjectDocument &project, Analysis analysis)
     : owner_(project), analysis_(std::move(analysis)) {
@@ -405,6 +447,10 @@ void record_data(Project &project, const DataSnapshot &data) {
     project.earth_orientation = data.eop() ? std::optional{data.eop()->data_info()} : std::nullopt;
     project.time_data =
         !data.eop() && data.time() ? std::optional{data.time()->data_info()} : std::nullopt;
+    project.force_data.clear();
+    for (const auto &ref : data.data_lock().references())
+        if (ref.role.starts_with("gravity/"))
+            project.force_data.push_back(ref);
 }
 } // namespace
 void save_project(const ProjectDocument &project, const std::filesystem::path &path,
@@ -445,8 +491,8 @@ ProjectDocument ProjectOpenPlan::open(bool accept) const {
         auto selected = *snapshot().project;
         record_data(selected, data());
         auto edit = result.edit();
-        edit.analysis_data(selected.earth_orientation, selected.time_data,
-                           selected.analysis_record);
+        edit.analysis_data(selected.earth_orientation, selected.time_data, selected.analysis_record,
+                           selected.force_data);
         edit.commit();
     }
     return result;

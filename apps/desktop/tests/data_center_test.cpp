@@ -306,7 +306,7 @@ TEST_F(DataCenterTest, ConditionalUpdatesSkipUnchangedBytesAndPreserveOldVersion
 TEST_F(DataCenterTest, InventorySeparatesInstallationCoverageAndUpdateCapabilities) {
     EopCatalog empty(root() / "empty", {}, {}, false);
     const auto missing = empty.inventory();
-    ASSERT_EQ(missing.size(), 3);
+    ASSERT_EQ(missing.size(), all_data_products.size());
     EXPECT_EQ(missing[0].installation, DataInstallation::missing);
     EXPECT_FALSE(missing[0].last.isValid());
     EXPECT_TRUE(missing[0].online_updates);
@@ -707,6 +707,64 @@ TEST_F(DataCenterTest, ExtrapolationNeverExtendsLeapSecondValidity) {
     const auto expiry = core::Epoch{source->info.last_epoch.tai_nanoseconds() + 86'400'000'000'000};
     EXPECT_NO_THROW((void)extended->at(core::Epoch{expiry.tai_nanoseconds() - 1}));
     EXPECT_THROW((void)extended->at(expiry), core::TimeDataRangeError);
+}
+TEST_F(DataCenterTest, GravityImportRunsInBackgroundAndRejectsInvalidReplacement) {
+    EopCatalog catalog(root() / "data", {}, {}, false);
+    EXPECT_FALSE(catalog.automatic_updates(DataProduct::egm2008));
+    EXPECT_FALSE(catalog.automatic_updates(DataProduct::egm96));
+    const auto file = root() / "custom.grv";
+    QFile source(QString::fromStdWString(file.wstring()));
+    ASSERT_TRUE(source.open(QIODevice::WriteOnly));
+    source.write("stk.v.6.0\nModel Local\nDegree 21\nOrder 21\nGm 3.986004415e14\nRefDistance "
+                 "6378136.3\nNormalized Yes\nIncludesPermTide No\nBEGIN Coefficients\n2 0 "
+                 "-0.000484 0\nEND Coefficients\n");
+    source.close();
+    catalog.import_raw(file, DataProduct::custom_gravity);
+    ASSERT_TRUE(catalog.downloading());
+    complete(catalog);
+    const auto item = catalog.inventory().at(static_cast<std::size_t>(DataProduct::custom_gravity));
+    ASSERT_TRUE(item.gravity);
+    EXPECT_EQ(item.gravity->degree, 21);
+    EXPECT_FALSE(item.first.isValid());
+    EXPECT_FALSE(item.last.isValid());
+    ASSERT_TRUE(source.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    source.write("bad gravity data\n");
+    source.close();
+    catalog.import_raw(file, DataProduct::custom_gravity);
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(DataProduct::custom_gravity).state, DataUpdateState::failed);
+    EXPECT_EQ(catalog.inventory().at(static_cast<std::size_t>(DataProduct::custom_gravity)).sha256,
+              item.sha256);
+    Server server("not an official EGM2008 field");
+    catalog.start_download(server.url(), DataProduct::egm2008);
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(DataProduct::egm2008).state, DataUpdateState::failed);
+    EXPECT_FALSE(catalog.has_full_download(DataProduct::egm2008));
+}
+TEST_F(DataCenterTest, LiveOfficialGravityDownload) {
+    if (qEnvironmentVariableIsEmpty("ORBITFORGE_LIVE_GRAVITY"))
+        GTEST_SKIP();
+    EopCatalog catalog(root() / "data", {}, {}, false);
+    const auto product = qEnvironmentVariable("ORBITFORGE_LIVE_GRAVITY") == "egm2008"
+                             ? DataProduct::egm2008
+                             : DataProduct::egm96;
+    catalog.start_download({}, product);
+    QElapsedTimer timer;
+    timer.start();
+    while (catalog.downloading() && timer.elapsed() < 600000)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    ASSERT_FALSE(catalog.downloading());
+    ASSERT_EQ(catalog.update_status(product).state, DataUpdateState::updated)
+        << catalog.status().toStdString();
+    EXPECT_TRUE(catalog.has_full_download(product));
+    const auto received = catalog.received_bytes();
+    EXPECT_GT(received, product == DataProduct::egm2008 ? 200'000'000 : 5'000'000);
+    catalog.start_download({}, product);
+    timer.restart();
+    while (catalog.downloading() && timer.elapsed() < 600000)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    ASSERT_FALSE(catalog.downloading());
+    EXPECT_EQ(catalog.update_status(product).state, DataUpdateState::unchanged);
 }
 } // namespace
 } // namespace orbitforge::desktop

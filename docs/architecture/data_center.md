@@ -1,10 +1,10 @@
 # 统一数据中心
 
-当前实现包括 [Scenario 数据锁](scenario_data_lock.md)、SQLite 统一目录、左列表、右详情的数据管理窗口及有限 EOP 外推、IERS finals2000A 全量下载和应用运行期间的自动更新。C04 和 UTC／闰秒同样支持全量下载、独立自动更新及本地原文导入；SPICE、GP/OMM/TLE 尚未接入。
+当前实现包括 [Scenario 数据锁](scenario_data_lock.md)、SQLite 统一目录、左列表、右详情的数据管理窗口及有限 EOP 外推、IERS finals2000A 全量下载和应用运行期间的自动更新。C04 和 UTC／闰秒同样支持全量下载、独立自动更新及本地原文导入；地球重力场支持 EGM2008 / EGM96 全量下载和静态外部文件导入。SPICE、GP/OMM/TLE 尚未接入。
 
 ## 管理边界
 
-应用级“数据中心”按数据类型管理当前文件、获取时间、覆盖范围和更新操作。左侧采用两级目录：“地球定向参数”为一级，finals2000A 与 C04 是它的二级来源；“UTC / 闰秒”为另一一级条目。底层 `DataInventoryItem` 仍分别表示两种 EOP 来源与 UTC，保留各自的安装状态、获取记录、覆盖范围、文件信息和操作能力；分类与来源身份独立于 Provider 下标。当前覆盖 EOP 与按实例加载的 UTC 时间数据，后续扩展 SPICE、GP/OMM/TLE。普通用户不管理历史版本或默认版本，清单由适配器生成。
+应用级“数据中心”按数据类型管理当前文件、获取时间、覆盖范围和更新操作。左侧采用两级目录：“地球定向参数”下是 finals2000A 与 C04；“UTC / 闰秒”是独立条目；“地球重力场”下是 EGM2008、EGM96 与外部重力场。底层 `DataInventoryItem` 保留各自的安装状态、获取记录、覆盖范围、文件信息和操作能力；分类与来源身份独立于 Provider 下标。普通用户不管理历史版本或默认版本，清单由适配器生成。
 
 安装状态区分未下载、内置示例、本地文件、完整包已下载、程序内置。安装、时间覆盖和联网更新结果彼此独立：内置 EOP 示例不算完整包，能覆盖今天不代表联网确认过最新版，历史 EOP 的覆盖结束也不表示文件失效。UTC 的有效截止保留明确的排他边界。
 
@@ -33,6 +33,7 @@ data/
   blobs/sha256/...      原始文件，按内容哈希寻址、去重
   snapshots/<lock>/    manifest.json、record.json 及数据文件视图
   time/<sha256>.dat    不可变 UTC 原文
+  gravity/<sha256>.dat 不可变完整重力原文
   staging/...          尚未校验发布的临时下载
 ```
 
@@ -54,17 +55,45 @@ Runtime 的 `DataCatalog` 不依赖 Qt，提供目录查询、EOP 安装、final
 
 来源详情分为“概览”“更新与计算”“文件信息”三页。概览只放获取时间、计算覆盖／有效截止、最近检查和下载／导入操作；自动检查频率与有限外推放在设置页，来源、路径、大小、哈希及清单导入放在文件页。切换来源回到概览。三种数据均可联网下载、更新及原文导入，各自保存检查状态和偏好；UTC 不提供 EOP 优先级或外推。没有历史版本列表或应用到场景按钮。
 
-自动下载与更新默认开启，也负责首次完整文件获取；已有用户关闭的偏好仍被尊重。启动后延迟 1.5 秒检查一次，此后仅在应用运行期间每分钟检查是否到期；每次调度依次考虑 UTC、finals2000A、C04，串行执行到期下载，不增加常驻服务。默认距上次尝试 24 小时，可在界面选择 6 小时、24 小时或 7 天，底层支持 1–168 小时。用户可关闭自动更新或随时手动下载。关闭窗口后下载继续，退出应用会中止；失败后的自动重试遵循相同间隔。
+EOP 与 UTC 的自动下载与更新默认开启，也负责首次完整文件获取；已有用户关闭的偏好仍被尊重。启动后延迟 1.5 秒检查一次，此后仅在应用运行期间每分钟检查是否到期；每次调度依次考虑 UTC、finals2000A、C04 及已启用自动更新的重力产品，串行执行到期下载，不增加常驻服务。默认距上次尝试 24 小时，可在界面选择 6 小时、24 小时或 7 天，底层支持 1–168 小时。用户可关闭自动更新或随时手动下载。关闭窗口后下载继续，退出应用会中止；失败后的自动重试遵循相同间隔。
 
 `DataUpdateStatus` 单独记录尚未检查、检查中、下载中、已更新、无新内容、失败、取消、中断，以及更换本地文件后待检查。`finals-update-record`、`c04-update-record`、`utc-update-record` 分别以带 schema 的结构化记录存入 SQLite settings，包含尝试时间、最后成功检查时间、被检查文件的 SHA-256 和结果。重启遇到未完成状态显示“上次下载未完成”；旧目录只有自由文本状态时不推断曾成功检查。失败、取消和 304 不改下载时间，失败/取消也不改最后成功检查时间。进度条使用服务器提供的总大小；总大小未知时显示活动进度与实际接收字节数。
 
 成功安装后保存该来源的 ETag 和 Last-Modified。再次更新使用条件请求：收到 304 时不传输文件正文、不新建快照；收到 200 时校验完整文件后发布。200 返回相同字节时记录“无新内容”和实际下载时间。条件头只用于当前文件与上次验证文件的哈希一致、来源相同的情况，不因旧缓存中存在该文件而套用到另一份导入文件。导入不同内容后显示待检查；304 返回时再次检查当前文件未变。失败或仅收到响应头时不推进验证器。来源不支持条件请求时，完整获取后按 SHA-256 去重。这里没有承诺字节级增量传输，也不把不完整的 daily 文件拼接为历史版本；网络优化不改变完整文件身份及计算来源记录。
 
-下载先进入 staging，使用 HTTPS、系统证书验证、不降级到 HTTP 的重定向、30 秒无活动超时、120 秒总时限和 16 MiB 大小上限。完成后校验传输结果、文件格式、完整逐日覆盖、数据数值及时间依赖，再发布快照。成功、失败或取消时清理本次下载临时文件；进程被强制终止时可能留下不参与加载的 staging 文件。不会把半成品标记为已安装，也不修改已有场景。Windows 便携包携带 Qt TLS 后端。
+EOP 与 UTC 下载先进入 staging，使用 HTTPS、系统证书验证、不降级到 HTTP 的重定向、30 秒无活动超时、120 秒总时限和 16 MiB 大小上限。完成后校验传输结果、文件格式、完整逐日覆盖、数据数值及时间依赖，再发布快照。成功、失败或取消时清理本次下载临时文件；进程被强制终止时可能留下不参与加载的 staging 文件。不会把半成品标记为已安装，也不修改已有场景。Windows 便携包携带 Qt TLS 后端。
 
 下载源为 [IERS finals2000A](https://datacenter.iers.org/data/9/finals2000A.all)、[C04 operational 全量文件](https://datacenter.iers.org/products/eop/long-term/c04_operational/eopc04.1962-now) 和 [IERS Leap_Second.dat](https://hpiers.obspm.fr/iers/bul/bulc/Leap_Second.dat)。C04 全文保留，当前状态插值需要实测极移变化率，因此可计算起点不早于 1984-01-01；并验证所选 0h UTC / dX,dY 格式的全部记录。导入后的 ID 由全文件内容哈希构成，重复下载同一内容不会产生重复版本。原文件中的历史记录和不完整预测尾部全部保留；可计算范围取连续完整的 x/y、UT1、dX/dY 记录与时间 Provider 有效期的交集。导入时不对缺字段尾部补零或伪造覆盖；中间缺日、重复日、错误日期、部分缺损字段和非有限数拒绝安装。Bulletin A 的历史支持从 1972 年后的有效 UTC 起，不沿用 C04 的 1984 年限制。列定义以 [USNO 说明](https://maia.usno.navy.mil/ser7/readme.finals2000A)为准。
 
 因此“完整文件已下载”与“任意未来日期可计算”是不同条件。界面显示实际可计算范围；UTC 超出本次计算所用时间表的有效期仍明确拒绝。UTC 更新读取原文到期日期，验证日期/MJD、顺序、整数偏移及单秒正负变化，不修改 ERFA 全局表，也不手工延长有效期。先校验新 UTC 并重建当前 EOP 解释，再在一个 SQLite settings 事务中切换 UTC 与两种 EOP 的当前引用；保持 EOP 原下载时间。活动计算和显示继续捕获旧 Provider，下次打开／重算按新哈希确认。日期编辑器、时间轴和当前时间显示均使用对应的时间 Provider。
+
+## 地球重力场
+
+EGM2008 / EGM96 从 [ICGEM 官方模型目录](https://icgem.gfz.de/tom_longtime)下载完整 `.gfc` 文件，分别约 240 MiB / 5.4 MiB。固定来源原文 SHA-256 随实现核验，修改过的模型须导入外部项，不能冒充官方产品。重力文件采用 512 MiB 上限和 30 分钟总时限，网络、临时写入、后台解析及校验均可取消；成功后才切换当前引用，失败保留原文件。
+
+这两个产品是静态模型，不按日失效。概览展示下载／导入时间、文件 Degree / Order、当前计算上限、GM、参考半径与潮汐系统，并标注“无固定有效期”。文件信息页展示来源、完整原文哈希、路径和大小。重力场父级介绍可用模型；HPOP 配置选择具体资源，不设置类似 EOP 的优先级。完整 EGM2008 文件仍全部保存，当前计算仅使用至多 360 阶系数，界面明确区分文件容量与计算能力。
+
+重力产品默认关闭自动下载，用户手动下载或主动开启按期检查；不会在启动时自动获取大文件。开启后复用条件请求与调度机制。桌面提供一个当前外部模型槽位 `custom`，支持静态 ICGEM `.gfc` 与 STK `.grv` 子集；Runtime 目录允许用独立 ID 管理多个自定义模型。解析器拒绝时变、潮汐及其他尚不支持的力模型块，不悄悄忽略。原文与模型 μ / 半径一同校验，不联网补数据。
+
+重力收据以 `gravity/<ID>` 存入 SQLite settings，记录获取方式与时间，完整文件保存在 `gravity/<sha256>.dat`。`DataCatalog.install_gravity()` 先复制和校验再发布；`gravity_models()` 查询收据，`load_gravity(ID)` 校验并加载不可变资源。`DataSnapshot.with_gravity_file(ID, path)` 用于显式装配。`project.prepare(catalog)` 只加载对象实际选择的重力资源，项目以 `gravity/<ID>` 记录原文哈希和解析配置；下载时间不参与计算身份。
+
+```python
+import orbitforge as of
+from orbitforge import units as u
+
+catalog = of.DataCatalog("local/data")
+entry = catalog.install_gravity("EGM2008.gfc", model="egm2008")
+data = of.DataSnapshot.load(eop_manifest="eop/manifest.json").with_gravity(
+    entry.selection, entry.file)
+project = of.Project("Gravity", of.Epoch(0), of.Epoch(600 * 10**9))
+sat = project.objects.satellite("Sat", orbit=of.orbits.Hpop(
+    initial=of.orbits.Keplerian(of.Epoch(0), u.km(7000), 0, u.deg(30)),
+    gravity_model=entry.selection, gravity_mu=entry.info.mu, gravity_degree=21))
+analysis = project.prepare(data=data)
+project.save("gravity.orbitforge", analysis=analysis)
+```
+
+此示例显式使用本地文件，EOP 必须覆盖示例时段。外部模型 GM 与轨道配置不符时需要重新选择模型、核对输入；不会仅通过接受新哈希静默改变初始根数的物理含义。系数更新沿用项目打开／重算的确认流程，运行中结果保持原资源。
 
 ## 覆盖不足与有限外推
 

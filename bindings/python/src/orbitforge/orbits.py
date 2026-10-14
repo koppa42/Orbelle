@@ -53,10 +53,13 @@ class Keplerian:
 
 @dataclass(frozen=True, slots=True)
 class HpopSettings:
-    """Static EGM96 gravity and Cowell integration; tolerances are local numerical errors.
+    """Static file or built-in gravity and Cowell integration with local error tolerances.
 
     No drag, third bodies, SRP or tides in this release. Noncentral gravity requires
     explicitly selected EOP covering the entire integration path, including initial epoch.
+    gravity_model selects a catalog/DataSnapshot ID (empty: built-in EGM96, up to 20).
+    File models support degrees through 360. gravity_mu must match the selected file's
+    GM in m^3/s^2 and is also used when converting initial Keplerian elements.
     """
     gravity_degree: int = 8
     gravity_order: int = 8
@@ -68,6 +71,8 @@ class HpopSettings:
     max_step_seconds: float = 60
     fixed_step_seconds: float = 10
     minimum_altitude_m: float = 0
+    gravity_model: str = ""
+    gravity_mu: float = 3.986004415e14
 
     def _native(self) -> n.HpopOptions:
         value = n.HpopOptions()
@@ -139,7 +144,7 @@ def Mission(*, initial: Keplerian | Cartesian | n.CartesianState,
     """
     plan = missions.Plan(tuple(segments), propagation)
     if isinstance(initial, Keplerian):
-        initial = initial._cartesian(mu=3.986004415e14 if propagation == "hpop" else None)
+        initial = initial._cartesian(mu=hpop.gravity_mu if propagation == "hpop" else None)
     elif isinstance(initial, n.CartesianState):
         initial = Cartesian._read(initial)
     orbit = Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.MISSION,
@@ -165,6 +170,7 @@ def Sgp4(*, tle: n.Tle) -> Orbit:
 
 
 def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
+         gravity_model: str = "", gravity_mu: float = 3.986004415e14,
          gravity_degree: int = 8, gravity_order: int | None = None,
          integrator: Literal["rkf78", "rk4"] = "rkf78", max_step_seconds: float = 60,
          min_step_seconds: float = 0.001, fixed_step_seconds: float = 10,
@@ -176,12 +182,13 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
     Omitted gravity_order uses gravity_degree; order=0 retains only zonal terms.
     """
     if isinstance(initial, Keplerian):
-        initial = initial._cartesian(mu=3.986004415e14)
+        initial = initial._cartesian(mu=gravity_mu)
     elif isinstance(initial, n.CartesianState):
         initial = Cartesian._read(initial)
     settings = HpopSettings(
         gravity_degree, gravity_degree if gravity_order is None else gravity_order, integrator,
         relative_tolerance, position_tolerance_m, velocity_tolerance_mps,
-        min_step_seconds, max_step_seconds, fixed_step_seconds, minimum_altitude_m)
+        min_step_seconds, max_step_seconds, fixed_step_seconds, minimum_altitude_m,
+        gravity_model.lower(), gravity_mu)
     settings._native()  # Fail at construction, before changing a project.
     return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)

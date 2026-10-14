@@ -29,6 +29,23 @@
 
 namespace orbitforge::desktop {
 namespace {
+QString product_name(DataProduct p) {
+    switch (p) {
+    case DataProduct::finals2000a:
+        return QStringLiteral("finals2000A");
+    case DataProduct::c04:
+        return QStringLiteral("C04");
+    case DataProduct::utc:
+        return QStringLiteral("UTC / 闰秒");
+    case DataProduct::egm2008:
+        return QStringLiteral("EGM2008");
+    case DataProduct::egm96:
+        return QStringLiteral("EGM96");
+    case DataProduct::custom_gravity:
+        return QStringLiteral("外部重力场");
+    }
+    return {};
+}
 QString installation_text(const DataInventoryItem &item) {
     switch (item.installation) {
     case DataInstallation::missing:
@@ -252,6 +269,13 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     auto *finals_node = add_source(DataProduct::finals2000a, eop_node);
     auto *c04_node = add_source(DataProduct::c04, eop_node);
     auto *utc_node = add_source(DataProduct::utc, nullptr);
+    auto *gravity_node =
+        new QTreeWidgetItem(list, {QStringLiteral("地球重力场\n模型文件与计算资源")});
+    gravity_node->setSizeHint(0, QSize(0, 62));
+    auto *egm2008_node = add_source(DataProduct::egm2008, gravity_node);
+    auto *egm96_node = add_source(DataProduct::egm96, gravity_node);
+    auto *custom_node = add_source(DataProduct::custom_gravity, gravity_node);
+    gravity_node->setExpanded(true);
     eop_node->setExpanded(true);
     list->setCurrentItem(eop_node);
     sidebar_layout->addWidget(list, 1);
@@ -281,6 +305,13 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     data_description->setObjectName("dataDescription");
     data_description->setWordWrap(true);
     detail_layout->addWidget(data_description);
+    auto *gravity_summary = new QLabel(QStringLiteral(
+        "EGM2008 / EGM96 "
+        "是静态重力场，无固定有效期，默认按需下载。\n\n完整文件保留全部系数；当前计算支持最高 360 "
+        "× 360。外部文件支持静态 ICGEM .gfc 和 STK .grv，不支持的时变项会明确报错。"));
+    gravity_summary->setWordWrap(true);
+    gravity_summary->setObjectName("hint");
+    detail_layout->addWidget(gravity_summary);
     auto *priority_scroll = new QScrollArea;
     priority_scroll->setWidgetResizable(true);
     priority_scroll->setFrameShape(QFrame::NoFrame);
@@ -547,7 +578,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     QString operation_error;
     bool syncing_priority = false;
     const auto selected = [&]() -> std::optional<DataProduct> {
-        return list->currentItem() == eop_node
+        return list->currentItem() == eop_node || list->currentItem() == gravity_node
                    ? std::nullopt
                    : std::optional{static_cast<DataProduct>(
                          list->currentItem()->data(0, Qt::UserRole).toInt())};
@@ -561,6 +592,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     };
     const auto update_details = [&] {
         const bool group = !selected();
+        gravity_summary->setVisible(list->currentItem() == gravity_node);
         priority_scroll->setVisible(group);
         pages->setVisible(!group);
         state->setVisible(!group);
@@ -568,6 +600,13 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
         note->setVisible(!group);
         technical->setVisible(!group);
         if (group) {
+            if (list->currentItem() == gravity_node) {
+                priority_scroll->hide();
+                title->setText(QStringLiteral("地球重力场"));
+                data_description->setText(QStringLiteral(
+                    "下载完整模型，或导入自己的重力文件。在 HPOP 设置中选择使用的模型和阶次。"));
+                return;
+            }
             title->setText(QStringLiteral("地球定向参数"));
             data_description->setText(
                 QStringLiteral("拖动数据来源调整计算顺序，排在上方的优先使用。"));
@@ -578,6 +617,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
         }
         const auto &item = selected_item();
         const bool is_time = item.product == DataProduct::utc;
+        const bool is_gravity = gravity_product(item.product);
         acquisition->show();
         policy_title->setVisible(item.extrapolation);
         extrapolation->setVisible(item.extrapolation);
@@ -606,10 +646,10 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
             days->setEnabled(limit > 0);
             limit_caption->setEnabled(limit > 0);
         }
-        title->setText(is_time                                    ? QStringLiteral("UTC / 闰秒")
-                       : item.product == DataProduct::finals2000a ? QStringLiteral("finals2000A")
-                                                                  : QStringLiteral("C04"));
-        data_description->setText(is_time ? QStringLiteral("UTC、TAI 与 TT 之间的时间转换")
+        title->setText(product_name(item.product));
+        data_description->setText(is_gravity
+                                      ? QStringLiteral("地球静态球谐重力场 · HPOP / 机动滑行共用")
+                                  : is_time ? QStringLiteral("UTC、TAI 与 TT 之间的时间转换")
                                   : item.product == DataProduct::finals2000a
                                       ? QStringLiteral("快速观测与预测 · 适用于近期和未来时段")
                                       : QStringLiteral("综合参考序列 · 历史时段的默认首选"));
@@ -626,13 +666,35 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
                           : item.installation == DataInstallation::missing
                               ? QStringLiteral("尚未下载或导入")
                               : QStringLiteral("未记录（已有本地文件）"));
-        first->setText(coverage_time(item.first));
-        until->setText(coverage_time(item.last) +
-                       (item.exclusive_end ? QStringLiteral("\n不含当日") : QString{}));
+        qobject_cast<QLabel *>(form->labelForField(first))
+            ->setText(is_gravity ? QStringLiteral("文件阶次 / 计算上限")
+                                 : QStringLiteral("覆盖起点（UTC）"));
+        first->setText(is_gravity ? (item.gravity ? QStringLiteral("%1 × %2 / 360 × 360")
+                                                        .arg(item.gravity->degree)
+                                                        .arg(item.gravity->order)
+                                                  : QStringLiteral("下载或导入后显示"))
+                                  : coverage_time(item.first));
+        until->setText(is_gravity
+                           ? QStringLiteral("无固定有效期")
+                           : coverage_time(item.last) +
+                                 (item.exclusive_end ? QStringLiteral("\n不含当日") : QString{}));
         qobject_cast<QLabel *>(form->labelForField(until))
-            ->setText(is_time ? QStringLiteral("有效截止（UTC）")
-                              : QStringLiteral("覆盖截止（UTC）"));
-        if (is_time)
+            ->setText(is_gravity ? QStringLiteral("有效期")
+                      : is_time  ? QStringLiteral("有效截止（UTC）")
+                                 : QStringLiteral("覆盖截止（UTC）"));
+        if (is_gravity)
+            note->setText(
+                item.gravity ? QStringLiteral("%1 · %2\nGM = %3 m³/s² · 参考半径 %4 "
+                                              "m\n计算开始时固定文件；更新不会改变正在运行的计算。")
+                                   .arg(QString::fromStdString(item.gravity->model),
+                                        QString::fromStdString(item.gravity->tide_system))
+                                   .arg(item.gravity->mu, 0, 'g', 15)
+                                   .arg(item.gravity->radius_m, 0, 'g', 15)
+                : item.product == DataProduct::egm2008
+                    ? QStringLiteral(
+                          "官方完整文件约 240 MiB，下载后在后台校验。静态模型默认不自动下载。")
+                    : QStringLiteral("导入或下载完整重力场后，可在 HPOP 中选择模型与阶次。"));
+        else if (is_time)
             note->setText(QDateTime::currentDateTimeUtc() >= item.last
                               ? QStringLiteral("闰秒数据已到期，请检查更新后再计算后续时段。")
                               : QStringLiteral("有效期来自 IERS 公告；到期后可在此联网更新。"));
@@ -779,25 +841,25 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
             seen_day = today;
         }
         const bool busy = catalog.downloading();
-        for (auto *node : {finals_node, c04_node, utc_node}) {
+        for (auto *node :
+             {finals_node, c04_node, utc_node, egm2008_node, egm96_node, custom_node}) {
             const auto &entry =
                 inventory_item(static_cast<DataProduct>(node->data(0, Qt::UserRole).toInt()));
-            const auto name = entry.product == DataProduct::finals2000a
-                                  ? QStringLiteral("finals2000A")
-                              : entry.product == DataProduct::c04 ? QStringLiteral("C04")
-                                                                  : QStringLiteral("UTC / 闰秒");
+            const auto name = product_name(entry.product);
             const auto update = catalog.update_status(entry.product);
             const bool failed = update.state == DataUpdateState::failed ||
                                 update.state == DataUpdateState::interrupted;
             const auto installation = (busy && catalog.active_product() == entry.product) || failed
                                           ? check_text(update.state)
                                           : installation_text(entry);
-            node->setText(0, name + "\n" + installation + "\n" +
-                                 (entry.last.isValid() ? (entry.product == DataProduct::utc
-                                                              ? QStringLiteral("有效至 ")
-                                                              : QStringLiteral("覆盖至 ")) +
-                                                             entry.last.date().toString(Qt::ISODate)
-                                                       : QStringLiteral("尚无覆盖数据")));
+            node->setText(
+                0, name + "\n" + installation + "\n" +
+                       (gravity_product(entry.product) ? QStringLiteral("静态模型 · 无固定有效期")
+                        : entry.last.isValid()
+                            ? (entry.product == DataProduct::utc ? QStringLiteral("有效至 ")
+                                                                 : QStringLiteral("覆盖至 ")) +
+                                  entry.last.date().toString(Qt::ISODate)
+                            : QStringLiteral("尚无覆盖数据")));
             node->setData(0, Qt::UserRole + 1, entry.online_updates && failed);
             node->setToolTip(0, node->text(0));
         }
@@ -860,7 +922,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
                               ? QStringLiteral("在应用运行时检查；尚未安装完整文件时会自动下载。")
                               : QStringLiteral("自动更新已关闭，可随时手动下载或检查。"));
         QString message = operation_error;
-        if (message.isEmpty() && item.online_updates) {
+        if (message.isEmpty() && (item.online_updates || gravity_product(item.product))) {
             if (downloading_this) {
                 message = update.message;
                 if (catalog.received_bytes() > 0)

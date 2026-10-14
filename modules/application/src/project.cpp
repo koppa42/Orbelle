@@ -25,7 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 14;
+constexpr std::uint32_t project_version = 15;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -43,7 +43,7 @@ struct SectionSchema {
 // One current schema, shared by the reader and writer. Null means an optional section.
 constexpr std::array section_schemas{
     SectionSchema{scene_tag, 1, "Missing scene section"},
-    SectionSchema{objects_tag, 5, "Missing satellites section"},
+    SectionSchema{objects_tag, 6, "Missing satellites section"},
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
     SectionSchema{sensors_tag, 1, "Missing sensors section"},
@@ -239,9 +239,12 @@ Project::Project(std::string project_name, core::Epoch begin, core::Epoch end)
     : name(std::move(project_name)), first(begin), last(end), current(begin) {}
 DataLock Project::data_lock() const {
     try {
-        return earth_orientation ? eop_data_lock(*earth_orientation)
-               : time_data       ? time_data_lock(*time_data)
-                                 : DataLock{};
+        const auto base = earth_orientation ? eop_data_lock(*earth_orientation)
+                          : time_data       ? time_data_lock(*time_data)
+                                            : DataLock{};
+        std::vector<DataReference> refs(base.references().begin(), base.references().end());
+        refs.insert(refs.end(), force_data.begin(), force_data.end());
+        return DataLock{std::move(refs)};
     } catch (const std::invalid_argument &error) {
         throw ProjectError(error.what());
     }
@@ -275,7 +278,9 @@ std::string analysis_input_sha256(const Project &project) {
             write_mission(out, orbit.mission, false);
         if (orbit.uses_hpop()) {
             const auto &o = orbit.hpop;
-            out.text(std::string(core::egm96_model_id()));
+            out.text(o.gravity_model.empty() ? std::string(core::egm96_model_id())
+                                             : o.gravity_model);
+            out.real(o.gravity_mu);
             out.number(static_cast<unsigned>(o.gravity_degree), 4);
             out.number(static_cast<unsigned>(o.gravity_order), 4);
             out.number(static_cast<unsigned>(o.integrator), 4);
@@ -446,10 +451,10 @@ void validate_project(const Project &project, bool relationships) {
         text_check(sensor.target_station_id);
         check(ids.insert(sensor.object_id).second, "Duplicate project object ID");
         check(!relationships || std::ranges::any_of(project.satellites,
-                                  [&](const auto &satellite) {
-                                      return satellite.orbit.object_id ==
-                                             sensor.parent_satellite_id;
-                                  }),
+                                                    [&](const auto &satellite) {
+                                                        return satellite.orbit.object_id ==
+                                                               sensor.parent_satellite_id;
+                                                    }),
               "Sensor parent satellite does not exist");
         check(std::isfinite(sensor.half_angle_rad) && sensor.half_angle_rad > 0 &&
                   sensor.half_angle_rad <= std::numbers::pi / 2,
@@ -483,6 +488,12 @@ void validate_project(const Project &project, bool relationships) {
             throw ProjectError(error.what());
         }
     }
+    for (const auto &ref : project.force_data) {
+        check(ref.role.starts_with("gravity/"), "Unsupported force-data role");
+        text_check(ref.snapshot_id, true);
+        text_check(ref.interpretation_version, true);
+    }
+    (void)project.data_lock();
     if (project.time_data) {
         const auto &data = *project.time_data;
         text_check(data.id, true);
@@ -654,6 +665,8 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
             write_mission(objects, input.mission);
         if (input.uses_hpop()) {
             const auto &o = input.hpop;
+            objects.text(o.gravity_model);
+            objects.real(o.gravity_mu);
             objects.number(static_cast<unsigned>(o.gravity_degree), 4);
             objects.number(static_cast<unsigned>(o.gravity_order), 4);
             objects.number(static_cast<unsigned>(o.integrator), 4);
@@ -823,6 +836,8 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             input.mission = read_mission(objects);
         if (input.uses_hpop()) {
             auto &o = input.hpop;
+            o.gravity_model = objects.text();
+            o.gravity_mu = objects.real();
             o.gravity_degree = static_cast<int>(objects.number(4));
             o.gravity_order = static_cast<int>(objects.number(4));
             const auto integrator = objects.number(4);
@@ -966,6 +981,9 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
                 {locked.text(), locked.text(), locked.text(), locked.text(), locked.text()});
         try {
             const DataLock lock(std::move(references));
+            for (const auto &ref : lock.references())
+                if (ref.role.starts_with("gravity/"))
+                    project.force_data.push_back(ref);
             check(lock.sha256() == locked.text(), "Scenario data lock SHA256 mismatch");
             check(lock == project.data_lock(),
                   "Scenario data references disagree with project metadata");
@@ -974,6 +992,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         }
         locked.done();
     }
+    validate_project(project);
     return project;
 }
 Project load_project(const std::filesystem::path &path) {

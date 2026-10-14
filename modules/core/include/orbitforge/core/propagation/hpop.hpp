@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <orbitforge/core/frames/frame_provider.hpp>
+#include <orbitforge/core/propagation/gravity.hpp>
 #include <orbitforge/core/propagation/state_provider.hpp>
 #include <string_view>
 
@@ -12,14 +13,19 @@ inline constexpr int egm96_max_degree = 20;
 inline constexpr double hpop_max_duration_seconds = 366.0 * 86400;
 enum class HpopIntegrator { rkf78, rk4 };
 struct HpopOptions {
-    // 0/0 selects point mass; 2..20 includes all terms through degree/order.
+    // Catalog selection, never a file path. Empty selects the built-in 20x20 EGM96.
+    std::string gravity_model{};
+    // Selected resource's GM, also used when converting initial osculating elements.
+    // Resource preparation verifies this value against the file; it cannot override it.
+    double gravity_mu = egm96_mu;
+    // 0/0 selects the chosen model's monopole. File models support up to 360x360.
     int gravity_degree = 8, gravity_order = 8;
     HpopIntegrator integrator = HpopIntegrator::rkf78;
     double relative_tolerance = 1e-12;
     double position_tolerance_m = 1e-3, velocity_tolerance_mps = 1e-6;
     double min_step_seconds = 0.001, max_step_seconds = 60;
     double fixed_step_seconds = 10; // RK4 only; no error control.
-    // Geocentric altitude above the EGM96 reference sphere, at every force evaluation.
+    // Geocentric altitude above the selected model's reference sphere, at each force evaluation.
     double minimum_altitude_m = 0;
     bool operator==(const HpopOptions &) const = default;
 };
@@ -32,6 +38,7 @@ struct HpopEnvironment {
     // Required for noncentral gravity. Shared immutable ownership, concurrent reads.
     std::shared_ptr<const IFrameProvider> frames;
     std::shared_ptr<const IEarthOrientationProvider> eop;
+    std::shared_ptr<const GravityModel> gravity{};
 };
 // Cowell equations in GCRF, TAI seconds. Initial state is osculating, not mean elements.
 // Deterministic checkpoints are independent of query order and output sampling.

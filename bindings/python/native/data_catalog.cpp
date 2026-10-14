@@ -5,6 +5,22 @@
 namespace py = pybind11;
 using namespace orbitforge;
 void bind_data_catalog(py::module_ &module) {
+    py::class_<core::GravityInfo>(module, "GravityInfo")
+        .def_readonly("model", &core::GravityInfo::model)
+        .def_readonly("sha256", &core::GravityInfo::sha256)
+        .def_readonly("source_url", &core::GravityInfo::source_url)
+        .def_readonly("tide_system", &core::GravityInfo::tide_system)
+        .def_readonly("mu", &core::GravityInfo::mu)
+        .def_readonly("radius_m", &core::GravityInfo::radius_m)
+        .def_readonly("degree", &core::GravityInfo::degree)
+        .def_readonly("order", &core::GravityInfo::order);
+    py::class_<runtime::CatalogGravity>(module, "CatalogGravity")
+        .def_readonly("selection", &runtime::CatalogGravity::selection)
+        .def_readonly("info", &runtime::CatalogGravity::info)
+        .def_readonly("file", &runtime::CatalogGravity::file)
+        .def_readonly("acquisition", &runtime::CatalogGravity::acquisition)
+        .def_readonly("acquired_at_unix_seconds",
+                      &runtime::CatalogGravity::acquired_at_unix_seconds);
     module.def("data_catalog_available", &runtime::data_catalog_available);
     py::enum_<runtime::EopProduct>(module, "EopProduct")
         .value("C04", runtime::EopProduct::c04)
@@ -27,6 +43,14 @@ void bind_data_catalog(py::module_ &module) {
     py::class_<runtime::DataCatalog>(module, "DataCatalog")
         .def(py::init<std::filesystem::path>(), py::arg("root"))
         .def_property_readonly("root", &runtime::DataCatalog::root)
+        .def_property_readonly("gravity_models", &runtime::DataCatalog::gravity_models)
+        .def(
+            "install_gravity",
+            [](runtime::DataCatalog &catalog, const std::filesystem::path &file,
+               const std::string &model,
+               const std::string &url) { return catalog.install_gravity(file, model, url); },
+            py::arg("file"), py::arg("model") = "custom", py::arg("source_url") = "",
+            py::call_guard<py::gil_scoped_release>())
         .def("snapshot", &runtime::DataCatalog::snapshot, py::arg("first"), py::arg("last"),
              py::kw_only(), py::arg("earth_orientation") = true,
              py::call_guard<py::gil_scoped_release>())

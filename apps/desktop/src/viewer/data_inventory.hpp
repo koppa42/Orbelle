@@ -6,7 +6,14 @@
 #include <orbitforge/runtime/data_catalog.hpp>
 
 namespace orbitforge::desktop {
-enum class DataProduct { finals2000a, c04, utc };
+enum class DataProduct { finals2000a, c04, utc, egm2008, egm96, custom_gravity };
+inline constexpr std::array all_data_products{
+    DataProduct::finals2000a, DataProduct::c04,   DataProduct::utc,
+    DataProduct::egm2008,     DataProduct::egm96, DataProduct::custom_gravity};
+inline bool gravity_product(DataProduct p) { return p >= DataProduct::egm2008; }
+inline std::string gravity_selection(DataProduct p) {
+    return p == DataProduct::egm2008 ? "egm2008" : p == DataProduct::egm96 ? "egm96" : "custom";
+}
 enum class DataInstallation { missing, bundled_sample, local_file, downloaded, builtin };
 // Values are persisted by finals-update-record schema 1; append new states.
 enum class DataUpdateState {
@@ -43,5 +50,6 @@ struct DataInventoryItem {
     QString source_url, sha256, identity_sha256;
     std::filesystem::path file;
     std::optional<std::uintmax_t> file_size;
+    std::optional<core::GravityInfo> gravity;
 };
 } // namespace orbitforge::desktop

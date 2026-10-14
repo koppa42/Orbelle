@@ -52,7 +52,7 @@ struct OrbitInput {
     [[nodiscard]] bool uses_eop_force() const { return uses_hpop() && hpop.gravity_degree > 0; }
     [[nodiscard]] double mu() const {
         if (uses_hpop())
-            return core::egm96_mu;
+            return hpop.gravity_mu;
         if (propagator == OrbitPropagator::j4_secular)
             return core::j4_earth().mu.metres_cubed_per_second_squared;
         if (propagator == OrbitPropagator::sgp4)
@@ -128,6 +128,7 @@ struct Project {
     std::optional<core::EopDataInfo> earth_orientation;
     // Standalone UTC provenance when EOP is absent. EOP carries its own UTC identity.
     std::optional<core::TimeDataInfo> time_data;
+    std::vector<DataReference> force_data;
     std::optional<AnalysisRecord> analysis_record;
     [[nodiscard]] std::optional<core::TimeDataInfo> time_data_info() const;
     [[nodiscard]] AnalysisStatus analysis_status() const;

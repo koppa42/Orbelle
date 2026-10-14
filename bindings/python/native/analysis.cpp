@@ -48,6 +48,8 @@ void bind_analysis(py::module_ &module) {
     py::class_<runtime::DataSnapshot>(module, "DataSnapshot")
         .def(py::init<>())
         .def_property_readonly("selection_notes", &runtime::DataSnapshot::selection_notes)
+        .def("with_gravity", &runtime::DataSnapshot::with_gravity_file, py::arg("model"),
+             py::arg("file"), py::call_guard<py::gil_scoped_release>())
         .def_static("builtin_time", &runtime::DataSnapshot::builtin_time,
                     py::call_guard<py::gil_scoped_release>())
         .def_static("load", &runtime::DataSnapshot::load, py::kw_only(),
