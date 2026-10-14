@@ -1,15 +1,44 @@
 #pragma once
 #include <array>
+#include <optional>
 #include <orbitforge/core/time/epoch.hpp>
+#include <span>
 #include <string>
+#include <string_view>
 
 namespace orbitforge::core {
-enum class ThirdBody { sun, moon };
+// Ordered like the Earth HPOP table. Mars and outer planets use system barycentres.
+enum class ThirdBody { sun, moon, jupiter, venus, saturn, mars, mercury, uranus, neptune, pluto };
+inline constexpr std::size_t third_body_count = 10;
+inline constexpr std::array third_body_list{
+    ThirdBody::sun,  ThirdBody::moon,    ThirdBody::jupiter, ThirdBody::venus,   ThirdBody::saturn,
+    ThirdBody::mars, ThirdBody::mercury, ThirdBody::uranus,  ThirdBody::neptune, ThirdBody::pluto};
+[[nodiscard]] std::string_view third_body_name(ThirdBody body);
+[[nodiscard]] std::int32_t third_body_naif_id(ThirdBody body);
+enum class ThirdBodyGravitySource { cb_file, jpl_de, user_specified };
+// Captured constants, not a live path. GM in SI; raw file SHA-256 records provenance.
+struct CbGravity {
+    double mu = 0;
+    std::string name, content_sha256;
+    ThirdBody body = ThirdBody::sun;
+    bool operator==(const CbGravity &) const = default;
+};
+struct ThirdBodyGravity {
+    bool enabled = false;
+    ThirdBodyGravitySource source = ThirdBodyGravitySource::jpl_de;
+    std::optional<double> user_mu{}; // SI; retained when another source is selected.
+    std::optional<CbGravity> cb{};
+    bool operator==(const ThirdBodyGravity &) const = default;
+};
 struct ThirdBodyDataInfo {
     std::string model, content_sha256, interpretation_version;
     Epoch first{0}, last{0};        // Inclusive TAI interval; no extrapolation.
     double sun_mu = 0, moon_mu = 0; // m^3/s^2, matching the ephemeris solution.
+    std::array<double, third_body_count - 2> planet_mu{}; // Same order as third_body_list[2:].
+    [[nodiscard]] double mu(ThirdBody body) const;
 };
+[[nodiscard]] double third_body_mu(const ThirdBodyGravity &settings, ThirdBody body,
+                                   const ThirdBodyDataInfo &data);
 // Geometric Earth-relative positions in ICRF-aligned axes for Newtonian forces.
 // This is not a full relativistic BCRS -> GCRS state conversion; no aberration,
 // light time or velocity re-labelling. Implementations own immutable resources.
@@ -17,7 +46,17 @@ class IThirdBodyEphemeris {
   public:
     virtual ~IThirdBodyEphemeris() = default;
     [[nodiscard]] virtual std::array<double, 3> position(ThirdBody body, Epoch epoch) const = 0;
-    virtual void validate_interval(Epoch first, Epoch last, bool sun, bool moon) const = 0;
+    virtual void validate_interval(Epoch first, Epoch last,
+                                   std::span<const ThirdBody> bodies) const = 0;
+    void validate_interval(Epoch first, Epoch last, bool sun, bool moon) const {
+        std::array<ThirdBody, 2> bodies{};
+        std::size_t count = 0;
+        if (sun)
+            bodies[count++] = ThirdBody::sun;
+        if (moon)
+            bodies[count++] = ThirdBody::moon;
+        validate_interval(first, last, std::span{bodies}.first(count));
+    }
     [[nodiscard]] virtual const ThirdBodyDataInfo &data_info() const noexcept = 0;
 };
 // Differential gravity: includes the acceleration of the geocentric origin.

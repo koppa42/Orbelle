@@ -168,10 +168,18 @@ std::string report_input_sha256(const application::Project &project) {
         if (s.orbit.uses_hpop()) {
             // Persist both integrators' drafts, but identify only the active calculation.
             auto &options = s.orbit.hpop;
-            if (!options.sun_gravity)
-                options.sun_mu.reset();
-            if (!options.moon_gravity)
-                options.moon_mu.reset();
+            for (auto &body : options.third_bodies) {
+                if (!body.enabled)
+                    body = {};
+                else {
+                    if (body.source != core::ThirdBodyGravitySource::user_specified)
+                        body.user_mu.reset();
+                    if (body.source != core::ThirdBodyGravitySource::cb_file)
+                        body.cb.reset();
+                    else if (body.cb)
+                        body.cb->name = "Cb file"; // Display name is not a calculation input.
+                }
+            }
             if (!options.uses_third_bodies())
                 options.ephemeris_model = core::HpopOptions{}.ephemeris_model;
             if (options.integrator == core::HpopIntegrator::rk4) {

@@ -18,6 +18,7 @@ namespace orbitforge::desktop {
 class EpochEditor;
 class QuantityEditor;
 class TrackStyleEditor;
+class EopCatalog;
 class OrbitEditor final : public QWidget {
   public:
     explicit OrbitEditor(const OrbitInput &input, QWidget *parent = nullptr);
@@ -26,6 +27,7 @@ class OrbitEditor final : public QWidget {
     std::function<void()> cancel;
     std::function<std::vector<runtime::CatalogGravity>()> gravity_models;
     std::function<std::vector<runtime::CatalogEphemeris>()> ephemerides, manage_ephemerides;
+    EopCatalog *data_catalog = nullptr;
     std::function<void()> close_requested;
     std::function<void(int, QString, double)> appearance;
     std::function<void(DisplaySettings)> display;
@@ -62,6 +64,7 @@ class OrbitEditor final : public QWidget {
     core::FrameId input_frame_ = core::FrameId::gcrf;
     OrbitPropagator propagator_kind_ = OrbitPropagator::two_body;
     core::HpopOptions hpop_;
+    bool hpop_initialized_ = false;
     core::MissionPlan mission_;
     [[nodiscard]] bool uses_hpop() const {
         return propagator_kind_ == OrbitPropagator::hpop ||

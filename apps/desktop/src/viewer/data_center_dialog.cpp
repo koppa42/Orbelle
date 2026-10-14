@@ -612,8 +612,9 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
                 data_description->setText(
                     QStringLiteral("统一管理 HPOP 使用的太阳、月球位置数据。"));
                 gravity_summary->setText(QStringLiteral(
-                    "JPL DE440s\n\n完整文件约 32 MiB，安装后支持 1850—2150 年的日月引力计算。"
-                    "\n\n选择左侧 DE440s 下载或导入文件，然后在 HPOP 的第三体引力页启用相应天体。"
+                    "JPL DE440s\n\n完整文件约 32 MiB，安装后支持 1850—2150 年的日月与行星引力计算。"
+                    "\n\n选择左侧 DE440s 下载或导入文件，然后在 HPOP 的“力模型 → "
+                    "引力”页启用相应第三体。"
                     "\n\n星历覆盖不使用外推。每次计算固定数据内容，更新后重新计算需确认。"));
                 return;
             }
@@ -668,13 +669,13 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
             limit_caption->setEnabled(limit > 0);
         }
         title->setText(product_name(item.product));
-        data_description->setText(
-            is_gravity     ? QStringLiteral("地球静态球谐重力场 · HPOP / 机动滑行共用")
-            : is_ephemeris ? QStringLiteral("JPL 行星星历 · 太阳与月球第三体引力")
-            : is_time      ? QStringLiteral("UTC、TAI 与 TT 之间的时间转换")
-            : item.product == DataProduct::finals2000a
-                ? QStringLiteral("快速观测与预测 · 适用于近期和未来时段")
-                : QStringLiteral("综合参考序列 · 历史时段的默认首选"));
+        data_description->setText(is_gravity
+                                      ? QStringLiteral("地球静态球谐重力场 · HPOP / 机动滑行共用")
+                                  : is_ephemeris ? QStringLiteral("JPL 行星星历 · 太阳系第三体引力")
+                                  : is_time      ? QStringLiteral("UTC、TAI 与 TT 之间的时间转换")
+                                  : item.product == DataProduct::finals2000a
+                                      ? QStringLiteral("快速观测与预测 · 适用于近期和未来时段")
+                                      : QStringLiteral("综合参考序列 · 历史时段的默认首选"));
         state->setText(installation_text(item));
         state->setProperty("tone", item.installation == DataInstallation::bundled_sample ||
                                            item.installation == DataInstallation::missing
@@ -719,10 +720,10 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
                           "官方完整文件约 240 MiB，下载后在后台校验。静态模型默认不自动下载。")
                     : QStringLiteral("导入或下载完整重力场后，可在 HPOP 中选择模型与阶次。"));
         else if (is_ephemeris)
-            note->setText(
-                QStringLiteral("完整 DE440s 约 32 MiB · NAIF 官方文件\n"
-                               "HPOP 使用地心几何位置与 DE440 配套 GM；太阳、月球可独立启用。"
-                               "覆盖为可计算时段，静态星历不按下载日期到期，也不作外推。"));
+            note->setText(QStringLiteral(
+                "完整 DE440s 约 32 MiB · NAIF 官方文件\n"
+                "HPOP 使用地心几何位置与 DE440 配套 GM；日月、行星和冥王星可独立启用。"
+                "覆盖为可计算时段，静态星历不按下载日期到期，也不作外推。"));
         else if (is_time)
             note->setText(QDateTime::currentDateTimeUtc() >= item.last
                               ? QStringLiteral("闰秒数据已到期，请检查更新后再计算后续时段。")

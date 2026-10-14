@@ -62,11 +62,21 @@ class IEphemerisProvider {
     geometric_states(std::int32_t target, std::int32_t observer,
                      std::span<const Epoch> epochs) const = 0;
     [[nodiscard]] virtual const EphemerisDataInfo &data_info() const noexcept = 0;
-    // Validate continuous DE-style Earth/Sun/Moon segment chains, including inertial
+    // Validate continuous DE-style Earth/target segment chains, including inertial
     // axes and centres. Providers that cannot certify this must reject HPOP use.
-    virtual void validate_earth_gravity_interval(Epoch, Epoch, bool, bool) const {
+    virtual void validate_earth_gravity_interval(Epoch, Epoch,
+                                                 std::span<const std::int32_t>) const {
         throw EphemerisDataError(
             "This ephemeris cannot validate Earth third-body gravity coverage");
+    }
+    void validate_earth_gravity_interval(Epoch first, Epoch last, bool sun, bool moon) const {
+        std::array<std::int32_t, 2> ids{};
+        std::size_t count = 0;
+        if (sun)
+            ids[count++] = 10;
+        if (moon)
+            ids[count++] = 301;
+        validate_earth_gravity_interval(first, last, std::span{ids}.first(count));
     }
 };
 } // namespace orbitforge::core

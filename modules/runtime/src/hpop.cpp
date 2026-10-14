@@ -25,14 +25,16 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
     if (options.uses_third_bodies() && environment.ephemeris) {
         std::ostringstream config;
         config.imbue(std::locale::classic());
-        config << std::hexfloat << ";sun=" << options.sun_gravity
-               << ";moon=" << options.moon_gravity;
-        if (options.sun_gravity)
-            config << ";sun-mu="
-                   << options.sun_mu.value_or(environment.ephemeris->data_info().sun_mu);
-        if (options.moon_gravity)
-            config << ";moon-mu="
-                   << options.moon_mu.value_or(environment.ephemeris->data_info().moon_mu);
+        config << std::hexfloat;
+        for (auto body : options.enabled_third_bodies()) {
+            const auto &settings = options.third_body(body);
+            config << ";" << core::third_body_name(body)
+                   << "-target=" << core::third_body_naif_id(body)
+                   << ";source=" << static_cast<int>(settings.source) << ";mu="
+                   << core::third_body_mu(settings, body, environment.ephemeris->data_info());
+            if (settings.source == core::ThirdBodyGravitySource::cb_file)
+                config << ";cb=" << settings.cb->content_sha256;
+        }
         algorithm +=
             config.str() + ";ephemeris=" +
             application::DataLock(

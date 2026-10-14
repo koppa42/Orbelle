@@ -20,13 +20,12 @@ application::Session make_orbit_session(const application::OrbitInput &input,
     const auto &body = core::central_body(input.initial.origin);
     if (input.uses_hpop() && input.hpop.uses_third_bodies()) {
         if (!environment.ephemeris)
-            throw core::EphemerisDataError("Sun/Moon gravity requires an ephemeris");
+            throw core::EphemerisDataError("Third-body gravity requires an ephemeris");
         const auto first = core::Epoch{
             std::min(input.initial.epoch.tai_nanoseconds(), input.first.tai_nanoseconds())};
         const auto last = core::Epoch{
             std::max(input.initial.epoch.tai_nanoseconds(), input.last.tai_nanoseconds())};
-        environment.ephemeris->validate_interval(first, last, input.hpop.sun_gravity,
-                                                 input.hpop.moon_gravity);
+        environment.ephemeris->validate_interval(first, last, input.hpop.enabled_third_bodies());
     }
     if (input.uses_eop_force()) {
         if (!environment.eop || !environment.frames)

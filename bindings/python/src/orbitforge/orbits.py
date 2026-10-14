@@ -51,11 +51,46 @@ class Keplerian:
             elements, n.central_body().gravitational_parameter_m3_s2 if mu is None else mu))
 
 
+THIRD_BODY_NAMES = ("sun", "moon", "jupiter", "venus", "saturn", "mars", "mercury", "uranus", "neptune", "pluto")
+
+
+@dataclass(frozen=True, slots=True)
+class ThirdBodySettings:
+    """GM source and retained drafts for one body. mu is SI m^3/s^2.
+
+    cb is a captured value from load_cb_gravity(); all positions use the selected DE440s.
+    Mars and outer planets use system barycentres and require SystemGm in Cb files.
+    """
+    body: str
+    source: Literal["jpl_de", "cb_file", "user_specified"] = "jpl_de"
+    mu: float | None = None
+    cb: n.CbGravity | None = None
+
+    def _native(self) -> n.ThirdBodyGravity:
+        if self.body not in THIRD_BODY_NAMES:
+            raise ValueError("Unknown third body")
+        sources = {"jpl_de": n.ThirdBodyGravitySource.JPL_DE,
+                   "cb_file": n.ThirdBodyGravitySource.CB_FILE,
+                   "user_specified": n.ThirdBodyGravitySource.USER_SPECIFIED}
+        if self.source not in sources:
+            raise ValueError("Unknown third-body gravity source")
+        value = n.ThirdBodyGravity()
+        value.source, value.user_mu, value.cb = sources[self.source], self.mu, self.cb
+        return value
+
+
+def load_cb_gravity(path, body: str, *, mu_scale: float = 1.0) -> n.CbGravity:
+    """Capture Gm/SystemGm from body.cb. SI by default; km^3/s^2 uses mu_scale=1e9."""
+    if body not in THIRD_BODY_NAMES:
+        raise ValueError("Unknown third body")
+    return n.load_cb_gravity(path, getattr(n.ThirdBody, body.upper()), mu_scale)
+
+
 @dataclass(frozen=True, slots=True)
 class HpopSettings:
     """Static file or built-in gravity and Cowell integration with local error tolerances.
 
-    Optional Sun/Moon gravity uses an explicitly selected DE440s ephemeris. No drag,
+    Optional solar-system third-body gravity uses an explicitly selected DE440s ephemeris. No drag,
     SRP or tides in this release. Noncentral gravity requires
     explicitly selected EOP covering the entire integration path, including initial epoch.
     gravity_model selects a catalog/DataSnapshot ID (empty: built-in EGM96, up to 20).
@@ -74,26 +109,38 @@ class HpopSettings:
     minimum_altitude_m: float = 0
     gravity_model: str = ""
     gravity_mu: float = 3.986004415e14
-    third_bodies: tuple[Literal["sun", "moon"], ...] = ()
+    third_bodies: tuple[str, ...] = ()
     ephemeris: str = "de440s"
-    sun_mu: float | None = None
-    moon_mu: float | None = None
+    body_gravity: tuple[ThirdBodySettings, ...] = ()
 
     def __post_init__(self) -> None:
         bodies = tuple(self.third_bodies)
-        if any(body not in ("sun", "moon") for body in bodies) or len(set(bodies)) != len(bodies):
-            raise ValueError("third_bodies accepts 'sun' and 'moon', each at most once")
-        object.__setattr__(self, "third_bodies", tuple(b for b in ("sun", "moon") if b in bodies))
+        if any(body not in THIRD_BODY_NAMES for body in bodies) or len(set(bodies)) != len(bodies):
+            raise ValueError("third_bodies accepts solar-system body names, each at most once")
+        settings = tuple(self.body_gravity)
+        if any(not isinstance(v, ThirdBodySettings) for v in settings):
+            raise TypeError("body_gravity requires ThirdBodySettings values")
+        if len({v.body for v in settings}) != len(settings):
+            raise ValueError("Duplicate third-body gravity settings")
+        for item in settings:
+            item._native()
+        object.__setattr__(self, "third_bodies", tuple(b for b in THIRD_BODY_NAMES if b in bodies))
+        active = (v for v in settings if v.source != "jpl_de" or v.mu is not None or v.cb is not None)
+        object.__setattr__(self, "body_gravity", tuple(sorted(active, key=lambda v: THIRD_BODY_NAMES.index(v.body))))
 
     def _native(self) -> n.HpopOptions:
         value = n.HpopOptions()
         if self.integrator not in ("rkf78", "rk4"):
             raise ValueError("integrator must be 'rkf78' or 'rk4'")
         for name in self.__dataclass_fields__:
-            if name not in ("integrator", "third_bodies", "ephemeris"):
+            if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity"):
                 setattr(value, name, getattr(self, name))
-        value.sun_gravity = "sun" in self.third_bodies
-        value.moon_gravity = "moon" in self.third_bodies
+        rows = list(value.third_bodies)
+        for item in self.body_gravity:
+            rows[THIRD_BODY_NAMES.index(item.body)] = item._native()
+        for name, row in zip(THIRD_BODY_NAMES, rows):
+            row.enabled = name in self.third_bodies
+        value.third_bodies = rows
         value.ephemeris_model = self.ephemeris
         value.integrator = n.HpopIntegrator.RKF78 if self.integrator == "rkf78" else n.HpopIntegrator.RK4
         value.validate()
@@ -102,9 +149,16 @@ class HpopSettings:
     @classmethod
     def _read(cls, value: n.HpopOptions) -> "HpopSettings":
         fields = {name: getattr(value, name) for name in cls.__dataclass_fields__
-                  if name not in ("integrator", "third_bodies", "ephemeris")}
-        fields["third_bodies"] = tuple(b for b, enabled in (
-            ("sun", value.sun_gravity), ("moon", value.moon_gravity)) if enabled)
+                  if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity")}
+        rows = value.third_bodies
+        fields["third_bodies"] = tuple(b for b, row in zip(THIRD_BODY_NAMES, rows) if row.enabled)
+        sources = {n.ThirdBodyGravitySource.JPL_DE: "jpl_de",
+                   n.ThirdBodyGravitySource.CB_FILE: "cb_file",
+                   n.ThirdBodyGravitySource.USER_SPECIFIED: "user_specified"}
+        fields["body_gravity"] = tuple(ThirdBodySettings(b, sources[row.source], row.user_mu, row.cb)
+                                      for b, row in zip(THIRD_BODY_NAMES, rows)
+                                      if row.source != n.ThirdBodyGravitySource.JPL_DE or
+                                      row.user_mu is not None or row.cb is not None)
         fields["ephemeris"] = value.ephemeris_model
         return cls(**fields, integrator="rkf78" if value.integrator == n.HpopIntegrator.RKF78 else "rk4")
 
@@ -194,9 +248,10 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          min_step_seconds: float = 0.001, fixed_step_seconds: float = 10,
          relative_tolerance: float = 1e-12, position_tolerance_m: float = 1e-3,
          velocity_tolerance_mps: float = 1e-6, minimum_altitude_m: float = 0,
-         third_bodies: tuple[Literal["sun", "moon"], ...] = (), ephemeris: str = "de440s",
-         sun_mu: float | None = None, moon_mu: float | None = None) -> Orbit:
-    """Cowell orbit with static gravity, optional Sun/Moon attraction, RKF78 or RK4.
+         third_bodies: tuple[str, ...] = (), ephemeris: str = "de440s",
+         sun_mu: float | None = None, moon_mu: float | None = None,
+         body_gravity: tuple[ThirdBodySettings, ...] = ()) -> Orbit:
+    """Cowell orbit with static gravity, solar-system third bodies, RKF78 or RK4.
 
     Built-in EGM96 supports up to degree 20; installed gravity files up to 360.
     third_bodies=("sun", "moon") requires explicitly supplied DE440s ephemerides.
@@ -209,10 +264,12 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
         initial = initial._cartesian(mu=gravity_mu)
     elif isinstance(initial, n.CartesianState):
         initial = Cartesian._read(initial)
+    overrides = tuple(ThirdBodySettings(body, "user_specified", mu)
+                      for body, mu in (("sun", sun_mu), ("moon", moon_mu)) if mu is not None)
     settings = HpopSettings(
         gravity_degree, gravity_degree if gravity_order is None else gravity_order, integrator,
         relative_tolerance, position_tolerance_m, velocity_tolerance_mps,
         min_step_seconds, max_step_seconds, fixed_step_seconds, minimum_altitude_m,
-        gravity_model.lower(), gravity_mu, third_bodies, ephemeris, sun_mu, moon_mu)
+        gravity_model.lower(), gravity_mu, third_bodies, ephemeris, tuple(body_gravity) + overrides)
     settings._native()  # Fail at construction, before changing a project.
     return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)

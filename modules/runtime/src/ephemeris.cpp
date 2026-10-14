@@ -1,11 +1,78 @@
 #include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <fstream>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <picosha2.h>
+#include <sstream>
 #ifdef ORBITFORGE_HAS_SPICE
 #include <orbitforge/providers/spice/provider.hpp>
 #endif
 
 namespace orbitforge::runtime {
+core::CbGravity load_cb_gravity(const std::filesystem::path &path, core::ThirdBody body,
+                                double mu_scale) {
+    const auto lower = [](std::string value) {
+        std::ranges::transform(value, value.begin(),
+                               [](unsigned char c) { return std::tolower(c); });
+        return value;
+    };
+    if (!std::isfinite(mu_scale) || mu_scale <= 0)
+        throw std::invalid_argument("Cb file GM unit scale must be finite and positive");
+    if (lower(path.stem().string()) != lower(std::string(core::third_body_name(body))))
+        throw std::invalid_argument(
+            "Cb file name must match the selected body (for example Sun.cb)");
+    if (std::filesystem::file_size(path) > 1024 * 1024)
+        throw std::invalid_argument("Cb file exceeds the 1 MiB limit");
+    std::ifstream file(path, std::ios::binary);
+    if (!file)
+        throw std::runtime_error("Cannot read Cb file");
+    const std::string bytes{std::istreambuf_iterator<char>(file), {}};
+    if (bytes.find('\0') != std::string::npos)
+        throw std::invalid_argument("Cb file is not text");
+    std::istringstream lines(bytes);
+    std::string line;
+    std::optional<double> gm, system_gm;
+    while (std::getline(lines, line)) {
+        if (auto comment = line.find('#'); comment != std::string::npos)
+            line.resize(comment);
+        std::istringstream row(line);
+        row.imbue(std::locale::classic());
+        std::string key;
+        row >> key;
+        key = lower(key);
+        if (key != "gm" && key != "systemgm")
+            continue;
+        std::string token, extra;
+        row >> token;
+        if (token == "=")
+            row >> token;
+        if (token.empty() || row >> extra)
+            throw std::invalid_argument("Invalid Cb file GM record");
+        std::ranges::replace(token, 'D', 'e');
+        std::ranges::replace(token, 'd', 'e');
+        std::istringstream number(token);
+        number.imbue(std::locale::classic());
+        double value = 0;
+        if (!(number >> value) || number.peek() != std::char_traits<char>::eof() ||
+            !std::isfinite(value * mu_scale) || value * mu_scale <= 0)
+            throw std::invalid_argument("Cb file GM must be finite and positive");
+        auto &destination = key == "gm" ? gm : system_gm;
+        if (destination)
+            throw std::invalid_argument("Duplicate Cb file GM record");
+        destination = value * mu_scale;
+    }
+    const auto id = core::third_body_naif_id(body);
+    const bool system = id >= 4 && id <= 9;
+    if (system && !system_gm)
+        throw std::invalid_argument("SystemGm is required for a DE440 planetary system barycentre");
+    if (!system && !gm)
+        throw std::invalid_argument("Cb file requires Gm for Sun/Moon/Mercury/Venus");
+    // Earth's parent is the Sun: use its body-centred Gm. Otherwise prefer
+    // a declared system value, as in the Earth HPOP Cb-file convention.
+    const auto selected = body != core::ThirdBody::sun && system_gm ? *system_gm : *gm;
+    return {selected, path.filename().string(), picosha2::hash256_hex_string(bytes), body};
+}
 namespace {
 class ThirdBodyEphemeris final : public core::IThirdBodyEphemeris {
     std::shared_ptr<const core::IEphemerisProvider> source_;
@@ -27,34 +94,35 @@ class ThirdBodyEphemeris final : public core::IThirdBodyEphemeris {
                 "HPOP currently supports ICRF-aligned DE440s ephemerides only");
         info_ = {info.model,
                  info.manifest_sha256,
-                 "de440-newtonian-geocentric-icrf-none-gm440-v1;" + info.toolkit_version,
+                 "de440-newtonian-geocentric-icrf-none-gm440-planets-v2;" + info.toolkit_version,
                  info.first_epoch,
                  info.last_epoch,
                  de440_sun_mu,
-                 de440_moon_mu};
+                 de440_moon_mu,
+                 de440_planet_mu};
     }
     std::array<double, 3> position(core::ThirdBody body, core::Epoch at) const override {
-        if (body != core::ThirdBody::sun && body != core::ThirdBody::moon)
-            throw std::invalid_argument("Unsupported third body");
-        const auto state =
-            source_->geometric_state(body == core::ThirdBody::sun ? 10 : 301, 399, at);
+        const auto state = source_->geometric_state(core::third_body_naif_id(body), 399, at);
         if (state.frame != core::FrameId::spice_j2000)
             throw core::EphemerisDataError("DE440 force ephemeris returned unexpected axes");
         return state.position_m;
     }
-    void validate_interval(core::Epoch first, core::Epoch last, bool sun,
-                           bool moon) const override {
+    void validate_interval(core::Epoch first, core::Epoch last,
+                           std::span<const core::ThirdBody> bodies) const override {
         if (first.tai_nanoseconds() < info_.first.tai_nanoseconds() ||
             last.tai_nanoseconds() > info_.last.tai_nanoseconds())
             throw core::EphemerisCoverageError(
-                "Sun/Moon ephemeris coverage is insufficient. Required TAI ns [" +
+                "Third-body ephemeris coverage is insufficient. Required TAI ns [" +
                 std::to_string(first.tai_nanoseconds()) + ", " +
                 std::to_string(last.tai_nanoseconds()) + "]; available [" +
                 std::to_string(info_.first.tai_nanoseconds()) + ", " +
                 std::to_string(info_.last.tai_nanoseconds()) +
                 "]. Select covering ephemerides in Data Center or adjust the orbit interval; no "
                 "extrapolation.");
-        source_->validate_earth_gravity_interval(first, last, sun, moon);
+        std::vector<std::int32_t> ids;
+        for (auto body : bodies)
+            ids.push_back(core::third_body_naif_id(body));
+        source_->validate_earth_gravity_interval(first, last, ids);
     }
     const core::ThirdBodyDataInfo &data_info() const noexcept override { return info_; }
 };

@@ -1,4 +1,5 @@
 #include <orbitforge/runtime/data_catalog.hpp>
+#include <orbitforge/runtime/ephemeris.hpp>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl/filesystem.h>
@@ -12,7 +13,10 @@ void bind_data_catalog(py::module_ &module) {
         .def_readonly("first", &core::ThirdBodyDataInfo::first)
         .def_readonly("last", &core::ThirdBodyDataInfo::last)
         .def_readonly("sun_mu", &core::ThirdBodyDataInfo::sun_mu)
-        .def_readonly("moon_mu", &core::ThirdBodyDataInfo::moon_mu);
+        .def_readonly("moon_mu", &core::ThirdBodyDataInfo::moon_mu)
+        .def("mu", &core::ThirdBodyDataInfo::mu);
+    module.def("load_cb_gravity", &runtime::load_cb_gravity, py::arg("path"), py::arg("body"),
+               py::arg("mu_scale") = 1.0);
     py::class_<runtime::CatalogEphemeris>(module, "CatalogEphemeris")
         .def_readonly("selection", &runtime::CatalogEphemeris::selection)
         .def_readonly("info", &runtime::CatalogEphemeris::info)

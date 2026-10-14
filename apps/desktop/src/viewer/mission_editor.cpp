@@ -121,7 +121,8 @@ class MissionEditor final : public QDialog {
                   core::Epoch scenario_first, core::Epoch scenario_last, QWidget *parent,
                   const std::vector<runtime::CatalogGravity> &models,
                   const std::vector<runtime::CatalogEphemeris> &ephemerides,
-                  const std::function<std::vector<runtime::CatalogEphemeris>()> &manage_ephemerides)
+                  const std::function<std::vector<runtime::CatalogEphemeris>()> &manage_ephemerides,
+                  EopCatalog *catalog, bool initialize_hpop)
         : QDialog(parent), plan(std::move(draft)), hpop(options), initial_(initial),
           first_(scenario_first), last_(scenario_last) {
         setObjectName("missionEditorDialog");
@@ -151,15 +152,21 @@ class MissionEditor final : public QDialog {
         model_row->addWidget(settings);
         outer->addLayout(model_row);
         connect(settings, &QPushButton::clicked, this,
-                [this, models, ephemerides, manage_ephemerides] {
-                    edit_hpop_settings(hpop, this, models, ephemerides, manage_ephemerides);
+                [this, models, ephemerides, manage_ephemerides, catalog] {
+                    edit_hpop_settings(hpop, this, models, ephemerides, manage_ephemerides,
+                                       catalog);
                 });
-        connect(model_, &QComboBox::currentIndexChanged, this, [this, settings](int index) {
-            plan.coast_model =
-                index == 0 ? core::MissionCoastModel::two_body : core::MissionCoastModel::hpop;
-            settings->setEnabled(index == 1);
-            refresh_summary();
-        });
+        connect(model_, &QComboBox::currentIndexChanged, this,
+                [this, settings, initialize_hpop](int index) mutable {
+                    if (index == 1 && initialize_hpop) {
+                        hpop = new_hpop_options();
+                        initialize_hpop = false;
+                    }
+                    plan.coast_model = index == 0 ? core::MissionCoastModel::two_body
+                                                  : core::MissionCoastModel::hpop;
+                    settings->setEnabled(index == 1);
+                    refresh_summary();
+                });
 
         navigation_ = new QTabBar(this);
         navigation_->setObjectName("missionNavigation");
@@ -677,14 +684,14 @@ class MissionEditor final : public QDialog {
     }
 };
 } // namespace
-bool edit_mission(
-    core::MissionPlan &plan, core::HpopOptions &hpop, core::Epoch initial,
-    core::Epoch scenario_first, core::Epoch scenario_last, QWidget *parent,
-    const std::vector<runtime::CatalogGravity> &models,
-    const std::vector<runtime::CatalogEphemeris> &ephemerides,
-    const std::function<std::vector<runtime::CatalogEphemeris>()> &manage_ephemerides) {
+bool edit_mission(core::MissionPlan &plan, core::HpopOptions &hpop, core::Epoch initial,
+                  core::Epoch scenario_first, core::Epoch scenario_last, QWidget *parent,
+                  const std::vector<runtime::CatalogGravity> &models,
+                  const std::vector<runtime::CatalogEphemeris> &ephemerides,
+                  const std::function<std::vector<runtime::CatalogEphemeris>()> &manage_ephemerides,
+                  EopCatalog *catalog, bool initialize_hpop) {
     MissionEditor dialog(plan, hpop, initial, scenario_first, scenario_last, parent, models,
-                         ephemerides, manage_ephemerides);
+                         ephemerides, manage_ephemerides, catalog, initialize_hpop);
     if (dialog.exec() != QDialog::Accepted)
         return false;
     plan = std::move(dialog.plan);

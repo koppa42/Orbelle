@@ -79,10 +79,9 @@ class Hpop final : public IStateProvider {
                 for (int i = 0; i < 3; ++i)
                     acceleration[i] += force[i];
             };
-            if (options_.sun_gravity)
-                add(ThirdBody::sun, options_.sun_mu.value_or(info.sun_mu));
-            if (options_.moon_gravity)
-                add(ThirdBody::moon, options_.moon_mu.value_or(info.moon_mu));
+            for (auto body : third_body_list)
+                if (options_.third_body(body).enabled)
+                    add(body, third_body_mu(options_.third_body(body), body, info));
         }
         return {s[3], s[4], s[5], acceleration[0], acceleration[1], acceleration[2]};
     }
@@ -173,9 +172,9 @@ class Hpop final : public IStateProvider {
         validate_hpop_options(options_);
         if (options_.uses_third_bodies()) {
             if (!environment_.ephemeris)
-                throw std::invalid_argument("Sun/Moon gravity requires selected ephemeris data");
+                throw std::invalid_argument("Third-body gravity requires selected ephemeris data");
             environment_.ephemeris->validate_interval(initial.epoch, initial.epoch,
-                                                      options_.sun_gravity, options_.moon_gravity);
+                                                      options_.enabled_third_bodies());
         }
         if (options_.gravity_model.empty())
             environment_.gravity = builtin_egm96();
@@ -213,7 +212,7 @@ class Hpop final : public IStateProvider {
         if (options_.uses_third_bodies())
             environment_.ephemeris->validate_interval(t < 0 ? epoch : initial_.epoch,
                                                       t < 0 ? initial_.epoch : epoch,
-                                                      options_.sun_gravity, options_.moon_gravity);
+                                                      options_.enabled_third_bodies());
         if (options_.gravity_degree > 0 && !eop_covers(environment_.eop->data_info(), epoch))
             throw EopCoverageError(
                 "HPOP integration requires EOP covering the initial and query epochs");
@@ -256,10 +255,29 @@ void validate_hpop_options(const HpopOptions &o) {
             return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-';
         }))
         throw std::invalid_argument("Invalid ephemeris model selection");
-    if (o.sun_mu)
-        positive(*o.sun_mu, "Sun GM must be finite and positive");
-    if (o.moon_mu)
-        positive(*o.moon_mu, "Moon GM must be finite and positive");
+    for (auto id : third_body_list) {
+        const auto &body = o.third_body(id);
+        if (body.source != ThirdBodyGravitySource::cb_file &&
+            body.source != ThirdBodyGravitySource::jpl_de &&
+            body.source != ThirdBodyGravitySource::user_specified)
+            throw std::invalid_argument("Unsupported third-body gravity source");
+        if (body.user_mu)
+            positive(*body.user_mu, "Third-body GM must be finite and positive");
+        if (body.cb) {
+            positive(body.cb->mu, "Cb file GM must be finite and positive");
+            if (body.cb->name.empty() || body.cb->name.size() > 256 ||
+                body.cb->content_sha256.size() != 64 ||
+                !std::all_of(
+                    body.cb->content_sha256.begin(), body.cb->content_sha256.end(),
+                    [](char ch) { return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f'); }) ||
+                body.cb->body != id)
+                throw std::invalid_argument("Invalid Cb file provenance");
+        }
+        if (body.enabled && body.source == ThirdBodyGravitySource::cb_file && !body.cb)
+            throw std::invalid_argument("Cb file gravity requires imported constants");
+        if (body.enabled && body.source == ThirdBodyGravitySource::user_specified && !body.user_mu)
+            throw std::invalid_argument("User Specified gravity requires a GM value");
+    }
     const int limit = o.gravity_model.empty() ? egm96_max_degree : gravity_max_degree;
     if (o.gravity_degree < 0 || o.gravity_degree == 1 || o.gravity_degree > limit ||
         o.gravity_order < 0 || o.gravity_order > o.gravity_degree)

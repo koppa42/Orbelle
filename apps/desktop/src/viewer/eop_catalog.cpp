@@ -193,10 +193,17 @@ EopCatalog::EopCatalog(std::filesystem::path store, std::vector<std::filesystem:
     });
     connect(&schedule_, &QTimer::timeout, this,
             [this] { check_updates_if_due(QDateTime::currentSecsSinceEpoch()); });
-    if (automatic) {
+    set_update_schedule_enabled(automatic);
+}
+void EopCatalog::set_update_schedule_enabled(bool enabled) {
+    if (enabled) {
         schedule_.start(60000);
-        QTimer::singleShot(1500, this,
-                           [this] { check_updates_if_due(QDateTime::currentSecsSinceEpoch()); });
+        QTimer::singleShot(1500, this, [this] {
+            if (schedule_.isActive())
+                check_updates_if_due(QDateTime::currentSecsSinceEpoch());
+        });
+    } else {
+        schedule_.stop();
     }
 }
 EopCatalog::~EopCatalog() {
@@ -210,8 +217,25 @@ EopCatalog::~EopCatalog() {
     }
 }
 bool EopCatalog::has_full_download(DataProduct product) const {
-    if (force_product(product))
-        return !current_hash(product).empty();
+    const auto present = [](const std::filesystem::path &path) {
+        std::error_code error;
+        return std::filesystem::is_regular_file(path, error) &&
+               std::filesystem::file_size(path, error) > 0 && !error;
+    };
+    if (product == DataProduct::de440s) {
+        for (const auto &entry : data_.ephemerides())
+            if (entry.selection == "de440s")
+                return present(entry.manifest) &&
+                       present(entry.manifest.parent_path() / "de440s.bsp") &&
+                       present(entry.manifest.parent_path() / "uniform-time.tls");
+        return false;
+    }
+    if (gravity_product(product)) {
+        for (const auto &entry : data_.gravity_models())
+            if (entry.selection == gravity_selection(product))
+                return present(entry.file);
+        return false;
+    }
     if (product == DataProduct::utc)
         return !time_file_.empty();
     const auto index = current_index(product);

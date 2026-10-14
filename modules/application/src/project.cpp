@@ -25,7 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 16;
+constexpr std::uint32_t project_version = 17;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -43,7 +43,7 @@ struct SectionSchema {
 // One current schema, shared by the reader and writer. Null means an optional section.
 constexpr std::array section_schemas{
     SectionSchema{scene_tag, 1, "Missing scene section"},
-    SectionSchema{objects_tag, 7, "Missing satellites section"},
+    SectionSchema{objects_tag, 8, "Missing satellites section"},
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
     SectionSchema{sensors_tag, 1, "Missing sensors section"},
@@ -278,20 +278,24 @@ std::string analysis_input_sha256(const Project &project) {
             write_mission(out, orbit.mission, false);
         if (orbit.uses_hpop()) {
             const auto &o = orbit.hpop;
+            core::validate_hpop_options(o);
             out.text(o.gravity_model.empty() ? std::string(core::egm96_model_id())
                                              : o.gravity_model);
             out.real(o.gravity_mu);
-            out.number(o.sun_gravity, 1);
-            out.number(o.moon_gravity, 1);
-            if (o.uses_third_bodies()) {
-                out.text(o.ephemeris_model);
-                for (const auto mu : {o.sun_gravity ? o.sun_mu : std::nullopt,
-                                      o.moon_gravity ? o.moon_mu : std::nullopt}) {
-                    out.number(mu.has_value(), 1);
-                    if (mu)
-                        out.real(*mu);
+            for (const auto &body : o.third_bodies) {
+                out.number(body.enabled, 1);
+                if (!body.enabled)
+                    continue;
+                out.number(static_cast<unsigned>(body.source), 4);
+                if (body.source == core::ThirdBodyGravitySource::user_specified)
+                    out.real(*body.user_mu);
+                else if (body.source == core::ThirdBodyGravitySource::cb_file) {
+                    out.real(body.cb->mu);
+                    out.text(body.cb->content_sha256);
                 }
             }
+            if (o.uses_third_bodies())
+                out.text(o.ephemeris_model);
             out.number(static_cast<unsigned>(o.gravity_degree), 4);
             out.number(static_cast<unsigned>(o.gravity_order), 4);
             out.number(static_cast<unsigned>(o.integrator), 4);
@@ -679,13 +683,20 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
             const auto &o = input.hpop;
             objects.text(o.gravity_model);
             objects.real(o.gravity_mu);
-            objects.number(o.sun_gravity, 1);
-            objects.number(o.moon_gravity, 1);
             objects.text(o.ephemeris_model);
-            for (const auto mu : {o.sun_mu, o.moon_mu}) {
-                objects.number(mu.has_value(), 1);
-                if (mu)
-                    objects.real(*mu);
+            for (const auto &body : o.third_bodies) {
+                objects.number(body.enabled, 1);
+                objects.number(static_cast<unsigned>(body.source), 4);
+                objects.number(body.user_mu.has_value(), 1);
+                if (body.user_mu)
+                    objects.real(*body.user_mu);
+                objects.number(body.cb.has_value(), 1);
+                if (body.cb) {
+                    objects.real(body.cb->mu);
+                    objects.text(body.cb->name);
+                    objects.text(body.cb->content_sha256);
+                    objects.number(static_cast<unsigned>(body.cb->body), 4);
+                }
             }
             objects.number(static_cast<unsigned>(o.gravity_degree), 4);
             objects.number(static_cast<unsigned>(o.gravity_order), 4);
@@ -858,13 +869,21 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             auto &o = input.hpop;
             o.gravity_model = objects.text();
             o.gravity_mu = objects.real();
-            o.sun_gravity = objects.boolean();
-            o.moon_gravity = objects.boolean();
             o.ephemeris_model = objects.text();
-            if (objects.boolean())
-                o.sun_mu = objects.real();
-            if (objects.boolean())
-                o.moon_mu = objects.real();
+            for (auto &body : o.third_bodies) {
+                body.enabled = objects.boolean();
+                const auto source = objects.number(4);
+                check(source <= 2, "Unsupported third-body gravity source");
+                body.source = static_cast<core::ThirdBodyGravitySource>(source);
+                if (objects.boolean())
+                    body.user_mu = objects.real();
+                if (objects.boolean()) {
+                    body.cb = core::CbGravity{objects.real(), objects.text(), objects.text()};
+                    const auto cb_body = objects.number(4);
+                    check(cb_body < core::third_body_count, "Unsupported Cb file body");
+                    body.cb->body = static_cast<core::ThirdBody>(cb_body);
+                }
+            }
             o.gravity_degree = static_cast<int>(objects.number(4));
             o.gravity_order = static_cast<int>(objects.number(4));
             const auto integrator = objects.number(4);

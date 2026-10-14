@@ -6,6 +6,7 @@
 #include <orbitforge/core/propagation/state_provider.hpp>
 #include <orbitforge/core/propagation/third_body.hpp>
 #include <string_view>
+#include <vector>
 
 namespace orbitforge::core {
 // Static, tide-free EGM96, truncated to degree/order 20. No tides or secular drift.
@@ -20,11 +21,27 @@ struct HpopOptions {
     // Selected resource's GM, also used when converting initial osculating elements.
     // Resource preparation verifies this value against the file; it cannot override it.
     double gravity_mu = egm96_mu;
-    bool sun_gravity = false, moon_gravity = false;
     std::string ephemeris_model = "de440s";
-    // Empty uses the ephemeris solution's constants; overrides are SI m^3/s^2.
-    std::optional<double> sun_mu{}, moon_mu{};
-    [[nodiscard]] bool uses_third_bodies() const { return sun_gravity || moon_gravity; }
+    std::array<ThirdBodyGravity, third_body_count> third_bodies{};
+    [[nodiscard]] ThirdBodyGravity &third_body(ThirdBody body) {
+        return third_bodies.at(static_cast<std::size_t>(body));
+    }
+    [[nodiscard]] const ThirdBodyGravity &third_body(ThirdBody body) const {
+        return third_bodies.at(static_cast<std::size_t>(body));
+    }
+    [[nodiscard]] std::vector<ThirdBody> enabled_third_bodies() const {
+        std::vector<ThirdBody> result;
+        for (auto body : third_body_list)
+            if (third_body(body).enabled)
+                result.push_back(body);
+        return result;
+    }
+    [[nodiscard]] bool uses_third_bodies() const {
+        for (const auto &body : third_bodies)
+            if (body.enabled)
+                return true;
+        return false;
+    }
     // 0/0 selects the chosen model's monopole. File models support up to 360x360.
     int gravity_degree = 8, gravity_order = 8;
     HpopIntegrator integrator = HpopIntegrator::rkf78;

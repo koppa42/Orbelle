@@ -3,6 +3,50 @@
 #include <stdexcept>
 
 namespace orbitforge::core {
+std::string_view third_body_name(ThirdBody body) {
+    constexpr std::array<std::string_view, third_body_count> names{
+        "Sun",  "Moon",    "Jupiter", "Venus",   "Saturn",
+        "Mars", "Mercury", "Uranus",  "Neptune", "Pluto"};
+    return names.at(static_cast<std::size_t>(body));
+}
+std::int32_t third_body_naif_id(ThirdBody body) {
+    constexpr std::array<std::int32_t, third_body_count> ids{10, 301, 5, 299, 6, 4, 199, 7, 8, 9};
+    return ids.at(static_cast<std::size_t>(body));
+}
+double ThirdBodyDataInfo::mu(ThirdBody body) const {
+    if (body == ThirdBody::sun)
+        return sun_mu;
+    if (body == ThirdBody::moon)
+        return moon_mu;
+    return planet_mu.at(static_cast<std::size_t>(body) - 2);
+}
+double third_body_mu(const ThirdBodyGravity &settings, ThirdBody body,
+                     const ThirdBodyDataInfo &data) {
+    double value = 0;
+    switch (settings.source) {
+    case ThirdBodyGravitySource::jpl_de:
+        value = data.mu(body);
+        break;
+    case ThirdBodyGravitySource::cb_file:
+        if (!settings.cb)
+            throw std::invalid_argument("Cb file gravity requires imported constants");
+        if (settings.cb->body != body)
+            throw std::invalid_argument("Cb file belongs to another body");
+        value = settings.cb->mu;
+        break;
+    case ThirdBodyGravitySource::user_specified:
+        if (!settings.user_mu)
+            throw std::invalid_argument("User Specified gravity requires a GM value");
+        value = *settings.user_mu;
+        break;
+    default:
+        throw std::invalid_argument("Unsupported third-body gravity source");
+    }
+    if (!std::isfinite(value) || value <= 0)
+        throw std::invalid_argument(std::string(third_body_name(body)) +
+                                    " GM must be finite and positive");
+    return value;
+}
 std::array<double, 3> third_body_acceleration(const std::array<double, 3> &r,
                                               const std::array<double, 3> &rb, double mu) {
     if (!std::isfinite(mu) || mu <= 0)

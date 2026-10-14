@@ -3,6 +3,7 @@
 #include <cspice/SpiceUsr.h>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <orbitforge/providers/spice/provider.hpp>
@@ -288,8 +289,8 @@ class Snapshot final : public core::IEphemerisProvider {
         return result;
     }
     const core::EphemerisDataInfo &data_info() const noexcept override { return info_; }
-    void validate_earth_gravity_interval(core::Epoch first, core::Epoch last, bool sun,
-                                         bool moon) const override {
+    void validate_earth_gravity_interval(core::Epoch first, core::Epoch last,
+                                         std::span<const std::int32_t> targets) const override {
         check_epoch(first);
         check_epoch(last);
         if (first.tai_nanoseconds() > last.tai_nanoseconds())
@@ -298,11 +299,24 @@ class Snapshot final : public core::IEphemerisProvider {
         activate();
         const double begin = tdb_unlocked(first).seconds_past_j2000;
         const double end = tdb_unlocked(last).seconds_past_j2000;
-        // DE4xx chains: 10->0, 3->0, 399->3 and 301->3. Inspect every segment,
-        // not just endpoint queries, so internal gaps or overriding frames fail early.
-        constexpr std::array ids{3, 10, 399, 301};
-        constexpr std::array centres{0, 0, 3, 3};
-        std::array<std::vector<std::pair<double, double>>, 4> coverage;
+        // Earth -> EMB -> SSB, then each selected target's full DE chain.
+        std::map<std::int32_t, std::int32_t> chains;
+        if (!targets.empty()) {
+            chains[399] = 3;
+            chains[3] = 0;
+        }
+        for (auto target : targets) {
+            if (target == 10 || target == 301)
+                chains[target] = target == 301 ? 3 : 0;
+            else if (target == 199 || target == 299) {
+                chains[target] = target / 100;
+                chains[target / 100] = 0;
+            } else if (target >= 4 && target <= 9)
+                chains[target] = 0;
+            else
+                throw core::EphemerisDataError("Unsupported DE third-body target");
+        }
+        std::map<std::int32_t, std::vector<std::pair<double, double>>> coverage;
         for (std::size_t k = 0; k < copies_->paths.size(); ++k) {
             if (info_.kernels[k].kind != "SPK")
                 continue;
@@ -321,13 +335,11 @@ class Snapshot final : public core::IEphemerisProvider {
                     dafgs_c(summary);
                     dafus_c(summary, 2, 6, dc, ic);
                     check_spice();
-                    for (std::size_t i = 0; i < ids.size(); ++i) {
-                        if (ic[0] != ids[i] || !(i == 3 ? moon : i == 2 ? sun || moon : sun))
-                            continue;
-                        if (ic[1] != centres[i] || ic[2] != 1)
+                    if (const auto chain = chains.find(ic[0]); chain != chains.end()) {
+                        if (ic[1] != chain->second || ic[2] != 1)
                             throw core::EphemerisDataError(
-                                "HPOP requires DE-style ICRF-aligned Earth/Sun/Moon chains");
-                        coverage[i].emplace_back(dc[0], dc[1]);
+                                "HPOP requires DE-style ICRF-aligned Earth/third-body chains");
+                        coverage[ic[0]].emplace_back(dc[0], dc[1]);
                     }
                     daffna_c(&found);
                     check_spice();
@@ -341,10 +353,9 @@ class Snapshot final : public core::IEphemerisProvider {
                 throw;
             }
         }
-        for (std::size_t i = 0; i < ids.size(); ++i) {
-            if (!(i == 3 ? moon : i == 2 ? sun || moon : sun))
-                continue;
-            auto &intervals = coverage[i];
+        for (const auto &[id, centre] : chains) {
+            (void)centre;
+            auto &intervals = coverage[id];
             std::sort(intervals.begin(), intervals.end());
             double covered = begin;
             bool matched = false;
@@ -359,7 +370,9 @@ class Snapshot final : public core::IEphemerisProvider {
                     break;
             }
             if (!matched || covered < end)
-                throw core::EphemerisCoverageError("Sun/Moon ephemeris has a gap or does not cover "
+                throw core::EphemerisCoverageError("Third-body ephemeris target " +
+                                                   std::to_string(id) +
+                                                   " has a gap or does not cover "
                                                    "the complete integration interval");
         }
     }

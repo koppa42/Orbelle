@@ -1,3 +1,4 @@
+#include "../src/viewer/eop_catalog.hpp"
 #include "../src/viewer/epoch_editor.hpp"
 #include "../src/viewer/ground_station_editor.hpp"
 #include "../src/viewer/hpop_settings.hpp"
@@ -16,25 +17,34 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QElapsedTimer>
 #include <QEventLoop>
+#include <QFile>
+#include <QHostAddress>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
 #include <QPlainTextEdit>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSpinBox>
 #include <QTabBar>
 #include <QTabWidget>
+#include <QTableWidget>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <cmath>
 #include <gtest/gtest.h>
 #include <numbers>
+#include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/j2.hpp>
 #include <orbitforge/runtime/j4.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
@@ -1083,7 +1093,7 @@ TEST_F(QuantityTest, HpopSettingsValidateCancelAndRoundTripWithoutApplyingTheOrb
         ASSERT_NE(dialog, nullptr);
         auto *degree = dialog->findChild<QSpinBox *>("hpopGravityDegree");
         auto *order = dialog->findChild<QSpinBox *>("hpopGravityOrder");
-        auto *tabs = dialog->findChild<QTabWidget *>();
+        auto *tabs = dialog->findChild<QTabWidget *>("hpopSettingsTabs");
         ASSERT_NE(degree, nullptr);
         ASSERT_NE(order, nullptr);
         degree->setValue(4);
@@ -1092,7 +1102,7 @@ TEST_F(QuantityTest, HpopSettingsValidateCancelAndRoundTripWithoutApplyingTheOrb
             ASSERT_TRUE(QDir{}.mkpath(capture));
             QApplication::processEvents();
             EXPECT_TRUE(dialog->grab().save(capture + "/hpop-forces.png"));
-            tabs->setCurrentIndex(2);
+            tabs->setCurrentIndex(1);
             QApplication::processEvents();
             EXPECT_TRUE(dialog->grab().save(capture + "/hpop-integration.png"));
             dialog->resize(400, 460);
@@ -1180,16 +1190,17 @@ TEST_F(QuantityTest, HpopThirdBodiesPreserveDraftsAndValidateManualConstants) {
         ASSERT_TRUE(dialog);
         auto *tabs = dialog->findChild<QTabWidget *>("hpopSettingsTabs");
         ASSERT_TRUE(tabs);
-        tabs->setCurrentIndex(1);
+        tabs->setCurrentIndex(0);
         auto *sun = dialog->findChild<QCheckBox *>("hpopSunGravity");
         auto *moon = dialog->findChild<QCheckBox *>("hpopMoonGravity");
         auto *source = dialog->findChild<QComboBox *>("hpopSunSource");
         auto *quantity = dialog->findChild<QuantityEditor *>("hpopSunMu");
         auto *mu = quantity->findChild<QLineEdit *>("quantityValue");
         ASSERT_TRUE(sun && moon && source && mu);
-        EXPECT_EQ(source->currentIndex(), 0);
-        EXPECT_EQ(dialog->findChild<QComboBox *>("hpopMoonSource")->currentIndex(), 0);
-        EXPECT_FALSE(options.sun_mu || options.moon_mu);
+        EXPECT_EQ(source->currentIndex(), 1);
+        EXPECT_EQ(dialog->findChild<QComboBox *>("hpopMoonSource")->currentIndex(), 1);
+        EXPECT_FALSE(options.third_body(core::ThirdBody::sun).user_mu ||
+                     options.third_body(core::ThirdBody::moon).user_mu);
         EXPECT_FALSE(source->isEnabled());
         sun->setChecked(true);
         moon->setChecked(true);
@@ -1201,11 +1212,11 @@ TEST_F(QuantityTest, HpopThirdBodiesPreserveDraftsAndValidateManualConstants) {
         quantity->set_unit(Unit::metres_cubed_per_second_squared);
         EXPECT_EQ(quantity->value(Unit::metres_cubed_per_second_squared), constant);
         quantity->set_unit(Unit::kilometres_cubed_per_second_squared);
-        source->setCurrentIndex(1);
+        source->setCurrentIndex(2);
         mu->setText("1.3271244e11");
-        source->setCurrentIndex(0);
-        EXPECT_TRUE(mu->isReadOnly());
         source->setCurrentIndex(1);
+        EXPECT_TRUE(mu->isReadOnly());
+        source->setCurrentIndex(2);
         EXPECT_EQ(mu->text(), QStringLiteral("1.3271244e11"));
         dialog->findChild<QToolButton *>("hpopManageEphemerides")->click();
         EXPECT_TRUE(managed);
@@ -1213,8 +1224,11 @@ TEST_F(QuantityTest, HpopThirdBodiesPreserveDraftsAndValidateManualConstants) {
         EXPECT_TRUE(dialog->findChild<QLabel *>("hpopEphemerisStatus")->text().contains("2000"));
         const auto output = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
         if (!output.isEmpty()) {
-            source->setCurrentIndex(0); // Preview the normal, automatic-GM configuration.
+            source->setCurrentIndex(1); // Preview the normal, automatic-GM configuration.
             QDir{}.mkpath(output);
+            auto *gravity_scroll = dialog->findChild<QScrollArea *>("hpopGravityPage");
+            gravity_scroll->ensureWidgetVisible(
+                dialog->findChild<QTableWidget *>("hpopThirdBodyTable"));
             QApplication::processEvents();
             EXPECT_TRUE(dialog->grab().save(output + "/third-body-wide.png"));
             dialog->resize(460, 680);
@@ -1222,7 +1236,7 @@ TEST_F(QuantityTest, HpopThirdBodiesPreserveDraftsAndValidateManualConstants) {
             QTimer::singleShot(60, &settled, &QEventLoop::quit);
             settled.exec();
             EXPECT_TRUE(dialog->grab().save(output + "/third-body-compact.png"));
-            source->setCurrentIndex(1);
+            source->setCurrentIndex(2);
         }
         mu->setText("0");
         dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
@@ -1238,10 +1252,11 @@ TEST_F(QuantityTest, HpopThirdBodiesPreserveDraftsAndValidateManualConstants) {
         entry.info.last = core::Epoch{86400000000000};
         return std::vector{entry};
     }));
-    EXPECT_TRUE(options.sun_gravity && options.moon_gravity);
-    ASSERT_TRUE(options.sun_mu);
-    EXPECT_EQ(*options.sun_mu, 1.3271244e20);
-    EXPECT_FALSE(options.moon_mu);
+    EXPECT_TRUE(options.third_body(core::ThirdBody::sun).enabled &&
+                options.third_body(core::ThirdBody::moon).enabled);
+    ASSERT_TRUE(options.third_body(core::ThirdBody::sun).user_mu);
+    EXPECT_EQ(*options.third_body(core::ThirdBody::sun).user_mu, 1.3271244e20);
+    EXPECT_FALSE(options.third_body(core::ThirdBody::moon).user_mu);
     const auto saved = options;
     QTimer::singleShot(0, [&] {
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
@@ -1252,5 +1267,389 @@ TEST_F(QuantityTest, HpopThirdBodiesPreserveDraftsAndValidateManualConstants) {
     });
     EXPECT_FALSE(edit_hpop_settings(options, nullptr));
     EXPECT_EQ(options, saved);
+}
+TEST_F(QuantityTest, HpopPlanetTableSearchAndSourceSwitchingPreserveCbAndManualDrafts) {
+    core::HpopOptions options;
+    auto &jupiter = options.third_body(core::ThirdBody::jupiter);
+    jupiter = {true, core::ThirdBodyGravitySource::cb_file, 1.1e17,
+               core::CbGravity{1.26712764e17, "Jupiter.cb", std::string(64, 'a'),
+                               core::ThirdBody::jupiter}};
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *table = dialog->findChild<QTableWidget *>("hpopThirdBodyTable");
+        ASSERT_TRUE(table);
+        EXPECT_EQ(table->rowCount(), 10);
+        EXPECT_EQ(table->columnCount(), 4);
+        auto *search = dialog->findChild<QLineEdit *>("hpopThirdBodySearch");
+        search->setText("Jupiter");
+        EXPECT_FALSE(table->isRowHidden(2));
+        EXPECT_TRUE(table->isRowHidden(0));
+        auto *source = dialog->findChild<QComboBox *>("hpopJupiterSource");
+        auto *gm = dialog->findChild<QuantityEditor *>("hpopJupiterMu");
+        EXPECT_EQ(source->currentIndex(), 0);
+        EXPECT_EQ(gm->value(Unit::metres_cubed_per_second_squared), 1.26712764e17);
+        source->setCurrentIndex(2);
+        auto *input = gm->findChild<QLineEdit *>("quantityValue");
+        input->setText("1.25e8");
+        source->setCurrentIndex(1);
+        EXPECT_NEAR(gm->value(Unit::metres_cubed_per_second_squared), runtime::de440_planet_mu[0],
+                    1000);
+        source->setCurrentIndex(0);
+        EXPECT_EQ(gm->value(Unit::metres_cubed_per_second_squared), 1.26712764e17);
+        source->setCurrentIndex(2);
+        EXPECT_EQ(input->text(), QStringLiteral("1.25e8"));
+        dialog->resize(460, 680);
+        EXPECT_EQ(input->text(), QStringLiteral("1.25e8"));
+        dialog->findChild<QCheckBox *>("hpopPlutoGravity")->setChecked(true);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr));
+    EXPECT_EQ(jupiter.source, core::ThirdBodyGravitySource::user_specified);
+    EXPECT_EQ(*jupiter.user_mu, 1.25e17);
+    ASSERT_TRUE(jupiter.cb);
+    EXPECT_EQ(jupiter.cb->mu, 1.26712764e17);
+    EXPECT_TRUE(options.third_body(core::ThirdBody::pluto).enabled);
+}
+TEST_F(QuantityTest, HpopSourceSwitchingKeepsExactSiAndRecoversAnUnavailableCbDisplay) {
+    core::HpopOptions options;
+    auto &sun = options.third_body(core::ThirdBody::sun);
+    const auto exact = std::nextafter(runtime::de440_sun_mu, 0.0);
+    sun = {true, core::ThirdBodyGravitySource::user_specified, exact, std::nullopt};
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *source = dialog->findChild<QComboBox *>("hpopSunSource");
+        auto *gm = dialog->findChild<QuantityEditor *>("hpopSunMu");
+        gm->set_unit(Unit::metres_cubed_per_second_squared);
+        source->setCurrentIndex(1);
+        gm->set_unit(Unit::kilometres_cubed_per_second_squared);
+        source->setCurrentIndex(0); // Missing Cb constants display a nonnumeric placeholder.
+        source->setCurrentIndex(2);
+        EXPECT_EQ(gm->unit(), Unit::metres_cubed_per_second_squared);
+        EXPECT_EQ(gm->value(Unit::metres_cubed_per_second_squared), exact);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr));
+    EXPECT_EQ(*sun.user_mu, exact);
+}
+TEST_F(QuantityTest, HpopNestedPagesPreserveDraftsAndKeepUnavailableModelsInactive) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    core::HpopOptions options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *outer = dialog->findChild<QTabWidget *>("hpopSettingsTabs");
+        auto *forces = dialog->findChild<QTabWidget *>("hpopForceModelTabs");
+        ASSERT_TRUE(outer && forces);
+        EXPECT_EQ(outer->count(), 3);
+        EXPECT_EQ(outer->tabText(0), QStringLiteral("力模型"));
+        EXPECT_EQ(outer->tabText(1), QStringLiteral("积分器"));
+        EXPECT_EQ(outer->tabText(2), QStringLiteral("协方差"));
+        EXPECT_EQ(forces->count(), 4);
+        EXPECT_EQ(forces->tabText(0), QStringLiteral("引力"));
+        EXPECT_EQ(forces->tabText(1), QStringLiteral("阻力"));
+        EXPECT_EQ(forces->tabText(2), QStringLiteral("太阳辐射压"));
+        EXPECT_EQ(forces->tabText(3), QStringLiteral("其他"));
+        auto *gravity = dialog->findChild<QScrollArea *>("hpopGravityPage");
+        EXPECT_TRUE(
+            gravity->isAncestorOf(dialog->findChild<QFrame *>("hpopCentralGravitySection")));
+        EXPECT_TRUE(gravity->isAncestorOf(dialog->findChild<QTableWidget *>("hpopThirdBodyTable")));
+        auto *integration = dialog->findChild<QScrollArea *>("hpopIntegratorPage");
+        auto *altitude = dialog->findChild<QuantityEditor *>("hpopMinimumAltitude");
+        EXPECT_TRUE(integration->isAncestorOf(altitude));
+        auto *sun = dialog->findChild<QuantityEditor *>("hpopSunMu");
+        dialog->findChild<QCheckBox *>("hpopSunGravity")->setChecked(true);
+        dialog->findChild<QComboBox *>("hpopSunSource")->setCurrentIndex(2);
+        sun->set_unit(Unit::metres_cubed_per_second_squared);
+        auto *draft = sun->findChild<QLineEdit *>("quantityValue");
+        draft->setText("1.23456789e20");
+        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        const auto screenshot = [&](const QString &name) {
+            QApplication::processEvents();
+            if (!capture.isEmpty()) {
+                QEventLoop settled;
+                QTimer::singleShot(60, &settled, &QEventLoop::quit);
+                settled.exec();
+                QDir{}.mkpath(capture);
+                EXPECT_TRUE(dialog->grab().save(capture + "/" + name + ".png"));
+            }
+        };
+        screenshot("hpop-gravity");
+        for (int index = 1; index < 4; ++index) {
+            forces->setCurrentIndex(index);
+            EXPECT_TRUE(forces->currentWidget()->findChildren<QCheckBox *>().isEmpty());
+            EXPECT_TRUE(forces->currentWidget()->findChild<QLabel *>("hpopPendingBadge"));
+            screenshot(QStringLiteral("hpop-force-%1").arg(index));
+        }
+        outer->setCurrentIndex(2);
+        EXPECT_TRUE(outer->currentWidget()->findChildren<QCheckBox *>().isEmpty());
+        screenshot("hpop-covariance");
+        outer->setCurrentIndex(1);
+        altitude->set_unit(Unit::kilometre);
+        altitude->set_value(10, Unit::kilometre);
+        screenshot("hpop-integrator");
+        outer->setCurrentIndex(0);
+        EXPECT_EQ(forces->currentIndex(), 3);
+        forces->setCurrentIndex(0);
+        dialog->resize(460, 680);
+        screenshot("hpop-gravity-compact");
+        EXPECT_EQ(dialog->findChild<QuantityEditor *>("hpopSunMu"), sun);
+        EXPECT_EQ(draft->text(), QStringLiteral("1.23456789e20"));
+        EXPECT_EQ(sun->unit(), Unit::metres_cubed_per_second_squared);
+        EXPECT_EQ(altitude->value(Unit::metre), 10000);
+        outer->setCurrentIndex(2);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr));
+    EXPECT_EQ(options.minimum_altitude_m, 10000);
+    EXPECT_EQ(*options.third_body(core::ThirdBody::sun).user_mu, 1.23456789e20);
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        dialog->findChild<QTabWidget *>("hpopForceModelTabs")->setCurrentIndex(2);
+        dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(2);
+        dialog->findChild<QSpinBox *>("hpopGravityDegree")->setValue(2);
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr));
+    EXPECT_EQ(options, saved);
+}
+TEST_F(QuantityTest, HpopValidationReturnsToTheOffscreenFieldAndDoesNotCommitTheDraft) {
+    core::HpopOptions options;
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *outer = dialog->findChild<QTabWidget *>("hpopSettingsTabs");
+        auto *forces = dialog->findChild<QTabWidget *>("hpopForceModelTabs");
+        auto *source = dialog->findChild<QComboBox *>("hpopSunSource");
+        dialog->findChild<QCheckBox *>("hpopSunGravity")->setChecked(true);
+        source->setCurrentIndex(2);
+        auto *mu = dialog->findChild<QuantityEditor *>("hpopSunMu")
+                       ->findChild<QLineEdit *>("quantityValue");
+        mu->setText("0");
+        auto *search = dialog->findChild<QLineEdit *>("hpopThirdBodySearch");
+        search->setText("Mars");
+        forces->setCurrentIndex(2);
+        outer->setCurrentIndex(2);
+        auto *accept = dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok);
+        accept->click();
+        EXPECT_TRUE(dialog->isVisible());
+        EXPECT_EQ(options, saved);
+        EXPECT_EQ(outer->currentIndex(), 0);
+        EXPECT_EQ(forces->currentIndex(), 0);
+        EXPECT_TRUE(search->text().isEmpty());
+        EXPECT_FALSE(dialog->findChild<QTableWidget *>("hpopThirdBodyTable")->isRowHidden(0));
+        EXPECT_TRUE(dialog->findChild<QLabel *>("errorText")->isVisible());
+        source->setCurrentIndex(1);
+        dialog->findChild<QuantityEditor *>("hpopMinStep")->set_value(50, Unit::second);
+        dialog->findChild<QuantityEditor *>("hpopMaxStep")->set_value(10, Unit::second);
+        outer->setCurrentIndex(2);
+        accept->click();
+        EXPECT_EQ(options, saved);
+        EXPECT_EQ(outer->currentIndex(), 1);
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr));
+    EXPECT_EQ(options, saved);
+}
+
+namespace {
+void settle_hpop_catalog(EopCatalog &catalog) {
+    QElapsedTimer elapsed;
+    elapsed.start();
+    while (catalog.downloading() && elapsed.elapsed() < 5000)
+        QApplication::processEvents(QEventLoop::AllEvents, 20);
+    EXPECT_FALSE(catalog.downloading()) << catalog.status().toStdString();
+    QEventLoop settled;
+    QTimer::singleShot(150, &settled, &QEventLoop::quit);
+    settled.exec();
+}
+} // namespace
+TEST_F(QuantityTest, HpopNewDesktopDefaultsUseEgm2008AndKeepExplicitModelChoices) {
+    OrbitEditor editor(OrbitInput{});
+    runtime::CatalogGravity entry;
+    entry.selection = "egm2008";
+    entry.info = {"EGM2008", {}, {}, "tide_free", core::egm96_mu, 6378137, 2190, 2159};
+    editor.gravity_models = [entry] { return std::vector{entry}; };
+    editor.set_propagator(OrbitPropagator::hpop);
+    QTimer::singleShot(0, &editor, [&] {
+        auto *dialog = editor.findChild<QDialog *>("hpopSettingsDialog");
+        ASSERT_TRUE(dialog);
+        EXPECT_EQ(dialog->findChild<QComboBox *>("hpopGravityModel")->currentData().toString(),
+                  "egm2008");
+        EXPECT_EQ(dialog->findChild<QComboBox *>("hpopGravityModel")->currentText(), "EGM2008");
+        EXPECT_EQ(dialog->findChild<QSpinBox *>("hpopGravityDegree")->value(), 21);
+        EXPECT_EQ(dialog->findChild<QSpinBox *>("hpopGravityOrder")->value(), 21);
+        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        if (!capture.isEmpty()) {
+            QEventLoop settled;
+            QTimer::singleShot(60, &settled, &QEventLoop::quit);
+            settled.exec();
+            EXPECT_TRUE(QDir{}.mkpath(capture));
+            EXPECT_TRUE(dialog->grab().save(capture + "/hpop-egm2008.png"));
+        }
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    editor.open_propagator_details();
+    std::optional<OrbitInput> saved;
+    editor.apply = [&](OrbitInput input) { saved = input; };
+    editor.submit();
+    ASSERT_TRUE(saved);
+    EXPECT_EQ(saved->hpop.gravity_model, "egm2008");
+    OrbitInput explicit_builtin;
+    explicit_builtin.propagator = OrbitPropagator::hpop;
+    editor.set_input(explicit_builtin);
+    editor.set_propagator(OrbitPropagator::two_body);
+    editor.set_propagator(OrbitPropagator::hpop);
+    editor.submit();
+    ASSERT_TRUE(saved);
+    EXPECT_EQ(saved->hpop, explicit_builtin.hpop);
+}
+TEST_F(QuantityTest, HpopMissingGravityStartsOwnedDownloadAndCancelCloseCanRetryWithoutCommitting) {
+    QTemporaryDir temporary;
+    ASSERT_TRUE(temporary.isValid());
+    EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
+    auto options = new_hpop_options();
+    const auto original = options;
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        QTimer::singleShot(0, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            ASSERT_TRUE(dialog);
+            auto *model = dialog->findChild<QComboBox *>("hpopGravityModel");
+            EXPECT_EQ(model->currentData().toString(), "egm2008");
+            EXPECT_EQ(dialog->findChild<QSpinBox *>("hpopGravityDegree")->value(), 21);
+            // Trigger the same request before processing network events: this test is offline.
+            dialog->findChild<QPushButton *>("hpopDownloadGravity")->click();
+            EXPECT_TRUE(catalog.downloading());
+            EXPECT_EQ(catalog.active_product(), DataProduct::egm2008);
+            EXPECT_TRUE(dialog->findChild<QProgressBar *>("hpopGravityProgress")->isVisible());
+            EXPECT_FALSE(
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->isEnabled());
+            if (attempt == 1)
+                dialog->findChild<QPushButton *>("hpopCancelGravityDownload")->click();
+            dialog->findChild<QSpinBox *>("hpopGravityDegree")->setValue(30);
+            dialog->reject();
+        });
+        EXPECT_FALSE(edit_hpop_settings(options, nullptr, {}, {}, {}, &catalog));
+        EXPECT_EQ(options, original);
+        settle_hpop_catalog(catalog);
+        EXPECT_EQ(catalog.update_status(DataProduct::egm2008).state, DataUpdateState::cancelled);
+        EXPECT_TRUE(catalog.data().gravity_models().empty());
+    }
+}
+TEST_F(QuantityTest, HpopGravityFailureIsVisibleAndNeverRetriesOrFallsBackAutomatically) {
+    QTemporaryDir temporary;
+    EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
+    QTcpServer server;
+    ASSERT_TRUE(server.listen(QHostAddress::LocalHost));
+    int requests = 0;
+    QObject::connect(&server, &QTcpServer::newConnection, &server, [&] {
+        auto *socket = server.nextPendingConnection();
+        QObject::connect(socket, &QTcpSocket::readyRead, socket, [&, socket] {
+            socket->readAll();
+            ++requests;
+            socket->write(
+                "HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\ninvalid");
+            socket->disconnectFromHost();
+        });
+        QObject::connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+    });
+    catalog.start_download(
+        QUrl(QStringLiteral("http://127.0.0.1:%1/gravity").arg(server.serverPort())),
+        DataProduct::egm2008);
+    auto options = new_hpop_options();
+    const auto original = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        // It observes the shared download without owning or cancelling it.
+        EXPECT_TRUE(dialog->findChild<QPushButton *>("hpopCancelGravityDownload")->isHidden());
+        settle_hpop_catalog(catalog);
+        EXPECT_EQ(catalog.update_status(DataProduct::egm2008).state, DataUpdateState::failed);
+        EXPECT_EQ(requests, 1);
+        EXPECT_EQ(dialog->findChild<QComboBox *>("hpopGravityModel")->currentData().toString(),
+                  "egm2008");
+        EXPECT_TRUE(dialog->findChild<QLabel *>("hpopGravityStatus")
+                        ->text()
+                        .contains(QStringLiteral("重试")));
+        EXPECT_TRUE(dialog->findChild<QPushButton *>("hpopDownloadGravity")->isVisible());
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        EXPECT_TRUE(dialog->isVisible());
+        EXPECT_EQ(options, original);
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr, {}, {}, {}, &catalog));
+    EXPECT_EQ(options, original);
+    EXPECT_EQ(requests, 1);
+}
+TEST_F(QuantityTest, HpopQueuedGravityCanBeCancelledWithoutCancellingAnUnrelatedDownload) {
+    QTemporaryDir temporary;
+    EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
+    QTcpServer server;
+    ASSERT_TRUE(server.listen(QHostAddress::LocalHost));
+    catalog.start_download(
+        QUrl(QStringLiteral("http://127.0.0.1:%1/pending").arg(server.serverPort())));
+    auto options = new_hpop_options();
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        dialog->findChild<QPushButton *>("hpopDownloadGravity")->click();
+        EXPECT_TRUE(dialog->findChild<QLabel *>("hpopGravityStatus")
+                        ->text()
+                        .contains(QStringLiteral("等待")));
+        dialog->findChild<QPushButton *>("hpopCancelGravityDownload")->click();
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr, {}, {}, {}, &catalog));
+    EXPECT_TRUE(catalog.downloading());
+    EXPECT_EQ(catalog.active_product(), DataProduct::finals2000a);
+    catalog.cancel_download();
+    settle_hpop_catalog(catalog);
+}
+TEST_F(QuantityTest,
+       HpopBackgroundGravityPublicationRefreshesLimitsAndCachedReopenDoesNotDownload) {
+    QTemporaryDir temporary;
+    ASSERT_TRUE(temporary.isValid());
+    const auto root = std::filesystem::path(temporary.path().toStdWString());
+    EopCatalog catalog(root / "data", {}, {}, false);
+    QFile file(temporary.path() + "/local.grv");
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    file.write("stk.v.6.0\nModel Local\nDegree 21\nOrder 12\nGm 3.95e14\nRefDistance 6378137\n"
+               "Normalized Yes\nIncludesPermTide No\nBEGIN Coefficients\n2 0 -0.000484 0\nEND "
+               "Coefficients\n");
+    file.close();
+    catalog.import_raw(root / "local.grv", DataProduct::custom_gravity);
+    core::HpopOptions options;
+    options.gravity_model = "custom";
+    const auto original = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        settle_hpop_catalog(catalog);
+        auto *degree = dialog->findChild<QSpinBox *>("hpopGravityDegree");
+        EXPECT_EQ(degree->maximum(), 21);
+        degree->setValue(21);
+        dialog->findChild<QSpinBox *>("hpopGravityOrder")->setValue(12);
+        EXPECT_TRUE(dialog->findChild<QLabel *>("hpopGravityStatus")->text().contains("21"));
+        EXPECT_EQ(options, original);
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr, {}, {}, {}, &catalog));
+    EXPECT_EQ(options, original);
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        EXPECT_FALSE(catalog.downloading());
+        EXPECT_TRUE(dialog->findChild<QPushButton *>("hpopDownloadGravity")->isHidden());
+        EXPECT_EQ(dialog->findChild<QComboBox *>("hpopGravityModel")->currentText(),
+                  QStringLiteral("Local · 外部文件"));
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr, {}, {}, {}, &catalog));
+    EXPECT_EQ(options.gravity_mu, 3.95e14);
+    EXPECT_FALSE(catalog.downloading());
 }
 } // namespace orbitforge::desktop

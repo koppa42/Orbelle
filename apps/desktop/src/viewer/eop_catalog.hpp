@@ -48,6 +48,7 @@ class EopCatalog : public QObject {
     void start_download(QUrl url = {}, DataProduct product = DataProduct::finals2000a);
     void cancel_download();
     void check_updates_if_due(qint64 now, QUrl source = {});
+    void set_update_schedule_enabled(bool enabled);
     [[nodiscard]] bool has_full_download(DataProduct product = DataProduct::finals2000a) const;
     [[nodiscard]] bool downloading() const { return reply_ != nullptr || resource_job_.valid(); }
     [[nodiscard]] DataProduct active_product() const { return active_product_; }

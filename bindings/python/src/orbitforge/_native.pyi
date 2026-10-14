@@ -798,14 +798,48 @@ class HpopIntegrator:
     RKF78: HpopIntegrator
     RK4: HpopIntegrator
 
+class ThirdBody:
+    SUN: ThirdBody
+    MOON: ThirdBody
+    JUPITER: ThirdBody
+    VENUS: ThirdBody
+    SATURN: ThirdBody
+    MARS: ThirdBody
+    MERCURY: ThirdBody
+    URANUS: ThirdBody
+    NEPTUNE: ThirdBody
+    PLUTO: ThirdBody
+
+class ThirdBodyGravitySource:
+    CB_FILE: ThirdBodyGravitySource
+    JPL_DE: ThirdBodyGravitySource
+    USER_SPECIFIED: ThirdBodyGravitySource
+
+class CbGravity:
+    @property
+    def mu(self) -> float: ...
+    @property
+    def name(self) -> str: ...
+    @property
+    def content_sha256(self) -> str: ...
+
+    @property
+    def body(self) -> ThirdBody: ...
+
+class ThirdBodyGravity:
+    def __init__(self) -> None: ...
+    enabled: bool
+    source: ThirdBodyGravitySource
+    user_mu: float | None
+    cb: CbGravity | None
+
+def load_cb_gravity(path: str | Path, body: ThirdBody, mu_scale: float = 1.0) -> CbGravity: ...
+
 class HpopOptions:
     gravity_model: str
     gravity_mu: float
-    sun_gravity: bool
-    moon_gravity: bool
+    third_bodies: list[ThirdBodyGravity]
     ephemeris_model: str
-    sun_mu: float | None
-    moon_mu: float | None
     def __init__(self) -> None: ...
     gravity_degree: int
     gravity_order: int
@@ -972,6 +1006,8 @@ class ThirdBodyDataInfo:
     def sun_mu(self) -> float: ...
     @property
     def moon_mu(self) -> float: ...
+
+    def mu(self, body: ThirdBody) -> float: ...
 
 class CatalogEphemeris:
     @property

@@ -40,6 +40,7 @@ if(ORBITFORGE_WITH_VSG)
         src/viewer/epoch_editor.cpp src/viewer/ground_map.cpp src/viewer/workspace.cpp
         src/viewer/workbench_profile.cpp src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
         src/viewer/startup_splash.cpp src/viewer/startup_splash.hpp
+        src/viewer/initial_data_setup.cpp src/viewer/initial_data_setup.hpp
         src/viewer/welcome_page.cpp src/viewer/welcome_page.hpp)
     set_target_properties(orbitforge_desktop PROPERTIES AUTOMOC ON)
     target_link_libraries(orbitforge_desktop PRIVATE OrbitForge::GeoRocky vsgQt::vsgQt
@@ -83,11 +84,13 @@ if(ORBITFORGE_WITH_VSG)
         orbitforge_copy_runtime_dlls(orbitforge_data_center_tests)
         gtest_discover_tests(orbitforge_data_center_tests DISCOVERY_MODE PRE_TEST TEST_PREFIX "desktop." PROPERTIES TIMEOUT 30)
         add_executable(orbitforge_data_center_ui_tests tests/data_center_dialog_test.cpp
-            src/viewer/eop_catalog.cpp src/viewer/data_center_dialog.cpp src/viewer/workbench_style.cpp)
+            src/viewer/eop_catalog.cpp src/viewer/data_center_dialog.cpp src/viewer/workbench_style.cpp
+            src/viewer/initial_data_setup.cpp)
         qt_add_resources(orbitforge_data_center_ui_tests "data_center_icons" PREFIX "/orbitforge"
             BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/icons/chevron-down.png)
         target_compile_definitions(orbitforge_data_center_ui_tests PRIVATE
-            ORBITFORGE_TEST_FINALS="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json")
+            ORBITFORGE_TEST_FINALS="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json"
+            ORBITFORGE_TEST_TIME="${PROJECT_SOURCE_DIR}/data/samples/time/iers_leap_seconds_2026_07.dat")
         target_link_libraries(orbitforge_data_center_ui_tests PRIVATE
             OrbitForge::Runtime Qt6::Widgets Qt6::Network GTest::gtest_main)
         orbitforge_warnings(orbitforge_data_center_ui_tests)
@@ -113,13 +116,14 @@ if(ORBITFORGE_WITH_VSG)
             src/viewer/ground_station_editor.cpp src/viewer/sensor_editor.cpp
             src/viewer/object_selection.cpp src/viewer/object_selection.hpp
             src/viewer/orbit_editor.cpp src/viewer/hpop_settings.cpp src/viewer/mission_editor.cpp src/viewer/track_style_editor.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp)
+        target_sources(orbitforge_quantity_tests PRIVATE src/viewer/eop_catalog.cpp)
         set_target_properties(orbitforge_quantity_tests PROPERTIES AUTOMOC ON)
         qt_add_resources(orbitforge_quantity_tests "quantity_icons" PREFIX "/orbitforge"
             BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/icons/chevron-down.png resources/icons/chevron-right.png)
         target_compile_definitions(orbitforge_quantity_tests PRIVATE
             ORBITFORGE_TEST_EOP="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json")
         target_link_libraries(orbitforge_quantity_tests PRIVATE
-            OrbitForge::Runtime OrbitForge::Visualization Qt6::Widgets GTest::gtest_main)
+            OrbitForge::Runtime OrbitForge::Visualization Qt6::Widgets Qt6::Network GTest::gtest_main)
         orbitforge_warnings(orbitforge_quantity_tests)
         orbitforge_copy_runtime_dlls(orbitforge_quantity_tests)
         gtest_discover_tests(orbitforge_quantity_tests DISCOVERY_MODE PRE_TEST

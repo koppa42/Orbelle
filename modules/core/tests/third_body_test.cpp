@@ -19,7 +19,7 @@ class MovingBodies final : public IThirdBodyEphemeris {
   public:
     mutable std::size_t sun_calls = 0, moon_calls = 0;
     const ThirdBodyDataInfo &data_info() const noexcept override { return info_; }
-    void validate_interval(Epoch first, Epoch last, bool, bool) const override {
+    void validate_interval(Epoch first, Epoch last, std::span<const ThirdBody>) const override {
         if (first.tai_nanoseconds() < info_.first.tai_nanoseconds() ||
             last.tai_nanoseconds() > info_.last.tai_nanoseconds())
             throw std::out_of_range("Synthetic coverage exceeded");
@@ -79,23 +79,29 @@ TEST(ThirdBody, MovingSunAndMoonMatchIndependentOrekitIntegration) {
             ASSERT_TRUE(row >> v);
         HpopOptions options;
         options.gravity_degree = options.gravity_order = 0;
-        options.sun_gravity = mode != 1;
-        options.moon_gravity = mode != 0;
+        options.third_body(orbitforge::core::ThirdBody::sun).enabled = mode != 1;
+        options.third_body(orbitforge::core::ThirdBody::moon).enabled = mode != 0;
         options.relative_tolerance = 1e-13;
         options.position_tolerance_m = 1e-5;
         options.velocity_tolerance_mps = 1e-8;
         auto bodies = std::make_shared<MovingBodies>();
         const auto &info = bodies->data_info();
         if (mode == 3) {
-            options.sun_mu = info.sun_mu * 1.01;
-            options.moon_mu = info.moon_mu * .99;
+            options.third_body(ThirdBody::sun).source = ThirdBodyGravitySource::user_specified;
+            options.third_body(ThirdBody::moon).source = ThirdBodyGravitySource::user_specified;
+            options.third_body(ThirdBody::sun).user_mu = info.sun_mu * 1.01;
+            options.third_body(ThirdBody::moon).user_mu = info.moon_mu * .99;
         }
         std::array<double, 3> actual_force{};
         for (auto body : {ThirdBody::sun, ThirdBody::moon}) {
-            if (body == ThirdBody::sun ? !options.sun_gravity : !options.moon_gravity)
+            if (body == ThirdBody::sun
+                    ? !options.third_body(orbitforge::core::ThirdBody::sun).enabled
+                    : !options.third_body(orbitforge::core::ThirdBody::moon).enabled)
                 continue;
-            const auto mu = body == ThirdBody::sun ? options.sun_mu.value_or(info.sun_mu)
-                                                   : options.moon_mu.value_or(info.moon_mu);
+            const auto mu =
+                body == ThirdBody::sun
+                    ? options.third_body(ThirdBody::sun).user_mu.value_or(info.sun_mu)
+                    : options.third_body(ThirdBody::moon).user_mu.value_or(info.moon_mu);
             const auto force = third_body_acceleration(initial.position_m,
                                                        bodies->position(body, initial.epoch), mu);
             for (int i = 0; i < 3; ++i)
@@ -112,8 +118,10 @@ TEST(ThirdBody, MovingSunAndMoonMatchIndependentOrekitIntegration) {
             EXPECT_NEAR(result.velocity_mps[i], expected.velocity_mps[i], 2e-6);
         }
         EXPECT_EQ(provider->state_at(expected.epoch).position_m, result.position_m);
-        EXPECT_EQ(bodies->sun_calls > 1, options.sun_gravity);
-        EXPECT_EQ(bodies->moon_calls > 1, options.moon_gravity);
+        EXPECT_EQ(bodies->sun_calls > 1,
+                  options.third_body(orbitforge::core::ThirdBody::sun).enabled);
+        EXPECT_EQ(bodies->moon_calls > 1,
+                  options.third_body(orbitforge::core::ThirdBody::moon).enabled);
         ++cases;
     }
     EXPECT_EQ(cases, 32U);
@@ -121,7 +129,7 @@ TEST(ThirdBody, MovingSunAndMoonMatchIndependentOrekitIntegration) {
 TEST(ThirdBody, ResourceCoverageAndCancellationAreEnforcedBeforePublishingResults) {
     HpopOptions options;
     options.gravity_degree = options.gravity_order = 0;
-    options.sun_gravity = true;
+    options.third_body(orbitforge::core::ThirdBody::sun).enabled = true;
     const CartesianState initial{
         Epoch{0}, OriginId::earth, FrameId::gcrf, {7e6, 0, 0}, {0, 6200, 5300}};
     EXPECT_THROW((void)make_hpop(initial, options), std::invalid_argument);
@@ -141,6 +149,97 @@ TEST(ThirdBody, ResourceCoverageAndCancellationAreEnforcedBeforePublishingResult
               make_hpop(initial, options, {nullptr, nullptr, nullptr, bodies})
                   ->state_at(Epoch{600000000000})
                   .position_m);
-    options.moon_mu = 0;
+    options.third_body(ThirdBody::moon).user_mu = 0;
     EXPECT_THROW((void)validate_hpop_options(options), std::invalid_argument);
+}
+namespace {
+class PlanetBodies final : public IThirdBodyEphemeris {
+    ThirdBodyDataInfo info_{"synthetic",
+                            std::string(64, 'b'),
+                            "planets-test",
+                            Epoch{-1000000000},
+                            Epoch{1000000000},
+                            1e15,
+                            2e15,
+                            {3e15, 4e15, 5e15, 6e15, 7e15, 8e15, 9e15, 1e16}};
+
+  public:
+    mutable std::array<unsigned, third_body_count> calls{};
+    mutable std::vector<ThirdBody> validated;
+    const ThirdBodyDataInfo &data_info() const noexcept override { return info_; }
+    void validate_interval(Epoch, Epoch, std::span<const ThirdBody> bodies) const override {
+        validated.assign(bodies.begin(), bodies.end());
+    }
+    std::array<double, 3> position(ThirdBody body, Epoch) const override {
+        ++calls.at(static_cast<std::size_t>(body));
+        return {1e10 * (1 + static_cast<int>(body)), 2e9, -3e8};
+    }
+};
+} // namespace
+TEST(ThirdBody, EveryBodyAndSourceActuallyChangesTheIntegratedForce) {
+    const CartesianState initial{
+        Epoch{0}, OriginId::earth, FrameId::gcrf, {42164000, 1200000, -3400000}, {0, 0, 0}};
+    for (auto body : third_body_list) {
+        for (auto source : {ThirdBodyGravitySource::jpl_de, ThirdBodyGravitySource::cb_file,
+                            ThirdBodyGravitySource::user_specified}) {
+            SCOPED_TRACE(std::string(third_body_name(body)) + ":" + std::to_string(int(source)));
+            auto ephemeris = std::make_shared<PlanetBodies>();
+            HpopOptions options;
+            options.gravity_degree = options.gravity_order = 0;
+            options.integrator = HpopIntegrator::rk4;
+            options.fixed_step_seconds = .0001;
+            auto &settings = options.third_body(body);
+            settings.enabled = true;
+            settings.source = source;
+            settings.user_mu = ephemeris->data_info().mu(body) * 1.2;
+            settings.cb =
+                CbGravity{ephemeris->data_info().mu(body) * 1.3,
+                          std::string(third_body_name(body)) + ".cb", std::string(64, 'a'), body};
+            const auto rb = ephemeris->position(body, Epoch{0});
+            // Independent direct equation in extended precision; also checks the indirect term.
+            long double distance2 = 0, separation2 = 0, radius2 = 0;
+            for (int axis = 0; axis < 3; ++axis) {
+                distance2 += (long double)rb[axis] * rb[axis];
+                const auto delta = (long double)rb[axis] - initial.position_m[axis];
+                separation2 += delta * delta;
+                radius2 += (long double)initial.position_m[axis] * initial.position_m[axis];
+            }
+            const auto mu = source == ThirdBodyGravitySource::jpl_de
+                                ? ephemeris->data_info().mu(body)
+                            : source == ThirdBodyGravitySource::cb_file ? settings.cb->mu
+                                                                        : *settings.user_mu;
+            const auto provider =
+                make_hpop(initial, options, {nullptr, nullptr, nullptr, ephemeris});
+            const auto state = provider->state_at(Epoch{100000});
+            for (int axis = 0; axis < 3; ++axis) {
+                const auto expected =
+                    mu * (((long double)rb[axis] - initial.position_m[axis]) /
+                              (separation2 * std::sqrt(separation2)) -
+                          rb[axis] / (distance2 * std::sqrt(distance2))) -
+                    egm96_mu * initial.position_m[axis] / (radius2 * std::sqrt(radius2));
+                EXPECT_NEAR(state.velocity_mps[axis] / .0001, double(expected), 2e-14);
+            }
+            EXPECT_EQ(ephemeris->validated, std::vector{body});
+            for (auto other : third_body_list)
+                EXPECT_EQ(ephemeris->calls[static_cast<std::size_t>(other)] > 1, other == body);
+        }
+    }
+}
+TEST(ThirdBody, MissingMismatchedOrInvalidSourcesAreRejected) {
+    HpopOptions options;
+    auto &jupiter = options.third_body(ThirdBody::jupiter);
+    jupiter.enabled = true;
+    jupiter.source = ThirdBodyGravitySource::cb_file;
+    EXPECT_THROW(validate_hpop_options(options), std::invalid_argument);
+    jupiter.cb = CbGravity{1e17, "Sun.cb", std::string(64, 'a')};
+    EXPECT_THROW(validate_hpop_options(options), std::invalid_argument);
+    jupiter.cb.reset();
+    jupiter.source = ThirdBodyGravitySource::user_specified;
+    EXPECT_THROW(validate_hpop_options(options), std::invalid_argument);
+    jupiter.user_mu = INFINITY;
+    EXPECT_THROW(validate_hpop_options(options), std::invalid_argument);
+    jupiter.user_mu = 1e17;
+    EXPECT_NO_THROW(validate_hpop_options(options));
+    jupiter.source = static_cast<ThirdBodyGravitySource>(3);
+    EXPECT_THROW(validate_hpop_options(options), std::invalid_argument);
 }

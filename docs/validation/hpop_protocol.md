@@ -53,9 +53,17 @@ java -cp "out/validation/hpop;$classpath" OrbitForgeThirdBodyReference
 ## 集成与交付
 
 - `HpopProject.*`：真实 ERFA/IERS 帧转换、原生 GCRF 的 EOP 身份、报告/AER 复用、初始历元覆盖与取消。
-- `test_hpop.py`：Python 易用入口、不可变配置、Keplerian 的模型 μ、输出网格无关性、编辑前验证、准备结果独立和 v16 保存/打开。
+- `test_hpop.py`：Python 易用入口、不可变配置、Keplerian 的模型 μ、输出网格无关性、编辑前验证、准备结果独立和 v17 保存/打开。
 - `project-current.orbitforge`：独立二进制固定输入中的 HPOP 参数精确往返；非当前版本拒绝。
 - 安装后的 SDK 消费端：通过公共头文件创建 HPOP、查询并保存/重开，不依赖源码路径。
 - `QuantityTest.HpopSettingsValidateCancelAndRoundTripWithoutApplyingTheOrbit`：配置草稿、阶次约束、错误校验、取消和重开；可用 `ORBITFORGE_HPOP_UI_CAPTURE` 输出宽/窄窗口截图，配合 DPI 设置检查。
 
 运行日志与截图写入新 `out/validation/<运行名称>/`。修改力模型、系数、误差控制或分段策略时重新执行数值与交付检查；不因默认容差很小而提高产品精度宣称。
+
+## 逐天体与 GM 来源验证
+
+Core 的 `EveryBodyAndSourceActuallyChangesTheIntegratedForce` 将十个天体分别通过三种 GM 来源积分，并用独立的扩展精度差分公式核对速度增量（2e-14 m/s² 的分量容限），验证地心加速度项和逐阶段 Provider 路由。此短步测试验证力模型装配；长弧日月仍用已有 32 组 Orekit 参考验证。
+
+`data/samples/spice/de440s_planets_2016_leap` 从固定原始 DE440s 保留十四条链，包括 199→1→0、299→2→0、399→3→0、301→3→0、火星与外行星系统质心→0。集成与 Python 测试检查全部天体传播、原始日月样例缺少行星时的失败、项目重开和 Cb 常数快照。CSPICE 合成断档测试覆盖 Mercury、Jupiter 的内部空隙与缺失 Saturn，不能仅查询区间端点。
+
+使用 `compare_spice_ephemeris.py --all-planets` 对全部十四组状态与原始 DE440s 的独立 jplephem 读取比较；每分量位置容限 1 mm，速度 1e-7 m/s。固定输入、覆盖及单位说明见样例 README。每次结果写入新的 `out/validation/`；这些测试不代替相同资源及设置的 STK 轨迹比较。

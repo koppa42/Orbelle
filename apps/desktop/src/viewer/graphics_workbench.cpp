@@ -4,6 +4,7 @@
 #include "ground_map.hpp"
 #include "ground_station_editor.hpp"
 #include "insert_object_dialog.hpp"
+#include "initial_data_setup.hpp"
 #include "mission_timeline.hpp"
 #include "orbit_editor.hpp"
 #include "orbit_scene.hpp"
@@ -336,7 +337,7 @@ class Workbench final : public QMainWindow {
                                                  "/eop")
                                                     .toStdWString())
                         : std::filesystem::path{},
-                    smoke_dir_.isEmpty());
+                    false);
                 eop_current_ = eop_catalog_->providers().at(0);
                 eop_history_ = eop_catalog_->providers().at(1);
                 eop_ = eop_history_;
@@ -522,6 +523,7 @@ class Workbench final : public QMainWindow {
                 object_dock->setMinimumWidth(200);
             if (!benchmarking_ && runtime::two_body_available()) {
                 editor_ = new OrbitEditor(OrbitInput{});
+                editor_->data_catalog = eop_catalog_.get();
                 editor_->gravity_models = [this] { return eop_catalog_->data().gravity_models(); };
                 editor_->ephemerides = [this] { return eop_catalog_->data().ephemerides(); };
                 editor_->manage_ephemerides = [this] {
@@ -1041,6 +1043,16 @@ class Workbench final : public QMainWindow {
         }
     }
     ~Workbench() override { shutdown(); }
+    bool initialize_data() {
+        if (benchmarking_ || !smoke_dir_.isEmpty() || profile_)
+            return true;
+        if (!prepare_initial_data(this, *eop_catalog_))
+            return false;
+        if (editor_)
+            editor_->set_time_provider(eop_catalog_->time_provider());
+        eop_catalog_->set_update_schedule_enabled(true);
+        return true;
+    }
     void closeEvent(QCloseEvent *event) override {
         if (!benchmarking_ && smoke_dir_.isEmpty() && !profile_) {
             if (busy()) {
@@ -6199,6 +6211,7 @@ class Workbench final : public QMainWindow {
                     std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) /
                         "resources/eop/manifest.json"},
                 std::filesystem::path{}, false);
+            editor_->data_catalog = eop_catalog_.get();
             require(eop_catalog_->providers().size() == 3 && eop_catalog_->warnings().empty() &&
                         eop_catalog_->current_indices().size() == 2 &&
                         std::find(eop_catalog_->current_indices().begin(),
@@ -7863,7 +7876,7 @@ int run_graphics_workbench(QApplication &app) {
                     "Startup splash did not close after opening the workbench");
             splash.reset();
         }
-        const int code = app.exec();
+        const int code = window.initialize_data() ? app.exec() : 0;
         window.shutdown();
         return window.report(code);
     } catch (const std::exception &error) {

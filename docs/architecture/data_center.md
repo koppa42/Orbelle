@@ -1,6 +1,6 @@
 # 统一数据中心
 
-当前实现包括 [Scenario 数据锁](scenario_data_lock.md)、SQLite 统一目录、左列表、右详情的数据管理窗口及有限 EOP 外推、IERS finals2000A 全量下载和应用运行期间的自动更新。C04 和 UTC／闰秒同样支持全量下载、独立自动更新及本地原文导入；地球重力场支持 EGM2008 / EGM96 全量下载和静态外部文件导入。SPICE、GP/OMM/TLE 尚未接入。
+当前实现包括 [Scenario 数据锁](scenario_data_lock.md)、SQLite 统一目录、左列表、右详情的数据管理窗口及有限 EOP 外推、IERS finals2000A 全量下载和应用运行期间的自动更新。C04 和 UTC／闰秒同样支持全量下载、独立自动更新及本地原文导入；地球重力场支持 EGM2008 / EGM96 全量下载和静态外部文件导入，太阳系星历支持 DE440s 全量下载和导入。桌面首次启动必须准备完整基础数据；GP/OMM/TLE 的数据中心管理尚未接入。
 
 ## 管理边界
 
@@ -73,7 +73,11 @@ EGM2008 / EGM96 从 [ICGEM 官方模型目录](https://icgem.gfz.de/tom_longtime
 
 这两个产品是静态模型，不按日失效。概览展示下载／导入时间、文件 Degree / Order、当前计算上限、GM、参考半径与潮汐系统，并标注“无固定有效期”。文件信息页展示来源、完整原文哈希、路径和大小。重力场父级介绍可用模型；HPOP 配置选择具体资源，不设置类似 EOP 的优先级。完整 EGM2008 文件仍全部保存，当前计算仅使用至多 360 阶系数，界面明确区分文件容量与计算能力。
 
-重力产品默认关闭自动下载，用户手动下载或主动开启按期检查；不会在启动时自动获取大文件。开启后复用条件请求与调度机制。桌面提供一个当前外部模型槽位 `custom`，支持静态 ICGEM `.gfc` 与 STK `.grv` 子集；Runtime 目录允许用独立 ID 管理多个自定义模型。解析器拒绝时变、潮汐及其他尚不支持的力模型块，不悄悄忽略。原文与模型 μ / 半径一同校验，不联网补数据。
+桌面首次启动进入工作台前必须准备完整的基础数据：按 UTC / 闰秒表、IERS C04、IERS finals2000A、EGM2008、DE440s 的顺序自动下载缺失项；未编译 CSPICE 的构建不要求 DE440s。先准备 UTC，再解释 EOP。准备窗口显示各项状态、实际接收字节、后台校验与安装进度；失败停止队列并提供重试或导入官方文件入口，取消退出本次启动。成功文件即时保留，后续启动只补齐缺失项；已有完整资源不重复获取。删除缓存文件后会重新准备，目录收据本身不算可用数据。图形烟雾测试与性能测量使用固定输入，不执行联网准备。定期更新在首次准备完成后才开始调度，静态重力与星历的定期检查仍默认关闭。
+
+桌面新建 HPOP 配置默认选 EGM2008、21×21；引力页若选到尚未安装的 EGM2008 / EGM96，仍可通过数据中心后台自动补齐。页面显示连接、接收字节、校验和安装状态，提供取消与失败后重试；已安装时直接使用当前资源。其他数据任务正在运行时排队等待，取消排队或关闭窗口不会取消其他窗口启动的任务；关闭 HPOP 窗口取消本窗口启动且尚未完成的下载。下载失败不切换到内置示例，取消设置不提交模型或参数草稿；成功安装的文件保留在共享目录。主动开启按期更新后复用条件请求与调度机制。
+
+桌面提供一个当前外部模型槽位 `custom`，支持静态 ICGEM `.gfc` 与 STK `.grv` 子集；Runtime 目录允许用独立 ID 管理多个自定义模型。解析器拒绝时变、潮汐及其他尚不支持的力模型块，不悄悄忽略。原文与模型 μ / 半径一同校验，计算层不联网补数据。
 
 重力收据以 `gravity/<ID>` 存入 SQLite settings，记录获取方式与时间，完整文件保存在 `gravity/<sha256>.dat`。`DataCatalog.install_gravity()` 先复制和校验再发布；`gravity_models()` 查询收据，`load_gravity(ID)` 校验并加载不可变资源。`DataSnapshot.with_gravity_file(ID, path)` 用于显式装配。`project.prepare(catalog)` 只加载对象实际选择的重力资源，项目以 `gravity/<ID>` 记录原文哈希和解析配置；下载时间不参与计算身份。
 
@@ -101,7 +105,7 @@ project.save("gravity.orbitforge", analysis=analysis)
 
 本产品可计算覆盖为 **1850-01-01 00:00:00 TAI 至 2150-01-01 00:00:00 TAI**，是官方文件实际 SPK 覆盖内的保守区间。界面明确标注 TAI；历史或未来几何查询不依赖尚不存在的 UTC 闰秒表。将历元作为 UTC 输入、输出，或使用 EOP 时，仍分别遵守时间表和 EOP 的覆盖约束。DE440s 不按下载日期失效，也不允许通过 EOP 的外推设置延长星历覆盖。
 
-安装过程校验原文哈希及完整目标链的连续覆盖，生成带时间转换常数的清单，再原子发布到 `ephemerides/<manifest SHA-256>/`。SQLite 收据 `ephemeris/de440s` 记录获取方式、获取时间与可用范围；`DataCatalog.ephemerides()` 读取元数据，`load_ephemeris("de440s")` 校验清单、文件与只读运行副本。当前天体是太阳/月球；全文件保留，不将其余行星系数的存在宣称为已支持对应 HPOP 开关。
+安装过程校验原文哈希及完整目标链的连续覆盖，生成带时间转换常数的清单，再原子发布到 `ephemerides/<manifest SHA-256>/`。SQLite 收据 `ephemeris/de440s` 记录获取方式、获取时间与可用范围；`DataCatalog.ephemerides()` 读取元数据，`load_ephemeris("de440s")` 校验清单、文件与只读运行副本。HPOP 支持日月、七颗行星及冥王星；安装时检查全部目标链的连续覆盖。
 
 HPOP 使用地心几何位置（无光行时/像差），通过专用 ICRF 轴适配器求差分引力。配套 GM 为太阳 `1.3271244004127942e20`、月球 `4.9028001184575496e12` m³/s²，来自 [NAIF DE440 常数](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/gm_de440.tpc)。每个天体也可手动设置 GM，与位置星历分别记录。这里不构造或重标记一个相对论 GCRF 状态；时标使用 CSPICE 的均匀时间转换模型。有关轴约定见 [NAIF Frames](https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/req/frames.html)。
 
@@ -123,9 +127,9 @@ analysis = project.prepare(data=data)
 project.save("sun-moon.orbitforge", analysis=analysis)
 ```
 
-C++ 可用 `catalog.load_ephemeris("de440s")` 装配 `DataSnapshot::with_ephemeris()`，或设置 `HpopEnvironment::ephemeris` 后调用 `make_hpop()`；`HpopOptions::sun_gravity` / `moon_gravity` 为开关，`sun_mu` / `moon_mu` 为可选 SI 覆盖值。桌面、项目报告和任务序列 HPOP 滑行复用同一实现。
+C++ 可用 `catalog.load_ephemeris("de440s")` 装配 `DataSnapshot::with_ephemeris()`，或设置 `HpopEnvironment::ephemeris` 后调用 `make_hpop()`；`HpopOptions::third_body(body)` 保存逐天体启用和 GM 来源（JPL DE / Cb file / User Specified）。Cb 常数是显式导入后捕获的配置值，位置仍来自统一管理的 DE440s，详见[第三体引力](third_body_gravity.md)。桌面、项目报告和任务序列 HPOP 滑行复用同一实现。
 
-项目 v16 记录 `ephemeris/<选择 ID>` 的清单内容与解释哈希，解释包含几何位置、轴、GM 常数集及 CSPICE 版本；下载时间和本机路径不参与身份。数据变化先确认，拒绝则停止打开或重算。覆盖检查包含初始状态到查询/场景的完整积分路径，检查内部空洞，不仅检查两个端点。运行中的分析持有不可变资源。
+项目 v17 记录 `ephemeris/<选择 ID>` 的清单内容与解释哈希，解释包含几何位置、轴、GM 常数集及 CSPICE 版本；下载时间和本机路径不参与身份。数据变化先确认，拒绝则停止打开或重算。覆盖检查包含初始状态到查询/场景的完整积分路径，检查内部空洞，不仅检查两个端点。运行中的分析持有不可变资源。
 
 ## 覆盖不足与有限外推
 

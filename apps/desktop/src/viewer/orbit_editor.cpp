@@ -649,6 +649,7 @@ void OrbitEditor::set_input(const OrbitInput &input) {
     propagator_kind_ = input.propagator;
     hpop_ = input.hpop;
     mission_ = input.mission;
+    hpop_initialized_ = uses_hpop() || hpop_ != core::HpopOptions{};
     manual_state_ = input.initial;
     tle_text_->setPlainText(QString::fromStdString(
         input.tle.line1 + (input.tle.line1.empty() ? "" : "\n") + input.tle.line2));
@@ -816,6 +817,10 @@ void OrbitEditor::set_propagator(OrbitPropagator propagator) {
         if (propagator == OrbitPropagator::sgp4)
             manual_state_ = state;
         propagator_kind_ = propagator;
+        if (propagator == OrbitPropagator::hpop && !hpop_initialized_) {
+            hpop_ = new_hpop_options();
+            hpop_initialized_ = true;
+        }
         if (propagator == OrbitPropagator::mission && mission_.segments.empty()) {
             const double seconds = last_->epoch().seconds_since(state.epoch);
             if (seconds > 0 && seconds <= core::hpop_max_duration_seconds)
@@ -854,8 +859,9 @@ void OrbitEditor::update_state_labels() {
                                                     : QString::fromStdString(hpop_.gravity_model))
                    .arg(hpop_.gravity_degree)
                    .arg(hpop_.gravity_order)) +
-        (hpop_.sun_gravity ? QStringLiteral(" + 太阳") : QString{}) +
-        (hpop_.moon_gravity ? QStringLiteral(" + 月球") : QString{}) +
+        (hpop_.uses_third_bodies()
+             ? QStringLiteral(" + %1 个第三体").arg(hpop_.enabled_third_bodies().size())
+             : QString{}) +
         (hpop_.integrator == core::HpopIntegrator::rkf78 ? QStringLiteral(" · RKF78 自适应")
                                                          : QStringLiteral(" · RK4 固定步长")));
     if (propagator_kind_ == OrbitPropagator::mission) {
@@ -955,7 +961,9 @@ void OrbitEditor::open_propagator_details() {
                              gravity_models ? gravity_models()
                                             : std::vector<runtime::CatalogGravity>{},
                              ephemerides ? ephemerides() : std::vector<runtime::CatalogEphemeris>{},
-                             manage_ephemerides)) {
+                             manage_ephemerides, data_catalog, !hpop_initialized_)) {
+                hpop_initialized_ =
+                    hpop_initialized_ || uses_hpop() || hpop_ != core::HpopOptions{};
                 if (state_mode_index_ == 1)
                     write_elements(state);
                 update_state_labels();
@@ -970,7 +978,7 @@ void OrbitEditor::open_propagator_details() {
                 hpop_, this,
                 gravity_models ? gravity_models() : std::vector<runtime::CatalogGravity>{},
                 ephemerides ? ephemerides() : std::vector<runtime::CatalogEphemeris>{},
-                manage_ephemerides))
+                manage_ephemerides, data_catalog))
             update_state_labels();
         return;
     }

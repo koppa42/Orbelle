@@ -392,7 +392,7 @@ CatalogEphemeris DataCatalog::install_de440s(const std::filesystem::path &spk,
     const auto resource = make_third_body_ephemeris(
         load_spice_snapshot(stage.path / "manifest.json", impl_->root / "runtime"));
     const auto info = resource->data_info();
-    resource->validate_interval(info.first, info.last, true, true);
+    resource->validate_interval(info.first, info.last, core::third_body_list);
     const auto acquired = std::chrono::duration_cast<std::chrono::seconds>(
                               std::chrono::system_clock::now().time_since_epoch())
                               .count();
@@ -434,7 +434,8 @@ std::vector<CatalogEphemeris> DataCatalog::ephemerides() const {
                                  core::Epoch{r.at("first").get<std::int64_t>()},
                                  core::Epoch{r.at("last").get<std::int64_t>()},
                                  r.at("sun_mu"),
-                                 r.at("moon_mu")};
+                                 r.at("moon_mu"),
+                                 de440_planet_mu};
     return {{"de440s", info, impl_->root / "ephemerides" / info.content_sha256 / "manifest.json",
              static_cast<DataAcquisition>(r.at("acquisition").get<int>()), r.at("acquired_at")}};
 }

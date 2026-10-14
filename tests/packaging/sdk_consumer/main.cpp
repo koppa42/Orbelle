@@ -256,7 +256,8 @@ int main(int argc, char **argv) {
         auto ephemeris = orbitforge::runtime::make_third_body_ephemeris(std::move(provider));
         orbitforge::core::HpopOptions options;
         options.gravity_degree = options.gravity_order = 0;
-        options.sun_gravity = options.moon_gravity = true;
+        options.third_body(orbitforge::core::ThirdBody::sun).enabled =
+            options.third_body(orbitforge::core::ThirdBody::moon).enabled = true;
         const orbitforge::core::CartesianState initial{epoch,
                                                        orbitforge::core::OriginId::earth,
                                                        orbitforge::core::FrameId::gcrf,
