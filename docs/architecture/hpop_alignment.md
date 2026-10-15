@@ -52,8 +52,8 @@
 | --- | --- | --- |
 | Gravity | 重力文件；Maximum Degree / Order | 部分：EGM2008 / EGM96 / 外部静态文件、最高 360 阶；文件范围与计算范围分开显示 |
 | Gravity | Include Secular Variations | 待实现：系数参考历元、长期变化率与时间单位；开启后力值随历元改变 |
-| Gravity | 固体潮模式，含 Permanent tide only | 部分：三种模式及日月主要形变已接入，永久潮按底场去重；频率项、极潮与自定义 Love 数待实现，见[固体潮契约](solid_tides.md) |
-| Gravity | Truncate to Gravity Field Size；Time Dependent Terms；Min. Amplitude | 部分：阶/次独立截断已生效，可扩展超出底场阶次；频率项和幅度阈值待实现 |
+| Gravity | 固体潮模式，含 Permanent tide only | 部分：三种模式、日月形变、71 个频率项和 IERS 2003 固体极潮已接入，永久潮按底场去重；自定义 Love 数待实现，见[固体潮契约](solid_tides.md) |
+| Gravity | Truncate to Gravity Field Size；Time Dependent Terms；Min. Amplitude | 部分：阶/次独立截断及附加时间项开关已生效，可扩展超出底场阶次；幅度阈值待实现 |
 | Gravity | Use Ocean Tides；独立 Degree / Order；Min. Amplitude | 待实现：海潮文件统一管理；分潮、阶次与筛选实际生效 |
 | Gravity | 第三体 Name / Use / Source / Gravity Value | 已接入：日月、七行星及冥王星；三种 GM 来源、Cb 常数导入和中心/系统质心约定。仍需同配置 STK 实测，且不导入 Cb 文件的其他星历设置，见[第三体契约](third_body_gravity.md) |
 | Drag | Use Drag；Spherical；Cd；Area/Mass Ratio | 已实现：共转 ITRF 大气相对速度、完整旋转率项、独立面积质量比及 Cd；见[阻力契约](atmospheric_drag.md) |

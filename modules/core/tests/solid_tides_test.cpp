@@ -1,7 +1,9 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <iostream>
 #include <limits>
 #include <numbers>
 #include <orbitforge/core/propagation/hpop.hpp>
@@ -49,9 +51,47 @@ class Eop final : public IEarthOrientationProvider {
 
   public:
     EarthOrientationState at(Epoch epoch) const override {
-        return {{epoch, -32, 0, 0, 0, 0, "test"}, {0, 0, 0, 0, 0}};
+        return {{epoch, -31.7, .12 * std::numbers::pi / 648000, .25 * std::numbers::pi / 648000, 0,
+                 0, "test"},
+                {0, 0, 0, 0, 0}};
     }
     const EopDataInfo &data_info() const noexcept override { return info_; }
+};
+// Controlled clock shared with the independent Java reference, UTC = TAI - 32 s.
+class Time final : public ITimeProvider {
+    TimeDataInfo info_{"test", "", "", 0, 100000};
+
+  public:
+    explicit Time(std::string hash = {}) { info_.sha256 = std::move(hash); }
+    Epoch from_utc(const UtcDateTime &u) const override {
+        using namespace std::chrono;
+        const auto days = sys_days{year{u.year} / month{static_cast<unsigned>(u.month)} /
+                                   day{static_cast<unsigned>(u.day)}} -
+                          sys_days{year{2000} / 1 / 1};
+        const auto seconds = static_cast<std::int64_t>(days.count()) * 86400 + u.hour * 3600 +
+                             u.minute * 60 + u.second - 43200 + 32;
+        return Epoch{seconds * 1000000000LL + u.nanosecond};
+    }
+    UtcDateTime to_utc(Epoch e) const override {
+        using namespace std::chrono;
+        const auto ns = nanoseconds{e.tai_nanoseconds()} + seconds{43200 - 32};
+        const auto days = floor<std::chrono::days>(ns);
+        const year_month_day date{sys_days{year{2000} / 1 / 1} + days};
+        const hh_mm_ss clock{ns - days};
+        return {int(date.year()),
+                int(unsigned(date.month())),
+                int(unsigned(date.day())),
+                int(clock.hours().count()),
+                int(clock.minutes().count()),
+                int(clock.seconds().count()),
+                int(clock.subseconds().count())};
+    }
+    int tai_minus_utc_seconds(Epoch) const override { return 32; }
+    JulianDate julian_date(Epoch e, TimeScale scale) const override {
+        return {scale, 2451545,
+                (e.seconds_since(Epoch{0}) + (scale == TimeScale::tt ? 32.184 : 0)) / 86400};
+    }
+    const TimeDataInfo &data_info() const noexcept override { return info_; }
 };
 class Ephemeris final : public IThirdBodyEphemeris {
     ThirdBodyDataInfo info_{
@@ -243,4 +283,163 @@ TEST(SolidTides, InvalidModelsBodiesAndAdditiveCoefficientsFailExplicitly) {
              {{2, 0, 0, 0}, {2, 0, 1, 0}},
              {{2, 0, std::numeric_limits<double>::infinity(), 0}}})
         EXPECT_THROW((void)model.acceleration({7e6, 0, 0}, 2, 2, values), std::invalid_argument);
+}
+
+TEST(SolidTides, TimeDependentCoefficientsMatchIndependentIers2003AcrossDatesAndPoleHistory) {
+    std::ifstream file(ORBITFORGE_TIME_TIDE_REFERENCE);
+    ASSERT_TRUE(file.is_open());
+    const Time time;
+    const auto info = field();
+    const std::array bodies{body(true), body(false)};
+    const auto primary =
+        solid_tide_corrections(info, {SolidTideMode::full, false, false}, 0, 0, bodies);
+    double maximum = 0;
+    int count = 0;
+    for (std::string line; std::getline(file, line);) {
+        if (line.empty() || line[0] != 'C')
+            continue;
+        std::istringstream in(line);
+        char tag;
+        std::int64_t ns;
+        double ut1, x, y;
+        std::array<double, 7> expected{};
+        in >> tag >> ns >> ut1 >> x >> y;
+        for (auto &v : expected)
+            in >> v;
+        ASSERT_TRUE(in);
+        const EarthOrientationSample eop{Epoch{ns}, ut1, x, y, 0, 0, "test"};
+        const auto full = solid_tide_corrections(info, {SolidTideMode::full, false, true}, 0, 0,
+                                                 bodies, &eop, &time);
+        ASSERT_EQ(full.size(), primary.size());
+        const std::array values{full[0].c - primary[0].c, full[1].c - primary[1].c,
+                                full[1].s - primary[1].s, full[2].c - primary[2].c,
+                                full[2].s - primary[2].s};
+        expected[1] += expected[5];
+        expected[2] += expected[6];
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            maximum = std::max(maximum, std::abs(values[i] - expected[i]));
+            EXPECT_NEAR(values[i], expected[i], 2e-20) << line << " component " << i;
+        }
+        for (std::size_t i = 3; i < full.size(); ++i) {
+            EXPECT_EQ(full[i].c, primary[i].c);
+            EXPECT_EQ(full[i].s, primary[i].s);
+        }
+        ++count;
+    }
+    EXPECT_EQ(count, 39);
+    std::cout << "Time-dependent tide maximum coefficient error: " << maximum << '\n';
+}
+TEST(SolidTides, TimeDependentAccelerationMatchesIndependentOrekitIncludingZonalTruncation) {
+    std::ifstream file(ORBITFORGE_TIME_TIDE_REFERENCE);
+    ASSERT_TRUE(file.is_open());
+    const auto info = field();
+    const Time time;
+    const auto eop = Eop{}.at(Epoch{0}).sample;
+    GravityModel model(info, {{2, 0, -4.84165371736e-4, 0}});
+    const std::array bodies{body(true), body(false)};
+    int count = 0;
+    double maximum = 0;
+    for (std::string line; std::getline(file, line);) {
+        if (line.empty() || line[0] != 'A')
+            continue;
+        std::istringstream in(line);
+        char tag;
+        int degree, order, truncate;
+        std::array<double, 3> r{}, expected{};
+        in >> tag >> degree >> order >> truncate;
+        for (auto &v : r)
+            in >> v;
+        for (auto &v : expected)
+            in >> v;
+        ASSERT_TRUE(in);
+        const auto delta = solid_tide_corrections(info, {SolidTideMode::full, truncate != 0, true},
+                                                  degree, order, bodies, &eop, &time);
+        const auto actual = model.acceleration(r, degree, order, delta);
+        for (int i = 0; i < 3; ++i) {
+            maximum = std::max(maximum, std::abs(actual[i] - expected[i]));
+            EXPECT_NEAR(actual[i], expected[i], 2e-14) << line;
+        }
+        ++count;
+    }
+    EXPECT_EQ(count, 24);
+    std::cout << "Time-dependent tide maximum acceleration error (m/s^2): " << maximum << '\n';
+}
+TEST(SolidTides, TimeDependentHpopMatchesIndependentForwardAndBackwardPropagation) {
+    HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    options.solid_tides = {SolidTideMode::full, false, true};
+    options.max_step_seconds = 30;
+    options.relative_tolerance = 1e-13;
+    options.position_tolerance_m = 1e-5;
+    options.velocity_tolerance_mps = 1e-8;
+    HpopEnvironment environment{std::make_shared<Frames>(),
+                                std::make_shared<Eop>(),
+                                {},
+                                std::make_shared<Ephemeris>(),
+                                std::make_shared<Time>()};
+    const CartesianState initial{
+        Epoch{0}, OriginId::earth, FrameId::gcrf, {7e6, 0, 0}, {0, 6200, 5300}};
+    const auto provider = make_hpop(initial, options, environment);
+    std::ifstream file(ORBITFORGE_TIME_TIDE_REFERENCE);
+    ASSERT_TRUE(file.is_open());
+    int count = 0;
+    double dr = 0, dv = 0;
+    for (std::string line; std::getline(file, line);) {
+        if (line.empty() || line[0] != 'T')
+            continue;
+        std::istringstream in(line);
+        char tag;
+        std::int64_t seconds;
+        std::array<double, 3> r{}, v{};
+        in >> tag >> seconds;
+        for (auto &x : r)
+            in >> x;
+        for (auto &x : v)
+            in >> x;
+        ASSERT_TRUE(in);
+        const auto actual = provider->state_at(Epoch{seconds * 1000000000LL});
+        for (int i = 0; i < 3; ++i) {
+            dr = std::max(dr, std::abs(actual.position_m[i] - r[i]));
+            dv = std::max(dv, std::abs(actual.velocity_mps[i] - v[i]));
+            EXPECT_NEAR(actual.position_m[i], r[i], .003) << line;
+            EXPECT_NEAR(actual.velocity_mps[i], v[i], 3e-6) << line;
+        }
+        ++count;
+    }
+    EXPECT_EQ(count, 4);
+    std::cout << "Time-dependent tide maximum propagated component error: " << dr << " m; " << dv
+              << " m/s\n";
+    auto bad = environment;
+    bad.time.reset();
+    EXPECT_THROW((void)make_hpop(initial, options, bad), std::invalid_argument);
+    bad.time = std::make_shared<Time>("different");
+    EXPECT_THROW((void)make_hpop(initial, options, bad), std::invalid_argument);
+    EXPECT_THROW((void)provider->state_at(Epoch{91000000000000LL}), std::out_of_range);
+    EXPECT_EQ(
+        provider->state_at(Epoch{6000000000000LL}).position_m,
+        make_hpop(initial, options, environment)->state_at(Epoch{6000000000000LL}).position_m);
+    options.solid_tides.truncate_to_gravity = true;
+    EXPECT_FALSE(options.uses_utc_force());
+    EXPECT_NO_THROW((void)make_hpop(initial, options, {}));
+}
+TEST(SolidTides, TimeDependentInputsAndInactiveDraftsAreExplicit) {
+    const auto info = field();
+    const Time time;
+    const std::array bodies{body(true), body(false)};
+    auto eop = Eop{}.at(Epoch{0}).sample;
+    const SolidTideOptions options{SolidTideMode::full, false, true};
+    EXPECT_THROW((void)solid_tide_corrections(info, options, 0, 0, bodies), std::invalid_argument);
+    eop.ut1_minus_tai_seconds = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_THROW((void)solid_tide_corrections(info, options, 0, 0, bodies, &eop, &time),
+                 std::invalid_argument);
+    eop = Eop{}.at(time.from_utc({1899, 12, 31, 0, 0, 0, 0})).sample;
+    EXPECT_THROW((void)solid_tide_corrections(info, options, 0, 0, bodies, &eop, &time),
+                 std::out_of_range);
+    for (auto mode : {SolidTideMode::none, SolidTideMode::permanent}) {
+        const auto effective = effective_solid_tide_options({mode, false, true}, 2);
+        EXPECT_FALSE(effective.include_time_dependent_terms);
+        EXPECT_NO_THROW((void)solid_tide_corrections(info, {mode, false, true}, 2, 2));
+    }
+    EXPECT_EQ(effective_solid_tide_options({SolidTideMode::full, true, true}, 0),
+              SolidTideOptions{});
 }

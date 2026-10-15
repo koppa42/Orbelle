@@ -233,6 +233,8 @@ void bind_project(py::module_ &module) {
         .def(py::init<>())
         .def_readwrite("mode", &core::SolidTideOptions::mode)
         .def_readwrite("truncate_to_gravity", &core::SolidTideOptions::truncate_to_gravity)
+        .def_readwrite("include_time_dependent_terms",
+                       &core::SolidTideOptions::include_time_dependent_terms)
         .def("validate", &core::validate_solid_tide_options);
     py::class_<core::HpopOptions>(module, "HpopOptions")
         .def(py::init<>())

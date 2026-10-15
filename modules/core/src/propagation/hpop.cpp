@@ -140,8 +140,8 @@ class Hpop final : public IStateProvider {
             acceleration = environment_.gravity->acceleration(r, 0, 0);
         } else {
             const auto epoch = epoch_at(t);
-            const auto rotation =
-                environment_.frames->gcrf_to_itrf(epoch, environment_.eop->at(epoch).sample);
+            const auto eop = environment_.eop->at(epoch).sample;
+            const auto rotation = environment_.frames->gcrf_to_itrf(epoch, eop);
             std::array<TideRaisingBody, 2> bodies{};
             if (options_.uses_full_solid_tides()) {
                 const auto &info = environment_.ephemeris->data_info();
@@ -152,9 +152,9 @@ class Hpop final : public IStateProvider {
                                 environment_.ephemeris->position(ThirdBody::moon, epoch)),
                             info.moon_mu}}};
             }
-            const auto corrections =
-                solid_tide_corrections(environment_.gravity->info(), options_.solid_tides,
-                                       options_.gravity_degree, options_.gravity_order, bodies);
+            const auto corrections = solid_tide_corrections(
+                environment_.gravity->info(), options_.solid_tides, options_.gravity_degree,
+                options_.gravity_order, bodies, &eop, environment_.time.get());
             acceleration = rotation.inverse_position(environment_.gravity->acceleration(
                 rotation.apply_position(r), options_.gravity_degree, options_.gravity_order,
                 corrections));
@@ -332,11 +332,10 @@ class Hpop final : public IStateProvider {
                 "HPOP gravity corrections and drag require explicit EOP and frame providers");
         if (options.uses_eop_force() && !eop_covers(environment_.eop->data_info(), initial.epoch))
             throw EopCoverageError("HPOP initial epoch is outside selected EOP coverage");
-        if (options.drag.enabled) {
+        if (options.uses_utc_force()) {
             if (!environment_.time || environment_.time->data_info().sha256 !=
                                           environment_.eop->data_info().time_data.sha256)
-                throw std::invalid_argument(
-                    "Atmospheric drag requires the EOP's confirmed UTC provider");
+                throw std::invalid_argument("HPOP forces require the EOP's confirmed UTC provider");
             (void)environment_.time->to_utc(initial.epoch);
         }
         environment_.validate_weather_interval(options_.drag, initial.epoch, initial.epoch);
@@ -367,7 +366,7 @@ class Hpop final : public IStateProvider {
         if (options_.uses_eop_force() && !eop_covers(environment_.eop->data_info(), epoch))
             throw EopCoverageError(
                 "HPOP integration requires EOP covering the initial and query epochs");
-        if (options_.drag.enabled)
+        if (options_.uses_utc_force())
             (void)environment_.time->to_utc(epoch);
         const double sign = t < 0 ? -1 : 1;
         const auto index = static_cast<std::size_t>(std::floor(std::abs(t) / checkpoint_seconds));

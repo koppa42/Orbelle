@@ -293,22 +293,30 @@ bool edit_hpop_settings(
         {QStringLiteral("无"), QStringLiteral("仅永久潮"), QStringLiteral("完整固体潮")});
     solid_mode->setCurrentIndex(static_cast<int>(options.solid_tides.mode));
     solid_mode->setItemData(
-        2, QStringLiteral("Full：日月引起的 2、3 阶形变，以及诱导 4 阶项；附加时间项尚未实现。"),
+        2,
+        QStringLiteral("Full：日月引起的 2、3 阶形变，以及诱导 4 阶项；可另启用频率修正与极潮。"),
         Qt::ToolTipRole);
     solid->addRow(QStringLiteral("模型"), solid_mode);
     auto *solid_truncate = new QCheckBox(QStringLiteral("截断至重力场阶次"));
     solid_truncate->setObjectName("hpopSolidTideTruncate");
     solid_truncate->setChecked(options.solid_tides.truncate_to_gravity);
     solid->addRow(solid_truncate);
-    const auto refresh_solid = [solid_mode, solid_truncate] {
+    auto *solid_time = new QCheckBox(QStringLiteral("包含附加时间项"));
+    solid_time->setObjectName("hpopSolidTideTimeDependent");
+    solid_time->setChecked(options.solid_tides.include_time_dependent_terms);
+    solid_time->setToolTip(
+        QStringLiteral("同时计算 71 个频率修正项和固体极潮，需要覆盖传播时段的 EOP 与时间数据。"));
+    solid->addRow(solid_time);
+    const auto refresh_solid = [solid_mode, solid_truncate, solid_time] {
         solid_truncate->setEnabled(solid_mode->currentIndex() != 0);
+        solid_time->setEnabled(solid_mode->currentIndex() == 2);
     };
     QObject::connect(solid_mode, &QComboBox::currentIndexChanged, &dialog, refresh_solid);
     refresh_solid();
     help(solid,
          QStringLiteral("采用 IERS 2003 非弹性地球模型；永久潮按重力文件的潮汐系统计入一次。"
                         "完整固体潮独立使用所选星历中的太阳、月球位置与 GM，无需勾选第三体引力。"));
-    caution(solid, QStringLiteral("附加时间项（频率修正、极潮）与最小振幅筛选待实现。"));
+    caution(solid, QStringLiteral("最小振幅筛选待实现，当前包含全部潮汐分量。"));
     auto *third = section(gravity_page, QStringLiteral("第三体引力"), "hpopThirdBodySection");
     third->setVerticalSpacing(8);
     auto *resource = new QFrame;
@@ -1236,6 +1244,7 @@ bool edit_hpop_settings(
             candidate.solid_tides.mode =
                 static_cast<core::SolidTideMode>(solid_mode->currentIndex());
             candidate.solid_tides.truncate_to_gravity = solid_truncate->isChecked();
+            candidate.solid_tides.include_time_dependent_terms = solid_time->isChecked();
             validation_field = solid_mode;
             if (candidate.uses_full_solid_tides() &&
                 std::none_of(installed_ephemerides.begin(), installed_ephemerides.end(),

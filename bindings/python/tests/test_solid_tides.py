@@ -17,11 +17,11 @@ class SolidTideTests(unittest.TestCase):
         settings = of.orbits.SolidTideSettings()
         with self.assertRaises(FrozenInstanceError):
             settings.mode = "full"
-        for kwargs in ({"mode": "unknown"}, {"truncate_to_gravity": 1}):
+        for kwargs in ({"mode": "unknown"}, {"truncate_to_gravity": 1}, {"include_time_dependent_terms": 1}):
             with self.assertRaises((TypeError, ValueError)):
                 of.orbits.SolidTideSettings(**kwargs)
         for mode in ("none", "permanent", "full"):
-            value = of.orbits.SolidTideSettings(mode, False)
+            value = of.orbits.SolidTideSettings(mode, False, True)
             self.assertEqual(of.orbits.SolidTideSettings._read(value._native()), value)
         self.assertEqual(settings._native().mode, of.SolidTideMode.NONE)
         with self.assertRaises(TypeError):
@@ -35,7 +35,7 @@ class SolidTideTests(unittest.TestCase):
         sat = project.objects.satellite("Sat", orbit=orbit)
         before = project.prepare().states(sat, step=u.s(60))
         for mode in ("permanent", "full"):
-            tides = of.orbits.SolidTideSettings(mode, True)
+            tides = of.orbits.SolidTideSettings(mode, True, True)
             sat.orbit = replace(orbit, hpop=replace(orbit.hpop, solid_tides=tides))
             after = project.prepare().states(sat, step=u.s(60))
             self.assertEqual(before.input_sha256, after.input_sha256)
@@ -57,7 +57,7 @@ class SolidTideTests(unittest.TestCase):
             sat.orbit = replace(orbit, hpop=replace(orbit.hpop, solid_tides=of.orbits.SolidTideSettings(mode, True)))
             before = project.prepare(data=data)
             states = before.states(sat, step=u.s(60))
-            sat.orbit = replace(orbit, hpop=replace(orbit.hpop, solid_tides=of.orbits.SolidTideSettings(mode, False)))
+            sat.orbit = replace(orbit, hpop=replace(orbit.hpop, solid_tides=of.orbits.SolidTideSettings(mode, False, True)))
             after = project.prepare(data=data).states(sat, step=u.s(60))
             self.assertEqual(states.input_sha256, after.input_sha256)
             self.assertEqual(states.position.values, after.position.values)
@@ -91,22 +91,22 @@ class SolidTideTests(unittest.TestCase):
                                      units=of.ReportUnits.SI, time_scale=of.ReportTimeScale.TAI)
             self.assertEqual(tuple(report.table.rows[-1][4:7]), before.position.values[-1])
             identities, endpoints = set(), set()
-            for mode in ("none", "permanent", "full"):
-                tides = of.orbits.SolidTideSettings(mode, False)
+            for mode, secondary in (("none", False), ("permanent", False), ("full", False), ("full", True)):
+                tides = of.orbits.SolidTideSettings(mode, False, secondary)
                 sat.orbit = replace(orbit, hpop=replace(orbit.hpop, solid_tides=tides))
                 result = project.prepare(data=data)
                 states = result.states(sat, step=u.s(60))
                 identities.add(states.input_sha256)
                 endpoints.add(tuple(states.position.values[-1]))
-                path = root / f"{mode}.orbitforge"
+                path = root / f"{mode}-{secondary}.orbitforge"
                 project.save(path, analysis=result)
                 reopened = of.Project.open(path, data=data)
                 self.assertEqual(reopened.objects[sat.id].orbit.hpop.solid_tides, tides)
                 self.assertEqual(reopened.prepare(data=data).states(reopened.objects[sat.id], step=u.s(60))
                                  .position.values, states.position.values)
                 self.assertEqual(analysis.states(sat, step=u.s(60)).position.values, before.position.values)
-            self.assertEqual(len(identities), 3)
-            self.assertEqual(len(endpoints), 3)
+            self.assertEqual(len(identities), 4)
+            self.assertEqual(len(endpoints), 4)
             self.assertEqual(sat.orbit.hpop.third_bodies, ())
             del analysis, data, without_frames, result, reopened
 

@@ -73,7 +73,7 @@ TEST(Propagators, NewModelsRoundTripAndReportsUseConvertedStates) {
     project.satellites.push_back(satellite);
     const auto bytes = application::encode_project(project);
     const auto restored = application::decode_project(bytes);
-    EXPECT_EQ(bytes[8], 23);
+    EXPECT_EQ(bytes[8], 24);
     EXPECT_EQ(application::encode_project(restored), bytes);
     EXPECT_EQ(restored.satellites[0].orbit.tle, tle);
     const auto scenario = runtime::make_project_scenario(restored, time.get());

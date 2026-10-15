@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <numbers>
 #include <orbitforge/core/propagation/solid_tides.hpp>
 #include <stdexcept>
 
@@ -11,6 +12,89 @@ constexpr std::array k2_real{k20, 0.29830, 0.30102};
 constexpr std::array k2_imag{0.0, -0.00144, -0.00130};
 constexpr std::array k2_plus{-0.00089, -0.00080, -0.00057};
 constexpr std::array k3_real{0.093, 0.093, 0.093, 0.094};
+constexpr double arcsec = std::numbers::pi / (180 * 3600);
+constexpr double julian_year_seconds = 365.25 * 86400;
+struct FrequencyTerm {
+    int order;
+    std::array<int, 5> delaunay;   // Printed table multipliers; phase = m * gamma - dot(args).
+    double in_phase, out_of_phase; // 1e-12, already includes the forcing amplitude.
+};
+#include "solid_tide_data.inc"
+
+double polynomial(const std::array<double, 5> &a, double t) {
+    return ((((a[4] * t + a[3]) * t + a[2]) * t + a[1]) * t + a[0]);
+}
+std::array<double, 2> mean_pole(Epoch epoch, const ITimeProvider &time) {
+    const auto utc =
+        time.to_utc(epoch); // Enforce the confirmed UTC coverage, including future dates.
+    if (utc.year < 1900)
+        throw std::out_of_range("IERS 2003 mean pole starts at 1900-01-01 UTC");
+    if (utc.year >= 2000) {
+        // Preserve the final tabulated value at the exact endpoint, as in IERS/Orekit.
+        if (utc.year == 2000 && utc.month == 1 && utc.day == 1 && utc.hour == 0 &&
+            utc.minute == 0 && utc.second == 0 && utc.nanosecond == 0)
+            return annual_mean_pole.back();
+        const double years = (epoch.seconds_since(Epoch{0}) + 32.184) / julian_year_seconds;
+        return {.054 + .00083 * years, .357 + .00395 * years};
+    }
+    const auto first = time.from_utc({utc.year, 1, 1, 0, 0, 0, 0});
+    const auto last = time.from_utc({utc.year + 1, 1, 1, 0, 0, 0, 0});
+    const double fraction = epoch.seconds_since(first) / last.seconds_since(first);
+    const auto &a = annual_mean_pole.at(static_cast<std::size_t>(utc.year - 1900));
+    const auto &b = annual_mean_pole.at(static_cast<std::size_t>(utc.year - 1899));
+    return {a[0] + fraction * (b[0] - a[0]), a[1] + fraction * (b[1] - a[1])};
+}
+std::array<std::complex<double>, 3> time_dependent_tides(const EarthOrientationSample &eop,
+                                                         const ITimeProvider &time) {
+    if (!std::isfinite(eop.ut1_minus_tai_seconds) || !std::isfinite(eop.polar_motion_x_rad) ||
+        !std::isfinite(eop.polar_motion_y_rad))
+        throw std::invalid_argument(
+            "Time-dependent solid tides require finite UT1 and polar motion");
+    const double t = (eop.epoch.seconds_since(Epoch{0}) + 32.184) / (100 * julian_year_seconds);
+    // IERS 2003 luni-solar fundamental arguments, TT centuries from J2000 TT.
+    constexpr std::array<std::array<double, 5>, 5> polynomials{
+        {{134.96340251 * 3600, 1717915923.2178, 31.8792, .051635, -.00024470},
+         {357.52910918 * 3600, 129596581.0481, -.5532, .000136, -.00001149},
+         {93.27209062 * 3600, 1739527262.8478, -12.7512, -.001037, .00000417},
+         {297.85019547 * 3600, 1602961601.2090, -6.3706, .006593, -.00003169},
+         {125.04455501 * 3600, -6962890.5431, 7.4722, .007702, -.00005939}}};
+    std::array<double, 5> args{};
+    for (std::size_t i = 0; i < args.size(); ++i)
+        args[i] = std::remainder(polynomial(polynomials[i], t) * arcsec, 2 * std::numbers::pi);
+    // Split TAI into whole days and a sub-day remainder before adding UT1-TAI.
+    constexpr std::int64_t day_ns = 86400000000000LL;
+    const double days = static_cast<double>(eop.epoch.tai_nanoseconds() / day_ns);
+    const double fraction = (static_cast<double>(eop.epoch.tai_nanoseconds() % day_ns) * 1e-9 +
+                             eop.ut1_minus_tai_seconds) /
+                            86400;
+    const double era =
+        2 * std::numbers::pi * (.7790572732640 + fraction + .00273781191135448 * (days + fraction));
+    // IERS 2003 table 5.4 polynomial; not the IAU 2006 GMST polynomial.
+    const double gamma =
+        era + arcsec * polynomial({.014506, 4612.15739966, 1.39667721, -.00009344, .00001882}, t) +
+        std::numbers::pi;
+    std::array<std::complex<double>, 3> delta{};
+    for (const auto &term : frequency_terms) {
+        double phase = term.order * gamma;
+        for (std::size_t i = 0; i < args.size(); ++i)
+            phase -= term.delaunay[i] * args[i];
+        const double s = std::sin(phase), c = std::cos(phase);
+        const double ip = term.in_phase * 1e-12, op = term.out_of_phase * 1e-12;
+        if (term.order == 0)
+            delta[0] += ip * c - op * s;
+        else if (term.order == 1)
+            delta[1] += std::complex<double>{ip * s + op * c, ip * c - op * s};
+        else
+            delta[2] += std::complex<double>{ip * c, -ip * s};
+    }
+    const auto pole = mean_pole(eop.epoch, time);
+    const double m1 = eop.polar_motion_x_rad / arcsec - pole[0];
+    const double m2 = pole[1] - eop.polar_motion_y_rad / arcsec;
+    // Printed IERS 2003 section 6.2 signs, retained explicitly for reproducibility.
+    delta[1] += std::complex<double>{-1.333e-9 * (m1 - .0115 * m2), -1.333e-9 * (m2 + .0115 * m1)};
+    return delta;
+}
+
 } // namespace
 double iers2003_permanent_tide_c20() noexcept { return 4.4228e-8 * -0.31460 * k20; }
 void validate_solid_tide_options(const SolidTideOptions &options) {
@@ -25,12 +109,14 @@ SolidTideOptions effective_solid_tide_options(SolidTideOptions options, int grav
     if (options.mode == SolidTideMode::none ||
         (options.mode == SolidTideMode::permanent && gravity_degree >= 2))
         options.truncate_to_gravity = true;
+    if (options.mode != SolidTideMode::full)
+        options.include_time_dependent_terms = false;
     return options;
 }
-std::vector<GravityCoefficient> solid_tide_corrections(const GravityInfo &field,
-                                                       const SolidTideOptions &options, int degree,
-                                                       int order,
-                                                       std::span<const TideRaisingBody> bodies) {
+std::vector<GravityCoefficient>
+solid_tide_corrections(const GravityInfo &field, const SolidTideOptions &options, int degree,
+                       int order, std::span<const TideRaisingBody> bodies,
+                       const EarthOrientationSample *eop, const ITimeProvider *time) {
     validate_solid_tide_options(options);
     if (!std::isfinite(field.mu) || field.mu <= 0 || !std::isfinite(field.radius_m) ||
         field.radius_m <= 0 ||
@@ -74,6 +160,13 @@ std::vector<GravityCoefficient> solid_tide_corrections(const GravityInfo &field,
             for (std::size_t m = 0; m < p3.size(); ++m)
                 delta[3][m] += k3_real[m] * factor3 * p3[m];
         }
+    }
+    if (options.mode == SolidTideMode::full && options.include_time_dependent_terms) {
+        if (!eop || !time)
+            throw std::invalid_argument("Time-dependent solid tides require EOP and UTC providers");
+        const auto secondary = time_dependent_tides(*eop, *time);
+        for (std::size_t m = 0; m < secondary.size(); ++m)
+            delta[2][m] += secondary[m];
     }
     if (field.tide_system == "zero_tide" && degree >= 2)
         delta[2][0] -= iers2003_permanent_tide_c20();

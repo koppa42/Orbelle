@@ -2049,8 +2049,12 @@ TEST_F(QuantityTest, HpopSolidTidesModesTruncationResizeReopenAndCancel) {
         ASSERT_TRUE(dialog);
         auto *mode = dialog->findChild<QComboBox *>("hpopSolidTideMode");
         auto *truncate = dialog->findChild<QCheckBox *>("hpopSolidTideTruncate");
+        auto *time = dialog->findChild<QCheckBox *>("hpopSolidTideTimeDependent");
+        ASSERT_TRUE(time);
         ASSERT_TRUE(mode);
         ASSERT_TRUE(truncate);
+        EXPECT_FALSE(time->isEnabled());
+        EXPECT_FALSE(time->isChecked());
         EXPECT_EQ(mode->count(), 3);
         EXPECT_EQ(mode->currentIndex(), 0);
         EXPECT_FALSE(truncate->isEnabled());
@@ -2060,7 +2064,10 @@ TEST_F(QuantityTest, HpopSolidTidesModesTruncationResizeReopenAndCancel) {
         QApplication::sendEvent(mode, &next);
         EXPECT_EQ(mode->currentIndex(), 1);
         EXPECT_TRUE(truncate->isEnabled());
+        EXPECT_FALSE(time->isEnabled());
         mode->setCurrentIndex(2);
+        EXPECT_TRUE(time->isEnabled());
+        time->setChecked(true);
         truncate->setChecked(false);
         const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
         std::cout << "HPOP solid tide device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
@@ -2070,7 +2077,8 @@ TEST_F(QuantityTest, HpopSolidTidesModesTruncationResizeReopenAndCancel) {
             QTimer::singleShot(60, &settled, &QEventLoop::quit);
             settled.exec();
             auto *scroll = dialog->findChild<QScrollArea *>("hpopGravityPage");
-            scroll->ensureWidgetVisible(truncate);
+            scroll->ensureWidgetVisible(time);
+            EXPECT_TRUE(time->isChecked());
             QApplication::processEvents();
             EXPECT_EQ(mode, dialog->findChild<QComboBox *>("hpopSolidTideMode"));
             EXPECT_EQ(mode->currentIndex(), 2);
@@ -2086,6 +2094,8 @@ TEST_F(QuantityTest, HpopSolidTidesModesTruncationResizeReopenAndCancel) {
             }
         }
         mode->setCurrentIndex(0);
+        EXPECT_FALSE(time->isEnabled());
+        EXPECT_TRUE(time->isChecked());
         EXPECT_FALSE(truncate->isEnabled());
         EXPECT_FALSE(truncate->isChecked());
         mode->setCurrentIndex(2);
@@ -2094,15 +2104,21 @@ TEST_F(QuantityTest, HpopSolidTidesModesTruncationResizeReopenAndCancel) {
     EXPECT_TRUE(edit_hpop_settings(options, nullptr, {}, {entry}));
     EXPECT_EQ(options.solid_tides.mode, core::SolidTideMode::full);
     EXPECT_FALSE(options.solid_tides.truncate_to_gravity);
+    EXPECT_TRUE(options.solid_tides.include_time_dependent_terms);
     const auto saved = options;
     QTimer::singleShot(0, [&] {
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
         ASSERT_TRUE(dialog);
         auto *mode = dialog->findChild<QComboBox *>("hpopSolidTideMode");
         auto *truncate = dialog->findChild<QCheckBox *>("hpopSolidTideTruncate");
+        auto *time = dialog->findChild<QCheckBox *>("hpopSolidTideTimeDependent");
+        ASSERT_TRUE(time);
         EXPECT_EQ(mode->currentIndex(), 2);
         EXPECT_FALSE(truncate->isChecked());
+        EXPECT_TRUE(time->isChecked());
         mode->setCurrentIndex(1);
+        EXPECT_FALSE(time->isEnabled());
+        time->setChecked(false);
         truncate->setChecked(true);
         dialog->reject();
     });
@@ -2119,7 +2135,12 @@ TEST_F(QuantityTest, HpopSolidTidesMissingEphemerisReturnsToGravityAndTruncatedP
         ASSERT_TRUE(dialog);
         auto *mode = dialog->findChild<QComboBox *>("hpopSolidTideMode");
         auto *truncate = dialog->findChild<QCheckBox *>("hpopSolidTideTruncate");
+        auto *time = dialog->findChild<QCheckBox *>("hpopSolidTideTimeDependent");
+        ASSERT_TRUE(time);
+        EXPECT_FALSE(time->isEnabled());
         mode->setCurrentIndex(2);
+        EXPECT_TRUE(time->isEnabled());
+        time->setChecked(true);
         truncate->setChecked(false);
         auto *outer = dialog->findChild<QTabWidget *>("hpopSettingsTabs");
         auto *forces = dialog->findChild<QTabWidget *>("hpopForceModelTabs");
@@ -2139,6 +2160,8 @@ TEST_F(QuantityTest, HpopSolidTidesMissingEphemerisReturnsToGravityAndTruncatedP
     EXPECT_EQ(options.solid_tides.mode, core::SolidTideMode::full);
     EXPECT_TRUE(options.solid_tides.truncate_to_gravity);
     EXPECT_FALSE(options.uses_full_solid_tides());
+    EXPECT_TRUE(options.solid_tides.include_time_dependent_terms);
+    EXPECT_FALSE(options.uses_utc_force());
 }
 
 } // namespace orbitforge::desktop

@@ -994,6 +994,7 @@ class SolidTideMode:
 class SolidTideOptions:
     mode: SolidTideMode
     truncate_to_gravity: bool
+    include_time_dependent_terms: bool
     def __init__(self) -> None: ...
     def validate(self) -> None: ...
 

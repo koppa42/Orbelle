@@ -33,6 +33,10 @@ struct HpopOptions {
         return solid_tides.mode == SolidTideMode::full &&
                (!solid_tides.truncate_to_gravity || gravity_degree >= 2);
     }
+    [[nodiscard]] bool uses_utc_force() const {
+        return drag.enabled ||
+               (uses_full_solid_tides() && solid_tides.include_time_dependent_terms);
+    }
     [[nodiscard]] bool uses_earth_fixed_gravity() const {
         // None may also remove the permanent component of a zero-tide base field.
         return gravity_degree > 0 ||
@@ -94,7 +98,7 @@ struct HpopEnvironment {
     std::shared_ptr<const IEarthOrientationProvider> eop;
     std::shared_ptr<const GravityModel> gravity{};
     std::shared_ptr<const IThirdBodyEphemeris> ephemeris{};
-    // UTC epoch and day-of-year for atmosphere models. Must match the EOP time identity.
+    // UTC for atmosphere and time-dependent solid tides. Must match the EOP time identity.
     std::shared_ptr<const ITimeProvider> time{};
     std::shared_ptr<const SpaceWeather> weather{};
     void validate_ephemeris_interval(const HpopOptions &options, Epoch first, Epoch last) const;

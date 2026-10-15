@@ -36,9 +36,9 @@ application::Session make_orbit_session(const application::OrbitInput &input,
             if (!core::eop_covers(environment.eop->data_info(), epoch))
                 throw core::EopCoverageError("HPOP needs EOP covering the entire integration "
                                              "interval, including the initial epoch");
-        if (input.hpop.drag.enabled) {
+        if (input.hpop.uses_utc_force()) {
             if (!environment.time)
-                throw std::invalid_argument("HPOP drag requires a retained UTC provider");
+                throw std::invalid_argument("HPOP forces require a retained UTC provider");
             for (auto epoch : {input.initial.epoch, input.first, input.last})
                 (void)environment.time->to_utc(epoch);
         }

@@ -1,6 +1,6 @@
 # 固体潮
 
-HPOP 的固体潮由共享 Core 计算，桌面、Python、C++ SDK 和任务序列使用同一实现。当前支持 STK Gravity 页的 None / Permanent tide only / Full，以及 Truncate to Gravity Field Size；Full 对应关闭 Include Time Dependent Terms 的日月主要形变。频率修正、极潮、最小振幅筛选、长期变化和海洋潮仍待实现，不能将本阶段视为完整 STK 等价实现。
+HPOP 的固体潮由共享 Core 计算，桌面、Python、C++ SDK 和任务序列使用同一实现。当前支持 STK Gravity 页的 None / Permanent tide only / Full，以及 Truncate to Gravity Field Size 和 Include Time Dependent Terms。Full 默认计算日月主要形变，可另启用 71 个频率修正项和固体极潮。最小振幅筛选、长期变化和海洋潮仍待实现，不能将本阶段视为完整 STK 等价实现。
 
 ## 计算模型
 
@@ -12,14 +12,28 @@ HPOP 的固体潮由共享 Core 计算，桌面、Python、C++ SDK 和任务序�
 
 截断开启时按静态重力的 degree 和 order 分别筛选潮汐系数；0/0 不产生潮汐力，也不要求相关星历/EOP。截断关闭时可计算至 4 阶、3 次，即使静态文件只到 2 阶、0 次，或当前选择 0/0。静态场对象保持不可变；`GravityModel::acceleration` 接收当次加性系数，既不克隆整份高阶系数表，也不改变下一次静态求值。该通用接口检查重复项、有限数、归一化索引及 360 阶计算上限。
 
+## 附加时间项
+
+`include_time_dependent_terms` 仅在 Full 且有效潮汐阶次至少为 2 时生效，默认关闭；同时控制频率项和固体极潮，对应 STK 的单一开关。其余模式保存该草稿，但不要求额外资源，也不改变计算身份。每个积分阶段读取同历元 EOP，不重用初始历元的修正。
+
+频率修正使用 IERS 2003 表 6.3a/b/c 的 48/21/2 项，仅改变 C20、C21/S21、C22/S22。表中振幅单位 1e−12；相位为 `m × (GMST + π) − Σ(表列 Delaunay 乘子 × 基本角)`。Delaunay 多项式采用 TT 世纪，GMST 使用 IERS 2003 表 5.4（IAU 2000）的多项式和 UT1 地球自转角；UT1 从 EOP 的 UT1−TAI 直接构造，先拆整数日与日内部分以保持精度，不把 UTC 当 UT1。
+
+极潮使用 IERS 2003 第六章原文的 `δC21=−1.333e−9(m1−0.0115m2)`、`δS21=−1.333e−9(m2+0.0115m1)`，其中 `m1=xp−mean_xp`、`m2=mean_yp−yp`，单位角秒。**这与 IERS 2010 修正后的交叉项符号不同。** 当前选择 2003 原文以明确遵循 STK 帮助所指规范；尚未用 STK 数值导出确定具体版本是否采用后续修正，不能据文档名称声称逐位一致。
+
+平均极点使用 IERS 2003 `annual.pole` 的 1900–2000 年样本。各年 1 月 1 日 UTC 由注入的时间 Provider 转成 TAI 后线性插值；2000-01-01 UTC 的末端样本保留，此后采用 `mean_xp=.054+.00083t`、`mean_yp=.357+.00395t`（角秒），t 为自 J2000 TT 起的儒略年。表与线性外推在末端存在规范本身的不连续；测试覆盖端点及两侧。早于 1900 年明确拒绝；UTC、EOP 和星历各自的实际覆盖仍须满足，不静默将缺少极潮当零。历史插值也要求时间 Provider 覆盖相邻两个年初。
+
+数值表固定在 `solid_tide_data.inc`，来自 IERS 2003，转录依据为 [Orekit 13.1.2 原始资源包](https://repo.maven.apache.org/maven2/org/orekit/orekit/13.1.2/orekit-13.1.2-sources.jar)的 `assets/org/orekit/IERS-conventions/2003/`，包 SHA-256 `e83fc14e95e1c92fe7da978e0c99e3d90c670a5e32292bb89b3d27159ee3983c`。表 6.3a/b/c 原文资源 SHA-256 分别为 `b6a3ccdec48fa08ec1a8a704ea620a081d4be571127e5e0d8bc19b439f75a212`、`96ad401b3cea47a8ae62c942256dbdd356c7a59d350372f397b90866c4093b31`、`5bac1f2cc2cffa2720fc32bc6c0b8fbac2cff67e52703cf0b072d8b8437c38e5`；`annual.pole` 为 `9239c0b841fb55bb5ac1ddebbea9fc628f1748b1366c5ac9b841046e74155fa8`。只转录规范数值，运行时不依赖 Orekit，也不联网。
+
 ## 接口与来源
 
-C++ 使用 `HpopOptions::solid_tides`（`SolidTideOptions`），Python 使用 `of.orbits.SolidTideSettings(mode="full", truncate_to_gravity=False)` 并传入 `Hpop(..., solid_tides=...)`。SDK/Python 默认 None；桌面新配置默认仅永久潮，按参考截图。完整模式独立要求 Sun/Moon 星历和 EOP/Frame Provider，覆盖校验包括初始历元至全部积分路径，计算核心不联网。
+C++ 使用 `HpopOptions::solid_tides`（`SolidTideOptions`），Python 使用 `of.orbits.SolidTideSettings(mode="full", truncate_to_gravity=False, include_time_dependent_terms=True)` 并传入 `Hpop(..., solid_tides=...)`。SDK/Python 默认 None；桌面新配置默认仅永久潮，按参考截图。完整模式独立要求 Sun/Moon 星历和 EOP/Frame Provider，覆盖校验包括初始历元至全部积分路径，计算核心不联网。
 
-模型标识 `iers2003-anelastic-primary-v1` 记录模式、截断、k20、关闭的频率/极潮、实际日月 GM 及星历/EOP 身份。项目 v23 / OBJS14 保存两个选项及非活动草稿；修改设置不改变旧分析。只接受当前格式。`.grv` 的自定义潮汐/Love 数块仍明确拒绝；没有把未读取的元数据当作默认值静默接受。
+模型标识 `iers2003-anelastic-v2` 记录模式、截断、k20、频率/极潮约定及其开关、实际日月 GM 及星历/EOP 身份。项目 v24 / OBJS15 保存三个选项及非活动草稿；修改设置不改变旧分析。只接受当前格式。`.grv` 的自定义潮汐/Love 数块仍明确拒绝；没有把未读取的元数据当作默认值静默接受。
 
 ## 验证
 
 `tools/validation/orekit/OrbitForgeSolidTideReference.java` 调用未修改的 Orekit 13.1.2 `SolidTidesField`、IERS_2003 Love 数、Holmes–Featherstone 与 Hipparchus 4.0.2 DP853。固定结果为 `tests/reference/propagators/solid_tides.txt`：120 组加速度（两种底场潮汐系统、三组日月几何、五组静态截断、潮汐截断开关、普通/近极点卫星）；四组移动日月 ±6000 s / ±1 天传播，关闭直接第三体引力。加速度逐分量容限 2e−14 m/s²（浮点球谐舍入），传播 3 mm / 3 μm/s（两种积分器误差控制差异）。另验证永久潮解析 J2、极点、低阶文件的扩展、覆盖不足、错误恢复及不可变底场。
 
-这些是独立 IERS/Orekit 对照，尚无同配置 STK 轨迹导出实测；尤其不能把未启用的附加时间项或不同 Love 数约定的结果视为相同模型。
+这些是独立 IERS/Orekit 对照，尚无同配置 STK 轨迹导出实测；不能把关闭的附加时间项、不同极潮符号或不同 Love 数约定的结果视为相同模型。
+
+附加时间项的独立参考为 `solid_tides_time_dependent.txt`，由 `OrbitForgeTimeDependentTideReference.java` 调用未修改的 Orekit `IERS_2003` 频率/极潮函数、`SolidTidesField`、Holmes–Featherstone 和 DP853 生成。使用明确的合成 UTC=TAI−32 s、恒定 EOP 和单位旋转，以隔离力模型；39 组系数覆盖 1972–2026、纳秒余数、历史平均极点及 2000 边界，24 组加速度覆盖 0/0、2/0、2/1、2/2、4/3、21/21、截断开关及近极点，4 条 ±6000 s/±1 天轨迹。系数绝对容限 2e−20，依据大历元基本角的浮点舍入；加速度及轨迹沿用上述容限，没有放宽。Python 另使用真实 DE440s/EOP/闰秒表核验启用开关后的身份、报告、保存与重开。

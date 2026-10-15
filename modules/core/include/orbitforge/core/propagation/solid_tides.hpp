@@ -1,4 +1,5 @@
 #pragma once
+#include <orbitforge/core/frames/eop_provider.hpp>
 #include <orbitforge/core/propagation/gravity.hpp>
 #include <span>
 
@@ -7,6 +8,7 @@ enum class SolidTideMode { none, permanent, full };
 struct SolidTideOptions {
     SolidTideMode mode = SolidTideMode::none;
     bool truncate_to_gravity = true;
+    bool include_time_dependent_terms = false; // Full only: 71 frequency terms and solid pole tide.
     bool operator==(const SolidTideOptions &) const = default;
 };
 struct TideRaisingBody {
@@ -20,17 +22,21 @@ void validate_solid_tide_options(const SolidTideOptions &options);
                                                             int gravity_degree);
 // Fully normalized IERS 2003, anelastic Earth, k20 = 0.30190 (post-2006 STK default).
 // Full includes the instantaneous Sun/Moon deformation (degrees 2/3, induced degree 4).
-// Frequency-dependent constituents and pole tide are not yet included, corresponding
-// to STK's Full with Include Time Dependent Terms off. No constituent amplitude filter.
+// Include Time Dependent Terms adds IERS 2003 tables 6.3a/b/c and the printed
+// 2003 pole-tide signs (not the corrected 2010 convention). No amplitude filter.
 // None removes the separable permanent deformation from a zero-tide base field;
 // Permanent includes it exactly once; Full already contains it in the body response.
 // Only tide_free / zero_tide fields are supported; mean_tide is rejected explicitly.
 // Input/output axes are ITRF; no downloads, frame conversion or ephemeris resolution.
 // Full requires exactly two bodies (Sun and Moon); other modes do not read bodies.
-// Invalid options/metadata/geometry throw std::invalid_argument.
-[[nodiscard]] std::vector<GravityCoefficient>
-solid_tide_corrections(const GravityInfo &field, const SolidTideOptions &options,
-                       int gravity_degree, int gravity_order,
-                       std::span<const TideRaisingBody> bodies = {});
+// Active time-dependent terms require borrowed EOP at the evaluation epoch and
+// its UTC provider. Historical mean pole uses 1900-2000 annual samples, then the
+// IERS 2003 linear extension; no silent omission outside time/mean-pole coverage.
+// Invalid options/metadata/geometry throw std::invalid_argument; time range errors
+// propagate from the provider (std::out_of_range before the mean-pole table).
+[[nodiscard]] std::vector<GravityCoefficient> solid_tide_corrections(
+    const GravityInfo &field, const SolidTideOptions &options, int gravity_degree,
+    int gravity_order, std::span<const TideRaisingBody> bodies = {},
+    const EarthOrientationSample *eop = nullptr, const ITimeProvider *time = nullptr);
 [[nodiscard]] double iers2003_permanent_tide_c20() noexcept;
 } // namespace orbitforge::core

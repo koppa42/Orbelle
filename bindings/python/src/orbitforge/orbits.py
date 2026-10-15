@@ -224,13 +224,15 @@ class DragSettings:
 class SolidTideSettings:
     """IERS 2003 primary Sun/Moon deformation and separable permanent tide.
 
-    'full' includes degrees 2/3 and induced degree 4, with frequency-dependent
-    terms and pole tide off. No amplitude filtering yet. 'none' removes the
+    'full' includes degrees 2/3 and induced degree 4. The optional time-dependent
+    terms add 71 frequency corrections and printed IERS 2003 pole tide signs.
+    They require the confirmed EOP/UTC providers. No amplitude filtering yet. 'none' removes the
     permanent component of zero-tide fields; 'permanent' includes it once.
     With truncation off, tides can extend beyond the static degree/order.
     """
     mode: Literal["none", "permanent", "full"] = "none"
     truncate_to_gravity: bool = True
+    include_time_dependent_terms: bool = False
 
     def __post_init__(self) -> None:
         self._native()
@@ -242,9 +244,12 @@ class SolidTideSettings:
             raise ValueError("solid tide mode must be 'none', 'permanent', or 'full'")
         if not isinstance(self.truncate_to_gravity, bool):
             raise TypeError("truncate_to_gravity must be bool")
+        if not isinstance(self.include_time_dependent_terms, bool):
+            raise TypeError("include_time_dependent_terms must be bool")
         value = n.SolidTideOptions()
         value.mode = modes[self.mode]
         value.truncate_to_gravity = self.truncate_to_gravity
+        value.include_time_dependent_terms = self.include_time_dependent_terms
         value.validate()
         return value
 
@@ -252,7 +257,7 @@ class SolidTideSettings:
     def _read(cls, value: n.SolidTideOptions) -> "SolidTideSettings":
         modes = {n.SolidTideMode.NONE: "none", n.SolidTideMode.PERMANENT: "permanent",
                  n.SolidTideMode.FULL: "full"}
-        return cls(modes[value.mode], value.truncate_to_gravity)
+        return cls(modes[value.mode], value.truncate_to_gravity, value.include_time_dependent_terms)
 
 
 @dataclass(frozen=True, slots=True)
