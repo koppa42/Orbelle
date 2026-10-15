@@ -84,7 +84,8 @@ TEST(Hpop, SatelliteMassValidatesCompatibleAreasEvenForDisabledForceDrafts) {
 }
 TEST(Hpop, PointMassMatchesCircularAnalyticSolutionForwardBackwardAndNearEpochLimits) {
     const double rate = std::sqrt(egm96_mu / std::pow(7e6, 3));
-    for (auto integrator : {HpopIntegrator::rkf78, HpopIntegrator::rkv89})
+    for (auto integrator :
+         {HpopIntegrator::rkf78, HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer})
         for (auto origin : {0LL, 8'000'000'000'000'000'000LL}) {
             auto initial = circular();
             initial.epoch = Epoch{origin};
@@ -214,7 +215,8 @@ TEST(Hpop, MatchesIndependentOrekitHolmesFeatherstoneAndDp853Reference) {
         SCOPED_TRACE(line);
         const auto acceleration =
             egm96_acceleration(initial.position_m, options.gravity_degree, options.gravity_order);
-        for (auto integrator : {HpopIntegrator::rkf78, HpopIntegrator::rkv89}) {
+        for (auto integrator :
+             {HpopIntegrator::rkf78, HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer}) {
             options.integrator = integrator;
             const auto actual = make_hpop(initial, options, environment)
                                     ->state_at(Epoch{static_cast<std::int64_t>(elapsed * 1e9)});
@@ -326,6 +328,59 @@ TEST(Hpop, Rkv89MatchesIndependentScipyDop853ForEccentricJ2AndTimeVaryingForces)
     RecordProperty("max_position_error_m", metrics_r.str());
     RecordProperty("max_velocity_error_mps", metrics_v.str());
 }
+TEST(Hpop, BulirschStoerMatchesIndependentHipparchusForEccentricJ2AndTimeVaryingForces) {
+    std::ifstream file{ORBITFORGE_BS_REFERENCE};
+    ASSERT_TRUE(file.good());
+    HpopEnvironment environment{std::make_shared<FixedFrames>(), std::make_shared<FixedEop>()};
+    environment.ephemeris = std::make_shared<MovingMoon>();
+    std::string line;
+    int count = 0;
+    double max_position = 0, max_velocity = 0;
+    while (std::getline(file, line)) {
+        if (line.empty() || line[0] == '#')
+            continue;
+        SCOPED_TRACE(line);
+        std::istringstream row{line};
+        int kind;
+        double seconds;
+        auto initial = circular(), expected = initial;
+        row >> kind >> seconds;
+        for (auto &v : initial.position_m)
+            row >> v;
+        for (auto &v : initial.velocity_mps)
+            row >> v;
+        for (auto &v : expected.position_m)
+            row >> v;
+        for (auto &v : expected.velocity_mps)
+            row >> v;
+        ASSERT_FALSE(row.fail());
+        expected.epoch = Epoch{std::llround(seconds * 1e9)};
+        auto options = point_mass();
+        options.integrator = HpopIntegrator::bulirsch_stoer;
+        options.gravity_degree = kind ? 2 : 0;
+        options.relative_tolerance = 1e-14;
+        options.position_tolerance_m = 1e-8;
+        options.velocity_tolerance_mps = 1e-11;
+        options.max_step_seconds = 300;
+        options.third_bodies[static_cast<std::size_t>(ThirdBody::moon)].enabled = kind == 2;
+        const auto actual = make_hpop(initial, options, environment)->state_at(expected.epoch);
+        const double er = position_error(actual, expected);
+        const double ev = std::hypot(actual.velocity_mps[0] - expected.velocity_mps[0],
+                                     actual.velocity_mps[1] - expected.velocity_mps[1],
+                                     actual.velocity_mps[2] - expected.velocity_mps[2]);
+        max_position = std::max(max_position, er);
+        max_velocity = std::max(max_velocity, ev);
+        EXPECT_LT(er, .005);
+        EXPECT_LT(ev, 5e-6);
+        ++count;
+    }
+    EXPECT_EQ(count, 60);
+    std::ostringstream metrics_r, metrics_v;
+    metrics_r << std::setprecision(17) << max_position;
+    metrics_v << std::setprecision(17) << max_velocity;
+    RecordProperty("max_position_error_m", metrics_r.str());
+    RecordProperty("max_velocity_error_mps", metrics_v.str());
+}
 TEST(Hpop, Rkv89AdvancesTheEighthOrderMemberAndControlsRejectedSteps) {
     const auto initial = eccentric_analytic(0), expected = eccentric_analytic(6000);
     auto options = point_mass();
@@ -353,25 +408,60 @@ TEST(Hpop, Rkv89AdvancesTheEighthOrderMemberAndControlsRejectedSteps) {
     const auto adaptive = make_hpop(initial, options)->state_at(expected.epoch);
     EXPECT_LT(position_error(adaptive, expected), 1e-4);
 }
-TEST(Hpop, Rkv89CancellationAndQueryOrderPreserveDeterministicCheckpoints) {
+TEST(Hpop, AdaptiveCancellationAndQueryOrderPreserveDeterministicCheckpoints) {
+    for (auto integrator : {HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer}) {
+        auto options = point_mass();
+        options.integrator = integrator;
+        const auto provider = make_hpop(circular(), options),
+                   fresh = make_hpop(circular(), options);
+        int calls = 0;
+        EXPECT_THROW((void)provider->state_at(Epoch{9000'000'000'000},
+                                              [&] {
+                                                  if (++calls == 20)
+                                                      throw std::runtime_error("cancel");
+                                              }),
+                     std::runtime_error);
+        EXPECT_EQ(calls, 20);
+        for (auto ns : {777'000'000'000LL, -199'000'000'000LL, 1LL})
+            (void)provider->state_at(Epoch{ns});
+        auto job = std::async(std::launch::async,
+                              [&] { return provider->state_at(Epoch{-8123'456'789'012}); });
+        EXPECT_EQ(provider->state_at(Epoch{9000'000'000'000}).position_m,
+                  fresh->state_at(Epoch{9000'000'000'000}).position_m);
+        const auto actual = job.get(), expected = fresh->state_at(Epoch{-8123'456'789'012});
+        EXPECT_EQ(actual.position_m, expected.position_m);
+        EXPECT_EQ(actual.velocity_mps, expected.velocity_mps);
+    }
+}
+
+TEST(Hpop, BulirschStoerAdaptsOrderAndRejectsUnresolvedMinimumSteps) {
+    const auto initial = eccentric_analytic(0), expected = eccentric_analytic(6000);
     auto options = point_mass();
-    options.integrator = HpopIntegrator::rkv89;
-    const auto provider = make_hpop(circular(), options), fresh = make_hpop(circular(), options);
-    int calls = 0;
-    EXPECT_THROW((void)provider->state_at(Epoch{9000'000'000'000},
-                                          [&] {
-                                              if (++calls == 20)
-                                                  throw std::runtime_error("cancel");
-                                          }),
-                 std::runtime_error);
-    EXPECT_EQ(calls, 20);
-    for (auto ns : {777'000'000'000LL, -199'000'000'000LL, 1LL})
-        (void)provider->state_at(Epoch{ns});
-    auto job = std::async(std::launch::async,
-                          [&] { return provider->state_at(Epoch{-8123'456'789'012}); });
-    EXPECT_EQ(provider->state_at(Epoch{9000'000'000'000}).position_m,
-              fresh->state_at(Epoch{9000'000'000'000}).position_m);
-    const auto actual = job.get(), expected = fresh->state_at(Epoch{-8123'456'789'012});
-    EXPECT_EQ(actual.position_m, expected.position_m);
-    EXPECT_EQ(actual.velocity_mps, expected.velocity_mps);
+    options.integrator = HpopIntegrator::bulirsch_stoer;
+    options.min_step_seconds = options.max_step_seconds = 300;
+    options.relative_tolerance = 1e-6;
+    options.position_tolerance_m = .1;
+    options.velocity_tolerance_mps = 1e-4;
+    int loose_work = 0, tight_work = 0;
+    const auto loose = make_hpop(initial, options)->state_at(expected.epoch, [&] { ++loose_work; });
+    options.relative_tolerance = 1e-14;
+    options.position_tolerance_m = 1e-8;
+    options.velocity_tolerance_mps = 1e-11;
+    const auto tight = make_hpop(initial, options)->state_at(expected.epoch, [&] { ++tight_work; });
+    EXPECT_LT(position_error(tight, expected), .001);
+    EXPECT_LT(position_error(tight, expected), position_error(loose, expected) * .01);
+    EXPECT_GT(tight_work, loose_work);
+    options.min_step_seconds = options.max_step_seconds = 60;
+    const auto small_steps = make_hpop(initial, options)->state_at(expected.epoch);
+    EXPECT_LT(position_error(small_steps, tight), .001);
+    // Fast hyperbolic departure needs a shorter step than the allowed 300 seconds.
+    auto fast = initial;
+    fast.velocity_mps[1] = 120000;
+    options.min_step_seconds = options.max_step_seconds = 300;
+    EXPECT_THROW((void)make_hpop(fast, options)->state_at(Epoch{300'000'000'000}),
+                 PropagationError);
+    options.min_step_seconds = .001;
+    EXPECT_NO_THROW((void)make_hpop(fast, options)->state_at(Epoch{300'000'000'000}));
+    RecordProperty("loose_work", loose_work);
+    RecordProperty("tight_work", tight_work);
 }

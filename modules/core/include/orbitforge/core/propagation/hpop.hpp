@@ -20,7 +20,7 @@ inline constexpr double egm96_radius_m = 6378136.3;
 inline constexpr int egm96_max_degree = 20;
 inline constexpr double hpop_max_duration_seconds = 366.0 * 86400;
 // RKV uses Verner's efficient 16-stage pair, advancing its eighth-order member.
-enum class HpopIntegrator { rkf78, rk4, rkv89 };
+enum class HpopIntegrator { rkf78, rk4, rkv89, bulirsch_stoer };
 struct HpopOptions {
     // Catalog selection, never a file path. Empty selects the built-in 20x20 EGM96.
     std::string gravity_model{};

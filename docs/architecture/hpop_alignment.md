@@ -82,9 +82,9 @@
 | Additional | Relativistic Accelerations；Satellite Mass | 已接入 IERS 2003 三项相对论、TAI 星历速度、自转轴方向与共享卫星质量；质量用于球形对应面积换算，不覆盖各自显式给定的面积质量比；相对论和球形质量语义分别与 Orekit 对照。见[相对论契约](relativity.md) |
 | Additional | Use Plugin；Plugin 选择；Plugin Settings | 待实现：注册、具名设置、生命周期、加速度及偏导契约、可复现配置和错误隔离 |
 | Additional | Advanced 子窗口 | 待实现：继续逐项核对官方高级设置；须与力模型版本和数值含义对应，不能放一个空入口 |
-| Integrator | Integration 方法 | 部分：RK4、RKF78、RKV 8(9) Efficient 已实现；RKV 已做 SciPy DOP853 / Orekit 数值对照及八阶收敛验证；仍须 Bulirsch–Stoer、Gauss–Jackson，STK 同配置验收待完成 |
+| Integrator | Integration 方法 | 部分：RK4、RKF78、RKV 8(9) Efficient、Bulirsch–Stoer 已实现；RKV 已做 SciPy DOP853 / Orekit 数值对照及八阶收敛验证；Bulirsch–Stoer 已做 Hipparchus GBS / Orekit 对照、自动升阶及步长收敛；仍须 Gauss–Jackson，STK 同配置验收待完成 |
 | Integrator | VOP；Predictor Corrector Scheme | 待实现：通用变量方程、Full/Pseudo Correction、有效组合及机动后重启 |
-| Integrator | Fixed/Relative Error；Tolerance；Min/Max Step | 部分：RK4 固定、RKF78 / RKV89 混合绝对/相对控制；需对齐各方法语义并验证截图 1–86400 s 范围 |
+| Integrator | Fixed/Relative Error；Tolerance；Min/Max Step | 部分：RK4 固定、RKF78 / RKV89 / Bulirsch–Stoer 混合绝对/相对控制；需对齐各方法语义并验证截图 1–86400 s 范围 |
 | Integrator | Interpolation 方法；Order；VOP μ | 待实现：Lagrange、Hermite、VOP；误差、位置速度一致性及禁止跨脉冲插值 |
 | Integrator | Allow PosVel Covariance Interpolation | 待实现：协方差传播完成后验证插值、对称性与半正定性 |
 | Integrator | Time Regularization；Exponent；Steps Per Orbit | 待实现：正则化时间变换及高偏心轨道、正反向和边界事件 |

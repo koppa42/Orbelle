@@ -285,7 +285,11 @@ class Hpop final : public IStateProvider {
             tmp[i] = s[i] + h / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
         return tmp;
     }
-    std::pair<State, double> rkf78(double t, const State &s, double h) const {
+    struct TrialStep {
+        State value{};
+        double error = 0, exponent = 0;
+    };
+    TrialStep rkf78(double t, const State &s, double h) const {
         std::array<State, 13> k;
         for (std::size_t stage = 0; stage < 13; ++stage) {
             auto value = s;
@@ -313,9 +317,9 @@ class Hpop final : public IStateProvider {
                                                 std::max(std::abs(s[i]), std::abs(result[i]));
             error = std::max(error, estimate / scale);
         }
-        return {result, error};
+        return {result, error, -1.0 / 8};
     }
-    std::pair<State, double> rkv89(double t, const State &s, double h) const {
+    TrialStep rkv89(double t, const State &s, double h) const {
         std::array<State, 16> k;
         for (std::size_t stage = 0; stage < k.size(); ++stage) {
             auto value = s;
@@ -343,7 +347,99 @@ class Hpop final : public IStateProvider {
                                                 std::max(std::abs(s[i]), std::abs(result[i]));
             error = std::max(error, std::abs(h * difference) / scale);
         }
-        return {result, error};
+        return {result, error, -1.0 / 9};
+    }
+    TrialStep bulirsch_stoer(double t, const State &s, double h,
+                             const std::function<void()> &checkpoint) const {
+        // Smoothed modified midpoint, polynomial Richardson extrapolation in 1/n^2.
+        // Even substep counts preserve the even-power expansion: orders 4..18.
+        constexpr std::size_t levels = 9;
+        std::array<State, levels> table{};
+        const auto first = derivative(t, s, weather_stage(t, t, t + h));
+        TrialStep best{}, rejected{};
+        bool accepted = false;
+        double best_work = std::numeric_limits<double>::infinity();
+        int evaluations = 1;
+        for (std::size_t level = 0; level < levels; ++level) {
+            const int n = 2 * (static_cast<int>(level) + 1);
+            const double substep = h / n;
+            State previous = s, current = s;
+            for (std::size_t i = 0; i < s.size(); ++i)
+                current[i] += substep * first[i];
+            for (int j = 1; j < n; ++j) {
+                if (checkpoint)
+                    checkpoint();
+                const double at = t + h * (static_cast<double>(j) / n);
+                const auto slope = derivative(at, current, weather_stage(at, t, t + h));
+                auto next = previous;
+                for (std::size_t i = 0; i < s.size(); ++i)
+                    next[i] += 2 * substep * slope[i];
+                previous = current;
+                current = next;
+            }
+            if (checkpoint)
+                checkpoint();
+            const auto last = derivative(t + h, current, weather_stage(t + h, t, t + h));
+            State estimate{}, correction{};
+            for (std::size_t i = 0; i < s.size(); ++i)
+                estimate[i] = .5 * (previous[i] + current[i] + substep * last[i]);
+            evaluations += n;
+            for (std::size_t column = 0; column < level; ++column) {
+                const auto lower = estimate;
+                const double ratio = static_cast<double>(level + 1) / (level - column);
+                for (std::size_t i = 0; i < s.size(); ++i) {
+                    correction[i] = (estimate[i] - table[column][i]) / (ratio * ratio - 1);
+                    estimate[i] += correction[i];
+                }
+                table[column] = lower;
+            }
+            table[level] = estimate;
+            if (level == 0)
+                continue; // A single second-order result has no error estimate.
+            double error = 0;
+            for (std::size_t i = 0; i < s.size(); ++i) {
+                if (!std::isfinite(estimate[i]) || !std::isfinite(correction[i]))
+                    throw PropagationError("HPOP extrapolation produced a nonfinite result");
+                const double absolute =
+                    i < 3 ? options_.position_tolerance_m : options_.velocity_tolerance_mps;
+                const double scale = absolute + options_.relative_tolerance *
+                                                    std::max(std::abs(s[i]), std::abs(estimate[i]));
+                error = std::max(error, std::abs(correction[i]) / scale);
+            }
+            TrialStep candidate{estimate, error, -1.0 / (2 * level + 1)};
+            rejected = candidate;
+            const bool lookahead = accepted;
+            if (error <= 1) {
+                const double factor =
+                    error == 0 ? 4 : std::clamp(.9 * std::pow(error, candidate.exponent), .1, 4.);
+                // One lookahead column compares force evaluations per attainable next second.
+                const double proposed =
+                    std::min({std::abs(h) * factor, options_.max_step_seconds, checkpoint_seconds});
+                const double work = evaluations / proposed;
+                if (work < best_work) {
+                    best = candidate;
+                    best_work = work;
+                }
+                accepted = true;
+            }
+            if (lookahead)
+                return best;
+        }
+        return accepted ? best : rejected;
+    }
+    TrialStep trial_step(double t, const State &s, double h,
+                         const std::function<void()> &checkpoint) const {
+        switch (options_.integrator) {
+        case HpopIntegrator::rkf78:
+            return rkf78(t, s, h);
+        case HpopIntegrator::rkv89:
+            return rkv89(t, s, h);
+        case HpopIntegrator::bulirsch_stoer:
+            return bulirsch_stoer(t, s, h, checkpoint);
+        case HpopIntegrator::rk4:
+            return {rk4(t, s, h), 0, 0};
+        }
+        throw std::invalid_argument("Unsupported HPOP integrator");
     }
     State integrate(State state, double t, double end, std::size_t &attempts,
                     const std::function<void()> &checkpoint) const {
@@ -362,9 +458,7 @@ class Hpop final : public IStateProvider {
             const double h = std::copysign(magnitude, end - t);
             if (t + h == t)
                 throw PropagationError("HPOP integration step cannot advance time");
-            auto [next, error] = options_.integrator == HpopIntegrator::rkv89 ? rkv89(t, state, h)
-                                 : adaptive                                   ? rkf78(t, state, h)
-                                            : std::pair{rk4(t, state, h), 0.0};
+            auto [next, error, exponent] = trial_step(t, state, h, checkpoint);
             if (!std::isfinite(error) ||
                 !std::all_of(next.begin(), next.end(), [](double v) { return std::isfinite(v); }))
                 throw PropagationError("HPOP integration produced a nonfinite result");
@@ -377,8 +471,6 @@ class Hpop final : public IStateProvider {
                 throw PropagationError("HPOP cannot meet tolerance at the minimum step");
             }
             if (adaptive) {
-                const double exponent =
-                    options_.integrator == HpopIntegrator::rkv89 ? -1.0 / 9 : -1.0 / 8;
                 const double factor =
                     error == 0 ? 4 : std::clamp(0.9 * std::pow(error, exponent), 0.1, 4.0);
                 step = std::clamp(magnitude * factor, options_.min_step_seconds,
@@ -557,7 +649,7 @@ void validate_hpop_options(const HpopOptions &o) {
         throw std::invalid_argument(
             "HPOP gravity degree must be 0 or 2..model limit; order must be 0..degree");
     if (o.integrator != HpopIntegrator::rkf78 && o.integrator != HpopIntegrator::rk4 &&
-        o.integrator != HpopIntegrator::rkv89)
+        o.integrator != HpopIntegrator::rkv89 && o.integrator != HpopIntegrator::bulirsch_stoer)
         throw std::invalid_argument("Unsupported HPOP integrator");
     positive(o.position_tolerance_m, "HPOP position tolerance must be finite and positive");
     positive(o.velocity_tolerance_mps, "HPOP velocity tolerance must be finite and positive");

@@ -14,6 +14,8 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
                      (options.integrator == core::HpopIntegrator::rkf78 ? "rkf78-8th-v1;"
                       : options.integrator == core::HpopIntegrator::rkv89
                           ? "rkv89-efficient-8th-rklib-a1bf2d26-v1;"
+                      : options.integrator == core::HpopIntegrator::bulirsch_stoer
+                          ? "bulirsch-stoer-midpoint-richardson-4to18-cost-v1;"
                           : "rk4-v1;") +
                      (options.gravity_model.empty() ? std::string(core::egm96_model_id())
                                                     : options.gravity_model) +

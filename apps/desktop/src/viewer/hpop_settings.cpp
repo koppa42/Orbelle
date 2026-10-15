@@ -1067,7 +1067,8 @@ bool edit_hpop_settings(
     auto *method = new QComboBox;
     method->setObjectName("hpopIntegrator");
     method->addItems({QStringLiteral("RKF78 · 自适应步长"), QStringLiteral("RK4 · 固定步长"),
-                      QStringLiteral("RKV 8(9) Efficient · 自适应步长")});
+                      QStringLiteral("RKV 8(9) Efficient · 自适应步长"),
+                      QStringLiteral("Bulirsch–Stoer · 自适应步长")});
     method->setCurrentIndex(static_cast<int>(options.integrator));
     integration->addRow(QStringLiteral("积分器"), method);
     auto *adaptive_widget = new QWidget;

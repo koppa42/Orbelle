@@ -92,6 +92,7 @@ void bind_project(py::module_ &module) {
             },
             py::arg("initial"));
     py::enum_<core::HpopIntegrator>(module, "HpopIntegrator")
+        .value("BULIRSCH_STOER", core::HpopIntegrator::bulirsch_stoer)
         .value("RKV89", core::HpopIntegrator::rkv89)
         .value("RKF78", core::HpopIntegrator::rkf78)
         .value("RK4", core::HpopIntegrator::rk4);

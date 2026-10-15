@@ -124,7 +124,7 @@ class WeatherTests(unittest.TestCase):
                 target=of.Epoch(initial.tai_nanoseconds+direction*300*10**9)
                 first,last=(initial,target) if direction==1 else (target,initial)
                 positions=[]
-                for integrator,step in (("rkf78",60),("rkf78",7),("rkf78",1),("rkv89",60),("rkv89",7),("rk4",.5)):
+                for integrator,step in (("rkf78",60),("rkf78",7),("rkf78",1),("rkv89",60),("rkv89",7),("bulirsch_stoer",60),("bulirsch_stoer",7),("rk4",.5)):
                     project=of.Project('Storm',first,last)
                     orbit=of.orbits.Hpop(initial=of.orbits.Cartesian(initial,(6628137,0,0),(0,7750,0)),
                         gravity_degree=0,integrator=integrator,max_step_seconds=step,fixed_step_seconds=step,relative_tolerance=1e-13,
