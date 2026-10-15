@@ -214,10 +214,12 @@ TEST(SecularGravity, RejectsInvalidRateMetadataAndOverflowAndRequiresSelectedRes
              {{2, 0, 0, 1e-11}},
              {{2, 1, 0, 0}, {2, 1, 1e-11, 0}},
              {{2, 0, std::numeric_limits<double>::infinity(), 0}}}) {
-        info.secular_variations->rates_per_year = rates;
+        info.secular_variations.value().rates_per_year = rates;
         EXPECT_THROW((void)core::GravityModel(info, {}), std::invalid_argument);
     }
-    info.secular_variations->rates_per_year = {{2, 0, 1e308, 0}};
+    auto &overflow_rates = info.secular_variations.value().rates_per_year;
+    overflow_rates.clear();
+    overflow_rates.push_back({2, 0, 1e308, 0});
     const core::GravityModel huge(info, {});
     EXPECT_THROW(
         (void)huge.secular_corrections(core::Epoch{std::numeric_limits<std::int64_t>::max()}, 2, 0),
