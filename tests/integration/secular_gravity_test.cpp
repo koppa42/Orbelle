@@ -186,12 +186,14 @@ TEST(SecularGravity, ExplicitEpochImmutableMetadataAndIndependentTruncation) {
               10634482570667LL);
     auto info = field->info();
     const auto ref = runtime::gravity_reference("custom", info);
-    info.secular_variations->reference_epoch = core::Epoch{0};
+    info.secular_variations.value().reference_epoch = core::Epoch{0};
     EXPECT_NE(runtime::gravity_reference("custom", info), ref);
     EXPECT_EQ(field->info().secular_variations->reference_epoch, epoch);
-    info = field->info();
-    info.secular_variations->rates_per_year[0].c *= 2;
-    EXPECT_NE(runtime::gravity_reference("custom", info), ref);
+    auto changed_rate = field->info();
+    auto &rates = changed_rate.secular_variations.value().rates_per_year;
+    ASSERT_FALSE(rates.empty());
+    rates.front().c *= 2;
+    EXPECT_NE(runtime::gravity_reference("custom", changed_rate), ref);
     auto high_info = core::builtin_egm96()->info();
     high_info.degree = high_info.order = 2190;
     high_info.secular_variations =
