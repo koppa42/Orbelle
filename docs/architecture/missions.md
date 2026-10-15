@@ -86,4 +86,4 @@ auto states = analysis.states(satellite, 60s, of::FrameId::gcrf);
 
 公共段类型位于 Core；`runtime::make_mission_session` 装配二体或 HPOP，桌面与两种 SDK 共用。`ManeuverSeries` 拥有结果、对象/修订/算法来源及输入和数据哈希；非任务序列卫星返回空记录，地面站和传感器不接受机动查询。取消回调可中止传播，失败不返回部分结果；已完成弧段可缓存，重试保持一致。
 
-`.orbitforge` v26 保存初态、滑行模型、全部有序段及活动 HPOP 配置，只读写当前格式。机动名称属于显示元数据，不改变计算输入哈希；时长、顺序、方向和 Δv 均影响哈希。固定二进制样本由独立 `struct.pack` 构造，精确校验纳秒字段。验证范围与容限见[机动验证协议](../validation/mission_protocol.md)。
+`.orbitforge` v27 保存初态、滑行模型、全部有序段及活动 HPOP 配置，只读写当前格式。机动名称属于显示元数据，不改变计算输入哈希；时长、顺序、方向和 Δv 均影响哈希。固定二进制样本由独立 `struct.pack` 构造，精确校验纳秒字段。验证范围与容限见[机动验证协议](../validation/mission_protocol.md)。

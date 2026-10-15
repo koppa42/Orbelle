@@ -1,5 +1,6 @@
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
+#include <orbitforge/runtime/ocean_tides.hpp>
 #include <orbitforge/runtime/space_weather.hpp>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -68,6 +69,29 @@ void bind_data_catalog(py::module_ &module) {
         "load_space_weather",
         [](const std::filesystem::path &file) { return runtime::load_space_weather(file); },
         py::arg("file"), py::call_guard<py::gil_scoped_release>());
+    py::class_<core::OceanTideInfo>(module, "OceanTideInfo")
+        .def_readonly("model", &core::OceanTideInfo::model)
+        .def_readonly("sha256", &core::OceanTideInfo::sha256)
+        .def_readonly("source_url", &core::OceanTideInfo::source_url)
+        .def_readonly("degree", &core::OceanTideInfo::degree)
+        .def_readonly("order", &core::OceanTideInfo::order)
+        .def_readonly("constituents", &core::OceanTideInfo::constituents)
+        .def_readonly("mu", &core::OceanTideInfo::mu)
+        .def_readonly("radius_m", &core::OceanTideInfo::radius_m);
+    py::class_<core::OceanTideModel, std::shared_ptr<core::OceanTideModel>>(module,
+                                                                            "OceanTideModel")
+        .def_property_readonly("info", &core::OceanTideModel::info, py::return_value_policy::copy);
+    py::class_<runtime::CatalogOceanTides>(module, "CatalogOceanTides")
+        .def_readonly("selection", &runtime::CatalogOceanTides::selection)
+        .def_readonly("info", &runtime::CatalogOceanTides::info)
+        .def_readonly("file", &runtime::CatalogOceanTides::file)
+        .def_readonly("acquisition", &runtime::CatalogOceanTides::acquisition)
+        .def_readonly("acquired_at_unix_seconds",
+                      &runtime::CatalogOceanTides::acquired_at_unix_seconds);
+    module.def(
+        "load_ocean_tides",
+        [](const std::filesystem::path &file) { return runtime::load_ocean_tides(file); },
+        py::arg("file"), py::call_guard<py::gil_scoped_release>());
     module.def("data_catalog_available", &runtime::data_catalog_available);
     py::enum_<runtime::EopProduct>(module, "EopProduct")
         .value("C04", runtime::EopProduct::c04)
@@ -93,6 +117,14 @@ void bind_data_catalog(py::module_ &module) {
         .def_property_readonly("gravity_models", &runtime::DataCatalog::gravity_models)
         .def_property_readonly("ephemerides", &runtime::DataCatalog::ephemerides)
         .def_property_readonly("weather_sources", &runtime::DataCatalog::weather_sources)
+        .def_property_readonly("ocean_tide_models", &runtime::DataCatalog::ocean_tide_models)
+        .def(
+            "install_ocean_tides",
+            [](runtime::DataCatalog &catalog, const std::filesystem::path &file,
+               const std::string &model,
+               const std::string &url) { return catalog.install_ocean_tides(file, model, url); },
+            py::arg("file"), py::arg("model") = "fes2014bv1", py::arg("source_url") = "",
+            py::call_guard<py::gil_scoped_release>())
         .def(
             "install_space_weather",
             [](runtime::DataCatalog &catalog, const std::filesystem::path &file,

@@ -2,6 +2,7 @@
 // Everyday SDK entry point. Link OrbitForge::Runtime; no Qt or Python dependency.
 #include <orbitforge/project.hpp>
 #include <orbitforge/runtime/gravity.hpp>
+#include <orbitforge/runtime/ocean_tides.hpp>
 
 namespace orbitforge {
 using application::DataLock;

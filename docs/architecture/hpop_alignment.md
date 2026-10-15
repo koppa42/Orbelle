@@ -2,7 +2,7 @@
 
 本文定义 OrbitForge 通用地球轨道数值传播的目标契约与验收顺序，以 STK 的公开设计和参数语义为准。Gravity、Drag、SRP、Additional、Integrator、Covariance 六页是组织依据，包含未勾选、灰显和子窗口中的目标设置；不能仅实现截图当前启用的组合。后续力模型截图只作辅助参考，不据此引入与 STK 不同的输入模式。交付按下表逐项验收。
 
-当前已实现静态重力资源、太阳系第三体引力及球形太阳辐射压：数据中心下载 EGM2008 / EGM96 / DE440s、导入外部静态重力文件，最高 2190 阶重力计算、日月与行星差分引力，以及无阴影／圆柱／双锥的球面地月遮挡，贯通桌面、C++、Python 和项目数据引用。其余目标按下文逐项验收；当前能力以[预报器](propagators.md#hpop)为准，不能把本增量称为完整 HPOP。
+当前已实现静态重力资源、永久/完整固体潮、FES2014bv1 显式分潮与海洋极潮、太阳系第三体引力、球形阻力/太阳辐射压及三项相对论：数据中心下载 EGM2008 / EGM96 / DE440s、导入外部静态重力文件，最高 2190 阶重力计算、日月与行星差分引力，以及无阴影／圆柱／双锥的球面地月遮挡，贯通桌面、C++、Python 和项目数据引用。其余目标按下文逐项验收；当前能力以[预报器](propagators.md#hpop)为准，不能把本增量称为完整 HPOP。
 
 桌面第一次正常启动必须准备 UTC、C04、finals2000A、完整 EGM2008，以及启用 CSPICE 时的 DE440s；已有有效文件直接复用，缺失文件由启动准备窗口下载。进度、取消、校验与原子安装复用数据中心；失败可重试，取消则退出启动。新建 HPOP 使用 EGM2008、21×21，配置中不显示“已安装”。以后所选官方重力文件缺失时，HPOP 设置页仍提供下载与重试。内置示例和点质量可主动选择；计算 API 的资源装配保持显式。
 
@@ -52,7 +52,7 @@
 | --- | --- | --- |
 | 0 | 解除 360×360 限制 | 支持至 2190×2190，完整 EGM2008 为 2190×2159；全阶 Orekit 参考、极点解析值及接口往返已通过 |
 | 1 | Additional 卫星质量 | 已接入 kg/g/t、独立阻力/光压对应面积、C++/Python 和保存重开；球形加速度仍仅使用显式 A/m；以 Orekit 面积与质量参数独立验收 |
-| 2 | Gravity 时变系数与剩余潮汐设置 | 按六页清单继续；文件自定义 Love 数已接入；长期变化、幅度筛选和海潮继续逐项实现、验证 |
+| 2 | Gravity 时变系数与剩余潮汐设置 | 按六页清单继续；文件自定义 Love 数、FES2014bv1 显式分潮与海洋极潮已接入；长期变化、幅度筛选和次要分潮推算继续逐项实现、验证 |
 | 3 | 阻力、光压、其他及数值页的剩余设置 | 按下表逐项补齐，保持 STK 参数含义和成熟算法对照 |
 | 暂缓 | WGS84 球谐重力模型 | 等待可核实的 STK 原始系数与版本；不以 WGS84 椭球或 EGM84 冒充 |
 
@@ -66,7 +66,7 @@
 | Gravity | Include Secular Variations | 待实现：系数参考历元、长期变化率与时间单位；开启后力值随历元改变 |
 | Gravity | 固体潮模式，含 Permanent tide only | 部分：三种模式、日月形变、71 个频率项和 IERS 2003 固体极潮已接入，永久潮按底场去重；`.grv` 自定义 k20 已接入并与 Orekit 对照，见[固体潮契约](solid_tides.md) |
 | Gravity | Truncate to Gravity Field Size；Time Dependent Terms；Min. Amplitude | 部分：阶/次独立截断及附加时间项开关已生效，可扩展超出底场阶次；幅度阈值待实现 |
-| Gravity | Use Ocean Tides；独立 Degree / Order；Min. Amplitude | 待实现：海潮文件统一管理；分潮、阶次与筛选实际生效 |
+| Gravity | Use Ocean Tides；独立 Degree / Order；Min. Amplitude | 部分：FES2014bv1 官方 100×100 / 36 个显式分潮、独立阶次、IERS 2010 海洋极潮和统一文件管理已接入并通过 Orekit 对照；Min. Amplitude 与 STK 次要分潮推算待实现，见[海潮契约](ocean_tides.md) |
 | Gravity | 第三体 Name / Use / Source / Gravity Value | 已接入：日月、七行星及冥王星；三种 GM 来源、Cb 常数导入和中心/系统质心约定。仍需同配置 STK 实测，且不导入 Cb 文件的其他星历设置，见[第三体契约](third_body_gravity.md) |
 | Drag | Use Drag；Spherical；Cd；Area/Mass Ratio | 已实现：共转 ITRF 大气相对速度、完整旋转率项、独立面积质量比及 Cd；见[阻力契约](atmospheric_drag.md) |
 | Drag | Atmospheric Density，含 Jacchia–Roberts | 已实现 JR / NRLMSISE-00 gtd7d；分别核对原始 GMAT / 作者 C 密度，尚未完成 STK 同配置数值验收 |

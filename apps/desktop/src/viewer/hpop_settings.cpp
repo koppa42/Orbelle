@@ -294,7 +294,7 @@ bool edit_hpop_settings(
         form->addRow(label, field);
         return field;
     };
-    caution(gravity, QStringLiteral("重力系数长期变化与海洋潮待实现。"));
+    caution(gravity, QStringLiteral("重力系数长期变化待实现。"));
     auto *solid = section(gravity_page, QStringLiteral("固体潮"), "hpopSolidTidesSection");
     auto *solid_mode = new QComboBox;
     solid_mode->setObjectName("hpopSolidTideMode");
@@ -332,6 +332,69 @@ bool edit_hpop_settings(
          QStringLiteral("采用 IERS 2003 非弹性地球模型；永久潮按重力文件的潮汐系统计入一次。"
                         "完整固体潮独立使用所选星历中的太阳、月球位置与 GM，无需勾选第三体引力。"));
     caution(solid, QStringLiteral("最小振幅筛选待实现，当前包含全部潮汐分量。"));
+    auto installed_oceans =
+        data ? data->data().ocean_tide_models() : std::vector<runtime::CatalogOceanTides>{};
+    auto *ocean = section(gravity_page, QStringLiteral("海潮"), "hpopOceanTidesSection");
+    auto *ocean_use = new QCheckBox(QStringLiteral("使用海潮 Use Ocean Tides"));
+    ocean_use->setObjectName("hpopUseOceanTides");
+    ocean_use->setChecked(options.ocean_tides.enabled);
+    ocean->addRow(ocean_use);
+    auto *ocean_model = new QComboBox;
+    ocean_model->setObjectName("hpopOceanTideModel");
+    ocean_model->addItem(QStringLiteral("FES2014bv1"), QStringLiteral("fes2014bv1"));
+    const auto refresh_ocean_models = [&] {
+        const QSignalBlocker blocker(ocean_model);
+        for (const auto &entry : installed_oceans) {
+            const auto id = QString::fromStdString(entry.selection);
+            if (entry.selection == "fes2014bv1")
+                continue;
+            const auto title =
+                QString::fromStdString(entry.info.model) + QStringLiteral(" · 外部文件");
+            const int index = ocean_model->findData(id);
+            if (index < 0)
+                ocean_model->addItem(title, id);
+            else
+                ocean_model->setItemText(index, title);
+        }
+    };
+    refresh_ocean_models();
+    const auto ocean_id = QString::fromStdString(options.ocean_tides.model);
+    if (ocean_model->findData(ocean_id) < 0)
+        ocean_model->addItem(ocean_id, ocean_id);
+    ocean_model->setCurrentIndex(ocean_model->findData(ocean_id));
+    ocean->addRow(QStringLiteral("模型"), ocean_model);
+    auto *ocean_degree = new QSpinBox;
+    ocean_degree->setObjectName("hpopOceanTideDegree");
+    ocean_degree->setRange(0, core::gravity_max_degree);
+    ocean_degree->setValue(options.ocean_tides.degree);
+    auto *ocean_order = new QSpinBox;
+    ocean_order->setObjectName("hpopOceanTideOrder");
+    ocean_order->setRange(0, options.ocean_tides.degree);
+    ocean_order->setValue(options.ocean_tides.order);
+    ocean->addRow(QStringLiteral("最大阶 Degree"), ocean_degree);
+    ocean->addRow(QStringLiteral("最大次 Order"), ocean_order);
+    QObject::connect(ocean_degree, &QSpinBox::valueChanged, ocean_order, &QSpinBox::setMaximum);
+    auto *ocean_status = new QLabel;
+    ocean_status->setObjectName("hpopOceanTideStatus");
+    ocean_status->setWordWrap(true);
+    ocean->addRow(ocean_status);
+    auto *ocean_progress = new QProgressBar;
+    ocean_progress->setObjectName("hpopOceanTideProgress");
+    ocean_progress->hide();
+    ocean->addRow(ocean_progress);
+    auto *ocean_download = new QPushButton(QStringLiteral("下载 / 重试"));
+    ocean_download->setObjectName("hpopDownloadOceanTides");
+    ocean->addRow(ocean_download);
+    auto *ocean_cancel = new QPushButton(QStringLiteral("取消下载"));
+    ocean_cancel->setObjectName("hpopCancelOceanDownload");
+    ocean->addRow(ocean_cancel);
+    auto *ocean_manage = new QPushButton(QStringLiteral("在数据中心管理海潮"));
+    ocean_manage->setObjectName("hpopManageOceanTides");
+    ocean_manage->setVisible(data != nullptr);
+    ocean->addRow(ocean_manage);
+    help(ocean, QStringLiteral("阶数和次数独立于中心引力设置；2 阶 1 次及以上自动包含海洋极潮。"
+                               "0、1 阶不产生地心海潮引力。计算需要覆盖传播时段的 EOP。"));
+    caution(ocean, QStringLiteral("当前使用文件中的显式分潮；次要分潮推算与最小振幅筛选待实现。"));
     auto *third = section(gravity_page, QStringLiteral("第三体引力"), "hpopThirdBodySection");
     third->setVerticalSpacing(8);
     auto *resource = new QFrame;
@@ -1135,6 +1198,8 @@ bool edit_hpop_settings(
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
     layout->addWidget(buttons);
     std::optional<DataProduct> queued_gravity, owned_gravity;
+    bool queued_ocean = false, owned_ocean = false;
+    QString ocean_message;
     QString gravity_message;
     auto catalog_revision = data ? data->revision() : 0;
     const auto selected_product = [&]() -> std::optional<DataProduct> {
@@ -1207,7 +1272,17 @@ bool edit_hpop_settings(
                                    (data && owned_gravity && data->downloading() &&
                                     data->active_product() == *owned_gravity));
         gravity_actions->setVisible(!download_gravity->isHidden() || !cancel_gravity->isHidden());
-        buttons->button(QDialogButtonBox::Ok)->setEnabled(ready || (!running && !waiting));
+        const bool ocean_missing =
+            std::none_of(installed_oceans.begin(), installed_oceans.end(), [&](const auto &entry) {
+                return QString::fromStdString(entry.selection) == ocean_model->currentData();
+            });
+        const bool ocean_waiting =
+            ocean_use->isChecked() && ocean_degree->value() >= 2 && ocean_missing &&
+            ocean_model->currentData().toString() == "fes2014bv1" &&
+            (queued_ocean ||
+             (data && data->downloading() && data->active_product() == DataProduct::fes2014bv1));
+        buttons->button(QDialogButtonBox::Ok)
+            ->setEnabled((ready || (!running && !waiting)) && !ocean_waiting);
     };
     const auto request_gravity = [&] {
         const auto product = selected_product();
@@ -1237,12 +1312,91 @@ bool edit_hpop_settings(
             data->cancel_download();
         refresh_gravity_status();
     });
+    const auto selected_ocean = [&] {
+        return std::find_if(installed_oceans.begin(), installed_oceans.end(), [&](const auto &v) {
+            return v.selection == ocean_model->currentData().toString().toStdString();
+        });
+    };
+    const auto refresh_ocean_status = [&] {
+        const bool enabled = ocean_use->isChecked(), active = enabled && ocean_degree->value() >= 2;
+        ocean_model->setEnabled(enabled);
+        ocean_degree->setEnabled(enabled);
+        ocean_order->setEnabled(enabled);
+        const bool running = ocean_model->currentData().toString() == "fes2014bv1" && data &&
+                             data->downloading() &&
+                             data->active_product() == DataProduct::fes2014bv1;
+        const auto found = selected_ocean();
+        const bool ready = found != installed_oceans.end();
+        ocean_status->setVisible(enabled);
+        ocean_status->setText(!active ? QStringLiteral("当前阶数不产生海潮引力。")
+                              : ready ? QStringLiteral("%1 × %2 · %3 个显式分潮")
+                                            .arg(found->info.degree)
+                                            .arg(found->info.order)
+                                            .arg(found->info.constituents)
+                              : queued_ocean ? QStringLiteral("等待当前数据任务完成后下载海潮文件…")
+                              : running      ? data->status()
+                              : !ocean_message.isEmpty()
+                                  ? ocean_message
+                                  : QStringLiteral("缺少所选海潮文件，请下载或在数据中心导入。"));
+        ocean_progress->setVisible(active && running);
+        if (running && data->total_bytes() > 0) {
+            ocean_progress->setRange(0, 1000);
+            ocean_progress->setValue(static_cast<int>(
+                std::min<qint64>(1000, data->received_bytes() * 1000 / data->total_bytes())));
+        } else {
+            ocean_progress->setRange(0, 0);
+        }
+        ocean_download->setVisible(data && active && !ready && !running && !queued_ocean &&
+                                   ocean_model->currentData().toString() == "fes2014bv1");
+        ocean_cancel->setVisible(queued_ocean || (owned_ocean && running));
+        refresh_gravity_status();
+    };
+    const auto request_ocean = [&] {
+        queued_ocean = false;
+        ocean_message.clear();
+        const bool needs_download = ocean_use->isChecked() && ocean_degree->value() >= 2 &&
+                                    ocean_model->currentData().toString() == "fes2014bv1" &&
+                                    selected_ocean() == installed_oceans.end();
+        if (!needs_download && data && owned_ocean && data->downloading() &&
+            data->active_product() == DataProduct::fes2014bv1)
+            data->cancel_download();
+        if (needs_download && data) {
+            if (data->downloading()) {
+                queued_ocean = data->active_product() != DataProduct::fes2014bv1;
+            } else {
+                data->start_download({}, DataProduct::fes2014bv1);
+                owned_ocean = data->downloading();
+            }
+        }
+        refresh_ocean_status();
+    };
+    QObject::connect(ocean_use, &QCheckBox::toggled, &dialog, request_ocean);
+    QObject::connect(ocean_model, &QComboBox::currentIndexChanged, &dialog, request_ocean);
+    QObject::connect(ocean_degree, &QSpinBox::valueChanged, &dialog, request_ocean);
+    QObject::connect(ocean_download, &QPushButton::clicked, &dialog, request_ocean);
+    QObject::connect(ocean_cancel, &QPushButton::clicked, &dialog, [&] {
+        queued_ocean = false;
+        ocean_message = QStringLiteral("已取消下载，可重试或在数据中心导入。");
+        if (data && owned_ocean && data->downloading() &&
+            data->active_product() == DataProduct::fes2014bv1)
+            data->cancel_download();
+        refresh_ocean_status();
+    });
+    QObject::connect(ocean_manage, &QPushButton::clicked, &dialog, [&] {
+        if (data)
+            show_data_center(&dialog, *data,
+                             ocean_model->currentData().toString() == "fes2014bv1"
+                                 ? DataProduct::fes2014bv1
+                                 : DataProduct::custom_ocean_tides);
+    });
     QTimer gravity_poll;
     QObject::connect(&gravity_poll, &QTimer::timeout, &dialog, [&] {
         if (data && data->revision() != catalog_revision) {
             catalog_revision = data->revision();
             installed_models = data->data().gravity_models();
             installed_ephemerides = data->data().ephemerides();
+            installed_oceans = data->data().ocean_tide_models();
+            refresh_ocean_models();
             refresh_ephemeris();
             refresh_srp_resource();
             refresh_drag_resource();
@@ -1251,15 +1405,24 @@ bool edit_hpop_settings(
         }
         if (data && !data->downloading()) {
             owned_gravity.reset();
+            if (owned_ocean) {
+                owned_ocean = false;
+                if (selected_ocean() == installed_oceans.end())
+                    ocean_message = data->update_status(DataProduct::fes2014bv1).message;
+            }
             if (queued_gravity)
                 request_gravity();
+            if (queued_ocean && !data->downloading())
+                request_ocean();
         }
-        refresh_gravity_status();
+        refresh_ocean_status();
     });
     if (data)
         gravity_poll.start(100);
     refresh_gravity_status();
     QTimer::singleShot(0, &dialog, request_gravity);
+    refresh_ocean_status();
+    QTimer::singleShot(0, &dialog, request_ocean);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
         int validation_page = 0;
@@ -1313,6 +1476,19 @@ bool edit_hpop_settings(
                 static_cast<core::SolidTideMode>(solid_mode->currentIndex());
             candidate.solid_tides.truncate_to_gravity = solid_truncate->isChecked();
             candidate.solid_tides.include_time_dependent_terms = solid_time->isChecked();
+            candidate.ocean_tides = {ocean_use->isChecked(),
+                                     ocean_model->currentData().toString().toStdString(),
+                                     ocean_degree->value(), ocean_order->value()};
+            validation_field = ocean_model;
+            if (candidate.ocean_tides.active()) {
+                const auto found = selected_ocean();
+                if (found == installed_oceans.end())
+                    throw std::runtime_error("请先下载或在数据中心导入所选海潮文件。");
+                validation_field = ocean_degree;
+                if (candidate.ocean_tides.degree > found->info.degree ||
+                    candidate.ocean_tides.order > found->info.order)
+                    throw std::runtime_error("海潮阶数或次数超出所选文件的可用范围。");
+            }
             validation_field = solid_mode;
             if (candidate.uses_full_solid_tides() &&
                 std::none_of(installed_ephemerides.begin(), installed_ephemerides.end(),
@@ -1481,6 +1657,9 @@ bool edit_hpop_settings(
     gravity_poll.stop();
     // Cancel only work this dialog started; shared data-center tasks keep their owner.
     if (data && owned_gravity && data->downloading() && data->active_product() == *owned_gravity)
+        data->cancel_download();
+    if (data && owned_ocean && data->downloading() &&
+        data->active_product() == DataProduct::fes2014bv1)
         data->cancel_download();
     return accepted;
 }

@@ -6,6 +6,7 @@
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
+#include <orbitforge/runtime/ocean_tides.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/report.hpp>
 #include <orbitforge/runtime/space_weather.hpp>
@@ -134,7 +135,18 @@ core::HpopEnvironment DataSnapshot::force_environment(const OrbitInput &input) c
                                           "'; download/import it in Data Center");
         weather = found->second;
     }
-    return {frames_, eop_, std::move(model), std::move(ephemeris), time_, std::move(weather)};
+    std::shared_ptr<const core::OceanTideModel> ocean;
+    if (input.uses_hpop() && input.hpop.ocean_tides.active()) {
+        const auto found = ocean_tides_.find(input.hpop.ocean_tides.model);
+        if (found == ocean_tides_.end())
+            throw AnalysisCapabilityError("Missing ocean tide model '" +
+                                          input.hpop.ocean_tides.model +
+                                          "'; download/import it in Data Center");
+        ocean = found->second;
+    }
+    return {
+        frames_,         eop_, std::move(model), std::move(ephemeris), time_, std::move(weather),
+        std::move(ocean)};
 }
 DataSnapshot
 DataSnapshot::with_ephemeris(const std::string &selection,
@@ -177,6 +189,29 @@ DataSnapshot::with_space_weather(const std::string &selection,
 DataSnapshot DataSnapshot::with_space_weather_file(const std::string &selection,
                                                    const std::filesystem::path &file) const {
     return with_space_weather(selection, load_space_weather(file));
+}
+DataSnapshot
+DataSnapshot::with_ocean_tides(const std::string &selection,
+                               std::shared_ptr<const core::OceanTideModel> model) const {
+    core::OceanTideOptions options;
+    options.model = selection;
+    core::validate_ocean_tide_options(options);
+    if (!model)
+        throw std::invalid_argument("Ocean tides require a model");
+    auto result = *this;
+    const auto ref = ocean_tide_reference(selection, model->info());
+    std::vector<DataReference> refs;
+    for (const auto &current : lock_.references())
+        if (current.role != ref.role)
+            refs.push_back(current);
+    refs.push_back(ref);
+    result.lock_ = DataLock{std::move(refs)};
+    result.ocean_tides_[selection] = std::move(model);
+    return result;
+}
+DataSnapshot DataSnapshot::with_ocean_tide_file(const std::string &selection,
+                                                const std::filesystem::path &file) const {
+    return with_ocean_tides(selection, load_ocean_tides(file));
 }
 DataSnapshot
 DataSnapshot::from_providers(std::shared_ptr<const core::ITimeProvider> time,
@@ -436,9 +471,10 @@ ReportResult Analysis::report(const ReportDefinition &definition,
     // A callback may edit a caller-owned definition; capture it before the first callback.
     const auto captured = definition;
     check_cancelled(cancelled);
-    ReportContext context{
-        *snapshot().project,     data().time(),        data().frames(),         data().eop(),
-        data().gravity_models(), data().ephemerides(), data().weather_sources()};
+    ReportContext context{*snapshot().project,      data().time(),
+                          data().frames(),          data().eop(),
+                          data().gravity_models(),  data().ephemerides(),
+                          data().weather_sources(), data().ocean_tide_models()};
     record_data(context.project, data());
     if (!data().time() && report_uses_utc(captured.format, captured.query.kind))
         throw AnalysisCapabilityError("Prepare with UTC data for a UTC report, or select TAI/TT");
@@ -482,6 +518,11 @@ AnalysisPlan::AnalysisPlan(const ProjectDocument &project, const DataCatalog &ca
                   !data.gravity_models().contains(input.hpop.gravity_model))
                   data = data.with_gravity(input.hpop.gravity_model,
                                            catalog.load_gravity(input.hpop.gravity_model));
+              if (input.uses_hpop() && input.hpop.ocean_tides.active() &&
+                  !data.ocean_tide_models().contains(input.hpop.ocean_tides.model))
+                  data =
+                      data.with_ocean_tides(input.hpop.ocean_tides.model,
+                                            catalog.load_ocean_tides(input.hpop.ocean_tides.model));
               if (input.uses_hpop() && input.hpop.drag.enabled &&
                   !input.hpop.drag.weather_model.empty() &&
                   !data.weather_sources().contains(input.hpop.drag.weather_model))
@@ -523,7 +564,7 @@ void record_data(Project &project, const DataSnapshot &data) {
     project.force_data.clear();
     for (const auto &ref : data.data_lock().references())
         if (ref.role.starts_with("gravity/") || ref.role.starts_with("ephemeris/") ||
-            ref.role.starts_with("space-weather/"))
+            ref.role.starts_with("space-weather/") || ref.role.starts_with("ocean-tides/"))
             project.force_data.push_back(ref);
 }
 } // namespace

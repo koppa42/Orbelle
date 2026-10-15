@@ -10,6 +10,7 @@
 #include <orbitforge/application/project.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
+#include <orbitforge/runtime/ocean_tides.hpp>
 #include <orbitforge/runtime/space_weather.hpp>
 
 namespace orbitforge::desktop {
@@ -25,6 +26,9 @@ std::string source_url(DataProduct product) {
     case DataProduct::egm2008:
     case DataProduct::egm96:
         return runtime::gravity_download_url(gravity_selection(product));
+    case DataProduct::fes2014bv1:
+        return runtime::ocean_tide_download_url();
+    case DataProduct::custom_ocean_tides:
     case DataProduct::custom_gravity:
         return {};
     case DataProduct::space_weather:
@@ -35,6 +39,8 @@ std::string source_url(DataProduct product) {
     throw std::invalid_argument("Unknown data product");
 }
 std::string setting_key(DataProduct product, const char *suffix) {
+    if (ocean_product(product))
+        return "ocean-tides-" + ocean_selection(product) + "-" + suffix;
     if (gravity_product(product))
         return "gravity-" + gravity_selection(product) + "-" + suffix;
     const auto prefix = product == DataProduct::space_weather ? "space-weather"
@@ -45,6 +51,8 @@ std::string setting_key(DataProduct product, const char *suffix) {
     return std::string(prefix) + "-" + suffix;
 }
 qint64 download_limit(DataProduct p) {
+    if (ocean_product(p))
+        return 128LL * 1024 * 1024;
     if (p == DataProduct::space_weather)
         return 32LL * 1024 * 1024;
     if (p == DataProduct::de440s)
@@ -228,6 +236,12 @@ bool EopCatalog::has_full_download(DataProduct product) const {
         return std::filesystem::is_regular_file(path, error) &&
                std::filesystem::file_size(path, error) > 0 && !error;
     };
+    if (ocean_product(product)) {
+        for (const auto &entry : data_.ocean_tide_models())
+            if (entry.selection == ocean_selection(product))
+                return present(entry.file);
+        return false;
+    }
     if (product == DataProduct::space_weather) {
         for (const auto &entry : data_.weather_sources())
             if (entry.selection == "celestrak")
@@ -264,6 +278,12 @@ std::optional<std::size_t> EopCatalog::current_index(DataProduct product) const 
     return std::nullopt;
 }
 std::string EopCatalog::current_hash(DataProduct product) const {
+    if (ocean_product(product)) {
+        for (const auto &entry : data_.ocean_tide_models())
+            if (entry.selection == ocean_selection(product))
+                return entry.info.sha256;
+        return {};
+    }
     if (product == DataProduct::space_weather) {
         for (const auto &entry : data_.weather_sources())
             if (entry.selection == "celestrak")
@@ -447,6 +467,32 @@ std::vector<DataInventoryItem> EopCatalog::inventory() const {
         if (!error)
             weather.file_size = size;
     }
+    const auto oceans = data_.ocean_tide_models();
+    for (auto product : {DataProduct::fes2014bv1, DataProduct::custom_ocean_tides}) {
+        auto &item = items[static_cast<std::size_t>(product)];
+        item.product = product;
+        item.raw_import = true;
+        item.online_updates = product == DataProduct::fes2014bv1;
+        item.source_url = QString::fromStdString(source_url(product));
+        for (const auto &entry : oceans) {
+            if (entry.selection != ocean_selection(product))
+                continue;
+            item.ocean_tides = entry.info;
+            item.file = entry.file;
+            item.sha256 = item.identity_sha256 = QString::fromStdString(entry.info.sha256);
+            item.acquired_at = entry.acquired_at_unix_seconds;
+            item.acquisition = entry.acquisition;
+            item.installation = entry.acquisition == runtime::DataAcquisition::downloaded
+                                    ? DataInstallation::downloaded
+                                    : DataInstallation::local_file;
+            std::error_code error;
+            const auto size = std::filesystem::file_size(item.file, error);
+            if (error)
+                item.installation = DataInstallation::missing;
+            else
+                item.file_size = size;
+        }
+    }
     return items;
 }
 DataUpdateStatus EopCatalog::update_status(DataProduct product) const {
@@ -476,9 +522,9 @@ void EopCatalog::check_updates_if_due(qint64 now, QUrl source) {
     try {
         if (downloading())
             return;
-        for (const auto product :
-             {DataProduct::utc, DataProduct::finals2000a, DataProduct::c04, DataProduct::egm2008,
-              DataProduct::egm96, DataProduct::de440s, DataProduct::space_weather}) {
+        for (const auto product : {DataProduct::utc, DataProduct::finals2000a, DataProduct::c04,
+                                   DataProduct::egm2008, DataProduct::egm96, DataProduct::de440s,
+                                   DataProduct::space_weather, DataProduct::fes2014bv1}) {
             if ((!source.isEmpty() && product != DataProduct::finals2000a) ||
                 !automatic_updates(product))
                 continue;
@@ -877,6 +923,11 @@ void EopCatalog::start_resource_install(const std::filesystem::path &file, DataP
             if (*cancel)
                 throw std::runtime_error("操作已取消，已有数据保持不变。");
         };
+        if (ocean_product(product)) {
+            const auto installed = catalog.install_ocean_tides(file, ocean_selection(product), url,
+                                                               acquisition, checkpoint);
+            return InstalledResource{installed.info.sha256, acquisition};
+        }
         if (product == DataProduct::space_weather) {
             const auto installed =
                 catalog.install_space_weather(file, "celestrak", url, acquisition, checkpoint);

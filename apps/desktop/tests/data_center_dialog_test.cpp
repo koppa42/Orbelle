@@ -171,7 +171,7 @@ TEST(DataCenterDialog, GroupedSourcesKeepDownloadStateAndPriorityIndependent) {
         auto *status = dialog->findChild<QLabel *>("dataCenterStatus");
         ASSERT_TRUE(list && priority && checked && badge && progress && cancel && download &&
                     status);
-        ASSERT_EQ(list->topLevelItemCount(), 5);
+        ASSERT_EQ(list->topLevelItemCount(), 6);
         auto *group = list->topLevelItem(0);
         ASSERT_EQ(group->childCount(), 2);
         auto *finals = group->child(0);
@@ -465,7 +465,7 @@ TEST(DataCenterDialog, GravityHasItsOwnGroupAndStaticValidityWithoutImplicitDown
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
         ASSERT_NE(dialog, nullptr);
         auto *tree = dialog->findChild<QTreeWidget *>("dataInventory");
-        ASSERT_EQ(tree->topLevelItemCount(), 5);
+        ASSERT_EQ(tree->topLevelItemCount(), 6);
         auto *gravity = tree->topLevelItem(2);
         ASSERT_EQ(gravity->childCount(), 3);
         tree->setCurrentItem(gravity->child(0));
@@ -506,7 +506,7 @@ TEST(DataCenterDialog, EphemerisGroupAndDetailsRemainReadableAtCompactWidth) {
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
         ASSERT_TRUE(dialog);
         auto *tree = dialog->findChild<QTreeWidget *>("dataInventory");
-        ASSERT_EQ(tree->topLevelItemCount(), 5);
+        ASSERT_EQ(tree->topLevelItemCount(), 6);
         auto *group = tree->topLevelItem(3);
         ASSERT_EQ(group->childCount(), 1);
         EXPECT_EQ(tree->currentItem(), group->child(0));
@@ -781,4 +781,43 @@ TEST(DataCenterDialog, LiveInitialDataSetup) {
     EXPECT_TRUE(prepare_initial_data(nullptr, catalog));
 }
 } // namespace
+
+TEST(DataCenterDialog, OceanGroupShowsIndependentExtentAndLocalImportAtCompactWidth) {
+    (void)test_app();
+    QTemporaryDir temporary;
+    EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *tree = dialog->findChild<QTreeWidget *>("dataInventory");
+        ASSERT_EQ(tree->topLevelItemCount(), 6);
+        auto *group = tree->topLevelItem(5);
+        ASSERT_EQ(group->childCount(), 2);
+        EXPECT_EQ(tree->currentItem(), group->child(0));
+        EXPECT_EQ(dialog->findChild<QLabel *>("dataName")->text(),
+                  QStringLiteral("FES2014bv1 海潮"));
+        EXPECT_FALSE(catalog.automatic_updates(DataProduct::fes2014bv1));
+        tree->setCurrentItem(group);
+        EXPECT_EQ(dialog->findChild<QLabel *>("dataName")->text(), QStringLiteral("海潮模型"));
+        tree->setCurrentItem(group->child(1));
+        EXPECT_EQ(dialog->findChild<QLabel *>("dataName")->text(), QStringLiteral("外部海潮模型"));
+        EXPECT_FALSE(dialog->findChild<QPushButton *>("downloadEop")->isVisible());
+        dialog->resize(500, 660);
+        tree->itemActivated(group->child(1), 0);
+        QEventLoop settled;
+        QTimer::singleShot(60, &settled, &QEventLoop::quit);
+        settled.exec();
+        for (auto *scroll : dialog->findChildren<QScrollArea *>())
+            if (scroll->isVisible()) {
+                EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+            }
+        const auto output = qEnvironmentVariable("ORBITFORGE_DATA_UI_CAPTURE");
+        if (!output.isEmpty()) {
+            EXPECT_TRUE(QDir{}.mkpath(output));
+            EXPECT_TRUE(dialog->grab().save(output + "/ocean-compact.png"));
+        }
+        dialog->reject();
+    });
+    show_data_center(nullptr, catalog, DataProduct::fes2014bv1);
+}
 } // namespace orbitforge::desktop

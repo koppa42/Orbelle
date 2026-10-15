@@ -38,7 +38,7 @@ Cr 范围为 `[-100, 100]`，面积质量比为 `[0, 9999] m²/kg`，允许带�
 
 光压启用时总是需要太阳星历，启用阴影且分配月球时还需要月球。第三体引力勾选状态与此独立，GM 不参与光压力值。每个积分阶段使用对应历元的 Provider；准备阶段检查完整传播区间与实际目标链。缺文件或覆盖不足会停止准备，不能自动关闭光压。太阳向量由现有 ICRF 对齐的 SPICE 力模型适配器提供；SDK 不隐式下载资源。地心视太阳认证起点前 600 秒的历史。卫星视太阳不假定固定地心距离：准备时验证整个接收区间的 Earth→EMB→SSB 链，以及从快照起点到接收区间终点的完整 Sun→SSB 链；每次求值另检查实际发光时刻。过去的太阳链有洞即拒绝准备，不能以只查接收端点替代；若实际距离所需历史早于快照起点，求值失败，不外推。
 
-会话和分析持有不可变星历；来源包含 `spherical-uniform-angular-union-v2`、太阳方法、`NONE` / `earth-LT+S-v1` / `spacecraft-LT+S-tai-rate-v1` 及 `occultors=geometric`、有效光压参数及星历解释／内容身份。禁用光压的草稿，以及无阴影或未分配遮挡体的半径草稿不改变分析和报告身份。项目 v26／OBJS17 保存全部有效草稿；不提供旧版本解码。
+会话和分析持有不可变星历；来源包含 `spherical-uniform-angular-union-v2`、太阳方法、`NONE` / `earth-LT+S-v1` / `spacecraft-LT+S-tai-rate-v1` 及 `occultors=geometric`、有效光压参数及星历解释／内容身份。禁用光压的草稿，以及无阴影或未分配遮挡体的半径草稿不改变分析和报告身份。项目 v27／OBJS18 保存全部有效草稿；不提供旧版本解码。
 
 ```python
 data = of.DataSnapshot.builtin_time().with_ephemeris("de440s", manifest, workspace)

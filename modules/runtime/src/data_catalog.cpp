@@ -2,6 +2,7 @@
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
+#include <orbitforge/runtime/ocean_tides.hpp>
 #include <orbitforge/runtime/space_weather.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <stdexcept>
@@ -651,6 +652,119 @@ DataCatalog::load_space_weather(const std::string &selection) const {
     check(model->info().sha256 == it->info.sha256, "Space weather content SHA256 mismatch");
     return model;
 }
+CatalogOceanTides DataCatalog::install_ocean_tides(const std::filesystem::path &source,
+                                                   const std::string &selection,
+                                                   const std::string &url,
+                                                   DataAcquisition acquisition,
+                                                   const std::function<void()> &checkpoint) {
+    check(!selection.empty() && selection.size() <= 64 &&
+              std::all_of(selection.begin(), selection.end(),
+                          [](char c) {
+                              return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-';
+                          }),
+          "Invalid ocean-tides selection ID");
+    Stage stage(impl_->root / "staging");
+    const auto pending = stage.path / "ocean-tides.dat";
+    // Own a stable copy before validation; never parse a file that can be replaced by import.
+    std::ifstream input(source, std::ios::binary);
+    check(input.is_open(), "Cannot open ocean-tides source");
+    std::ofstream output(pending, std::ios::binary);
+    std::array<char, 65536> buffer{};
+    std::size_t total = 0;
+    while (input) {
+        if (checkpoint)
+            checkpoint();
+        input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        total += static_cast<std::size_t>(input.gcount());
+        check(total <= 128U * 1024 * 1024, "Ocean tide file exceeds 128 MiB");
+        output.write(buffer.data(), input.gcount());
+        check(static_cast<bool>(output), "Cannot stage ocean-tides file");
+    }
+    check(input.eof() && !input.bad(), "Cannot read ocean-tides source");
+    output.close();
+    check(static_cast<bool>(output), "Cannot close staged ocean-tides file");
+    const auto model = runtime::load_ocean_tides(pending, url, checkpoint);
+    const auto &info = model->info();
+    if (selection == "fes2014bv1")
+        check(info.sha256 == fes2014bv1_sha256,
+              "Official FES2014bv1 checksum mismatch; import modified models as custom data");
+    const auto target = impl_->root / "ocean-tides" / (info.sha256 + ".dat");
+    std::filesystem::create_directories(target.parent_path());
+    const auto acquired = std::chrono::duration_cast<std::chrono::seconds>(
+                              std::chrono::system_clock::now().time_since_epoch())
+                              .count();
+    const Json record{{"schema", 1},
+                      {"sha256", info.sha256},
+                      {"source_url", url},
+                      {"model", info.model},
+                      {"degree", info.degree},
+                      {"order", info.order},
+                      {"constituents", info.constituents},
+                      {"mu", info.mu},
+                      {"radius_m", info.radius_m},
+                      {"acquisition", static_cast<int>(acquisition)},
+                      {"acquired_at", acquired}};
+    std::lock_guard guard(impl_->mutex);
+    Transaction transaction(impl_->db);
+    if (checkpoint)
+        checkpoint();
+    if (std::filesystem::exists(target))
+        check(runtime::load_ocean_tides(target, url, checkpoint)->info().sha256 == info.sha256,
+              "Existing ocean-tides resource is damaged");
+    else
+        publish(pending, target);
+    set_setting("ocean-tides/" + selection, record.dump());
+    transaction.commit();
+    return {selection, info, target, acquisition, acquired};
+}
+std::vector<CatalogOceanTides> DataCatalog::ocean_tide_models() const {
+    std::lock_guard guard(impl_->mutex);
+    Statement rows(impl_->db,
+                   "SELECT key,value FROM settings WHERE key LIKE 'ocean-tides/%' ORDER BY key");
+    std::vector<CatalogOceanTides> result;
+    while (rows.next()) {
+        const auto key = reinterpret_cast<const char *>(sqlite3_column_text(rows.value, 0));
+        const auto r =
+            Json::parse(reinterpret_cast<const char *>(sqlite3_column_text(rows.value, 1)));
+        check(r.at("schema") == 1 && hash_valid(r.at("sha256")), "Invalid ocean-tides receipt");
+        core::OceanTideInfo info{r.at("model"),  r.at("sha256"),  r.at("source_url"),
+                                 r.at("degree"), r.at("order"),   r.at("constituents"),
+                                 r.at("mu"),     r.at("radius_m")};
+        core::OceanTideOptions options;
+        options.model = std::string(key).substr(12);
+        options.degree = info.degree;
+        options.order = info.order;
+        core::validate_ocean_tide_options(options);
+        check(!info.model.empty() && info.model.size() <= 512 && info.degree >= 2 &&
+                  info.constituents >= 1 && info.constituents <= 4096 && std::isfinite(info.mu) &&
+                  info.mu > 0 && std::isfinite(info.radius_m) && info.radius_m > 0 &&
+                  r.at("acquisition") >= 0 && r.at("acquisition") <= 3,
+              "Invalid ocean tide receipt metadata");
+        check(options.model != "fes2014bv1" || info.sha256 == fes2014bv1_sha256,
+              "Official FES2014bv1 receipt checksum mismatch");
+        result.push_back({std::string(key).substr(12), info,
+                          impl_->root / "ocean-tides" / (info.sha256 + ".dat"),
+                          static_cast<DataAcquisition>(r.at("acquisition").get<int>()),
+                          r.at("acquired_at")});
+    }
+    return result;
+}
+std::shared_ptr<const core::OceanTideModel>
+DataCatalog::load_ocean_tides(const std::string &selection) const {
+    const auto models = ocean_tide_models();
+    const auto it = std::find_if(models.begin(), models.end(),
+                                 [&](const auto &v) { return v.selection == selection; });
+    check(it != models.end(),
+          "Ocean tide model is not installed; download or import it in Data Center");
+    const auto model = runtime::load_ocean_tides(it->file, it->info.source_url);
+    check(model->info().sha256 == it->info.sha256, "Ocean tide content SHA256 mismatch");
+    const auto &actual = model->info();
+    check(actual.model == it->info.model && actual.degree == it->info.degree &&
+              actual.order == it->info.order && actual.constituents == it->info.constituents &&
+              actual.mu == it->info.mu && actual.radius_m == it->info.radius_m,
+          "Ocean tide receipt metadata differs from its file; reimport the model");
+    return model;
+}
 void DataCatalog::activate_eop(const std::string &key) {
     std::lock_guard guard(impl_->mutex);
     Transaction transaction(impl_->db);
@@ -1083,6 +1197,16 @@ CatalogSpaceWeather DataCatalog::install_space_weather(const std::filesystem::pa
 std::vector<CatalogSpaceWeather> DataCatalog::weather_sources() const { unavailable(); }
 std::shared_ptr<const core::SpaceWeather>
 DataCatalog::load_space_weather(const std::string &) const {
+    unavailable();
+}
+CatalogOceanTides DataCatalog::install_ocean_tides(const std::filesystem::path &,
+                                                   const std::string &, const std::string &,
+                                                   DataAcquisition, const std::function<void()> &) {
+    unavailable();
+}
+std::vector<CatalogOceanTides> DataCatalog::ocean_tide_models() const { unavailable(); }
+std::shared_ptr<const core::OceanTideModel>
+DataCatalog::load_ocean_tides(const std::string &) const {
     unavailable();
 }
 CatalogGravity DataCatalog::install_gravity(const std::filesystem::path &, const std::string &,

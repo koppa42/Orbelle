@@ -14,6 +14,7 @@ struct PreparedProject {
     std::map<std::string, std::shared_ptr<const core::GravityModel>> gravity{};
     std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> ephemerides{};
     std::map<std::string, std::shared_ptr<const core::SpaceWeather>> weather{};
+    std::map<std::string, std::shared_ptr<const core::OceanTideModel>> ocean_tides{};
 };
 // Preparation selects current data covering the interval; saved hashes are provenance.
 // Inputs and providers are captured for the whole calculation, leaving the live workbench intact.
@@ -27,5 +28,6 @@ struct PreparedProject {
     std::shared_ptr<const core::ITimeProvider> time = {},
     const std::map<std::string, std::shared_ptr<const core::GravityModel>> &gravity = {},
     const std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> &ephemerides = {},
-    const std::map<std::string, std::shared_ptr<const core::SpaceWeather>> &weather = {});
+    const std::map<std::string, std::shared_ptr<const core::SpaceWeather>> &weather = {},
+    const std::map<std::string, std::shared_ptr<const core::OceanTideModel>> &ocean_tides = {});
 } // namespace orbitforge::desktop

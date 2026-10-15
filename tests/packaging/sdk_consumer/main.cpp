@@ -349,6 +349,16 @@ int main(int argc, char **argv) try {
             ephemeris->data_info().sun_mu != orbitforge::runtime::de440_sun_mu)
             return 17;
     }
+    {
+        const orbitforge::core::OceanTideModel ocean({"sdk-ocean", {}, {}, 2, 0},
+                                                     {{55555, {{2, 0, 1e-10, 0, 2e-10, 0}}}});
+        const auto delta =
+            ocean.corrections(orbitforge::core::builtin_egm96()->info(),
+                              {orbitforge::core::Epoch{0}, 0, 0, 0, 0, 0, "test"}, 2, 0);
+        if (delta.size() != 1 || std::abs(delta[0].c - 3e-10) > 1e-25)
+            return 36;
+        orbitforge::core::validate_ocean_tide_options({false, "missing", 100, 12});
+    }
     std::cout << "Installed SDK consumer passed\n";
 } catch (const std::exception &error) {
     std::cerr << "Installed SDK consumer failed: " << error.what() << '\n';

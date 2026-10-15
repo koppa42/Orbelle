@@ -4,6 +4,7 @@
 #include <limits>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
+#include <orbitforge/runtime/ocean_tides.hpp>
 #include <orbitforge/runtime/space_weather.hpp>
 
 namespace orbitforge::desktop {
@@ -16,7 +17,8 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
     std::shared_ptr<const core::ITimeProvider> time,
     const std::map<std::string, std::shared_ptr<const core::GravityModel>> &gravity,
     const std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> &ephemerides,
-    const std::map<std::string, std::shared_ptr<const core::SpaceWeather>> &weather) {
+    const std::map<std::string, std::shared_ptr<const core::SpaceWeather>> &weather,
+    const std::map<std::string, std::shared_ptr<const core::OceanTideModel>> &ocean_tides) {
     application::validate_project(project);
     const auto [data_first, data_last] = application::calculation_data_interval(project);
     std::shared_ptr<const core::IEarthOrientationProvider> eop;
@@ -61,6 +63,7 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
     result->gravity = gravity;
     result->ephemerides = ephemerides;
     result->weather = weather;
+    result->ocean_tides = ocean_tides;
     for (auto &satellite : result->project.satellites) {
         if (cancelled.load())
             throw OrbitCancelled{};
@@ -80,6 +83,11 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
             runtime::validate_space_weather_reference(
                 project.force_data, input.hpop.drag.weather_model,
                 weather.at(input.hpop.drag.weather_model)->info());
+        if (input.uses_hpop() && input.hpop.ocean_tides.active() &&
+            ocean_tides.contains(input.hpop.ocean_tides.model))
+            runtime::validate_ocean_tide_reference(
+                project.force_data, input.hpop.ocean_tides.model,
+                ocean_tides.at(input.hpop.ocean_tides.model)->info());
         const auto existing = std::find_if(
             result->scenario.objects().begin(), result->scenario.objects().end(),
             [&](const auto &s) { return s.provenance().object_id == satellite.orbit.object_id; });
@@ -108,6 +116,9 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
                                       time,
                                       weather.contains(input.hpop.drag.weather_model)
                                           ? weather.at(input.hpop.drag.weather_model)
+                                          : nullptr,
+                                      ocean_tides.contains(input.hpop.ocean_tides.model)
+                                          ? ocean_tides.at(input.hpop.ocean_tides.model)
                                           : nullptr});
         auto orbit = prepare_orbit_scene(
             satellite.orbit, session, *frames, *eop, cancelled,

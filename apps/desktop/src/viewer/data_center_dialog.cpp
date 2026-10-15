@@ -45,6 +45,10 @@ QString product_name(DataProduct p) {
         return QStringLiteral("EGM96");
     case DataProduct::custom_gravity:
         return QStringLiteral("外部重力场");
+    case DataProduct::fes2014bv1:
+        return QStringLiteral("FES2014bv1 海潮");
+    case DataProduct::custom_ocean_tides:
+        return QStringLiteral("外部海潮模型");
     case DataProduct::space_weather:
         return QStringLiteral("空间天气 · CelesTrak");
     case DataProduct::de440s:
@@ -332,6 +336,11 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     ephemeris_node->setSizeHint(0, QSize(0, 54));
     auto *de440s_node = add_source(DataProduct::de440s, ephemeris_node);
     auto *weather_node = add_source(DataProduct::space_weather, nullptr);
+    auto *ocean_node = new QTreeWidgetItem(list, {QStringLiteral("海潮模型\n归一化势系数")});
+    ocean_node->setSizeHint(0, QSize(0, 54));
+    auto *fes_node = add_source(DataProduct::fes2014bv1, ocean_node);
+    auto *custom_ocean_node = add_source(DataProduct::custom_ocean_tides, ocean_node);
+    ocean_node->setExpanded(true);
     ephemeris_node->setExpanded(true);
     eop_node->setExpanded(true);
     list->setCurrentItem(eop_node);
@@ -623,7 +632,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     bool syncing_priority = false;
     const auto selected = [&]() -> std::optional<DataProduct> {
         return list->currentItem() == eop_node || list->currentItem() == gravity_node ||
-                       list->currentItem() == ephemeris_node
+                       list->currentItem() == ephemeris_node || list->currentItem() == ocean_node
                    ? std::nullopt
                    : std::optional{static_cast<DataProduct>(
                          list->currentItem()->data(0, Qt::UserRole).toInt())};
@@ -638,7 +647,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     const auto update_details = [&] {
         const bool group = !selected();
         gravity_summary->setVisible(list->currentItem() == gravity_node ||
-                                    list->currentItem() == ephemeris_node);
+                                    list->currentItem() == ephemeris_node ||
+                                    list->currentItem() == ocean_node);
         priority_scroll->setVisible(group);
         pages->setVisible(!group);
         state->setVisible(!group);
@@ -656,6 +666,17 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
                     "\n\n选择左侧 DE440s 下载或导入文件，然后在 HPOP 的“力模型 → "
                     "引力”页启用相应第三体。"
                     "\n\n星历覆盖不使用外推。每次计算固定数据内容，更新后重新计算需确认。"));
+                return;
+            }
+            if (list->currentItem() == ocean_node) {
+                priority_scroll->hide();
+                title->setText(QStringLiteral("海潮模型"));
+                data_description->setText(QStringLiteral("管理 HPOP 使用的海潮引力系数。"));
+                gravity_summary->setText(QStringLiteral(
+                    "FES2014bv1\n\n官方公开势系数文件约 10.7 MiB，包含 36 个显式分潮，最高 100 × "
+                    "100。"
+                    "\n\n在 HPOP 的“引力 → 海潮”中启用，并独立设置阶数和次数。"
+                    "适用时自动包含海洋极潮。\n\n外部模型使用相同的 FES 归一化势系数格式。"));
                 return;
             }
             if (list->currentItem() == gravity_node) {
@@ -679,6 +700,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         const auto &item = selected_item();
         const bool is_time = item.product == DataProduct::utc;
         const bool is_gravity = gravity_product(item.product);
+        const bool is_ocean = ocean_product(item.product);
         const bool is_ephemeris = item.product == DataProduct::de440s;
         acquisition->show();
         policy_title->setVisible(item.extrapolation);
@@ -713,6 +735,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
             item.product == DataProduct::space_weather
                 ? QStringLiteral(
                       "F10.7 / Kp / Ap · 原始记录范围；计算另检查模型滞后、历史窗口和缺值")
+            : is_ocean     ? QStringLiteral("海潮势系数 · HPOP / 机动滑行共用")
             : is_gravity   ? QStringLiteral("地球静态球谐重力场 · HPOP / 机动滑行共用")
             : is_ephemeris ? QStringLiteral("JPL 行星星历 · 太阳系第三体引力")
             : is_time      ? QStringLiteral("UTC、TAI 与 TT 之间的时间转换")
@@ -733,23 +756,27 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
                               ? QStringLiteral("尚未下载或导入")
                               : QStringLiteral("未记录（已有本地文件）"));
         qobject_cast<QLabel *>(form->labelForField(first))
-            ->setText(is_gravity     ? QStringLiteral("可用阶 × 次")
-                      : is_ephemeris ? QStringLiteral("覆盖起点（TAI）")
-                                     : QStringLiteral("覆盖起点（UTC）"));
-        first->setText(is_gravity ? (item.gravity ? QStringLiteral("%1 × %2")
-                                                        .arg(item.gravity->degree)
-                                                        .arg(item.gravity->order)
-                                                  : QStringLiteral("下载或导入后显示"))
-                                  : coverage_time(item.first));
-        until->setText(is_gravity
+            ->setText(is_gravity || is_ocean ? QStringLiteral("可用阶 × 次")
+                      : is_ephemeris         ? QStringLiteral("覆盖起点（TAI）")
+                                             : QStringLiteral("覆盖起点（UTC）"));
+        first->setText(is_ocean     ? (item.ocean_tides ? QStringLiteral("%1 × %2")
+                                                          .arg(item.ocean_tides->degree)
+                                                          .arg(item.ocean_tides->order)
+                                                        : QStringLiteral("下载或导入后显示"))
+                       : is_gravity ? (item.gravity ? QStringLiteral("%1 × %2")
+                                                          .arg(item.gravity->degree)
+                                                          .arg(item.gravity->order)
+                                                    : QStringLiteral("下载或导入后显示"))
+                                    : coverage_time(item.first));
+        until->setText(is_gravity || is_ocean
                            ? QStringLiteral("无固定有效期")
                            : coverage_time(item.last) +
                                  (item.exclusive_end ? QStringLiteral("\n不含当日") : QString{}));
         qobject_cast<QLabel *>(form->labelForField(until))
-            ->setText(is_gravity     ? QStringLiteral("有效期")
-                      : is_ephemeris ? QStringLiteral("覆盖截止（TAI）")
-                      : is_time      ? QStringLiteral("有效截止（UTC）")
-                                     : QStringLiteral("覆盖截止（UTC）"));
+            ->setText(is_gravity || is_ocean ? QStringLiteral("有效期")
+                      : is_ephemeris         ? QStringLiteral("覆盖截止（TAI）")
+                      : is_time              ? QStringLiteral("有效截止（UTC）")
+                                             : QStringLiteral("覆盖截止（UTC）"));
         if (is_gravity)
             note->setText(
                 item.gravity
@@ -765,6 +792,14 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
                     ? QStringLiteral(
                           "官方完整文件约 240 MiB，下载后在后台校验。静态模型默认不自动下载。")
                     : QStringLiteral("导入或下载完整重力场后，可在 HPOP 中选择模型与阶次。"));
+        else if (is_ocean)
+            note->setText(
+                item.ocean_tides
+                    ? QStringLiteral(
+                          "%1 · %2 个显式分潮\n计算开始时固定文件；更新不会改变正在运行的计算。")
+                          .arg(QString::fromStdString(item.ocean_tides->model))
+                          .arg(item.ocean_tides->constituents)
+                    : QStringLiteral("下载官方 FES2014bv1，或导入外部 FES 势系数文件。"));
         else if (is_ephemeris)
             note->setText(QStringLiteral(
                 "完整 DE440s 约 32 MiB · NAIF 官方文件\n"
@@ -863,7 +898,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     QObject::connect(raw, &QPushButton::clicked, &dialog, [&] {
         const auto file = QFileDialog::getOpenFileName(
             &dialog, QStringLiteral("导入 %1 文件").arg(title->text()), {},
-            *selected() == DataProduct::space_weather
+            ocean_product(*selected()) ? QStringLiteral("海潮势系数 (*.txt *.pot);;所有文件 (*)")
+            : *selected() == DataProduct::space_weather
                 ? QStringLiteral("空间天气 (*.csv *.txt);;所有文件 (*)")
             : *selected() == DataProduct::de440s ? QStringLiteral("DE440s 星历 (de440s.bsp *.bsp)")
             : gravity_product(*selected()) ? QStringLiteral("重力场 (*.gfc *.grv);;所有文件 (*)")
@@ -923,7 +959,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         }
         const bool busy = catalog.downloading();
         for (auto *node : {finals_node, c04_node, utc_node, egm2008_node, egm96_node, custom_node,
-                           de440s_node, weather_node}) {
+                           de440s_node, weather_node, fes_node, custom_ocean_node}) {
             const auto &entry =
                 inventory_item(static_cast<DataProduct>(node->data(0, Qt::UserRole).toInt()));
             const auto name = product_name(entry.product);
@@ -935,7 +971,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
                                           : installation_text(entry);
             node->setText(
                 0, name + "\n" + installation + "\n" +
-                       (gravity_product(entry.product) ? QStringLiteral("静态模型 · 无固定有效期")
+                       (ocean_product(entry.product)     ? QStringLiteral("海潮系数 · 无固定有效期")
+                        : gravity_product(entry.product) ? QStringLiteral("静态模型 · 无固定有效期")
                         : entry.last.isValid()
                             ? (entry.product == DataProduct::utc ? QStringLiteral("有效至 ")
                                                                  : QStringLiteral("覆盖至 ")) +
@@ -1003,7 +1040,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
                               ? QStringLiteral("在应用运行时检查；尚未安装完整文件时会自动下载。")
                               : QStringLiteral("自动更新已关闭，可随时手动下载或检查。"));
         QString message = operation_error;
-        if (message.isEmpty() && (item.online_updates || gravity_product(item.product))) {
+        if (message.isEmpty() &&
+            (item.online_updates || gravity_product(item.product) || ocean_product(item.product))) {
             if (downloading_this) {
                 message = update.message;
                 if (catalog.received_bytes() > 0)
@@ -1048,7 +1086,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     refresh();
     if (initial) {
         for (auto *node : {finals_node, c04_node, utc_node, egm2008_node, egm96_node, custom_node,
-                           de440s_node, weather_node})
+                           de440s_node, weather_node, fes_node, custom_ocean_node})
             if (node->data(0, Qt::UserRole).toInt() == static_cast<int>(*initial)) {
                 list->setCurrentItem(node);
                 list->itemActivated(node, 0);

@@ -1,8 +1,9 @@
 add_executable(orbitforge_integration_tests runtime_test.cpp scenario_test.cpp project_test.cpp report_test.cpp
     propagators_test.cpp access_test.cpp project_document_test.cpp analysis_test.cpp catalog_analysis_test.cpp
-    project_analysis_persistence_test.cpp analysis_access_test.cpp project_facade_test.cpp hpop_test.cpp mission_test.cpp gravity_test.cpp third_body_test.cpp solar_radiation_pressure_test.cpp atmospheric_drag_test.cpp space_weather_test.cpp)
+    project_analysis_persistence_test.cpp analysis_access_test.cpp project_facade_test.cpp hpop_test.cpp mission_test.cpp gravity_test.cpp third_body_test.cpp solar_radiation_pressure_test.cpp atmospheric_drag_test.cpp space_weather_test.cpp ocean_tides_test.cpp)
 target_link_libraries(orbitforge_integration_tests PRIVATE OrbitForge::Runtime GTest::gtest_main)
 target_compile_definitions(orbitforge_integration_tests PRIVATE
+    ORBITFORGE_OCEAN_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators"
     ORBITFORGE_EGM2008_FULL_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/gravity_egm2008_full.txt"
     ORBITFORGE_REPORT_EOP="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
     ORBITFORGE_DRAG_EOP="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_c04_2016_12_28_2017_01_04/manifest.json"

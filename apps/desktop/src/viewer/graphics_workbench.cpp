@@ -26,6 +26,7 @@
 #include <orbitforge/runtime/access.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
+#include <orbitforge/runtime/ocean_tides.hpp>
 #include <orbitforge/runtime/space_weather.hpp>
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
 #include "benchmark_gpu.hpp"
@@ -1770,6 +1771,26 @@ class Workbench final : public QMainWindow {
         }
         return result;
     }
+    std::vector<runtime::CatalogOceanTides>
+    selected_ocean_tides(const application::Project &project) const {
+        std::vector<runtime::CatalogOceanTides> result;
+        const auto installed = eop_catalog_->data().ocean_tide_models();
+        for (const auto &satellite : project.satellites) {
+            const auto &input = satellite.orbit;
+            const auto &id = input.hpop.ocean_tides.model;
+            if (!input.uses_hpop() || !input.hpop.ocean_tides.active())
+                continue;
+            if (std::any_of(result.begin(), result.end(),
+                            [&](const auto &v) { return v.selection == id; }))
+                continue;
+            const auto found = std::find_if(installed.begin(), installed.end(),
+                                            [&](const auto &v) { return v.selection == id; });
+            if (found == installed.end())
+                throw std::runtime_error("缺少海潮模型，请在数据中心 → 海潮模型下载或导入：" + id);
+            result.push_back(*found);
+        }
+        return result;
+    }
     application::DataLock selected_data_lock(const application::Project &project,
                                              const core::EopDataInfo &eop) const {
         const auto base = application::eop_data_lock(eop);
@@ -1781,6 +1802,8 @@ class Workbench final : public QMainWindow {
             refs.push_back(runtime::ephemeris_reference(model.selection, model.info));
         for (const auto &model : selected_weather(project))
             refs.push_back(runtime::space_weather_reference(model.selection, model.info));
+        for (const auto &model : selected_ocean_tides(project))
+            refs.push_back(runtime::ocean_tide_reference(model.selection, model.info));
         return application::DataLock{std::move(refs)};
     }
     ReportInput report_input() const {
@@ -1791,6 +1814,8 @@ class Workbench final : public QMainWindow {
             resources = resources.with_ephemeris(id, model);
         for (const auto &[id, model] : weather_)
             resources = resources.with_space_weather(id, model);
+        for (const auto &[id, model] : ocean_tides_)
+            resources = resources.with_ocean_tides(id, model);
         return {project_snapshot(project_path_), std::move(resources)};
     }
     void show_reports() {
@@ -1848,7 +1873,8 @@ class Workbench final : public QMainWindow {
                     access_session_.emplace(
                         runtime::ReportContext{*analysis.snapshot().project, data.time(),
                                                data.frames(), data.eop(), data.gravity_models(),
-                                               data.ephemerides(), data.weather_sources()},
+                                               data.ephemerides(), data.weather_sources(),
+                                               data.ocean_tide_models()},
                         ids[0], ids[1]);
                     access_hash_ = runtime::report_input_sha256(*analysis.snapshot().project);
                     access_ids_ = ids;
@@ -2021,6 +2047,7 @@ class Workbench final : public QMainWindow {
         const auto gravity_files = selected_gravity(project);
         const auto ephemeris_files = selected_ephemerides(project);
         const auto weather_files = selected_weather(project);
+        const auto ocean_files = selected_ocean_tides(project);
         const auto selected_lock = selected_data_lock(project, next_data->data_info());
         if (!project.data_lock().references().empty() && project.data_lock() != selected_lock) {
             QMessageBox message(
@@ -2049,6 +2076,8 @@ class Workbench final : public QMainWindow {
         for (const auto &file : weather_files)
             project.force_data.push_back(
                 runtime::space_weather_reference(file.selection, file.info));
+        for (const auto &file : ocean_files)
+            project.force_data.push_back(runtime::ocean_tide_reference(file.selection, file.info));
         if (settings) {
             project.earth_orientation = next_data->data_info();
             project = project.with_settings(settings->name, first, last);
@@ -2093,10 +2122,21 @@ class Workbench final : public QMainWindow {
             [this, project = std::move(project),
              source = std::filesystem::path(pending_project_path_.toStdWString()), installed_data,
              retained, edited_object, calculation_time, gravity_files, ephemeris_files,
-             weather_files, cancel = project_cancellation_]() mutable {
+             weather_files, ocean_files, cancel = project_cancellation_]() mutable {
                 std::map<std::string, std::shared_ptr<const core::GravityModel>> gravity;
                 std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> ephemerides;
                 std::map<std::string, std::shared_ptr<const core::SpaceWeather>> weather;
+                std::map<std::string, std::shared_ptr<const core::OceanTideModel>> ocean_tides;
+                for (const auto &file : ocean_files) {
+                    auto model =
+                        runtime::load_ocean_tides(file.file, file.info.source_url, [cancel] {
+                            if (*cancel)
+                                throw OrbitCancelled{};
+                        });
+                    if (model->info().sha256 != file.info.sha256)
+                        throw std::runtime_error("Ocean tide content changed after selection");
+                    ocean_tides.emplace(file.selection, std::move(model));
+                }
                 for (const auto &file : weather_files) {
                     auto model =
                         runtime::load_space_weather(file.file, file.info.source_url, [cancel] {
@@ -2128,7 +2168,7 @@ class Workbench final : public QMainWindow {
                 }
                 return prepare_project_scene(std::move(project), source, frames_, installed_data,
                                              *cancel, retained, edited_object, calculation_time,
-                                             gravity, ephemerides, weather);
+                                             gravity, ephemerides, weather, ocean_tides);
             });
         update_actions();
         statusBar()->showMessage(editing ? QStringLiteral("正在更新场景并准备轨迹…")
@@ -2237,6 +2277,7 @@ class Workbench final : public QMainWindow {
             gravity_ = candidate->gravity;
             ephemerides_ = candidate->ephemerides;
             weather_ = candidate->weather;
+            ocean_tides_ = candidate->ocean_tides;
             if (!project_edit_)
                 close_reports();
             reports_ = candidate->project.reports;
@@ -2578,6 +2619,7 @@ class Workbench final : public QMainWindow {
         gravity_.clear();
         ephemerides_.clear();
         weather_.clear();
+        ocean_tides_.clear();
         time_label_epoch_.reset();
         scenario_ = scenario_->with_data_lock(application::eop_data_lock(eop_->data_info()));
         scenario_item_ = new QTreeWidgetItem(objects_, {QString::fromStdString(scenario_->name())});
@@ -3262,8 +3304,10 @@ class Workbench final : public QMainWindow {
             const auto current_data = data_for_interval(data_first, data_last);
             if (!application::matching_project_data(current_data->data_info(), eop_->data_info()) ||
                 !gravity_.empty() || !ephemerides_.empty() || !weather_.empty() ||
+                !ocean_tides_.empty() ||
                 (input.uses_hpop() &&
                  (!input.hpop.gravity_model.empty() || input.hpop.uses_ephemeris() ||
+                  input.hpop.ocean_tides.active() ||
                   (input.hpop.drag.enabled && !input.hpop.drag.weather_model.empty())))) {
                 // Publish all tracks and their provider together, never mix EOP revisions.
                 auto project = project_snapshot(project_path_);
@@ -7783,6 +7827,7 @@ class Workbench final : public QMainWindow {
     std::map<std::string, std::shared_ptr<const core::GravityModel>> gravity_;
     std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> ephemerides_;
     std::map<std::string, std::shared_ptr<const core::SpaceWeather>> weather_;
+    std::map<std::string, std::shared_ptr<const core::OceanTideModel>> ocean_tides_;
     mutable std::shared_ptr<const core::ITimeProvider> active_time_;
     bool project_edit_ = false, project_orbit_edit_ = false, project_settings_edit_ = false;
     std::optional<std::size_t> pending_project_selection_;

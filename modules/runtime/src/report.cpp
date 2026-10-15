@@ -9,6 +9,7 @@
 #include <orbitforge/runtime/access.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
+#include <orbitforge/runtime/ocean_tides.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/report.hpp>
 #include <orbitforge/runtime/space_weather.hpp>
@@ -157,6 +158,13 @@ core::HpopEnvironment ReportContext::force_environment(const application::OrbitI
                                          found->second->info());
         environment.weather = found->second;
     }
+    if (input.hpop.ocean_tides.active()) {
+        const auto found = ocean_tides.find(input.hpop.ocean_tides.model);
+        check(found != ocean_tides.end() && found->second, "Missing selected ocean tide model");
+        validate_ocean_tide_reference(project.force_data, input.hpop.ocean_tides.model,
+                                      found->second->info());
+        environment.ocean_tides = found->second;
+    }
     return environment;
 }
 std::string report_input_sha256(const application::Project &project) {
@@ -194,6 +202,8 @@ std::string report_input_sha256(const application::Project &project) {
             }
             options.solid_tides =
                 core::effective_solid_tide_options(options.solid_tides, options.gravity_degree);
+            if (!options.ocean_tides.active())
+                options.ocean_tides = {};
             options.srp = core::effective_srp_options(options.srp);
             options.drag = core::effective_drag_options(options.drag);
             if (!options.uses_ephemeris())

@@ -24,7 +24,7 @@ IERS 原文 de Sitter 使用地球相对太阳的 R、V；这里两向量同时�
 
 Python 使用 `of.orbits.Hpop(..., include_relativistic_accelerations=True)`，或不可变 `HpopSettings` 的同名严格布尔字段；`of.evaluate_relativity` 调用同一个核心函数。桌面在“力模型 → 其他 → 相对论”提供开关与模型说明，取消不提交草稿。
 
-项目 v26 / OBJS17 在固体潮设置之后保存一个严格布尔字节；旧版本明确拒绝。物理输入哈希包含开关，启用后的来源标识包含 `iers2003-three-terms-v1`、三项常数、ITRF 极轴约定、速度时间尺度、地球/太阳 GM 和所选 EOP/星历身份。DE440 解释版本为 `de440-newtonian-geocentric-icrf-none-gm440-planets-tai-rate-v3`。开关或输入变化不会改变已经捕获的分析快照。
+项目 v27 / OBJS18 在海潮设置之后保存一个严格布尔字节；旧版本明确拒绝。物理输入哈希包含开关，启用后的来源标识包含 `iers2003-three-terms-v1`、三项常数、ITRF 极轴约定、速度时间尺度、地球/太阳 GM 和所选 EOP/星历身份。DE440 解释版本为 `de440-newtonian-geocentric-icrf-none-gm440-planets-tai-rate-v3`。开关或输入变化不会改变已经捕获的分析快照。
 
 ## 独立数值验收
 

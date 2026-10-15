@@ -850,4 +850,76 @@ TEST_F(DataCenterTest, WeatherDownloadImportsRawBytesAndFailedReplacementRetains
     EXPECT_EQ(catalog.data().load_space_weather("celestrak")->info().sha256, before->info().sha256);
 }
 
+TEST_F(DataCenterTest, OceanImportRunsInBackgroundAndFailedOrCancelledDownloadsPreserveData) {
+    EopCatalog catalog(root() / "data", {}, {}, false);
+    EXPECT_FALSE(catalog.automatic_updates(DataProduct::fes2014bv1));
+    const auto path = root() / "custom.pot";
+    QFile file(QString::fromStdWString(path.wstring()));
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    file.write(
+        "Coefficients to compute variations in normalized Stokes coefficients (unit = 10^-11)\n"
+        "Ocean tide model: Local up to (2,0)\n(test)\nDoodson Darw l m DelC+ DelS+ DelC- DelS-\n"
+        "55.555 Test 2 0 1 2 3 4\n");
+    file.close();
+    catalog.import_raw(path, DataProduct::custom_ocean_tides);
+    EXPECT_TRUE(catalog.downloading());
+    complete(catalog);
+    const auto item =
+        catalog.inventory().at(static_cast<std::size_t>(DataProduct::custom_ocean_tides));
+    ASSERT_TRUE(item.ocean_tides);
+    EXPECT_EQ(item.ocean_tides->degree, 2);
+    EXPECT_EQ(item.ocean_tides->order, 0);
+    EXPECT_FALSE(item.first.isValid());
+    const auto frozen = catalog.data().load_ocean_tides("custom-ocean");
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    file.write("bad ocean data");
+    file.close();
+    catalog.import_raw(path, DataProduct::custom_ocean_tides);
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(DataProduct::custom_ocean_tides).state,
+              DataUpdateState::failed);
+    EXPECT_EQ(catalog.data().load_ocean_tides("custom-ocean")->info().sha256,
+              frozen->info().sha256);
+    Server invalid("not an official FES potential model");
+    catalog.start_download(invalid.url(), DataProduct::fes2014bv1);
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(DataProduct::fes2014bv1).state, DataUpdateState::failed);
+    EXPECT_FALSE(catalog.has_full_download(DataProduct::fes2014bv1));
+    catalog.start_download(invalid.url(), DataProduct::fes2014bv1);
+    catalog.cancel_download();
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(DataProduct::fes2014bv1).state, DataUpdateState::cancelled);
+    EXPECT_EQ(catalog.data().load_ocean_tides("custom-ocean")->info().sha256,
+              frozen->info().sha256);
+}
+TEST_F(DataCenterTest, FullOceanTransferRecheckAndInvalidReplacementPreserveFrozenModel) {
+    const auto path = qEnvironmentVariable("ORBITFORGE_FULL_OCEAN_FILE");
+    if (path.isEmpty())
+        GTEST_SKIP()
+            << "Set ORBITFORGE_FULL_OCEAN_FILE to test the complete pinned download payload";
+    QFile file(path);
+    ASSERT_TRUE(file.open(QIODevice::ReadOnly));
+    Server server(file.readAll());
+    server.etag = "\"ocean-v1\"";
+    EopCatalog catalog(root() / "data", {}, {}, false);
+    catalog.start_download(server.url(), DataProduct::fes2014bv1);
+    complete(catalog);
+    ASSERT_EQ(catalog.update_status(DataProduct::fes2014bv1).state, DataUpdateState::updated)
+        << catalog.status().toStdString();
+    EXPECT_TRUE(catalog.has_full_download(DataProduct::fes2014bv1));
+    const auto frozen = catalog.data().load_ocean_tides("fes2014bv1");
+    EXPECT_EQ(frozen->info().degree, 100);
+    EXPECT_EQ(frozen->info().constituents, 36U);
+    catalog.start_download(server.url(), DataProduct::fes2014bv1);
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(DataProduct::fes2014bv1).state, DataUpdateState::unchanged);
+    ASSERT_EQ(server.requests.size(), 2);
+    EXPECT_TRUE(server.requests.back().contains("If-None-Match: " + server.etag));
+    Server invalid("truncated replacement");
+    catalog.start_download(invalid.url(), DataProduct::fes2014bv1);
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(DataProduct::fes2014bv1).state, DataUpdateState::failed);
+    EXPECT_EQ(catalog.data().load_ocean_tides("fes2014bv1")->info().sha256, frozen->info().sha256);
+}
+
 } // namespace orbitforge::desktop

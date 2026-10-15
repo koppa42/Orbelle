@@ -152,9 +152,28 @@ class Hpop final : public IStateProvider {
                                 environment_.ephemeris->position(ThirdBody::moon, epoch)),
                             info.moon_mu}}};
             }
-            const auto corrections = solid_tide_corrections(
+            auto corrections = solid_tide_corrections(
                 environment_.gravity->info(), options_.solid_tides, options_.gravity_degree,
                 options_.gravity_order, bodies, &eop, environment_.time.get());
+            if (options_.ocean_tides.active()) {
+                auto ocean = environment_.ocean_tides->corrections(environment_.gravity->info(),
+                                                                   eop, options_.ocean_tides.degree,
+                                                                   options_.ocean_tides.order);
+                // Solid tides have at most ten terms. Merge equal indices before evaluating
+                // the field; ocean truncation is independent of both the base and solid tides.
+                for (const auto &solid : corrections) {
+                    const auto found = std::ranges::find_if(ocean, [&](const auto &term) {
+                        return term.degree == solid.degree && term.order == solid.order;
+                    });
+                    if (found == ocean.end())
+                        ocean.push_back(solid);
+                    else {
+                        found->c += solid.c;
+                        found->s += solid.s;
+                    }
+                }
+                corrections = std::move(ocean);
+            }
             acceleration = rotation.inverse_position(environment_.gravity->acceleration(
                 rotation.apply_position(r), options_.gravity_degree, options_.gravity_order,
                 corrections));
@@ -349,6 +368,9 @@ class Hpop final : public IStateProvider {
                 throw std::invalid_argument("HPOP forces require the EOP's confirmed UTC provider");
             (void)environment_.time->to_utc(initial.epoch);
         }
+        if (options_.ocean_tides.active() && !environment_.ocean_tides)
+            throw std::invalid_argument(
+                "Selected ocean tide model is missing; download or import it in Data Center");
         environment_.validate_weather_interval(options_.drag, initial.epoch, initial.epoch);
         State value{};
         for (std::size_t i = 0; i < 3; ++i) {
@@ -443,6 +465,7 @@ void validate_hpop_options(const HpopOptions &o) {
     (void)o.drag_area_m2();
     (void)o.srp_area_m2();
     validate_solid_tide_options(o.solid_tides);
+    validate_ocean_tide_options(o.ocean_tides);
     validate_srp_options(o.srp);
     validate_drag_options(o.drag);
     if (o.gravity_model.size() > 64 ||

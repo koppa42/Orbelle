@@ -2,6 +2,7 @@
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
 #include <orbitforge/runtime/hpop.hpp>
+#include <orbitforge/runtime/ocean_tides.hpp>
 #include <orbitforge/runtime/space_weather.hpp>
 #include <sstream>
 
@@ -45,6 +46,15 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
                       << ";tide-moon-mu=" << environment.ephemeris->data_info().moon_mu;
             algorithm += constants.str();
         }
+    }
+    if (options.ocean_tides.active() && environment.ocean_tides) {
+        const auto &o = options.ocean_tides;
+        algorithm +=
+            ";ocean-tides=iers2010-potential-original-mean-pole-v1;pole=automatic"
+            ";ocean-degree=" +
+            std::to_string(o.degree) + ";ocean-order=" + std::to_string(o.order) + ";ocean-data=" +
+            application::DataLock({ocean_tide_reference(o.model, environment.ocean_tides->info())})
+                .sha256();
     }
     if (options.include_relativistic_accelerations && environment.ephemeris) {
         std::ostringstream constants;

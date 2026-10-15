@@ -21,6 +21,7 @@ struct ReportContext {
     std::map<std::string, std::shared_ptr<const core::GravityModel>> gravity{};
     std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> ephemerides{};
     std::map<std::string, std::shared_ptr<const core::SpaceWeather>> weather{};
+    std::map<std::string, std::shared_ptr<const core::OceanTideModel>> ocean_tides{};
     [[nodiscard]] core::HpopEnvironment
     force_environment(const application::OrbitInput &input) const;
 };

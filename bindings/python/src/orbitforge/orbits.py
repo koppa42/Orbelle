@@ -261,6 +261,38 @@ class SolidTideSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class OceanTideSettings:
+    """IERS 2010 ocean potential with independent degree/order and automatic pole tide.
+
+    The catalog/DataSnapshot model is required only when enabled and degree >= 2.
+    Defaults to FES2014bv1, 4x4. Includes only explicit file constituents; no minor-wave
+    inference or amplitude filtering. Uses TT/UT1 and original IERS 2010 mean pole.
+    """
+    enabled: bool = False
+    model: str = "fes2014bv1"
+    degree: int = 4
+    order: int = 4
+
+    def __post_init__(self) -> None:
+        self._native()
+
+    def _native(self) -> n.OceanTideOptions:
+        if type(self.enabled) is not bool:
+            raise TypeError("ocean tide enabled must be bool")
+        if type(self.degree) is not int or type(self.order) is not int:
+            raise TypeError("ocean tide degree/order must be integers")
+        value = n.OceanTideOptions()
+        value.enabled, value.model = self.enabled, self.model
+        value.degree, value.order = self.degree, self.order
+        value.validate()
+        return value
+
+    @classmethod
+    def _read(cls, value: n.OceanTideOptions) -> "OceanTideSettings":
+        return cls(value.enabled, value.model, value.degree, value.order)
+
+
+@dataclass(frozen=True, slots=True)
 class HpopSettings:
     """Static file or built-in gravity and Cowell integration with local error tolerances.
 
@@ -293,6 +325,7 @@ class HpopSettings:
     solid_tides: SolidTideSettings = field(default_factory=SolidTideSettings)
     include_relativistic_accelerations: bool = False
     satellite_mass_kg: float = 1000.0
+    ocean_tides: OceanTideSettings = field(default_factory=OceanTideSettings)
 
     def __post_init__(self) -> None:
         if type(self.include_relativistic_accelerations) is not bool:
@@ -300,6 +333,7 @@ class HpopSettings:
         require(self.srp, SrpSettings, "srp")
         require(self.drag, DragSettings, "drag")
         require(self.solid_tides, SolidTideSettings, "solid_tides")._native()
+        require(self.ocean_tides, OceanTideSettings, "ocean_tides")._native()
         bodies = tuple(self.third_bodies)
         if any(body not in THIRD_BODY_NAMES for body in bodies) or len(set(bodies)) != len(bodies):
             raise ValueError("third_bodies accepts solar-system body names, each at most once")
@@ -329,7 +363,7 @@ class HpopSettings:
         if self.integrator not in ("rkf78", "rk4"):
             raise ValueError("integrator must be 'rkf78' or 'rk4'")
         for name in self.__dataclass_fields__:
-            if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides"):
+            if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides"):
                 setattr(value, name, getattr(self, name))
         rows = list(value.third_bodies)
         for item in self.body_gravity:
@@ -341,6 +375,7 @@ class HpopSettings:
         value.srp = self.srp._native()
         value.drag = self.drag._native()
         value.solid_tides = self.solid_tides._native()
+        value.ocean_tides = self.ocean_tides._native()
         value.integrator = n.HpopIntegrator.RKF78 if self.integrator == "rkf78" else n.HpopIntegrator.RK4
         value.validate()
         return value
@@ -348,7 +383,7 @@ class HpopSettings:
     @classmethod
     def _read(cls, value: n.HpopOptions) -> "HpopSettings":
         fields = {name: getattr(value, name) for name in cls.__dataclass_fields__
-                  if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides")}
+                  if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides")}
         rows = value.third_bodies
         fields["third_bodies"] = tuple(b for b, row in zip(THIRD_BODY_NAMES, rows) if row.enabled)
         sources = {n.ThirdBodyGravitySource.JPL_DE: "jpl_de",
@@ -362,6 +397,7 @@ class HpopSettings:
         fields["srp"] = SrpSettings._read(value.srp)
         fields["drag"] = DragSettings._read(value.drag)
         fields["solid_tides"] = SolidTideSettings._read(value.solid_tides)
+        fields["ocean_tides"] = OceanTideSettings._read(value.ocean_tides)
         return cls(**fields, integrator="rkf78" if value.integrator == n.HpopIntegrator.RKF78 else "rk4")
 
 
@@ -455,7 +491,7 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          body_gravity: tuple[ThirdBodySettings, ...] = (), srp: SrpSettings | None = None,
          drag: DragSettings | None = None, solid_tides: SolidTideSettings | None = None,
          include_relativistic_accelerations: bool = False,
-         satellite_mass_kg: float = 1000.0) -> Orbit:
+         satellite_mass_kg: float = 1000.0, ocean_tides: OceanTideSettings | None = None) -> Orbit:
     """Cowell orbit with static gravity, third bodies, spherical SRP, RKF78 or RK4.
 
     Built-in EGM96 supports up to degree 20; installed gravity files up to 2190 (EGM2008 order limit 2159).
@@ -481,6 +517,7 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
         SrpSettings() if srp is None else require(srp, SrpSettings, "srp"),
         DragSettings() if drag is None else require(drag, DragSettings, "drag"),
         SolidTideSettings() if solid_tides is None else require(solid_tides, SolidTideSettings, "solid_tides"),
-        include_relativistic_accelerations, satellite_mass_kg)
+        include_relativistic_accelerations, satellite_mass_kg,
+        OceanTideSettings() if ocean_tides is None else require(ocean_tides, OceanTideSettings, "ocean_tides"))
     settings._native()  # Fail at construction, before changing a project.
     return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)

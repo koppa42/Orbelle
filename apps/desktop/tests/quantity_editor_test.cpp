@@ -2450,4 +2450,150 @@ TEST_F(QuantityTest, HpopLoveNumberFollowsGravityFileAndCancelPreservesSelection
     EXPECT_EQ(options.gravity_model, "custom");
     EXPECT_EQ(options.solid_tides.mode, core::SolidTideMode::permanent);
 }
+
+TEST_F(QuantityTest, HpopOceanIndependentTruncationKeyboardResizeReopenAndCancel) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    QTemporaryDir temporary;
+    const auto root = std::filesystem::path(temporary.path().toStdWString());
+    EopCatalog catalog(root / "data", {}, {}, false);
+    QFile file(temporary.path() + "/test.pot");
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    file.write(
+        "Coefficients to compute variations in normalized Stokes coefficients (unit = 10^-11)\n"
+        "Ocean tide model: Test up to (4,2)\n(test)\nDoodson Darw l m DelC+ DelS+ DelC- DelS-\n");
+    for (int n = 2; n <= 4; ++n)
+        for (int m = 0; m <= 2; ++m)
+            file.write(QString("55.555 Test %1 %2 1 2 3 4\n").arg(n).arg(m).toUtf8());
+    file.close();
+    catalog.data().install_ocean_tides(root / "test.pot", "custom-ocean");
+    core::HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    options.ocean_tides = {false, "custom-ocean", 4, 2};
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *use = dialog->findChild<QCheckBox *>("hpopUseOceanTides");
+        auto *degree = dialog->findChild<QSpinBox *>("hpopOceanTideDegree");
+        auto *order = dialog->findChild<QSpinBox *>("hpopOceanTideOrder");
+        ASSERT_TRUE(use);
+        ASSERT_TRUE(degree);
+        ASSERT_TRUE(order);
+        EXPECT_FALSE(degree->isEnabled());
+        reveal(use);
+        use->setFocus();
+        QKeyEvent press(QEvent::KeyPress, Qt::Key_Space, Qt::NoModifier);
+        QKeyEvent release(QEvent::KeyRelease, Qt::Key_Space, Qt::NoModifier);
+        QApplication::sendEvent(use, &press);
+        QApplication::sendEvent(use, &release);
+        EXPECT_TRUE(use->isChecked());
+        EXPECT_TRUE(degree->isEnabled());
+        auto *accept = dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok);
+        degree->setValue(5);
+        accept->click();
+        EXPECT_TRUE(dialog->isVisible());
+        EXPECT_FALSE(options.ocean_tides.enabled);
+        EXPECT_TRUE(
+            dialog->findChild<QLabel *>("errorText")->text().contains(QStringLiteral("可用范围")));
+        degree->setValue(4);
+        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        std::cout << "HPOP ocean tide device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
+        for (int width : {720, 430}) {
+            dialog->resize(width, width == 720 ? 700 : 620);
+            QEventLoop settled;
+            QTimer::singleShot(60, &settled, &QEventLoop::quit);
+            settled.exec();
+            auto *scroll = dialog->findChild<QScrollArea *>("hpopGravityPage");
+            scroll->ensureWidgetVisible(order);
+            QApplication::processEvents();
+            EXPECT_EQ(degree, dialog->findChild<QSpinBox *>("hpopOceanTideDegree"));
+            EXPECT_EQ(degree->value(), 4);
+            EXPECT_EQ(order->value(), 2);
+            EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+            EXPECT_FALSE(dialog->findChild<QLabel *>("hpopOceanTideStatus")
+                             ->text()
+                             .contains(QStringLiteral("已安装")));
+            if (!capture.isEmpty()) {
+                EXPECT_TRUE(QDir{}.mkpath(capture));
+                EXPECT_TRUE(
+                    dialog->grab().save(capture + QString("/hpop-ocean-%1.png").arg(width)));
+            }
+        }
+        // An unrelated official-model download must not block this available custom model.
+        catalog.start_download(QUrl("http://127.0.0.1:1"), DataProduct::fes2014bv1);
+        use->setChecked(false);
+        EXPECT_FALSE(degree->isEnabled());
+        EXPECT_EQ(order->value(), 2);
+        use->setChecked(true);
+        EXPECT_TRUE(accept->isEnabled());
+        EXPECT_TRUE(dialog->findChild<QProgressBar *>("hpopOceanTideProgress")->isHidden());
+        accept->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr, {}, {}, {}, &catalog));
+    EXPECT_TRUE(catalog.downloading());
+    catalog.cancel_download();
+    settle_hpop_catalog(catalog);
+    EXPECT_EQ(options.gravity_degree, 0);
+    EXPECT_EQ(options.ocean_tides, (core::OceanTideOptions{true, "custom-ocean", 4, 2}));
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        EXPECT_TRUE(dialog->findChild<QCheckBox *>("hpopUseOceanTides")->isChecked());
+        EXPECT_EQ(dialog->findChild<QSpinBox *>("hpopOceanTideDegree")->value(), 4);
+        dialog->findChild<QSpinBox *>("hpopOceanTideOrder")->setValue(0);
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr, {}, {}, {}, &catalog));
+    EXPECT_EQ(options, saved);
+}
+TEST_F(QuantityTest, HpopMissingOceanDownloadsAreOwnedCancellableAndRetryOnReopen) {
+    QTemporaryDir temporary;
+    EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
+    core::HpopOptions options;
+    options.ocean_tides.enabled = true;
+    const auto saved = options;
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        QTimer::singleShot(0, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            ASSERT_TRUE(dialog);
+            dialog->findChild<QPushButton *>("hpopDownloadOceanTides")->click();
+            EXPECT_TRUE(catalog.downloading());
+            EXPECT_EQ(catalog.active_product(), DataProduct::fes2014bv1);
+            EXPECT_FALSE(
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->isEnabled());
+            if (attempt)
+                dialog->findChild<QPushButton *>("hpopCancelOceanDownload")->click();
+            dialog->reject();
+        });
+        EXPECT_FALSE(edit_hpop_settings(options, nullptr, {}, {}, {}, &catalog));
+        settle_hpop_catalog(catalog);
+        EXPECT_EQ(options, saved);
+        EXPECT_EQ(catalog.update_status(DataProduct::fes2014bv1).state, DataUpdateState::cancelled);
+    }
+}
+TEST_F(QuantityTest, HpopQueuedOceanCancellationPreservesUnrelatedDownloadAndDisabledDraft) {
+    QTemporaryDir temporary;
+    EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
+    catalog.start_download(QUrl("http://127.0.0.1:1"), DataProduct::space_weather);
+    core::HpopOptions options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *use = dialog->findChild<QCheckBox *>("hpopUseOceanTides");
+        use->setChecked(true);
+        EXPECT_TRUE(dialog->findChild<QLabel *>("hpopOceanTideStatus")
+                        ->text()
+                        .contains(QStringLiteral("等待")));
+        dialog->findChild<QPushButton *>("hpopCancelOceanDownload")->click();
+        EXPECT_TRUE(catalog.downloading());
+        EXPECT_EQ(catalog.active_product(), DataProduct::space_weather);
+        use->setChecked(false);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr, {}, {}, {}, &catalog));
+    EXPECT_FALSE(options.ocean_tides.enabled);
+    EXPECT_EQ(options.ocean_tides.degree, 4);
+    catalog.cancel_download();
+    settle_hpop_catalog(catalog);
+}
 } // namespace orbitforge::desktop

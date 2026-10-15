@@ -66,6 +66,13 @@ class DataSnapshot {
     [[nodiscard]] DataSnapshot with_space_weather_file(const std::string &selection,
                                                        const std::filesystem::path &file) const;
     [[nodiscard]] const auto &weather_sources() const { return weather_; }
+    [[nodiscard]] DataSnapshot
+    with_ocean_tides(const std::string &selection,
+                     std::shared_ptr<const core::OceanTideModel> model) const;
+    [[nodiscard]] DataSnapshot with_ocean_tide_file(const std::string &selection,
+                                                    const std::filesystem::path &file) const;
+    [[nodiscard]] const auto &ocean_tide_models() const { return ocean_tides_; }
+
     [[nodiscard]] core::HpopEnvironment
     force_environment(const application::OrbitInput &input) const;
     [[nodiscard]] const application::DataLock &data_lock() const { return lock_; }
@@ -84,6 +91,7 @@ class DataSnapshot {
     std::map<std::string, std::shared_ptr<const core::GravityModel>> gravity_;
     std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> ephemerides_;
     std::map<std::string, std::shared_ptr<const core::SpaceWeather>> weather_;
+    std::map<std::string, std::shared_ptr<const core::OceanTideModel>> ocean_tides_;
     application::DataLock lock_;
     std::vector<std::string> selection_notes_;
     friend class DataCatalog;

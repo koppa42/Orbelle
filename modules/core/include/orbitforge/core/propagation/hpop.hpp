@@ -4,6 +4,7 @@
 #include <orbitforge/core/frames/frame_provider.hpp>
 #include <orbitforge/core/propagation/atmospheric_drag.hpp>
 #include <orbitforge/core/propagation/gravity.hpp>
+#include <orbitforge/core/propagation/ocean_tides.hpp>
 #include <orbitforge/core/propagation/relativity.hpp>
 #include <orbitforge/core/propagation/solar_radiation_pressure.hpp>
 #include <orbitforge/core/propagation/solid_tides.hpp>
@@ -37,6 +38,7 @@ struct HpopOptions {
     SrpOptions srp;
     DragOptions drag;
     SolidTideOptions solid_tides;
+    OceanTideOptions ocean_tides;
     bool include_relativistic_accelerations = false; // All three IERS 2003 terms.
     [[nodiscard]] bool uses_full_solid_tides() const {
         return solid_tides.mode == SolidTideMode::full &&
@@ -48,7 +50,7 @@ struct HpopOptions {
     }
     [[nodiscard]] bool uses_earth_fixed_gravity() const {
         // None may also remove the permanent component of a zero-tide base field.
-        return gravity_degree > 0 ||
+        return gravity_degree > 0 || ocean_tides.active() ||
                (solid_tides.mode != SolidTideMode::none && !solid_tides.truncate_to_gravity);
     }
     [[nodiscard]] bool uses_eop_force() const {
@@ -115,6 +117,8 @@ struct HpopEnvironment {
     // UTC for atmosphere and time-dependent solid tides. Must match the EOP time identity.
     std::shared_ptr<const ITimeProvider> time{};
     std::shared_ptr<const SpaceWeather> weather{};
+    // Owned immutable normalized potential model, required only when ocean tides are active.
+    std::shared_ptr<const OceanTideModel> ocean_tides{};
     void validate_ephemeris_interval(const HpopOptions &options, Epoch first, Epoch last) const;
     // Validates complete weather paths, both models when a low-altitude model is selected.
     void validate_weather_interval(const DragOptions &drag, Epoch first, Epoch last) const;

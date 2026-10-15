@@ -33,6 +33,13 @@ struct CatalogSpaceWeather {
     DataAcquisition acquisition = DataAcquisition::unknown;
     std::int64_t acquired_at_unix_seconds = 0;
 };
+struct CatalogOceanTides {
+    std::string selection;
+    core::OceanTideInfo info;
+    std::filesystem::path file;
+    DataAcquisition acquisition = DataAcquisition::unknown;
+    std::int64_t acquired_at_unix_seconds = 0;
+};
 struct CatalogSnapshot {
     std::string lock_sha256;
     std::string snapshot_id;
@@ -75,6 +82,16 @@ class DataCatalog {
     [[nodiscard]] std::vector<CatalogSpaceWeather> weather_sources() const;
     [[nodiscard]] std::shared_ptr<const core::SpaceWeather>
     load_space_weather(const std::string &selection) const;
+    // FES normalized potential file. The official fes2014bv1 ID requires the pinned
+    // original bytes; custom models use another ID. Atomic, cancellable publication.
+    CatalogOceanTides install_ocean_tides(const std::filesystem::path &source,
+                                          const std::string &selection = "fes2014bv1",
+                                          const std::string &source_url = {},
+                                          DataAcquisition acquisition = DataAcquisition::imported,
+                                          const std::function<void()> &checkpoint = {});
+    [[nodiscard]] std::vector<CatalogOceanTides> ocean_tide_models() const;
+    [[nodiscard]] std::shared_ptr<const core::OceanTideModel>
+    load_ocean_tides(const std::string &selection) const;
     // Reads a coherent local catalog view; never downloads or changes current pointers.
     // Full coverage wins over extrapolation, then preferred_eop() orders the sources.
     [[nodiscard]] DataSnapshot snapshot(core::Epoch first, core::Epoch last,

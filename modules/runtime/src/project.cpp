@@ -5,6 +5,7 @@
 #include <orbitforge/runtime/j2.hpp>
 #include <orbitforge/runtime/j4.hpp>
 #include <orbitforge/runtime/mission.hpp>
+#include <orbitforge/runtime/ocean_tides.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/sgp4.hpp>
 #include <orbitforge/runtime/space_weather.hpp>
@@ -111,6 +112,12 @@ application::Scenario make_project_scenario(const application::Project &project,
                 throw application::ProjectError("Missing space weather");
             validate_space_weather_reference(project.force_data, input.hpop.drag.weather_model,
                                              environment.weather->info());
+        }
+        if (input.uses_hpop() && input.hpop.ocean_tides.active()) {
+            if (!environment.ocean_tides)
+                throw application::ProjectError("Missing selected ocean tide model");
+            validate_ocean_tide_reference(project.force_data, input.hpop.ocean_tides.model,
+                                          environment.ocean_tides->info());
         }
         result = result.with_object(make_orbit_session(satellite.orbit, 1, time, environment));
     }

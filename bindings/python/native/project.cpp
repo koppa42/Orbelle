@@ -244,6 +244,13 @@ void bind_project(py::module_ &module) {
         .def_readwrite("include_time_dependent_terms",
                        &core::SolidTideOptions::include_time_dependent_terms)
         .def("validate", &core::validate_solid_tide_options);
+    py::class_<core::OceanTideOptions>(module, "OceanTideOptions")
+        .def(py::init<>())
+        .def_readwrite("enabled", &core::OceanTideOptions::enabled)
+        .def_readwrite("model", &core::OceanTideOptions::model)
+        .def_readwrite("degree", &core::OceanTideOptions::degree)
+        .def_readwrite("order", &core::OceanTideOptions::order)
+        .def("validate", &core::validate_ocean_tide_options);
     py::class_<core::HpopOptions>(module, "HpopOptions")
         .def(py::init<>())
         .def_readwrite("gravity_model", &core::HpopOptions::gravity_model)
@@ -255,6 +262,7 @@ void bind_project(py::module_ &module) {
         .def_readwrite("srp", &core::HpopOptions::srp)
         .def_readwrite("drag", &core::HpopOptions::drag)
         .def_readwrite("solid_tides", &core::HpopOptions::solid_tides)
+        .def_readwrite("ocean_tides", &core::HpopOptions::ocean_tides)
         .def_readwrite("include_relativistic_accelerations",
                        &core::HpopOptions::include_relativistic_accelerations)
         .def_readwrite("ephemeris_model", &core::HpopOptions::ephemeris_model)

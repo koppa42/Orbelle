@@ -1,4 +1,4 @@
-add_executable(orbitforge_core_tests circular_two_body_test.cpp ground_station_test.cpp hpop_test.cpp mission_test.cpp gravity_test.cpp solid_tides_test.cpp relativity_test.cpp third_body_test.cpp solar_radiation_pressure_test.cpp atmospheric_drag_test.cpp)
+add_executable(orbitforge_core_tests circular_two_body_test.cpp ground_station_test.cpp hpop_test.cpp mission_test.cpp gravity_test.cpp solid_tides_test.cpp ocean_tides_test.cpp relativity_test.cpp third_body_test.cpp solar_radiation_pressure_test.cpp atmospheric_drag_test.cpp)
 target_compile_definitions(orbitforge_core_tests PRIVATE
     ORBITFORGE_GRAVITY_FULL_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/gravity_full.txt"
     ORBITFORGE_RELATIVITY_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/relativity.txt"
