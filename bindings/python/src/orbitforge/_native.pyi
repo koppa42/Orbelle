@@ -903,6 +903,7 @@ class DragOptions:
     f107_average: float
     kp: float
     use_apparent_sun_position: bool
+    use_approximate_altitude: bool
     weather_model: str
     geomagnetic_update: GeomagneticUpdate
     geomagnetic_source: GeomagneticSource
@@ -929,6 +930,8 @@ class AtmosphereEvaluation:
     def exospheric_temperature_k(self) -> float: ...
 
 class DragEvaluation:
+    @property
+    def density_altitude_m(self) -> float: ...
     @property
     def acceleration_itrf_mps2(self) -> list[float]: ...
     @property

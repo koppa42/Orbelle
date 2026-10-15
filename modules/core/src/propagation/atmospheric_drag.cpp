@@ -174,11 +174,24 @@ DragEvaluation evaluate_drag(const std::array<double, 3> &r, const std::array<do
     if (!std::isfinite(sun_distance) || sun_distance == 0)
         throw std::invalid_argument("Atmospheric density requires a finite nonzero Sun position");
     const auto g = drag_geodetic_position(r);
+    double density_altitude = g.height_m;
+    if (options.use_approximate_altitude) {
+        // STK's oblate-spheroid approximation: radius minus the ellipsoid's
+        // radial intersection, using geocentric (not geodetic) latitude.
+        // Latitude/longitude passed to the atmosphere retain their exact definition.
+        const double p = std::hypot(r[0], r[1]), radius = std::hypot(p, r[2]);
+        const double cos_lat = p / radius;
+        const double surface = p == 0      ? b
+                               : r[2] == 0 ? a
+                                           : b / std::sqrt(1 - e2 * cos_lat * cos_lat);
+        density_altitude = radius - surface;
+    }
     const double angle = std::atan2(sun[0] * r[1] - sun[1] * r[0], sun[0] * r[0] + sun[1] * r[1]);
     AtmosphereInput input{utc,          g,
                           angle,        std::atan2(sun[2], std::hypot(sun[0], sun[1])),
                           options.f107, options.f107_average,
                           options.kp};
+    input.geodetic.height_m = density_altitude;
     const auto density_for = [&](AtmosphereModel model, bool low = false) {
         auto values = input;
         if (!options.weather_model.empty()) {
@@ -205,19 +218,19 @@ DragEvaluation evaluate_drag(const std::array<double, 3> &r, const std::array<do
     double density;
     if (options.atmosphere == AtmosphereModel::jacchia_roberts &&
         options.low_altitude_model == LowAltitudeDensityModel::nrlmsise00 &&
-        g.height_m < 90000 + options.blending_range_m) {
+        density_altitude < 90000 + options.blending_range_m) {
         const double lower = density_for(AtmosphereModel::nrlmsise00, true);
-        if (g.height_m <= 90000) {
+        if (density_altitude <= 90000) {
             density = lower;
         } else {
             const double upper = density_for(AtmosphereModel::jacchia_roberts);
-            const double t = (g.height_m - 90000) / options.blending_range_m;
+            const double t = (density_altitude - 90000) / options.blending_range_m;
             const double weight = t * t * (3 - 2 * t);
             density = lower + weight * (upper - lower);
         }
     } else if (options.atmosphere == AtmosphereModel::jacchia_roberts &&
                options.low_altitude_model == LowAltitudeDensityModel::nrlmsise00 &&
-               g.height_m < 90000) {
+               density_altitude < 90000) {
         density = density_for(AtmosphereModel::nrlmsise00, true);
     } else {
         density = density_for(options.atmosphere);
@@ -226,6 +239,6 @@ DragEvaluation evaluate_drag(const std::array<double, 3> &r, const std::array<do
                          std::hypot(v[0], v[1], v[2]);
     const std::array force{scale * v[0], scale * v[1], scale * v[2]};
     finite_vector(force);
-    return {force, density, g};
+    return {force, density, g, density_altitude};
 }
 } // namespace orbitforge::core

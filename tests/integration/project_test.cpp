@@ -315,6 +315,7 @@ TEST(Project, CurrentSchemaFixturePreservesInputsRelationshipsAndExactEncoding) 
     EXPECT_EQ(drag.f107, 170);
     EXPECT_EQ(drag.kp, 4.3);
     EXPECT_TRUE(drag.use_apparent_sun_position);
+    EXPECT_TRUE(drag.use_approximate_altitude);
     EXPECT_EQ(drag.weather_model, "fixture-weather");
     EXPECT_EQ(drag.geomagnetic_update, core::GeomagneticUpdate::three_hourly);
     EXPECT_EQ(drag.geomagnetic_source, core::GeomagneticSource::kp);
@@ -392,8 +393,8 @@ TEST(Project, DataLocksHaveStableCanonicalOrderAndRejectDuplicateRoles) {
 }
 TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
     const auto bytes = application::encode_project(example());
-    for (std::uint32_t version = 0; version <= 21; ++version) {
-        if (version == 20)
+    for (std::uint32_t version = 0; version <= 22; ++version) {
+        if (version == 21)
             continue;
         SCOPED_TRACE(version);
         auto unsupported = bytes;
@@ -405,7 +406,7 @@ TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
         } catch (const application::ProjectError &error) {
             EXPECT_NE(std::string(error.what()).find("version " + std::to_string(version) + ";"),
                       std::string::npos);
-            EXPECT_NE(std::string(error.what()).find("reads only version 20"), std::string::npos);
+            EXPECT_NE(std::string(error.what()).find("reads only version 21"), std::string::npos);
         }
     }
 }

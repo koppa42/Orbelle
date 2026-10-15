@@ -57,7 +57,9 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
         const auto d = core::effective_drag_options(options.drag);
         std::ostringstream config;
         config.imbue(std::locale::classic());
-        config << std::hexfloat << ";drag=spherical-corotating-itrf-exact-wgs84-v1"
+        config << std::hexfloat << ";drag=spherical-corotating-itrf-wgs84-v2"
+               << ";density-altitude="
+               << (d.use_approximate_altitude ? "radial-wgs84-v1" : "geodetic-wgs84-v1")
                << ";atmosphere=" << static_cast<int>(d.atmosphere)
                << ";density-kernel=jr-gmat-c9b78bd;nrlmsise00-orekit-13.1.2-gtd7d"
                << ";cd=" << d.cd << ";drag-area-mass=" << d.area_mass_ratio_m2_per_kg

@@ -50,9 +50,11 @@ trajectory = analysis.states(satellite, step=u.s(30))
 
 RK4 使用 `integrator="rk4", fixed_step_seconds=10`；点质量使用 `gravity_degree=0`，无需 EOP。`satellite.orbit.hpop` 是不可变 `HpopSettings`，可用 `dataclasses.replace` 修改后将新 `Orbit` 赋回 `satellite.orbit`；旧分析继续持有旧参数与数据。完整示例见 `examples/python/propagators.py`。
 
-C++ 设置 `OrbitInput.propagator = OrbitPropagator::hpop`、`OrbitInput.hpop`（`HpopOptions`），通过 `Project::prepare(data)` 查询。低层工厂 `runtime::make_hpop_session(initial, options, environment, id)` 持有不可变 UTC、Frame/EOP、重力、星历和空间天气 Provider 的共享所有权。核心只依赖标准库；Runtime 的 DE440s 装配需要 CSPICE。桌面选择 HPOP 后，“配置…”左侧导航分“力模型”（引力、阻力、太阳辐射压、其他）和“数值”（积分器、协方差）两组，每项下方实时显示当前草稿摘要，如“EGM2008 · 21 × 21 · 第三体 2”；窄窗口改为顶部页签。各页按标题分组，标签列对齐；补充说明收在分组标题旁的说明标记中，页面只保留限制与数据要求。阻力与光压以开关启用，关闭时只显示一行说明；光压的太阳位置与模型常数默认折叠为一行摘要。引力页将中心天体引力与第三体引力放在同一滚动页面；第三体区域用 Name / Use / Source / GM 四列表格配置日月、七颗行星及冥王星，支持搜索和独立的 Cb file / JPL DE / User Specified 来源。光压页提供球形模型、独立 Cr 与面积质量比、三种阴影模式、地球／月球分配及等效大气高度；太阳位置当前为几何位置。最低停止高度放在积分器页。阻力页提供球形 Cd/面积质量比、JR/NRLMSISE-00、手动 F10.7/Kp 或 CelesTrak 文件（日/三小时 Ap/Kp）、低空拼接和视太阳，详见[阻力契约](atmospheric_drag.md)。其他模型与协方差尚未实现，页面只显示能力状态，不提供可保存为已启用的开关。切换内外页、调整窗口或单位不重建输入；校验失败返回相应页并定位字段。保存设置仅改变属性草稿，轨道页的“应用”才计算并发布。参数随项目 v20 保存。
+C++ 设置 `OrbitInput.propagator = OrbitPropagator::hpop`、`OrbitInput.hpop`（`HpopOptions`），通过 `Project::prepare(data)` 查询。低层工厂 `runtime::make_hpop_session(initial, options, environment, id)` 持有不可变 UTC、Frame/EOP、重力、星历和空间天气 Provider 的共享所有权。核心只依赖标准库；Runtime 的 DE440s 装配需要 CSPICE。桌面选择 HPOP 后，“配置…”左侧导航分“力模型”（引力、阻力、太阳辐射压、其他）和“数值”（积分器、协方差）两组，每项下方实时显示当前草稿摘要，如“EGM2008 · 21 × 21 · 第三体 2”；窄窗口改为顶部页签。各页按标题分组，标签列对齐；补充说明收在分组标题旁的说明标记中，页面只保留限制与数据要求。阻力与光压以开关启用，关闭时只显示一行说明；光压的太阳位置与模型常数默认折叠为一行摘要。引力页将中心天体引力与第三体引力放在同一滚动页面；第三体区域用 Name / Use / Source / GM 四列表格配置日月、七颗行星及冥王星，支持搜索和独立的 Cb file / JPL DE / User Specified 来源。光压页提供球形模型、独立 Cr 与面积质量比、三种阴影模式、地球／月球分配及等效大气高度；太阳位置当前为几何位置。最低停止高度放在积分器页。阻力页提供球形 Cd/面积质量比、JR/NRLMSISE-00、手动 F10.7/Kp 或 CelesTrak 文件（日/三小时 Ap/Kp）、低空拼接和视太阳，详见[阻力契约](atmospheric_drag.md)。其他模型与协方差尚未实现，页面只显示能力状态，不提供可保存为已启用的开关。切换内外页、调整窗口或单位不重建输入；校验失败返回相应页并定位字段。保存设置仅改变属性草稿，轨道页的“应用”才计算并发布。参数随项目 v21 保存。
 
 独立回归使用 Orekit 13.1.2 Holmes–Featherstone 重力和 Hipparchus 4.0.2 DP853：五类轨道 × 三组阶次 × ±6000 s/±1 天共 60 个状态，检查位置每分量 0.15 m、速度 0.15 mm/s、初始加速度 5e-13 m/s²。参考刻意采用静态同轴重力系，隔离球谐与积分；真实 EOP 路由另由集成测试验证。尚无同配置 STK 导出数据直接对照，见 [HPOP 验证](../validation/hpop_protocol.md)。后续按完整截图清单继续完善光压、空间天气、大气并接入潮汐、附加力、积分高级选项和协方差；未实现的力不提供无效开关。
+
+阻力的 `use_approximate_altitude` 可选择 WGS84 椭球径向近似，默认关闭并使用精确大地高；密度、低空拼接和高度域检查使用同一个选择。位置报告仍返回精确大地高，低层 `DragEvaluation.density_altitude_m` 可核对实际密度输入，详见[阻力契约](atmospheric_drag.md)。
 
 ## J4
 

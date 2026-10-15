@@ -158,7 +158,7 @@ class ReportsTest(unittest.TestCase):
             path = Path(directory) / 'derived.orbitforge'
             project.save(path)
             raw = path.read_bytes()
-            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 20)
+            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 21)
             self.assertEqual(of.load_project(path).reports[0].query.kind, of.ReportKind.GEODETIC_POSITION)
 
 

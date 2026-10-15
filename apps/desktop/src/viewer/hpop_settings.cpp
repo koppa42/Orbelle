@@ -600,9 +600,8 @@ bool edit_hpop_settings(
     auto *drag_blend = quantity(drag_density, QStringLiteral("拼接范围"), "hpopDragBlendingRange",
                                 Unit::metre, options.drag.blending_range_m, 0, 1000000);
     drag_blend->set_unit(Unit::kilometre);
-    help(drag_density,
-         QStringLiteral("Jacchia–Roberts：90–2500 km；NRLMSISE-00：0–1000 km。"
-                        "低空模型在 90 km 以上的指定范围内平滑拼接；高度使用 WGS84 精确大地高。"));
+    help(drag_density, QStringLiteral("Jacchia–Roberts：90–2500 km；NRLMSISE-00：0–1000 km。"
+                                      "低空模型在 90 km 以上的指定范围内平滑拼接。"));
     auto *drag_weather =
         section(drag_page, QStringLiteral("太阳通量 / 地磁"), "hpopDragWeatherSection");
     auto *drag_weather_source = new QComboBox;
@@ -662,7 +661,14 @@ bool edit_hpop_settings(
          QStringLiteral(
              "手动模式使用常量。文件模式使用观测 F10.7、居中 81 日均值，"
              "按 UTC 和模型滞后取样；NRLMSISE 三小时模式包含历史 Ap。缺值或覆盖不足时停止计算。"));
-    auto *drag_sun = section(drag_page, QStringLiteral("太阳位置与计算数据"), "hpopDragSunSection");
+    auto *drag_sun =
+        section(drag_page, QStringLiteral("高度、太阳位置与计算数据"), "hpopDragSunSection");
+    auto *drag_approximate = new QCheckBox(QStringLiteral("使用近似高度"));
+    drag_approximate->setObjectName("hpopDragApproximateAltitude");
+    drag_approximate->setChecked(options.drag.use_approximate_altitude);
+    drag_approximate->setToolTip(
+        QStringLiteral("密度和低空拼接使用相对 WGS84 椭球的径向高度；关闭时使用精确大地高。"));
+    drag_sun->addRow(QString{}, drag_approximate);
     auto *drag_apparent = new QCheckBox(QStringLiteral("使用地心视太阳位置 (LT+S)"));
     drag_apparent->setObjectName("hpopDragApparentSun");
     drag_apparent->setChecked(options.drag.use_apparent_sun_position);
@@ -704,7 +710,7 @@ bool edit_hpop_settings(
     help(drag_sun, QStringLiteral("阻力需要覆盖传播区间的 UTC、EOP 和太阳星历。启用视太阳后，星历"
                                   "还须覆盖起点之前 600 秒；关闭时使用几何太阳。"));
     if (auto *group = group_of(drag_sun))
-        group->set_collapsible(false);
+        group->set_collapsible(true);
     const auto update_drag = [&] {
         const bool enabled = drag_use->isChecked();
         // A switched-off model folds away to one line instead of a page of inactive fields.
@@ -1195,6 +1201,7 @@ bool edit_hpop_settings(
             drag.low_altitude_model =
                 static_cast<core::LowAltitudeDensityModel>(low_density->currentIndex());
             drag.use_apparent_sun_position = drag_apparent->isChecked();
+            drag.use_approximate_altitude = drag_approximate->isChecked();
             drag.weather_model = drag_weather_source->currentIndex() == 1
                                      ? weather_file->currentData().toString().toStdString()
                                      : std::string{};

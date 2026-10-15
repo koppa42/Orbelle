@@ -1624,6 +1624,7 @@ TEST_F(QuantityTest, HpopDragUnitsModelsResizeSaveReopenAndCancel) {
         auto *low = dialog->findChild<QComboBox *>("hpopDragLowAltitudeModel");
         EXPECT_FALSE(area->isEnabled());
         use->setChecked(true);
+        EXPECT_TRUE(dialog->findChild<QCheckBox *>("hpopDragApproximateAltitude")->isVisible());
         area->set_unit(Unit::square_centimetres_per_gram);
         area->findChild<QLineEdit *>("quantityValue")->setText("0.3");
         low->setCurrentIndex(1);
@@ -1640,6 +1641,7 @@ TEST_F(QuantityTest, HpopDragUnitsModelsResizeSaveReopenAndCancel) {
         dialog->findChild<QuantityEditor *>("hpopDragF107Average")->set_value(160, Unit::one);
         dialog->findChild<QuantityEditor *>("hpopDragKp")->set_value(4.3, Unit::one);
         dialog->findChild<QCheckBox *>("hpopDragApparentSun")->setChecked(true);
+        dialog->findChild<QCheckBox *>("hpopDragApproximateAltitude")->setChecked(true);
         EXPECT_FALSE(dialog->findChild<QLabel *>("hpopDragEphemerisStatus")
                          ->text()
                          .contains(QStringLiteral("已安装")));
@@ -1660,7 +1662,20 @@ TEST_F(QuantityTest, HpopDragUnitsModelsResizeSaveReopenAndCancel) {
                 scroll->verticalScrollBar()->setValue(0);
                 QApplication::processEvents();
                 EXPECT_TRUE(dialog->grab().save(capture + QString("/hpop-drag-%1.png").arg(width)));
-                scroll->ensureWidgetVisible(dialog->findChild<QCheckBox *>("hpopDragApparentSun"));
+                auto *approximate = dialog->findChild<QCheckBox *>("hpopDragApproximateAltitude");
+                EXPECT_TRUE(approximate->isVisible());
+                scroll->ensureWidgetVisible(approximate);
+                approximate->setFocus();
+                const auto press_space = [&] {
+                    QKeyEvent press(QEvent::KeyPress, Qt::Key_Space, Qt::NoModifier);
+                    QKeyEvent release(QEvent::KeyRelease, Qt::Key_Space, Qt::NoModifier);
+                    QApplication::sendEvent(approximate, &press);
+                    QApplication::sendEvent(approximate, &release);
+                };
+                press_space();
+                EXPECT_FALSE(approximate->isChecked());
+                press_space();
+                EXPECT_TRUE(approximate->isChecked());
                 QApplication::processEvents();
                 EXPECT_TRUE(
                     dialog->grab().save(capture + QString("/hpop-drag-data-%1.png").arg(width)));
@@ -1677,11 +1692,14 @@ TEST_F(QuantityTest, HpopDragUnitsModelsResizeSaveReopenAndCancel) {
     EXPECT_EQ(options.drag.f107_average, 160);
     EXPECT_EQ(options.drag.kp, 4.3);
     EXPECT_TRUE(options.drag.use_apparent_sun_position);
+    EXPECT_TRUE(options.drag.use_approximate_altitude);
     const auto saved = options;
     QTimer::singleShot(0, [&] {
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
         ASSERT_TRUE(dialog);
         EXPECT_TRUE(dialog->findChild<QCheckBox *>("hpopUseDrag")->isChecked());
+        EXPECT_TRUE(dialog->findChild<QCheckBox *>("hpopDragApproximateAltitude")->isChecked());
+        dialog->findChild<QCheckBox *>("hpopDragApproximateAltitude")->setChecked(false);
         EXPECT_EQ(dialog->findChild<QuantityEditor *>("hpopDragF107")->value(Unit::one), 180);
         dialog->findChild<QCheckBox *>("hpopUseDrag")->setChecked(false);
         dialog->reject();

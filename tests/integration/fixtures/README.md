@@ -1,14 +1,14 @@
 # Current project format fixture
 
-`project-current.orbitforge` is a fixed v20 input assembled independently with Python's `struct.pack` from the [documented binary layout](../../../docs/architecture/project_files.md), without calling OrbitForge's writer. C++ and Python must read it and reproduce its bytes exactly. It guards against reader and writer drifting together.
+`project-current.orbitforge` is a fixed v21 input assembled independently with Python's `struct.pack` from the [documented binary layout](../../../docs/architecture/project_files.md), without calling OrbitForge's writer. C++ and Python must read it and reproduce its bytes exactly. It guards against reader and writer drifting together.
 
-- 1407 bytes; SHA-256 `24acb66ea5d699922bcd6e0a80b8f8a1843cfcef88f9e13e83a0b57043eff743`.
+- 1408 bytes; SHA-256 `6c9b259587854fa9ffe497bfedb6812627baf435165b20fafc8a5a13bf2c4f00`.
 - `Schema fixture`, TAI nanoseconds `[123, 600000000123]`, current time `1000000123`.
 - Two-body `satellite-a` named `观测卫星 A`, and mission sequence `satellite-b` with an empty display name (use its ID). Both use GCRF state `[7000000, 0, 0]` m and `[0, 6200, 5300]` m/s at TAI nanosecond 123.
 - Mission uses HPOP point-mass coasts: `Drift` (200000000001 ns), `Raise` (VNC delta-v `[12, -3, 0.5]` m/s), `Coast` (399999999999 ns). The sequence covers the scenario exactly.
 - HPOP stores an empty gravity selection (built-in EGM96), GM `3.986004415e14 m³/s²`, and uses RKF78, relative tolerance `2e-12`, position tolerance `0.002 m`, velocity tolerance `2e-6 m/s`, minimum/maximum steps `0.005/45 s`, inactive RK4 step `12 s`, minimum geocentric altitude `1000 m`.
 - SRP is disabled; its draft preserves Cr `1.25`, area/mass `0.03 m²/kg`, dual cone, Earth shadow on / Moon shadow off, atmospheric height `23000 m`, pressure `4.56e-6 Pa` at `149597870700 m`, Sun/Earth/Moon radii `696000000/6378137/1737400 m`.
-- Drag is disabled; its draft preserves Cd `2.3`, area/mass `0.03 m²/kg`, NRLMSISE-00, inactive low-altitude NRLMSISE selection, blend `42000 m`, F10.7 `170 sfu`, average `150 sfu`, Kp `4.3`, apparent Sun on, file selection `fixture-weather`, three-hour updates and Kp source.
+- Drag is disabled; its draft preserves Cd `2.3`, area/mass `0.03 m²/kg`, NRLMSISE-00, inactive low-altitude NRLMSISE selection, blend `42000 m`, F10.7 `170 sfu`, average `150 sfu`, Kp `4.3`, apparent Sun on, file selection `fixture-weather`, three-hour updates, Kp source and approximate altitude on.
 - All ten third bodies are disabled, with JPL DE sources; the saved ephemeris selection is `de440s`, with no GM overrides.
 - Both tracks use color `0xe9a2ba`, dash-dot lines and width 3.25 logical pixels.
 - `station-a` named `地面站 A`, WGS84 longitude 1.2 rad, latitude -0.4 rad, height 2500 m, minimum elevation 0.2 rad.

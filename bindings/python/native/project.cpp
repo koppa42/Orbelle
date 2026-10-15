@@ -128,6 +128,7 @@ void bind_project(py::module_ &module) {
         .def_readwrite("f107_average", &core::DragOptions::f107_average)
         .def_readwrite("kp", &core::DragOptions::kp)
         .def_readwrite("use_apparent_sun_position", &core::DragOptions::use_apparent_sun_position)
+        .def_readwrite("use_approximate_altitude", &core::DragOptions::use_approximate_altitude)
         .def_readwrite("weather_model", &core::DragOptions::weather_model)
         .def_readwrite("geomagnetic_update", &core::DragOptions::geomagnetic_update)
         .def_readwrite("geomagnetic_source", &core::DragOptions::geomagnetic_source)
@@ -159,6 +160,7 @@ void bind_project(py::module_ &module) {
     py::class_<core::DragEvaluation>(module, "DragEvaluation")
         .def_readonly("acceleration_itrf_mps2", &core::DragEvaluation::acceleration_itrf_mps2)
         .def_readonly("density_kg_m3", &core::DragEvaluation::density_kg_m3)
+        .def_readonly("density_altitude_m", &core::DragEvaluation::density_altitude_m)
         .def_property_readonly("geodetic", [](const core::DragEvaluation &result) {
             return std::array{result.geodetic.longitude_rad, result.geodetic.latitude_rad,
                               result.geodetic.height_m};

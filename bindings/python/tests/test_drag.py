@@ -20,6 +20,7 @@ class DragTests(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             settings.cd = 3
         for kwargs in ({"enabled": 1}, {"use_apparent_sun_position": "true"},
+                       {"use_approximate_altitude": 1},
                        {"cd": float("inf")}, {"area_mass_ratio_m2_per_kg": -1},
                        {"atmosphere": "unknown"}, {"kp": -1}, {"kp": 9.1}, {"f107": 0}):
             with self.assertRaises((TypeError, ValueError)):
@@ -106,10 +107,26 @@ class DragTests(unittest.TestCase):
             inputs.daily_ap = None
         self.assertEqual(of.evaluate_atmosphere(model, inputs).density_kg_m3, manual)
 
+    def test_approximate_altitude_changes_density_without_relabeling_geodetic_height(self):
+        options = of.DragOptions()
+        options.enabled = True
+        utc = of.UtcDateTime(2000, 1, 1, 12, 0, 0)
+        args = ((4_000_000, 3_000_000, 4_500_000), (0, 7200, 0), (1e11, 0, 2e10), utc)
+        exact = of.evaluate_drag(*args, options)
+        self.assertEqual(exact.density_altitude_m, exact.geodetic[2])
+        options.use_approximate_altitude = True
+        approximate = of.evaluate_drag(*args, options)
+        self.assertAlmostEqual(approximate.density_altitude_m, 358271.6089933367, delta=3e-9)
+        self.assertEqual(approximate.geodetic, exact.geodetic)
+        self.assertGreater(approximate.density_altitude_m, exact.geodetic[2])
+        self.assertNotEqual(approximate.density_kg_m3, exact.density_kg_m3)
+        self.assertNotEqual(approximate.acceleration_itrf_mps2, exact.acceleration_itrf_mps2)
+
     def test_disabled_drafts_roundtrip_without_data_and_do_not_change_identity(self):
         project = of.Project("Drag drafts", of.Epoch(0), of.Epoch(600 * 10**9))
         drag = of.orbits.DragSettings(cd=2.3, f107=170, kp=4.3, use_apparent_sun_position=True,
-                                     atmosphere="nrlmsise00", low_altitude_model="nrlmsise00")
+                                     atmosphere="nrlmsise00", low_altitude_model="nrlmsise00",
+                                     use_approximate_altitude=True)
         orbit = of.orbits.Hpop(initial=of.orbits.Cartesian(of.Epoch(0), (6778137, 0, 0), (0, 6300, 4300)),
                               gravity_degree=0, drag=drag)
         sat = project.objects.satellite("Sat", orbit=orbit)
@@ -142,7 +159,8 @@ class DragTests(unittest.TestCase):
             project = of.Project("Drag", first, last)
             orbit = of.orbits.Hpop(initial=of.orbits.Cartesian(first, (6778137, 0, 0), (0, 6300, 4300)),
                                   gravity_degree=0,
-                                  drag=of.orbits.DragSettings(enabled=True, use_apparent_sun_position=True))
+                                  drag=of.orbits.DragSettings(enabled=True, use_apparent_sun_position=True,
+                                                             use_approximate_altitude=True))
             sat = project.objects.satellite("Sat", orbit=orbit)
             with self.assertRaises((of.AnalysisCapabilityError, ValueError)):
                 project.prepare(data=time_only)
@@ -158,7 +176,8 @@ class DragTests(unittest.TestCase):
             self.assertEqual(restored.prepare(data=data).states(restored.objects[sat.id], step=u.s(60))
                              .position.values, before.position.values)
             for change in ({"cd": 2.8}, {"f107": 220}, {"kp": 7},
-                           {"atmosphere": "nrlmsise00"}, {"use_apparent_sun_position": False}):
+                           {"atmosphere": "nrlmsise00"}, {"use_apparent_sun_position": False},
+                           {"use_approximate_altitude": False}):
                 sat.orbit = replace(orbit, hpop=replace(orbit.hpop, drag=replace(orbit.hpop.drag, **change)))
                 changed = project.prepare(data=data).states(sat, step=u.s(60))
                 self.assertNotEqual(changed.input_sha256, before.input_sha256)

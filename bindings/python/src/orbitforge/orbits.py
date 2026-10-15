@@ -143,9 +143,11 @@ class DragSettings:
     JR supports 90..2500 km; NRLMSISE-00 gtd7d supports 0..1000 km.
     Manual flux/Kp values are constants; Kp is converted to Ap for NRLMSISE.
     Optional NRLMSISE low atmosphere blends over [90 km, 90 km + blending_range].
-    Height is exact WGS84 geodetic. Apparent Sun means received geocentric LT+S.
+    Density height is exact WGS84 geodetic unless use_approximate_altitude selects
+    the oblate-spheroid radial height. Geodetic latitude stays exact.
+    Apparent Sun means received geocentric LT+S.
     File weather uses an explicit catalog selection and checked model lags/history.
-    No winds or STK approximate height are implied.
+    No atmospheric winds are modeled.
     """
     enabled: bool = False
     cd: float = 2.2
@@ -157,12 +159,13 @@ class DragSettings:
     f107_average: float = 150.0
     kp: float = 3.0
     use_apparent_sun_position: bool = False
+    use_approximate_altitude: bool = False
     weather_model: str = ""
     geomagnetic_update: Literal["daily", "three_hourly"] = "daily"
     geomagnetic_source: Literal["ap", "kp"] = "ap"
 
     def __post_init__(self) -> None:
-        for name in ("enabled", "use_apparent_sun_position"):
+        for name in ("enabled", "use_apparent_sun_position", "use_approximate_altitude"):
             if not isinstance(getattr(self, name), bool):
                 raise TypeError(f"{name} requires bool")
         self._native()

@@ -284,6 +284,105 @@ TEST(AtmosphericDrag, RelativeVelocityDirectionAreaAndLowAltitudeBlendActuallyAf
         previous = value.density_kg_m3;
     }
 }
+TEST(AtmosphericDrag, ApproximateAltitudeUsesRadialIntersectionAndKeepsGeodeticCoordinates) {
+    // Independent 60-digit decimal ray/ellipsoid intersections, not the production formula.
+    // Solve (t*x/a)^2+(t*y/a)^2+(t*z/b)^2=1, then measure |r-t*r|.
+    const std::array<std::pair<std::array<double, 3>, double>, 3> cases{{
+        {{4000000, 3000000, 4500000}, 358271.6089933367},
+        {{-4800000, 4000000, -3500000}, 788693.7962020884},
+        {{1000, -1000, 6800000}, 443247.83189334586},
+    }};
+    const std::array v{0., 7200., 0.}, sun{1e11, 0., 2e10};
+    const UtcDateTime utc{2000, 1, 1, 12, 0, 0, 0};
+    for (const auto model : {AtmosphereModel::jacchia_roberts, AtmosphereModel::nrlmsise00}) {
+        for (const auto &[r, expected_height] : cases) {
+            SCOPED_TRACE(expected_height);
+            DragOptions options;
+            options.enabled = true;
+            options.atmosphere = model;
+            const auto exact = evaluate_drag(r, v, sun, utc, options);
+            options.use_approximate_altitude = true;
+            const auto approximate = evaluate_drag(r, v, sun, utc, options);
+            EXPECT_NEAR(approximate.density_altitude_m, expected_height, 3e-9);
+            EXPECT_EQ(exact.density_altitude_m, exact.geodetic.height_m);
+            EXPECT_EQ(approximate.geodetic.longitude_rad, exact.geodetic.longitude_rad);
+            EXPECT_EQ(approximate.geodetic.latitude_rad, exact.geodetic.latitude_rad);
+            EXPECT_EQ(approximate.geodetic.height_m, exact.geodetic.height_m);
+            AtmosphereInput input;
+            input.utc = utc;
+            input.geodetic = exact.geodetic;
+            input.geodetic.height_m = expected_height;
+            input.solar_hour_angle_rad = std::atan2(r[1], r[0]);
+            input.sun_declination_rad = std::atan2(2e10, 1e11);
+            const auto density = evaluate_atmosphere(model, input).density_kg_m3;
+            EXPECT_NEAR(approximate.density_kg_m3 / density, 1, 1e-12);
+            EXPECT_DOUBLE_EQ(approximate.acceleration_itrf_mps2[1],
+                             -.5 * approximate.density_kg_m3 * 2.2 * .02 * 7200 * 7200);
+            if (std::abs(r[0]) > 1e6) {
+                EXPECT_GT(approximate.density_altitude_m, exact.density_altitude_m);
+                EXPECT_NE(approximate.density_kg_m3, exact.density_kg_m3);
+            }
+        }
+    }
+}
+TEST(AtmosphericDrag, ApproximateAltitudeEquatorPolesDomainsAndLowAltitudeSelection) {
+    constexpr double a = 6378137, b = a * (1 - 1 / 298.257223563);
+    const std::array v{0., 7200., 0.}, sun{1e11, 0., 2e10};
+    const UtcDateTime utc{2000, 1, 1, 12, 0, 0, 0};
+    DragOptions options;
+    options.enabled = options.use_approximate_altitude = true;
+    options.atmosphere = AtmosphereModel::nrlmsise00;
+    for (const double height : {0., 90000., 400000., 1000000.}) {
+        for (const auto r : {std::array{a + height, 0., 0.}, std::array{0., -a - height, 0.},
+                             std::array{0., 0., b + height}, std::array{0., 0., -b - height}}) {
+            const auto result = evaluate_drag(r, v, sun, utc, options);
+            EXPECT_DOUBLE_EQ(result.density_altitude_m, height);
+            EXPECT_NEAR(result.geodetic.height_m, height, 1e-8);
+            EXPECT_GT(result.density_kg_m3, 0);
+        }
+    }
+    EXPECT_THROW((void)evaluate_drag({a - 1, 0, 0}, v, sun, utc, options), PropagationError);
+    EXPECT_THROW((void)evaluate_drag({a + 1000001, 0, 0}, v, sun, utc, options), PropagationError);
+    EXPECT_THROW((void)evaluate_drag({0, 0, 0}, v, sun, utc, options), PropagationError);
+    EXPECT_THROW(
+        (void)evaluate_drag({0, std::numeric_limits<double>::infinity(), 0}, v, sun, utc, options),
+        std::invalid_argument);
+    options.atmosphere = AtmosphereModel::jacchia_roberts;
+    options.low_altitude_model = LowAltitudeDensityModel::nrlmsise00;
+    options.blending_range_m = 0;
+    // Exact geodetic height is below 90 km, radial height just above: model selection
+    // must use the same height as the density kernel. Values are independent decimals.
+    const std::array r{4566084.003699506, 0., 4566084.003699506};
+    const auto radial = evaluate_drag(r, v, sun, utc, options);
+    EXPECT_LT(radial.geodetic.height_m, 90000);
+    EXPECT_NEAR(radial.density_altitude_m, 90000.2, 3e-9);
+    AtmosphereInput input;
+    input.utc = utc;
+    input.geodetic = radial.geodetic;
+    input.geodetic.height_m = radial.density_altitude_m;
+    input.sun_declination_rad = std::atan2(2e10, 1e11);
+    EXPECT_EQ(radial.density_kg_m3,
+              evaluate_atmosphere(AtmosphereModel::jacchia_roberts, input).density_kg_m3);
+    options.use_approximate_altitude = false;
+    const auto exact = evaluate_drag(r, v, sun, utc, options);
+    input.geodetic.height_m = exact.geodetic.height_m;
+    EXPECT_EQ(exact.density_kg_m3,
+              evaluate_atmosphere(AtmosphereModel::nrlmsise00, input).density_kg_m3);
+    options.use_approximate_altitude = true;
+    options.blending_range_m = 100;
+    const auto blend =
+        evaluate_drag({4566119.217617209, 0., 4566119.217617209}, v, sun, utc, options);
+    EXPECT_NEAR(blend.density_altitude_m, 90050, 3e-9);
+    input.geodetic = blend.geodetic;
+    input.geodetic.height_m = blend.density_altitude_m;
+    const double lower = evaluate_atmosphere(AtmosphereModel::nrlmsise00, input).density_kg_m3;
+    const double upper = evaluate_atmosphere(AtmosphereModel::jacchia_roberts, input).density_kg_m3;
+    // The decimal midpoint is rounded to binary64 Cartesian coordinates. Propagate
+    // the 3 nm height bound through max |dw/dh| = 1.5 / blending_range.
+    const double expected = .5 * (lower + upper);
+    const double bound = expected * 1e-12 + std::abs(upper - lower) * 1.5 * 3e-9 / 100;
+    EXPECT_NEAR(blend.density_kg_m3, expected, bound);
+}
 TEST(AtmosphericDrag, CoRotatingWgs84NrlmsisePropagationMatchesIndependentOrekit) {
     std::ifstream source(ORBITFORGE_DRAG_REFERENCE);
     ASSERT_TRUE(source);

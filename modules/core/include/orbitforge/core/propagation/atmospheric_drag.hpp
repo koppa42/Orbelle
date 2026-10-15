@@ -18,6 +18,8 @@ struct DragOptions {
     double f107 = 150, f107_average = 150, kp = 3;
     // Geometric positions by default; apparent Sun requires a certifying ephemeris.
     bool use_apparent_sun_position = false;
+    // Density height above the WGS84 radial intersection; geodetic latitude stays exact.
+    bool use_approximate_altitude = false;
     // Empty: manual constants. Otherwise an immutable catalog selection, never a path.
     std::string weather_model;
     GeomagneticUpdate geomagnetic_update = GeomagneticUpdate::daily;
@@ -56,7 +58,8 @@ struct AtmosphereEvaluation {
 struct DragEvaluation {
     std::array<double, 3> acceleration_itrf_mps2{};
     double density_kg_m3 = 0;
-    GeodeticPosition geodetic{};
+    GeodeticPosition geodetic{};   // Always the exact WGS84 geodetic position.
+    double density_altitude_m = 0; // Height actually supplied to density and blending.
 };
 // Satellite velocity is relative to the co-rotating atmosphere in ITRF. The caller
 // must use a full inertial-to-ITRF state transform, including the rotation-rate term.

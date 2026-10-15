@@ -42,6 +42,7 @@ TEST(DragPersistence, DraftsRoundtripAndOnlyEffectiveFieldsChangeIdentity) {
     drag.f107 = 200;
     drag.kp = 8;
     drag.use_apparent_sun_position = true;
+    drag.use_approximate_altitude = true;
     drag.low_altitude_model = core::LowAltitudeDensityModel::nrlmsise00;
     drag.blending_range_m = 45000;
     options.ephemeris_model = "draft-only";
@@ -56,6 +57,9 @@ TEST(DragPersistence, DraftsRoundtripAndOnlyEffectiveFieldsChangeIdentity) {
     drag.low_altitude_model = core::LowAltitudeDensityModel::none;
     drag.blending_range_m += 1000;
     EXPECT_EQ(drag_identity(p), original);
+    drag.use_approximate_altitude = false;
+    EXPECT_NE(drag_identity(p), original);
+    original = drag_identity(p);
     drag.cd += .1;
     EXPECT_NE(drag_identity(p), original);
     original = drag_identity(p);
@@ -71,6 +75,7 @@ TEST_F(DragFiles, PointMassDragRetainsTimeEopSunAcrossSessionReportAndReopen) {
     auto &options = p.satellites[0].orbit.hpop;
     options.drag.enabled = true;
     options.drag.use_apparent_sun_position = true;
+    options.drag.use_approximate_altitude = true;
     const auto ephemeris = runtime::make_third_body_ephemeris(std::move(raw));
     const auto time_only =
         runtime::DataSnapshot::builtin_time().with_ephemeris("de440s", ephemeris);
@@ -84,7 +89,8 @@ TEST_F(DragFiles, PointMassDragRetainsTimeEopSunAcrossSessionReportAndReopen) {
     const auto &orbit = p.satellites[0].orbit;
     const auto session =
         runtime::make_hpop_session(orbit.initial, options, data.force_environment(orbit));
-    EXPECT_NE(session.provenance().algorithm.find("drag="), std::string::npos);
+    EXPECT_NE(session.provenance().algorithm.find("density-altitude=radial-wgs84-v1"),
+              std::string::npos);
     EXPECT_EQ(session.sample(std::array{p.last}).states()[0].position_m, state.position_m);
     application::ReportDefinition definition;
     definition.id = "drag-state";
