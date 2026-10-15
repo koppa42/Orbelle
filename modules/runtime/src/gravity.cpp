@@ -76,6 +76,7 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
     std::vector<bool> seen;
     bool grv = false, started = false, ended = false, normalized = true;
     std::size_t line_number = 0, bytes = 0, count = 0;
+    int maximum_order = 0;
     const auto begin = [&] {
         const auto get = [&](const char *gfc, const char *stk) -> const std::string & {
             const auto it = header.find(grv ? stk : gfc);
@@ -87,7 +88,7 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
         info.radius_m = number<double>(get("radius", "refdistance"));
         info.degree = number<int>(get("max_degree", "degree"));
         info.order = grv ? number<int>(get("max_degree", "order")) : info.degree;
-        require(info.degree >= 2 && info.degree <= 2190 && info.order >= 0 &&
+        require(info.degree >= 2 && info.degree <= core::gravity_max_degree && info.order >= 0 &&
                     info.order <= info.degree,
                 "Gravity file degree/order must be within 2..2190");
         // This loader is for the terrestrial HPOP environment, not lunar/planetary fields.
@@ -113,6 +114,7 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
             }
         }
         seen.resize(static_cast<std::size_t>((info.degree + 1) * (info.degree + 2) / 2));
+        coefficients.reserve(grv ? std::min<std::size_t>(seen.size(), 1024) : seen.size());
         started = true;
     };
     for (std::string line; std::getline(input, line);) {
@@ -176,6 +178,7 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
         const auto i = static_cast<std::size_t>(n * (n + 1) / 2 + m);
         require(!seen[i], "Duplicate gravity coefficient");
         seen[i] = true;
+        maximum_order = std::max(maximum_order, m);
         const auto real = [](std::string_view s) {
             std::string value(s);
             std::replace(value.begin(), value.end(), 'D', 'E');
@@ -214,8 +217,7 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
         for (int m = 0; m <= info.degree; ++m)
             if (seen[static_cast<std::size_t>(info.degree * (info.degree + 1) / 2 + m)])
                 last_order = m;
-        require(last_order >= std::min(info.degree, core::gravity_max_degree),
-                "Truncated ICGEM gravity file");
+        require(last_order >= 0 && last_order == maximum_order, "Truncated ICGEM gravity file");
         info.order = last_order;
         for (int n = 2; n <= info.degree; ++n)
             for (int m = 0; m <= std::min(n, last_order); ++m)
@@ -231,7 +233,7 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
 application::DataReference gravity_reference(const std::string &selection,
                                              const core::GravityInfo &info) {
     // Raw bytes carry all physical metadata; the reader/model version covers interpretation.
-    constexpr auto version = "static-normalized-gravity-360-v1";
+    constexpr auto version = "static-normalized-gravity-2190-v2";
     return {"gravity/" + selection, info.model, info.sha256, version,
             picosha2::hash256_hex_string(std::string(version))};
 }

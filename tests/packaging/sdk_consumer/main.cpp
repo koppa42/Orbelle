@@ -14,6 +14,22 @@
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 int main(int argc, char **argv) try {
+    {
+        using namespace orbitforge::core;
+        const GravityModel field(
+            {"Full field", {}, {}, "tide_free", 3.986004415e14, 6378136.3, 2190, 2159},
+            {{2, 0, -4.84165371736e-4, 0}, {2190, 2159, 2e-8, -3e-8}});
+        const auto full = field.acceleration({6378146.3, 0, 0}, 2190, 2159);
+        const auto truncated = field.acceleration({6378146.3, 0, 0}, 2189, 2159);
+        if (gravity_max_degree != 2190 || !std::isfinite(full[2]) ||
+            std::abs(full[2] - truncated[2]) < 1e-8)
+            return 34;
+        try {
+            (void)field.acceleration({6378146.3, 0, 0}, 2190, 2160);
+            return 35;
+        } catch (const std::invalid_argument &) {
+        }
+    }
     orbitforge::core::DragOptions drag;
     drag.enabled = true;
     drag.atmosphere = orbitforge::core::AtmosphereModel::nrlmsise00;

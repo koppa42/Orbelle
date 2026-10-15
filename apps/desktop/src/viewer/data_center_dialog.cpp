@@ -364,8 +364,9 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     detail_layout->addWidget(data_description);
     auto *gravity_summary = new QLabel(QStringLiteral(
         "EGM2008 / EGM96 "
-        "是静态重力场，无固定有效期，默认按需下载。\n\n完整文件保留全部系数；当前计算支持最高 360 "
-        "× 360。外部文件支持静态 ICGEM .gfc 和 STK .grv，不支持的时变项会明确报错。"));
+        "是静态重力场，无固定有效期，默认按需下载。\n\n完整文件保留全部系数；支持 EGM2008 "
+        "完整 2190 × 2159，按文件范围独立选择阶数和次数。外部文件支持静态 ICGEM .gfc 和 STK .grv，"
+        "不支持的时变项会明确报错。"));
     gravity_summary->setWordWrap(true);
     gravity_summary->setObjectName("hint");
     detail_layout->addWidget(gravity_summary);
@@ -732,10 +733,10 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
                               ? QStringLiteral("尚未下载或导入")
                               : QStringLiteral("未记录（已有本地文件）"));
         qobject_cast<QLabel *>(form->labelForField(first))
-            ->setText(is_gravity     ? QStringLiteral("文件阶次 / 计算上限")
+            ->setText(is_gravity     ? QStringLiteral("可用阶 × 次")
                       : is_ephemeris ? QStringLiteral("覆盖起点（TAI）")
                                      : QStringLiteral("覆盖起点（UTC）"));
-        first->setText(is_gravity ? (item.gravity ? QStringLiteral("%1 × %2 / 360 × 360")
+        first->setText(is_gravity ? (item.gravity ? QStringLiteral("%1 × %2")
                                                         .arg(item.gravity->degree)
                                                         .arg(item.gravity->order)
                                                   : QStringLiteral("下载或导入后显示"))

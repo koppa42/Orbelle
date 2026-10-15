@@ -1160,25 +1160,68 @@ TEST_F(QuantityTest, HpopSettingsValidateCancelAndRoundTripWithoutApplyingTheOrb
     }
 }
 TEST_F(QuantityTest, HpopUsesInstalledGravityLimitsAndPersistsSelectedModel) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
     core::HpopOptions options;
     runtime::CatalogGravity entry;
     entry.selection = "egm2008";
-    entry.info = {"EGM2008", {}, {}, "tide_free", core::egm96_mu, core::egm96_radius_m, 2190, 2190};
+    entry.info = {"EGM2008", {}, {}, "tide_free", core::egm96_mu, core::egm96_radius_m, 2190, 2159};
     QTimer::singleShot(0, [&] {
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
         ASSERT_TRUE(dialog);
         auto *model = dialog->findChild<QComboBox *>("hpopGravityModel");
         model->setCurrentIndex(model->findData(QStringLiteral("egm2008")));
         auto *degree = dialog->findChild<QSpinBox *>("hpopGravityDegree");
-        EXPECT_EQ(degree->maximum(), 360);
-        degree->setValue(21);
-        dialog->findChild<QSpinBox *>("hpopGravityOrder")->setValue(21);
+        auto *order = dialog->findChild<QSpinBox *>("hpopGravityOrder");
+        EXPECT_EQ(degree->maximum(), 2190);
+        degree->setValue(2190);
+        EXPECT_EQ(order->maximum(), 2159);
+        order->setValue(2190);
+        EXPECT_EQ(order->value(), 2159);
+        degree->setValue(720);
+        EXPECT_EQ(order->maximum(), 720);
+        EXPECT_EQ(order->value(), 720);
+        degree->setValue(2190);
+        order->setValue(2159);
+        degree->setFocus();
+        QKeyEvent down(QEvent::KeyPress, Qt::Key_Down, Qt::NoModifier);
+        QApplication::sendEvent(degree, &down);
+        EXPECT_EQ(degree->value(), 2189);
+        QKeyEvent up(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
+        QApplication::sendEvent(degree, &up);
+        EXPECT_EQ(degree->value(), 2190);
+        const auto output = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        if (!output.isEmpty()) {
+            QDir{}.mkpath(output);
+            for (const int width : {720, 430}) {
+                dialog->resize(width, 700);
+                QEventLoop settled;
+                QTimer::singleShot(60, &settled, &QEventLoop::quit);
+                settled.exec();
+                EXPECT_EQ(degree->value(), 2190);
+                EXPECT_EQ(order->value(), 2159);
+                EXPECT_TRUE(
+                    dialog->grab().save(output + QString("/full-gravity-%1.png").arg(width)));
+                std::cout << "Full gravity UI width=" << dialog->width()
+                          << " DPR=" << dialog->devicePixelRatioF() << '\n';
+            }
+        }
         dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
     });
     EXPECT_TRUE(edit_hpop_settings(options, nullptr, {entry}));
     EXPECT_EQ(options.gravity_model, "egm2008");
-    EXPECT_EQ(options.gravity_degree, 21);
-    EXPECT_EQ(options.gravity_order, 21);
+    EXPECT_EQ(options.gravity_degree, 2190);
+    EXPECT_EQ(options.gravity_order, 2159);
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        EXPECT_EQ(dialog->findChild<QSpinBox *>("hpopGravityDegree")->value(), 2190);
+        EXPECT_EQ(dialog->findChild<QSpinBox *>("hpopGravityOrder")->value(), 2159);
+        dialog->findChild<QSpinBox *>("hpopGravityDegree")->setValue(720);
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr, {entry}));
+    EXPECT_EQ(options, saved);
     QTimer::singleShot(0, [&] {
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
         ASSERT_TRUE(dialog);
@@ -1188,7 +1231,7 @@ TEST_F(QuantityTest, HpopUsesInstalledGravityLimitsAndPersistsSelectedModel) {
         dialog->reject();
     });
     EXPECT_FALSE(edit_hpop_settings(options, nullptr));
-    EXPECT_EQ(options.gravity_model, "egm2008");
+    EXPECT_EQ(options, saved);
 }
 TEST_F(QuantityTest, HpopThirdBodiesPreserveDraftsAndValidateManualConstants) {
     apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));

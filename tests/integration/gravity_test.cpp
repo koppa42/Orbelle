@@ -1,5 +1,8 @@
+#include <cstdlib>
 #include <fstream>
+#include <full_gravity.hpp>
 #include <gtest/gtest.h>
+#include <memory>
 #include <orbitforge/runtime/analysis.hpp>
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/gravity.hpp>
@@ -118,4 +121,61 @@ TEST_F(GravityFiles, HpopSnapshotProjectRoundtripAndChangedDataConfirmation) {
     EXPECT_THROW(
         (void)runtime::prepare(project, runtime::DataSnapshot::load(ORBITFORGE_REPORT_EOP)),
         runtime::AnalysisCapabilityError);
+}
+
+TEST_F(GravityFiles, LoadsHighestCoefficientAndRejectsRectangularTailDamage) {
+    const auto source = grv().replace(grv().find("Degree 2"), 8, "Degree 2190");
+    auto bytes = source;
+    bytes.replace(bytes.find("Order 2"), 7, "Order 2159");
+    bytes.insert(bytes.find("END Coefficients"), "2190 2159 2e-8 -3e-8\n");
+    const auto model = runtime::load_gravity(write(bytes));
+    EXPECT_EQ(model->info().degree, 2190);
+    EXPECT_EQ(model->info().order, 2159);
+    const core::GravityModel expected(model->info(),
+                                      {{2, 0, -4.84165371736e-4, 0}, {2190, 2159, 2e-8, -3e-8}});
+    EXPECT_EQ(model->acceleration({6378146.3, 0, 0}, 2190, 2159),
+              expected.acceleration({6378146.3, 0, 0}, 2190, 2159));
+    EXPECT_THROW((void)model->acceleration({7e6, 0, 0}, 2190, 2160), std::invalid_argument);
+    const std::string header =
+        "product_type gravity_field\nmodelname Rectangle\n"
+        "earth_gravity_constant 3.986004415e14\nradius 6378136.3\nmax_degree 3\n"
+        "tide_system tide_free\nend_of_head\n";
+    const std::string rows = "gfc 2 0 -4.84165371736e-4 0\ngfc 2 1 1e-9 2e-9\n"
+                             "gfc 3 0 1e-8 0\ngfc 3 1 2e-9 3e-9\n";
+    EXPECT_EQ(runtime::load_gravity(write(header + rows))->info().order, 1);
+    EXPECT_THROW((void)runtime::load_gravity(write(header + rows + "gfc 2 2 1e-8 2e-8\n")),
+                 std::runtime_error);
+    EXPECT_THROW((void)runtime::load_gravity(write(header + rows.substr(0, rows.find("gfc 3 1")))),
+                 std::runtime_error);
+}
+TEST_F(GravityFiles, FullOfficialEgm2008MatchesIndependentOrekit) {
+    std::string source;
+#ifdef _WIN32
+    char *value = nullptr;
+    std::size_t length = 0;
+    const auto error = _dupenv_s(&value, &length, "ORBITFORGE_FULL_GRAVITY_FILE");
+    const std::unique_ptr<char, decltype(&std::free)> owned(value, &std::free);
+    ASSERT_EQ(error, 0);
+    if (owned)
+        source = owned.get();
+#else
+    if (const char *value = std::getenv("ORBITFORGE_FULL_GRAVITY_FILE"))
+        source = value;
+#endif
+    if (source.empty())
+        GTEST_SKIP() << "Set ORBITFORGE_FULL_GRAVITY_FILE to the pinned complete EGM2008.gfc";
+    int checkpoints = 0;
+    const auto model = runtime::load_gravity(source, {}, [&] { ++checkpoints; });
+    ASSERT_EQ(model->info().sha256,
+              "ab5b524da073e63b5bdceb7ca47a0de07a26dd44a1c5798f39fc98dc80af70fd");
+    EXPECT_EQ(model->info().degree, 2190);
+    // The pinned ICGEM export explicitly pads orders 2160..2190 with zeros.
+    // Keep its complete coefficient extent, and verify the published 2159-order
+    // truncation is identical to evaluating every record in the square export.
+    EXPECT_EQ(model->info().order, 2190);
+    for (const auto position : {std::array{6378146.3, 0., 0.}, std::array{.001, -.002, 6356752.3}})
+        EXPECT_EQ(model->acceleration(position, 2190, 2159),
+                  model->acceleration(position, 2190, 2190));
+    EXPECT_GT(checkpoints, 2000);
+    full_gravity_test::verify(model, 3, ORBITFORGE_EGM2008_FULL_REFERENCE, 80, 2);
 }

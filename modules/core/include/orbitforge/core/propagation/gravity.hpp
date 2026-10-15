@@ -6,9 +6,9 @@
 #include <vector>
 
 namespace orbitforge::core {
-// The file may contain more coefficients; this is the independently validated
-// computation limit. Coefficients are fully normalized, without Condon-Shortley phase.
-inline constexpr int gravity_max_degree = 360;
+// Supports the full EGM2008 degree (2190) and its rectangular order limit (2159).
+// Each field retains its declared degree/order. Fully normalized, no Condon-Shortley phase.
+inline constexpr int gravity_max_degree = 2190;
 struct GravityInfo {
     std::string model, sha256, source_url, tide_system;
     double mu = 0, radius_m = 0;
@@ -32,7 +32,7 @@ class GravityModel {
   private:
     GravityInfo info_;
     struct Term {
-        double c = 0, s = 0, a = 0, b = 0;
+        double c = 0, s = 0, offset = 0, b = 0;
     };
     std::vector<Term> terms_;
 };

@@ -53,3 +53,30 @@ Fixed solid tide reference SHA-256: `8b50c6af9cc1beb3ecf762f71e2e39b65c5e0301b33
 `solid_tides_time_dependent.txt` adds unmodified Orekit 13.1.2 IERS_2003 frequency corrections (71 constituents) and the printed 2003 solid pole tide, including annual.pole interpolation. `OrbitForgeTimeDependentTideReference.java` calls Orekit's own implementations, then Holmes–Featherstone/DP853, without importing OrbitForge. Compile it with `OrbitForgeSolidTideReference.java` using the pinned JARs in `tools/validation/orekit/dependencies.json`; run `org.orekit.forces.gravity.OrbitForgeTimeDependentTideReference` and save UTF-8 LF output. The file records its synthetic UTC/EOP/frame convention and column meanings. There are 39 coefficient, 24 acceleration and 4 trajectory rows. Canonical LF SHA-256: `ad701acd8b1a4f2d0993acaa9c356e180a3c2dd6cfb8844927da5ef3c592e63f`.
 
 `relativity.txt` contains 45 independent three-term acceleration rows and 8 on/off forward/backward trajectories. `tools/validation/orekit/OrbitForgeRelativityReference.java` calls unmodified Orekit 13.1.2 Relativity, LenseThirringRelativity, DeSitterRelativity and DP853 with an explicit moving geometric Sun and tilted Earth axis. No OrbitForge code is called. Dependency hashes are in `dependencies.json`; units, TAI conventions and tolerances are in `docs/architecture/relativity.md`. Canonical UTF-8/LF SHA-256: `b3d6c74b77b0dedb0ee25881ac0b7e291f41b44667bdcf0aed1d7905d05e2339`.
+
+`gravity_full.txt` and `gravity_egm2008_full.txt` call unmodified Orekit 13.1.2
+Holmes–Featherstone and Hipparchus 4.0.2 DP853 through
+`tools/validation/orekit/OrbitForgeFullGravityReference.java`. The generator is in
+package `org.orekit.forces.gravity.potential` to access the reader's normalized
+wrapper. It never calls OrbitForge. Dependency hashes are in `dependencies.json`.
+Without arguments it emits 120 acceleration / 2 trajectory rows for three
+synthetic fields: dense 2190×2190, rectangular 2190×2159, and an amplified boundary
+field. Dense C20=-4.84165371736e-4; other Cnm=1e-8/(n+1)^2*sin((n+1)(m+2)),
+Snm=1e-8/(n+1)^2*cos((n+1)(m+2)), with Sn0=0. The boundary field contains C20 and
+C2190,0=1e-8; C2190,1=1e-10/S2190,1=-2e-10; C2190,2=-2e-10/S2190,2=3e-10;
+C2190,2159=2e-8/S2190,2159=-3e-8; C2190,2190=1e-8/S2190,2190=4e-8.
+With the complete pinned EGM2008.gfc path it emits 80 acceleration / 2 trajectory
+rows, after checking source SHA-256
+`ab5b524da073e63b5bdceb7ca47a0de07a26dd44a1c5798f39fc98dc80af70fd`.
+Orders 2160–2190 in this ICGEM export are explicitly zero-padded; integration
+tests check that evaluating all records equals the published 2190×2159 field.
+The 252140870-byte input is obtained from the ICGEM EGM2008 product URL pinned in
+`modules/runtime/src/gravity.cpp`; it is not redistributed in this repository.
+Both fields use GM=3.986004415e14 m³/s², radius=6378136.3 m, tide-free coefficients,
+a fixed GCRF-aligned Earth, and Epoch(0) TAI. Full inputs, truncations, bounds and
+commands are in `docs/validation/hpop_protocol.md`. The optional full-file test
+uses `ORBITFORGE_FULL_GRAVITY_FILE`; synthetic cases run offline in normal CI.
+Canonical LF SHA-256: `gravity_full.txt`
+`a916af840a15eb820ed0a3784d436d0b7f46e7f454eb758c9c24963ea7317185`;
+`gravity_egm2008_full.txt`
+`3853ad823b55dc6d5d86443e8390109dfc9f3b1fab1f8ff49cc4ffca6b555dba`.

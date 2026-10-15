@@ -82,7 +82,8 @@ struct HpopOptions {
                 result.push_back(body);
         return result;
     }
-    // 0/0 selects the chosen model's monopole. File models support up to 360x360.
+    // 0/0 selects the chosen model's monopole. File models support up to degree 2190, within their
+    // actual order limit.
     int gravity_degree = 8, gravity_order = 8;
     HpopIntegrator integrator = HpopIntegrator::rkf78;
     double relative_tolerance = 1e-12;

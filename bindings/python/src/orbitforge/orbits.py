@@ -268,7 +268,7 @@ class HpopSettings:
     Spherical drag requires UTC/EOP and Sun ephemerides. Solid tides use IERS 2003. Noncentral gravity requires
     explicitly selected EOP covering the entire integration path, including initial epoch.
     gravity_model selects a catalog/DataSnapshot ID (empty: built-in EGM96, up to 20).
-    File models support degrees through 360. gravity_mu must match the selected file's
+    File models support degrees through 2190 and their actual order limit. gravity_mu must match the selected file's
     GM in m^3/s^2 and is also used when converting initial Keplerian elements.
     include_relativistic_accelerations enables all three IERS 2003 terms and
     requires explicit EOP and geometric Sun position/velocity even for degree 0.
@@ -446,7 +446,7 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          include_relativistic_accelerations: bool = False) -> Orbit:
     """Cowell orbit with static gravity, third bodies, spherical SRP, RKF78 or RK4.
 
-    Built-in EGM96 supports up to degree 20; installed gravity files up to 360.
+    Built-in EGM96 supports up to degree 20; installed gravity files up to 2190 (EGM2008 order limit 2159).
     third_bodies=("sun", "moon") requires explicitly supplied DE440s ephemerides.
     sun_mu and moon_mu are optional overrides in m^3/s^2; None uses DE440 constants.
 

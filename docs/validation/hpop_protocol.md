@@ -29,9 +29,32 @@ javac -cp $classpath -d out/validation/hpop tools/validation/orekit/OrbitForgeGr
 java -cp "out/validation/hpop;$classpath" OrbitForgeGravityReference
 ```
 
-`GravityFiles.*` 验证 `.grv` 归一化／非归一化、ICGEM 默认归一化、D 指数、原始换行哈希、截断／重复／NaN／不支持块、取消保留、不可变资源及项目更新确认。低层报告和场景也拒绝与项目记录不匹配的重力 Provider。`test_gravity.py` 验证目录安装、21 阶 Python 配置、准备、保存和重新打开。
+`GravityFiles.*` 验证 `.grv` 归一化／非归一化、ICGEM 默认归一化、D 指数、原始换行哈希、截断／重复／NaN／不支持块、取消保留、不可变资源及项目更新确认。低层报告和场景也拒绝与项目记录不匹配的重力 Provider。`test_gravity.py` 验证目录安装、21 阶与完整 2190×2159 Python 配置、准备、保存和重新打开，并拒绝超出文件实际次数的配置。
 
-官方文件另做完整下载与原文校验；不把数百 MiB 文件提交仓库或作为普通 CI 的联网依赖。可选 `DataCenterTest.LiveOfficialGravityDownload` 通过 `ORBITFORGE_LIVE_GRAVITY=egm2008` 或 `egm96` 执行真实 Qt 下载、全量安装及再次检查；未设置时跳过。桌面离线测试覆盖后台导入和失败保留、重力分组、静态有效期、360 阶计算上限与未安装模型错误。截图入口沿用 `ORBITFORGE_DATA_UI_CAPTURE` 和 `ORBITFORGE_HPOP_UI_CAPTURE`。
+官方文件另做完整下载与原文校验；不把数百 MiB 文件提交仓库或作为普通 CI 的联网依赖。可选 `DataCenterTest.LiveOfficialGravityDownload` 通过 `ORBITFORGE_LIVE_GRAVITY=egm2008` 或 `egm96` 执行真实 Qt 下载、全量安装及再次检查；未设置时跳过。桌面离线测试覆盖后台导入和失败保留、重力分组、静态有效期、2190 阶／2159 次独立限幅、键盘输入、窄窗草稿保留、取消重开与缺资源错误。截图入口沿用 `ORBITFORGE_DATA_UI_CAPTURE` 和 `ORBITFORGE_HPOP_UI_CAPTURE`。
+
+### 完整 EGM2008 与 2190 阶验证
+
+`OrbitForgeFullGravityReference.java` 直接调用未经修改的 Orekit 13.1.2 `HolmesFeatherstoneAttractionModel`、`ICGEMFormatReader` 和 Hipparchus 4.0.2 DP853。生成器不导入 OrbitForge，也不转录生产递推。依赖散列使用同目录 `dependencies.json`；参考字节保持 UTF-8/LF。
+
+- `gravity_full.txt`：120 个加速度与 2 条 ±120 s 轨迹。包含稠密 2190×2190、2190×2159，以及刻意放大最高阶带谐、近带谐和扇谐的压力场；截断覆盖 720、1440、2190 阶，0 次和完整次数。
+- `gravity_egm2008_full.txt`：从完整官方 EGM2008 原文读取 80 个加速度与 2 条 ±120 s 轨迹；截断覆盖 20、360、720、1440、2190 阶，0 次和完整次数。输入 252140870 bytes，SHA-256 为 `ab5b524da073e63b5bdceb7ca47a0de07a26dd44a1c5798f39fc98dc80af70fd`；生成器及集成测试都核对散列。有效模型范围 2190×2159 与 [NGA 模型说明](https://earth-info.nga.mil/?action=wgs84&dir=wgs84)一致。该 ICGEM 导出把 2160–2190 次显式补零，因此文件记录范围是 2190×2190；加载器完整校验并保留该范围，另断言全文件求值与 2190×2159 求值相同，不把填零当成额外模型精度。
+- 八个加速度位置覆盖赤道近地表、一般位置、GEO、南北近极点，以及生产递推切换点两侧；单位为地固 SI，地球固定与 GCRF 同轴。完整文件测试不增加联网依赖：设置 `ORBITFORGE_FULL_GRAVITY_FILE` 指向已校验的本地文件后运行 `GravityFiles.FullOfficialEgm2008MatchesIndependentOrekit`，未提供时明确跳过。稠密与放大系数测试始终离线运行。
+- 全部加速度每分量容限 5e-12 m/s²；全阶轨迹每分量位置 1e-4 m、速度 1e-7 m/s。初始 TAI 历元 Epoch(0)，位置 `(6408136.3,0,0)` m、速度 `(0,6200,4700)` m/s，只包含选定静态重力。DP853 最大步长 10 s、相对 1e-14、位置/速度绝对容差 1e-7 m / 1e-10 m/s；生产 RKF78 最大步长 5 s、相对 1e-14、位置/速度绝对容差 1e-8 m / 1e-11 m/s。收紧积分设置用于隔离全阶力模型误差，不改变生产默认设置，也不把局部容差解释为全局精度。
+- 极点本身另用 `P_n(1)=1`、`P'_n(1)=n(n+1)/2` 的闭式值核对，70 位 Decimal 生成器为 `tools/validation/gravity_pole.py`。它区分最高阶真实横向梯度与数值奇点，包含正负零输入一致性检查。
+
+复现命令（`$classpath` 为已核验 JAR 的平台分隔列表）：
+
+```powershell
+javac -cp $classpath -d out/validation/full-gravity tools/validation/orekit/OrbitForgeFullGravityReference.java
+java -Xmx1536m -cp "out/validation/full-gravity;$classpath" org.orekit.forces.gravity.potential.OrbitForgeFullGravityReference
+java -Xmx1536m -cp "out/validation/full-gravity;$classpath" org.orekit.forces.gravity.potential.OrbitForgeFullGravityReference out/research/hpop/EGM2008.gfc
+python tools/validation/gravity_pole.py
+$env:ORBITFORGE_FULL_GRAVITY_FILE = (Resolve-Path out/research/hpop/EGM2008.gfc)
+ctest --test-dir out/build/desktop-graphics -C Release --output-on-failure -R 'Gravity[.]|GravityFiles[.]'
+```
+
+这些数值只验证匹配输入下的模型与积分一致性，不是 STK 同配置实测，也不代表真实轨道预报误差。完整文件不提交仓库，固定结果与复现程序保留在版本库。
 
 ## 日月引力与星历
 

@@ -277,7 +277,7 @@ TEST(SolidTides, InvalidModelsBodiesAndAdditiveCoefficientsFailExplicitly) {
     GravityModel model(info, {});
     for (const auto &values : std::vector<std::vector<GravityCoefficient>>{
              {{1, 0, 0, 0}},
-             {{361, 0, 0, 0}},
+             {{gravity_max_degree + 1, 0, 0, 0}},
              {{2, 3, 0, 0}},
              {{2, 0, 0, 1}},
              {{2, 0, 0, 0}, {2, 0, 1, 0}},

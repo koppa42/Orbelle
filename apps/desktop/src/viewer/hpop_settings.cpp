@@ -239,18 +239,26 @@ bool edit_hpop_settings(
     truncation_layout->addWidget(order, 1);
     truncation->setMaximumWidth(276);
     gravity->addRow(QStringLiteral("阶 × 次"), truncation);
-    QObject::connect(degree, &QSpinBox::valueChanged, &dialog,
-                     [order](int value) { order->setMaximum(value); });
+    const auto gravity_limits = [&] {
+        const auto id = model->currentData().toString();
+        int max_degree = id.isEmpty() ? core::egm96_max_degree : core::gravity_max_degree;
+        int max_order = id == QStringLiteral("egm2008") ? 2159 : max_degree;
+        for (const auto &entry : installed_models)
+            if (entry.selection == id.toStdString()) {
+                max_degree = std::min(entry.info.degree, core::gravity_max_degree);
+                max_order = std::min(entry.info.order, max_degree);
+            }
+        return std::pair{max_degree, max_order};
+    };
+    QObject::connect(degree, &QSpinBox::valueChanged, &dialog, [&](int value) {
+        order->setMaximum(std::min(value, gravity_limits().second));
+    });
     const auto update_gravity = [&] {
         degree->setEnabled(model->currentIndex() != 1);
         order->setEnabled(model->currentIndex() != 1);
-        int limit = model->currentData().toString().isEmpty() ? core::egm96_max_degree
-                                                              : core::gravity_max_degree;
-        for (const auto &entry : installed_models)
-            if (entry.selection == model->currentData().toString().toStdString())
-                limit = std::min(entry.info.degree, core::gravity_max_degree);
-        degree->setMaximum(limit);
-        order->setMaximum(degree->value());
+        const auto [max_degree, max_order] = gravity_limits();
+        degree->setMaximum(max_degree);
+        order->setMaximum(std::min(degree->value(), max_order));
     };
     QObject::connect(model, &QComboBox::currentIndexChanged, &dialog, update_gravity);
     update_gravity();
@@ -273,8 +281,9 @@ bool edit_hpop_settings(
     gravity_action_layout->addWidget(cancel_gravity);
     gravity_action_layout->addStretch();
     gravity->addRow(QString{}, gravity_actions);
-    help(gravity, QStringLiteral("截断阶 Degree × 次 Order。文件模型计算支持最高 360 × 360；"
-                                 "次为 0 时只保留带谐项。外部重力场可在数据中心导入。"));
+    help(gravity, QStringLiteral(
+                      "按文件实际范围选择截断阶 Degree × 次 Order；支持 EGM2008 完整 2190 × 2159。"
+                      "次为 0 时只保留带谐项。外部重力场可在数据中心导入。"));
     const auto quantity = [](QFormLayout *form, const QString &label, const char *id, Unit unit,
                              double value, double low, double high) {
         auto *field = new QuantityEditor(unit);
@@ -1126,11 +1135,9 @@ bool edit_hpop_settings(
         } else if (waiting) {
             gravity_status->setText(QStringLiteral("等待数据中心当前任务完成后下载所选重力场…"));
         } else if (found != installed_models.end()) {
-            gravity_status->setText(
-                QStringLiteral("文件：%1 × %2 · 当前计算上限：%3 × %3")
-                    .arg(found->info.degree)
-                    .arg(found->info.order)
-                    .arg(std::min(found->info.degree, core::gravity_max_degree)));
+            gravity_status->setText(QStringLiteral("可用阶 × 次：%1 × %2")
+                                        .arg(found->info.degree)
+                                        .arg(found->info.order));
         } else if (model->currentIndex() == 0) {
             gravity_status->setText(QStringLiteral("内置 EGM96 示例，最高 20 × 20。"));
         } else if (model->currentIndex() == 1) {
