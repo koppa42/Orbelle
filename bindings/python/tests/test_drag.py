@@ -122,6 +122,44 @@ class DragTests(unittest.TestCase):
         self.assertNotEqual(approximate.density_kg_m3, exact.density_kg_m3)
         self.assertNotEqual(approximate.acceleration_itrf_mps2, exact.acceleration_itrf_mps2)
 
+    @unittest.skipUnless(of.ephemeris_available() and of.time_frames_available(), "requires CSPICE/ERFA")
+    def test_shared_mass_preserves_active_force_identity_and_captured_analysis(self):
+        metadata = json.loads(SPICE.read_text())
+        first = of.Epoch(metadata["first_tai_ns"] + 3600 * 10**9)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            data = analysis = reopened = None
+            try:
+                data = of.DataSnapshot.load(eop_manifest=EOP).with_ephemeris("de440s", SPICE, root / "runtime")
+                project = of.Project("Mass", first, of.Epoch(first.tai_nanoseconds + 600 * 10**9))
+                orbit = of.orbits.Hpop(initial=of.orbits.Cartesian(first, (6778137, 0, 0), (0, 6300, 4300)),
+                    gravity_degree=0, drag=of.orbits.DragSettings(enabled=True, atmosphere="nrlmsise00"),
+                    srp=of.orbits.SrpSettings(enabled=True, area_mass_ratio_m2_per_kg=.03))
+                sat = project.objects.satellite("Sat", orbit=orbit)
+                analysis = project.prepare(data=data)
+                before = analysis.states(sat, step=u.s(60))
+                sat.orbit = replace(orbit, hpop=replace(orbit.hpop, satellite_mass_kg=250))
+                after = project.prepare(data=data).states(sat, step=u.s(60))
+                self.assertEqual(sat.orbit.hpop.drag_area_m2, 5)
+                self.assertEqual(sat.orbit.hpop.srp_area_m2, 7.5)
+                self.assertEqual(before.input_sha256, after.input_sha256)
+                self.assertEqual(before.position.values, after.position.values)
+                self.assertEqual(before.velocity.values, after.velocity.values)
+                path = root / "mass.orbitforge"
+                project.save(path, analysis=analysis)
+                reopened = of.Project.open(path, data=data)
+                self.assertEqual(reopened.objects[sat.id].orbit.hpop, sat.orbit.hpop)
+                self.assertEqual(reopened.prepare(data=data).states(reopened.objects[sat.id], step=u.s(60))
+                                 .position.values, before.position.values)
+                sat.orbit = replace(sat.orbit, hpop=replace(sat.orbit.hpop,
+                    drag=replace(sat.orbit.hpop.drag, area_mass_ratio_m2_per_kg=.04)))
+                changed = project.prepare(data=data).states(sat, step=u.s(60))
+                self.assertNotEqual(changed.input_sha256, before.input_sha256)
+                self.assertNotEqual(changed.position.values[-1], before.position.values[-1])
+                self.assertEqual(analysis.states(sat, step=u.s(60)).position.values, before.position.values)
+            finally:
+                del data, analysis, reopened
+
     def test_disabled_drafts_roundtrip_without_data_and_do_not_change_identity(self):
         project = of.Project("Drag drafts", of.Epoch(0), of.Epoch(600 * 10**9))
         drag = of.orbits.DragSettings(cd=2.3, f107=170, kp=4.3, use_apparent_sun_position=True,

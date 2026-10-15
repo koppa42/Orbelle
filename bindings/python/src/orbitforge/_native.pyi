@@ -1025,6 +1025,11 @@ class HpopOptions:
     gravity_degree: int
     gravity_order: int
     solid_tides: SolidTideOptions
+    satellite_mass_kg: float
+    @property
+    def drag_area_m2(self) -> float: ...
+    @property
+    def srp_area_m2(self) -> float: ...
     include_relativistic_accelerations: bool
     integrator: HpopIntegrator
     relative_tolerance: float

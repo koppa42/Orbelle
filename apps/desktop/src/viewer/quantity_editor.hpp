@@ -24,7 +24,10 @@ enum class Unit {
     kilometres_cubed_per_second_squared,
     square_metres_per_kilogram,
     square_centimetres_per_gram,
-    pascal
+    pascal,
+    kilogram,
+    gram,
+    tonne
 };
 QString unit_symbol(Unit unit);
 std::vector<Unit> compatible_units(Unit unit);

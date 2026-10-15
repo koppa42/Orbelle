@@ -55,7 +55,7 @@ density = of.evaluate_atmosphere(of.AtmosphereModel.NRLMSISE00, inputs)
 
 默认使用几何太阳。`use_apparent_sun_position=True` 使用 CSPICE 对地球接收观测的 `LT+S` 太阳方向；此约定影响密度中的当地太阳时/赤纬，不修改第三体引力或光压的几何太阳。准备计算时额外认证区间起点前 600 s 的太阳与地球核覆盖，边界不足明确拒绝。自定义星历必须提供相应查询和区间认证接口，不能将几何方向冒充视方向。
 
-项目格式为 v25 / OBJS v16，只读写当前版本。禁用模型时保存合法参数草稿，计算身份忽略这些草稿；启用时计入实际密度模型、天气、Cd、面积质量比、高度算法、太阳方法及 UTC/EOP/星历来源。NRLMSISE 主模型的低空草稿和未启用的拼接范围不改变结果身份。
+项目格式为 v26 / OBJS v17，只读写当前版本。禁用模型时保存合法参数草稿，计算身份忽略这些草稿；启用时计入实际密度模型、天气、Cd、面积质量比、高度算法、太阳方法及 UTC/EOP/星历来源。NRLMSISE 主模型的低空草稿和未启用的拼接范围不改变结果身份。
 
 ```python
 import orbitforge as of
@@ -74,3 +74,9 @@ analysis = project.prepare(data=data)
 ```
 
 独立密度、传播、覆盖和跨接口验证见[阻力协议](../validation/atmospheric_drag_protocol.md)。现有状态报告直接查询同一阻力 Session；密度/分项加速度专用报告尚未实现。
+
+## 共享卫星质量
+
+`HpopOptions.satellite_mass_kg` / `HpopSettings.satellite_mass_kg` 默认为 1000 kg，必须有限且正。“其他”页支持 kg、g、t；阻力和光压页的面积质量比仍是独立输入，并显示只读的对应面积。C++ `drag_area_m2()` / `srp_area_m2()`（Python 同名只读属性）返回各自 A/m 与质量的乘积，拒绝溢出或非零乘积下溢为零；零 A/m 允许零面积。
+
+修改质量只改变对应面积，球形加速度、轨迹与计算身份保持不变；设置仍写入项目并标记为已修改。未来非球形或插件模型使用质量时，必须把实际使用的质量纳入身份。此行为依据 [STK Satellite mass](https://help.agi.com/stk/Content/hpop/hpopAdditional.htm)，独立面积/质量模式不作为球形模型的第二套输入。

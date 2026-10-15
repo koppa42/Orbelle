@@ -80,3 +80,14 @@ Canonical LF SHA-256: `gravity_full.txt`
 `a916af840a15eb820ed0a3784d436d0b7f46e7f454eb758c9c24963ea7317185`;
 `gravity_egm2008_full.txt`
 `3853ad823b55dc6d5d86443e8390109dfc9f3b1fab1f8ff49cc4ffca6b555dba`.
+
+`mass.txt` compares STK spherical mass semantics with Orekit's area-and-mass API.
+Compile `OrbitForgeMassReference.java` with `OrbitForgeDragReference.java`, using
+the pinned `dependencies.json` JARs, then run `OrbitForgeMassReference` and save
+UTF-8/LF output. Its 28 rows cover masses 1/250/1000/2700 kg at equal A/m,
+changed A/m, zero drag/SRP areas, two LEO states and ±6000 s combined propagation.
+It calls Orekit 13.1.2 `DragForce` / `IsotropicDrag`, `SolarRadiationPressure` /
+`IsotropicRadiationSingleCoefficient`, and Hipparchus 4.0.2 DP853 without calling
+OrbitForge. The synthetic UTC/rotation/Sun are shared with the existing drag
+reference; full conventions and bounds are in `docs/validation/hpop_protocol.md`.
+Canonical LF SHA-256: `ff1e9b22217a87263181b4fab347a29cbdf21d6ab221395bd72145b3d4b04e3d`.

@@ -2305,4 +2305,110 @@ TEST_F(QuantityTest, HpopRelativityMissingEphemerisReturnsToAdditionalWithoutPub
     EXPECT_EQ(options, saved);
 }
 
+TEST_F(QuantityTest, HpopSatelliteMassUnitsKeyboardResizeReopenAndCancel) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    core::HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    options.drag.enabled = options.srp.enabled = true;
+    options.srp.area_mass_ratio_m2_per_kg = .03;
+    runtime::CatalogEphemeris entry;
+    entry.selection = "de440s";
+    entry.info.first = core::Epoch{0};
+    entry.info.last = core::Epoch{86400000000000};
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *mass = dialog->findChild<QuantityEditor *>("hpopSatelliteMass");
+        auto *drag_area = dialog->findChild<QLabel *>("hpopDragCompatibleArea");
+        auto *srp_area = dialog->findChild<QLabel *>("hpopSrpCompatibleArea");
+        ASSERT_TRUE(mass && drag_area && srp_area);
+        EXPECT_EQ(mass->value(Unit::kilogram), 1000);
+        auto *forces = dialog->findChild<QTabWidget *>("hpopForceModelTabs");
+        forces->setCurrentIndex(3);
+        reveal(mass);
+        choose(*mass, Unit::tonne);
+        text(*mass)->setFocus();
+        text(*mass)->selectAll();
+        QKeyEvent typing(QEvent::KeyPress, Qt::Key_1, Qt::NoModifier, QStringLiteral("1.25"));
+        QApplication::sendEvent(text(*mass), &typing);
+        EXPECT_EQ(mass->value(Unit::kilogram), 1250);
+        choose(*mass, Unit::gram);
+        EXPECT_EQ(mass->value(Unit::gram), 1250000);
+        choose(*mass, Unit::tonne);
+        EXPECT_EQ(text(*mass)->text(), QStringLiteral("1.25"));
+        EXPECT_EQ(drag_area->text(), QStringLiteral("25 m²"));
+        EXPECT_EQ(srp_area->text(), QStringLiteral("37.5 m²"));
+        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        std::cout << "HPOP mass device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
+        for (int width : {720, 430}) {
+            dialog->resize(width, width == 720 ? 700 : 620);
+            for (const int page_index : {3, 1, 2}) {
+                forces->setCurrentIndex(page_index);
+                QEventLoop settled;
+                QTimer::singleShot(60, &settled, &QEventLoop::quit);
+                settled.exec();
+                auto *scroll = qobject_cast<QScrollArea *>(forces->currentWidget());
+                ASSERT_TRUE(scroll);
+                EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+                EXPECT_EQ(mass, dialog->findChild<QuantityEditor *>("hpopSatelliteMass"));
+                EXPECT_EQ(mass->value(Unit::kilogram), 1250);
+                EXPECT_EQ(mass->unit(), Unit::tonne);
+                EXPECT_TRUE(
+                    dialog->rect().contains(dialog->findChild<QDialogButtonBox *>()->geometry()));
+                if (!capture.isEmpty()) {
+                    EXPECT_TRUE(QDir{}.mkpath(capture));
+                    EXPECT_TRUE(dialog->grab().save(
+                        capture + QString("/hpop-mass-%1-%2.png").arg(page_index).arg(width)));
+                }
+            }
+        }
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr, {}, {entry}));
+    EXPECT_EQ(options.satellite_mass_kg, 1250);
+    EXPECT_EQ(options.drag.area_mass_ratio_m2_per_kg, .02);
+    EXPECT_EQ(options.srp.area_mass_ratio_m2_per_kg, .03);
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *mass = dialog->findChild<QuantityEditor *>("hpopSatelliteMass");
+        ASSERT_TRUE(mass);
+        EXPECT_EQ(mass->value(Unit::kilogram), 1250);
+        text(*mass)->setText("900");
+        EXPECT_EQ(dialog->findChild<QLabel *>("hpopDragCompatibleArea")->text(),
+                  QStringLiteral("18 m²"));
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr, {}, {entry}));
+    EXPECT_EQ(options, saved);
+}
+TEST_F(QuantityTest, HpopSatelliteMassInvalidValueReturnsToAdditionalWithoutCommitting) {
+    core::HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    options.srp.area_mass_ratio_m2_per_kg = 9999;
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *mass = dialog->findChild<QuantityEditor *>("hpopSatelliteMass");
+        ASSERT_TRUE(mass);
+        auto *outer = dialog->findChild<QTabWidget *>("hpopSettingsTabs");
+        auto *ok = dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok);
+        for (const char *invalid : {"0", "-1", "1e309", "1e308", "5e-324"}) {
+            text(*mass)->setText(invalid);
+            outer->setCurrentIndex(2);
+            ok->click();
+            EXPECT_TRUE(dialog->isVisible());
+            EXPECT_EQ(options, saved);
+            EXPECT_EQ(outer->currentIndex(), 0);
+            EXPECT_EQ(dialog->findChild<QTabWidget *>("hpopForceModelTabs")->currentIndex(), 3);
+            EXPECT_FALSE(dialog->findChild<QLabel *>("errorText")->text().isEmpty());
+            EXPECT_TRUE(mass->isVisible());
+        }
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr));
+    EXPECT_EQ(options, saved);
+}
 } // namespace orbitforge::desktop

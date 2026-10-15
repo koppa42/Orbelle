@@ -292,6 +292,7 @@ class HpopSettings:
     drag: DragSettings = field(default_factory=DragSettings)
     solid_tides: SolidTideSettings = field(default_factory=SolidTideSettings)
     include_relativistic_accelerations: bool = False
+    satellite_mass_kg: float = 1000.0
 
     def __post_init__(self) -> None:
         if type(self.include_relativistic_accelerations) is not bool:
@@ -312,6 +313,16 @@ class HpopSettings:
         object.__setattr__(self, "third_bodies", tuple(b for b in THIRD_BODY_NAMES if b in bodies))
         active = (v for v in settings if v.source != "jpl_de" or v.mu is not None or v.cb is not None)
         object.__setattr__(self, "body_gravity", tuple(sorted(active, key=lambda v: THIRD_BODY_NAMES.index(v.body))))
+
+    @property
+    def drag_area_m2(self) -> float:
+        """Compatible spherical drag area: A/m multiplied by the shared mass."""
+        return self._native().drag_area_m2
+
+    @property
+    def srp_area_m2(self) -> float:
+        """Compatible spherical SRP area; changing mass preserves the given A/m."""
+        return self._native().srp_area_m2
 
     def _native(self) -> n.HpopOptions:
         value = n.HpopOptions()
@@ -443,10 +454,13 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          sun_mu: float | None = None, moon_mu: float | None = None,
          body_gravity: tuple[ThirdBodySettings, ...] = (), srp: SrpSettings | None = None,
          drag: DragSettings | None = None, solid_tides: SolidTideSettings | None = None,
-         include_relativistic_accelerations: bool = False) -> Orbit:
+         include_relativistic_accelerations: bool = False,
+         satellite_mass_kg: float = 1000.0) -> Orbit:
     """Cowell orbit with static gravity, third bodies, spherical SRP, RKF78 or RK4.
 
     Built-in EGM96 supports up to degree 20; installed gravity files up to 2190 (EGM2008 order limit 2159).
+    Satellite mass is in kg (finite and positive); spherical forces retain their explicit
+    A/m ratios. Mass only determines their compatible areas, without changing acceleration.
     third_bodies=("sun", "moon") requires explicitly supplied DE440s ephemerides.
     sun_mu and moon_mu are optional overrides in m^3/s^2; None uses DE440 constants.
 
@@ -467,6 +481,6 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
         SrpSettings() if srp is None else require(srp, SrpSettings, "srp"),
         DragSettings() if drag is None else require(drag, DragSettings, "drag"),
         SolidTideSettings() if solid_tides is None else require(solid_tides, SolidTideSettings, "solid_tides"),
-        include_relativistic_accelerations)
+        include_relativistic_accelerations, satellite_mass_kg)
     settings._native()  # Fail at construction, before changing a project.
     return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)

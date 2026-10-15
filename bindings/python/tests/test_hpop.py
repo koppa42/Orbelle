@@ -35,6 +35,38 @@ class HpopTests(unittest.TestCase):
         self.assertNotEqual(project.prepare().state(satellite, at=project.last).position_m, before.position_m)
         self.assertEqual(analysis.state(satellite, at=project.last).position_m, before.position_m)
 
+    def test_mass_is_shared_validated_and_persisted_without_changing_spherical_ratios(self):
+        project, satellite = self.make(gravity_degree=0, satellite_mass_kg=1250,
+            srp=of.orbits.SrpSettings(area_mass_ratio_m2_per_kg=.03))
+        settings = satellite.orbit.hpop
+        self.assertEqual(settings.drag_area_m2, 25)
+        self.assertEqual(settings.srp_area_m2, 37.5)
+        native = settings._native()
+        self.assertEqual(native.satellite_mass_kg, 1250)
+        self.assertEqual(native.srp_area_m2, 37.5)
+        with self.assertRaises(AttributeError):
+            native.drag_area_m2 = 1
+        analysis = project.prepare()
+        before = analysis.states(satellite, step=u.s(600))
+        satellite.orbit = replace(satellite.orbit, hpop=replace(settings, satellite_mass_kg=2500))
+        after = project.prepare().states(satellite, step=u.s(600))
+        self.assertEqual(satellite.orbit.hpop.drag_area_m2, 50)
+        self.assertEqual(satellite.orbit.hpop.srp_area_m2, 75)
+        self.assertEqual(after.input_sha256, before.input_sha256)
+        self.assertEqual(after.position.values, before.position.values)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mass.orbitforge"
+            project.save(path, analysis=analysis)
+            reopened = of.Project.open(path)
+            self.assertEqual(reopened.objects[satellite.id].orbit.hpop, satellite.orbit.hpop)
+        revision = project.revision
+        for mass in (0, -1, float("nan"), float("inf"), 5e-324):
+            with self.subTest(mass=mass), self.assertRaises(ValueError):
+                satellite.orbit = replace(satellite.orbit, hpop=replace(settings, satellite_mass_kg=mass))
+        self.assertEqual(project.revision, revision)
+        self.assertEqual(satellite.orbit.hpop.satellite_mass_kg, 2500)
+        self.assertEqual(analysis.states(satellite, step=u.s(600)).position.values, before.position.values)
+
     def test_output_grid_is_independent_and_keplerian_uses_egm96_mu(self):
         project, satellite = self.make(gravity_degree=0)
         analysis = project.prepare()

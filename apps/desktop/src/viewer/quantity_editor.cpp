@@ -44,7 +44,10 @@ constexpr std::array definitions{
                "平方米每千克"},
     Definition{Unit::square_centimetres_per_gram, Unit::square_metres_per_kilogram, 0.1, "cm²/g",
                "平方厘米每克"},
-    Definition{Unit::pascal, Unit::pascal, 1, "Pa", "帕斯卡（N/m²）"}};
+    Definition{Unit::pascal, Unit::pascal, 1, "Pa", "帕斯卡（N/m²）"},
+    Definition{Unit::kilogram, Unit::kilogram, 1, "kg", "千克"},
+    Definition{Unit::gram, Unit::kilogram, .001, "g", "克"},
+    Definition{Unit::tonne, Unit::kilogram, 1000, "t", "吨"}};
 const Definition &definition(Unit unit) {
     const auto found = std::find_if(definitions.begin(), definitions.end(),
                                     [unit](const auto &item) { return item.unit == unit; });

@@ -39,6 +39,34 @@ TEST(HpopProject, OptionsPersistAndInvalidateAnalysisOnlyWhenActive) {
     input.satellites[0].orbit.hpop.gravity_order = 1;
     EXPECT_THROW(application::validate_project(input), application::ProjectError);
 }
+TEST(HpopProject, MassPersistsButOnlyAreaMassRatiosChangeSphericalCalculationIdentity) {
+    auto input = hpop_project();
+    auto &options = input.satellites[0].orbit.hpop;
+    for (bool active : {false, true}) {
+        options.drag.enabled = options.srp.enabled = active;
+        const auto hash = application::analysis_input_sha256(input);
+        const auto report_hash = runtime::report_input_sha256(input);
+        const auto encoded = application::encode_project(input);
+        options.satellite_mass_kg *= 2;
+        EXPECT_EQ(application::analysis_input_sha256(input), hash);
+        EXPECT_EQ(runtime::report_input_sha256(input), report_hash);
+        EXPECT_NE(application::encode_project(input), encoded);
+        EXPECT_EQ(application::decode_project(application::encode_project(input))
+                      .satellites[0]
+                      .orbit.hpop.satellite_mass_kg,
+                  options.satellite_mass_kg);
+        options.drag.area_mass_ratio_m2_per_kg *= 2;
+        if (active) {
+            EXPECT_NE(application::analysis_input_sha256(input), hash);
+            EXPECT_NE(runtime::report_input_sha256(input), report_hash);
+        } else {
+            EXPECT_EQ(application::analysis_input_sha256(input), hash);
+            EXPECT_EQ(runtime::report_input_sha256(input), report_hash);
+        }
+    }
+    options.satellite_mass_kg = 0;
+    EXPECT_THROW((void)runtime::report_input_sha256(input), std::invalid_argument);
+}
 TEST(HpopProject, PreparedSessionsDriveReportsAccessAndRetainForceDependencies) {
     if (!runtime::time_frames_available()) {
         GTEST_SKIP();

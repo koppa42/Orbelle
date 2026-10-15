@@ -11,6 +11,7 @@ target_compile_definitions(orbitforge_core_tests PRIVATE
     ORBITFORGE_NRLMSISE_AP_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/nrlmsise00_ap.txt"
     ORBITFORGE_NRLMSISE_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/nrlmsise00.txt"
     ORBITFORGE_JR_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/jacchia_roberts.txt"
+    ORBITFORGE_MASS_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/mass.txt"
     ORBITFORGE_DRAG_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/drag.txt"
     ORBITFORGE_HPOP_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/hpop.txt")
 target_link_libraries(orbitforge_core_tests PRIVATE OrbitForge::Core GTest::gtest_main)

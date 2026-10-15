@@ -177,6 +177,9 @@ std::string report_input_sha256(const application::Project &project) {
         if (s.orbit.uses_hpop()) {
             // Persist both integrators' drafts, but identify only the active calculation.
             auto &options = s.orbit.hpop;
+            core::validate_hpop_options(options);
+            // Spherical accelerations use explicit A/m, independent of compatible area and mass.
+            options.satellite_mass_kg = core::HpopOptions{}.satellite_mass_kg;
             for (auto &body : options.third_bodies) {
                 if (!body.enabled)
                     body = {};

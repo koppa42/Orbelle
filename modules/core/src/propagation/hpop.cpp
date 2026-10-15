@@ -420,7 +420,28 @@ void HpopEnvironment::validate_ephemeris_interval(const HpopOptions &options, Ep
     if (options.srp.enabled && options.srp.sun_position_method == SrpSunPositionMethod::apparent)
         ephemeris->validate_spacecraft_apparent_sun_interval(first, last);
 }
+namespace {
+double compatible_area(double mass, double ratio) {
+    positive(mass, "Satellite mass must be finite and positive in kg");
+    if (!std::isfinite(ratio) || ratio < 0 || ratio > 9999)
+        throw std::invalid_argument("Spherical area/mass ratio must be within 0..9999 m^2/kg");
+    const double area = mass * ratio;
+    if (!std::isfinite(area) || (ratio > 0 && area == 0))
+        throw std::invalid_argument(
+            "Satellite mass times area/mass ratio is not representable in m^2");
+    return area;
+}
+} // namespace
+
+double HpopOptions::drag_area_m2() const {
+    return compatible_area(satellite_mass_kg, drag.area_mass_ratio_m2_per_kg);
+}
+double HpopOptions::srp_area_m2() const {
+    return compatible_area(satellite_mass_kg, srp.area_mass_ratio_m2_per_kg);
+}
 void validate_hpop_options(const HpopOptions &o) {
+    (void)o.drag_area_m2();
+    (void)o.srp_area_m2();
     validate_solid_tide_options(o.solid_tides);
     validate_srp_options(o.srp);
     validate_drag_options(o.drag);

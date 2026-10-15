@@ -27,6 +27,13 @@ struct HpopOptions {
     double gravity_mu = egm96_mu;
     std::string ephemeris_model = "de440s";
     std::array<ThirdBodyGravity, third_body_count> third_bodies{};
+    // Constant mass in kg. Spherical forces use their explicit A/m ratios;
+    // mass determines the compatible areas without changing those accelerations.
+    double satellite_mass_kg = 1000;
+    // Area in m²; throws invalid_argument for nonpositive/nonfinite mass, invalid
+    // A/m or a product outside the representable positive double range. Zero A/m is valid.
+    [[nodiscard]] double drag_area_m2() const;
+    [[nodiscard]] double srp_area_m2() const;
     SrpOptions srp;
     DragOptions drag;
     SolidTideOptions solid_tides;

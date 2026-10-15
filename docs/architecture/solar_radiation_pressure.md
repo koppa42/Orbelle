@@ -38,7 +38,7 @@ Cr 范围为 `[-100, 100]`，面积质量比为 `[0, 9999] m²/kg`，允许带�
 
 光压启用时总是需要太阳星历，启用阴影且分配月球时还需要月球。第三体引力勾选状态与此独立，GM 不参与光压力值。每个积分阶段使用对应历元的 Provider；准备阶段检查完整传播区间与实际目标链。缺文件或覆盖不足会停止准备，不能自动关闭光压。太阳向量由现有 ICRF 对齐的 SPICE 力模型适配器提供；SDK 不隐式下载资源。地心视太阳认证起点前 600 秒的历史。卫星视太阳不假定固定地心距离：准备时验证整个接收区间的 Earth→EMB→SSB 链，以及从快照起点到接收区间终点的完整 Sun→SSB 链；每次求值另检查实际发光时刻。过去的太阳链有洞即拒绝准备，不能以只查接收端点替代；若实际距离所需历史早于快照起点，求值失败，不外推。
 
-会话和分析持有不可变星历；来源包含 `spherical-uniform-angular-union-v2`、太阳方法、`NONE` / `earth-LT+S-v1` / `spacecraft-LT+S-tai-rate-v1` 及 `occultors=geometric`、有效光压参数及星历解释／内容身份。禁用光压的草稿，以及无阴影或未分配遮挡体的半径草稿不改变分析和报告身份。项目 v25／OBJS16 保存全部有效草稿；不提供旧版本解码。
+会话和分析持有不可变星历；来源包含 `spherical-uniform-angular-union-v2`、太阳方法、`NONE` / `earth-LT+S-v1` / `spacecraft-LT+S-tai-rate-v1` 及 `occultors=geometric`、有效光压参数及星历解释／内容身份。禁用光压的草稿，以及无阴影或未分配遮挡体的半径草稿不改变分析和报告身份。项目 v26／OBJS17 保存全部有效草稿；不提供旧版本解码。
 
 ```python
 data = of.DataSnapshot.builtin_time().with_ephemeris("de440s", manifest, workspace)
@@ -56,3 +56,9 @@ trajectory = analysis.states(sat, step=of.units.s(60))
 C++ 使用 `HpopOptions::srp`／`SrpOptions`，通过显式 `HpopEnvironment` 或 `Project::prepare(data)` 装配资源。低层 `evaluate_srp` 返回加速度与照明比例，便于独立几何验证；它消费调用者已经选好的太阳向量，不自行解释太阳方法或查询 Provider。Python 提供对应原生 `SrpOptions`、`SrpSunPositionMethod`、`SrpShadowModel`、`SrpEvaluation`、`evaluate_srp`，易用接口使用不可变 `of.orbits.SrpSettings`。
 
 独立 Orekit 轨迹参考、独立面积积分和边界测试见 [HPOP 验证协议](../validation/hpop_protocol.md)。这些验证不代表同配置 STK 的直接轨迹对照或实际预报精度。
+
+## 共享卫星质量
+
+`HpopOptions.satellite_mass_kg` / `HpopSettings.satellite_mass_kg` 默认为 1000 kg，必须有限且正。“其他”页支持 kg、g、t；阻力和光压页的面积质量比仍是独立输入，并显示只读的对应面积。C++ `drag_area_m2()` / `srp_area_m2()`（Python 同名只读属性）返回各自 A/m 与质量的乘积，拒绝溢出或非零乘积下溢为零；零 A/m 允许零面积。
+
+修改质量只改变对应面积，球形加速度、轨迹与计算身份保持不变；设置仍写入项目并标记为已修改。未来非球形或插件模型使用质量时，必须把实际使用的质量纳入身份。此行为依据 [STK Satellite mass](https://help.agi.com/stk/Content/hpop/hpopAdditional.htm)，独立面积/质量模式不作为球形模型的第二套输入。

@@ -626,6 +626,10 @@ bool edit_hpop_settings(
     auto *drag_area =
         quantity(drag_model, QStringLiteral("面积 / 质量"), "hpopDragAreaMassRatio",
                  Unit::square_metres_per_kilogram, options.drag.area_mass_ratio_m2_per_kg, 0, 9999);
+    auto *drag_compatible_area = new QLabel;
+    drag_compatible_area->setObjectName("hpopDragCompatibleArea");
+    drag_compatible_area->setWordWrap(true);
+    drag_model->addRow(QStringLiteral("对应面积"), drag_compatible_area);
     auto *drag_density = section(drag_page, QStringLiteral("大气密度"), "hpopDragDensitySection");
     auto *density_model = new QComboBox;
     density_model->setObjectName("hpopDragDensityModel");
@@ -800,6 +804,10 @@ bool edit_hpop_settings(
     auto *srp_area =
         quantity(srp_model, QStringLiteral("面积 / 质量"), "hpopSrpAreaMassRatio",
                  Unit::square_metres_per_kilogram, options.srp.area_mass_ratio_m2_per_kg, 0, 9999);
+    auto *srp_compatible_area = new QLabel;
+    srp_compatible_area->setObjectName("hpopSrpCompatibleArea");
+    srp_compatible_area->setWordWrap(true);
+    srp_model->addRow(QStringLiteral("对应面积"), srp_compatible_area);
     auto *srp_shadow_section = section(srp_page, QStringLiteral("阴影"), "hpopSrpShadowSection");
     auto *srp_shadow = new QComboBox;
     srp_shadow->setObjectName("hpopSrpShadowModel");
@@ -909,6 +917,34 @@ bool edit_hpop_settings(
     QObject::connect(srp_moon, &QCheckBox::toggled, &dialog, update_srp);
     update_srp();
     auto *additional_page = page(force_tabs, QStringLiteral("其他"), "hpopAdditionalPage");
+    auto *mass_section = section(additional_page, QStringLiteral("卫星质量"), "hpopMassSection");
+    auto *satellite_mass =
+        quantity(mass_section, QStringLiteral("质量"), "hpopSatelliteMass", Unit::kilogram,
+                 options.satellite_mass_kg, std::numeric_limits<double>::denorm_min(),
+                 std::numeric_limits<double>::max());
+    help(mass_section, QStringLiteral("球形阻力与光压按各自的面积质量比计算。修改质量时，"
+                                      "对应面积随之换算，面积质量比和加速度保持不变。"));
+    const auto refresh_compatible_areas = [&] {
+        const auto refresh = [&](QuantityEditor *ratio, QLabel *label) {
+            try {
+                core::HpopOptions value;
+                value.satellite_mass_kg = satellite_mass->value(Unit::kilogram);
+                value.drag.area_mass_ratio_m2_per_kg =
+                    ratio->value(Unit::square_metres_per_kilogram);
+                label->setText(QStringLiteral("%1 m²").arg(value.drag_area_m2(), 0, 'g', 12));
+            } catch (const std::exception &) {
+                label->setText(QStringLiteral("请输入有效的质量和面积质量比"));
+            }
+        };
+        refresh(drag_area, drag_compatible_area);
+        refresh(srp_area, srp_compatible_area);
+    };
+    for (auto *field : {satellite_mass, drag_area, srp_area}) {
+        QObject::connect(field->findChild<QLineEdit *>("quantityValue"), &QLineEdit::textChanged,
+                         &dialog, refresh_compatible_areas);
+        QObject::connect(field, &QuantityEditor::unitChanged, &dialog, refresh_compatible_areas);
+    }
+    refresh_compatible_areas();
     auto *relativity_section =
         section(additional_page, QStringLiteral("相对论"), "hpopRelativitySection");
     auto *relativity = new QCheckBox(QStringLiteral("包含相对论加速度"));
@@ -921,8 +957,7 @@ bool edit_hpop_settings(
              "三项修正。需要覆盖传播时段的地球定向参数和太阳星历；无需启用太阳第三体引力。"));
     auto *additional_pending =
         section(additional_page, QStringLiteral("其他附加模型"), "hpopAdditionalPendingSection");
-    caution(additional_pending,
-            QStringLiteral("地球反照与热辐射、卫星质量及自定义力模型尚未实现。"));
+    caution(additional_pending, QStringLiteral("地球反照与热辐射及自定义力模型尚未实现。"));
     auto *integration_page = page(tabs, QStringLiteral("积分器"), "hpopIntegratorPage");
     auto *integration =
         section(integration_page, QStringLiteral("积分方法"), "hpopIntegratorMethodSection");
@@ -1027,9 +1062,10 @@ bool edit_hpop_settings(
                           srp_use->isChecked()
                               ? part(srp_shadow, 1) + QStringLiteral(" · Cr ") + value_text(srp_cr)
                               : QStringLiteral("未启用"));
-        other_item->setData(summary_role, relativity->isChecked()
-                                              ? QStringLiteral("相对论 · 三项修正")
-                                              : QStringLiteral("未启用"));
+        other_item->setData(
+            summary_role, value_text(satellite_mass) + QStringLiteral(" ") +
+                              unit_symbol(satellite_mass->unit()) +
+                              (relativity->isChecked() ? QStringLiteral(" · 相对论") : QString{}));
         integrator_item->setData(summary_role, method->currentIndex() == 0
                                                    ? part(method, 0) +
                                                          QStringLiteral(" · 相对容差 ") +
@@ -1046,9 +1082,10 @@ bool edit_hpop_settings(
         QObject::connect(check, &QCheckBox::toggled, &dialog, refresh_summaries);
     for (auto &row : fields)
         QObject::connect(row.enabled, &QCheckBox::toggled, &dialog, refresh_summaries);
-    for (auto *field : {drag_cd, srp_cr, relative, fixed})
+    for (auto *field : {drag_cd, srp_cr, relative, fixed, satellite_mass})
         QObject::connect(field->findChild<QLineEdit *>("quantityValue"), &QLineEdit::textChanged,
                          &dialog, refresh_summaries);
+    QObject::connect(satellite_mass, &QuantityEditor::unitChanged, &dialog, refresh_summaries);
     refresh_summaries();
     QObject::connect(navigation, &QListWidget::currentItemChanged, &dialog,
                      [&](QListWidgetItem *item) {
@@ -1372,6 +1409,10 @@ bool edit_hpop_settings(
                                             }))
                 throw std::runtime_error("太阳辐射压需要所选位置星历，请先在数据中心准备。");
             validation_force_page = 3;
+            validation_field = satellite_mass;
+            candidate.satellite_mass_kg = read(satellite_mass, Unit::kilogram);
+            (void)candidate.drag_area_m2();
+            (void)candidate.srp_area_m2();
             validation_field = relativity;
             candidate.include_relativistic_accelerations = relativity->isChecked();
             if (candidate.include_relativistic_accelerations &&

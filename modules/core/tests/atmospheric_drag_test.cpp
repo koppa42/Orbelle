@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -457,6 +458,79 @@ TEST(AtmosphericDrag, CoRotatingWgs84NrlmsisePropagationMatchesIndependentOrekit
     EXPECT_EQ(count, 24U);
     std::cout << "Drag Orekit reference: max position component " << max_position << " m; velocity "
               << max_velocity << " m/s\n";
+}
+TEST(AtmosphericDrag, SharedMassAndIndependentAreasMatchOrekitCombinedForcesAndPropagation) {
+    std::ifstream source(ORBITFORGE_MASS_REFERENCE);
+    ASSERT_TRUE(source);
+    const auto env = environment();
+    std::string line;
+    std::size_t count = 0;
+    double max_acceleration = 0, max_position = 0, max_velocity = 0;
+    while (std::getline(source, line)) {
+        if (line.empty() || line[0] == '#')
+            continue;
+        SCOPED_TRACE(line);
+        std::istringstream row(line);
+        double mass, drag_area, srp_area, seconds;
+        CartesianState initial{Epoch{0}, OriginId::earth, FrameId::gcrf, {}, {}},
+            expected = initial;
+        std::array<double, 3> drag_acceleration, srp_acceleration;
+        ASSERT_TRUE(row >> mass >> drag_area >> srp_area >> seconds);
+        for (auto *vector : {&initial.position_m, &initial.velocity_mps, &expected.position_m,
+                             &expected.velocity_mps, &drag_acceleration, &srp_acceleration}) {
+            for (auto &value : *vector)
+                ASSERT_TRUE(row >> value);
+        }
+        expected.epoch = Epoch{static_cast<std::int64_t>(seconds * 1e9)};
+        HpopOptions options;
+        options.gravity_degree = options.gravity_order = 0;
+        options.max_step_seconds = 2.5;
+        options.min_step_seconds = 1e-6;
+        options.relative_tolerance = 1e-14;
+        options.position_tolerance_m = 1e-8;
+        options.velocity_tolerance_mps = 1e-11;
+        options.satellite_mass_kg = mass;
+        options.drag.enabled = options.srp.enabled = true;
+        options.drag.atmosphere = AtmosphereModel::nrlmsise00;
+        options.drag.area_mass_ratio_m2_per_kg = drag_area / mass;
+        options.srp.area_mass_ratio_m2_per_kg = srp_area / mass;
+        options.srp.cr = 1.7;
+        options.srp.sun_position_method = SrpSunPositionMethod::geometric;
+        options.srp.moon_shadow = false;
+        EXPECT_DOUBLE_EQ(options.drag_area_m2(), drag_area);
+        EXPECT_DOUBLE_EQ(options.srp_area_m2(), srp_area);
+        const auto transform =
+            env.frames->gcrf_to_itrf_state(initial.epoch, env.eop->at(initial.epoch));
+        const auto fixed = transform.apply(initial);
+        const auto sun = env.ephemeris->position(ThirdBody::sun, initial.epoch);
+        const auto drag = evaluate_drag(fixed.position_m, fixed.velocity_mps,
+                                        transform.rotation.apply_position(sun),
+                                        env.time->to_utc(initial.epoch), options.drag);
+        const auto da = transform.rotation.inverse_position(drag.acceleration_itrf_mps2);
+        const auto sa = evaluate_srp(initial.position_m, sun, options.srp).acceleration_mps2;
+        const auto actual = make_hpop(initial, options, env)->state_at(expected.epoch);
+        // STK spherical semantics: a different shared mass must leave both explicit ratios intact.
+        options.satellite_mass_kg = 9876;
+        const auto changed = make_hpop(initial, options, env)->state_at(expected.epoch);
+        EXPECT_EQ(changed.position_m, actual.position_m);
+        EXPECT_EQ(changed.velocity_mps, actual.velocity_mps);
+        for (std::size_t i = 0; i < 3; ++i) {
+            EXPECT_NEAR(da[i], drag_acceleration[i], 1e-17);
+            EXPECT_NEAR(sa[i], srp_acceleration[i], 1e-17);
+            EXPECT_NEAR(actual.position_m[i], expected.position_m[i], .0005);
+            EXPECT_NEAR(actual.velocity_mps[i], expected.velocity_mps[i], 5e-7);
+            max_acceleration = std::max({max_acceleration, std::abs(da[i] - drag_acceleration[i]),
+                                         std::abs(sa[i] - srp_acceleration[i])});
+            max_position =
+                std::max(max_position, std::abs(actual.position_m[i] - expected.position_m[i]));
+            max_velocity =
+                std::max(max_velocity, std::abs(actual.velocity_mps[i] - expected.velocity_mps[i]));
+        }
+        ++count;
+    }
+    EXPECT_EQ(count, 28U);
+    std::cout << "Mass Orekit reference: max acceleration " << max_acceleration
+              << " m/s^2; position " << max_position << " m; velocity " << max_velocity << " m/s\n";
 }
 TEST(AtmosphericDrag, RequiresUtcEopSunAndDeclaredApparentCoverageAndCancellationIsReusable) {
     const CartesianState initial{

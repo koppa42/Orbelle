@@ -19,7 +19,7 @@ class ProjectFormatTests(unittest.TestCase):
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 25)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 26)
         self.path.write_bytes(self.raw)
         project = of.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
@@ -27,7 +27,11 @@ class ProjectFormatTests(unittest.TestCase):
         self.assertEqual(project.objects["satellite-b"].orbit.hpop.solid_tides,
                          of.orbits.SolidTideSettings("full", True, True))
         self.assertEqual(project.objects["satellite-b"].orbit.hpop.srp.sun_position_method, "apparent")
-        drag = project.objects["satellite-b"].orbit.hpop.drag
+        hpop = project.objects["satellite-b"].orbit.hpop
+        self.assertEqual(hpop.satellite_mass_kg, 1250)
+        self.assertEqual(hpop.drag_area_m2, 37.5)
+        self.assertEqual(hpop.srp_area_m2, 37.5)
+        drag = hpop.drag
         self.assertTrue(drag.use_approximate_altitude)
         self.assertEqual(drag.weather_model, "fixture-weather")
         self.assertEqual(drag.geomagnetic_update, "three_hourly")
@@ -42,14 +46,14 @@ class ProjectFormatTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), self.raw)
 
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(25), 26, 0xFFFFFFFF):
+        for version in (*range(26), 27, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (of.load_project_data, of.load_project,
                                  of.Project.open, of.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 25"):
+                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 26"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 
@@ -72,7 +76,7 @@ class ProjectFormatTests(unittest.TestCase):
                         of.load_project_data(self.path)
 
     def test_unknown_tide_mode_and_nonboolean_tides_or_relativity_rejected_with_valid_crcs(self):
-        marker = struct.pack("<IIIBBBI7d", 0, 0, 2, 1, 1, 0, 0, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
+        marker = struct.pack("<IIIBBBdI7d", 0, 0, 2, 1, 1, 0, 1250, 0, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
         for offset, fmt, value in ((8, "I", 3), (12, "B", 2), (13, "B", 2), (14, "B", 2)):
             sections = []
             for tag, version, body in read_sections(self.raw):
@@ -84,6 +88,23 @@ class ProjectFormatTests(unittest.TestCase):
             corrupted = with_sections(self.raw, sections)
             self.path.write_bytes(corrupted)
             with self.assertRaises(of.ProjectError):
+                of.Project.open(self.path)
+            self.assertEqual(self.path.read_bytes(), corrupted)
+
+    def test_invalid_mass_is_rejected_even_with_valid_crcs_and_disabled_forces(self):
+        marker = struct.pack("<IIIBBBdI7d", 0, 0, 2, 1, 1, 0, 1250, 0,
+                             2e-12, .002, 2e-6, .005, 45, 12, 1000)
+        for mass in (0, -1, float("nan"), float("inf"), 5e-324):
+            sections = []
+            for tag, version, body in read_sections(self.raw):
+                if tag == b"OBJS":
+                    self.assertEqual(body.count(marker), 1)
+                    body = bytearray(body)
+                    struct.pack_into("<d", body, body.index(marker) + 15, mass)
+                sections.append((tag, version, body))
+            corrupted = with_sections(self.raw, sections)
+            self.path.write_bytes(corrupted)
+            with self.subTest(mass=mass), self.assertRaises(of.ProjectError):
                 of.Project.open(self.path)
             self.assertEqual(self.path.read_bytes(), corrupted)
 

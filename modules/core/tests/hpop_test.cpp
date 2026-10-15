@@ -55,6 +55,32 @@ double position_error(const CartesianState &a, const CartesianState &b) {
                       a.position_m[2] - b.position_m[2]);
 }
 } // namespace
+TEST(Hpop, SatelliteMassValidatesCompatibleAreasEvenForDisabledForceDrafts) {
+    auto options = point_mass();
+    EXPECT_EQ(options.satellite_mass_kg, 1000);
+    EXPECT_EQ(options.drag_area_m2(), 20);
+    options.satellite_mass_kg = 1250;
+    options.srp.area_mass_ratio_m2_per_kg = .03;
+    EXPECT_EQ(options.drag_area_m2(), 25);
+    EXPECT_EQ(options.srp_area_m2(), 37.5);
+    for (double mass :
+         {0., -1., std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::denorm_min()}) {
+        options.satellite_mass_kg = mass;
+        EXPECT_THROW(validate_hpop_options(options), std::invalid_argument);
+        EXPECT_THROW((void)make_hpop(circular(), options), std::invalid_argument);
+    }
+    options.satellite_mass_kg = std::numeric_limits<double>::max();
+    options.srp.area_mass_ratio_m2_per_kg = 2;
+    EXPECT_THROW(validate_hpop_options(options), std::invalid_argument);
+    options.srp.area_mass_ratio_m2_per_kg = 0;
+    EXPECT_NO_THROW(validate_hpop_options(options));
+    EXPECT_EQ(options.srp_area_m2(), 0);
+    options.drag.area_mass_ratio_m2_per_kg = 0;
+    options.satellite_mass_kg = std::numeric_limits<double>::denorm_min();
+    EXPECT_NO_THROW(validate_hpop_options(options));
+    EXPECT_EQ(options.drag_area_m2(), 0);
+}
 TEST(Hpop, PointMassMatchesCircularAnalyticSolutionForwardBackwardAndNearEpochLimits) {
     const double rate = std::sqrt(egm96_mu / std::pow(7e6, 3));
     for (auto origin : {0LL, 8'000'000'000'000'000'000LL}) {

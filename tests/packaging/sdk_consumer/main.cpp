@@ -30,6 +30,17 @@ int main(int argc, char **argv) try {
         } catch (const std::invalid_argument &) {
         }
     }
+    orbitforge::core::HpopOptions mass_options;
+    mass_options.satellite_mass_kg = 1250;
+    mass_options.srp.area_mass_ratio_m2_per_kg = .03;
+    if (mass_options.drag_area_m2() != 25 || mass_options.srp_area_m2() != 37.5)
+        return 36;
+    mass_options.satellite_mass_kg = 0;
+    try {
+        orbitforge::core::validate_hpop_options(mass_options);
+        return 37;
+    } catch (const std::invalid_argument &) {
+    }
     orbitforge::core::DragOptions drag;
     drag.enabled = true;
     drag.atmosphere = orbitforge::core::AtmosphereModel::nrlmsise00;
