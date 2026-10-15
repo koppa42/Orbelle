@@ -4,7 +4,7 @@ HPOP 的球形太阳辐射压由 Core 实现，桌面、C++、Python、报告与
 
 ## 输入与计算
 
-所有计算参数使用 SI；位置为同一历元、同一惯性轴系的地心几何位置。令 `s = r_sun − r_sat`，计算
+所有计算参数使用 SI。太阳方向在每个积分阶段按所选方法求值；遮挡体中心使用接收历元的地心几何位置。令 `s` 为卫星指向所选太阳位置的向量，计算
 
 ```text
 a_srp = −lighting_ratio · P_ref · (d_ref / |s|)² · Cr · (A_srp / m) · s / |s|
@@ -16,13 +16,29 @@ Cr 范围为 `[-100, 100]`，面积质量比为 `[0, 9999] m²/kg`，允许带�
 
 `SrpShadowModel::none` 使用全照；`cylindrical` 按太阳方向射线是否穿过任一分配球体判定 0/1；`dual_cone` 使用均匀亮度的视太阳圆盘，支持全照、半影、本影和环食。双锥在太阳方向的局部角平面上求地球／月球视圆盘并集与太阳圆盘的交面积，以 Green 定理分段圆弧积分求遮挡比例。重叠遮挡只计一次，不能把两个独立照明比例相乘。地球等效半径为球面半径加大气高度；月球不加该高度。
 
-当前遮挡体为球形地球和月球，太阳位置为几何位置。STK 的地球椭球轮廓、视太阳位置及光行时、Boundary Mitigation、其他可选遮挡体仍待实现。圆柱存在不连续边界，双锥在边缘不保证高阶光滑；当前按每个 RK 阶段求值，尚无专用食边界事件定位，使用者应通过步长与容差收敛检查评估穿越误差。[STK SRP 设置](https://help.agi.com/stk/Content/hpop/hpopSRP.htm)
+当前遮挡体为球形地球和月球。地球椭球轮廓、遮挡体自身的视位置修正、Boundary Mitigation、其他可选遮挡体仍待实现。圆柱存在不连续边界，双锥在边缘不保证高阶光滑；当前按每个 RK 阶段求值，尚无专用食边界事件定位，使用者应通过步长与容差收敛检查评估穿越误差。[STK SRP 设置](https://help.agi.com/stk/Content/hpop/hpopSRP.htm)
+
+## 太阳位置方法
+
+`SrpSunPositionMethod` / `SrpSettings.sun_position_method` 保存三种独立方法，与 [STK HPOP 的太阳位置选项](https://help.agi.com/stk/Content/hpop/hpopSRP.htm)对应：
+
+| C++ / Python | 计算 |
+| --- | --- |
+| `geometric` / `"true"` | 接收历元的几何太阳，减卫星位置，无光行时或光行差 |
+| `apparent_to_true_cb` / `"apparent_to_true_cb"`（默认） | 以地心为观测者求接收型 LT+S 视太阳，再相对卫星构造向量 |
+| `apparent` / `"apparent"` | 以当前积分阶段的卫星位置和速度为观测者，求接收型 LT+S 太阳向量 |
+
+默认地心视太阳与用户参考图一致；几何太阳的独立 Orekit 参考显式选择 `true`。公开帮助定义功能含义，并不完整披露 HPOP 内部星历、光行差或遮挡体历元约定；这三种实现不等于已通过 STK 同配置数值验收。
+
+卫星方法采用 [NAIF `spkapo` 的单次 LT+S 约定](https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/cspice/spkapo_c.html)：先由几何距离估计光行时，查询太阳发光时刻，再按观测者质心速度计算光行差。实现将各步显式展开，查询前校验发光时刻；不允许内部查询越过快照边界。速度包含地球的 SSB 速度及卫星相对地球的速度，后者从 TAI 导数换到 TDB 导数。换算使用当前 LSK 的 `K、EB、M0、M1`，按 [NAIF TIME 的公式](https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/req/time.html)求 `dTAI/dTDB = 1 − K cos(E) M1 (1 + EB cos(M))`。这是 ICRF 对齐轴下的牛顿叠加，不是完整 BCRS/GCRS 相对论转换。
+
+第三体引力仍独立使用几何位置；切换光压太阳方法不改变其星历算法。地月遮挡中心目前仍为几何中心，已在界面说明与算法来源中记录；不能将此等同于 AGI Components 对所有辐射向量的视位置修正。
 
 ## 资源、来源与持久化
 
-光压启用时总是需要太阳星历，启用阴影且分配月球时还需要月球。第三体引力勾选状态与此独立，GM 不参与光压力值。每个积分阶段使用对应历元的 Provider；准备阶段检查完整传播区间与实际目标链。缺文件或覆盖不足会停止准备，不能自动关闭光压。几何位置经现有 SPICE 力模型适配器进入 GCRF；SDK 不隐式下载资源。
+光压启用时总是需要太阳星历，启用阴影且分配月球时还需要月球。第三体引力勾选状态与此独立，GM 不参与光压力值。每个积分阶段使用对应历元的 Provider；准备阶段检查完整传播区间与实际目标链。缺文件或覆盖不足会停止准备，不能自动关闭光压。太阳向量由现有 ICRF 对齐的 SPICE 力模型适配器提供；SDK 不隐式下载资源。地心视太阳认证起点前 600 秒的历史。卫星视太阳不假定固定地心距离：准备时验证整个接收区间的 Earth→EMB→SSB 链，以及从快照起点到接收区间终点的完整 Sun→SSB 链；每次求值另检查实际发光时刻。过去的太阳链有洞即拒绝准备，不能以只查接收端点替代；若实际距离所需历史早于快照起点，求值失败，不外推。
 
-会话和分析持有不可变星历；来源包含 `spherical-geometric-uniform-angular-union-v1`、有效光压参数及星历解释／内容身份。禁用光压的草稿，以及无阴影或未分配遮挡体的半径草稿不改变分析和报告身份。项目 v21／OBJS11 保存全部有效草稿；不提供旧版本解码。
+会话和分析持有不可变星历；来源包含 `spherical-uniform-angular-union-v2`、太阳方法、`NONE` / `earth-LT+S-v1` / `spacecraft-LT+S-tai-rate-v1` 及 `occultors=geometric`、有效光压参数及星历解释／内容身份。禁用光压的草稿，以及无阴影或未分配遮挡体的半径草稿不改变分析和报告身份。项目 v22／OBJS13 保存全部有效草稿；不提供旧版本解码。
 
 ```python
 data = of.DataSnapshot.builtin_time().with_ephemeris("de440s", manifest, workspace)
@@ -30,12 +46,13 @@ orbit = of.orbits.Hpop(
     initial=initial, gravity_degree=0,
     srp=of.orbits.SrpSettings(enabled=True, cr=1.2,
                              area_mass_ratio_m2_per_kg=0.02,
-                             shadow_model="dual_cone", earth_shadow=True, moon_shadow=True))
+                             shadow_model="dual_cone", sun_position_method="apparent_to_true_cb",
+                             earth_shadow=True, moon_shadow=True))
 sat = project.objects.satellite("SRP", orbit=orbit)
 analysis = project.prepare(data=data)
 trajectory = analysis.states(sat, step=of.units.s(60))
 ```
 
-C++ 使用 `HpopOptions::srp`／`SrpOptions`，通过显式 `HpopEnvironment` 或 `Project::prepare(data)` 装配资源。低层 `evaluate_srp` 返回加速度与照明比例，便于独立几何验证；它不加载文件、不查询 Provider、不修改输入。Python 提供对应原生 `SrpOptions`、`SrpShadowModel`、`SrpEvaluation`、`evaluate_srp`，易用接口使用不可变 `of.orbits.SrpSettings`。
+C++ 使用 `HpopOptions::srp`／`SrpOptions`，通过显式 `HpopEnvironment` 或 `Project::prepare(data)` 装配资源。低层 `evaluate_srp` 返回加速度与照明比例，便于独立几何验证；它消费调用者已经选好的太阳向量，不自行解释太阳方法或查询 Provider。Python 提供对应原生 `SrpOptions`、`SrpSunPositionMethod`、`SrpShadowModel`、`SrpEvaluation`、`evaluate_srp`，易用接口使用不可变 `of.orbits.SrpSettings`。
 
 独立 Orekit 轨迹参考、独立面积积分和边界测试见 [HPOP 验证协议](../validation/hpop_protocol.md)。这些验证不代表同配置 STK 的直接轨迹对照或实际预报精度。

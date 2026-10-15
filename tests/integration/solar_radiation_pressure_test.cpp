@@ -36,6 +36,7 @@ TEST(SrpPersistence, StoresInactiveDraftsButHashesOnlyEffectiveInputs) {
     auto &hpop = p.satellites[0].orbit.hpop;
     auto &srp = hpop.srp;
     auto original = identity(p);
+    srp.sun_position_method = core::SrpSunPositionMethod::apparent;
     srp.cr = 1.7;
     srp.area_mass_ratio_m2_per_kg = .03;
     srp.atmospheric_altitude_m = 23000;
@@ -77,7 +78,7 @@ TEST_F(SrpFiles, SrpOnlyUsesImmutableSpiceAcrossSessionReportAndReopen) {
     if (!runtime::ephemeris_available())
         GTEST_SKIP();
     auto raw = runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root);
-    auto p = input(raw->data_info().first_epoch);
+    auto p = input(core::Epoch{raw->data_info().first_epoch.tai_nanoseconds() + 600000000000});
     const auto ephemeris = runtime::make_third_body_ephemeris(std::move(raw));
     const auto data = runtime::DataSnapshot::builtin_time().with_ephemeris("de440s", ephemeris);
     auto &orbit = p.satellites[0].orbit;

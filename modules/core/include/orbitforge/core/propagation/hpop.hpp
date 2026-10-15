@@ -84,6 +84,7 @@ struct HpopEnvironment {
     // UTC epoch and day-of-year for atmosphere models. Must match the EOP time identity.
     std::shared_ptr<const ITimeProvider> time{};
     std::shared_ptr<const SpaceWeather> weather{};
+    void validate_ephemeris_interval(const HpopOptions &options, Epoch first, Epoch last) const;
     // Validates complete weather paths, both models when a low-altitude model is selected.
     void validate_weather_interval(const DragOptions &drag, Epoch first, Epoch last) const;
 };

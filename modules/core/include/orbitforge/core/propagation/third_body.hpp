@@ -52,6 +52,24 @@ class IThirdBodyEphemeris {
     [[nodiscard]] virtual std::array<double, 3> apparent_sun_from_earth(Epoch) const {
         throw std::invalid_argument("This ephemeris does not support the apparent Sun");
     }
+    // Received Sun vector relative to a moving spacecraft: metres in ICRF-aligned
+    // axes, Earth-relative position and velocity per TAI second. The provider
+    // converts the velocity rate before forming its Newtonian SSB observer state.
+    // This is not a complete relativistic BCRS/GCRS transformation.
+    [[nodiscard]] virtual std::array<double, 3>
+    apparent_sun_from_spacecraft(Epoch, const std::array<double, 3> &,
+                                 const std::array<double, 3> &) const {
+        throw std::invalid_argument(
+            "This ephemeris does not support spacecraft apparent Sun positions");
+    }
+    // Certifies Earth chains throughout the receiving interval and Sun chains
+    // from the snapshot start through its end. The actual emission epoch is also
+    // checked at each query; arbitrary spacecraft distances are not given a fixed
+    // geocentric light-time allowance. Unsupported providers must reject this mode.
+    virtual void validate_spacecraft_apparent_sun_interval(Epoch, Epoch) const {
+        throw std::invalid_argument(
+            "This ephemeris cannot certify spacecraft apparent Sun coverage");
+    }
     virtual void validate_apparent_sun_interval(Epoch, Epoch) const {
         throw std::invalid_argument("This ephemeris cannot certify apparent Sun coverage");
     }

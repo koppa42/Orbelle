@@ -1,5 +1,6 @@
 #include "../src/viewer/eop_catalog.hpp"
 #include "../src/viewer/epoch_editor.hpp"
+#include "../src/viewer/form_kit.hpp"
 #include "../src/viewer/ground_station_editor.hpp"
 #include "../src/viewer/hpop_settings.hpp"
 #include "../src/viewer/mission_editor.hpp"
@@ -1505,7 +1506,16 @@ TEST_F(QuantityTest, HpopSrpUnitsShadowAssignmentsResizeAndCancelPreserveExactDr
         auto *shadow = dialog->findChild<QComboBox *>("hpopSrpShadowModel");
         auto *earth = dialog->findChild<QCheckBox *>("hpopSrpEarthShadow");
         auto *moon = dialog->findChild<QCheckBox *>("hpopSrpMoonShadow");
+        auto *sun = dialog->findChild<QComboBox *>("hpopSrpSunMethod");
+        ASSERT_TRUE(sun);
+        EXPECT_EQ(sun->count(), 3);
+        EXPECT_EQ(sun->currentIndex(), 1);
         use->setChecked(true);
+        EXPECT_TRUE(sun->isVisible());
+        sun->setFocus();
+        QKeyEvent next(QEvent::KeyPress, Qt::Key_Down, Qt::NoModifier);
+        QApplication::sendEvent(sun, &next);
+        EXPECT_EQ(sun->currentIndex(), 2);
         area->set_unit(Unit::square_centimetres_per_gram);
         area->findChild<QLineEdit *>("quantityValue")->setText("0.3");
         altitude->set_unit(Unit::kilometre);
@@ -1528,6 +1538,8 @@ TEST_F(QuantityTest, HpopSrpUnitsShadowAssignmentsResizeAndCancelPreserveExactDr
             QEventLoop settled;
             QTimer::singleShot(60, &settled, &QEventLoop::quit);
             settled.exec();
+            EXPECT_EQ(sun, dialog->findChild<QComboBox *>("hpopSrpSunMethod"));
+            EXPECT_EQ(sun->currentIndex(), 2);
             EXPECT_EQ(area, dialog->findChild<QuantityEditor *>("hpopSrpAreaMassRatio"));
             EXPECT_EQ(area->findChild<QLineEdit *>("quantityValue")->text(), "0.3");
             EXPECT_NEAR(area->value(Unit::square_metres_per_kilogram), .03, 1e-16);
@@ -1537,8 +1549,18 @@ TEST_F(QuantityTest, HpopSrpUnitsShadowAssignmentsResizeAndCancelPreserveExactDr
                 EXPECT_TRUE(QDir{}.mkpath(capture));
                 EXPECT_TRUE(dialog->grab().save(capture + QString("/hpop-srp-%1.png").arg(width)));
                 auto *scroll = dialog->findChild<QScrollArea *>("hpopSrpPage");
-                scroll->ensureWidgetVisible(
-                    dialog->findChild<QuantityEditor *>("hpopSrpMoonRadius"));
+                scroll->ensureWidgetVisible(sun);
+                QApplication::processEvents();
+                EXPECT_TRUE(
+                    dialog->grab().save(capture + QString("/hpop-srp-sun-%1.png").arg(width)));
+                sun->setCurrentIndex(1);
+                QApplication::processEvents();
+                EXPECT_TRUE(dialog->grab().save(
+                    capture + QString("/hpop-srp-sun-default-%1.png").arg(width)));
+                sun->setCurrentIndex(2);
+                auto *radius = dialog->findChild<QuantityEditor *>("hpopSrpMoonRadius");
+                reveal(radius);
+                scroll->ensureWidgetVisible(radius);
                 QApplication::processEvents();
                 EXPECT_TRUE(
                     dialog->grab().save(capture + QString("/hpop-srp-data-%1.png").arg(width)));
@@ -1552,6 +1574,7 @@ TEST_F(QuantityTest, HpopSrpUnitsShadowAssignmentsResizeAndCancelPreserveExactDr
     });
     EXPECT_TRUE(edit_hpop_settings(options, nullptr, {}, {entry}));
     EXPECT_TRUE(options.srp.enabled);
+    EXPECT_EQ(options.srp.sun_position_method, core::SrpSunPositionMethod::apparent);
     EXPECT_NEAR(options.srp.area_mass_ratio_m2_per_kg, .03, 1e-16);
     EXPECT_EQ(options.srp.atmospheric_altitude_m, 23000);
     EXPECT_FALSE(options.srp.moon_shadow);
@@ -1561,6 +1584,9 @@ TEST_F(QuantityTest, HpopSrpUnitsShadowAssignmentsResizeAndCancelPreserveExactDr
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
         ASSERT_TRUE(dialog);
         EXPECT_TRUE(dialog->findChild<QCheckBox *>("hpopUseSrp")->isChecked());
+        auto *sun = dialog->findChild<QComboBox *>("hpopSrpSunMethod");
+        EXPECT_EQ(sun->currentIndex(), 2);
+        sun->setCurrentIndex(0);
         dialog->findChild<QCheckBox *>("hpopUseSrp")->setChecked(false);
         dialog->findChild<QuantityEditor *>("hpopSrpCr")->set_value(2, Unit::one);
         dialog->reject();

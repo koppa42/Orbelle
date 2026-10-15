@@ -163,8 +163,23 @@ class Hpop final : public IStateProvider {
             std::optional<std::array<double, 3>> moon;
             if (options_.srp.moon_shadow && options_.srp.shadow_model != SrpShadowModel::none)
                 moon = environment_.ephemeris->position(ThirdBody::moon, epoch);
-            const auto force = evaluate_srp(
-                r, environment_.ephemeris->position(ThirdBody::sun, epoch), options_.srp, moon);
+            auto sun = [&] {
+                switch (options_.srp.sun_position_method) {
+                case SrpSunPositionMethod::geometric:
+                    return environment_.ephemeris->position(ThirdBody::sun, epoch);
+                case SrpSunPositionMethod::apparent_to_true_cb:
+                    return environment_.ephemeris->apparent_sun_from_earth(epoch);
+                case SrpSunPositionMethod::apparent: {
+                    auto received = environment_.ephemeris->apparent_sun_from_spacecraft(
+                        epoch, r, {s[3], s[4], s[5]});
+                    for (std::size_t i = 0; i < 3; ++i)
+                        received[i] += r[i]; // Geometry evaluator takes a geocentric Sun endpoint.
+                    return received;
+                }
+                }
+                throw std::invalid_argument("Unsupported SRP Sun position method");
+            }();
+            const auto force = evaluate_srp(r, sun, options_.srp, moon);
             for (int i = 0; i < 3; ++i)
                 acceleration[i] += force.acceleration_mps2[i];
         }
@@ -287,15 +302,7 @@ class Hpop final : public IStateProvider {
     Hpop(CartesianState initial, HpopOptions options, HpopEnvironment environment)
         : initial_(initial), options_(options), environment_(std::move(environment)) {
         validate_hpop_options(options_);
-        if (options_.uses_ephemeris()) {
-            if (!environment_.ephemeris)
-                throw std::invalid_argument("Enabled HPOP forces require selected ephemeris data");
-            environment_.ephemeris->validate_interval(initial.epoch, initial.epoch,
-                                                      options_.required_ephemeris_bodies());
-            if (options_.drag.enabled && options_.drag.use_apparent_sun_position)
-                environment_.ephemeris->validate_apparent_sun_interval(initial.epoch,
-                                                                       initial.epoch);
-        }
+        environment_.validate_ephemeris_interval(options_, initial.epoch, initial.epoch);
         if (options_.gravity_model.empty())
             environment_.gravity = builtin_egm96();
         if (!environment_.gravity)
@@ -343,13 +350,8 @@ class Hpop final : public IStateProvider {
             options_.drag,
             Epoch{std::min(epoch.tai_nanoseconds(), initial_.epoch.tai_nanoseconds())},
             Epoch{std::max(epoch.tai_nanoseconds(), initial_.epoch.tai_nanoseconds())});
-        if (options_.uses_ephemeris())
-            environment_.ephemeris->validate_interval(t < 0 ? epoch : initial_.epoch,
-                                                      t < 0 ? initial_.epoch : epoch,
-                                                      options_.required_ephemeris_bodies());
-        if (options_.drag.enabled && options_.drag.use_apparent_sun_position)
-            environment_.ephemeris->validate_apparent_sun_interval(t < 0 ? epoch : initial_.epoch,
-                                                                   t < 0 ? initial_.epoch : epoch);
+        environment_.validate_ephemeris_interval(options_, t < 0 ? epoch : initial_.epoch,
+                                                 t < 0 ? initial_.epoch : epoch);
         if ((options_.gravity_degree > 0 || options_.drag.enabled) &&
             !eop_covers(environment_.eop->data_info(), epoch))
             throw EopCoverageError(
@@ -383,6 +385,20 @@ class Hpop final : public IStateProvider {
     }
 };
 } // namespace
+void HpopEnvironment::validate_ephemeris_interval(const HpopOptions &options, Epoch first,
+                                                  Epoch last) const {
+    if (!options.uses_ephemeris())
+        return;
+    if (!ephemeris)
+        throw std::invalid_argument("Enabled HPOP forces require selected ephemeris data");
+    ephemeris->validate_interval(first, last, options.required_ephemeris_bodies());
+    if ((options.drag.enabled && options.drag.use_apparent_sun_position) ||
+        (options.srp.enabled &&
+         options.srp.sun_position_method == SrpSunPositionMethod::apparent_to_true_cb))
+        ephemeris->validate_apparent_sun_interval(first, last);
+    if (options.srp.enabled && options.srp.sun_position_method == SrpSunPositionMethod::apparent)
+        ephemeris->validate_spacecraft_apparent_sun_interval(first, last);
+}
 void validate_hpop_options(const HpopOptions &o) {
     validate_srp_options(o.srp);
     validate_drag_options(o.drag);

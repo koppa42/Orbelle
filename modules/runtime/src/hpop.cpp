@@ -42,7 +42,13 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
         const auto o = core::effective_srp_options(options.srp);
         std::ostringstream config;
         config.imbue(std::locale::classic());
-        config << std::hexfloat << ";srp=spherical-geometric-uniform-angular-union-v1"
+        config << std::hexfloat << ";srp=spherical-uniform-angular-union-v2"
+               << ";sun-method=" << static_cast<int>(o.sun_position_method) << ";sun-correction="
+               << (o.sun_position_method == core::SrpSunPositionMethod::geometric ? "NONE"
+                   : o.sun_position_method == core::SrpSunPositionMethod::apparent_to_true_cb
+                       ? "earth-LT+S-v1"
+                       : "spacecraft-LT+S-tai-rate-v1")
+               << ";occultors=geometric"
                << ";shadow=" << static_cast<int>(o.shadow_model)
                << ";earth-shadow=" << o.earth_shadow << ";moon-shadow=" << o.moon_shadow
                << ";cr=" << o.cr << ";area-mass=" << o.area_mass_ratio_m2_per_kg

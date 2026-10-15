@@ -21,7 +21,13 @@ LSK 只用于上述均匀时间转换所需常数。UTC↔TAI 继续使用独立
 | `velocity_mps` / `velocity_time_scale` | 相对速度，米/秒；导数时间尺度明确为 `TDB` |
 | `source_id` | 清单 SHA256、工具包、轴标签、像差选项和速度时间尺度 |
 
-DE440 数据使用 ICRF 对齐的轴。此接口保留 SPICE 标签，尚未实现 BCRS/GCRS 的完整相对论转换或 TDB→TAI 速度导数转换，不能将结果直接改标签作为 GCRF `CartesianState` 输入地球旋转接口。尚未提供光行时/光行差修正、任意 FK/PCK 参考系或地面站观测量。
+DE440 数据使用 ICRF 对齐的轴。此接口保留 SPICE 标签，尚未实现 BCRS/GCRS 的完整相对论转换或 TDB→TAI 速度导数转换，不能将结果直接改标签作为 GCRF `CartesianState` 输入地球旋转接口。几何状态接口不应用光行时/光行差；另有下述受限太阳接口。尚未提供任意 FK/PCK 参考系或地面站观测量。
+
+## 接收型太阳向量
+
+`apparent_sun_from_earth(epoch)` 返回地心 LT+S 太阳向量。`apparent_sun_from_spacecraft(epoch, position_earth_m, velocity_earth_tai_mps)` 返回从移动卫星指向太阳的接收型 LT+S 向量，单位米，ICRF 对齐轴。后者明确接受地心位置和 **每 TAI 秒** 的相对速度，通过 LSK 时间模型导数换算速率，再与 Earth/SSB 的 TDB 状态组合；只用于牛顿力环境，不将 `EphemerisState` 重命名为 GCRF 状态。位置/速度必须有限，SSB 观测者速度须小于光速。
+
+地心方法继续使用 600 秒历史余量。卫星方法用实际几何距离的一次光行时估计，查询发光时刻前检查快照策略边界，再应用恒星光行差；不假定卫星始终靠近地球。`validate_spacecraft_apparent_sun_interval(first,last)` 检查接收区间的 Earth→EMB→SSB 链及快照起点到 last 的 Sun→SSB 连续历史；发光时刻是否仍在该范围内还须在每次求值时确认。详见[太阳辐射压](solar_radiation_pressure.md)。
 
 ## 快照清单与覆盖
 

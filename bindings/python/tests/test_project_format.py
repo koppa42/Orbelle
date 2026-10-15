@@ -19,11 +19,12 @@ class ProjectFormatTests(unittest.TestCase):
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 21)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 22)
         self.path.write_bytes(self.raw)
         project = of.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
         self.assertEqual(project.objects["satellite-b"].orbit.hpop.max_step_seconds, 45)
+        self.assertEqual(project.objects["satellite-b"].orbit.hpop.srp.sun_position_method, "apparent")
         drag = project.objects["satellite-b"].orbit.hpop.drag
         self.assertTrue(drag.use_approximate_altitude)
         self.assertEqual(drag.weather_model, "fixture-weather")
@@ -39,14 +40,14 @@ class ProjectFormatTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), self.raw)
 
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(21), 22, 0xFFFFFFFF):
+        for version in (*range(22), 23, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (of.load_project_data, of.load_project,
                                  of.Project.open, of.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 21"):
+                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 22"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 
@@ -67,6 +68,23 @@ class ProjectFormatTests(unittest.TestCase):
                     self.path.write_bytes(with_sections(self.raw, mutation))
                     with self.assertRaises(of.ProjectError):
                         of.load_project_data(self.path)
+
+    def test_invalid_srp_sun_method_is_rejected_with_valid_crcs(self):
+        sections = read_sections(self.raw)
+        marker = struct.pack("<BIIBB8d", 0, 2, 2, 1, 0, 1.25, .03, 23000,
+                             4.56e-6, 149597870700, 696000000, 6378137, 1737400)
+        altered = []
+        for tag, version, body in sections:
+            if tag == b"OBJS":
+                self.assertEqual(body.count(marker), 1)
+                body = bytearray(body)
+                struct.pack_into("<I", body, body.index(marker) + 5, 3)
+            altered.append((tag, version, body))
+        corrupted = with_sections(self.raw, altered)
+        self.path.write_bytes(corrupted)
+        with self.assertRaisesRegex(of.ProjectError, "SRP Sun position method"):
+            of.Project.open(self.path)
+        self.assertEqual(self.path.read_bytes(), corrupted)
 
     def test_section_order_is_independent_and_writer_is_canonical(self):
         self.path.write_bytes(with_sections(self.raw, reversed(read_sections(self.raw))))

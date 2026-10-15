@@ -271,7 +271,14 @@ int main(int argc, char **argv) try {
             return 8;
         }
         auto provider = orbitforge::runtime::load_spice_snapshot(argv[2], argv[3]);
-        const auto epoch = provider->data_info().first_epoch;
+        const auto epoch = orbitforge::core::Epoch{
+            provider->data_info().first_epoch.tai_nanoseconds() + 600000000000};
+        provider->validate_spacecraft_apparent_sun_interval(epoch, epoch);
+        const auto apparent = provider->apparent_sun_from_spacecraft(epoch, {}, {});
+        const auto centre_sun = provider->apparent_sun_from_earth(epoch);
+        for (std::size_t i = 0; i < 3; ++i)
+            if (std::abs(apparent[i] - centre_sun[i]) > 1e-3)
+                return 34;
         const auto moon = provider->geometric_state(301, 399, epoch);
         const auto range = std::hypot(moon.position_m[0], moon.position_m[1], moon.position_m[2]);
         if (moon.frame != orbitforge::core::FrameId::spice_j2000 ||
@@ -287,6 +294,7 @@ int main(int argc, char **argv) try {
             options.third_body(orbitforge::core::ThirdBody::moon).enabled = true;
         options.srp.enabled = true;
         options.srp.cr = 1.2;
+        options.srp.sun_position_method = orbitforge::core::SrpSunPositionMethod::apparent;
         const auto full_light = orbitforge::core::evaluate_srp(
             {7e6, 0, 0}, {149597870700, 0, 0}, options.srp, std::array{0., 384400000., 0.});
         if (full_light.lighting_ratio != 1 || full_light.acceleration_mps2[0] >= 0)

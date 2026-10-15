@@ -4,11 +4,14 @@
 
 namespace orbitforge::core {
 enum class SrpShadowModel { none, cylindrical, dual_cone };
+// Sun direction only; occultor centres remain geometric at the receiving epoch.
+enum class SrpSunPositionMethod { geometric, apparent_to_true_cb, apparent };
 struct SrpOptions {
     bool enabled = false;
     double cr = 1;
     double area_mass_ratio_m2_per_kg = 0.02;
     SrpShadowModel shadow_model = SrpShadowModel::dual_cone;
+    SrpSunPositionMethod sun_position_method = SrpSunPositionMethod::apparent_to_true_cb;
     bool earth_shadow = true, moon_shadow = true;
     double atmospheric_altitude_m = 0;
     double pressure_at_reference_pa = 4.56e-6;
@@ -26,14 +29,17 @@ struct SrpEvaluation {
     std::array<double, 3> acceleration_mps2{};
     double lighting_ratio = 1;
 };
-// SI, geocentric geometric positions in the same inertial axes at one TAI epoch.
+// SI, geocentric positions in the same inertial axes at one receiving TAI epoch.
+// This geometry-only evaluator consumes the already selected Sun vector; it has
+// no ephemeris and does not apply sun_position_method itself. HPOP resolves that
+// method at every integration stage, preserving geometric occultor centres.
 // Spherical satellite and occultors. Dual cone uses the uniform apparent solar disk
 // and the union of Earth's/Moon's apparent disks, including annular eclipses.
 // Throws invalid_argument for missing required Moon geometry; PropagationError for
 // nonfinite positions/force or an observer inside the Sun/assigned occultor.
 // Moon is required only with SRP and a non-none shadow model assigning the Moon.
-// Disabled SRP does not inspect positions. No light-time/aberration,
-// ellipsoidal limb, atmospheric refraction or STK boundary mitigation is implied.
+// Disabled SRP does not inspect positions. No ellipsoidal limb, atmospheric
+// refraction or STK boundary mitigation is implied.
 [[nodiscard]] SrpEvaluation evaluate_srp(const std::array<double, 3> &satellite_m,
                                          const std::array<double, 3> &sun_m,
                                          const SrpOptions &options,

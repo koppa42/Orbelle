@@ -133,6 +133,10 @@ double covered_area(std::span<const Disk> occultors) {
 }
 } // namespace
 void validate_srp_options(const SrpOptions &o) {
+    if (o.sun_position_method != SrpSunPositionMethod::geometric &&
+        o.sun_position_method != SrpSunPositionMethod::apparent_to_true_cb &&
+        o.sun_position_method != SrpSunPositionMethod::apparent)
+        throw std::invalid_argument("Unsupported SRP Sun position method");
     if (o.shadow_model != SrpShadowModel::none && o.shadow_model != SrpShadowModel::cylindrical &&
         o.shadow_model != SrpShadowModel::dual_cone)
         throw std::invalid_argument("Unsupported SRP shadow model");

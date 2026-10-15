@@ -88,16 +88,19 @@ def load_cb_gravity(path, body: str, *, mu_scale: float = 1.0) -> n.CbGravity:
 
 @dataclass(frozen=True, slots=True)
 class SrpSettings:
-    """Spherical SRP using geometric DE440s positions and spherical Earth/Moon shadows.
+    """Spherical SRP using DE440s Sun positions and spherical Earth/Moon shadows.
 
     All quantities are SI. Dual cone integrates the uniform apparent solar disk;
-    Earth/Moon occultations use their union. No light-time, ellipsoidal limb or STK
-    boundary mitigation is implied. Disabled drafts are retained but do not affect results.
+    Earth/Moon occultations use their union and geometric centres. Sun methods are
+    true, geocentric apparent (default), and spacecraft apparent (received LT+S).
+    No ellipsoidal limb or STK boundary mitigation is implied. Disabled drafts are
+    retained but do not affect results.
     """
     enabled: bool = False
     cr: float = 1.0
     area_mass_ratio_m2_per_kg: float = 0.02
     shadow_model: Literal["none", "cylindrical", "dual_cone"] = "dual_cone"
+    sun_position_method: Literal["true", "apparent_to_true_cb", "apparent"] = "apparent_to_true_cb"
     earth_shadow: bool = True
     moon_shadow: bool = True
     atmospheric_altitude_m: float = 0.0
@@ -119,11 +122,17 @@ class SrpSettings:
                    "dual_cone": n.SrpShadowModel.DUAL_CONE}
         if self.shadow_model not in shadows:
             raise ValueError("Unknown SRP shadow model")
+        suns = {"true": n.SrpSunPositionMethod.TRUE,
+                "apparent_to_true_cb": n.SrpSunPositionMethod.APPARENT_TO_TRUE_CB,
+                "apparent": n.SrpSunPositionMethod.APPARENT}
+        if self.sun_position_method not in suns:
+            raise ValueError("Unknown SRP Sun position method")
         value = n.SrpOptions()
         for name in self.__dataclass_fields__:
-            if name != "shadow_model":
+            if name not in ("shadow_model", "sun_position_method"):
                 setattr(value, name, getattr(self, name))
         value.shadow_model = shadows[self.shadow_model]
+        value.sun_position_method = suns[self.sun_position_method]
         value.validate()
         return value
 
@@ -131,9 +140,13 @@ class SrpSettings:
     def _read(cls, value: n.SrpOptions) -> "SrpSettings":
         shadows = {n.SrpShadowModel.NONE: "none", n.SrpShadowModel.CYLINDRICAL: "cylindrical",
                    n.SrpShadowModel.DUAL_CONE: "dual_cone"}
+        suns = {n.SrpSunPositionMethod.TRUE: "true",
+                n.SrpSunPositionMethod.APPARENT_TO_TRUE_CB: "apparent_to_true_cb",
+                n.SrpSunPositionMethod.APPARENT: "apparent"}
         fields = {name: getattr(value, name) for name in cls.__dataclass_fields__
-                  if name != "shadow_model"}
-        return cls(**fields, shadow_model=shadows[value.shadow_model])
+                  if name not in ("shadow_model", "sun_position_method")}
+        return cls(**fields, shadow_model=shadows[value.shadow_model],
+                   sun_position_method=suns[value.sun_position_method])
 
 
 @dataclass(frozen=True, slots=True)

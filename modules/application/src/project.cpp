@@ -25,7 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 21;
+constexpr std::uint32_t project_version = 22;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -43,7 +43,7 @@ struct SectionSchema {
 // One current schema, shared by the reader and writer. Null means an optional section.
 constexpr std::array section_schemas{
     SectionSchema{scene_tag, 1, "Missing scene section"},
-    SectionSchema{objects_tag, 12, "Missing satellites section"},
+    SectionSchema{objects_tag, 13, "Missing satellites section"},
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
     SectionSchema{sensors_tag, 1, "Missing sensors section"},
@@ -177,6 +177,7 @@ void write_srp(Writer &out, const core::SrpOptions &o, bool draft = true) {
     if (!draft && !o.enabled)
         return;
     out.number(static_cast<unsigned>(o.shadow_model), 4);
+    out.number(static_cast<unsigned>(o.sun_position_method), 4);
     out.number(o.earth_shadow, 1);
     out.number(o.moon_shadow, 1);
     for (double value :
@@ -190,6 +191,9 @@ core::SrpOptions read_srp(Reader &in) {
     const auto shadow = in.number(4);
     check(shadow <= 2, "Unsupported SRP shadow model");
     o.shadow_model = static_cast<core::SrpShadowModel>(shadow);
+    const auto sun = in.number(4);
+    check(sun <= 2, "Unsupported SRP Sun position method");
+    o.sun_position_method = static_cast<core::SrpSunPositionMethod>(sun);
     o.earth_shadow = in.boolean();
     o.moon_shadow = in.boolean();
     o.cr = in.real();

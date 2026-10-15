@@ -781,10 +781,21 @@ bool edit_hpop_settings(
     help(srp_shadow_section, QStringLiteral("双锥按日面可见比例缩放光压，包含半影、本影与环食。"
                                             "地月遮挡按并集计算。当前采用球形轮廓；大气高度增加"
                                             "地球遮挡半径，不计算折射或衰减。"));
-    auto *srp_sun = section(srp_page, QStringLiteral("太阳位置与模型常数"), "hpopSrpSunSection");
+    auto *srp_sun = section(srp_page, QStringLiteral("太阳位置"), "hpopSrpSunSection");
     auto *srp_sun_method = new QComboBox;
     srp_sun_method->setObjectName("hpopSrpSunMethod");
-    srp_sun_method->addItem(QStringLiteral("True · 几何位置"));
+    srp_sun_method->addItems(
+        {QStringLiteral("几何太阳"), QStringLiteral("地心视太阳"), QStringLiteral("卫星视太阳")});
+    srp_sun_method->setItemData(0, QStringLiteral("True"), Qt::ToolTipRole);
+    srp_sun_method->setItemData(1, QStringLiteral("Apparent to True CB"), Qt::ToolTipRole);
+    srp_sun_method->setItemData(2, QStringLiteral("Apparent"), Qt::ToolTipRole);
+    srp_sun_method->setMinimumContentsLength(12);
+    srp_sun_method->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    srp_sun_method->setCurrentIndex(static_cast<int>(options.srp.sun_position_method));
+    srp_sun_method->setToolTip(QStringLiteral(
+        "几何太阳（True）使用同历元位置；地心视太阳（Apparent to True CB）以地心为观测者；"
+        "卫星视太阳（Apparent）使用积分阶段的卫星位置与速度。两种视位置包含光行时和光行差。"
+        "遮挡天体中心仍使用几何位置。"));
     srp_sun->addRow(QStringLiteral("太阳位置方法"), srp_sun_method);
     auto *srp_resource = new QLabel;
     srp_resource->setObjectName("hpopSrpEphemerisStatus");
@@ -795,7 +806,7 @@ bool edit_hpop_settings(
             installed_ephemerides.begin(), installed_ephemerides.end(),
             [&](const auto &entry) { return entry.selection == options.ephemeris_model; });
         srp_resource->setText(
-            ready ? QStringLiteral("位置星历：%1 · 太阳方向使用几何位置")
+            ready ? QStringLiteral("位置星历：%1")
                         .arg(QString::fromStdString(options.ephemeris_model))
                   : QStringLiteral("缺少所选位置星历：%1，请在数据中心准备太阳/月球位置数据。")
                         .arg(QString::fromStdString(options.ephemeris_model)));
@@ -808,38 +819,40 @@ bool edit_hpop_settings(
     QObject::connect(manage, &QToolButton::clicked, &dialog, refresh_srp_resource);
     QObject::connect(manage, &QToolButton::clicked, &dialog, refresh_drag_resource);
     refresh_srp_resource();
+    help(srp_sun, QStringLiteral("视太阳需要更早的太阳星历；实际发光时刻超出所选覆盖时会报错。"));
+    auto *srp_constants = section(srp_page, QStringLiteral("模型常数"), "hpopSrpConstantsSection");
     auto *srp_pressure =
-        quantity(srp_sun, QStringLiteral("参考距离处光压"), "hpopSrpPressure", Unit::pascal,
+        quantity(srp_constants, QStringLiteral("参考距离处光压"), "hpopSrpPressure", Unit::pascal,
                  options.srp.pressure_at_reference_pa, std::numeric_limits<double>::min(),
                  std::numeric_limits<double>::max());
     auto *srp_distance =
-        quantity(srp_sun, QStringLiteral("光压参考距离"), "hpopSrpReferenceDistance", Unit::metre,
-                 options.srp.reference_distance_m, std::numeric_limits<double>::min(),
+        quantity(srp_constants, QStringLiteral("光压参考距离"), "hpopSrpReferenceDistance",
+                 Unit::metre, options.srp.reference_distance_m, std::numeric_limits<double>::min(),
                  std::numeric_limits<double>::max());
     auto *srp_sun_radius =
-        quantity(srp_sun, QStringLiteral("太阳半径"), "hpopSrpSunRadius", Unit::metre,
+        quantity(srp_constants, QStringLiteral("太阳半径"), "hpopSrpSunRadius", Unit::metre,
                  options.srp.sun_radius_m, std::numeric_limits<double>::min(),
                  std::numeric_limits<double>::max());
     auto *srp_earth_radius =
-        quantity(srp_sun, QStringLiteral("地球球面半径"), "hpopSrpEarthRadius", Unit::metre,
+        quantity(srp_constants, QStringLiteral("地球球面半径"), "hpopSrpEarthRadius", Unit::metre,
                  options.srp.earth_radius_m, std::numeric_limits<double>::min(),
                  std::numeric_limits<double>::max());
     auto *srp_moon_radius =
-        quantity(srp_sun, QStringLiteral("月球球面半径"), "hpopSrpMoonRadius", Unit::metre,
+        quantity(srp_constants, QStringLiteral("月球球面半径"), "hpopSrpMoonRadius", Unit::metre,
                  options.srp.moon_radius_m, std::numeric_limits<double>::min(),
                  std::numeric_limits<double>::max());
     for (auto *field : {srp_distance, srp_sun_radius, srp_earth_radius, srp_moon_radius})
         field->set_unit(Unit::kilometre);
     // Physical constants rarely change: the group starts folded behind a summary.
-    if (auto *group = group_of(srp_sun)) {
-        group->set_summary(QStringLiteral("几何太阳 · 标准常数"));
+    if (auto *group = group_of(srp_constants)) {
+        group->set_summary(QStringLiteral("标准太阳与地月常数"));
         group->set_collapsible(false);
     }
-    caution(srp_page, QStringLiteral("视太阳位置、椭球轮廓与 STK Boundary Mitigation 尚未实现。"
+    caution(srp_page, QStringLiteral("椭球轮廓与 STK Boundary Mitigation 尚未实现。"
                                      "阴影边界附近应检查减小最大步长后的轨迹收敛。"));
     const auto update_srp = [&] {
         const bool enabled = srp_use->isChecked(), shadows = srp_shadow->currentIndex() != 0;
-        for (auto *form : {srp_model, srp_shadow_section, srp_sun}) {
+        for (auto *form : {srp_model, srp_shadow_section, srp_sun, srp_constants}) {
             form->parentWidget()->setEnabled(enabled);
             group_of(form)->setVisible(enabled);
         }
@@ -1252,6 +1265,8 @@ bool edit_hpop_settings(
             auto &srp = candidate.srp;
             srp.enabled = srp_use->isChecked();
             srp.shadow_model = static_cast<core::SrpShadowModel>(srp_shadow->currentIndex());
+            srp.sun_position_method =
+                static_cast<core::SrpSunPositionMethod>(srp_sun_method->currentIndex());
             srp.earth_shadow = srp_earth->isChecked();
             srp.moon_shadow = srp_moon->isChecked();
             const auto srp_value = [&](QuantityEditor *field, Unit unit, double &value, bool used) {

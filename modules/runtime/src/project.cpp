@@ -26,10 +26,7 @@ application::Session make_orbit_session(const application::OrbitInput &input,
             std::min(input.initial.epoch.tai_nanoseconds(), input.first.tai_nanoseconds())};
         const auto last = core::Epoch{
             std::max(input.initial.epoch.tai_nanoseconds(), input.last.tai_nanoseconds())};
-        environment.ephemeris->validate_interval(first, last,
-                                                 input.hpop.required_ephemeris_bodies());
-        if (input.hpop.drag.enabled && input.hpop.drag.use_apparent_sun_position)
-            environment.ephemeris->validate_apparent_sun_interval(first, last);
+        environment.validate_ephemeris_interval(input.hpop, first, last);
     }
     if (input.uses_eop_force()) {
         if (!environment.eop || !environment.frames)

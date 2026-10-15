@@ -299,6 +299,74 @@ class Snapshot final : public core::IEphemerisProvider {
         activate();
         return state_unlocked(10, 399, epoch, "LT+S").position_m;
     }
+    std::array<double, 3>
+    apparent_sun_from_spacecraft(core::Epoch epoch, const std::array<double, 3> &position,
+                                 const std::array<double, 3> &velocity) const override {
+        check_epoch(epoch);
+        for (std::size_t i = 0; i < 3; ++i)
+            if (!std::isfinite(position[i]) || !std::isfinite(velocity[i]))
+                throw std::invalid_argument("Apparent Sun observer state must be finite");
+        std::scoped_lock guard(engine().mutex);
+        activate();
+        const auto earth = state_unlocked(399, 0, epoch);
+        const double et = earth.tdb.seconds_past_j2000;
+        const double rate = tai_per_tdb_unlocked(et);
+        double observer[6]{};
+        for (std::size_t i = 0; i < 3; ++i) {
+            observer[i] = (earth.position_m[i] + position[i]) / 1000;
+            observer[i + 3] = (earth.velocity_mps[i] + velocity[i] * rate) / 1000;
+            if (!std::isfinite(observer[i]) || !std::isfinite(observer[i + 3]))
+                throw std::invalid_argument("Apparent Sun observer state overflows");
+        }
+        if (std::hypot(observer[3], observer[4], observer[5]) >= clight_c())
+            throw std::invalid_argument("Apparent Sun observer speed must be below light speed");
+        double sun[3]{}, ignored = 0;
+        spkgps_c(10, et, "J2000", 0, sun, &ignored);
+        check_spice();
+        const double light_time =
+            std::hypot(sun[0] - observer[0], sun[1] - observer[1], sun[2] - observer[2]) /
+            clight_c();
+        const double emission = et - light_time;
+        if (!std::isfinite(emission) ||
+            emission < tdb_unlocked(info_.first_epoch).seconds_past_j2000 || emission > et)
+            throw core::EphemerisCoverageError(
+                "Spacecraft apparent Sun emission epoch is outside the selected snapshot; "
+                "select earlier ephemeris coverage");
+        // Explicit single-iteration reception LT, as in spkapo(..., "LT+S").
+        // Check the emission epoch BEFORE querying so hidden SPICE reads cannot
+        // escape the snapshot policy window. Stellar aberration uses the full
+        // moving observer velocity, not a fixed geocentric offset.
+        spkgps_c(10, emission, "J2000", 0, sun, &ignored);
+        check_spice();
+        for (std::size_t i = 0; i < 3; ++i)
+            sun[i] -= observer[i];
+        double apparent[3]{};
+        stelab_c(sun, observer + 3, apparent);
+        check_spice();
+        std::array<double, 3> result{};
+        for (std::size_t i = 0; i < 3; ++i) {
+            result[i] = apparent[i] * 1000;
+            if (!std::isfinite(result[i]))
+                throw core::EphemerisQueryError("CSPICE returned a nonfinite apparent Sun");
+        }
+        return result;
+    }
+    void validate_spacecraft_apparent_sun_interval(core::Epoch first,
+                                                   core::Epoch last) const override {
+        check_epoch(first);
+        check_epoch(last);
+        if (first.tai_nanoseconds() > last.tai_nanoseconds())
+            throw core::EphemerisCoverageError("Invalid ephemeris interval");
+        std::scoped_lock guard(engine().mutex);
+        activate();
+        const double begin = tdb_unlocked(first).seconds_past_j2000;
+        const double end = tdb_unlocked(last).seconds_past_j2000;
+        validate_chains_unlocked(begin, end, {{399, 3}, {3, 0}});
+        // No assumed spacecraft range. All available past Sun data are certified;
+        // the actual emission epoch is checked against that range at each stage.
+        validate_chains_unlocked(tdb_unlocked(info_.first_epoch).seconds_past_j2000, end,
+                                 {{10, 0}});
+    }
     void validate_apparent_sun_interval(core::Epoch first, core::Epoch last) const override {
         // DE440 Earth/Sun distances stay below 1.02 AU: a conservative 600 s
         // reception margin certifies all light-time and observer-state queries.
@@ -335,6 +403,12 @@ class Snapshot final : public core::IEphemerisProvider {
             else
                 throw core::EphemerisDataError("Unsupported DE third-body target");
         }
+        validate_chains_unlocked(begin, end, chains);
+    }
+
+  private:
+    void validate_chains_unlocked(double begin, double end,
+                                  const std::map<std::int32_t, std::int32_t> &chains) const {
         std::map<std::int32_t, std::vector<std::pair<double, double>>> coverage;
         for (std::size_t k = 0; k < copies_->paths.size(); ++k) {
             if (info_.kernels[k].kind != "SPK")
@@ -395,8 +469,29 @@ class Snapshot final : public core::IEphemerisProvider {
                                                    "the complete integration interval");
         }
     }
+    // Derivative of NAIF TIME Required Reading equations (1)-(3), using the
+    // snapshot's own validated LSK constants: TAI = TDB - 32.184 - K sin(E).
+    double tai_per_tdb_unlocked(double et) const {
+        const auto constant = [](const char *name, SpiceInt size, double *values) {
+            SpiceInt count = 0;
+            SpiceBoolean found = SPICEFALSE;
+            gdpool_c(name, 0, size, &count, values, &found);
+            check_spice();
+            if (!found || count != size)
+                throw core::EphemerisDataError("Missing LSK time derivative constants");
+        };
+        double k = 0, eb = 0, m[2]{};
+        constant("DELTET/K", 1, &k);
+        constant("DELTET/EB", 1, &eb);
+        constant("DELTET/M", 2, m);
+        const double mean = m[0] + m[1] * et;
+        const double eccentric = mean + eb * std::sin(mean);
+        const double rate = 1 - k * std::cos(eccentric) * m[1] * (1 + eb * std::cos(mean));
+        if (!std::isfinite(rate) || rate <= 0)
+            throw core::EphemerisDataError("Invalid LSK TAI/TDB derivative");
+        return rate;
+    }
 
-  private:
     void check_epoch(core::Epoch epoch) const {
         if (epoch.tai_nanoseconds() < info_.first_epoch.tai_nanoseconds() ||
             epoch.tai_nanoseconds() > info_.last_epoch.tai_nanoseconds()) {

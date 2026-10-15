@@ -499,6 +499,9 @@ class EphemerisQueryError(RuntimeError): ...
 
 class EphemerisProvider:
     def apparent_sun_from_earth(self, epoch: Epoch) -> list[float]: ...
+    def apparent_sun_from_spacecraft(self, epoch: Epoch, position_earth_m: Sequence[float],
+                                    velocity_earth_tai_mps: Sequence[float]) -> list[float]: ...
+    def validate_spacecraft_apparent_sun_interval(self, first: Epoch, last: Epoch) -> None: ...
     def validate_apparent_sun_interval(self, first: Epoch, last: Epoch) -> None: ...
     def to_tdb(self, epoch: Epoch) -> TdbTime: ...
     def from_tdb(self, time: TdbTime) -> Epoch: ...
@@ -947,6 +950,11 @@ def evaluate_drag(position_itrf_m: Sequence[float], velocity_itrf_mps: Sequence[
                   weather: SpaceWeatherSample | None = None,
                   low_weather: SpaceWeatherSample | None = None) -> DragEvaluation: ...
 
+class SrpSunPositionMethod:
+    TRUE: SrpSunPositionMethod
+    APPARENT_TO_TRUE_CB: SrpSunPositionMethod
+    APPARENT: SrpSunPositionMethod
+
 class SrpShadowModel:
     NONE: SrpShadowModel
     CYLINDRICAL: SrpShadowModel
@@ -958,6 +966,7 @@ class SrpOptions:
     cr: float
     area_mass_ratio_m2_per_kg: float
     shadow_model: SrpShadowModel
+    sun_position_method: SrpSunPositionMethod
     earth_shadow: bool
     moon_shadow: bool
     atmospheric_altitude_m: float

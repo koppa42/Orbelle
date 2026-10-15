@@ -332,3 +332,145 @@ TEST(Spice, RealSnapshotSunMoonAndIndependentTdbModel) {
     }
 }
 #endif
+
+namespace {
+constexpr std::array<double, 3> sun_origin{-8e7, 1e7, 2e7}, sun_velocity{.01, -.02, .03};
+constexpr std::array<double, 3> earth_origin{2e7, 4e7, -3e7}, earth_velocity{20, -15, 3};
+void linear_sun_kernel(Fixture &fixture, bool sun_gap = false, double earth_first = -4000) {
+    const auto path = fixture.root / "a.bsp";
+    std::filesystem::remove(path);
+    SpiceInt handle = 0;
+    spkopn_c(path.string().c_str(), "Linear Sun and Earth", 0, &handle);
+    spice_ok();
+    const auto segment = [&](int body, int centre, double first, double last,
+                             const std::array<double, 3> &position,
+                             const std::array<double, 3> &velocity) {
+        double coefficients[6]{};
+        for (std::size_t i = 0; i < 3; ++i) {
+            coefficients[2 * i] = position[i] + velocity[i] * (first + last) / 2;
+            coefficients[2 * i + 1] = velocity[i] * (last - first) / 2;
+        }
+        spkw02_c(handle, body, centre, "J2000", first, last, "Linear reference", last - first, 1, 1,
+                 coefficients, first);
+        spice_ok();
+    };
+    segment(3, 0, earth_first, 4000, earth_origin, earth_velocity);
+    segment(399, 3, earth_first, 4000, {}, {});
+    if (sun_gap) {
+        segment(10, 0, -4000, -700, sun_origin, sun_velocity);
+        segment(10, 0, -100, 4000, sun_origin, sun_velocity);
+    } else
+        segment(10, 0, -4000, 4000, sun_origin, sun_velocity);
+    spkcls_c(handle);
+    spice_ok();
+    fixture.document["kernels"] =
+        Json::array({fixture.kernel("naif0012.tls", "LSK"), fixture.kernel("a.bsp", "SPK")});
+    fixture.save();
+}
+} // namespace
+TEST(Spice, MovingSunLightTimeAndAberration) {
+    for (bool custom_clock : {false, true}) {
+        SCOPED_TRACE(custom_clock);
+        Fixture fixture;
+        if (custom_clock) {
+            // Amplify the rate difference to detect omission or reversal of the
+            // TAI/TDB velocity derivative. This is an artificial clock model.
+            std::ofstream(fixture.root / "naif0012.tls", std::ios::app)
+                << "\n\\begindata\nDELTET/K = 5\nDELTET/EB = 0.1\n"
+                   "DELTET/M = (0.4 0.002)\n\\begintext\n";
+        }
+        linear_sun_kernel(fixture);
+        const auto provider = fixture.load();
+        provider->validate_spacecraft_apparent_sun_interval(core::Epoch{0},
+                                                            core::Epoch{100000000000});
+        for (double sign : {-1., 0., 1.}) {
+            const std::array<double, 3> position{7e6, 2e6, -1e6};
+            const std::array<double, 3> velocity{sign * 1000, sign * 7500, sign * -2000};
+            const auto actual =
+                provider->apparent_sun_from_spacecraft(core::Epoch{0}, position, velocity);
+            const long double et = provider->to_tdb(core::Epoch{0}).seconds_past_j2000;
+            const long double k = custom_clock ? 5 : 1.657e-3;
+            const long double eb = custom_clock ? .1 : 1.671e-2;
+            const long double m0 = custom_clock ? .4 : 6.239996;
+            const long double m1 = custom_clock ? .002 : 1.99096871e-7;
+            const auto mean = m0 + m1 * et;
+            const auto rate =
+                1 - k * std::cos(mean + eb * std::sin(mean)) * m1 * (1 + eb * std::cos(mean));
+            constexpr long double light_speed = 299792.458L; // km / TDB second.
+            std::array<long double, 3> observer{}, beta{}, ray{};
+            long double distance2 = 0;
+            for (std::size_t i = 0; i < 3; ++i) {
+                observer[i] = earth_origin[i] + earth_velocity[i] * et + position[i] / 1000;
+                beta[i] = (earth_velocity[i] + velocity[i] * rate / 1000) / light_speed;
+                ray[i] = sun_origin[i] + sun_velocity[i] * et - observer[i];
+                distance2 += ray[i] * ray[i];
+            }
+            // One Newtonian light-time iteration, with an analytic moving Sun.
+            const auto emission = et - std::sqrt(distance2) / light_speed;
+            distance2 = 0;
+            for (std::size_t i = 0; i < 3; ++i) {
+                ray[i] = sun_origin[i] + sun_velocity[i] * emission - observer[i];
+                distance2 += ray[i] * ray[i];
+            }
+            const auto distance = std::sqrt(distance2);
+            long double parallel = 0, transverse2 = 0;
+            for (std::size_t i = 0; i < 3; ++i) {
+                ray[i] /= distance;
+                parallel += beta[i] * ray[i];
+            }
+            for (std::size_t i = 0; i < 3; ++i) {
+                beta[i] -= parallel * ray[i];
+                transverse2 += beta[i] * beta[i];
+            }
+            for (std::size_t i = 0; i < 3; ++i) {
+                const auto expected =
+                    distance * (ray[i] * std::sqrt(1 - transverse2) + beta[i]) * 1000;
+                // Millimetre bound is ~10^-14 relative: double SPK/rotation roundoff.
+                EXPECT_NEAR(actual[i], static_cast<double>(expected), 1e-3);
+            }
+        }
+        const auto centre = provider->apparent_sun_from_spacecraft(core::Epoch{0}, {}, {});
+        const auto earth = provider->apparent_sun_from_earth(core::Epoch{0});
+        for (std::size_t i = 0; i < 3; ++i)
+            EXPECT_NEAR(centre[i], earth[i], 1e-3);
+        EXPECT_THROW((void)provider->apparent_sun_from_spacecraft(core::Epoch{0}, {2e15, 0, 0}, {}),
+                     core::EphemerisCoverageError);
+        EXPECT_THROW((void)provider->apparent_sun_from_spacecraft(
+                         core::Epoch{0}, {std::numeric_limits<double>::quiet_NaN(), 0, 0}, {}),
+                     std::invalid_argument);
+        EXPECT_THROW((void)provider->apparent_sun_from_spacecraft(core::Epoch{0}, {}, {4e8, 0, 0}),
+                     std::invalid_argument);
+        EXPECT_EQ(provider->apparent_sun_from_spacecraft(core::Epoch{0}, {}, {}), centre);
+    }
+}
+TEST(Spice, MovingSunCertifiesHistoryAndGaps) {
+    Fixture fixture;
+    linear_sun_kernel(fixture, true);
+    {
+        const auto provider = fixture.load();
+        // Receiving endpoints are covered, but retarded Sun history has a hole.
+        provider->validate_earth_gravity_interval(core::Epoch{0}, core::Epoch{100000000000}, true,
+                                                  false);
+        EXPECT_THROW(provider->validate_spacecraft_apparent_sun_interval(core::Epoch{0},
+                                                                         core::Epoch{100000000000}),
+                     core::EphemerisCoverageError);
+        EXPECT_THROW((void)provider->apparent_sun_from_spacecraft(core::Epoch{0}, {}, {}),
+                     core::EphemerisCoverageError);
+    }
+    linear_sun_kernel(fixture, false, -100);
+    const auto provider = fixture.load();
+    // Earth is needed at reception only; requiring ancient Earth data would be
+    // spurious when the full past Sun chain is available.
+    EXPECT_NO_THROW(provider->validate_spacecraft_apparent_sun_interval(core::Epoch{0},
+                                                                        core::Epoch{100000000000}));
+    EXPECT_NO_THROW((void)provider->apparent_sun_from_spacecraft(core::Epoch{0}, {}, {}));
+    EXPECT_THROW(provider->validate_spacecraft_apparent_sun_interval(core::Epoch{-1000000000000},
+                                                                     core::Epoch{0}),
+                 core::EphemerisCoverageError);
+    EXPECT_THROW(provider->validate_spacecraft_apparent_sun_interval(core::Epoch{100000000000},
+                                                                     core::Epoch{0}),
+                 core::EphemerisCoverageError);
+    EXPECT_THROW(provider->validate_spacecraft_apparent_sun_interval(core::Epoch{-3600000000001},
+                                                                     core::Epoch{0}),
+                 core::EphemerisCoverageError);
+}

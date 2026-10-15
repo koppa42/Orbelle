@@ -94,6 +94,10 @@ void bind_project(py::module_ &module) {
     py::enum_<core::HpopIntegrator>(module, "HpopIntegrator")
         .value("RKF78", core::HpopIntegrator::rkf78)
         .value("RK4", core::HpopIntegrator::rk4);
+    py::enum_<core::SrpSunPositionMethod>(module, "SrpSunPositionMethod")
+        .value("TRUE", core::SrpSunPositionMethod::geometric)
+        .value("APPARENT_TO_TRUE_CB", core::SrpSunPositionMethod::apparent_to_true_cb)
+        .value("APPARENT", core::SrpSunPositionMethod::apparent);
     py::enum_<core::SrpShadowModel>(module, "SrpShadowModel")
         .value("NONE", core::SrpShadowModel::none)
         .value("CYLINDRICAL", core::SrpShadowModel::cylindrical)
@@ -179,6 +183,7 @@ void bind_project(py::module_ &module) {
         .def_readwrite("cr", &core::SrpOptions::cr)
         .def_readwrite("area_mass_ratio_m2_per_kg", &core::SrpOptions::area_mass_ratio_m2_per_kg)
         .def_readwrite("shadow_model", &core::SrpOptions::shadow_model)
+        .def_readwrite("sun_position_method", &core::SrpOptions::sun_position_method)
         .def_readwrite("earth_shadow", &core::SrpOptions::earth_shadow)
         .def_readwrite("moon_shadow", &core::SrpOptions::moon_shadow)
         .def_readwrite("atmospheric_altitude_m", &core::SrpOptions::atmospheric_altitude_m)

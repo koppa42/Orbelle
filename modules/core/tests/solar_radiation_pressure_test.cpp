@@ -152,6 +152,7 @@ TEST(SolarRadiationPressure, HpopRequiresSunWithoutThirdBodyGravityAndOnlyRequir
     HpopOptions options;
     options.gravity_degree = options.gravity_order = 0;
     options.srp.enabled = true;
+    options.srp.sun_position_method = SrpSunPositionMethod::geometric;
     options.srp.shadow_model = SrpShadowModel::none;
     options.srp.area_mass_ratio_m2_per_kg = 1000;
     options.max_step_seconds = 1;
@@ -177,6 +178,7 @@ TEST(SolarRadiationPressure, HpopRequiresSunWithoutThirdBodyGravityAndOnlyRequir
     EXPECT_GT(bodies->sun_calls, 13U);
     EXPECT_EQ(bodies->moon_calls, 0U);
     options.srp.enabled = true;
+    options.srp.sun_position_method = SrpSunPositionMethod::geometric;
     options.srp.shadow_model = SrpShadowModel::dual_cone;
     EXPECT_THROW((void)make_hpop(initial, options, environment), EphemerisCoverageError);
     EXPECT_THROW((void)provider->state_at(Epoch{172801000000000}), EphemerisCoverageError);
@@ -188,6 +190,7 @@ TEST(SolarRadiationPressure, CancellationDuringSrpIntegrationRetainsReusableChec
     HpopOptions options;
     options.gravity_degree = options.gravity_order = 0;
     options.srp.enabled = true;
+    options.srp.sun_position_method = SrpSunPositionMethod::geometric;
     const HpopEnvironment environment{nullptr, nullptr, nullptr, bodies};
     const auto provider = make_hpop(initial, options, environment);
     const auto target = Epoch{6000000000000};
@@ -242,6 +245,7 @@ TEST(SolarRadiationPressure, MovingSunAndEarthEclipsesMatchIndependentOrekitTraj
         options.min_step_seconds = 1e-6;
         options.max_step_seconds = 2.5;
         options.srp.enabled = true;
+        options.srp.sun_position_method = SrpSunPositionMethod::geometric;
         options.srp.moon_shadow = false;
         options.srp.sun_radius_m = sun_radius;
         options.srp.atmospheric_altitude_m = mode == 1 ? 23000 : 0;
@@ -294,4 +298,94 @@ TEST(SolarRadiationPressure, ClippedEarthMoonDiskUnionMatchesIndependentNumerica
     }
     EXPECT_EQ(count, 182U);
     std::cout << "SRP clipped disk-union reference: maximum fraction error " << maximum << '\n';
+}
+
+namespace {
+class ApparentSolarSystem final : public IThirdBodyEphemeris {
+    ThirdBodyDataInfo info_{"apparent-srp",        std::string(64, 'b'), "test-v1",
+                            Epoch{-1000000000000}, Epoch{1000000000000}, 1.3271244004127942e20,
+                            4.9028001184575496e12};
+
+  public:
+    mutable unsigned geometric = 0, earth = 0, spacecraft = 0;
+    mutable unsigned earth_checks = 0, spacecraft_checks = 0;
+    mutable std::array<double, 3> last_position{}, last_velocity{};
+    const ThirdBodyDataInfo &data_info() const noexcept override { return info_; }
+    void validate_interval(Epoch, Epoch, std::span<const ThirdBody>) const override {}
+    void validate_apparent_sun_interval(Epoch, Epoch) const override { ++earth_checks; }
+    void validate_spacecraft_apparent_sun_interval(Epoch, Epoch) const override {
+        ++spacecraft_checks;
+    }
+    std::array<double, 3> position(ThirdBody, Epoch) const override {
+        ++geometric;
+        return {au, 0, 0};
+    }
+    std::array<double, 3> apparent_sun_from_earth(Epoch) const override {
+        ++earth;
+        return {au, 1e8, 0};
+    }
+    std::array<double, 3>
+    apparent_sun_from_spacecraft(Epoch, const std::array<double, 3> &r,
+                                 const std::array<double, 3> &v) const override {
+        ++spacecraft;
+        last_position = r;
+        last_velocity = v;
+        return {au - r[0], 2e8 - r[1] + 1000 * v[1], -r[2] + 1000 * v[2]};
+    }
+};
+} // namespace
+TEST(SolarRadiationPressure, SunMethodsUseStageObserversAndKeepGravityGeometric) {
+    const CartesianState initial{
+        Epoch{0}, OriginId::earth, FrameId::gcrf, {7e6, 0, 0}, {0, 6200, 5300}};
+    HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    options.srp.enabled = true;
+    options.srp.shadow_model = SrpShadowModel::none;
+    options.srp.area_mass_ratio_m2_per_kg = 1000;
+    std::array<std::array<double, 3>, 3> results;
+    int index = 0;
+    for (auto method : {SrpSunPositionMethod::geometric, SrpSunPositionMethod::apparent_to_true_cb,
+                        SrpSunPositionMethod::apparent}) {
+        SCOPED_TRACE(index);
+        options.srp.sun_position_method = method;
+        const auto bodies = std::make_shared<ApparentSolarSystem>();
+        const HpopEnvironment env{nullptr, nullptr, nullptr, bodies};
+        const auto provider = make_hpop(initial, options, env);
+        results[index++] = provider->state_at(Epoch{100000000000}).position_m;
+        (void)provider->state_at(Epoch{-100000000000});
+        EXPECT_EQ(bodies->geometric > 0, method == SrpSunPositionMethod::geometric);
+        EXPECT_EQ(bodies->earth > 0, method == SrpSunPositionMethod::apparent_to_true_cb);
+        EXPECT_EQ(bodies->spacecraft > 0, method == SrpSunPositionMethod::apparent);
+        EXPECT_EQ(bodies->earth_checks > 0, method == SrpSunPositionMethod::apparent_to_true_cb);
+        EXPECT_EQ(bodies->spacecraft_checks > 0, method == SrpSunPositionMethod::apparent);
+        if (method == SrpSunPositionMethod::apparent) {
+            EXPECT_NE(bodies->last_position, initial.position_m);
+            EXPECT_NE(bodies->last_velocity, initial.velocity_mps);
+        }
+    }
+    EXPECT_NE(results[0], results[1]);
+    EXPECT_NE(results[1], results[2]);
+    options.third_body(ThirdBody::sun).enabled = true;
+    const auto bodies = std::make_shared<ApparentSolarSystem>();
+    const HpopEnvironment env{nullptr, nullptr, nullptr, bodies};
+    (void)make_hpop(initial, options, env)->state_at(Epoch{100000000000});
+    EXPECT_GT(bodies->spacecraft, 1U);
+    EXPECT_EQ(bodies->geometric, bodies->spacecraft); // One separate gravity query at each stage.
+}
+TEST(SolarRadiationPressure, ApparentModesRequireCapableProvidersAndValidateEnums) {
+    const CartesianState initial{
+        Epoch{0}, OriginId::earth, FrameId::gcrf, {7e6, 0, 0}, {0, 6200, 5300}};
+    HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    options.srp.enabled = true;
+    const HpopEnvironment env{nullptr, nullptr, nullptr, std::make_shared<MovingSolarSystem>()};
+    EXPECT_EQ(options.srp.sun_position_method, SrpSunPositionMethod::apparent_to_true_cb);
+    EXPECT_THROW((void)make_hpop(initial, options, env), std::invalid_argument);
+    options.srp.sun_position_method = SrpSunPositionMethod::apparent;
+    EXPECT_THROW((void)make_hpop(initial, options, env), std::invalid_argument);
+    options.srp.sun_position_method = SrpSunPositionMethod::geometric;
+    EXPECT_NO_THROW((void)make_hpop(initial, options, env));
+    options.srp.enabled = false;
+    options.srp.sun_position_method = static_cast<SrpSunPositionMethod>(99);
+    EXPECT_THROW(validate_srp_options(options.srp), std::invalid_argument);
 }
