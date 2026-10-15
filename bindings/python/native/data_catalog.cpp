@@ -30,6 +30,7 @@ void bind_data_catalog(py::module_ &module) {
         .def_readonly("sha256", &core::GravityInfo::sha256)
         .def_readonly("source_url", &core::GravityInfo::source_url)
         .def_readonly("tide_system", &core::GravityInfo::tide_system)
+        .def_readonly("solid_tide_k20", &core::GravityInfo::solid_tide_k20)
         .def_readonly("mu", &core::GravityInfo::mu)
         .def_readonly("radius_m", &core::GravityInfo::radius_m)
         .def_readonly("degree", &core::GravityInfo::degree)

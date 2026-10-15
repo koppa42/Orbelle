@@ -30,6 +30,16 @@ int main(int argc, char **argv) try {
         } catch (const std::invalid_argument &) {
         }
     }
+    {
+        using namespace orbitforge::core;
+        auto info = builtin_egm96()->info();
+        info.solid_tide_k20 = .3;
+        const GravityModel custom(info, {});
+        const auto delta = solid_tide_corrections(custom.info(), {SolidTideMode::permanent}, 2, 0);
+        if (delta.size() != 1 || delta[0].c != iers2003_permanent_tide_c20(.3) ||
+            std::abs(delta[0].c - (-4.17423864e-9)) > 1e-24)
+            return 38;
+    }
     orbitforge::core::HpopOptions mass_options;
     mass_options.satellite_mass_kg = 1250;
     mass_options.srp.area_mass_ratio_m2_per_kg = .03;

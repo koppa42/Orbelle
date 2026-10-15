@@ -501,7 +501,8 @@ CatalogGravity DataCatalog::install_gravity(const std::filesystem::path &source,
     const auto acquired = std::chrono::duration_cast<std::chrono::seconds>(
                               std::chrono::system_clock::now().time_since_epoch())
                               .count();
-    const Json record{{"schema", 1},
+    const Json record{{"schema", 2},
+                      {"solid_tide_k20", info.solid_tide_k20},
                       {"model", info.model},
                       {"sha256", info.sha256},
                       {"source_url", url},
@@ -534,10 +535,12 @@ std::vector<CatalogGravity> DataCatalog::gravity_models() const {
         const auto key = reinterpret_cast<const char *>(sqlite3_column_text(rows.value, 0));
         const auto r =
             Json::parse(reinterpret_cast<const char *>(sqlite3_column_text(rows.value, 1)));
-        check(r.at("schema") == 1 && hash_valid(r.at("sha256")), "Invalid gravity receipt");
+        check(r.at("schema") == 2 && hash_valid(r.at("sha256")),
+              "Unsupported gravity receipt; reimport or download gravity data");
         core::GravityInfo info{r.at("model"),       r.at("sha256"), r.at("source_url"),
                                r.at("tide_system"), r.at("mu"),     r.at("radius_m"),
-                               r.at("degree"),      r.at("order")};
+                               r.at("degree"),      r.at("order"),  r.at("solid_tide_k20")};
+        check(std::isfinite(info.solid_tide_k20), "Invalid gravity Love number receipt");
         result.push_back(
             {std::string(key).substr(8), info, impl_->root / "gravity" / (info.sha256 + ".dat"),
              static_cast<DataAcquisition>(r.at("acquisition").get<int>()), r.at("acquired_at")});

@@ -20,7 +20,9 @@ void validate_solid_tide_options(const SolidTideOptions &options);
 // Canonical calculation settings; inactive drafts remain in the saved options.
 [[nodiscard]] SolidTideOptions effective_solid_tide_options(SolidTideOptions options,
                                                             int gravity_degree);
-// Fully normalized IERS 2003, anelastic Earth, k20 = 0.30190 (post-2006 STK default).
+// Fully normalized IERS 2003, anelastic Earth; k20 comes from field.solid_tide_k20.
+// The same real k20 controls the degree-2 response and permanent deformation.
+// Other Love numbers and frequency/pole terms retain the IERS 2003 values.
 // Full includes the instantaneous Sun/Moon deformation (degrees 2/3, induced degree 4).
 // Include Time Dependent Terms adds IERS 2003 tables 6.3a/b/c and the printed
 // 2003 pole-tide signs (not the corrected 2010 convention). No amplitude filter.
@@ -38,5 +40,6 @@ void validate_solid_tide_options(const SolidTideOptions &options);
     const GravityInfo &field, const SolidTideOptions &options, int gravity_degree,
     int gravity_order, std::span<const TideRaisingBody> bodies = {},
     const EarthOrientationSample *eop = nullptr, const ITimeProvider *time = nullptr);
-[[nodiscard]] double iers2003_permanent_tide_c20() noexcept;
+// Dimensionless normalized permanent deformation; rejects a nonfinite real k20.
+[[nodiscard]] double iers2003_permanent_tide_c20(double k20 = 0.30190);
 } // namespace orbitforge::core

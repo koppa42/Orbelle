@@ -7,8 +7,7 @@
 
 namespace orbitforge::core {
 namespace {
-constexpr double k20 = 0.30190;
-constexpr std::array k2_real{k20, 0.29830, 0.30102};
+constexpr std::array k2_real{0.30190, 0.29830, 0.30102};
 constexpr std::array k2_imag{0.0, -0.00144, -0.00130};
 constexpr std::array k2_plus{-0.00089, -0.00080, -0.00057};
 constexpr std::array k3_real{0.093, 0.093, 0.093, 0.094};
@@ -96,7 +95,11 @@ std::array<std::complex<double>, 3> time_dependent_tides(const EarthOrientationS
 }
 
 } // namespace
-double iers2003_permanent_tide_c20() noexcept { return 4.4228e-8 * -0.31460 * k20; }
+double iers2003_permanent_tide_c20(double k20) {
+    if (!std::isfinite(k20))
+        throw std::invalid_argument("Solid tide k20 must be finite");
+    return 4.4228e-8 * -0.31460 * k20;
+}
 void validate_solid_tide_options(const SolidTideOptions &options) {
     if (options.mode != SolidTideMode::none && options.mode != SolidTideMode::permanent &&
         options.mode != SolidTideMode::full)
@@ -119,7 +122,7 @@ solid_tide_corrections(const GravityInfo &field, const SolidTideOptions &options
                        const EarthOrientationSample *eop, const ITimeProvider *time) {
     validate_solid_tide_options(options);
     if (!std::isfinite(field.mu) || field.mu <= 0 || !std::isfinite(field.radius_m) ||
-        field.radius_m <= 0 ||
+        field.radius_m <= 0 || !std::isfinite(field.solid_tide_k20) ||
         (field.tide_system != "tide_free" && field.tide_system != "zero_tide"))
         throw std::invalid_argument("Solid tides require a tide-free or zero-tide Earth field");
     if (degree < 0 || degree == 1 || degree > std::min(field.degree, gravity_max_degree) ||
@@ -129,7 +132,7 @@ solid_tide_corrections(const GravityInfo &field, const SolidTideOptions &options
         return {};
     std::array<std::array<std::complex<double>, 4>, 5> delta{};
     if (options.mode == SolidTideMode::permanent)
-        delta[2][0] = iers2003_permanent_tide_c20();
+        delta[2][0] = iers2003_permanent_tide_c20(field.solid_tide_k20);
     else if (options.mode == SolidTideMode::full) {
         if (bodies.size() != 2)
             throw std::invalid_argument("Full solid tides require geometric Sun and Moon states");
@@ -154,7 +157,8 @@ solid_tide_corrections(const GravityInfo &field, const SolidTideOptions &options
             const double factor3 = factor2 * ratio * (5.0 / 7);
             for (std::size_t m = 0; m < p2.size(); ++m) {
                 // C + i S = conjugate(k) * Pnm exp(i m lambda) * scale.
-                delta[2][m] += std::complex<double>{k2_real[m], -k2_imag[m]} * factor2 * p2[m];
+                const double real = m == 0 ? field.solid_tide_k20 : k2_real[m];
+                delta[2][m] += std::complex<double>{real, -k2_imag[m]} * factor2 * p2[m];
                 delta[4][m] += k2_plus[m] * factor2 * p2[m];
             }
             for (std::size_t m = 0; m < p3.size(); ++m)
@@ -169,7 +173,7 @@ solid_tide_corrections(const GravityInfo &field, const SolidTideOptions &options
             delta[2][m] += secondary[m];
     }
     if (field.tide_system == "zero_tide" && degree >= 2)
-        delta[2][0] -= iers2003_permanent_tide_c20();
+        delta[2][0] -= iers2003_permanent_tide_c20(field.solid_tide_k20);
     std::vector<GravityCoefficient> result;
     result.reserve(10);
     for (int n = 2; n <= 4; ++n)

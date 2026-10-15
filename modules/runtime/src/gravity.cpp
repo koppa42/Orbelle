@@ -30,6 +30,12 @@ template <class T> T number(std::string_view s) {
             "Invalid gravity numeric field");
     return value;
 }
+double real(std::string_view text) {
+    std::string value(text);
+    std::replace(value.begin(), value.end(), 'D', 'E');
+    std::replace(value.begin(), value.end(), 'd', 'e');
+    return number<double>(value);
+}
 std::vector<std::string_view> fields(std::string_view line) {
     std::vector<std::string_view> result;
     while (!line.empty()) {
@@ -75,6 +81,27 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
     std::vector<core::GravityCoefficient> coefficients;
     std::vector<bool> seen;
     bool grv = false, started = false, ended = false, normalized = true;
+    std::string tide_block;
+    bool tide_block_seen = false, love_seen = false;
+    bool header_tide_seen = false, block_tide_seen = false;
+    const auto read_permanent = [&](const std::vector<std::string_view> &row, bool in_block) {
+        bool &seen_tide = in_block ? block_tide_seen : header_tide_seen;
+        require(row.size() == 2 && !seen_tide, "Invalid or duplicate permanent tide designation");
+        const auto value = lower(row[1]);
+        require(value == "yes" || value == "no", "Invalid permanent tide designation");
+        const auto [it, inserted] = header.emplace("includespermtide", value);
+        require(inserted || lower(it->second) == value, "Conflicting permanent tide designations");
+        seen_tide = true;
+    };
+    const auto read_love = [&](const std::vector<std::string_view> &row, std::size_t offset) {
+        require(!love_seen && row.size() == offset + 4, "Invalid or duplicate Love number");
+        require(number<int>(row[offset]) == 2 && number<int>(row[offset + 1]) == 0,
+                "STK Earth tides support only a degree-2 order-0 Love number override");
+        info.solid_tide_k20 = real(row[offset + 2]);
+        // STK explicitly uses only the real part, but the imaginary field must be valid.
+        (void)real(row[offset + 3]);
+        love_seen = true;
+    };
     std::size_t line_number = 0, bytes = 0, count = 0;
     int maximum_order = 0;
     const auto begin = [&] {
@@ -96,6 +123,8 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
                     info.radius_m < 6.5e6,
                 "Gravity file does not describe an Earth field in SI units");
         if (grv) {
+            require(!header.contains("centralbody") || lower(header.at("centralbody")) == "earth",
+                    "Gravity loader supports only Earth central body");
             const auto norm = lower(get("norm", "normalized"));
             require(norm == "yes" || norm == "no", "Invalid gravity normalization");
             normalized = norm == "yes";
@@ -134,7 +163,25 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
             continue;
         const auto key = lower(raw.front());
         if (!started) {
+            if (!tide_block.empty()) {
+                if (key == "end") {
+                    require(raw.size() == 2 && lower(raw[1]) == tide_block,
+                            "Mismatched STK tide block terminator");
+                    require(tide_block != "lovenumbers" || love_seen, "Empty LoveNumbers block");
+                    tide_block.clear();
+                } else if (tide_block == "lovenumbers") {
+                    read_love(raw, 0);
+                } else if (key == "lovenumbers") {
+                    read_love(raw, 1);
+                } else if (key == "includespermtide") {
+                    read_permanent(raw, true);
+                } else {
+                    throw std::runtime_error("Unsupported record in EarthIERSTideModel");
+                }
+                continue;
+            }
             if (key.starts_with("stk.v.")) {
+                require(!grv && raw.size() == 1, "Invalid or duplicate STK gravity version");
                 grv = true;
                 continue;
             }
@@ -143,9 +190,18 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
                 begin();
                 continue;
             }
-            if (grv && key == "begin")
-                throw std::runtime_error(
-                    "STK tide/process-noise blocks are not supported by the static gravity loader");
+            if (grv && key == "begin") {
+                require(raw.size() == 2 && !tide_block_seen, "Invalid or duplicate STK tide block");
+                tide_block = lower(raw[1]);
+                require(tide_block == "earthierstidemodel" || tide_block == "lovenumbers",
+                        "Unsupported STK tide/process-noise block");
+                tide_block_seen = true;
+                continue;
+            }
+            if (grv && key == "includespermtide") {
+                read_permanent(raw, false);
+                continue;
+            }
             const bool known = grv || key == "modelname" || key == "earth_gravity_constant" ||
                                key == "radius" || key == "max_degree" || key == "norm" ||
                                key == "tide_system" || key == "product_type" || key == "errors" ||
@@ -156,7 +212,7 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
                 if (grv)
                     require(key == "model" || key == "gm" || key == "refdistance" ||
                                 key == "degree" || key == "order" || key == "normalized" ||
-                                key == "includespermtide",
+                                key == "centralbody",
                             "Unsupported STK gravity header field");
                 header.emplace(key, raw[1]);
             }
@@ -179,12 +235,6 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
         require(!seen[i], "Duplicate gravity coefficient");
         seen[i] = true;
         maximum_order = std::max(maximum_order, m);
-        const auto real = [](std::string_view s) {
-            std::string value(s);
-            std::replace(value.begin(), value.end(), 'D', 'E');
-            std::replace(value.begin(), value.end(), 'd', 'e');
-            return number<double>(value);
-        };
         double c = real(raw[offset + 2]), s = real(raw[offset + 3]);
         for (std::size_t j = offset + 4; j < raw.size(); ++j)
             require(real(raw[j]) >= 0, "Invalid gravity uncertainty");
@@ -233,7 +283,7 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
 application::DataReference gravity_reference(const std::string &selection,
                                              const core::GravityInfo &info) {
     // Raw bytes carry all physical metadata; the reader/model version covers interpretation.
-    constexpr auto version = "static-normalized-gravity-2190-v2";
+    constexpr auto version = "static-normalized-gravity-2190-k20-v3";
     return {"gravity/" + selection, info.model, info.sha256, version,
             picosha2::hash256_hex_string(std::string(version))};
 }

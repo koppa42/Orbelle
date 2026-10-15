@@ -66,6 +66,7 @@ GravityModel::GravityModel(GravityInfo info, const std::vector<GravityCoefficien
     if (!std::isfinite(info_.mu) || info_.mu <= 0 || !std::isfinite(info_.radius_m) ||
         info_.radius_m <= 0 || info_.degree < 2 || info_.degree > gravity_max_degree ||
         info_.order < 0 || info_.order > info_.degree || info_.model.empty() ||
+        !std::isfinite(info_.solid_tide_k20) ||
         (info_.tide_system != "tide_free" && info_.tide_system != "zero_tide" &&
          info_.tide_system != "mean_tide"))
         throw std::invalid_argument("Invalid static Earth gravity metadata");

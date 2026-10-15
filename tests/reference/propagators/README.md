@@ -91,3 +91,15 @@ It calls Orekit 13.1.2 `DragForce` / `IsotropicDrag`, `SolarRadiationPressure` /
 OrbitForge. The synthetic UTC/rotation/Sun are shared with the existing drag
 reference; full conventions and bounds are in `docs/validation/hpop_protocol.md`.
 Canonical LF SHA-256: `ff1e9b22217a87263181b4fab347a29cbdf21d6ab221395bd72145b3d4b04e3d`.
+
+`solid_tides_love.txt` adds custom real k20 values 0, 0.3, 0.30190 and 0.4 to
+unmodified Orekit 13.1.2 `LoveNumbers` / `SolidTidesField`. It has 48 coefficient,
+96 acceleration and 16 forward/backward one-day trajectory rows, covering both
+tide systems, independent degree/order truncation, near-polar positions and
+frequency/pole terms on/off. The permanent deformation uses the same custom k20;
+all other Love numbers and frequency/pole functions stay at IERS_2003 values.
+Compile `OrbitForgeLoveNumberReference.java` with the two tide generators above,
+using the pinned dependency JARs; run
+`org.orekit.forces.gravity.OrbitForgeLoveNumberReference` and save UTF-8 LF output.
+No OrbitForge implementation is called. Canonical LF SHA-256:
+`6f290d7b461a3d9881e3d0cd0cddae912871f305c901b8c10e6320044577475e`.

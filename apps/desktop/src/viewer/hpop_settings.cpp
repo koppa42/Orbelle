@@ -306,6 +306,12 @@ bool edit_hpop_settings(
         QStringLiteral("Full：日月引起的 2、3 阶形变，以及诱导 4 阶项；可另启用频率修正与极潮。"),
         Qt::ToolTipRole);
     solid->addRow(QStringLiteral("模型"), solid_mode);
+    auto *solid_k20 = new QLabel;
+    solid_k20->setObjectName("hpopSolidTideK20");
+    solid_k20->setWordWrap(true);
+    solid_k20->setToolTip(
+        QStringLiteral("读取所选重力文件中的实部 k20；未指定时采用 IERS 2003 默认值 0.30190。"));
+    solid->addRow(QStringLiteral("Love 数 k20"), solid_k20);
     auto *solid_truncate = new QCheckBox(QStringLiteral("截断至重力场阶次"));
     solid_truncate->setObjectName("hpopSolidTideTruncate");
     solid_truncate->setChecked(options.solid_tides.truncate_to_gravity);
@@ -1147,6 +1153,10 @@ bool edit_hpop_settings(
     const auto refresh_gravity_status = [&] {
         const auto product = selected_product();
         const auto found = selected_model();
+        solid_k20->setText(
+            found != installed_models.end() ? QString::number(found->info.solid_tide_k20, 'g', 15)
+            : model->currentData().toString().isEmpty() ? QStringLiteral("0.30190")
+                                                        : QStringLiteral("待读取重力文件"));
         const bool ready =
             model->currentData().toString().isEmpty() || found != installed_models.end();
         const bool running =

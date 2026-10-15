@@ -13,6 +13,9 @@ struct GravityInfo {
     std::string model, sha256, source_url, tide_system;
     double mu = 0, radius_m = 0;
     int degree = 0, order = 0;
+    // Dimensionless real Earth k20, finite; STK overrides only this Love number.
+    // IERS 2003 default after the March 2006 update.
+    double solid_tide_k20 = 0.30190;
 };
 struct GravityCoefficient {
     int degree = 0, order = 0;

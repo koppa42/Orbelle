@@ -443,3 +443,158 @@ TEST(SolidTides, TimeDependentInputsAndInactiveDraftsAreExplicit) {
     EXPECT_EQ(effective_solid_tide_options({SolidTideMode::full, true, true}, 0),
               SolidTideOptions{});
 }
+
+TEST(SolidTides, CustomLoveNumbersMatchIndependentOrekitCoefficientsForBothTideSystems) {
+    std::ifstream file(ORBITFORGE_LOVE_TIDE_REFERENCE);
+    ASSERT_TRUE(file.is_open());
+    const Time time;
+    const Eop eop;
+    double maximum = 0;
+    int rows = 0;
+    for (std::string line; std::getline(file, line);) {
+        if (line.empty() || line[0] != 'C')
+            continue;
+        std::istringstream in(line);
+        char tag;
+        double k20;
+        int zero, secondary;
+        long long seconds;
+        in >> tag >> k20 >> zero >> secondary >> seconds;
+        auto info = field(zero != 0);
+        info.solid_tide_k20 = k20;
+        const auto sample = eop.at(Epoch{seconds * 1000000000LL}).sample;
+        const std::array bodies{body(true, static_cast<double>(seconds)),
+                                body(false, static_cast<double>(seconds))};
+        const auto actual = solid_tide_corrections(
+            info, {SolidTideMode::full, false, secondary != 0}, 4, 3, bodies, &sample, &time);
+        for (int n = 2; n <= 4; ++n)
+            for (int m = 0; m <= (n == 4 ? 2 : n); ++m) {
+                double c, s;
+                in >> c >> s;
+                ASSERT_TRUE(in);
+                const auto found = std::ranges::find_if(
+                    actual, [=](const auto &v) { return v.degree == n && v.order == m; });
+                const double ac = found == actual.end() ? 0 : found->c;
+                const double as = found == actual.end() ? 0 : found->s;
+                maximum = std::max({maximum, std::abs(ac - c), std::abs(as - s)});
+                EXPECT_NEAR(ac, c, 2e-20) << line;
+                EXPECT_NEAR(as, s, 2e-20) << line;
+            }
+        ++rows;
+    }
+    EXPECT_EQ(rows, 48);
+    std::cout << "Custom k20 maximum coefficient difference: " << maximum << '\n';
+}
+TEST(SolidTides, CustomLoveNumbersMatchIndependentOrekitAccelerationAndPropagation) {
+    std::ifstream file(ORBITFORGE_LOVE_TIDE_REFERENCE);
+    ASSERT_TRUE(file.is_open());
+    const auto time = std::make_shared<Time>();
+    const auto eop = std::make_shared<Eop>();
+    const auto frames = std::make_shared<Frames>();
+    double max_a = 0, max_r = 0, max_v = 0;
+    int accelerations = 0, trajectories = 0;
+    for (std::string line; std::getline(file, line);) {
+        if (line.empty() || (line[0] != 'A' && line[0] != 'T'))
+            continue;
+        std::istringstream in(line);
+        char tag;
+        double k20;
+        in >> tag >> k20;
+        auto info = field();
+        info.solid_tide_k20 = k20;
+        if (tag == 'A') {
+            int zero, secondary, degree, order, truncate;
+            std::array<double, 3> r{}, expected{};
+            in >> zero >> secondary >> degree >> order >> truncate;
+            for (auto &x : r)
+                in >> x;
+            for (auto &x : expected)
+                in >> x;
+            ASSERT_TRUE(in);
+            info.tide_system = zero ? "zero_tide" : "tide_free";
+            const GravityModel model(
+                info,
+                {{2, 0, -4.84165371736e-4 + (zero ? iers2003_permanent_tide_c20(k20) : 0), 0}});
+            const std::array bodies{body(true), body(false)};
+            const auto sample = eop->at(Epoch{0}).sample;
+            const auto correction =
+                solid_tide_corrections(info, {SolidTideMode::full, truncate != 0, secondary != 0},
+                                       degree, order, bodies, &sample, time.get());
+            const auto actual = model.acceleration(r, degree, order, correction);
+            for (int i = 0; i < 3; ++i) {
+                max_a = std::max(max_a, std::abs(actual[i] - expected[i]));
+                EXPECT_NEAR(actual[i], expected[i], 2e-14) << line;
+            }
+            ++accelerations;
+        } else {
+            int secondary;
+            long long seconds;
+            std::array<double, 3> r{}, v{};
+            in >> secondary >> seconds;
+            for (auto &x : r)
+                in >> x;
+            for (auto &x : v)
+                in >> x;
+            ASSERT_TRUE(in);
+            HpopOptions options;
+            options.gravity_model = "custom";
+            options.gravity_degree = options.gravity_order = 0;
+            options.solid_tides = {SolidTideMode::full, false, secondary != 0};
+            options.max_step_seconds = 30;
+            options.relative_tolerance = 1e-13;
+            options.position_tolerance_m = 1e-5;
+            options.velocity_tolerance_mps = 1e-8;
+            const auto model =
+                std::make_shared<GravityModel>(info, std::vector<GravityCoefficient>{});
+            HpopEnvironment environment{frames, eop, model, std::make_shared<Ephemeris>(), time};
+            const CartesianState initial{
+                Epoch{0}, OriginId::earth, FrameId::gcrf, {7e6, 0, 0}, {0, 6200, 5300}};
+            const auto actual =
+                make_hpop(initial, options, environment)->state_at(Epoch{seconds * 1000000000LL});
+            for (int i = 0; i < 3; ++i) {
+                max_r = std::max(max_r, std::abs(actual.position_m[i] - r[i]));
+                max_v = std::max(max_v, std::abs(actual.velocity_mps[i] - v[i]));
+                EXPECT_NEAR(actual.position_m[i], r[i], .003) << line;
+                EXPECT_NEAR(actual.velocity_mps[i], v[i], 3e-6) << line;
+            }
+            ++trajectories;
+        }
+    }
+    EXPECT_EQ(accelerations, 96);
+    EXPECT_EQ(trajectories, 16);
+    std::cout << "Custom k20 max acceleration/position/velocity differences: " << max_a << ' '
+              << max_r << ' ' << max_v << '\n';
+}
+TEST(SolidTides, CustomLoveNumberControlsPermanentDeformationExactlyOnceAndRejectsNonfinite) {
+    for (double k20 : {0., .3, .30190, .4, -.1}) {
+        auto info = field();
+        info.solid_tide_k20 = k20;
+        const double expected = 4.4228e-8 * -0.31460 * k20;
+        EXPECT_EQ(iers2003_permanent_tide_c20(k20), expected);
+        const auto tide = solid_tide_corrections(info, {SolidTideMode::permanent}, 2, 0);
+        if (k20 == 0) {
+            EXPECT_TRUE(tide.empty());
+        } else {
+            ASSERT_EQ(tide.size(), 1U);
+            EXPECT_EQ(tide.front().c, expected);
+        }
+        info.tide_system = "zero_tide";
+        EXPECT_TRUE(solid_tide_corrections(info, {SolidTideMode::permanent}, 2, 0).empty());
+        const auto removed = solid_tide_corrections(info, {}, 2, 0);
+        if (k20 == 0) {
+            EXPECT_TRUE(removed.empty());
+        } else {
+            ASSERT_EQ(removed.size(), 1U);
+            EXPECT_EQ(removed.front().c, -expected);
+        }
+    }
+    for (double k20 :
+         {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
+          -std::numeric_limits<double>::infinity()}) {
+        auto info = field();
+        info.solid_tide_k20 = k20;
+        EXPECT_THROW((void)iers2003_permanent_tide_c20(k20), std::invalid_argument);
+        EXPECT_THROW((void)solid_tide_corrections(info, {}, 0, 0), std::invalid_argument);
+        EXPECT_THROW((void)GravityModel(info, {}), std::invalid_argument);
+    }
+}

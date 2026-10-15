@@ -26,8 +26,13 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
     if (options.uses_earth_fixed_gravity()) {
         const auto tides =
             core::effective_solid_tide_options(options.solid_tides, options.gravity_degree);
-        algorithm += ";solid-tides=iers2003-anelastic-v2;k20=0.30190;mode=" +
-                     std::to_string(static_cast<int>(tides.mode)) +
+        const auto field =
+            options.gravity_model.empty() ? core::builtin_egm96() : environment.gravity;
+        std::ostringstream love;
+        love.imbue(std::locale::classic());
+        love << std::hexfloat << ";solid-tides=iers2003-anelastic-v3;k20="
+             << (field ? field->info().solid_tide_k20 : 0.30190);
+        algorithm += love.str() + ";mode=" + std::to_string(static_cast<int>(tides.mode)) +
                      ";tide-truncate=" + std::to_string(tides.truncate_to_gravity) +
                      (tides.include_time_dependent_terms
                           ? ";frequency=iers2003-71;pole=iers2003-printed-annual-v1"

@@ -7,6 +7,9 @@
 namespace orbitforge::runtime {
 // Static ICGEM .gfc and STK .grv subset. Reads and hashes the complete file, retains
 // coefficients through core::gravity_max_degree, rejects time-dependent records.
+// EarthIERSTideModel and legacy LoveNumbers blocks override the real k20 only,
+// as in STK; their finite imaginary component is parsed but not used. Conflicting
+// permanent-tide declarations and unsupported tide/process-noise blocks fail.
 // The returned resource owns all computation data; it never reopens its source.
 [[nodiscard]] std::shared_ptr<const core::GravityModel>
 load_gravity(const std::filesystem::path &file, const std::string &source_url = {},

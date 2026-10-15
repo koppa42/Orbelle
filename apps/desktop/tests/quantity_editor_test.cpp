@@ -2411,4 +2411,43 @@ TEST_F(QuantityTest, HpopSatelliteMassInvalidValueReturnsToAdditionalWithoutComm
     EXPECT_FALSE(edit_hpop_settings(options, nullptr));
     EXPECT_EQ(options, saved);
 }
+
+TEST_F(QuantityTest, HpopLoveNumberFollowsGravityFileAndCancelPreservesSelection) {
+    core::HpopOptions options;
+    runtime::CatalogGravity custom;
+    custom.selection = "custom";
+    custom.info = {"Custom", {}, {}, "tide_free", core::egm96_mu, core::egm96_radius_m, 21, 21, .3};
+    const auto original = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *love = dialog->findChild<QLabel *>("hpopSolidTideK20");
+        auto *model = dialog->findChild<QComboBox *>("hpopGravityModel");
+        ASSERT_TRUE(love);
+        ASSERT_TRUE(model);
+        EXPECT_DOUBLE_EQ(love->text().toDouble(), .30190);
+        model->setCurrentIndex(model->findData(QStringLiteral("custom")));
+        EXPECT_DOUBLE_EQ(love->text().toDouble(), .3);
+        auto *mode = dialog->findChild<QComboBox *>("hpopSolidTideMode");
+        mode->setCurrentIndex(1);
+        dialog->resize(430, 620);
+        QApplication::processEvents();
+        EXPECT_EQ(love, dialog->findChild<QLabel *>("hpopSolidTideK20"));
+        EXPECT_DOUBLE_EQ(love->text().toDouble(), .3);
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr, {custom}, {}));
+    EXPECT_EQ(options, original);
+    options.gravity_model = "custom";
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        EXPECT_DOUBLE_EQ(dialog->findChild<QLabel *>("hpopSolidTideK20")->text().toDouble(), .3);
+        dialog->findChild<QComboBox *>("hpopSolidTideMode")->setCurrentIndex(1);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr, {custom}, {}));
+    EXPECT_EQ(options.gravity_model, "custom");
+    EXPECT_EQ(options.solid_tides.mode, core::SolidTideMode::permanent);
+}
 } // namespace orbitforge::desktop

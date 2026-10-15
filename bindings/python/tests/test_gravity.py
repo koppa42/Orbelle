@@ -57,6 +57,60 @@ class GravityTests(unittest.TestCase):
                 catalog.install_gravity(file, "egm2008")
             del catalog  # Close SQLite before TemporaryDirectory cleanup on Windows.
 
+    def test_custom_love_number_metadata_roundtrip_changes_force_and_requires_data_consent(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            file = root / "love.grv"
+            custom = GRV.replace("BEGIN Coefficients", "Begin EarthIERSTideModel\n"
+                "IncludesPermTide No\nLoveNumbers 2 0 .3 .12\nEnd EarthIERSTideModel\nBEGIN Coefficients")
+            file.write_text(custom)
+            catalog = of.DataCatalog(root / "catalog")
+            try:
+                receipt = catalog.install_gravity(file)
+                self.assertEqual(receipt.info.solid_tide_k20, .3)
+                self.assertEqual(catalog.gravity_models[0].info.solid_tide_k20, .3)
+                with self.assertRaises(AttributeError):
+                    receipt.info.solid_tide_k20 = .4
+                data = of.DataSnapshot.load(eop_manifest=EOP).with_gravity("custom", receipt.file)
+                project = of.Project("Love numbers", of.Epoch(0), of.Epoch(600 * 10**9))
+                sat = project.objects.satellite("Sat", orbit=of.orbits.Hpop(
+                    initial=of.orbits.Cartesian(of.Epoch(0), (7e6, 0, 0), (0, 6200, 5300)),
+                    gravity_model="custom", gravity_degree=2,
+                    solid_tides=of.orbits.SolidTideSettings("permanent")))
+                analysis = project.prepare(data=data)
+                before = analysis.states(sat, step=u.s(60))
+                path = root / "love.orbitforge"
+                project.save(path, analysis=analysis)
+                restored = of.Project.open(path, data=data)
+                self.assertEqual(restored.prepare(data=data).states(restored.objects[sat.id], step=u.s(60))
+                                 .position.values, before.position.values)
+                file.write_text(custom.replace(".3 .12", ".4 .12"))
+                changed = data.with_gravity("custom", file)
+                plan = of.Project.plan_open(path, data=changed)
+                self.assertEqual(plan.data_changes[0].role, "gravity/custom")
+                with self.assertRaises(of.DataChangedError):
+                    plan.open()
+                confirmed = plan.open(accept_data_changes=True)
+                after = confirmed.prepare(data=changed).states(confirmed.objects[sat.id], step=u.s(60))
+                self.assertEqual(after.input_sha256, before.input_sha256)
+                self.assertNotEqual(after.data_sha256, before.data_sha256)
+                for series, k20 in ((before, .3), (after, .4)):
+                    used = series.provenance.algorithm.split(";k20=")[1].split(";")[0]
+                    self.assertEqual(float.fromhex(used), k20)
+                self.assertNotEqual(after.position.values[-1], before.position.values[-1])
+                self.assertEqual(analysis.states(sat, step=u.s(60)).position.values, before.position.values)
+                file.write_text(custom.replace("2 0 .3", "2 1 .3"))
+                with self.assertRaises(RuntimeError):
+                    catalog.install_gravity(file)
+                self.assertEqual(catalog.gravity_models[0].info.solid_tide_k20, .3)
+            finally:
+                del catalog
+            reopened = of.DataCatalog(root / "catalog")
+            try:
+                self.assertEqual(reopened.gravity_models[0].info.solid_tide_k20, .3)
+            finally:
+                del reopened
+
     def test_full_degree_rectangular_field_persists_and_enforces_actual_order(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

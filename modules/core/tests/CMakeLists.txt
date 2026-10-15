@@ -2,6 +2,7 @@ add_executable(orbitforge_core_tests circular_two_body_test.cpp ground_station_t
 target_compile_definitions(orbitforge_core_tests PRIVATE
     ORBITFORGE_GRAVITY_FULL_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/gravity_full.txt"
     ORBITFORGE_RELATIVITY_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/relativity.txt"
+    ORBITFORGE_LOVE_TIDE_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/solid_tides_love.txt"
     ORBITFORGE_TIME_TIDE_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/solid_tides_time_dependent.txt"
     ORBITFORGE_SOLID_TIDE_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/solid_tides.txt"
     ORBITFORGE_GRAVITY_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/gravity.txt"

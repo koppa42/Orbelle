@@ -127,6 +127,8 @@ Core 的 `EveryBodyAndSourceActuallyChangesTheIntegratedForce` 将十个天体�
 
 固定文本参考按 `.gitattributes` 保存为 UTF-8 / LF；Windows Java 输出先只规范换行再记录散列，数值文本保持原样。
 
+自定义 Love 数的独立参考为 `solid_tides_love.txt`：48 组系数、96 组加速度及 16 条 ±1 天轨迹，覆盖四个 k20、两种底场潮汐系统、截断、近极点、频率/极潮开关，沿用现有容限。生成器 `OrbitForgeLoveNumberReference.java` 与上述两个生成器一起编译，运行 `org.orekit.forces.gravity.OrbitForgeLoveNumberReference`。`GravityFiles.*` / Python 检查 `.grv` 两种 Love 数语法、冲突与损坏、导入失败/取消、收据重开、数据确认及分析不可变；Qt 检查选文件时显示值变化和取消，SDK 直接调用自定义 k20 的永久潮 API。
+
 附加时间项另有 39 组独立系数、24 组加速度及四条轨迹对照（`solid_tides_time_dependent.txt`），包括 IERS 2003 与 2010 极潮符号差异、历史平均极点边界、UT1/TT 时间约定和非活动开关身份。Python 核验 Full 开关切换、数据覆盖、报告与存档；Qt 核验附加时间项仅 Full 可操作、切换模式保留草稿、宽窄/DPI、确认与取消。全部来源和容限见固体潮契约。
 
 ## 相对论

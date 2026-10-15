@@ -752,12 +752,15 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
                                      : QStringLiteral("覆盖截止（UTC）"));
         if (is_gravity)
             note->setText(
-                item.gravity ? QStringLiteral("%1 · %2\nGM = %3 m³/s² · 参考半径 %4 "
-                                              "m\n计算开始时固定文件；更新不会改变正在运行的计算。")
-                                   .arg(QString::fromStdString(item.gravity->model),
-                                        QString::fromStdString(item.gravity->tide_system))
-                                   .arg(item.gravity->mu, 0, 'g', 15)
-                                   .arg(item.gravity->radius_m, 0, 'g', 15)
+                item.gravity
+                    ? QStringLiteral(
+                          "%1 · %2\nGM = %3 m³/s² · 参考半径 %4 "
+                          "m · 固体潮 k20 = %5\n计算开始时固定文件；更新不会改变正在运行的计算。")
+                          .arg(QString::fromStdString(item.gravity->model),
+                               QString::fromStdString(item.gravity->tide_system))
+                          .arg(item.gravity->mu, 0, 'g', 15)
+                          .arg(item.gravity->radius_m, 0, 'g', 15)
+                          .arg(item.gravity->solid_tide_k20, 0, 'g', 15)
                 : item.product == DataProduct::egm2008
                     ? QStringLiteral(
                           "官方完整文件约 240 MiB，下载后在后台校验。静态模型默认不自动下载。")

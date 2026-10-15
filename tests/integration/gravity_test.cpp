@@ -6,6 +6,7 @@
 #include <orbitforge/runtime/analysis.hpp>
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/gravity.hpp>
+#include <orbitforge/runtime/hpop.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <sstream>
@@ -24,6 +25,11 @@ class GravityFiles : public ::testing::Test {
         std::ofstream out(path, std::ios::binary);
         out << bytes;
         return path;
+    }
+    std::string tide_grv(const std::string &block) {
+        auto text = grv();
+        text.insert(text.find("BEGIN Coefficients"), block);
+        return text;
     }
     std::string grv(std::string value = "-4.84165371736e-4", std::string norm = "Yes") {
         return "stk.v.6.0\nModel Test\nDegree 2\nOrder 2\nGm 3.986004415e14\nRefDistance "
@@ -178,4 +184,129 @@ TEST_F(GravityFiles, FullOfficialEgm2008MatchesIndependentOrekit) {
                   model->acceleration(position, 2190, 2190));
     EXPECT_GT(checkpoints, 2000);
     full_gravity_test::verify(model, 3, ORBITFORGE_EGM2008_FULL_REFERENCE, 80, 2);
+}
+
+TEST_F(GravityFiles, ReadsEarthIersAndLegacyLoveNumbersWithExplicitTideSystem) {
+    const auto defaults = runtime::load_gravity(write(grv()));
+    EXPECT_EQ(defaults->info().solid_tide_k20, .30190);
+    for (const std::string block : {"Begin EarthIERSTideModel\nIncludesPermTide No\nLoveNumbers 2 "
+                                    "0 +3.0D-1 0.12\nEnd EarthIERSTideModel\n",
+                                    "Begin LoveNumbers\n2 0 0.3 -0.12\nEnd LoveNumbers\n"}) {
+        const auto bytes = tide_grv("CentralBody Earth\n" + block);
+        const auto model = runtime::load_gravity(write(bytes));
+        EXPECT_EQ(model->info().solid_tide_k20, .3);
+        EXPECT_EQ(model->info().tide_system, "tide_free");
+        // File metadata cannot alter the immutable static field.
+        EXPECT_EQ(model->acceleration({4e6, -3e6, 5e6}, 2, 2),
+                  defaults->acceleration({4e6, -3e6, 5e6}, 2, 2));
+        EXPECT_NE(model->info().sha256, defaults->info().sha256);
+    }
+    auto block_only = tide_grv("Begin EarthIERSTideModel\nIncludesPermTide Yes\n"
+                               "LoveNumbers 2 0 0 0\nEnd EarthIERSTideModel\n");
+    block_only.erase(block_only.find("IncludesPermTide No\n"),
+                     std::string("IncludesPermTide No\n").size());
+    const auto zero = runtime::load_gravity(write(block_only));
+    EXPECT_EQ(zero->info().tide_system, "zero_tide");
+    EXPECT_EQ(zero->info().solid_tide_k20, 0);
+    EXPECT_EQ(
+        runtime::load_gravity(write(tide_grv("Begin EarthIERSTideModel\nEnd EarthIERSTideModel\n")))
+            ->info()
+            .solid_tide_k20,
+        .30190);
+}
+TEST_F(GravityFiles, RejectsAmbiguousMalformedAndUnsupportedTideBlocks) {
+    for (const std::string block :
+         {"Begin EarthIERSTideModel\nIncludesPermTide Yes\nEnd EarthIERSTideModel\n",
+          "Begin EarthIERSTideModel\nLoveNumbers 2 1 .3 0\nEnd EarthIERSTideModel\n",
+          "Begin EarthIERSTideModel\nLoveNumbers 2 0 nan 0\nEnd EarthIERSTideModel\n",
+          "Begin EarthIERSTideModel\nLoveNumbers 2 0 .3 inf\nEnd EarthIERSTideModel\n",
+          "Begin EarthIERSTideModel\nLoveNumbers 2 0 .3\nEnd EarthIERSTideModel\n",
+          "Begin EarthIERSTideModel\nLoveNumbers 2 0 .3 0\nLoveNumbers 2 0 .4 0\nEnd "
+          "EarthIERSTideModel\n",
+          "Begin EarthIERSTideModel\nIncludesPermTide No\nIncludesPermTide No\nEnd "
+          "EarthIERSTideModel\n",
+          "Begin EarthIERSTideModel\nLoveNumbers 2 0 .3 0\nEnd LoveNumbers\n",
+          "Begin EarthIERSTideModel\nLoveNumbers 2 0 .3 0\n",
+          "Begin EarthIERSTideModel\nK3 .093\nEnd EarthIERSTideModel\n",
+          "Begin EarthIERSTideModel\nEnd EarthIERSTideModel\nBegin LoveNumbers\n2 0 .3 0\nEnd "
+          "LoveNumbers\n",
+          "Begin EarthIERSTideModel\nBegin LoveNumbers\n2 0 .3 0\nEnd LoveNumbers\nEnd "
+          "EarthIERSTideModel\n",
+          "Begin LoveNumbers\nEnd LoveNumbers\n",
+          "Begin SimpleTideModel\nK2 .3\nEnd SimpleTideModel\n",
+          "Begin ProcessNoise\nEnd ProcessNoise\n", "CentralBody Moon\n",
+          "ReferenceFrame PrincipalAxes_430\n"}) {
+        EXPECT_THROW((void)runtime::load_gravity(write(tide_grv(block))), std::runtime_error)
+            << block;
+    }
+}
+TEST_F(GravityFiles, LoveNumberCatalogReopenCancellationAndFailedImportPreservePriorResource) {
+    if (!runtime::data_catalog_available())
+        GTEST_SKIP();
+    const std::string custom = tide_grv("Begin EarthIERSTideModel\n"
+                                        "LoveNumbers 2 0 .3 0\nEnd EarthIERSTideModel\n");
+    std::shared_ptr<const core::GravityModel> frozen;
+    {
+        runtime::DataCatalog catalog(root / "catalog");
+        const auto installed = catalog.install_gravity(write(custom), "custom");
+        EXPECT_EQ(installed.info.solid_tide_k20, .3);
+        frozen = catalog.load_gravity("custom");
+        EXPECT_THROW(
+            (void)catalog.install_gravity(
+                write(tide_grv(
+                    "Begin EarthIERSTideModel\nLoveNumbers 3 0 .4 0\nEnd EarthIERSTideModel\n")),
+                "custom"),
+            std::runtime_error);
+        EXPECT_THROW((void)catalog.install_gravity(write(grv()), "custom", {},
+                                                   runtime::DataAcquisition::imported,
+                                                   [] { throw std::runtime_error("cancelled"); }),
+                     std::runtime_error);
+        EXPECT_EQ(catalog.gravity_models().front().info.solid_tide_k20, .3);
+        EXPECT_EQ(catalog.load_gravity("custom")->info().sha256, frozen->info().sha256);
+    }
+    runtime::DataCatalog reopened(root / "catalog");
+    EXPECT_EQ(reopened.gravity_models().front().info.solid_tide_k20, .3);
+    EXPECT_EQ(reopened.load_gravity("custom")->info().solid_tide_k20, .3);
+    reopened.install_gravity(write(grv()), "custom");
+    EXPECT_EQ(reopened.load_gravity("custom")->info().solid_tide_k20, .30190);
+    EXPECT_EQ(frozen->info().solid_tide_k20, .3);
+    const auto receipt = reopened.setting("gravity/custom");
+    reopened.set_setting("gravity/custom", R"({"schema":1})");
+    EXPECT_THROW((void)reopened.gravity_models(), std::runtime_error);
+    reopened.set_setting("gravity/custom", receipt);
+    EXPECT_EQ(reopened.load_gravity("custom")->info().solid_tide_k20, .30190);
+}
+TEST_F(GravityFiles, LoveNumberOnlyResourceChangeRequiresConfirmationAndPreservesOldAnalysis) {
+    if (!runtime::time_frames_available())
+        GTEST_SKIP();
+    auto data =
+        runtime::DataSnapshot::load(ORBITFORGE_REPORT_EOP)
+            .with_gravity_file("custom",
+                               write(tide_grv("Begin EarthIERSTideModel\n"
+                                              "LoveNumbers 2 0 .3 0\nEnd EarthIERSTideModel\n")));
+    application::Project p{"Love numbers", core::Epoch{0}, core::Epoch{600'000'000'000}};
+    application::ProjectSatellite sat;
+    sat.orbit.first = p.first;
+    sat.orbit.last = p.last;
+    sat.orbit.propagator = application::OrbitPropagator::hpop;
+    sat.orbit.hpop.gravity_model = "custom";
+    sat.orbit.hpop.gravity_degree = sat.orbit.hpop.gravity_order = 2;
+    sat.orbit.hpop.solid_tides.mode = core::SolidTideMode::permanent;
+    p.satellites.push_back(sat);
+    application::ProjectDocument project{p};
+    const auto before = runtime::prepare(project, data);
+    const auto object = project.objects().get("satellite-1");
+    const auto state = before.state(object, p.last, core::FrameId::gcrf);
+    runtime::save_project(project, root / "love.orbitforge", before);
+    auto changed = data.with_gravity_file("custom", write(grv()));
+    runtime::ProjectOpenPlan plan(root / "love.orbitforge", changed);
+    ASSERT_EQ(plan.data_changes().size(), 1U);
+    EXPECT_EQ(plan.data_changes().front().role, "gravity/custom");
+    EXPECT_THROW((void)plan.open(), runtime::OpenDataChangedError);
+    auto confirmed = plan.open(true);
+    const auto after = runtime::prepare(confirmed, changed);
+    EXPECT_NE(
+        after.state(confirmed.objects().get("satellite-1"), p.last, core::FrameId::gcrf).position_m,
+        state.position_m);
+    EXPECT_EQ(before.state(object, p.last, core::FrameId::gcrf).position_m, state.position_m);
 }
