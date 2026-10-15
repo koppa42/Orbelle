@@ -25,6 +25,16 @@ int main(int argc, char **argv) try {
     if (!std::isfinite(density.density_kg_m3) || density.density_kg_m3 <= 0 ||
         force.acceleration_itrf_mps2[1] >= 0 || orbitforge::core::kp_to_ap(3) != 15)
         return 29;
+    atmosphere.daily_ap = 15;
+    if (orbitforge::core::evaluate_atmosphere(drag.atmosphere, atmosphere).density_kg_m3 !=
+        density.density_kg_m3)
+        return 31;
+    atmosphere.daily_ap.reset();
+    atmosphere.ap_history = std::array{40., 400., 100., 50., 20., 7.125, 3.75};
+    const auto historical = orbitforge::core::evaluate_atmosphere(drag.atmosphere, atmosphere);
+    if (!std::isfinite(historical.density_kg_m3) || historical.density_kg_m3 <= 0 ||
+        historical.density_kg_m3 == density.density_kg_m3)
+        return 32;
     namespace app = orbitforge::application;
     app::ProjectDocument document{app::Project{"SDK objects", orbitforge::core::Epoch{0},
                                                orbitforge::core::Epoch{60'000'000'000}}};

@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <optional>
 #include <orbitforge/core/frames/geodetic.hpp>
 #include <orbitforge/core/time/time_provider.hpp>
 
@@ -31,6 +32,15 @@ struct AtmosphereInput {
     double solar_hour_angle_rad = 0, sun_declination_rad = 0;
     double f107 = 150, f107_average = 150;
     double kp = 3;
+    // NRLMSISE-only alternatives to Kp, in native Ap units [0,400]. Mutually exclusive;
+    // when either is provided, kp is inactive. daily_ap selects SW[9]=1;
+    // ap_history selects SW[9]=-1 and owns seven values in this order:
+    // daily Ap; current 3 h ap; ap 3, 6 and 9 h earlier; mean ap 12..33 h earlier;
+    // mean ap 36..57 h earlier (each mean spans eight 3 h values).
+    // The caller supplies a complete history for this UTC instant; no files,
+    // interpolation, extrapolation or substitution of missing values is implied.
+    std::optional<double> daily_ap{};
+    std::optional<std::array<double, 7>> ap_history{};
 };
 struct AtmosphereEvaluation {
     double density_kg_m3, temperature_k, exospheric_temperature_k;

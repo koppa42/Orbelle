@@ -4,6 +4,7 @@ target_compile_definitions(orbitforge_core_tests PRIVATE
     ORBITFORGE_THIRD_BODY_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/third_body.txt"
     ORBITFORGE_SRP_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/srp.txt"
     ORBITFORGE_SRP_GEOMETRY_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/srp_geometry.txt"
+    ORBITFORGE_NRLMSISE_AP_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/nrlmsise00_ap.txt"
     ORBITFORGE_NRLMSISE_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/nrlmsise00.txt"
     ORBITFORGE_JR_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/jacchia_roberts.txt"
     ORBITFORGE_DRAG_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/drag.txt"

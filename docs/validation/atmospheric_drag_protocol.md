@@ -8,14 +8,16 @@
 
 `jacchia_roberts.txt` 有 576 个未修改 NASA GMAT 标量模型参考，提交为 `c9b78bd1c8499845cb78fde315e1f761b6b06f1c`。覆盖同样日期、16 个分段高度（90…2500 km，含 100/125/200/500 km 附近）、4 个几何条件和 3 组天气。API-only stubs 不执行时间/高度换算，标量入口直接接受 UTC JD−2430000、WGS84 大地纬度、椭球高、太阳方向；未调用的外层时间和测地函数会抛异常。参考不声明等同于 GMAT 全部外层传播配置。
 
-生成器为 `tools/validation/nrlmsise_reference.c` 和 `jacchia_roberts_reference.cpp`；上游文件 URL 与原始字节 SHA-256 固定于 `density_sources.json`。`atmosphere_reference.py` 下载后校验字节、独立编译并在指定目录写候选文件，不能自动覆盖参考：
+`nrlmsise00_ap.txt` 另含 1056 个同一原作者 C `gtd7d` 参考，覆盖 3 个日期、11 个高度、4 组几何和 8 组地磁输入：3 组原生日 Ap（含非 Kp 表节点的 15.25）、5 组历史 Ap（全零、恒定、最大值、上升和衰减磁暴）。历史模式显式设置原生 `SW[9]=-1`；测试完整密度及两个温度。历史均值包含非整数，不舍入到离散 Kp 表。参考 SHA-256 为 `da884507a21fc53dd8f5c0002bedb6270f289fbf88fbb254366b71eb219e9037`。
+
+生成器为 `tools/validation/nrlmsise_reference.c`、`nrlmsise_ap_reference.c` 和 `jacchia_roberts_reference.cpp`；上游文件 URL 与原始字节 SHA-256 固定于 `density_sources.json`。`atmosphere_reference.py` 下载后校验字节、独立编译并在指定目录写候选文件，不能自动覆盖参考：
 
 ```powershell
 # 在 MSVC developer shell 中；Linux 去掉 --msvc，使用 gcc/g++。
 python tools/validation/atmosphere_reference.py out/validation/density-reference --msvc
 ```
 
-Core/Python 对照密度相对容限 `2e-10`，NRL 温度绝对容限 `1e-7 K`，用于不同浮点运算顺序。另测非法日期、非法枚举、非有限参数、越界高度、Kp→Ap、极点/赤纬零/正午午夜及并发；这些测试不代表经验大气模型的物理精度。
+Core/Python 对照密度相对容限 `2e-10`，NRL 温度绝对容限 `1e-7 K`，用于不同浮点运算顺序。另测非法日期、非法枚举、非有限参数、越界高度、Kp→Ap、极点/赤纬零/正午午夜及并发；这些测试不代表经验大气模型的物理精度。原生 Ap 测试额外检查两种输入互斥、JR 拒绝 Ap、七项长度与各项范围、显式 Ap 不读取非活动 Kp、输入数组所有权，以及日/历史模式交替和并发计算不串状态。Python 独立安装和 C++ SDK 消费端同时验证公开字段。历史 Ap 尚未用于 HPOP 轨道参考。
 
 ## 轨道参考
 

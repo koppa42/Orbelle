@@ -99,7 +99,20 @@ GeodeticPosition drag_geodetic_position(const std::array<double, 3> &r) {
     return {longitude, latitude, height};
 }
 AtmosphereEvaluation evaluate_atmosphere(AtmosphereModel model, const AtmosphereInput &input) {
-    weather(input.f107, input.f107_average, input.kp);
+    if (input.daily_ap && input.ap_history)
+        throw std::invalid_argument("Choose either daily Ap or seven-value Ap history");
+    if ((input.daily_ap || input.ap_history) && model != AtmosphereModel::nrlmsise00)
+        throw std::invalid_argument("Explicit Ap inputs require NRLMSISE-00");
+    weather(input.f107, input.f107_average, input.daily_ap || input.ap_history ? 3 : input.kp);
+    const auto validate_ap = [](double ap) {
+        if (!std::isfinite(ap) || ap < 0 || ap > 400)
+            throw std::invalid_argument("Ap must be finite and within 0..400");
+    };
+    if (input.daily_ap)
+        validate_ap(*input.daily_ap);
+    if (input.ap_history)
+        for (const double ap : *input.ap_history)
+            validate_ap(ap);
     const auto &g = input.geodetic;
     if (!std::isfinite(g.longitude_rad) || std::abs(g.longitude_rad) > pi ||
         !std::isfinite(g.latitude_rad) || std::abs(g.latitude_rad) > pi / 2 ||

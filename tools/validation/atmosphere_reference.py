@@ -34,16 +34,17 @@ def main():
         if hashlib.sha256(path.read_bytes()).hexdigest() != record["sha256"]:
             raise ValueError(f"Unexpected cached source hash: {record['file']}")
     for model, producer in (("nrlmsise00", "nrlmsise_reference.c"),
+                            ("nrlmsise00_ap", "nrlmsise_ap_reference.c"),
                             ("jacchia_roberts", "jacchia_roberts_reference.cpp")):
         executable = output / (model + (".exe" if os.name == "nt" else ""))
         sources = [str(tools / producer)]
-        if model == "nrlmsise00":
+        if model.startswith("nrlmsise00"):
             sources += [str(upstream / "nrlmsise-00.c"), str(upstream / "nrlmsise-00_data.c")]
         if args.msvc:
             command = ["cl", "/nologo", "/O2", "/EHsc", "/std:c++20", f"/I{upstream}",
                        f"/I{tools / 'gmat_jr_stubs'}", *sources, f"/Fe:{executable}"]
         else:
-            command = ["gcc" if model == "nrlmsise00" else "g++", "-O2", f"-I{upstream}",
+            command = ["gcc" if model.startswith("nrlmsise00") else "g++", "-O2", f"-I{upstream}",
                        f"-I{tools / 'gmat_jr_stubs'}", *sources, "-lm", "-o", str(executable)]
         subprocess.run(command, cwd=output, check=True)
         raw = subprocess.check_output([str(executable)], cwd=output).replace(b"\r\n", b"\n")

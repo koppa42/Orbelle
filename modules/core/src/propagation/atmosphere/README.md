@@ -15,7 +15,8 @@ calls its original scalar `JacchiaRoberts` method directly.
 `nrlmsise00.cpp` transcribes the double precision `Output` methods/tables from
 [Orekit 13.1.2](https://github.com/CS-SI/Orekit/blob/13.1.2/src/main/java/org/orekit/models/earth/atmosphere/NRLMSISE00.java).
 It calls the gtd7d path including anomalous oxygen, with default variations and
-daily Ap. Fixed arrays replace Java allocations; spline scratch is bounded to
+daily Ap (`SW[9]=1`) or explicit seven-value Ap history (`SW[9]=-1`).
+Fixed arrays replace Java allocations; spline scratch is bounded to
 five nodes. Inputs retain native F10.7 units (sfu) and convert manual Kp to Ap
 using the standard 1/3-Kp table and linear interpolation.
 

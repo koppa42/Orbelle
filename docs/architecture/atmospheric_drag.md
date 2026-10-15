@@ -1,6 +1,6 @@
 # HPOP 大气阻力
 
-桌面阻力页、C++ `DragOptions` 和 Python `orbits.DragSettings` 共用 Core 模型。当前实现球形阻力、Jacchia–Roberts / NRLMSISE-00 密度、手动空间天气、低空拼接及地心视太阳位置；天气文件、历史 Ap、风场和近似高度尚未实现。[STK 阻力设置](https://help.agi.com/stk/Content/hpop/hpopDrag.htm)是功能与输入含义的对齐依据；尚未取得 STK 同配置数值输出。
+桌面阻力页、C++ `DragOptions` 和 Python `orbits.DragSettings` 共用 Core 模型。当前实现球形阻力、Jacchia–Roberts / NRLMSISE-00 密度、手动空间天气、低空拼接及地心视太阳位置；低层密度接口支持原生日 Ap 和七项历史 Ap；HPOP 天气文件、历史窗口装配、风场和近似高度尚未实现。[STK 阻力设置](https://help.agi.com/stk/Content/hpop/hpopDrag.htm)是功能与输入含义的对齐依据；尚未取得 STK 同配置数值输出。
 
 ## 力与参考系
 
@@ -17,6 +17,23 @@ Jacchia–Roberts 适用 90…2500 km，保留 NASA GMAT 标量模型的拟合�
 当前天气来源为常量手动输入：日 F10.7、平均 F10.7（sfu）、Kp。NRLMSISE 将手动日值作为前一日 F10.7，将平均值作为模型平均通量；没有隐含的历史查询。Kp 使用标准 1/3 刻度的 28 项 Ap 表，非表格刻度线性插值，Kp=3 对应 Ap=15。界面/API 当前限制通量 `(0,1000]` sfu、Kp `[0,9]`，这些限制与 STK 命令允许的全部范围不同，不能据此宣称所有参数范围已对齐。低层 `AtmosphereInput` 使用 UTC 公历日期 1600…2600；闰秒合法性在 HPOP 中由实际时间 Provider 认证，独立标量调用方负责保证其 UTC 真实有效。
 
 JR 可选择 NRLMSISE-00 作为低空模型。低于 90 km 使用低空模型；在 `90 km…90 km+拼接范围` 内，以 `w=t²(3−2t)` 对质量密度加权，在其上使用 JR。正范围拼接具有连续的一阶权重；零范围表示明确的硬切换。有效拼接范围至多 910 km，防止低空模型查询超出 1000 km。NRLMSISE 为主模型时低空设置不生效，但合法草稿仍保存。该拼接定义为 OrbitForge 的公开约定，仍需 STK 数值核对。
+
+## 原生 Ap 密度接口
+
+`evaluate_atmosphere(NRLMSISE00, input)` 可通过 `AtmosphereInput.daily_ap` 直接使用原生日 Ap，或通过 `ap_history` 使用七项历史数组；二者互斥，均省略时沿用 Kp→日 Ap。显式 Ap 模式不读取 Kp。所有 Ap 值必须有限且在 `[0,400]` 内，JR 拒绝显式 Ap，避免误把 Ap 当成 Kp。
+
+历史数组按模型原生顺序保存：日 Ap、当前三小时 ap、此前 3 / 6 / 9 小时 ap、此前 12–33 小时八项 ap 的均值、此前 36–57 小时八项 ap 的均值。输入归调用方所有，模型按值使用；每次计算的状态独立。日模式设置 `SW[9]=1`，历史模式设置 `SW[9]=-1`，即使七项相同也不能把历史模式简化为日模式。原生定义见[原作者接口](https://git.linta.de/~brodo/nrlmsise-00.git/plain/nrlmsise-00.h?id=bc9a2feba4344e74201281e563332688a4d09cc3)。
+
+```python
+inputs = of.AtmosphereInput()
+inputs.utc = of.UtcDateTime(2000, 2, 29, 12, 30, 0)
+inputs.geodetic = (0.4, 0.6, 400_000)  # 经度、大地纬度、椭球高；rad、rad、m
+inputs.f107, inputs.f107_average = 150, 150
+inputs.ap_history = (40, 400, 100, 50, 20, 7.125, 3.75)
+density = of.evaluate_atmosphere(of.AtmosphereModel.NRLMSISE00, inputs)
+```
+
+这个入口用于独立密度计算及后续空间天气 Provider 装配；调用方须提供与查询 UTC 对应的完整窗口，接口不读取文件、不补齐缺值。当前 `DragSettings`、`evaluate_drag` 和 HPOP 传播仍使用手动常量 Kp，尚未把历史 Ap 接入轨道传播或桌面文件选择；项目格式仍为 v19。本增量不宣称完成 STK 的天气文件模式。
 
 ## 数据与持久化
 

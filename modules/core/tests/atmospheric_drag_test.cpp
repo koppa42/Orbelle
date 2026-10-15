@@ -10,6 +10,7 @@
 #include <orbitforge/core/propagation/hpop.hpp>
 #include <orbitforge/core/propagation/state_provider.hpp>
 #include <sstream>
+#include <vector>
 
 using namespace orbitforge::core;
 namespace {
@@ -392,4 +393,98 @@ TEST(AtmosphericDrag, RequiresUtcEopSunAndDeclaredApparentCoverageAndCancellatio
                  std::runtime_error);
     EXPECT_EQ(provider->state_at(target).position_m, fresh->state_at(target).position_m);
     EXPECT_THROW((void)provider->state_at(Epoch{172801000000000}), std::out_of_range);
+}
+
+TEST(AtmosphericDrag, NativeDailyAndHistoricalApMatchIndependentAuthorGtd7d) {
+    std::ifstream source(ORBITFORGE_NRLMSISE_AP_REFERENCE);
+    ASSERT_TRUE(source);
+    std::string line;
+    std::size_t count = 0;
+    double max_relative = 0;
+    while (std::getline(source, line)) {
+        if (line.empty() || line[0] == '#')
+            continue;
+        SCOPED_TRACE(line);
+        std::istringstream row(line);
+        AtmosphereInput input;
+        double seconds, density, temperature, exospheric;
+        int history;
+        std::array<double, 7> ap{};
+        ASSERT_TRUE(row >> input.utc.year >> input.utc.month >> input.utc.day >> seconds >>
+                    input.geodetic.height_m >> input.geodetic.latitude_rad >>
+                    input.geodetic.longitude_rad >> input.solar_hour_angle_rad >> input.f107 >>
+                    input.f107_average >> history);
+        for (auto &value : ap)
+            ASSERT_TRUE(row >> value);
+        ASSERT_TRUE(row >> density >> temperature >> exospheric);
+        if (seconds == 86400) {
+            input.utc.hour = 23;
+            input.utc.minute = 59;
+            input.utc.second = 60;
+        } else {
+            input.utc.hour = static_cast<int>(seconds) / 3600;
+            input.utc.minute = static_cast<int>(seconds) % 3600 / 60;
+            input.utc.second = static_cast<int>(seconds) % 60;
+        }
+        // Inactive Kp must not be converted, even as a default argument expression.
+        input.kp = std::numeric_limits<double>::quiet_NaN();
+        if (history)
+            input.ap_history = ap;
+        else
+            input.daily_ap = ap[0];
+        const auto actual = evaluate_atmosphere(AtmosphereModel::nrlmsise00, input);
+        max_relative = std::max(max_relative, std::abs(actual.density_kg_m3 / density - 1));
+        EXPECT_NEAR(actual.density_kg_m3, density, density * 2e-10);
+        EXPECT_NEAR(actual.temperature_k, temperature, 1e-7);
+        EXPECT_NEAR(actual.exospheric_temperature_k, exospheric, 1e-7);
+        ++count;
+    }
+    EXPECT_EQ(count, 1056u);
+    std::cout << "NRLMSISE native/history Ap max relative density error: " << max_relative << '\n';
+}
+
+TEST(AtmosphericDrag, ExplicitApModesAreDistinctValidatedAndLocalToEachCall) {
+    AtmosphereInput input;
+    input.geodetic = {.4, .6, 400000};
+    const auto model = AtmosphereModel::nrlmsise00;
+    const auto manual = evaluate_atmosphere(model, input);
+    input.daily_ap = 15;
+    const auto daily = evaluate_atmosphere(model, input);
+    EXPECT_EQ(daily.density_kg_m3, manual.density_kg_m3);
+    input.ap_history = std::array{15., 15., 15., 15., 15., 15., 15.};
+    EXPECT_THROW((void)evaluate_atmosphere(model, input), std::invalid_argument);
+    input.daily_ap.reset();
+    const auto steady = evaluate_atmosphere(model, input);
+    EXPECT_GT(std::abs(steady.density_kg_m3 / daily.density_kg_m3 - 1), 1e-4);
+    EXPECT_THROW((void)evaluate_atmosphere(AtmosphereModel::jacchia_roberts, input),
+                 std::invalid_argument);
+    auto storm = input;
+    storm.ap_history = std::array{40., 400., 100., 50., 20., 7.125, 3.75};
+    const auto storm_density = evaluate_atmosphere(model, storm).density_kg_m3;
+    EXPECT_NE(storm_density, steady.density_kg_m3);
+    std::vector<std::future<double>> calls;
+    for (int i = 0; i < 16; ++i)
+        calls.push_back(std::async(std::launch::async, [&, i] {
+            return evaluate_atmosphere(model, i % 2 ? storm : input).density_kg_m3;
+        }));
+    for (std::size_t i = 0; i < calls.size(); ++i)
+        EXPECT_EQ(calls[i].get(), i % 2 ? storm_density : steady.density_kg_m3);
+    for (const double bad : {-1., 400.01, std::numeric_limits<double>::infinity(),
+                             std::numeric_limits<double>::quiet_NaN()}) {
+        for (std::size_t i = 0; i < 7; ++i) {
+            auto invalid = input;
+            (*invalid.ap_history)[i] = bad;
+            EXPECT_THROW((void)evaluate_atmosphere(model, invalid), std::invalid_argument);
+        }
+        auto invalid = input;
+        invalid.ap_history.reset();
+        invalid.daily_ap = bad;
+        EXPECT_THROW((void)evaluate_atmosphere(model, invalid), std::invalid_argument);
+    }
+    input.ap_history.reset();
+    input.daily_ap = 0;
+    EXPECT_THROW((void)evaluate_atmosphere(AtmosphereModel::jacchia_roberts, input),
+                 std::invalid_argument);
+    input.daily_ap.reset();
+    EXPECT_EQ(evaluate_atmosphere(model, input).density_kg_m3, manual.density_kg_m3);
 }

@@ -133,7 +133,9 @@ void bind_project(py::module_ &module) {
         .def_readwrite("sun_declination_rad", &core::AtmosphereInput::sun_declination_rad)
         .def_readwrite("f107", &core::AtmosphereInput::f107)
         .def_readwrite("f107_average", &core::AtmosphereInput::f107_average)
-        .def_readwrite("kp", &core::AtmosphereInput::kp);
+        .def_readwrite("kp", &core::AtmosphereInput::kp)
+        .def_readwrite("daily_ap", &core::AtmosphereInput::daily_ap)
+        .def_readwrite("ap_history", &core::AtmosphereInput::ap_history);
     py::class_<core::AtmosphereEvaluation>(module, "AtmosphereEvaluation")
         .def_readonly("density_kg_m3", &core::AtmosphereEvaluation::density_kg_m3)
         .def_readonly("temperature_k", &core::AtmosphereEvaluation::temperature_k)

@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-// C++ adaptation by OrbitForge: local scratch state, SI API, manual daily Ap.
+// C++ adaptation by OrbitForge: local scratch state, SI API, daily or historical Ap.
 #include "../atmosphere_models.hpp"
 #include <algorithm>
 #include <array>
@@ -664,7 +664,11 @@ struct NrlOutput {
     }();
     std::array<int, 24> swc = sw;
     NrlOutput(int doy, double sec, double lat, double lon, double hl, double f107a, double f107,
-              std::array<double, 7> ap) {
+              std::array<double, 7> ap, bool history) {
+        // Native NRLMSISE switch 9 changes the geomagnetic response algorithm.
+        // A constant seven-value array is not equivalent to daily mode.
+        if (history)
+            sw[9] = swc[9] = -1;
 
         this->doy = doy;
         this->sec = sec;
@@ -1606,8 +1610,11 @@ struct NrlOutput {
 };
 } // namespace
 AtmosphereEvaluation nrlmsise00(const AtmosphereInput &input, int doy, double sec) {
-    std::array<double, 7> ap;
-    ap.fill(kp_to_ap(input.kp));
+    std::array<double, 7> ap{};
+    if (input.ap_history)
+        ap = *input.ap_history;
+    else
+        ap[0] = input.daily_ap ? *input.daily_ap : kp_to_ap(input.kp);
     auto hour = 12 + input.solar_hour_angle_rad * 12 / std::numbers::pi;
     if (hour < 0)
         hour += 24;
@@ -1615,7 +1622,7 @@ AtmosphereEvaluation nrlmsise00(const AtmosphereInput &input, int doy, double se
         hour -= 24;
     NrlOutput output(doy, sec, input.geodetic.latitude_rad * 180 / std::numbers::pi,
                      input.geodetic.longitude_rad * 180 / std::numbers::pi, hour,
-                     input.f107_average, input.f107, ap);
+                     input.f107_average, input.f107, ap, input.ap_history.has_value());
     output.gtd7d(input.geodetic.height_m / 1000);
     return {output.densities[TOTAL_MASS], output.temperatures[ALTITUDE],
             output.temperatures[EXOSPHERIC]};

@@ -868,6 +868,8 @@ class AtmosphereInput:
     f107: float
     f107_average: float
     kp: float
+    daily_ap: float | None  # NRLMSISE only; mutually exclusive with ap_history
+    ap_history: Sequence[float] | None  # Seven native Ap values; see atmospheric_drag.md
 
 class AtmosphereEvaluation:
     @property

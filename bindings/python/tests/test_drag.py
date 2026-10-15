@@ -43,6 +43,69 @@ class DragTests(unittest.TestCase):
                 actual = of.evaluate_atmosphere(model, inputs)
                 self.assertAlmostEqual(actual.density_kg_m3 / values[12], 1, delta=2e-10)
 
+    def test_explicit_daily_and_history_ap_match_author_reference(self):
+        rows = (ROOT / "tests/reference/propagators/nrlmsise00_ap.txt").read_text().splitlines()
+        rows = [list(map(float, line.split())) for line in rows if line and not line.startswith("#")]
+        self.assertEqual(len(rows), 1056)
+        for row in rows[::17]:
+            inputs = of.AtmosphereInput()
+            seconds = int(row[3])
+            hour, minute, second = (23, 59, 60) if seconds == 86400 else (
+                seconds // 3600, seconds % 3600 // 60, seconds % 60)
+            inputs.utc = of.UtcDateTime(*map(int, row[:3]), hour, minute, second)
+            inputs.geodetic = (row[6], row[5], row[4])
+            inputs.solar_hour_angle_rad = row[7]
+            inputs.f107, inputs.f107_average = row[8:10]
+            inputs.kp = float("nan")  # Explicit Ap leaves Kp inactive.
+            if row[10]:
+                inputs.ap_history = row[11:18]
+            else:
+                inputs.daily_ap = row[11]
+            result = of.evaluate_atmosphere(of.AtmosphereModel.NRLMSISE00, inputs)
+            self.assertAlmostEqual(result.density_kg_m3 / row[18], 1, delta=2e-10)
+            self.assertAlmostEqual(result.temperature_k, row[19], delta=1e-7)
+            self.assertAlmostEqual(result.exospheric_temperature_k, row[20], delta=1e-7)
+
+    def test_explicit_ap_validation_selection_and_owned_values(self):
+        inputs = of.AtmosphereInput()
+        inputs.geodetic = (.4, .6, 400000)
+        model = of.AtmosphereModel.NRLMSISE00
+        self.assertIsNone(inputs.daily_ap)
+        self.assertIsNone(inputs.ap_history)
+        manual = of.evaluate_atmosphere(model, inputs).density_kg_m3
+        inputs.daily_ap = 15
+        self.assertEqual(of.evaluate_atmosphere(model, inputs).density_kg_m3, manual)
+        history = [15.0] * 7
+        inputs.ap_history = history
+        with self.assertRaises(ValueError):
+            of.evaluate_atmosphere(model, inputs)
+        inputs.daily_ap = None
+        original = of.evaluate_atmosphere(model, inputs).density_kg_m3
+        self.assertNotEqual(original, manual)
+        history[1] = 400
+        returned = inputs.ap_history
+        returned[2] = 400
+        self.assertEqual(inputs.ap_history, [15.0] * 7)
+        self.assertEqual(of.evaluate_atmosphere(model, inputs).density_kg_m3, original)
+        with self.assertRaises(ValueError):
+            of.evaluate_atmosphere(of.AtmosphereModel.JACCHIA_ROBERTS, inputs)
+        for wrong_length in ([1] * 6, [1] * 8):
+            with self.assertRaises(TypeError):
+                inputs.ap_history = wrong_length
+        for bad in (-1, 400.01, float("nan"), float("inf")):
+            for index in range(7):
+                values = [15.0] * 7
+                values[index] = bad
+                inputs.ap_history = values
+                with self.assertRaises(ValueError):
+                    of.evaluate_atmosphere(model, inputs)
+            inputs.ap_history = None
+            inputs.daily_ap = bad
+            with self.assertRaises(ValueError):
+                of.evaluate_atmosphere(model, inputs)
+            inputs.daily_ap = None
+        self.assertEqual(of.evaluate_atmosphere(model, inputs).density_kg_m3, manual)
+
     def test_disabled_drafts_roundtrip_without_data_and_do_not_change_identity(self):
         project = of.Project("Drag drafts", of.Epoch(0), of.Epoch(600 * 10**9))
         drag = of.orbits.DragSettings(cd=2.3, f107=170, kp=4.3, use_apparent_sun_position=True,
