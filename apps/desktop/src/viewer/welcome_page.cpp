@@ -19,7 +19,7 @@ constexpr int narrow_width = 720;
 // on the left keeps the copy and actions legible; narrow pages veil the whole picture.
 class WelcomeBackdrop final : public QWidget {
   public:
-    WelcomeBackdrop() : artwork_(":/orbitforge/startup/star-gazing.png") {}
+    WelcomeBackdrop() : artwork_(":/orbitforge/artwork/orbital-welcome.png") {}
 
   protected:
     void paintEvent(QPaintEvent *) override {
@@ -30,8 +30,8 @@ class WelcomeBackdrop final : public QWidget {
             const auto scale =
                 std::max(width() / double(artwork_.width()), height() / double(artwork_.height()));
             const QSizeF source_size(width() / scale, height() / scale);
-            const QRectF source((artwork_.width() - source_size.width()) * 0.8,
-                                (artwork_.height() - source_size.height()) * 0.4,
+            const QRectF source((artwork_.width() - source_size.width()) * 0.78,
+                                (artwork_.height() - source_size.height()) * 0.15,
                                 source_size.width(), source_size.height());
             painter.drawPixmap(QRectF(rect()), artwork_, source);
         }

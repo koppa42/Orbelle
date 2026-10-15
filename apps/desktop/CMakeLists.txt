@@ -24,7 +24,8 @@ if(ORBITFORGE_WITH_VSG)
         BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
         FILES resources/icons/chevron-down.png
               resources/icons/chevron-left.png resources/icons/chevron-right.png
-              resources/startup/star-gazing.png)
+              resources/startup/star-gazing.png
+              resources/artwork/orbital-welcome.png resources/artwork/data-preparation.png)
     find_package(vsgQt 0.4.0 EXACT CONFIG REQUIRED)
     find_package(rocky 1.1.0 EXACT CONFIG REQUIRED)
     find_package(vsgXchange 1.1.13 EXACT CONFIG REQUIRED)
@@ -66,7 +67,7 @@ if(ORBITFORGE_WITH_VSG)
         add_executable(orbitforge_welcome_tests tests/welcome_page_test.cpp
             src/viewer/welcome_page.cpp src/viewer/workbench_style.cpp)
         qt_add_resources(orbitforge_welcome_tests "welcome_resources" PREFIX "/orbitforge"
-            BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/startup/star-gazing.png)
+            BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/artwork/orbital-welcome.png)
         target_link_libraries(orbitforge_welcome_tests PRIVATE Qt6::Widgets GTest::gtest_main)
         orbitforge_warnings(orbitforge_welcome_tests)
         orbitforge_copy_runtime_dlls(orbitforge_welcome_tests)
@@ -87,7 +88,8 @@ if(ORBITFORGE_WITH_VSG)
             src/viewer/eop_catalog.cpp src/viewer/data_center_dialog.cpp src/viewer/workbench_style.cpp
             src/viewer/initial_data_setup.cpp)
         qt_add_resources(orbitforge_data_center_ui_tests "data_center_icons" PREFIX "/orbitforge"
-            BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/icons/chevron-down.png)
+            BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+            FILES resources/icons/chevron-down.png resources/artwork/data-preparation.png)
         target_compile_definitions(orbitforge_data_center_ui_tests PRIVATE
             ORBITFORGE_TEST_FINALS="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json"
             ORBITFORGE_TEST_TIME="${PROJECT_SOURCE_DIR}/data/samples/time/iers_leap_seconds_2026_07.dat")
