@@ -94,8 +94,9 @@ TEST(Gravity, FullDegreeAndRectangularFieldsMatchIndependentOrekit) {
         EXPECT_EQ(model->acceleration({6378146.3, 0, 0.0}, 2190, order),
                   model->acceleration({6378146.3, 0, -0.0}, 2190, order));
         EXPECT_THROW((void)model->acceleration({7e6, 0, 0}, 2191, order), std::invalid_argument);
-        if (profile == 1)
+        if (profile == 1) {
             EXPECT_THROW((void)model->acceleration({7e6, 0, 0}, 2190, 2160), std::invalid_argument);
+        }
     }
 }
 
