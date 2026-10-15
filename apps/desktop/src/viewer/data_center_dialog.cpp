@@ -1,4 +1,5 @@
 #include "eop_catalog.hpp"
+#include "form_kit.hpp"
 #include "responsive_layout.hpp"
 #include "workbench_spin_box.hpp"
 #include "workbench_style.hpp"
@@ -105,12 +106,13 @@ class DataTreeWidget final : public QTreeWidget {
   protected:
     void drawBranches(QPainter *painter, const QRect &rect,
                       const QModelIndex &index) const override {
-        painter->fillRect(rect, QColor("#171e27"));
+        painter->fillRect(rect, theme::color(theme::panel));
         if (!model()->hasChildren(index))
             return;
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing);
-        painter->setPen(QPen(QColor("#a4b1ca"), 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter->setPen(
+            QPen(theme::color(theme::text_muted), 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         const QPointF center(rect.right() - indentation() / 2.0, rect.center().y());
         const auto points = isExpanded(index)
                                 ? QPolygonF{center + QPointF(-3, -2), center + QPointF(0, 1),
@@ -128,37 +130,38 @@ class DataItemDelegate final : public QStyledItemDelegate {
                const QModelIndex &index) const override {
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing);
-        const auto bounds = option.rect.adjusted(2, 3, -2, -3);
+        // A desktop list row: transparent at rest, a soft wash on hover, and the selected row
+        // marked by an accent wash with a leading stripe.
+        const auto bounds = QRectF(option.rect).adjusted(2, 2, -2, -2);
         const bool selected = option.state & QStyle::State_Selected;
-        const bool hover = option.state & QStyle::State_MouseOver;
-        painter->setPen(option.state & QStyle::State_HasFocus ? QColor("#95cdec")
-                                                              : Qt::transparent);
-        painter->setBrush(QColor(selected ? "#294357" : hover ? "#233341" : "#171e27"));
-        painter->drawRoundedRect(bounds, 7, 7);
+        paint_list_row(painter, option, bounds, theme::color(theme::accent));
         const bool child = index.parent().isValid();
         const auto icon = child ? WorkbenchIcon::database
                           : index.data(Qt::UserRole).toInt() == static_cast<int>(DataProduct::utc)
                               ? WorkbenchIcon::clock
                               : WorkbenchIcon::earth;
-        workbench_icon(icon, QColor(selected ? "#b6def3" : "#8e9ebb"))
-            .paint(painter, QRect(bounds.left() + 12, bounds.top() + 12, 18, 18));
-        const auto left = bounds.left() + 40;
-        const auto width = bounds.right() - left - 8;
+        const auto top = static_cast<int>(bounds.top());
+        workbench_icon(icon, theme::color(selected ? theme::accent_bright
+                                          : child  ? theme::text_muted
+                                                   : theme::accent))
+            .paint(painter, QRect(static_cast<int>(bounds.left()) + 12, top + 11, 16, 16));
+        const auto left = static_cast<int>(bounds.left()) + 38;
+        const auto width = static_cast<int>(bounds.right()) - left - 8;
         const auto lines = index.data().toString().split('\n');
         auto title_font = option.font;
-        title_font.setPixelSize(13);
-        title_font.setWeight(QFont::DemiBold);
-        painter->setFont(title_font);
-        painter->setPen(QColor(selected ? "#eff6fa" : "#d0d9eb"));
-        painter->drawText(QRect(left, bounds.top() + 8, width, 22), Qt::AlignVCenter,
-                          painter->fontMetrics().elidedText(lines.value(0), Qt::ElideRight, width));
-        title_font.setPixelSize(11);
+        title_font.setPixelSize(child ? 13 : 12);
         title_font.setWeight(QFont::Normal);
         painter->setFont(title_font);
-        painter->setPen(QColor(index.data(Qt::UserRole + 1).toBool() ? "#e6c68b"
-                               : selected                            ? "#b7d1e3"
-                                                                     : "#a0b6c8"));
-        painter->drawText(QRect(left, bounds.top() + 32, width, 17), Qt::AlignVCenter,
+        painter->setPen(theme::color(selected ? theme::accent_bright
+                                     : child  ? theme::text
+                                              : theme::text_soft));
+        painter->drawText(QRect(left, top + 6, width, 22), Qt::AlignVCenter,
+                          painter->fontMetrics().elidedText(lines.value(0), Qt::ElideRight, width));
+        title_font.setPixelSize(11);
+        painter->setFont(title_font);
+        painter->setPen(theme::color(index.data(Qt::UserRole + 1).toBool() ? theme::warning
+                                                                           : theme::text_muted));
+        painter->drawText(QRect(left, top + 28, width, 17), Qt::AlignVCenter,
                           painter->fontMetrics().elidedText(lines.value(1), Qt::ElideRight, width));
         painter->restore();
     }
@@ -173,11 +176,13 @@ class PriorityDelegate final : public QStyledItemDelegate {
         const auto bounds = option.rect.adjusted(1, 4, -1, -4);
         const bool selected = option.state & QStyle::State_Selected;
         const bool hover = option.state & QStyle::State_MouseOver;
-        painter->setPen(QColor(selected ? "#91bed6" : "#3a4b5a"));
-        painter->setBrush(QColor(selected ? "#273f50" : hover ? "#233341" : "#222c38"));
-        painter->drawRoundedRect(bounds, 8, 8);
+        painter->setPen(theme::color(selected ? theme::accent : theme::line));
+        painter->setBrush(theme::color(selected ? theme::accent_wash
+                                       : hover  ? theme::accent_hover
+                                                : theme::panel));
+        painter->drawRoundedRect(bounds, 6, 6);
         painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor("#8e9ebb"));
+        painter->setBrush(theme::color(theme::text_muted));
         for (int x = 0; x < 2; ++x)
             for (int y = 0; y < 3; ++y)
                 painter->drawEllipse(
@@ -186,19 +191,19 @@ class PriorityDelegate final : public QStyledItemDelegate {
         font.setPixelSize(14);
         font.setWeight(QFont::DemiBold);
         painter->setFont(font);
-        painter->setPen(QColor("#aed4e8"));
+        painter->setPen(theme::color(theme::accent));
         painter->drawText(QRect(bounds.left() + 33, bounds.top(), 24, bounds.height()),
                           Qt::AlignCenter, QString::number(index.row() + 1));
         const auto lines = index.data().toString().split('\n');
         const auto left = bounds.left() + 72;
         const auto width = bounds.width() - 96;
-        painter->setPen(QColor("#e7edff"));
+        painter->setPen(theme::color(theme::text));
         painter->drawText(QRect(left, bounds.top() + 12, width, 22), Qt::AlignVCenter,
                           lines.value(0));
         font.setPixelSize(12);
         font.setWeight(QFont::Normal);
         painter->setFont(font);
-        painter->setPen(QColor("#aebeca"));
+        painter->setPen(theme::color(theme::text_muted));
         painter->drawText(QRect(left, bounds.top() + 40, width, 20), Qt::AlignVCenter,
                           painter->fontMetrics().elidedText(lines.value(1), Qt::ElideRight, width));
         painter->restore();
@@ -218,7 +223,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     auto *heading = new QVBoxLayout;
-    heading->setContentsMargins(24, 16, 24, 14);
+    heading->setContentsMargins(24, 20, 24, 16);
     heading->setSpacing(6);
     auto *heading_title = new QLabel(QStringLiteral("数据中心"));
     heading_title->setObjectName("panelTitle");
@@ -242,7 +247,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     sidebar->setObjectName("dataSidebar");
     sidebar->setFixedWidth(std::clamp(dialog.width() / 4, 220, 258));
     auto *sidebar_layout = new QVBoxLayout(sidebar);
-    sidebar_layout->setContentsMargins(12, 18, 12, 18);
+    sidebar_layout->setContentsMargins(12, 16, 12, 16);
     sidebar_layout->setSpacing(12);
     auto *inventory_caption = new QLabel(QStringLiteral("数据列表"));
     inventory_caption->setObjectName("dataSidebarCaption");
@@ -291,8 +296,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     panel->setObjectName("dataDetailPanel");
     panel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
     auto *detail_layout = new QVBoxLayout(panel);
-    detail_layout->setContentsMargins(30, 26, 30, 24);
-    detail_layout->setSpacing(18);
+    detail_layout->setContentsMargins(theme::space::page);
+    detail_layout->setSpacing(16);
     panels->addWidget(panel, 1);
     layout->addLayout(panels, 1);
     auto *title = new QLabel;
@@ -324,7 +329,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     auto *priority_panel = new QWidget;
     priority_scroll->setWidget(priority_panel);
     auto *priority_layout = new QVBoxLayout(priority_panel);
-    priority_layout->setContentsMargins(0, 10, 0, 0);
+    priority_layout->setContentsMargins(0, 12, 0, 0);
     priority_layout->setSpacing(12);
     auto *priority_heading = new QHBoxLayout;
     auto *priority_caption = new QLabel(QStringLiteral("计算优先级"));
@@ -387,8 +392,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         auto *widget = new QWidget;
         auto *page_layout = new QVBoxLayout(widget);
-        page_layout->setContentsMargins(0, 24, 0, 0);
-        page_layout->setSpacing(22);
+        page_layout->setContentsMargins(0, 16, 0, 0);
+        page_layout->setSpacing(24);
         scroll->setWidget(widget);
         pages->addTab(scroll, label);
         return page_layout;
@@ -400,9 +405,9 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     auto *facts = new QFrame;
     facts->setObjectName("dataFacts");
     auto *form = new QFormLayout(facts);
-    form->setContentsMargins(22, 22, 22, 22);
+    form->setContentsMargins(theme::space::panel);
     form->setHorizontalSpacing(20);
-    form->setVerticalSpacing(18);
+    form->setVerticalSpacing(16);
     form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     form->setRowWrapPolicy(QFormLayout::WrapLongRows);
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
@@ -432,7 +437,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     acquisition->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
     auto *acquisition_layout = new QVBoxLayout(acquisition);
     acquisition_layout->setContentsMargins(0, 0, 0, 0);
-    acquisition_layout->setSpacing(14);
+    acquisition_layout->setSpacing(12);
     auto *actions = new QHBoxLayout;
     actions->setSpacing(10);
     auto *download = new QPushButton;
@@ -449,30 +454,28 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     file_layout->addWidget(manifest, 0, Qt::AlignLeft);
     actions->addStretch();
     acquisition_layout->addLayout(actions);
-    auto *automatic_row = new QWidget;
-    auto *automatic_layout = new QHBoxLayout(automatic_row);
-    automatic_layout->setContentsMargins(0, 0, 0, 0);
+    // Update and extrapolation settings: two inspector groups, each opened by a switch.
+    settings_layout->setSpacing(0);
+    auto *automatic_row = new FormGroup(QStringLiteral("自动更新"));
+    automatic_row->setProperty("leading", true);
     auto *automatic = new QCheckBox(QStringLiteral("自动下载与更新"));
     automatic->setObjectName("dataAutoUpdate");
     automatic->setChecked(catalog.automatic_updates());
+    make_switch(automatic);
     auto *frequency = new QComboBox;
     frequency->setObjectName("dataUpdateFrequency");
     frequency->setAccessibleName(QStringLiteral("自动检查频率"));
     frequency->addItem(QStringLiteral("每 6 小时"), 6);
     frequency->addItem(QStringLiteral("每 24 小时"), 24);
     frequency->addItem(QStringLiteral("每 7 天"), 168);
-    automatic_layout->addWidget(automatic);
-    automatic_layout->addSpacing(8);
-    automatic_layout->addWidget(frequency);
-    automatic_layout->addStretch();
-    auto *update_title = new QLabel(QStringLiteral("自动更新"));
-    update_title->setObjectName("sectionTitle");
-    settings_layout->addWidget(update_title);
+    frequency->setMaximumWidth(276);
+    automatic_row->form()->addRow(automatic);
+    automatic_row->form()->addRow(QStringLiteral("检查频率"), frequency);
     settings_layout->addWidget(automatic_row);
     auto *schedule = new QLabel;
     schedule->setObjectName("dataUpdateSchedule");
     schedule->setWordWrap(true);
-    settings_layout->addWidget(schedule);
+    automatic_row->form()->addRow(schedule);
     auto *progress = new QProgressBar;
     progress->setObjectName("dataDownloadProgress");
     progress->setTextVisible(false);
@@ -481,16 +484,12 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     overview_layout->addWidget(acquisition);
     overview_layout->addWidget(note);
     overview_layout->addStretch();
-    auto *policy_title = new QLabel(QStringLiteral("覆盖范围之外"));
-    policy_title->setObjectName("sectionTitle");
-    settings_layout->addSpacing(12);
+    auto *policy_title = new FormGroup(QStringLiteral("覆盖范围之外"));
     settings_layout->addWidget(policy_title);
-    auto *extrapolation = new QWidget;
-    auto *extrapolation_layout = new QVBoxLayout(extrapolation);
-    extrapolation_layout->setContentsMargins(0, 0, 0, 0);
-    extrapolation_layout->setSpacing(14);
+    auto *extrapolation = policy_title->body();
     auto *allow = new QCheckBox(QStringLiteral("允许有限外推"));
     allow->setObjectName("allowEopExtrapolation");
+    make_switch(allow);
     auto *days = new WorkbenchSpinBox<QSpinBox>;
     days->setObjectName("eopExtrapolationDays");
     days->setAccessibleName(QStringLiteral("EOP 前后各允许外推的天数"));
@@ -499,20 +498,13 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     days->setRange(1, core::max_eop_extrapolation_days);
     days->setValue(3);
     days->setSuffix(QStringLiteral(" 天"));
-    extrapolation_layout->addWidget(allow);
-    auto *limit_row = new QHBoxLayout;
+    days->setMaximumWidth(160);
+    policy_title->form()->addRow(allow);
     auto *limit_caption = new QLabel(QStringLiteral("前后各最多"));
-    limit_caption->setObjectName("hint");
-    limit_row->addWidget(limit_caption);
-    limit_row->addWidget(days);
-    limit_row->addStretch();
-    extrapolation_layout->addLayout(limit_row);
-    settings_layout->addWidget(extrapolation);
-    auto *extrapolation_note = new QLabel(
+    policy_title->form()->addRow(limit_caption, days);
+    auto *extrapolation_note = policy_title->add_caution(
         QStringLiteral("端点线性估算，距离覆盖时段越远，误差越大。闰秒有效期不会随外推延长。"));
-    extrapolation_note->setObjectName("hint");
-    extrapolation_note->setWordWrap(true);
-    settings_layout->addWidget(extrapolation_note);
+    align_form_labels(policy_title->parentWidget());
     settings_layout->addStretch();
     auto *technical = new QLabel;
     technical->setObjectName("dataInventoryDetails");
@@ -537,7 +529,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     auto *footer_panel = new QWidget;
     footer_panel->setObjectName("dataFooter");
     auto *footer = new QHBoxLayout(footer_panel);
-    footer->setContentsMargins(24, 12, 24, 12);
+    footer->setContentsMargins(theme::space::footer);
     auto *usage = new QLabel(QStringLiteral("打开或重算时检查数据，数据变化后需确认。"));
     usage->setWordWrap(true);
     usage->setObjectName("hint");
@@ -550,7 +542,6 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     footer->addWidget(close);
     layout->addWidget(footer_panel);
     responsive_columns(acquisition, actions, 380);
-    responsive_columns(automatic_row, automatic_layout, 380);
     bool narrow = false, showing_details = false;
     const auto show_panels = [&] {
         sidebar->setVisible(!narrow || !showing_details);

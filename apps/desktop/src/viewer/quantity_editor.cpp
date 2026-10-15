@@ -88,7 +88,8 @@ QuantityEditor::QuantityEditor(Unit display_unit, QWidget *parent)
     setMinimumWidth(130);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     auto *row = new QHBoxLayout(this);
-    row->setContentsMargins(1, 1, 2, 1);
+    // Every single-line input is 28 px tall: the frame border plus the 26 px inner row.
+    row->setContentsMargins(0, 0, 1, 0);
     row->setSpacing(0);
     input_ = new QLineEdit;
     input_->setObjectName("quantityValue");
@@ -101,12 +102,10 @@ QuantityEditor::QuantityEditor(Unit display_unit, QWidget *parent)
     unit_button_->setObjectName("quantityUnit");
     unit_button_->setPopupMode(QToolButton::InstantPopup);
     unit_button_->setFocusPolicy(Qt::StrongFocus);
-    unit_button_->setCursor(Qt::PointingHandCursor);
     unit_button_->setToolTip(QStringLiteral("切换单位并换算数值"));
     menu_ = new QMenu(unit_button_);
     menu_->setObjectName("quantityUnitMenu");
     auto *group = new QActionGroup(menu_);
-    int unit_width = 0;
     for (const auto unit : compatible_units(unit_)) {
         const auto &item = definition(unit);
         auto *action = menu_->addAction(QString::fromUtf8(item.symbol) + "  ·  " +
@@ -114,7 +113,6 @@ QuantityEditor::QuantityEditor(Unit display_unit, QWidget *parent)
         action->setCheckable(true);
         action->setData(static_cast<int>(unit));
         group->addAction(action);
-        unit_width = std::max(unit_width, fontMetrics().horizontalAdvance(unit_symbol(unit)));
         connect(action, &QAction::triggered, this, [this, unit] {
             try {
                 set_unit(unit);
@@ -127,8 +125,8 @@ QuantityEditor::QuantityEditor(Unit display_unit, QWidget *parent)
             }
         });
     }
-    unit_button_->setFixedWidth(std::max(44, unit_width + 24));
     unit_button_->setMenu(menu_);
+    fit_unit_button();
     unit_button_->setVisible(unit_ != Unit::one);
     row->addWidget(unit_button_);
     setFocusProxy(input_);
@@ -259,7 +257,22 @@ void QuantityEditor::refresh_style() {
     style()->polish(this);
     update();
 }
+// Sized from the button's own (stylesheet) font so the longest compatible symbol is never
+// clipped; refitted when the style or font changes after construction.
+void QuantityEditor::fit_unit_button() {
+    const auto metrics = unit_button_->fontMetrics();
+    int widest = 0;
+    for (const auto unit : compatible_units(unit_))
+        widest = std::max(widest, metrics.horizontalAdvance(unit_symbol(unit)));
+    // Stylesheet padding 7 + 17 (menu chevron), the 1 px divider and breathing room. A shared
+    // minimum keeps the unit dividers of common units (s, m, km, m/s) in one column.
+    unit_button_->setFixedWidth(std::max(60, widest + 7 + 17 + 1 + 8));
+}
 bool QuantityEditor::eventFilter(QObject *object, QEvent *event) {
+    if (object == unit_button_ &&
+        (event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange ||
+         event->type() == QEvent::Polish))
+        fit_unit_button();
     if (object == input_ && event->type() == QEvent::KeyPress) {
         const auto key = static_cast<QKeyEvent *>(event)->key();
         if (key == Qt::Key_Up || key == Qt::Key_Down) {

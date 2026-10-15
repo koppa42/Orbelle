@@ -62,6 +62,7 @@ class QuantityEditor final : public QFrame {
     void render();
     void validate_text();
     void refresh_style();
+    void fit_unit_button();
     Unit unit_, base_unit_;
     double stored_ = 0, last_notified_ = 0;
     double minimum_ = -std::numeric_limits<double>::max();

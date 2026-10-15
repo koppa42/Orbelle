@@ -113,9 +113,10 @@ TEST_F(QuantityTest, ResponsivePropertiesPreserveDraftsAndKeepFieldsInsideViewpo
     editor.resize(1120, 620);
     editor.show();
     auto *selector = editor.findChild<QComboBox *>("propertyPageSelector");
+    auto *tabs = editor.findChild<QTabBar *>("propertyPageTabs");
     auto *navigation = editor.findChild<QTreeWidget *>("propertyNavigation");
     auto *state = editor.findChild<QComboBox *>("stateRepresentation");
-    ASSERT_TRUE(selector && navigation && state);
+    ASSERT_TRUE(selector && tabs && navigation && state);
     state->setCurrentIndex(1);
     auto &axis = field(editor, "semiMajorAxis");
     text(axis)->setText("7123.456");
@@ -134,12 +135,19 @@ TEST_F(QuantityTest, ResponsivePropertiesPreserveDraftsAndKeepFieldsInsideViewpo
         settle();
         EXPECT_EQ(editor.width(), width);
         EXPECT_EQ(selector->currentIndex(), page);
-        EXPECT_EQ(selector->isVisible(), width < 680);
+        // Tree beside wide pages, tabs at inspector widths, a selector when narrower.
+        EXPECT_EQ(selector->isVisible(), width < 400);
+        EXPECT_EQ(tabs->isVisible(), width >= 400 && width < 680);
         EXPECT_EQ(navigation->isVisible(), width >= 680);
         for (int index = 0; index < 4; ++index) {
-            selector->setCurrentIndex(index);
+            if (tabs->isVisible())
+                tabs->setCurrentIndex(index);
+            else
+                selector->setCurrentIndex(index);
             settle();
             EXPECT_EQ(navigation->currentItem()->data(0, Qt::UserRole).toInt(), index);
+            EXPECT_EQ(selector->currentIndex(), index);
+            EXPECT_EQ(tabs->currentIndex(), index);
             for (auto *scroll : editor.findChildren<QScrollArea *>())
                 if (scroll->isVisible()) {
                     EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0)
@@ -159,6 +167,7 @@ TEST_F(QuantityTest, ResponsivePropertiesPreserveDraftsAndKeepFieldsInsideViewpo
     settle();
     EXPECT_EQ(selector->currentIndex(), 0);
     EXPECT_FALSE(selector->isEnabled());
+    EXPECT_FALSE(tabs->isEnabled());
     EXPECT_TRUE(editor.findChild<QPushButton *>("applyOrbit")->isVisible());
     editor.set_create_mode(false);
     EXPECT_TRUE(selector->isEnabled());
@@ -253,7 +262,7 @@ TEST_F(QuantityTest, SensorPointingChoicesKeepTargetDraftAndSubmitStableIds) {
     editor.set_sensor(*applied, project, false);
     EXPECT_EQ(angle->unit(), Unit::radian);
     EXPECT_EQ(target->id(), "station-b");
-    EXPECT_EQ(submit->text(), QStringLiteral("应用更改"));
+    EXPECT_EQ(submit->text(), QStringLiteral("应用"));
     applied.reset();
     name->setText("Unsubmitted draft");
     editor.findChild<QPushButton *>("closeSensor")->click();
@@ -585,9 +594,7 @@ TEST_F(QuantityTest, DisplayDurationAndModelDiameterKeepExistingStorageUnits) {
     text(diameter)->setText("17000");
     double applied = 0;
     editor.appearance = [&](int, QString, double km) { applied = km; };
-    for (auto *button : editor.findChildren<QPushButton *>())
-        if (button->text() == QStringLiteral("应用外观"))
-            button->click();
+    editor.findChild<QPushButton *>("applyAppearance")->click();
     EXPECT_DOUBLE_EQ(applied, 17);
 }
 TEST_F(QuantityTest, TrackStylePreviewApplyCustomColorAndObjectSwitchStayIndependent) {

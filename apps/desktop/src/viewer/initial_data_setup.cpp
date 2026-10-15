@@ -1,6 +1,7 @@
 #include "initial_data_setup.hpp"
 #include "eop_catalog.hpp"
 #include "responsive_layout.hpp"
+#include "workbench_theme.hpp"
 #include <QDialog>
 #include <QFormLayout>
 #include <QLabel>
@@ -56,7 +57,7 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
     dialog.setObjectName("initialDataSetupDialog");
     dialog.setWindowTitle(QStringLiteral("OrbitForge · 准备基础数据"));
     auto *layout = new QVBoxLayout(&dialog);
-    layout->setContentsMargins(24, 22, 24, 20);
+    layout->setContentsMargins(theme::space::page);
     layout->setSpacing(16);
     auto *heading = new QLabel(QStringLiteral("首次使用 · 准备基础数据"));
     heading->setObjectName("panelTitle");
@@ -72,8 +73,8 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
     scroll->setWidgetResizable(true);
     auto *content = new QWidget;
     auto *form = new QFormLayout(content);
-    form->setContentsMargins(0, 10, 6, 8);
-    form->setVerticalSpacing(14);
+    form->setContentsMargins(0, 8, 12, 8);
+    form->setVerticalSpacing(12);
     form->setRowWrapPolicy(QFormLayout::WrapLongRows);
     std::vector<QLabel *> states;
     for (auto product : required) {

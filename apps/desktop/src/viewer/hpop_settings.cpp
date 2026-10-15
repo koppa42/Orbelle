@@ -1,6 +1,8 @@
 #include "hpop_settings.hpp"
 #include "eop_catalog.hpp"
+#include "form_kit.hpp"
 #include "quantity_editor.hpp"
+#include "responsive_layout.hpp"
 #include "workbench_style.hpp"
 #include <QCheckBox>
 #include <QComboBox>
@@ -12,6 +14,8 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
+#include <QPainter>
 #include <QPointer>
 #include <QProgressBar>
 #include <QPushButton>
@@ -19,6 +23,7 @@
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStyledItemDelegate>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTimeZone>
@@ -30,6 +35,54 @@
 #include <orbitforge/runtime/ephemeris.hpp>
 
 namespace orbitforge::desktop {
+namespace {
+constexpr int summary_role = Qt::UserRole + 1;
+constexpr int heading_role = Qt::UserRole + 2;
+class NavigationDelegate final : public QStyledItemDelegate {
+  public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {
+        return {160, index.data(heading_role).toBool() ? option.fontMetrics.height() + 14
+                                                       : option.fontMetrics.height() * 2 + 18};
+    }
+    void paint(QPainter *painter, const QStyleOptionViewItem &option,
+               const QModelIndex &index) const override {
+        const QRect row = option.rect.adjusted(2, 1, -2, -1);
+        auto font = option.font;
+        painter->save();
+        if (index.data(heading_role).toBool()) {
+            font.setPixelSize(std::max(10, font.pixelSize() - 1));
+            font.setLetterSpacing(QFont::AbsoluteSpacing, 1);
+            painter->setFont(font);
+            painter->setPen(theme::color(theme::text_muted));
+            painter->drawText(row.adjusted(10, 6, -6, 0), Qt::AlignLeft | Qt::AlignVCenter,
+                              index.data().toString());
+            painter->restore();
+            return;
+        }
+        const bool selected = option.state & QStyle::State_Selected;
+        paint_list_row(painter, option, QRectF(row), theme::color(theme::accent));
+        const QFontMetrics metrics(font);
+        painter->setFont(font);
+        painter->setPen(theme::color(selected ? theme::accent_bright : theme::text));
+        painter->drawText(QRect(row.left() + 12, row.top() + 7, row.width() - 20, metrics.height()),
+                          Qt::AlignLeft | Qt::AlignVCenter, index.data().toString());
+        font.setPixelSize(std::max(10, font.pixelSize() - 1));
+        painter->setFont(font);
+        const QFontMetrics small(font);
+        const auto summary = index.data(summary_role).toString();
+        painter->setPen(theme::color(summary.startsWith(QStringLiteral("未")) ||
+                                             summary.startsWith(QStringLiteral("尚未"))
+                                         ? theme::text_faint
+                                         : theme::text_muted));
+        painter->drawText(QRect(row.left() + 12, row.top() + 9 + metrics.height(), row.width() - 20,
+                                small.height()),
+                          Qt::AlignLeft | Qt::AlignVCenter,
+                          small.elidedText(summary, Qt::ElideRight, row.width() - 20));
+        painter->restore();
+    }
+};
+} // namespace
 bool edit_hpop_settings(
     core::HpopOptions &options, QWidget *parent, const std::vector<runtime::CatalogGravity> &models,
     const std::vector<runtime::CatalogEphemeris> &ephemerides,
@@ -46,20 +99,8 @@ bool edit_hpop_settings(
     QDialog dialog(parent);
     dialog.setObjectName("hpopSettingsDialog");
     dialog.setWindowTitle(QStringLiteral("HPOP · 数值传播"));
-    dialog.setStyleSheet(R"(
-        QFrame#hpopResource { background: #202d39; border: 1px solid #354958; border-radius: 10px; }
-        QLabel#hpopEphemerisStatus { color: #9fb8c9; font-size: 12px; }
-        QLabel#hpopResourceTitle { color: #d9edf7; font-size: 16px; font-weight: 600; }
-        QLabel#hpopResourceBadge { color: #9fcde5; background: #294353; border-radius: 5px; padding: 3px 9px; font-size: 11px; }
-        QFrame[hpopSection="true"] { background: #202b36; border: 1px solid #334654; border-radius: 8px; }
-        QLabel#hpopSectionTitle { color: #d9edf7; font-size: 14px; font-weight: 600; }
-        QLabel#hpopPendingBadge { color: #c7bac8; background: #38323d; border-radius: 5px; padding: 3px 9px; font-size: 11px; }
-        QTabWidget#hpopForceModelTabs QTabBar::tab { background: transparent; padding: 5px 10px; border-bottom-color: #334654; }
-        QTabWidget#hpopForceModelTabs QTabBar::tab:selected { background: #243847; border-bottom-color: #8cbfd5; }
-        QLineEdit[readOnly="true"] { color: #a8bdcd; }
-    )");
     auto *layout = new QVBoxLayout(&dialog);
-    layout->setContentsMargins(24, 22, 24, 20);
+    layout->setContentsMargins(theme::space::page);
     layout->setSpacing(16);
     auto *heading = new QLabel(QStringLiteral("HPOP 轨道传播"));
     heading->setObjectName("panelTitle");
@@ -67,13 +108,27 @@ bool edit_hpop_settings(
     auto *subtitle = new QLabel(QStringLiteral("力模型、积分器与协方差设置"));
     subtitle->setObjectName("hint");
     layout->addWidget(subtitle);
+    // A navigation list with live summaries replaces the two levels of tabs; the tab widgets
+    // keep the pages (and their indices) and show their bars only in narrow windows.
+    auto *columns = new QWidget;
+    auto *body_layout = new QHBoxLayout(columns);
+    body_layout->setContentsMargins(0, 0, 0, 0);
+    body_layout->setSpacing(16);
+    auto *navigation = new QListWidget;
+    navigation->setObjectName("hpopNavigation");
+    navigation->setAccessibleName(QStringLiteral("HPOP 设置页面"));
+    navigation->setItemDelegate(new NavigationDelegate(navigation));
+    navigation->setFixedWidth(196);
+    navigation->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    body_layout->addWidget(navigation);
     auto *tabs = new QTabWidget;
     tabs->setObjectName("hpopSettingsTabs");
-    layout->addWidget(tabs, 1);
+    body_layout->addWidget(tabs, 1);
+    layout->addWidget(columns, 1);
     auto *force_page = new QWidget;
     force_page->setObjectName("hpopForceModelsPage");
     auto *force_layout = new QVBoxLayout(force_page);
-    force_layout->setContentsMargins(0, 10, 0, 0);
+    force_layout->setContentsMargins(0, 0, 0, 0);
     auto *force_tabs = new QTabWidget;
     force_tabs->setObjectName("hpopForceModelTabs");
     force_layout->addWidget(force_tabs);
@@ -85,9 +140,9 @@ bool edit_hpop_settings(
         scroll->setFrameShape(QFrame::NoFrame);
         auto *content = new QWidget;
         auto *form = new QFormLayout(content);
-        form->setContentsMargins(0, 20, 6, 8);
-        form->setHorizontalSpacing(20);
-        form->setVerticalSpacing(16);
+        form->setContentsMargins(0, 4, 12, 8);
+        form->setHorizontalSpacing(12);
+        form->setVerticalSpacing(10);
         form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
         form->setRowWrapPolicy(QFormLayout::WrapLongRows);
         scroll->setWidget(content);
@@ -101,24 +156,31 @@ bool edit_hpop_settings(
         form->addRow(label);
     };
     const auto section = [](QFormLayout *parent_form, const QString &title, const char *name) {
-        auto *frame = new QFrame;
-        frame->setObjectName(name);
-        frame->setProperty("hpopSection", true);
-        auto *form = new QFormLayout(frame);
-        form->setContentsMargins(14, 12, 14, 12);
-        form->setHorizontalSpacing(14);
-        form->setVerticalSpacing(8);
-        form->setRowWrapPolicy(QFormLayout::WrapLongRows);
-        form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-        auto *section_title = new QLabel(title);
-        section_title->setObjectName("hpopSectionTitle");
-        form->addRow(section_title);
-        parent_form->addRow(frame);
-        return form;
+        auto *group = new FormGroup(title, name);
+        parent_form->addRow(group);
+        return group->form();
+    };
+    const auto group_of = [](QFormLayout *form) -> FormGroup * {
+        return form && form->parentWidget()
+                   ? dynamic_cast<FormGroup *>(form->parentWidget()->parentWidget())
+                   : nullptr;
+    };
+    // Explanations sit behind the group's info marker; limitations stay on the page.
+    const auto help = [&](QFormLayout *form, const QString &text) {
+        if (auto *group = group_of(form))
+            group->add_help(text);
+        else
+            note(form, text);
+    };
+    const auto caution = [&](QFormLayout *form, const QString &text) {
+        if (auto *group = group_of(form))
+            group->add_caution(text);
+        else
+            form->addRow(caution_label(text));
     };
     auto *gravity_page = page(force_tabs, QStringLiteral("引力"), "hpopGravityPage");
     gravity_page->setVerticalSpacing(12);
-    gravity_page->setContentsMargins(0, 12, 6, 8);
+    gravity_page->setContentsMargins(0, 4, 12, 8);
     auto *gravity =
         section(gravity_page, QStringLiteral("中心天体引力"), "hpopCentralGravitySection");
     auto *model = new QComboBox;
@@ -161,8 +223,22 @@ bool edit_hpop_settings(
     order->setObjectName("hpopGravityOrder");
     order->setRange(0, degree->value());
     order->setValue(options.gravity_order);
-    gravity->addRow(QStringLiteral("最大阶 Degree"), degree);
-    gravity->addRow(QStringLiteral("最大次 Order"), order);
+    // Truncation is read as one quantity ("8 × 8"), so degree and order share a row.
+    degree->setAccessibleName(QStringLiteral("最大阶 Degree"));
+    order->setAccessibleName(QStringLiteral("最大次 Order"));
+    degree->setToolTip(QStringLiteral("最大阶 Degree"));
+    order->setToolTip(QStringLiteral("最大次 Order"));
+    auto *truncation = new QWidget;
+    auto *truncation_layout = new QHBoxLayout(truncation);
+    truncation_layout->setContentsMargins(0, 0, 0, 0);
+    truncation_layout->setSpacing(8);
+    truncation_layout->addWidget(degree, 1);
+    auto *times = new QLabel(QStringLiteral("×"));
+    times->setObjectName("muted");
+    truncation_layout->addWidget(times);
+    truncation_layout->addWidget(order, 1);
+    truncation->setMaximumWidth(276);
+    gravity->addRow(QStringLiteral("阶 × 次"), truncation);
     QObject::connect(degree, &QSpinBox::valueChanged, &dialog,
                      [order](int value) { order->setMaximum(value); });
     const auto update_gravity = [&] {
@@ -181,11 +257,11 @@ bool edit_hpop_settings(
     auto *gravity_status = new QLabel;
     gravity_status->setObjectName("hpopGravityStatus");
     gravity_status->setWordWrap(true);
-    gravity->addRow(gravity_status);
+    gravity->addRow(QString{}, gravity_status);
     auto *gravity_progress = new QProgressBar;
     gravity_progress->setObjectName("hpopGravityProgress");
     gravity_progress->hide();
-    gravity->addRow(gravity_progress);
+    gravity->addRow(QString{}, gravity_progress);
     auto *gravity_actions = new QWidget;
     auto *gravity_action_layout = new QHBoxLayout(gravity_actions);
     gravity_action_layout->setContentsMargins(0, 0, 0, 0);
@@ -196,9 +272,9 @@ bool edit_hpop_settings(
     gravity_action_layout->addWidget(download_gravity);
     gravity_action_layout->addWidget(cancel_gravity);
     gravity_action_layout->addStretch();
-    gravity->addRow(gravity_actions);
-    note(gravity, QStringLiteral("文件模型计算支持最高 360 × 360。Order 为 0 时只保留带谐项。"
-                                 "外部重力场可在数据中心导入。"));
+    gravity->addRow(QString{}, gravity_actions);
+    help(gravity, QStringLiteral("截断阶 Degree × 次 Order。文件模型计算支持最高 360 × 360；"
+                                 "次为 0 时只保留带谐项。外部重力场可在数据中心导入。"));
     const auto quantity = [](QFormLayout *form, const QString &label, const char *id, Unit unit,
                              double value, double low, double high) {
         auto *field = new QuantityEditor(unit);
@@ -209,13 +285,13 @@ bool edit_hpop_settings(
         form->addRow(label, field);
         return field;
     };
-    note(gravity, QStringLiteral("当前使用静态重力场，长期变化、固体潮与海洋潮尚未实现。"));
+    caution(gravity, QStringLiteral("当前使用静态重力场；长期变化、固体潮与海洋潮尚未实现。"));
     auto *third = section(gravity_page, QStringLiteral("第三体引力"), "hpopThirdBodySection");
     third->setVerticalSpacing(8);
     auto *resource = new QFrame;
     resource->setObjectName("hpopResource");
     auto *resource_layout = new QVBoxLayout(resource);
-    resource_layout->setContentsMargins(14, 10, 14, 10);
+    resource_layout->setContentsMargins(theme::space::card);
     resource_layout->setSpacing(6);
     auto *resource_header = new QHBoxLayout;
     auto *resource_title = new QLabel(options.ephemeris_model == "de440s"
@@ -290,7 +366,7 @@ bool edit_hpop_settings(
                                       QStringLiteral("来源 Source"),
                                       QStringLiteral("引力参数 GM")});
     table->verticalHeader()->hide();
-    table->verticalHeader()->setDefaultSectionSize(42);
+    table->verticalHeader()->setDefaultSectionSize(36);
     table->setSelectionBehavior(QAbstractItemView::SelectRows);
     table->setSelectionMode(QAbstractItemView::SingleSelection);
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -475,7 +551,7 @@ bool edit_hpop_settings(
         }
     });
     table->selectRow(0);
-    note(third,
+    help(third,
          QStringLiteral(
              "位置星历：DE440s。Cb file 读取文件中的 Gm / SystemGm；火星与外行星使用系统质心。"));
     const auto pending = [&](QTabWidget *owner, const QString &title, const char *name,
@@ -493,7 +569,13 @@ bool edit_hpop_settings(
     auto *drag_use = new QCheckBox(QStringLiteral("使用大气阻力 Use Drag"));
     drag_use->setObjectName("hpopUseDrag");
     drag_use->setChecked(options.drag.enabled);
+    make_switch(drag_use);
     drag_page->addRow(drag_use);
+    auto *drag_off =
+        new QLabel(QStringLiteral("未启用。开启后设置阻力系数、大气密度、太阳通量与地磁。"));
+    drag_off->setObjectName("hint");
+    drag_off->setWordWrap(true);
+    drag_page->addRow(drag_off);
     auto *drag_model = section(drag_page, QStringLiteral("球形阻力模型"), "hpopDragModelSection");
     auto *drag_type = new QComboBox;
     drag_type->setObjectName("hpopDragType");
@@ -518,7 +600,7 @@ bool edit_hpop_settings(
     auto *drag_blend = quantity(drag_density, QStringLiteral("拼接范围"), "hpopDragBlendingRange",
                                 Unit::metre, options.drag.blending_range_m, 0, 1000000);
     drag_blend->set_unit(Unit::kilometre);
-    note(drag_density,
+    help(drag_density,
          QStringLiteral("Jacchia–Roberts：90–2500 km；NRLMSISE-00：0–1000 km。"
                         "低空模型在 90 km 以上的指定范围内平滑拼接；高度使用 WGS84 精确大地高。"));
     auto *drag_weather =
@@ -534,22 +616,28 @@ bool edit_hpop_settings(
                  options.drag.f107_average, 1e-9, 1000);
     auto *drag_kp = quantity(drag_weather, QStringLiteral("地磁指数 Kp"), "hpopDragKp", Unit::one,
                              options.drag.kp, 0, 9);
-    note(drag_weather,
+    help(drag_weather,
          QStringLiteral("通量与 Kp 在传播期间保持所填常量。NRLMSISE-00 将 Kp 转换为每日 Ap，"
                         "包含异常氧的阻力有效密度。天气文件与历史 Ap 模式尚未接入。"));
     auto *drag_sun = section(drag_page, QStringLiteral("太阳位置与计算数据"), "hpopDragSunSection");
     auto *drag_apparent = new QCheckBox(QStringLiteral("使用地心视太阳位置 (LT+S)"));
     drag_apparent->setObjectName("hpopDragApparentSun");
     drag_apparent->setChecked(options.drag.use_apparent_sun_position);
-    drag_sun->addRow(drag_apparent);
+    drag_sun->addRow(QString{}, drag_apparent);
     auto *drag_resource = new QLabel;
     drag_resource->setObjectName("hpopDragEphemerisStatus");
     drag_resource->setWordWrap(true);
-    drag_sun->addRow(drag_resource);
+    drag_sun->addRow(QString{}, drag_resource);
     const auto refresh_drag_resource = [&] {
         const bool available = std::any_of(
             installed_ephemerides.begin(), installed_ephemerides.end(),
             [&](const auto &entry) { return entry.selection == options.ephemeris_model; });
+        if (auto *group = group_of(drag_sun)) {
+            group->set_summary(available ? QStringLiteral("星历就绪")
+                                         : QStringLiteral("星历未就绪"));
+            if (!available)
+                group->set_expanded(true);
+        }
         drag_resource->setText(available
                                    ? QStringLiteral("位置星历：%1")
                                          .arg(QString::fromStdString(options.ephemeris_model))
@@ -559,7 +647,7 @@ bool edit_hpop_settings(
     auto *drag_manage = new QPushButton(QStringLiteral("管理太阳系星历…"));
     drag_manage->setObjectName("hpopDragManageEphemerides");
     drag_manage->setVisible(static_cast<bool>(manage_ephemerides));
-    drag_sun->addRow(drag_manage);
+    drag_sun->addRow(QString{}, drag_manage);
     std::function<void()> refresh_srp_resource;
     QObject::connect(drag_manage, &QPushButton::clicked, &dialog, [&] {
         if (manage_ephemerides) {
@@ -570,12 +658,18 @@ bool edit_hpop_settings(
                 refresh_srp_resource();
         }
     });
-    note(drag_sun, QStringLiteral("阻力需要覆盖传播区间的 UTC、EOP 和太阳星历。启用视太阳后，星历"
+    help(drag_sun, QStringLiteral("阻力需要覆盖传播区间的 UTC、EOP 和太阳星历。启用视太阳后，星历"
                                   "还须覆盖起点之前 600 秒；关闭时使用几何太阳。"));
+    if (auto *group = group_of(drag_sun))
+        group->set_collapsible(false);
     const auto update_drag = [&] {
         const bool enabled = drag_use->isChecked();
-        for (auto *form : {drag_model, drag_density, drag_weather, drag_sun})
+        // A switched-off model folds away to one line instead of a page of inactive fields.
+        for (auto *form : {drag_model, drag_density, drag_weather, drag_sun}) {
             form->parentWidget()->setEnabled(enabled);
+            group_of(form)->setVisible(enabled);
+        }
+        drag_off->setVisible(!enabled);
         const bool jr = density_model->currentIndex() == 0;
         low_density->setEnabled(enabled && jr);
         drag_blend->setEnabled(enabled && jr && low_density->currentIndex() == 1);
@@ -589,7 +683,12 @@ bool edit_hpop_settings(
     auto *srp_use = new QCheckBox(QStringLiteral("使用太阳辐射压 Use SRP"));
     srp_use->setObjectName("hpopUseSrp");
     srp_use->setChecked(options.srp.enabled);
+    make_switch(srp_use);
     srp_page->addRow(srp_use);
+    auto *srp_off = new QLabel(QStringLiteral("未启用。开启后设置光压系数、阴影模型与太阳常数。"));
+    srp_off->setObjectName("hint");
+    srp_off->setWordWrap(true);
+    srp_page->addRow(srp_off);
     auto *srp_model = section(srp_page, QStringLiteral("球形光压模型"), "hpopSrpModelSection");
     auto *srp_type = new QComboBox;
     srp_type->setObjectName("hpopSrpType");
@@ -614,11 +713,11 @@ bool edit_hpop_settings(
     srp_moon->setObjectName("hpopSrpMoonShadow");
     srp_moon->setChecked(options.srp.moon_shadow);
     srp_shadow_section->addRow(QStringLiteral("遮挡天体"), srp_earth);
-    srp_shadow_section->addRow(srp_moon);
+    srp_shadow_section->addRow(QString{}, srp_moon);
     auto *srp_altitude = quantity(
         srp_shadow_section, QStringLiteral("地球大气等效高度"), "hpopSrpAtmosphericAltitude",
         Unit::metre, options.srp.atmospheric_altitude_m, 0, std::numeric_limits<double>::max());
-    note(srp_shadow_section, QStringLiteral("双锥按日面可见比例缩放光压，包含半影、本影与环食。"
+    help(srp_shadow_section, QStringLiteral("双锥按日面可见比例缩放光压，包含半影、本影与环食。"
                                             "地月遮挡按并集计算。当前采用球形轮廓；大气高度增加"
                                             "地球遮挡半径，不计算折射或衰减。"));
     auto *srp_sun = section(srp_page, QStringLiteral("太阳位置与模型常数"), "hpopSrpSunSection");
@@ -629,7 +728,7 @@ bool edit_hpop_settings(
     auto *srp_resource = new QLabel;
     srp_resource->setObjectName("hpopSrpEphemerisStatus");
     srp_resource->setWordWrap(true);
-    srp_sun->addRow(srp_resource);
+    srp_sun->addRow(QString{}, srp_resource);
     refresh_srp_resource = [&] {
         const bool ready = std::any_of(
             installed_ephemerides.begin(), installed_ephemerides.end(),
@@ -643,7 +742,7 @@ bool edit_hpop_settings(
     auto *srp_manage = new QPushButton(QStringLiteral("在数据中心管理星历"));
     srp_manage->setObjectName("hpopSrpManageEphemerides");
     srp_manage->setVisible(static_cast<bool>(manage_ephemerides));
-    srp_sun->addRow(srp_manage);
+    srp_sun->addRow(QString{}, srp_manage);
     QObject::connect(srp_manage, &QPushButton::clicked, manage, &QToolButton::click);
     QObject::connect(manage, &QToolButton::clicked, &dialog, refresh_srp_resource);
     QObject::connect(manage, &QToolButton::clicked, &dialog, refresh_drag_resource);
@@ -670,13 +769,20 @@ bool edit_hpop_settings(
                  std::numeric_limits<double>::max());
     for (auto *field : {srp_distance, srp_sun_radius, srp_earth_radius, srp_moon_radius})
         field->set_unit(Unit::kilometre);
-    note(srp_page, QStringLiteral("视太阳位置、椭球轮廓与 STK Boundary Mitigation 尚未实现。"
-                                  "阴影边界附近应检查减小最大步长后的轨迹收敛。"));
+    // Physical constants rarely change: the group starts folded behind a summary.
+    if (auto *group = group_of(srp_sun)) {
+        group->set_summary(QStringLiteral("几何太阳 · 标准常数"));
+        group->set_collapsible(false);
+    }
+    caution(srp_page, QStringLiteral("视太阳位置、椭球轮廓与 STK Boundary Mitigation 尚未实现。"
+                                     "阴影边界附近应检查减小最大步长后的轨迹收敛。"));
     const auto update_srp = [&] {
         const bool enabled = srp_use->isChecked(), shadows = srp_shadow->currentIndex() != 0;
-        srp_model->parentWidget()->setEnabled(enabled);
-        srp_shadow_section->parentWidget()->setEnabled(enabled);
-        srp_sun->parentWidget()->setEnabled(enabled);
+        for (auto *form : {srp_model, srp_shadow_section, srp_sun}) {
+            form->parentWidget()->setEnabled(enabled);
+            group_of(form)->setVisible(enabled);
+        }
+        srp_off->setVisible(!enabled);
         srp_earth->setEnabled(shadows);
         srp_moon->setEnabled(shadows);
         srp_altitude->setEnabled(shadows && srp_earth->isChecked());
@@ -691,7 +797,9 @@ bool edit_hpop_settings(
     pending(force_tabs, QStringLiteral("其他"), "hpopAdditionalPage",
             QStringLiteral("附加力模型尚未接入 HPOP。"),
             QStringLiteral("地球反照与热辐射、相对论、卫星质量及自定义力模型将集中在此配置。"));
-    auto *integration = page(tabs, QStringLiteral("积分器"), "hpopIntegratorPage");
+    auto *integration_page = page(tabs, QStringLiteral("积分器"), "hpopIntegratorPage");
+    auto *integration =
+        section(integration_page, QStringLiteral("积分方法"), "hpopIntegratorMethodSection");
     auto *method = new QComboBox;
     method->setObjectName("hpopIntegrator");
     method->addItems({QStringLiteral("RKF78 · 自适应步长"), QStringLiteral("RK4 · 固定步长")});
@@ -700,8 +808,8 @@ bool edit_hpop_settings(
     auto *adaptive_widget = new QWidget;
     auto *adaptive = new QFormLayout(adaptive_widget);
     adaptive->setContentsMargins(0, 0, 0, 0);
-    adaptive->setVerticalSpacing(16);
-    adaptive->setHorizontalSpacing(20);
+    adaptive->setVerticalSpacing(10);
+    adaptive->setHorizontalSpacing(12);
     adaptive->setRowWrapPolicy(QFormLayout::WrapLongRows);
     adaptive->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     auto *minimum = quantity(adaptive, QStringLiteral("最小步长"), "hpopMinStep", Unit::second,
@@ -727,16 +835,121 @@ bool edit_hpop_settings(
     };
     QObject::connect(method, &QComboBox::currentIndexChanged, &dialog, update_method);
     update_method();
-    note(integration, QStringLiteral("输出采样间隔独立设置。容差约束单步数值误差，不代表轨道预报的"
+    help(integration, QStringLiteral("输出采样间隔独立设置。容差约束单步数值误差，不代表轨道预报的"
                                      "实际精度。RK4 不进行误差控制。"));
+    auto *stop = section(integration_page, QStringLiteral("停止条件"), "hpopStopSection");
     auto *altitude =
-        quantity(integration, QStringLiteral("最低地心高度"), "hpopMinimumAltitude", Unit::metre,
+        quantity(stop, QStringLiteral("最低地心高度"), "hpopMinimumAltitude", Unit::metre,
                  options.minimum_altitude_m, 0, std::numeric_limits<double>::max());
-    note(integration, QStringLiteral("高度相对所选重力场参考球面；积分中低于此高度会停止并报错。"));
+    help(stop, QStringLiteral("高度相对所选重力场参考球面；积分中低于此高度会停止并报错。"));
     pending(
         tabs, QStringLiteral("协方差"), "hpopCovariancePage",
         QStringLiteral("协方差传播尚未实现，当前只计算确定性轨迹。"),
         QStringLiteral("初始 6 × 6 矩阵、参考系、独立重力截断与 consider 参数将集中在此配置。"));
+    // Navigation: force models and numerics, each with a live summary of the current draft so
+    // the whole configuration reads at a glance.
+    struct Destination {
+        QListWidgetItem *item;
+        int outer, inner;
+    };
+    std::vector<Destination> destinations;
+    const auto heading_item = [&](const QString &text) {
+        auto *item = new QListWidgetItem(text, navigation);
+        item->setData(heading_role, true);
+        item->setFlags(Qt::NoItemFlags);
+    };
+    const auto entry = [&](const QString &text, int outer, int inner) {
+        auto *item = new QListWidgetItem(text, navigation);
+        destinations.push_back({item, outer, inner});
+        return item;
+    };
+    heading_item(QStringLiteral("力模型"));
+    auto *gravity_item = entry(QStringLiteral("引力"), 0, 0);
+    auto *drag_item = entry(QStringLiteral("阻力"), 0, 1);
+    auto *srp_item = entry(QStringLiteral("太阳辐射压"), 0, 2);
+    auto *other_item = entry(QStringLiteral("其他"), 0, 3);
+    heading_item(QStringLiteral("数值"));
+    auto *integrator_item = entry(QStringLiteral("积分器"), 1, -1);
+    auto *covariance_item = entry(QStringLiteral("协方差"), 2, -1);
+    const auto value_text = [](QuantityEditor *field) {
+        const auto *input = field->findChild<QLineEdit *>("quantityValue");
+        return input ? input->text() : QString{};
+    };
+    const auto part = [](const QComboBox *box, int index) {
+        const auto parts = box->currentText().split(QStringLiteral(" · "));
+        return parts.value(std::min<int>(index, static_cast<int>(parts.size()) - 1));
+    };
+    const auto refresh_summaries = [&] {
+        auto gravity_text =
+            model->currentIndex() == 1
+                ? QStringLiteral("点质量")
+                : part(model, 0) +
+                      QStringLiteral(" · %1 × %2").arg(degree->value()).arg(order->value());
+        const auto bodies = std::count_if(fields.begin(), fields.end(),
+                                          [](const auto &row) { return row.enabled->isChecked(); });
+        if (bodies > 0)
+            gravity_text += QStringLiteral(" · 第三体 %1").arg(bodies);
+        gravity_item->setData(summary_role, gravity_text);
+        drag_item->setData(summary_role, drag_use->isChecked()
+                                             ? density_model->currentText() +
+                                                   QStringLiteral(" · Cd ") + value_text(drag_cd)
+                                             : QStringLiteral("未启用"));
+        srp_item->setData(summary_role,
+                          srp_use->isChecked()
+                              ? part(srp_shadow, 1) + QStringLiteral(" · Cr ") + value_text(srp_cr)
+                              : QStringLiteral("未启用"));
+        other_item->setData(summary_role, QStringLiteral("尚未实现"));
+        integrator_item->setData(summary_role, method->currentIndex() == 0
+                                                   ? part(method, 0) +
+                                                         QStringLiteral(" · 相对容差 ") +
+                                                         value_text(relative)
+                                                   : part(method, 0) + QStringLiteral(" · 步长 ") +
+                                                         value_text(fixed) + QStringLiteral(" s"));
+        covariance_item->setData(summary_role, QStringLiteral("尚未实现"));
+    };
+    for (auto *box : {model, density_model, srp_shadow, method})
+        QObject::connect(box, &QComboBox::currentIndexChanged, &dialog, refresh_summaries);
+    for (auto *spin : {degree, order})
+        QObject::connect(spin, &QSpinBox::valueChanged, &dialog, refresh_summaries);
+    for (auto *check : {drag_use, srp_use})
+        QObject::connect(check, &QCheckBox::toggled, &dialog, refresh_summaries);
+    for (auto &row : fields)
+        QObject::connect(row.enabled, &QCheckBox::toggled, &dialog, refresh_summaries);
+    for (auto *field : {drag_cd, srp_cr, relative, fixed})
+        QObject::connect(field->findChild<QLineEdit *>("quantityValue"), &QLineEdit::textChanged,
+                         &dialog, refresh_summaries);
+    refresh_summaries();
+    QObject::connect(navigation, &QListWidget::currentItemChanged, &dialog,
+                     [&](QListWidgetItem *item) {
+                         for (const auto &destination : destinations)
+                             if (destination.item == item) {
+                                 tabs->setCurrentIndex(destination.outer);
+                                 if (destination.inner >= 0)
+                                     force_tabs->setCurrentIndex(destination.inner);
+                             }
+                     });
+    const auto sync_navigation = [&] {
+        // Values set programmatically do not emit edits; refresh whenever the page changes.
+        refresh_summaries();
+        for (const auto &destination : destinations)
+            if (destination.outer == tabs->currentIndex() &&
+                (destination.inner < 0 || destination.inner == force_tabs->currentIndex())) {
+                const QSignalBlocker block(navigation);
+                navigation->setCurrentItem(destination.item);
+            }
+    };
+    QObject::connect(tabs, &QTabWidget::currentChanged, &dialog, sync_navigation);
+    QObject::connect(force_tabs, &QTabWidget::currentChanged, &dialog, sync_navigation);
+    sync_navigation();
+    // Narrow windows give the width to the fields and fall back to the tab bars.
+    new WidthObserver(&dialog,
+                      [navigation, tabs, force_tabs, mode = WidthMode{}](int width) mutable {
+                          const bool narrow = mode.narrow(width, 620);
+                          navigation->setVisible(!narrow);
+                          tabs->tabBar()->setVisible(narrow);
+                          force_tabs->tabBar()->setVisible(narrow);
+                      });
+    align_form_labels(&dialog);
     auto *error = new QLabel;
     error->setObjectName("errorText");
     error->setWordWrap(true);
@@ -1027,6 +1240,7 @@ bool edit_hpop_settings(
             }
             error->setText(QString::fromUtf8(e.what()));
             error->show();
+            reveal(validation_field);
             if (scroll)
                 scroll->ensureWidgetVisible(validation_field);
             validation_field->setFocus(Qt::OtherFocusReason);

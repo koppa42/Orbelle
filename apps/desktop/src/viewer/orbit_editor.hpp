@@ -10,6 +10,7 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QComboBox;
+class QTabBar;
 class QCheckBox;
 class QTreeWidget;
 class QStackedWidget;
@@ -76,6 +77,7 @@ class OrbitEditor final : public QWidget {
     bool create_mode_ = false, orbit_busy_ = false, model_busy_ = false;
     QTreeWidget *navigation_ = nullptr;
     QComboBox *compact_navigation_ = nullptr;
+    QTabBar *page_tabs_ = nullptr;
     QLineEdit *object_ = nullptr;
     QComboBox *propagator_ = nullptr, *reference_frame_ = nullptr;
     QLabel *anomaly_label_ = nullptr, *state_title_ = nullptr;
@@ -94,6 +96,12 @@ class OrbitEditor final : public QWidget {
     QLineEdit *model_path_ = nullptr;
     QuantityEditor *model_diameter_ = nullptr;
     QPushButton *apply_model_ = nullptr;
+    // Last values handed to the workbench; the 3D page's single Apply submits only changes.
+    bool applied_track_3d_ = true;
+    int applied_model_kind_ = 0;
+    QString applied_model_path_;
+    double applied_model_diameter_km_ = 1000;
+    void apply_appearance_page();
     QLabel *model_message_ = nullptr;
     QComboBox *track_extent_ = nullptr;
     TrackStyleEditor *track_style_ = nullptr;
