@@ -81,6 +81,12 @@ int main(int argc, char **argv) try {
     const auto resource = of::runtime::load_gravity(gravity_file);
     if (resource->info().degree != 2 || resource->info().sha256.size() != 64)
         return 9;
+    const auto tide = of::core::solid_tide_corrections(
+        resource->info(), {of::core::SolidTideMode::permanent, false}, 0, 0);
+    if (tide.size() != 1 || tide.front().c >= 0 ||
+        resource->acceleration({7e6, 0, 0}, 0, 0, tide) ==
+            resource->acceleration({7e6, 0, 0}, 0, 0))
+        return 12;
     numerical.hpop.gravity_model = "custom";
     auto gravity_edit = reopened.edit();
     gravity_edit.objects().update(satellite, of::objects::SatelliteUpdate{.orbit = numerical});

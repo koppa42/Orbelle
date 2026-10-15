@@ -64,12 +64,12 @@ python tools/validation/generate_srp_geometry_reference.py
 
 `srp_geometry.txt` 有 182 个独立均匀视圆盘面积参考，含太阳／地球／月球三圆交与并集、重合、包含、内外切、环食及大小相差悬殊的随机配置。独立 Python 生成器沿垂直截面积分，与生产 Green 定理圆弧积分采用不同方法；照明比例绝对容限 2e-9。Core 另检查距离平方、带符号 Cr、零面积、圆柱、大气高度、奇点、缺月球、无阴影不查询月球，以及光压单独启用时的完整星历覆盖。
 
-`SrpPersistence.*`／`SrpFiles.*` 和 `test_srp.py` 检查共享会话／分析／报告、真实 DE440s 路由、v22 保存与重开、有效参数身份及原分析不可变。桌面 `QuantityTest.HpopSrp*` 检查单位转换、有效遮挡体组合、窄窗、草稿、错误路由及取消；截图使用 `ORBITFORGE_HPOP_UI_CAPTURE`，Windows 原生平台分别设置 `QT_SCALE_FACTOR=1`／`1.5`，日志记录实际窗口 DPR。
+`SrpPersistence.*`／`SrpFiles.*` 和 `test_srp.py` 检查共享会话／分析／报告、真实 DE440s 路由、v23 保存与重开、有效参数身份及原分析不可变。桌面 `QuantityTest.HpopSrp*` 检查单位转换、有效遮挡体组合、窄窗、草稿、错误路由及取消；截图使用 `ORBITFORGE_HPOP_UI_CAPTURE`，Windows 原生平台分别设置 `QT_SCALE_FACTOR=1`／`1.5`，日志记录实际窗口 DPR。
 
 ## 集成与交付
 
 - `HpopProject.*`：真实 ERFA/IERS 帧转换、原生 GCRF 的 EOP 身份、报告/AER 复用、初始历元覆盖与取消。
-- `test_hpop.py`：Python 易用入口、不可变配置、Keplerian 的模型 μ、输出网格无关性、编辑前验证、准备结果独立和 v22 保存/打开。
+- `test_hpop.py`：Python 易用入口、不可变配置、Keplerian 的模型 μ、输出网格无关性、编辑前验证、准备结果独立和 v23 保存/打开。
 - `project-current.orbitforge`：独立二进制固定输入中的 HPOP 参数精确往返；非当前版本拒绝。
 - 安装后的 SDK 消费端：通过公共头文件创建 HPOP、查询并保存/重开，不依赖源码路径。
 - `QuantityTest.HpopSettingsValidateCancelAndRoundTripWithoutApplyingTheOrbit`：配置草稿、阶次约束、错误校验、取消和重开；可用 `ORBITFORGE_HPOP_UI_CAPTURE` 输出宽/窄窗口截图，配合 DPI 设置检查。
@@ -92,6 +92,14 @@ Core 的 `EveryBodyAndSourceActuallyChangesTheIntegratedForce` 将十个天体�
 - `Spice.MovingSunCertifiesHistoryAndGaps` 检查接收端点有数据而过去 Sun 链有洞、过去 Earth 数据缺失但不需要、接收区间内部缺口、反序和策略越界。远距离观测者所需发光时刻越界必须失败；失败后合法查询仍可用。
 - `SolarRadiationPressure.SunMethodsUseStageObserversAndKeepGravityGeometric` 检查三种方法真实进入正反向传播、卫星状态按积分阶段更新、第三体几何引力查询独立；不支持视太阳的 Provider 必须拒绝对应方法。
 - Python `test_srp.py` 使用固定 DE440s：三个方法分别改变轨迹/身份，保存重开精确复现，旧分析保持不变；运动与静止观测者不能返回相同视方向。原有 Orekit 几何基准显式选择 True，不用改基准值掩盖默认方法变化。
-- v22 / OBJS13 独立固定样例保存禁用的 Apparent 草稿；重算 CRC 后的未知太阳方法依然拒绝。安装后 SDK 调用新接口；桌面验证三选项、默认值、键盘切换、宽窄/DPI、保存后重开和取消。
+- v23 / OBJS14 独立固定样例保存禁用的 Apparent 草稿；重算 CRC 后的未知太阳方法依然拒绝。安装后 SDK 调用新接口；桌面验证三选项、默认值、键盘切换、宽窄/DPI、保存后重开和取消。
 
 上述为公开 NAIF 模型及路由验证；STK HPOP 同版本、同配置的轨迹验收仍未完成，遮挡体视位置和 Boundary Mitigation 单独列为待实现。
+
+## 固体潮
+
+计算边界、IERS 常数与容限见[固体潮契约](../architecture/solid_tides.md)。新增 `SolidTides.*` 核验 120 个独立加速度和四条正反向轨迹；`test_solid_tides.py` 检查真实 DE440s/EOP、零直接第三体、三种潮汐模式、报告、来源身份、非活动草稿和保存/重开；当前格式样例包含 Full + 截断的 0/0 草稿。SDK 消费端直接调用加性系数接口。`QuantityTest.HpopSolidTides*` 覆盖三选项、截断联动、键盘、宽窄/DPI、重开/取消及缺少星历时返回引力页。
+
+独立数据生成使用 `tools/validation/orekit/dependencies.json` 中八个已验 SHA-256 的 JAR。将它们加入 Java classpath，运行 `javac -cp <classpath> -d <output> tools/validation/orekit/OrbitForgeSolidTideReference.java`，然后运行 `java -cp <classpath+output> org.orekit.forces.gravity.OrbitForgeSolidTideReference`。classpath 分隔符按平台使用 `;` 或 `:`。生成器置于 Orekit 包名仅为调用其包级 `SolidTidesField`，没有修改或复制该库算法；Love 数来自该固定版本的 IERS_2003 资源，频率/极潮函数明确关闭。
+
+固定文本参考按 `.gitattributes` 保存为 UTF-8 / LF；Windows Java 输出先只规范换行再记录散列，数值文本保持原样。

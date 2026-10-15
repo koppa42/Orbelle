@@ -2036,4 +2036,109 @@ TEST_F(QuantityTest, HpopWeatherFileSwitchesFieldsRetainsDraftsAndReopens) {
     EXPECT_EQ(options, saved);
 }
 
+TEST_F(QuantityTest, HpopSolidTidesModesTruncationResizeReopenAndCancel) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    core::HpopOptions options;
+    runtime::CatalogEphemeris entry;
+    entry.selection = "de440s";
+    entry.info.first = core::Epoch{0};
+    entry.info.last = core::Epoch{86400000000000};
+    EXPECT_EQ(new_hpop_options().solid_tides.mode, core::SolidTideMode::permanent);
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *mode = dialog->findChild<QComboBox *>("hpopSolidTideMode");
+        auto *truncate = dialog->findChild<QCheckBox *>("hpopSolidTideTruncate");
+        ASSERT_TRUE(mode);
+        ASSERT_TRUE(truncate);
+        EXPECT_EQ(mode->count(), 3);
+        EXPECT_EQ(mode->currentIndex(), 0);
+        EXPECT_FALSE(truncate->isEnabled());
+        reveal(mode);
+        mode->setFocus();
+        QKeyEvent next(QEvent::KeyPress, Qt::Key_Down, Qt::NoModifier);
+        QApplication::sendEvent(mode, &next);
+        EXPECT_EQ(mode->currentIndex(), 1);
+        EXPECT_TRUE(truncate->isEnabled());
+        mode->setCurrentIndex(2);
+        truncate->setChecked(false);
+        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        std::cout << "HPOP solid tide device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
+        for (int width : {720, 430}) {
+            dialog->resize(width, width == 720 ? 700 : 620);
+            QEventLoop settled;
+            QTimer::singleShot(60, &settled, &QEventLoop::quit);
+            settled.exec();
+            auto *scroll = dialog->findChild<QScrollArea *>("hpopGravityPage");
+            scroll->ensureWidgetVisible(truncate);
+            QApplication::processEvents();
+            EXPECT_EQ(mode, dialog->findChild<QComboBox *>("hpopSolidTideMode"));
+            EXPECT_EQ(mode->currentIndex(), 2);
+            EXPECT_FALSE(truncate->isChecked());
+            EXPECT_TRUE(mode->isVisible());
+            auto *buttons = dialog->findChild<QDialogButtonBox *>();
+            EXPECT_TRUE(dialog->rect().contains(buttons->geometry()));
+            EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+            if (!capture.isEmpty()) {
+                EXPECT_TRUE(QDir{}.mkpath(capture));
+                EXPECT_TRUE(
+                    dialog->grab().save(capture + QString("/hpop-solid-tides-%1.png").arg(width)));
+            }
+        }
+        mode->setCurrentIndex(0);
+        EXPECT_FALSE(truncate->isEnabled());
+        EXPECT_FALSE(truncate->isChecked());
+        mode->setCurrentIndex(2);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr, {}, {entry}));
+    EXPECT_EQ(options.solid_tides.mode, core::SolidTideMode::full);
+    EXPECT_FALSE(options.solid_tides.truncate_to_gravity);
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *mode = dialog->findChild<QComboBox *>("hpopSolidTideMode");
+        auto *truncate = dialog->findChild<QCheckBox *>("hpopSolidTideTruncate");
+        EXPECT_EQ(mode->currentIndex(), 2);
+        EXPECT_FALSE(truncate->isChecked());
+        mode->setCurrentIndex(1);
+        truncate->setChecked(true);
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr, {}, {entry}));
+    EXPECT_EQ(options, saved);
+}
+
+TEST_F(QuantityTest, HpopSolidTidesMissingEphemerisReturnsToGravityAndTruncatedPointMassNeedsNone) {
+    core::HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *mode = dialog->findChild<QComboBox *>("hpopSolidTideMode");
+        auto *truncate = dialog->findChild<QCheckBox *>("hpopSolidTideTruncate");
+        mode->setCurrentIndex(2);
+        truncate->setChecked(false);
+        auto *outer = dialog->findChild<QTabWidget *>("hpopSettingsTabs");
+        auto *forces = dialog->findChild<QTabWidget *>("hpopForceModelTabs");
+        outer->setCurrentIndex(2);
+        auto *accept = dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok);
+        accept->click();
+        EXPECT_TRUE(dialog->isVisible());
+        EXPECT_EQ(options, saved);
+        EXPECT_EQ(outer->currentIndex(), 0);
+        EXPECT_EQ(forces->currentIndex(), 0);
+        EXPECT_TRUE(
+            dialog->findChild<QLabel *>("errorText")->text().contains(QStringLiteral("固体潮")));
+        truncate->setChecked(true);
+        accept->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr));
+    EXPECT_EQ(options.solid_tides.mode, core::SolidTideMode::full);
+    EXPECT_TRUE(options.solid_tides.truncate_to_gravity);
+    EXPECT_FALSE(options.uses_full_solid_tides());
+}
+
 } // namespace orbitforge::desktop

@@ -16,13 +16,29 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
                                        : options.gravity_model) +
         ";degree=" + std::to_string(options.gravity_degree) +
         ";order=" + std::to_string(options.gravity_order);
-    if ((options.gravity_degree > 0 || options.drag.enabled) && environment.eop)
+    if (options.uses_eop_force() && environment.eop)
         algorithm += ";data=" + application::eop_data_lock(environment.eop->data_info()).sha256();
     if (!options.gravity_model.empty() && environment.gravity)
         algorithm += ";gravity=" +
                      application::DataLock(
                          {gravity_reference(options.gravity_model, environment.gravity->info())})
                          .sha256();
+    if (options.uses_earth_fixed_gravity()) {
+        const auto tides =
+            core::effective_solid_tide_options(options.solid_tides, options.gravity_degree);
+        algorithm +=
+            ";solid-tides=iers2003-anelastic-primary-v1;k20=0.30190;frequency=off;pole=off;mode=" +
+            std::to_string(static_cast<int>(tides.mode)) +
+            ";tide-truncate=" + std::to_string(tides.truncate_to_gravity);
+        if (options.uses_full_solid_tides() && environment.ephemeris) {
+            std::ostringstream constants;
+            constants.imbue(std::locale::classic());
+            constants << std::hexfloat
+                      << ";tide-sun-mu=" << environment.ephemeris->data_info().sun_mu
+                      << ";tide-moon-mu=" << environment.ephemeris->data_info().moon_mu;
+            algorithm += constants.str();
+        }
+    }
     if (options.uses_third_bodies() && environment.ephemeris) {
         std::ostringstream config;
         config.imbue(std::locale::classic());

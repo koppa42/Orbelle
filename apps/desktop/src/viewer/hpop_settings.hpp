@@ -10,6 +10,7 @@ inline core::HpopOptions new_hpop_options() {
     core::HpopOptions options;
     options.gravity_model = "egm2008";
     options.gravity_degree = options.gravity_order = 21;
+    options.solid_tides.mode = core::SolidTideMode::permanent;
     return options;
 }
 // Commits only when the user accepts valid settings. Cancel leaves the draft intact.

@@ -189,6 +189,8 @@ std::string report_input_sha256(const application::Project &project) {
                         body.cb->name = "Cb file"; // Display name is not a calculation input.
                 }
             }
+            options.solid_tides =
+                core::effective_solid_tide_options(options.solid_tides, options.gravity_degree);
             options.srp = core::effective_srp_options(options.srp);
             options.drag = core::effective_drag_options(options.drag);
             if (!options.uses_ephemeris())

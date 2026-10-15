@@ -5,6 +5,7 @@
 #include <orbitforge/core/propagation/atmospheric_drag.hpp>
 #include <orbitforge/core/propagation/gravity.hpp>
 #include <orbitforge/core/propagation/solar_radiation_pressure.hpp>
+#include <orbitforge/core/propagation/solid_tides.hpp>
 #include <orbitforge/core/propagation/state_provider.hpp>
 #include <orbitforge/core/propagation/third_body.hpp>
 #include <string_view>
@@ -27,6 +28,17 @@ struct HpopOptions {
     std::array<ThirdBodyGravity, third_body_count> third_bodies{};
     SrpOptions srp;
     DragOptions drag;
+    SolidTideOptions solid_tides;
+    [[nodiscard]] bool uses_full_solid_tides() const {
+        return solid_tides.mode == SolidTideMode::full &&
+               (!solid_tides.truncate_to_gravity || gravity_degree >= 2);
+    }
+    [[nodiscard]] bool uses_earth_fixed_gravity() const {
+        // None may also remove the permanent component of a zero-tide base field.
+        return gravity_degree > 0 ||
+               (solid_tides.mode != SolidTideMode::none && !solid_tides.truncate_to_gravity);
+    }
+    [[nodiscard]] bool uses_eop_force() const { return uses_earth_fixed_gravity() || drag.enabled; }
     [[nodiscard]] ThirdBodyGravity &third_body(ThirdBody body) {
         return third_bodies.at(static_cast<std::size_t>(body));
     }
@@ -47,12 +59,13 @@ struct HpopOptions {
         return false;
     }
     [[nodiscard]] bool uses_ephemeris() const {
-        return uses_third_bodies() || srp.enabled || drag.enabled;
+        return uses_third_bodies() || srp.enabled || drag.enabled || uses_full_solid_tides();
     }
     [[nodiscard]] std::vector<ThirdBody> required_ephemeris_bodies() const {
         std::vector<ThirdBody> result;
         for (auto body : third_body_list)
             if (third_body(body).enabled || (drag.enabled && body == ThirdBody::sun) ||
+                (uses_full_solid_tides() && (body == ThirdBody::sun || body == ThirdBody::moon)) ||
                 (srp.enabled &&
                  (body == ThirdBody::sun || (body == ThirdBody::moon && srp.moon_shadow &&
                                              srp.shadow_model != SrpShadowModel::none))))

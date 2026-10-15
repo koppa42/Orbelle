@@ -225,6 +225,15 @@ void bind_project(py::module_ &module) {
         .def_readwrite("source", &core::ThirdBodyGravity::source)
         .def_readwrite("user_mu", &core::ThirdBodyGravity::user_mu)
         .def_readwrite("cb", &core::ThirdBodyGravity::cb);
+    py::enum_<core::SolidTideMode>(module, "SolidTideMode")
+        .value("NONE", core::SolidTideMode::none)
+        .value("PERMANENT", core::SolidTideMode::permanent)
+        .value("FULL", core::SolidTideMode::full);
+    py::class_<core::SolidTideOptions>(module, "SolidTideOptions")
+        .def(py::init<>())
+        .def_readwrite("mode", &core::SolidTideOptions::mode)
+        .def_readwrite("truncate_to_gravity", &core::SolidTideOptions::truncate_to_gravity)
+        .def("validate", &core::validate_solid_tide_options);
     py::class_<core::HpopOptions>(module, "HpopOptions")
         .def(py::init<>())
         .def_readwrite("gravity_model", &core::HpopOptions::gravity_model)
@@ -232,6 +241,7 @@ void bind_project(py::module_ &module) {
         .def_readwrite("third_bodies", &core::HpopOptions::third_bodies)
         .def_readwrite("srp", &core::HpopOptions::srp)
         .def_readwrite("drag", &core::HpopOptions::drag)
+        .def_readwrite("solid_tides", &core::HpopOptions::solid_tides)
         .def_readwrite("ephemeris_model", &core::HpopOptions::ephemeris_model)
         .def_readwrite("gravity_degree", &core::HpopOptions::gravity_degree)
         .def_readwrite("gravity_order", &core::HpopOptions::gravity_order)

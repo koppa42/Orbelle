@@ -221,11 +221,46 @@ class DragSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class SolidTideSettings:
+    """IERS 2003 primary Sun/Moon deformation and separable permanent tide.
+
+    'full' includes degrees 2/3 and induced degree 4, with frequency-dependent
+    terms and pole tide off. No amplitude filtering yet. 'none' removes the
+    permanent component of zero-tide fields; 'permanent' includes it once.
+    With truncation off, tides can extend beyond the static degree/order.
+    """
+    mode: Literal["none", "permanent", "full"] = "none"
+    truncate_to_gravity: bool = True
+
+    def __post_init__(self) -> None:
+        self._native()
+
+    def _native(self) -> n.SolidTideOptions:
+        modes = {"none": n.SolidTideMode.NONE, "permanent": n.SolidTideMode.PERMANENT,
+                 "full": n.SolidTideMode.FULL}
+        if self.mode not in modes:
+            raise ValueError("solid tide mode must be 'none', 'permanent', or 'full'")
+        if not isinstance(self.truncate_to_gravity, bool):
+            raise TypeError("truncate_to_gravity must be bool")
+        value = n.SolidTideOptions()
+        value.mode = modes[self.mode]
+        value.truncate_to_gravity = self.truncate_to_gravity
+        value.validate()
+        return value
+
+    @classmethod
+    def _read(cls, value: n.SolidTideOptions) -> "SolidTideSettings":
+        modes = {n.SolidTideMode.NONE: "none", n.SolidTideMode.PERMANENT: "permanent",
+                 n.SolidTideMode.FULL: "full"}
+        return cls(modes[value.mode], value.truncate_to_gravity)
+
+
+@dataclass(frozen=True, slots=True)
 class HpopSettings:
     """Static file or built-in gravity and Cowell integration with local error tolerances.
 
     Optional third-body gravity and spherical SRP use explicitly selected DE440s ephemerides.
-    Spherical drag requires UTC/EOP and Sun ephemerides. No tides in this release. Noncentral gravity requires
+    Spherical drag requires UTC/EOP and Sun ephemerides. Solid tides use IERS 2003. Noncentral gravity requires
     explicitly selected EOP covering the entire integration path, including initial epoch.
     gravity_model selects a catalog/DataSnapshot ID (empty: built-in EGM96, up to 20).
     File models support degrees through 360. gravity_mu must match the selected file's
@@ -248,10 +283,12 @@ class HpopSettings:
     body_gravity: tuple[ThirdBodySettings, ...] = ()
     srp: SrpSettings = field(default_factory=SrpSettings)
     drag: DragSettings = field(default_factory=DragSettings)
+    solid_tides: SolidTideSettings = field(default_factory=SolidTideSettings)
 
     def __post_init__(self) -> None:
         require(self.srp, SrpSettings, "srp")
         require(self.drag, DragSettings, "drag")
+        require(self.solid_tides, SolidTideSettings, "solid_tides")._native()
         bodies = tuple(self.third_bodies)
         if any(body not in THIRD_BODY_NAMES for body in bodies) or len(set(bodies)) != len(bodies):
             raise ValueError("third_bodies accepts solar-system body names, each at most once")
@@ -271,7 +308,7 @@ class HpopSettings:
         if self.integrator not in ("rkf78", "rk4"):
             raise ValueError("integrator must be 'rkf78' or 'rk4'")
         for name in self.__dataclass_fields__:
-            if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp", "drag"):
+            if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides"):
                 setattr(value, name, getattr(self, name))
         rows = list(value.third_bodies)
         for item in self.body_gravity:
@@ -282,6 +319,7 @@ class HpopSettings:
         value.ephemeris_model = self.ephemeris
         value.srp = self.srp._native()
         value.drag = self.drag._native()
+        value.solid_tides = self.solid_tides._native()
         value.integrator = n.HpopIntegrator.RKF78 if self.integrator == "rkf78" else n.HpopIntegrator.RK4
         value.validate()
         return value
@@ -289,7 +327,7 @@ class HpopSettings:
     @classmethod
     def _read(cls, value: n.HpopOptions) -> "HpopSettings":
         fields = {name: getattr(value, name) for name in cls.__dataclass_fields__
-                  if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp", "drag")}
+                  if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides")}
         rows = value.third_bodies
         fields["third_bodies"] = tuple(b for b, row in zip(THIRD_BODY_NAMES, rows) if row.enabled)
         sources = {n.ThirdBodyGravitySource.JPL_DE: "jpl_de",
@@ -302,6 +340,7 @@ class HpopSettings:
         fields["ephemeris"] = value.ephemeris_model
         fields["srp"] = SrpSettings._read(value.srp)
         fields["drag"] = DragSettings._read(value.drag)
+        fields["solid_tides"] = SolidTideSettings._read(value.solid_tides)
         return cls(**fields, integrator="rkf78" if value.integrator == n.HpopIntegrator.RKF78 else "rk4")
 
 
@@ -393,7 +432,7 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          third_bodies: tuple[str, ...] = (), ephemeris: str = "de440s",
          sun_mu: float | None = None, moon_mu: float | None = None,
          body_gravity: tuple[ThirdBodySettings, ...] = (), srp: SrpSettings | None = None,
-         drag: DragSettings | None = None) -> Orbit:
+         drag: DragSettings | None = None, solid_tides: SolidTideSettings | None = None) -> Orbit:
     """Cowell orbit with static gravity, third bodies, spherical SRP, RKF78 or RK4.
 
     Built-in EGM96 supports up to degree 20; installed gravity files up to 360.
@@ -415,6 +454,7 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
         min_step_seconds, max_step_seconds, fixed_step_seconds, minimum_altitude_m,
         gravity_model.lower(), gravity_mu, third_bodies, ephemeris, tuple(body_gravity) + overrides,
         SrpSettings() if srp is None else require(srp, SrpSettings, "srp"),
-        DragSettings() if drag is None else require(drag, DragSettings, "drag"))
+        DragSettings() if drag is None else require(drag, DragSettings, "drag"),
+        SolidTideSettings() if solid_tides is None else require(solid_tides, SolidTideSettings, "solid_tides"))
     settings._native()  # Fail at construction, before changing a project.
     return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)

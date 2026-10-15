@@ -46,3 +46,6 @@ radii are in units of the apparent solar radius; output is the lighting ratio.
 Cases include identical, contained, tangent, disjoint, annular and simultaneous
 Earth/Moon disks, with occultor radii up to 300 solar radii. Neither generator
 imports OrbitForge or calls the production force implementation.
+
+`solid_tides.txt` calls unmodified Orekit 13.1.2 SolidTidesField (IERS_2003 Love numbers, frequency/pole terms off), Holmes–Featherstone and DP853. Its 120 acceleration and 4 moving-body trajectory rows are produced by `tools/validation/orekit/OrbitForgeSolidTideReference.java`. See `docs/architecture/solid_tides.md` for complete conventions and tolerances.
+Fixed solid tide reference SHA-256: `8b50c6af9cc1beb3ecf762f71e2e39b65c5e0301b335e205fdce6552153eb1d1`. The generator uses only Orekit/Hipparchus; it does not import or call OrbitForge.

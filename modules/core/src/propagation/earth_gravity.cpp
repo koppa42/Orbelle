@@ -85,16 +85,38 @@ GravityModel::GravityModel(GravityInfo info, const std::vector<GravityCoefficien
                                    ((2.0 * n - 3) * (n * n - m * m)));
         }
 }
-std::array<double, 3> GravityModel::acceleration(const std::array<double, 3> &r, int degree,
-                                                 int order) const {
+std::array<double, 3>
+GravityModel::acceleration(const std::array<double, 3> &r, int degree, int order,
+                           std::span<const GravityCoefficient> corrections) const {
     if (degree < 0 || degree == 1 || degree > std::min(info_.degree, gravity_max_degree) ||
         order < 0 || order > std::min(degree, info_.order))
         throw std::invalid_argument("Gravity truncation exceeds the model or computation limit");
+    int correction_degree = 0, correction_order = 0;
+    for (const auto &v : corrections) {
+        if (v.degree < 2 || v.degree > gravity_max_degree || v.order < 0 || v.order > v.degree ||
+            !std::isfinite(v.c) || !std::isfinite(v.s) || (v.order == 0 && v.s != 0))
+            throw std::invalid_argument("Invalid additive gravity coefficient");
+        correction_degree = std::max(correction_degree, v.degree);
+        correction_order = std::max(correction_order, v.order);
+    }
+    struct Delta {
+        double c = 0, s = 0;
+        bool seen = false;
+    };
+    std::vector<Delta> delta(corrections.empty() ? 0 : index(correction_degree + 1, 0));
+    for (const auto &v : corrections) {
+        auto &d = delta[index(v.degree, v.order)];
+        if (d.seen)
+            throw std::invalid_argument("Duplicate additive gravity coefficient");
+        d = {v.c, v.s, true};
+    }
+    const int effective_degree = std::max(degree, correction_degree);
+    const int effective_order = std::max(order, correction_order);
     const double radius = std::hypot(r[0], r[1], r[2]);
     if (!std::isfinite(radius) || radius <= 0)
         throw PropagationError("Gravity requires a finite, nonzero position");
     const double inverse2 = 1 / (radius * radius);
-    if (degree == 0) {
+    if (effective_degree == 0) {
         const double factor = -info_.mu * inverse2 / radius;
         return {factor * r[0], factor * r[1], factor * r[2]};
     }
@@ -110,7 +132,7 @@ std::array<double, 3> GravityModel::acceleration(const std::array<double, 3> &r,
     Jet diagonal_v = info_.radius_m * invr, diagonal_w{}, potential{};
     // Fully normalized Cartesian solid harmonics. O(1) recurrence workspace;
     // no factorials or unnormalized intermediate values at high degree/poles.
-    for (int m = 0; m <= order; ++m) {
+    for (int m = 0; m <= effective_order; ++m) {
         if (m > 0) {
             const double scale = m == 1 ? std::sqrt(3.0) : std::sqrt((2.0 * m + 1) / (2.0 * m));
             const auto next_v = scale * (x * diagonal_v - y * diagonal_w);
@@ -118,8 +140,18 @@ std::array<double, 3> GravityModel::acceleration(const std::array<double, 3> &r,
             diagonal_v = next_v;
         }
         Jet v = diagonal_v, w = diagonal_w, previous_v{}, previous_w{};
-        for (int n = m; n <= degree; ++n) {
-            const auto &term = terms_[index(n, m)];
+        for (int n = m; n <= effective_degree; ++n) {
+            const auto i = index(n, m);
+            Term term{};
+            if (i < terms_.size())
+                term = terms_[i];
+            else if (n > m) {
+                // Corrections may extend beyond the base file's degree/order.
+                term.a = std::sqrt((4.0 * n * n - 1) / (n * n - m * m));
+                if (n >= m + 2)
+                    term.b = std::sqrt((2.0 * n + 1) * ((n - 1.0) * (n - 1) - m * m) /
+                                       ((2.0 * n - 3) * (n * n - m * m)));
+            }
             if (n > m) {
                 const auto next_v = term.a * (z * v) - term.b * (rho * previous_v);
                 const auto next_w = term.a * (z * w) - term.b * (rho * previous_w);
@@ -128,7 +160,13 @@ std::array<double, 3> GravityModel::acceleration(const std::array<double, 3> &r,
                 v = next_v;
                 w = next_w;
             }
-            potential = potential + term.c * v + term.s * w;
+            double c = n <= degree && m <= order ? term.c : 0;
+            double s = n <= degree && m <= order ? term.s : 0;
+            if (i < delta.size()) {
+                c += delta[i].c;
+                s += delta[i].s;
+            }
+            potential = potential + c * v + s * w;
         }
     }
     auto acceleration = potential.gradient;

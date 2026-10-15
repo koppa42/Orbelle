@@ -285,7 +285,30 @@ bool edit_hpop_settings(
         form->addRow(label, field);
         return field;
     };
-    caution(gravity, QStringLiteral("当前使用静态重力场；长期变化、固体潮与海洋潮尚未实现。"));
+    caution(gravity, QStringLiteral("重力系数长期变化与海洋潮待实现。"));
+    auto *solid = section(gravity_page, QStringLiteral("固体潮"), "hpopSolidTidesSection");
+    auto *solid_mode = new QComboBox;
+    solid_mode->setObjectName("hpopSolidTideMode");
+    solid_mode->addItems(
+        {QStringLiteral("无"), QStringLiteral("仅永久潮"), QStringLiteral("完整固体潮")});
+    solid_mode->setCurrentIndex(static_cast<int>(options.solid_tides.mode));
+    solid_mode->setItemData(
+        2, QStringLiteral("Full：日月引起的 2、3 阶形变，以及诱导 4 阶项；附加时间项尚未实现。"),
+        Qt::ToolTipRole);
+    solid->addRow(QStringLiteral("模型"), solid_mode);
+    auto *solid_truncate = new QCheckBox(QStringLiteral("截断至重力场阶次"));
+    solid_truncate->setObjectName("hpopSolidTideTruncate");
+    solid_truncate->setChecked(options.solid_tides.truncate_to_gravity);
+    solid->addRow(solid_truncate);
+    const auto refresh_solid = [solid_mode, solid_truncate] {
+        solid_truncate->setEnabled(solid_mode->currentIndex() != 0);
+    };
+    QObject::connect(solid_mode, &QComboBox::currentIndexChanged, &dialog, refresh_solid);
+    refresh_solid();
+    help(solid,
+         QStringLiteral("采用 IERS 2003 非弹性地球模型；永久潮按重力文件的潮汐系统计入一次。"
+                        "完整固体潮独立使用所选星历中的太阳、月球位置与 GM，无需勾选第三体引力。"));
+    caution(solid, QStringLiteral("附加时间项（频率修正、极潮）与最小振幅筛选待实现。"));
     auto *third = section(gravity_page, QStringLiteral("第三体引力"), "hpopThirdBodySection");
     third->setVerticalSpacing(8);
     auto *resource = new QFrame;
@@ -963,6 +986,9 @@ bool edit_hpop_settings(
                                           [](const auto &row) { return row.enabled->isChecked(); });
         if (bodies > 0)
             gravity_text += QStringLiteral(" · 第三体 %1").arg(bodies);
+        if (solid_mode->currentIndex() != 0 &&
+            (model->currentIndex() != 1 || !solid_truncate->isChecked()))
+            gravity_text += QStringLiteral(" · ") + solid_mode->currentText();
         gravity_item->setData(summary_role, gravity_text);
         drag_item->setData(summary_role, drag_use->isChecked()
                                              ? density_model->currentText() +
@@ -981,11 +1007,11 @@ bool edit_hpop_settings(
                                                          value_text(fixed) + QStringLiteral(" s"));
         covariance_item->setData(summary_role, QStringLiteral("尚未实现"));
     };
-    for (auto *box : {model, density_model, srp_shadow, method})
+    for (auto *box : {model, density_model, srp_shadow, method, solid_mode})
         QObject::connect(box, &QComboBox::currentIndexChanged, &dialog, refresh_summaries);
     for (auto *spin : {degree, order})
         QObject::connect(spin, &QSpinBox::valueChanged, &dialog, refresh_summaries);
-    for (auto *check : {drag_use, srp_use})
+    for (auto *check : {drag_use, srp_use, solid_truncate})
         QObject::connect(check, &QCheckBox::toggled, &dialog, refresh_summaries);
     for (auto &row : fields)
         QObject::connect(row.enabled, &QCheckBox::toggled, &dialog, refresh_summaries);
@@ -1207,6 +1233,23 @@ bool edit_hpop_settings(
             }
             candidate.gravity_degree = model->currentIndex() != 1 ? degree->value() : 0;
             candidate.gravity_order = model->currentIndex() != 1 ? order->value() : 0;
+            candidate.solid_tides.mode =
+                static_cast<core::SolidTideMode>(solid_mode->currentIndex());
+            candidate.solid_tides.truncate_to_gravity = solid_truncate->isChecked();
+            validation_field = solid_mode;
+            if (candidate.uses_full_solid_tides() &&
+                std::none_of(installed_ephemerides.begin(), installed_ephemerides.end(),
+                             [&](const auto &entry) {
+                                 return entry.selection == candidate.ephemeris_model;
+                             }))
+                throw std::runtime_error("完整固体潮需要太阳和月球星历，请先在数据中心准备。");
+            if (candidate.uses_earth_fixed_gravity()) {
+                for (const auto &entry : installed_models)
+                    if (entry.selection == candidate.gravity_model &&
+                        entry.info.tide_system == "mean_tide")
+                        throw std::runtime_error("固体潮暂不支持 mean_tide 重力场，请选择 "
+                                                 "tide_free 或 zero_tide 文件。");
+            }
             validation_force_page = 1;
             auto &drag = candidate.drag;
             drag.enabled = drag_use->isChecked();

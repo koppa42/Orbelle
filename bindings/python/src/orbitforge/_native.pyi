@@ -986,6 +986,17 @@ class SrpEvaluation:
 def evaluate_srp(satellite_m: Sequence[float], sun_m: Sequence[float], options: SrpOptions,
                  moon_m: Sequence[float] | None = None) -> SrpEvaluation: ...
 
+class SolidTideMode:
+    NONE: SolidTideMode
+    PERMANENT: SolidTideMode
+    FULL: SolidTideMode
+
+class SolidTideOptions:
+    mode: SolidTideMode
+    truncate_to_gravity: bool
+    def __init__(self) -> None: ...
+    def validate(self) -> None: ...
+
 class HpopOptions:
     gravity_model: str
     gravity_mu: float
@@ -996,6 +1007,7 @@ class HpopOptions:
     def __init__(self) -> None: ...
     gravity_degree: int
     gravity_order: int
+    solid_tides: SolidTideOptions
     integrator: HpopIntegrator
     relative_tolerance: float
     position_tolerance_m: float

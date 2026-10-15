@@ -136,14 +136,28 @@ class Hpop final : public IStateProvider {
             environment_.gravity->info().radius_m + options_.minimum_altitude_m)
             throw PropagationError("HPOP reached its minimum geocentric altitude");
         std::array<double, 3> acceleration;
-        if (options_.gravity_degree == 0) {
+        if (!options_.uses_earth_fixed_gravity()) {
             acceleration = environment_.gravity->acceleration(r, 0, 0);
         } else {
             const auto epoch = epoch_at(t);
             const auto rotation =
                 environment_.frames->gcrf_to_itrf(epoch, environment_.eop->at(epoch).sample);
+            std::array<TideRaisingBody, 2> bodies{};
+            if (options_.uses_full_solid_tides()) {
+                const auto &info = environment_.ephemeris->data_info();
+                bodies = {{{rotation.apply_position(
+                                environment_.ephemeris->position(ThirdBody::sun, epoch)),
+                            info.sun_mu},
+                           {rotation.apply_position(
+                                environment_.ephemeris->position(ThirdBody::moon, epoch)),
+                            info.moon_mu}}};
+            }
+            const auto corrections =
+                solid_tide_corrections(environment_.gravity->info(), options_.solid_tides,
+                                       options_.gravity_degree, options_.gravity_order, bodies);
             acceleration = rotation.inverse_position(environment_.gravity->acceleration(
-                rotation.apply_position(r), options_.gravity_degree, options_.gravity_order));
+                rotation.apply_position(r), options_.gravity_degree, options_.gravity_order,
+                corrections));
         }
         if (options_.uses_third_bodies()) {
             const auto epoch = epoch_at(t);
@@ -313,12 +327,10 @@ class Hpop final : public IStateProvider {
                 "HPOP gravity GM differs from the selected file; update model settings");
         if (initial.origin != OriginId::earth || initial.frame != FrameId::gcrf)
             throw std::invalid_argument("HPOP requires an Earth-centered GCRF initial state");
-        if ((options.gravity_degree > 0 || options.drag.enabled) &&
-            (!environment_.eop || !environment_.frames))
+        if (options.uses_eop_force() && (!environment_.eop || !environment_.frames))
             throw std::invalid_argument(
-                "HPOP noncentral gravity and drag require explicit EOP and frame providers");
-        if ((options.gravity_degree > 0 || options.drag.enabled) &&
-            !eop_covers(environment_.eop->data_info(), initial.epoch))
+                "HPOP gravity corrections and drag require explicit EOP and frame providers");
+        if (options.uses_eop_force() && !eop_covers(environment_.eop->data_info(), initial.epoch))
             throw EopCoverageError("HPOP initial epoch is outside selected EOP coverage");
         if (options.drag.enabled) {
             if (!environment_.time || environment_.time->data_info().sha256 !=
@@ -352,8 +364,7 @@ class Hpop final : public IStateProvider {
             Epoch{std::max(epoch.tai_nanoseconds(), initial_.epoch.tai_nanoseconds())});
         environment_.validate_ephemeris_interval(options_, t < 0 ? epoch : initial_.epoch,
                                                  t < 0 ? initial_.epoch : epoch);
-        if ((options_.gravity_degree > 0 || options_.drag.enabled) &&
-            !eop_covers(environment_.eop->data_info(), epoch))
+        if (options_.uses_eop_force() && !eop_covers(environment_.eop->data_info(), epoch))
             throw EopCoverageError(
                 "HPOP integration requires EOP covering the initial and query epochs");
         if (options_.drag.enabled)
@@ -400,6 +411,7 @@ void HpopEnvironment::validate_ephemeris_interval(const HpopOptions &options, Ep
         ephemeris->validate_spacecraft_apparent_sun_interval(first, last);
 }
 void validate_hpop_options(const HpopOptions &o) {
+    validate_solid_tide_options(o.solid_tides);
     validate_srp_options(o.srp);
     validate_drag_options(o.drag);
     if (o.gravity_model.size() > 64 ||
