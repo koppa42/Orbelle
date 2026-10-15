@@ -70,6 +70,20 @@ GravityModel::GravityModel(GravityInfo info, const std::vector<GravityCoefficien
         (info_.tide_system != "tide_free" && info_.tide_system != "zero_tide" &&
          info_.tide_system != "mean_tide"))
         throw std::invalid_argument("Invalid static Earth gravity metadata");
+    if (info_.secular_variations) {
+        auto &rates = info_.secular_variations->rates_per_year;
+        if (rates.empty() || rates.size() > index(info_.degree + 1, 0))
+            throw std::invalid_argument("Empty or oversized gravity secular model");
+        for (const auto &v : rates)
+            if (v.degree < 2 || v.degree > info_.degree || v.order < 0 ||
+                v.order > std::min(v.degree, info_.order) || !std::isfinite(v.c) ||
+                !std::isfinite(v.s) || (v.order == 0 && v.s != 0))
+                throw std::invalid_argument("Invalid gravity secular coefficient rate");
+        std::ranges::sort(rates, {}, [](const auto &v) { return index(v.degree, v.order); });
+        for (std::size_t i = 1; i < rates.size(); ++i)
+            if (rates[i - 1].degree == rates[i].degree && rates[i - 1].order == rates[i].order)
+                throw std::invalid_argument("Duplicate gravity secular coefficient rate");
+    }
     const int degree = std::min(info_.degree, gravity_max_degree);
     terms_.resize(index(degree + 1, 0));
     std::vector<bool> seen(terms_.size());
@@ -96,9 +110,32 @@ GravityModel::GravityModel(GravityInfo info, const std::vector<GravityCoefficien
             term.b = b;
         }
 }
-std::array<double, 3>
-GravityModel::acceleration(const std::array<double, 3> &r, int degree, int order,
-                           std::span<const GravityCoefficient> corrections) const {
+std::vector<GravityCoefficient> GravityModel::secular_corrections(Epoch at, int degree,
+                                                                  int order) const {
+    if (!info_.secular_variations)
+        throw std::invalid_argument("Gravity file has no secular reference epoch and rates");
+    if (degree < 0 || degree == 1 || degree > info_.degree || order < 0 ||
+        order > std::min(degree, info_.order))
+        throw std::invalid_argument("Secular gravity truncation exceeds the field");
+    const auto &model = *info_.secular_variations;
+    const double years = at.seconds_since(model.reference_epoch) / (365.25 * 86400);
+    std::vector<GravityCoefficient> result;
+    for (const auto &rate : model.rates_per_year) {
+        if (rate.degree > degree)
+            break;
+        if (rate.order > order)
+            continue;
+        const double c = rate.c * years, s = rate.s * years;
+        if (!std::isfinite(c) || !std::isfinite(s))
+            throw PropagationError("Secular gravity correction overflow");
+        result.push_back({rate.degree, rate.order, c, s});
+    }
+    return result;
+}
+std::array<double, 3> GravityModel::acceleration(const std::array<double, 3> &r, int degree,
+                                                 int order,
+                                                 std::span<const GravityCoefficient> corrections,
+                                                 std::optional<Epoch> secular_at) const {
     if (degree < 0 || degree == 1 || degree > std::min(info_.degree, gravity_max_degree) ||
         order < 0 || order > std::min(degree, info_.order))
         throw std::invalid_argument("Gravity truncation exceeds the model or computation limit");
@@ -110,16 +147,31 @@ GravityModel::acceleration(const std::array<double, 3> &r, int degree, int order
         correction_degree = std::max(correction_degree, v.degree);
         correction_order = std::max(correction_order, v.order);
     }
+    const auto secular = secular_at ? secular_corrections(*secular_at, degree, order)
+                                    : std::vector<GravityCoefficient>{};
+    for (const auto &v : secular) {
+        correction_degree = std::max(correction_degree, v.degree);
+        correction_order = std::max(correction_order, v.order);
+    }
     struct Delta {
         double c = 0, s = 0;
         bool seen = false;
     };
-    std::vector<Delta> delta(corrections.empty() ? 0 : index(correction_degree + 1, 0));
+    std::vector<Delta> delta(
+        corrections.empty() && secular.empty() ? 0 : index(correction_degree + 1, 0));
     for (const auto &v : corrections) {
         auto &d = delta[index(v.degree, v.order)];
         if (d.seen)
             throw std::invalid_argument("Duplicate additive gravity coefficient");
         d = {v.c, v.s, true};
+    }
+    // Secular evolution and tides are independent additive changes to the reference field.
+    for (const auto &v : secular) {
+        auto &d = delta[index(v.degree, v.order)];
+        d.c += v.c;
+        d.s += v.s;
+        if (!std::isfinite(d.c) || !std::isfinite(d.s))
+            throw PropagationError("Combined gravity correction overflow");
     }
     const int effective_degree = std::max(degree, correction_degree);
     const int effective_order = std::max(order, correction_order);

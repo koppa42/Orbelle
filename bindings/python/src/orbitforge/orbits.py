@@ -294,8 +294,11 @@ class OceanTideSettings:
 
 @dataclass(frozen=True, slots=True)
 class HpopSettings:
-    """Static file or built-in gravity and Cowell integration with local error tolerances.
+    """File or built-in gravity and Cowell integration with local error tolerances.
 
+    include_secular_variations applies the selected file's explicit epoch and coefficient
+    rates per Julian year. Static files without these data cannot enable it; the flag
+    remains an inactive draft for gravity degree 0. No secular defaults are inferred.
     Optional third-body gravity and spherical SRP use explicitly selected DE440s ephemerides.
     Spherical drag requires UTC/EOP and Sun ephemerides. Solid tides use IERS 2003. Noncentral gravity requires
     explicitly selected EOP covering the entire integration path, including initial epoch.
@@ -326,8 +329,11 @@ class HpopSettings:
     include_relativistic_accelerations: bool = False
     satellite_mass_kg: float = 1000.0
     ocean_tides: OceanTideSettings = field(default_factory=OceanTideSettings)
+    include_secular_variations: bool = False
 
     def __post_init__(self) -> None:
+        if type(self.include_secular_variations) is not bool:
+            raise TypeError("include_secular_variations must be bool")
         if type(self.include_relativistic_accelerations) is not bool:
             raise TypeError("include_relativistic_accelerations must be bool")
         require(self.srp, SrpSettings, "srp")
@@ -491,8 +497,9 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          body_gravity: tuple[ThirdBodySettings, ...] = (), srp: SrpSettings | None = None,
          drag: DragSettings | None = None, solid_tides: SolidTideSettings | None = None,
          include_relativistic_accelerations: bool = False,
-         satellite_mass_kg: float = 1000.0, ocean_tides: OceanTideSettings | None = None) -> Orbit:
-    """Cowell orbit with static gravity, third bodies, spherical SRP, RKF78 or RK4.
+         satellite_mass_kg: float = 1000.0, ocean_tides: OceanTideSettings | None = None,
+         include_secular_variations: bool = False) -> Orbit:
+    """Cowell orbit with gravity, tides, third bodies, drag, spherical SRP, RKF78 or RK4.
 
     Built-in EGM96 supports up to degree 20; installed gravity files up to 2190 (EGM2008 order limit 2159).
     Satellite mass is in kg (finite and positive); spherical forces retain their explicit
@@ -518,6 +525,7 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
         DragSettings() if drag is None else require(drag, DragSettings, "drag"),
         SolidTideSettings() if solid_tides is None else require(solid_tides, SolidTideSettings, "solid_tides"),
         include_relativistic_accelerations, satellite_mass_kg,
-        OceanTideSettings() if ocean_tides is None else require(ocean_tides, OceanTideSettings, "ocean_tides"))
+        OceanTideSettings() if ocean_tides is None else require(ocean_tides, OceanTideSettings, "ocean_tides"),
+        include_secular_variations)
     settings._native()  # Fail at construction, before changing a project.
     return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)

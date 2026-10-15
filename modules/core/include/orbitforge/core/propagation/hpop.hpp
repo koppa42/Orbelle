@@ -26,6 +26,12 @@ struct HpopOptions {
     // Selected resource's GM, also used when converting initial osculating elements.
     // Resource preparation verifies this value against the file; it cannot override it.
     double gravity_mu = egm96_mu;
+    // Uses the selected field's explicit reference epoch and linear rates. Inactive for 0/0;
+    // enabling it with a noncentral field lacking these data is an error.
+    bool include_secular_variations = false;
+    [[nodiscard]] bool uses_secular_gravity() const {
+        return include_secular_variations && gravity_degree >= 2;
+    }
     std::string ephemeris_model = "de440s";
     std::array<ThirdBodyGravity, third_body_count> third_bodies{};
     // Constant mass in kg. Spherical forces use their explicit A/m ratios;

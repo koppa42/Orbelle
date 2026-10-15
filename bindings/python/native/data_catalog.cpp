@@ -26,12 +26,21 @@ void bind_data_catalog(py::module_ &module) {
         .def_readonly("acquisition", &runtime::CatalogEphemeris::acquisition)
         .def_readonly("acquired_at_unix_seconds",
                       &runtime::CatalogEphemeris::acquired_at_unix_seconds);
+    py::class_<core::GravityCoefficient>(module, "GravityCoefficient")
+        .def_readonly("degree", &core::GravityCoefficient::degree)
+        .def_readonly("order", &core::GravityCoefficient::order)
+        .def_readonly("c", &core::GravityCoefficient::c)
+        .def_readonly("s", &core::GravityCoefficient::s);
+    py::class_<core::GravitySecularVariations>(module, "GravitySecularVariations")
+        .def_readonly("reference_epoch", &core::GravitySecularVariations::reference_epoch)
+        .def_readonly("rates_per_year", &core::GravitySecularVariations::rates_per_year);
     py::class_<core::GravityInfo>(module, "GravityInfo")
         .def_readonly("model", &core::GravityInfo::model)
         .def_readonly("sha256", &core::GravityInfo::sha256)
         .def_readonly("source_url", &core::GravityInfo::source_url)
         .def_readonly("tide_system", &core::GravityInfo::tide_system)
         .def_readonly("solid_tide_k20", &core::GravityInfo::solid_tide_k20)
+        .def_readonly("secular_variations", &core::GravityInfo::secular_variations)
         .def_readonly("mu", &core::GravityInfo::mu)
         .def_readonly("radius_m", &core::GravityInfo::radius_m)
         .def_readonly("degree", &core::GravityInfo::degree)

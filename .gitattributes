@@ -16,3 +16,5 @@
 /tests/integration/fixtures/*.orbitforge -text
 
 /tests/reference/propagators/*.pot -text
+
+/tests/reference/propagators/*.grv -text

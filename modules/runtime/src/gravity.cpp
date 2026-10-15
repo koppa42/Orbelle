@@ -2,6 +2,7 @@
 #include <charconv>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <orbitforge/runtime/gravity.hpp>
 #include <picosha2.h>
@@ -35,6 +36,60 @@ double real(std::string_view text) {
     std::replace(value.begin(), value.end(), 'D', 'E');
     std::replace(value.begin(), value.end(), 'd', 'e');
     return number<double>(value);
+}
+// Parse TDT (= TT) JD by separating its integral day before rounding to Epoch
+// nanoseconds. Converting the whole Julian date to double would lose tens of us.
+core::Epoch secular_epoch(std::string_view text) {
+    const double check = real(text);
+    require(check > 2e6 && check < 3e6, "Secular reference TT Julian date is outside Epoch range");
+    std::string digits(text);
+    if (digits.starts_with('+'))
+        digits.erase(0, 1);
+    const auto exp_at = digits.find_first_of("eEdD");
+    int exponent = 0;
+    if (exp_at != digits.npos) {
+        exponent = number<int>(std::string_view(digits).substr(exp_at + 1));
+        digits.resize(exp_at);
+    }
+    const auto dot = digits.find('.');
+    const auto integral = dot == digits.npos ? digits.size() : dot;
+    if (dot != digits.npos)
+        digits.erase(dot, 1);
+    const auto point = static_cast<std::int64_t>(integral) + exponent;
+    require(point > 0 && point <= 4096, "Invalid secular reference TT Julian date");
+    if (point > static_cast<std::int64_t>(digits.size()))
+        digits.append(static_cast<std::size_t>(point) - digits.size(), '0');
+    const auto whole = number<std::int64_t>(std::string_view(digits).substr(0, point));
+    const double fraction = point == static_cast<std::int64_t>(digits.size())
+                                ? 0
+                                : real("0." + digits.substr(static_cast<std::size_t>(point)));
+    constexpr std::int64_t day_ns = 86400000000000LL;
+    auto days = whole - 2451545;
+    auto partial = static_cast<std::int64_t>(std::llround(fraction * day_ns)) - 32184000000LL;
+    // Make the day part closer to zero so the earliest representable fractional day
+    // is accepted without multiplying an out-of-range negative integral day.
+    if (days < 0) {
+        ++days;
+        partial -= day_ns;
+    }
+    constexpr auto low = std::numeric_limits<std::int64_t>::min();
+    constexpr auto high = std::numeric_limits<std::int64_t>::max();
+    require(days >= low / day_ns && days <= high / day_ns,
+            "Secular reference TT Julian date is outside Epoch range");
+    const auto base = days * day_ns;
+    require(!((partial > 0 && base > high - partial) || (partial < 0 && base < low - partial)),
+            "Secular reference TT Julian date is outside Epoch range");
+    return core::Epoch{base + partial};
+}
+double normalize(double v, int n, int m) {
+    if (v == 0)
+        return 0;
+    const double log_scale = 0.5 * (std::log((m == 0 ? 1.0 : 2.0) * (2 * n + 1)) +
+                                    std::lgamma(n - m + 1.0) - std::lgamma(n + m + 1.0));
+    const double result = std::copysign(std::exp(std::log(std::abs(v)) - log_scale), v);
+    require(std::isfinite(result) && result != 0,
+            "Unnormalized gravity coefficient overflow or underflow");
+    return result;
 }
 std::vector<std::string_view> fields(std::string_view line) {
     std::vector<std::string_view> result;
@@ -81,6 +136,13 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
     std::vector<core::GravityCoefficient> coefficients;
     std::vector<bool> seen;
     bool grv = false, started = false, ended = false, normalized = true;
+    bool secular_block = false, secular_seen = false;
+    std::optional<core::Epoch> reference_epoch;
+    struct Rate {
+        double c = 0, s = 0;
+        bool cosine_seen = false, sine_seen = false;
+    };
+    std::map<std::pair<int, int>, Rate> rates;
     std::string tide_block;
     bool tide_block_seen = false, love_seen = false;
     bool header_tide_seen = false, block_tide_seen = false;
@@ -158,10 +220,47 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
             hash.process(lf.begin(), lf.end());
         }
         // Fortran D exponents occur in ICGEM data. Change only numeric text, after hashing.
-        const auto raw = fields(line);
+        std::string_view view(line);
+        if (line_number == 1 && view.starts_with("\xef\xbb\xbf"))
+            view.remove_prefix(3);
+        const auto raw = fields(view);
         if (raw.empty())
             continue;
         const auto key = lower(raw.front());
+        if (secular_block) {
+            if (key == "end") {
+                require(raw.size() == 2 && lower(raw[1]) == "secularvariations",
+                        "Mismatched STK secular block terminator");
+                require(reference_epoch && !rates.empty(), "Incomplete STK secular model");
+                secular_block = false;
+            } else if (key == "refepochtdt") {
+                require(raw.size() == 2 && !reference_epoch,
+                        "Invalid or duplicate secular reference epoch");
+                reference_epoch = secular_epoch(raw[1]);
+            } else if (key == "linearrate") {
+                require(raw.size() == 5, "Invalid secular LinearRate record");
+                const auto component = lower(raw[1]);
+                require(component == "cos" || component == "sin", "Invalid secular component");
+                const int n = number<int>(raw[2]), m = number<int>(raw[3]);
+                require(n >= 2 && n <= core::gravity_max_degree && m >= 0 && m <= n,
+                        "Secular coefficient exceeds degree/order limits");
+                auto &rate = rates[{n, m}];
+                auto &seen_component = component == "cos" ? rate.cosine_seen : rate.sine_seen;
+                require(!seen_component, "Duplicate secular coefficient component");
+                (component == "cos" ? rate.c : rate.s) = real(raw[4]);
+                require(m != 0 || rate.s == 0, "Nonzero secular zonal sine coefficient");
+                seen_component = true;
+            } else {
+                throw std::runtime_error("Unsupported record in SecularVariations");
+            }
+            continue;
+        }
+        if (grv && key == "begin" && raw.size() == 2 && lower(raw[1]) == "secularvariations") {
+            require((!started || ended) && tide_block.empty() && !secular_seen,
+                    "Duplicate or misplaced STK secular block");
+            secular_block = secular_seen = true;
+            continue;
+        }
         if (!started) {
             if (!tide_block.empty()) {
                 if (key == "end") {
@@ -241,24 +340,16 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
         require((n != 0 || (c == 1 && s == 0)) && (n != 1 || (c == 0 && s == 0)) &&
                     (m != 0 || s == 0),
                 "Gravity field must be geocentric with unit monopole");
-        if (!normalized && n <= core::gravity_max_degree) {
-            // Logarithmic normalization avoids factorial overflow. Underflow cannot be
-            // silently accepted for a nonzero unnormalized coefficient.
-            const double log_scale = 0.5 * (std::log((m == 0 ? 1.0 : 2.0) * (2 * n + 1)) +
-                                            std::lgamma(n - m + 1.0) - std::lgamma(n + m + 1.0));
-            const auto convert = [log_scale](double v) {
-                return v == 0 ? 0.0 : std::copysign(std::exp(std::log(std::abs(v)) - log_scale), v);
-            };
-            c = convert(c);
-            s = convert(s);
-            require(std::isfinite(c) && std::isfinite(s),
-                    "Unnormalized gravity coefficient overflow");
+        if (!normalized) {
+            c = normalize(c, n, m);
+            s = normalize(s, n, m);
         }
         if (n <= core::gravity_max_degree)
             coefficients.push_back({n, m, c, s});
         ++count;
     }
-    require(input.eof() && !input.bad() && started && count > 0 && (!grv || ended),
+    require(input.eof() && !input.bad() && started && count > 0 && (!grv || ended) &&
+                !secular_block && tide_block.empty(),
             "Incomplete gravity file");
     if (!grv) {
         // ICGEM fields are dense through their square part. EGM2008 legitimately
@@ -274,6 +365,20 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
                 require(seen[static_cast<std::size_t>(n * (n + 1) / 2 + m)],
                         "Missing ICGEM gravity coefficient");
     }
+    if (reference_epoch) {
+        info.secular_variations = core::GravitySecularVariations{*reference_epoch, {}};
+        auto &normalized_rates = info.secular_variations->rates_per_year;
+        normalized_rates.reserve(rates.size());
+        for (const auto &[nm, rate] : rates) {
+            const auto [n, m] = nm;
+            require(n <= info.degree && m <= info.order,
+                    "Secular coefficient exceeds the declared gravity field");
+            if (normalized_rates.size() % 1024 == 0 && checkpoint)
+                checkpoint();
+            normalized_rates.push_back({n, m, normalized ? rate.c : normalize(rate.c, n, m),
+                                        normalized ? rate.s : normalize(rate.s, n, m)});
+        }
+    }
     if (checkpoint)
         checkpoint();
     hash.finish();
@@ -282,9 +387,20 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
 }
 application::DataReference gravity_reference(const std::string &selection,
                                              const core::GravityInfo &info) {
-    // Raw bytes carry all physical metadata; the reader/model version covers interpretation.
-    constexpr auto version = "static-normalized-gravity-2190-k20-v3";
+    constexpr auto version = "normalized-gravity-2190-secular-julian-year-v4";
+    // Also hash physical metadata for explicitly constructed SDK resources: callers must
+    // not reuse a content digest with a different epoch, rate, k20, GM or truncation.
+    std::ostringstream config;
+    config.imbue(std::locale::classic());
+    config << version << std::hexfloat << ";mu=" << info.mu << ";radius=" << info.radius_m
+           << ";degree=" << info.degree << ";order=" << info.order << ";tide=" << info.tide_system
+           << ";k20=" << info.solid_tide_k20;
+    if (info.secular_variations) {
+        config << ";epoch-tai-ns=" << info.secular_variations->reference_epoch.tai_nanoseconds();
+        for (const auto &v : info.secular_variations->rates_per_year)
+            config << ';' << v.degree << ',' << v.order << ',' << v.c << ',' << v.s;
+    }
     return {"gravity/" + selection, info.model, info.sha256, version,
-            picosha2::hash256_hex_string(std::string(version))};
+            picosha2::hash256_hex_string(config.str())};
 }
 } // namespace orbitforge::runtime

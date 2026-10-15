@@ -176,7 +176,8 @@ class Hpop final : public IStateProvider {
             }
             acceleration = rotation.inverse_position(environment_.gravity->acceleration(
                 rotation.apply_position(r), options_.gravity_degree, options_.gravity_order,
-                corrections));
+                corrections,
+                options_.uses_secular_gravity() ? std::optional{epoch} : std::nullopt));
         }
         if (options_.include_relativistic_accelerations) {
             const auto epoch = epoch_at(t);
@@ -352,6 +353,9 @@ class Hpop final : public IStateProvider {
         if (!environment_.gravity)
             throw std::invalid_argument(
                 "Selected gravity model is missing; download or import it in Data Center");
+        if (options_.uses_secular_gravity() && !environment_.gravity->info().secular_variations)
+            throw std::invalid_argument(
+                "Selected gravity file has no secular reference epoch and rates");
         if (environment_.gravity->info().mu != options_.gravity_mu)
             throw std::invalid_argument(
                 "HPOP gravity GM differs from the selected file; update model settings");

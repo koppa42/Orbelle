@@ -2596,4 +2596,94 @@ TEST_F(QuantityTest, HpopQueuedOceanCancellationPreservesUnrelatedDownloadAndDis
     catalog.cancel_download();
     settle_hpop_catalog(catalog);
 }
+TEST_F(QuantityTest, HpopSecularFileCapabilityKeyboardDraftAndValidation) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    core::HpopOptions options;
+    runtime::CatalogGravity custom;
+    custom.selection = "custom";
+    custom.info = {"Secular", {}, {}, "tide_free", core::egm96_mu, core::egm96_radius_m, 8, 4};
+    custom.info.secular_variations = core::GravitySecularVariations{
+        core::Epoch{-32184000000LL}, {{2, 0, 1.162755e-11, 0}, {2, 1, -.337e-11, 1.606e-11}}};
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *use = dialog->findChild<QCheckBox *>("hpopSecularVariations");
+        auto *model = dialog->findChild<QComboBox *>("hpopGravityModel");
+        auto *status = dialog->findChild<QLabel *>("hpopSecularStatus");
+        ASSERT_TRUE(use);
+        ASSERT_TRUE(model);
+        ASSERT_TRUE(status);
+        EXPECT_FALSE(use->isEnabled());
+        model->setCurrentIndex(model->findData(QStringLiteral("custom")));
+        EXPECT_TRUE(use->isEnabled());
+        EXPECT_TRUE(status->text().contains("2451545.000000000"));
+        use->setFocus();
+        QKeyEvent press(QEvent::KeyPress, Qt::Key_Space, Qt::NoModifier);
+        QKeyEvent release(QEvent::KeyRelease, Qt::Key_Space, Qt::NoModifier);
+        QApplication::sendEvent(use, &press);
+        QApplication::sendEvent(use, &release);
+        EXPECT_TRUE(use->isChecked());
+        std::cout << "HPOP secular device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
+        for (int width : {720, 430}) {
+            dialog->resize(width, width == 720 ? 700 : 620);
+            QEventLoop settled;
+            QTimer::singleShot(60, &settled, &QEventLoop::quit);
+            settled.exec();
+            EXPECT_EQ(use, dialog->findChild<QCheckBox *>("hpopSecularVariations"));
+            EXPECT_TRUE(use->isChecked());
+            auto *forces = dialog->findChild<QTabWidget *>("hpopForceModelTabs");
+            auto *scroll = qobject_cast<QScrollArea *>(forces->currentWidget());
+            ASSERT_TRUE(scroll);
+            EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+            EXPECT_TRUE(
+                dialog->rect().contains(dialog->findChild<QDialogButtonBox *>()->geometry()));
+            const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+            if (!capture.isEmpty()) {
+                EXPECT_TRUE(QDir{}.mkpath(capture));
+                EXPECT_TRUE(
+                    dialog->grab().save(capture + QString("/hpop-secular-%1.png").arg(width)));
+            }
+        }
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr, {custom}, {}));
+    EXPECT_TRUE(options.include_secular_variations);
+    EXPECT_EQ(options.gravity_model, "custom");
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *use = dialog->findChild<QCheckBox *>("hpopSecularVariations");
+        auto *model = dialog->findChild<QComboBox *>("hpopGravityModel");
+        EXPECT_TRUE(use->isChecked());
+        model->setCurrentIndex(0);
+        EXPECT_TRUE(use->isEnabled()); // A stale checked draft can always be switched off.
+        dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(2);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        EXPECT_TRUE(dialog->isVisible());
+        EXPECT_FALSE(dialog->findChild<QLabel *>("errorText")->text().isEmpty());
+        EXPECT_EQ(dialog->findChild<QTabWidget *>("hpopSettingsTabs")->currentIndex(), 0);
+        EXPECT_EQ(options, saved);
+        use->setChecked(false);
+        EXPECT_FALSE(use->isEnabled());
+        model->setCurrentIndex(model->findData(QStringLiteral("custom")));
+        EXPECT_TRUE(use->isEnabled());
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr, {custom}, {}));
+    EXPECT_EQ(options, saved);
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        dialog->findChild<QComboBox *>("hpopGravityModel")->setCurrentIndex(1);
+        auto *use = dialog->findChild<QCheckBox *>("hpopSecularVariations");
+        EXPECT_FALSE(use->isEnabled());
+        EXPECT_TRUE(use->isChecked());
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr, {custom}, {}));
+    EXPECT_EQ(options.gravity_degree, 0);
+    EXPECT_TRUE(options.include_secular_variations);
+}
+
 } // namespace orbitforge::desktop

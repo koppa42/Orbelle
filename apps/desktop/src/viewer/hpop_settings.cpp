@@ -294,7 +294,16 @@ bool edit_hpop_settings(
         form->addRow(label, field);
         return field;
     };
-    caution(gravity, QStringLiteral("重力系数长期变化待实现。"));
+    auto *secular_use = new QCheckBox(QStringLiteral("包含引力系数长期变化"));
+    secular_use->setObjectName("hpopSecularVariations");
+    secular_use->setChecked(options.include_secular_variations);
+    secular_use->setToolTip(
+        QStringLiteral("使用重力文件的参考历元与线性变化率，在各积分阶段求值。"));
+    gravity->addRow(secular_use);
+    auto *secular_status = new QLabel;
+    secular_status->setObjectName("hpopSecularStatus");
+    secular_status->setWordWrap(true);
+    gravity->addRow(QString{}, secular_status);
     auto *solid = section(gravity_page, QStringLiteral("固体潮"), "hpopSolidTidesSection");
     auto *solid_mode = new QComboBox;
     solid_mode->setObjectName("hpopSolidTideMode");
@@ -1119,6 +1128,8 @@ bool edit_hpop_settings(
                                           [](const auto &row) { return row.enabled->isChecked(); });
         if (bodies > 0)
             gravity_text += QStringLiteral(" · 第三体 %1").arg(bodies);
+        if (secular_use->isChecked() && model->currentIndex() != 1)
+            gravity_text += QStringLiteral(" · 长期变化");
         if (solid_mode->currentIndex() != 0 &&
             (model->currentIndex() != 1 || !solid_truncate->isChecked()))
             gravity_text += QStringLiteral(" · ") + solid_mode->currentText();
@@ -1143,6 +1154,7 @@ bool edit_hpop_settings(
                                                          value_text(fixed) + QStringLiteral(" s"));
         covariance_item->setData(summary_role, QStringLiteral("尚未实现"));
     };
+    QObject::connect(secular_use, &QCheckBox::toggled, &dialog, refresh_summaries);
     for (auto *box : {model, density_model, srp_shadow, method, solid_mode})
         QObject::connect(box, &QComboBox::currentIndexChanged, &dialog, refresh_summaries);
     for (auto *spin : {degree, order})
@@ -1218,6 +1230,23 @@ bool edit_hpop_settings(
     const auto refresh_gravity_status = [&] {
         const auto product = selected_product();
         const auto found = selected_model();
+        const bool secular_ready =
+            found != installed_models.end() && found->info.secular_variations.has_value();
+        secular_use->setEnabled(model->currentIndex() != 1 &&
+                                (secular_ready || secular_use->isChecked()));
+        if (model->currentIndex() == 1) {
+            secular_status->setText(QStringLiteral("点质量不使用长期变化；保留当前草稿。"));
+        } else if (secular_ready) {
+            const auto &variation = *found->info.secular_variations;
+            const double jd =
+                2451545.0 +
+                (variation.reference_epoch.seconds_since(core::Epoch{0}) + 32.184) / 86400;
+            secular_status->setText(QStringLiteral("参考历元 JD %1 TT · %2 项变化率 / 儒略年")
+                                        .arg(jd, 0, 'f', 9)
+                                        .arg(variation.rates_per_year.size()));
+        } else {
+            secular_status->setText(QStringLiteral("所选文件未提供长期变化的参考历元与变化率。"));
+        }
         solid_k20->setText(
             found != installed_models.end() ? QString::number(found->info.solid_tide_k20, 'g', 15)
             : model->currentData().toString().isEmpty() ? QStringLiteral("0.30190")
@@ -1304,6 +1333,7 @@ bool edit_hpop_settings(
     };
     QObject::connect(model, &QComboBox::currentIndexChanged, &dialog, request_gravity);
     QObject::connect(download_gravity, &QPushButton::clicked, &dialog, request_gravity);
+    QObject::connect(secular_use, &QCheckBox::toggled, &dialog, refresh_gravity_status);
     QObject::connect(cancel_gravity, &QPushButton::clicked, &dialog, [&] {
         queued_gravity.reset();
         gravity_message = QStringLiteral("已取消下载。");
@@ -1472,6 +1502,14 @@ bool edit_hpop_settings(
             }
             candidate.gravity_degree = model->currentIndex() != 1 ? degree->value() : 0;
             candidate.gravity_order = model->currentIndex() != 1 ? order->value() : 0;
+            candidate.include_secular_variations = secular_use->isChecked();
+            validation_field = secular_use;
+            if (candidate.uses_secular_gravity()) {
+                const auto found = selected_model();
+                if (found == installed_models.end() || !found->info.secular_variations)
+                    throw std::runtime_error(
+                        "所选重力场缺少长期变化的参考历元与变化率；请导入完整文件或关闭此项。");
+            }
             candidate.solid_tides.mode =
                 static_cast<core::SolidTideMode>(solid_mode->currentIndex());
             candidate.solid_tides.truncate_to_gravity = solid_truncate->isChecked();

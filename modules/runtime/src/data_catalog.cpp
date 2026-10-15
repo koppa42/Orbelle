@@ -1,4 +1,5 @@
 #include <charconv>
+#include <limits>
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
@@ -502,7 +503,16 @@ CatalogGravity DataCatalog::install_gravity(const std::filesystem::path &source,
     const auto acquired = std::chrono::duration_cast<std::chrono::seconds>(
                               std::chrono::system_clock::now().time_since_epoch())
                               .count();
-    const Json record{{"schema", 2},
+    Json secular = nullptr;
+    if (info.secular_variations) {
+        Json rates = Json::array();
+        for (const auto &v : info.secular_variations->rates_per_year)
+            rates.push_back({v.degree, v.order, v.c, v.s});
+        secular = {{"epoch_tai_ns", info.secular_variations->reference_epoch.tai_nanoseconds()},
+                   {"rates_per_julian_year", std::move(rates)}};
+    }
+    const Json record{{"schema", 3},
+                      {"secular_variations", std::move(secular)},
                       {"solid_tide_k20", info.solid_tide_k20},
                       {"model", info.model},
                       {"sha256", info.sha256},
@@ -536,12 +546,44 @@ std::vector<CatalogGravity> DataCatalog::gravity_models() const {
         const auto key = reinterpret_cast<const char *>(sqlite3_column_text(rows.value, 0));
         const auto r =
             Json::parse(reinterpret_cast<const char *>(sqlite3_column_text(rows.value, 1)));
-        check(r.at("schema") == 2 && hash_valid(r.at("sha256")),
+        check(r.at("schema") == 3 && hash_valid(r.at("sha256")),
               "Unsupported gravity receipt; reimport or download gravity data");
         core::GravityInfo info{r.at("model"),       r.at("sha256"), r.at("source_url"),
                                r.at("tide_system"), r.at("mu"),     r.at("radius_m"),
                                r.at("degree"),      r.at("order"),  r.at("solid_tide_k20")};
         check(std::isfinite(info.solid_tide_k20), "Invalid gravity Love number receipt");
+        const auto &secular = r.at("secular_variations");
+        if (!secular.is_null()) {
+            const auto &epoch = secular.at("epoch_tai_ns");
+            check(epoch.is_number_integer() &&
+                      (!epoch.is_number_unsigned() ||
+                       epoch.get<std::uint64_t>() <=
+                           static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())),
+                  "Invalid gravity secular epoch receipt");
+            const auto &rates = secular.at("rates_per_julian_year");
+            check(info.degree >= 2 && info.degree <= core::gravity_max_degree && info.order >= 0 &&
+                      info.order <= info.degree && rates.is_array() && !rates.empty() &&
+                      rates.size() <=
+                          static_cast<std::size_t>((info.degree + 1) * (info.degree + 2) / 2),
+                  "Invalid gravity secular rate receipt");
+            info.secular_variations =
+                core::GravitySecularVariations{core::Epoch{epoch.get<std::int64_t>()}, {}};
+            auto &values = info.secular_variations->rates_per_year;
+            for (const auto &v : rates) {
+                check(v.is_array() && v.size() == 4 && v[0].is_number_integer() &&
+                          v[1].is_number_integer() && v[0] >= 2 && v[0] <= info.degree &&
+                          v[1] >= 0 && v[1] <= v[0] && v[1] <= info.order,
+                      "Invalid gravity secular rate indices");
+                core::GravityCoefficient term{v[0], v[1], v[2], v[3]};
+                check(
+                    std::isfinite(term.c) && std::isfinite(term.s) &&
+                        (term.order != 0 || term.s == 0) &&
+                        (values.empty() || values.back().degree < term.degree ||
+                         (values.back().degree == term.degree && values.back().order < term.order)),
+                    "Invalid or duplicate gravity secular rate receipt");
+                values.push_back(term);
+            }
+        }
         result.push_back(
             {std::string(key).substr(8), info, impl_->root / "gravity" / (info.sha256 + ".dat"),
              static_cast<DataAcquisition>(r.at("acquisition").get<int>()), r.at("acquired_at")});
@@ -556,7 +598,8 @@ DataCatalog::load_gravity(const std::string &selection) const {
     check(it != models.end(),
           "Gravity model is not installed; download or import it in Data Center");
     const auto model = runtime::load_gravity(it->file, it->info.source_url);
-    check(model->info().sha256 == it->info.sha256, "Gravity content SHA256 mismatch");
+    check(gravity_reference(selection, model->info()) == gravity_reference(selection, it->info),
+          "Gravity content or physical metadata differs from its receipt; reimport the data");
     return model;
 }
 CatalogSpaceWeather DataCatalog::install_space_weather(const std::filesystem::path &source,

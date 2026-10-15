@@ -17,6 +17,8 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
                                        : options.gravity_model) +
         ";degree=" + std::to_string(options.gravity_degree) +
         ";order=" + std::to_string(options.gravity_order);
+    if (options.uses_secular_gravity())
+        algorithm += ";secular=file-linear-julian-year-v1";
     if (options.uses_eop_force() && environment.eop)
         algorithm += ";data=" + application::eop_data_lock(environment.eop->data_info()).sha256();
     if (!options.gravity_model.empty() && environment.gravity)

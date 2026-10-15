@@ -255,6 +255,7 @@ void bind_project(py::module_ &module) {
         .def(py::init<>())
         .def_readwrite("gravity_model", &core::HpopOptions::gravity_model)
         .def_readwrite("gravity_mu", &core::HpopOptions::gravity_mu)
+        .def_readwrite("include_secular_variations", &core::HpopOptions::include_secular_variations)
         .def_readwrite("third_bodies", &core::HpopOptions::third_bodies)
         .def_readwrite("satellite_mass_kg", &core::HpopOptions::satellite_mass_kg)
         .def_property_readonly("drag_area_m2", &core::HpopOptions::drag_area_m2)

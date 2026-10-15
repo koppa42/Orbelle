@@ -5,8 +5,12 @@
 #include <orbitforge/core/propagation/gravity.hpp>
 
 namespace orbitforge::runtime {
-// Static ICGEM .gfc and STK .grv subset. Reads and hashes the complete file, retains
-// coefficients through core::gravity_max_degree, rejects time-dependent records.
+// Static ICGEM .gfc and STK .grv with optional SecularVariations. Hashes complete
+// files and retains coefficients through core::gravity_max_degree. RefEpochTDT is
+// a TT Julian date; LinearRate Cos/Sin n m value is per Julian year and follows the
+// file's Normalized designation. Converts the epoch to TAI ns, rounded to nearest ns.
+// Time-dependent ICGEM records and unsupported STK blocks are rejected. No name-based
+// secular model is added to static files.
 // EarthIERSTideModel and legacy LoveNumbers blocks override the real k20 only,
 // as in STK; their finite imaginary component is parsed but not used. Conflicting
 // permanent-tide declarations and unsupported tide/process-noise blocks fail.

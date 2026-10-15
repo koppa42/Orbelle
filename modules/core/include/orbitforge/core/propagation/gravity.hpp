@@ -1,6 +1,8 @@
 #pragma once
 #include <array>
 #include <memory>
+#include <optional>
+#include <orbitforge/core/time/epoch.hpp>
 #include <span>
 #include <string>
 #include <vector>
@@ -9,6 +11,17 @@ namespace orbitforge::core {
 // Supports the full EGM2008 degree (2190) and its rectangular order limit (2159).
 // Each field retains its declared degree/order. Fully normalized, no Condon-Shortley phase.
 inline constexpr int gravity_max_degree = 2190;
+struct GravityCoefficient {
+    int degree = 0, order = 0;
+    double c = 0, s = 0;
+};
+// Rates of fully normalized coefficients per Julian year (365.25 SI days).
+// At reference_epoch the additive correction is exactly zero. The base coefficients
+// must describe that epoch; no model-name inference or implicit re-epoching is applied.
+struct GravitySecularVariations {
+    Epoch reference_epoch{0};
+    std::vector<GravityCoefficient> rates_per_year;
+};
 struct GravityInfo {
     std::string model, sha256, source_url, tide_system;
     double mu = 0, radius_m = 0;
@@ -16,12 +29,9 @@ struct GravityInfo {
     // Dimensionless real Earth k20, finite; STK overrides only this Love number.
     // IERS 2003 default after the March 2006 update.
     double solid_tide_k20 = 0.30190;
+    std::optional<GravitySecularVariations> secular_variations{};
 };
-struct GravityCoefficient {
-    int degree = 0, order = 0;
-    double c = 0, s = 0;
-};
-// Immutable, Earth-centered static potential, including its monopole. SI units;
+// Immutable, Earth-centered reference potential, including its monopole. SI units;
 // input/output axes are Earth-fixed. Optional additive normalized corrections are supplied
 // by the caller at the force epoch; they never mutate the immutable base field.
 class GravityModel {
@@ -30,7 +40,12 @@ class GravityModel {
     [[nodiscard]] const GravityInfo &info() const noexcept { return info_; }
     [[nodiscard]] std::array<double, 3>
     acceleration(const std::array<double, 3> &position_m, int degree, int order,
-                 std::span<const GravityCoefficient> corrections = {}) const;
+                 std::span<const GravityCoefficient> corrections = {},
+                 std::optional<Epoch> secular_at = {}) const;
+    // Select only rates inside the base field truncation. Throws if metadata is absent,
+    // truncation is invalid, or the evolved corrections are not finite. No UTC is needed.
+    [[nodiscard]] std::vector<GravityCoefficient> secular_corrections(Epoch at, int degree,
+                                                                      int order) const;
 
   private:
     GravityInfo info_;

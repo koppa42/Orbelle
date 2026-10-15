@@ -1041,6 +1041,7 @@ class HpopOptions:
     @property
     def srp_area_m2(self) -> float: ...
     include_relativistic_accelerations: bool
+    include_secular_variations: bool
     integrator: HpopIntegrator
     relative_tolerance: float
     position_tolerance_m: float
@@ -1219,7 +1220,18 @@ class CatalogEphemeris:
     @property
     def acquired_at_unix_seconds(self) -> int: ...
 
+class GravityCoefficient:
+    degree: int
+    order: int
+    c: float
+    s: float
+
+class GravitySecularVariations:
+    reference_epoch: Epoch
+    rates_per_year: list[GravityCoefficient]
+
 class GravityInfo:
+    secular_variations: GravitySecularVariations | None
     @property
     def model(self) -> str: ...
     @property

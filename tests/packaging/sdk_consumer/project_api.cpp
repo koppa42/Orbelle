@@ -82,11 +82,21 @@ int main(int argc, char **argv) try {
         std::ofstream file(gravity_file);
         file << "stk.v.6.0\nModel SDK\nDegree 2\nOrder 2\nGm 3.986004415e14\n"
                 "RefDistance 6378136.3\nNormalized Yes\nIncludesPermTide No\n"
+                "Begin SecularVariations\nRefEpochTDT 2451545\n"
+                "LinearRate Cos 2 0 1e-11\nEnd SecularVariations\n"
                 "BEGIN Coefficients\n2 0 -4.84165371736e-4 0\nEND Coefficients\n";
     }
     const auto resource = of::runtime::load_gravity(gravity_file);
     if (resource->info().degree != 2 || resource->info().sha256.size() != 64)
         return 9;
+    if (!resource->info().secular_variations ||
+        resource->info().secular_variations->reference_epoch != of::Epoch{-32184000000LL})
+        return 14;
+    const auto secular = resource->secular_corrections(of::Epoch{31557567816000000LL}, 2, 0);
+    if (secular.size() != 1 || secular[0].c != 1e-11 || secular[0].s != 0 ||
+        resource->acceleration({7e6, 0, 0}, 2, 0, {}, of::Epoch{31557567816000000LL}) ==
+            resource->acceleration({7e6, 0, 0}, 2, 0))
+        return 15;
     const auto tide = of::core::solid_tide_corrections(
         resource->info(), {of::core::SolidTideMode::permanent, false}, 0, 0);
     if (tide.size() != 1 || tide.front().c >= 0 ||
@@ -94,6 +104,7 @@ int main(int argc, char **argv) try {
             resource->acceleration({7e6, 0, 0}, 0, 0))
         return 12;
     numerical.hpop.gravity_model = "custom";
+    numerical.hpop.include_secular_variations = true;
     auto gravity_edit = reopened.edit();
     gravity_edit.objects().update(satellite, of::objects::SatelliteUpdate{.orbit = numerical});
     gravity_edit.commit();
