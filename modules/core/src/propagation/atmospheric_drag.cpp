@@ -53,6 +53,7 @@ void validate_drag_options(const DragOptions &o) {
         throw std::invalid_argument("Invalid space weather selection ID");
     if ((o.geomagnetic_update != GeomagneticUpdate::daily &&
          o.geomagnetic_update != GeomagneticUpdate::three_hourly &&
+         o.geomagnetic_update != GeomagneticUpdate::three_hourly_interpolated &&
          o.geomagnetic_update != GeomagneticUpdate::three_hourly_cubic_spline) ||
         (o.geomagnetic_source != GeomagneticSource::ap &&
          o.geomagnetic_source != GeomagneticSource::kp))
@@ -78,7 +79,8 @@ DragOptions effective_drag_options(DragOptions o) {
     }
     if (o.atmosphere == AtmosphereModel::nrlmsise00) {
         o.low_altitude_model = LowAltitudeDensityModel::none;
-        if (o.geomagnetic_update == GeomagneticUpdate::three_hourly_cubic_spline)
+        if (o.geomagnetic_update == GeomagneticUpdate::three_hourly_interpolated ||
+            o.geomagnetic_update == GeomagneticUpdate::three_hourly_cubic_spline)
             o.geomagnetic_update = GeomagneticUpdate::three_hourly;
     }
     if (o.low_altitude_model == LowAltitudeDensityModel::none)

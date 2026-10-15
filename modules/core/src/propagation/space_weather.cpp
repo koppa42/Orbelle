@@ -33,6 +33,7 @@ Epoch lagged(Epoch at, int seconds) {
 void choices(AtmosphereModel model, GeomagneticUpdate update, GeomagneticSource source) {
     if ((model != AtmosphereModel::jacchia_roberts && model != AtmosphereModel::nrlmsise00) ||
         (update != GeomagneticUpdate::daily && update != GeomagneticUpdate::three_hourly &&
+         update != GeomagneticUpdate::three_hourly_interpolated &&
          update != GeomagneticUpdate::three_hourly_cubic_spline) ||
         (source != GeomagneticSource::ap && source != GeomagneticSource::kp))
         throw std::invalid_argument("Unsupported space weather sampling choice");
@@ -71,21 +72,25 @@ int spline_node(const UtcDateTime &u) {
     const int seconds = (u.hour % 3) * 3600 + u.minute * 60 + u.second;
     return s.day * 8 + s.index - (seconds < 5400 ? 1 : 0);
 }
-UtcDateTime spline_utc(int node) {
+UtcDateTime slot_utc(int node) {
     const int d = node >= 0 ? node / 8 : (node - 7) / 8;
-    auto utc = utc_date(d, (node - d * 8) * 3 + 1);
+    return utc_date(d, (node - d * 8) * 3);
+}
+UtcDateTime spline_utc(int node) {
+    auto utc = slot_utc(node);
+    ++utc.hour;
     utc.minute = 30;
     return utc;
 }
 double spline_value(const std::array<double, 4> &c, double x) {
     return ((c[3] * x + c[2]) * x + c[1]) * x + c[0];
 }
-double check_spline(double value, GeomagneticSource source) {
+double check_geomagnetic_range(double value, GeomagneticSource source) {
     const double upper = source == GeomagneticSource::ap ? 400 : 9;
     const double roundoff = 64 * std::numeric_limits<double>::epsilon() * upper;
     if (!std::isfinite(value) || value < -roundoff || value > upper + roundoff)
         throw SpaceWeatherCoverageError(
-            "Natural cubic geomagnetic spline overshoots the Ap/Kp range; "
+            "Geomagnetic interpolation overshoots the Ap/Kp range; "
             "choose daily/three-hour updates or import a suitable weather resource");
     return std::clamp(value, 0.0, upper); // Only roundoff-sized excursions reach this line.
 }
@@ -115,6 +120,8 @@ SpaceWeather::SpaceWeather(SpaceWeatherInfo info, std::vector<SpaceWeatherDay> d
     for (std::size_t source = 0; source < 2; ++source) {
         auto &second = spline_second_[source];
         second.resize(days_.size() * 8, std::numeric_limits<double>::quiet_NaN());
+        auto &mean = mean_coefficients_[source];
+        mean.resize(second.size());
         const auto value = [&](std::size_t i) {
             const auto &d = days_[i / 8];
             return d.quality == WeatherQuality::monthly_prediction
@@ -145,6 +152,45 @@ SpaceWeather::SpaceWeather(SpaceWeatherInfo info, std::vector<SpaceWeatherDay> d
             }
             for (auto i = end - 1; i > begin + 1; --i)
                 second[i - 1] -= upper[i - begin - 1] * second[i];
+            // Natural cubic of the cumulative integral: its edge second
+            // derivatives satisfy M[i-1]+4M[i]+M[i+1]=6(y[i]-y[i-1]).
+            // Solve using differences directly, avoiding cumulative cancellation.
+            const auto count = end - begin;
+            std::vector<double> edge(count + 1, 0);
+            upper.assign(count + 1, 0);
+            for (std::size_t i = 1; i < count; ++i) {
+                const double denominator = 4 - upper[i - 1];
+                upper[i] = 1 / denominator;
+                edge[i] =
+                    (6 * (*value(begin + i) - *value(begin + i - 1)) - edge[i - 1]) / denominator;
+            }
+            for (auto i = count; i > 1; --i)
+                edge[i - 1] -= upper[i - 1] * edge[i];
+            const double bound = source == 0 ? 400 : 9;
+            for (std::size_t i = 0; i < count; ++i) {
+                const double y = *value(begin + i);
+                double b = edge[i], c = (edge[i + 1] - edge[i]) / 2;
+                const double a = y - b / 2 - c / 3;
+                const auto polynomial = [&](double x) { return (c * x + b) * x + a; };
+                double low = std::min(a, polynomial(1)), high = std::max(a, polynomial(1));
+                if (c != 0) {
+                    const double vertex = -b / (2 * c);
+                    if (vertex > 0 && vertex < 1) {
+                        low = std::min(low, polynomial(vertex));
+                        high = std::max(high, polynomial(vertex));
+                    }
+                }
+                // Cell-mean scaling limiter, with exact quadratic extrema.
+                // Unlike clipping samples, y + theta*(p-y) retains the integral.
+                double theta = 1;
+                if (low < 0)
+                    theta = std::min(theta, y / (y - low));
+                if (high > bound)
+                    theta = std::min(theta, (bound - y) / (high - y));
+                if (y == 0 || y == bound)
+                    theta = 0;
+                mean[begin + i] = {theta * b, theta * c};
+            }
             begin = end;
         }
     }
@@ -164,6 +210,25 @@ const SpaceWeatherDay &SpaceWeather::day(int number) const {
                                         "daily/three-hour sampling is unavailable on " +
                                         date_text(number));
     return record;
+}
+SpaceWeather::SplineInterval SpaceWeather::mean_interval(int node, const ITimeProvider &time,
+                                                         GeomagneticSource source) const {
+    const auto utc = slot_utc(node);
+    const int d = day_number(utc), i = utc.hour / 3;
+    const auto &r = day(d);
+    const double y = required(source == GeomagneticSource::ap ? r.ap[i] : r.kp[i], d,
+                              "three-hour mean-preserving interpolation bin");
+    const auto index = static_cast<std::size_t>(&r - days_.data()) * 8 + i;
+    const auto [b, c] = mean_coefficients_[source == GeomagneticSource::ap ? 0 : 1][index];
+    return {{{y - b / 2 - c / 3, b, c, 0}}, time.from_utc(utc), time.from_utc(slot_utc(node + 1))};
+}
+double SpaceWeather::mean_sample(Epoch at, const ITimeProvider &time,
+                                 GeomagneticSource source) const {
+    const auto bin = slot(time.to_utc(at));
+    const auto s = mean_interval(bin.day * 8 + bin.index, time, source);
+    return check_geomagnetic_range(
+        spline_value(s.coefficients, at.seconds_since(s.first) / s.last.seconds_since(s.first)),
+        source);
 }
 SpaceWeather::SplineInterval SpaceWeather::spline_interval(int node, const ITimeProvider &time,
                                                            GeomagneticSource source) const {
@@ -196,7 +261,7 @@ double SpaceWeather::spline_sample(Epoch at, const ITimeProvider &time,
     const auto s = spline_interval(node, time, source);
     const auto result =
         spline_value(s.coefficients, at.seconds_since(s.first) / s.last.seconds_since(s.first));
-    return check_spline(result, source);
+    return check_geomagnetic_range(result, source);
 }
 void SpaceWeather::validate_spline(Epoch first, Epoch last, const ITimeProvider &time,
                                    GeomagneticSource source) const {
@@ -210,11 +275,11 @@ void SpaceWeather::validate_spline(Epoch first, Epoch last, const ITimeProvider 
         const double duration = s.last.seconds_since(s.first);
         const double a = std::max(0.0, first.seconds_since(s.first) / duration);
         const double b = std::min(1.0, last.seconds_since(s.first) / duration);
-        check_spline(spline_value(c, a), source);
-        check_spline(spline_value(c, b), source);
+        check_geomagnetic_range(spline_value(c, a), source);
+        check_geomagnetic_range(spline_value(c, b), source);
         const auto extremum = [&](double x) {
             if (x > a && x < b)
-                check_spline(spline_value(c, x), source);
+                check_geomagnetic_range(spline_value(c, x), source);
         };
         if (c[3] == 0) {
             if (c[2] != 0)
@@ -294,6 +359,8 @@ SpaceWeatherSample SpaceWeather::sample(Epoch at, const ITimeProvider &time, Atm
                         from_ap ? "three-hour Ap" : "three-hour Kp");
     };
     const double geomag = update == GeomagneticUpdate::daily ? daily()
+                          : jr && update == GeomagneticUpdate::three_hourly_interpolated
+                              ? mean_sample(lagged(at, 24120), time, source)
                           : jr && update == GeomagneticUpdate::three_hourly_cubic_spline
                               ? spline_sample(lagged(at, 24120), time, source)
                               : hourly(0);
@@ -348,6 +415,8 @@ void SpaceWeather::validate_interval(Epoch first, Epoch last, const ITimeProvide
             const int d = n >= 0 ? n / 8 : (n - 7) / 8, i = n - d * 8;
             const auto &r = day(d);
             (void)required(ap ? r.ap[i] : r.kp[i], d, ap ? "three-hour Ap" : "three-hour Kp");
+            if (jr && update == GeomagneticUpdate::three_hourly_interpolated)
+                (void)mean_interval(n, time, source);
         }
     }
     (void)sample(first, time, model, update, source, sun_distance_m);

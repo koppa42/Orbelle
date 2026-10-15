@@ -492,78 +492,85 @@ TEST(SpaceWeather, SplineDrivenJacchiaRobertsMatchesOriginalGmatDensity) {
     RecordProperty("maximum_relative_density_error", maximum);
 }
 
-TEST_F(WeatherFiles, SplineTrajectoryConvergesAndSurvivesProjectReopen) {
+TEST_F(WeatherFiles, InterpolatedTrajectoriesConvergeAndSurviveProjectReopen) {
     if (!runtime::time_frames_available() || !runtime::ephemeris_available())
         GTEST_SKIP();
-    auto text = daily_file();
-    const std::string old = ",15,15,15,15,15,15,15,15,15,0,0,0,";
-    const std::string varied = ",15,20,30,50,40,30,20,15,27,0,0,0,";
-    std::size_t offset = 0;
-    while ((offset = text.find(old, offset)) != std::string::npos) {
-        text.replace(offset, old.size(), varied);
-        offset += varied.size();
-    }
-    const auto data =
-        runtime::DataSnapshot::load(ORBITFORGE_DRAG_EOP)
-            .with_ephemeris("de440s",
-                            runtime::make_third_body_ephemeris(
-                                runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root)))
-            .with_space_weather_file("celestrak", write(text));
-    const auto epoch = data.time()->from_utc({2017, 1, 1, 1, 0, 0, 0});
-    const core::Epoch first{epoch.tai_nanoseconds() - 21600000000000LL};
-    const core::Epoch last{epoch.tai_nanoseconds() + 21600000000000LL};
-    application::Project settings{"Spline", first, last};
-    application::ProjectSatellite satellite;
-    auto &orbit = satellite.orbit;
-    orbit.propagator = application::OrbitPropagator::hpop;
-    orbit.first = first;
-    orbit.last = last;
-    orbit.initial.epoch = epoch;
-    orbit.initial.position_m = {6778137, 0, 0};
-    orbit.initial.velocity_mps = {0, 6300, 4300};
-    auto &h = orbit.hpop;
-    h.gravity_degree = h.gravity_order = 0;
-    h.max_step_seconds = 60;
-    h.relative_tolerance = 1e-13;
-    h.position_tolerance_m = 1e-6;
-    h.velocity_tolerance_mps = 1e-9;
-    h.drag.enabled = true;
-    h.drag.atmosphere = Model::jacchia_roberts;
-    h.drag.weather_model = "celestrak";
-    h.drag.geomagnetic_update = Update::three_hourly_cubic_spline;
-    settings.satellites.push_back(satellite);
-    const auto project = Project::from_data(settings);
-    const auto analysis = project.prepare(data);
-    const auto object = project.objects().get("satellite-1");
-    const auto a = analysis.state(object, first, FrameId::gcrf),
-               b = analysis.state(object, last, FrameId::gcrf);
-    settings.satellites[0].orbit.hpop.max_step_seconds = 7;
-    const auto refined = Project::from_data(settings);
-    const auto finer = refined.prepare(data);
-    double maximum = 0;
-    for (const auto &state : {a, b}) {
-        const auto other =
-            finer.state(refined.objects().get("satellite-1"), state.epoch, FrameId::gcrf);
-        for (std::size_t i = 0; i < 3; ++i) {
-            maximum = std::max(maximum, std::abs(state.position_m[i] - other.position_m[i]));
-            EXPECT_NEAR(state.position_m[i], other.position_m[i], 1e-3);
-            EXPECT_NEAR(state.velocity_mps[i], other.velocity_mps[i], 1e-6);
+    for (const auto update :
+         {Update::three_hourly_interpolated, Update::three_hourly_cubic_spline}) {
+        SCOPED_TRACE(static_cast<int>(update));
+        auto text = daily_file();
+        const std::string old = ",15,15,15,15,15,15,15,15,15,0,0,0,";
+        const std::string varied = ",15,20,30,50,40,30,20,15,27,0,0,0,";
+        std::size_t offset = 0;
+        while ((offset = text.find(old, offset)) != std::string::npos) {
+            text.replace(offset, old.size(), varied);
+            offset += varied.size();
         }
+        const auto data =
+            runtime::DataSnapshot::load(ORBITFORGE_DRAG_EOP)
+                .with_ephemeris(
+                    "de440s", runtime::make_third_body_ephemeris(
+                                  runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root)))
+                .with_space_weather_file("celestrak", write(text));
+        const auto epoch = data.time()->from_utc({2017, 1, 1, 1, 0, 0, 0});
+        const core::Epoch first{epoch.tai_nanoseconds() - 21600000000000LL};
+        const core::Epoch last{epoch.tai_nanoseconds() + 21600000000000LL};
+        application::Project settings{"Spline", first, last};
+        application::ProjectSatellite satellite;
+        auto &orbit = satellite.orbit;
+        orbit.propagator = application::OrbitPropagator::hpop;
+        orbit.first = first;
+        orbit.last = last;
+        orbit.initial.epoch = epoch;
+        orbit.initial.position_m = {6778137, 0, 0};
+        orbit.initial.velocity_mps = {0, 6300, 4300};
+        auto &h = orbit.hpop;
+        h.gravity_degree = h.gravity_order = 0;
+        h.max_step_seconds = 60;
+        h.relative_tolerance = 1e-13;
+        h.position_tolerance_m = 1e-6;
+        h.velocity_tolerance_mps = 1e-9;
+        h.drag.enabled = true;
+        h.drag.atmosphere = Model::jacchia_roberts;
+        h.drag.weather_model = "celestrak";
+        h.drag.geomagnetic_update = update;
+        settings.satellites.push_back(satellite);
+        const auto project = Project::from_data(settings);
+        const auto analysis = project.prepare(data);
+        const auto object = project.objects().get("satellite-1");
+        const auto a = analysis.state(object, first, FrameId::gcrf),
+                   b = analysis.state(object, last, FrameId::gcrf);
+        settings.satellites[0].orbit.hpop.max_step_seconds = 7;
+        const auto refined = Project::from_data(settings);
+        const auto finer = refined.prepare(data);
+        double maximum = 0;
+        for (const auto &state : {a, b}) {
+            const auto other =
+                finer.state(refined.objects().get("satellite-1"), state.epoch, FrameId::gcrf);
+            for (std::size_t i = 0; i < 3; ++i) {
+                maximum = std::max(maximum, std::abs(state.position_m[i] - other.position_m[i]));
+                EXPECT_NEAR(state.position_m[i], other.position_m[i], 1e-3);
+                EXPECT_NEAR(state.velocity_mps[i], other.velocity_mps[i], 1e-6);
+            }
+        }
+        RecordProperty("maximum_step_refinement_position_m_" +
+                           std::to_string(static_cast<int>(update)),
+                       maximum);
+        settings.satellites[0].orbit.hpop.drag.geomagnetic_update = Update::three_hourly;
+        const auto stepped = Project::from_data(settings);
+        EXPECT_NE(stepped.prepare(data)
+                      .state(stepped.objects().get("satellite-1"), last, FrameId::gcrf)
+                      .position_m,
+                  b.position_m);
+        const auto file =
+            root / ("interpolation-" + std::to_string(static_cast<int>(update)) + ".orbitforge");
+        project.save(file, analysis);
+        const auto reopened = Project::open(file, data);
+        EXPECT_EQ(reopened.to_data().satellites[0].orbit.hpop.drag.geomagnetic_update, update);
+        EXPECT_EQ(reopened.prepare(data)
+                      .state(reopened.objects().get("satellite-1"), last, FrameId::gcrf)
+                      .position_m,
+                  b.position_m);
+        EXPECT_EQ(analysis.state(object, last, FrameId::gcrf).position_m, b.position_m);
     }
-    RecordProperty("maximum_step_refinement_position_m", maximum);
-    settings.satellites[0].orbit.hpop.drag.geomagnetic_update = Update::three_hourly;
-    const auto stepped = Project::from_data(settings);
-    EXPECT_NE(stepped.prepare(data)
-                  .state(stepped.objects().get("satellite-1"), last, FrameId::gcrf)
-                  .position_m,
-              b.position_m);
-    project.save(root / "spline.orbitforge", analysis);
-    const auto reopened = Project::open(root / "spline.orbitforge", data);
-    EXPECT_EQ(reopened.to_data().satellites[0].orbit.hpop.drag.geomagnetic_update,
-              Update::three_hourly_cubic_spline);
-    EXPECT_EQ(reopened.prepare(data)
-                  .state(reopened.objects().get("satellite-1"), last, FrameId::gcrf)
-                  .position_m,
-              b.position_m);
-    EXPECT_EQ(analysis.state(object, last, FrameId::gcrf).position_m, b.position_m);
 }

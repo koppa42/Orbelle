@@ -37,7 +37,7 @@ java -cp "out/validation/drag;$dragClasspath" OrbitForgeDragReference
 
 测试认证点质量+阻力仍需要 UTC/EOP/Sun，缺项和区间外查询先失败；视太阳需要额外 600 s 核覆盖，几何方向不冒充视方向；取消后 Session 可再次使用。用实际 ERFA/IERS/SPICE 2016 闰秒片段检查 C++ Session、Project、报告及 Python 状态一致；保存/重开保留参数及来源，修改 Cd/天气/密度模型/太阳方法改变新结果，旧 Analysis 保持不变。
 
-项目 v29 固定样例独立组装，禁用参数草稿往返而不改变身份；NRL 主模型的非活动低空参数不计入计算身份。Qt 测试检查阻力开关、模型关联、面积质量比单位转换、错误定位、缺星历拒绝、取消/重开；真实 Windows 窗口检查 430/720 逻辑像素及至少两个 DPI 设置（日志记录实际 DPR），不重建编辑器、不丢失输入，操作按钮可达。
+项目 v30 固定样例独立组装，禁用参数草稿往返而不改变身份；NRL 主模型的非活动低空参数不计入计算身份。Qt 测试检查阻力开关、模型关联、面积质量比单位转换、错误定位、缺星历拒绝、取消/重开；真实 Windows 窗口检查 430/720 逻辑像素及至少两个 DPI 设置（日志记录实际 DPR），不重建编辑器、不丢失输入，操作按钮可达。
 
 
 ## 文件模式验收
@@ -87,3 +87,18 @@ python tools/validation/fxm_weather_reference.py OUTPUT_DIR GMAT_DRIVER
 C++ 集成测试另外用真实 DE440 星历，将 FXM 路径与显式转换的 observed CSV 路径比较，覆盖 JR、NRL、低空模型准备、视太阳方向、项目保存/重开与数据变更确认；位置容限 `1e-5 m`、速度 `1e-8 m/s`。此项验证接口组合与转换路由，不是独立轨道真值。格式损坏、预测重叠/缺字段、错误 Kp/Q、取消导入、无距离或内部覆盖缺口均有失败路径测试。Python 安装后对同一参考执行 74 组取样并检查可选回调及目录重开。
 
 尚未获得 STK 本机输出，不能据此声称 FXM 改正与 STK 位级一致；FXM 的日预测没有补成三小时历史，CSSI Predicts 月预报仍另行实现。
+
+
+## 保持三小时均值的插值
+
+`tools/validation/space_weather_mean_reference.py` 使用固定 NumPy 2.3.3 / SciPy 1.16.3，将原始窗口值累积后调用 `CubicSpline(..., bc_type="natural").derivative()`，再用独立多项式 API 求极值并缩放。生成器不导入 OrbitForge，不使用生产求解器或其输出；密度参考调用上述未修改 GMAT JR。复现命令：
+
+```text
+python tools/validation/space_weather_mean_reference.py OUTPUT GMAT_DRIVER
+```
+
+固定参考含 112 对独立 Ap/Kp 输入、1314 个逐点值、218 个窗口的五点 Gauss–Legendre 积分和 70 个 GMAT 密度结果。覆盖平稳变化、Ap=0/400、Kp=0/9、磁暴跳变、16 个受限制的窗口、来源独立缺测、单窗口和双窗口序列、UTC 边界前后 1 ns，以及 2016 正闰秒的 10801 s 窗口。逐点绝对容限 Ap `1e-10`、Kp `1e-11`，计入 SciPy 对约 1e4 累积量求导的舍入；窗口均值绝对容限 `1e-10`，计入积分节点映射到整纳秒的误差；GMAT 密度相对容限仍为 `2e-10`。
+
+C++ 另测缺日期/月预报断档、窗口外拒绝、不可变数据、NRL 原生历史不变、有效计算身份及保存草稿。真实 DE440/EOP 场景对两种插值分别作 ±6 h RKF78 最大步长 60/7 s 收敛检查，位置/速度每分量容限 1 mm / 1e-6 m/s，并验证保存重开精确重现。此项是数值积分收敛，不是独立轨迹真值。Python 从 CSV 重建独立输入后复核全部 1314 点与 218 个积分，并验证高层设置保存；安装 SDK 与 Qt 窄窗/DPI、四项顺序、键盘切换、重开和取消同步验收。
+
+参考 SHA-256（LF）：`d85e283b597361fe3180c979fbfa373ba0e17322cf2e40d2da528ea28cb64ac1`。STK 公开约束已实现；缺少 STK 本机参考时，不能以这些独立算法对照宣称内部边界处理完全一致。

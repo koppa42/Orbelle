@@ -223,3 +223,56 @@ class FxmWeatherTests(unittest.TestCase):
                 self.assertEqual(old.info.sha256,catalog.weather_sources[0].info.sha256)
             finally:
                 del catalog
+
+
+class MeanInterpolationTests(unittest.TestCase):
+    @unittest.skipUnless(of.time_frames_available(), 'requires ERFA')
+    def test_csv_api_matches_independent_scipy_and_every_bin_integral(self):
+        reference=(ROOT/'tests/reference/propagators/space_weather_mean.txt').read_text().splitlines()
+        rows=list(csv.reader(io.StringIO(weather())))
+        # Add only flux guards; geomagnetic cells outside the reference remain missing.
+        for day in (23,22):
+            guard=rows[1].copy(); guard[0]=f'2016-12-{day}'
+            guard[3:11]=['']*8; guard[12:20]=['']*8
+            rows.insert(1,guard)
+        for line in reference:
+            if not line.startswith('D '): continue
+            _,d,slot,ap,kp=line.split(); row=rows[int(d)+3]; slot=int(slot)
+            row[12+slot]='' if float(ap)<0 else ap
+            row[3+slot]='' if float(kp)<0 else str(round(float(kp)*10))
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'mean.csv'
+            with path.open('w',newline='',encoding='ascii') as output:
+                csv.writer(output).writerows(rows)
+            parsed=of.load_space_weather(path); clock=of.make_builtin_time_provider()
+            def value(source,ns):
+                sample=parsed.sample(of.Epoch(int(ns)),clock,of.AtmosphereModel.JACCHIA_ROBERTS,
+                    of.GeomagneticUpdate.THREE_HOURLY_INTERPOLATED,
+                    of.GeomagneticSource.AP if source=='0' else of.GeomagneticSource.KP)
+                return sample.ap if source=='0' else sample.kp
+            points=windows=0
+            for line in reference:
+                fields=line.split()
+                if fields[0]=='C':
+                    self.assertAlmostEqual(value(fields[1],fields[2]),float(fields[3]),delta=1e-10)
+                    points+=1
+                elif fields[0]=='Q':
+                    mean=sum(value(fields[1],fields[i])*float(fields[i+1]) for i in range(5,15,2))
+                    self.assertAlmostEqual(mean,float(fields[4]),delta=1e-10)
+                    windows+=1
+            self.assertEqual((points,windows),(1314,218))
+
+    def test_high_level_interpolated_draft_round_trips(self):
+        epoch=of.Epoch(0)
+        with tempfile.TemporaryDirectory() as folder:
+            project=of.Project('Mean interpolation',epoch,of.Epoch(10_000_000_000))
+            drag=of.orbits.DragSettings(weather_model='celestrak',geomagnetic_update='three_hourly_interpolated',geomagnetic_source='kp')
+            sat=project.objects.satellite('Sat',orbit=of.orbits.Hpop(
+                initial=of.orbits.Cartesian(epoch,(7000000,0,0),(0,7500,0)),gravity_degree=0,drag=drag))
+            path=Path(folder)/'mean.orbitforge'; project.save(path)
+            reopened=of.Project.open(path)
+            self.assertEqual(reopened.objects[sat.id].orbit.hpop.drag,drag)
+            reopened.save(path,overwrite=True)
+            self.assertEqual(of.Project.open(path).objects[sat.id].orbit.hpop.drag.geomagnetic_update,'three_hourly_interpolated')
+        with self.assertRaises(ValueError):
+            of.orbits.DragSettings(geomagnetic_update='unknown')

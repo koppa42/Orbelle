@@ -9,7 +9,12 @@
 
 namespace orbitforge::core {
 enum class AtmosphereModel { jacchia_roberts, nrlmsise00 };
-enum class GeomagneticUpdate { daily, three_hourly, three_hourly_cubic_spline };
+enum class GeomagneticUpdate {
+    daily,
+    three_hourly,
+    three_hourly_interpolated,
+    three_hourly_cubic_spline
+};
 enum class GeomagneticSource { ap, kp };
 enum class WeatherQuality { observed, interpolated, daily_prediction, monthly_prediction };
 struct SpaceWeatherDay {
@@ -59,7 +64,11 @@ class SpaceWeather {
     // knots at 01:30, 04:30, ..., 22:30 UTC. Inter-node fractions use elapsed
     // TAI seconds, including leap seconds. Interpolate the selected Ap/Kp before
     // conversion; reject overshoot outside its physical range. NRL keeps its
-    // native un-interpolated seven-value history for either three-hour choice.
+    // native un-interpolated seven-value history for all three-hour choices.
+    // Mean-preserving interpolation: natural cubic primitive differentiated to
+    // quadratic UTC-bin profiles, scaled about each cell mean to bound Ap/Kp.
+    // Each actual UTC-bin duration (including leap seconds) retains its mean.
+    // Limiting may create boundary jumps. Gaps split runs; no extrapolation.
     // Checks every required record / slot, including all lags and history, not
     // just the two endpoints. Missing fields, holes and extrapolation are errors.
     void validate_interval(Epoch first, Epoch last, const ITimeProvider &time,
@@ -74,10 +83,17 @@ class SpaceWeather {
     // Second derivatives in the dimensionless, uniformly spaced UTC-slot coordinate.
     // Missing values/monthly predictions split runs; no spline crosses a gap.
     std::array<std::vector<double>, 2> spline_second_;
+    // Linear/quadratic coefficients in a normalized UTC bin; constant term is
+    // reconstructed from its recorded mean. Scaling preserves that mean.
+    std::array<std::vector<std::array<double, 2>>, 2> mean_coefficients_;
     struct SplineInterval {
         std::array<double, 4> coefficients;
         Epoch first, last;
     };
+    [[nodiscard]] SplineInterval mean_interval(int slot_number, const ITimeProvider &time,
+                                               GeomagneticSource source) const;
+    [[nodiscard]] double mean_sample(Epoch at, const ITimeProvider &time,
+                                     GeomagneticSource source) const;
     [[nodiscard]] SplineInterval spline_interval(int slot_number, const ITimeProvider &time,
                                                  GeomagneticSource source) const;
     [[nodiscard]] double spline_sample(Epoch at, const ITimeProvider &time,

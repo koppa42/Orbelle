@@ -174,7 +174,7 @@ class DragSettings:
     use_apparent_sun_position: bool = False
     use_approximate_altitude: bool = False
     weather_model: str = ""
-    geomagnetic_update: Literal["daily", "three_hourly", "three_hourly_cubic_spline"] = "daily"
+    geomagnetic_update: Literal["daily", "three_hourly", "three_hourly_interpolated", "three_hourly_cubic_spline"] = "daily"
     geomagnetic_source: Literal["ap", "kp"] = "ap"
 
     def __post_init__(self) -> None:
@@ -191,6 +191,7 @@ class DragSettings:
         if self.atmosphere not in models or self.low_altitude_model not in lower:
             raise ValueError("Unknown atmospheric density model")
         updates = {"daily": n.GeomagneticUpdate.DAILY, "three_hourly": n.GeomagneticUpdate.THREE_HOURLY,
+                   "three_hourly_interpolated": n.GeomagneticUpdate.THREE_HOURLY_INTERPOLATED,
                    "three_hourly_cubic_spline": n.GeomagneticUpdate.THREE_HOURLY_CUBIC_SPLINE}
         sources = {"ap": n.GeomagneticSource.AP, "kp": n.GeomagneticSource.KP}
         if self.geomagnetic_update not in updates or self.geomagnetic_source not in sources:
@@ -219,6 +220,7 @@ class DragSettings:
         fields["geomagnetic_update"] = {
             n.GeomagneticUpdate.DAILY: "daily",
             n.GeomagneticUpdate.THREE_HOURLY: "three_hourly",
+            n.GeomagneticUpdate.THREE_HOURLY_INTERPOLATED: "three_hourly_interpolated",
             n.GeomagneticUpdate.THREE_HOURLY_CUBIC_SPLINE: "three_hourly_cubic_spline",
         }[value.geomagnetic_update]
         fields["geomagnetic_source"] = "ap" if value.geomagnetic_source == n.GeomagneticSource.AP else "kp"

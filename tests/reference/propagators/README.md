@@ -189,3 +189,5 @@ SHA-256 (raw .grv bytes; canonical LF reference output):
 - `gravity_secular_2.grv`: `9780376f5db774fb8c864bbb255f23bddbfb1e7e9618b10b29ed858806f1b67b`
 
 - `space_weather_spline.txt`：固定 SciPy 1.16.3 自然样条的 112 节点、1112 次取样及原始 GMAT JR 的 66 个密度样例；生成器、范围与容限见[阻力验证协议](../../../docs/validation/atmospheric_drag_protocol.md)。
+
+- `space_weather_mean.txt`：SciPy 1.16.3 保持均值插值的 1314 个逐点值、218 个窗口积分及原始 GMAT JR 的 70 个密度样例；含磁暴、限幅、缺测与闰秒。LF SHA-256 `d85e283b597361fe3180c979fbfa373ba0e17322cf2e40d2da528ea28cb64ac1`；复现见[阻力验证协议](../../../docs/validation/atmospheric_drag_protocol.md)。

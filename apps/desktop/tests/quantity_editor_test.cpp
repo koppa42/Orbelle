@@ -2040,7 +2040,12 @@ TEST_F(QuantityTest, HpopWeatherFileSwitchesFieldsRetainsDraftsAndReopens) {
         update->setFocus();
         QKeyEvent key(QEvent::KeyPress, Qt::Key_End, Qt::NoModifier);
         QApplication::sendEvent(update, &key);
+        EXPECT_EQ(update->count(), 4);
+        EXPECT_EQ(update->currentIndex(), 3);
+        QKeyEvent previous(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
+        QApplication::sendEvent(update, &previous);
         EXPECT_EQ(update->currentIndex(), 2);
+        EXPECT_TRUE(update->currentText().contains("Interp"));
         dialog->findChild<QComboBox *>("hpopDragGeomagneticSource")->setCurrentIndex(1);
         source->setCurrentIndex(0);
         EXPECT_EQ(f107->value(Unit::one), 183);
@@ -2069,7 +2074,7 @@ TEST_F(QuantityTest, HpopWeatherFileSwitchesFieldsRetainsDraftsAndReopens) {
     ASSERT_TRUE(edit_hpop_settings(
         options, nullptr, {}, {entry}, [entry] { return std::vector{entry}; }, &catalog));
     EXPECT_EQ(options.drag.weather_model, "celestrak");
-    EXPECT_EQ(options.drag.geomagnetic_update, core::GeomagneticUpdate::three_hourly_cubic_spline);
+    EXPECT_EQ(options.drag.geomagnetic_update, core::GeomagneticUpdate::three_hourly_interpolated);
     EXPECT_EQ(options.drag.geomagnetic_source, core::GeomagneticSource::kp);
     EXPECT_EQ(options.drag.f107, 183);
     const auto saved = options;

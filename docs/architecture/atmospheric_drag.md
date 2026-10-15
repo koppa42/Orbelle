@@ -47,7 +47,7 @@ density = of.evaluate_atmosphere(of.AtmosphereModel.NRLMSISE00, inputs)
 
 积分步在日/三小时地磁更新处截断（JR/低空 NRL 各自的滞后窗口均计入），RK 端点使用该步内部一侧的天气值；正反向均不跨跳变混合密度。滞后按 TAI 实际秒数，日/三小时窗口按 UTC；正闰秒属于当天最后一个三小时窗口。NRL 三小时模式组装上述七项 Ap 历史；选择 Kp 时先逐项转换为 Ap 再求历史均值。日模式使用文件日 Ap 或由文件日 Kp 转换，不能从当日八项重新计算并替换原始日值。
 
-准备时检查完整传播路径所需的每个日期、通量插值节点和全部历史槽，包括初始历元早于场景的情况。缺字段、内部断档、域外查询均报错，不外推或零填充。文件中月预报记录保留，但当前每日/三小时模型拒绝使用它们；原始首末日期不是可传播范围。3-Hourly Interp（保持三小时均值）、月预报和 CSSI Predicts 仍待实现；FXM 范围见下节。
+准备时检查完整传播路径所需的每个日期、通量插值节点和全部历史槽，包括初始历元早于场景的情况。缺字段、内部断档、域外查询均报错，不外推或零填充。文件中月预报记录保留，但当前每日/三小时模型拒绝使用它们；原始首末日期不是可传播范围。月预报和 CSSI Predicts 仍待实现；FXM 范围见下节。
 
 ## 三小时自然三次样条
 
@@ -61,7 +61,19 @@ density = of.evaluate_atmosphere(of.AtmosphereModel.NRLMSISE00, inputs)
 
 依照 STK 对 MSIS 不使用插值的说明，NRLMSISE 在该选择下沿用未插值的七项 Ap 历史、`SW[9]=-1`，其有效身份等同三小时取样。JR 与低空 NRL 混合时，两者仍分别取样；前者使用样条，后者使用原生历史。设置草稿保留选择，手动天气或禁用阻力时该项不改变结果身份。现有 UTC 步边界策略仍生效。
 
-C++ / Python 的枚举新增 `three_hourly_cubic_spline` / `THREE_HOURLY_CUBIC_SPLINE`；高层 `DragSettings` 使用同名字符串。项目 v29 / OBJS20 保存枚举 2，拒绝旧格式和未知值；参考样例独立构造并覆盖未启用草稿。JR 文件样条的算法标识包含 `natural-utc-midpoint-runs-v1;overshoot=error`。
+C++ / Python 的枚举新增 `three_hourly_cubic_spline` / `THREE_HOURLY_CUBIC_SPLINE`；高层 `DragSettings` 使用同名字符串。项目 v30 / OBJS21 保存自然三次样条枚举 3，拒绝旧格式和未知值；参考样例独立构造并覆盖未启用草稿。JR 文件样条的算法标识包含 `natural-utc-midpoint-runs-v1;overshoot=error`。
+
+## 三小时保持均值插值
+
+`three_hourly_interpolated` / `THREE_HOURLY_INTERPOLATED` 对应 [STK 的 3-Hourly Interp](https://help.agi.com/stk/Content/hpop/hpopDrag.htm)：每个三小时窗口内的平均值等于原始 Ap/Kp 记录。它与自然三次样条是不同选项。STK 未公开完整边界与限幅算法；下面是 OrbitForge 可复现的实现约定，同配置 STK 数值对照仍待验收。
+
+对每个连续有效序列，在 UTC 三小时窗口边界拟合累积积分的自然三次样条，再对其求导，得到每个窗口的二次多项式。该[积分函数构造方法](https://kluge.in-chemnitz.de/opensource/spline/)自然保留窗口均值；实现直接求解相邻均值差的三对角方程，避免大累积量相减。每个来源独立分段，缺日期、缺字段和月预报均切断序列；单窗口退化为常值，首末窗口内可查询，窗口外不外推。
+
+设窗口均值为 `y`，原始二次曲线为 `p(u)`，`u∈[0,1]`。检查两个端点与内部顶点；若超出 Ap `[0,400]` / Kp `[0,9]`，采用 `y + θ(p(u)−y)`，取满足上下界的最大 `θ∈[0,1]`。这是[保留单元均值的缩放限制方法（式 5.3）](https://archive.ymsc.tsinghua.edu.cn/pacm_download/113/1168-paper.pdf)，这里对整个二次区间的极值施加约束。均值为零或上限时为常值。它保持每个窗口的积分；逐点截断则不具备这一性质。未限制的曲线在均匀窗口坐标下 C¹；限制可能在窗口边界产生跳变，沿用已有单侧天气取样和积分步截断。
+
+窗口按 UTC 的 00:00、03:00、…、24:00 划分，采用左闭右开区间；局部坐标使用该窗口实际 TAI 时长，因此包含正闰秒的 10801 s 窗口也保持时间平均值。JR 施加 24120 s 地磁滞后，再对所选 Ap/Kp 插值，最后才转换指数；均值保持针对所选原始量，非线性转换后的量不声称均值相等。NRLMSISE 主模型和 JR 的低空 NRL 分支均沿用原生七项 Ap 历史、`SW[9]=-1`；主模型 NRL 的有效身份等同 3-Hourly，设置草稿仍保留所选项。
+
+桌面按 Daily、3-Hourly、3-Hourly Interp、3-Hourly Cubic Spline 排列。项目 v30 / OBJS21 将四项分别保存为 0、1、2、3，拒绝所有非当前版本。JR 文件模式算法标识包含 `geomag-interp=natural-primitive-quadratic-utc-runs-v1;bounds=cell-mean-scaling`。Core 无新增外部依赖；SciPy 只用于独立参考生成。
 
 ## STK FXM 文件
 
@@ -71,7 +83,7 @@ FXM 只有 1 AU 调整通量。`SpaceWeatherInfo.solar_flux_adjusted` 明确此�
 
 低层 C++ / Python `sample`、`validate_interval` 增加可选 `sun_distance_m(Epoch) -> metres` 参数。FXM 要求该函数；其他文件不调用它。回调必须来自本次计算冻结的几何星历，距离须有限且为正。HPOP 自动使用已经捕获的 Sun 星历，独立于密度的“Use Apparent Sun Position”方向选择；不访问网络。准备阶段检查包含模型滞后在内的每个必需通量节点，故星历仅覆盖传播起止时刻仍可能不足。换算结果超出模型 `(0, 1000] sfu` 输入范围时明确失败。
 
-观测段的八个 Ap/Kp 支持现有每日、三小时及自然样条取样。FXM 预测段只提供日 Ap，支持 **Daily + Ap**；不伪造三小时值或 Kp，缺少所选模式需要的字段时给出覆盖错误。分开的预测段存在日期缺口也不补值或外推。桌面数据中心的天气导入支持 `.fxm`；自动下载仍使用 CelesTrak CSV。FXM 数据解释标识增加 `flux=adjusted-au-geometric-utc20-v1`，原始天气与冻结星历都参与项目数据引用；项目参数结构未改变，仍为 v29 / OBJS20。
+观测段的八个 Ap/Kp 支持现有每日、三小时、保持均值插值及自然样条取样。FXM 预测段只提供日 Ap，支持 **Daily + Ap**；不伪造三小时值或 Kp，缺少所选模式需要的字段时给出覆盖错误。分开的预测段存在日期缺口也不补值或外推。桌面数据中心的天气导入支持 `.fxm`；自动下载仍使用 CelesTrak CSV。FXM 数据解释标识增加 `flux=adjusted-au-geometric-utc20-v1`，原始天气与冻结星历都参与项目数据引用；当前项目格式为 v30 / OBJS21。
 
 ## 数据与持久化
 
@@ -79,7 +91,7 @@ FXM 只有 1 AU 调整通量。`SpaceWeatherInfo.solar_flux_adjusted` 明确此�
 
 默认使用几何太阳。`use_apparent_sun_position=True` 使用 CSPICE 对地球接收观测的 `LT+S` 太阳方向；此约定影响密度中的当地太阳时/赤纬，不修改第三体引力或光压的几何太阳。准备计算时额外认证区间起点前 600 s 的太阳与地球核覆盖，边界不足明确拒绝。自定义星历必须提供相应查询和区间认证接口，不能将几何方向冒充视方向。
 
-项目格式为 v29 / OBJS v20，只读写当前版本。禁用模型时保存合法参数草稿，计算身份忽略这些草稿；启用时计入实际密度模型、天气、Cd、面积质量比、高度算法、太阳方法及 UTC/EOP/星历来源。NRLMSISE 主模型的低空草稿和未启用的拼接范围不改变结果身份。
+项目格式为 v30 / OBJS v21，只读写当前版本。禁用模型时保存合法参数草稿，计算身份忽略这些草稿；启用时计入实际密度模型、天气、Cd、面积质量比、高度算法、太阳方法及 UTC/EOP/星历来源。NRLMSISE 主模型的低空草稿和未启用的拼接范围不改变结果身份。
 
 ```python
 import orbitforge as of

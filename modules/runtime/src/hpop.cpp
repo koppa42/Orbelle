@@ -121,6 +121,9 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
                    << ";kp=" << d.kp;
         algorithm += config.str();
         if (!d.weather_model.empty() && environment.weather) {
+            if (d.geomagnetic_update == core::GeomagneticUpdate::three_hourly_interpolated)
+                algorithm += ";geomag-interp=natural-primitive-quadratic-utc-runs-v1;"
+                             "bounds=cell-mean-scaling";
             if (d.geomagnetic_update == core::GeomagneticUpdate::three_hourly_cubic_spline)
                 algorithm += ";geomag-spline=natural-utc-midpoint-runs-v1;overshoot=error";
             algorithm +=

@@ -850,6 +850,7 @@ class AtmosphereModel:
 class GeomagneticUpdate:
     DAILY: GeomagneticUpdate
     THREE_HOURLY: GeomagneticUpdate
+    THREE_HOURLY_INTERPOLATED: GeomagneticUpdate
     THREE_HOURLY_CUBIC_SPLINE: GeomagneticUpdate
 
 class GeomagneticSource:

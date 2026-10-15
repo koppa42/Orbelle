@@ -8,7 +8,7 @@
 
 对照依据是 STK 13.1 官方帮助，以及维护者提供的 Gravity、Drag、SRP、Additional、Integrator、Covariance 六个设置页面。截图中的参数是一组参考配置，不据此推定所有 STK 版本的出厂默认值。HPOP 的公开接口和模型说明可供对照，不能据此声称复现了其内部源码、步长控制器或全部精度特性。
 
-本轮已接入球形阻力、JR / NRLMSISE-00、手动/文件天气、低空拼接、近似高度和阻力地心视太阳；桌面、C++、Python、保存重开和状态报告使用同一实现，详见[阻力契约](atmospheric_drag.md)。低层 NRLMSISE 密度接口已支持原生日 Ap 与七项历史 Ap，并通过原作者模型验证；HPOP 已接入 CelesTrak 文件、日/三小时更新、Ap/Kp 来源和历史窗口；三小时自然样条已接入（节点/端点约定待 STK 验收）；保持窗口均值的插值、月预报/其他文件格式及 STK 同配置数值验收仍待完成。
+本轮已接入球形阻力、JR / NRLMSISE-00、手动/文件天气、低空拼接、近似高度和阻力地心视太阳；桌面、C++、Python、保存重开和状态报告使用同一实现，详见[阻力契约](atmospheric_drag.md)。低层 NRLMSISE 密度接口已支持原生日 Ap 与七项历史 Ap，并通过原作者模型验证；HPOP 已接入 CelesTrak 文件、日/三小时更新、Ap/Kp 来源和历史窗口；三小时自然样条已接入（节点/端点约定待 STK 验收）；保持窗口均值插值及 FXM 已接入；月预报/CSSI Predicts 及 STK 同配置数值验收仍待完成。
 
 ## 1. 重构起点
 
@@ -71,7 +71,7 @@
 | Drag | Use Drag；Spherical；Cd；Area/Mass Ratio | 已实现：共转 ITRF 大气相对速度、完整旋转率项、独立面积质量比及 Cd；见[阻力契约](atmospheric_drag.md) |
 | Drag | Atmospheric Density，含 Jacchia–Roberts | 已实现 JR / NRLMSISE-00 gtd7d；分别核对原始 GMAT / 作者 C 密度，尚未完成 STK 同配置数值验收 |
 | Drag | Low Altitude Density；Blending Range | 已实现 JR 低空 NRLMSISE-00、正范围 smoothstep 拼接和显式零范围硬切换；STK 拼接细节仍需数值核对 |
-| Drag | Solar Flux/GeoMag 来源；Daily / Average F10.7；Kp | 部分：手动日/平均通量、Kp→Ap 表与插值已生效；CelesTrak CSV/定宽文件、每日/三小时 Ap/Kp、模型滞后与完整历史检查已接入；自然三次样条与 SciPy/GMAT 对照已接入，节点/端点的 STK 细节待验收；保持窗口均值的插值、月预报、CSSI Predicts 和 STK 同配置轨迹核对仍待实现；FXM 观测及日 Ap 预测已支持 |
+| Drag | Solar Flux/GeoMag 来源；Daily / Average F10.7；Kp | 部分：手动日/平均通量、Kp→Ap 表与插值已生效；CelesTrak CSV/定宽文件、每日/三小时 Ap/Kp、模型滞后与完整历史检查已接入；自然三次样条与 SciPy/GMAT 对照已接入，节点/端点的 STK 细节待验收；保持窗口均值插值已实现并与 SciPy/GMAT 对照；月预报、CSSI Predicts 和 STK 同配置轨迹核对仍待实现；FXM 观测及日 Ap 预测已支持 |
 | Drag | Use Approximate Altitude；Use Apparent Sun Position | 已实现：精确 WGS84 高度/椭球径向近似可选，几何/地心 LT+S 视太阳已生效；仍待 STK 同配置数值验收 |
 | SRP | Use SRP；Spherical；Cr；Area/Mass | 已实现球形光压、距离平方缩放与独立面积质量比；见[光压契约](solar_radiation_pressure.md) |
 | SRP | Shadow Model，含 Dual Cone | 已实现无阴影／圆柱／球面双锥、全照／半影／本影／环食；独立几何和轨迹对照通过，椭球轮廓及专用事件时刻待实现 |
@@ -250,7 +250,7 @@ C++ 共享同一份具名强类型定义，Python 不要求创建 `Update` 包�
 | D：积分高级能力 | 其余积分器、VOP、时间正则化、科学插值和事件诊断 | 阶数与容差收敛、正反向、偏心轨道、阴影边界、机动重启及性能基准通过 |
 | E：不确定度 | STM、状态协方差、坐标变换、参数敏感度和 consider analysis | 有限差分参考、协方差性质、跨坐标系、机动跳变与独立结果比较通过 |
 
-每个阶段都以可用的计算、数据、API、持久化、桌面和验证闭环交付，不先放一整套可点击但不生效的设置。阶段 A 的静态重力与 DE440s 已完成；桌面分页完成，内部配置进一步解耦仍待推进。阶段 B 已实现太阳系第三体引力和球形光压／球面地月遮挡；球形阻力、JR/NRLMSISE-00、手动天气、近似高度、阻力地心视太阳已实现；CelesTrak 天气文件及历史取样已接入；光压三种太阳位置已接入；三小时自然样条已接入（节点/端点约定待 STK 验收）；FXM 观测与日 Ap 预测、1 AU 通量改正已接入（改正节点约定待 STK 验收）；保持窗口均值的插值、月预报/CSSI Predicts、遮挡体视位置与阴影边界高级处理仍待实现。阶段 B 是“常用完整力环境”的最低门槛；完成 B 仍不代表潮汐、全部积分器和协方差已与 STK 全面对齐。完整验收以本文件逐项清单全部通过为准。
+每个阶段都以可用的计算、数据、API、持久化、桌面和验证闭环交付，不先放一整套可点击但不生效的设置。阶段 A 的静态重力与 DE440s 已完成；桌面分页完成，内部配置进一步解耦仍待推进。阶段 B 已实现太阳系第三体引力和球形光压／球面地月遮挡；球形阻力、JR/NRLMSISE-00、手动天气、近似高度、阻力地心视太阳已实现；CelesTrak 天气文件及历史取样已接入；光压三种太阳位置已接入；三小时自然样条已接入（节点/端点约定待 STK 验收）；FXM 观测与日 Ap 预测、1 AU 通量改正已接入（改正节点约定待 STK 验收）；保持窗口均值的插值已接入（边界/限制约定待 STK 验收）；月预报/CSSI Predicts、遮挡体视位置与阴影边界高级处理仍待实现。阶段 B 是“常用完整力环境”的最低门槛；完成 B 仍不代表潮汐、全部积分器和协方差已与 STK 全面对齐。完整验收以本文件逐项清单全部通过为准。
 
 ### 数值比较
 

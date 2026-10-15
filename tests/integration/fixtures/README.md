@@ -1,8 +1,8 @@
 # Current project format fixture
 
-`project-current.orbitforge` is a fixed v29 input assembled independently with Python's `struct.pack` from the [documented binary layout](../../../docs/architecture/project_files.md), without calling OrbitForge's writer. C++ and Python must read it and reproduce its bytes exactly. It guards against reader and writer drifting together.
+`project-current.orbitforge` is a fixed v30 input assembled independently with Python's `struct.pack` from the [documented binary layout](../../../docs/architecture/project_files.md), without calling OrbitForge's writer. C++ and Python must read it and reproduce its bytes exactly. It guards against reader and writer drifting together.
 
-- 1454 bytes; SHA-256 `82f4149979a8b4fb25f4332385adfae01862b9b3d3eb737ec6c32408ed662a18`.
+- 1454 bytes; SHA-256 `a312552c2a9f0aa7985f38c21029cc716d9551f892c43f77cb1e06a6b69163e1`.
 - `Schema fixture`, TAI nanoseconds `[123, 600000000123]`, current time `1000000123`.
 - Two-body `satellite-a` named `观测卫星 A`, and mission sequence `satellite-b` with an empty display name (use its ID). Both use GCRF state `[7000000, 0, 0]` m and `[0, 6200, 5300]` m/s at TAI nanosecond 123.
 - Mission uses HPOP point-mass coasts: `Drift` (200000000001 ns), `Raise` (VNC delta-v `[12, -3, 0.5]` m/s), `Coast` (399999999999 ns). The sequence covers the scenario exactly.
