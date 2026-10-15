@@ -47,7 +47,7 @@ density = of.evaluate_atmosphere(of.AtmosphereModel.NRLMSISE00, inputs)
 
 积分步在日/三小时地磁更新处截断（JR/低空 NRL 各自的滞后窗口均计入），RK 端点使用该步内部一侧的天气值；正反向均不跨跳变混合密度。滞后按 TAI 实际秒数，日/三小时窗口按 UTC；正闰秒属于当天最后一个三小时窗口。NRL 三小时模式组装上述七项 Ap 历史；选择 Kp 时先逐项转换为 Ap 再求历史均值。日模式使用文件日 Ap 或由文件日 Kp 转换，不能从当日八项重新计算并替换原始日值。
 
-准备时检查完整传播路径所需的每个日期、通量插值节点和全部历史槽，包括初始历元早于场景的情况。缺字段、内部断档、域外查询均报错，不外推或零填充。文件中月预报记录保留，但当前每日/三小时模型拒绝使用它们；原始首末日期不是可传播范围。3-Hourly Interp（保持三小时均值）、月预报、CSSI predicts 和 FXM 仍待实现。
+准备时检查完整传播路径所需的每个日期、通量插值节点和全部历史槽，包括初始历元早于场景的情况。缺字段、内部断档、域外查询均报错，不外推或零填充。文件中月预报记录保留，但当前每日/三小时模型拒绝使用它们；原始首末日期不是可传播范围。3-Hourly Interp（保持三小时均值）、月预报和 CSSI Predicts 仍待实现；FXM 范围见下节。
 
 ## 三小时自然三次样条
 
@@ -62,6 +62,16 @@ density = of.evaluate_atmosphere(of.AtmosphereModel.NRLMSISE00, inputs)
 依照 STK 对 MSIS 不使用插值的说明，NRLMSISE 在该选择下沿用未插值的七项 Ap 历史、`SW[9]=-1`，其有效身份等同三小时取样。JR 与低空 NRL 混合时，两者仍分别取样；前者使用样条，后者使用原生历史。设置草稿保留选择，手动天气或禁用阻力时该项不改变结果身份。现有 UTC 步边界策略仍生效。
 
 C++ / Python 的枚举新增 `three_hourly_cubic_spline` / `THREE_HOURLY_CUBIC_SPLINE`；高层 `DragSettings` 使用同名字符串。项目 v29 / OBJS20 保存枚举 2，拒绝旧格式和未知值；参考样例独立构造并覆盖未启用草稿。JR 文件样条的算法标识包含 `natural-utc-midpoint-runs-v1;overshoot=error`。
+
+## STK FXM 文件
+
+导入器支持 STK `stkFluxGeoMag` 的 `OBSERVED`、`F10_PREDICT`、`AP_PREDICT` 三个定宽段，按此顺序读取，保留原始字节及 SHA-256。日期在每段内严格递增，预测不得覆盖观测；F10.7 和 Ap 预测按日期合并。每段必须完整结束；缺字段保持缺失。观测 Q=3 表示无太阳通量观测，不能将该数值当作有效日通量。格式依据 [STK FXM 说明](https://help.agi.com/stk/Content/stk/example_SolarFlux2.htm)。
+
+FXM 只有 1 AU 调整通量。`SpaceWeatherInfo.solar_flux_adjusted` 明确此来源；取样在每个所需的 20:00 UTC 节点调用几何日地距离，将日 F10.7 和文件给出的中心 81 日均值分别乘以 `(149597870700 / distance_m)^2`，再执行现有线性插值与模型滞后。文件中已经计算的 81 日均值直接使用，不自行重新求平均。CelesTrak 文件始终使用自己的 observed 字段；不因缺失而自动改用 adjusted 字段。STK 文档确认 [FXM 的距离改正及 20:00 UTC 插值](https://help.agi.com/stk/Content/hpop/hpopDrag.htm)，但没有公开全部改正实现细节；这里的节点改正约定仍待同配置 STK 实测验收。
+
+低层 C++ / Python `sample`、`validate_interval` 增加可选 `sun_distance_m(Epoch) -> metres` 参数。FXM 要求该函数；其他文件不调用它。回调必须来自本次计算冻结的几何星历，距离须有限且为正。HPOP 自动使用已经捕获的 Sun 星历，独立于密度的“Use Apparent Sun Position”方向选择；不访问网络。准备阶段检查包含模型滞后在内的每个必需通量节点，故星历仅覆盖传播起止时刻仍可能不足。换算结果超出模型 `(0, 1000] sfu` 输入范围时明确失败。
+
+观测段的八个 Ap/Kp 支持现有每日、三小时及自然样条取样。FXM 预测段只提供日 Ap，支持 **Daily + Ap**；不伪造三小时值或 Kp，缺少所选模式需要的字段时给出覆盖错误。分开的预测段存在日期缺口也不补值或外推。桌面数据中心的天气导入支持 `.fxm`；自动下载仍使用 CelesTrak CSV。FXM 数据解释标识增加 `flux=adjusted-au-geometric-utc20-v1`，原始天气与冻结星历都参与项目数据引用；项目参数结构未改变，仍为 v29 / OBJS20。
 
 ## 数据与持久化
 

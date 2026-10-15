@@ -10,6 +10,14 @@
 namespace orbitforge::core {
 namespace {
 using State = std::array<double, 6>;
+std::function<double(Epoch)> sun_distance(const IThirdBodyEphemeris *ephemeris) {
+    if (!ephemeris)
+        return {};
+    return [ephemeris](Epoch at) {
+        const auto position = ephemeris->position(ThirdBody::sun, at);
+        return std::hypot(position[0], position[1], position[2]);
+    };
+}
 // Fehlberg, NASA TR R-287 (1968), Table XI. Eighth order accepted solution,
 // embedded seventh order error estimate; all stage epochs stay within a step.
 constexpr std::array<double, 13> c{0,       2.0 / 27, 1.0 / 9, 1.0 / 6, 5.0 / 12, 0.5, 5.0 / 6,
@@ -242,12 +250,14 @@ class Hpop final : public IStateProvider {
                 const auto &d = options_.drag;
                 weather = environment_.weather->sample(weather_at.value_or(epoch),
                                                        *environment_.time, d.atmosphere,
-                                                       d.geomagnetic_update, d.geomagnetic_source);
+                                                       d.geomagnetic_update, d.geomagnetic_source,
+                                                       sun_distance(environment_.ephemeris.get()));
                 if (d.atmosphere == AtmosphereModel::jacchia_roberts &&
                     d.low_altitude_model == LowAltitudeDensityModel::nrlmsise00)
                     lower = environment_.weather->sample(
                         weather_at.value_or(epoch), *environment_.time, AtmosphereModel::nrlmsise00,
-                        d.geomagnetic_update, d.geomagnetic_source);
+                        d.geomagnetic_update, d.geomagnetic_source,
+                        sun_distance(environment_.ephemeris.get()));
             }
             const auto force = evaluate_drag(
                 fixed.position_m, fixed.velocity_mps, transform.rotation.apply_position(sun),
@@ -540,10 +550,11 @@ void HpopEnvironment::validate_weather_interval(const DragOptions &drag, Epoch f
     if (!weather || !time)
         throw std::invalid_argument("File drag requires selected weather and UTC providers");
     weather->validate_interval(first, last, *time, drag.atmosphere, drag.geomagnetic_update,
-                               drag.geomagnetic_source);
+                               drag.geomagnetic_source, sun_distance(ephemeris.get()));
     if (drag.atmosphere == AtmosphereModel::jacchia_roberts &&
         drag.low_altitude_model == LowAltitudeDensityModel::nrlmsise00)
         weather->validate_interval(first, last, *time, AtmosphereModel::nrlmsise00,
-                                   drag.geomagnetic_update, drag.geomagnetic_source);
+                                   drag.geomagnetic_update, drag.geomagnetic_source,
+                                   sun_distance(ephemeris.get()));
 }
 } // namespace orbitforge::core

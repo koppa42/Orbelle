@@ -18,3 +18,5 @@
 /tests/reference/propagators/*.pot -text
 
 /tests/reference/propagators/*.grv -text
+
+/tests/reference/propagators/*.fxm -text

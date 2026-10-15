@@ -156,3 +156,70 @@ class NaturalSplineTests(unittest.TestCase):
                 b=data.sample(at,time,of.AtmosphereModel.NRLMSISE00,
                               of.GeomagneticUpdate.THREE_HOURLY_CUBIC_SPLINE,source)
                 self.assertEqual(a.ap_history,b.ap_history)
+
+
+class FxmWeatherTests(unittest.TestCase):
+    @unittest.skipUnless(of.time_frames_available(), 'requires ERFA')
+    def test_fxm_sampling_callback_matches_independent_reference(self):
+        source=ROOT/'tests/reference/propagators'
+        parsed=of.load_space_weather(source/'weather_fxm.fxm')
+        self.assertEqual(parsed.info.format,'stk-flux-geomag')
+        self.assertTrue(parsed.info.solar_flux_adjusted)
+        self.assertEqual(parsed.info.sha256,hashlib.sha256((source/'weather_fxm.fxm').read_bytes()).hexdigest())
+        with self.assertRaises(AttributeError): parsed.info.solar_flux_adjusted=False
+        time=of.make_builtin_time_provider()
+        def distance(at):
+            utc=time.to_utc(at)
+            self.assertEqual((utc.hour,utc.minute,utc.second,utc.nanosecond),(20,0,0,0))
+            day=utc.day-24 if utc.month==12 else utc.day+7
+            return 149597870700.0*(.97+.005*day)
+        count=0
+        for line in (source/'weather_fxm.txt').read_text().splitlines():
+            if not line.startswith('S '): continue
+            _,model,ns,flux,average,ap,kp=line.split()
+            actual=parsed.sample(of.Epoch(int(ns)),time,
+                of.AtmosphereModel.JACCHIA_ROBERTS if model=='0' else of.AtmosphereModel.NRLMSISE00,
+                of.GeomagneticUpdate.DAILY,of.GeomagneticSource.AP,sun_distance_m=distance)
+            self.assertAlmostEqual(actual.f107,float(flux),delta=3e-11)
+            self.assertAlmostEqual(actual.f107_average,float(average),delta=3e-11)
+            self.assertEqual(actual.ap,float(ap))
+            self.assertAlmostEqual(actual.kp,float(kp),delta=1e-14)
+            count+=1
+        self.assertEqual(count,74)
+        first=time.from_utc(of.UtcDateTime(2016,12,29,20,0,0))
+        last=time.from_utc(of.UtcDateTime(2017,1,3,20,0,0))
+        parsed.validate_interval(first,last,time,of.AtmosphereModel.NRLMSISE00,
+                                 of.GeomagneticUpdate.DAILY,of.GeomagneticSource.AP,distance)
+        with self.assertRaises(of.SpaceWeatherCoverageError):
+            parsed.sample(first,time,of.AtmosphereModel.NRLMSISE00,
+                          of.GeomagneticUpdate.DAILY,of.GeomagneticSource.AP)
+        def missing(at):
+            if time.to_utc(at).day==30: raise ValueError('missing Sun distance')
+            return distance(at)
+        with self.assertRaisesRegex(ValueError,'missing Sun distance'):
+            parsed.validate_interval(first,last,time,of.AtmosphereModel.NRLMSISE00,
+                                     of.GeomagneticUpdate.DAILY,of.GeomagneticSource.AP,missing)
+        for invalid in (0,-1,float('nan'),float('inf')):
+            with self.assertRaises(of.SpaceWeatherCoverageError):
+                parsed.sample(first,time,of.AtmosphereModel.NRLMSISE00,
+                              of.GeomagneticUpdate.DAILY,of.GeomagneticSource.AP,lambda _:invalid)
+
+    @unittest.skipUnless(of.data_catalog_available(), 'requires data catalog')
+    def test_fxm_catalog_reopens_adjusted_metadata_and_retains_pinned_resource(self):
+        with tempfile.TemporaryDirectory() as folder:
+            catalog=of.DataCatalog(Path(folder)/'catalog')
+            try:
+                fixture=ROOT/'tests/reference/propagators/weather_fxm.fxm'
+                installed=catalog.install_space_weather(fixture,'fxm')
+                old=of.load_space_weather(installed.file)
+                self.assertTrue(installed.info.solar_flux_adjusted)
+                reopened=of.DataCatalog(Path(folder)/'catalog')
+                try:
+                    self.assertTrue(reopened.weather_sources[0].info.solar_flux_adjusted)
+                finally:
+                    del reopened
+                broken=Path(folder)/'broken.fxm';broken.write_text('BEGIN OBSERVED\n')
+                with self.assertRaises(RuntimeError): catalog.install_space_weather(broken,'fxm')
+                self.assertEqual(old.info.sha256,catalog.weather_sources[0].info.sha256)
+            finally:
+                del catalog

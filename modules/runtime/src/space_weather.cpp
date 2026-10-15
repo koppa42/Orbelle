@@ -127,6 +127,50 @@ core::SpaceWeatherDay fixed_day(std::string_view line, const std::string &sectio
         d.quality = core::WeatherQuality::interpolated;
     return d;
 }
+core::SpaceWeatherDay fxm_day(std::string_view line, std::string_view section) {
+    const std::size_t width = section == "OBSERVED" ? 78 : section == "F10_PREDICT" ? 18 : 12;
+    require(line.size() >= width && trim(line.substr(width)).empty(), "FXM record width mismatch");
+    core::SpaceWeatherDay d;
+    d.date = {number<int>(line.substr(0, 4)),
+              number<int>(line.substr(4, 2)),
+              number<int>(line.substr(6, 2)),
+              0,
+              0,
+              0,
+              0};
+    if (section == "OBSERVED") {
+        for (std::size_t i = 0; i < 8; ++i) {
+            d.kp[i] = kp(line.substr(14 + 2 * i, 2), false);
+            d.ap[i] = optional_number(line.substr(33 + 3 * i, 3));
+        }
+        if (const auto sum = optional_number(line.substr(30, 3)))
+            d.daily_kp = *sum / 80;
+        d.daily_ap = optional_number(line.substr(57, 3));
+        d.f107_adjusted = optional_number(line.substr(67, 5));
+        d.adjusted_center81 = optional_number(line.substr(73, 5));
+        if (!trim(line.substr(72, 1)).empty()) {
+            d.flux_qualifier = number<int>(line.substr(72, 1));
+            require(*d.flux_qualifier >= 0 && *d.flux_qualifier <= 3, "invalid FXM flux qualifier");
+            if (*d.flux_qualifier >= 2)
+                d.quality = core::WeatherQuality::interpolated;
+            if (*d.flux_qualifier == 3)
+                d.f107_adjusted.reset(); // Format explicitly says no observation.
+        }
+    } else {
+        require(line[8] == ' ', "FXM prediction separator must be a space");
+        d.quality = core::WeatherQuality::daily_prediction;
+        if (section == "F10_PREDICT") {
+            require(line[12] == ' ', "FXM prediction separator must be a space");
+            d.f107_adjusted = optional_number(line.substr(9, 3));
+            d.adjusted_center81 = optional_number(line.substr(13, 5));
+        } else
+            d.daily_ap = optional_number(line.substr(9, 3));
+    }
+    return d;
+}
+int fxm_date(const core::SpaceWeatherDay &d) {
+    return d.date.year * 10000 + d.date.month * 100 + d.date.day;
+}
 } // namespace
 std::shared_ptr<const core::SpaceWeather>
 load_space_weather(const std::filesystem::path &file, const std::string &url,
@@ -148,7 +192,11 @@ load_space_weather(const std::filesystem::path &file, const std::string &url,
     std::string line, section;
     std::vector<core::SpaceWeatherDay> days;
     std::map<std::string, std::size_t> declared, observed;
-    bool csv_format = false, identified = false;
+    bool csv_format = false, fxm_format = false, identified = false;
+    constexpr std::array<std::string_view, 3> fxm_sections{"OBSERVED", "F10_PREDICT", "AP_PREDICT"};
+    std::size_t fxm_section = 0;
+    int fxm_last_date = 0;
+    std::map<int, core::SpaceWeatherDay> predictions;
     std::size_t line_number = 0;
     while (std::getline(lines, line)) {
         ++line_number;
@@ -163,11 +211,50 @@ load_space_weather(const std::filesystem::path &file, const std::string &url,
             continue;
         try {
             if (!identified) {
-                require(text == header || text == "DATATYPE CssiSpaceWeather",
+                require(text == header || text == "DATATYPE CssiSpaceWeather" ||
+                            text == "BEGIN OBSERVED",
                         "unknown format/header");
                 csv_format = text == header;
-                info.format = csv_format ? "celestrak-csv" : "celestrak-fixed";
+                fxm_format = text == "BEGIN OBSERVED";
+                info.format = fxm_format   ? "stk-flux-geomag"
+                              : csv_format ? "celestrak-csv"
+                                           : "celestrak-fixed";
+                info.solar_flux_adjusted = fxm_format;
                 identified = true;
+                if (fxm_format)
+                    section = "OBSERVED";
+                continue;
+            }
+            if (fxm_format) {
+                if (text.starts_with("BEGIN ")) {
+                    require(section.empty() && fxm_section < fxm_sections.size() &&
+                                text.substr(6) == fxm_sections[fxm_section],
+                            "invalid FXM section order/start");
+                    section = std::string(fxm_sections[fxm_section]);
+                    fxm_last_date = 0;
+                } else if (text.starts_with("END ")) {
+                    require(!section.empty() && text.substr(4) == section,
+                            "invalid FXM section end");
+                    section.clear();
+                    ++fxm_section;
+                } else {
+                    require(!section.empty(), "FXM record outside a section");
+                    auto d = fxm_day(line, section);
+                    const int key = fxm_date(d);
+                    require(key > fxm_last_date, "FXM section dates must be unique and ordered");
+                    fxm_last_date = key;
+                    if (section == "OBSERVED")
+                        days.push_back(std::move(d));
+                    else {
+                        require(days.empty() || key > fxm_date(days.back()),
+                                "FXM prediction overlaps observed data");
+                        if (auto found = predictions.find(key); found != predictions.end()) {
+                            require(section == "AP_PREDICT", "duplicate FXM prediction");
+                            found->second.daily_ap = d.daily_ap;
+                        } else
+                            predictions.emplace(key, std::move(d));
+                    }
+                }
                 continue;
             }
             if (csv_format) {
@@ -207,8 +294,13 @@ load_space_weather(const std::filesystem::path &file, const std::string &url,
                                      e.what());
         }
     }
+    if (fxm_format) {
+        require(fxm_section == fxm_sections.size() && section.empty(), "incomplete FXM sections");
+        for (auto &[key, d] : predictions)
+            days.push_back(std::move(d));
+    }
     require(identified && section.empty() && !days.empty(), "incomplete file");
-    if (!csv_format)
+    if (!csv_format && !fxm_format)
         for (const auto &[name, count] : declared)
             require(observed.contains(name) && observed.at(name) == count,
                     "missing or incomplete section");
@@ -218,7 +310,10 @@ load_space_weather(const std::filesystem::path &file, const std::string &url,
 }
 application::DataReference space_weather_reference(const std::string &selection,
                                                    const core::SpaceWeatherInfo &info) {
-    const std::string version = "spaceweather-utc20-linear-jr-msis-lags-v1";
+    const std::string version =
+        info.solar_flux_adjusted
+            ? "spaceweather-utc20-linear-jr-msis-lags-v1;flux=adjusted-au-geometric-utc20-v1"
+            : "spaceweather-utc20-linear-jr-msis-lags-v1";
     return {"space-weather/" + selection, "spaceweather-" + info.sha256, info.sha256, version,
             picosha2::hash256_hex_string(version)};
 }

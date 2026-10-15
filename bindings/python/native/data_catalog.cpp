@@ -2,6 +2,7 @@
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/ocean_tides.hpp>
 #include <orbitforge/runtime/space_weather.hpp>
+#include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl/filesystem.h>
@@ -58,15 +59,17 @@ void bind_data_catalog(py::module_ &module) {
         .def_readonly("sha256", &core::SpaceWeatherInfo::sha256)
         .def_readonly("source_url", &core::SpaceWeatherInfo::source_url)
         .def_readonly("format", &core::SpaceWeatherInfo::format)
+        .def_readonly("solar_flux_adjusted", &core::SpaceWeatherInfo::solar_flux_adjusted)
         .def_readonly("first", &core::SpaceWeatherInfo::first)
         .def_readonly("last", &core::SpaceWeatherInfo::last);
     py::class_<core::SpaceWeather, std::shared_ptr<core::SpaceWeather>>(module, "SpaceWeather")
         .def_property_readonly("info", &core::SpaceWeather::info, py::return_value_policy::copy)
         .def("sample", &core::SpaceWeather::sample, py::arg("at"), py::arg("time"),
-             py::arg("model"), py::arg("update"), py::arg("source"))
+             py::arg("model"), py::arg("update"), py::arg("source"),
+             py::arg("sun_distance_m") = nullptr)
         .def("validate_interval", &core::SpaceWeather::validate_interval, py::arg("first"),
              py::arg("last"), py::arg("time"), py::arg("model"), py::arg("update"),
-             py::arg("source"));
+             py::arg("source"), py::arg("sun_distance_m") = nullptr);
     py::class_<runtime::CatalogSpaceWeather>(module, "CatalogSpaceWeather")
         .def_readonly("selection", &runtime::CatalogSpaceWeather::selection)
         .def_readonly("info", &runtime::CatalogSpaceWeather::info)

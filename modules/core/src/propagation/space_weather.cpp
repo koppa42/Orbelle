@@ -241,16 +241,37 @@ double ap_to_kp(double ap) {
     }
     return 9;
 }
+double SpaceWeather::flux_value(int number, bool average, const ITimeProvider &time,
+                                const std::function<double(Epoch)> &sun_distance_m) const {
+    const auto &r = day(number);
+    if (!info_.solar_flux_adjusted)
+        return required(average ? r.observed_center81 : r.f107_observed, number,
+                        average ? "centered observed F10.7" : "observed F10.7");
+    const double adjusted = required(average ? r.adjusted_center81 : r.f107_adjusted, number,
+                                     average ? "centered adjusted F10.7" : "adjusted F10.7");
+    if (!sun_distance_m)
+        throw SpaceWeatherCoverageError(
+            "Adjusted FXM flux requires a geometric Sun-Earth distance provider");
+    const double distance = sun_distance_m(time.from_utc(utc_date(number, 20)));
+    if (!std::isfinite(distance) || distance <= 0)
+        throw SpaceWeatherCoverageError(
+            "FXM Sun-Earth distance must be finite and positive in metres");
+    const double scale = 149597870700.0 / distance; // IAU 2012 exact astronomical unit, SI.
+    const double observed = adjusted * scale * scale;
+    if (!std::isfinite(observed) || observed <= 0 || observed > 1000)
+        throw SpaceWeatherCoverageError(
+            "Distance-corrected FXM flux is outside the density model range (0, 1000] sfu");
+    return observed;
+}
 SpaceWeatherSample SpaceWeather::sample(Epoch at, const ITimeProvider &time, AtmosphereModel model,
-                                        GeomagneticUpdate update, GeomagneticSource source) const {
+                                        GeomagneticUpdate update, GeomagneticSource source,
+                                        const std::function<double(Epoch)> &sun_distance_m) const {
     choices(model, update, source);
     const bool jr = model == AtmosphereModel::jacchia_roberts;
     const auto flux = [&](Epoch epoch, bool average) {
         const auto [d, interpolate] = flux_node(time.to_utc(epoch));
         const auto field = [&](int number) {
-            const auto &r = day(number);
-            return required(average ? r.observed_center81 : r.f107_observed, number,
-                            average ? "centered observed F10.7" : "observed F10.7");
+            return flux_value(number, average, time, sun_distance_m);
         };
         const double left = field(d);
         if (!interpolate)
@@ -295,7 +316,8 @@ SpaceWeatherSample SpaceWeather::sample(Epoch at, const ITimeProvider &time, Atm
 }
 void SpaceWeather::validate_interval(Epoch first, Epoch last, const ITimeProvider &time,
                                      AtmosphereModel model, GeomagneticUpdate update,
-                                     GeomagneticSource source) const {
+                                     GeomagneticSource source,
+                                     const std::function<double(Epoch)> &sun_distance_m) const {
     choices(model, update, source);
     if (first.tai_nanoseconds() > last.tai_nanoseconds())
         throw std::invalid_argument("Space weather interval must be ordered");
@@ -304,9 +326,7 @@ void SpaceWeather::validate_interval(Epoch first, Epoch last, const ITimeProvide
         const auto begin = flux_node(time.to_utc(lagged(first, lag)));
         const auto end = flux_node(time.to_utc(lagged(last, lag)));
         for (int d = begin.first; d <= end.first + (end.second ? 1 : 0); ++d) {
-            const auto &r = day(d);
-            (void)required(average ? r.observed_center81 : r.f107_observed, d,
-                           average ? "centered observed F10.7" : "observed F10.7");
+            (void)flux_value(d, average, time, sun_distance_m);
             (void)time.from_utc(utc_date(d, 20));
         }
     };
@@ -330,7 +350,7 @@ void SpaceWeather::validate_interval(Epoch first, Epoch last, const ITimeProvide
             (void)required(ap ? r.ap[i] : r.kp[i], d, ap ? "three-hour Ap" : "three-hour Kp");
         }
     }
-    (void)sample(first, time, model, update, source);
-    (void)sample(last, time, model, update, source);
+    (void)sample(first, time, model, update, source, sun_distance_m);
+    (void)sample(last, time, model, update, source, sun_distance_m);
 }
 } // namespace orbitforge::core

@@ -911,7 +911,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
             &dialog, QStringLiteral("导入 %1 文件").arg(title->text()), {},
             ocean_product(*selected()) ? QStringLiteral("海潮势系数 (*.txt *.pot);;所有文件 (*)")
             : *selected() == DataProduct::space_weather
-                ? QStringLiteral("空间天气 (*.csv *.txt);;所有文件 (*)")
+                ? QStringLiteral("空间天气 (*.csv *.txt *.fxm);;所有文件 (*)")
             : *selected() == DataProduct::de440s ? QStringLiteral("DE440s 星历 (de440s.bsp *.bsp)")
             : gravity_product(*selected()) ? QStringLiteral("重力场 (*.gfc *.grv);;所有文件 (*)")
                                            : QStringLiteral("所有文件 (*)"));

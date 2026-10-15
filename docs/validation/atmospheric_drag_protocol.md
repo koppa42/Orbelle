@@ -72,3 +72,18 @@ python tools/validation/space_weather_spline_reference.py <候选文件> <输出
 参考只按 LF 换行保存。额外测试缺测分段、端点不外推、内部极值越界、Ap/Kp 来源独立、NRL 原生历史和有效身份、禁用草稿、当前格式未知枚举拒绝、Python 安装、SDK 保存重开及桌面窄窗/DPI/键盘/取消。STK 的节点落点和端点处理未由公开文档确定，仍单列待验收，不用 SciPy/GMAT 对照代替 STK 同配置实测。
 
 该参考文件的 LF 字节 SHA-256 为 `92cee02d59e8eeee3244ac2af3ab2f138307777d8deb132e13957c7e86d64fce`，重算结果逐字节一致。
+
+
+## FXM 调整通量与文件传播
+
+`tools/validation/fxm_weather_reference.py` 不导入 OrbitForge，用 NumPy 2.3.3 和 SciPy 1.16.3 `interp1d` 对独立计算的节点通量进行插值，并将预期天气输入交给原始 NASA GMAT JR 适配器。适配器、原始源码版本与散列沿用 `jacchia_roberts_weather_reference.cpp` / `density_sources.json`。复现方式：
+
+```text
+python tools/validation/fxm_weather_reference.py OUTPUT_DIR GMAT_DRIVER
+```
+
+输出 `weather_fxm.fxm` 和 `weather_fxm.txt`。参考使用显式合成的 0.97–1.035 AU 节点距离，刻意加快变化以检测改正次序和滞后错误；它不是实际太阳星历。74 组 JR / NRL 天气样本覆盖 20:00 UTC 前后 1 ns、半日、2016 年正闰秒和观测/预测切换；37 组 JR 密度覆盖 100、126、400、1000 km。通量容限 `3e-11 sfu` 包含独立插值时间坐标的浮点舍入；GMAT 相对密度容限 `2e-10` 沿用现有 JR 对照。
+
+C++ 集成测试另外用真实 DE440 星历，将 FXM 路径与显式转换的 observed CSV 路径比较，覆盖 JR、NRL、低空模型准备、视太阳方向、项目保存/重开与数据变更确认；位置容限 `1e-5 m`、速度 `1e-8 m/s`。此项验证接口组合与转换路由，不是独立轨道真值。格式损坏、预测重叠/缺字段、错误 Kp/Q、取消导入、无距离或内部覆盖缺口均有失败路径测试。Python 安装后对同一参考执行 74 组取样并检查可选回调及目录重开。
+
+尚未获得 STK 本机输出，不能据此声称 FXM 改正与 STK 位级一致；FXM 的日预测没有补成三小时历史，CSSI Predicts 月预报仍另行实现。

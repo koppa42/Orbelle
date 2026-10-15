@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <orbitforge/core/time/time_provider.hpp>
@@ -26,6 +27,7 @@ struct SpaceWeatherDay {
 struct SpaceWeatherInfo {
     std::string sha256, source_url, format;
     UtcDateTime first{}, last{}; // Inclusive raw record dates, not propagation coverage.
+    bool solar_flux_adjusted = false; // FXM: use 1-AU fields and an explicit Sun distance.
 };
 struct SpaceWeatherSample {
     double f107, f107_average, kp, ap;
@@ -46,9 +48,13 @@ class SpaceWeather {
     // 86400 s for both models. Average flux lag: JR 86400 s, NRL 0 s.
     // Geomagnetic lag: JR 24120 s, NRL 0 s. NRL three-hour mode assembles the
     // native seven-value Ap history; JR uses the selected scalar Kp / converted Ap.
-    [[nodiscard]] SpaceWeatherSample sample(Epoch at, const ITimeProvider &time,
-                                            AtmosphereModel model, GeomagneticUpdate update,
-                                            GeomagneticSource source) const;
+    [[nodiscard]] SpaceWeatherSample
+    sample(Epoch at, const ITimeProvider &time, AtmosphereModel model, GeomagneticUpdate update,
+           GeomagneticSource source, const std::function<double(Epoch)> &sun_distance_m = {}) const;
+    // Adjusted-only files require a finite positive geometric Sun-Earth distance
+    // in metres, evaluated at each required 20:00 UTC flux node. Convert both
+    // daily and centered-81 values by (149597870700 / distance)^2 before
+    // interpolation. No callback is used for files with observed fluxes.
     // Cubic spline: natural end conditions on each complete UTC-slot run,
     // knots at 01:30, 04:30, ..., 22:30 UTC. Inter-node fractions use elapsed
     // TAI seconds, including leap seconds. Interpolate the selected Ap/Kp before
@@ -58,7 +64,8 @@ class SpaceWeather {
     // just the two endpoints. Missing fields, holes and extrapolation are errors.
     void validate_interval(Epoch first, Epoch last, const ITimeProvider &time,
                            AtmosphereModel model, GeomagneticUpdate update,
-                           GeomagneticSource source) const;
+                           GeomagneticSource source,
+                           const std::function<double(Epoch)> &sun_distance_m = {}) const;
 
   private:
     SpaceWeatherInfo info_;
@@ -78,6 +85,8 @@ class SpaceWeather {
     void validate_spline(Epoch first, Epoch last, const ITimeProvider &time,
                          GeomagneticSource source) const;
     [[nodiscard]] const SpaceWeatherDay &day(int number) const;
+    [[nodiscard]] double flux_value(int number, bool average, const ITimeProvider &time,
+                                    const std::function<double(Epoch)> &sun_distance_m) const;
 };
 [[nodiscard]] double ap_to_kp(double ap);
 } // namespace orbitforge::core
