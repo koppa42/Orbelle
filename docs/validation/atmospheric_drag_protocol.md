@@ -37,7 +37,7 @@ java -cp "out/validation/drag;$dragClasspath" OrbitForgeDragReference
 
 测试认证点质量+阻力仍需要 UTC/EOP/Sun，缺项和区间外查询先失败；视太阳需要额外 600 s 核覆盖，几何方向不冒充视方向；取消后 Session 可再次使用。用实际 ERFA/IERS/SPICE 2016 闰秒片段检查 C++ Session、Project、报告及 Python 状态一致；保存/重开保留参数及来源，修改 Cd/天气/密度模型/太阳方法改变新结果，旧 Analysis 保持不变。
 
-项目 v28 固定样例独立组装，禁用参数草稿往返而不改变身份；NRL 主模型的非活动低空参数不计入计算身份。Qt 测试检查阻力开关、模型关联、面积质量比单位转换、错误定位、缺星历拒绝、取消/重开；真实 Windows 窗口检查 430/720 逻辑像素及至少两个 DPI 设置（日志记录实际 DPR），不重建编辑器、不丢失输入，操作按钮可达。
+项目 v29 固定样例独立组装，禁用参数草稿往返而不改变身份；NRL 主模型的非活动低空参数不计入计算身份。Qt 测试检查阻力开关、模型关联、面积质量比单位转换、错误定位、缺星历拒绝、取消/重开；真实 Windows 窗口检查 430/720 逻辑像素及至少两个 DPI 设置（日志记录实际 DPR），不重建编辑器、不丢失输入，操作按钮可达。
 
 
 ## 文件模式验收
@@ -55,3 +55,20 @@ java -cp "out/validation/drag;$dragClasspath" OrbitForgeDragReference
 赤道、两极及 0/90/400/1000 km 检查有限极限和域边界；在近似高度刚过 90 km、精确高度仍低于 90 km 的点，检查零宽硬切换使用正确模型；100 m 拼接区中点检查两模型等权密度；中点 Cartesian 舍入的高度容差按权重导数上界 `1.5/100 m` 传播到密度容差。非有限输入、地心及域外高度继续拒绝。
 
 Python 检查开关、返回的实际密度高度及加速度变化；C++/Python 的保存重开、分析/报告身份、旧快照不变和 Qt 草稿/取消/重开检查均包含该开关。此处验证的是公开公式和软件路由，尚未取得 STK 同配置轨迹输出。
+
+## 自然三次样条与密度链路
+
+`space_weather_spline.txt` 由 `tools/validation/space_weather_spline_reference.py` 调用固定 SciPy 1.16.3 的 [CubicSpline](https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.CubicSpline.html)（`CubicSpline(bc_type="natural", extrapolate=False)`）生成，不读取 OrbitForge 算法或输出。112 个三小时输入节点包含独立的 Ap/Kp 序列，1112 个取样覆盖节点、节点后 1 ns、节点前 1 ns、中间值、跨 2016 正闰秒及首末端点。逐项绝对容限 Ap `5e-12`、Kp `5e-13`，覆盖独立三对角求解器和全局/局部坐标的浮点舍入。
+
+66 个密度样例将 SciPy 的天气输出传给未修改 NASA GMAT `c9b78bd1` 标量 JR；几何、高度、UTC JD、150 sfu 日/平均通量及 Kp 显式输入。适配器为 `jacchia_roberts_weather_reference.cpp`，使用已有 `gmat_jr_stubs`；上游原文的两个 SHA-256 沿用 `density_sources.json`。选 Ap 时，参考侧用标准 28 点表和 NumPy 插值转为 Kp。Core 从同一原始日记录重新计算天气和密度，密度相对容限沿用 `2e-10`，不放宽原有标准。
+
+复现时先用 `atmosphere_reference.py` 获取并认证原始 GMAT 文件；在 MSVC developer shell 中编译适配器（Linux 可用 g++ 对应选项）：
+
+```powershell
+cl /nologo /O2 /EHsc /std:c++20 /I<上游目录> /Itools/validation/gmat_jr_stubs tools/validation/jacchia_roberts_weather_reference.cpp /Fe:<输出目录>/weather_reference.exe
+python tools/validation/space_weather_spline_reference.py <候选文件> <输出目录>/weather_reference.exe
+```
+
+参考只按 LF 换行保存。额外测试缺测分段、端点不外推、内部极值越界、Ap/Kp 来源独立、NRL 原生历史和有效身份、禁用草稿、当前格式未知枚举拒绝、Python 安装、SDK 保存重开及桌面窄窗/DPI/键盘/取消。STK 的节点落点和端点处理未由公开文档确定，仍单列待验收，不用 SciPy/GMAT 对照代替 STK 同配置实测。
+
+该参考文件的 LF 字节 SHA-256 为 `92cee02d59e8eeee3244ac2af3ab2f138307777d8deb132e13957c7e86d64fce`，重算结果逐字节一致。

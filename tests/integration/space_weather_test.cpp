@@ -297,3 +297,273 @@ TEST_F(WeatherFiles, HpopFileWeatherMatchesManualConstantAndPinsSessionReportAnd
     drag.geomagnetic_update = Update::three_hourly;
     EXPECT_NE(application::analysis_input_sha256(p), identity);
 }
+
+namespace {
+std::vector<core::SpaceWeatherDay> spline_records() {
+    std::vector<core::SpaceWeatherDay> days(16);
+    for (int i = 0; i < 16; ++i) {
+        auto &d = days[i];
+        d.date = i < 10 ? core::UtcDateTime{2016, 12, 22 + i, 0, 0, 0, 0}
+                        : core::UtcDateTime{2017, 1, i - 9, 0, 0, 0, 0};
+        d.f107_observed = d.observed_center81 = 150;
+        d.daily_ap = 15;
+        d.daily_kp = 3;
+    }
+    std::ifstream input(ORBITFORGE_WEATHER_SPLINE_REFERENCE);
+    if (!input)
+        throw std::runtime_error("Missing SciPy weather spline reference");
+    std::string line;
+    while (std::getline(input, line)) {
+        if (!line.starts_with("D "))
+            continue;
+        std::istringstream row(line.substr(2));
+        int day, slot;
+        double ap, kp;
+        row >> day >> slot >> ap >> kp;
+        if (!row)
+            throw std::runtime_error("Invalid SciPy weather input row");
+        days.at(day + 2).ap.at(slot) = ap;
+        days.at(day + 2).kp.at(slot) = kp;
+    }
+    return days;
+}
+core::Epoch jr_at(const core::ITimeProvider &time, core::UtcDateTime weather_utc) {
+    return core::Epoch{time.from_utc(weather_utc).tai_nanoseconds() + 24120000000000LL};
+}
+} // namespace
+TEST(SpaceWeather, NaturalCubicMatchesIndependentScipyAcrossKnotsAndLeapSecond) {
+    if (!runtime::time_frames_available())
+        GTEST_SKIP();
+    const auto time = runtime::make_builtin_time_provider();
+    const core::SpaceWeather w{{}, spline_records()};
+    std::ifstream input(ORBITFORGE_WEATHER_SPLINE_REFERENCE);
+    std::string line;
+    std::size_t count = 0;
+    double maximum = 0;
+    while (std::getline(input, line)) {
+        if (!line.starts_with("C "))
+            continue;
+        std::istringstream row(line.substr(2));
+        int source;
+        std::int64_t ns;
+        double expected;
+        ASSERT_TRUE(row >> source >> ns >> expected);
+        const auto value =
+            w.sample(core::Epoch{ns}, *time, Model::jacchia_roberts,
+                     Update::three_hourly_cubic_spline, source == 0 ? Source::ap : Source::kp);
+        const double actual = source == 0 ? value.ap : value.kp;
+        maximum = std::max(maximum, std::abs(actual - expected));
+        EXPECT_NEAR(actual, expected, source == 0 ? 5e-12 : 5e-13) << line;
+        EXPECT_DOUBLE_EQ(value.f107, 150);
+        EXPECT_DOUBLE_EQ(value.f107_average, 150);
+        ++count;
+    }
+    EXPECT_EQ(count, 1112U);
+    RecordProperty("maximum_index_error", maximum);
+    for (auto source : {Source::ap, Source::kp})
+        EXPECT_NO_THROW(w.validate_interval(
+            jr_at(*time, {2016, 12, 24, 1, 30, 0, 0}), jr_at(*time, {2017, 1, 6, 22, 30, 0, 0}),
+            *time, Model::jacchia_roberts, Update::three_hourly_cubic_spline, source));
+}
+TEST(SpaceWeather, NaturalCubicGapsEndpointsAndInteriorOvershootAreExplicit) {
+    if (!runtime::time_frames_available())
+        GTEST_SKIP();
+    const auto time = runtime::make_builtin_time_provider();
+    const auto sample = [&](const core::SpaceWeather &w, core::UtcDateTime u,
+                            Source source = Source::ap) {
+        return w.sample(jr_at(*time, u), *time, Model::jacchia_roberts,
+                        Update::three_hourly_cubic_spline, source);
+    };
+    auto days = spline_records();
+    const core::SpaceWeather original{{}, days};
+    EXPECT_NO_THROW((void)sample(original, {2016, 12, 24, 1, 30, 0, 0}));
+    EXPECT_NO_THROW((void)sample(original, {2017, 1, 6, 22, 30, 0, 0}));
+    EXPECT_THROW((void)sample(original, {2016, 12, 24, 1, 29, 59, 999999999}),
+                 core::SpaceWeatherCoverageError);
+    EXPECT_THROW((void)sample(original, {2017, 1, 6, 22, 30, 0, 1}),
+                 core::SpaceWeatherCoverageError);
+    days[7].ap[2] = {};
+    const core::SpaceWeather hole{{}, days};
+    EXPECT_NO_THROW((void)sample(hole, {2016, 12, 29, 4, 30, 0, 0}));
+    EXPECT_NO_THROW((void)sample(hole, {2016, 12, 29, 10, 30, 0, 0}));
+    EXPECT_THROW(hole.validate_interval(jr_at(*time, {2016, 12, 29, 4, 30, 0, 0}),
+                                        jr_at(*time, {2016, 12, 29, 10, 30, 0, 0}), *time,
+                                        Model::jacchia_roberts, Update::three_hourly_cubic_spline,
+                                        Source::ap),
+                 core::SpaceWeatherCoverageError);
+    EXPECT_NO_THROW((void)sample(hole, {2016, 12, 29, 7, 30, 0, 0}, Source::kp));
+    days = spline_records();
+    for (auto &d : days)
+        for (auto &v : d.ap)
+            if (v)
+                v = 0;
+    days[7].ap[2] = 400;
+    const core::SpaceWeather storm{{}, days};
+    // Endpoints are legal zeros, but the interior natural spline is negative.
+    EXPECT_DOUBLE_EQ(sample(storm, {2016, 12, 29, 10, 30, 0, 0}).ap, 0);
+    EXPECT_DOUBLE_EQ(sample(storm, {2016, 12, 29, 13, 30, 0, 0}).ap, 0);
+    EXPECT_THROW((void)sample(storm, {2016, 12, 29, 12, 0, 0, 0}), core::SpaceWeatherCoverageError);
+    EXPECT_THROW(storm.validate_interval(jr_at(*time, {2016, 12, 29, 10, 30, 0, 0}),
+                                         jr_at(*time, {2016, 12, 29, 13, 30, 0, 0}), *time,
+                                         Model::jacchia_roberts, Update::three_hourly_cubic_spline,
+                                         Source::ap),
+                 core::SpaceWeatherCoverageError);
+}
+TEST(SpaceWeather, CubicChoiceRetainsNativeNrlHistoryAndCanonicalIdentity) {
+    if (!runtime::time_frames_available())
+        GTEST_SKIP();
+    const auto time = runtime::make_builtin_time_provider();
+    const core::SpaceWeather w{{}, spline_records()};
+    for (auto source : {Source::ap, Source::kp}) {
+        for (const auto u : {core::UtcDateTime{2016, 12, 31, 23, 59, 60, 0},
+                             core::UtcDateTime{2017, 1, 1, 0, 0, 0, 0}}) {
+            const auto at = time->from_utc(u);
+            const auto a = w.sample(at, *time, Model::nrlmsise00, Update::three_hourly, source);
+            const auto b =
+                w.sample(at, *time, Model::nrlmsise00, Update::three_hourly_cubic_spline, source);
+            EXPECT_EQ(a.ap_history, b.ap_history);
+            EXPECT_EQ(a.ap, b.ap);
+            EXPECT_EQ(a.kp, b.kp);
+            core::AtmosphereInput in;
+            in.utc = u;
+            in.geodetic = {.4, .6, 400000};
+            in.f107 = a.f107;
+            in.f107_average = a.f107_average;
+            in.ap_history = a.ap_history;
+            const auto rho = core::evaluate_atmosphere(Model::nrlmsise00, in).density_kg_m3;
+            in.ap_history = b.ap_history;
+            EXPECT_EQ(core::evaluate_atmosphere(Model::nrlmsise00, in).density_kg_m3, rho);
+        }
+    }
+    core::DragOptions d;
+    d.enabled = true;
+    d.weather_model = "test";
+    d.atmosphere = Model::nrlmsise00;
+    d.geomagnetic_update = Update::three_hourly_cubic_spline;
+    EXPECT_EQ(core::effective_drag_options(d).geomagnetic_update, Update::three_hourly);
+    d.atmosphere = Model::jacchia_roberts;
+    EXPECT_EQ(core::effective_drag_options(d).geomagnetic_update,
+              Update::three_hourly_cubic_spline);
+    d.weather_model.clear();
+    EXPECT_EQ(core::effective_drag_options(d).geomagnetic_update, Update::daily);
+}
+
+TEST(SpaceWeather, SplineDrivenJacchiaRobertsMatchesOriginalGmatDensity) {
+    if (!runtime::time_frames_available())
+        GTEST_SKIP();
+    const auto time = runtime::make_builtin_time_provider();
+    const core::SpaceWeather w{{}, spline_records()};
+    std::ifstream input(ORBITFORGE_WEATHER_SPLINE_REFERENCE);
+    std::string line;
+    std::size_t count = 0;
+    double maximum = 0;
+    while (std::getline(input, line)) {
+        if (!line.starts_with("R "))
+            continue;
+        std::istringstream row(line.substr(2));
+        int source, year, month, day;
+        std::int64_t ns;
+        double seconds, height, latitude, angle, declination, expected;
+        ASSERT_TRUE(row >> source >> ns >> year >> month >> day >> seconds >> height >> latitude >>
+                    angle >> declination >> expected);
+        const auto sample =
+            w.sample(core::Epoch{ns}, *time, Model::jacchia_roberts,
+                     Update::three_hourly_cubic_spline, source == 0 ? Source::ap : Source::kp);
+        core::AtmosphereInput in;
+        in.utc = time->to_utc(core::Epoch{ns});
+        EXPECT_EQ(in.utc.year, year);
+        EXPECT_EQ(in.utc.month, month);
+        EXPECT_EQ(in.utc.day, day);
+        EXPECT_NEAR(in.utc.hour * 3600 + in.utc.minute * 60 + in.utc.second +
+                        in.utc.nanosecond * 1e-9,
+                    seconds, 1e-10);
+        in.geodetic = {.5, latitude, height};
+        in.solar_hour_angle_rad = angle;
+        in.sun_declination_rad = declination;
+        in.f107 = sample.f107;
+        in.f107_average = sample.f107_average;
+        in.kp = sample.kp;
+        const auto actual = core::evaluate_atmosphere(Model::jacchia_roberts, in).density_kg_m3;
+        maximum = std::max(maximum, std::abs(actual / expected - 1));
+        EXPECT_NEAR(actual, expected, expected * 2e-10) << line;
+        ++count;
+    }
+    EXPECT_EQ(count, 66U);
+    RecordProperty("maximum_relative_density_error", maximum);
+}
+
+TEST_F(WeatherFiles, SplineTrajectoryConvergesAndSurvivesProjectReopen) {
+    if (!runtime::time_frames_available() || !runtime::ephemeris_available())
+        GTEST_SKIP();
+    auto text = daily_file();
+    const std::string old = ",15,15,15,15,15,15,15,15,15,0,0,0,";
+    const std::string varied = ",15,20,30,50,40,30,20,15,27,0,0,0,";
+    std::size_t offset = 0;
+    while ((offset = text.find(old, offset)) != std::string::npos) {
+        text.replace(offset, old.size(), varied);
+        offset += varied.size();
+    }
+    const auto data =
+        runtime::DataSnapshot::load(ORBITFORGE_DRAG_EOP)
+            .with_ephemeris("de440s",
+                            runtime::make_third_body_ephemeris(
+                                runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root)))
+            .with_space_weather_file("celestrak", write(text));
+    const auto epoch = data.time()->from_utc({2017, 1, 1, 1, 0, 0, 0});
+    const core::Epoch first{epoch.tai_nanoseconds() - 21600000000000LL};
+    const core::Epoch last{epoch.tai_nanoseconds() + 21600000000000LL};
+    application::Project settings{"Spline", first, last};
+    application::ProjectSatellite satellite;
+    auto &orbit = satellite.orbit;
+    orbit.propagator = application::OrbitPropagator::hpop;
+    orbit.first = first;
+    orbit.last = last;
+    orbit.initial.epoch = epoch;
+    orbit.initial.position_m = {6778137, 0, 0};
+    orbit.initial.velocity_mps = {0, 6300, 4300};
+    auto &h = orbit.hpop;
+    h.gravity_degree = h.gravity_order = 0;
+    h.max_step_seconds = 60;
+    h.relative_tolerance = 1e-13;
+    h.position_tolerance_m = 1e-6;
+    h.velocity_tolerance_mps = 1e-9;
+    h.drag.enabled = true;
+    h.drag.atmosphere = Model::jacchia_roberts;
+    h.drag.weather_model = "celestrak";
+    h.drag.geomagnetic_update = Update::three_hourly_cubic_spline;
+    settings.satellites.push_back(satellite);
+    const auto project = Project::from_data(settings);
+    const auto analysis = project.prepare(data);
+    const auto object = project.objects().get("satellite-1");
+    const auto a = analysis.state(object, first, FrameId::gcrf),
+               b = analysis.state(object, last, FrameId::gcrf);
+    settings.satellites[0].orbit.hpop.max_step_seconds = 7;
+    const auto refined = Project::from_data(settings);
+    const auto finer = refined.prepare(data);
+    double maximum = 0;
+    for (const auto &state : {a, b}) {
+        const auto other =
+            finer.state(refined.objects().get("satellite-1"), state.epoch, FrameId::gcrf);
+        for (std::size_t i = 0; i < 3; ++i) {
+            maximum = std::max(maximum, std::abs(state.position_m[i] - other.position_m[i]));
+            EXPECT_NEAR(state.position_m[i], other.position_m[i], 1e-3);
+            EXPECT_NEAR(state.velocity_mps[i], other.velocity_mps[i], 1e-6);
+        }
+    }
+    RecordProperty("maximum_step_refinement_position_m", maximum);
+    settings.satellites[0].orbit.hpop.drag.geomagnetic_update = Update::three_hourly;
+    const auto stepped = Project::from_data(settings);
+    EXPECT_NE(stepped.prepare(data)
+                  .state(stepped.objects().get("satellite-1"), last, FrameId::gcrf)
+                  .position_m,
+              b.position_m);
+    project.save(root / "spline.orbitforge", analysis);
+    const auto reopened = Project::open(root / "spline.orbitforge", data);
+    EXPECT_EQ(reopened.to_data().satellites[0].orbit.hpop.drag.geomagnetic_update,
+              Update::three_hourly_cubic_spline);
+    EXPECT_EQ(reopened.prepare(data)
+                  .state(reopened.objects().get("satellite-1"), last, FrameId::gcrf)
+                  .position_m,
+              b.position_m);
+    EXPECT_EQ(analysis.state(object, last, FrameId::gcrf).position_m, b.position_m);
+}

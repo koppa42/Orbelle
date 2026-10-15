@@ -2036,7 +2036,11 @@ TEST_F(QuantityTest, HpopWeatherFileSwitchesFieldsRetainsDraftsAndReopens) {
         EXPECT_TRUE(selection->isEnabled());
         EXPECT_EQ(selection->currentData().toString(), "celestrak");
         EXPECT_FALSE(selection->currentText().contains(QStringLiteral("已安装")));
-        dialog->findChild<QComboBox *>("hpopDragGeomagneticUpdate")->setCurrentIndex(1);
+        auto *update = dialog->findChild<QComboBox *>("hpopDragGeomagneticUpdate");
+        update->setFocus();
+        QKeyEvent key(QEvent::KeyPress, Qt::Key_End, Qt::NoModifier);
+        QApplication::sendEvent(update, &key);
+        EXPECT_EQ(update->currentIndex(), 2);
         dialog->findChild<QComboBox *>("hpopDragGeomagneticSource")->setCurrentIndex(1);
         source->setCurrentIndex(0);
         EXPECT_EQ(f107->value(Unit::one), 183);
@@ -2065,7 +2069,7 @@ TEST_F(QuantityTest, HpopWeatherFileSwitchesFieldsRetainsDraftsAndReopens) {
     ASSERT_TRUE(edit_hpop_settings(
         options, nullptr, {}, {entry}, [entry] { return std::vector{entry}; }, &catalog));
     EXPECT_EQ(options.drag.weather_model, "celestrak");
-    EXPECT_EQ(options.drag.geomagnetic_update, core::GeomagneticUpdate::three_hourly);
+    EXPECT_EQ(options.drag.geomagnetic_update, core::GeomagneticUpdate::three_hourly_cubic_spline);
     EXPECT_EQ(options.drag.geomagnetic_source, core::GeomagneticSource::kp);
     EXPECT_EQ(options.drag.f107, 183);
     const auto saved = options;
@@ -2073,7 +2077,7 @@ TEST_F(QuantityTest, HpopWeatherFileSwitchesFieldsRetainsDraftsAndReopens) {
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
         ASSERT_TRUE(dialog);
         EXPECT_EQ(dialog->findChild<QComboBox *>("hpopDragWeatherSource")->currentIndex(), 1);
-        EXPECT_EQ(dialog->findChild<QComboBox *>("hpopDragGeomagneticUpdate")->currentIndex(), 1);
+        EXPECT_EQ(dialog->findChild<QComboBox *>("hpopDragGeomagneticUpdate")->currentIndex(), 2);
         dialog->findChild<QComboBox *>("hpopDragWeatherSource")->setCurrentIndex(0);
         dialog->reject();
     });

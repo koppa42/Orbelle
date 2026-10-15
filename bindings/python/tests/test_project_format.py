@@ -19,7 +19,7 @@ class ProjectFormatTests(unittest.TestCase):
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 28)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 29)
         self.path.write_bytes(self.raw)
         project = of.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
@@ -36,7 +36,7 @@ class ProjectFormatTests(unittest.TestCase):
         drag = hpop.drag
         self.assertTrue(drag.use_approximate_altitude)
         self.assertEqual(drag.weather_model, "fixture-weather")
-        self.assertEqual(drag.geomagnetic_update, "three_hourly")
+        self.assertEqual(drag.geomagnetic_update, "three_hourly_cubic_spline")
         self.assertEqual(drag.geomagnetic_source, "kp")
         plan = project.objects["satellite-b"].orbit.mission
         self.assertEqual(plan.propagation, "hpop")
@@ -47,15 +47,30 @@ class ProjectFormatTests(unittest.TestCase):
         project.save(self.path, overwrite=True)
         self.assertEqual(self.path.read_bytes(), self.raw)
 
+    def test_unknown_weather_enum_is_rejected_with_valid_crcs(self):
+        for value in (3, 0xFFFFFFFF):
+            sections=[]
+            for tag, version, body in read_sections(self.raw):
+                if tag == b"OBJS":
+                    body=bytearray(body)
+                    offset=body.index(b"fixture-weather")+len(b"fixture-weather")
+                    struct.pack_into("<I",body,offset,value)
+                sections.append((tag,version,body))
+            raw=with_sections(self.raw,sections)
+            self.path.write_bytes(raw)
+            with self.assertRaisesRegex(of.ProjectError,"weather update/source"):
+                of.Project.open(self.path)
+            self.assertEqual(self.path.read_bytes(),raw)
+
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(28), 29, 0xFFFFFFFF):
+        for version in (*range(29), 30, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (of.load_project_data, of.load_project,
                                  of.Project.open, of.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 28"):
+                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 29"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 

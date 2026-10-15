@@ -762,7 +762,13 @@ bool edit_hpop_settings(
     drag_weather->addRow(QStringLiteral("天气文件"), weather_file);
     auto *weather_update = new QComboBox;
     weather_update->setObjectName("hpopDragGeomagneticUpdate");
-    weather_update->addItems({QStringLiteral("Daily · 每日"), QStringLiteral("3-Hourly · 三小时")});
+    weather_update->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    weather_update->setMinimumContentsLength(18);
+    weather_update->addItems({QStringLiteral("Daily · 每日"), QStringLiteral("3-Hourly · 三小时"),
+                              QStringLiteral("3-Hourly · 自然三次样条")});
+    weather_update->setToolTip(QStringLiteral(
+        "3-Hourly Cubic Spline：自然三次样条以三小时窗口中心为节点；缺测不外推，越界时报错。"
+        "NRLMSISE 仍使用未插值的三小时 Ap 历史。"));
     weather_update->setCurrentIndex(static_cast<int>(options.drag.geomagnetic_update));
     drag_weather->addRow(QStringLiteral("地磁更新率"), weather_update);
     auto *weather_source = new QComboBox;

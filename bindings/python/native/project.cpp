@@ -110,7 +110,8 @@ void bind_project(py::module_ &module) {
         .value("NRLMSISE00", core::LowAltitudeDensityModel::nrlmsise00);
     py::enum_<core::GeomagneticUpdate>(module, "GeomagneticUpdate")
         .value("DAILY", core::GeomagneticUpdate::daily)
-        .value("THREE_HOURLY", core::GeomagneticUpdate::three_hourly);
+        .value("THREE_HOURLY", core::GeomagneticUpdate::three_hourly)
+        .value("THREE_HOURLY_CUBIC_SPLINE", core::GeomagneticUpdate::three_hourly_cubic_spline);
     py::enum_<core::GeomagneticSource>(module, "GeomagneticSource")
         .value("AP", core::GeomagneticSource::ap)
         .value("KP", core::GeomagneticSource::kp);

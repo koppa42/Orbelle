@@ -8,7 +8,7 @@
 
 namespace orbitforge::core {
 enum class AtmosphereModel { jacchia_roberts, nrlmsise00 };
-enum class GeomagneticUpdate { daily, three_hourly };
+enum class GeomagneticUpdate { daily, three_hourly, three_hourly_cubic_spline };
 enum class GeomagneticSource { ap, kp };
 enum class WeatherQuality { observed, interpolated, daily_prediction, monthly_prediction };
 struct SpaceWeatherDay {
@@ -49,6 +49,11 @@ class SpaceWeather {
     [[nodiscard]] SpaceWeatherSample sample(Epoch at, const ITimeProvider &time,
                                             AtmosphereModel model, GeomagneticUpdate update,
                                             GeomagneticSource source) const;
+    // Cubic spline: natural end conditions on each complete UTC-slot run,
+    // knots at 01:30, 04:30, ..., 22:30 UTC. Inter-node fractions use elapsed
+    // TAI seconds, including leap seconds. Interpolate the selected Ap/Kp before
+    // conversion; reject overshoot outside its physical range. NRL keeps its
+    // native un-interpolated seven-value history for either three-hour choice.
     // Checks every required record / slot, including all lags and history, not
     // just the two endpoints. Missing fields, holes and extrapolation are errors.
     void validate_interval(Epoch first, Epoch last, const ITimeProvider &time,
@@ -59,6 +64,19 @@ class SpaceWeather {
     SpaceWeatherInfo info_;
     std::vector<SpaceWeatherDay> days_;
     std::vector<int> day_numbers_;
+    // Second derivatives in the dimensionless, uniformly spaced UTC-slot coordinate.
+    // Missing values/monthly predictions split runs; no spline crosses a gap.
+    std::array<std::vector<double>, 2> spline_second_;
+    struct SplineInterval {
+        std::array<double, 4> coefficients;
+        Epoch first, last;
+    };
+    [[nodiscard]] SplineInterval spline_interval(int slot_number, const ITimeProvider &time,
+                                                 GeomagneticSource source) const;
+    [[nodiscard]] double spline_sample(Epoch at, const ITimeProvider &time,
+                                       GeomagneticSource source) const;
+    void validate_spline(Epoch first, Epoch last, const ITimeProvider &time,
+                         GeomagneticSource source) const;
     [[nodiscard]] const SpaceWeatherDay &day(int number) const;
 };
 [[nodiscard]] double ap_to_kp(double ap);

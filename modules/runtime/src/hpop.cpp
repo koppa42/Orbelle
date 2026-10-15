@@ -121,6 +121,8 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
                    << ";kp=" << d.kp;
         algorithm += config.str();
         if (!d.weather_model.empty() && environment.weather) {
+            if (d.geomagnetic_update == core::GeomagneticUpdate::three_hourly_cubic_spline)
+                algorithm += ";geomag-spline=natural-utc-midpoint-runs-v1;overshoot=error";
             algorithm +=
                 ";weather=file;boundary=utc-one-sided-v1;update=" +
                 std::to_string(static_cast<int>(d.geomagnetic_update)) +

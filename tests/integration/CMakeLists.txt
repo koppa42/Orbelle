@@ -3,6 +3,7 @@ add_executable(orbitforge_integration_tests runtime_test.cpp scenario_test.cpp p
     project_analysis_persistence_test.cpp analysis_access_test.cpp project_facade_test.cpp hpop_test.cpp mission_test.cpp gravity_test.cpp third_body_test.cpp solar_radiation_pressure_test.cpp atmospheric_drag_test.cpp space_weather_test.cpp ocean_tides_test.cpp secular_gravity_test.cpp)
 target_link_libraries(orbitforge_integration_tests PRIVATE OrbitForge::Runtime GTest::gtest_main)
 target_compile_definitions(orbitforge_integration_tests PRIVATE
+    ORBITFORGE_WEATHER_SPLINE_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/space_weather_spline.txt"
     ORBITFORGE_SECULAR_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators"
     ORBITFORGE_OCEAN_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators"
     ORBITFORGE_EGM2008_FULL_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/gravity_egm2008_full.txt"

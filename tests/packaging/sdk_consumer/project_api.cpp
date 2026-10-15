@@ -47,6 +47,7 @@ int main(int argc, char **argv) try {
     numerical.propagator = of::OrbitPropagator::hpop;
     numerical.hpop.gravity_degree = numerical.hpop.gravity_order = 0;
     numerical.hpop.integrator = of::HpopIntegrator::rkf78;
+    numerical.hpop.drag.geomagnetic_update = of::core::GeomagneticUpdate::three_hourly_cubic_spline;
     const auto satellite =
         reopened.objects().create(of::objects::Satellite{.name = "HPOP", .orbit = numerical});
     const auto numerical_analysis = reopened.prepare();

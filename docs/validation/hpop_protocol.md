@@ -87,12 +87,12 @@ python tools/validation/generate_srp_geometry_reference.py
 
 `srp_geometry.txt` 有 182 个独立均匀视圆盘面积参考，含太阳／地球／月球三圆交与并集、重合、包含、内外切、环食及大小相差悬殊的随机配置。独立 Python 生成器沿垂直截面积分，与生产 Green 定理圆弧积分采用不同方法；照明比例绝对容限 2e-9。Core 另检查距离平方、带符号 Cr、零面积、圆柱、大气高度、奇点、缺月球、无阴影不查询月球，以及光压单独启用时的完整星历覆盖。
 
-`SrpPersistence.*`／`SrpFiles.*` 和 `test_srp.py` 检查共享会话／分析／报告、真实 DE440s 路由、v28 保存与重开、有效参数身份及原分析不可变。桌面 `QuantityTest.HpopSrp*` 检查单位转换、有效遮挡体组合、窄窗、草稿、错误路由及取消；截图使用 `ORBITFORGE_HPOP_UI_CAPTURE`，Windows 原生平台分别设置 `QT_SCALE_FACTOR=1`／`1.5`，日志记录实际窗口 DPR。
+`SrpPersistence.*`／`SrpFiles.*` 和 `test_srp.py` 检查共享会话／分析／报告、真实 DE440s 路由、v29 保存与重开、有效参数身份及原分析不可变。桌面 `QuantityTest.HpopSrp*` 检查单位转换、有效遮挡体组合、窄窗、草稿、错误路由及取消；截图使用 `ORBITFORGE_HPOP_UI_CAPTURE`，Windows 原生平台分别设置 `QT_SCALE_FACTOR=1`／`1.5`，日志记录实际窗口 DPR。
 
 ## 集成与交付
 
 - `HpopProject.*`：真实 ERFA/IERS 帧转换、原生 GCRF 的 EOP 身份、报告/AER 复用、初始历元覆盖与取消。
-- `test_hpop.py`：Python 易用入口、不可变配置、Keplerian 的模型 μ、输出网格无关性、编辑前验证、准备结果独立和 v28 保存/打开。
+- `test_hpop.py`：Python 易用入口、不可变配置、Keplerian 的模型 μ、输出网格无关性、编辑前验证、准备结果独立和 v29 保存/打开。
 - `project-current.orbitforge`：独立二进制固定输入中的 HPOP 参数精确往返；非当前版本拒绝。
 - 安装后的 SDK 消费端：通过公共头文件创建 HPOP、查询并保存/重开，不依赖源码路径。
 - `QuantityTest.HpopSettingsValidateCancelAndRoundTripWithoutApplyingTheOrbit`：配置草稿、阶次约束、错误校验、取消和重开；可用 `ORBITFORGE_HPOP_UI_CAPTURE` 输出宽/窄窗口截图，配合 DPI 设置检查。
@@ -115,7 +115,7 @@ Core 的 `EveryBodyAndSourceActuallyChangesTheIntegratedForce` 将十个天体�
 - `Spice.MovingSunCertifiesHistoryAndGaps` 检查接收端点有数据而过去 Sun 链有洞、过去 Earth 数据缺失但不需要、接收区间内部缺口、反序和策略越界。远距离观测者所需发光时刻越界必须失败；失败后合法查询仍可用。
 - `SolarRadiationPressure.SunMethodsUseStageObserversAndKeepGravityGeometric` 检查三种方法真实进入正反向传播、卫星状态按积分阶段更新、第三体几何引力查询独立；不支持视太阳的 Provider 必须拒绝对应方法。
 - Python `test_srp.py` 使用固定 DE440s：三个方法分别改变轨迹/身份，保存重开精确复现，旧分析保持不变；运动与静止观测者不能返回相同视方向。原有 Orekit 几何基准显式选择 True，不用改基准值掩盖默认方法变化。
-- v28 / OBJS19 独立固定样例保存禁用的 Apparent 草稿；重算 CRC 后的未知太阳方法依然拒绝。安装后 SDK 调用新接口；桌面验证三选项、默认值、键盘切换、宽窄/DPI、保存后重开和取消。
+- v29 / OBJS20 独立固定样例保存禁用的 Apparent 草稿；重算 CRC 后的未知太阳方法依然拒绝。安装后 SDK 调用新接口；桌面验证三选项、默认值、键盘切换、宽窄/DPI、保存后重开和取消。
 
 上述为公开 NAIF 模型及路由验证；STK HPOP 同版本、同配置的轨迹验收仍未完成，遮挡体视位置和 Boundary Mitigation 单独列为待实现。
 
@@ -143,7 +143,7 @@ IERS 2003 三项修正的公式、时间/坐标约定、独立 Orekit 生成器�
 
 `AtmosphericDrag.SharedMassAndIndependentAreasMatchOrekitCombinedForcesAndPropagation` 使用 RKF78（最大步长 2.5 s），核对分项加速度及组合传播；容限沿用阻力协议：每分量 1e-17 m/s²、0.5 mm、5e-7 m/s。另将质量改为 9876 kg，固定各自 A/m，确认轨迹逐位相同。质量有限性、正值、乘积上溢/下溢和零面积由 `Hpop.SatelliteMass*` 覆盖。
 
-项目 v28 / OBJS19 固定样例独立插入 1250 kg；C++/Python 精确字节往返，损坏质量即使重算 CRC 也拒绝。Python 真实 EOP/SPICE 组合力场景验证质量变更保存、计算身份、旧分析不变以及 A/m 改变后的轨迹变化；安装后 SDK 调用派生面积接口。Qt `HpopSatelliteMass*` 检查单位与键盘、430/720 逻辑宽度、不同 DPI、取消、重开和错误定位，截图路径由 `ORBITFORGE_HPOP_UI_CAPTURE` 指定。
+项目 v29 / OBJS20 固定样例独立插入 1250 kg；C++/Python 精确字节往返，损坏质量即使重算 CRC 也拒绝。Python 真实 EOP/SPICE 组合力场景验证质量变更保存、计算身份、旧分析不变以及 A/m 改变后的轨迹变化；安装后 SDK 调用派生面积接口。Qt `HpopSatelliteMass*` 检查单位与键盘、430/720 逻辑宽度、不同 DPI、取消、重开和错误定位，截图路径由 `ORBITFORGE_HPOP_UI_CAPTURE` 指定。
 
 
 ## 海潮与组合潮汐
@@ -168,7 +168,7 @@ classpath 分隔符随平台使用 `;` 或 `:`；固定输出只规范为 UTF-8 
 
 `OceanTides.*` 另检查常相位解析系数、GM/R 缩放后的物理加速度不变、自动海洋极潮、非有限 EOP、不同分潮范围、最高 2190×0、缺项/重复/溢出拒绝和并发只读。`OceanTideFiles.*` 检查原始字节哈希、单位、坏头、取消及原子发布、固定官方身份、不可变旧分析和真实 EOP 场景/报告/存档。
 
-Python `test_ocean_tides.py` 验证不可变易用配置、显式 DataSnapshot 与目录装配相同、原始文件变化确认、真实 EOP 传播/报告、保存重开和关闭/0/1 阶草稿身份。项目 v28 / OBJS19 使用独立 `struct.pack` 样例精确往返；非当前版本拒绝。安装后的 SDK 直接构造常相位海潮并核对解析系数。
+Python `test_ocean_tides.py` 验证不可变易用配置、显式 DataSnapshot 与目录装配相同、原始文件变化确认、真实 EOP 传播/报告、保存重开和关闭/0/1 阶草稿身份。项目 v29 / OBJS20 使用独立 `struct.pack` 样例精确往返；非当前版本拒绝。安装后的 SDK 直接构造常相位海潮并核对解析系数。
 
 桌面 `Hpop*Ocean*` 与 `DataCenterDialog.OceanGroup*` 检查独立阶次、文件上限、键盘、430/720 逻辑宽度、草稿重开/取消、自有下载取消/重试、排队取消不影响其他下载，以及不显示“已安装”。使用 Windows 原生 Qt、`QT_SCALE_FACTOR=1` / `1.5`，由 `ORBITFORGE_HPOP_UI_CAPTURE` 与 `ORBITFORGE_DATA_UI_CAPTURE` 保存布局截图并记录实际 DPR；同时执行相关 offscreen 回归。`DataCenterTest.*Ocean*` 另外验证后台导入、失败/取消保留；设置 `ORBITFORGE_FULL_OCEAN_FILE` 时将完整固定原文作为 loopback HTTP 响应，核验实际传输、304 条件重查及损坏替换不影响旧资源。
 
@@ -192,6 +192,6 @@ java -cp <classes-and-jars> org.orekit.forces.gravity.potential.OrbitForgeSecula
 
 组合参考有 8 条正反向一天轨迹。两个文件、底场 2/0 或 8/4，长期变化开启；IERS 2003 完整固体潮不截断，频率/固体极潮关闭；FES2014bv1 4×4 包含全部 36 个显式分潮和 IERS 2010 海洋极潮。UT1−TAI=−31.7 s、xp=0.12″、yp=0.25″，日月位置沿用固体潮生成器。Orekit 把底场/长期变化、固体潮、海潮作为三个独立力叠加，检验生产代码的重叠系数相加与独立截断；位置/速度沿用上述容限。
 
-`SecularGravity.*` / `SecularFiles.*` 覆盖上述数值、最高 2190 阶率截断、百年时差、纳秒历元、非有限及溢出拒绝、重复/损坏块、导入取消、资源冻结、重准备确认及报告身份。Python `test_gravity.py` 检查只读元数据、真实 EOP 场景、保存重开、变化确认、0/0 非活动草稿和严格布尔输入；SDK 消费端调用公开率和加速度 API。项目 v28 / OBJS19 的独立固定样例与损坏测试属于本项验收。
+`SecularGravity.*` / `SecularFiles.*` 覆盖上述数值、最高 2190 阶率截断、百年时差、纳秒历元、非有限及溢出拒绝、重复/损坏块、导入取消、资源冻结、重准备确认及报告身份。Python `test_gravity.py` 检查只读元数据、真实 EOP 场景、保存重开、变化确认、0/0 非活动草稿和严格布尔输入；SDK 消费端调用公开率和加速度 API。项目 v29 / OBJS20 的独立固定样例与损坏测试属于本项验收。
 
 Qt `QuantityTest.HpopSecularFileCapabilityKeyboardDraftAndValidation` 检查有/无元数据、键盘操作、错误路由、取消/重开和 0/0 草稿；用 Windows 原生 Qt、`QT_SCALE_FACTOR=1` / `1.5` 检查 430/720 逻辑宽度，并通过 `ORBITFORGE_HPOP_UI_CAPTURE` 保存实际 DPR 截图。运行日志放入新的 `out/validation/`。静态 EGM96/EGM2008 的 STK 默认演化仍待核对，尚无 STK 同配置轨迹真值。

@@ -52,7 +52,8 @@ void validate_drag_options(const DragOptions &o) {
         }))
         throw std::invalid_argument("Invalid space weather selection ID");
     if ((o.geomagnetic_update != GeomagneticUpdate::daily &&
-         o.geomagnetic_update != GeomagneticUpdate::three_hourly) ||
+         o.geomagnetic_update != GeomagneticUpdate::three_hourly &&
+         o.geomagnetic_update != GeomagneticUpdate::three_hourly_cubic_spline) ||
         (o.geomagnetic_source != GeomagneticSource::ap &&
          o.geomagnetic_source != GeomagneticSource::kp))
         throw std::invalid_argument("Unsupported geomagnetic update/source");
@@ -75,8 +76,11 @@ DragOptions effective_drag_options(DragOptions o) {
         o.f107_average = DragOptions{}.f107_average;
         o.kp = DragOptions{}.kp;
     }
-    if (o.atmosphere == AtmosphereModel::nrlmsise00)
+    if (o.atmosphere == AtmosphereModel::nrlmsise00) {
         o.low_altitude_model = LowAltitudeDensityModel::none;
+        if (o.geomagnetic_update == GeomagneticUpdate::three_hourly_cubic_spline)
+            o.geomagnetic_update = GeomagneticUpdate::three_hourly;
+    }
     if (o.low_altitude_model == LowAltitudeDensityModel::none)
         o.blending_range_m = DragOptions{}.blending_range_m;
     return o;
@@ -202,7 +206,7 @@ DragEvaluation evaluate_drag(const std::array<double, 3> &r, const std::array<do
             values.f107_average = selected->f107_average;
             values.kp = selected->kp;
             if (model == AtmosphereModel::nrlmsise00) {
-                if (options.geomagnetic_update == GeomagneticUpdate::three_hourly) {
+                if (options.geomagnetic_update != GeomagneticUpdate::daily) {
                     if (!selected->ap_history)
                         throw std::invalid_argument(
                             "Three-hour NRLMSISE requires complete Ap history");

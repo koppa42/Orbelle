@@ -98,7 +98,7 @@ class WeatherTests(unittest.TestCase):
     def test_invalid_choices_and_disabled_file_drafts(self):
         for kw in ({'weather_model':'../file'}, {'geomagnetic_update':'hourly'}, {'geomagnetic_source':'other'}):
             with self.assertRaises((ValueError,TypeError)): of.orbits.DragSettings(**kw)
-        drag=of.orbits.DragSettings(weather_model='missing',geomagnetic_update='three_hourly',geomagnetic_source='kp')
+        drag=of.orbits.DragSettings(weather_model='missing',geomagnetic_update='three_hourly_cubic_spline',geomagnetic_source='kp')
         project=of.Project('Draft',of.Epoch(0),of.Epoch(600*10**9))
         orbit=of.orbits.Hpop(initial=of.orbits.Cartesian(of.Epoch(0),(7000000,0,0),(0,7500,0)),gravity_degree=0,drag=drag)
         sat=project.objects.satellite('Sat',orbit=orbit)
@@ -136,3 +136,23 @@ class WeatherTests(unittest.TestCase):
                 # This is a trajectory convergence bound, not a physical atmosphere error.
                 for position in positions[:-1]: self.assertLess(math.dist(position,positions[-1]),1e-4)
             del data
+
+
+class NaturalSplineTests(unittest.TestCase):
+    @unittest.skipUnless(of.time_frames_available(), 'requires ERFA')
+    def test_constant_spline_and_native_nrl_history(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'weather.csv'; path.write_text(weather(150))
+            data=of.load_space_weather(path)
+            time=of.make_builtin_time_provider()
+            at=time.from_utc(of.UtcDateTime(2016,12,31,23,59,60))
+            for source in (of.GeomagneticSource.AP,of.GeomagneticSource.KP):
+                jr=data.sample(at,time,of.AtmosphereModel.JACCHIA_ROBERTS,
+                               of.GeomagneticUpdate.THREE_HOURLY_CUBIC_SPLINE,source)
+                self.assertAlmostEqual(jr.kp,3)
+                self.assertAlmostEqual(jr.ap,15)
+                a=data.sample(at,time,of.AtmosphereModel.NRLMSISE00,
+                              of.GeomagneticUpdate.THREE_HOURLY,source)
+                b=data.sample(at,time,of.AtmosphereModel.NRLMSISE00,
+                              of.GeomagneticUpdate.THREE_HOURLY_CUBIC_SPLINE,source)
+                self.assertEqual(a.ap_history,b.ap_history)

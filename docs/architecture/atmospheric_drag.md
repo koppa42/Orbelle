@@ -1,6 +1,6 @@
 # HPOP 大气阻力
 
-桌面阻力页、C++ `DragOptions` 和 Python `orbits.DragSettings` 共用 Core 模型。当前实现球形阻力、Jacchia–Roberts / NRLMSISE-00 密度、手动/文件空间天气、低空拼接、近似高度及地心视太阳位置；低层密度接口支持原生日 Ap 和七项历史 Ap；插值地磁更新、月预报及风场尚未实现。[STK 阻力设置](https://help.agi.com/stk/Content/hpop/hpopDrag.htm)是功能与输入含义的对齐依据；尚未取得 STK 同配置数值输出。
+桌面阻力页、C++ `DragOptions` 和 Python `orbits.DragSettings` 共用 Core 模型。当前实现球形阻力、Jacchia–Roberts / NRLMSISE-00 密度、手动/文件空间天气、低空拼接、近似高度及地心视太阳位置；低层密度接口支持原生日 Ap 和七项历史 Ap；自然三次样条地磁更新已接入；保持窗口均值的插值、月预报及风场尚未实现。[STK 阻力设置](https://help.agi.com/stk/Content/hpop/hpopDrag.htm)是功能与输入含义的对齐依据；尚未取得 STK 同配置数值输出。
 
 ## 力与参考系
 
@@ -41,13 +41,27 @@ density = of.evaluate_atmosphere(of.AtmosphereModel.NRLMSISE00, inputs)
 
 支持 CelesTrak 原始 31 列 CSV 和 130 列 `CssiSpaceWeather` 定宽文件，格式依据 [CelesTrak 说明](https://celestrak.org/SpaceData/SpaceWx-format.php)。原始全文及 SHA-256 保留，解析区分观测/预报、观测/1 AU 调整通量、中心/尾随 81 日均值、日 Ap 与三小时 ap。空字段保持缺失。观测 Kp 的 53 表示 5⅓；预报中由 Ap 推导的非三分之一值（如 22、24）按十分之一刻度保留。
 
-桌面“阻力 → 太阳通量 / 地磁”可选手动或文件、每日或三小时更新、Ap 或 Kp 来源。文件由数据中心下载/导入 CelesTrak `SW-All.csv`，API 不隐式联网。`DragSettings.weather_model` 是目录选择 ID，空字符串表示手动，`geomagnetic_update` 为 `daily` / `three_hourly`，`geomagnetic_source` 为 `ap` / `kp`。也可显式 `DataSnapshot.with_space_weather("celestrak", path)`。
+桌面“阻力 → 太阳通量 / 地磁”可选手动或文件、每日、三小时或三小时自然三次样条更新，以及 Ap 或 Kp 来源。文件由数据中心下载/导入 CelesTrak `SW-All.csv`，API 不隐式联网。`DragSettings.weather_model` 是目录选择 ID，空字符串表示手动，`geomagnetic_update` 为 `daily` / `three_hourly` / `three_hourly_cubic_spline`，`geomagnetic_source` 为 `ap` / `kp`。也可显式 `DataSnapshot.with_space_weather("celestrak", path)`。
 
 按照 [STK Drag 文件说明](https://help.agi.com/stk/Content/hpop/hpopDrag.htm)，日与中心 81 日观测通量在 20:00 UTC 节点间线性取样。滞后采用 [AGI JR 定义](https://help.agi.com/STKComponents/html/T_AGI_Foundation_Celestial_ScalarDensityJacchiaRoberts.htm)及 [MSIS-2000 定义](https://help.agi.com/STKComponents/html/T_AGI_Foundation_Celestial_ScalarDensityMsis2000.htm)：两者日通量滞后 86400 s；JR 平均通量也滞后 86400 s、地磁滞后 24120 s；NRL 平均通量及地磁不滞后。这是公开组件文档依据，尚未完成 STK HPOP 同场景数值验收。
 
 积分步在日/三小时地磁更新处截断（JR/低空 NRL 各自的滞后窗口均计入），RK 端点使用该步内部一侧的天气值；正反向均不跨跳变混合密度。滞后按 TAI 实际秒数，日/三小时窗口按 UTC；正闰秒属于当天最后一个三小时窗口。NRL 三小时模式组装上述七项 Ap 历史；选择 Kp 时先逐项转换为 Ap 再求历史均值。日模式使用文件日 Ap 或由文件日 Kp 转换，不能从当日八项重新计算并替换原始日值。
 
-准备时检查完整传播路径所需的每个日期、通量插值节点和全部历史槽，包括初始历元早于场景的情况。缺字段、内部断档、域外查询均报错，不外推或零填充。文件中月预报记录保留，但当前每日/三小时模型拒绝使用它们；原始首末日期不是可传播范围。3-Hourly Interp、自然三次样条、月预报、CSSI predicts 和 FXM 仍待实现。
+准备时检查完整传播路径所需的每个日期、通量插值节点和全部历史槽，包括初始历元早于场景的情况。缺字段、内部断档、域外查询均报错，不外推或零填充。文件中月预报记录保留，但当前每日/三小时模型拒绝使用它们；原始首末日期不是可传播范围。3-Hourly Interp（保持三小时均值）、月预报、CSSI predicts 和 FXM 仍待实现。
+
+## 三小时自然三次样条
+
+`three_hourly_cubic_spline` 对应 STK 的 3-Hourly Cubic Spline 选择。STK 公开说明采用自然三次样条，但没有公开节点落点、断档端点和越界策略。以下是 OrbitForge 的明确计算约定，已对照独立 SciPy 与 GMAT；这些细节仍需同配置 STK 数值验收，不将其称为完全复现。
+
+将每个三小时值放在该 UTC 窗口中心（01:30、04:30、…、22:30）。在连续、非月预报且该来源无缺值的序列上，一次性求自然三次样条，首末节点的二阶导数为零；两节点退化成线性，孤立节点仅允许精确命中。Ap 与 Kp 各有自己的有效序列，缺失日期/字段和月预报均断开序列，不跨缺口连接，也不外推。远处节点可能影响同一完整序列的曲线，因此更新文件仍须重新准备和确认；运行中的数据不可变。
+
+样条的独立坐标是等距 UTC 三小时窗口编号。每对节点间以真实 TAI 时差求局部分数，跨闰秒的节点间隔实际为 10801 s。该时间映射连续，样条对窗口坐标 C²；不承诺闰秒处对 TAI 的导数连续。JR 仍先施加 24120 s 地磁滞后。选择 Ap 时先插值 Ap，再转为 Kp；选择 Kp 时直接插值 Kp，不能先转换节点再声称曲线相同。
+
+自然样条可能越过原始节点范围。结果超出 Ap `[0,400]` / Kp `[0,9]` 时明确报错；仅容忍不超过 `64 × double epsilon × 上限` 的舍入偏差并收回边界。准备计算逐段检查端点及导数的实根，能发现两端合法而内部越界的情况。错误提示可改用每日/三小时取样或完整数据，不静默改变已选插值算法。
+
+依照 STK 对 MSIS 不使用插值的说明，NRLMSISE 在该选择下沿用未插值的七项 Ap 历史、`SW[9]=-1`，其有效身份等同三小时取样。JR 与低空 NRL 混合时，两者仍分别取样；前者使用样条，后者使用原生历史。设置草稿保留选择，手动天气或禁用阻力时该项不改变结果身份。现有 UTC 步边界策略仍生效。
+
+C++ / Python 的枚举新增 `three_hourly_cubic_spline` / `THREE_HOURLY_CUBIC_SPLINE`；高层 `DragSettings` 使用同名字符串。项目 v29 / OBJS20 保存枚举 2，拒绝旧格式和未知值；参考样例独立构造并覆盖未启用草稿。JR 文件样条的算法标识包含 `natural-utc-midpoint-runs-v1;overshoot=error`。
 
 ## 数据与持久化
 
@@ -55,7 +69,7 @@ density = of.evaluate_atmosphere(of.AtmosphereModel.NRLMSISE00, inputs)
 
 默认使用几何太阳。`use_apparent_sun_position=True` 使用 CSPICE 对地球接收观测的 `LT+S` 太阳方向；此约定影响密度中的当地太阳时/赤纬，不修改第三体引力或光压的几何太阳。准备计算时额外认证区间起点前 600 s 的太阳与地球核覆盖，边界不足明确拒绝。自定义星历必须提供相应查询和区间认证接口，不能将几何方向冒充视方向。
 
-项目格式为 v28 / OBJS v19，只读写当前版本。禁用模型时保存合法参数草稿，计算身份忽略这些草稿；启用时计入实际密度模型、天气、Cd、面积质量比、高度算法、太阳方法及 UTC/EOP/星历来源。NRLMSISE 主模型的低空草稿和未启用的拼接范围不改变结果身份。
+项目格式为 v29 / OBJS v20，只读写当前版本。禁用模型时保存合法参数草稿，计算身份忽略这些草稿；启用时计入实际密度模型、天气、Cd、面积质量比、高度算法、太阳方法及 UTC/EOP/星历来源。NRLMSISE 主模型的低空草稿和未启用的拼接范围不改变结果身份。
 
 ```python
 import orbitforge as of
