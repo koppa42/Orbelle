@@ -1,6 +1,7 @@
 #include "graphics_workbench.hpp"
 #include "eop_catalog.hpp"
 #include "epoch_editor.hpp"
+#include "form_kit.hpp"
 #include "ground_map.hpp"
 #include "ground_station_editor.hpp"
 #include "initial_data_setup.hpp"
@@ -259,6 +260,22 @@ class EmbeddedWindow final : public vsgQt::Window {
     vsg::ref_ptr<vsgQt::Viewer> owner_;
 };
 
+// QToolBar recomputes its layout margins from style metrics on every style change. The
+// timeline card must span the full toolbar to line up with the panels above, so the margins
+// are cleared after each recomputation.
+class FlushToolBar final : public QToolBar {
+  public:
+    using QToolBar::QToolBar;
+
+  protected:
+    bool event(QEvent *event) override {
+        const bool handled = QToolBar::event(event);
+        if ((event->type() == QEvent::StyleChange || event->type() == QEvent::Polish) && layout())
+            layout()->setContentsMargins(0, 0, 0, 0);
+        return handled;
+    }
+};
+
 class Workbench final : public QMainWindow {
     struct Station {
         application::ProjectGroundStation config;
@@ -378,45 +395,83 @@ class Workbench final : public QMainWindow {
             if (!benchmarking_) {
                 model_group_ = vsg::Group::create();
                 scene_->addChild(model_group_);
-                scene_menu_ = menuBar()->addMenu(QStringLiteral("场景"));
-                insert_menu_ = menuBar()->addMenu(QStringLiteral("插入"));
-                view_menu_ = menuBar()->addMenu(QStringLiteral("视图"));
-                time_menu_ = menuBar()->addMenu(QStringLiteral("时间"));
-                commands_ = addToolBar(QStringLiteral("场景与图形"));
-                commands_->setObjectName("commandBar");
-                commands_->setMovable(false);
-                commands_->setFixedHeight(44);
-                commands_->setIconSize(QSize(18, 18));
-                commands_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-                new WidthObserver(commands_, [this, mode = WidthMode{}](int width) mutable {
-                    commands_->setToolButtonStyle(mode.narrow(width, 900)
-                                                      ? Qt::ToolButtonIconOnly
-                                                      : Qt::ToolButtonTextBesideIcon);
-                });
+                // One title row: brand and menus on the left, the scene in the centre and icon
+                // commands on the right. Narrow windows drop the wordmark, then the scene chip;
+                // QMenuBar folds overflowing menus into its extension button.
+                // Every region is a rounded panel floating on the canvas, 8 px apart.
+                setContentsMargins(6, 6, 6, 0);
+                auto *title_host = new QWidget;
+                auto *title_host_layout = new QVBoxLayout(title_host);
+                title_host_layout->setContentsMargins(0, 0, 0, 6);
+                auto *title_bar = new QWidget;
+                title_bar->setObjectName("titleBar");
+                title_bar->setFixedHeight(40);
+                title_host_layout->addWidget(title_bar);
+                auto *title_layout = new QHBoxLayout(title_bar);
+                title_layout->setContentsMargins(10, 0, 6, 0);
+                title_layout->setSpacing(6);
                 auto *symbol = new QLabel;
-                symbol->setPixmap(
-                    workbench_icon(WorkbenchIcon::orbit, QColor("#aad5ee")).pixmap(22, 22));
-                commands_->addWidget(symbol);
+                symbol->setObjectName("brandMark");
+                symbol->setPixmap(brand_mark(22, devicePixelRatioF()));
+                title_layout->addWidget(symbol);
                 auto *name = new QLabel("OrbitForge");
                 name->setObjectName("brand");
-                commands_->addWidget(name);
-                commands_->addSeparator();
+                title_layout->addWidget(name);
+                menu_bar_ = new QMenuBar;
+                menu_bar_->setObjectName("titleMenus");
+                menu_bar_->setNativeMenuBar(false);
+                title_layout->addWidget(menu_bar_, 0, Qt::AlignVCenter);
+                title_layout->addStretch(1);
+                auto *chip = new QFrame;
+                chip->setObjectName("workspaceChip");
+                chip->setFixedHeight(24);
+                auto *chip_layout = new QHBoxLayout(chip);
+                chip_layout->setContentsMargins(12, 0, 14, 0);
+                chip_layout->setSpacing(8);
+                workspace_dot_ = new QLabel;
+                workspace_dot_->setObjectName("workspaceDot");
+                workspace_dot_->setFixedSize(6, 6);
+                chip_layout->addWidget(workspace_dot_);
+                workspace_label_ = new QLabel(QStringLiteral("未创建场景"));
+                workspace_label_->setObjectName("workspaceName");
+                workspace_label_->setMaximumWidth(260);
+                chip_layout->addWidget(workspace_label_);
+                title_layout->addWidget(chip);
+                title_layout->addStretch(1);
+                commands_ = new QToolBar(QStringLiteral("场景与图形"));
+                commands_->setObjectName("commandBar");
+                commands_->setMovable(false);
+                commands_->setIconSize(QSize(16, 16));
+                commands_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+                title_layout->addWidget(commands_);
+                setMenuWidget(title_host);
+                new WidthObserver(title_bar, [name, chip, wide = WidthMode{},
+                                              roomy = WidthMode{}](int width) mutable {
+                    name->setVisible(!wide.narrow(width, 1180));
+                    chip->setVisible(!roomy.narrow(width, 960));
+                });
+                scene_menu_ = menu_bar_->addMenu(QStringLiteral("场景"));
+                insert_menu_ = menu_bar_->addMenu(QStringLiteral("插入"));
+                view_menu_ = menu_bar_->addMenu(QStringLiteral("视图"));
+                time_menu_ = menu_bar_->addMenu(QStringLiteral("时间"));
                 new_action_ = commands_->addAction(workbench_icon(WorkbenchIcon::new_scenario),
                                                    QStringLiteral("新建场景"));
                 new_action_->setShortcut(QKeySequence("Ctrl+N"));
+                new_action_->setToolTip(QStringLiteral("新建场景 · Ctrl+N"));
                 connect(new_action_, &QAction::triggered, this, [this] { create_scenario(); });
                 scene_menu_->addAction(new_action_);
                 open_action_ = commands_->addAction(workbench_icon(WorkbenchIcon::folder),
                                                     QStringLiteral("打开"));
                 open_action_->setShortcut(QKeySequence::Open);
                 open_action_->setObjectName("openProject");
+                open_action_->setToolTip(QStringLiteral("打开项目 · Ctrl+O"));
                 connect(open_action_, &QAction::triggered, this, [this] { choose_project(); });
                 scene_menu_->addAction(open_action_);
                 save_action_ = commands_->addAction(workbench_icon(WorkbenchIcon::save),
                                                     QStringLiteral("保存"));
                 save_action_->setShortcut(QKeySequence::Save);
                 save_action_->setObjectName("saveProject");
-                save_action_->setToolTip(QStringLiteral("保存已应用的场景和对象属性"));
+                save_action_->setToolTip(QStringLiteral("保存已应用的场景和对象属性 · Ctrl+S"));
                 connect(save_action_, &QAction::triggered, this,
                         [this] { (void)save_project_dialog(false); });
                 scene_menu_->addAction(save_action_);
@@ -426,33 +481,32 @@ class Workbench final : public QMainWindow {
                         [this] { (void)save_project_dialog(true); });
                 example_action_ = scene_menu_->addAction(QStringLiteral("打开二体示例"));
                 connect(example_action_, &QAction::triggered, this, [this] { open_example(); });
-                auto *data_menu = menuBar()->addMenu(QStringLiteral("数据"));
+                auto *data_menu = menu_bar_->addMenu(QStringLiteral("数据"));
                 eop_action_ = data_menu->addAction(workbench_icon(WorkbenchIcon::database),
                                                    QStringLiteral("数据中心…"));
                 eop_action_->setObjectName("manageEopData");
                 connect(eop_action_, &QAction::triggered, this, [this] { manage_eop_data(); });
-                auto *analysis_menu = menuBar()->addMenu(QStringLiteral("分析"));
+                auto *analysis_menu = menu_bar_->addMenu(QStringLiteral("分析"));
                 report_action_ = analysis_menu->addAction(workbench_icon(WorkbenchIcon::properties),
                                                           QStringLiteral("报告…"));
                 report_action_->setObjectName("openReports");
                 connect(report_action_, &QAction::triggered, this, [this] { show_reports(); });
                 scene_menu_->addSeparator();
-                insert_action_ = commands_->addAction(workbench_icon(WorkbenchIcon::satellite),
-                                                      QStringLiteral("插入对象"));
+                // Analysis and data were only reachable from menus; keep them one click away.
+                commands_->addSeparator();
+                report_action_->setToolTip(QStringLiteral("报告与曲线"));
+                commands_->addAction(report_action_);
+                eop_action_->setToolTip(QStringLiteral("数据中心 · 地球定向、引力场与星历"));
+                commands_->addAction(eop_action_);
+                // Inserting lives with the objects it creates: the explorer's add button,
+                // the Insert menu and Ctrl+Shift+I.
+                insert_action_ = new QAction(workbench_icon(WorkbenchIcon::add),
+                                             QStringLiteral("插入对象…"), this);
                 insert_action_->setShortcut(QKeySequence("Ctrl+Shift+I"));
+                insert_action_->setToolTip(QStringLiteral("插入卫星或地面站 · Ctrl+Shift+I"));
                 connect(insert_action_, &QAction::triggered, this,
                         [this] { show_insert_objects(); });
                 insert_menu_->addAction(insert_action_);
-                auto *space = new QWidget;
-                space->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-                commands_->addWidget(space);
-                auto *scene_symbol = new QLabel;
-                scene_symbol->setPixmap(workbench_icon(WorkbenchIcon::earth).pixmap(16, 16));
-                commands_->addWidget(scene_symbol);
-                workspace_label_ = new QLabel(QStringLiteral("未创建场景"));
-                workspace_label_->setObjectName("workspaceName");
-                workspace_label_->setMaximumWidth(260);
-                commands_->addWidget(workspace_label_);
             }
             if (benchmarking_) {
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
@@ -512,7 +566,18 @@ class Workbench final : public QMainWindow {
                                   QLineEdit::LeadingPosition);
                 search->setClearButtonEnabled(true);
                 connect(search, &QLineEdit::textChanged, objects, [this] { filter_objects(); });
-                layout->addWidget(search);
+                auto *search_row = new QHBoxLayout;
+                search_row->setSpacing(6);
+                search_row->addWidget(search, 1);
+                auto *add = new QToolButton;
+                add->setObjectName("explorerInsert");
+                add->setDefaultAction(insert_action_);
+                add->setToolButtonStyle(Qt::ToolButtonIconOnly);
+                add->setFixedSize(26, 26);
+                add->setIconSize(QSize(16, 16));
+                add->setAccessibleName(QStringLiteral("插入对象"));
+                search_row->addWidget(add);
+                layout->addLayout(search_row);
                 layout->addWidget(objects, 1);
                 object_dock->setWidget(explorer);
                 style_dock(object_dock, WorkbenchIcon::orbit);
@@ -616,7 +681,7 @@ class Workbench final : public QMainWindow {
                             open_properties();
                         });
                 scene_menu_->addAction(properties);
-                auto *object_menu = menuBar()->insertMenu(view_menu_->menuAction(),
+                auto *object_menu = menu_bar_->insertMenu(view_menu_->menuAction(),
                                                           new QMenu(QStringLiteral("对象"), this));
                 auto *object_commands = object_menu->menu();
                 object_commands->addAction(properties);
@@ -639,8 +704,11 @@ class Workbench final : public QMainWindow {
                 view_menu_->addAction(object_dock->toggleViewAction());
                 show_orbit_status();
             }
-            auto *toolbar = new QToolBar(QStringLiteral("时间"), this);
+            auto *toolbar = benchmarking_ ? new QToolBar(QStringLiteral("时间"), this)
+                                          : new FlushToolBar(QStringLiteral("时间"), this);
             time_toolbar_ = toolbar;
+            if (!benchmarking_)
+                toolbar->setObjectName("timelineBar");
             addToolBar(benchmarking_ ? Qt::TopToolBarArea : Qt::BottomToolBarArea, toolbar);
             toolbar->setMovable(false);
             toolbar->setIconSize(QSize(18, 18));
@@ -650,7 +718,7 @@ class Workbench final : public QMainWindow {
                 toolbar->setEnabled(false);
 #endif
             auto *play =
-                new QAction(workbench_icon(playing_ ? WorkbenchIcon::pause : WorkbenchIcon::play),
+                new QAction(play_icon(playing_),
                             playing_ ? QStringLiteral("暂停") : QStringLiteral("播放"), this);
             play_action_ = play;
             connect(play, &QAction::triggered, this, [this] { set_playing(!playing_); });
@@ -661,18 +729,18 @@ class Workbench final : public QMainWindow {
                 slider_->setMinimumWidth(300);
                 toolbar->addWidget(slider_);
             } else {
-                toolbar->setObjectName("timelineBar");
                 auto *timeline = new QWidget;
+                timeline->setObjectName("timelineCard");
                 timeline->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
                 // Keep the toolbar's cached single-row hint from blocking the narrow layout.
                 timeline->setMinimumWidth(560);
                 auto *layout = new QVBoxLayout(timeline);
-                layout->setContentsMargins(0, 0, 0, 0);
+                layout->setContentsMargins(1, 0, 1, 4);
                 layout->setSpacing(0);
                 auto *control_panel = new QWidget;
                 control_panel->setObjectName("timelineControls");
                 auto *control_rows = new QHBoxLayout(control_panel);
-                control_rows->setContentsMargins(10, 4, 10, 4);
+                control_rows->setContentsMargins(8, 3, 8, 3);
                 control_rows->setSpacing(4);
                 auto *transport = new QHBoxLayout;
                 auto *controls = transport;
@@ -707,17 +775,23 @@ class Workbench final : public QMainWindow {
                     if (scenario_)
                         seek_epoch(scenario_->last());
                 });
+                auto *transport_group = new QFrame;
+                transport_group->setObjectName("transportGroup");
+                auto *transport_buttons = new QHBoxLayout(transport_group);
+                transport_buttons->setContentsMargins(2, 2, 2, 2);
+                transport_buttons->setSpacing(1);
                 for (auto *action : {start, slower, play, faster, end}) {
                     auto *button = new QToolButton;
                     button->setDefaultAction(action);
                     button->setFixedSize(28, 28);
-                    button->setIconSize(QSize(18, 18));
+                    button->setIconSize(QSize(action == play ? 16 : 18, action == play ? 16 : 18));
                     if (action == play)
                         button->setObjectName("transportPlay");
                     button->setAccessibleName(action->text());
-                    controls->addWidget(button);
+                    transport_buttons->addWidget(button);
                     time_menu_->addAction(action);
                 }
+                controls->addWidget(transport_group);
                 time_menu_->addSeparator();
                 auto *jump = time_menu_->addAction(QStringLiteral("跳转到指定时间…"));
                 jump->setShortcut(QKeySequence("Ctrl+T"));
@@ -891,7 +965,14 @@ class Workbench final : public QMainWindow {
                 control_rows->addLayout(controls);
                 layout->addWidget(control_panel);
                 layout->addWidget(timeline_);
-                toolbar->addWidget(timeline);
+                // The gap above the card lives in a host widget: toolbar padding would also
+                // inset the card horizontally and misalign it with the panels above.
+                auto *timeline_host = new QWidget;
+                timeline_host->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+                auto *host_layout = new QVBoxLayout(timeline_host);
+                host_layout->setContentsMargins(0, 6, 0, 0);
+                host_layout->addWidget(timeline);
+                toolbar->addWidget(timeline_host);
                 responsive_columns(timeline, control_rows, 1000);
                 auto *credit = new QLabel("NASA Blue Marble");
                 credit->setObjectName("hint");
@@ -2030,7 +2111,7 @@ class Workbench final : public QMainWindow {
             std::vector<Station> stations;
             auto root = std::make_unique<QTreeWidgetItem>(
                 QStringList{QString::fromStdString(candidate->project.name)});
-            root->setIcon(0, workbench_icon(WorkbenchIcon::earth));
+            root->setIcon(0, workbench_icon(WorkbenchIcon::earth, theme::color(theme::accent)));
             auto tracks = vsg::Group::create(), models = vsg::Group::create();
             for (std::size_t i = 0; i < candidate->orbits.size(); ++i) {
                 Satellite satellite;
@@ -2068,7 +2149,7 @@ class Workbench final : public QMainWindow {
                 auto *item =
                     new QTreeWidgetItem(parent->item, {QString::fromStdString(sensor.name())});
                 item->setData(0, Qt::UserRole + 17, QString::fromStdString(sensor.object_id));
-                item->setIcon(0, workbench_icon(WorkbenchIcon::focus, QColor("#b4a8e8")));
+                item->setIcon(0, workbench_icon(WorkbenchIcon::focus, theme::color(theme::sakura)));
                 item->setToolTip(0,
                                  QStringLiteral("圆锥传感器 · %1°\nID：%2")
                                      .arg(sensor.half_angle_rad * 180 / std::numbers::pi, 0, 'g', 5)
@@ -2078,7 +2159,7 @@ class Workbench final : public QMainWindow {
                 Station station{config};
                 station.item = new QTreeWidgetItem(root.get(), {station.name()});
                 station.item->setIcon(
-                    0, workbench_icon(WorkbenchIcon::ground_station, QColor("#87d4c6")));
+                    0, workbench_icon(WorkbenchIcon::ground_station, theme::color(theme::success)));
                 station.item->setToolTip(0, QStringLiteral("地面站 · WGS84\nID：%1")
                                                 .arg(QString::fromStdString(config.object_id)));
                 stations.push_back(std::move(station));
@@ -2145,11 +2226,7 @@ class Workbench final : public QMainWindow {
             ground_map_->set_ground_stations(candidate->project.ground_stations);
             if (!project_edit_)
                 ground_map_->reset_view();
-            workspace_label_->setText(QString::fromStdString(scenario_->name()) +
-                                      (eop_->data_info().extrapolation_days > 0
-                                           ? QStringLiteral(" · EOP 外推")
-                                           : QString{}));
-            workspace_label_->setToolTip(workspace_label_->text());
+            set_workspace_name(QString::fromStdString(scenario_->name()));
             set_selection(project_edit_ ? pending_project_selection_ : std::nullopt);
             if (pending_project_sensor_selection_)
                 for (const auto &satellite : satellites_)
@@ -2459,15 +2536,13 @@ class Workbench final : public QMainWindow {
         time_label_epoch_.reset();
         scenario_ = scenario_->with_data_lock(application::eop_data_lock(eop_->data_info()));
         scenario_item_ = new QTreeWidgetItem(objects_, {QString::fromStdString(scenario_->name())});
-        scenario_item_->setIcon(0, workbench_icon(WorkbenchIcon::earth));
+        scenario_item_->setIcon(0,
+                                workbench_icon(WorkbenchIcon::earth, theme::color(theme::accent)));
         scenario_item_->setToolTip(
             0, QStringLiteral("Scenario · 中心天体 Earth\n%1 — %2 TAI")
                    .arg(display_tai(scenario_->first()), display_tai(scenario_->last())));
         scenario_item_->setExpanded(true);
-        workspace_label_->setText(
-            QString::fromStdString(scenario_->name()) +
-            (eop_->data_info().extrapolation_days > 0 ? QStringLiteral(" · EOP 外推") : QString{}));
-        workspace_label_->setToolTip(workspace_label_->text());
+        set_workspace_name(QString::fromStdString(scenario_->name()));
         setWindowTitle(QString::fromStdString(scenario_->name()) + QStringLiteral(" · OrbitForge"));
         project_path_.clear();
         standalone_time_data_.reset();
@@ -2619,8 +2694,7 @@ class Workbench final : public QMainWindow {
             precise_epoch_.reset();
         if (play_action_) {
             play_action_->setText(value ? QStringLiteral("暂停") : QStringLiteral("播放"));
-            play_action_->setIcon(
-                workbench_icon(value ? WorkbenchIcon::pause : WorkbenchIcon::play));
+            play_action_->setIcon(play_icon(value));
         }
         clock_.restart();
     }
@@ -2726,10 +2800,7 @@ class Workbench final : public QMainWindow {
         scenario_ = scenario_->with_settings(checked.name, checked.first, checked.last);
         const auto name = QString::fromStdString(checked.name);
         scenario_item_->setText(0, name);
-        workspace_label_->setText(name + (eop_->data_info().extrapolation_days > 0
-                                              ? QStringLiteral(" · EOP 外推")
-                                              : QString{}));
-        workspace_label_->setToolTip(workspace_label_->text());
+        set_workspace_name(name);
         if (scenario_properties_)
             scenario_properties_->setWindowTitle(name + QStringLiteral(" · 场景属性"));
         show_timeline_status();
@@ -2767,7 +2838,7 @@ class Workbench final : public QMainWindow {
                               QStringLiteral(" · 场景属性"));
         dialog.setMinimumWidth(620);
         auto *layout = new QVBoxLayout(&dialog);
-        layout->setContentsMargins(24, 22, 24, 18);
+        layout->setContentsMargins(theme::space::page);
         layout->setSpacing(16);
         auto *title = new QLabel(QStringLiteral("场景设置"));
         title->setObjectName("panelTitle");
@@ -2783,61 +2854,51 @@ class Workbench final : public QMainWindow {
         auto *body = new QWidget;
         auto *body_layout = new QVBoxLayout(body);
         body_layout->setContentsMargins(0, 0, 8, 0);
-        body_layout->setSpacing(14);
+        body_layout->setSpacing(0);
         scroll->setWidget(body);
         layout->addWidget(scroll, 1);
-        auto *section = new QFrame;
-        section->setObjectName("formSection");
-        section->setMaximumWidth(880);
-        auto *section_layout = new QVBoxLayout(section);
-        section_layout->setContentsMargins(20, 16, 20, 16);
-        auto *form = new QFormLayout;
-        form->setSpacing(12);
-        form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        // Editable settings first, then read-only facts, then the applied data record.
+        const auto group = [](const QString &heading) {
+            auto *frame = new FormGroup(heading);
+            frame->setMaximumWidth(880);
+            return std::pair{frame, frame->form()};
+        };
+        auto [section, form] = group(QStringLiteral("基本设置"));
         auto *name = new QLineEdit(QString::fromStdString(scenario_->name()));
         name->setObjectName("scenarioSettingsName");
         name->setMaximumWidth(380);
         form->addRow(QStringLiteral("场景名称"), name);
-        form->addRow(QStringLiteral("中心天体"), new QLabel(QStringLiteral("Earth / 地球")));
         auto *first = new EpochEditor(nullptr, eop_catalog_->time_provider());
         auto *last = new EpochEditor(nullptr, eop_catalog_->time_provider());
         first->setObjectName("scenarioSettingsStart");
         last->setObjectName("scenarioSettingsEnd");
         first->set_epoch(scenario_->first());
         last->set_epoch(scenario_->last());
+        for (auto *field : {first, last})
+            field->setMaximumWidth(380);
         form->addRow(QStringLiteral("开始时间"), first);
         form->addRow(QStringLiteral("结束时间"), last);
+        section->add_help(
+            QStringLiteral("修改时段后将重新准备全部轨迹。当前时刻超出新范围时，定位到最近的边界；"
+                           "数据不足或更新失败时保留原场景。"));
+        auto [facts, facts_form] = group(QStringLiteral("场景概况"));
+        facts_form->addRow(QStringLiteral("中心天体"), new QLabel(QStringLiteral("Earth / 地球")));
         auto *count = new QLabel(QString::number(satellites_.size() + stations_.size()));
         count->setObjectName("scenarioObjectCount");
-        form->addRow(QStringLiteral("对象数量"), count);
+        facts_form->addRow(QStringLiteral("对象数量"), count);
         auto *duration = new QLabel;
         duration->setObjectName("scenarioSettingsDuration");
-        form->addRow(QStringLiteral("时长"), duration);
-        section_layout->addLayout(form);
+        facts_form->addRow(QStringLiteral("时长"), duration);
         auto *fields = new QWidget;
         fields->setObjectName("scenarioSettingsFields");
         auto *fields_layout = new QVBoxLayout(fields);
         fields_layout->setContentsMargins(0, 0, 0, 0);
+        fields_layout->setSpacing(0);
         fields_layout->addWidget(section);
+        fields_layout->addWidget(facts);
         body_layout->addWidget(fields);
-        auto *hint = new QLabel(
-            QStringLiteral("修改时段后将重新准备全部轨迹。当前时刻超出新范围时，定位到最近的边界；"
-                           "数据不足或更新失败时保留原场景。"));
-        hint->setWordWrap(true);
-        hint->setObjectName("dialogDescription");
-        hint->setMaximumWidth(880);
-        body_layout->addWidget(hint);
-        auto *data_section = new QFrame;
-        data_section->setObjectName("formSection");
-        data_section->setMaximumWidth(880);
-        auto *data_layout = new QVBoxLayout(data_section);
-        data_layout->setContentsMargins(20, 16, 20, 16);
-        auto *data_title = new QLabel(QStringLiteral("当前已应用的计算数据"));
-        data_title->setObjectName("sectionTitle");
-        data_layout->addWidget(data_title);
-        form = new QFormLayout;
-        form->setSpacing(12);
-        data_layout->addLayout(form);
+        auto [data_section, data_form] = group(QStringLiteral("当前已应用的计算数据"));
+        form = data_form;
         body_layout->addWidget(data_section);
         auto *eop_caption = new QLabel(QString::fromStdString(eop_->data_info().id));
         if (eop_->data_info().interpolation.starts_with("finals2000a"))
@@ -2846,17 +2907,23 @@ class Workbench final : public QMainWindow {
         eop_caption->setWordWrap(true);
         eop_caption->setToolTip(QString::fromStdString(eop_->data_info().id));
         form->addRow(QStringLiteral("地球定向数据"), eop_caption);
-        auto *locked = new QLineEdit(QString::fromStdString(scenario_->data_lock().sha256()));
-        locked->setObjectName("scenarioDataHash");
-        locked->setReadOnly(true);
-        locked->setToolTip(
-            QStringLiteral("本次计算的数据来源记录；再次打开或计算时检查变化并请求确认。"));
-        form->addRow(QStringLiteral("本次计算数据 SHA-256"), locked);
         auto *extrapolated = new QLabel(
             extrapolation_description(eop_->data_info(), scenario_->first(), scenario_->last()));
         extrapolated->setObjectName("scenarioExtrapolation");
         extrapolated->setWordWrap(true);
         form->addRow(QStringLiteral("外推情况"), extrapolated);
+        // The 64-digit hash reads best on its own full-width row under its caption.
+        auto *locked = new QLineEdit(QString::fromStdString(scenario_->data_lock().sha256()));
+        locked->setObjectName("scenarioDataHash");
+        locked->setReadOnly(true);
+        locked->setAccessibleName(QStringLiteral("本次计算数据 SHA-256"));
+        auto *locked_caption = new QLabel(QStringLiteral("本次计算数据 SHA-256"));
+        locked_caption->setBuddy(locked);
+        form->addRow(locked_caption);
+        form->addRow(locked);
+        data_section->add_help(
+            QStringLiteral("本次计算的数据来源记录；再次打开或计算时检查变化并请求确认。"));
+        align_form_labels(body);
         body_layout->addStretch();
         auto *result = new QLabel;
         result->setObjectName("scenarioSettingsResult");
@@ -2872,8 +2939,9 @@ class Workbench final : public QMainWindow {
         auto *close = new QPushButton(QStringLiteral("关闭"));
         close->setAutoDefault(false);
         buttons->addWidget(close);
-        auto *apply = new QPushButton(QStringLiteral("应用更改"));
+        auto *apply = new QPushButton(QStringLiteral("应用"));
         apply->setObjectName("applyScenarioSettings");
+        apply->setToolTip(QStringLiteral("应用场景名称与分析时段"));
         apply->setProperty("primary", true);
         apply->setDefault(true);
         buttons->addWidget(apply);
@@ -3545,17 +3613,32 @@ class Workbench final : public QMainWindow {
         snapshot_ = sample_frame(snapshot_.epoch);
         update_satellite();
     }
+    // The workbench play button is an ice-filled circle; the benchmark bar keeps plain icons.
+    [[nodiscard]] QIcon play_icon(bool playing) const {
+        return workbench_icon(playing ? WorkbenchIcon::pause : WorkbenchIcon::play,
+                              theme::color(benchmarking_ ? theme::text_soft : theme::on_accent));
+    }
+    void set_workspace_name(const QString &name) {
+        const bool extrapolated = eop_->data_info().extrapolation_days > 0;
+        workspace_label_->setText(name +
+                                  (extrapolated ? QStringLiteral(" · EOP 外推") : QString{}));
+        workspace_label_->setToolTip(workspace_label_->text());
+        workspace_dot_->setProperty("active", true);
+        workspace_dot_->setProperty("warning", extrapolated);
+        workspace_dot_->style()->unpolish(workspace_dot_);
+        workspace_dot_->style()->polish(workspace_dot_);
+    }
     QWidget *make_view_controls(std::optional<std::size_t> slot) {
         auto *header = new QWidget;
         header->setObjectName("viewHeading");
         header->setMinimumHeight(34);
         header->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         auto *rows = new QHBoxLayout(header);
-        rows->setContentsMargins(10, 3, 6, 3);
-        rows->setSpacing(3);
+        rows->setContentsMargins(12, 4, 8, 4);
+        rows->setSpacing(4);
         auto *bar = new QHBoxLayout;
         bar->setContentsMargins(0, 0, 0, 0);
-        bar->setSpacing(3);
+        bar->setSpacing(4);
         auto *title = new QLabel(slot ? QStringLiteral("地球") : QStringLiteral("地面 · WGS84"));
         title->setObjectName("viewTitle");
         bar->addWidget(title);
@@ -3574,17 +3657,23 @@ class Workbench final : public QMainWindow {
         rows->addLayout(bar);
         bar = new QHBoxLayout;
         bar->setContentsMargins(0, 0, 0, 0);
-        bar->setSpacing(3);
+        bar->setSpacing(4);
         rows->addLayout(bar, 1);
+        auto *tools = new QFrame;
+        tools->setObjectName("viewTools");
+        auto *tool_layout = new QHBoxLayout(tools);
+        tool_layout->setContentsMargins(2, 1, 2, 1);
+        tool_layout->setSpacing(1);
+        bar->addWidget(tools);
         const auto button = [&](WorkbenchIcon icon, const QString &text, auto command) {
             auto *control = new QToolButton;
             control->setIcon(workbench_icon(icon));
-            control->setIconSize(QSize(17, 17));
-            control->setFixedSize(28, 28);
+            control->setIconSize(QSize(16, 16));
+            control->setFixedSize(26, 26);
             control->setToolTip(text);
             control->setAccessibleName(text);
             connect(control, &QToolButton::clicked, this, command);
-            bar->addWidget(control);
+            tool_layout->addWidget(control);
             return control;
         };
         button(WorkbenchIcon::fit, slot ? QStringLiteral("适配轨道") : QStringLiteral("显示全球"),
@@ -7314,13 +7403,16 @@ class Workbench final : public QMainWindow {
             smoke_wait_frame_ = frame_count_ + 4;
             ++orbit_smoke_stage_;
             break;
-        case 151:
+        case 151: {
             if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
                 return;
             save_workbench_image("responsive-workbench.png");
+            // Compact navigation is page tabs at inspector widths, a selector when narrower.
+            const bool compact_navigation =
+                editor_->findChild<QComboBox *>("propertyPageSelector")->isVisible() ||
+                editor_->findChild<QTabBar *>("propertyPageTabs")->isVisible();
             require(
-                width() <= 880 &&
-                    editor_->findChild<QComboBox *>("propertyPageSelector")->isVisible() &&
+                width() <= 880 && compact_navigation &&
                     commands_->toolButtonStyle() == Qt::ToolButtonIconOnly &&
                     findChild<QWidget *>("timelineControls")->height() > 50 &&
                     action_in_workspace("applyOrbit"),
@@ -7329,7 +7421,7 @@ class Workbench final : public QMainWindow {
                             "iconStyle=%4, controlsHeight=%5, applyVisible=%6")
                         .arg(width())
                         .arg(editor_->width())
-                        .arg(editor_->findChild<QComboBox *>("propertyPageSelector")->isVisible())
+                        .arg(compact_navigation)
                         .arg(commands_->toolButtonStyle())
                         .arg(findChild<QWidget *>("timelineControls")->height())
                         .arg(action_in_workspace("applyOrbit"))));
@@ -7339,6 +7431,7 @@ class Workbench final : public QMainWindow {
             properties_dialog_->window()->resize(360, 520);
             ++orbit_smoke_stage_;
             break;
+        }
         case 152:
             require(properties_dialog_->window()->width() == 360 &&
                         editor_->findChild<QComboBox *>("propertyPageSelector")->isVisible() &&
@@ -7675,7 +7768,8 @@ class Workbench final : public QMainWindow {
     std::optional<core::PositionRotation> display_to_itrf_;
     std::vector<QComboBox *> frame_choices_;
     vsg::ref_ptr<vsg::MatrixTransform> earth_transform_;
-    QLabel *workspace_label_ = nullptr;
+    QLabel *workspace_label_ = nullptr, *workspace_dot_ = nullptr;
+    QMenuBar *menu_bar_ = nullptr;
     QAction *new_action_ = nullptr, *example_action_ = nullptr, *insert_action_ = nullptr;
     QAction *fit_action_ = nullptr, *aux_action_ = nullptr, *map_action_ = nullptr;
     GroundMap *ground_map_ = nullptr;
