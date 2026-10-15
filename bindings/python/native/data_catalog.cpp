@@ -1,5 +1,6 @@
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
+#include <orbitforge/runtime/space_weather.hpp>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl/filesystem.h>
@@ -40,6 +41,32 @@ void bind_data_catalog(py::module_ &module) {
         .def_readonly("acquisition", &runtime::CatalogGravity::acquisition)
         .def_readonly("acquired_at_unix_seconds",
                       &runtime::CatalogGravity::acquired_at_unix_seconds);
+    py::register_exception<core::SpaceWeatherCoverageError>(module, "SpaceWeatherCoverageError",
+                                                            PyExc_IndexError);
+    py::class_<core::SpaceWeatherInfo>(module, "SpaceWeatherInfo")
+        .def_readonly("sha256", &core::SpaceWeatherInfo::sha256)
+        .def_readonly("source_url", &core::SpaceWeatherInfo::source_url)
+        .def_readonly("format", &core::SpaceWeatherInfo::format)
+        .def_readonly("first", &core::SpaceWeatherInfo::first)
+        .def_readonly("last", &core::SpaceWeatherInfo::last);
+    py::class_<core::SpaceWeather, std::shared_ptr<core::SpaceWeather>>(module, "SpaceWeather")
+        .def_property_readonly("info", &core::SpaceWeather::info, py::return_value_policy::copy)
+        .def("sample", &core::SpaceWeather::sample, py::arg("at"), py::arg("time"),
+             py::arg("model"), py::arg("update"), py::arg("source"))
+        .def("validate_interval", &core::SpaceWeather::validate_interval, py::arg("first"),
+             py::arg("last"), py::arg("time"), py::arg("model"), py::arg("update"),
+             py::arg("source"));
+    py::class_<runtime::CatalogSpaceWeather>(module, "CatalogSpaceWeather")
+        .def_readonly("selection", &runtime::CatalogSpaceWeather::selection)
+        .def_readonly("info", &runtime::CatalogSpaceWeather::info)
+        .def_readonly("file", &runtime::CatalogSpaceWeather::file)
+        .def_readonly("acquisition", &runtime::CatalogSpaceWeather::acquisition)
+        .def_readonly("acquired_at_unix_seconds",
+                      &runtime::CatalogSpaceWeather::acquired_at_unix_seconds);
+    module.def(
+        "load_space_weather",
+        [](const std::filesystem::path &file) { return runtime::load_space_weather(file); },
+        py::arg("file"), py::call_guard<py::gil_scoped_release>());
     module.def("data_catalog_available", &runtime::data_catalog_available);
     py::enum_<runtime::EopProduct>(module, "EopProduct")
         .value("C04", runtime::EopProduct::c04)
@@ -64,6 +91,14 @@ void bind_data_catalog(py::module_ &module) {
         .def_property_readonly("root", &runtime::DataCatalog::root)
         .def_property_readonly("gravity_models", &runtime::DataCatalog::gravity_models)
         .def_property_readonly("ephemerides", &runtime::DataCatalog::ephemerides)
+        .def_property_readonly("weather_sources", &runtime::DataCatalog::weather_sources)
+        .def(
+            "install_space_weather",
+            [](runtime::DataCatalog &catalog, const std::filesystem::path &file,
+               const std::string &model,
+               const std::string &url) { return catalog.install_space_weather(file, model, url); },
+            py::arg("file"), py::arg("model") = "celestrak", py::arg("source_url") = "",
+            py::call_guard<py::gil_scoped_release>())
         .def(
             "install_de440s",
             [](runtime::DataCatalog &catalog, const std::filesystem::path &file) {

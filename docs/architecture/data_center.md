@@ -129,7 +129,7 @@ project.save("sun-moon.orbitforge", analysis=analysis)
 
 C++ 可用 `catalog.load_ephemeris("de440s")` 装配 `DataSnapshot::with_ephemeris()`，或设置 `HpopEnvironment::ephemeris` 后调用 `make_hpop()`；`HpopOptions::third_body(body)` 保存逐天体启用和 GM 来源（JPL DE / Cb file / User Specified）。Cb 常数是显式导入后捕获的配置值，位置仍来自统一管理的 DE440s，详见[第三体引力](third_body_gravity.md)。桌面、项目报告和任务序列 HPOP 滑行复用同一实现。
 
-项目 v19 记录 `ephemeris/<选择 ID>` 的清单内容与解释哈希，解释包含几何位置、轴、GM 常数集及 CSPICE 版本；下载时间和本机路径不参与身份。数据变化先确认，拒绝则停止打开或重算。覆盖检查包含初始状态到查询/场景的完整积分路径，检查内部空洞，不仅检查两个端点。运行中的分析持有不可变资源。
+项目 v20 记录 `ephemeris/<选择 ID>` 的清单内容与解释哈希，解释包含几何位置、轴、GM 常数集及 CSPICE 版本；下载时间和本机路径不参与身份。数据变化先确认，拒绝则停止打开或重算。覆盖检查包含初始状态到查询/场景的完整积分路径，检查内部空洞，不仅检查两个端点。运行中的分析持有不可变资源。
 
 ## 覆盖不足与有限外推
 
@@ -177,3 +177,10 @@ project.earth_orientation = limited.data_info
 ```
 
 `ORBITFORGE_WITH_DATA_CATALOG` 默认关闭，图形桌面预设和标准 wheel 显式启用。关闭时 `data_catalog_available()` 返回 false，构造目录明确报告功能不可用；普通 headless 构建保持无 SQLite 依赖。
+
+
+## 空间天气
+
+空间天气单列显示，下载源为 [CelesTrak SW-All.csv](https://celestrak.org/SpaceData/SW-All.csv)，可导入 CSV 或定宽 SpaceWeather 原文。文件上限 32 MiB，完整解析及哈希后原子发布到 `space-weather/<sha256>.dat`；失败或取消保留当前选择。目录收据记录来源、格式、原始首末日、获取方式及时间，获取时间不参与计算身份。
+
+HPOP 文件模式在准备时捕获资源，后续更新不修改现有分析、报告和轨迹。重新准备时比较 `space-weather/<selection>` 数据引用，变化需沿用既有确认流程。日/三小时模式的可用范围还受模型滞后、历史 Ap、缺值及 UTC 数据约束；界面原始记录日期不表示整段可计算。计算规则见[阻力](atmospheric_drag.md)。

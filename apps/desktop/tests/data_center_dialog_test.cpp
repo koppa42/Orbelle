@@ -171,7 +171,7 @@ TEST(DataCenterDialog, GroupedSourcesKeepDownloadStateAndPriorityIndependent) {
         auto *status = dialog->findChild<QLabel *>("dataCenterStatus");
         ASSERT_TRUE(list && priority && checked && badge && progress && cancel && download &&
                     status);
-        ASSERT_EQ(list->topLevelItemCount(), 4);
+        ASSERT_EQ(list->topLevelItemCount(), 5);
         auto *group = list->topLevelItem(0);
         ASSERT_EQ(group->childCount(), 2);
         auto *finals = group->child(0);
@@ -465,7 +465,7 @@ TEST(DataCenterDialog, GravityHasItsOwnGroupAndStaticValidityWithoutImplicitDown
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
         ASSERT_NE(dialog, nullptr);
         auto *tree = dialog->findChild<QTreeWidget *>("dataInventory");
-        ASSERT_EQ(tree->topLevelItemCount(), 4);
+        ASSERT_EQ(tree->topLevelItemCount(), 5);
         auto *gravity = tree->topLevelItem(2);
         ASSERT_EQ(gravity->childCount(), 3);
         tree->setCurrentItem(gravity->child(0));
@@ -506,7 +506,7 @@ TEST(DataCenterDialog, EphemerisGroupAndDetailsRemainReadableAtCompactWidth) {
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
         ASSERT_TRUE(dialog);
         auto *tree = dialog->findChild<QTreeWidget *>("dataInventory");
-        ASSERT_EQ(tree->topLevelItemCount(), 4);
+        ASSERT_EQ(tree->topLevelItemCount(), 5);
         auto *group = tree->topLevelItem(3);
         ASSERT_EQ(group->childCount(), 1);
         EXPECT_EQ(tree->currentItem(), group->child(0));

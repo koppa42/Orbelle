@@ -117,7 +117,7 @@ if(ORBITFORGE_WITH_VSG)
             src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
             src/viewer/ground_station_editor.cpp src/viewer/sensor_editor.cpp
             src/viewer/object_selection.cpp src/viewer/object_selection.hpp
-            src/viewer/orbit_editor.cpp src/viewer/hpop_settings.cpp src/viewer/mission_editor.cpp src/viewer/track_style_editor.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp)
+            src/viewer/orbit_editor.cpp src/viewer/hpop_settings.cpp src/viewer/data_center_dialog.cpp src/viewer/mission_editor.cpp src/viewer/track_style_editor.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp)
         target_sources(orbitforge_quantity_tests PRIVATE src/viewer/eop_catalog.cpp)
         set_target_properties(orbitforge_quantity_tests PROPERTIES AUTOMOC ON)
         qt_add_resources(orbitforge_quantity_tests "quantity_icons" PREFIX "/orbitforge"

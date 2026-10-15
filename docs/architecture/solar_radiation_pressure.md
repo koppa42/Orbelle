@@ -22,7 +22,7 @@ Cr 范围为 `[-100, 100]`，面积质量比为 `[0, 9999] m²/kg`，允许带�
 
 光压启用时总是需要太阳星历，启用阴影且分配月球时还需要月球。第三体引力勾选状态与此独立，GM 不参与光压力值。每个积分阶段使用对应历元的 Provider；准备阶段检查完整传播区间与实际目标链。缺文件或覆盖不足会停止准备，不能自动关闭光压。几何位置经现有 SPICE 力模型适配器进入 GCRF；SDK 不隐式下载资源。
 
-会话和分析持有不可变星历；来源包含 `spherical-geometric-uniform-angular-union-v1`、有效光压参数及星历解释／内容身份。禁用光压的草稿，以及无阴影或未分配遮挡体的半径草稿不改变分析和报告身份。项目 v19／OBJS10 保存全部有效草稿；不提供旧版本解码。
+会话和分析持有不可变星历；来源包含 `spherical-geometric-uniform-angular-union-v1`、有效光压参数及星历解释／内容身份。禁用光压的草稿，以及无阴影或未分配遮挡体的半径草稿不改变分析和报告身份。项目 v20／OBJS11 保存全部有效草稿；不提供旧版本解码。
 
 ```python
 data = of.DataSnapshot.builtin_time().with_ephemeris("de440s", manifest, workspace)

@@ -83,6 +83,9 @@ struct HpopEnvironment {
     std::shared_ptr<const IThirdBodyEphemeris> ephemeris{};
     // UTC epoch and day-of-year for atmosphere models. Must match the EOP time identity.
     std::shared_ptr<const ITimeProvider> time{};
+    std::shared_ptr<const SpaceWeather> weather{};
+    // Validates complete weather paths, both models when a low-altitude model is selected.
+    void validate_weather_interval(const DragOptions &drag, Epoch first, Epoch last) const;
 };
 // Cowell equations in GCRF, TAI seconds. Initial state is osculating, not mean elements.
 // Deterministic checkpoints are independent of query order and output sampling.

@@ -48,6 +48,8 @@ void bind_analysis(py::module_ &module) {
     py::class_<runtime::DataSnapshot>(module, "DataSnapshot")
         .def(py::init<>())
         .def_property_readonly("selection_notes", &runtime::DataSnapshot::selection_notes)
+        .def("with_space_weather", &runtime::DataSnapshot::with_space_weather_file,
+             py::arg("model"), py::arg("file"), py::call_guard<py::gil_scoped_release>())
         .def("with_gravity", &runtime::DataSnapshot::with_gravity_file, py::arg("model"),
              py::arg("file"), py::call_guard<py::gil_scoped_release>())
         .def("with_ephemeris", &runtime::DataSnapshot::with_ephemeris_file, py::arg("model"),

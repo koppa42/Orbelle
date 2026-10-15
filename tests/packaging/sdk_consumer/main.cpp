@@ -35,6 +35,12 @@ int main(int argc, char **argv) try {
     if (!std::isfinite(historical.density_kg_m3) || historical.density_kg_m3 <= 0 ||
         historical.density_kg_m3 == density.density_kg_m3)
         return 32;
+    orbitforge::core::SpaceWeatherDay weather_day;
+    weather_day.f107_observed = 150;
+    const orbitforge::core::SpaceWeather weather{{}, {weather_day}};
+    if (weather.days().size() != 1 || *weather.days()[0].f107_observed != 150 ||
+        orbitforge::core::ap_to_kp(15) != 3)
+        return 33;
     namespace app = orbitforge::application;
     app::ProjectDocument document{app::Project{"SDK objects", orbitforge::core::Epoch{0},
                                                orbitforge::core::Epoch{60'000'000'000}}};

@@ -2,10 +2,10 @@
 #include <array>
 #include <optional>
 #include <orbitforge/core/frames/geodetic.hpp>
+#include <orbitforge/core/propagation/space_weather.hpp>
 #include <orbitforge/core/time/time_provider.hpp>
 
 namespace orbitforge::core {
-enum class AtmosphereModel { jacchia_roberts, nrlmsise00 };
 enum class LowAltitudeDensityModel { none, nrlmsise00 };
 struct DragOptions {
     bool enabled = false;
@@ -18,6 +18,10 @@ struct DragOptions {
     double f107 = 150, f107_average = 150, kp = 3;
     // Geometric positions by default; apparent Sun requires a certifying ephemeris.
     bool use_apparent_sun_position = false;
+    // Empty: manual constants. Otherwise an immutable catalog selection, never a path.
+    std::string weather_model;
+    GeomagneticUpdate geomagnetic_update = GeomagneticUpdate::daily;
+    GeomagneticSource geomagnetic_source = GeomagneticSource::ap;
     bool operator==(const DragOptions &) const = default;
 };
 void validate_drag_options(const DragOptions &options);
@@ -56,9 +60,13 @@ struct DragEvaluation {
 };
 // Satellite velocity is relative to the co-rotating atmosphere in ITRF. The caller
 // must use a full inertial-to-ITRF state transform, including the rotation-rate term.
-// Sun is geocentric in the same ITRF axes. No atmospheric winds or weather files implied.
-[[nodiscard]] DragEvaluation evaluate_drag(const std::array<double, 3> &position_itrf_m,
-                                           const std::array<double, 3> &velocity_itrf_mps,
-                                           const std::array<double, 3> &sun_itrf_m,
-                                           const UtcDateTime &utc, const DragOptions &options);
+// Sun is geocentric in the same ITRF axes; no atmospheric winds. File mode requires
+// a sample for the main model and, when blending, one for the low-altitude model,
+// each sampled with its own lag. This pure evaluator performs no file access.
+[[nodiscard]] DragEvaluation
+evaluate_drag(const std::array<double, 3> &position_itrf_m,
+              const std::array<double, 3> &velocity_itrf_mps,
+              const std::array<double, 3> &sun_itrf_m, const UtcDateTime &utc,
+              const DragOptions &options, const std::optional<SpaceWeatherSample> &weather = {},
+              const std::optional<SpaceWeatherSample> &low_weather = {});
 } // namespace orbitforge::core

@@ -20,14 +20,14 @@
 | 数据中心 | C04、finals2000A、UTC / 闰秒完整文件下载与自动更新；来源优先级、覆盖检查、有限 EOP 外推 |
 | 报告与曲线 | 九种报告（含 Access / AER）；对象范围、时间采样、多对象曲线、缩放与时刻定位、CSV / PNG 导出、项目内模板 |
 | 报告模板 API | Python/C++ 共用查询与模板模型；字段选择、顺序、逐列单位与标题，复用已有结果更换显示格式 |
-| 项目文件 | `.orbitforge` 版本化容器、完整性校验、原子保存；开发阶段仅读写当前 v19，不兼容旧格式，API 支持数据确认和分析来源记录 |
+| 项目文件 | `.orbitforge` 版本化容器、完整性校验、原子保存；开发阶段仅读写当前 v20，不兼容旧格式，API 支持数据确认和分析来源记录 |
 | 开发接口 | 模块化 C++20 库与 CMake SDK；pybind11 Python 包；桌面与脚本共用 Runtime |
 
 新场景使用当前计算数据；打开或重新计算时，数据发生变化须经用户确认。计算过程保持数据一致，项目记录实际使用的数据哈希供溯源。外部模型和 EOP 文件仍为独立依赖，详见[项目格式](docs/architecture/project_files.md)和[数据中心](docs/architecture/data_center.md)。
 
 图形桌面首次启动自动准备 UTC / 闰秒表、完整 C04 与 finals2000A、EGM2008，以及启用 CSPICE 时的 DE440s。准备窗口支持进度、失败重试、导入官方文件和取消退出；已完成的文件保留，后续启动只补齐缺失项。新建 HPOP 默认使用 EGM2008、21×21，当前文件重力计算支持最高 360×360。
 
-尚未实现 OMM / 在线卫星目录、通用事件分析、覆盖分析、HDF5 结果存储或通用分析任务系统。HPOP 支持地球静态引力、可选太阳系第三体引力、[球形大气阻力](docs/architecture/atmospheric_drag.md)及[球形太阳辐射压／球面地月阴影](docs/architecture/solar_radiation_pressure.md)，数据中心可下载 EGM2008 / EGM96 / DE440s 或导入相应文件；天气文件、近似高度、光压高级设置、潮汐、附加力及协方差按[完整对齐清单](docs/architecture/hpop_alignment.md)继续推进。J2/J4 使用长期项平均根数，SGP4 使用固定 TLE（见[预报器说明](docs/architecture/propagators.md)）。时间与参考系尚无日内 EOP 潮汐改正。万星图形场景已有验证入口，尚未完成正式性能验收。
+尚未实现 OMM / 在线卫星目录、通用事件分析、覆盖分析、HDF5 结果存储或通用分析任务系统。HPOP 支持地球静态引力、可选太阳系第三体引力、[球形大气阻力](docs/architecture/atmospheric_drag.md)及[球形太阳辐射压／球面地月阴影](docs/architecture/solar_radiation_pressure.md)，数据中心可下载 EGM2008 / EGM96 / DE440s / CelesTrak 空间天气或导入相应文件；天气插值更新率、月预报、近似高度、光压高级设置、潮汐、附加力及协方差按[完整对齐清单](docs/architecture/hpop_alignment.md)继续推进。J2/J4 使用长期项平均根数，SGP4 使用固定 TLE（见[预报器说明](docs/architecture/propagators.md)）。时间与参考系尚无日内 EOP 潮汐改正。万星图形场景已有验证入口，尚未完成正式性能验收。
 
 ## 获取与构建
 

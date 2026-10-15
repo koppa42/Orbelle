@@ -7,6 +7,7 @@
 #include <orbitforge/runtime/mission.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/sgp4.hpp>
+#include <orbitforge/runtime/space_weather.hpp>
 
 namespace orbitforge::runtime {
 application::Session make_ground_station_session(const application::ProjectGroundStation &station,
@@ -45,6 +46,13 @@ application::Session make_orbit_session(const application::OrbitInput &input,
                 (void)environment.time->to_utc(epoch);
         }
     }
+    if (input.uses_hpop())
+        environment.validate_weather_interval(
+            input.hpop.drag,
+            core::Epoch{
+                std::min(input.initial.epoch.tai_nanoseconds(), input.first.tai_nanoseconds())},
+            core::Epoch{
+                std::max(input.initial.epoch.tai_nanoseconds(), input.last.tai_nanoseconds())});
     switch (input.propagator) {
     case application::OrbitPropagator::two_body:
         return make_two_body_session(input.initial, body.mu, input.object_id, revision);
@@ -99,6 +107,13 @@ application::Scenario make_project_scenario(const application::Project &project,
                 throw application::ProjectError("Missing selected gravity provider");
             validate_gravity_reference(project.force_data, input.hpop.gravity_model,
                                        environment.gravity->info());
+        }
+        if (input.uses_hpop() && input.hpop.drag.enabled &&
+            !input.hpop.drag.weather_model.empty()) {
+            if (!environment.weather)
+                throw application::ProjectError("Missing space weather");
+            validate_space_weather_reference(project.force_data, input.hpop.drag.weather_model,
+                                             environment.weather->info());
         }
         result = result.with_object(make_orbit_session(satellite.orbit, 1, time, environment));
     }

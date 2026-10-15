@@ -104,6 +104,18 @@ void bind_project(py::module_ &module) {
     py::enum_<core::LowAltitudeDensityModel>(module, "LowAltitudeDensityModel")
         .value("NONE", core::LowAltitudeDensityModel::none)
         .value("NRLMSISE00", core::LowAltitudeDensityModel::nrlmsise00);
+    py::enum_<core::GeomagneticUpdate>(module, "GeomagneticUpdate")
+        .value("DAILY", core::GeomagneticUpdate::daily)
+        .value("THREE_HOURLY", core::GeomagneticUpdate::three_hourly);
+    py::enum_<core::GeomagneticSource>(module, "GeomagneticSource")
+        .value("AP", core::GeomagneticSource::ap)
+        .value("KP", core::GeomagneticSource::kp);
+    py::class_<core::SpaceWeatherSample>(module, "SpaceWeatherSample")
+        .def_readonly("f107", &core::SpaceWeatherSample::f107)
+        .def_readonly("f107_average", &core::SpaceWeatherSample::f107_average)
+        .def_readonly("kp", &core::SpaceWeatherSample::kp)
+        .def_readonly("ap", &core::SpaceWeatherSample::ap)
+        .def_readonly("ap_history", &core::SpaceWeatherSample::ap_history);
     py::class_<core::DragOptions>(module, "DragOptions")
         .def(py::init<>())
         .def_readwrite("enabled", &core::DragOptions::enabled)
@@ -116,6 +128,9 @@ void bind_project(py::module_ &module) {
         .def_readwrite("f107_average", &core::DragOptions::f107_average)
         .def_readwrite("kp", &core::DragOptions::kp)
         .def_readwrite("use_apparent_sun_position", &core::DragOptions::use_apparent_sun_position)
+        .def_readwrite("weather_model", &core::DragOptions::weather_model)
+        .def_readwrite("geomagnetic_update", &core::DragOptions::geomagnetic_update)
+        .def_readwrite("geomagnetic_source", &core::DragOptions::geomagnetic_source)
         .def("validate", &core::validate_drag_options);
     py::class_<core::AtmosphereInput>(module, "AtmosphereInput")
         .def(py::init<>())
@@ -152,7 +167,9 @@ void bind_project(py::module_ &module) {
                py::arg("input"));
     module.def("evaluate_drag", &core::evaluate_drag, py::arg("position_itrf_m"),
                py::arg("velocity_itrf_mps"), py::arg("sun_itrf_m"), py::arg("utc"),
-               py::arg("options"));
+               py::arg("options"), py::arg("weather") = std::nullopt,
+               py::arg("low_weather") = std::nullopt);
+    module.def("ap_to_kp", &core::ap_to_kp, py::arg("ap"));
     module.def("kp_to_ap", &core::kp_to_ap, py::arg("kp"));
     py::class_<core::SrpOptions>(module, "SrpOptions")
         .def(py::init<>())

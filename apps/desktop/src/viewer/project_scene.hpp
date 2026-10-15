@@ -13,6 +13,7 @@ struct PreparedProject {
     GroundMap::PreparedTracks ground_tracks;
     std::map<std::string, std::shared_ptr<const core::GravityModel>> gravity{};
     std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> ephemerides{};
+    std::map<std::string, std::shared_ptr<const core::SpaceWeather>> weather{};
 };
 // Preparation selects current data covering the interval; saved hashes are provenance.
 // Inputs and providers are captured for the whole calculation, leaving the live workbench intact.
@@ -25,6 +26,6 @@ struct PreparedProject {
     const std::optional<std::string> &edited_object = std::nullopt,
     std::shared_ptr<const core::ITimeProvider> time = {},
     const std::map<std::string, std::shared_ptr<const core::GravityModel>> &gravity = {},
-    const std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> &ephemerides =
-        {});
+    const std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> &ephemerides = {},
+    const std::map<std::string, std::shared_ptr<const core::SpaceWeather>> &weather = {});
 } // namespace orbitforge::desktop

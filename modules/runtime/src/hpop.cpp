@@ -2,6 +2,7 @@
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
 #include <orbitforge/runtime/hpop.hpp>
+#include <orbitforge/runtime/space_weather.hpp>
 #include <sstream>
 
 namespace orbitforge::runtime {
@@ -61,10 +62,22 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
                << ";density-kernel=jr-gmat-c9b78bd;nrlmsise00-orekit-13.1.2-gtd7d"
                << ";cd=" << d.cd << ";drag-area-mass=" << d.area_mass_ratio_m2_per_kg
                << ";low-altitude=" << static_cast<int>(d.low_altitude_model)
-               << ";blend=" << d.blending_range_m << ";weather=manual-daily;f107=" << d.f107
-               << ";f107-average=" << d.f107_average << ";kp=" << d.kp
+               << ";blend=" << d.blending_range_m
                << ";sun=" << (d.use_apparent_sun_position ? "earth-LT+S" : "NONE");
+        if (d.weather_model.empty())
+            config << ";weather=manual-daily;f107=" << d.f107 << ";f107-average=" << d.f107_average
+                   << ";kp=" << d.kp;
         algorithm += config.str();
+        if (!d.weather_model.empty() && environment.weather) {
+            algorithm +=
+                ";weather=file;boundary=utc-one-sided-v1;update=" +
+                std::to_string(static_cast<int>(d.geomagnetic_update)) +
+                ";source=" + std::to_string(static_cast<int>(d.geomagnetic_source)) +
+                ";weather-data=" +
+                application::DataLock(
+                    {space_weather_reference(d.weather_model, environment.weather->info())})
+                    .sha256();
+        }
     }
     if (options.uses_ephemeris() && environment.ephemeris) {
         algorithm +=

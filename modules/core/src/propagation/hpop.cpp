@@ -1,8 +1,10 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <mutex>
 #include <orbitforge/core/propagation/hpop.hpp>
+#include <tuple>
 #include <vector>
 
 namespace orbitforge::core {
@@ -52,7 +54,80 @@ class Hpop final : public IStateProvider {
             throw PropagationError("HPOP stage epoch exceeds the representable time range");
         return Epoch{start + offset};
     }
-    State derivative(double t, const State &s) const {
+    // File geomagnetism is piecewise constant in UTC. Stop at every update,
+    // including the separately lagged JR and low-altitude MSIS windows.
+    std::optional<double> weather_boundary(double t, double end) const {
+        const auto &d = options_.drag;
+        if (!d.enabled || d.weather_model.empty())
+            return {};
+        const bool forward = end > t;
+        const auto at = epoch_at(t);
+        const auto until = epoch_at(end);
+        const int period = d.geomagnetic_update == GeomagneticUpdate::daily ? 24 : 3;
+        const auto boundary = [&](AtmosphereModel model) {
+            const std::int64_t lag =
+                model == AtmosphereModel::jacchia_roberts ? 24120000000000LL : 0;
+            if (std::min(at.tai_nanoseconds(), until.tai_nanoseconds()) <
+                std::numeric_limits<std::int64_t>::min() + lag)
+                throw PropagationError("Weather lag exceeds the Epoch range");
+            const auto utc = environment_.time->to_utc(Epoch{at.tai_nanoseconds() - lag});
+            const auto limit = environment_.time->to_utc(Epoch{until.tai_nanoseconds() - lag});
+            const auto fields = [](const UtcDateTime &u) {
+                return std::tuple{u.year, u.month, u.day, u.hour, u.minute, u.second, u.nanosecond};
+            };
+            const auto day = std::chrono::sys_days{
+                std::chrono::year{utc.year} / std::chrono::month{static_cast<unsigned>(utc.month)} /
+                std::chrono::day{static_cast<unsigned>(utc.day)}};
+            int hour = utc.hour / period * period + (forward ? period : 0);
+            const auto instant = [&](int h) {
+                const int delta = h >= 0 ? h / 24 : (h - 23) / 24;
+                const std::chrono::year_month_day date{day + std::chrono::days{delta}};
+                const UtcDateTime boundary_utc{
+                    static_cast<int>(date.year()),
+                    static_cast<int>(static_cast<unsigned>(date.month())),
+                    static_cast<int>(static_cast<unsigned>(date.day())),
+                    h - delta * 24,
+                    0,
+                    0,
+                    0};
+                // The next nominal boundary may lie outside the time provider's
+                // coverage; never query it when the requested integration ends earlier.
+                if (forward ? fields(boundary_utc) > fields(limit)
+                            : fields(boundary_utc) < fields(limit))
+                    return end;
+                const auto e = environment_.time->from_utc(boundary_utc);
+                if (e.tai_nanoseconds() > std::numeric_limits<std::int64_t>::max() - lag)
+                    throw PropagationError("Weather boundary exceeds the Epoch range");
+                return Epoch{e.tai_nanoseconds() + lag}.seconds_since(initial_.epoch);
+            };
+            auto next = instant(hour);
+            // Compare in the integrator's relative time, so rounding to nanoseconds
+            // at an accepted boundary cannot create a zero-length next step.
+            if (forward ? next <= t : next >= t)
+                next = instant(hour + (forward ? period : -period));
+            return next;
+        };
+        auto next = boundary(d.atmosphere);
+        if (d.atmosphere == AtmosphereModel::jacchia_roberts &&
+            d.low_altitude_model == LowAltitudeDensityModel::nrlmsise00) {
+            const auto low = boundary(AtmosphereModel::nrlmsise00);
+            next = forward ? std::min(next, low) : std::max(next, low);
+        }
+        return next;
+    }
+    std::optional<Epoch> weather_stage(double t, double start, double end) const {
+        if (!options_.drag.enabled || options_.drag.weather_model.empty())
+            return {};
+        const auto first_ns = epoch_at(start).tai_nanoseconds(),
+                   last_ns = epoch_at(end).tai_nanoseconds();
+        const auto lower = std::min(first_ns, last_ns), upper = std::max(first_ns, last_ns);
+        if (lower == upper)
+            return Epoch{lower};
+        // A step occupies [lower, upper). Endpoint RK stages must use its one-sided
+        // weather limit in both directions, rather than averaging across a jump.
+        return Epoch{std::clamp(epoch_at(t).tai_nanoseconds(), lower, upper - 1)};
+    }
+    State derivative(double t, const State &s, std::optional<Epoch> weather_at = {}) const {
         for (double value : s)
             if (!std::isfinite(value))
                 throw PropagationError("HPOP encountered a nonfinite state");
@@ -102,9 +177,21 @@ class Hpop final : public IStateProvider {
             const auto sun = options_.drag.use_apparent_sun_position
                                  ? environment_.ephemeris->apparent_sun_from_earth(epoch)
                                  : environment_.ephemeris->position(ThirdBody::sun, epoch);
-            const auto force = evaluate_drag(fixed.position_m, fixed.velocity_mps,
-                                             transform.rotation.apply_position(sun),
-                                             environment_.time->to_utc(epoch), options_.drag);
+            std::optional<SpaceWeatherSample> weather, lower;
+            if (!options_.drag.weather_model.empty()) {
+                const auto &d = options_.drag;
+                weather = environment_.weather->sample(weather_at.value_or(epoch),
+                                                       *environment_.time, d.atmosphere,
+                                                       d.geomagnetic_update, d.geomagnetic_source);
+                if (d.atmosphere == AtmosphereModel::jacchia_roberts &&
+                    d.low_altitude_model == LowAltitudeDensityModel::nrlmsise00)
+                    lower = environment_.weather->sample(
+                        weather_at.value_or(epoch), *environment_.time, AtmosphereModel::nrlmsise00,
+                        d.geomagnetic_update, d.geomagnetic_source);
+            }
+            const auto force = evaluate_drag(
+                fixed.position_m, fixed.velocity_mps, transform.rotation.apply_position(sun),
+                environment_.time->to_utc(epoch), options_.drag, weather, lower);
             const auto inertial = transform.rotation.inverse_position(force.acceleration_itrf_mps2);
             for (int i = 0; i < 3; ++i)
                 acceleration[i] += inertial[i];
@@ -112,17 +199,17 @@ class Hpop final : public IStateProvider {
         return {s[3], s[4], s[5], acceleration[0], acceleration[1], acceleration[2]};
     }
     State rk4(double t, const State &s, double h) const {
-        const auto k1 = derivative(t, s);
+        const auto k1 = derivative(t, s, weather_stage(t, t, t + h));
         State tmp{};
         for (std::size_t i = 0; i < 6; ++i)
             tmp[i] = s[i] + h * 0.5 * k1[i];
-        const auto k2 = derivative(t + h * 0.5, tmp);
+        const auto k2 = derivative(t + h * 0.5, tmp, weather_stage(t + h * 0.5, t, t + h));
         for (std::size_t i = 0; i < 6; ++i)
             tmp[i] = s[i] + h * 0.5 * k2[i];
-        const auto k3 = derivative(t + h * 0.5, tmp);
+        const auto k3 = derivative(t + h * 0.5, tmp, weather_stage(t + h * 0.5, t, t + h));
         for (std::size_t i = 0; i < 6; ++i)
             tmp[i] = s[i] + h * k3[i];
-        const auto k4 = derivative(t + h, tmp);
+        const auto k4 = derivative(t + h, tmp, weather_stage(t + h, t, t + h));
         for (std::size_t i = 0; i < 6; ++i)
             tmp[i] = s[i] + h / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
         return tmp;
@@ -137,7 +224,8 @@ class Hpop final : public IStateProvider {
                     sum += a[stage][j] * k[j][i];
                 value[i] += h * sum;
             }
-            k[stage] = derivative(t + c[stage] * h, value);
+            k[stage] =
+                derivative(t + c[stage] * h, value, weather_stage(t + c[stage] * h, t, t + h));
         }
         State result = s;
         double error = 0;
@@ -166,7 +254,10 @@ class Hpop final : public IStateProvider {
             if (++attempts > max_attempts)
                 throw PropagationError("HPOP exceeded 200000 integration attempts in one query");
             const double remaining = std::abs(end - t);
-            const double magnitude = std::min(step, remaining);
+            double magnitude = std::min(step, remaining);
+            const auto boundary = weather_boundary(t, end);
+            if (boundary)
+                magnitude = std::min(magnitude, std::abs(*boundary - t));
             const double h = std::copysign(magnitude, end - t);
             if (t + h == t)
                 throw PropagationError("HPOP integration step cannot advance time");
@@ -229,6 +320,7 @@ class Hpop final : public IStateProvider {
                     "Atmospheric drag requires the EOP's confirmed UTC provider");
             (void)environment_.time->to_utc(initial.epoch);
         }
+        environment_.validate_weather_interval(options_.drag, initial.epoch, initial.epoch);
         State value{};
         for (std::size_t i = 0; i < 3; ++i) {
             value[i] = initial.position_m[i];
@@ -247,6 +339,10 @@ class Hpop final : public IStateProvider {
             throw PropagationError("HPOP query exceeds 366 days from the initial epoch");
         if (epoch == initial_.epoch)
             return initial_;
+        environment_.validate_weather_interval(
+            options_.drag,
+            Epoch{std::min(epoch.tai_nanoseconds(), initial_.epoch.tai_nanoseconds())},
+            Epoch{std::max(epoch.tai_nanoseconds(), initial_.epoch.tai_nanoseconds())});
         if (options_.uses_ephemeris())
             environment_.ephemeris->validate_interval(t < 0 ? epoch : initial_.epoch,
                                                       t < 0 ? initial_.epoch : epoch,
@@ -350,5 +446,18 @@ void validate_hpop_options(const HpopOptions &o) {
 std::shared_ptr<const IStateProvider> make_hpop(CartesianState initial, HpopOptions options,
                                                 HpopEnvironment environment) {
     return std::make_shared<Hpop>(initial, options, std::move(environment));
+}
+void HpopEnvironment::validate_weather_interval(const DragOptions &drag, Epoch first,
+                                                Epoch last) const {
+    if (!drag.enabled || drag.weather_model.empty())
+        return;
+    if (!weather || !time)
+        throw std::invalid_argument("File drag requires selected weather and UTC providers");
+    weather->validate_interval(first, last, *time, drag.atmosphere, drag.geomagnetic_update,
+                               drag.geomagnetic_source);
+    if (drag.atmosphere == AtmosphereModel::jacchia_roberts &&
+        drag.low_altitude_model == LowAltitudeDensityModel::nrlmsise00)
+        weather->validate_interval(first, last, *time, AtmosphereModel::nrlmsise00,
+                                   drag.geomagnetic_update, drag.geomagnetic_source);
 }
 } // namespace orbitforge::core

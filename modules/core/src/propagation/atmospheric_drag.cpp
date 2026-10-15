@@ -46,6 +46,16 @@ void validate_drag_options(const DragOptions &o) {
         o.area_mass_ratio_m2_per_kg > 9999)
         throw std::invalid_argument("Drag area/mass ratio must be within 0..9999 m^2/kg");
     weather(o.f107, o.f107_average, o.kp);
+    if (o.weather_model.size() > 64 ||
+        !std::all_of(o.weather_model.begin(), o.weather_model.end(), [](char c) {
+            return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-';
+        }))
+        throw std::invalid_argument("Invalid space weather selection ID");
+    if ((o.geomagnetic_update != GeomagneticUpdate::daily &&
+         o.geomagnetic_update != GeomagneticUpdate::three_hourly) ||
+        (o.geomagnetic_source != GeomagneticSource::ap &&
+         o.geomagnetic_source != GeomagneticSource::kp))
+        throw std::invalid_argument("Unsupported geomagnetic update/source");
     if (!std::isfinite(o.blending_range_m) || o.blending_range_m < 0 ||
         o.blending_range_m > 1000000)
         throw std::invalid_argument("Drag blending range must be within 0..1000 km");
@@ -57,6 +67,14 @@ void validate_drag_options(const DragOptions &o) {
 DragOptions effective_drag_options(DragOptions o) {
     if (!o.enabled)
         return {};
+    if (o.weather_model.empty()) {
+        o.geomagnetic_update = GeomagneticUpdate::daily;
+        o.geomagnetic_source = GeomagneticSource::ap;
+    } else {
+        o.f107 = DragOptions{}.f107;
+        o.f107_average = DragOptions{}.f107_average;
+        o.kp = DragOptions{}.kp;
+    }
     if (o.atmosphere == AtmosphereModel::nrlmsise00)
         o.low_altitude_model = LowAltitudeDensityModel::none;
     if (o.low_altitude_model == LowAltitudeDensityModel::none)
@@ -144,7 +162,9 @@ AtmosphereEvaluation evaluate_atmosphere(AtmosphereModel model, const Atmosphere
 }
 DragEvaluation evaluate_drag(const std::array<double, 3> &r, const std::array<double, 3> &v,
                              const std::array<double, 3> &sun, const UtcDateTime &utc,
-                             const DragOptions &options) {
+                             const DragOptions &options,
+                             const std::optional<SpaceWeatherSample> &weather,
+                             const std::optional<SpaceWeatherSample> &low_weather) {
     validate_drag_options(options);
     if (!options.enabled)
         return {};
@@ -159,16 +179,38 @@ DragEvaluation evaluate_drag(const std::array<double, 3> &r, const std::array<do
                           angle,        std::atan2(sun[2], std::hypot(sun[0], sun[1])),
                           options.f107, options.f107_average,
                           options.kp};
+    const auto density_for = [&](AtmosphereModel model, bool low = false) {
+        auto values = input;
+        if (!options.weather_model.empty()) {
+            const auto &selected = low ? low_weather : weather;
+            if (!selected)
+                throw std::invalid_argument("File drag requires sampled space weather");
+            values.f107 = selected->f107;
+            values.f107_average = selected->f107_average;
+            values.kp = selected->kp;
+            if (model == AtmosphereModel::nrlmsise00) {
+                if (options.geomagnetic_update == GeomagneticUpdate::three_hourly) {
+                    if (!selected->ap_history)
+                        throw std::invalid_argument(
+                            "Three-hour NRLMSISE requires complete Ap history");
+                    values.ap_history = selected->ap_history;
+                } else
+                    values.daily_ap = selected->ap;
+            }
+        } else if (weather || low_weather) {
+            throw std::invalid_argument("Manual drag cannot receive file weather samples");
+        }
+        return evaluate_atmosphere(model, values).density_kg_m3;
+    };
     double density;
     if (options.atmosphere == AtmosphereModel::jacchia_roberts &&
         options.low_altitude_model == LowAltitudeDensityModel::nrlmsise00 &&
         g.height_m < 90000 + options.blending_range_m) {
-        const double lower = evaluate_atmosphere(AtmosphereModel::nrlmsise00, input).density_kg_m3;
+        const double lower = density_for(AtmosphereModel::nrlmsise00, true);
         if (g.height_m <= 90000) {
             density = lower;
         } else {
-            const double upper =
-                evaluate_atmosphere(AtmosphereModel::jacchia_roberts, input).density_kg_m3;
+            const double upper = density_for(AtmosphereModel::jacchia_roberts);
             const double t = (g.height_m - 90000) / options.blending_range_m;
             const double weight = t * t * (3 - 2 * t);
             density = lower + weight * (upper - lower);
@@ -176,9 +218,9 @@ DragEvaluation evaluate_drag(const std::array<double, 3> &r, const std::array<do
     } else if (options.atmosphere == AtmosphereModel::jacchia_roberts &&
                options.low_altitude_model == LowAltitudeDensityModel::nrlmsise00 &&
                g.height_m < 90000) {
-        density = evaluate_atmosphere(AtmosphereModel::nrlmsise00, input).density_kg_m3;
+        density = density_for(AtmosphereModel::nrlmsise00, true);
     } else {
-        density = evaluate_atmosphere(options.atmosphere, input).density_kg_m3;
+        density = density_for(options.atmosphere);
     }
     const double scale = -.5 * density * options.cd * options.area_mass_ratio_m2_per_kg *
                          std::hypot(v[0], v[1], v[2]);

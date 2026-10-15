@@ -25,7 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 19;
+constexpr std::uint32_t project_version = 20;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -43,7 +43,7 @@ struct SectionSchema {
 // One current schema, shared by the reader and writer. Null means an optional section.
 constexpr std::array section_schemas{
     SectionSchema{scene_tag, 1, "Missing scene section"},
-    SectionSchema{objects_tag, 10, "Missing satellites section"},
+    SectionSchema{objects_tag, 11, "Missing satellites section"},
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
     SectionSchema{sensors_tag, 1, "Missing sensors section"},
@@ -213,6 +213,9 @@ void write_drag(Writer &out, const core::DragOptions &d, bool draft = true) {
     for (double value : {d.blending_range_m, d.f107, d.f107_average, d.kp})
         out.real(value);
     out.number(d.use_apparent_sun_position, 1);
+    out.text(d.weather_model);
+    out.number(static_cast<unsigned>(d.geomagnetic_update), 4);
+    out.number(static_cast<unsigned>(d.geomagnetic_source), 4);
 }
 core::DragOptions read_drag(Reader &in) {
     core::DragOptions d;
@@ -228,6 +231,11 @@ core::DragOptions read_drag(Reader &in) {
     d.f107_average = in.real();
     d.kp = in.real();
     d.use_apparent_sun_position = in.boolean();
+    d.weather_model = in.text();
+    const auto update = in.number(4), source = in.number(4);
+    check(update <= 1 && source <= 1, "Unsupported weather update/source");
+    d.geomagnetic_update = static_cast<core::GeomagneticUpdate>(update);
+    d.geomagnetic_source = static_cast<core::GeomagneticSource>(source);
     return d;
 }
 void write_mission(Writer &out, const core::MissionPlan &plan, bool names = true) {
@@ -564,7 +572,8 @@ void validate_project(const Project &project, bool relationships) {
         }
     }
     for (const auto &ref : project.force_data) {
-        check(ref.role.starts_with("gravity/") || ref.role.starts_with("ephemeris/"),
+        check(ref.role.starts_with("gravity/") || ref.role.starts_with("ephemeris/") ||
+                  ref.role.starts_with("space-weather/"),
               "Unsupported force-data role");
         text_check(ref.snapshot_id, true);
         text_check(ref.interpretation_version, true);
@@ -1092,7 +1101,8 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         try {
             const DataLock lock(std::move(references));
             for (const auto &ref : lock.references())
-                if (ref.role.starts_with("gravity/") || ref.role.starts_with("ephemeris/"))
+                if (ref.role.starts_with("gravity/") || ref.role.starts_with("ephemeris/") ||
+                    ref.role.starts_with("space-weather/"))
                     project.force_data.push_back(ref);
             check(lock.sha256() == locked.text(), "Scenario data lock SHA256 mismatch");
             check(lock == project.data_lock(),

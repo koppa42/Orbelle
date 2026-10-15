@@ -825,4 +825,29 @@ TEST_F(DataCenterTest, LiveOfficialEphemerisDownloadAndRecheckRetainCurrentData)
         position);
 }
 } // namespace
+TEST_F(DataCenterTest, WeatherDownloadImportsRawBytesAndFailedReplacementRetainsSnapshot) {
+    EopCatalog catalog(root() / "data", {}, {}, false);
+    const QByteArray csv =
+        "DATE,BSRN,ND,KP1,KP2,KP3,KP4,KP5,KP6,KP7,KP8,KP_SUM,"
+        "AP1,AP2,AP3,AP4,AP5,AP6,AP7,AP8,AP_AVG,CP,C9,ISN,F10.7_OBS,F10.7_ADJ,"
+        "F10.7_DATA_TYPE,F10.7_OBS_CENTER81,F10.7_OBS_LAST81,F10.7_ADJ_CENTER81,F10.7_ADJ_LAST81\n"
+        "2000-01-01,1,1,30,30,30,30,30,30,30,30,240,15,15,15,15,15,15,15,15,15,0,0,0,150,150,OBS,"
+        "150,150,150,150\n";
+    Server server(csv);
+    catalog.start_download(server.url(), DataProduct::space_weather);
+    complete(catalog);
+    ASSERT_EQ(catalog.update_status(DataProduct::space_weather).state, DataUpdateState::updated)
+        << catalog.status().toStdString();
+    EXPECT_TRUE(catalog.has_full_download(DataProduct::space_weather));
+    const auto before = catalog.data().load_space_weather("celestrak");
+    const auto item = catalog.inventory().at(static_cast<std::size_t>(DataProduct::space_weather));
+    EXPECT_EQ(item.first.date(), QDate(2000, 1, 1));
+    EXPECT_EQ(item.sha256, QString::fromStdString(before->info().sha256));
+    Server broken("bad weather");
+    catalog.start_download(broken.url(), DataProduct::space_weather);
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(DataProduct::space_weather).state, DataUpdateState::failed);
+    EXPECT_EQ(catalog.data().load_space_weather("celestrak")->info().sha256, before->info().sha256);
+}
+
 } // namespace orbitforge::desktop

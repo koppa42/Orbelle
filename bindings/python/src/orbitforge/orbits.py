@@ -144,7 +144,8 @@ class DragSettings:
     Manual flux/Kp values are constants; Kp is converted to Ap for NRLMSISE.
     Optional NRLMSISE low atmosphere blends over [90 km, 90 km + blending_range].
     Height is exact WGS84 geodetic. Apparent Sun means received geocentric LT+S.
-    No winds, space-weather files or STK approximate height are implied.
+    File weather uses an explicit catalog selection and checked model lags/history.
+    No winds or STK approximate height are implied.
     """
     enabled: bool = False
     cd: float = 2.2
@@ -156,6 +157,9 @@ class DragSettings:
     f107_average: float = 150.0
     kp: float = 3.0
     use_apparent_sun_position: bool = False
+    weather_model: str = ""
+    geomagnetic_update: Literal["daily", "three_hourly"] = "daily"
+    geomagnetic_source: Literal["ap", "kp"] = "ap"
 
     def __post_init__(self) -> None:
         for name in ("enabled", "use_apparent_sun_position"):
@@ -170,23 +174,33 @@ class DragSettings:
                  "nrlmsise00": n.LowAltitudeDensityModel.NRLMSISE00}
         if self.atmosphere not in models or self.low_altitude_model not in lower:
             raise ValueError("Unknown atmospheric density model")
+        updates = {"daily": n.GeomagneticUpdate.DAILY, "three_hourly": n.GeomagneticUpdate.THREE_HOURLY}
+        sources = {"ap": n.GeomagneticSource.AP, "kp": n.GeomagneticSource.KP}
+        if self.geomagnetic_update not in updates or self.geomagnetic_source not in sources:
+            raise ValueError("Unknown geomagnetic update/source")
+        if not isinstance(self.weather_model, str):
+            raise TypeError("weather_model requires str")
         value = n.DragOptions()
         for name in self.__dataclass_fields__:
-            if name not in ("atmosphere", "low_altitude_model"):
+            if name not in ("atmosphere", "low_altitude_model", "geomagnetic_update", "geomagnetic_source"):
                 setattr(value, name, getattr(self, name))
         value.atmosphere = models[self.atmosphere]
         value.low_altitude_model = lower[self.low_altitude_model]
+        value.geomagnetic_update = updates[self.geomagnetic_update]
+        value.geomagnetic_source = sources[self.geomagnetic_source]
         value.validate()
         return value
 
     @classmethod
     def _read(cls, value: n.DragOptions) -> "DragSettings":
         fields = {name: getattr(value, name) for name in cls.__dataclass_fields__
-                  if name not in ("atmosphere", "low_altitude_model")}
+                  if name not in ("atmosphere", "low_altitude_model", "geomagnetic_update", "geomagnetic_source")}
         fields["atmosphere"] = ("jacchia_roberts" if value.atmosphere == n.AtmosphereModel.JACCHIA_ROBERTS
                                 else "nrlmsise00")
         fields["low_altitude_model"] = ("none" if value.low_altitude_model == n.LowAltitudeDensityModel.NONE
                                        else "nrlmsise00")
+        fields["geomagnetic_update"] = "daily" if value.geomagnetic_update == n.GeomagneticUpdate.DAILY else "three_hourly"
+        fields["geomagnetic_source"] = "ap" if value.geomagnetic_source == n.GeomagneticSource.AP else "kp"
         return cls(**fields)
 
 

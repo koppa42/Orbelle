@@ -14,7 +14,7 @@ Cd 为带符号经验系数，范围 −100…100；面积质量比为 0…9999 
 
 Jacchia–Roberts 适用 90…2500 km，保留 NASA GMAT 标量模型的拟合常数及分段公式，并处理正午、午夜、极点、太阳赤纬为零的有限极限。GMAT 外层 `Density` 不开放 90…100 km，本实现使用其原有标量公式开放这一高度段。NRLMSISE-00 适用 0…1000 km，移植 Orekit 13.1.2 的双精度计算和表格，使用 `gtd7d` 总质量密度，包含异常氧；默认变化项开启，使用日 Ap。源码来源和 Apache-2.0 许可见 [模型说明](../../modules/core/src/propagation/atmosphere/README.md)。所有临时状态属于单次调用，模型可并发使用。
 
-当前天气来源为常量手动输入：日 F10.7、平均 F10.7（sfu）、Kp。NRLMSISE 将手动日值作为前一日 F10.7，将平均值作为模型平均通量；没有隐含的历史查询。Kp 使用标准 1/3 刻度的 28 项 Ap 表，非表格刻度线性插值，Kp=3 对应 Ap=15。界面/API 当前限制通量 `(0,1000]` sfu、Kp `[0,9]`，这些限制与 STK 命令允许的全部范围不同，不能据此宣称所有参数范围已对齐。低层 `AtmosphereInput` 使用 UTC 公历日期 1600…2600；闰秒合法性在 HPOP 中由实际时间 Provider 认证，独立标量调用方负责保证其 UTC 真实有效。
+手动天气来源为常量输入：日 F10.7、平均 F10.7（sfu）、Kp。NRLMSISE 将手动日值作为前一日 F10.7，将平均值作为模型平均通量；没有隐含的历史查询。Kp 使用标准 1/3 刻度的 28 项 Ap 表，非表格刻度线性插值，Kp=3 对应 Ap=15。界面/API 当前限制通量 `(0,1000]` sfu、Kp `[0,9]`，这些限制与 STK 命令允许的全部范围不同，不能据此宣称所有参数范围已对齐。低层 `AtmosphereInput` 使用 UTC 公历日期 1600…2600；闰秒合法性在 HPOP 中由实际时间 Provider 认证，独立标量调用方负责保证其 UTC 真实有效。
 
 JR 可选择 NRLMSISE-00 作为低空模型。低于 90 km 使用低空模型；在 `90 km…90 km+拼接范围` 内，以 `w=t²(3−2t)` 对质量密度加权，在其上使用 JR。正范围拼接具有连续的一阶权重；零范围表示明确的硬切换。有效拼接范围至多 910 km，防止低空模型查询超出 1000 km。NRLMSISE 为主模型时低空设置不生效，但合法草稿仍保存。该拼接定义为 OrbitForge 的公开约定，仍需 STK 数值核对。
 
@@ -33,7 +33,19 @@ inputs.ap_history = (40, 400, 100, 50, 20, 7.125, 3.75)
 density = of.evaluate_atmosphere(of.AtmosphereModel.NRLMSISE00, inputs)
 ```
 
-这个入口用于独立密度计算及后续空间天气 Provider 装配；调用方须提供与查询 UTC 对应的完整窗口，接口不读取文件、不补齐缺值。当前 `DragSettings`、`evaluate_drag` 和 HPOP 传播仍使用手动常量 Kp，尚未把历史 Ap 接入轨道传播或桌面文件选择；项目格式仍为 v19。本增量不宣称完成 STK 的天气文件模式。
+这个入口也供空间天气装配调用；标量密度接口本身不读取文件、不补齐缺值。HPOP 的文件模式在每个积分阶段通过不可变 `SpaceWeather` 取样；JR 与低空 NRLMSISE 分别使用自己的时间滞后。
+
+## 空间天气文件
+
+支持 CelesTrak 原始 31 列 CSV 和 130 列 `CssiSpaceWeather` 定宽文件，格式依据 [CelesTrak 说明](https://celestrak.org/SpaceData/SpaceWx-format.php)。原始全文及 SHA-256 保留，解析区分观测/预报、观测/1 AU 调整通量、中心/尾随 81 日均值、日 Ap 与三小时 ap。空字段保持缺失。观测 Kp 的 53 表示 5⅓；预报中由 Ap 推导的非三分之一值（如 22、24）按十分之一刻度保留。
+
+桌面“阻力 → 太阳通量 / 地磁”可选手动或文件、每日或三小时更新、Ap 或 Kp 来源。文件由数据中心下载/导入 CelesTrak `SW-All.csv`，API 不隐式联网。`DragSettings.weather_model` 是目录选择 ID，空字符串表示手动，`geomagnetic_update` 为 `daily` / `three_hourly`，`geomagnetic_source` 为 `ap` / `kp`。也可显式 `DataSnapshot.with_space_weather("celestrak", path)`。
+
+按照 [STK Drag 文件说明](https://help.agi.com/stk/Content/hpop/hpopDrag.htm)，日与中心 81 日观测通量在 20:00 UTC 节点间线性取样。滞后采用 [AGI JR 定义](https://help.agi.com/STKComponents/html/T_AGI_Foundation_Celestial_ScalarDensityJacchiaRoberts.htm)及 [MSIS-2000 定义](https://help.agi.com/STKComponents/html/T_AGI_Foundation_Celestial_ScalarDensityMsis2000.htm)：两者日通量滞后 86400 s；JR 平均通量也滞后 86400 s、地磁滞后 24120 s；NRL 平均通量及地磁不滞后。这是公开组件文档依据，尚未完成 STK HPOP 同场景数值验收。
+
+积分步在日/三小时地磁更新处截断（JR/低空 NRL 各自的滞后窗口均计入），RK 端点使用该步内部一侧的天气值；正反向均不跨跳变混合密度。滞后按 TAI 实际秒数，日/三小时窗口按 UTC；正闰秒属于当天最后一个三小时窗口。NRL 三小时模式组装上述七项 Ap 历史；选择 Kp 时先逐项转换为 Ap 再求历史均值。日模式使用文件日 Ap 或由文件日 Kp 转换，不能从当日八项重新计算并替换原始日值。
+
+准备时检查完整传播路径所需的每个日期、通量插值节点和全部历史槽，包括初始历元早于场景的情况。缺字段、内部断档、域外查询均报错，不外推或零填充。文件中月预报记录保留，但当前每日/三小时模型拒绝使用它们；原始首末日期不是可传播范围。3-Hourly Interp、自然三次样条、月预报、CSSI predicts 和 FXM 仍待实现。
 
 ## 数据与持久化
 
@@ -41,7 +53,7 @@ density = of.evaluate_atmosphere(of.AtmosphereModel.NRLMSISE00, inputs)
 
 默认使用几何太阳。`use_apparent_sun_position=True` 使用 CSPICE 对地球接收观测的 `LT+S` 太阳方向；此约定影响密度中的当地太阳时/赤纬，不修改第三体引力或光压的几何太阳。准备计算时额外认证区间起点前 600 s 的太阳与地球核覆盖，边界不足明确拒绝。自定义星历必须提供相应查询和区间认证接口，不能将几何方向冒充视方向。
 
-项目格式为 v19 / OBJS v10，只读写当前版本。禁用模型时保存合法参数草稿，计算身份忽略这些草稿；启用时计入实际密度模型、天气、Cd、面积质量比、太阳方法及 UTC/EOP/星历来源。NRLMSISE 主模型的低空草稿和未启用的拼接范围不改变结果身份。
+项目格式为 v20 / OBJS v11，只读写当前版本。禁用模型时保存合法参数草稿，计算身份忽略这些草稿；启用时计入实际密度模型、天气、Cd、面积质量比、太阳方法及 UTC/EOP/星历来源。NRLMSISE 主模型的低空草稿和未启用的拼接范围不改变结果身份。
 
 ```python
 import orbitforge as of

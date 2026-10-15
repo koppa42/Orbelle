@@ -1909,4 +1909,87 @@ TEST_F(QuantityTest,
     EXPECT_EQ(options.gravity_mu, 3.95e14);
     EXPECT_FALSE(catalog.downloading());
 }
+TEST_F(QuantityTest, HpopWeatherFileSwitchesFieldsRetainsDraftsAndReopens) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    QTemporaryDir temporary;
+    ASSERT_TRUE(temporary.isValid());
+    const auto root = std::filesystem::path(temporary.path().toStdWString());
+    EopCatalog catalog(root / "data", {}, {}, false);
+    QFile file(temporary.path() + "/weather.csv");
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    file.write(
+        "DATE,BSRN,ND,KP1,KP2,KP3,KP4,KP5,KP6,KP7,KP8,KP_SUM,"
+        "AP1,AP2,AP3,AP4,AP5,AP6,AP7,AP8,AP_AVG,CP,C9,ISN,F10.7_OBS,F10.7_ADJ,"
+        "F10.7_DATA_TYPE,F10.7_OBS_CENTER81,F10.7_OBS_LAST81,F10.7_ADJ_CENTER81,F10.7_ADJ_LAST81\n"
+        "2000-01-01,1,1,30,30,30,30,30,30,30,30,240,15,15,15,15,15,15,15,15,15,0,0,0,150,150,OBS,"
+        "150,150,150,150\n");
+    file.close();
+    catalog.data().install_space_weather(root / "weather.csv");
+    core::HpopOptions options;
+    runtime::CatalogEphemeris entry;
+    entry.selection = "de440s";
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        dialog->findChild<QTabWidget *>("hpopForceModelTabs")->setCurrentIndex(1);
+        dialog->findChild<QCheckBox *>("hpopUseDrag")->setChecked(true);
+        dialog->findChild<QPushButton *>("hpopDragManageEphemerides")->click();
+        QTimer::singleShot(5000, dialog, &QDialog::reject);
+        auto *source = dialog->findChild<QComboBox *>("hpopDragWeatherSource");
+        auto *f107 = dialog->findChild<QuantityEditor *>("hpopDragF107");
+        auto *selection = dialog->findChild<QComboBox *>("hpopDragWeatherFile");
+        f107->set_value(183, Unit::one);
+        EXPECT_TRUE(f107->isEnabled());
+        EXPECT_FALSE(selection->isEnabled());
+        source->setCurrentIndex(1);
+        EXPECT_FALSE(f107->isEnabled());
+        EXPECT_TRUE(selection->isEnabled());
+        EXPECT_EQ(selection->currentData().toString(), "celestrak");
+        EXPECT_FALSE(selection->currentText().contains(QStringLiteral("已安装")));
+        dialog->findChild<QComboBox *>("hpopDragGeomagneticUpdate")->setCurrentIndex(1);
+        dialog->findChild<QComboBox *>("hpopDragGeomagneticSource")->setCurrentIndex(1);
+        source->setCurrentIndex(0);
+        EXPECT_EQ(f107->value(Unit::one), 183);
+        source->setCurrentIndex(1);
+        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        for (const int width : {720, 430}) {
+            dialog->resize(width, 620);
+            QEventLoop settled;
+            QTimer::singleShot(60, &settled, &QEventLoop::quit);
+            settled.exec();
+            EXPECT_EQ(selection, dialog->findChild<QComboBox *>("hpopDragWeatherFile"));
+            EXPECT_EQ(selection->currentData().toString(), "celestrak");
+            auto *scroll = dialog->findChild<QScrollArea *>("hpopDragPage");
+            scroll->ensureWidgetVisible(selection);
+            QApplication::processEvents();
+            EXPECT_TRUE(
+                dialog->rect().contains(dialog->findChild<QDialogButtonBox *>()->geometry()));
+            if (!capture.isEmpty()) {
+                EXPECT_TRUE(QDir{}.mkpath(capture));
+                EXPECT_TRUE(
+                    dialog->grab().save(capture + QString("/hpop-weather-%1.png").arg(width)));
+            }
+        }
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    ASSERT_TRUE(edit_hpop_settings(
+        options, nullptr, {}, {entry}, [entry] { return std::vector{entry}; }, &catalog));
+    EXPECT_EQ(options.drag.weather_model, "celestrak");
+    EXPECT_EQ(options.drag.geomagnetic_update, core::GeomagneticUpdate::three_hourly);
+    EXPECT_EQ(options.drag.geomagnetic_source, core::GeomagneticSource::kp);
+    EXPECT_EQ(options.drag.f107, 183);
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        EXPECT_EQ(dialog->findChild<QComboBox *>("hpopDragWeatherSource")->currentIndex(), 1);
+        EXPECT_EQ(dialog->findChild<QComboBox *>("hpopDragGeomagneticUpdate")->currentIndex(), 1);
+        dialog->findChild<QComboBox *>("hpopDragWeatherSource")->setCurrentIndex(0);
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(
+        options, nullptr, {}, {entry}, [entry] { return std::vector{entry}; }, &catalog));
+    EXPECT_EQ(options, saved);
+}
+
 } // namespace orbitforge::desktop

@@ -11,6 +11,7 @@
 #include <orbitforge/runtime/gravity.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/report.hpp>
+#include <orbitforge/runtime/space_weather.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 #include <picosha2.h>
@@ -148,6 +149,13 @@ core::HpopEnvironment ReportContext::force_environment(const application::OrbitI
         validate_ephemeris_reference(project.force_data, input.hpop.ephemeris_model,
                                      found->second->data_info());
         environment.ephemeris = found->second;
+    }
+    if (input.hpop.drag.enabled && !input.hpop.drag.weather_model.empty()) {
+        const auto found = weather.find(input.hpop.drag.weather_model);
+        check(found != weather.end() && found->second, "Missing selected weather provider");
+        validate_space_weather_reference(project.force_data, input.hpop.drag.weather_model,
+                                         found->second->info());
+        environment.weather = found->second;
     }
     return environment;
 }

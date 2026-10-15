@@ -6,15 +6,26 @@
 #include <orbitforge/runtime/data_catalog.hpp>
 
 namespace orbitforge::desktop {
-enum class DataProduct { finals2000a, c04, utc, egm2008, egm96, custom_gravity, de440s };
+enum class DataProduct {
+    finals2000a,
+    c04,
+    utc,
+    egm2008,
+    egm96,
+    custom_gravity,
+    de440s,
+    space_weather
+};
 inline constexpr std::array all_data_products{DataProduct::finals2000a, DataProduct::c04,
                                               DataProduct::utc,         DataProduct::egm2008,
                                               DataProduct::egm96,       DataProduct::custom_gravity,
-                                              DataProduct::de440s};
+                                              DataProduct::de440s,      DataProduct::space_weather};
 inline bool gravity_product(DataProduct p) {
     return p >= DataProduct::egm2008 && p <= DataProduct::custom_gravity;
 }
-inline bool force_product(DataProduct p) { return gravity_product(p) || p == DataProduct::de440s; }
+inline bool force_product(DataProduct p) {
+    return gravity_product(p) || p == DataProduct::de440s || p == DataProduct::space_weather;
+}
 inline std::string gravity_selection(DataProduct p) {
     return p == DataProduct::egm2008 ? "egm2008" : p == DataProduct::egm96 ? "egm96" : "custom";
 }

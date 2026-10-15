@@ -26,6 +26,13 @@ struct CatalogEphemeris {
     DataAcquisition acquisition = DataAcquisition::unknown;
     std::int64_t acquired_at_unix_seconds = 0;
 };
+struct CatalogSpaceWeather {
+    std::string selection;
+    core::SpaceWeatherInfo info;
+    std::filesystem::path file;
+    DataAcquisition acquisition = DataAcquisition::unknown;
+    std::int64_t acquired_at_unix_seconds = 0;
+};
 struct CatalogSnapshot {
     std::string lock_sha256;
     std::string snapshot_id;
@@ -61,6 +68,13 @@ class DataCatalog {
     [[nodiscard]] std::vector<CatalogEphemeris> ephemerides() const;
     [[nodiscard]] std::shared_ptr<const core::IThirdBodyEphemeris>
     load_ephemeris(const std::string &selection) const;
+    CatalogSpaceWeather install_space_weather(
+        const std::filesystem::path &source, const std::string &selection = "celestrak",
+        const std::string &source_url = {}, DataAcquisition acquisition = DataAcquisition::imported,
+        const std::function<void()> &checkpoint = {});
+    [[nodiscard]] std::vector<CatalogSpaceWeather> weather_sources() const;
+    [[nodiscard]] std::shared_ptr<const core::SpaceWeather>
+    load_space_weather(const std::string &selection) const;
     // Reads a coherent local catalog view; never downloads or changes current pointers.
     // Full coverage wins over extrapolation, then preferred_eop() orders the sources.
     [[nodiscard]] DataSnapshot snapshot(core::Epoch first, core::Epoch last,

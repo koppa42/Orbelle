@@ -19,11 +19,15 @@ class ProjectFormatTests(unittest.TestCase):
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 19)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 20)
         self.path.write_bytes(self.raw)
         project = of.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
         self.assertEqual(project.objects["satellite-b"].orbit.hpop.max_step_seconds, 45)
+        drag = project.objects["satellite-b"].orbit.hpop.drag
+        self.assertEqual(drag.weather_model, "fixture-weather")
+        self.assertEqual(drag.geomagnetic_update, "three_hourly")
+        self.assertEqual(drag.geomagnetic_source, "kp")
         plan = project.objects["satellite-b"].orbit.mission
         self.assertEqual(plan.propagation, "hpop")
         self.assertEqual(plan.segments[0].duration.nanoseconds, 200_000_000_001)
@@ -34,14 +38,14 @@ class ProjectFormatTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), self.raw)
 
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(19), 20, 0xFFFFFFFF):
+        for version in (*range(20), 21, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (of.load_project_data, of.load_project,
                                  of.Project.open, of.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 19"):
+                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 20"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 

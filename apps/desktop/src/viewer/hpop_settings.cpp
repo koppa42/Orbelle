@@ -608,6 +608,8 @@ bool edit_hpop_settings(
     auto *drag_weather_source = new QComboBox;
     drag_weather_source->setObjectName("hpopDragWeatherSource");
     drag_weather_source->addItem(QStringLiteral("Enter Manually · 手动常量"));
+    drag_weather_source->addItem(QStringLiteral("Use File · 数据中心文件"));
+    drag_weather_source->setCurrentIndex(options.drag.weather_model.empty() ? 0 : 1);
     drag_weather->addRow(QStringLiteral("输入来源"), drag_weather_source);
     auto *drag_f107 = quantity(drag_weather, QStringLiteral("日 F10.7 (sfu)"), "hpopDragF107",
                                Unit::one, options.drag.f107, 1e-9, 1000);
@@ -616,9 +618,50 @@ bool edit_hpop_settings(
                  options.drag.f107_average, 1e-9, 1000);
     auto *drag_kp = quantity(drag_weather, QStringLiteral("地磁指数 Kp"), "hpopDragKp", Unit::one,
                              options.drag.kp, 0, 9);
+    auto *weather_file = new QComboBox;
+    weather_file->setObjectName("hpopDragWeatherFile");
+    const auto refresh_weather_files = [&] {
+        const auto selected = weather_file->currentData().toString();
+        const auto id = selected.isEmpty()
+                            ? QString::fromStdString(options.drag.weather_model.empty()
+                                                         ? "celestrak"
+                                                         : options.drag.weather_model)
+                            : selected;
+        const QSignalBlocker blocker(weather_file);
+        weather_file->clear();
+        if (data)
+            for (const auto &entry : data->data().weather_sources())
+                weather_file->addItem(QString::fromStdString(entry.selection),
+                                      QString::fromStdString(entry.selection));
+        if (weather_file->findData(id) < 0)
+            weather_file->addItem(id + QStringLiteral(" · 数据未就绪"), id);
+        weather_file->setCurrentIndex(weather_file->findData(id));
+    };
+    refresh_weather_files();
+    drag_weather->addRow(QStringLiteral("天气文件"), weather_file);
+    auto *weather_update = new QComboBox;
+    weather_update->setObjectName("hpopDragGeomagneticUpdate");
+    weather_update->addItems({QStringLiteral("Daily · 每日"), QStringLiteral("3-Hourly · 三小时")});
+    weather_update->setCurrentIndex(static_cast<int>(options.drag.geomagnetic_update));
+    drag_weather->addRow(QStringLiteral("地磁更新率"), weather_update);
+    auto *weather_source = new QComboBox;
+    weather_source->setObjectName("hpopDragGeomagneticSource");
+    weather_source->addItems({QStringLiteral("Ap"), QStringLiteral("Kp")});
+    weather_source->setCurrentIndex(static_cast<int>(options.drag.geomagnetic_source));
+    drag_weather->addRow(QStringLiteral("地磁数据来源"), weather_source);
+    auto *weather_manage = new QPushButton(QStringLiteral("管理空间天气…"));
+    weather_manage->setObjectName("hpopDragManageWeather");
+    weather_manage->setVisible(data != nullptr);
+    drag_weather->addRow(QString{}, weather_manage);
+    QObject::connect(weather_manage, &QPushButton::clicked, &dialog, [&] {
+        if (data)
+            show_data_center(&dialog, *data, DataProduct::space_weather);
+        refresh_weather_files();
+    });
     help(drag_weather,
-         QStringLiteral("通量与 Kp 在传播期间保持所填常量。NRLMSISE-00 将 Kp 转换为每日 Ap，"
-                        "包含异常氧的阻力有效密度。天气文件与历史 Ap 模式尚未接入。"));
+         QStringLiteral(
+             "手动模式使用常量。文件模式使用观测 F10.7、居中 81 日均值，"
+             "按 UTC 和模型滞后取样；NRLMSISE 三小时模式包含历史 Ap。缺值或覆盖不足时停止计算。"));
     auto *drag_sun = section(drag_page, QStringLiteral("太阳位置与计算数据"), "hpopDragSunSection");
     auto *drag_apparent = new QCheckBox(QStringLiteral("使用地心视太阳位置 (LT+S)"));
     drag_apparent->setObjectName("hpopDragApparentSun");
@@ -670,6 +713,17 @@ bool edit_hpop_settings(
             group_of(form)->setVisible(enabled);
         }
         drag_off->setVisible(!enabled);
+        const bool file_weather = drag_weather_source->currentIndex() == 1;
+        for (auto *input : {drag_f107, drag_average, drag_kp}) {
+            input->setEnabled(enabled && !file_weather);
+            drag_weather->setRowVisible(input, !file_weather);
+        }
+        for (auto *input : {weather_file, weather_update, weather_source}) {
+            input->setEnabled(enabled && file_weather);
+            drag_weather->setRowVisible(input, file_weather);
+        }
+        weather_manage->setEnabled(enabled && file_weather && data);
+        drag_weather->setRowVisible(weather_manage, file_weather && data);
         const bool jr = density_model->currentIndex() == 0;
         low_density->setEnabled(enabled && jr);
         drag_blend->setEnabled(enabled && jr && low_density->currentIndex() == 1);
@@ -678,6 +732,7 @@ bool edit_hpop_settings(
     QObject::connect(drag_use, &QCheckBox::toggled, &dialog, update_drag);
     QObject::connect(density_model, &QComboBox::currentIndexChanged, &dialog, update_drag);
     QObject::connect(low_density, &QComboBox::currentIndexChanged, &dialog, update_drag);
+    QObject::connect(drag_weather_source, &QComboBox::currentIndexChanged, &dialog, update_drag);
     update_drag();
     auto *srp_page = page(force_tabs, QStringLiteral("太阳辐射压"), "hpopSrpPage");
     auto *srp_use = new QCheckBox(QStringLiteral("使用太阳辐射压 Use SRP"));
@@ -1140,6 +1195,13 @@ bool edit_hpop_settings(
             drag.low_altitude_model =
                 static_cast<core::LowAltitudeDensityModel>(low_density->currentIndex());
             drag.use_apparent_sun_position = drag_apparent->isChecked();
+            drag.weather_model = drag_weather_source->currentIndex() == 1
+                                     ? weather_file->currentData().toString().toStdString()
+                                     : std::string{};
+            drag.geomagnetic_update =
+                static_cast<core::GeomagneticUpdate>(weather_update->currentIndex());
+            drag.geomagnetic_source =
+                static_cast<core::GeomagneticSource>(weather_source->currentIndex());
             const auto drag_value = [&](QuantityEditor *field, Unit unit, double &value,
                                         bool used) {
                 if (used)
@@ -1154,9 +1216,10 @@ bool edit_hpop_settings(
             drag_value(drag_cd, Unit::one, drag.cd, drag.enabled);
             drag_value(drag_area, Unit::square_metres_per_kilogram, drag.area_mass_ratio_m2_per_kg,
                        drag.enabled);
-            drag_value(drag_f107, Unit::one, drag.f107, drag.enabled);
-            drag_value(drag_average, Unit::one, drag.f107_average, drag.enabled);
-            drag_value(drag_kp, Unit::one, drag.kp, drag.enabled);
+            drag_value(drag_f107, Unit::one, drag.f107, drag.enabled && drag.weather_model.empty());
+            drag_value(drag_average, Unit::one, drag.f107_average,
+                       drag.enabled && drag.weather_model.empty());
+            drag_value(drag_kp, Unit::one, drag.kp, drag.enabled && drag.weather_model.empty());
             const bool blend = drag.enabled &&
                                drag.atmosphere == core::AtmosphereModel::jacchia_roberts &&
                                drag.low_altitude_model == core::LowAltitudeDensityModel::nrlmsise00;
@@ -1169,6 +1232,15 @@ bool edit_hpop_settings(
                                                         candidate.ephemeris_model;
                                              }))
                 throw std::runtime_error("大气阻力需要太阳位置星历，请先在数据中心准备。");
+            if (drag.enabled && !drag.weather_model.empty()) {
+                validation_field = weather_file;
+                const auto available = data ? data->data().weather_sources()
+                                            : std::vector<runtime::CatalogSpaceWeather>{};
+                if (std::none_of(available.begin(), available.end(), [&](const auto &entry) {
+                        return entry.selection == drag.weather_model;
+                    }))
+                    throw std::runtime_error("缺少空间天气文件，请在数据中心下载或导入。");
+            }
             validation_force_page = 2;
             auto &srp = candidate.srp;
             srp.enabled = srp_use->isChecked();

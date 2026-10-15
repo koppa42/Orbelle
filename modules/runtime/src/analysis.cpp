@@ -8,6 +8,7 @@
 #include <orbitforge/runtime/gravity.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/report.hpp>
+#include <orbitforge/runtime/space_weather.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 
 namespace orbitforge::runtime {
@@ -124,7 +125,16 @@ core::HpopEnvironment DataSnapshot::force_environment(const OrbitInput &input) c
                 "'; download/import it in Data Center or supply it in DataSnapshot");
         model = it->second;
     }
-    return {frames_, eop_, std::move(model), std::move(ephemeris), time_};
+    std::shared_ptr<const core::SpaceWeather> weather;
+    if (input.uses_hpop() && input.hpop.drag.enabled && !input.hpop.drag.weather_model.empty()) {
+        const auto found = weather_.find(input.hpop.drag.weather_model);
+        if (found == weather_.end())
+            throw AnalysisCapabilityError("Missing space weather '" +
+                                          input.hpop.drag.weather_model +
+                                          "'; download/import it in Data Center");
+        weather = found->second;
+    }
+    return {frames_, eop_, std::move(model), std::move(ephemeris), time_, std::move(weather)};
 }
 DataSnapshot
 DataSnapshot::with_ephemeris(const std::string &selection,
@@ -147,6 +157,26 @@ DataSnapshot DataSnapshot::with_ephemeris_file(const std::string &selection,
                                                const std::filesystem::path &workspace) const {
     return with_ephemeris(selection,
                           make_third_body_ephemeris(load_spice_snapshot(manifest, workspace)));
+}
+DataSnapshot
+DataSnapshot::with_space_weather(const std::string &selection,
+                                 std::shared_ptr<const core::SpaceWeather> weather) const {
+    if (!weather || selection.empty())
+        throw std::invalid_argument("Weather requires an ID and data");
+    auto result = *this;
+    const auto ref = space_weather_reference(selection, weather->info());
+    std::vector<DataReference> refs;
+    for (const auto &current : lock_.references())
+        if (current.role != ref.role)
+            refs.push_back(current);
+    refs.push_back(ref);
+    result.lock_ = DataLock{std::move(refs)};
+    result.weather_[selection] = std::move(weather);
+    return result;
+}
+DataSnapshot DataSnapshot::with_space_weather_file(const std::string &selection,
+                                                   const std::filesystem::path &file) const {
+    return with_space_weather(selection, load_space_weather(file));
 }
 DataSnapshot
 DataSnapshot::from_providers(std::shared_ptr<const core::ITimeProvider> time,
@@ -406,8 +436,9 @@ ReportResult Analysis::report(const ReportDefinition &definition,
     // A callback may edit a caller-owned definition; capture it before the first callback.
     const auto captured = definition;
     check_cancelled(cancelled);
-    ReportContext context{*snapshot().project, data().time(),           data().frames(),
-                          data().eop(),        data().gravity_models(), data().ephemerides()};
+    ReportContext context{
+        *snapshot().project,     data().time(),        data().frames(),         data().eop(),
+        data().gravity_models(), data().ephemerides(), data().weather_sources()};
     record_data(context.project, data());
     if (!data().time() && report_uses_utc(captured.format, captured.query.kind))
         throw AnalysisCapabilityError("Prepare with UTC data for a UTC report, or select TAI/TT");
@@ -451,6 +482,12 @@ AnalysisPlan::AnalysisPlan(const ProjectDocument &project, const DataCatalog &ca
                   !data.gravity_models().contains(input.hpop.gravity_model))
                   data = data.with_gravity(input.hpop.gravity_model,
                                            catalog.load_gravity(input.hpop.gravity_model));
+              if (input.uses_hpop() && input.hpop.drag.enabled &&
+                  !input.hpop.drag.weather_model.empty() &&
+                  !data.weather_sources().contains(input.hpop.drag.weather_model))
+                  data = data.with_space_weather(
+                      input.hpop.drag.weather_model,
+                      catalog.load_space_weather(input.hpop.drag.weather_model));
           }
           return Analysis{captured, std::move(data)};
       }()) {}
@@ -485,7 +522,8 @@ void record_data(Project &project, const DataSnapshot &data) {
         !data.eop() && data.time() ? std::optional{data.time()->data_info()} : std::nullopt;
     project.force_data.clear();
     for (const auto &ref : data.data_lock().references())
-        if (ref.role.starts_with("gravity/") || ref.role.starts_with("ephemeris/"))
+        if (ref.role.starts_with("gravity/") || ref.role.starts_with("ephemeris/") ||
+            ref.role.starts_with("space-weather/"))
             project.force_data.push_back(ref);
 }
 } // namespace

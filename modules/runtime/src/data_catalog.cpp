@@ -2,6 +2,7 @@
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
+#include <orbitforge/runtime/space_weather.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <stdexcept>
 #include <string_view>
@@ -554,6 +555,99 @@ DataCatalog::load_gravity(const std::string &selection) const {
     check(model->info().sha256 == it->info.sha256, "Gravity content SHA256 mismatch");
     return model;
 }
+CatalogSpaceWeather DataCatalog::install_space_weather(const std::filesystem::path &source,
+                                                       const std::string &selection,
+                                                       const std::string &url,
+                                                       DataAcquisition acquisition,
+                                                       const std::function<void()> &checkpoint) {
+    check(!selection.empty() && selection.size() <= 64 &&
+              std::all_of(selection.begin(), selection.end(),
+                          [](char c) {
+                              return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-';
+                          }),
+          "Invalid space-weather selection ID");
+    Stage stage(impl_->root / "staging");
+    const auto pending = stage.path / "space-weather.dat";
+    // Own a stable copy before validation; never parse a file that can be replaced by import.
+    std::ifstream input(source, std::ios::binary);
+    check(input.is_open(), "Cannot open space-weather source");
+    std::ofstream output(pending, std::ios::binary);
+    std::array<char, 65536> buffer{};
+    std::size_t total = 0;
+    while (input) {
+        if (checkpoint)
+            checkpoint();
+        input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        total += static_cast<std::size_t>(input.gcount());
+        check(total <= 32U * 1024 * 1024, "Space weather file exceeds 32 MiB");
+        output.write(buffer.data(), input.gcount());
+        check(static_cast<bool>(output), "Cannot stage space-weather file");
+    }
+    check(input.eof() && !input.bad(), "Cannot read space-weather source");
+    output.close();
+    check(static_cast<bool>(output), "Cannot close staged space-weather file");
+    const auto model = runtime::load_space_weather(pending, url, checkpoint);
+    const auto &info = model->info();
+    const auto target = impl_->root / "space-weather" / (info.sha256 + ".dat");
+    std::filesystem::create_directories(target.parent_path());
+    const auto acquired = std::chrono::duration_cast<std::chrono::seconds>(
+                              std::chrono::system_clock::now().time_since_epoch())
+                              .count();
+    const Json record{{"schema", 1},
+                      {"sha256", info.sha256},
+                      {"source_url", url},
+                      {"format", info.format},
+                      {"first", {info.first.year, info.first.month, info.first.day}},
+                      {"last", {info.last.year, info.last.month, info.last.day}},
+                      {"acquisition", static_cast<int>(acquisition)},
+                      {"acquired_at", acquired}};
+    std::lock_guard guard(impl_->mutex);
+    Transaction transaction(impl_->db);
+    if (checkpoint)
+        checkpoint();
+    if (std::filesystem::exists(target))
+        check(runtime::load_space_weather(target, url, checkpoint)->info().sha256 == info.sha256,
+              "Existing space-weather resource is damaged");
+    else
+        publish(pending, target);
+    set_setting("space-weather/" + selection, record.dump());
+    transaction.commit();
+    return {selection, info, target, acquisition, acquired};
+}
+std::vector<CatalogSpaceWeather> DataCatalog::weather_sources() const {
+    std::lock_guard guard(impl_->mutex);
+    Statement rows(impl_->db,
+                   "SELECT key,value FROM settings WHERE key LIKE 'space-weather/%' ORDER BY key");
+    std::vector<CatalogSpaceWeather> result;
+    while (rows.next()) {
+        const auto key = reinterpret_cast<const char *>(sqlite3_column_text(rows.value, 0));
+        const auto r =
+            Json::parse(reinterpret_cast<const char *>(sqlite3_column_text(rows.value, 1)));
+        check(r.at("schema") == 1 && hash_valid(r.at("sha256")), "Invalid space-weather receipt");
+        const auto date = [&](const char *field) {
+            const auto &d = r.at(field);
+            return core::UtcDateTime{d.at(0), d.at(1), d.at(2), 0, 0, 0, 0};
+        };
+        core::SpaceWeatherInfo info{r.at("sha256"), r.at("source_url"), r.at("format"),
+                                    date("first"), date("last")};
+        result.push_back({std::string(key).substr(14), info,
+                          impl_->root / "space-weather" / (info.sha256 + ".dat"),
+                          static_cast<DataAcquisition>(r.at("acquisition").get<int>()),
+                          r.at("acquired_at")});
+    }
+    return result;
+}
+std::shared_ptr<const core::SpaceWeather>
+DataCatalog::load_space_weather(const std::string &selection) const {
+    const auto models = weather_sources();
+    const auto it = std::find_if(models.begin(), models.end(),
+                                 [&](const auto &v) { return v.selection == selection; });
+    check(it != models.end(),
+          "Space weather model is not installed; download or import it in Data Center");
+    const auto model = runtime::load_space_weather(it->file, it->info.source_url);
+    check(model->info().sha256 == it->info.sha256, "Space weather content SHA256 mismatch");
+    return model;
+}
 void DataCatalog::activate_eop(const std::string &key) {
     std::lock_guard guard(impl_->mutex);
     Transaction transaction(impl_->db);
@@ -975,6 +1069,17 @@ CatalogEphemeris DataCatalog::install_de440s(const std::filesystem::path &, Data
 std::vector<CatalogEphemeris> DataCatalog::ephemerides() const { unavailable(); }
 std::shared_ptr<const core::IThirdBodyEphemeris>
 DataCatalog::load_ephemeris(const std::string &) const {
+    unavailable();
+}
+CatalogSpaceWeather DataCatalog::install_space_weather(const std::filesystem::path &,
+                                                       const std::string &, const std::string &,
+                                                       DataAcquisition,
+                                                       const std::function<void()> &) {
+    unavailable();
+}
+std::vector<CatalogSpaceWeather> DataCatalog::weather_sources() const { unavailable(); }
+std::shared_ptr<const core::SpaceWeather>
+DataCatalog::load_space_weather(const std::string &) const {
     unavailable();
 }
 CatalogGravity DataCatalog::install_gravity(const std::filesystem::path &, const std::string &,

@@ -45,6 +45,8 @@ QString product_name(DataProduct p) {
         return QStringLiteral("EGM96");
     case DataProduct::custom_gravity:
         return QStringLiteral("外部重力场");
+    case DataProduct::space_weather:
+        return QStringLiteral("空间天气 · CelesTrak");
     case DataProduct::de440s:
         return QStringLiteral("DE440s");
     }
@@ -329,6 +331,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         new QTreeWidgetItem(list, {QStringLiteral("太阳系星历\n第三体引力数据")});
     ephemeris_node->setSizeHint(0, QSize(0, 54));
     auto *de440s_node = add_source(DataProduct::de440s, ephemeris_node);
+    auto *weather_node = add_source(DataProduct::space_weather, nullptr);
     ephemeris_node->setExpanded(true);
     eop_node->setExpanded(true);
     list->setCurrentItem(eop_node);
@@ -705,13 +708,16 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
             limit_caption->setEnabled(limit > 0);
         }
         title->setText(product_name(item.product));
-        data_description->setText(is_gravity
-                                      ? QStringLiteral("地球静态球谐重力场 · HPOP / 机动滑行共用")
-                                  : is_ephemeris ? QStringLiteral("JPL 行星星历 · 太阳系第三体引力")
-                                  : is_time      ? QStringLiteral("UTC、TAI 与 TT 之间的时间转换")
-                                  : item.product == DataProduct::finals2000a
-                                      ? QStringLiteral("快速观测与预测 · 适用于近期和未来时段")
-                                      : QStringLiteral("综合参考序列 · 历史时段的默认首选"));
+        data_description->setText(
+            item.product == DataProduct::space_weather
+                ? QStringLiteral(
+                      "F10.7 / Kp / Ap · 原始记录范围；计算另检查模型滞后、历史窗口和缺值")
+            : is_gravity   ? QStringLiteral("地球静态球谐重力场 · HPOP / 机动滑行共用")
+            : is_ephemeris ? QStringLiteral("JPL 行星星历 · 太阳系第三体引力")
+            : is_time      ? QStringLiteral("UTC、TAI 与 TT 之间的时间转换")
+            : item.product == DataProduct::finals2000a
+                ? QStringLiteral("快速观测与预测 · 适用于近期和未来时段")
+                : QStringLiteral("综合参考序列 · 历史时段的默认首选"));
         state->setText(installation_text(item));
         state->setProperty("tone", item.installation == DataInstallation::bundled_sample ||
                                            item.installation == DataInstallation::missing
@@ -853,7 +859,9 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     QObject::connect(raw, &QPushButton::clicked, &dialog, [&] {
         const auto file = QFileDialog::getOpenFileName(
             &dialog, QStringLiteral("导入 %1 文件").arg(title->text()), {},
-            *selected() == DataProduct::de440s ? QStringLiteral("DE440s 星历 (de440s.bsp *.bsp)")
+            *selected() == DataProduct::space_weather
+                ? QStringLiteral("空间天气 (*.csv *.txt);;所有文件 (*)")
+            : *selected() == DataProduct::de440s ? QStringLiteral("DE440s 星历 (de440s.bsp *.bsp)")
             : gravity_product(*selected()) ? QStringLiteral("重力场 (*.gfc *.grv);;所有文件 (*)")
                                            : QStringLiteral("所有文件 (*)"));
         if (file.isEmpty())
@@ -911,7 +919,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         }
         const bool busy = catalog.downloading();
         for (auto *node : {finals_node, c04_node, utc_node, egm2008_node, egm96_node, custom_node,
-                           de440s_node}) {
+                           de440s_node, weather_node}) {
             const auto &entry =
                 inventory_item(static_cast<DataProduct>(node->data(0, Qt::UserRole).toInt()));
             const auto name = product_name(entry.product);
@@ -1035,8 +1043,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     timer.start(150);
     refresh();
     if (initial) {
-        for (auto *node :
-             {finals_node, c04_node, utc_node, egm2008_node, egm96_node, custom_node, de440s_node})
+        for (auto *node : {finals_node, c04_node, utc_node, egm2008_node, egm96_node, custom_node,
+                           de440s_node, weather_node})
             if (node->data(0, Qt::UserRole).toInt() == static_cast<int>(*initial)) {
                 list->setCurrentItem(node);
                 list->itemActivated(node, 0);
