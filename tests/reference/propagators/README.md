@@ -191,3 +191,5 @@ SHA-256 (raw .grv bytes; canonical LF reference output):
 - `space_weather_spline.txt`：固定 SciPy 1.16.3 自然样条的 112 节点、1112 次取样及原始 GMAT JR 的 66 个密度样例；生成器、范围与容限见[阻力验证协议](../../../docs/validation/atmospheric_drag_protocol.md)。
 
 - `space_weather_mean.txt`：SciPy 1.16.3 保持均值插值的 1314 个逐点值、218 个窗口积分及原始 GMAT JR 的 70 个密度样例；含磁暴、限幅、缺测与闰秒。LF SHA-256 `d85e283b597361fe3180c979fbfa373ba0e17322cf2e40d2da528ea28cb64ac1`；复现见[阻力验证协议](../../../docs/validation/atmospheric_drag_protocol.md)。
+
+- `weather_cssi.dat` / `weather_monthly.csv` / `weather_monthly.txt`：独立合成的 CSSI 月中和 CelesTrak 月初输入、1056 组 SciPy / NumPy 天气与历史取样、32 组原始 GMAT JR 密度；含中心 81 日均值、闰日/闰秒及来源强制规则。生成器 `tools/validation/monthly_weather_reference.py`；格式、散列、命令与容限见[阻力验证协议](../../../docs/validation/atmospheric_drag_protocol.md)。这些文件不是 STK 导出结果。

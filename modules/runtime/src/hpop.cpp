@@ -128,8 +128,10 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
                 algorithm += ";geomag-spline=natural-utc-midpoint-runs-v1;overshoot=error";
             algorithm +=
                 ";weather=file;boundary=utc-one-sided-v1;update=" +
-                std::to_string(static_cast<int>(d.geomagnetic_update)) +
-                ";source=" + std::to_string(static_cast<int>(d.geomagnetic_source)) +
+                std::to_string(static_cast<int>(d.geomagnetic_update)) + ";source=" +
+                std::to_string(static_cast<int>(environment.weather->info().cssi_predictions
+                                                    ? core::GeomagneticSource::ap
+                                                    : d.geomagnetic_source)) +
                 ";weather-data=" +
                 application::DataLock(
                     {space_weather_reference(d.weather_model, environment.weather->info())})

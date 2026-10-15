@@ -741,6 +741,7 @@ bool edit_hpop_settings(
                              options.drag.kp, 0, 9);
     auto *weather_file = new QComboBox;
     weather_file->setObjectName("hpopDragWeatherFile");
+    std::function<void()> refresh_weather_policy;
     const auto refresh_weather_files = [&] {
         const auto selected = weather_file->currentData().toString();
         const auto id = selected.isEmpty()
@@ -751,12 +752,17 @@ bool edit_hpop_settings(
         const QSignalBlocker blocker(weather_file);
         weather_file->clear();
         if (data)
-            for (const auto &entry : data->data().weather_sources())
+            for (const auto &entry : data->data().weather_sources()) {
                 weather_file->addItem(QString::fromStdString(entry.selection),
                                       QString::fromStdString(entry.selection));
+                weather_file->setItemData(weather_file->count() - 1, entry.info.cssi_predictions,
+                                          Qt::UserRole + 1);
+            }
         if (weather_file->findData(id) < 0)
             weather_file->addItem(id + QStringLiteral(" · 数据未就绪"), id);
         weather_file->setCurrentIndex(weather_file->findData(id));
+        if (refresh_weather_policy)
+            refresh_weather_policy();
     };
     refresh_weather_files();
     drag_weather->addRow(QStringLiteral("天气文件"), weather_file);
@@ -778,6 +784,15 @@ bool edit_hpop_settings(
     weather_source->addItems({QStringLiteral("Ap"), QStringLiteral("Kp")});
     weather_source->setCurrentIndex(static_cast<int>(options.drag.geomagnetic_source));
     drag_weather->addRow(QStringLiteral("地磁数据来源"), weather_source);
+    refresh_weather_policy = [&] {
+        const bool enabled = drag_use->isChecked() && drag_weather_source->currentIndex() == 1;
+        const bool ap_only = enabled && weather_file->currentData(Qt::UserRole + 1).toBool();
+        if (ap_only)
+            weather_source->setCurrentIndex(0);
+        weather_source->setEnabled(enabled && !ap_only);
+        weather_source->setToolTip(ap_only ? QStringLiteral("CSSI Predicts 使用名义月预报和 Ap。")
+                                           : QString{});
+    };
     auto *weather_manage = new QPushButton(QStringLiteral("管理空间天气…"));
     weather_manage->setObjectName("hpopDragManageWeather");
     weather_manage->setVisible(data != nullptr);
@@ -788,9 +803,9 @@ bool edit_hpop_settings(
         refresh_weather_files();
     });
     help(drag_weather,
-         QStringLiteral(
-             "手动模式使用常量。文件模式使用观测 F10.7、居中 81 日均值，"
-             "按 UTC 和模型滞后取样；NRLMSISE 三小时模式包含历史 Ap。缺值或覆盖不足时停止计算。"));
+         QStringLiteral("手动模式使用常量。文件模式使用观测 F10.7、居中 81 日均值，"
+                        "按 UTC 和模型滞后取样；月预报按节点插值，CSSI Predicts 使用名义值和 Ap。"
+                        "NRLMSISE 三小时模式包含历史 Ap。缺值或覆盖不足时停止计算。"));
     auto *drag_sun =
         section(drag_page, QStringLiteral("高度、太阳位置与计算数据"), "hpopDragSunSection");
     auto *drag_approximate = new QCheckBox(QStringLiteral("使用近似高度"));
@@ -858,6 +873,7 @@ bool edit_hpop_settings(
             input->setEnabled(enabled && file_weather);
             drag_weather->setRowVisible(input, file_weather);
         }
+        refresh_weather_policy();
         weather_manage->setEnabled(enabled && file_weather && data);
         drag_weather->setRowVisible(weather_manage, file_weather && data);
         const bool jr = density_model->currentIndex() == 0;
@@ -869,6 +885,7 @@ bool edit_hpop_settings(
     QObject::connect(density_model, &QComboBox::currentIndexChanged, &dialog, update_drag);
     QObject::connect(low_density, &QComboBox::currentIndexChanged, &dialog, update_drag);
     QObject::connect(drag_weather_source, &QComboBox::currentIndexChanged, &dialog, update_drag);
+    QObject::connect(weather_file, &QComboBox::currentIndexChanged, &dialog, update_drag);
     update_drag();
     auto *srp_page = page(force_tabs, QStringLiteral("太阳辐射压"), "hpopSrpPage");
     auto *srp_use = new QCheckBox(QStringLiteral("使用太阳辐射压 Use SRP"));

@@ -86,7 +86,7 @@ python tools/validation/fxm_weather_reference.py OUTPUT_DIR GMAT_DRIVER
 
 C++ 集成测试另外用真实 DE440 星历，将 FXM 路径与显式转换的 observed CSV 路径比较，覆盖 JR、NRL、低空模型准备、视太阳方向、项目保存/重开与数据变更确认；位置容限 `1e-5 m`、速度 `1e-8 m/s`。此项验证接口组合与转换路由，不是独立轨道真值。格式损坏、预测重叠/缺字段、错误 Kp/Q、取消导入、无距离或内部覆盖缺口均有失败路径测试。Python 安装后对同一参考执行 74 组取样并检查可选回调及目录重开。
 
-尚未获得 STK 本机输出，不能据此声称 FXM 改正与 STK 位级一致；FXM 的日预测没有补成三小时历史，CSSI Predicts 月预报仍另行实现。
+尚未获得 STK 本机输出，不能据此声称 FXM 改正与 STK 位级一致；FXM 的日预测没有补成三小时历史，CSSI Predicts 月预报采用下述独立契约与验证。
 
 
 ## 保持三小时均值的插值
@@ -102,3 +102,25 @@ python tools/validation/space_weather_mean_reference.py OUTPUT GMAT_DRIVER
 C++ 另测缺日期/月预报断档、窗口外拒绝、不可变数据、NRL 原生历史不变、有效计算身份及保存草稿。真实 DE440/EOP 场景对两种插值分别作 ±6 h RKF78 最大步长 60/7 s 收敛检查，位置/速度每分量容限 1 mm / 1e-6 m/s，并验证保存重开精确重现。此项是数值积分收敛，不是独立轨迹真值。Python 从 CSV 重建独立输入后复核全部 1314 点与 218 个积分，并验证高层设置保存；安装 SDK 与 Qt 窄窗/DPI、四项顺序、键盘切换、重开和取消同步验收。
 
 参考 SHA-256（LF）：`d85e283b597361fe3180c979fbfa373ba0e17322cf2e40d2da528ea28cb64ac1`。STK 公开约束已实现；缺少 STK 本机参考时，不能以这些独立算法对照宣称内部边界处理完全一致。
+
+## 月节点天气和 CSSI Predicts
+
+`tools/validation/monthly_weather_reference.py` 固定 NumPy 2.3.3 / SciPy 1.16.3，不导入 OrbitForge。它用 `interp1d` 计算月节点线性曲线、`numpy.convolve` 计算 81 日中心均值，独立组装七项历史，随后把预期天气交给原始 GMAT JR 适配器。时间节点以独立整数 UTC→TAI 映射构造；测试区间分别采用 36 / 37 s 偏移。复现命令：
+
+```text
+python tools/validation/monthly_weather_reference.py OUTPUT_DIR GMAT_DRIVER
+```
+
+输出 `weather_cssi.dat`、`weather_monthly.csv` 与 `weather_monthly.txt`。输入包括 18 个月中 CSSI 名义 F10.7 / Ap 节点，以及含观测末段和月初预报的 CelesTrak CSV；三小时预报槽保持为空，CSV 的 Ap / Kp 刻意独立。1056 组逐点参考覆盖两个文件、JR / NRL、四种更新、两种来源、2016 闰日/正闰秒、月节点前后 1 ns、滞后节点与观测到预报的连接。32 组 GMAT JR 密度覆盖 100、126、400、1000 km。
+
+通量及 Ap / 历史绝对容限 `3e-10`，Kp `3e-11`，计入独立插值坐标和 81 次求和的舍入差；GMAT 相对密度容限 `2e-10`。这验证公开计算约定的实现，不代表已有 STK 输出对照。CSSI 第 15 日、Ap 来源及 F10.7 20:00 线性插值有官方依据，直接月预报的中心平均和边界细节仍待 STK 验收。
+
+C++ 另测损坏头部/列数/数量/顺序/非有限数、缺月、指数或均值缺测、中心平均的前后 40 日余量、最后地磁节点后 1 ns 的整段拒绝、原文字节/取消导入与目录重开。真实 DE440/EOP 场景对两个文件及两个密度模型作 ±6 h RKF78 最大步长 60/7 s 对照，位置/速度每分量容限 `1 mm / 1e-6 m/s`；再验证项目保存重开、天气更换确认及旧分析不变。此项是步长收敛和数据路由检查，不是独立轨迹真值。
+
+安装后的 Python 复核全部 1056 组并检查目录元数据及失败后保留原数据；安装 SDK 用常值 CSSI 验证公共取样入口及平均值。Qt 检查切换 CSSI 后 Ap 自动选中且不可编辑、切回普通文件可选择 Kp、取消与重开保留已应用状态；真实 Windows 窗口检查 430/720 逻辑像素及 DPR 1/1.5。
+
+固定文件 SHA-256（原始 `.dat`；CSV/TXT 为 LF）：
+
+- `weather_cssi.dat`: `d3c3ab1ee4654c2a5e14a7020d6d30b2f0d1247c7fc0b6fbd188b6ad598a99ea`
+- `weather_monthly.csv`: `cd0add4a31dea4e1c397af6849d10b871141c02a6121f13ad7861049fb15a890`
+- `weather_monthly.txt`: `ca82c8aa82186544d85580e7c3944de7e646dcbf7827685125f71ec8ae3006e3`

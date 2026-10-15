@@ -276,3 +276,51 @@ class MeanInterpolationTests(unittest.TestCase):
             self.assertEqual(of.Project.open(path).objects[sat.id].orbit.hpop.drag.geomagnetic_update,'three_hourly_interpolated')
         with self.assertRaises(ValueError):
             of.orbits.DragSettings(geomagnetic_update='unknown')
+
+
+class MonthlyWeatherTests(unittest.TestCase):
+    @unittest.skipUnless(of.time_frames_available(), 'requires ERFA')
+    def test_monthly_sampling_and_history_match_independent_reference(self):
+        root=ROOT/'tests/reference/propagators'
+        weather=[of.load_space_weather(root/'weather_cssi.dat'),of.load_space_weather(root/'weather_monthly.csv')]
+        self.assertTrue(weather[0].info.cssi_predictions)
+        self.assertFalse(weather[1].info.cssi_predictions)
+        with self.assertRaises(AttributeError): weather[0].info.cssi_predictions=False
+        clock=of.make_builtin_time_provider();count=0
+        updates=(of.GeomagneticUpdate.DAILY,of.GeomagneticUpdate.THREE_HOURLY,
+                 of.GeomagneticUpdate.THREE_HOURLY_INTERPOLATED,of.GeomagneticUpdate.THREE_HOURLY_CUBIC_SPLINE)
+        for line in (root/'weather_monthly.txt').read_text().splitlines():
+            if not line.startswith('S '):continue
+            row=line.split();dataset,model,update,source,ns=map(int,row[1:6])
+            sample=weather[dataset].sample(of.Epoch(ns),clock,
+                of.AtmosphereModel.JACCHIA_ROBERTS if model==0 else of.AtmosphereModel.NRLMSISE00,
+                updates[update],of.GeomagneticSource.AP if source==0 else of.GeomagneticSource.KP)
+            for actual,expected in zip((sample.f107,sample.f107_average,sample.kp,sample.ap),map(float,row[6:10])):
+                self.assertAlmostEqual(actual,expected,delta=3e-10)
+            if int(row[10]):
+                for actual,expected in zip(sample.ap_history,map(float,row[11:])):
+                    self.assertAlmostEqual(actual,expected,delta=3e-10)
+            else:self.assertIsNone(sample.ap_history)
+            count+=1
+        self.assertEqual(count,1056)
+        boundary=clock.from_utc(of.UtcDateTime(2015,12,25,20,0,0))
+        with self.assertRaises(of.SpaceWeatherCoverageError):
+            weather[0].sample(of.Epoch(boundary.tai_nanoseconds-1),clock,of.AtmosphereModel.NRLMSISE00,
+                              of.GeomagneticUpdate.DAILY,of.GeomagneticSource.AP)
+
+    @unittest.skipUnless(of.data_catalog_available(), 'requires data catalog')
+    def test_cssi_catalog_reopens_metadata_and_keeps_raw_bytes(self):
+        fixture=ROOT/'tests/reference/propagators/weather_cssi.dat'
+        with tempfile.TemporaryDirectory() as folder:
+            catalog=of.DataCatalog(Path(folder)/'catalog')
+            try:
+                installed=catalog.install_space_weather(fixture,'cssi')
+                self.assertTrue(installed.info.cssi_predictions)
+                self.assertEqual(Path(installed.file).read_bytes(),fixture.read_bytes())
+                reopened=of.DataCatalog(Path(folder)/'catalog')
+                try:self.assertTrue(reopened.weather_sources[0].info.cssi_predictions)
+                finally:del reopened
+                broken=Path(folder)/'bad.dat';broken.write_text('2015 11 2017 4 2015 10 18\n')
+                with self.assertRaises(RuntimeError):catalog.install_space_weather(broken,'cssi')
+                self.assertEqual(catalog.weather_sources[0].info.sha256,installed.info.sha256)
+            finally:del catalog

@@ -60,6 +60,7 @@ void bind_data_catalog(py::module_ &module) {
         .def_readonly("source_url", &core::SpaceWeatherInfo::source_url)
         .def_readonly("format", &core::SpaceWeatherInfo::format)
         .def_readonly("solar_flux_adjusted", &core::SpaceWeatherInfo::solar_flux_adjusted)
+        .def_readonly("cssi_predictions", &core::SpaceWeatherInfo::cssi_predictions)
         .def_readonly("first", &core::SpaceWeatherInfo::first)
         .def_readonly("last", &core::SpaceWeatherInfo::last);
     py::class_<core::SpaceWeather, std::shared_ptr<core::SpaceWeather>>(module, "SpaceWeather")

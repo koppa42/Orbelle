@@ -5,7 +5,7 @@
 #include <orbitforge/core/propagation/space_weather.hpp>
 
 namespace orbitforge::runtime {
-// CelesTrak CSV / fixed-width and STK FXM originals. Reads and hashes all bytes;
+// CelesTrak CSV / fixed-width, STK FXM and CSSI Predicts originals. Hashes all bytes;
 // owns parsed values and quality flags. No implicit download or gap filling.
 [[nodiscard]] std::shared_ptr<const core::SpaceWeather>
 load_space_weather(const std::filesystem::path &file, const std::string &source_url = {},

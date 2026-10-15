@@ -20,3 +20,6 @@
 /tests/reference/propagators/*.grv -text
 
 /tests/reference/propagators/*.fxm -text
+
+/tests/reference/propagators/weather_cssi.dat -text
+/tests/reference/propagators/weather_monthly.csv text eol=lf

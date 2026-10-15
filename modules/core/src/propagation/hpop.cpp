@@ -62,7 +62,7 @@ class Hpop final : public IStateProvider {
             throw PropagationError("HPOP stage epoch exceeds the representable time range");
         return Epoch{start + offset};
     }
-    // File geomagnetism is piecewise constant in UTC. Stop at every update,
+    // File geomagnetism can jump at UTC boundaries. Stop at every update,
     // including the separately lagged JR and low-altitude MSIS windows.
     std::optional<double> weather_boundary(double t, double end) const {
         const auto &d = options_.drag;

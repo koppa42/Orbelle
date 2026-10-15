@@ -1,6 +1,8 @@
 #include <fstream>
 #include <iostream>
 #include <orbitforge/orbitforge.hpp>
+#include <orbitforge/runtime/space_weather.hpp>
+#include <orbitforge/runtime/time_frames.hpp>
 
 namespace of = orbitforge;
 using namespace std::chrono_literals;
@@ -43,6 +45,23 @@ int main(int argc, char **argv) try {
     if (relativity.schwarzschild_mps2[0] <= 0 || relativity.lense_thirring_mps2[0] <= 0 ||
         relativity.de_sitter_mps2[0] >= 0 || relativity.acceleration_mps2[0] <= 0)
         return 13;
+    if (of::runtime::time_frames_available()) {
+        const auto file = path.parent_path() / "sdk-cssi.dat";
+        std::ofstream output(file);
+        output << "2000 1 2000 6 1999 12 6\n";
+        for (int month = 1; month <= 6; ++month)
+            output << "2000 " << month << " 170 150 20 15\n";
+        output.close();
+        const auto weather = of::runtime::load_space_weather(file);
+        const auto time = of::runtime::make_builtin_time_provider();
+        const auto at = time->from_utc({2000, 3, 15, 20, 0, 0, 0});
+        const auto sample =
+            weather->sample(at, *time, of::core::AtmosphereModel::nrlmsise00,
+                            of::core::GeomagneticUpdate::daily, of::core::GeomagneticSource::kp);
+        if (!weather->info().cssi_predictions || sample.f107 != 150 || sample.f107_average != 150 ||
+            sample.ap != 15)
+            return 38;
+    }
     of::OrbitInput numerical;
     numerical.propagator = of::OrbitPropagator::hpop;
     numerical.hpop.gravity_degree = numerical.hpop.gravity_order = 0;

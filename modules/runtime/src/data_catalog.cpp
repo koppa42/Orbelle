@@ -680,6 +680,7 @@ std::vector<CatalogSpaceWeather> DataCatalog::weather_sources() const {
         // The file format determines the flux convention; keep receipt metadata
         // consistent with load_space_weather without a redundant persisted flag.
         info.solar_flux_adjusted = info.format == "stk-flux-geomag";
+        info.cssi_predictions = info.format == "cssi-predicts";
         result.push_back({std::string(key).substr(14), info,
                           impl_->root / "space-weather" / (info.sha256 + ".dat"),
                           static_cast<DataAcquisition>(r.at("acquisition").get<int>()),

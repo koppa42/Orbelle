@@ -105,6 +105,10 @@ SpaceWeather::SpaceWeather(SpaceWeatherInfo info, std::vector<SpaceWeatherDay> d
             (!day_numbers_.empty() && n <= day_numbers_.back()))
             throw std::invalid_argument("Space weather dates must be unique, ordered UTC days");
         day_numbers_.push_back(n);
+        has_monthly_ = has_monthly_ || d.quality == WeatherQuality::monthly_prediction;
+        if (info_.cssi_predictions &&
+            (d.quality != WeatherQuality::monthly_prediction || d.date.day != 15))
+            throw std::invalid_argument("CSSI Predicts requires monthly nodes on the 15th");
         for (const auto v : d.kp)
             check_value(v, 0, 9, "Kp");
         for (const auto v : d.ap)
@@ -205,11 +209,86 @@ const SpaceWeatherDay &SpaceWeather::day(int number) const {
                                         " through " + date_text(day_numbers_.back()) +
                                         "; import data including model lags/history");
     const auto &record = days_[static_cast<std::size_t>(it - day_numbers_.begin())];
-    if (record.quality == WeatherQuality::monthly_prediction)
-        throw SpaceWeatherCoverageError("Monthly predictions require a monthly weather model; "
-                                        "daily/three-hour sampling is unavailable on " +
-                                        date_text(number));
     return record;
+}
+std::optional<SpaceWeather::MonthlyBracket>
+SpaceWeather::monthly_bracket(Epoch at, int hour, const ITimeProvider &time) const {
+    if (!has_monthly_)
+        return {};
+    const auto utc = time.to_utc(at);
+    const int date = day_number(utc) - (utc.hour < hour ? 1 : 0);
+    const auto after = std::upper_bound(day_numbers_.begin(), day_numbers_.end(), date);
+    if (after == day_numbers_.begin())
+        return {};
+    const auto left = static_cast<std::size_t>(after - day_numbers_.begin() - 1);
+    const bool monthly = days_[left].quality == WeatherQuality::monthly_prediction;
+    if (!monthly && (after == day_numbers_.end() ||
+                     days_[left + 1].quality != WeatherQuality::monthly_prediction))
+        return {};
+    const auto first = time.from_utc(utc_date(day_numbers_[left], hour));
+    if (at == first)
+        return monthly ? std::optional{MonthlyBracket{left, left, 0}} : std::nullopt;
+    if (after == day_numbers_.end()) {
+        if (monthly)
+            throw SpaceWeatherCoverageError(
+                "Monthly space weather cannot extrapolate after its last node");
+        return {};
+    }
+    const auto right = left + 1;
+    const bool next_monthly = days_[right].quality == WeatherQuality::monthly_prediction;
+    if (!monthly && !next_monthly)
+        return {};
+    const auto &a = days_[left].date;
+    const auto &b = days_[right].date;
+    const int months = (b.year - a.year) * 12 + b.month - a.month;
+    if (!next_monthly || months != 1 || (monthly && a.day != b.day))
+        throw SpaceWeatherCoverageError(
+            "Monthly space weather has a missing month or inconsistent node dates");
+    const auto last = time.from_utc(utc_date(day_numbers_[right], hour));
+    return MonthlyBracket{left, right, at.seconds_since(first) / last.seconds_since(first)};
+}
+std::optional<double> SpaceWeather::monthly_geomagnetic(Epoch at, const ITimeProvider &time,
+                                                        GeomagneticSource source) const {
+    const auto bracket = monthly_bracket(at, 0, time);
+    if (!bracket)
+        return {};
+    const auto value = [&](std::size_t i) {
+        const auto &d = days_[i];
+        return required(source == GeomagneticSource::ap ? d.daily_ap : d.daily_kp, day_numbers_[i],
+                        "monthly/daily forecast geomagnetic value");
+    };
+    const double first = value(bracket->left);
+    return first + bracket->fraction * (value(bracket->right) - first);
+}
+double SpaceWeather::sample_flux(Epoch at, bool average, const ITimeProvider &time,
+                                 const std::function<double(Epoch)> &sun_distance_m) const {
+    const auto [d, interpolate] = flux_node(time.to_utc(at));
+    if (average && info_.cssi_predictions) {
+        const auto centered = [&](int date) {
+            double total = 0;
+            for (int offset = -40; offset <= 40; ++offset)
+                total += sample_flux(time.from_utc(utc_date(date + offset, 20)), false, time,
+                                     sun_distance_m);
+            return total / 81;
+        };
+        const double first = centered(d);
+        if (!interpolate)
+            return first;
+        const auto a = time.from_utc(utc_date(d, 20)), b = time.from_utc(utc_date(d + 1, 20));
+        return first + at.seconds_since(a) / b.seconds_since(a) * (centered(d + 1) - first);
+    }
+    if (const auto bracket = monthly_bracket(at, 20, time)) {
+        const double first = flux_value(day_numbers_[bracket->left], average, time, sun_distance_m);
+        return first + bracket->fraction * (flux_value(day_numbers_[bracket->right], average, time,
+                                                       sun_distance_m) -
+                                            first);
+    }
+    const double first = flux_value(d, average, time, sun_distance_m);
+    if (!interpolate)
+        return first;
+    const auto a = time.from_utc(utc_date(d, 20)), b = time.from_utc(utc_date(d + 1, 20));
+    return first + at.seconds_since(a) / b.seconds_since(a) *
+                       (flux_value(d + 1, average, time, sun_distance_m) - first);
 }
 SpaceWeather::SplineInterval SpaceWeather::mean_interval(int node, const ITimeProvider &time,
                                                          GeomagneticSource source) const {
@@ -333,32 +412,33 @@ SpaceWeatherSample SpaceWeather::sample(Epoch at, const ITimeProvider &time, Atm
                                         const std::function<double(Epoch)> &sun_distance_m) const {
     choices(model, update, source);
     const bool jr = model == AtmosphereModel::jacchia_roberts;
+    if (info_.cssi_predictions)
+        source = GeomagneticSource::ap;
     const auto flux = [&](Epoch epoch, bool average) {
-        const auto [d, interpolate] = flux_node(time.to_utc(epoch));
-        const auto field = [&](int number) {
-            return flux_value(number, average, time, sun_distance_m);
-        };
-        const double left = field(d);
-        if (!interpolate)
-            return left;
-        const auto a = time.from_utc(utc_date(d, 20)), b = time.from_utc(utc_date(d + 1, 20));
-        return left + epoch.seconds_since(a) / b.seconds_since(a) * (field(d + 1) - left);
+        return sample_flux(epoch, average, time, sun_distance_m);
     };
     const auto utc = time.to_utc(lagged(at, jr ? 24120 : 0));
     const int d = day_number(utc);
-    const auto &record = day(d);
     const bool from_ap = source == GeomagneticSource::ap;
     const auto daily = [&] {
+        if (auto value = monthly_geomagnetic(lagged(at, jr ? 24120 : 0), time, source))
+            return *value;
+        const auto &record = day(d);
         return required(from_ap ? record.daily_ap : record.daily_kp, d,
                         from_ap ? "daily Ap" : "daily Kp");
     };
     const auto hourly = [&](int earlier) {
+        if (auto value =
+                monthly_geomagnetic(lagged(at, (jr ? 24120 : 0) + earlier * 10800), time, source))
+            return *value;
         const auto s = slot(utc, earlier);
         const auto &r = day(s.day);
         return required(from_ap ? r.ap[s.index] : r.kp[s.index], s.day,
                         from_ap ? "three-hour Ap" : "three-hour Kp");
     };
-    const double geomag = update == GeomagneticUpdate::daily ? daily()
+    const auto forecast = monthly_geomagnetic(lagged(at, jr ? 24120 : 0), time, source);
+    const double geomag = forecast                             ? *forecast
+                          : update == GeomagneticUpdate::daily ? daily()
                           : jr && update == GeomagneticUpdate::three_hourly_interpolated
                               ? mean_sample(lagged(at, 24120), time, source)
                           : jr && update == GeomagneticUpdate::three_hourly_cubic_spline
@@ -388,13 +468,25 @@ void SpaceWeather::validate_interval(Epoch first, Epoch last, const ITimeProvide
     choices(model, update, source);
     if (first.tai_nanoseconds() > last.tai_nanoseconds())
         throw std::invalid_argument("Space weather interval must be ordered");
+    // Monthly geomagnetic coverage ends at the exact final midnight node,
+    // potentially before the final 20:00 flux node. Check the requested ends
+    // themselves, in addition to the interior daily/three-hour boundaries.
+    (void)sample(first, time, model, update, source, sun_distance_m);
+    if (first == last)
+        return;
+    (void)sample(last, time, model, update, source, sun_distance_m);
     const bool jr = model == AtmosphereModel::jacchia_roberts;
+    if (info_.cssi_predictions)
+        source = GeomagneticSource::ap;
     const auto flux = [&](int lag, bool average) {
-        const auto begin = flux_node(time.to_utc(lagged(first, lag)));
-        const auto end = flux_node(time.to_utc(lagged(last, lag)));
-        for (int d = begin.first; d <= end.first + (end.second ? 1 : 0); ++d) {
-            (void)flux_value(d, average, time, sun_distance_m);
-            (void)time.from_utc(utc_date(d, 20));
+        const auto begin = lagged(first, lag), end = lagged(last, lag);
+        (void)sample_flux(begin, average, time, sun_distance_m);
+        (void)sample_flux(end, average, time, sun_distance_m);
+        for (int d = day_number(time.to_utc(begin)); d <= day_number(time.to_utc(end)); ++d) {
+            const auto node = time.from_utc(utc_date(d, 20));
+            if (node.tai_nanoseconds() >= begin.tai_nanoseconds() &&
+                node.tai_nanoseconds() <= end.tai_nanoseconds())
+                (void)sample_flux(node, average, time, sun_distance_m);
         }
     };
     flux(86400, false);
@@ -404,15 +496,33 @@ void SpaceWeather::validate_interval(Epoch first, Epoch last, const ITimeProvide
     const bool ap = source == GeomagneticSource::ap;
     if (update == GeomagneticUpdate::daily || !jr)
         for (int d = day_number(a); d <= day_number(b); ++d) {
+            const Epoch at{std::max(lagged(first, jr ? 24120 : 0).tai_nanoseconds(),
+                                    time.from_utc(utc_date(d)).tai_nanoseconds())};
+            if (monthly_geomagnetic(at, time, source))
+                continue;
             const auto &r = day(d);
             (void)required(ap ? r.daily_ap : r.daily_kp, d, ap ? "daily Ap" : "daily Kp");
         }
-    if (jr && update == GeomagneticUpdate::three_hourly_cubic_spline)
-        validate_spline(lagged(first, 24120), lagged(last, 24120), time, source);
-    else if (update != GeomagneticUpdate::daily) {
+    if (update != GeomagneticUpdate::daily) {
         const auto start = slot(a, jr ? 0 : 19), stop = slot(b);
         for (int n = start.day * 8 + start.index; n <= stop.day * 8 + stop.index; ++n) {
             const int d = n >= 0 ? n / 8 : (n - 7) / 8, i = n - d * 8;
+            const auto node = time.from_utc(slot_utc(n));
+            if (monthly_geomagnetic(node, time, source))
+                continue;
+            if (jr && update == GeomagneticUpdate::three_hourly_cubic_spline) {
+                const Epoch begin{
+                    std::max(lagged(first, 24120).tai_nanoseconds(), node.tai_nanoseconds())};
+                const Epoch end{std::min(lagged(last, 24120).tai_nanoseconds(),
+                                         time.from_utc(slot_utc(n + 1)).tai_nanoseconds())};
+                if (begin.tai_nanoseconds() < end.tai_nanoseconds()) {
+                    const Epoch middle{begin.tai_nanoseconds() +
+                                       (end.tai_nanoseconds() - begin.tai_nanoseconds()) / 2};
+                    if (!monthly_geomagnetic(middle, time, source))
+                        validate_spline(begin, end, time, source);
+                }
+                continue;
+            }
             const auto &r = day(d);
             (void)required(ap ? r.ap[i] : r.kp[i], d, ap ? "three-hour Ap" : "three-hour Kp");
             if (jr && update == GeomagneticUpdate::three_hourly_interpolated)

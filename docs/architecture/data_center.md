@@ -182,9 +182,9 @@ project.earth_orientation = limited.data_info
 
 ## 空间天气
 
-空间天气单列显示，下载源为 [CelesTrak SW-All.csv](https://celestrak.org/SpaceData/SW-All.csv)，可导入 CSV 或定宽 SpaceWeather 原文。文件上限 32 MiB，完整解析及哈希后原子发布到 `space-weather/<sha256>.dat`；失败或取消保留当前选择。目录收据记录来源、格式、原始首末日、获取方式及时间，获取时间不参与计算身份。
+空间天气单列显示，下载源为 [CelesTrak SW-All.csv](https://celestrak.org/SpaceData/SW-All.csv)，可导入 CSV、定宽 SpaceWeather、STK FXM 或 CSSI Predicts `.dat` 原文。文件上限 32 MiB，完整解析及哈希后原子发布到 `space-weather/<sha256>.dat`；失败或取消保留当前选择。目录收据记录来源、格式、原始首末日、获取方式及时间，获取时间不参与计算身份。
 
-HPOP 文件模式在准备时捕获资源，后续更新不修改现有分析、报告和轨迹。重新准备时比较 `space-weather/<selection>` 数据引用，变化需沿用既有确认流程。日/三小时模式的可用范围还受模型滞后、历史 Ap、缺值及 UTC 数据约束；界面原始记录日期不表示整段可计算。计算规则见[阻力](atmospheric_drag.md)。
+HPOP 文件模式在准备时捕获资源，后续更新不修改现有分析、报告和轨迹。重新准备时比较 `space-weather/<selection>` 数据引用，变化需沿用既有确认流程。日/三小时及月预报模式的可用范围还受模型滞后、历史 Ap、CSSI 中心平均所需前后各 40 日、缺值及 UTC 数据约束；界面原始记录日期不表示整段可计算。计算规则见[阻力](atmospheric_drag.md)。
 
 
 ## 海潮模型

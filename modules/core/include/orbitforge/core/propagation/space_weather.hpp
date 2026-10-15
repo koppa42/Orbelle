@@ -33,6 +33,7 @@ struct SpaceWeatherInfo {
     std::string sha256, source_url, format;
     UtcDateTime first{}, last{}; // Inclusive raw record dates, not propagation coverage.
     bool solar_flux_adjusted = false; // FXM: use 1-AU fields and an explicit Sun distance.
+    bool cssi_predictions = false;    // Nominal monthly .dat; Ap only, derive centered 81-day flux.
 };
 struct SpaceWeatherSample {
     double f107, f107_average, kp, ap;
@@ -53,6 +54,12 @@ class SpaceWeather {
     // 86400 s for both models. Average flux lag: JR 86400 s, NRL 0 s.
     // Geomagnetic lag: JR 24120 s, NRL 0 s. NRL three-hour mode assembles the
     // native seven-value Ap history; JR uses the selected scalar Kp / converted Ap.
+    // Monthly predictions interpolate between adjacent calendar months: flux
+    // at 20:00 UTC, geomagnetism at 00:00 UTC, with elapsed-TAI fractions.
+    // CSSI Predicts uses nominal flux/Ap on day 15 and always selects Ap;
+    // its average flux is the centered mean of 81 daily 20:00 UTC samples.
+    // Forecast histories sample the continuous monthly curve at the required
+    // lags; raw observed three-hour values are not synthesized or overwritten.
     [[nodiscard]] SpaceWeatherSample
     sample(Epoch at, const ITimeProvider &time, AtmosphereModel model, GeomagneticUpdate update,
            GeomagneticSource source, const std::function<double(Epoch)> &sun_distance_m = {}) const;
@@ -64,7 +71,7 @@ class SpaceWeather {
     // knots at 01:30, 04:30, ..., 22:30 UTC. Inter-node fractions use elapsed
     // TAI seconds, including leap seconds. Interpolate the selected Ap/Kp before
     // conversion; reject overshoot outside its physical range. NRL keeps its
-    // native un-interpolated seven-value history for all three-hour choices.
+    // native un-interpolated observed history for all three-hour choices.
     // Mean-preserving interpolation: natural cubic primitive differentiated to
     // quadratic UTC-bin profiles, scaled about each cell mean to bound Ap/Kp.
     // Each actual UTC-bin duration (including leap seconds) retains its mean.
@@ -80,6 +87,7 @@ class SpaceWeather {
     SpaceWeatherInfo info_;
     std::vector<SpaceWeatherDay> days_;
     std::vector<int> day_numbers_;
+    bool has_monthly_ = false;
     // Second derivatives in the dimensionless, uniformly spaced UTC-slot coordinate.
     // Missing values/monthly predictions split runs; no spline crosses a gap.
     std::array<std::vector<double>, 2> spline_second_;
@@ -100,6 +108,16 @@ class SpaceWeather {
                                        GeomagneticSource source) const;
     void validate_spline(Epoch first, Epoch last, const ITimeProvider &time,
                          GeomagneticSource source) const;
+    struct MonthlyBracket {
+        std::size_t left, right;
+        double fraction;
+    };
+    [[nodiscard]] std::optional<MonthlyBracket> monthly_bracket(Epoch at, int hour,
+                                                                const ITimeProvider &time) const;
+    [[nodiscard]] std::optional<double> monthly_geomagnetic(Epoch at, const ITimeProvider &time,
+                                                            GeomagneticSource source) const;
+    [[nodiscard]] double sample_flux(Epoch at, bool average, const ITimeProvider &time,
+                                     const std::function<double(Epoch)> &sun_distance_m) const;
     [[nodiscard]] const SpaceWeatherDay &day(int number) const;
     [[nodiscard]] double flux_value(int number, bool average, const ITimeProvider &time,
                                     const std::function<double(Epoch)> &sun_distance_m) const;

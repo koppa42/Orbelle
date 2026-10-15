@@ -53,6 +53,47 @@ std::vector<std::string_view> csv(std::string_view line) {
         line.remove_prefix(comma + 1);
     }
 }
+std::vector<std::string> words(std::string_view line, std::size_t count) {
+    std::istringstream input{std::string(line)};
+    std::vector<std::string> result;
+    std::string word;
+    while (input >> word)
+        result.push_back(word);
+    require(result.size() == count, "incorrect CSSI Predicts column count");
+    return result;
+}
+void cssi_month(int year, int month) {
+    require(year >= 1600 && year <= 2600 && month >= 1 && month <= 12,
+            "invalid CSSI Predicts year/month");
+}
+std::array<int, 7> cssi_header_values(std::string_view line) {
+    const auto values = words(line, 7);
+    std::array<int, 7> result;
+    for (std::size_t i = 0; i < result.size(); ++i)
+        result[i] = number<int>(values[i]);
+    for (int i = 0; i < 6; i += 2)
+        cssi_month(result[i], result[i + 1]);
+    require(result[6] >= 1 && result[6] <= 12012 &&
+                result[0] * 12 + result[1] <= result[2] * 12 + result[3],
+            "invalid CSSI Predicts span/count");
+    return result;
+}
+core::SpaceWeatherDay cssi_day(std::string_view line) {
+    const auto values = words(line, 6);
+    const int year = number<int>(values[0]), month = number<int>(values[1]);
+    cssi_month(year, month);
+    for (std::size_t i = 2; i < 6; ++i) {
+        const double value = number<double>(values[i]);
+        require((i < 4 ? value > 0 : value >= 0) && value <= (i < 4 ? 1000 : 400),
+                "CSSI Predicts flux/Ap outside its valid range");
+    }
+    core::SpaceWeatherDay result;
+    result.date = {year, month, 15, 0, 0, 0, 0};
+    result.quality = core::WeatherQuality::monthly_prediction;
+    result.f107_observed = number<double>(values[3]);
+    result.daily_ap = number<double>(values[5]);
+    return result;
+}
 constexpr std::string_view header =
     "DATE,BSRN,ND,KP1,KP2,KP3,KP4,KP5,KP6,KP7,KP8,KP_SUM,AP1,AP2,AP3,AP4,AP5,AP6,AP7,AP8,"
     "AP_AVG,CP,C9,ISN,F10.7_OBS,F10.7_ADJ,F10.7_DATA_TYPE,F10.7_OBS_CENTER81,"
@@ -193,6 +234,7 @@ load_space_weather(const std::filesystem::path &file, const std::string &url,
     std::vector<core::SpaceWeatherDay> days;
     std::map<std::string, std::size_t> declared, observed;
     bool csv_format = false, fxm_format = false, identified = false;
+    std::optional<std::array<int, 7>> cssi_header;
     constexpr std::array<std::string_view, 3> fxm_sections{"OBSERVED", "F10_PREDICT", "AP_PREDICT"};
     std::size_t fxm_section = 0;
     int fxm_last_date = 0;
@@ -211,6 +253,13 @@ load_space_weather(const std::filesystem::path &file, const std::string &url,
             continue;
         try {
             if (!identified) {
+                if (text.front() >= '0' && text.front() <= '9') {
+                    cssi_header = cssi_header_values(text);
+                    info.format = "cssi-predicts";
+                    info.cssi_predictions = true;
+                    identified = true;
+                    continue;
+                }
                 require(text == header || text == "DATATYPE CssiSpaceWeather" ||
                             text == "BEGIN OBSERVED",
                         "unknown format/header");
@@ -223,6 +272,10 @@ load_space_weather(const std::filesystem::path &file, const std::string &url,
                 identified = true;
                 if (fxm_format)
                     section = "OBSERVED";
+                continue;
+            }
+            if (cssi_header) {
+                days.push_back(cssi_day(text));
                 continue;
             }
             if (fxm_format) {
@@ -294,6 +347,14 @@ load_space_weather(const std::filesystem::path &file, const std::string &url,
                                      e.what());
         }
     }
+    if (cssi_header) {
+        const auto &h = *cssi_header;
+        require(days.size() == static_cast<std::size_t>(h[6]),
+                "CSSI Predicts record count mismatch");
+        require(days.front().date.year == h[0] && days.front().date.month == h[1] &&
+                    days.back().date.year == h[2] && days.back().date.month == h[3],
+                "CSSI Predicts header span does not match the records");
+    }
     if (fxm_format) {
         require(fxm_section == fxm_sections.size() && section.empty(), "incomplete FXM sections");
         for (auto &[key, d] : predictions)
@@ -310,10 +371,11 @@ load_space_weather(const std::filesystem::path &file, const std::string &url,
 }
 application::DataReference space_weather_reference(const std::string &selection,
                                                    const core::SpaceWeatherInfo &info) {
-    const std::string version =
-        info.solar_flux_adjusted
-            ? "spaceweather-utc20-linear-jr-msis-lags-v1;flux=adjusted-au-geometric-utc20-v1"
-            : "spaceweather-utc20-linear-jr-msis-lags-v1";
+    std::string version = "spaceweather-utc20-linear-jr-msis-lags-monthly-linear-v2";
+    if (info.solar_flux_adjusted)
+        version += ";flux=adjusted-au-geometric-utc20-v1";
+    if (info.cssi_predictions)
+        version += ";cssi=nominal-ap-only;average=centered-81-utc-days-v1";
     return {"space-weather/" + selection, "spaceweather-" + info.sha256, info.sha256, version,
             picosha2::hash256_hex_string(version)};
 }

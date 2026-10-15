@@ -43,6 +43,7 @@
 #include <QToolButton>
 #include <QTreeWidget>
 #include <cmath>
+#include <fstream>
 #include <gtest/gtest.h>
 #include <iostream>
 #include <numbers>
@@ -2015,6 +2016,10 @@ TEST_F(QuantityTest, HpopWeatherFileSwitchesFieldsRetainsDraftsAndReopens) {
         "150,150,150,150\n");
     file.close();
     catalog.data().install_space_weather(root / "weather.csv");
+    std::ofstream cssi(root / "cssi.dat");
+    cssi << "2000 1 2000 2 1999 12 2\n2000 1 170 150 20 15\n2000 2 180 160 22 16\n";
+    cssi.close();
+    catalog.data().install_space_weather(root / "cssi.dat", "cssi");
     core::HpopOptions options;
     runtime::CatalogEphemeris entry;
     entry.selection = "de440s";
@@ -2046,21 +2051,27 @@ TEST_F(QuantityTest, HpopWeatherFileSwitchesFieldsRetainsDraftsAndReopens) {
         QApplication::sendEvent(update, &previous);
         EXPECT_EQ(update->currentIndex(), 2);
         EXPECT_TRUE(update->currentText().contains("Interp"));
-        dialog->findChild<QComboBox *>("hpopDragGeomagneticSource")->setCurrentIndex(1);
+        auto *geomagnetic_source = dialog->findChild<QComboBox *>("hpopDragGeomagneticSource");
+        geomagnetic_source->setCurrentIndex(1);
+        selection->setCurrentIndex(selection->findData("cssi"));
+        EXPECT_EQ(geomagnetic_source->currentIndex(), 0);
+        EXPECT_FALSE(geomagnetic_source->isEnabled());
         source->setCurrentIndex(0);
         EXPECT_EQ(f107->value(Unit::one), 183);
         source->setCurrentIndex(1);
         const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        std::cout << "HPOP weather device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
         for (const int width : {720, 430}) {
             dialog->resize(width, 620);
             QEventLoop settled;
             QTimer::singleShot(60, &settled, &QEventLoop::quit);
             settled.exec();
             EXPECT_EQ(selection, dialog->findChild<QComboBox *>("hpopDragWeatherFile"));
-            EXPECT_EQ(selection->currentData().toString(), "celestrak");
+            EXPECT_EQ(selection->currentData().toString(), "cssi");
             auto *scroll = dialog->findChild<QScrollArea *>("hpopDragPage");
-            scroll->ensureWidgetVisible(selection);
+            scroll->ensureWidgetVisible(geomagnetic_source);
             QApplication::processEvents();
+            EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
             EXPECT_TRUE(
                 dialog->rect().contains(dialog->findChild<QDialogButtonBox *>()->geometry()));
             if (!capture.isEmpty()) {
@@ -2073,9 +2084,9 @@ TEST_F(QuantityTest, HpopWeatherFileSwitchesFieldsRetainsDraftsAndReopens) {
     });
     ASSERT_TRUE(edit_hpop_settings(
         options, nullptr, {}, {entry}, [entry] { return std::vector{entry}; }, &catalog));
-    EXPECT_EQ(options.drag.weather_model, "celestrak");
+    EXPECT_EQ(options.drag.weather_model, "cssi");
     EXPECT_EQ(options.drag.geomagnetic_update, core::GeomagneticUpdate::three_hourly_interpolated);
-    EXPECT_EQ(options.drag.geomagnetic_source, core::GeomagneticSource::kp);
+    EXPECT_EQ(options.drag.geomagnetic_source, core::GeomagneticSource::ap);
     EXPECT_EQ(options.drag.f107, 183);
     const auto saved = options;
     QTimer::singleShot(0, [&] {
@@ -2083,6 +2094,13 @@ TEST_F(QuantityTest, HpopWeatherFileSwitchesFieldsRetainsDraftsAndReopens) {
         ASSERT_TRUE(dialog);
         EXPECT_EQ(dialog->findChild<QComboBox *>("hpopDragWeatherSource")->currentIndex(), 1);
         EXPECT_EQ(dialog->findChild<QComboBox *>("hpopDragGeomagneticUpdate")->currentIndex(), 2);
+        auto *geomagnetic_source = dialog->findChild<QComboBox *>("hpopDragGeomagneticSource");
+        EXPECT_EQ(geomagnetic_source->currentIndex(), 0);
+        EXPECT_FALSE(geomagnetic_source->isEnabled());
+        auto *file = dialog->findChild<QComboBox *>("hpopDragWeatherFile");
+        file->setCurrentIndex(file->findData("celestrak"));
+        EXPECT_TRUE(geomagnetic_source->isEnabled());
+        geomagnetic_source->setCurrentIndex(1);
         dialog->findChild<QComboBox *>("hpopDragWeatherSource")->setCurrentIndex(0);
         dialog->reject();
     });

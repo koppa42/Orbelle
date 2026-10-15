@@ -1,6 +1,6 @@
 # HPOP 大气阻力
 
-桌面阻力页、C++ `DragOptions` 和 Python `orbits.DragSettings` 共用 Core 模型。当前实现球形阻力、Jacchia–Roberts / NRLMSISE-00 密度、手动/文件空间天气、低空拼接、近似高度及地心视太阳位置；低层密度接口支持原生日 Ap 和七项历史 Ap；自然三次样条地磁更新已接入；保持窗口均值的插值、月预报及风场尚未实现。[STK 阻力设置](https://help.agi.com/stk/Content/hpop/hpopDrag.htm)是功能与输入含义的对齐依据；尚未取得 STK 同配置数值输出。
+桌面阻力页、C++ `DragOptions` 和 Python `orbits.DragSettings` 共用 Core 模型。当前实现球形阻力、Jacchia–Roberts / NRLMSISE-00 密度、手动/文件空间天气、低空拼接、近似高度及地心视太阳位置；低层密度接口支持原生日 Ap 和七项历史 Ap；自然三次样条、保持窗口均值插值、CelesTrak 月预报及 CSSI Predicts 已接入；风场尚未实现。[STK 阻力设置](https://help.agi.com/stk/Content/hpop/hpopDrag.htm)是功能与输入含义的对齐依据；尚未取得 STK 同配置数值输出。
 
 ## 力与参考系
 
@@ -41,13 +41,13 @@ density = of.evaluate_atmosphere(of.AtmosphereModel.NRLMSISE00, inputs)
 
 支持 CelesTrak 原始 31 列 CSV 和 130 列 `CssiSpaceWeather` 定宽文件，格式依据 [CelesTrak 说明](https://celestrak.org/SpaceData/SpaceWx-format.php)。原始全文及 SHA-256 保留，解析区分观测/预报、观测/1 AU 调整通量、中心/尾随 81 日均值、日 Ap 与三小时 ap。空字段保持缺失。观测 Kp 的 53 表示 5⅓；预报中由 Ap 推导的非三分之一值（如 22、24）按十分之一刻度保留。
 
-桌面“阻力 → 太阳通量 / 地磁”可选手动或文件、每日、三小时或三小时自然三次样条更新，以及 Ap 或 Kp 来源。文件由数据中心下载/导入 CelesTrak `SW-All.csv`，API 不隐式联网。`DragSettings.weather_model` 是目录选择 ID，空字符串表示手动，`geomagnetic_update` 为 `daily` / `three_hourly` / `three_hourly_cubic_spline`，`geomagnetic_source` 为 `ap` / `kp`。也可显式 `DataSnapshot.with_space_weather("celestrak", path)`。
+桌面“阻力 → 太阳通量 / 地磁”可选手动或文件、每日、三小时、三小时保持均值插值或自然三次样条更新，以及 Ap 或 Kp 来源。文件由数据中心下载/导入 CelesTrak `SW-All.csv`，API 不隐式联网。`DragSettings.weather_model` 是目录选择 ID，空字符串表示手动，`geomagnetic_update` 为 `daily` / `three_hourly` / `three_hourly_interpolated` / `three_hourly_cubic_spline`，`geomagnetic_source` 为 `ap` / `kp`。也可显式 `DataSnapshot.with_space_weather("celestrak", path)`。
 
 按照 [STK Drag 文件说明](https://help.agi.com/stk/Content/hpop/hpopDrag.htm)，日与中心 81 日观测通量在 20:00 UTC 节点间线性取样。滞后采用 [AGI JR 定义](https://help.agi.com/STKComponents/html/T_AGI_Foundation_Celestial_ScalarDensityJacchiaRoberts.htm)及 [MSIS-2000 定义](https://help.agi.com/STKComponents/html/T_AGI_Foundation_Celestial_ScalarDensityMsis2000.htm)：两者日通量滞后 86400 s；JR 平均通量也滞后 86400 s、地磁滞后 24120 s；NRL 平均通量及地磁不滞后。这是公开组件文档依据，尚未完成 STK HPOP 同场景数值验收。
 
 积分步在日/三小时地磁更新处截断（JR/低空 NRL 各自的滞后窗口均计入），RK 端点使用该步内部一侧的天气值；正反向均不跨跳变混合密度。滞后按 TAI 实际秒数，日/三小时窗口按 UTC；正闰秒属于当天最后一个三小时窗口。NRL 三小时模式组装上述七项 Ap 历史；选择 Kp 时先逐项转换为 Ap 再求历史均值。日模式使用文件日 Ap 或由文件日 Kp 转换，不能从当日八项重新计算并替换原始日值。
 
-准备时检查完整传播路径所需的每个日期、通量插值节点和全部历史槽，包括初始历元早于场景的情况。缺字段、内部断档、域外查询均报错，不外推或零填充。文件中月预报记录保留，但当前每日/三小时模型拒绝使用它们；原始首末日期不是可传播范围。月预报和 CSSI Predicts 仍待实现；FXM 范围见下节。
+准备时检查完整传播路径所需的每个日期、通量插值节点和全部历史槽，包括初始历元早于场景的情况。缺字段、内部断档、域外查询均报错，不外推或零填充。月预报采用下述独立的月节点取样，原始首末日期不是可传播范围。FXM 与 CSSI Predicts 范围见对应章节。
 
 ## 三小时自然三次样条
 
@@ -84,6 +84,20 @@ FXM 只有 1 AU 调整通量。`SpaceWeatherInfo.solar_flux_adjusted` 明确此�
 低层 C++ / Python `sample`、`validate_interval` 增加可选 `sun_distance_m(Epoch) -> metres` 参数。FXM 要求该函数；其他文件不调用它。回调必须来自本次计算冻结的几何星历，距离须有限且为正。HPOP 自动使用已经捕获的 Sun 星历，独立于密度的“Use Apparent Sun Position”方向选择；不访问网络。准备阶段检查包含模型滞后在内的每个必需通量节点，故星历仅覆盖传播起止时刻仍可能不足。换算结果超出模型 `(0, 1000] sfu` 输入范围时明确失败。
 
 观测段的八个 Ap/Kp 支持现有每日、三小时、保持均值插值及自然样条取样。FXM 预测段只提供日 Ap，支持 **Daily + Ap**；不伪造三小时值或 Kp，缺少所选模式需要的字段时给出覆盖错误。分开的预测段存在日期缺口也不补值或外推。桌面数据中心的天气导入支持 `.fxm`；自动下载仍使用 CelesTrak CSV。FXM 数据解释标识增加 `flux=adjusted-au-geometric-utc20-v1`，原始天气与冻结星历都参与项目数据引用；当前项目格式为 v30 / OBJS21。
+
+## 月预报与 CSSI Predicts
+
+CelesTrak 的 `PRM` / `MONTHLY_PREDICTED` 记录是月初节点；通量与文件提供的中心 81 日均值在各月 1 日 20:00 UTC 之间线性插值，日 Ap/Kp 在月初 00:00 UTC 之间线性插值。字段仍独立保留缺失状态；例如官方月预报缺少 Ap/Kp 时，不能用零或固定常量代替。取样需要的指数或中心均值缺失即报错。日期语义依据 [CelesTrak 格式说明](https://celestrak.org/spacedata/spacewx-format.php)。
+
+导入器另支持 [CSSI Predicts `.dat`](https://help.agi.com/stk/Content/stk/importfiles-15.htm)：七个整数的文件头及六列月记录，逐项检查日期、数量、首末月份、有限值和物理范围。按 STK 格式将节点放在每月 15 日；使用名义 F10.7、名义 Ap，原始二倍标准差列随文件完整保存，当前 HPOP 不应用随机扰动。该格式强制使用 Ap，桌面自动选择并禁用 Kp；C++ / Python 即使收到合法 Kp 草稿也按 Ap 计算，有效计算身份记录 Ap。文件头生成月份不改变节点日期。
+
+CSSI 没有单独的平均通量列。当前约定先在每个 UTC 日期的 20:00 对月通量曲线取样，使用当天及前后各 40 个日节点的算术平均，再对相邻日平均节点线性插值。F10.7 使用文件名义值，不附加 FXM 的日地距离改正。[STK GenFluxHistory](https://help.agi.com/stk/Subsystems/connectCmds/Content/cmd_GenFluxHistory.htm)说明了中心 81 日平均和历史数据需求，但未公开 HPOP 直接读取月预报的全部算法；本节的平均构造、地磁节点时刻和边界约定须继续用 STK 同配置结果验收。
+
+月曲线的局部分数使用两个节点间的实际 TAI 时长，计入月长、闰日与闰秒。连续月节点必须相隔一个公历月且日期一致；允许最后一个日记录连接下个月的首个月节点。缺月不跨越，首末节点之外不外推。最后节点只允许精确命中；整个准备区间还需满足通量滞后、81 日平均和历史 Ap 的额外覆盖要求，不重复末尾太阳活动周期。
+
+JR 的四种更新选择在月预报段均使用连续月曲线，经模型地磁滞后后求值；观测段仍使用所选的日/三小时算法。NRL 的 Daily 使用月曲线当前 Ap，三种三小时选择使用七项历史模式：在各实际时间滞后处取月曲线值，转换所选指数后再求两组八项平均。月曲线只提供预报取样，不向原始记录伪造八个观测槽；跨观测/预报边界的历史按各段自己的取样方式组装。
+
+数据中心支持导入 `.dat`，`SpaceWeatherInfo.cssi_predictions` 和目录重开后的元数据一致。所有天气数据解释标识升级为 `spaceweather-utc20-linear-jr-msis-lags-monthly-linear-v2`；CSSI 额外记录 `cssi=nominal-ap-only;average=centered-81-utc-days-v1`，FXM 保留原改正标识。项目结构仍为 v30 / OBJS21；旧天气解释引用触发既有数据变化确认，已准备分析继续持有原不可变数据。独立 SciPy / NumPy / GMAT 对照见[验证协议](../validation/atmospheric_drag_protocol.md)。
 
 ## 数据与持久化
 
