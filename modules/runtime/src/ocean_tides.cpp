@@ -5,7 +5,6 @@
 #include <map>
 #include <orbitforge/runtime/ocean_tides.hpp>
 #include <picosha2.h>
-#include <regex>
 #include <sstream>
 namespace orbitforge::runtime {
 namespace {
@@ -65,9 +64,10 @@ load_ocean_tides(const std::filesystem::path &file, const std::string &url,
     double scale = 0;
     std::size_t records = 0;
     std::map<int, core::OceanTideConstituent> waves;
-    const std::regex units(
-        R"(Coefficients to compute variations in normalized Stokes coefficients \(unit = 10\^-(11|12)\))");
-    const std::regex model(R"(Ocean tide model: (.+) up to \(([0-9]+),([0-9]+)\))");
+    constexpr std::string_view units =
+        "Coefficients to compute variations in normalized Stokes coefficients (unit = 10^-";
+    constexpr std::string_view model_prefix = "Ocean tide model: ";
+    constexpr std::string_view extent_prefix = " up to (";
     while (std::getline(lines, line)) {
         ++line_number;
         if (checkpoint && line_number % 256 == 0)
@@ -78,20 +78,36 @@ load_ocean_tides(const std::filesystem::path &file, const std::string &url,
         if (line.empty() || line.starts_with('#'))
             continue;
         try {
-            std::smatch match;
             if (stage == 0) {
-                require(std::regex_match(line, match, units),
+                require(line.starts_with(units), "expected normalized potential units");
+                const auto exponent = std::string_view(line).substr(units.size());
+                require(exponent == "11)" || exponent == "12)",
                         "expected normalized potential units");
-                scale = match[1] == "11" ? 1e-11 : 1e-12;
+                scale = exponent == "11)" ? 1e-11 : 1e-12;
                 ++stage;
                 continue;
             }
             if (stage == 1) {
-                require(std::regex_match(line, match, model),
+                const auto extent_at = line.rfind(extent_prefix);
+                require(line.starts_with(model_prefix) && line.ends_with(')') &&
+                            extent_at != line.npos && extent_at > model_prefix.size(),
                         "expected model and degree/order header");
-                info.model = match[1];
-                info.degree = number<int>(match[2]);
-                info.order = number<int>(match[3]);
+                const auto extent = std::string_view(line).substr(extent_at + extent_prefix.size(),
+                                                                  line.size() - extent_at -
+                                                                      extent_prefix.size() - 1);
+                const auto comma = extent.find(',');
+                require(comma != extent.npos, "expected degree/order pair");
+                const auto degree = extent.substr(0, comma);
+                const auto order = extent.substr(comma + 1);
+                const auto decimal = [](std::string_view value) {
+                    return !value.empty() && std::ranges::all_of(value, [](char ch) {
+                        return ch >= '0' && ch <= '9';
+                    });
+                };
+                require(decimal(degree) && decimal(order), "invalid decimal degree/order");
+                info.model = line.substr(model_prefix.size(), extent_at - model_prefix.size());
+                info.degree = number<int>(std::string(degree));
+                info.order = number<int>(std::string(order));
                 require(info.degree >= 2 && info.degree <= core::gravity_max_degree &&
                             info.order >= 0 && info.order <= info.degree,
                         "invalid file extent");

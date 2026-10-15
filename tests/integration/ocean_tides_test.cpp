@@ -279,6 +279,46 @@ TEST_F(OceanTideFiles, LoaderChecksHeadersRecordsUnitsAndHashesTheOriginalBytes)
                                                  [] { throw std::runtime_error("cancel"); }),
                  std::runtime_error);
 }
+TEST_F(OceanTideFiles, RejectsMalformedModelAndUnitHeadersBeforeReadingCoefficients) {
+    const auto original = example();
+    const std::string model_header = "Ocean tide model: FES2014b up to (4,4)";
+    const auto at = original.find(model_header);
+    ASSERT_NE(at, std::string::npos);
+    for (const std::string header : {
+             "Ocean tide model:  up to (4,4)",
+             "Ocean tide model: FES2014b up to (,4)",
+             "Ocean tide model: FES2014b up to (4,)",
+             "Ocean tide model: FES2014b up to (4,4,0)",
+             "Ocean tide model: FES2014b up to (+4,4)",
+             "Ocean tide model: FES2014b up to (4,-1)",
+             "Ocean tide model: FES2014b up to (4, 4)",
+             "Ocean tide model: FES2014b up to (4,4) trailing",
+             "Ocean tide model: FES2014b up to (99999999999999999999,4)",
+             "Ocean tide model: FES2014b up to (1,1)",
+             "Ocean tide model: FES2014b up to (4,5)",
+             "Ocean tide model: FES2014b up to (4,4",
+             "Ocean tide model: FES2014b up to )",
+         }) {
+        auto changed = original;
+        changed.replace(at, model_header.size(), header);
+        EXPECT_THROW((void)runtime::load_ocean_tides(write(changed)), std::runtime_error) << header;
+    }
+    const auto exponent_at = original.find("10^-11)");
+    ASSERT_NE(exponent_at, std::string::npos);
+    for (const std::string exponent : {"10^-13)", "10^-11) trailing", "10^-11", "10^-011)"}) {
+        auto changed = original;
+        changed.replace(exponent_at, 7, exponent);
+        EXPECT_THROW((void)runtime::load_ocean_tides(write(changed)), std::runtime_error)
+            << exponent;
+    }
+    auto changed = original;
+    changed.replace(at, model_header.size(), "Ocean tide model: Custom up to (test) up to (04,04)");
+    changed.insert(0, "\xef\xbb\xbf# imported model\n");
+    const auto parsed = runtime::load_ocean_tides(write(changed));
+    EXPECT_EQ(parsed->info().model, "Custom up to (test)");
+    EXPECT_EQ(parsed->info().degree, 4);
+    EXPECT_EQ(parsed->info().order, 4);
+}
 TEST_F(OceanTideFiles, CatalogPublicationIsCancellablePinnedAndKeepsExistingSnapshots) {
     if (!runtime::data_catalog_available())
         GTEST_SKIP();
