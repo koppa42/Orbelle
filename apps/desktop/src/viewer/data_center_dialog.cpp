@@ -11,6 +11,7 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QPainter>
+#include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScreen>
@@ -29,6 +30,46 @@
 
 namespace orbitforge::desktop {
 namespace {
+class DataCenterArtwork final : public QWidget {
+  public:
+    DataCenterArtwork() : artwork_(":/orbitforge/artwork/data-preparation.png") {
+        setObjectName("dataCenterArtwork");
+        setMinimumHeight(112);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    }
+
+  protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+        painter.fillRect(rect(), QColor("#111a30"));
+        if (!artwork_.isNull()) {
+            // Keep the full head visible; narrow windows crop only the quiet left side.
+            const auto ratio = devicePixelRatioF();
+            const auto pixels = qRound(height() * ratio);
+            if (scaled_artwork_.height() != pixels || scaled_artwork_.devicePixelRatio() != ratio) {
+                scaled_artwork_ = artwork_.scaledToHeight(pixels, Qt::SmoothTransformation);
+                scaled_artwork_.setDevicePixelRatio(ratio);
+            }
+            const auto left = width() - scaled_artwork_.width() / ratio;
+            painter.drawPixmap(QPointF(left, 0), scaled_artwork_);
+            QLinearGradient blend(left, 0, left + height(), 0);
+            blend.setColorAt(0, QColor("#111a30"));
+            blend.setColorAt(1, QColor(17, 26, 48, 0));
+            painter.fillRect(QRectF(left, 0, height(), height()), blend);
+        }
+        QLinearGradient shade(0, 0, width(), 0);
+        shade.setColorAt(0, QColor(15, 23, 40, 245));
+        shade.setColorAt(0.5, QColor(15, 23, 40, width() < 620 ? 210 : 100));
+        shade.setColorAt(1, QColor(15, 23, 40, width() < 620 ? 90 : 0));
+        painter.fillRect(rect(), shade);
+    }
+
+  private:
+    QPixmap artwork_;
+    QPixmap scaled_artwork_;
+};
+
 QString installation_text(const DataInventoryItem &item) {
     switch (item.installation) {
     case DataInstallation::missing:
@@ -201,25 +242,28 @@ void show_data_center(QWidget *parent, EopCatalog &catalog) {
     auto *layout = new QVBoxLayout(&dialog);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    auto *heading = new QVBoxLayout;
+    auto *artwork = new DataCenterArtwork;
+    auto *heading = new QVBoxLayout(artwork);
     heading->setContentsMargins(24, 16, 24, 14);
     heading->setSpacing(6);
     auto *heading_title = new QLabel(QStringLiteral("数据中心"));
     heading_title->setObjectName("panelTitle");
     auto *heading_row = new QHBoxLayout;
-    heading_row->addWidget(heading_title, 1);
+    heading_row->addWidget(heading_title);
     auto *back = new QPushButton(QStringLiteral("数据列表"), &dialog);
     back->setObjectName("dataBackToList");
     back->setIcon(workbench_icon(WorkbenchIcon::database));
     back->hide();
     heading_row->addWidget(back);
+    heading_row->addStretch();
     heading->addLayout(heading_row);
     auto *description =
         new QLabel(QStringLiteral("管理计算数据，查看下载时间、覆盖范围与更新结果。"));
     description->setObjectName("dialogDescription");
     description->setWordWrap(true);
+    description->setMaximumWidth(600);
     heading->addWidget(description);
-    layout->addLayout(heading);
+    layout->addWidget(artwork);
     auto *panels = new QHBoxLayout;
     panels->setSpacing(0);
     auto *sidebar = new QWidget;
