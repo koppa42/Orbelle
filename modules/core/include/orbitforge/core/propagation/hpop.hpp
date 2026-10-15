@@ -4,6 +4,7 @@
 #include <orbitforge/core/frames/frame_provider.hpp>
 #include <orbitforge/core/propagation/atmospheric_drag.hpp>
 #include <orbitforge/core/propagation/gravity.hpp>
+#include <orbitforge/core/propagation/relativity.hpp>
 #include <orbitforge/core/propagation/solar_radiation_pressure.hpp>
 #include <orbitforge/core/propagation/solid_tides.hpp>
 #include <orbitforge/core/propagation/state_provider.hpp>
@@ -29,6 +30,7 @@ struct HpopOptions {
     SrpOptions srp;
     DragOptions drag;
     SolidTideOptions solid_tides;
+    bool include_relativistic_accelerations = false; // All three IERS 2003 terms.
     [[nodiscard]] bool uses_full_solid_tides() const {
         return solid_tides.mode == SolidTideMode::full &&
                (!solid_tides.truncate_to_gravity || gravity_degree >= 2);
@@ -42,7 +44,9 @@ struct HpopOptions {
         return gravity_degree > 0 ||
                (solid_tides.mode != SolidTideMode::none && !solid_tides.truncate_to_gravity);
     }
-    [[nodiscard]] bool uses_eop_force() const { return uses_earth_fixed_gravity() || drag.enabled; }
+    [[nodiscard]] bool uses_eop_force() const {
+        return uses_earth_fixed_gravity() || drag.enabled || include_relativistic_accelerations;
+    }
     [[nodiscard]] ThirdBodyGravity &third_body(ThirdBody body) {
         return third_bodies.at(static_cast<std::size_t>(body));
     }
@@ -63,12 +67,14 @@ struct HpopOptions {
         return false;
     }
     [[nodiscard]] bool uses_ephemeris() const {
-        return uses_third_bodies() || srp.enabled || drag.enabled || uses_full_solid_tides();
+        return uses_third_bodies() || srp.enabled || drag.enabled || uses_full_solid_tides() ||
+               include_relativistic_accelerations;
     }
     [[nodiscard]] std::vector<ThirdBody> required_ephemeris_bodies() const {
         std::vector<ThirdBody> result;
         for (auto body : third_body_list)
-            if (third_body(body).enabled || (drag.enabled && body == ThirdBody::sun) ||
+            if (third_body(body).enabled ||
+                ((drag.enabled || include_relativistic_accelerations) && body == ThirdBody::sun) ||
                 (uses_full_solid_tides() && (body == ThirdBody::sun || body == ThirdBody::moon)) ||
                 (srp.enabled &&
                  (body == ThirdBody::sun || (body == ThirdBody::moon && srp.moon_shadow &&
@@ -93,7 +99,7 @@ void validate_hpop_options(const HpopOptions &options);
                                                        int degree, int order);
 [[nodiscard]] std::string_view egm96_model_id() noexcept;
 struct HpopEnvironment {
-    // Required for noncentral gravity. Shared immutable ownership, concurrent reads.
+    // Required for noncentral gravity, drag and relativity. Immutable concurrent reads.
     std::shared_ptr<const IFrameProvider> frames;
     std::shared_ptr<const IEarthOrientationProvider> eop;
     std::shared_ptr<const GravityModel> gravity{};

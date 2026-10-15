@@ -21,7 +21,7 @@ LSK 只用于上述均匀时间转换所需常数。UTC↔TAI 继续使用独立
 | `velocity_mps` / `velocity_time_scale` | 相对速度，米/秒；导数时间尺度明确为 `TDB` |
 | `source_id` | 清单 SHA256、工具包、轴标签、像差选项和速度时间尺度 |
 
-DE440 数据使用 ICRF 对齐的轴。此接口保留 SPICE 标签，尚未实现 BCRS/GCRS 的完整相对论转换或 TDB→TAI 速度导数转换，不能将结果直接改标签作为 GCRF `CartesianState` 输入地球旋转接口。几何状态接口不应用光行时/光行差；另有下述受限太阳接口。尚未提供任意 FK/PCK 参考系或地面站观测量。
+DE440 数据使用 ICRF 对齐的轴。此接口保留 SPICE 标签，尚未实现 BCRS/GCRS 的完整相对论转换，不能将结果直接改标签作为 GCRF `CartesianState` 输入地球旋转接口。原始速度保持每 TDB 秒；`tdb_seconds_per_tai_second(epoch)` 依据快照自身 LSK 给出解析 dTDB/dTAI，HPOP 的几何状态适配器显式转换速度导数用于[相对论力](relativity.md)，这不构成坐标系转换。几何状态接口不应用光行时/光行差；另有下述受限太阳接口。尚未提供任意 FK/PCK 参考系或地面站观测量。
 
 ## 接收型太阳向量
 

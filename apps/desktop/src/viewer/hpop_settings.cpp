@@ -899,9 +899,21 @@ bool edit_hpop_settings(
     QObject::connect(srp_earth, &QCheckBox::toggled, &dialog, update_srp);
     QObject::connect(srp_moon, &QCheckBox::toggled, &dialog, update_srp);
     update_srp();
-    pending(force_tabs, QStringLiteral("其他"), "hpopAdditionalPage",
-            QStringLiteral("附加力模型尚未接入 HPOP。"),
-            QStringLiteral("地球反照与热辐射、相对论、卫星质量及自定义力模型将集中在此配置。"));
+    auto *additional_page = page(force_tabs, QStringLiteral("其他"), "hpopAdditionalPage");
+    auto *relativity_section =
+        section(additional_page, QStringLiteral("相对论"), "hpopRelativitySection");
+    auto *relativity = new QCheckBox(QStringLiteral("包含相对论加速度"));
+    relativity->setObjectName("hpopRelativisticAccelerations");
+    relativity->setChecked(options.include_relativistic_accelerations);
+    relativity_section->addRow(relativity);
+    help(relativity_section,
+         QStringLiteral(
+             "IERS 2003：包含地球 Schwarzschild、Lense–Thirring 和太阳 de Sitter "
+             "三项修正。需要覆盖传播时段的地球定向参数和太阳星历；无需启用太阳第三体引力。"));
+    auto *additional_pending =
+        section(additional_page, QStringLiteral("其他附加模型"), "hpopAdditionalPendingSection");
+    caution(additional_pending,
+            QStringLiteral("地球反照与热辐射、卫星质量及自定义力模型尚未实现。"));
     auto *integration_page = page(tabs, QStringLiteral("积分器"), "hpopIntegratorPage");
     auto *integration =
         section(integration_page, QStringLiteral("积分方法"), "hpopIntegratorMethodSection");
@@ -1006,7 +1018,9 @@ bool edit_hpop_settings(
                           srp_use->isChecked()
                               ? part(srp_shadow, 1) + QStringLiteral(" · Cr ") + value_text(srp_cr)
                               : QStringLiteral("未启用"));
-        other_item->setData(summary_role, QStringLiteral("尚未实现"));
+        other_item->setData(summary_role, relativity->isChecked()
+                                              ? QStringLiteral("相对论 · 三项修正")
+                                              : QStringLiteral("未启用"));
         integrator_item->setData(summary_role, method->currentIndex() == 0
                                                    ? part(method, 0) +
                                                          QStringLiteral(" · 相对容差 ") +
@@ -1019,7 +1033,7 @@ bool edit_hpop_settings(
         QObject::connect(box, &QComboBox::currentIndexChanged, &dialog, refresh_summaries);
     for (auto *spin : {degree, order})
         QObject::connect(spin, &QSpinBox::valueChanged, &dialog, refresh_summaries);
-    for (auto *check : {drag_use, srp_use, solid_truncate})
+    for (auto *check : {drag_use, srp_use, solid_truncate, relativity})
         QObject::connect(check, &QCheckBox::toggled, &dialog, refresh_summaries);
     for (auto &row : fields)
         QObject::connect(row.enabled, &QCheckBox::toggled, &dialog, refresh_summaries);
@@ -1350,6 +1364,16 @@ bool edit_hpop_settings(
                                                 return entry.selection == candidate.ephemeris_model;
                                             }))
                 throw std::runtime_error("太阳辐射压需要所选位置星历，请先在数据中心准备。");
+            validation_force_page = 3;
+            validation_field = relativity;
+            candidate.include_relativistic_accelerations = relativity->isChecked();
+            if (candidate.include_relativistic_accelerations &&
+                std::none_of(installed_ephemerides.begin(), installed_ephemerides.end(),
+                             [&](const auto &entry) {
+                                 return entry.selection == candidate.ephemeris_model;
+                             }))
+                throw std::runtime_error(
+                    "相对论加速度需要太阳位置与速度星历，请先在数据中心准备。");
             candidate.integrator = method->currentIndex() == 0 ? core::HpopIntegrator::rkf78
                                                                : core::HpopIntegrator::rk4;
             validation_page = 1;
@@ -1371,7 +1395,8 @@ bool edit_hpop_settings(
         } catch (const std::exception &e) {
             tabs->setCurrentIndex(validation_page);
             auto *scroll = dialog.findChild<QScrollArea *>(
-                validation_page == 0 ? (validation_force_page == 2   ? "hpopSrpPage"
+                validation_page == 0 ? (validation_force_page == 3   ? "hpopAdditionalPage"
+                                        : validation_force_page == 2 ? "hpopSrpPage"
                                         : validation_force_page == 1 ? "hpopDragPage"
                                                                      : "hpopGravityPage")
                                      : "hpopIntegratorPage");

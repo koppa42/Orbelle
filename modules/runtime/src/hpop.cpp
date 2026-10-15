@@ -41,6 +41,15 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
             algorithm += constants.str();
         }
     }
+    if (options.include_relativistic_accelerations && environment.ephemeris) {
+        std::ostringstream constants;
+        constants.imbue(std::locale::classic());
+        constants << std::hexfloat << ";relativity=iers2003-three-terms-v1;beta=1;gamma=1"
+                  << ";c=299792458;earth-J-per-mass=980000000;pole=itrf-z;velocity=tai"
+                  << ";relativity-earth-mu=" << options.gravity_mu
+                  << ";relativity-sun-mu=" << environment.ephemeris->data_info().sun_mu;
+        algorithm += constants.str();
+    }
     if (options.uses_third_bodies() && environment.ephemeris) {
         std::ostringstream config;
         config.imbue(std::locale::classic());

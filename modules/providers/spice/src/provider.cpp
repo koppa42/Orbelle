@@ -289,6 +289,12 @@ class Snapshot final : public core::IEphemerisProvider {
         return result;
     }
     const core::EphemerisDataInfo &data_info() const noexcept override { return info_; }
+    double tdb_seconds_per_tai_second(core::Epoch epoch) const override {
+        check_epoch(epoch);
+        std::scoped_lock guard(engine().mutex);
+        activate();
+        return 1 / tai_per_tdb_unlocked(tdb_unlocked(epoch).seconds_past_j2000);
+    }
     std::array<double, 3> apparent_sun_from_earth(core::Epoch epoch) const override {
         check_epoch(epoch);
         constexpr std::int64_t margin = 600000000000;

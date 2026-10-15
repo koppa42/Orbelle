@@ -4,6 +4,7 @@
 #include <orbitforge/orbitforge.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/hpop.hpp>
+#include <orbitforge/runtime/time_frames.hpp>
 
 using namespace orbitforge;
 namespace {
@@ -179,4 +180,47 @@ TEST_F(EphemerisFiles, EveryPlanetUsesTheDeclaredCentreAndFullIntegrationCoverag
                   .state(reopened.objects().get("satellite-1"), input.last, FrameId::gcrf)
                   .position_m,
               state.position_m);
+}
+
+TEST_F(EphemerisFiles, GeometricVelocityUsesTaiDerivativeAndRelativityRecordsItsInputs) {
+    if (!runtime::ephemeris_available() || !runtime::time_frames_available())
+        GTEST_SKIP();
+    const std::shared_ptr<const core::IEphemerisProvider> raw =
+        runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root);
+    const auto epoch =
+        core::Epoch{raw->data_info().first_epoch.tai_nanoseconds() + 3600000000000LL};
+    const auto ephemeris = runtime::make_third_body_ephemeris(raw);
+    const auto state = raw->geometric_state(10, 399, epoch);
+    const double rate = raw->tdb_seconds_per_tai_second(epoch);
+    const auto geometric = ephemeris->geometric_state(core::ThirdBody::sun, epoch);
+    EXPECT_EQ(geometric.position_m, state.position_m);
+    EXPECT_NE(rate, 1);
+    for (std::size_t i = 0; i < 3; ++i)
+        EXPECT_DOUBLE_EQ(geometric.velocity_mps[i], state.velocity_mps[i] * rate);
+    const auto before = ephemeris->position(core::ThirdBody::sun,
+                                            core::Epoch{epoch.tai_nanoseconds() - 10000000000LL});
+    const auto after = ephemeris->position(core::ThirdBody::sun,
+                                           core::Epoch{epoch.tai_nanoseconds() + 10000000000LL});
+    for (std::size_t i = 0; i < 3; ++i)
+        EXPECT_NEAR(geometric.velocity_mps[i], (after[i] - before[i]) / 20, 1e-4);
+    core::HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    options.include_relativistic_accelerations = true;
+    core::HpopEnvironment env{runtime::make_frame_provider(),
+                              runtime::load_eop_snapshot(ORBITFORGE_DRAG_EOP),
+                              {},
+                              ephemeris};
+    const core::CartesianState initial{
+        epoch, core::OriginId::earth, core::FrameId::gcrf, {7e6, 0, 0}, {0, 6200, 5300}};
+    const auto session = runtime::make_hpop_session(initial, options, env);
+    const auto &algorithm = session.provenance().algorithm;
+    EXPECT_NE(algorithm.find("relativity=iers2003-three-terms-v1"), std::string::npos);
+    EXPECT_NE(algorithm.find("relativity-sun-mu="), std::string::npos);
+    EXPECT_NE(algorithm.find("data="), std::string::npos);
+    EXPECT_NE(algorithm.find("ephemeris="), std::string::npos);
+    const auto end = core::Epoch{epoch.tai_nanoseconds() + 600000000000LL};
+    const auto result = session.sample(std::array{end});
+    options.include_relativistic_accelerations = false;
+    const auto monopole = runtime::make_hpop_session(initial, options, {}).sample(std::array{end});
+    EXPECT_NE(result.states()[0].position_m, monopole.states()[0].position_m);
 }

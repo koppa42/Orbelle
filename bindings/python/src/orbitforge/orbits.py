@@ -270,6 +270,8 @@ class HpopSettings:
     gravity_model selects a catalog/DataSnapshot ID (empty: built-in EGM96, up to 20).
     File models support degrees through 360. gravity_mu must match the selected file's
     GM in m^3/s^2 and is also used when converting initial Keplerian elements.
+    include_relativistic_accelerations enables all three IERS 2003 terms and
+    requires explicit EOP and geometric Sun position/velocity even for degree 0.
     """
     gravity_degree: int = 8
     gravity_order: int = 8
@@ -289,8 +291,11 @@ class HpopSettings:
     srp: SrpSettings = field(default_factory=SrpSettings)
     drag: DragSettings = field(default_factory=DragSettings)
     solid_tides: SolidTideSettings = field(default_factory=SolidTideSettings)
+    include_relativistic_accelerations: bool = False
 
     def __post_init__(self) -> None:
+        if type(self.include_relativistic_accelerations) is not bool:
+            raise TypeError("include_relativistic_accelerations must be bool")
         require(self.srp, SrpSettings, "srp")
         require(self.drag, DragSettings, "drag")
         require(self.solid_tides, SolidTideSettings, "solid_tides")._native()
@@ -437,7 +442,8 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          third_bodies: tuple[str, ...] = (), ephemeris: str = "de440s",
          sun_mu: float | None = None, moon_mu: float | None = None,
          body_gravity: tuple[ThirdBodySettings, ...] = (), srp: SrpSettings | None = None,
-         drag: DragSettings | None = None, solid_tides: SolidTideSettings | None = None) -> Orbit:
+         drag: DragSettings | None = None, solid_tides: SolidTideSettings | None = None,
+         include_relativistic_accelerations: bool = False) -> Orbit:
     """Cowell orbit with static gravity, third bodies, spherical SRP, RKF78 or RK4.
 
     Built-in EGM96 supports up to degree 20; installed gravity files up to 360.
@@ -460,6 +466,7 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
         gravity_model.lower(), gravity_mu, third_bodies, ephemeris, tuple(body_gravity) + overrides,
         SrpSettings() if srp is None else require(srp, SrpSettings, "srp"),
         DragSettings() if drag is None else require(drag, DragSettings, "drag"),
-        SolidTideSettings() if solid_tides is None else require(solid_tides, SolidTideSettings, "solid_tides"))
+        SolidTideSettings() if solid_tides is None else require(solid_tides, SolidTideSettings, "solid_tides"),
+        include_relativistic_accelerations)
     settings._native()  # Fail at construction, before changing a project.
     return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)

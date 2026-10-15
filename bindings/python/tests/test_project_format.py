@@ -19,7 +19,7 @@ class ProjectFormatTests(unittest.TestCase):
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 24)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 25)
         self.path.write_bytes(self.raw)
         project = of.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
@@ -42,14 +42,14 @@ class ProjectFormatTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), self.raw)
 
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(24), 25, 0xFFFFFFFF):
+        for version in (*range(25), 26, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (of.load_project_data, of.load_project,
                                  of.Project.open, of.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 24"):
+                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 25"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 
@@ -71,9 +71,9 @@ class ProjectFormatTests(unittest.TestCase):
                     with self.assertRaises(of.ProjectError):
                         of.load_project_data(self.path)
 
-    def test_unknown_solid_tide_mode_and_nonboolean_truncation_rejected_with_valid_crcs(self):
-        marker = struct.pack("<IIIBBI7d", 0, 0, 2, 1, 1, 0, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
-        for offset, fmt, value in ((8, "I", 3), (12, "B", 2), (13, "B", 2)):
+    def test_unknown_tide_mode_and_nonboolean_tides_or_relativity_rejected_with_valid_crcs(self):
+        marker = struct.pack("<IIIBBBI7d", 0, 0, 2, 1, 1, 0, 0, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
+        for offset, fmt, value in ((8, "I", 3), (12, "B", 2), (13, "B", 2), (14, "B", 2)):
             sections = []
             for tag, version, body in read_sections(self.raw):
                 if tag == b"OBJS":

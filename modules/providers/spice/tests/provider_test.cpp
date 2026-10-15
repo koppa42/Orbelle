@@ -396,6 +396,10 @@ TEST(Spice, MovingSunLightTimeAndAberration) {
             const auto mean = m0 + m1 * et;
             const auto rate =
                 1 - k * std::cos(mean + eb * std::sin(mean)) * m1 * (1 + eb * std::cos(mean));
+            EXPECT_NEAR(provider->tdb_seconds_per_tai_second(core::Epoch{0}),
+                        static_cast<double>(1 / rate), 3e-16);
+            EXPECT_THROW((void)provider->tdb_seconds_per_tai_second(core::Epoch{3600000000001LL}),
+                         core::EphemerisCoverageError);
             constexpr long double light_speed = 299792.458L; // km / TDB second.
             std::array<long double, 3> observer{}, beta{}, ray{};
             long double distance2 = 0;

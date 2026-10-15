@@ -67,7 +67,7 @@
 | SRP | Method to Compute Sun，含 Apparent To True CB | 已实现 True、地心视太阳与卫星视太阳，接收型 LT+S、速度时间尺度和历史链校验；遮挡体视位置及 STK 同配置验收待完成 |
 | SRP | Atmospheric Altitude；Eclipsing Central Bodies 增删 | 部分：地球／月球独立分配、大气等效半径、多体遮挡并集已实现；其他遮挡体和通用选择窗口待实现 |
 | Additional | Albedo；Thermal；Ck；Area/Mass；Ground Reflection Model | 待实现：各自开关、地表反射/发射率资源、可见地表积分 |
-| Additional | Relativistic Accelerations；Satellite Mass | 待实现：明确相对论项与质量用途；不覆盖球形模型显式给定的面积质量比 |
+| Additional | Relativistic Accelerations；Satellite Mass | 部分：IERS 2003 三项相对论、TAI 星历速度及自转轴方向已接入，并与 Orekit 独立对照；卫星质量待实现，不覆盖球形模型显式给定的面积质量比。见[相对论契约](relativity.md) |
 | Additional | Use Plugin；Plugin 选择；Plugin Settings | 待实现：注册、具名设置、生命周期、加速度及偏导契约、可复现配置和错误隔离 |
 | Additional | Advanced 子窗口 | 待实现：继续逐项核对官方高级设置；须与力模型版本和数值含义对应，不能放一个空入口 |
 | Integrator | Integration 方法 | 部分：RK4、RKF78；仍须 RKV8(9)、Bulirsch–Stoer、Gauss–Jackson 的独立实现和收敛验证 |

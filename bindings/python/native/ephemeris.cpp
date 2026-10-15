@@ -45,6 +45,8 @@ void bind_ephemeris(py::module_ &module) {
              py::call_guard<py::gil_scoped_release>())
         .def("from_tdb", &core::IEphemerisProvider::from_tdb, py::arg("time"),
              py::call_guard<py::gil_scoped_release>())
+        .def("tdb_seconds_per_tai_second", &core::IEphemerisProvider::tdb_seconds_per_tai_second,
+             py::arg("epoch"), py::call_guard<py::gil_scoped_release>())
         .def("geometric_state", &core::IEphemerisProvider::geometric_state,
              py::arg("target_naif_id"), py::arg("observer_naif_id"), py::arg("epoch"),
              py::call_guard<py::gil_scoped_release>())

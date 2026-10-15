@@ -28,7 +28,7 @@ HPOP 的固体潮由共享 Core 计算，桌面、Python、C++ SDK 和任务序�
 
 C++ 使用 `HpopOptions::solid_tides`（`SolidTideOptions`），Python 使用 `of.orbits.SolidTideSettings(mode="full", truncate_to_gravity=False, include_time_dependent_terms=True)` 并传入 `Hpop(..., solid_tides=...)`。SDK/Python 默认 None；桌面新配置默认仅永久潮，按参考截图。完整模式独立要求 Sun/Moon 星历和 EOP/Frame Provider，覆盖校验包括初始历元至全部积分路径，计算核心不联网。
 
-模型标识 `iers2003-anelastic-v2` 记录模式、截断、k20、频率/极潮约定及其开关、实际日月 GM 及星历/EOP 身份。项目 v24 / OBJS15 保存三个选项及非活动草稿；修改设置不改变旧分析。只接受当前格式。`.grv` 的自定义潮汐/Love 数块仍明确拒绝；没有把未读取的元数据当作默认值静默接受。
+模型标识 `iers2003-anelastic-v2` 记录模式、截断、k20、频率/极潮约定及其开关、实际日月 GM 及星历/EOP 身份。项目 v25 / OBJS16 保存三个选项及非活动草稿；修改设置不改变旧分析。只接受当前格式。`.grv` 的自定义潮汐/Love 数块仍明确拒绝；没有把未读取的元数据当作默认值静默接受。
 
 ## 验证
 

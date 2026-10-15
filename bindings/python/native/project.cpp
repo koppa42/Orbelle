@@ -225,6 +225,14 @@ void bind_project(py::module_ &module) {
         .def_readwrite("source", &core::ThirdBodyGravity::source)
         .def_readwrite("user_mu", &core::ThirdBodyGravity::user_mu)
         .def_readwrite("cb", &core::ThirdBodyGravity::cb);
+    py::class_<core::RelativityEvaluation>(module, "RelativityEvaluation")
+        .def_readonly("schwarzschild_mps2", &core::RelativityEvaluation::schwarzschild_mps2)
+        .def_readonly("lense_thirring_mps2", &core::RelativityEvaluation::lense_thirring_mps2)
+        .def_readonly("de_sitter_mps2", &core::RelativityEvaluation::de_sitter_mps2)
+        .def_readonly("acceleration_mps2", &core::RelativityEvaluation::acceleration_mps2);
+    module.def("evaluate_relativity", &core::evaluate_relativity, py::arg("position_m"),
+               py::arg("velocity_mps"), py::arg("earth_mu"), py::arg("sun_position_m"),
+               py::arg("sun_velocity_mps"), py::arg("sun_mu"), py::arg("earth_pole"));
     py::enum_<core::SolidTideMode>(module, "SolidTideMode")
         .value("NONE", core::SolidTideMode::none)
         .value("PERMANENT", core::SolidTideMode::permanent)
@@ -244,6 +252,8 @@ void bind_project(py::module_ &module) {
         .def_readwrite("srp", &core::HpopOptions::srp)
         .def_readwrite("drag", &core::HpopOptions::drag)
         .def_readwrite("solid_tides", &core::HpopOptions::solid_tides)
+        .def_readwrite("include_relativistic_accelerations",
+                       &core::HpopOptions::include_relativistic_accelerations)
         .def_readwrite("ephemeris_model", &core::HpopOptions::ephemeris_model)
         .def_readwrite("gravity_degree", &core::HpopOptions::gravity_degree)
         .def_readwrite("gravity_order", &core::HpopOptions::gravity_order)

@@ -37,6 +37,12 @@ int main(int argc, char **argv) try {
                                                   reopened.first(), of::FrameId::itrf);
     if (current.position_m != trajectory.states().front().position_m)
         return 4;
+    const auto relativity = of::core::evaluate_relativity(
+        {7e6, 0, 0}, {0, 6200, 5300}, 3.986004415e14, {1.496e11, 0, 0}, {0, 30000, 0},
+        1.3271244004127942e20, {0, 0, 1});
+    if (relativity.schwarzschild_mps2[0] <= 0 || relativity.lense_thirring_mps2[0] <= 0 ||
+        relativity.de_sitter_mps2[0] >= 0 || relativity.acceleration_mps2[0] <= 0)
+        return 13;
     of::OrbitInput numerical;
     numerical.propagator = of::OrbitPropagator::hpop;
     numerical.hpop.gravity_degree = numerical.hpop.gravity_order = 0;

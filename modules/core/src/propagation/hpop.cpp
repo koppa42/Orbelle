@@ -159,6 +159,17 @@ class Hpop final : public IStateProvider {
                 rotation.apply_position(r), options_.gravity_degree, options_.gravity_order,
                 corrections));
         }
+        if (options_.include_relativistic_accelerations) {
+            const auto epoch = epoch_at(t);
+            const auto rotation =
+                environment_.frames->gcrf_to_itrf(epoch, environment_.eop->at(epoch).sample);
+            const auto sun = environment_.ephemeris->geometric_state(ThirdBody::sun, epoch);
+            const auto force = evaluate_relativity(
+                r, {s[3], s[4], s[5]}, options_.gravity_mu, sun.position_m, sun.velocity_mps,
+                environment_.ephemeris->data_info().sun_mu, rotation.inverse_position({0, 0, 1}));
+            for (std::size_t i = 0; i < 3; ++i)
+                acceleration[i] += force.acceleration_mps2[i];
+        }
         if (options_.uses_third_bodies()) {
             const auto epoch = epoch_at(t);
             const auto &info = environment_.ephemeris->data_info();
@@ -328,8 +339,8 @@ class Hpop final : public IStateProvider {
         if (initial.origin != OriginId::earth || initial.frame != FrameId::gcrf)
             throw std::invalid_argument("HPOP requires an Earth-centered GCRF initial state");
         if (options.uses_eop_force() && (!environment_.eop || !environment_.frames))
-            throw std::invalid_argument(
-                "HPOP gravity corrections and drag require explicit EOP and frame providers");
+            throw std::invalid_argument("HPOP gravity corrections, drag and relativity require "
+                                        "explicit EOP and frame providers");
         if (options.uses_eop_force() && !eop_covers(environment_.eop->data_info(), initial.epoch))
             throw EopCoverageError("HPOP initial epoch is outside selected EOP coverage");
         if (options.uses_utc_force()) {

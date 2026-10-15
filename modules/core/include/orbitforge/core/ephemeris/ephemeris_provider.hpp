@@ -56,6 +56,12 @@ class IEphemerisProvider {
     virtual ~IEphemerisProvider() = default;
     [[nodiscard]] virtual TdbTime to_tdb(Epoch epoch) const = 0;
     [[nodiscard]] virtual Epoch from_tdb(TdbTime time) const = 0;
+    // Local derivative dTDB/dTAI from this immutable snapshot's time conversion.
+    // Required before using geometric ephemeris velocities in TAI/TT dynamics.
+    // Unsupported providers reject explicitly; no implicit finite differencing.
+    [[nodiscard]] virtual double tdb_seconds_per_tai_second(Epoch) const {
+        throw EphemerisDataError("This ephemeris does not provide the TDB/TAI rate");
+    }
     [[nodiscard]] virtual EphemerisState geometric_state(std::int32_t target, std::int32_t observer,
                                                          Epoch epoch) const = 0;
     [[nodiscard]] virtual std::vector<EphemerisState>

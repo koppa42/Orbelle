@@ -94,7 +94,8 @@ class ThirdBodyEphemeris final : public core::IThirdBodyEphemeris {
                 "HPOP currently supports ICRF-aligned DE440s ephemerides only");
         info_ = {info.model,
                  info.manifest_sha256,
-                 "de440-newtonian-geocentric-icrf-none-gm440-planets-v2;" + info.toolkit_version,
+                 "de440-newtonian-geocentric-icrf-none-gm440-planets-tai-rate-v3;" +
+                     info.toolkit_version,
                  info.first_epoch,
                  info.last_epoch,
                  de440_sun_mu,
@@ -106,6 +107,22 @@ class ThirdBodyEphemeris final : public core::IThirdBodyEphemeris {
         if (state.frame != core::FrameId::spice_j2000)
             throw core::EphemerisDataError("DE440 force ephemeris returned unexpected axes");
         return state.position_m;
+    }
+    core::GeometricBodyState geometric_state(core::ThirdBody body, core::Epoch at) const override {
+        const auto state = source_->geometric_state(core::third_body_naif_id(body), 399, at);
+        if (state.frame != core::FrameId::spice_j2000 ||
+            state.velocity_time_scale != core::TimeScale::tdb || state.epoch != at ||
+            state.target_naif_id != core::third_body_naif_id(body) || state.observer_naif_id != 399)
+            throw core::EphemerisDataError(
+                "DE440 force ephemeris returned an unexpected state convention");
+        const double rate = source_->tdb_seconds_per_tai_second(at);
+        if (!std::isfinite(rate) || rate <= 0)
+            throw core::EphemerisDataError(
+                "DE440 force ephemeris returned an invalid TDB/TAI rate");
+        auto velocity = state.velocity_mps;
+        for (double &component : velocity)
+            component *= rate;
+        return {state.position_m, velocity};
     }
     std::array<double, 3> apparent_sun_from_earth(core::Epoch at) const override {
         return source_->apparent_sun_from_earth(at);

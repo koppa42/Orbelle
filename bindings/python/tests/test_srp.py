@@ -49,7 +49,7 @@ class SrpTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "srp.orbitforge"
             project.save(path)
-            self.assertEqual(int.from_bytes(path.read_bytes()[8:12], "little"), 24)
+            self.assertEqual(int.from_bytes(path.read_bytes()[8:12], "little"), 25)
             restored = of.Project.open(path)
             self.assertEqual(restored.objects[sat.id].orbit.hpop.srp, srp)
         sat.orbit = replace(orbit, hpop=replace(orbit.hpop, srp=replace(srp, cr=1.5)))

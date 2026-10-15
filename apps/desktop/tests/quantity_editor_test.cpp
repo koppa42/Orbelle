@@ -1394,8 +1394,11 @@ TEST_F(QuantityTest, HpopNestedPagesPreserveDraftsAndKeepUnavailableModelsInacti
                 EXPECT_FALSE(dialog->findChild<QCheckBox *>("hpopUseDrag")->isChecked());
                 EXPECT_FALSE(dialog->findChild<QuantityEditor *>("hpopDragCd")->isEnabled());
             } else {
-                EXPECT_TRUE(forces->currentWidget()->findChildren<QCheckBox *>().isEmpty());
-                EXPECT_TRUE(forces->currentWidget()->findChild<QLabel *>("hpopPendingBadge"));
+                EXPECT_EQ(forces->currentWidget()->findChildren<QCheckBox *>().size(), 1);
+                EXPECT_FALSE(
+                    dialog->findChild<QCheckBox *>("hpopRelativisticAccelerations")->isChecked());
+                EXPECT_TRUE(
+                    forces->currentWidget()->findChild<QWidget *>("hpopAdditionalPendingSection"));
             }
             screenshot(QStringLiteral("hpop-force-%1").arg(index));
         }
@@ -2162,6 +2165,101 @@ TEST_F(QuantityTest, HpopSolidTidesMissingEphemerisReturnsToGravityAndTruncatedP
     EXPECT_FALSE(options.uses_full_solid_tides());
     EXPECT_TRUE(options.solid_tides.include_time_dependent_terms);
     EXPECT_FALSE(options.uses_utc_force());
+}
+
+TEST_F(QuantityTest, HpopRelativityKeyboardResizeReopenAndCancel) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    core::HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    runtime::CatalogEphemeris entry;
+    entry.selection = "de440s";
+    entry.info.first = core::Epoch{0};
+    entry.info.last = core::Epoch{86400000000000};
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *outer = dialog->findChild<QTabWidget *>("hpopSettingsTabs");
+        auto *forces = dialog->findChild<QTabWidget *>("hpopForceModelTabs");
+        auto *relativity = dialog->findChild<QCheckBox *>("hpopRelativisticAccelerations");
+        ASSERT_TRUE(relativity);
+        forces->setCurrentIndex(3);
+        reveal(relativity);
+        relativity->setFocus();
+        EXPECT_FALSE(relativity->isChecked());
+        QKeyEvent press(QEvent::KeyPress, Qt::Key_Space, Qt::NoModifier),
+            release(QEvent::KeyRelease, Qt::Key_Space, Qt::NoModifier);
+        QApplication::sendEvent(relativity, &press);
+        QApplication::sendEvent(relativity, &release);
+        EXPECT_TRUE(relativity->isChecked());
+        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        std::cout << "HPOP relativity device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
+        for (int width : {720, 430}) {
+            dialog->resize(width, width == 720 ? 700 : 620);
+            QEventLoop settled;
+            QTimer::singleShot(60, &settled, &QEventLoop::quit);
+            settled.exec();
+            auto *scroll = dialog->findChild<QScrollArea *>("hpopAdditionalPage");
+            scroll->ensureWidgetVisible(relativity);
+            QApplication::processEvents();
+            EXPECT_TRUE(relativity->isVisible());
+            EXPECT_TRUE(relativity->isChecked());
+            EXPECT_EQ(relativity, dialog->findChild<QCheckBox *>("hpopRelativisticAccelerations"));
+            EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+            EXPECT_TRUE(
+                dialog->rect().contains(dialog->findChild<QDialogButtonBox *>()->geometry()));
+            if (!capture.isEmpty()) {
+                EXPECT_TRUE(QDir{}.mkpath(capture));
+                EXPECT_TRUE(
+                    dialog->grab().save(capture + QString("/hpop-relativity-%1.png").arg(width)));
+            }
+        }
+        outer->setCurrentIndex(1);
+        outer->setCurrentIndex(0);
+        EXPECT_EQ(forces->currentIndex(), 3);
+        EXPECT_TRUE(relativity->isChecked());
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr, {}, {entry}));
+    EXPECT_TRUE(options.include_relativistic_accelerations);
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *relativity = dialog->findChild<QCheckBox *>("hpopRelativisticAccelerations");
+        ASSERT_TRUE(relativity);
+        EXPECT_TRUE(relativity->isChecked());
+        relativity->setChecked(false);
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr, {}, {entry}));
+    EXPECT_EQ(options, saved);
+}
+TEST_F(QuantityTest, HpopRelativityMissingEphemerisReturnsToAdditionalWithoutPublishingDraft) {
+    core::HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *relativity = dialog->findChild<QCheckBox *>("hpopRelativisticAccelerations");
+        ASSERT_TRUE(relativity);
+        relativity->setChecked(true);
+        auto *outer = dialog->findChild<QTabWidget *>("hpopSettingsTabs");
+        outer->setCurrentIndex(2);
+        auto *ok = dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok);
+        ok->click();
+        EXPECT_TRUE(dialog->isVisible());
+        EXPECT_EQ(options, saved);
+        EXPECT_EQ(outer->currentIndex(), 0);
+        EXPECT_EQ(dialog->findChild<QTabWidget *>("hpopForceModelTabs")->currentIndex(), 3);
+        EXPECT_TRUE(
+            dialog->findChild<QLabel *>("errorText")->text().contains(QStringLiteral("相对论")));
+        EXPECT_TRUE(relativity->isVisible());
+        relativity->setChecked(false);
+        ok->click();
+    });
+    EXPECT_TRUE(edit_hpop_settings(options, nullptr));
+    EXPECT_EQ(options, saved);
 }
 
 } // namespace orbitforge::desktop

@@ -43,10 +43,19 @@ struct ThirdBodyDataInfo {
 // Geometric Earth-relative positions in ICRF-aligned axes for Newtonian forces.
 // This is not a full relativistic BCRS -> GCRS state conversion; no aberration,
 // light time or velocity re-labelling. Implementations own immutable resources.
+struct GeometricBodyState {
+    std::array<double, 3> position_m, velocity_mps; // Velocity per TAI second.
+};
 class IThirdBodyEphemeris {
   public:
     virtual ~IThirdBodyEphemeris() = default;
     [[nodiscard]] virtual std::array<double, 3> position(ThirdBody body, Epoch epoch) const = 0;
+    // Optional geometric position and velocity, Earth relative, ICRF-aligned axes.
+    // The velocity is the derivative of position() per TAI second. This is a
+    // Newtonian ephemeris input, not a relativistic coordinate transformation.
+    [[nodiscard]] virtual GeometricBodyState geometric_state(ThirdBody, Epoch) const {
+        throw std::invalid_argument("This ephemeris does not provide geometric TAI velocities");
+    }
     // Optional geocentric apparent Sun: received light, LT+S in the same ICRF axes.
     // Unsupported providers fail explicitly; geometric forces continue to use position().
     [[nodiscard]] virtual std::array<double, 3> apparent_sun_from_earth(Epoch) const {
