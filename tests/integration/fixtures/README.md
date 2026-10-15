@@ -1,12 +1,12 @@
 # Current project format fixture
 
-`project-current.orbitforge` is a fixed v30 input assembled independently with Python's `struct.pack` from the [documented binary layout](../../../docs/architecture/project_files.md), without calling OrbitForge's writer. C++ and Python must read it and reproduce its bytes exactly. It guards against reader and writer drifting together.
+`project-current.orbitforge` is a fixed v31 input assembled independently with Python's `struct.pack` from the [documented binary layout](../../../docs/architecture/project_files.md), without calling OrbitForge's writer. C++ and Python must read it and reproduce its bytes exactly. It guards against reader and writer drifting together.
 
-- 1454 bytes; SHA-256 `a312552c2a9f0aa7985f38c21029cc716d9551f892c43f77cb1e06a6b69163e1`.
+- 1454 bytes; SHA-256 `ff1312cfcf4e3ad90f2450a952055b08269e28fe071df3357adb87073d0c4ce8`.
 - `Schema fixture`, TAI nanoseconds `[123, 600000000123]`, current time `1000000123`.
 - Two-body `satellite-a` named `观测卫星 A`, and mission sequence `satellite-b` with an empty display name (use its ID). Both use GCRF state `[7000000, 0, 0]` m and `[0, 6200, 5300]` m/s at TAI nanosecond 123.
 - Mission uses HPOP point-mass coasts: `Drift` (200000000001 ns), `Raise` (VNC delta-v `[12, -3, 0.5]` m/s), `Coast` (399999999999 ns). The sequence covers the scenario exactly.
-- HPOP stores an empty gravity selection (built-in EGM96), GM `3.986004415e14 m³/s²`, and uses RKF78, relative tolerance `2e-12`, position tolerance `0.002 m`, velocity tolerance `2e-6 m/s`, minimum/maximum steps `0.005/45 s`, inactive RK4 step `12 s`, minimum geocentric altitude `1000 m`.
+- HPOP stores an empty gravity selection (built-in EGM96), GM `3.986004415e14 m³/s²`, and uses RKV 8(9) Efficient, relative tolerance `2e-12`, position tolerance `0.002 m`, velocity tolerance `2e-6 m/s`, minimum/maximum steps `0.005/45 s`, inactive RK4 step `12 s`, minimum geocentric altitude `1000 m`.
 - Relativistic accelerations are disabled. Satellite mass is `1250 kg`; both inactive spherical areas are `37.5 m²` from their explicit ratios.
 - Solid tide draft is Full with truncation and time-dependent terms on; it is inactive for 0/0 gravity.
 - Secular variations are enabled as an inactive draft for the 0/0 base gravity; no reference epoch/rates are inferred.

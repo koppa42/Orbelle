@@ -35,6 +35,32 @@ class HpopTests(unittest.TestCase):
         self.assertNotEqual(project.prepare().state(satellite, at=project.last).position_m, before.position_m)
         self.assertEqual(analysis.state(satellite, at=project.last).position_m, before.position_m)
 
+    def test_rkv89_public_options_identity_snapshots_and_project_roundtrip(self):
+        project, satellite = self.make(gravity_degree=0)
+        original = project.prepare()
+        original_states = original.states(satellite, step=u.s(600))
+        satellite.orbit = replace(satellite.orbit, hpop=replace(satellite.orbit.hpop, integrator="rkv89"))
+        settings = satellite.orbit.hpop
+        self.assertEqual(settings.integrator, "rkv89")
+        self.assertEqual(settings._native().integrator, of.HpopIntegrator.RKV89)
+        analysis = project.prepare()
+        result = analysis.states(satellite, step=u.s(600))
+        self.assertNotEqual(result.input_sha256, original_states.input_sha256)
+        self.assertEqual(original.states(satellite, step=u.s(600)).position.values, original_states.position.values)
+        for point, reference in zip(result.position.values, original_states.position.values):
+            self.assertLess(math.dist(point, reference), .01)
+        satellite.orbit = replace(satellite.orbit, hpop=replace(settings, fixed_step_seconds=7))
+        self.assertEqual(project.prepare().states(satellite, step=u.s(600)).input_sha256, result.input_sha256)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "rkv89.orbitforge"
+            project.save(path)
+            restored = of.Project.open(path)
+            sat = restored.objects[satellite.id]
+            self.assertEqual(sat.orbit.hpop.integrator, "rkv89")
+            self.assertEqual(restored.prepare().states(sat, step=u.s(600)).position.values, result.position.values)
+        _, explicit = self.make(gravity_degree=0, integrator="rkv89")
+        self.assertEqual(explicit.orbit.hpop.integrator, "rkv89")
+
     def test_mass_is_shared_validated_and_persisted_without_changing_spherical_ratios(self):
         project, satellite = self.make(gravity_degree=0, satellite_mass_kg=1250,
             srp=of.orbits.SrpSettings(area_mass_ratio_m2_per_kg=.03))

@@ -922,7 +922,9 @@ void OrbitEditor::update_state_labels() {
         (hpop_.srp.enabled ? QStringLiteral(" + 太阳辐射压") : QString{}) +
         (hpop_.drag.enabled ? QStringLiteral(" + 大气阻力") : QString{}) +
         (hpop_.integrator == core::HpopIntegrator::rkf78 ? QStringLiteral(" · RKF78 自适应")
-                                                         : QStringLiteral(" · RK4 固定步长")));
+         : hpop_.integrator == core::HpopIntegrator::rkv89
+             ? QStringLiteral(" · RKV 8(9) Efficient 自适应")
+             : QStringLiteral(" · RK4 固定步长")));
     if (propagator_kind_ == OrbitPropagator::mission) {
         model_button_->setText(QStringLiteral("规划…"));
         model_button_->setToolTip(QStringLiteral("编辑滑行与脉冲机动序列"));

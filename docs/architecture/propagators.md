@@ -24,9 +24,9 @@
 | --- | --- | --- |
 | 地球引力 | 桌面新配置默认 EGM2008、21×21，缺少数据时首次打开设置自动下载；SDK 默认内置 EGM96 8×8、最高 20×20；可下载完整 EGM96 / EGM2008，或导入静态 `.gfc` / `.grv`；文件模型计算最高 2190×2190，EGM2008 完整 2190×2159，0/0 为所选模型点质量 | 阶数与次数按文件实际范围独立限幅；支持[永久潮／完整固体潮](solid_tides.md)；支持[FES2014bv1 海潮与海洋极潮](ocean_tides.md)及独立截断；长期系数变化、潮汐幅度筛选和次要分潮推算待实现 |
 | 第三体引力 | 日月、七行星及冥王星独立启用，默认关闭；DE440s 地心几何位置，GM 来源为 JPL DE / Cb file / User Specified | 每个积分阶段求值；覆盖不足报错，不外推 |
-| 积分器 | RKF78 自适应；RK4 固定步长 | 尚无 VOP、RK89、Gauss–Jackson、Bulirsch–Stoer |
+| 积分器 | RKF78 / RKV 8(9) Efficient 自适应；RK4 固定步长 | 尚无 VOP、Gauss–Jackson、Bulirsch–Stoer |
 | 自适应容差 | 相对 1e-12，位置绝对 1e-3 m，速度绝对 1e-6 m/s | 分量误差尺度为 `atol + rtol × max(abs(old), abs(new))`；是局部数值误差，不是预报精度 |
-| 步长 | RKF78 默认 0.001–60 s；RK4 默认 10 s | 输出采样间隔独立；RK4 不作误差控制 |
+| 步长 | RKF78 / RKV89 默认 0.001–60 s；RK4 默认 10 s | 输出采样间隔独立；RK4 不作误差控制 |
 | 停止条件 | 最低地心高度（默认 0 m）、无法满足容差、非有限状态、资源上限 | 高度相对所选重力模型参考球面，不是大地高；不作再入事件定位 |
 | 其他摄动 | 已计入球形阻力及光压；已计入永久潮及完整固体潮（可选频率项与极潮）；已接入[IERS 2003 三项相对论](relativity.md)；已计入 FES2014bv1 显式分潮和 IERS 2010 海洋极潮；潮汐幅度筛选及次要分潮推算待实现；脉冲机动使用任务序列 | STK 的完整力模型更多，不能据本阶段宣称长期 LEO/GEO 预报精度等价 |
 
@@ -35,6 +35,8 @@ EGM96 取自 [ICGEM 原始系数](https://icgem.gfz.de/getmodel/gfc/971b0a3b49a4
 球谐势采用归一化 Cartesian 角向递推与解析一阶自动微分；径向幂单独计算，最终乘入完全归一化因子。近极点使用差分形式递推，并以有理化公式计算小系数和 `u−1`，避免大项相减积累误差；逐分量补偿求和。角向递推仅保留前两阶，径向权重工作区为 O(degree)。高阶测试同时覆盖两种递推形式的切换位置、南北极及完整 EGM2008，见[验证协议](../validation/hpop_protocol.md#完整-egm2008-与-2190-阶验证)。每次计算无需经纬度除法、数值差分或未归一化阶乘。每次力评估使用当前分析持有的 EOP 将位置旋转到 ITRF，计算引力后旋回 GCRF；惯性方程不另加离心或科里奥利项。即使输出 GCRF，非中心重力也必须有 EOP，其哈希进入结果来源。数据必须覆盖初始历元到场景时段的整个积分路径；目录选源和桌面准备均按该范围检查，计算中不换源或联网。
 
 文件模型使用自己的 GM、参考半径、潮汐系统及 `.grv` 中显式指定的实部 k20（未指定为 0.30190），静态系数保持原始潮汐系统，HPOP 按显式固体潮模式转换可分离永久项。资源保留完整文件，并将全部声明范围内的系数装入不可变 `GravityModel`；超过已经验证的 2190 阶明确拒绝。ICGEM 检查稠密系数与一致的最高次数，允许 EGM2008 的 2190 阶、2159 次尾部；不静默截掉文件内容。`HpopOptions.gravity_model` 保存目录选择 ID，`gravity_mu` 保存初始根数转换和报告所用 GM；准备时与文件核对，GM 不符时需重新选择模型并确认轨道输入。自定义文件可以更新系数，但不会偷偷重新解释原始根数。模型哈希与解析版本进入项目 LOCK，文件更新经确认后重建全部调用方，运行中的分析继续持有原资源。
+
+RKV 8(9) Efficient 使用 Verner 的 16 阶段高效 9(8) 嵌入对，按 [STK 的八阶推进定义](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)推进八阶成员，以九阶与八阶之差估计局部误差。系数固定于 [rklib `rkv98e`](https://github.com/jacobwilliams/rklib/blob/a1bf2d26ba2c37d049b448d28d4e9800a0ee4b58/src/rklib_variable_steps.f90)（BSD-3-Clause）；其原实现推进九阶成员，OrbitForge 显式选择八阶权重。每步使用 16 次阶段力评估，所有阶段在该步闭区间内，另验证接受端点。控制器使用上述分量混合绝对/相对误差的最大范数，接受阈值 1，安全因子 0.9、缩放范围 0.1–4、指数 −1/9，随后约束到最小/最大步长。天气边界及末段可短于最小步长；若误差仍超限则报错。它与 RKF78 共用分段缓存和取消边界；暂不提供固定步长 RKV、稠密插值或 FSAL 缓存。Python 使用 `integrator="rkv89"`，C++ 为 `HpopIntegrator::rkv89`，结果来源包含 `rkv89-efficient-8th-rklib-a1bf2d26-v1`。控制器并不宣称与 STK 内部实现相同；局部容差不能保证整段轨道误差，见[数值对照](../validation/hpop_protocol.md#rkv-89-efficient)。
 
 RKF78 系数来自 Fehlberg [NASA TR R-287](https://ntrs.nasa.gov/citations/19680027281)，推进八阶解，以嵌入七阶解估计误差；不宣称逐位复现 STK 的控制器。从初始历元向前后独立建立完整 300 s 计算段，余段单独积分；改变采样、乱序、重复和并发查询不改变结果。共享缓存加锁，取消保留已完成段，不发布部分结果。每次查询最多 200000 次积分尝试，距离初始历元最多 366 天；这是资源边界，不是精度保证。显示插值不参与科学查询。
 
@@ -50,7 +52,7 @@ trajectory = analysis.states(satellite, step=u.s(30))
 
 RK4 使用 `integrator="rk4", fixed_step_seconds=10`；点质量使用 `gravity_degree=0`，启用未截断潮汐时仍需要 EOP。`satellite.orbit.hpop` 是不可变 `HpopSettings`，可用 `dataclasses.replace` 修改后将新 `Orbit` 赋回 `satellite.orbit`；旧分析继续持有旧参数与数据。完整示例见 `examples/python/propagators.py`。
 
-C++ 设置 `OrbitInput.propagator = OrbitPropagator::hpop`、`OrbitInput.hpop`（`HpopOptions`），通过 `Project::prepare(data)` 查询。低层工厂 `runtime::make_hpop_session(initial, options, environment, id)` 持有不可变 UTC、Frame/EOP、重力、星历、空间天气和海潮 Provider 的共享所有权。核心只依赖标准库；Runtime 的 DE440s 装配需要 CSPICE。桌面选择 HPOP 后，“配置…”左侧导航分“力模型”（引力、阻力、太阳辐射压、其他）和“数值”（积分器、协方差）两组，每项下方实时显示当前草稿摘要，如“EGM2008 · 21 × 21 · 第三体 2”；窄窗口改为顶部页签。各页按标题分组，标签列对齐；补充说明收在分组标题旁的说明标记中，页面只保留限制与数据要求。阻力与光压以开关启用，关闭时只显示一行说明；光压的太阳位置方法直接显示，模型常数默认折叠为一行摘要。引力页将中心天体引力、固体潮、海潮与第三体引力放在同一滚动页面；第三体区域用 Name / Use / Source / GM 四列表格配置日月、七颗行星及冥王星，支持搜索和独立的 Cb file / JPL DE / User Specified 来源。光压页提供球形模型、独立 Cr 与面积质量比、三种阴影模式、地球／月球分配及等效大气高度；太阳位置提供 True、Apparent to True CB 和 Apparent，默认地心视太阳；遮挡体中心仍使用几何位置。最低停止高度放在积分器页。阻力页提供球形 Cd/面积质量比、JR/NRLMSISE-00、手动 F10.7/Kp 或 CelesTrak 文件（日/三小时 Ap/Kp）、低空拼接和视太阳，详见[阻力契约](atmospheric_drag.md)。“其他”页已接入 IERS 2003 三项相对论加速度，默认关闭，详见[相对论契约](relativity.md)；卫星质量默认 1000 kg，支持 kg/g/t，按 STK 球形模型语义换算对应面积而不改变各自 A/m 或加速度；地球辐射、插件及协方差尚未实现，只显示能力状态。切换内外页、调整窗口或单位不重建输入；校验失败返回相应页并定位字段。保存设置仅改变属性草稿，轨道页的“应用”才计算并发布。参数随项目 v30 保存。
+C++ 设置 `OrbitInput.propagator = OrbitPropagator::hpop`、`OrbitInput.hpop`（`HpopOptions`），通过 `Project::prepare(data)` 查询。低层工厂 `runtime::make_hpop_session(initial, options, environment, id)` 持有不可变 UTC、Frame/EOP、重力、星历、空间天气和海潮 Provider 的共享所有权。核心只依赖标准库；Runtime 的 DE440s 装配需要 CSPICE。桌面选择 HPOP 后，“配置…”左侧导航分“力模型”（引力、阻力、太阳辐射压、其他）和“数值”（积分器、协方差）两组，每项下方实时显示当前草稿摘要，如“EGM2008 · 21 × 21 · 第三体 2”；窄窗口改为顶部页签。各页按标题分组，标签列对齐；补充说明收在分组标题旁的说明标记中，页面只保留限制与数据要求。阻力与光压以开关启用，关闭时只显示一行说明；光压的太阳位置方法直接显示，模型常数默认折叠为一行摘要。引力页将中心天体引力、固体潮、海潮与第三体引力放在同一滚动页面；第三体区域用 Name / Use / Source / GM 四列表格配置日月、七颗行星及冥王星，支持搜索和独立的 Cb file / JPL DE / User Specified 来源。光压页提供球形模型、独立 Cr 与面积质量比、三种阴影模式、地球／月球分配及等效大气高度；太阳位置提供 True、Apparent to True CB 和 Apparent，默认地心视太阳；遮挡体中心仍使用几何位置。最低停止高度放在积分器页。阻力页提供球形 Cd/面积质量比、JR/NRLMSISE-00、手动 F10.7/Kp 或 CelesTrak 文件（日/三小时 Ap/Kp）、低空拼接和视太阳，详见[阻力契约](atmospheric_drag.md)。“其他”页已接入 IERS 2003 三项相对论加速度，默认关闭，详见[相对论契约](relativity.md)；卫星质量默认 1000 kg，支持 kg/g/t，按 STK 球形模型语义换算对应面积而不改变各自 A/m 或加速度；地球辐射、插件及协方差尚未实现，只显示能力状态。切换内外页、调整窗口或单位不重建输入；校验失败返回相应页并定位字段。保存设置仅改变属性草稿，轨道页的“应用”才计算并发布。参数随项目 v31 保存。
 
 独立回归使用 Orekit 13.1.2 Holmes–Featherstone 重力和 Hipparchus 4.0.2 DP853：五类轨道 × 三组阶次 × ±6000 s/±1 天共 60 个状态，检查位置每分量 0.15 m、速度 0.15 mm/s、初始加速度 5e-13 m/s²。参考刻意采用静态同轴重力系，隔离球谐与积分；真实 EOP 路由另由集成测试验证。尚无同配置 STK 导出数据直接对照，见 [HPOP 验证](../validation/hpop_protocol.md)。后续按完整截图清单继续完善光压、空间天气、大气并接入潮汐、附加力、积分高级选项和协方差；未实现的力不提供无效开关。
 

@@ -317,7 +317,7 @@ class HpopSettings:
     """
     gravity_degree: int = 8
     gravity_order: int = 8
-    integrator: Literal["rkf78", "rk4"] = "rkf78"
+    integrator: Literal["rkf78", "rk4", "rkv89"] = "rkf78"
     relative_tolerance: float = 1e-12
     position_tolerance_m: float = 1e-3
     velocity_tolerance_mps: float = 1e-6
@@ -373,8 +373,8 @@ class HpopSettings:
 
     def _native(self) -> n.HpopOptions:
         value = n.HpopOptions()
-        if self.integrator not in ("rkf78", "rk4"):
-            raise ValueError("integrator must be 'rkf78' or 'rk4'")
+        if self.integrator not in ("rkf78", "rk4", "rkv89"):
+            raise ValueError("integrator must be 'rkf78', 'rk4' or 'rkv89'")
         for name in self.__dataclass_fields__:
             if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides"):
                 setattr(value, name, getattr(self, name))
@@ -389,7 +389,8 @@ class HpopSettings:
         value.drag = self.drag._native()
         value.solid_tides = self.solid_tides._native()
         value.ocean_tides = self.ocean_tides._native()
-        value.integrator = n.HpopIntegrator.RKF78 if self.integrator == "rkf78" else n.HpopIntegrator.RK4
+        value.integrator = {"rkf78": n.HpopIntegrator.RKF78, "rk4": n.HpopIntegrator.RK4,
+                            "rkv89": n.HpopIntegrator.RKV89}[self.integrator]
         value.validate()
         return value
 
@@ -411,7 +412,9 @@ class HpopSettings:
         fields["drag"] = DragSettings._read(value.drag)
         fields["solid_tides"] = SolidTideSettings._read(value.solid_tides)
         fields["ocean_tides"] = OceanTideSettings._read(value.ocean_tides)
-        return cls(**fields, integrator="rkf78" if value.integrator == n.HpopIntegrator.RKF78 else "rk4")
+        integrators = {n.HpopIntegrator.RKF78: "rkf78", n.HpopIntegrator.RK4: "rk4",
+                       n.HpopIntegrator.RKV89: "rkv89"}
+        return cls(**fields, integrator=integrators[value.integrator])
 
 
 @dataclass(frozen=True, slots=True)
@@ -495,7 +498,7 @@ def Sgp4(*, tle: n.Tle) -> Orbit:
 def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          gravity_model: str = "", gravity_mu: float = 3.986004415e14,
          gravity_degree: int = 8, gravity_order: int | None = None,
-         integrator: Literal["rkf78", "rk4"] = "rkf78", max_step_seconds: float = 60,
+         integrator: Literal["rkf78", "rk4", "rkv89"] = "rkf78", max_step_seconds: float = 60,
          min_step_seconds: float = 0.001, fixed_step_seconds: float = 10,
          relative_tolerance: float = 1e-12, position_tolerance_m: float = 1e-3,
          velocity_tolerance_mps: float = 1e-6, minimum_altitude_m: float = 0,
@@ -506,7 +509,7 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          include_relativistic_accelerations: bool = False,
          satellite_mass_kg: float = 1000.0, ocean_tides: OceanTideSettings | None = None,
          include_secular_variations: bool = False) -> Orbit:
-    """Cowell orbit with gravity, tides, third bodies, drag, spherical SRP, RKF78 or RK4.
+    """Cowell orbit with gravity, tides, third bodies, drag, spherical SRP, RKF78, RKV89 or RK4.
 
     Built-in EGM96 supports up to degree 20; installed gravity files up to 2190 (EGM2008 order limit 2159).
     Satellite mass is in kg (finite and positive); spherical forces retain their explicit

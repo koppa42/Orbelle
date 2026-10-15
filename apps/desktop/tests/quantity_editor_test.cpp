@@ -2713,4 +2713,87 @@ TEST_F(QuantityTest, HpopSecularFileCapabilityKeyboardDraftAndValidation) {
     EXPECT_TRUE(options.include_secular_variations);
 }
 
+TEST_F(QuantityTest, HpopRkv89UsesAdaptiveFieldsValidatesAndPreservesCancelledDrafts) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    core::HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    options.fixed_step_seconds = 12;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(1);
+        auto *method = dialog->findChild<QComboBox *>("hpopIntegrator");
+        auto *minimum = dialog->findChild<QuantityEditor *>("hpopMinStep");
+        auto *maximum = dialog->findChild<QuantityEditor *>("hpopMaxStep");
+        auto *fixed = dialog->findChild<QuantityEditor *>("hpopFixedStep");
+        ASSERT_EQ(method->count(), 3);
+        method->setCurrentIndex(1);
+        EXPECT_FALSE(maximum->isVisible());
+        EXPECT_TRUE(fixed->isVisible());
+        method->setFocus();
+        QKeyEvent end_key(QEvent::KeyPress, Qt::Key_End, Qt::NoModifier);
+        QApplication::sendEvent(method, &end_key);
+        EXPECT_EQ(method->currentIndex(), 2);
+        EXPECT_TRUE(method->currentText().contains("RKV 8(9) Efficient"));
+        EXPECT_TRUE(maximum->isVisible());
+        EXPECT_FALSE(fixed->isVisible());
+        minimum->set_value(50, Unit::second);
+        maximum->set_value(10, Unit::second);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        EXPECT_TRUE(dialog->isVisible());
+        EXPECT_TRUE(dialog->findChild<QLabel *>("errorText")->isVisible());
+        minimum->set_value(.01, Unit::second);
+        maximum->set_value(90, Unit::second);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    ASSERT_TRUE(edit_hpop_settings(options, nullptr));
+    EXPECT_EQ(options.integrator, core::HpopIntegrator::rkv89);
+    EXPECT_EQ(options.min_step_seconds, .01);
+    EXPECT_EQ(options.max_step_seconds, 90);
+    EXPECT_EQ(options.fixed_step_seconds, 12);
+    OrbitInput input;
+    input.propagator = OrbitPropagator::hpop;
+    input.hpop = options;
+    OrbitEditor editor(input);
+    bool summary_matches = false;
+    for (const auto *label : editor.findChildren<QLabel *>())
+        summary_matches |= label->text().contains("RKV 8(9) Efficient");
+    EXPECT_TRUE(summary_matches);
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        EXPECT_EQ(dialog->findChild<QComboBox *>("hpopIntegrator")->currentIndex(), 2);
+        dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(1);
+        auto *method = dialog->findChild<QComboBox *>("hpopIntegrator");
+        auto *maximum = dialog->findChild<QuantityEditor *>("hpopMaxStep");
+        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        std::cout << "HPOP RKV89 device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
+        for (const int width : {720, 430}) {
+            dialog->resize(width, 620);
+            QEventLoop settled;
+            QTimer::singleShot(60, &settled, &QEventLoop::quit);
+            settled.exec();
+            EXPECT_EQ(method, dialog->findChild<QComboBox *>("hpopIntegrator"));
+            EXPECT_EQ(maximum->value(Unit::second), 90);
+            auto *scroll = dialog->findChild<QScrollArea *>("hpopIntegratorPage");
+            scroll->ensureWidgetVisible(method);
+            QApplication::processEvents();
+            EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+            EXPECT_TRUE(
+                dialog->rect().contains(dialog->findChild<QDialogButtonBox *>()->geometry()));
+            if (!capture.isEmpty()) {
+                EXPECT_TRUE(QDir{}.mkpath(capture));
+                EXPECT_TRUE(
+                    dialog->grab().save(capture + QString("/hpop-rkv89-%1.png").arg(width)));
+            }
+        }
+        dialog->findChild<QComboBox *>("hpopIntegrator")->setCurrentIndex(1);
+        dialog->findChild<QuantityEditor *>("hpopFixedStep")->set_value(7, Unit::second);
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr));
+    EXPECT_EQ(options, saved);
+}
+
 } // namespace orbitforge::desktop

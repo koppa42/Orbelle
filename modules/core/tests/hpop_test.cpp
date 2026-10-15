@@ -2,6 +2,7 @@
 #include <fstream>
 #include <future>
 #include <gtest/gtest.h>
+#include <iomanip>
 #include <limits>
 #include <numbers>
 #include <orbitforge/core/propagation/hpop.hpp>
@@ -83,22 +84,25 @@ TEST(Hpop, SatelliteMassValidatesCompatibleAreasEvenForDisabledForceDrafts) {
 }
 TEST(Hpop, PointMassMatchesCircularAnalyticSolutionForwardBackwardAndNearEpochLimits) {
     const double rate = std::sqrt(egm96_mu / std::pow(7e6, 3));
-    for (auto origin : {0LL, 8'000'000'000'000'000'000LL}) {
-        auto initial = circular();
-        initial.epoch = Epoch{origin};
-        const auto provider = make_hpop(initial, point_mass());
-        for (auto seconds : {86400LL, -86400LL, 1701LL, 0LL, -5000LL}) {
-            const auto state = provider->state_at(Epoch{origin + seconds * 1000000000LL});
-            const double angle = rate * static_cast<double>(seconds);
-            EXPECT_NEAR(state.position_m[0], 7e6 * std::cos(angle), 0.06);
-            EXPECT_NEAR(state.position_m[1], 7e6 * std::sin(angle), 0.06);
-            EXPECT_NEAR(state.velocity_mps[0], -7e6 * rate * std::sin(angle), 6e-5);
-            EXPECT_NEAR(state.velocity_mps[1], 7e6 * rate * std::cos(angle), 6e-5);
+    for (auto integrator : {HpopIntegrator::rkf78, HpopIntegrator::rkv89})
+        for (auto origin : {0LL, 8'000'000'000'000'000'000LL}) {
+            auto initial = circular();
+            initial.epoch = Epoch{origin};
+            auto options = point_mass();
+            options.integrator = integrator;
+            const auto provider = make_hpop(initial, options);
+            for (auto seconds : {86400LL, -86400LL, 1701LL, 0LL, -5000LL}) {
+                const auto state = provider->state_at(Epoch{origin + seconds * 1000000000LL});
+                const double angle = rate * static_cast<double>(seconds);
+                EXPECT_NEAR(state.position_m[0], 7e6 * std::cos(angle), 0.06);
+                EXPECT_NEAR(state.position_m[1], 7e6 * std::sin(angle), 0.06);
+                EXPECT_NEAR(state.velocity_mps[0], -7e6 * rate * std::sin(angle), 6e-5);
+                EXPECT_NEAR(state.velocity_mps[1], 7e6 * rate * std::cos(angle), 6e-5);
+            }
+            EXPECT_EQ(provider->state_at(initial.epoch).position_m, initial.position_m);
+            const auto tiny = provider->state_at(Epoch{origin + 1});
+            EXPECT_NEAR(tiny.position_m[1], initial.velocity_mps[1] * 1e-9, 1e-16);
         }
-        EXPECT_EQ(provider->state_at(initial.epoch).position_m, initial.position_m);
-        const auto tiny = provider->state_at(Epoch{origin + 1});
-        EXPECT_NEAR(tiny.position_m[1], initial.velocity_mps[1] * 1e-9, 1e-16);
-    }
 }
 TEST(Hpop, Rk4ConvergesAtFourthOrderAndSamplingDoesNotChangeTheSolution) {
     const auto initial = circular();
@@ -210,14 +214,164 @@ TEST(Hpop, MatchesIndependentOrekitHolmesFeatherstoneAndDp853Reference) {
         SCOPED_TRACE(line);
         const auto acceleration =
             egm96_acceleration(initial.position_m, options.gravity_degree, options.gravity_order);
-        const auto actual = make_hpop(initial, options, environment)
-                                ->state_at(Epoch{static_cast<std::int64_t>(elapsed * 1e9)});
-        for (std::size_t i = 0; i < 3; ++i) {
-            EXPECT_NEAR(acceleration[i], expected_a[i], 5e-13);
-            EXPECT_NEAR(actual.position_m[i], expected_r[i], 0.15);
-            EXPECT_NEAR(actual.velocity_mps[i], expected_v[i], 0.00015);
+        for (auto integrator : {HpopIntegrator::rkf78, HpopIntegrator::rkv89}) {
+            options.integrator = integrator;
+            const auto actual = make_hpop(initial, options, environment)
+                                    ->state_at(Epoch{static_cast<std::int64_t>(elapsed * 1e9)});
+            for (std::size_t i = 0; i < 3; ++i) {
+                EXPECT_NEAR(acceleration[i], expected_a[i], 5e-13);
+                EXPECT_NEAR(actual.position_m[i], expected_r[i], 0.15);
+                EXPECT_NEAR(actual.velocity_mps[i], expected_v[i], 0.00015);
+            }
         }
         ++count;
     }
     EXPECT_EQ(count, 60);
+}
+
+namespace {
+class MovingMoon final : public IThirdBodyEphemeris {
+    ThirdBodyDataInfo info_{"synthetic-moving-Moon",
+                            "",
+                            "analytic-v1",
+                            Epoch{-86400'000'000'000},
+                            Epoch{86400'000'000'000},
+                            1.32712440018e20,
+                            4.902800066e12};
+
+  public:
+    std::array<double, 3> position(ThirdBody body, Epoch at) const override {
+        if (body != ThirdBody::moon || at.tai_nanoseconds() < info_.first.tai_nanoseconds() ||
+            at.tai_nanoseconds() > info_.last.tai_nanoseconds())
+            throw std::out_of_range("Moon stage outside certified interval");
+        const double angle = static_cast<double>(at.tai_nanoseconds()) * 1e-9 * 2 *
+                                 std::numbers::pi / (27.321661 * 86400) +
+                             .4;
+        return {384400000 * std::cos(angle), 384400000 * std::sin(angle) * std::cos(.3),
+                384400000 * std::sin(angle) * std::sin(.3)};
+    }
+    void validate_interval(Epoch first, Epoch last, std::span<const ThirdBody>) const override {
+        if (first.tai_nanoseconds() < info_.first.tai_nanoseconds() ||
+            last.tai_nanoseconds() > info_.last.tai_nanoseconds() ||
+            first.tai_nanoseconds() > last.tai_nanoseconds())
+            throw std::out_of_range("Moon coverage");
+    }
+    const ThirdBodyDataInfo &data_info() const noexcept override { return info_; }
+};
+CartesianState eccentric_analytic(double seconds) {
+    constexpr double e = .7, perigee = 7e6;
+    const double a = perigee / (1 - e), rate = std::sqrt(egm96_mu / (a * a * a));
+    const double mean = rate * seconds;
+    double anomaly = mean;
+    for (int i = 0; i < 30; ++i)
+        anomaly -= (anomaly - e * std::sin(anomaly) - mean) / (1 - e * std::cos(anomaly));
+    const double c = std::cos(anomaly), sn = std::sin(anomaly), beta = std::sqrt(1 - e * e);
+    return {Epoch{static_cast<std::int64_t>(seconds * 1e9)},
+            OriginId::earth,
+            FrameId::gcrf,
+            {a * (c - e), a * beta * sn, 0},
+            {-a * rate * sn / (1 - e * c), a * rate * beta * c / (1 - e * c), 0}};
+}
+} // namespace
+TEST(Hpop, Rkv89MatchesIndependentScipyDop853ForEccentricJ2AndTimeVaryingForces) {
+    std::ifstream file{ORBITFORGE_RKV89_REFERENCE};
+    ASSERT_TRUE(file.good());
+    HpopEnvironment environment{std::make_shared<FixedFrames>(), std::make_shared<FixedEop>()};
+    environment.ephemeris = std::make_shared<MovingMoon>();
+    std::string line;
+    int count = 0;
+    double max_position = 0, max_velocity = 0;
+    while (std::getline(file, line)) {
+        if (line.empty() || line[0] == '#')
+            continue;
+        SCOPED_TRACE(line);
+        std::istringstream row{line};
+        int kind;
+        double seconds;
+        auto initial = circular(), expected = initial;
+        row >> kind >> seconds;
+        for (auto &v : initial.position_m)
+            row >> v;
+        for (auto &v : initial.velocity_mps)
+            row >> v;
+        for (auto &v : expected.position_m)
+            row >> v;
+        for (auto &v : expected.velocity_mps)
+            row >> v;
+        ASSERT_FALSE(row.fail());
+        expected.epoch = Epoch{std::llround(seconds * 1e9)};
+        auto options = point_mass();
+        options.integrator = HpopIntegrator::rkv89;
+        options.gravity_degree = kind ? 2 : 0;
+        options.relative_tolerance = 1e-14;
+        options.position_tolerance_m = 1e-8;
+        options.velocity_tolerance_mps = 1e-11;
+        options.max_step_seconds = 300;
+        options.third_bodies[static_cast<std::size_t>(ThirdBody::moon)].enabled = kind == 2;
+        const auto actual = make_hpop(initial, options, environment)->state_at(expected.epoch);
+        const double er = position_error(actual, expected);
+        const double ev = std::hypot(actual.velocity_mps[0] - expected.velocity_mps[0],
+                                     actual.velocity_mps[1] - expected.velocity_mps[1],
+                                     actual.velocity_mps[2] - expected.velocity_mps[2]);
+        max_position = std::max(max_position, er);
+        max_velocity = std::max(max_velocity, ev);
+        EXPECT_LT(er, .005);
+        EXPECT_LT(ev, 5e-6);
+        ++count;
+    }
+    EXPECT_EQ(count, 60);
+    std::ostringstream metrics_r, metrics_v;
+    metrics_r << std::setprecision(17) << max_position;
+    metrics_v << std::setprecision(17) << max_velocity;
+    RecordProperty("max_position_error_m", metrics_r.str());
+    RecordProperty("max_velocity_error_mps", metrics_v.str());
+}
+TEST(Hpop, Rkv89AdvancesTheEighthOrderMemberAndControlsRejectedSteps) {
+    const auto initial = eccentric_analytic(0), expected = eccentric_analytic(6000);
+    auto options = point_mass();
+    options.integrator = HpopIntegrator::rkv89;
+    // Loose tolerances force equal steps for the order test, with no error rejection.
+    options.relative_tolerance = 1e-3;
+    options.position_tolerance_m = 1;
+    options.velocity_tolerance_mps = .001;
+    options.min_step_seconds = options.max_step_seconds = 300;
+    const auto coarse = make_hpop(initial, options)->state_at(expected.epoch);
+    options.min_step_seconds = options.max_step_seconds = 150;
+    const auto fine = make_hpop(initial, options)->state_at(expected.epoch);
+    const double ratio = position_error(coarse, expected) / position_error(fine, expected);
+    EXPECT_GT(ratio, 220); // Eighth order predicts 2^8; ninth-order advancement is excluded.
+    EXPECT_LT(ratio, 330);
+    EXPECT_LT(position_error(fine, expected), .001);
+    RecordProperty("step_halving_error_ratio", std::to_string(ratio));
+    options.relative_tolerance = 1e-14;
+    options.position_tolerance_m = 1e-10;
+    options.velocity_tolerance_mps = 1e-13;
+    options.min_step_seconds = options.max_step_seconds = 300;
+    EXPECT_THROW((void)make_hpop(initial, options)->state_at(Epoch{300'000'000'000}),
+                 PropagationError);
+    options.min_step_seconds = .001;
+    const auto adaptive = make_hpop(initial, options)->state_at(expected.epoch);
+    EXPECT_LT(position_error(adaptive, expected), 1e-4);
+}
+TEST(Hpop, Rkv89CancellationAndQueryOrderPreserveDeterministicCheckpoints) {
+    auto options = point_mass();
+    options.integrator = HpopIntegrator::rkv89;
+    const auto provider = make_hpop(circular(), options), fresh = make_hpop(circular(), options);
+    int calls = 0;
+    EXPECT_THROW((void)provider->state_at(Epoch{9000'000'000'000},
+                                          [&] {
+                                              if (++calls == 20)
+                                                  throw std::runtime_error("cancel");
+                                          }),
+                 std::runtime_error);
+    EXPECT_EQ(calls, 20);
+    for (auto ns : {777'000'000'000LL, -199'000'000'000LL, 1LL})
+        (void)provider->state_at(Epoch{ns});
+    auto job = std::async(std::launch::async,
+                          [&] { return provider->state_at(Epoch{-8123'456'789'012}); });
+    EXPECT_EQ(provider->state_at(Epoch{9000'000'000'000}).position_m,
+              fresh->state_at(Epoch{9000'000'000'000}).position_m);
+    const auto actual = job.get(), expected = fresh->state_at(Epoch{-8123'456'789'012});
+    EXPECT_EQ(actual.position_m, expected.position_m);
+    EXPECT_EQ(actual.velocity_mps, expected.velocity_mps);
 }

@@ -803,6 +803,7 @@ class ManeuverSeries:
     def __len__(self) -> int: ...
 
 class HpopIntegrator:
+    RKV89: HpopIntegrator
     RKF78: HpopIntegrator
     RK4: HpopIntegrator
 

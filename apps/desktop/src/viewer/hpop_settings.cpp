@@ -1066,8 +1066,9 @@ bool edit_hpop_settings(
         section(integration_page, QStringLiteral("积分方法"), "hpopIntegratorMethodSection");
     auto *method = new QComboBox;
     method->setObjectName("hpopIntegrator");
-    method->addItems({QStringLiteral("RKF78 · 自适应步长"), QStringLiteral("RK4 · 固定步长")});
-    method->setCurrentIndex(options.integrator == core::HpopIntegrator::rkf78 ? 0 : 1);
+    method->addItems({QStringLiteral("RKF78 · 自适应步长"), QStringLiteral("RK4 · 固定步长"),
+                      QStringLiteral("RKV 8(9) Efficient · 自适应步长")});
+    method->setCurrentIndex(static_cast<int>(options.integrator));
     integration->addRow(QStringLiteral("积分器"), method);
     auto *adaptive_widget = new QWidget;
     auto *adaptive = new QFormLayout(adaptive_widget);
@@ -1094,7 +1095,7 @@ bool edit_hpop_settings(
     auto *fixed = quantity(integration, QStringLiteral("固定步长"), "hpopFixedStep", Unit::second,
                            options.fixed_step_seconds, 1e-6, 3600);
     const auto update_method = [=] {
-        adaptive_widget->setVisible(method->currentIndex() == 0);
+        adaptive_widget->setVisible(method->currentIndex() != 1);
         integration->setRowVisible(fixed, method->currentIndex() == 1);
     };
     QObject::connect(method, &QComboBox::currentIndexChanged, &dialog, update_method);
@@ -1171,7 +1172,7 @@ bool edit_hpop_settings(
             summary_role, value_text(satellite_mass) + QStringLiteral(" ") +
                               unit_symbol(satellite_mass->unit()) +
                               (relativity->isChecked() ? QStringLiteral(" · 相对论") : QString{}));
-        integrator_item->setData(summary_role, method->currentIndex() == 0
+        integrator_item->setData(summary_role, method->currentIndex() != 1
                                                    ? part(method, 0) +
                                                          QStringLiteral(" · 相对容差 ") +
                                                          value_text(relative)
@@ -1671,11 +1672,10 @@ bool edit_hpop_settings(
                              }))
                 throw std::runtime_error(
                     "相对论加速度需要太阳位置与速度星历，请先在数据中心准备。");
-            candidate.integrator = method->currentIndex() == 0 ? core::HpopIntegrator::rkf78
-                                                               : core::HpopIntegrator::rk4;
+            candidate.integrator = static_cast<core::HpopIntegrator>(method->currentIndex());
             validation_page = 1;
             candidate.minimum_altitude_m = read(altitude, Unit::metre);
-            if (candidate.integrator == core::HpopIntegrator::rkf78) {
+            if (candidate.integrator != core::HpopIntegrator::rk4) {
                 candidate.min_step_seconds = read(minimum, Unit::second);
                 candidate.max_step_seconds = read(maximum, Unit::second);
                 if (candidate.min_step_seconds > candidate.max_step_seconds)

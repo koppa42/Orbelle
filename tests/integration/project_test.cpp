@@ -305,6 +305,7 @@ TEST(Project, CurrentSchemaFixturePreservesInputsRelationshipsAndExactEncoding) 
     EXPECT_EQ(project.satellites[1].orbit.hpop.gravity_degree, 0);
     EXPECT_FALSE(project.satellites[1].orbit.hpop.include_relativistic_accelerations);
     EXPECT_EQ(project.satellites[1].orbit.hpop.satellite_mass_kg, 1250);
+    EXPECT_EQ(project.satellites[1].orbit.hpop.integrator, core::HpopIntegrator::rkv89);
     EXPECT_TRUE(project.satellites[1].orbit.hpop.include_secular_variations);
     EXPECT_EQ(project.satellites[1].orbit.hpop.ocean_tides,
               (core::OceanTideOptions{false, "fixture-ocean", 30, 12}));
@@ -403,8 +404,8 @@ TEST(Project, DataLocksHaveStableCanonicalOrderAndRejectDuplicateRoles) {
 }
 TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
     const auto bytes = application::encode_project(example());
-    for (std::uint32_t version = 0; version <= 31; ++version) {
-        if (version == 30)
+    for (std::uint32_t version = 0; version <= 32; ++version) {
+        if (version == 31)
             continue;
         SCOPED_TRACE(version);
         auto unsupported = bytes;
@@ -416,7 +417,7 @@ TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
         } catch (const application::ProjectError &error) {
             EXPECT_NE(std::string(error.what()).find("version " + std::to_string(version) + ";"),
                       std::string::npos);
-            EXPECT_NE(std::string(error.what()).find("reads only version 30"), std::string::npos);
+            EXPECT_NE(std::string(error.what()).find("reads only version 31"), std::string::npos);
         }
     }
 }

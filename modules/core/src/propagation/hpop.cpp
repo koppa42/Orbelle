@@ -40,6 +40,7 @@ constexpr double a[13][13] = {
      33.0 / 164, 12.0 / 41, 0, 1}};
 constexpr std::array<double, 13> b{
     0, 0, 0, 0, 0, 34.0 / 105, 9.0 / 35, 9.0 / 35, 9.0 / 280, 9.0 / 280, 0, 41.0 / 840, 41.0 / 840};
+#include "integrators/rkv89_coefficients.inc"
 constexpr double checkpoint_seconds = 300;
 constexpr std::size_t max_attempts = 200000;
 void positive(double v, const char *message) {
@@ -314,9 +315,39 @@ class Hpop final : public IStateProvider {
         }
         return {result, error};
     }
+    std::pair<State, double> rkv89(double t, const State &s, double h) const {
+        std::array<State, 16> k;
+        for (std::size_t stage = 0; stage < k.size(); ++stage) {
+            auto value = s;
+            for (std::size_t i = 0; i < s.size(); ++i) {
+                double sum = 0;
+                for (std::size_t j = 0; j < stage; ++j)
+                    sum += rkv_a[stage][j] * k[j][i];
+                value[i] += h * sum;
+            }
+            const double at = t + rkv_c[stage] * h;
+            k[stage] = derivative(at, value, weather_stage(at, t, t + h));
+        }
+        State result = s;
+        double error = 0;
+        for (std::size_t i = 0; i < s.size(); ++i) {
+            double advance = 0, difference = 0;
+            for (std::size_t j = 0; j < k.size(); ++j) {
+                advance += rkv_b8[j] * k[j][i];
+                difference += rkv_error[j] * k[j][i];
+            }
+            result[i] += h * advance;
+            const double absolute =
+                i < 3 ? options_.position_tolerance_m : options_.velocity_tolerance_mps;
+            const double scale = absolute + options_.relative_tolerance *
+                                                std::max(std::abs(s[i]), std::abs(result[i]));
+            error = std::max(error, std::abs(h * difference) / scale);
+        }
+        return {result, error};
+    }
     State integrate(State state, double t, double end, std::size_t &attempts,
                     const std::function<void()> &checkpoint) const {
-        const bool adaptive = options_.integrator == HpopIntegrator::rkf78;
+        const bool adaptive = options_.integrator != HpopIntegrator::rk4;
         double step = adaptive ? options_.max_step_seconds : options_.fixed_step_seconds;
         while (t != end) {
             if (checkpoint)
@@ -331,7 +362,9 @@ class Hpop final : public IStateProvider {
             const double h = std::copysign(magnitude, end - t);
             if (t + h == t)
                 throw PropagationError("HPOP integration step cannot advance time");
-            auto [next, error] = adaptive ? rkf78(t, state, h) : std::pair{rk4(t, state, h), 0.0};
+            auto [next, error] = options_.integrator == HpopIntegrator::rkv89 ? rkv89(t, state, h)
+                                 : adaptive                                   ? rkf78(t, state, h)
+                                            : std::pair{rk4(t, state, h), 0.0};
             if (!std::isfinite(error) ||
                 !std::all_of(next.begin(), next.end(), [](double v) { return std::isfinite(v); }))
                 throw PropagationError("HPOP integration produced a nonfinite result");
@@ -344,8 +377,10 @@ class Hpop final : public IStateProvider {
                 throw PropagationError("HPOP cannot meet tolerance at the minimum step");
             }
             if (adaptive) {
+                const double exponent =
+                    options_.integrator == HpopIntegrator::rkv89 ? -1.0 / 9 : -1.0 / 8;
                 const double factor =
-                    error == 0 ? 4 : std::clamp(0.9 * std::pow(error, -0.125), 0.1, 4.0);
+                    error == 0 ? 4 : std::clamp(0.9 * std::pow(error, exponent), 0.1, 4.0);
                 step = std::clamp(magnitude * factor, options_.min_step_seconds,
                                   options_.max_step_seconds);
             }
@@ -521,7 +556,8 @@ void validate_hpop_options(const HpopOptions &o) {
         o.gravity_order < 0 || o.gravity_order > o.gravity_degree)
         throw std::invalid_argument(
             "HPOP gravity degree must be 0 or 2..model limit; order must be 0..degree");
-    if (o.integrator != HpopIntegrator::rkf78 && o.integrator != HpopIntegrator::rk4)
+    if (o.integrator != HpopIntegrator::rkf78 && o.integrator != HpopIntegrator::rk4 &&
+        o.integrator != HpopIntegrator::rkv89)
         throw std::invalid_argument("Unsupported HPOP integrator");
     positive(o.position_tolerance_m, "HPOP position tolerance must be finite and positive");
     positive(o.velocity_tolerance_mps, "HPOP velocity tolerance must be finite and positive");

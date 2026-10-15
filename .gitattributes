@@ -23,3 +23,5 @@
 
 /tests/reference/propagators/weather_cssi.dat -text
 /tests/reference/propagators/weather_monthly.csv text eol=lf
+
+/modules/core/src/propagation/integrators/rklib-LICENSE.txt -text

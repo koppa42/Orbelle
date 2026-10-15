@@ -17,3 +17,9 @@ foreach(notice IN ITEMS NOTICE.txt Apache-2.0.txt Orekit-NOTICE.txt)
         RENAME "Atmosphere-${notice}" COMPONENT Python)
 endforeach()
 
+if(ORBITFORGE_INSTALL_SDK)
+    install(FILES src/propagation/integrators/rklib-LICENSE.txt
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/OrbitForge/notices" COMPONENT SDK)
+endif()
+install(FILES src/propagation/integrators/rklib-LICENSE.txt
+    DESTINATION "orbitforge/notices" COMPONENT Python)
