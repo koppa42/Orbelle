@@ -2,7 +2,7 @@
 
 本文定义 OrbitForge 通用地球轨道数值传播的目标契约与验收顺序，以 STK 的公开设计和参数语义为准。Gravity、Drag、SRP、Additional、Integrator、Covariance 六页是组织依据，包含未勾选、灰显和子窗口中的目标设置；不能仅实现截图当前启用的组合。后续力模型截图只作辅助参考，不据此引入与 STK 不同的输入模式。交付按下表逐项验收。
 
-当前已实现静态重力资源、文件显式长期变化、永久/完整固体潮、FES2014bv1 显式分潮与海洋极潮、太阳系第三体引力、球形阻力/太阳辐射压及三项相对论：数据中心下载 EGM2008 / EGM96 / DE440s、导入外部静态重力文件，最高 2190 阶重力计算、日月与行星差分引力，以及无阴影／圆柱／双锥的球面地月遮挡，贯通桌面、C++、Python 和项目数据引用。其余目标按下文逐项验收；当前能力以[预报器](propagators.md#hpop)为准，不能把本增量称为完整 HPOP。
+当前已实现静态重力资源、文件显式长期变化、永久/完整固体潮、FES2014bv1 显式分潮与海洋极潮、太阳系第三体引力、球形阻力/太阳辐射压及三项相对论：数据中心下载 EGM2008 / EGM96 / DE440s、导入外部静态重力文件，最高 2190 阶重力计算、日月与行星差分引力，以及无阴影／圆柱／双锥和地月／行星球面遮挡配置，贯通桌面、C++、Python 和项目数据引用。其余目标按下文逐项验收；当前能力以[预报器](propagators.md#hpop)为准，不能把本增量称为完整 HPOP。
 
 桌面第一次正常启动必须准备 UTC、C04、finals2000A、完整 EGM2008，以及启用 CSPICE 时的 DE440s；已有有效文件直接复用，缺失文件由启动准备窗口下载。进度、取消、校验与原子安装复用数据中心；失败可重试，取消则退出启动。新建 HPOP 使用 EGM2008、21×21，配置中不显示“已安装”。以后所选官方重力文件缺失时，HPOP 设置页仍提供下载与重试。内置示例和点质量可主动选择；计算 API 的资源装配保持显式。
 
@@ -77,7 +77,7 @@
 | SRP | Shadow Model，含 Dual Cone | 已实现无阴影／圆柱／球面双锥、全照／半影／本影／环食；独立几何和轨迹对照通过，椭球轮廓及专用事件时刻待实现 |
 | SRP | Use Boundary Mitigation | 待实现：可复核的边界算法、标识及步长收敛，不能声称复刻未公开内部算法 |
 | SRP | Method to Compute Sun，含 Apparent To True CB | 已实现 True、地心视太阳与卫星视太阳，接收型 LT+S、速度时间尺度和历史链校验；遮挡体视位置及 STK 同配置验收待完成 |
-| SRP | Atmospheric Altitude；Eclipsing Central Bodies 增删 | 部分：地球／月球独立分配、大气等效半径、多体遮挡并集已实现；其他遮挡体和通用选择窗口待实现 |
+| SRP | Atmospheric Altitude；Eclipsing Central Bodies 增删 | 部分：地球／月球独立分配、大气等效半径、多体遮挡并集已实现；可搜索 Available / Assigned 窗口、七颗行星及冥王星的球面配置与十体并集已接入并有 SciPy 对照；DE440s 可直接提供地月／水星／金星本体，火星及外行星补充本体星历的目录支持、更多卫星和小天体仍待实现 |
 | Additional | Albedo；Thermal；Ck；Area/Mass；Ground Reflection Model | 待实现：各自开关、地表反射/发射率资源、可见地表积分 |
 | Additional | Relativistic Accelerations；Satellite Mass | 已接入 IERS 2003 三项相对论、TAI 星历速度、自转轴方向与共享卫星质量；质量用于球形对应面积换算，不覆盖各自显式给定的面积质量比；相对论和球形质量语义分别与 Orekit 对照。见[相对论契约](relativity.md) |
 | Additional | Use Plugin；Plugin 选择；Plugin Settings | 待实现：注册、具名设置、生命周期、加速度及偏导契约、可复现配置和错误隔离 |
@@ -87,7 +87,7 @@
 | Integrator | Fixed/Relative Error；Tolerance；Min/Max Step | 部分：独立 Fixed/Relative Error 选择已实现；RK4/GJ 强制固定，RKF/RKV/BS 两模式，固定网格及 BS 十八阶外推已验证。固定/自适应范围已扩至 1e−6–86400 s，自适应缓存不再截短配置上限，并有局部动力学首步估计及长弧独立对照。相对误差仍为混合绝对/相对分量尺度；STK 误差范数、完整合法范围/默认值及实机组合仍待核对，截图仅参考 |
 | Integrator | Interpolation 方法；Order；VOP μ | 部分：Lagrange / Hermite、项目自动装配、机动分段、UI / 持久化 / 分析及报告已接入并有独立参考，见[科学插值](orbit_interpolation.md)；VOP 与其 μ 尚未实现，STK 同配置验收仍待完成 |
 | Integrator | Allow PosVel Covariance Interpolation | 待实现：协方差传播完成后验证插值、对称性与半正定性 |
-| Integrator | Time Regularization；Exponent；Steps Per Orbit | 已接入：Sundman 方程、初始椭圆每圈尺度、五种积分器、物理 Min/Max Step、整数 TAI、天气分段、机动重启及科学插值；C++ / Python / 项目 v36 / UI 共用配置。非椭圆归一化明确拒绝；尚无 STK 同配置实测，见[时间正则化契约](time_regularization.md) |
+| Integrator | Time Regularization；Exponent；Steps Per Orbit | 已接入：Sundman 方程、初始椭圆每圈尺度、五种积分器、物理 Min/Max Step、整数 TAI、天气分段、机动重启及科学插值；C++ / Python / 项目 v37 / UI 共用配置。非椭圆归一化明确拒绝；尚无 STK 同配置实测，见[时间正则化契约](time_regularization.md) |
 | Integrator | Report Ephemeris on a Fixed Time Step | 部分：显式工厂及普通项目均支持接受端点或让积分步停在固定 TAI 输出网格，保留天气边界；UI、保存与报告已接入。项目轨道步长当前限于 1–60 整数秒，完整合法范围及短段策略仍待 STK 实测核对 |
 | Integrator | Do not propagate below altitude | 已有按力评估停止的参考球面地心高度；STK 比较须核对其高度参考面 |
 | Covariance | Compute Covariance；6×6 初始矩阵 | 待实现：变分方程、单位、对称性和正定性政策；关闭不影响确定性轨迹 |

@@ -263,7 +263,15 @@ class Hpop final : public IStateProvider {
                 }
                 throw std::invalid_argument("Unsupported SRP Sun position method");
             }();
-            const auto force = evaluate_srp(r, sun, options_.srp, moon);
+            std::array<SrpBodyPosition, third_body_count - 2> additional{};
+            std::size_t count = 0;
+            if (options_.srp.shadow_model != SrpShadowModel::none)
+                for (const auto &body : options_.srp.additional_eclipsing_bodies)
+                    additional[count++] = {
+                        body.body,
+                        environment_.ephemeris->eclipsing_body_position(body.body, epoch)};
+            const auto force =
+                evaluate_srp(r, sun, options_.srp, moon, std::span{additional}.first(count));
             for (int i = 0; i < 3; ++i)
                 acceleration[i] += force.acceleration_mps2[i];
         }
@@ -990,6 +998,13 @@ void HpopEnvironment::validate_ephemeris_interval(const HpopOptions &options, Ep
     if (!ephemeris)
         throw std::invalid_argument("Enabled HPOP forces require selected ephemeris data");
     ephemeris->validate_interval(first, last, options.required_ephemeris_bodies());
+    if (options.srp.enabled && options.srp.shadow_model != SrpShadowModel::none &&
+        !options.srp.additional_eclipsing_bodies.empty()) {
+        std::vector<ThirdBody> bodies;
+        for (const auto &body : options.srp.additional_eclipsing_bodies)
+            bodies.push_back(body.body);
+        ephemeris->validate_eclipsing_body_interval(first, last, bodies);
+    }
     if ((options.drag.enabled && options.drag.use_apparent_sun_position) ||
         (options.srp.enabled &&
          options.srp.sun_position_method == SrpSunPositionMethod::apparent_to_true_cb))

@@ -25,7 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 36;
+constexpr std::uint32_t project_version = 37;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -43,7 +43,7 @@ struct SectionSchema {
 // One current schema, shared by the reader and writer. Null means an optional section.
 constexpr std::array section_schemas{
     SectionSchema{scene_tag, 1, "Missing scene section"},
-    SectionSchema{objects_tag, 27, "Missing satellites section"},
+    SectionSchema{objects_tag, 28, "Missing satellites section"},
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
     SectionSchema{sensors_tag, 1, "Missing sensors section"},
@@ -184,6 +184,11 @@ void write_srp(Writer &out, const core::SrpOptions &o, bool draft = true) {
          {o.cr, o.area_mass_ratio_m2_per_kg, o.atmospheric_altitude_m, o.pressure_at_reference_pa,
           o.reference_distance_m, o.sun_radius_m, o.earth_radius_m, o.moon_radius_m})
         out.real(value);
+    out.number(o.additional_eclipsing_bodies.size(), 4);
+    for (const auto &body : o.additional_eclipsing_bodies) {
+        out.number(static_cast<unsigned>(body.body), 4);
+        out.real(body.radius_m);
+    }
 }
 core::SrpOptions read_srp(Reader &in) {
     core::SrpOptions o;
@@ -204,6 +209,18 @@ core::SrpOptions read_srp(Reader &in) {
     o.sun_radius_m = in.real();
     o.earth_radius_m = in.real();
     o.moon_radius_m = in.real();
+    const auto count = in.number(4);
+    check(count <= core::third_body_count - 2, "Too many additional SRP occultors");
+    for (std::uint64_t i = 0; i < count; ++i) {
+        const auto body = in.number(4);
+        check(body >= 2 && body < core::third_body_count, "Invalid additional SRP occultor");
+        o.additional_eclipsing_bodies.push_back({static_cast<core::ThirdBody>(body), in.real()});
+    }
+    try {
+        core::validate_srp_options(o);
+    } catch (const std::invalid_argument &error) {
+        throw ProjectError(error.what());
+    }
     return o;
 }
 void write_drag(Writer &out, const core::DragOptions &d, bool draft = true) {

@@ -295,6 +295,9 @@ TEST(Project, CurrentSchemaFixturePreservesInputsRelationshipsAndExactEncoding) 
     const auto project = application::load_project(ORBITFORGE_PROJECT_CURRENT);
     ASSERT_EQ(project.satellites.size(), 2U);
     EXPECT_EQ(project.name, "Schema fixture");
+    EXPECT_EQ(project.satellites[1].orbit.hpop.srp.additional_eclipsing_bodies,
+              (std::vector<core::SrpEclipsingBody>{{core::ThirdBody::mercury, 2440000.125},
+                                                   {core::ThirdBody::venus, 6051800}}));
     EXPECT_EQ(project.satellites[0].orbit.object_id, "satellite-a");
     EXPECT_EQ(project.satellites[0].display_name, "观测卫星 A");
     EXPECT_EQ(project.satellites[0].orbit.initial.position_m,
@@ -413,8 +416,8 @@ TEST(Project, DataLocksHaveStableCanonicalOrderAndRejectDuplicateRoles) {
 }
 TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
     const auto bytes = application::encode_project(example());
-    for (std::uint32_t version = 0; version <= 37; ++version) {
-        if (version == 36)
+    for (std::uint32_t version = 0; version <= 38; ++version) {
+        if (version == 37)
             continue;
         SCOPED_TRACE(version);
         auto unsupported = bytes;
@@ -426,7 +429,7 @@ TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
         } catch (const application::ProjectError &error) {
             EXPECT_NE(std::string(error.what()).find("version " + std::to_string(version) + ";"),
                       std::string::npos);
-            EXPECT_NE(std::string(error.what()).find("reads only version 36"), std::string::npos);
+            EXPECT_NE(std::string(error.what()).find("reads only version 37"), std::string::npos);
         }
     }
 }

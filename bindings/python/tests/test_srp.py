@@ -49,13 +49,89 @@ class SrpTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "srp.orbitforge"
             project.save(path)
-            self.assertEqual(int.from_bytes(path.read_bytes()[8:12], "little"), 36)
+            self.assertEqual(int.from_bytes(path.read_bytes()[8:12], "little"), 37)
             restored = of.Project.open(path)
             self.assertEqual(restored.objects[sat.id].orbit.hpop.srp, srp)
         sat.orbit = replace(orbit, hpop=replace(orbit.hpop, srp=replace(srp, cr=1.5)))
         after = project.prepare().states(sat, step=u.s(60))
         self.assertEqual(before.input_sha256, after.input_sha256)
         self.assertEqual(before.position.values, after.position.values)
+
+    def test_additional_bodies_are_explicit_immutable_and_evaluated_as_a_union(self):
+        mercury = of.orbits.SrpEclipsingBody("mercury")
+        venus = of.orbits.SrpEclipsingBody("venus", 6e6)
+        self.assertEqual(mercury.radius_m, 2440530)
+        values = [mercury, venus]
+        settings = of.orbits.SrpSettings(enabled=True, earth_shadow=False, moon_shadow=False,
+                                         additional_eclipsing_bodies=values)
+        values.clear()
+        self.assertEqual(settings.additional_eclipsing_bodies, (mercury, venus))
+        self.assertEqual(of.orbits.SrpSettings._read(settings._native()), settings)
+        with self.assertRaises(FrozenInstanceError):
+            venus.radius_m = 1
+        for body, radius in (("sun", 1), ("moon", 1), ("earth", 1), ("mars", 0),
+                             ("venus", float("nan")), ("jupiter", float("inf"))):
+            with self.assertRaises(ValueError):
+                of.orbits.SrpEclipsingBody(body, radius)
+        with self.assertRaises(ValueError):
+            replace(settings, additional_eclipsing_bodies=(mercury, mercury))
+        with self.assertRaises(TypeError):
+            replace(settings, additional_eclipsing_bodies=("venus",))
+        positions = []
+        for body in (of.ThirdBody.MERCURY, of.ThirdBody.VENUS):
+            value = of.SrpBodyPosition()
+            value.body, value.position_m = body, (1e8, 0, 0)
+            positions.append(value)
+        result = of.evaluate_srp((0,0,0), (149597870700,0,0), settings._native(),
+                                 additional_positions=positions)
+        self.assertEqual(result.lighting_ratio, 0)
+        with self.assertRaises(ValueError):
+            of.evaluate_srp((0,0,0), (149597870700,0,0), settings._native())
+        positions[1].body = of.ThirdBody.MERCURY
+        with self.assertRaises(ValueError):
+            of.evaluate_srp((0,0,0), (149597870700,0,0), settings._native(),
+                            additional_positions=positions)
+
+    @unittest.skipUnless(of.ephemeris_available(), "requires CSPICE")
+    def test_body_assignment_identity_real_centres_coverage_and_saved_drafts(self):
+        sample = SAMPLE.parent / "de440s_planets_2016_leap"
+        metadata = json.loads((sample / "manifest.json").read_text())
+        first = of.Epoch(metadata["first_tai_ns"] + 600 * 10**9)
+        last = of.Epoch(first.tai_nanoseconds + 60 * 10**9)
+        bodies = (of.orbits.SrpEclipsingBody("mercury"), of.orbits.SrpEclipsingBody("venus"))
+        settings = of.orbits.SrpSettings(enabled=True, additional_eclipsing_bodies=bodies)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            data = of.DataSnapshot.builtin_time().with_ephemeris("de440s", sample / "manifest.json", root / "runtime")
+            project = of.Project("Planet silhouettes", first, last)
+            orbit = of.orbits.Hpop(initial=of.orbits.Cartesian(first,(7e6,0,0),(0,6200,5300)),
+                                  gravity_degree=0,srp=settings)
+            sat = project.objects.satellite("Sat",orbit=orbit)
+            analysis = project.prepare(data=data)
+            states = analysis.states(sat,step=u.s(30))
+            sat.orbit = replace(orbit,hpop=replace(orbit.hpop,srp=replace(settings,additional_eclipsing_bodies=bodies[::-1])))
+            reversed_states=project.prepare(data=data).states(sat,step=u.s(30))
+            self.assertEqual(states.input_sha256,reversed_states.input_sha256)
+            self.assertEqual(states.position.values,reversed_states.position.values)
+            path=root/"bodies.orbitforge"
+            project.save(path)
+            restored=of.Project.open(path, data=data)
+            self.assertEqual(restored.objects[sat.id].orbit.hpop.srp.additional_eclipsing_bodies,bodies[::-1])
+            # The DE file has Jupiter's system barycentre but no 599 body centre.
+            sat.orbit=replace(orbit,hpop=replace(orbit.hpop,srp=replace(settings,
+                additional_eclipsing_bodies=(of.orbits.SrpEclipsingBody("jupiter"),))))
+            with self.assertRaises((of.EphemerisCoverageError,of.AnalysisCapabilityError,of.PropagationError)):
+                project.prepare(data=data)
+            self.assertEqual(analysis.states(sat,step=u.s(30)).position.values,states.position.values)
+            # Disabled shadows keep unsupported-body drafts, without querying them.
+            no_shadow=replace(sat.orbit.hpop.srp,shadow_model="none")
+            sat.orbit=replace(orbit,hpop=replace(orbit.hpop,srp=no_shadow))
+            one=project.prepare(data=data).states(sat,step=u.s(30))
+            sat.orbit=replace(orbit,hpop=replace(orbit.hpop,srp=replace(no_shadow,additional_eclipsing_bodies=())))
+            two=project.prepare(data=data).states(sat,step=u.s(30))
+            self.assertEqual(one.input_sha256,two.input_sha256)
+            self.assertEqual(one.position.values,two.position.values)
+            del data, analysis, restored
 
     @unittest.skipUnless(of.ephemeris_available(), "requires CSPICE")
     def test_srp_only_prepare_report_save_reopen_and_immutable_analysis(self):

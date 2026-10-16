@@ -23,6 +23,7 @@
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QStyledItemDelegate>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -30,8 +31,10 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <orbitforge/runtime/ephemeris.hpp>
 
 namespace orbitforge::desktop {
@@ -918,19 +921,19 @@ bool edit_hpop_settings(
                           QStringLiteral("Dual Cone · 双锥")});
     srp_shadow->setCurrentIndex(static_cast<int>(options.srp.shadow_model));
     srp_shadow_section->addRow(QStringLiteral("阴影模型"), srp_shadow);
-    auto *srp_earth = new QCheckBox(QStringLiteral("地球 Earth"));
-    srp_earth->setObjectName("hpopSrpEarthShadow");
-    srp_earth->setChecked(options.srp.earth_shadow);
-    auto *srp_moon = new QCheckBox(QStringLiteral("月球 Moon"));
-    srp_moon->setObjectName("hpopSrpMoonShadow");
-    srp_moon->setChecked(options.srp.moon_shadow);
-    srp_shadow_section->addRow(QStringLiteral("遮挡天体"), srp_earth);
-    srp_shadow_section->addRow(QString{}, srp_moon);
+    auto srp_assignments = options.srp;
+    auto *srp_assigned_summary = new QLabel;
+    srp_assigned_summary->setObjectName("hpopSrpEclipsingSummary");
+    srp_assigned_summary->setWordWrap(true);
+    srp_shadow_section->addRow(QStringLiteral("遮挡天体"), srp_assigned_summary);
+    auto *srp_select_bodies = new QPushButton(QStringLiteral("选择遮挡天体…"));
+    srp_select_bodies->setObjectName("hpopSrpSelectBodies");
+    srp_shadow_section->addRow(QString{}, srp_select_bodies);
     auto *srp_altitude = quantity(
         srp_shadow_section, QStringLiteral("地球大气等效高度"), "hpopSrpAtmosphericAltitude",
         Unit::metre, options.srp.atmospheric_altitude_m, 0, std::numeric_limits<double>::max());
     help(srp_shadow_section, QStringLiteral("双锥按日面可见比例缩放光压，包含半影、本影与环食。"
-                                            "地月遮挡按并集计算。当前采用球形轮廓；大气高度增加"
+                                            "多体遮挡按并集计算。当前采用球形轮廓；大气高度增加"
                                             "地球遮挡半径，不计算折射或衰减。"));
     auto *srp_sun = section(srp_page, QStringLiteral("太阳位置"), "hpopSrpSunSection");
     auto *srp_sun_method = new QComboBox;
@@ -959,7 +962,7 @@ bool edit_hpop_settings(
         srp_resource->setText(
             ready ? QStringLiteral("位置星历：%1")
                         .arg(QString::fromStdString(options.ephemeris_model))
-                  : QStringLiteral("缺少所选位置星历：%1，请在数据中心准备太阳/月球位置数据。")
+                  : QStringLiteral("缺少所选位置星历：%1，请在数据中心准备所选天体的位置数据。")
                         .arg(QString::fromStdString(options.ephemeris_model)));
     };
     auto *srp_manage = new QPushButton(QStringLiteral("在数据中心管理星历"));
@@ -1008,16 +1011,175 @@ bool edit_hpop_settings(
             group_of(form)->setVisible(enabled);
         }
         srp_off->setVisible(!enabled);
-        srp_earth->setEnabled(shadows);
-        srp_moon->setEnabled(shadows);
-        srp_altitude->setEnabled(shadows && srp_earth->isChecked());
-        srp_earth_radius->setEnabled(shadows && srp_earth->isChecked());
-        srp_moon_radius->setEnabled(shadows && srp_moon->isChecked());
+        srp_select_bodies->setEnabled(shadows);
+        srp_altitude->setEnabled(shadows && srp_assignments.earth_shadow);
+        srp_earth_radius->setEnabled(shadows && srp_assignments.earth_shadow);
+        srp_moon_radius->setEnabled(shadows && srp_assignments.moon_shadow);
+        QStringList names;
+        if (srp_assignments.earth_shadow)
+            names << QStringLiteral("Earth");
+        if (srp_assignments.moon_shadow)
+            names << QStringLiteral("Moon");
+        for (const auto &body : srp_assignments.additional_eclipsing_bodies)
+            names << QString::fromUtf8(core::third_body_name(body.body).data());
+        srp_assigned_summary->setText(names.isEmpty() ? QStringLiteral("无")
+                                                      : names.join(QStringLiteral("、")));
     };
     QObject::connect(srp_use, &QCheckBox::toggled, &dialog, update_srp);
     QObject::connect(srp_shadow, &QComboBox::currentIndexChanged, &dialog, update_srp);
-    QObject::connect(srp_earth, &QCheckBox::toggled, &dialog, update_srp);
-    QObject::connect(srp_moon, &QCheckBox::toggled, &dialog, update_srp);
+    QObject::connect(srp_select_bodies, &QPushButton::clicked, &dialog, [&] {
+        QDialog selection(&dialog);
+        selection.setObjectName("hpopSrpBodiesDialog");
+        selection.setWindowTitle(QStringLiteral("遮挡天体 · Eclipsing Central Bodies"));
+        selection.resize(430, 470);
+        auto *box = new QVBoxLayout(&selection);
+        auto *filter = new QLineEdit;
+        filter->setObjectName("hpopSrpBodySearch");
+        filter->setPlaceholderText(QStringLiteral("搜索可用天体"));
+        box->addWidget(filter);
+        auto *lists = new QHBoxLayout;
+        auto *available = new QListWidget;
+        available->setObjectName("hpopSrpAvailableBodies");
+        available->setAccessibleName(QStringLiteral("可用天体"));
+        auto *assigned = new QListWidget;
+        assigned->setObjectName("hpopSrpAssignedBodies");
+        assigned->setAccessibleName(QStringLiteral("已分配天体"));
+        for (auto *list : {available, assigned}) {
+            list->setMinimumWidth(100);
+            list->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        }
+        auto *available_column = new QVBoxLayout;
+        available_column->addWidget(new QLabel(QStringLiteral("可用 Available")));
+        available_column->addWidget(available);
+        auto *assigned_column = new QVBoxLayout;
+        assigned_column->addWidget(new QLabel(QStringLiteral("已分配 Assigned")));
+        assigned_column->addWidget(assigned);
+        lists->addLayout(available_column, 1);
+        auto *actions = new QVBoxLayout;
+        auto *add = new QToolButton;
+        add->setObjectName("hpopSrpAddBody");
+        add->setText(QStringLiteral("→"));
+        add->setAccessibleName(QStringLiteral("分配所选天体"));
+        auto *remove = new QToolButton;
+        remove->setObjectName("hpopSrpRemoveBody");
+        remove->setText(QStringLiteral("←"));
+        remove->setAccessibleName(QStringLiteral("移除所选天体"));
+        actions->addStretch();
+        actions->addWidget(add);
+        actions->addWidget(remove);
+        actions->addStretch();
+        lists->addLayout(actions);
+        lists->addLayout(assigned_column, 1);
+        box->addLayout(lists, 1);
+        auto *radii = new QStackedWidget;
+        auto *hint = new QLabel(QStringLiteral("地球与月球半径在光压模型常数中设置。"));
+        hint->setWordWrap(true);
+        radii->addWidget(hint);
+        std::map<int, QuantityEditor *> editors;
+        std::map<int, int> radius_pages;
+        const auto append = [&](int id, const QString &name, bool selected) {
+            auto *item = new QListWidgetItem(name, selected ? assigned : available);
+            item->setData(Qt::UserRole, id);
+        };
+        append(-1, QStringLiteral("地球 Earth"), srp_assignments.earth_shadow);
+        append(1, QStringLiteral("月球 Moon"), srp_assignments.moon_shadow);
+        for (auto body : core::third_body_list) {
+            if (body == core::ThirdBody::sun || body == core::ThirdBody::moon)
+                continue;
+            const auto found = std::ranges::find(srp_assignments.additional_eclipsing_bodies, body,
+                                                 &core::SrpEclipsingBody::body);
+            const auto value = found == srp_assignments.additional_eclipsing_bodies.end()
+                                   ? core::default_srp_eclipsing_body(body)
+                                   : *found;
+            const auto id = static_cast<int>(body);
+            append(id, QString::fromUtf8(core::third_body_name(body).data()),
+                   found != srp_assignments.additional_eclipsing_bodies.end());
+            auto *radius_page = new QWidget;
+            auto *form = new QFormLayout(radius_page);
+            form->setContentsMargins(0, 0, 0, 0);
+            form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+            const auto object_name = "hpopSrpRadius" + std::to_string(id);
+            auto *editor = quantity(form, QStringLiteral("所选行星球面半径"), object_name.c_str(),
+                                    Unit::metre, value.radius_m, std::numeric_limits<double>::min(),
+                                    std::numeric_limits<double>::max());
+            editor->set_unit(Unit::kilometre);
+            editors[id] = editor;
+            radius_pages[id] = radii->addWidget(radius_page);
+        }
+        box->addWidget(radii);
+        auto *coverage = new QLabel(
+            QStringLiteral("DE440s 包含地月、水星和金星的本体中心。其他行星需要对应本体星历；"
+                           "系统质心不能用于遮挡计算。"));
+        coverage->setObjectName("hint");
+        coverage->setWordWrap(true);
+        box->addWidget(coverage);
+        auto *error = new QLabel;
+        error->setObjectName("hpopSrpBodiesError");
+        error->setWordWrap(true);
+        box->addWidget(error);
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        box->addWidget(buttons);
+        const auto filter_available = [&] {
+            for (int i = 0; i < available->count(); ++i) {
+                auto *item = available->item(i);
+                const bool hidden = !item->text().contains(filter->text(), Qt::CaseInsensitive);
+                item->setHidden(hidden);
+                if (hidden)
+                    item->setSelected(false);
+            }
+        };
+        const auto move = [&](QListWidget *from, QListWidget *to) {
+            for (auto *item : from->selectedItems()) {
+                from->takeItem(from->row(item));
+                to->addItem(item);
+                item->setHidden(false);
+                to->setCurrentItem(item);
+            }
+            filter_available();
+        };
+        QObject::connect(filter, &QLineEdit::textChanged, &selection, filter_available);
+        QObject::connect(add, &QToolButton::clicked, &selection,
+                         [&] { move(available, assigned); });
+        QObject::connect(remove, &QToolButton::clicked, &selection,
+                         [&] { move(assigned, available); });
+        QObject::connect(available, &QListWidget::itemDoubleClicked, &selection,
+                         [&](QListWidgetItem *) { move(available, assigned); });
+        QObject::connect(assigned, &QListWidget::itemDoubleClicked, &selection,
+                         [&](QListWidgetItem *) { move(assigned, available); });
+        QObject::connect(
+            assigned, &QListWidget::currentItemChanged, &selection, [&](QListWidgetItem *item) {
+                const auto id = item ? item->data(Qt::UserRole).toInt() : -1;
+                radii->setCurrentIndex(radius_pages.contains(id) ? radius_pages.at(id) : 0);
+            });
+        QObject::connect(buttons, &QDialogButtonBox::rejected, &selection, &QDialog::reject);
+        QObject::connect(buttons, &QDialogButtonBox::accepted, &selection, [&] {
+            try {
+                auto candidate = srp_assignments;
+                candidate.earth_shadow = candidate.moon_shadow = false;
+                candidate.additional_eclipsing_bodies.clear();
+                for (int i = 0; i < assigned->count(); ++i) {
+                    auto *item = assigned->item(i);
+                    const auto id = item->data(Qt::UserRole).toInt();
+                    if (id == -1)
+                        candidate.earth_shadow = true;
+                    else if (id == 1)
+                        candidate.moon_shadow = true;
+                    else {
+                        assigned->setCurrentItem(item);
+                        candidate.additional_eclipsing_bodies.push_back(
+                            {static_cast<core::ThirdBody>(id), editors.at(id)->value(Unit::metre)});
+                    }
+                }
+                core::validate_srp_options(candidate);
+                srp_assignments = std::move(candidate);
+                selection.accept();
+            } catch (const std::exception &e) {
+                error->setText(QString::fromUtf8(e.what()));
+            }
+        });
+        if (selection.exec() == QDialog::Accepted)
+            update_srp();
+    });
     update_srp();
     auto *additional_page = page(force_tabs, QStringLiteral("其他"), "hpopAdditionalPage");
     auto *mass_section = section(additional_page, QStringLiteral("卫星质量"), "hpopMassSection");
@@ -1715,8 +1877,9 @@ bool edit_hpop_settings(
             srp.shadow_model = static_cast<core::SrpShadowModel>(srp_shadow->currentIndex());
             srp.sun_position_method =
                 static_cast<core::SrpSunPositionMethod>(srp_sun_method->currentIndex());
-            srp.earth_shadow = srp_earth->isChecked();
-            srp.moon_shadow = srp_moon->isChecked();
+            srp.earth_shadow = srp_assignments.earth_shadow;
+            srp.moon_shadow = srp_assignments.moon_shadow;
+            srp.additional_eclipsing_bodies = srp_assignments.additional_eclipsing_bodies;
             const auto srp_value = [&](QuantityEditor *field, Unit unit, double &value, bool used) {
                 if (used)
                     value = read(field, unit);

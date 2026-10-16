@@ -2,6 +2,7 @@
 #include <cctype>
 #include <cmath>
 #include <fstream>
+#include <orbitforge/core/propagation/solar_radiation_pressure.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <picosha2.h>
 #include <sstream>
@@ -107,6 +108,23 @@ class ThirdBodyEphemeris final : public core::IThirdBodyEphemeris {
         if (state.frame != core::FrameId::spice_j2000)
             throw core::EphemerisDataError("DE440 force ephemeris returned unexpected axes");
         return state.position_m;
+    }
+    std::array<double, 3> eclipsing_body_position(core::ThirdBody body,
+                                                  core::Epoch at) const override {
+        const auto target = core::srp_eclipsing_body_naif_id(body);
+        const auto state = source_->geometric_state(target, 399, at);
+        if (state.frame != core::FrameId::spice_j2000 || state.epoch != at ||
+            state.target_naif_id != target || state.observer_naif_id != 399)
+            throw core::EphemerisDataError(
+                "SRP ephemeris returned an unexpected body centre or frame");
+        return state.position_m;
+    }
+    void validate_eclipsing_body_interval(core::Epoch first, core::Epoch last,
+                                          std::span<const core::ThirdBody> bodies) const override {
+        std::vector<std::int32_t> ids;
+        for (auto body : bodies)
+            ids.push_back(core::srp_eclipsing_body_naif_id(body));
+        source_->validate_earth_gravity_interval(first, last, ids);
     }
     core::GeometricBodyState geometric_state(core::ThirdBody body, core::Epoch at) const override {
         const auto state = source_->geometric_state(core::third_body_naif_id(body), 399, at);

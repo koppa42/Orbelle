@@ -87,12 +87,45 @@ def load_cb_gravity(path, body: str, *, mu_scale: float = 1.0) -> n.CbGravity:
 
 
 @dataclass(frozen=True, slots=True)
+class SrpEclipsingBody:
+    """Additional spherical planet occultor; physical centre, explicit SI radius.
+
+    None uses the largest IAU 2015 axis from NAIF pck00011 as a starting sphere.
+    Planet-centre ephemeris coverage is required; system barycentres are not used.
+    """
+    body: Literal["mercury", "venus", "mars", "jupiter", "saturn", "uranus", "neptune", "pluto"]
+    radius_m: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.body not in THIRD_BODY_NAMES or self.body in ("sun", "moon"):
+            raise ValueError("Additional SRP occultors must be planets")
+        native = n.default_srp_eclipsing_body(getattr(n.ThirdBody, self.body.upper()))
+        if self.radius_m is None:
+            object.__setattr__(self, "radius_m", native.radius_m)
+        native.radius_m = self.radius_m
+        options = n.SrpOptions()
+        options.additional_eclipsing_bodies = [native]
+        options.validate()
+
+    def _native(self) -> n.SrpEclipsingBody:
+        result = n.SrpEclipsingBody()
+        result.body = getattr(n.ThirdBody, self.body.upper())
+        result.radius_m = self.radius_m
+        return result
+
+    @classmethod
+    def _read(cls, value: n.SrpEclipsingBody) -> "SrpEclipsingBody":
+        return cls(value.body.name.lower(), value.radius_m)
+
+
+@dataclass(frozen=True, slots=True)
 class SrpSettings:
-    """Spherical SRP using DE440s Sun positions and spherical Earth/Moon shadows.
+    """Spherical SRP using DE440s Sun positions and assigned spherical occultors.
 
     All quantities are SI. Dual cone integrates the uniform apparent solar disk;
-    Earth/Moon occultations use their union and geometric centres. Sun methods are
-    true, geocentric apparent (default), and spacecraft apparent (received LT+S).
+    occultations use the union of assigned spheres and geometric body centres.
+    Sun methods are true, geocentric apparent (default), and spacecraft apparent
+    (received LT+S).
     No ellipsoidal limb or STK boundary mitigation is implied. Disabled drafts are
     retained but do not affect results.
     """
@@ -109,11 +142,15 @@ class SrpSettings:
     sun_radius_m: float = 695700000.0
     earth_radius_m: float = 6378137.0
     moon_radius_m: float = 1737400.0
+    additional_eclipsing_bodies: tuple[SrpEclipsingBody, ...] = ()
 
     def __post_init__(self) -> None:
         for name in ("enabled", "earth_shadow", "moon_shadow"):
             if not isinstance(getattr(self, name), bool):
                 raise TypeError(f"{name} requires bool")
+        object.__setattr__(self, "additional_eclipsing_bodies", tuple(self.additional_eclipsing_bodies))
+        if any(not isinstance(body, SrpEclipsingBody) for body in self.additional_eclipsing_bodies):
+            raise TypeError("additional_eclipsing_bodies requires SrpEclipsingBody values")
         self._native()
 
     def _native(self) -> n.SrpOptions:
@@ -129,8 +166,9 @@ class SrpSettings:
             raise ValueError("Unknown SRP Sun position method")
         value = n.SrpOptions()
         for name in self.__dataclass_fields__:
-            if name not in ("shadow_model", "sun_position_method"):
+            if name not in ("shadow_model", "sun_position_method", "additional_eclipsing_bodies"):
                 setattr(value, name, getattr(self, name))
+        value.additional_eclipsing_bodies = [body._native() for body in self.additional_eclipsing_bodies]
         value.shadow_model = shadows[self.shadow_model]
         value.sun_position_method = suns[self.sun_position_method]
         value.validate()
@@ -144,7 +182,8 @@ class SrpSettings:
                 n.SrpSunPositionMethod.APPARENT_TO_TRUE_CB: "apparent_to_true_cb",
                 n.SrpSunPositionMethod.APPARENT: "apparent"}
         fields = {name: getattr(value, name) for name in cls.__dataclass_fields__
-                  if name not in ("shadow_model", "sun_position_method")}
+                  if name not in ("shadow_model", "sun_position_method", "additional_eclipsing_bodies")}
+        fields["additional_eclipsing_bodies"] = tuple(SrpEclipsingBody._read(body) for body in value.additional_eclipsing_bodies)
         return cls(**fields, shadow_model=shadows[value.shadow_model],
                    sun_position_method=suns[value.sun_position_method])
 

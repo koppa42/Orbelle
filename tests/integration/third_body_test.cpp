@@ -224,3 +224,27 @@ TEST_F(EphemerisFiles, GeometricVelocityUsesTaiDerivativeAndRelativityRecordsIts
     const auto monopole = runtime::make_hpop_session(initial, options, {}).sample(std::array{end});
     EXPECT_NE(result.states()[0].position_m, monopole.states()[0].position_m);
 }
+
+TEST_F(EphemerisFiles, SrpPhysicalCentresMatchCspiceAndNeverFallBackToSystemBarycentres) {
+    if (!runtime::ephemeris_available())
+        GTEST_SKIP();
+    const std::shared_ptr<const core::IEphemerisProvider> raw =
+        runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_PLANETS, root);
+    const auto ephemeris = runtime::make_third_body_ephemeris(raw);
+    const auto epoch =
+        core::Epoch{raw->data_info().first_epoch.tai_nanoseconds() + 3600000000000LL};
+    for (const auto body : {core::ThirdBody::mercury, core::ThirdBody::venus}) {
+        const auto id = core::srp_eclipsing_body_naif_id(body);
+        const std::array selection{body};
+        EXPECT_NO_THROW(ephemeris->validate_eclipsing_body_interval(epoch, epoch, selection));
+        EXPECT_EQ(ephemeris->eclipsing_body_position(body, epoch),
+                  raw->geometric_state(id, 399, epoch).position_m);
+    }
+    const std::array jupiter{core::ThirdBody::jupiter};
+    EXPECT_NO_THROW((void)ephemeris->position(core::ThirdBody::jupiter, epoch));
+    EXPECT_THROW(ephemeris->validate_eclipsing_body_interval(epoch, epoch, jupiter),
+                 core::EphemerisCoverageError);
+    EXPECT_THROW((void)ephemeris->eclipsing_body_position(core::ThirdBody::jupiter, epoch),
+                 core::EphemerisCoverageError);
+    EXPECT_NO_THROW((void)ephemeris->position(core::ThirdBody::jupiter, epoch));
+}

@@ -319,3 +319,16 @@ java -cp <classes-and-jars> org.orekit.forces.gravity.potential.OrbitForgeSecula
 `SecularGravity.*` / `SecularFiles.*` 覆盖上述数值、最高 2190 阶率截断、百年时差、纳秒历元、非有限及溢出拒绝、重复/损坏块、导入取消、资源冻结、重准备确认及报告身份。Python `test_gravity.py` 检查只读元数据、真实 EOP 场景、保存重开、变化确认、0/0 非活动草稿和严格布尔输入；SDK 消费端调用公开率和加速度 API。项目 v34 / OBJS25 的独立固定样例与损坏测试属于本项验收。
 
 Qt `QuantityTest.HpopSecularFileCapabilityKeyboardDraftAndValidation` 检查有/无元数据、键盘操作、错误路由、取消/重开和 0/0 草稿；用 Windows 原生 Qt、`QT_SCALE_FACTOR=1` / `1.5` 检查 430/720 逻辑宽度，并通过 `ORBITFORGE_HPOP_UI_CAPTURE` 保存实际 DPR 截图。运行日志放入新的 `out/validation/`。静态 EGM96/EGM2008 的 STK 默认演化仍待核对，尚无 STK 同配置轨迹真值。
+
+### 多体遮挡与本体中心
+
+`tools/validation/generate_srp_multi_reference.py` 使用固定 SciPy 1.16.3 QUADPACK，通过太阳圆盘垂直切片的区间并集积分，独立于生产 Green 定理圆弧求积。`srp_multi_geometry.txt` 的 175 组覆盖 0–10 个遮挡体、重合、包含、相切、三体以上交叠、150/300 倍视半径及固定随机种子；积分容差 2e−12 与 1e−11 的最大差为 4.11e−15。生产照明比例容限沿用 2e−9；反序配置及反序几何还须逐位相同。
+
+`--trajectories` 使用同一独立切片算法、SciPy DOP853、点质量地球、几何固定太阳与三个合成运动行星。初始轨道半径 7000/42000 km，速度方向分量为圆轨道速率的 0.8/0.6，正反向 6000 s，Cr=1.7、A/m=0.2 m²/kg；全部太阳、遮挡体半径、轨迹及参数在生成器中固定。参考最大步长 5/2.5 s，分量绝对容差 1e−8 m / 1e−11 m/s、相对容差 2.3e−14；参考步长收敛要求 0.1 mm / 1e−7 m/s。生产 RKF78 最大步长 2.5 s，容限沿用光压协议的每分量 0.5 mm / 2e−7 m/s。参考与生产均含地球遮挡及多个同时运动的额外遮挡体，第三体引力关闭。
+
+```powershell
+python -X utf8 tools/validation/generate_srp_multi_reference.py --output tests/reference/propagators/srp_multi_geometry.txt
+python -X utf8 tools/validation/generate_srp_multi_reference.py --trajectories --output tests/reference/propagators/srp_multi_trajectories.txt
+```
+
+CSPICE 固定 DE440s 样例检查水星／金星物理中心与原生 `geometric_state` 一致；木星系统质心可读但 599 缺失时必须拒绝。另用独立构造的 599→5→0 合成 SPK 验证完整链和内部缺口。Python、SDK、v37 独立样例及修复 CRC 后的坏配置覆盖公共接口、身份、旧分析不可变和保存失败保留源文件。Qt 测试覆盖搜索、增删、半径单位、错误不提交、两层取消及 430/720 逻辑宽度；原生截图记录实际 DPR。

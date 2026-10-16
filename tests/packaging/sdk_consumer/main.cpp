@@ -18,6 +18,17 @@
 int main(int argc, char **argv) try {
     {
         using namespace orbitforge::core;
+        SrpOptions options;
+        options.enabled = true;
+        options.earth_shadow = options.moon_shadow = false;
+        options.additional_eclipsing_bodies = {default_srp_eclipsing_body(ThirdBody::venus)};
+        const std::array positions{SrpBodyPosition{ThirdBody::venus, {1e8, 0, 0}}};
+        if (evaluate_srp({0, 0, 0}, {149597870700., 0, 0}, options, {}, positions).lighting_ratio !=
+            0)
+            return 47;
+    }
+    {
+        using namespace orbitforge::core;
         HpopOptions options;
         options.gravity_degree = options.gravity_order = 0;
         const CartesianState initial{Epoch{0},

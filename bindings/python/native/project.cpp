@@ -188,6 +188,15 @@ void bind_project(py::module_ &module) {
                py::arg("low_weather") = std::nullopt);
     module.def("ap_to_kp", &core::ap_to_kp, py::arg("ap"));
     module.def("kp_to_ap", &core::kp_to_ap, py::arg("kp"));
+    py::class_<core::SrpEclipsingBody>(module, "SrpEclipsingBody")
+        .def(py::init<>())
+        .def_readwrite("body", &core::SrpEclipsingBody::body)
+        .def_readwrite("radius_m", &core::SrpEclipsingBody::radius_m);
+    py::class_<core::SrpBodyPosition>(module, "SrpBodyPosition")
+        .def(py::init<>())
+        .def_readwrite("body", &core::SrpBodyPosition::body)
+        .def_readwrite("position_m", &core::SrpBodyPosition::position_m);
+    module.def("default_srp_eclipsing_body", &core::default_srp_eclipsing_body, py::arg("body"));
     py::class_<core::SrpOptions>(module, "SrpOptions")
         .def(py::init<>())
         .def_readwrite("enabled", &core::SrpOptions::enabled)
@@ -197,6 +206,8 @@ void bind_project(py::module_ &module) {
         .def_readwrite("sun_position_method", &core::SrpOptions::sun_position_method)
         .def_readwrite("earth_shadow", &core::SrpOptions::earth_shadow)
         .def_readwrite("moon_shadow", &core::SrpOptions::moon_shadow)
+        .def_readwrite("additional_eclipsing_bodies",
+                       &core::SrpOptions::additional_eclipsing_bodies)
         .def_readwrite("atmospheric_altitude_m", &core::SrpOptions::atmospheric_altitude_m)
         .def_readwrite("pressure_at_reference_pa", &core::SrpOptions::pressure_at_reference_pa)
         .def_readwrite("reference_distance_m", &core::SrpOptions::reference_distance_m)
@@ -207,8 +218,16 @@ void bind_project(py::module_ &module) {
     py::class_<core::SrpEvaluation>(module, "SrpEvaluation")
         .def_readonly("acceleration_mps2", &core::SrpEvaluation::acceleration_mps2)
         .def_readonly("lighting_ratio", &core::SrpEvaluation::lighting_ratio);
-    module.def("evaluate_srp", &core::evaluate_srp, py::arg("satellite_m"), py::arg("sun_m"),
-               py::arg("options"), py::arg("moon_m") = std::nullopt);
+    module.def(
+        "evaluate_srp",
+        [](const std::array<double, 3> &satellite, const std::array<double, 3> &sun,
+           const core::SrpOptions &options, const std::optional<std::array<double, 3>> &moon,
+           const std::vector<core::SrpBodyPosition> &additional) {
+            return core::evaluate_srp(satellite, sun, options, moon, additional);
+        },
+        py::arg("satellite_m"), py::arg("sun_m"), py::arg("options"),
+        py::arg("moon_m") = std::nullopt,
+        py::arg("additional_positions") = std::vector<core::SrpBodyPosition>{});
     py::enum_<core::ThirdBody>(module, "ThirdBody")
         .value("SUN", core::ThirdBody::sun)
         .value("MOON", core::ThirdBody::moon)

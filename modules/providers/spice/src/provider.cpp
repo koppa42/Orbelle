@@ -401,7 +401,7 @@ class Snapshot final : public core::IEphemerisProvider {
         for (auto target : targets) {
             if (target == 10 || target == 301)
                 chains[target] = target == 301 ? 3 : 0;
-            else if (target == 199 || target == 299) {
+            else if (target >= 199 && target <= 999 && target % 100 == 99 && target != 399) {
                 chains[target] = target / 100;
                 chains[target / 100] = 0;
             } else if (target >= 4 && target <= 9)

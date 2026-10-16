@@ -981,6 +981,18 @@ class SrpShadowModel:
     CYLINDRICAL: SrpShadowModel
     DUAL_CONE: SrpShadowModel
 
+class SrpEclipsingBody:
+    def __init__(self) -> None: ...
+    body: ThirdBody
+    radius_m: float
+
+class SrpBodyPosition:
+    def __init__(self) -> None: ...
+    body: ThirdBody
+    position_m: Sequence[float]
+
+def default_srp_eclipsing_body(body: ThirdBody) -> SrpEclipsingBody: ...
+
 class SrpOptions:
     def __init__(self) -> None: ...
     enabled: bool
@@ -990,6 +1002,7 @@ class SrpOptions:
     sun_position_method: SrpSunPositionMethod
     earth_shadow: bool
     moon_shadow: bool
+    additional_eclipsing_bodies: Sequence[SrpEclipsingBody]
     atmospheric_altitude_m: float
     pressure_at_reference_pa: float
     reference_distance_m: float
@@ -1005,7 +1018,8 @@ class SrpEvaluation:
     def lighting_ratio(self) -> float: ...
 
 def evaluate_srp(satellite_m: Sequence[float], sun_m: Sequence[float], options: SrpOptions,
-                 moon_m: Sequence[float] | None = None) -> SrpEvaluation: ...
+                 moon_m: Sequence[float] | None = None,
+                 additional_positions: Sequence[SrpBodyPosition] = ()) -> SrpEvaluation: ...
 
 class RelativityEvaluation:
     @property

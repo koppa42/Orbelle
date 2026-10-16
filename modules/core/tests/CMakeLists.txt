@@ -13,6 +13,8 @@ target_compile_definitions(orbitforge_core_tests PRIVATE
     ORBITFORGE_GRAVITY_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/gravity.txt"
     ORBITFORGE_THIRD_BODY_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/third_body.txt"
     ORBITFORGE_SRP_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/srp.txt"
+    ORBITFORGE_SRP_MULTI_TRAJECTORIES="${PROJECT_SOURCE_DIR}/tests/reference/propagators/srp_multi_trajectories.txt"
+    ORBITFORGE_SRP_MULTI_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/srp_multi_geometry.txt"
     ORBITFORGE_SRP_GEOMETRY_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/srp_geometry.txt"
     ORBITFORGE_NRLMSISE_AP_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/nrlmsise00_ap.txt"
     ORBITFORGE_NRLMSISE_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/nrlmsise00.txt"

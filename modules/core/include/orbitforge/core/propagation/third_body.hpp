@@ -50,6 +50,24 @@ class IThirdBodyEphemeris {
   public:
     virtual ~IThirdBodyEphemeris() = default;
     [[nodiscard]] virtual std::array<double, 3> position(ThirdBody body, Epoch epoch) const = 0;
+    // Optional physical-centre geometry for SRP. Mars and outer planets MUST NOT
+    // use position(), which represents the system barycentre. Unsupported providers
+    // reject rather than approximating a physical silhouette by a barycentre.
+    [[nodiscard]] virtual std::array<double, 3> eclipsing_body_position(ThirdBody body,
+                                                                        Epoch at) const {
+        if (body == ThirdBody::mercury || body == ThirdBody::venus)
+            return position(body, at);
+        throw std::invalid_argument(
+            "This ephemeris does not provide the requested SRP body centre");
+    }
+    virtual void validate_eclipsing_body_interval(Epoch first, Epoch last,
+                                                  std::span<const ThirdBody> bodies) const {
+        for (auto body : bodies)
+            if (body != ThirdBody::mercury && body != ThirdBody::venus)
+                throw std::invalid_argument(
+                    "This ephemeris cannot certify the requested SRP body centre");
+        validate_interval(first, last, bodies);
+    }
     // Optional geometric position and velocity, Earth relative, ICRF-aligned axes.
     // The velocity is the derivative of position() per TAI second. This is a
     // Newtonian ephemeris input, not a relativistic coordinate transformation.

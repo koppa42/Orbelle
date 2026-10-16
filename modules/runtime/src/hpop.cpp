@@ -108,7 +108,7 @@ std::string hpop_algorithm(const core::HpopOptions &options,
         const auto o = core::effective_srp_options(options.srp);
         std::ostringstream config;
         config.imbue(std::locale::classic());
-        config << std::hexfloat << ";srp=spherical-uniform-angular-union-v2"
+        config << std::hexfloat << ";srp=spherical-uniform-angular-union-v3"
                << ";sun-method=" << static_cast<int>(o.sun_position_method) << ";sun-correction="
                << (o.sun_position_method == core::SrpSunPositionMethod::geometric ? "NONE"
                    : o.sun_position_method == core::SrpSunPositionMethod::apparent_to_true_cb
@@ -123,6 +123,9 @@ std::string hpop_algorithm(const core::HpopOptions &options,
                << ";reference-distance=" << o.reference_distance_m
                << ";sun-radius=" << o.sun_radius_m << ";earth-radius=" << o.earth_radius_m
                << ";moon-radius=" << o.moon_radius_m;
+        for (const auto &body : o.additional_eclipsing_bodies)
+            config << ";occultor-centre=" << core::srp_eclipsing_body_naif_id(body.body)
+                   << ";radius=" << body.radius_m;
         algorithm += config.str();
     }
     if (options.drag.enabled) {

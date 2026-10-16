@@ -1551,8 +1551,8 @@ TEST_F(QuantityTest, HpopSrpUnitsShadowAssignmentsResizeAndCancelPreserveExactDr
         auto *area = dialog->findChild<QuantityEditor *>("hpopSrpAreaMassRatio");
         auto *altitude = dialog->findChild<QuantityEditor *>("hpopSrpAtmosphericAltitude");
         auto *shadow = dialog->findChild<QComboBox *>("hpopSrpShadowModel");
-        auto *earth = dialog->findChild<QCheckBox *>("hpopSrpEarthShadow");
-        auto *moon = dialog->findChild<QCheckBox *>("hpopSrpMoonShadow");
+        auto *select_bodies = dialog->findChild<QPushButton *>("hpopSrpSelectBodies");
+        ASSERT_TRUE(select_bodies);
         auto *sun = dialog->findChild<QComboBox *>("hpopSrpSunMethod");
         ASSERT_TRUE(sun);
         EXPECT_EQ(sun->count(), 3);
@@ -1568,11 +1568,21 @@ TEST_F(QuantityTest, HpopSrpUnitsShadowAssignmentsResizeAndCancelPreserveExactDr
         altitude->set_unit(Unit::kilometre);
         altitude->set_value(23, Unit::kilometre);
         shadow->setCurrentIndex(0);
-        EXPECT_FALSE(earth->isEnabled());
-        EXPECT_FALSE(moon->isEnabled());
+        EXPECT_FALSE(select_bodies->isEnabled());
         EXPECT_FALSE(altitude->isEnabled());
         shadow->setCurrentIndex(2);
-        moon->setChecked(false);
+        QTimer::singleShot(0, [&] {
+            auto *selection = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            ASSERT_TRUE(selection);
+            auto *assigned = selection->findChild<QListWidget *>("hpopSrpAssignedBodies");
+            ASSERT_TRUE(assigned);
+            for (int i = 0; i < assigned->count(); ++i)
+                if (assigned->item(i)->data(Qt::UserRole).toInt() == 1)
+                    assigned->setCurrentItem(assigned->item(i));
+            selection->findChild<QToolButton *>("hpopSrpRemoveBody")->click();
+            selection->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        });
+        select_bodies->click();
         EXPECT_TRUE(altitude->isEnabled());
         EXPECT_FALSE(dialog->findChild<QuantityEditor *>("hpopSrpMoonRadius")->isEnabled());
         EXPECT_FALSE(dialog->findChild<QLabel *>("hpopSrpEphemerisStatus")
@@ -3166,4 +3176,100 @@ TEST_F(QuantityTest, HpopRegularizationControlsPreserveDraftsCancelAndNarrowLayo
         EXPECT_EQ(options, saved);
     }
 }
+} // namespace orbitforge::desktop
+
+namespace orbitforge::desktop {
+TEST_F(QuantityTest, HpopSrpBodyAssignmentSearchRadiusDraftsNestedCancelAndNarrowLayout) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    core::HpopOptions options;
+    options.srp.enabled = true;
+    runtime::CatalogEphemeris entry;
+    entry.selection = "de440s";
+    const auto visit = [&](bool accept_main) {
+        QTimer::singleShot(0, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            ASSERT_TRUE(dialog);
+            dialog->findChild<QTabWidget *>("hpopForceModelTabs")->setCurrentIndex(2);
+            auto *select = dialog->findChild<QPushButton *>("hpopSrpSelectBodies");
+            const auto summary = dialog->findChild<QLabel *>("hpopSrpEclipsingSummary")->text();
+            QTimer::singleShot(0, [&] {
+                auto *selection = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                ASSERT_TRUE(selection);
+                auto *available = selection->findChild<QListWidget *>("hpopSrpAvailableBodies");
+                auto *assigned = selection->findChild<QListWidget *>("hpopSrpAssignedBodies");
+                auto *search = selection->findChild<QLineEdit *>("hpopSrpBodySearch");
+                ASSERT_TRUE(available && assigned && search);
+                search->setText("vEnUs");
+                for (int i = 0; i < available->count(); ++i)
+                    if (!available->item(i)->isHidden()) {
+                        EXPECT_EQ(available->item(i)->data(Qt::UserRole).toInt(), 3);
+                        available->setCurrentItem(available->item(i));
+                    }
+                selection->findChild<QToolButton *>("hpopSrpAddBody")->click();
+                ASSERT_EQ(assigned->count(), 3);
+                auto *radius = selection->findChild<QuantityEditor *>("hpopSrpRadius3");
+                ASSERT_TRUE(radius);
+                radius->set_unit(Unit::kilometre);
+                radius->findChild<QLineEdit *>("quantityValue")->setText("6000.125");
+                const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+                std::cout << "HPOP SRP bodies DPR: " << selection->devicePixelRatioF() << '\n';
+                for (int width : {430, 720}) {
+                    selection->resize(width, 520);
+                    QEventLoop settled;
+                    QTimer::singleShot(60, &settled, &QEventLoop::quit);
+                    settled.exec();
+                    EXPECT_EQ(radius->findChild<QLineEdit *>("quantityValue")->text(), "6000.125");
+                    EXPECT_TRUE(selection->rect().contains(
+                        selection->findChild<QDialogButtonBox *>()->geometry()));
+                    EXPECT_EQ(available->horizontalScrollBar()->maximum(), 0);
+                    EXPECT_EQ(assigned->horizontalScrollBar()->maximum(), 0);
+                    if (!capture.isEmpty()) {
+                        EXPECT_TRUE(QDir{}.mkpath(capture));
+                        EXPECT_TRUE(selection->grab().save(
+                            capture + QString("/hpop-srp-bodies-%1.png").arg(width)));
+                    }
+                }
+                radius->findChild<QLineEdit *>("quantityValue")->setText("-1");
+                selection->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+                EXPECT_TRUE(selection->isVisible());
+                EXPECT_FALSE(
+                    selection->findChild<QLabel *>("hpopSrpBodiesError")->text().isEmpty());
+                radius->findChild<QLineEdit *>("quantityValue")->setText("6000.125");
+                selection->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            });
+            select->click();
+            EXPECT_NE(dialog->findChild<QLabel *>("hpopSrpEclipsingSummary")->text(), summary);
+            QTimer::singleShot(0, [&] {
+                auto *selection = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                ASSERT_TRUE(selection);
+                auto *assigned = selection->findChild<QListWidget *>("hpopSrpAssignedBodies");
+                ASSERT_EQ(assigned->count(), 3);
+                for (int i = 0; i < assigned->count(); ++i)
+                    if (assigned->item(i)->data(Qt::UserRole).toInt() == 3)
+                        assigned->setCurrentItem(assigned->item(i));
+                EXPECT_EQ(
+                    selection->findChild<QuantityEditor *>("hpopSrpRadius3")->value(Unit::metre),
+                    6000125);
+                selection->findChild<QToolButton *>("hpopSrpRemoveBody")->click();
+                selection->reject();
+            });
+            select->click();
+            EXPECT_TRUE(
+                dialog->findChild<QLabel *>("hpopSrpEclipsingSummary")->text().contains("Venus"));
+            if (accept_main)
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            else
+                dialog->reject();
+        });
+        return edit_hpop_settings(options, nullptr, {}, {entry});
+    };
+    const auto before = options;
+    EXPECT_FALSE(visit(false));
+    EXPECT_EQ(options, before);
+    EXPECT_TRUE(visit(true));
+    ASSERT_EQ(options.srp.additional_eclipsing_bodies.size(), 1U);
+    EXPECT_EQ(options.srp.additional_eclipsing_bodies[0],
+              (core::SrpEclipsingBody{core::ThirdBody::venus, 6000125}));
+}
+
 } // namespace orbitforge::desktop

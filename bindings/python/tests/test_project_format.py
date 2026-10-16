@@ -19,7 +19,7 @@ class ProjectFormatTests(unittest.TestCase):
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 36)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 37)
         self.path.write_bytes(self.raw)
         project = of.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
@@ -31,6 +31,9 @@ class ProjectFormatTests(unittest.TestCase):
         self.assertEqual(hpop.ocean_tides, of.orbits.OceanTideSettings(False, "fixture-ocean", 30, 12))
         self.assertTrue(hpop.include_secular_variations)
         self.assertEqual(hpop.satellite_mass_kg, 1250)
+        self.assertEqual(hpop.srp.additional_eclipsing_bodies, (
+            of.orbits.SrpEclipsingBody("mercury", 2440000.125),
+            of.orbits.SrpEclipsingBody("venus", 6051800)))
         self.assertEqual(hpop.integrator, "gauss_jackson")
         self.assertEqual(hpop.correction, "pseudo")
         self.assertEqual(hpop.step_control, "fixed")
@@ -71,15 +74,32 @@ class ProjectFormatTests(unittest.TestCase):
                 of.Project.open(self.path)
             self.assertEqual(self.path.read_bytes(),raw)
 
+    def test_invalid_additional_occultors_preserve_source_after_crc_repair(self):
+        marker=struct.pack("<8d",1.25,.03,23000,4.56e-6,149597870700,696000000,6378137,1737400)
+        for offset,fmt,value in ((0,"I",9),(0,"I",0xFFFFFFFF),(4,"I",0),(4,"I",1),
+                (4,"I",10),(8,"d",-1),(8,"d",float("nan")),(8,"d",float("inf")),(16,"I",6)):
+            sections=[]
+            for tag,version,body in read_sections(self.raw):
+                if tag==b"OBJS":
+                    body=bytearray(body)
+                    self.assertEqual(body.count(marker),1)
+                    struct.pack_into("<"+fmt,body,body.index(marker)+len(marker)+offset,value)
+                sections.append((tag,version,body))
+            altered=with_sections(self.raw,sections)
+            self.path.write_bytes(altered)
+            with self.subTest(offset=offset,value=value), self.assertRaises(of.ProjectError):
+                of.Project.open(self.path)
+            self.assertEqual(self.path.read_bytes(),altered)
+
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(36), 37, 0xFFFFFFFF):
+        for version in (*range(37), 38, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (of.load_project_data, of.load_project,
                                  of.Project.open, of.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 36"):
+                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 37"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 

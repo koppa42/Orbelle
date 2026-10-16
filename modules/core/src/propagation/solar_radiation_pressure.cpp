@@ -46,7 +46,8 @@ double angle(double value) {
 // Green's theorem integrates the exposed boundary arcs of the clipped disk union.
 // Circle intersections partition each boundary into arcs with constant membership.
 double covered_area(std::span<const Disk> occultors) {
-    std::array<Disk, 3> storage{{{0, 0, 1}}};
+    std::array<Disk, third_body_count + 1> storage{
+        {{0, 0, 1}}}; // Sun + Earth/Moon + eight planets.
     std::size_t count = 1;
     for (std::size_t i = 0; i < occultors.size(); ++i) {
         const auto &disk = occultors[i];
@@ -79,7 +80,8 @@ double covered_area(std::span<const Disk> occultors) {
     double area = 0;
     for (std::size_t i = 0; i < circles.size(); ++i) {
         const auto &circle = circles[i];
-        std::array<double, 6> edge_storage{0, turn};
+        std::array<double, 2 * (third_body_count + 1)> edge_storage{
+            0, turn}; // Two endpoints per other circle.
         std::size_t edge_count = 2;
         for (std::size_t j = 0; j < circles.size(); ++j) {
             if (i == j)
@@ -98,8 +100,7 @@ double covered_area(std::span<const Disk> occultors) {
             edge_storage[edge_count++] = angle(direction + opening);
         }
         auto edges = std::span{edge_storage}.first(edge_count);
-        // At most six endpoints: direct insertion keeps the small stack buffer bounded
-        // and avoids generic std::sort's larger insertion-sort threshold on GCC 13.
+        // Direct insertion sorts only the populated, bounded endpoint span.
         for (std::size_t k = 1; k < edges.size(); ++k) {
             const double value = edges[k];
             auto position = k;
@@ -132,7 +133,49 @@ double covered_area(std::span<const Disk> occultors) {
     return std::clamp(area, 0.0, pi);
 }
 } // namespace
+std::int32_t srp_eclipsing_body_naif_id(ThirdBody body) {
+    if (static_cast<unsigned>(body) < 2 || static_cast<unsigned>(body) >= third_body_count)
+        throw std::invalid_argument("Additional SRP occultors must be planets");
+    const auto id = third_body_naif_id(body);
+    if (id == 199 || id == 299)
+        return id;
+    if (id >= 4 && id <= 9)
+        return id * 100 + 99;
+    throw std::invalid_argument(
+        "Additional SRP occultors must be planets; Earth/Moon use their own settings");
+}
+SrpEclipsingBody default_srp_eclipsing_body(ThirdBody body) {
+    switch (srp_eclipsing_body_naif_id(body)) {
+    case 199:
+        return {body, 2440530};
+    case 299:
+        return {body, 6051800};
+    case 499:
+        return {body, 3396190};
+    case 599:
+        return {body, 71492000};
+    case 699:
+        return {body, 60268000};
+    case 799:
+        return {body, 25559000};
+    case 899:
+        return {body, 24764000};
+    case 999:
+        return {body, 1188300};
+    }
+    throw std::invalid_argument("Unsupported SRP occultor");
+}
 void validate_srp_options(const SrpOptions &o) {
+    if (o.additional_eclipsing_bodies.size() > third_body_count - 2)
+        throw std::invalid_argument("Too many additional SRP occultors");
+    std::array<bool, third_body_count> seen{};
+    for (const auto &body : o.additional_eclipsing_bodies) {
+        (void)srp_eclipsing_body_naif_id(body.body);
+        auto &used = seen.at(static_cast<std::size_t>(body.body));
+        if (used || !std::isfinite(body.radius_m) || body.radius_m <= 0)
+            throw std::invalid_argument("SRP occultors must be unique with finite positive radii");
+        used = true;
+    }
     if (o.sun_position_method != SrpSunPositionMethod::geometric &&
         o.sun_position_method != SrpSunPositionMethod::apparent_to_true_cb &&
         o.sun_position_method != SrpSunPositionMethod::apparent)
@@ -158,8 +201,11 @@ SrpOptions effective_srp_options(SrpOptions options) {
     if (!options.enabled)
         return {};
     const SrpOptions defaults;
-    if (options.shadow_model == SrpShadowModel::none)
+    if (options.shadow_model == SrpShadowModel::none) {
         options.earth_shadow = options.moon_shadow = false;
+        options.additional_eclipsing_bodies.clear();
+    }
+    std::ranges::sort(options.additional_eclipsing_bodies, {}, &SrpEclipsingBody::body);
     if (!options.earth_shadow) {
         options.earth_radius_m = defaults.earth_radius_m;
         options.atmospheric_altitude_m = 0;
@@ -169,7 +215,8 @@ SrpOptions effective_srp_options(SrpOptions options) {
     return options;
 }
 SrpEvaluation evaluate_srp(const Vector &satellite, const Vector &sun, const SrpOptions &options,
-                           const std::optional<Vector> &moon) {
+                           const std::optional<Vector> &moon,
+                           std::span<const SrpBodyPosition> additional) {
     validate_srp_options(options);
     if (!options.enabled)
         return {};
@@ -181,7 +228,7 @@ SrpEvaluation evaluate_srp(const Vector &satellite, const Vector &sun, const Srp
         throw PropagationError("SRP observer must be outside the solar sphere");
     const auto direction = unit(to_sun, sun_distance);
     double lighting = 1;
-    std::array<std::pair<Vector, double>, 2> bodies;
+    std::array<std::pair<Vector, double>, third_body_count> bodies;
     std::size_t body_count = 0;
     if (options.shadow_model != SrpShadowModel::none) {
         if (options.earth_shadow)
@@ -193,8 +240,32 @@ SrpEvaluation evaluate_srp(const Vector &satellite, const Vector &sun, const Srp
             finite_vector(*moon);
             bodies[body_count++] = {subtract(*moon, satellite), options.moon_radius_m};
         }
+        if (additional.size() != options.additional_eclipsing_bodies.size())
+            throw std::invalid_argument(
+                "SRP requires one physical-centre position per additional occultor");
+        std::array<bool, third_body_count> found{};
+        for (const auto &position : additional) {
+            const auto body = std::ranges::find(options.additional_eclipsing_bodies, position.body,
+                                                &SrpEclipsingBody::body);
+            if (body == options.additional_eclipsing_bodies.end())
+                throw std::invalid_argument("Unassigned SRP occultor position");
+            auto &seen = found.at(static_cast<std::size_t>(body->body));
+            if (seen)
+                throw std::invalid_argument("Duplicate SRP occultor position");
+            seen = true;
+            finite_vector(position.position_m);
+        }
+        // Deterministic accumulation for identical assignments in any UI/API order.
+        for (auto body : third_body_list) {
+            const auto setting = std::ranges::find(options.additional_eclipsing_bodies, body,
+                                                   &SrpEclipsingBody::body);
+            if (setting == options.additional_eclipsing_bodies.end())
+                continue;
+            const auto position = std::ranges::find(additional, body, &SrpBodyPosition::body);
+            bodies[body_count++] = {subtract(position->position_m, satellite), setting->radius_m};
+        }
     }
-    std::array<Disk, 2> disks;
+    std::array<Disk, third_body_count> disks;
     std::size_t disk_count = 0;
     const double sun_angle = std::asin(options.sun_radius_m / sun_distance);
     const Vector axis = std::abs(direction[2]) < 0.8 ? Vector{0, 0, 1} : Vector{0, 1, 0};
@@ -210,8 +281,7 @@ SrpEvaluation evaluate_srp(const Vector &satellite, const Vector &sun, const Srp
             continue;
         if (options.shadow_model == SrpShadowModel::cylindrical) {
             if (norm(cross(to_body, direction)) <= radius) {
-                lighting = 0;
-                break;
+                lighting = 0; // Still validate the remaining assigned geometries.
             }
         } else {
             const auto body_direction = unit(to_body, distance);
