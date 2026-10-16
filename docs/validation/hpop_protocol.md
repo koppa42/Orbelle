@@ -149,6 +149,14 @@ STK 原始轨迹、阴影专用事件、VOP、时间正则化、科学插值以�
 
 普通 Core、集成、天气与科学插值回归、独立安装 Python 3.13 及 SDK 均已复核；项目结构仍为 v35 / OBJS26。Pseudo 的端到端总力调用数保持少于 Full，状态差仍小于 1e−5 m；另在克隆的同一历史上验证单步恰少一次完整力调用。两种模式分别传播时迭代次数可以不同，不再对总次数差施加无依据的逐步上限。
 
+## GJ 起步与求和补偿 v3
+
+GJ 起步状态带入求和时保留乘法、减法及起步器状态补偿；预测和校正重建也计入补偿。普通时间和 Sundman 混合系统共用此内核，算法来源更新为 `gauss-jackson12-summed-bs14to18-startup-full-v3` / `gauss-jackson12-summed-bs14to18-startup-pseudo-v3`。固定 BS 仍为 v2；项目结构 v35 / OBJS26 与固定参考字节不变。
+
+当前 Windows/MSVC Release 以相同 Hipparchus 60 组状态及原门槛复核：Full/Pseudo 的 30 s 最大位置范数差均为 4.33550e−4 m，最大速度差分别为 4.37863e−8 / 4.39405e−8 m/s；15 s 位置差约 41 µm，步长减半最大变化约 0.433 mm。200/160 s 观察阶数为 12.4137，细步位置误差约 0.164 mm。克隆相同历史的单步 Pseudo 仍恰好少一次完整力评估。
+
+本轮 Core 130/130、集成 177 通过 / 2 项完整资源条件跳过、独立 Python 217 通过 / 5 项可选依赖跳过、安装后 SDK 2/2。新增物理时间端点适配仍为内部能力，独立参考和 972 次端点比较见[时间正则化协议](time_regularization_protocol.md#指定物理时间端点验收)。
+
 ## 完整 EGM2008 与 2190 阶验证
 
 `OrbitForgeFullGravityReference.java` 直接调用未经修改的 Orekit 13.1.2 `HolmesFeatherstoneAttractionModel`、`ICGEMFormatReader` 和 Hipparchus 4.0.2 DP853。生成器不导入 OrbitForge，也不转录生产递推。依赖散列使用同目录 `dependencies.json`；参考字节保持 UTF-8/LF。

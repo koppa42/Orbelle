@@ -1,6 +1,6 @@
 # HPOP 时间正则化内核验证
 
-本协议验证内部 Sundman 方程和共用积分内核。公共 HPOP 仍按普通时间传播；真实 TAI 端点、天气/机动边界、自适应正则化控制、API、项目保存及界面尚未接入。本项不能代替 STK 同配置轨迹验收。方程、尺度和后续边界见[内部契约](../architecture/time_regularization.md)。
+本协议验证内部 Sundman 方程、共用积分内核及有界物理时间端点适配。公共 HPOP 仍按普通时间传播；整数 TAI、真实天气/机动、完整自适应步长政策、API、项目保存及界面尚未接入。本项不能代替 STK 同配置轨迹验收。方程、尺度和后续边界见[内部契约](../architecture/time_regularization.md)。
 
 ## 独立参考
 
@@ -34,10 +34,10 @@
 | RKF 7(8) | 4096 | 2.38487e−5 | 5.09532e−10 | 2.24682e−8 |
 | RKV 8(9) | 4096 | 2.93436e−5 | 6.96225e−10 | 4.07454e−8 |
 | BS 固定十八阶 | 2048 | 2.66512e−5 | 5.20493e−10 | 2.35159e−8 |
-| GJ Full | 点质量 4096；时变力 16384 | 5.12312e−5 | 7.28061e−10 | 2.28175e−7 |
-| GJ Pseudo | 点质量 4096；时变力 16384 | 5.09645e−5 | 7.24934e−10 | 2.27010e−7 |
+| GJ Full | 点质量 4096；时变力 16384 | 5.19507e−5 | 7.26381e−10 | 2.15136e−7 |
+| GJ Pseudo | 点质量 4096；时变力 16384 | 5.22845e−5 | 7.25424e−10 | 2.15601e−7 |
 
-所有粗细结果均须满足 **5 mm、5e−6 m/s、5e−7 s**；同条轨迹的步数加倍变化分别小于 **1 mm、1e−6 m/s、2.5e−7 s**。六种设置的步数加倍最大变化为 3.75930e−5 m、7.24049e−10 m/s、1.30851e−7 s。这些界限验证方程变换与积分一致性，不代表未来 TAI 端点拟合已达到纳秒精度，也不代表实轨预报精度。
+所有粗细结果均须满足 **5 mm、5e−6 m/s、5e−7 s**；同条轨迹的步数加倍变化分别小于 **1 mm、1e−6 m/s、2.5e−7 s**。六种设置的步数加倍最大变化为 4.32283e−5 m、7.24049e−10 m/s、1.29687e−7 s。这些界限验证方程变换与积分一致性，不代表未来 TAI 端点拟合已达到纳秒精度，也不代表实轨预报精度。
 
 高偏心率 n=2 的远地点附近，每个 q 步可跨越较长物理时间；时变摄动力额外要求足够取样。固定步 GJ 的校正收敛不保证截断误差合格，粗步可能失稳；无限增加步数又会进入时钟舍入平台。上述步数由保持原门槛的步数加倍检查确定，并非建议所有用户场景采用该默认值。普通时间 GJ 保持原有 64ε 收敛标准；七维混合方程的内核试验使用位置、dr/dq 范数及真实时间尺度的 8ε。起步器使用 BS 至少十四阶、相对容差 1e−14，位置/dr/dq/时钟绝对容差分别 1e−9/1e−8/1e−11。
 
@@ -48,11 +48,37 @@
 - 坐标往返、传入力的真实时间与速度；Pseudo 保留物理摄动并更新全部变换因子；非有限输入、无周期轨道、径向轨道和非法指数；中点子步取消不得发布部分状态。
 - 克隆相同 GJ 历史后比较正反向单步：两种校正的状态相同，Pseudo 恰好少一次收敛后的完整力调用。分别长期传播后的历史与迭代次数可不同，不能从总次数差推导逐步上限。
 
+## 指定物理时间端点验收
+
+`All/SundmanBoundaries.PhysicalEndpointsMatchIndependentReferenceWithoutOutOfRangeForces` 将同一独立文件中的真实秒作为终点，对五种算法的固定模式（GJ Full/Pseudo 分开）和 RKF/RKV/BS 自适应模式进行 **9×54×2 = 972 次最终状态比较**。每条轨迹经过 t/3、2t/3、t 三个顺序查询端点，保留状态和 q 网格；每次查询单独检查 200000 次尝试预算。力回调断言每个实际调用均在已声明的物理时间区间内。
+
+固定粗步每圈 RK4 为 131072，其余方法点质量为 4096、时变摄动力为 32768，细步加倍；自适应同时把物理上限从 300 s 减至 150 s，相对容差 1e−14、位置/速度绝对容差 1e−8 m / 1e−11 m/s。边界逆方程保留同一方法；GJ 使用 BS 十四至十八阶起步器，局部 r/u/t 绝对尺度为 1e−9 m / (1e−12 m/s × g) / 1e−11 s。
+
+| 方法 | 最大位置范数差 m | 最大速度范数差 m/s | 步长减半位置变化 m | 步长减半速度变化 m/s |
+| --- | --- | --- | --- | --- |
+| RK4 固定 | 0.000563998 | 1.02373e-08 | 0.000535238 | 7.39004e-09 |
+| RKF 固定 | 3.82328e-05 | 1.13292e-08 | 1.59986e-05 | 6.92137e-09 |
+| RKV 固定 | 9.95785e-05 | 6.03675e-08 | 7.10683e-05 | 4.02394e-08 |
+| BS 固定 | 8.05966e-05 | 4.88595e-08 | 6.0507e-05 | 3.66803e-08 |
+| GJ Full | 0.00097228 | 5.89426e-07 | 0.000495529 | 3.00983e-07 |
+| GJ Pseudo | 0.000960898 | 5.82525e-07 | 0.000500119 | 3.0377e-07 |
+| RKF 自适应 | 2.69267e-05 | 9.54182e-09 | 1.71097e-05 | 1.86338e-09 |
+| RKV 自适应 | 0.000125364 | 7.59994e-08 | 0.000144731 | 8.77402e-08 |
+| BS 自适应 | 8.97307e-05 | 2.47815e-08 | 7.84182e-05 | 1.98115e-08 |
+
+每条粗细轨迹均满足原 **5 mm / 5e−6 m/s** 绝对门槛和 **1 mm / 1e−6 m/s** 收敛门槛。终点秒与输入双精度值精确相等；这并不替代大历元下整数纳秒映射的后续验收。两种 GJ 每条轨迹均完成超过 100 个真实多步推进，各自累计 1924367 步，避免只检验起步器。
+
+`SundmanBounded` 另验全部五种方法的 ±1 ns 端点、取消不修改输入历史、预算耗尽前不调用力，以及拒绝直接反转旧历史。分段常加速度的正反向解析案例，在 ±315.123456789 s 重置力段后继续到 ±700.987654321 s，检查单侧力覆盖、精确终点、严格单调输出与 1e−5 m / 1e−8 m/s 误差。它是事件边界的受控测试，不冒充真实天气数据或机动管线验收。
+
+`GaussJacksonKernel.FirstOrderClockRetainsSubUlpStarterResidual` 用常导数的一次状态解析解验证起步到多步的补偿传递：基值 1e6，初始偏移四分之一 ulp，每步增量半个 ulp，正反向各检查 128 次推进。它可独立复现丢弃起步残差导致的舍入偏差。
+
+当前自适应内部适配包含误差拒步与物理最大步长；Min Step 仅充当误差拒步下限，尚未作为所有常规接受步的下限。不得据此宣称完整 STK 步长联动或公共 Time Regularization 已实现。
+
 ## 普通 HPOP 回归与身份
 
-为降低高阶外推的舍入放大，固定十八阶 BS 和 GJ 十四至十八阶起步器改用 2/4/6/8/12/16/24/32/48 子步，外推局部状态增量。普通自适应 BS 的 2/4/…/18 序列及其控制器保留。对应算法来源升级至 `bulirsch-stoer-midpoint-richardson-fixed18-v2`、`gauss-jackson12-summed-bs14to18-startup-full-v2` 和 `gauss-jackson12-summed-bs14to18-startup-pseudo-v2`；项目仍为 v35 / OBJS26。
+为降低高阶外推的舍入放大，固定十八阶 BS 和 GJ 十四至十八阶起步器改用 2/4/6/8/12/16/24/32/48 子步，外推局部状态增量。普通自适应 BS 的 2/4/…/18 序列及其控制器保留。对应算法来源升级至 `bulirsch-stoer-midpoint-richardson-fixed18-v2`、`gauss-jackson12-summed-bs14to18-startup-full-v3` 和 `gauss-jackson12-summed-bs14to18-startup-pseudo-v3`；GJ v3 还保留起步和求和重建的舍入补偿。项目仍为 v35 / OBJS26。
 
-普通时间的固定步长、Hipparchus/Orekit 轨迹、天气、缓存、科学插值、任务和 API 测试保持原门槛；v2 的普通时间数值见 [HPOP 协议](hpop_protocol.md#共用内核与外推-v2)。本次 Windows/MSVC Release 本地验证合计 Core 117 通过（全套后，以最终 13 项内核/正则化复核替代对应结果），集成 177 通过 / 2 项完整资源条件跳过，独立 Python 3.13 安装 217 通过 / 5 项可选 NumPy/pandas 跳过，安装后 SDK 2/2。没有新增界面，未重跑本轮无关的 DPI 验收。逐次 XML、日志、参考收敛输出及汇总保存在 `out/validation/`，不提交运行产物。
+普通时间的固定步长、Hipparchus/Orekit 轨迹、天气、缓存、科学插值、任务和 API 测试保持原门槛；GJ v3 的普通时间数值见 [HPOP 协议](hpop_protocol.md#gj-起步与求和补偿-v3)。本次 Windows/MSVC Release 本地验证 Core 单次全套 130/130 通过，集成 177 通过 / 2 项完整资源条件跳过，独立 Python 3.13 安装 217 通过 / 5 项可选 NumPy/pandas 跳过，安装后 SDK 2/2。没有新增界面，未重跑本轮无关的 DPI 验收。逐次 XML、日志、参考收敛输出及汇总保存在 `out/validation/`，不提交运行产物。
 
 ## 复现
 
@@ -66,7 +92,7 @@ javac -cp $classpath -d out/validation/sundman/classes tools/validation/orekit/O
 java -Xmx768m -cp ("out/validation/sundman/classes" + [IO.Path]::PathSeparator + $classpath) OrbitForgeSundmanReference out/validation/sundman/sundman.txt
 Get-FileHash -Algorithm SHA256 -LiteralPath out/validation/sundman/sundman.txt
 cmake --build --preset desktop-graphics
-ctest --preset desktop-graphics -R 'core\.(Sundman|GaussJacksonKernel|All/SundmanMethods)'
+ctest --preset desktop-graphics -R 'core\.(Sundman|GaussJacksonKernel|All/SundmanMethods|All/SundmanBoundaries)'
 ctest --preset desktop-graphics -R 'core\.(Hpop|Mission)'
 ```
 

@@ -44,7 +44,8 @@ template <std::size_t N, std::size_t K = 0> struct GaussJacksonSystem12 {
         }
         return result;
     }
-    void seed(const State &next, const Acceleration &acceleration, double h) {
+    void seed(const State &next, const Acceleration &acceleration, double h,
+              const State &state_compensation = {}) {
         for (std::size_t j = std::min(count, history.size() - 1); j > 0; --j)
             history[j] = history[j - 1];
         history[0] = acceleration;
@@ -53,12 +54,29 @@ template <std::size_t N, std::size_t K = 0> struct GaussJacksonSystem12 {
         if (count == history.size()) {
             const auto p = dot(gj_position, history, 1.0 / 12);
             const auto v = dot(gj_velocity, history, 0);
-            for (std::size_t i = 0; i < N + K; ++i) {
-                sum1[i] = state[i + N] - h * v[i];
-                if (i < N)
-                    sum2[i] = state[i] - h * h * p[i];
-            }
             compensation1 = compensation2 = {};
+            // Initialize the sums as compensated differences, including the
+            // starter's residual and the product rounding. Dropping these bits
+            // shifts the physical phase of a long, highly eccentric orbit.
+            const auto subtract = [](double value, double residual, double product,
+                                     double product_error, double &sum, double &compensation) {
+                sum = value - product;
+                const double virtual_b = sum - value;
+                const double addition_error = (value - (sum - virtual_b)) + (-product - virtual_b);
+                compensation = residual + product_error - addition_error;
+            };
+            for (std::size_t i = 0; i < N + K; ++i) {
+                const double velocity_term = h * v[i];
+                subtract(state[i + N], state_compensation[i + N], velocity_term,
+                         std::fma(h, v[i], -velocity_term), sum1[i], compensation1[i]);
+                if (i < N) {
+                    const double square = h * h, position_term = square * p[i];
+                    const double product_error =
+                        std::fma(square, p[i], -position_term) + std::fma(h, h, -square) * p[i];
+                    subtract(state[i], state_compensation[i], position_term, product_error, sum2[i],
+                             compensation2[i]);
+                }
+            }
         }
     }
     template <class Force, class Correction, class Converged>
@@ -74,8 +92,8 @@ template <std::size_t N, std::size_t K = 0> struct GaussJacksonSystem12 {
         State estimate{};
         for (std::size_t i = 0; i < N + K; ++i) {
             if (i < N)
-                estimate[i] = next_sum2[i] + h * h * p[i];
-            estimate[i + N] = sum1[i] + h * (.5 * history[0][i] + v[i]);
+                estimate[i] = next_sum2[i] + (h * h * p[i] - next_compensation2[i]);
+            estimate[i + N] = sum1[i] + (h * (.5 * history[0][i] + v[i]) - compensation1[i]);
         }
         auto shifted = history;
         for (std::size_t j = shifted.size() - 1; j > 0; --j)
@@ -91,8 +109,8 @@ template <std::size_t N, std::size_t K = 0> struct GaussJacksonSystem12 {
             State corrected{};
             for (std::size_t i = 0; i < N + K; ++i) {
                 if (i < N)
-                    corrected[i] = next_sum2[i] + h * h * corrected_p[i];
-                corrected[i + N] = next_sum1[i] + h * corrected_v[i];
+                    corrected[i] = next_sum2[i] + (h * h * corrected_p[i] - next_compensation2[i]);
+                corrected[i + N] = next_sum1[i] + (h * corrected_v[i] - next_compensation1[i]);
             }
             if (converged(estimate, corrected)) {
                 // STK's choice affects the final, post-convergence force update.

@@ -60,7 +60,7 @@ Python 使用 `integrator="gauss_jackson"` 和 `correction="full"` / `"pseudo"`�
 
 历史启动以及非网格查询的尾段使用至少十四阶、最高十八阶的 Bulirsch–Stoer，采用同一 2/4/6/8/12/16/24/32/48 序列并外推局部增量以降低舍入放大，固定内部相对容差 1e−14、位置/速度绝对容差 1e−9 m / 1e−12 m/s，最小拒绝步为 1 ns。只在传播方向的已请求区间取样，不为启动要求额外前后星历。缓存间隔为 `ceil(300 / h) × h`，保存状态、求和及加速度历史；尾段副本不回写，保证查询顺序和输出网格不改变后续积分。已知天气跳变以单侧启动器过渡并清空历史；每个机动后的 HPOP 滑行创建新的历史。阴影专用事件仍待实现，非光滑力段的高阶误差不能由局部迭代收敛保证。
 
-Gauss–Jackson 的自适应参数只保留草稿，RK 方法的校正选项同样不参与计算身份。项目 v35 / OBJS26 保存两种设置，结果来源区分 `gauss-jackson12-summed-bs14to18-startup-full-v2` 与 `gauss-jackson12-summed-bs14to18-startup-pseudo-v2`。这套启动与收敛策略是本项目明确的实现，不宣称与 STK 的内部策略相同；高偏心轨道须做固定步长收敛检查，见[数值对照](../validation/hpop_protocol.md#gaussjackson-12)。
+Gauss–Jackson 的自适应参数只保留草稿，RK 方法的校正选项同样不参与计算身份。项目 v35 / OBJS26 保存两种设置，结果来源区分 `gauss-jackson12-summed-bs14to18-startup-full-v3` 与 `gauss-jackson12-summed-bs14to18-startup-pseudo-v3`。这套启动与收敛策略是本项目明确的实现，不宣称与 STK 的内部策略相同；高偏心轨道须做固定步长收敛检查，见[数值对照](../validation/hpop_protocol.md#gaussjackson-12)。
 
 
 RKF 7(8) 系数来自 Fehlberg [NASA TR R-287](https://ntrs.nasa.gov/citations/19680027281) 第 65 页 Table X，按 STK 的定义推进七阶解，以嵌入八阶解估计误差，步长控制指数为 1/8。结果算法标识为 `rkf78-7th-fehlberg-r287-v1`，避免与之前八阶推进的结果混用；公开枚举 `rkf78` 不变。不宣称逐位复现 STK 的步长控制器。直接积分工厂的自适应模式从初始历元向前后独立建立宽度为 `max(300, max_step_seconds)` 秒的完整计算段，余段单独积分；改变采样、乱序、重复和并发查询不改变结果。共享缓存加锁，取消保留已完成段，不发布部分结果。每次查询最多 200000 次积分尝试，距离初始历元最多 366 天；这是资源边界，不是精度保证。显示插值不参与科学查询。普通项目及任务滑行采用连续有界星历，Lagrange / Hermite 方法与阶数可配置；固定输出开启时使用轨道页步长，见[科学插值契约](orbit_interpolation.md)。首次查询在捕获的资源上生成完整滑行段，之后查询使用不可变插值节点。

@@ -11,6 +11,7 @@ namespace orbitforge::core::detail {
 // Stages, coefficients and extrapolation are shared by Cartesian and augmented ODEs.
 template <std::size_t N> struct ErrorControl {
     bool fixed = false;
+    bool local_increments = false;
     double relative = 0;
     std::array<double, N> absolute{};
     double max_step = std::numeric_limits<double>::infinity();
@@ -169,7 +170,7 @@ TrialStep<N> bulirsch_stoer(double t, const std::array<double, N> &s, double h,
                          : std::array<int, levels>{2, 4, 6, 8, 10, 12, 14, 16, 18};
     // High-order extrapolation of absolute coordinates amplifies cancellation,
     // particularly in GJ's order 14..18 starter. Extrapolate local increments.
-    const bool offsets = fixed || startup;
+    const bool offsets = fixed || startup || control.local_increments;
     const auto absolute_state = [&](const State &value) {
         if (!offsets)
             return value;

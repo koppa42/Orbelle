@@ -20,8 +20,8 @@ std::string hpop_algorithm(const core::HpopOptions &options,
                                           : "bulirsch-stoer-midpoint-richardson-4to18-cost-v1;")
          : options.integrator == core::HpopIntegrator::gauss_jackson
              ? (options.correction == core::HpopCorrection::full
-                    ? "gauss-jackson12-summed-bs14to18-startup-full-v2;"
-                    : "gauss-jackson12-summed-bs14to18-startup-pseudo-v2;")
+                    ? "gauss-jackson12-summed-bs14to18-startup-full-v3;"
+                    : "gauss-jackson12-summed-bs14to18-startup-pseudo-v3;")
              : "rk4-fixed-grid-v2;") +
         (options.gravity_model.empty() ? std::string(core::egm96_model_id())
                                        : options.gravity_model) +

@@ -1,6 +1,7 @@
 #include "../src/propagation/integrators/gauss_jackson.hpp"
 #include "../src/propagation/integrators/one_step.hpp"
 #include "../src/propagation/integrators/sundman.hpp"
+#include "../src/propagation/integrators/sundman_propagation.hpp"
 #include <fstream>
 #include <gtest/gtest.h>
 #include <iomanip>
@@ -232,6 +233,30 @@ TEST_P(SundmanMethods, FixedRegularizedStepsMatchIndependentHighPrecisionAndConv
 }
 INSTANTIATE_TEST_SUITE_P(All, SundmanMethods, ::testing::Range(0, 6));
 
+TEST(GaussJacksonKernel, FirstOrderClockRetainsSubUlpStarterResidual) {
+    // y'=constant has an exact linear solution. A quarter-ulp initial offset
+    // must survive the starter/multistep handoff, including halfway rounding.
+    using Clock = GaussJacksonSystem12<0, 1>;
+    constexpr double base = 1e6;
+    const double ulp = std::nextafter(base, std::numeric_limits<double>::infinity()) - base;
+    const Clock::Acceleration rate{.5 * ulp};
+    for (double direction : {-1., 1.}) {
+        Clock history;
+        for (int j = 0; j < 13; ++j) {
+            const double offset = (.25 + direction * .5 * j) * ulp;
+            const double rounded = base + offset;
+            history.seed({rounded}, rate, direction, {(rounded - base) - offset});
+        }
+        for (int j = 13; j <= 140; ++j) {
+            history.advance(
+                direction, true, [&](const auto &) { return rate; },
+                [](const auto &, const auto &, const auto &a) { return a; },
+                [](const auto &a, const auto &b) { return a == b; });
+            EXPECT_EQ(history.state[0], base + (.25 + direction * .5 * j) * ulp);
+        }
+    }
+}
+
 TEST(GaussJacksonKernel, PseudoSkipsExactlyOnePostConvergenceForceCallOnTheSameHistory) {
     for (double h : {-30., 30.}) {
         GaussJackson12 history;
@@ -411,5 +436,213 @@ TEST(Sundman, SharedExtrapolationChecksCancellationWithoutPublishingAPartialStat
                  std::runtime_error);
     EXPECT_EQ(calls, 10);
     EXPECT_EQ(first, saved);
+}
+
+class SundmanBoundaries : public ::testing::TestWithParam<int> {};
+TEST_P(SundmanBoundaries, PhysicalEndpointsMatchIndependentReferenceWithoutOutOfRangeForces) {
+    const int selection = GetParam();
+    const bool adaptive = selection >= 6;
+    const int method = adaptive ? selection - 5 : std::min(selection, 4);
+    constexpr std::array methods{HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+                                 HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson};
+    double max_r = 0, max_v = 0, change_r = 0, change_v = 0;
+    std::size_t boundary_count = 0, multisteps = 0;
+    for (const auto &ref : references()) {
+        SCOPED_TRACE(::testing::Message() << "kind=" << ref.kind << " e=" << ref.eccentricity
+                                          << " n=" << ref.exponent << " t=" << ref.time);
+        HpopOptions options;
+        options.gravity_degree = options.gravity_order = 0;
+        options.integrator = methods[method];
+        options.correction = selection == 5 ? HpopCorrection::pseudo : HpopCorrection::full;
+        options.step_control = adaptive ? HpopStepControl::relative_error : HpopStepControl::fixed;
+        options.relative_tolerance = 1e-14;
+        options.position_tolerance_m = 1e-8;
+        options.velocity_tolerance_mps = 1e-11;
+        options.max_step_seconds = 300;
+        // The oscillatory force has a physical-time bandwidth near apoapsis.
+        // Fixed-q boundary bridges need to resolve it as well as the orbit.
+        const std::size_t steps = method == 0 ? 131072 : (ref.kind == 0 ? 4096 : 32768);
+        const auto run = [&](bool fine) {
+            auto settings = options;
+            if (fine)
+                settings.max_step_seconds *= .5;
+            SundmanPropagation propagation(ref.initial, mu, ref.exponent, steps * (fine ? 2 : 1),
+                                           settings);
+            auto result = propagation.initial_state();
+            // Three independent query gates keep each validation query within the
+            // production 200000-attempt budget, including the fine RK4 mesh.
+            for (int gate = 1; gate <= 3; ++gate) {
+                std::size_t attempts = 0;
+                const double target = gate == 3 ? ref.time : ref.time * (gate / 3.);
+                result = propagation.propagate(
+                    result, target,
+                    [&](double time, const Cartesian &s) {
+                        if (time < std::min(0., target) || time > std::max(0., target))
+                            throw std::runtime_error(
+                                "Force evaluated beyond the exact physical interval");
+                        return force(ref.kind, time, s);
+                    },
+                    attempts);
+                EXPECT_EQ(result.time(), target);
+            }
+            EXPECT_EQ(result.time(), ref.time);
+            EXPECT_LT(error(result.cartesian(), ref.final, 0), .005);
+            EXPECT_LT(error(result.cartesian(), ref.final, 3), 5e-6);
+            max_r = std::max(max_r, error(result.cartesian(), ref.final, 0));
+            max_v = std::max(max_v, error(result.cartesian(), ref.final, 3));
+            boundary_count += result.boundary_steps;
+            multisteps += result.multisteps;
+            if (method == 4)
+                EXPECT_GT(result.multisteps, 100);
+            return result.cartesian();
+        };
+        Cartesian coarse{}, fine{};
+        ASSERT_NO_THROW(coarse = run(false));
+        ASSERT_NO_THROW(fine = run(true));
+        change_r = std::max(change_r, error(coarse, fine, 0));
+        change_v = std::max(change_v, error(coarse, fine, 3));
+        EXPECT_LT(error(coarse, fine, 0), .001);
+        EXPECT_LT(error(coarse, fine, 3), 1e-6);
+    }
+    EXPECT_GT(boundary_count, 0);
+    RecordProperty("boundary_steps", std::to_string(boundary_count));
+    RecordProperty("gj_multisteps", std::to_string(multisteps));
+    for (const auto &[name, v] : std::initializer_list<std::pair<const char *, double>>{
+             {"max_position_m", max_r},
+             {"max_velocity_mps", max_v},
+             {"halving_position_m", change_r},
+             {"halving_velocity_mps", change_v}}) {
+        std::ostringstream text;
+        text << std::setprecision(17) << v;
+        RecordProperty(name, text.str());
+    }
+}
+INSTANTIATE_TEST_SUITE_P(All, SundmanBoundaries, ::testing::Range(0, 9));
+
+TEST(SundmanBounded, NanosecondEndpointsAndCancellationRetainTheInputHistory) {
+    const auto s = initial(.7);
+    for (auto method : {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+                        HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
+        HpopOptions options;
+        options.gravity_degree = options.gravity_order = 0;
+        options.integrator = method;
+        SundmanPropagation propagation(s, mu, 1.5, 4096, options);
+        for (double end : {-1e-9, 1e-9}) {
+            std::size_t attempts = 0, calls = 0;
+            const auto source = propagation.initial_state();
+            const auto result = propagation.propagate(
+                source, end,
+                [&](double t, const Cartesian &v) {
+                    EXPECT_GE(t, std::min(0., end));
+                    EXPECT_LE(t, std::max(0., end));
+                    ++calls;
+                    return force(0, t, v);
+                },
+                attempts);
+            EXPECT_EQ(source.time(), 0);
+            EXPECT_EQ(source.q, 0);
+            EXPECT_EQ(result.time(), end);
+            EXPECT_GT(calls, 0);
+            for (std::size_t i = 0; i < 3; ++i)
+                EXPECT_NEAR(result.cartesian()[i], s[i] + end * s[i + 3], 2e-9);
+        }
+        std::size_t attempts = 0;
+        int checkpoints = 0;
+        const auto source = propagation.initial_state();
+        EXPECT_THROW((void)propagation.propagate(
+                         source, 1000, [](double t, const Cartesian &v) { return force(0, t, v); },
+                         attempts,
+                         [&] {
+                             if (++checkpoints == 20)
+                                 throw std::runtime_error("cancel");
+                         }),
+                     std::runtime_error);
+        EXPECT_EQ(checkpoints, 20);
+        EXPECT_EQ(source.time(), 0);
+        EXPECT_EQ(source.history.count, 0);
+    }
+}
+
+TEST(SundmanBounded, ForceDiscontinuitiesUseOneSidedCoverageAndExactPhysicalGates) {
+    const auto initial_state = initial(.7);
+    constexpr std::array<double, 3> first_force{-.1, .02, -.03}, second_force{.03, -.06, .02};
+    const auto analytic = [](const Cartesian &s, double dt, const std::array<double, 3> &a) {
+        auto result = s;
+        for (std::size_t i = 0; i < 3; ++i) {
+            result[i] += dt * s[i + 3] + .5 * dt * dt * a[i];
+            result[i + 3] += dt * a[i];
+        }
+        return result;
+    };
+    for (auto method : {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+                        HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
+        for (double direction : {-1., 1.}) {
+            HpopOptions options;
+            options.gravity_degree = options.gravity_order = 0;
+            options.integrator = method;
+            options.step_control = HpopStepControl::fixed;
+            SundmanPropagation propagation(initial_state, mu, 1.5, 4096, options);
+            std::size_t attempts = 0, nodes = 0;
+            double previous = 0;
+            const double jump = direction * 315.123456789, end = direction * 700.987654321;
+            const auto observed = [&](double t, const Cartesian &) {
+                EXPECT_GT(direction * (t - previous), 0);
+                previous = t;
+                ++nodes;
+            };
+            auto result = propagation.propagate(
+                propagation.initial_state(), jump,
+                [&](double time, const Cartesian &) {
+                    EXPECT_GE(time, std::min(0., jump));
+                    EXPECT_LE(time, std::max(0., jump));
+                    return first_force;
+                },
+                attempts, {}, observed);
+            EXPECT_EQ(result.time(), jump);
+            auto expected = analytic(initial_state, jump, first_force);
+            EXPECT_LT(error(result.cartesian(), expected, 0), 1e-5);
+            EXPECT_LT(error(result.cartesian(), expected, 3), 1e-8);
+            result.restart_force_segment();
+            EXPECT_EQ(result.history.count, 0);
+            result = propagation.propagate(
+                result, end,
+                [&](double time, const Cartesian &) {
+                    EXPECT_GE(time, std::min(jump, end));
+                    EXPECT_LE(time, std::max(jump, end));
+                    return second_force;
+                },
+                attempts, {}, observed);
+            expected = analytic(expected, end - jump, second_force);
+            EXPECT_EQ(result.time(), end);
+            EXPECT_EQ(previous, end);
+            EXPECT_GT(nodes, 100);
+            EXPECT_LT(error(result.cartesian(), expected, 0), 1e-5);
+            EXPECT_LT(error(result.cartesian(), expected, 3), 1e-8);
+            if (method == HpopIntegrator::gauss_jackson)
+                EXPECT_GT(result.multisteps, 100);
+        }
+    }
+}
+TEST(SundmanBounded, RejectsInvalidStepCountsWorkExhaustionAndReversedHistory) {
+    HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    const auto s = initial(.7);
+    EXPECT_THROW((void)SundmanPropagation(s, mu, 1.5, 0, options), std::invalid_argument);
+    SundmanPropagation propagation(s, mu, 1.5, 4096, options);
+    const auto source = propagation.initial_state();
+    std::size_t attempts = 200000, calls = 0;
+    const auto acceleration = [&](double t, const Cartesian &v) {
+        ++calls;
+        return force(0, t, v);
+    };
+    EXPECT_THROW((void)propagation.propagate(source, 100, acceleration, attempts),
+                 PropagationError);
+    EXPECT_EQ(calls, 0);
+    EXPECT_EQ(source.q, 0);
+    attempts = 0;
+    const auto advanced = propagation.propagate(source, 100, acceleration, attempts);
+    EXPECT_THROW((void)propagation.propagate(advanced, 0, acceleration, attempts),
+                 std::invalid_argument);
+    EXPECT_EQ(advanced.time(), 100);
 }
 } // namespace
