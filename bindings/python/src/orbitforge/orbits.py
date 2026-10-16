@@ -303,6 +303,9 @@ class OceanTideSettings:
 class HpopSettings:
     """File or built-in gravity and Cowell integration with local error tolerances.
 
+    Fixed steps and adaptive Min/Max Step are 1e-6..86400 TAI seconds. The adaptive
+    ceiling is not a fixed step or an accuracy guarantee; local dynamics seed the first
+    trial, then error control chooses subsequent steps. Output/weather tails may be shorter.
     include_secular_variations applies the selected file's explicit epoch and coefficient
     rates per Julian year. Static files without these data cannot enable it; the flag
     remains an inactive draft for gravity degree 0. No secular defaults are inferred.

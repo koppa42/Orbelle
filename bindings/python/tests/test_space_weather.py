@@ -130,6 +130,8 @@ class WeatherTests(unittest.TestCase):
                 methods += [("gauss_jackson",1,"full"),("gauss_jackson",.7,"pseudo"),("rk4",.5,"full")]
                 methods = [(name, step, correction, "relative_error") for name, step, correction in methods]
                 methods[-1:-1] = [(name, 7, "full", "fixed") for name in ("rkf78", "rkv89", "bulirsch_stoer")]
+                methods[-1:-1] = [(name, 86400, "full", "relative_error")
+                                  for name in ("rkf78", "rkv89", "bulirsch_stoer")]
                 for integrator,step,correction,control in methods:
                     project=of.Project('Storm',first,last)
                     orbit=of.orbits.Hpop(initial=of.orbits.Cartesian(initial,(6628137,0,0),(0,7750,0)),

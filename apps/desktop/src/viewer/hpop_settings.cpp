@@ -1086,9 +1086,9 @@ bool edit_hpop_settings(
     adaptive->setRowWrapPolicy(QFormLayout::WrapLongRows);
     adaptive->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     auto *minimum = quantity(adaptive, QStringLiteral("最小步长"), "hpopMinStep", Unit::second,
-                             options.min_step_seconds, 1e-6, 3600);
+                             options.min_step_seconds, 1e-6, core::hpop_max_step_seconds);
     auto *maximum = quantity(adaptive, QStringLiteral("最大步长"), "hpopMaxStep", Unit::second,
-                             options.max_step_seconds, 1e-6, 3600);
+                             options.max_step_seconds, 1e-6, core::hpop_max_step_seconds);
     auto *relative = quantity(adaptive, QStringLiteral("相对容差"), "hpopRelativeTolerance",
                               Unit::one, options.relative_tolerance, 1e-14, 1e-3);
     auto *position =
@@ -1101,7 +1101,7 @@ bool edit_hpop_settings(
                  std::numeric_limits<double>::min(), std::numeric_limits<double>::max());
     integration->addRow(adaptive_widget);
     auto *fixed = quantity(integration, QStringLiteral("固定步长"), "hpopFixedStep", Unit::second,
-                           options.fixed_step_seconds, 1e-6, 3600);
+                           options.fixed_step_seconds, 1e-6, core::hpop_max_step_seconds);
     auto *correction = new QComboBox;
     correction->setObjectName("hpopCorrection");
     correction->setToolTip(

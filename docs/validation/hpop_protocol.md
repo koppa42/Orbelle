@@ -35,13 +35,36 @@ java -cp "out/validation/hpop;$classpath" OrbitForgeHpopReference out/research/h
 
 另验证 7.1 s 非整步长的正反向/乱序查询、全体五方法容差草稿变化后逐位不变、三个 700 s 步不会被 300 s 缓存拆短，以及两模式取消后的缓存复用和并发。Python 磁暴测试新增三种显式固定模式，跨 15→400 Ap 的非网格跳变仍与 RK4 0.5 s 比较，位置差须小于 0.1 mm。分析与报告输入哈希分别检查非活动容差、有效固定步长、强制固定方法的草稿及模式切换；项目 v34 / OBJS25 固定样例独立插入 StepControl u32 并重算两层 CRC，未知枚举和前后版本拒绝。
 
-原生 Qt 两种模式覆盖 RKF/RKV/BS、430/720 逻辑宽度、实际 DPR 1.5/2.25，生成 24 张截图并检查六张代表性截图；验证无横向溢出、可达按钮、强制固定方法的草稿恢复、应用与取消。输出尾步可截短但不改变固定网格，尚未实现科学插值；相对误差范数和更大步长范围仍待 STK 对齐。
+原生 Qt 两种模式覆盖 RKF/RKV/BS、430/720 逻辑宽度、实际 DPR 1.5/2.25，生成 24 张截图并检查六张代表性截图；验证无横向溢出、可达按钮、强制固定方法的草稿恢复、应用与取消。输出尾步可截短但不改变固定网格，尚未实现科学插值；相对误差范数及 STK 完整合法范围/默认值仍待核对；一天步长增量见下节。
+
+## 大步长与自适应缓存
+
+固定/自适应步长上限为 86400 s。`LongAdaptiveStepsMatchIndependentHipparchusAndConverge` 对三种自适应方法各检查已有 GBS 60 组及新增 DP853 52 组，共 112 组完整状态；最大步长分别为 86400/43200 s，相对容差 1e−14、位置/速度绝对容差 1e−8 m / 1e−11 m/s。两组都要求三维误差小于 5 mm / 5e−6 m/s，减半上限位置差小于 1 mm。低轨、高偏心率和运动月球场要求自动缩步；不靠关闭最低高度检查接受巨大失真试步。
+
+| 方法 | 两组最大位置差 m | 两组最大速度差 m/s | 上限减半位置差 m |
+| --- | --- | --- | --- |
+| RKF 7(8) | 2.76280e−3 | 2.97868e−6 | 5.72306e−6 |
+| RKV 8(9) | 7.36508e−4 | 7.32579e−7 | 2.74750e−5 |
+| Bulirsch–Stoer | 4.35495e−4 | 1.41373e−7 | 4.95309e−4 |
+
+`tests/reference/propagators/long_steps.txt` 的 SHA-256 为 `e6e64a921514b8c5ff254dea87a9d8cf1189aa1d5e915bd6e2cc6a7f623d0e11`。生成器 `tools/validation/orekit/OrbitForgeLongStepReference.java` 调用 [Hipparchus 4.0.2 DP853](https://www.hipparchus.org/hipparchus-ode/apidocs/org/hipparchus/ode/nonstiff/DormandPrince853Integrator.html)，不调用生产代码；JAR 散列仍用 `dependencies.json`。半长轴 42164000、2e8、1e9、1e10 m，偏心率 0/.7、倾角 .4 rad，二体及 J2；输出 +1 天、±(3 天 + .123456789 s)，1e10 m 数值问题另有 +16 天。时间和坐标用 `L=a`、`T=sqrt(a³/μ)` 无量纲化，参考绝对/相对容差为 1e−16/1e−15；最大步长在前两种尺度为 600/300 s，后两种为 21600/10800 s。
+
+参考减半步长的三维差为 2.519e−5 m / 7.762e−9 m/s，通过预设 1e−4 m / 1e−8 m/s 线；26 组二体参考另与 Kepler 解析解比较，最大 5.755e−6 m / 1.185e−9 m/s。再次生成逐字节一致。初始 GBS 和过小固定上限下的长弧参考未通过收敛线，保留诊断于本地验证目录；最终改用无量纲 DP853，未放宽参考或生产验收阈值。
+
+```powershell
+javac -cp $classpath -d out/validation/long-steps tools/validation/orekit/OrbitForgeBsReference.java tools/validation/orekit/OrbitForgeLongStepReference.java
+java -cp "out/validation/long-steps;$classpath" OrbitForgeLongStepReference out/validation/long-steps/long_steps.txt
+```
+
+`FullDayFixedStepsMatchIndependentLongPeriodReference` 以 86400/43200 s 比较全部五种固定方法，使用半长轴 1e10 m 的四组二体参考；最差位置差 0.178 mm、速度差 2.294e−12 m/s，满足 5 mm / 5e−8 m/s 线。该远距离孤立地球场是步长范围的数学压力测试，不代表地球势力范围以外的实际轨道模型。16 天输出保证 Gauss–Jackson 完成启动后也实际执行完整步。
+
+另在非中心场计数验证 RKF/RKV 接受一个完整 86400 s 步（分别 14/17 次含端点的力评估），避免仅扩大输入范围；所有三种自适应方法检查取消后重用、乱序/并发、缓存边界 ±1 ns，越界数值明确拒绝。Python 磁暴测试加入 86400 s 上限，仍与 RK4 0.5 s 对照并保持 0.1 mm 线。桌面验证超界输入后恢复、应用/取消及重开；项目仍为 v34 / OBJS25，SDK/Python 和报告身份同步，算法标识变为 `steps=relative-mixed-max-span-v2`。
 
 ## RKF 7(8)
 
 按 [STK 13.1 Integrator](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm) 的定义推进七阶解，以八阶嵌入解估计误差。系数核对 [Fehlberg NASA TR R-287](https://ntrs.nasa.gov/api/citations/19680027281/downloads/19680027281.pdf) 的 Table X（印刷第 65 页，PDF 第 72 页）；原 PDF SHA-256 为 `5553a2a3eb53785a461762cc2b29428015f1b32c3ad0a5cb57f85a421256a0c8`。零基阶段 0、10 的七阶权重为 41/840，阶段 11、12 为 0；误差用 `abs(h × 41/840 × (k11 + k12 − k0 − k10))`，控制指数为 1/8。运行时来源为 `rkf78-7th-fehlberg-r287-v1`，明确区别先前的八阶推进；不改变公开 `rkf78` 枚举或项目 v34 / OBJS25 的布局。
 
-成熟算法对照复用下述 Hipparchus 4.0.2 GBS 的 60 组固定输出和独立生成器，SHA-256 为 `62e89df62c29838d5fd03e37ce73ffac28632be40467cafeb4bbccb93ce6885b`。包含圆轨道、偏心率 0.7/0.98、J2、随时间变化的月球差分引力、正反向一天、非整数秒和 1 ns；GBS 参考已通过 60/30 s 收敛和 SciPy DOP853 交叉核验。生产 RKF 使用最大 300 s、相对容差 1e−14、位置/速度绝对容差 1e−8 m / 1e−11 m/s，保持 5 mm / 5e−6 m/s 三维验收线。Windows/MSVC 最大位置差 2.475 mm、速度差 2.619e−6 m/s。既有 Orekit Holmes–Featherstone/DP853 的 60 组重力轨迹使用默认容差也通过原验收线。
+成熟算法对照复用下述 Hipparchus 4.0.2 GBS 的 60 组固定输出和独立生成器，SHA-256 为 `62e89df62c29838d5fd03e37ce73ffac28632be40467cafeb4bbccb93ce6885b`。包含圆轨道、偏心率 0.7/0.98、J2、随时间变化的月球差分引力、正反向一天、非整数秒和 1 ns；GBS 参考已通过 60/30 s 收敛和 SciPy DOP853 交叉核验。生产 RKF 使用最大 300 s、相对容差 1e−14、位置/速度绝对容差 1e−8 m / 1e−11 m/s，保持 5 mm / 5e−6 m/s 三维验收线。局部动力学首步估计增量后，Windows/MSVC 最大位置差 2.519 mm、速度差 2.677e−6 m/s。既有 Orekit Holmes–Featherstone/DP853 的 60 组重力轨迹使用默认容差也通过原验收线。
 
 独立 Kepler 解析解采用偏心率 0.7、近地点 7000 km、600 s 弧段。以松容差和相同的最小/最大步长确保 150/75 s 两组等步积分，误差比须在 115–150 内，七阶预期为 128；实测约 133.411，细步位置误差约 7 µm。先用旧八阶生产权重运行同一测试，得到 243.105 并失败，确认该测试能区分推进成员。另验证拒步、无法达到精度的最小步报错、取消后的完整缓存复用、乱序/并发、大 Epoch 和纳秒查询。该阶次测试锁定自适应方法的步长上下界；独立固定步长模式另见前一节。
 
@@ -53,7 +76,7 @@ Qt 沿用自适应积分器交互验收，增加 RKF 7(8) 的键盘顺序、摘�
 
 `tools/validation/rkv89_reference.py` 使用 NumPy 2.3.3 / SciPy 1.16.3 DOP853，不导入 OrbitForge 或其系数表。`tests/reference/propagators/rkv89.txt` 的 SHA-256 为 `da35cab3683d41c18b02f46585c42812836bc66637b8797c6554c1cb8ae4f985`，60 行记录完整初值和终态：圆轨道、偏心率 0.7 / 0.98 椭圆、LEO / MEO 闭式 J2、J2 加解析运动月球的差分引力。时间覆盖 ±1 天、±6 小时、±2 小时、非整数秒、0.25 秒及 1 ns；所有位置为固定惯性轴的 SI 分量。EOP 取恒等旋转，太阳/月球摄动之外的力关闭，避免混入外部数据差异。月球轨迹使用 384400000 m 半径、27.321661 日周期、0.3 rad 倾角、0.4 rad 初相位，GM 为 4.902800066e12 m³/s²；这里用于检验非自治方程阶段时刻，不是真实月球星历。
 
-参考 DOP853 相对容差 3e−14，位置/速度绝对容差 1e−9 m / 1e−12 m/s；最大步长 10 s，另以 20 s 复算。两次参考最大位置差 1.40e−5 m、速度差 1.51e−8 m/s，分别须小于 5e−5 m / 5e−8 m/s。生产 RKV89 设置最大 300 s、相对 1e−14、位置/速度绝对容差 1e−8 m / 1e−11 m/s，正反向三维位置误差限 5 mm、速度限 5e−6 m/s。Windows/MSVC 实测最大 0.507 mm / 5.43e−7 m/s。数值容差是每步约束；例如将同一天圆轨道的绝对容差放宽到 1e−5 m / 1e−8 m/s、相对 1e−13，可产生约 7.5 cm 的累计误差，不能据容差值宣称全局毫米精度。
+参考 DOP853 相对容差 3e−14，位置/速度绝对容差 1e−9 m / 1e−12 m/s；最大步长 10 s，另以 20 s 复算。两次参考最大位置差 1.40e−5 m、速度差 1.51e−8 m/s，分别须小于 5e−5 m / 5e−8 m/s。生产 RKV89 设置最大 300 s、相对 1e−14、位置/速度绝对容差 1e−8 m / 1e−11 m/s，正反向三维位置误差限 5 mm、速度限 5e−6 m/s。局部动力学首步估计增量后，Windows/MSVC 实测最大 0.657 mm / 7.085e−7 m/s。数值容差是每步约束；例如将同一天圆轨道的绝对容差放宽到 1e−5 m / 1e−8 m/s、相对 1e−13，可产生约 7.5 cm 的累计误差，不能据容差值宣称全局毫米精度。
 
 八阶成员选择另由偏心率 0.7 的 Kepler 解析解验证：近地点 7000 km，传播 6000 s，松容差固定 300 s 和 150 s 两组积分步，位置误差比须在 220–330（八阶预期 256）内，排除误用九阶推进权重；150 s 误差小于 1 mm。另验证拒步缩步、最小步长无法满足精度时报错、初始历元与 1 ns、Epoch 大值、取消后的完整段复用、乱序/并发查询及阶段星历范围。既有 Orekit Holmes–Featherstone / DP853 的 60 行重力参考也对 RKV89 执行相同校验。Python 磁暴边界测试补充 RKV89 的 60/7 s 步长对照，仍以 RK4 0.5 s 作为收敛参考。
 
@@ -68,7 +91,7 @@ ctest --preset desktop-graphics -R "core.Hpop."
 
 `tools/validation/orekit/OrbitForgeBsReference.java` 直接调用固定 Hipparchus 4.0.2 `GraggBulirschStoerIntegrator`，JAR 散列沿用 `dependencies.json`。生产实现只依赖标准库，不调用该参考库。参考输入复用上述 SciPy 基准文件中的 kind、时间、初始六维状态；生成器忽略其中的终态，独立实现点质量/J2/运动月球闭式右端项。参考 GBS 保持默认阶数与控制器，关闭插值误差控制并直接积分至每个输出时刻，使用 1e−14 相对容差和 1e−9 m / 1e−12 m/s 绝对容差。最大步长 60/30 s 复算的最大位置/速度差为 3.516e−5 m / 3.679e−8 m/s，均小于 5e−5 m / 5e−8 m/s；与独立 SciPy DOP853 10 s 结果交叉比较为 3.497e−5 m / 3.674e−8 m/s。更小的 20/10 s GBS 步长在一天积分中进入舍入误差主导区，差值约 7.92e−5 m；不能假定不断减小步长会持续提高精度。
 
-固定输出 `tests/reference/propagators/bulirsch_stoer.txt` 包含 60 组正反向、非整数秒和 1 ns 参考，SHA-256 `62e89df62c29838d5fd03e37ce73ffac28632be40467cafeb4bbccb93ce6885b`。生产使用最大步长 300 s、相对 1e−14、位置/速度绝对容差 1e−8 m / 1e−11 m/s；三维误差限 5 mm / 5e−6 m/s。Windows/MSVC 实测最大位置差 0.117 mm、速度差 1.230e−7 m/s。既有 60 组 Orekit Holmes–Featherstone / DP853 重力参考同时加入 Bulirsch–Stoer，包含双曲线与 20×20 引力场。
+固定输出 `tests/reference/propagators/bulirsch_stoer.txt` 包含 60 组正反向、非整数秒和 1 ns 参考，SHA-256 `62e89df62c29838d5fd03e37ce73ffac28632be40467cafeb4bbccb93ce6885b`。生产使用最大步长 300 s、相对 1e−14、位置/速度绝对容差 1e−8 m / 1e−11 m/s；三维误差限 5 mm / 5e−6 m/s。局部动力学首步估计增量后，Windows/MSVC 实测最大位置差 0.144 mm、速度差 1.550e−7 m/s。既有 60 组 Orekit Holmes–Featherstone / DP853 重力参考同时加入 Bulirsch–Stoer，包含双曲线与 20×20 引力场。
 
 偏心率 0.7、近地点 7000 km、6000 s Kepler 解析解在最小/最大步长均为 300 s 时检验自适应阶数和精度：收紧容差后误差须至少下降 100 倍且小于 1 mm，记录中点子步工作量，不能固定在低阶后仅靠标签声称自适应。另测 300/60 s 最大步长收敛；快速双曲离去在固定 300 s 下精度不足必须报错，允许缩步后应成功。取消覆盖一次外推尝试内部；取消后重用、乱序、并发和大 Epoch 查询保持确定性。天气磁暴边界用 60/7 s Bulirsch–Stoer 与 RK4 0.5 s 比较，正反向位置差限 0.1 mm。
 

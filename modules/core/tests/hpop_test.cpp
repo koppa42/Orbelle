@@ -440,6 +440,195 @@ TEST(Hpop, FixedStepsIgnoreToleranceDraftsAndPreserveTheEpochGrid) {
     options.step_control = static_cast<HpopStepControl>(2);
     EXPECT_THROW(validate_hpop_options(options), std::invalid_argument);
 }
+TEST(Hpop, LongAdaptiveStepsMatchIndependentHipparchusAndConverge) {
+    for (auto integrator :
+         {HpopIntegrator::rkf78, HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer}) {
+        double max_r = 0, max_v = 0, max_refinement = 0;
+        for (const auto *path : {ORBITFORGE_BS_REFERENCE, ORBITFORGE_LONG_STEP_REFERENCE}) {
+            std::ifstream file{path};
+            ASSERT_TRUE(file.good());
+            HpopEnvironment environment{std::make_shared<FixedFrames>(),
+                                        std::make_shared<FixedEop>()};
+            environment.ephemeris = std::make_shared<MovingMoon>();
+            std::string line;
+            int count = 0;
+            while (std::getline(file, line)) {
+                if (line.empty() || line[0] == '#')
+                    continue;
+                SCOPED_TRACE(line);
+                SCOPED_TRACE(static_cast<int>(integrator));
+                std::istringstream row{line};
+                int kind;
+                double seconds;
+                auto initial = circular(), expected = initial;
+                row >> kind >> seconds;
+                for (auto &v : initial.position_m)
+                    row >> v;
+                for (auto &v : initial.velocity_mps)
+                    row >> v;
+                for (auto &v : expected.position_m)
+                    row >> v;
+                for (auto &v : expected.velocity_mps)
+                    row >> v;
+                ASSERT_FALSE(row.fail());
+                expected.epoch = Epoch{std::llround(seconds * 1e9)};
+                auto options = point_mass();
+                options.integrator = integrator;
+                options.gravity_degree = kind ? 2 : 0;
+                options.relative_tolerance = 1e-14;
+                options.position_tolerance_m = 1e-8;
+                options.velocity_tolerance_mps = 1e-11;
+                options.third_body(ThirdBody::moon).enabled = kind == 2;
+                CartesianState previous = expected;
+                for (double ceiling : {86400., 43200.}) {
+                    options.max_step_seconds = ceiling;
+                    const auto actual =
+                        make_hpop(initial, options, environment)->state_at(expected.epoch);
+                    const double er = position_error(actual, expected);
+                    const double ev = std::hypot(actual.velocity_mps[0] - expected.velocity_mps[0],
+                                                 actual.velocity_mps[1] - expected.velocity_mps[1],
+                                                 actual.velocity_mps[2] - expected.velocity_mps[2]);
+                    EXPECT_LT(er, .005);
+                    EXPECT_LT(ev, 5e-6);
+                    max_r = std::max(max_r, er);
+                    max_v = std::max(max_v, ev);
+                    if (ceiling == 43200) {
+                        const double refinement = position_error(actual, previous);
+                        EXPECT_LT(refinement, .001);
+                        max_refinement = std::max(max_refinement, refinement);
+                    }
+                    previous = actual;
+                }
+                ++count;
+            }
+            EXPECT_EQ(count, std::string_view(path) == ORBITFORGE_BS_REFERENCE ? 60 : 52);
+        }
+        const auto metric = [&](const char *name, double value) {
+            std::ostringstream text;
+            text << std::setprecision(17) << value;
+            RecordProperty(std::to_string(static_cast<int>(integrator)) + name, text.str());
+        };
+        metric("_position_m", max_r);
+        metric("_velocity_mps", max_v);
+        metric("_refinement_m", max_refinement);
+    }
+}
+TEST(Hpop, FullDayFixedStepsMatchIndependentLongPeriodReference) {
+    for (auto integrator : {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+                            HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
+        std::ifstream file{ORBITFORGE_LONG_STEP_REFERENCE};
+        ASSERT_TRUE(file.good());
+        std::string line;
+        int count = 0;
+        double max_r = 0, max_v = 0;
+        while (std::getline(file, line)) {
+            if (line.empty() || line[0] == '#')
+                continue;
+            std::istringstream row{line};
+            int kind;
+            double seconds;
+            auto initial = circular(), expected = initial;
+            row >> kind >> seconds;
+            for (auto &v : initial.position_m)
+                row >> v;
+            for (auto &v : initial.velocity_mps)
+                row >> v;
+            for (auto &v : expected.position_m)
+                row >> v;
+            for (auto &v : expected.velocity_mps)
+                row >> v;
+            ASSERT_FALSE(row.fail());
+            // This remote mathematical two-body orbit checks the range, not a
+            // physically valid geocentric prediction beyond Earth's Hill sphere.
+            if (kind || initial.position_m[0] != 1e10)
+                continue;
+            SCOPED_TRACE(line);
+            SCOPED_TRACE(static_cast<int>(integrator));
+            expected.epoch = Epoch{std::llround(seconds * 1e9)};
+            auto options = point_mass();
+            options.integrator = integrator;
+            options.step_control = HpopStepControl::fixed;
+            for (double step : {86400., 43200.}) {
+                options.fixed_step_seconds = step;
+                const auto actual = make_hpop(initial, options)->state_at(expected.epoch);
+                const double er = position_error(actual, expected);
+                const double ev = std::hypot(actual.velocity_mps[0] - expected.velocity_mps[0],
+                                             actual.velocity_mps[1] - expected.velocity_mps[1],
+                                             actual.velocity_mps[2] - expected.velocity_mps[2]);
+                EXPECT_LT(er, .005);
+                EXPECT_LT(ev, 5e-8);
+                max_r = std::max(max_r, er);
+                max_v = std::max(max_v, ev);
+            }
+            ++count;
+        }
+        EXPECT_EQ(count, 4);
+        std::ostringstream metric_r, metric_v;
+        metric_r << std::setprecision(17) << max_r;
+        metric_v << std::setprecision(17) << max_v;
+        RecordProperty(std::to_string(static_cast<int>(integrator)) + "_position_m",
+                       metric_r.str());
+        RecordProperty(std::to_string(static_cast<int>(integrator)) + "_velocity_mps",
+                       metric_v.str());
+    }
+}
+TEST(Hpop, AdaptiveCacheAllowsFullDayStepsAndPreservesCancellationAndQueryOrder) {
+    auto initial = circular();
+    initial.position_m = {1e10, 0, 0};
+    initial.velocity_mps = {0, std::sqrt(egm96_mu / 1e10), 0};
+    for (auto integrator :
+         {HpopIntegrator::rkf78, HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer}) {
+        auto options = point_mass();
+        options.gravity_degree = 2;
+        options.integrator = integrator;
+        options.min_step_seconds = options.max_step_seconds = 86400;
+        const auto frames = std::make_shared<FixedFrames>();
+        const HpopEnvironment environment{frames, std::make_shared<FixedEop>()};
+        const auto provider = make_hpop(initial, options, environment);
+        frames->evaluations = 0;
+        const auto first = provider->state_at(Epoch{86400'000'000'000});
+        // One complete accepted day step; no hidden 300 s or one-hour limit.
+        const auto evaluations = frames->evaluations.load();
+        if (integrator == HpopIntegrator::rkf78)
+            EXPECT_EQ(evaluations, 14U);
+        if (integrator == HpopIntegrator::rkv89)
+            EXPECT_EQ(evaluations, 17U);
+        EXPECT_LT(evaluations, 100U);
+        int calls = 0;
+        EXPECT_THROW((void)provider->state_at(Epoch{4 * 86400'000'000'000LL},
+                                              [&] {
+                                                  if (++calls == 3)
+                                                      throw std::runtime_error("cancel long step");
+                                              }),
+                     std::runtime_error);
+        EXPECT_EQ(provider->state_at(first.epoch).position_m, first.position_m);
+        auto job = std::async(std::launch::async,
+                              [&] { return provider->state_at(Epoch{-3 * 86400'000'000'000LL}); });
+        for (auto t : {3 * 86400'000'000'000LL, 86400'000'000'001LL, -86400'000'000'001LL,
+                       86400'000'000'000LL - 1, 5LL}) {
+            const auto actual = provider->state_at(Epoch{t});
+            const auto fresh = make_hpop(initial, options, environment)->state_at(Epoch{t});
+            EXPECT_EQ(actual.position_m, fresh.position_m);
+            EXPECT_EQ(actual.velocity_mps, fresh.velocity_mps);
+        }
+        EXPECT_EQ(job.get().position_m, make_hpop(initial, options, environment)
+                                            ->state_at(Epoch{-3 * 86400'000'000'000LL})
+                                            .position_m);
+    }
+    auto options = point_mass();
+    options.min_step_seconds = options.max_step_seconds = options.fixed_step_seconds = 86400;
+    EXPECT_NO_THROW(validate_hpop_options(options));
+    for (auto member : {&HpopOptions::min_step_seconds, &HpopOptions::max_step_seconds,
+                        &HpopOptions::fixed_step_seconds}) {
+        const double saved = options.*member;
+        for (double bad : {86400.000001, 0., std::numeric_limits<double>::infinity(),
+                           std::numeric_limits<double>::quiet_NaN()}) {
+            options.*member = bad;
+            EXPECT_THROW(validate_hpop_options(options), std::invalid_argument);
+        }
+        options.*member = saved;
+    }
+}
 TEST(Hpop, Rkf78MatchesIndependentHipparchusForEccentricJ2AndTimeVaryingForces) {
     std::ifstream file{ORBITFORGE_BS_REFERENCE};
     ASSERT_TRUE(file.good());

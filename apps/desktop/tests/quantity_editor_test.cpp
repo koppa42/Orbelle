@@ -2771,13 +2771,17 @@ TEST_F(QuantityTest, HpopAdaptiveIntegratorsValidatePersistAndPreserveCancelledD
             EXPECT_TRUE(dialog->isVisible());
             EXPECT_TRUE(dialog->findChild<QLabel *>("errorText")->isVisible());
             minimum->set_value(.01, Unit::second);
-            maximum->set_value(90, Unit::second);
+            text(*maximum)->setText("86401");
+            dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            EXPECT_TRUE(dialog->isVisible());
+            EXPECT_TRUE(dialog->findChild<QLabel *>("errorText")->isVisible());
+            maximum->set_value(86400, Unit::second);
             dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
         });
         ASSERT_TRUE(edit_hpop_settings(options, nullptr));
         EXPECT_EQ(options.integrator, integrator);
         EXPECT_EQ(options.min_step_seconds, .01);
-        EXPECT_EQ(options.max_step_seconds, 90);
+        EXPECT_EQ(options.max_step_seconds, 86400);
         EXPECT_EQ(options.fixed_step_seconds, 12);
         OrbitInput input;
         input.propagator = OrbitPropagator::hpop;
@@ -2805,7 +2809,7 @@ TEST_F(QuantityTest, HpopAdaptiveIntegratorsValidatePersistAndPreserveCancelledD
                 QTimer::singleShot(60, &settled, &QEventLoop::quit);
                 settled.exec();
                 EXPECT_EQ(method, dialog->findChild<QComboBox *>("hpopIntegrator"));
-                EXPECT_EQ(maximum->value(Unit::second), 90);
+                EXPECT_EQ(maximum->value(Unit::second), 86400);
                 auto *scroll = dialog->findChild<QScrollArea *>("hpopIntegratorPage");
                 scroll->ensureWidgetVisible(method);
                 QApplication::processEvents();

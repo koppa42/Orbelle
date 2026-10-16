@@ -40,13 +40,17 @@ EGM96 取自 [ICGEM 原始系数](https://icgem.gfz.de/getmodel/gfc/971b0a3b49a4
 
 固定单步方法使用以初始历元为原点的时间网格 `t_i = i h`，缓存块为 `ceil(300/h)` 个完整步，缓存不能把 700 s 设置改为 300 s。非网格查询的尾步和已知天气跳变可以截短当前步，之后返回原网格；尾段不回写缓存，查询顺序、取消和并发不会改变其他结果。RK4 的来源标识更新为 `rk4-fixed-grid-v2`。这些尾段是实际积分，不是科学插值。
 
+固定步长及自适应 Min/Max Step 都支持 1e−6–86400 TAI 秒（C++ 上限常量 `hpop_max_step_seconds`）。自适应缓存段宽度为 `max(300, max_step_seconds)`，以初始历元为原点；不再用内部 300 秒缓存限制实际步长。首个试步取 `0.1 × min(r / sqrt(μ/r), r / |v|)`，再约束到配置 Min/Max，速度为零时只用引力时间尺度。该估计只决定每个计算段的首步，后续由误差控制增减；大上限不会直接作为低轨首步。误差控制、停止高度和资源覆盖仍逐阶段生效。运行时来源升级为 `steps=relative-mixed-max-span-v2`，固定模式来源保持不变。
+
+缓存网格通过完整区间索引计算端点，避免重复加法漂移。查询不会为填满缓存读取请求区间之外的数据，尾段不回写，取消保留已经完成的整段。当前科学查询仍积分缓存尾段；大上限下密集查询可能重复计算较长尾段，尚无科学插值加速。一天固定步长只在合适的长周期数值问题中验证，不是低轨步长建议；独立对照及范围压力测试见[大步长验证](../validation/hpop_protocol.md#大步长与自适应缓存)。
+
 固定 Bulirsch–Stoer 采用全部九行外推，固定十八阶；中点过程和外推均使用相对当前步起点的状态增量，降低高阶大坐标消去误差。不根据误差拒步、调整步长或选择阶数，来源为 `bulirsch-stoer-midpoint-richardson-fixed18-v1`。此固定阶数是本项目的明确选择，STK 未公开其对应内部策略；不能据此宣称与 STK 逐位相同。相对误差模式保留已验证的自动 4–18 阶与混合绝对/相对分量尺度。
 
-[HPOP 帮助](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)明确 RKV 的嵌入误差控制；[Connect 页](https://help.agi.com/stk/SubSystems/connectCmds/Content/cmd_HPOPIntegrator.htm)的 RelativeError 行仍只列 RKF78/BS。本实现依据前者为 RKV 保留自适应并新增固定模式；STK 实机有效组合、误差范数、步长范围和默认值仍待核对。当前工程参数范围仍为 1e−6–3600 s，不能把参考截图的 86400 s 当作已实现的范围。
+[HPOP 帮助](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)明确 RKV 的嵌入误差控制；[Connect 页](https://help.agi.com/stk/SubSystems/connectCmds/Content/cmd_HPOPIntegrator.htm)的 RelativeError 行仍只列 RKF78/BS。本实现依据前者为 RKV 保留自适应并新增固定模式；STK 实机有效组合、误差范数、步长范围和默认值仍待核对。当前工程参数范围为 1e−6–86400 s，已覆盖参考配置的一天上限；这不是对 STK 全部合法范围或出厂默认值的断言，默认值保持显式配置。
 
-RKV 8(9) Efficient 使用 Verner 的 16 阶段高效 9(8) 嵌入对，按 [STK 的八阶推进定义](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)推进八阶成员，以九阶与八阶之差估计局部误差。系数固定于 [rklib `rkv98e`](https://github.com/jacobwilliams/rklib/blob/a1bf2d26ba2c37d049b448d28d4e9800a0ee4b58/src/rklib_variable_steps.f90)（BSD-3-Clause）；其原实现推进九阶成员，OrbitForge 显式选择八阶权重。每步使用 16 次阶段力评估，所有阶段在该步闭区间内，另验证接受端点。控制器使用上述分量混合绝对/相对误差的最大范数，接受阈值 1，安全因子 0.9、缩放范围 0.1–4、指数 −1/9，随后约束到最小/最大步长。天气边界及末段可短于最小步长；若误差仍超限则报错。它与 RKF78 共用分段缓存和取消边界；暂不提供固定步长 RKV、稠密插值或 FSAL 缓存。Python 使用 `integrator="rkv89"`，C++ 为 `HpopIntegrator::rkv89`，结果来源包含 `rkv89-efficient-8th-rklib-a1bf2d26-v1`。控制器并不宣称与 STK 内部实现相同；局部容差不能保证整段轨道误差，见[数值对照](../validation/hpop_protocol.md#rkv-89-efficient)。
+RKV 8(9) Efficient 使用 Verner 的 16 阶段高效 9(8) 嵌入对，按 [STK 的八阶推进定义](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)推进八阶成员，以九阶与八阶之差估计局部误差。系数固定于 [rklib `rkv98e`](https://github.com/jacobwilliams/rklib/blob/a1bf2d26ba2c37d049b448d28d4e9800a0ee4b58/src/rklib_variable_steps.f90)（BSD-3-Clause）；其原实现推进九阶成员，OrbitForge 显式选择八阶权重。每步使用 16 次阶段力评估，所有阶段在该步闭区间内，另验证接受端点。控制器使用上述分量混合绝对/相对误差的最大范数，接受阈值 1，安全因子 0.9、缩放范围 0.1–4、指数 −1/9，随后约束到最小/最大步长。天气边界及末段可短于最小步长；若误差仍超限则报错。它与 RKF78 共用分段缓存和取消边界；固定步长模式已提供；稠密插值和 FSAL 缓存仍待实现。Python 使用 `integrator="rkv89"`，C++ 为 `HpopIntegrator::rkv89`，结果来源包含 `rkv89-efficient-8th-rklib-a1bf2d26-v1`。控制器并不宣称与 STK 内部实现相同；局部容差不能保证整段轨道误差，见[数值对照](../validation/hpop_protocol.md#rkv-89-efficient)。
 
-Bulirsch–Stoer 的相对误差模式按 [STK 定义](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)使用 Richardson 外推和自动步长。实现采用平滑改良中点、偶数子步序列 2/4/…/18，以及关于 `1/n²` 的多项式外推，候选阶数为 4–18。最后一列外推修正使用相同分量绝对/相对尺度估计误差；第 k 行（从 0 计）的步长控制指数为 `−1/(2k+1)`。每次尝试从低阶开始，到首个满足误差要求的候选后再计算一列，以累计力评估次数 / 下一步可达到时长比较成本，在合格候选中选择；下一步受配置上限和 300 s 缓存段限制。最高阶仍不满足要求则缩步，在最小步长或更短边界段仍不满足要求时明确报错。所有中点阶段限制在该步时间范围内，并在子步检查取消；天气边界采用同一单侧求值规则。Python 为 `integrator="bulirsch_stoer"`，C++ 为 `HpopIntegrator::bulirsch_stoer`，来源为 `bulirsch-stoer-midpoint-richardson-4to18-cost-v1`。此选择策略和误差控制不宣称复现 STK 的内部细节；VOP 与科学插值仍待后续接入。独立对照见[验证协议](../validation/hpop_protocol.md#bulirschstoer)。
+Bulirsch–Stoer 的相对误差模式按 [STK 定义](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)使用 Richardson 外推和自动步长。实现采用平滑改良中点、偶数子步序列 2/4/…/18，以及关于 `1/n²` 的多项式外推，候选阶数为 4–18。最后一列外推修正使用相同分量绝对/相对尺度估计误差；第 k 行（从 0 计）的步长控制指数为 `−1/(2k+1)`。每次尝试从低阶开始，到首个满足误差要求的候选后再计算一列，以累计力评估次数 / 下一步可达到时长比较成本，在合格候选中选择；下一步受配置上限、当前计算段剩余时长和已知天气边界限制；计算段宽度至少为配置上限。最高阶仍不满足要求则缩步，在最小步长或更短边界段仍不满足要求时明确报错。所有中点阶段限制在该步时间范围内，并在子步检查取消；天气边界采用同一单侧求值规则。Python 为 `integrator="bulirsch_stoer"`，C++ 为 `HpopIntegrator::bulirsch_stoer`，来源为 `bulirsch-stoer-midpoint-richardson-4to18-cost-v1`。此选择策略和误差控制不宣称复现 STK 的内部细节；VOP 与科学插值仍待后续接入。独立对照见[验证协议](../validation/hpop_protocol.md#bulirschstoer)。
 
 Gauss–Jackson 12 使用 [STK 规定的固定步长和两种校正方式](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)。位置采用二重求和、速度采用求和 Adams，保留 13 个等距加速度值；四组预测/校正权重由 [Berry–Healy 的差分算子关系](https://hdl.handle.net/1903/2202)用有理数生成。`tools/validation/gauss_jackson_coefficients.py --check` 核对固定表、论文八阶表中的独立条目和 52 个多项式一致性条件。求和保留 SI 尺度并补偿舍入，系数点积先扣除公共加速度项。
 
@@ -57,7 +61,7 @@ Python 使用 `integrator="gauss_jackson"` 和 `correction="full"` / `"pseudo"`�
 Gauss–Jackson 的自适应参数只保留草稿，RK 方法的校正选项同样不参与计算身份。项目 v34 / OBJS25 保存两种设置，结果来源区分 `gauss-jackson12-summed-bs14to18-startup-full-v1` 与 `gauss-jackson12-summed-bs14to18-startup-pseudo-v1`。这套启动与收敛策略是本项目明确的实现，不宣称与 STK 的内部策略相同；高偏心轨道须做固定步长收敛检查，见[数值对照](../validation/hpop_protocol.md#gaussjackson-12)。
 
 
-RKF 7(8) 系数来自 Fehlberg [NASA TR R-287](https://ntrs.nasa.gov/citations/19680027281) 第 65 页 Table X，按 STK 的定义推进七阶解，以嵌入八阶解估计误差，步长控制指数为 1/8。结果算法标识为 `rkf78-7th-fehlberg-r287-v1`，避免与之前八阶推进的结果混用；公开枚举 `rkf78` 不变。不宣称逐位复现 STK 的步长控制器。从初始历元向前后独立建立完整 300 s 计算段，余段单独积分；改变采样、乱序、重复和并发查询不改变结果。共享缓存加锁，取消保留已完成段，不发布部分结果。每次查询最多 200000 次积分尝试，距离初始历元最多 366 天；这是资源边界，不是精度保证。显示插值不参与科学查询。
+RKF 7(8) 系数来自 Fehlberg [NASA TR R-287](https://ntrs.nasa.gov/citations/19680027281) 第 65 页 Table X，按 STK 的定义推进七阶解，以嵌入八阶解估计误差，步长控制指数为 1/8。结果算法标识为 `rkf78-7th-fehlberg-r287-v1`，避免与之前八阶推进的结果混用；公开枚举 `rkf78` 不变。不宣称逐位复现 STK 的步长控制器。自适应模式从初始历元向前后独立建立宽度为 `max(300, max_step_seconds)` 秒的完整计算段，余段单独积分；改变采样、乱序、重复和并发查询不改变结果。共享缓存加锁，取消保留已完成段，不发布部分结果。每次查询最多 200000 次积分尝试，距离初始历元最多 366 天；这是资源边界，不是精度保证。显示插值不参与科学查询。
 
 ```python
 satellite = project.objects.satellite("Numerical", orbit=of.orbits.Hpop(

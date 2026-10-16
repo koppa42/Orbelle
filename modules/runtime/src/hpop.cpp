@@ -27,7 +27,8 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
                                        : options.gravity_model) +
         ";degree=" + std::to_string(options.gravity_degree) +
         ";order=" + std::to_string(options.gravity_order);
-    algorithm += options.uses_fixed_step() ? ";steps=fixed-grid-v1" : ";steps=relative-mixed-v1";
+    algorithm +=
+        options.uses_fixed_step() ? ";steps=fixed-grid-v1" : ";steps=relative-mixed-max-span-v2";
     if (options.uses_secular_gravity())
         algorithm += ";secular=file-linear-julian-year-v1";
     if (options.uses_eop_force() && environment.eop)

@@ -39,6 +39,30 @@ TEST(HpopProject, OptionsPersistAndInvalidateAnalysisOnlyWhenActive) {
     input.satellites[0].orbit.hpop.gravity_order = 1;
     EXPECT_THROW(application::validate_project(input), application::ProjectError);
 }
+TEST(HpopProject, LongStepRangePersistsAndUsesDistinctAdaptiveAlgorithmIdentity) {
+    auto input = hpop_project();
+    auto &options = input.satellites[0].orbit.hpop;
+    options.min_step_seconds = options.max_step_seconds = options.fixed_step_seconds = 86400;
+    const auto restored = application::decode_project(application::encode_project(input));
+    EXPECT_EQ(restored.satellites[0].orbit.hpop, options);
+    const auto identity = runtime::report_input_sha256(input);
+    options.max_step_seconds = options.min_step_seconds = 43200;
+    EXPECT_NE(runtime::report_input_sha256(input), identity);
+    options.step_control = core::HpopStepControl::fixed;
+    const auto fixed_identity = runtime::report_input_sha256(input);
+    options.max_step_seconds = options.min_step_seconds = 86400;
+    EXPECT_EQ(runtime::report_input_sha256(input), fixed_identity);
+    options.fixed_step_seconds = 43200;
+    EXPECT_NE(runtime::report_input_sha256(input), fixed_identity);
+    for (auto method : {core::HpopIntegrator::rkf78, core::HpopIntegrator::rkv89,
+                        core::HpopIntegrator::bulirsch_stoer}) {
+        options.integrator = method;
+        options.step_control = core::HpopStepControl::relative_error;
+        const auto session = runtime::make_hpop_session(input.satellites[0].orbit.initial, options);
+        EXPECT_NE(session.provenance().algorithm.find("steps=relative-mixed-max-span-v2"),
+                  std::string::npos);
+    }
+}
 TEST(HpopProject, MassPersistsButOnlyAreaMassRatiosChangeSphericalCalculationIdentity) {
     auto input = hpop_project();
     auto &options = input.satellites[0].orbit.hpop;

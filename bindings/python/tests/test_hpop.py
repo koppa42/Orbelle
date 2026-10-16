@@ -55,6 +55,44 @@ class HpopTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.make(step_control="automatic")
 
+    def test_full_day_steps_roundtrip_and_active_identity(self):
+        radius = 1e10
+        for method in ("rk4", "rkf78", "rkv89", "bulirsch_stoer", "gauss_jackson"):
+            for control in ("fixed", "relative_error"):
+                with self.subTest(method=method, control=control):
+                    project = of.Project("Long steps", of.Epoch(0), of.Epoch(259200 * 10**9))
+                    initial = of.orbits.Cartesian(of.Epoch(0), (radius, 0, 0),
+                                                  (0, math.sqrt(3.986004415e14 / radius), 0))
+                    satellite = project.objects.satellite("Long", orbit=of.orbits.Hpop(
+                        initial=initial, gravity_degree=0, integrator=method, step_control=control,
+                        min_step_seconds=86400, max_step_seconds=86400, fixed_step_seconds=86400))
+                    analysis = project.prepare()
+                    result = analysis.states(satellite, step=u.s(86400))
+                    actual = analysis.state(satellite, at=project.last)
+                    angle = math.sqrt(3.986004415e14 / radius**3) * 259200
+                    self.assertLess(math.dist(actual.position_m, (radius*math.cos(angle),
+                                                                  radius*math.sin(angle), 0)), .005)
+                    with tempfile.TemporaryDirectory() as directory:
+                        path = Path(directory) / "full-day.orbitforge"
+                        project.save(path, analysis=analysis)
+                        reopened = of.Project.open(path)
+                        restored = reopened.objects[satellite.id]
+                        self.assertEqual(restored.orbit.hpop, satellite.orbit.hpop)
+                        self.assertEqual(reopened.prepare().state(restored, at=project.last).position_m,
+                                         actual.position_m)
+                    settings = satellite.orbit.hpop
+                    if settings._native().uses_fixed_step():
+                        changed = replace(settings, fixed_step_seconds=43200)
+                    else:
+                        changed = replace(settings, min_step_seconds=43200, max_step_seconds=43200)
+                    satellite.orbit = replace(satellite.orbit, hpop=changed)
+                    self.assertNotEqual(project.prepare().states(satellite, step=u.s(86400)).input_sha256,
+                                        result.input_sha256)
+                    self.assertEqual(analysis.state(satellite, at=project.last).position_m, actual.position_m)
+        for option in ("min_step_seconds", "max_step_seconds", "fixed_step_seconds"):
+            with self.assertRaises(ValueError):
+                self.make(**{option: 86400.1})
+
     def test_easy_constructor_copy_edit_and_current_file_roundtrip(self):
         project, satellite = self.make(gravity_degree=0, max_step_seconds=45)
         settings = satellite.orbit.hpop

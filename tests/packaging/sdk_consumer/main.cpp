@@ -40,6 +40,14 @@ int main(int argc, char **argv) try {
             std::abs(delta[0].c - (-4.17423864e-9)) > 1e-24)
             return 38;
     }
+    {
+        orbitforge::core::HpopOptions wide_steps;
+        wide_steps.min_step_seconds = wide_steps.max_step_seconds = wide_steps.fixed_step_seconds =
+            orbitforge::core::hpop_max_step_seconds;
+        orbitforge::core::validate_hpop_options(wide_steps);
+        if (wide_steps.max_step_seconds != 86400)
+            return 42;
+    }
     orbitforge::core::HpopOptions mass_options;
     mass_options.satellite_mass_kg = 1250;
     mass_options.srp.area_mass_ratio_m2_per_kg = .03;

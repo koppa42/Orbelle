@@ -445,8 +445,7 @@ class Hpop final : public IStateProvider {
                 const double factor =
                     error == 0 ? 4 : std::clamp(.9 * std::pow(error, candidate.exponent), .1, 4.);
                 // One lookahead column compares force evaluations per attainable next second.
-                const double limit =
-                    startup ? std::abs(h) : std::min(options_.max_step_seconds, checkpoint_seconds);
+                const double limit = startup ? std::abs(h) : options_.max_step_seconds;
                 const double proposed = std::min(std::abs(h) * factor, limit);
                 const double work = evaluations / proposed;
                 if (work < best_work) {
@@ -478,8 +477,16 @@ class Hpop final : public IStateProvider {
     }
     State integrate(State state, double t, double end, std::size_t &attempts,
                     const std::function<void()> &checkpoint) const {
-        const bool adaptive = options_.integrator != HpopIntegrator::rk4;
-        double step = adaptive ? options_.max_step_seconds : options_.fixed_step_seconds;
+        // A large allowed ceiling is not a suitable first trial in a low orbit:
+        // huge RK stages can enter the body before an error estimate is available.
+        // Seed from local gravitational and crossing time scales, then let error
+        // control grow/shrink the step over the full configured range.
+        const double radius = std::hypot(state[0], state[1], state[2]);
+        const double speed = std::hypot(state[3], state[4], state[5]);
+        const double dynamical = radius / std::sqrt(options_.gravity_mu / radius);
+        const double crossing = speed > 0 ? radius / speed : dynamical;
+        double step = std::clamp(.1 * std::min(dynamical, crossing), options_.min_step_seconds,
+                                 options_.max_step_seconds);
         while (t != end) {
             if (checkpoint)
                 checkpoint();
@@ -505,12 +512,10 @@ class Hpop final : public IStateProvider {
             } else if (magnitude <= options_.min_step_seconds) {
                 throw PropagationError("HPOP cannot meet tolerance at the minimum step");
             }
-            if (adaptive) {
-                const double factor =
-                    error == 0 ? 4 : std::clamp(0.9 * std::pow(error, exponent), 0.1, 4.0);
-                step = std::clamp(magnitude * factor, options_.min_step_seconds,
-                                  options_.max_step_seconds);
-            }
+            const double factor =
+                error == 0 ? 4 : std::clamp(0.9 * std::pow(error, exponent), 0.1, 4.0);
+            step = std::clamp(magnitude * factor, options_.min_step_seconds,
+                              options_.max_step_seconds);
         }
         return state;
     }
@@ -775,8 +780,17 @@ class Hpop final : public IStateProvider {
                     {value[0], value[1], value[2]},
                     {value[3], value[4], value[5]}};
         }
+        // Caching must not impose an undocumented maximum integration step. Keep
+        // full epoch-anchored blocks at least as wide as the configured ceiling.
+        // Partial outputs are integrated separately and never write into this cache.
+        const double interval = std::max(checkpoint_seconds, options_.max_step_seconds);
         const double sign = t < 0 ? -1 : 1;
-        const auto index = static_cast<std::size_t>(std::floor(std::abs(t) / checkpoint_seconds));
+        const auto grid = [=](std::size_t block) { return block * interval; };
+        auto index = static_cast<std::size_t>(std::floor(std::abs(t) / interval));
+        if (index > 0 && grid(index) > std::abs(t))
+            --index;
+        if (grid(index + 1) <= std::abs(t))
+            ++index;
         State value;
         double at;
         std::size_t attempts = 0;
@@ -784,14 +798,13 @@ class Hpop final : public IStateProvider {
             const std::lock_guard lock{mutex_};
             auto &cache = t < 0 ? backward_ : forward_;
             while (cache.size() <= index) {
-                const double begin =
-                    sign * static_cast<double>(cache.size() - 1) * checkpoint_seconds;
-                const auto next = integrate(cache.back(), begin, begin + sign * checkpoint_seconds,
-                                            attempts, checkpoint);
+                const auto block = cache.size() - 1;
+                const auto next = integrate(cache.back(), sign * grid(block),
+                                            sign * grid(block + 1), attempts, checkpoint);
                 cache.push_back(next);
             }
             value = cache[index];
-            at = sign * static_cast<double>(index) * checkpoint_seconds;
+            at = sign * grid(index);
         }
         value = integrate(value, at, t, attempts, checkpoint);
         return {epoch,
@@ -897,12 +910,12 @@ void validate_hpop_options(const HpopOptions &o) {
         throw std::invalid_argument("HPOP relative tolerance must be between 1e-14 and 1e-3");
     if (!std::isfinite(o.min_step_seconds) || !std::isfinite(o.max_step_seconds) ||
         o.min_step_seconds < 1e-6 || o.max_step_seconds < o.min_step_seconds ||
-        o.max_step_seconds > 3600)
+        o.max_step_seconds > hpop_max_step_seconds)
         throw std::invalid_argument(
-            "HPOP adaptive steps require 1e-6 <= min <= max <= 3600 seconds");
+            "HPOP adaptive steps require 1e-6 <= min <= max <= 86400 seconds");
     if (!std::isfinite(o.fixed_step_seconds) || o.fixed_step_seconds < 1e-6 ||
-        o.fixed_step_seconds > 3600)
-        throw std::invalid_argument("HPOP fixed step must be between 1e-6 and 3600 seconds");
+        o.fixed_step_seconds > hpop_max_step_seconds)
+        throw std::invalid_argument("HPOP fixed step must be between 1e-6 and 86400 seconds");
     if (!std::isfinite(o.minimum_altitude_m) || o.minimum_altitude_m < 0)
         throw std::invalid_argument("HPOP minimum altitude must be finite and nonnegative");
 }
