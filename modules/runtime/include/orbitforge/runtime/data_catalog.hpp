@@ -72,6 +72,22 @@ class DataCatalog {
     CatalogEphemeris install_de440s(const std::filesystem::path &spk,
                                     DataAcquisition acquisition = DataAcquisition::imported,
                                     const std::function<void()> &checkpoint = {});
+    // Import an explicit DE440s-based snapshot (including validated per-planet
+    // supplements). Owned copies and atomic publication; no implicit download.
+    CatalogEphemeris
+    install_ephemeris_snapshot(const std::filesystem::path &manifest,
+                               DataAcquisition acquisition = DataAcquisition::imported,
+                               const std::function<void()> &checkpoint = {});
+    // Augment the installed DE440s snapshot from a binary SPK (up to 2 GiB).
+    // Retain only 499..999 physical-centre segments in J2000 relative to each
+    // planet's own barycentre; replace only the imported planets. Other segments
+    // cannot override Sun/Earth/Moon or planetary-system gravity. Body coverage
+    // is checked for the requested propagation interval, independently of base DE.
+    CatalogEphemeris
+    install_planetary_centres(const std::filesystem::path &source,
+                              const std::string &source_url = {},
+                              DataAcquisition acquisition = DataAcquisition::imported,
+                              const std::function<void()> &checkpoint = {});
     [[nodiscard]] std::vector<CatalogEphemeris> ephemerides() const;
     [[nodiscard]] std::shared_ptr<const core::IThirdBodyEphemeris>
     load_ephemeris(const std::string &selection) const;
@@ -130,6 +146,10 @@ class DataCatalog {
     void set_settings(const std::map<std::string, std::string> &values);
 
   private:
+    CatalogEphemeris install_ephemeris_snapshot_checked(const std::filesystem::path &manifest,
+                                                        DataAcquisition acquisition,
+                                                        const std::function<void()> &checkpoint,
+                                                        const std::string &expected_receipt);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

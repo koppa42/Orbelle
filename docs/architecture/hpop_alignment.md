@@ -77,7 +77,7 @@
 | SRP | Shadow Model，含 Dual Cone | 已实现无阴影／圆柱／球面双锥、全照／半影／本影／环食；独立几何和轨迹对照通过，椭球轮廓及专用事件时刻待实现 |
 | SRP | Use Boundary Mitigation | 待实现：可复核的边界算法、标识及步长收敛，不能声称复刻未公开内部算法 |
 | SRP | Method to Compute Sun，含 Apparent To True CB | 已实现 True、地心视太阳与卫星视太阳，接收型 LT+S、速度时间尺度和历史链校验；遮挡体视位置及 STK 同配置验收待完成 |
-| SRP | Atmospheric Altitude；Eclipsing Central Bodies 增删 | 部分：地球／月球独立分配、大气等效半径、多体遮挡并集已实现；可搜索 Available / Assigned 窗口、七颗行星及冥王星的球面配置与十体并集已接入并有 SciPy 对照；DE440s 可直接提供地月／水星／金星本体，火星及外行星补充本体星历的目录支持、更多卫星和小天体仍待实现 |
+| SRP | Atmospheric Altitude；Eclipsing Central Bodies 增删 | 部分：地球／月球独立分配、大气等效半径、多体遮挡并集已实现；可搜索 Available / Assigned 窗口、七颗行星及冥王星的球面配置与十体并集已接入并有 SciPy 对照；DE440s 可直接提供地月／水星／金星本体，火星、外行星及冥王星可导入本体 SPK（逐段过滤、按区间认证、JPLEPHEM 对照）；更多卫星和小天体仍待实现 |
 | Additional | Albedo；Thermal；Ck；Area/Mass；Ground Reflection Model | 待实现：各自开关、地表反射/发射率资源、可见地表积分 |
 | Additional | Relativistic Accelerations；Satellite Mass | 已接入 IERS 2003 三项相对论、TAI 星历速度、自转轴方向与共享卫星质量；质量用于球形对应面积换算，不覆盖各自显式给定的面积质量比；相对论和球形质量语义分别与 Orekit 对照。见[相对论契约](relativity.md) |
 | Additional | Use Plugin；Plugin 选择；Plugin Settings | 待实现：注册、具名设置、生命周期、加速度及偏导契约、可复现配置和错误隔离 |

@@ -59,7 +59,11 @@ class EopCatalog : public QObject {
     void import_raw(const std::filesystem::path &source,
                     DataProduct product = DataProduct::finals2000a);
 
+    void import_ephemeris_snapshot(const std::filesystem::path &source);
+    void import_planetary_centres(const std::filesystem::path &source);
+
   private:
+    enum class EphemerisImport { base, snapshot, planetary_centres };
     std::size_t append(Provider provider);
     void refresh_current(std::optional<std::size_t> acquired = std::nullopt);
     [[nodiscard]] std::optional<std::size_t> current_index(DataProduct product) const;
@@ -71,7 +75,8 @@ class EopCatalog : public QObject {
     }
     void save_update_status();
     void start_resource_install(const std::filesystem::path &file, DataProduct product,
-                                const std::string &url, runtime::DataAcquisition acquisition);
+                                const std::string &url, runtime::DataAcquisition acquisition,
+                                EphemerisImport ephemeris_import = EphemerisImport::base);
     std::filesystem::path store_;
     runtime::DataCatalog data_;
     std::vector<Provider> providers_;

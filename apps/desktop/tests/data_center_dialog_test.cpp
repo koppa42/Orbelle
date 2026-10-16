@@ -514,16 +514,24 @@ TEST(DataCenterDialog, EphemerisGroupAndDetailsRemainReadableAtCompactWidth) {
         QApplication::processEvents();
         EXPECT_EQ(dialog->findChild<QLabel *>("dataName")->text(), QStringLiteral("DE440s"));
         EXPECT_TRUE(dialog->findChild<QPushButton *>("downloadEop")->isVisible());
+        auto *centres = dialog->findChild<QPushButton *>("importPlanetaryCentres");
+        ASSERT_TRUE(centres);
+        EXPECT_TRUE(centres->isVisible());
+        EXPECT_TRUE(centres->isEnabled());
         auto *tabs = dialog->findChild<QTabWidget *>("dataPages");
         tabs->setCurrentIndex(1);
         EXPECT_FALSE(dialog->findChild<QCheckBox *>("dataAutoUpdate")->isChecked());
+        tabs->setCurrentIndex(2);
+        EXPECT_TRUE(dialog->findChild<QPushButton *>("importEopSnapshot")->isVisible());
+        EXPECT_EQ(dialog->findChild<QPushButton *>("importEopSnapshot")->text(),
+                  QStringLiteral("导入星历数据包…"));
         tabs->setCurrentIndex(0);
         const auto output = qEnvironmentVariable("ORBITFORGE_DATA_UI_CAPTURE");
         if (!output.isEmpty()) {
             QDir{}.mkpath(output);
             EXPECT_TRUE(dialog->grab().save(output + "/ephemeris-wide.png"));
         }
-        dialog->resize(500, 660);
+        dialog->resize(430, 660);
         tree->itemActivated(group->child(0), 0);
         QEventLoop settled;
         QTimer::singleShot(60, &settled, &QEventLoop::quit);
@@ -534,6 +542,34 @@ TEST(DataCenterDialog, EphemerisGroupAndDetailsRemainReadableAtCompactWidth) {
                 EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
         if (!output.isEmpty())
             EXPECT_TRUE(dialog->grab().save(output + "/ephemeris-compact.png"));
+        EXPECT_TRUE(centres->isVisible());
+        EXPECT_GE(centres->width(), centres->sizeHint().width());
+        for (auto *ancestor = centres->parentWidget(); ancestor;
+             ancestor = ancestor->parentWidget())
+            if (auto *scroll = qobject_cast<QScrollArea *>(ancestor)) {
+                scroll->ensureWidgetVisible(centres);
+                break;
+            }
+        QApplication::processEvents();
+        EXPECT_FALSE(centres->visibleRegion().isEmpty());
+        if (!output.isEmpty()) {
+            qInfo() << "ephemeris compact logical width" << dialog->width() << "DPR"
+                    << dialog->devicePixelRatioF();
+            EXPECT_TRUE(dialog->grab().save(output + "/ephemeris-compact-import.png"));
+        }
+        tabs->setCurrentIndex(2);
+        QApplication::processEvents();
+        auto *package = dialog->findChild<QPushButton *>("importEopSnapshot");
+        for (auto *ancestor = package->parentWidget(); ancestor;
+             ancestor = ancestor->parentWidget())
+            if (auto *scroll = qobject_cast<QScrollArea *>(ancestor)) {
+                scroll->ensureWidgetVisible(package);
+                break;
+            }
+        QApplication::processEvents();
+        EXPECT_FALSE(package->visibleRegion().isEmpty());
+        if (!output.isEmpty())
+            EXPECT_TRUE(dialog->grab().save(output + "/ephemeris-compact-package.png"));
         EXPECT_FALSE(catalog.downloading());
         dialog->reject();
     });

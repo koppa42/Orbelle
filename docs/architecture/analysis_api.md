@@ -291,3 +291,17 @@ AER 与统一报告还由 `test_analysis_aer_reports.py` 和 `AnalysisAccess.*` 
 ### 机动记录
 
 任务序列卫星通过 `analysis.maneuvers(satellite, cancelled=...)` 返回拥有自身数据的 `ManeuverSeries`。`events` 包含段索引、名称、GCRF 机动前后状态、GCRF Δv 与累计 Δv；结果附对象、修订、算法及输入/数据哈希。非任务序列卫星返回空列表；不接受地面站或传感器。详见[任务序列](missions.md)。
+
+### 本体星历导入
+
+```python
+catalog = of.DataCatalog("local/shared-data")
+catalog.install_de440s("local/de440s.bsp")
+entry = catalog.install_planetary_centres("local/mar099s.bsp")
+# 也可导入已有完整快照：
+# entry = catalog.install_ephemeris_snapshot("local/ephemeris/manifest.json")
+data = of.DataSnapshot.builtin_time().with_ephemeris(
+    "de440s", entry.manifest, "local/spice-runtime")
+```
+
+两种导入与 C++ `DataCatalog` 共用实现；计算前仍须选择 SRP 遮挡体，并验证完整传播区间的覆盖。详见[数据中心](data_center.md#太阳系星历与日月引力)。

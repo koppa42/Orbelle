@@ -77,6 +77,7 @@ if(ORBITFORGE_WITH_VSG)
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbitforge_data_center_tests tests/data_center_test.cpp src/viewer/eop_catalog.cpp)
         target_compile_definitions(orbitforge_data_center_tests PRIVATE
+            ORBITFORGE_TEST_PLANETS="${PROJECT_SOURCE_DIR}/data/samples/spice/de440s_planets_2016_leap/manifest.json"
             ORBITFORGE_TEST_TIME="${PROJECT_SOURCE_DIR}/data/samples/time/iers_leap_seconds_2026_07.dat"
             ORBITFORGE_TEST_FINALS="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json"
             ORBITFORGE_TEST_C04="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json")
@@ -91,6 +92,7 @@ if(ORBITFORGE_WITH_VSG)
             BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
             FILES resources/icons/chevron-down.png resources/artwork/data-preparation.png)
         target_compile_definitions(orbitforge_data_center_ui_tests PRIVATE
+            ORBITFORGE_TEST_PLANETS="${PROJECT_SOURCE_DIR}/data/samples/spice/de440s_planets_2016_leap/manifest.json"
             ORBITFORGE_TEST_FINALS="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json"
             ORBITFORGE_TEST_TIME="${PROJECT_SOURCE_DIR}/data/samples/time/iers_leap_seconds_2026_07.dat")
         target_link_libraries(orbitforge_data_center_ui_tests PRIVATE

@@ -6,6 +6,7 @@
 #include <map>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <orbitforge/providers/spice/provider.hpp>
 #include <picosha2.h>
 #include <random>
@@ -199,6 +200,56 @@ struct KernelCopies {
     }
 };
 
+bool planetary_centre(SpiceInt id) { return id >= 499 && id <= 999 && id % 100 == 99; }
+
+template <typename Visitor>
+void visit_segments(const std::filesystem::path &path, Visitor visitor) {
+    SpiceInt handle = 0;
+    dafopr_c(path.string().c_str(), &handle);
+    check_spice();
+    try {
+        SpiceInt nd = 0, ni = 0;
+        dafhsf_c(handle, &nd, &ni);
+        check_spice();
+        if (nd != 2 || ni != 6)
+            throw core::EphemerisDataError("Expected an SPK DAF descriptor");
+        dafbfs_c(handle);
+        check_spice();
+        SpiceBoolean found = SPICEFALSE;
+        std::size_t count = 0;
+        daffna_c(&found);
+        check_spice();
+        while (found) {
+            if (++count > 100000)
+                throw core::EphemerisDataError("Too many SPK segments");
+            SpiceDouble descriptor[5]{}, bounds[2]{};
+            SpiceInt integers[6]{};
+            dafgs_c(descriptor);
+            dafus_c(descriptor, 2, 6, bounds, integers);
+            check_spice();
+            visitor(handle, descriptor, bounds, integers);
+            dafcs_c(handle);
+            check_spice();
+            daffna_c(&found);
+            check_spice();
+        }
+        dafcls_c(handle);
+        check_spice();
+    } catch (...) {
+        reset_c();
+        dafcls_c(handle);
+        reset_c();
+        throw;
+    }
+}
+void validate_centre_segment(const double *bounds, const SpiceInt *integers) {
+    if (!planetary_centre(integers[0]) || integers[1] != integers[0] / 100 || integers[2] != 1 ||
+        !std::isfinite(bounds[0]) || !std::isfinite(bounds[1]) || bounds[0] > bounds[1])
+        throw core::EphemerisDataError(
+            "Supplemental SPK must contain only planet centres 499..999 relative to "
+            "their own system barycentres in J2000");
+}
+
 class Snapshot final : public core::IEphemerisProvider {
   public:
     Snapshot(core::EphemerisDataInfo info, std::unique_ptr<KernelCopies> copies)
@@ -220,6 +271,21 @@ class Snapshot final : public core::IEphemerisProvider {
         // Verify required time constants at load time, without calling SPICE UTC conversion.
         (void)tdb_unlocked(info_.first_epoch);
         (void)tdb_unlocked(info_.last_epoch);
+        for (std::size_t i = 0; i < info_.kernels.size(); ++i) {
+            if (info_.kernels[i].kind != "SPK_BODY_CENTRES")
+                continue;
+            std::optional<SpiceInt> body;
+            visit_segments(copies_->paths[i], [&](SpiceInt, const double *, const double *bounds,
+                                                  const SpiceInt *integers) {
+                validate_centre_segment(bounds, integers);
+                if (body && *body != integers[0])
+                    throw core::EphemerisDataError("Each supplemental SPK must contain one planet");
+                body = integers[0];
+            });
+            if (!body || info_.kernels[i].file != "centre-" + std::to_string(*body) + ".bsp")
+                throw core::EphemerisDataError(
+                    "Supplemental SPK must be named centre-<physical NAIF ID>.bsp");
+        }
     }
     core::TdbTime to_tdb(core::Epoch epoch) const override {
         check_epoch(epoch);
@@ -417,7 +483,7 @@ class Snapshot final : public core::IEphemerisProvider {
                                   const std::map<std::int32_t, std::int32_t> &chains) const {
         std::map<std::int32_t, std::vector<std::pair<double, double>>> coverage;
         for (std::size_t k = 0; k < copies_->paths.size(); ++k) {
-            if (info_.kernels[k].kind != "SPK")
+            if (info_.kernels[k].kind == "LSK")
                 continue;
             SpiceInt handle = 0;
             dafopr_c(copies_->paths[k].string().c_str(), &handle);
@@ -523,7 +589,7 @@ class Snapshot final : public core::IEphemerisProvider {
                 char architecture[8]{}, kind[8]{};
                 getfat_c(path.c_str(), sizeof(architecture), sizeof(kind), architecture, kind);
                 check_spice();
-                if (std::string(kind) != info_.kernels[i].kind ||
+                if (std::string(kind) != (info_.kernels[i].kind == "LSK" ? "LSK" : "SPK") ||
                     std::string(architecture) != (info_.kernels[i].kind == "LSK" ? "KPL" : "DAF")) {
                     throw core::EphemerisDataError(
                         "Kernel content does not match the declared LSK/SPK type");
@@ -812,7 +878,7 @@ std::unique_ptr<core::IEphemerisProvider> load_snapshot(const std::filesystem::p
             const std::filesystem::path name(item.file);
             if (name.has_parent_path() || name.has_root_path() || name == "." || name == ".." ||
                 !hash_string(item.sha256) || !hash_string(item.source_sha256) ||
-                (item.kind != "LSK" && item.kind != "SPK")) {
+                (item.kind != "LSK" && item.kind != "SPK" && item.kind != "SPK_BODY_CENTRES")) {
                 throw core::EphemerisDataError("Invalid SPICE filename, hash or kernel kind");
             }
             const auto path = std::filesystem::canonical(parent / name);
@@ -827,7 +893,7 @@ std::unique_ptr<core::IEphemerisProvider> load_snapshot(const std::filesystem::p
             }
             copies->add(bytes, item.kind);
             lsk_count += item.kind == "LSK" ? 1 : 0;
-            spk_count += item.kind == "SPK" ? 1 : 0;
+            spk_count += item.kind != "LSK" ? 1 : 0;
             info.kernels.push_back(std::move(item));
         }
         if (lsk_count != 1 || spk_count < 1) {
@@ -841,6 +907,82 @@ std::unique_ptr<core::IEphemerisProvider> load_snapshot(const std::filesystem::p
         throw;
     } catch (const std::exception &error) {
         throw core::EphemerisDataError(std::string("Cannot load SPICE snapshot: ") + error.what());
+    }
+}
+std::vector<std::int32_t> extract_planetary_centres(const std::filesystem::path &source,
+                                                    const std::filesystem::path &directory,
+                                                    const std::function<void()> &checkpoint) {
+    std::scoped_lock guard(engine().mutex);
+    initialize_engine();
+    if (source.string().size() > 255)
+        throw core::EphemerisDataError("CSPICE input path exceeds 255 bytes");
+    char architecture[8]{}, kind[8]{};
+    getfat_c(source.string().c_str(), sizeof(architecture), sizeof(kind), architecture, kind);
+    check_spice();
+    if (std::string(architecture) != "DAF" || std::string(kind) != "SPK")
+        throw core::EphemerisDataError("Planet-centre input must be a binary SPK");
+    std::filesystem::create_directories(directory);
+    std::map<std::int32_t, SpiceInt> outputs;
+    std::vector<std::filesystem::path> created;
+    try {
+        visit_segments(source, [&](SpiceInt input, double *descriptor, const double *bounds,
+                                   const SpiceInt *integers) {
+            if (checkpoint)
+                checkpoint();
+            const auto id = integers[0];
+            if (!planetary_centre(id))
+                return;
+            validate_centre_segment(bounds, integers);
+            if (!outputs.contains(id)) {
+                const auto path = directory / ("centre-" + std::to_string(id) + ".bsp");
+                if (std::filesystem::exists(path) || path.string().size() > 255)
+                    throw core::EphemerisDataError(
+                        "Planet-centre output already exists or its path is too long");
+                SpiceInt handle = 0;
+                spkopn_c(path.string().c_str(), "OrbitForge planet-centre subset", 1024, &handle);
+                check_spice();
+                outputs[id] = handle;
+                created.push_back(path);
+                const char comments[][112] = {
+                    "Producer of this derived kernel: OrbitForge project.",
+                    "CSPICE N0067 spksub copied original segments without coefficient refitting.",
+                    "Only the physical planet centre relative to its own barycentre is retained.",
+                    "The accompanying manifest records original source SHA256 and provenance."};
+                dafac_c(handle, 4, 112, comments);
+                check_spice();
+            }
+            char identifier[41]{};
+            dafgn_c(sizeof(identifier), identifier);
+            check_spice();
+            spksub_c(input, descriptor, identifier, bounds[0], bounds[1], outputs.at(id));
+            check_spice();
+        });
+        if (outputs.empty())
+            throw core::EphemerisDataError("SPK contains no supported physical planet centres");
+        std::vector<std::int32_t> ids;
+        for (auto &[id, handle] : outputs) {
+            spkcls_c(handle);
+            check_spice();
+            handle = 0;
+            ids.push_back(id);
+        }
+        if (checkpoint)
+            checkpoint();
+        return ids;
+    } catch (...) {
+        reset_c();
+        for (const auto &[id, handle] : outputs) {
+            (void)id;
+            if (handle) {
+                spkcls_c(handle);
+                reset_c();
+            }
+        }
+        for (const auto &path : created) {
+            std::error_code ignored;
+            std::filesystem::remove(path, ignored);
+        }
+        throw;
     }
 }
 namespace {

@@ -2,6 +2,7 @@
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkRequest>
@@ -15,6 +16,23 @@
 
 namespace orbitforge::desktop {
 namespace {
+QJsonArray ephemeris_kernels(const runtime::CatalogEphemeris &entry) {
+    QFile file(QString::fromStdWString(entry.manifest.wstring()));
+    if (!file.open(QIODevice::ReadOnly) || file.size() > 65536)
+        return {};
+    const auto bytes = file.readAll();
+    if (QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex().toStdString() !=
+        entry.info.content_sha256)
+        return {};
+    const auto kernels = QJsonDocument::fromJson(bytes).object().value("kernels").toArray();
+    for (const auto &value : kernels) {
+        const std::filesystem::path name(value.toObject().value("file").toString().toStdWString());
+        if (name.empty() || name.has_parent_path() || name.has_root_path() || name == "." ||
+            name == "..")
+            return {};
+    }
+    return kernels;
+}
 std::string source_url(DataProduct product) {
     switch (product) {
     case DataProduct::finals2000a:
@@ -249,11 +267,33 @@ bool EopCatalog::has_full_download(DataProduct product) const {
         return false;
     }
     if (product == DataProduct::de440s) {
-        for (const auto &entry : data_.ephemerides())
-            if (entry.selection == "de440s")
-                return present(entry.manifest) &&
-                       present(entry.manifest.parent_path() / "de440s.bsp") &&
-                       present(entry.manifest.parent_path() / "uniform-time.tls");
+        for (const auto &entry : data_.ephemerides()) {
+            if (entry.selection != "de440s")
+                continue;
+            bool full_base = false, time_constants = false;
+            for (const auto &value : ephemeris_kernels(entry)) {
+                const auto kernel = value.toObject();
+                const auto path =
+                    entry.manifest.parent_path() /
+                    std::filesystem::path(kernel.value("file").toString().toStdWString());
+                if (!present(path))
+                    return false;
+                const auto kind = kernel.value("kind").toString();
+                full_base |= kind == "SPK" && kernel.value("sha256").toString() ==
+                                                  QString::fromUtf8(runtime::de440s_sha256);
+                time_constants |= kind == "LSK";
+            }
+            // A historical package is usable for its own interval, but cannot
+            // satisfy first-launch acquisition of the full DE440s policy window.
+            const QDateTime origin(QDate(2000, 1, 1), QTime(12, 0), QTimeZone::UTC);
+            const auto first =
+                origin.secsTo(QDateTime(QDate(1850, 1, 1), QTime(0, 0), QTimeZone::UTC));
+            const auto last =
+                origin.secsTo(QDateTime(QDate(2150, 1, 1), QTime(0, 0), QTimeZone::UTC));
+            return full_base && time_constants &&
+                   entry.info.first.tai_nanoseconds() <= first * 1000000000LL &&
+                   entry.info.last.tai_nanoseconds() >= last * 1000000000LL;
+        }
         return false;
     }
     if (gravity_product(product)) {
@@ -423,8 +463,18 @@ std::vector<DataInventoryItem> EopCatalog::inventory() const {
         if (entry.selection != "de440s")
             continue;
         ephemeris.ephemeris = entry.info;
-        ephemeris.file = entry.manifest.parent_path() / "de440s.bsp";
-        ephemeris.sha256 = QString::fromUtf8(runtime::de440s_sha256);
+        ephemeris.file = entry.manifest;
+        ephemeris.sha256 = QString::fromStdString(entry.info.content_sha256);
+        for (const auto &value : ephemeris_kernels(entry)) {
+            const auto kernel = value.toObject();
+            if (kernel.value("kind").toString() != "SPK")
+                continue;
+            ephemeris.file = entry.manifest.parent_path() /
+                             std::filesystem::path(kernel.value("file").toString().toStdWString());
+            ephemeris.sha256 = kernel.value("sha256").toString();
+            ephemeris.source_url = kernel.value("source_url").toString();
+            break;
+        }
         ephemeris.identity_sha256 = QString::fromStdString(entry.info.content_sha256);
         ephemeris.acquired_at = entry.acquired_at_unix_seconds;
         ephemeris.acquisition = entry.acquisition;
@@ -663,6 +713,18 @@ void EopCatalog::import_raw(const std::filesystem::path &source, DataProduct pro
     }
     install_source(source, product, source_url(product), runtime::DataAcquisition::imported);
     status_ = QStringLiteral("本地文件已导入。");
+}
+void EopCatalog::import_ephemeris_snapshot(const std::filesystem::path &source) {
+    if (downloading())
+        throw std::runtime_error("请等待当前操作完成，或先取消。");
+    start_resource_install(source, DataProduct::de440s, {}, runtime::DataAcquisition::imported,
+                           EphemerisImport::snapshot);
+}
+void EopCatalog::import_planetary_centres(const std::filesystem::path &source) {
+    if (downloading())
+        throw std::runtime_error("请等待当前操作完成，或先取消。");
+    start_resource_install(source, DataProduct::de440s, {}, runtime::DataAcquisition::imported,
+                           EphemerisImport::planetary_centres);
 }
 void EopCatalog::install_source(const std::filesystem::path &source, DataProduct product,
                                 const std::string &url, runtime::DataAcquisition acquisition) {
@@ -907,7 +969,8 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
 }
 void EopCatalog::start_resource_install(const std::filesystem::path &file, DataProduct product,
                                         const std::string &url,
-                                        runtime::DataAcquisition acquisition) {
+                                        runtime::DataAcquisition acquisition,
+                                        EphemerisImport ephemeris_import) {
     active_product_ = product;
     last_installed_.reset();
     total_ = -1;
@@ -917,7 +980,7 @@ void EopCatalog::start_resource_install(const std::filesystem::path &file, DataP
     record.state = DataUpdateState::checking;
     record.message = status_ = QStringLiteral("正在后台校验完整数据与覆盖范围，可取消…");
     resource_job_ = std::async(std::launch::async, [root = store_, file, product, url, acquisition,
-                                                    cancel = resource_cancel_] {
+                                                    cancel = resource_cancel_, ephemeris_import] {
         runtime::DataCatalog catalog(root);
         const auto checkpoint = [cancel] {
             if (*cancel)
@@ -934,7 +997,12 @@ void EopCatalog::start_resource_install(const std::filesystem::path &file, DataP
             return InstalledResource{installed.info.sha256, acquisition};
         }
         if (product == DataProduct::de440s) {
-            const auto installed = catalog.install_de440s(file, acquisition, checkpoint);
+            const auto installed =
+                ephemeris_import == EphemerisImport::snapshot
+                    ? catalog.install_ephemeris_snapshot(file, acquisition, checkpoint)
+                : ephemeris_import == EphemerisImport::planetary_centres
+                    ? catalog.install_planetary_centres(file, url, acquisition, checkpoint)
+                    : catalog.install_de440s(file, acquisition, checkpoint);
             return InstalledResource{installed.info.content_sha256, acquisition};
         }
         const auto installed =

@@ -69,7 +69,7 @@ C++ 使用 `HpopOptions::srp`／`SrpOptions`，通过显式 `HpopEnvironment` �
 
 `SrpOptions::additional_eclipsing_bodies` / `SrpSettings.additional_eclipsing_bodies` 支持水星、金星、火星、木星、土星、天王星、海王星和冥王星，不能与 Earth/Moon 字段重复。Python 例如 `SrpSettings(additional_eclipsing_bodies=(SrpEclipsingBody("venus"),))`。起始半径取 [NAIF pck00011](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/pck00011.tpc) 的最大轴（IAU 2015）：2440530、6051800、3396190、71492000、60268000、25559000、24764000、1188300 m。它们是显式可修改的球形近似，不代表 STK `.cb` 形状数据或椭球轮廓。
 
-行星遮挡使用 199、299、499、599、699、799、899、999 **本体中心**，不使用第三体引力采用的系统质心 4–9。Core 的 `IThirdBodyEphemeris` 新增可选 `eclipsing_body_position` 与完整区间认证；默认只复用水星、金星已有本体位置，其余未实现的 Provider 明确拒绝。SPICE 连续覆盖核验检查本体→系统质心→SSB 和 Earth→EMB→SSB 的全部链与内部缺口。当前桌面资源策略仍只接收 DE440s，因此可直接计算 Earth/Moon/Mercury/Venus；火星及外行星需要额外本体星历，当前准备时明确失败。支持这些补充星历的目录/导入策略，以及更多卫星和小天体仍在后续范围内，不以质心位置冒充支持。
+行星遮挡使用 199、299、499、599、699、799、899、999 **本体中心**，不使用第三体引力采用的系统质心 4–9。Core 的 `IThirdBodyEphemeris` 新增可选 `eclipsing_body_position` 与完整区间认证；默认只复用水星、金星已有本体位置，其余未实现的 Provider 明确拒绝。SPICE 连续覆盖核验检查本体→系统质心→SSB 和 Earth→EMB→SSB 的全部链与内部缺口。DE440s 可直接提供 Earth/Moon/Mercury/Venus。火星、外行星及冥王星可在数据中心导入本体 SPK；导入器只保留本体相对系统质心的片段，按传播区间认证覆盖，详见[补充星历契约](spice.md#行星本体补充星历)。未导入或覆盖不足时明确失败；更多卫星和小天体仍待接入。
 
 低层 `evaluate_srp` 可传 `SrpBodyPosition` 列表，与每个已分配额外天体一一匹配。缺失、重复、未分配或非有限位置拒绝；太阳、卫星与遮挡体在同一接收历元和同一惯性轴，调用方负责所选太阳方法。最多十个遮挡圆盘同时求并集，重合或包含只计一次。计算按固定天体顺序求和，因此列表重排不改变力、轨迹或计算身份。圆柱模型即使已判全影仍检查其余几何，避免掩盖卫星位于另一遮挡球体内部的错误。
 

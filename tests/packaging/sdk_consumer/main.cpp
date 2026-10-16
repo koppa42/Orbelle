@@ -367,6 +367,23 @@ int main(int argc, char **argv) try {
         if (argc != 4) {
             return 8;
         }
+        if (orbitforge::runtime::data_catalog_available()) {
+            using namespace orbitforge;
+            const auto samples = std::filesystem::path(argv[2]).parent_path().parent_path();
+            runtime::DataCatalog catalog(std::filesystem::path(argv[3]) / "centres-catalog");
+            (void)catalog.install_ephemeris_snapshot(samples /
+                                                     "de440s_planets_2016_leap/manifest.json");
+            const auto installed =
+                catalog.install_planetary_centres(samples / "mar099s_2016_leap/mar099s_subset.bsp");
+            const auto ephemeris = catalog.load_ephemeris("de440s");
+            const std::array bodies{core::ThirdBody::mars};
+            ephemeris->validate_eclipsing_body_interval(installed.info.first, installed.info.last,
+                                                        bodies);
+            const auto point =
+                ephemeris->eclipsing_body_position(core::ThirdBody::mars, installed.info.first);
+            if (!std::isfinite(point[0]))
+                return 48;
+        }
         auto provider = orbitforge::runtime::load_spice_snapshot(argv[2], argv[3]);
         const auto epoch = orbitforge::core::Epoch{
             provider->data_info().first_epoch.tai_nanoseconds() + 600000000000};

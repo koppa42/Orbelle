@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cmath>
 #include <cspice/SpiceUsr.h>
 #include <filesystem>
@@ -478,4 +479,93 @@ TEST(Spice, MovingSunCertifiesHistoryAndGaps) {
     EXPECT_THROW(provider->validate_spacecraft_apparent_sun_interval(core::Epoch{-3600000000001},
                                                                      core::Epoch{0}),
                  core::EphemerisCoverageError);
+}
+
+namespace {
+void planetary_test_kernel(const std::filesystem::path &path, int bad_centre = 0,
+                           const char *frame = "J2000", bool include_planets = true) {
+    std::filesystem::remove(path);
+    SpiceInt handle = 0;
+    spkopn_c(path.string().c_str(), "Synthetic planetary subset", 0, &handle);
+    spice_ok();
+    const double coefficients[]{7000, 10, 2, .5, -1200, .2, 3, 0, 500, -.3, 0, .6};
+    for (int id : {10, 4, 499, 599, 699, 799, 899, 999}) {
+        if (!include_planets && id >= 499)
+            continue;
+        const int centre = id < 499 ? 0 : (id == 599 && bad_centre ? bad_centre : id / 100);
+        spkw02_c(handle, id, centre, frame, -3600, 3600, "Original synthetic segment", 7200, 1, 3,
+                 coefficients, -3600);
+        spice_ok();
+    }
+    spkcls_c(handle);
+    spice_ok();
+}
+} // namespace
+TEST(Spice, PlanetarySubsetsRetainSixCentresAndMatchIndependentChebyshevValues) {
+    Fixture input;
+    const auto source = input.root / "planets.bsp";
+    planetary_test_kernel(source);
+    const auto directory =
+        input.root /
+        ("subset-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto ids = providers::spice::extract_planetary_centres(source, directory);
+    ASSERT_EQ(ids, (std::vector<std::int32_t>{499, 599, 699, 799, 899, 999}));
+    input.document["kernels"] = Json::array({input.kernel("naif0012.tls", "LSK")});
+    for (auto id : ids) {
+        const auto name = "centre-" + std::to_string(id) + ".bsp";
+        std::filesystem::copy_file(directory / name, input.root / name,
+                                   std::filesystem::copy_options::overwrite_existing);
+        input.document["kernels"].push_back(input.kernel(name, "SPK_BODY_CENTRES"));
+    }
+    input.save();
+    const auto provider = input.load();
+    for (auto id : ids)
+        for (auto ns : {-3000000000000LL, 0LL, 1234567890123LL, 3000000000000LL})
+            analytic(provider->geometric_state(id, id / 100, core::Epoch(ns)));
+    EXPECT_THROW((void)provider->geometric_state(10, 0, core::Epoch{0}),
+                 core::EphemerisCoverageError);
+    const auto original = read(directory / "centre-499.bsp");
+    EXPECT_THROW((void)providers::spice::extract_planetary_centres(source, directory),
+                 core::EphemerisDataError);
+    EXPECT_EQ(read(directory / "centre-499.bsp"), original);
+    // A role declaration cannot authorize unrelated targets to override the base chain.
+    std::filesystem::copy_file(source, input.root / "centre-599.bsp",
+                               std::filesystem::copy_options::overwrite_existing);
+    input.document["kernels"] = Json::array(
+        {input.kernel("naif0012.tls", "LSK"), input.kernel("centre-599.bsp", "SPK_BODY_CENTRES")});
+    input.save();
+    EXPECT_THROW((void)input.load(), core::EphemerisDataError);
+    analytic(provider->geometric_state(599, 5, core::Epoch{0}));
+}
+TEST(Spice, PlanetaryExtractionRejectsWrongChainsAxesAndCleansOnlyItsCreatedFiles) {
+    Fixture input;
+    const auto source = input.root / "planet-source.bsp";
+    const auto directory =
+        input.root /
+        ("partial-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(directory);
+    std::ofstream(directory / "keep.txt") << "caller-owned";
+    for (const auto wrong : {1, 2, 3}) {
+        planetary_test_kernel(source, wrong == 1 ? 4 : 0, wrong == 2 ? "ECLIPJ2000" : "J2000",
+                              wrong != 3);
+        EXPECT_THROW((void)providers::spice::extract_planetary_centres(source, directory),
+                     core::EphemerisDataError);
+        EXPECT_EQ(std::distance(std::filesystem::directory_iterator(directory),
+                                std::filesystem::directory_iterator{}),
+                  1);
+        EXPECT_EQ(read(directory / "keep.txt"), "caller-owned");
+    }
+    planetary_test_kernel(source);
+    unsigned checks = 0;
+    EXPECT_THROW((void)providers::spice::extract_planetary_centres(
+                     source, directory,
+                     [&] {
+                         if (++checks == 5)
+                             throw std::runtime_error("cancel after writing two planets");
+                     }),
+                 std::runtime_error);
+    EXPECT_EQ(checks, 5U);
+    EXPECT_EQ(std::distance(std::filesystem::directory_iterator(directory),
+                            std::filesystem::directory_iterator{}),
+              1);
 }

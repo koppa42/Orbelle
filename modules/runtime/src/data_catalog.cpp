@@ -8,6 +8,9 @@
 #include <orbitforge/runtime/time_frames.hpp>
 #include <stdexcept>
 #include <string_view>
+#ifdef ORBITFORGE_HAS_SPICE
+#include <orbitforge/providers/spice/provider.hpp>
+#endif
 
 namespace orbitforge::runtime {
 namespace {
@@ -64,6 +67,7 @@ void DataCatalog::set_extrapolation_days(EopProduct product, int days) {
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <picosha2.h>
+#include <set>
 #include <sqlite3.h>
 #include <sstream>
 #ifdef _WIN32
@@ -333,6 +337,7 @@ CatalogEphemeris DataCatalog::install_de440s(const std::filesystem::path &spk,
                                              const std::function<void()> &checkpoint) {
     if (!ephemeris_available())
         throw core::EphemerisDataError("This build does not include CSPICE");
+    const auto previous = setting("ephemeris/de440s");
     Stage stage(impl_->root / "staging");
     const auto file = stage.path / "de440s.bsp";
     std::ifstream input(spk, std::ios::binary);
@@ -370,7 +375,7 @@ CatalogEphemeris DataCatalog::install_de440s(const std::filesystem::path &spk,
             .count();
     };
     const auto lsk_hash = picosha2::hash256_hex_string(lsk);
-    const Json manifest{
+    Json manifest{
         {"schema_version", 1},
         {"snapshot_id", "de440s-1850-2150-v1"},
         {"model", "DE440s; ICRF axes; geometric Earth/Sun/Moon"},
@@ -391,7 +396,69 @@ CatalogEphemeris DataCatalog::install_de440s(const std::filesystem::path &spk,
                        {"source_url", de440s_url},
                        {"source_sha256", de440s_sha256},
                        {"producer", "JPL / NAIF"}}})}};
+    // Refreshing the base must retain already imported physical-centre kernels.
+    if (!previous.empty()) {
+        const auto entries = ephemerides();
+        (void)load_ephemeris("de440s");
+        const auto old = Json::parse(read(entries.at(0).manifest, 65536));
+        for (const auto &kernel : old.at("kernels")) {
+            if (kernel.at("kind") != "SPK_BODY_CENTRES")
+                continue;
+            const auto name = kernel.at("file").get<std::string>();
+            const auto supplement =
+                read(entries.at(0).manifest.parent_path() / name, 64 * 1024 * 1024);
+            check(picosha2::hash256_hex_string(supplement) ==
+                      kernel.at("sha256").get<std::string>(),
+                  "Installed planet-centre kernel changed");
+            write(stage.path / name, supplement);
+            manifest["kernels"].push_back(kernel);
+        }
+        if (manifest["kernels"].size() > 2) {
+            manifest["snapshot_id"] = "de440s-with-planetary-centres-v1";
+            manifest["model"] = "DE440s + imported planetary centres; ICRF/J2000";
+        }
+    }
     write(stage.path / "manifest.json", manifest.dump(2));
+    return install_ephemeris_snapshot_checked(stage.path / "manifest.json", acquisition, checkpoint,
+                                              previous);
+}
+CatalogEphemeris DataCatalog::install_ephemeris_snapshot(const std::filesystem::path &manifest,
+                                                         DataAcquisition acquisition,
+                                                         const std::function<void()> &checkpoint) {
+    return install_ephemeris_snapshot_checked(manifest, acquisition, checkpoint,
+                                              setting("ephemeris/de440s"));
+}
+CatalogEphemeris DataCatalog::install_ephemeris_snapshot_checked(
+    const std::filesystem::path &source, DataAcquisition acquisition,
+    const std::function<void()> &checkpoint, const std::string &expected_receipt) {
+    if (!ephemeris_available())
+        throw core::EphemerisDataError("This build does not include CSPICE");
+    Stage stage(impl_->root / "staging");
+    const auto bytes = read(source, 65536);
+    const auto manifest = Json::parse(bytes);
+    const auto &kernels = manifest.at("kernels");
+    check(kernels.is_array() && !kernels.empty() && kernels.size() <= 16,
+          "Invalid ephemeris kernel list");
+    const auto parent = std::filesystem::canonical(source).parent_path();
+    std::size_t total = 0;
+    std::set<std::filesystem::path> seen;
+    for (const auto &kernel : kernels) {
+        if (checkpoint)
+            checkpoint();
+        const std::filesystem::path name(kernel.at("file").get<std::string>());
+        check(!name.empty() && !name.has_parent_path() && name != "manifest.json" && name != "." &&
+                  name != ".." && !name.has_root_path(),
+              "Invalid ephemeris kernel filename");
+        const auto path = std::filesystem::canonical(parent / name);
+        check(path.parent_path() == parent && seen.insert(path).second,
+              "Ephemeris kernel escapes the snapshot or is duplicated");
+        const auto content = read(path, 64 * 1024 * 1024 - total);
+        total += content.size();
+        check(picosha2::hash256_hex_string(content) == kernel.at("sha256").get<std::string>(),
+              "Ephemeris kernel SHA256 mismatch");
+        write(stage.path / name, content);
+    }
+    write(stage.path / "manifest.json", bytes);
     const auto resource = make_third_body_ephemeris(
         load_spice_snapshot(stage.path / "manifest.json", impl_->root / "runtime"));
     const auto info = resource->data_info();
@@ -412,6 +479,8 @@ CatalogEphemeris DataCatalog::install_de440s(const std::filesystem::path &spk,
                       {"acquired_at", acquired}};
     std::lock_guard guard(impl_->mutex);
     Transaction transaction(impl_->db);
+    check(setting("ephemeris/de440s") == expected_receipt,
+          "Ephemeris changed during import; retry with the current snapshot");
     if (checkpoint)
         checkpoint();
     if (std::filesystem::exists(target)) {
@@ -424,6 +493,88 @@ CatalogEphemeris DataCatalog::install_de440s(const std::filesystem::path &spk,
     set_setting("ephemeris/de440s", record.dump());
     transaction.commit();
     return {"de440s", info, target / "manifest.json", acquisition, acquired};
+}
+CatalogEphemeris DataCatalog::install_planetary_centres(const std::filesystem::path &source,
+                                                        const std::string &url,
+                                                        DataAcquisition acquisition,
+                                                        const std::function<void()> &checkpoint) {
+#ifndef ORBITFORGE_HAS_SPICE
+    (void)source;
+    (void)url;
+    (void)acquisition;
+    (void)checkpoint;
+    throw core::EphemerisDataError("This build does not include CSPICE");
+#else
+    const auto previous = setting("ephemeris/de440s");
+    check(!previous.empty(), "Install DE440s before importing planet-centre ephemerides");
+    const auto entry = ephemerides().at(0);
+    (void)load_ephemeris("de440s");
+    Stage stage(impl_->root / "staging");
+    const auto staged_source = stage.path / "source.bsp";
+    std::ifstream input(source, std::ios::binary);
+    check(input.is_open(), "Cannot open supplemental planetary SPK");
+    std::ofstream output(staged_source, std::ios::binary);
+    picosha2::hash256_one_by_one hash;
+    std::array<char, 65536> buffer{};
+    std::uint64_t size = 0;
+    while (input) {
+        if (checkpoint)
+            checkpoint();
+        input.read(buffer.data(), buffer.size());
+        const auto count = input.gcount();
+        size += static_cast<std::uint64_t>(count);
+        check(size <= 2ULL * 1024 * 1024 * 1024, "Supplemental SPK exceeds 2 GiB");
+        hash.process(buffer.begin(), buffer.begin() + count);
+        output.write(buffer.data(), count);
+        check(static_cast<bool>(output), "Cannot stage supplemental SPK");
+    }
+    check(input.eof() && !input.bad(), "Cannot read supplemental SPK");
+    output.close();
+    check(static_cast<bool>(output), "Cannot close staged supplemental SPK");
+    hash.finish();
+    const auto source_hash = picosha2::get_hash_hex_string(hash);
+    const auto bodies =
+        providers::spice::extract_planetary_centres(staged_source, stage.path, checkpoint);
+    auto manifest = Json::parse(read(entry.manifest, 65536));
+    Json kernels = Json::array();
+    std::set<std::string> replacements;
+    for (auto id : bodies)
+        replacements.insert("centre-" + std::to_string(id) + ".bsp");
+    for (const auto &kernel : manifest.at("kernels")) {
+        const auto name = kernel.at("file").get<std::string>();
+        if (kernel.at("kind") == "SPK_BODY_CENTRES" && replacements.contains(name))
+            continue;
+        const auto content = read(entry.manifest.parent_path() / name, 64 * 1024 * 1024);
+        check(picosha2::hash256_hex_string(content) == kernel.at("sha256").get<std::string>(),
+              "Installed ephemeris changed during import");
+        write(stage.path / name, content);
+        kernels.push_back(kernel);
+    }
+    for (auto id : bodies) {
+        const auto name = "centre-" + std::to_string(id) + ".bsp";
+        const auto content = read(stage.path / name, 64 * 1024 * 1024);
+        kernels.push_back({{"file", name},
+                           {"kind", "SPK_BODY_CENTRES"},
+                           {"sha256", picosha2::hash256_hex_string(content)},
+                           {"source_url", url.empty() ? "urn:sha256:" + source_hash : url},
+                           {"source_sha256", source_hash},
+                           {"producer", "OrbitForge; CSPICE spksub physical-centre subset"}});
+    }
+    std::stable_sort(kernels.begin(), kernels.end(), [](const auto &a, const auto &b) {
+        const bool ca = a.at("kind") == "SPK_BODY_CENTRES";
+        const bool cb = b.at("kind") == "SPK_BODY_CENTRES";
+        if (ca != cb)
+            return !ca;
+        return ca &&
+               a.at("file").template get<std::string>() < b.at("file").template get<std::string>();
+    });
+    manifest["kernels"] = std::move(kernels);
+    manifest["snapshot_id"] = "de440s-with-planetary-centres-v1";
+    manifest["model"] = "DE440s + imported planetary centres; ICRF/J2000";
+    write(stage.path / "manifest.json", manifest.dump(2));
+    return install_ephemeris_snapshot_checked(stage.path / "manifest.json", acquisition, checkpoint,
+                                              previous);
+#endif
 }
 std::vector<CatalogEphemeris> DataCatalog::ephemerides() const {
     const auto value = setting("ephemeris/de440s");
@@ -1228,6 +1379,16 @@ namespace {
 bool data_catalog_available() noexcept { return false; }
 CatalogEphemeris DataCatalog::install_de440s(const std::filesystem::path &, DataAcquisition,
                                              const std::function<void()> &) {
+    unavailable();
+}
+CatalogEphemeris DataCatalog::install_ephemeris_snapshot(const std::filesystem::path &,
+                                                         DataAcquisition,
+                                                         const std::function<void()> &) {
+    unavailable();
+}
+CatalogEphemeris DataCatalog::install_planetary_centres(const std::filesystem::path &,
+                                                        const std::string &, DataAcquisition,
+                                                        const std::function<void()> &) {
     unavailable();
 }
 std::vector<CatalogEphemeris> DataCatalog::ephemerides() const { unavailable(); }

@@ -512,6 +512,10 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     file_layout->addWidget(manifest, 0, Qt::AlignLeft);
     actions->addStretch();
     acquisition_layout->addLayout(actions);
+    auto *planetary_centres = new QPushButton(QStringLiteral("导入行星本体星历…"));
+    planetary_centres->setObjectName("importPlanetaryCentres");
+    planetary_centres->setIcon(workbench_icon(WorkbenchIcon::folder));
+    acquisition_layout->addWidget(planetary_centres, 0, Qt::AlignLeft);
     // Update and extrapolation settings: two inspector groups, each opened by a switch.
     settings_layout->setSpacing(0);
     auto *automatic_row = new FormGroup(QStringLiteral("自动更新"));
@@ -708,8 +712,10 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         extrapolation_note->setVisible(item.extrapolation);
         download->setVisible(item.online_updates);
         raw->setVisible(item.raw_import);
-        manifest->setVisible(item.manifest_import);
-        manifest->setText(QStringLiteral("导入带清单的数据包…"));
+        manifest->setVisible(item.manifest_import || is_ephemeris);
+        manifest->setText(is_ephemeris ? QStringLiteral("导入星历数据包…")
+                                       : QStringLiteral("导入带清单的数据包…"));
+        planetary_centres->setVisible(is_ephemeris);
         automatic_row->setVisible(item.online_updates);
         schedule->setVisible(item.online_updates);
         const QSignalBlocker auto_block(automatic), frequency_block(frequency), allow_block(allow),
@@ -893,15 +899,37 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         catalog.start_download({}, *selected());
     });
     QObject::connect(manifest, &QPushButton::clicked, &dialog, [&] {
-        const auto file = QFileDialog::getOpenFileName(&dialog, QStringLiteral("导入 EOP 数据"), {},
-                                                       QStringLiteral("数据清单 (*.json)"));
+        const auto file = QFileDialog::getOpenFileName(&dialog,
+                                                       selected() == DataProduct::de440s
+                                                           ? QStringLiteral("导入星历数据包")
+                                                           : QStringLiteral("导入 EOP 数据"),
+                                                       {}, QStringLiteral("数据清单 (*.json)"));
         if (file.isEmpty())
             return;
         operation_error.clear();
         try {
-            const auto index = catalog.import_snapshot(std::filesystem::path(file.toStdWString()));
+            if (selected() == DataProduct::de440s) {
+                catalog.import_ephemeris_snapshot(std::filesystem::path(file.toStdWString()));
+                rebuild();
+            } else {
+                const auto index =
+                    catalog.import_snapshot(std::filesystem::path(file.toStdWString()));
+                rebuild();
+                select_provider(static_cast<int>(index));
+            }
+        } catch (const std::exception &error) {
+            show_error(error);
+        }
+    });
+    QObject::connect(planetary_centres, &QPushButton::clicked, &dialog, [&] {
+        const auto file = QFileDialog::getOpenFileName(&dialog, QStringLiteral("导入行星本体星历"),
+                                                       {}, QStringLiteral("SPICE 星历 (*.bsp)"));
+        if (file.isEmpty())
+            return;
+        operation_error.clear();
+        try {
+            catalog.import_planetary_centres(std::filesystem::path(file.toStdWString()));
             rebuild();
-            select_provider(static_cast<int>(index));
         } catch (const std::exception &error) {
             show_error(error);
         }
@@ -1037,6 +1065,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
                               : QStringLiteral("检查并更新"));
         download->setEnabled(!busy);
         raw->setEnabled(!busy);
+        planetary_centres->setEnabled(!busy);
         manifest->setEnabled(!busy);
         cancel->setVisible(downloading_this);
         progress->setVisible(downloading_this);

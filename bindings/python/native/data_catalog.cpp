@@ -146,6 +146,17 @@ void bind_data_catalog(py::module_ &module) {
             py::arg("file"), py::arg("model") = "celestrak", py::arg("source_url") = "",
             py::call_guard<py::gil_scoped_release>())
         .def(
+            "install_ephemeris_snapshot",
+            [](runtime::DataCatalog &catalog, const std::filesystem::path &manifest) {
+                return catalog.install_ephemeris_snapshot(manifest);
+            },
+            py::arg("manifest"), py::call_guard<py::gil_scoped_release>())
+        .def(
+            "install_planetary_centres",
+            [](runtime::DataCatalog &catalog, const std::filesystem::path &file,
+               const std::string &url) { return catalog.install_planetary_centres(file, url); },
+            py::arg("file"), py::arg("source_url") = "", py::call_guard<py::gil_scoped_release>())
+        .def(
             "install_de440s",
             [](runtime::DataCatalog &catalog, const std::filesystem::path &file) {
                 return catalog.install_de440s(file);

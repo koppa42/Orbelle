@@ -1,6 +1,6 @@
 # 统一数据中心
 
-当前实现包括 [Scenario 数据锁](scenario_data_lock.md)、SQLite 统一目录、左列表、右详情的数据管理窗口及有限 EOP 外推、IERS finals2000A 全量下载和应用运行期间的自动更新。C04 和 UTC／闰秒同样支持全量下载、独立自动更新及本地原文导入；地球重力场支持 EGM2008 / EGM96 全量下载和静态外部文件导入，太阳系星历支持 DE440s 全量下载和导入；海潮支持 FES2014bv1 POT 下载和外部 POT 导入。桌面首次启动必须准备完整基础数据；GP/OMM/TLE 的数据中心管理尚未接入。
+当前实现包括 [Scenario 数据锁](scenario_data_lock.md)、SQLite 统一目录、左列表、右详情的数据管理窗口及有限 EOP 外推、IERS finals2000A 全量下载和应用运行期间的自动更新。C04 和 UTC／闰秒同样支持全量下载、独立自动更新及本地原文导入；地球重力场支持 EGM2008 / EGM96 全量下载和静态外部文件导入，太阳系星历支持 DE440s 全量下载、显式快照与行星本体 SPK 导入；海潮支持 FES2014bv1 POT 下载和外部 POT 导入。桌面首次启动必须准备完整基础数据；GP/OMM/TLE 的数据中心管理尚未接入。
 
 ## 管理边界
 
@@ -107,6 +107,8 @@ project.save("gravity.orbitforge", analysis=analysis)
 本产品可计算覆盖为 **1850-01-01 00:00:00 TAI 至 2150-01-01 00:00:00 TAI**，是官方文件实际 SPK 覆盖内的保守区间。界面明确标注 TAI；历史或未来几何查询不依赖尚不存在的 UTC 闰秒表。将历元作为 UTC 输入、输出，或使用 EOP 时，仍分别遵守时间表和 EOP 的覆盖约束。DE440s 不按下载日期失效，也不允许通过 EOP 的外推设置延长星历覆盖。
 
 安装过程校验原文哈希及完整目标链的连续覆盖，生成带时间转换常数的清单，再原子发布到 `ephemerides/<manifest SHA-256>/`。SQLite 收据 `ephemeris/de440s` 记录获取方式、获取时间与可用范围；`DataCatalog.ephemerides()` 读取元数据，`load_ephemeris("de440s")` 校验清单、文件与只读运行副本。HPOP 支持日月、七颗行星及冥王星；安装时检查全部目标链的连续覆盖。
+
+“导入行星本体星历…”用于补齐火星、外行星及冥王星的 SRP 遮挡中心。导入前需有 DE440s；只提取本体相对系统质心的 J2000 片段，保留现有主星历和其他行星补充数据。文件信息页的“导入星历数据包…”接受显式 `manifest.json` 及同目录内核。两者均在后台运行，可取消，失败保留原数据；后续更新 DE440s 不丢失补充文件。输入与最终快照上限、覆盖和身份见[SPICE 契约](spice.md#行星本体补充星历)。文件信息从清单读取实际主 SPK 文件与哈希；历史片段快照可以按其覆盖范围使用，但不能满足首次启动的完整 DE440s 要求。HPOP 仍通过 Available / Assigned 分配遮挡体，不在力模型页管理安装状态。
 
 HPOP 使用地心几何位置（无光行时/像差），通过专用 ICRF 轴适配器求差分引力。配套 GM 为太阳 `1.3271244004127942e20`、月球 `4.9028001184575496e12` m³/s²，来自 [NAIF DE440 常数](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/gm_de440.tpc)。每个天体也可手动设置 GM，与位置星历分别记录。这里不构造或重标记一个相对论 GCRF 状态；时标使用 CSPICE 的均匀时间转换模型。有关轴约定见 [NAIF Frames](https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/req/frames.html)。
 

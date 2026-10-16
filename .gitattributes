@@ -25,3 +25,5 @@
 /tests/reference/propagators/weather_monthly.csv text eol=lf
 
 /modules/core/src/propagation/integrators/rklib-LICENSE.txt -text
+
+/data/samples/spice/mar099s_2016_leap/*.txt text eol=lf

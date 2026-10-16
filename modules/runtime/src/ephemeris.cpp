@@ -89,19 +89,26 @@ class ThirdBodyEphemeris final : public core::IThirdBodyEphemeris {
             std::none_of(info.kernels.begin(), info.kernels.end(),
                          [](const auto &k) { return k.kind == "SPK"; }) ||
             std::any_of(info.kernels.begin(), info.kernels.end(), [](const auto &k) {
-                return k.kind == "SPK" && k.source_sha256 != de440s_sha256;
+                return k.kind != "LSK" && k.kind != "SPK_BODY_CENTRES" &&
+                       (k.kind != "SPK" || k.source_sha256 != de440s_sha256);
             }))
             throw core::EphemerisDataError(
-                "HPOP currently supports ICRF-aligned DE440s ephemerides only");
-        info_ = {info.model,
-                 info.manifest_sha256,
-                 "de440-newtonian-geocentric-icrf-none-gm440-planets-tai-rate-v3;" +
-                     info.toolkit_version,
-                 info.first_epoch,
-                 info.last_epoch,
-                 de440_sun_mu,
-                 de440_moon_mu,
-                 de440_planet_mu};
+                "HPOP requires DE440s base ephemerides and validated planet-centre supplements");
+        const bool supplemented = std::ranges::any_of(
+            info.kernels, [](const auto &kernel) { return kernel.kind == "SPK_BODY_CENTRES"; });
+        info_ = {
+            info.model,
+            info.manifest_sha256,
+            std::string(supplemented
+                            ? "de440-newtonian-geocentric-icrf-none-gm440-planets-tai-rate-v4;"
+                              "body-centres=filtered-spk-v1;"
+                            : "de440-newtonian-geocentric-icrf-none-gm440-planets-tai-rate-v3;") +
+                info.toolkit_version,
+            info.first_epoch,
+            info.last_epoch,
+            de440_sun_mu,
+            de440_moon_mu,
+            de440_planet_mu};
     }
     std::array<double, 3> position(core::ThirdBody body, core::Epoch at) const override {
         const auto state = source_->geometric_state(core::third_body_naif_id(body), 399, at);

@@ -1108,8 +1108,8 @@ bool edit_hpop_settings(
         }
         box->addWidget(radii);
         auto *coverage = new QLabel(
-            QStringLiteral("DE440s 包含地月、水星和金星的本体中心。其他行星需要对应本体星历；"
-                           "系统质心不能用于遮挡计算。"));
+            QStringLiteral("DE440s 直接包含地月、水星和金星。火星及外行星的本体星历可在数据中心"
+                           "导入相应 SPK 文件；覆盖不足时停止计算。"));
         coverage->setObjectName("hint");
         coverage->setWordWrap(true);
         box->addWidget(coverage);
