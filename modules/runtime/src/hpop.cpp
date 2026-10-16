@@ -7,9 +7,9 @@
 #include <sstream>
 
 namespace orbitforge::runtime {
-application::Session make_hpop_session(core::CartesianState initial, core::HpopOptions options,
-                                       core::HpopEnvironment environment, std::string object_id,
-                                       std::uint64_t revision) {
+namespace {
+std::string hpop_algorithm(const core::HpopOptions &options,
+                           const core::HpopEnvironment &environment) {
     auto algorithm =
         std::string("hpop-cowell-gcrf-tai-v1;") +
         (options.integrator == core::HpopIntegrator::rkf78 ? "rkf78-7th-fehlberg-r287-v1;"
@@ -157,7 +157,36 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
                 {ephemeris_reference(options.ephemeris_model, environment.ephemeris->data_info())})
                 .sha256();
     }
+    return algorithm;
+}
+} // namespace
+application::Session make_hpop_session(core::CartesianState initial, core::HpopOptions options,
+                                       core::HpopEnvironment environment, std::string object_id,
+                                       std::uint64_t revision) {
+    auto algorithm = hpop_algorithm(options, environment);
     return {core::make_hpop(initial, options, std::move(environment)),
-            {std::move(object_id), revision, algorithm}};
+            {std::move(object_id), revision, std::move(algorithm)}};
+}
+application::Session make_hpop_ephemeris_session(core::CartesianState initial, core::Epoch end,
+                                                 core::HpopOptions options,
+                                                 core::HpopEnvironment environment,
+                                                 core::OrbitInterpolationOptions interpolation,
+                                                 std::int64_t reporting_step_nanoseconds,
+                                                 std::string object_id, std::uint64_t revision,
+                                                 const std::function<void()> &checkpoint) {
+    core::validate_orbit_interpolation(interpolation);
+    auto algorithm =
+        hpop_algorithm(options, environment) + ";ephemeris=continuous-accepted-gated-v1;from=" +
+        std::to_string(initial.epoch.tai_nanoseconds()) +
+        ";to=" + std::to_string(end.tai_nanoseconds()) +
+        ";report-ns=" + std::to_string(reporting_step_nanoseconds) +
+        ";interpolation=bracketed-nearest-v1;method=" +
+        (interpolation.method == core::OrbitInterpolationMethod::lagrange ? "lagrange"
+                                                                          : "hermite") +
+        ";interpolation-order=" + std::to_string(interpolation.order);
+    auto arcs = core::propagate_hpop_ephemeris(initial, end, options, std::move(environment),
+                                               reporting_step_nanoseconds, checkpoint);
+    return {core::make_tabulated_orbit(std::move(arcs), interpolation, checkpoint),
+            {std::move(object_id), revision, std::move(algorithm)}};
 }
 } // namespace orbitforge::runtime

@@ -1562,3 +1562,14 @@ def make_tabulated_orbit_session(
     object_id: str = "satellite-1",
     input_revision: int = 1,
 ) -> Session: ...
+
+def propagate_hpop_ephemeris(
+    input: OrbitInput, end: Epoch, *, reporting_step_nanoseconds: int = 0,
+    data: DataSnapshot = ..., cancelled: Callable[[], bool] | None = None,
+) -> list[list[CartesianState]]: ...
+
+def make_hpop_ephemeris_session(
+    input: OrbitInput, end: Epoch, interpolation: OrbitInterpolationOptions, *,
+    reporting_step_nanoseconds: int = 0, data: DataSnapshot = ...,
+    input_revision: int = 1, cancelled: Callable[[], bool] | None = None,
+) -> Session: ...

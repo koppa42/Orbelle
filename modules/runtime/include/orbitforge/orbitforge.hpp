@@ -2,6 +2,7 @@
 // Everyday SDK entry point. Link OrbitForge::Runtime; no Qt or Python dependency.
 #include <orbitforge/project.hpp>
 #include <orbitforge/runtime/gravity.hpp>
+#include <orbitforge/runtime/hpop.hpp>
 #include <orbitforge/runtime/ocean_tides.hpp>
 #include <orbitforge/runtime/tabulated_orbit.hpp>
 
@@ -37,6 +38,7 @@ using core::OrbitEphemerisArc;
 using core::OrbitInterpolationMethod;
 using core::OrbitInterpolationOptions;
 using core::OriginId;
+using core::propagate_hpop_ephemeris;
 using results::AccessWindows;
 using results::AerSeries;
 using results::ManeuverSeries;
@@ -46,6 +48,7 @@ using runtime::export_access_csv;
 using runtime::export_aer_csv;
 using runtime::export_report_csv;
 using runtime::export_trajectory_csv;
+using runtime::make_hpop_ephemeris_session;
 using runtime::make_tabulated_orbit_session;
 using runtime::ReportResult;
 } // namespace orbitforge

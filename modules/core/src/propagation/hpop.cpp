@@ -11,6 +11,7 @@
 namespace orbitforge::core {
 namespace {
 using State = std::array<double, 6>;
+using AcceptedStep = std::function<void(double, const State &, bool)>;
 std::function<double(Epoch)> sun_distance(const IThirdBodyEphemeris *ephemeris) {
     if (!ephemeris)
         return {};
@@ -53,14 +54,55 @@ class Hpop final : public IStateProvider {
     CartesianState initial_;
     HpopOptions options_;
     HpopEnvironment environment_;
+    std::optional<Epoch> ephemeris_end_;
     // Caches only full, epoch-anchored integration blocks. Partial queries cannot
     // alter the solution used by later queries. Both directions start at t=0.
     mutable std::mutex mutex_;
     mutable std::vector<State> forward_, backward_;
     mutable std::vector<detail::GaussJackson12> gj_forward_, gj_backward_;
+    void validate_duration(Epoch epoch) const {
+        const auto first = initial_.epoch.tai_nanoseconds(), last = epoch.tai_nanoseconds();
+        // Unsigned subtraction gives the exact distance, including opposite Epoch limits.
+        const auto duration =
+            first < last ? static_cast<std::uint64_t>(last) - static_cast<std::uint64_t>(first)
+                         : static_cast<std::uint64_t>(first) - static_cast<std::uint64_t>(last);
+        constexpr auto maximum =
+            static_cast<std::uint64_t>(hpop_max_duration_seconds) * 1'000'000'000ULL;
+        if (duration > maximum)
+            throw PropagationError("HPOP query exceeds 366 days from the initial epoch");
+    }
+    void validate_interval(Epoch epoch) const {
+        validate_duration(epoch);
+        const double t = epoch.seconds_since(initial_.epoch);
+        environment_.validate_weather_interval(
+            options_.drag,
+            Epoch{std::min(epoch.tai_nanoseconds(), initial_.epoch.tai_nanoseconds())},
+            Epoch{std::max(epoch.tai_nanoseconds(), initial_.epoch.tai_nanoseconds())});
+        environment_.validate_ephemeris_interval(options_, t < 0 ? epoch : initial_.epoch,
+                                                 t < 0 ? initial_.epoch : epoch);
+        if (options_.uses_eop_force() && !eop_covers(environment_.eop->data_info(), epoch))
+            throw EopCoverageError(
+                "HPOP integration requires EOP covering the initial and query epochs");
+        if (options_.uses_utc_force())
+            (void)environment_.time->to_utc(epoch);
+    }
     Epoch epoch_at(double seconds) const {
-        const auto offset = static_cast<std::int64_t>(std::llround(seconds * 1e9));
         const auto start = initial_.epoch.tai_nanoseconds();
+        if (ephemeris_end_) {
+            const double finish = ephemeris_end_->seconds_since(initial_.epoch);
+            if (seconds < std::min(0., finish) || seconds > std::max(0., finish))
+                throw PropagationError("HPOP stage exceeds the requested coast");
+            if (seconds == finish)
+                return *ephemeris_end_;
+        }
+        auto offset = static_cast<std::int64_t>(std::llround(seconds * 1e9));
+        if (ephemeris_end_) {
+            // A long relative double interval can round past an integer-ns endpoint.
+            // Preserve the exact coast coverage after rounding; this cannot extend it.
+            const auto end_offset = ephemeris_end_->tai_nanoseconds() - start;
+            offset = std::clamp(offset, std::min(std::int64_t{0}, end_offset),
+                                std::max(std::int64_t{0}, end_offset));
+        }
         if ((offset > 0 && start > std::numeric_limits<std::int64_t>::max() - offset) ||
             (offset < 0 && start < std::numeric_limits<std::int64_t>::min() - offset))
             throw PropagationError("HPOP stage epoch exceeds the representable time range");
@@ -476,7 +518,8 @@ class Hpop final : public IStateProvider {
         throw std::invalid_argument("Unsupported HPOP integrator");
     }
     State integrate(State state, double t, double end, std::size_t &attempts,
-                    const std::function<void()> &checkpoint) const {
+                    const std::function<void()> &checkpoint, const AcceptedStep &accepted = {},
+                    double *continued_step = nullptr) const {
         // A large allowed ceiling is not a suitable first trial in a low orbit:
         // huge RK stages can enter the body before an error estimate is available.
         // Seed from local gravitational and crossing time scales, then let error
@@ -487,6 +530,9 @@ class Hpop final : public IStateProvider {
         const double crossing = speed > 0 ? radius / speed : dynamical;
         double step = std::clamp(.1 * std::min(dynamical, crossing), options_.min_step_seconds,
                                  options_.max_step_seconds);
+        if (continued_step && *continued_step > 0)
+            step =
+                std::clamp(*continued_step, options_.min_step_seconds, options_.max_step_seconds);
         while (t != end) {
             if (checkpoint)
                 checkpoint();
@@ -505,10 +551,13 @@ class Hpop final : public IStateProvider {
                 !std::all_of(next.begin(), next.end(), [](double v) { return std::isfinite(v); }))
                 throw PropagationError("HPOP integration produced a nonfinite result");
             if (error <= 1) {
+                const bool at_boundary = boundary && magnitude == std::abs(*boundary - t);
                 state = next;
                 t = magnitude == remaining ? end : t + h;
                 // Validate the accepted endpoint as well as all RK stages.
                 (void)derivative(t, state);
+                if (accepted)
+                    accepted(at_boundary ? *boundary : t, state, at_boundary);
             } else if (magnitude <= options_.min_step_seconds) {
                 throw PropagationError("HPOP cannot meet tolerance at the minimum step");
             }
@@ -517,11 +566,14 @@ class Hpop final : public IStateProvider {
             step = std::clamp(magnitude * factor, options_.min_step_seconds,
                               options_.max_step_seconds);
         }
+        if (continued_step)
+            *continued_step = step;
         return state;
     }
 
     State integrate_fixed(State state, double t, double end, std::size_t first_node,
-                          std::size_t &attempts, const std::function<void()> &checkpoint) const {
+                          std::size_t &attempts, const std::function<void()> &checkpoint,
+                          const AcceptedStep &accepted = {}) const {
         const double step = std::copysign(options_.fixed_step_seconds, end - t);
         std::size_t node = first_node;
         while (t != end) {
@@ -535,13 +587,16 @@ class Hpop final : public IStateProvider {
                 if (++attempts > max_attempts)
                     throw PropagationError(
                         "HPOP exceeded 200000 integration attempts in one query");
-                const double target = weather_boundary(t, stop).value_or(stop);
+                const auto boundary = weather_boundary(t, stop);
+                const double target = boundary.value_or(stop);
                 const double h = target - t;
                 if (h == 0 || t + h == t)
                     throw PropagationError("HPOP fixed integration step cannot advance time");
                 state = trial_step(t, state, h, checkpoint).value;
                 (void)derivative(target, state);
                 t = target;
+                if (accepted)
+                    accepted(t, state, boundary.has_value());
             }
         }
         return state;
@@ -612,7 +667,8 @@ class Hpop final : public IStateProvider {
     detail::GaussJackson12 gauss_jackson_integrate(detail::GaussJackson12 history, double begin,
                                                    double end, std::size_t first_node,
                                                    std::size_t &attempts,
-                                                   const std::function<void()> &checkpoint) const {
+                                                   const std::function<void()> &checkpoint,
+                                                   const AcceptedStep &accepted = {}) const {
         const double h = std::copysign(options_.fixed_step_seconds, end - begin);
         double t = begin;
         std::size_t node = 0;
@@ -625,12 +681,14 @@ class Hpop final : public IStateProvider {
                 throw PropagationError("HPOP fixed step cannot advance time");
             // Weather jumps invalidate all backward differences. Bridge every such
             // interval with a one-sided starter, then build a new history on the grid.
-            bool bridge = until != nominal;
+            bool bridge = until != nominal || t != static_cast<double>(first_node + node - 1) * h;
             while (const auto boundary = weather_boundary(t, until)) {
                 history.state =
                     gauss_jackson_startup(history.state, t, *boundary, attempts, checkpoint);
                 history.reset();
                 t = *boundary;
+                if (accepted)
+                    accepted(t, history.state, true);
                 bridge = true;
                 if (t == until)
                     break;
@@ -665,6 +723,8 @@ class Hpop final : public IStateProvider {
                 }
             }
             t = until;
+            if (accepted)
+                accepted(t, history.state, false);
         }
         return history;
     }
@@ -708,9 +768,13 @@ class Hpop final : public IStateProvider {
     }
 
   public:
-    Hpop(CartesianState initial, HpopOptions options, HpopEnvironment environment)
-        : initial_(initial), options_(options), environment_(std::move(environment)) {
+    Hpop(CartesianState initial, HpopOptions options, HpopEnvironment environment,
+         std::optional<Epoch> ephemeris_end = {})
+        : initial_(initial), options_(options), environment_(std::move(environment)),
+          ephemeris_end_(ephemeris_end) {
         validate_hpop_options(options_);
+        if (ephemeris_end_)
+            validate_duration(*ephemeris_end_);
         environment_.validate_ephemeris_interval(options_, initial.epoch, initial.epoch);
         if (options_.gravity_model.empty())
             environment_.gravity = builtin_egm96();
@@ -749,26 +813,99 @@ class Hpop final : public IStateProvider {
         forward_.push_back(value);
         backward_.push_back(value);
     }
+    std::vector<OrbitEphemerisArc> ephemeris(Epoch end, std::int64_t reporting_step,
+                                             const std::function<void()> &checkpoint) const {
+        if (checkpoint)
+            checkpoint();
+        if (reporting_step < 0 || reporting_step > 86400'000'000'000LL)
+            throw std::invalid_argument("HPOP reporting step must be 0..86400 seconds");
+        validate_interval(end);
+        if (end == initial_.epoch)
+            return {{initial_}};
+        // The duration check above makes this integer subtraction safe even near Epoch limits.
+        const auto offset = end.tai_nanoseconds() - initial_.epoch.tai_nanoseconds();
+        const std::int64_t sign = offset < 0 ? -1 : 1, duration = offset * sign;
+        const double finish = end.seconds_since(initial_.epoch);
+        std::vector<OrbitEphemerisArc> arcs{{initial_}};
+        State value{};
+        for (std::size_t i = 0; i < 3; ++i) {
+            value[i] = initial_.position_m[i];
+            value[i + 3] = initial_.velocity_mps[i];
+        }
+        detail::GaussJackson12 history;
+        history.state = value;
+        std::size_t attempts = 0;
+        double at = 0, continued_step = 0;
+        std::int64_t elapsed = 0;
+        while (elapsed < duration) {
+            const auto next = reporting_step == 0
+                                  ? duration
+                                  : elapsed + std::min(reporting_step, duration - elapsed);
+            const Epoch gate{initial_.epoch.tai_nanoseconds() + sign * next};
+            const double until = gate.seconds_since(initial_.epoch);
+            if (until == at)
+                throw PropagationError("HPOP reporting step is unresolved in relative time");
+            const auto accepted = [&](double time, const State &state, bool boundary) {
+                if (reporting_step && !boundary && time != until)
+                    return;
+                // Reporting gates and the requested stop retain their exact integer epochs.
+                const auto when = time == until ? gate : epoch_at(time);
+                const auto previous = arcs.back().back().epoch.tai_nanoseconds();
+                if ((sign > 0 && when.tai_nanoseconds() <= previous) ||
+                    (sign < 0 && when.tai_nanoseconds() >= previous))
+                    throw PropagationError("HPOP accepted ephemeris nodes are not distinct");
+                if ((sign > 0 && when.tai_nanoseconds() > end.tai_nanoseconds()) ||
+                    (sign < 0 && when.tai_nanoseconds() < end.tai_nanoseconds()))
+                    throw PropagationError("HPOP accepted node exceeds the requested coast");
+                CartesianState node{when,
+                                    OriginId::earth,
+                                    FrameId::gcrf,
+                                    {state[0], state[1], state[2]},
+                                    {state[3], state[4], state[5]}};
+                arcs.back().push_back(node);
+                if (boundary && when != end)
+                    arcs.push_back({node});
+            };
+            if (options_.uses_fixed_step()) {
+                auto first_node = static_cast<std::size_t>(
+                    std::floor(std::abs(at) / options_.fixed_step_seconds));
+                const auto grid = [&](std::size_t n) { return n * options_.fixed_step_seconds; };
+                if (first_node && grid(first_node) > std::abs(at))
+                    --first_node;
+                if (grid(first_node + 1) <= std::abs(at))
+                    ++first_node;
+                if (options_.integrator == HpopIntegrator::gauss_jackson) {
+                    history = gauss_jackson_integrate(history, at, until, first_node, attempts,
+                                                      checkpoint, accepted);
+                    value = history.state;
+                } else {
+                    value = integrate_fixed(value, at, until, first_node, attempts, checkpoint,
+                                            accepted);
+                }
+            } else {
+                value =
+                    integrate(value, at, until, attempts, checkpoint, accepted, &continued_step);
+            }
+            at = until;
+            elapsed = next;
+        }
+        if (checkpoint)
+            checkpoint();
+        if (finish < 0) {
+            for (auto &arc : arcs)
+                std::reverse(arc.begin(), arc.end());
+            std::reverse(arcs.begin(), arcs.end());
+        }
+        return arcs;
+    }
     CartesianState state_at(Epoch epoch) const override { return state_at(epoch, {}); }
     CartesianState state_at(Epoch epoch, const std::function<void()> &checkpoint) const override {
         if (checkpoint)
             checkpoint();
         const double t = epoch.seconds_since(initial_.epoch);
-        if (std::abs(t) > hpop_max_duration_seconds)
-            throw PropagationError("HPOP query exceeds 366 days from the initial epoch");
         if (epoch == initial_.epoch)
             return initial_;
-        environment_.validate_weather_interval(
-            options_.drag,
-            Epoch{std::min(epoch.tai_nanoseconds(), initial_.epoch.tai_nanoseconds())},
-            Epoch{std::max(epoch.tai_nanoseconds(), initial_.epoch.tai_nanoseconds())});
-        environment_.validate_ephemeris_interval(options_, t < 0 ? epoch : initial_.epoch,
-                                                 t < 0 ? initial_.epoch : epoch);
-        if (options_.uses_eop_force() && !eop_covers(environment_.eop->data_info(), epoch))
-            throw EopCoverageError(
-                "HPOP integration requires EOP covering the initial and query epochs");
-        if (options_.uses_utc_force())
-            (void)environment_.time->to_utc(epoch);
+        validate_interval(epoch);
         if (options_.uses_fixed_step()) {
             std::size_t attempts = 0;
             const auto value = options_.integrator == HpopIntegrator::gauss_jackson
@@ -936,5 +1073,15 @@ void HpopEnvironment::validate_weather_interval(const DragOptions &drag, Epoch f
         weather->validate_interval(first, last, *time, AtmosphereModel::nrlmsise00,
                                    drag.geomagnetic_update, drag.geomagnetic_source,
                                    sun_distance(ephemeris.get()));
+}
+std::vector<OrbitEphemerisArc> propagate_hpop_ephemeris(CartesianState initial, Epoch end,
+                                                        HpopOptions options,
+                                                        HpopEnvironment environment,
+                                                        std::int64_t reporting_step_nanoseconds,
+                                                        const std::function<void()> &checkpoint) {
+    if (checkpoint)
+        checkpoint();
+    return Hpop(initial, std::move(options), std::move(environment), end)
+        .ephemeris(end, reporting_step_nanoseconds, checkpoint);
 }
 } // namespace orbitforge::core

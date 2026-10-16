@@ -1004,3 +1004,150 @@ TEST(Hpop, GaussJacksonPseudoCorrectionSavesOnlyTheFinalFullForceEvaluation) {
     RecordProperty("full_force_evaluations", std::to_string(evaluations[0]));
     RecordProperty("pseudo_force_evaluations", std::to_string(evaluations[1]));
 }
+
+TEST(HpopEphemeris, AcceptedAndReportedEndpointsMatchIndependentHipparchus) {
+    for (const auto integrator : {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+                                  HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
+        for (const auto reporting : {0LL, 120'123'456'789LL}) {
+            std::ifstream file{ORBITFORGE_BS_REFERENCE};
+            ASSERT_TRUE(file.good());
+            HpopEnvironment environment{std::make_shared<FixedFrames>(),
+                                        std::make_shared<FixedEop>()};
+            environment.ephemeris = std::make_shared<MovingMoon>();
+            std::string line;
+            int count = 0;
+            double max_r = 0, max_v = 0;
+            while (std::getline(file, line)) {
+                if (line.empty() || line[0] == '#')
+                    continue;
+                SCOPED_TRACE(line);
+                SCOPED_TRACE(static_cast<int>(integrator));
+                SCOPED_TRACE(reporting);
+                std::istringstream row{line};
+                int kind;
+                double seconds;
+                CartesianState initial{Epoch{0}, OriginId::earth, FrameId::gcrf, {}, {}},
+                    expected = initial;
+                row >> kind >> seconds;
+                for (auto &v : initial.position_m)
+                    row >> v;
+                for (auto &v : initial.velocity_mps)
+                    row >> v;
+                for (auto &v : expected.position_m)
+                    row >> v;
+                for (auto &v : expected.velocity_mps)
+                    row >> v;
+                ASSERT_TRUE(row);
+                expected.epoch = Epoch{std::llround(seconds * 1e9)};
+                auto options = point_mass();
+                options.integrator = integrator;
+                options.fixed_step_seconds = integrator == HpopIntegrator::rk4 ? 2 : 30;
+                options.gravity_degree = kind ? 2 : 0;
+                options.relative_tolerance = 1e-14;
+                options.position_tolerance_m = 1e-8;
+                options.velocity_tolerance_mps = 1e-11;
+                options.max_step_seconds = 60;
+                options.third_body(ThirdBody::moon).enabled = kind == 2;
+                const auto arcs = propagate_hpop_ephemeris(initial, expected.epoch, options,
+                                                           environment, reporting);
+                ASSERT_EQ(arcs.size(), 1U);
+                ASSERT_GE(arcs.front().size(), 2U);
+                const auto &actual = seconds > 0 ? arcs.back().back() : arcs.front().front();
+                EXPECT_EQ(actual.epoch, expected.epoch);
+                const auto er = position_error(actual, expected);
+                const auto ev = std::hypot(actual.velocity_mps[0] - expected.velocity_mps[0],
+                                           actual.velocity_mps[1] - expected.velocity_mps[1],
+                                           actual.velocity_mps[2] - expected.velocity_mps[2]);
+                EXPECT_LT(er, .005);
+                EXPECT_LT(ev, 5e-6);
+                max_r = std::max(max_r, er);
+                max_v = std::max(max_v, ev);
+                for (std::size_t i = 1; i < arcs[0].size(); ++i)
+                    EXPECT_GT(arcs[0][i].epoch.tai_nanoseconds(),
+                              arcs[0][i - 1].epoch.tai_nanoseconds());
+                ++count;
+            }
+            EXPECT_EQ(count, 60);
+            const auto key =
+                std::to_string(static_cast<int>(integrator)) + "_" + std::to_string(reporting);
+            RecordProperty(key + "_r_m", max_r);
+            RecordProperty(key + "_v_mps", max_v);
+        }
+    }
+}
+TEST(HpopEphemeris, FixedGridOutputAndExactNanosecondEndpointsWorkInBothDirections) {
+    for (const auto integrator : {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+                                  HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
+        auto o = point_mass();
+        o.integrator = integrator;
+        o.step_control = HpopStepControl::fixed;
+        o.fixed_step_seconds = 10;
+        for (auto start : {-8'000'000'000'000'000'000LL, 8'000'000'000'000'000'000LL}) {
+            for (auto direction : {-1LL, 1LL}) {
+                auto initial = circular();
+                initial.epoch = Epoch{start};
+                const Epoch end{start + direction * 123'123'456'789LL};
+                const auto accepted = propagate_hpop_ephemeris(initial, end, o);
+                ASSERT_EQ(accepted.size(), 1U);
+                EXPECT_EQ(accepted[0].size(), 14U);
+                const auto reported =
+                    propagate_hpop_ephemeris(initial, end, o, {}, 7'100'000'000LL);
+                ASSERT_EQ(reported.size(), 1U);
+                ASSERT_EQ(reported[0].size(), 19U);
+                for (std::size_t i = 0; i < reported[0].size(); ++i) {
+                    const auto n = direction > 0 ? i : reported[0].size() - 1 - i;
+                    const auto offset =
+                        std::min(static_cast<std::int64_t>(n) * 7'100'000'000LL, 123'123'456'789LL);
+                    EXPECT_EQ(reported[0][i].epoch, Epoch{start + direction * offset});
+                }
+            }
+        }
+    }
+    auto o = point_mass();
+    o.integrator = HpopIntegrator::rkf78;
+    const auto tiny = propagate_hpop_ephemeris(circular(), Epoch{31}, o, {}, 1);
+    ASSERT_EQ(tiny[0].size(), 32U);
+    for (std::size_t i = 0; i < tiny[0].size(); ++i)
+        EXPECT_EQ(tiny[0][i].epoch, Epoch{static_cast<std::int64_t>(i)});
+}
+TEST(HpopEphemeris, RejectsInvalidCoverageAndCancellationWithoutPartialPublication) {
+    auto o = point_mass();
+    for (auto sign : {-1LL, 1LL}) {
+        const Epoch outside{sign * (366LL * 86400'000'000'000LL + 1)};
+        EXPECT_THROW((void)propagate_hpop_ephemeris(circular(), outside, o), PropagationError);
+        EXPECT_THROW((void)make_hpop(circular(), o)->state_at(outside), PropagationError);
+    }
+    auto extreme = circular();
+    extreme.epoch = Epoch{std::numeric_limits<std::int64_t>::min()};
+    EXPECT_THROW(
+        (void)propagate_hpop_ephemeris(extreme, Epoch{std::numeric_limits<std::int64_t>::max()}, o),
+        PropagationError);
+    EXPECT_THROW((void)propagate_hpop_ephemeris(circular(), Epoch{1}, o, {}, -1),
+                 std::invalid_argument);
+    EXPECT_THROW((void)propagate_hpop_ephemeris(circular(), Epoch{1}, o, {}, 86400'000'000'001LL),
+                 std::invalid_argument);
+    EXPECT_THROW((void)propagate_hpop_ephemeris(circular(), Epoch{367LL * 86400'000'000'000LL}, o),
+                 PropagationError);
+    int calls = 0;
+    EXPECT_THROW((void)propagate_hpop_ephemeris(circular(), Epoch{600'000'000'000LL}, o, {}, 0,
+                                                [&] {
+                                                    if (++calls == 8)
+                                                        throw std::runtime_error("cancel nodes");
+                                                }),
+                 std::runtime_error);
+    const auto retry = propagate_hpop_ephemeris(circular(), Epoch{600'000'000'000LL}, o);
+    const auto fresh = propagate_hpop_ephemeris(circular(), Epoch{600'000'000'000LL}, o);
+    EXPECT_EQ(retry.back().back().position_m, fresh.back().back().position_m);
+    const auto instant = propagate_hpop_ephemeris(circular(), Epoch{0}, o);
+    ASSERT_EQ(instant.size(), 1U);
+    ASSERT_EQ(instant[0].size(), 1U);
+    EXPECT_EQ(instant[0][0].position_m, circular().position_m);
+    auto initial = circular();
+    initial.position_m = {1e10, 0, 0};
+    initial.velocity_mps = {0, std::sqrt(egm96_mu / 1e10), 0};
+    o.step_control = HpopStepControl::fixed;
+    o.fixed_step_seconds = 86400;
+    EXPECT_THROW((void)propagate_hpop_ephemeris(initial, Epoch{256LL * 86400'000'000'000LL + 1}, o,
+                                                {}, 86400'000'000'000LL),
+                 PropagationError);
+}

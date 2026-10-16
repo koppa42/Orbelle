@@ -9,6 +9,7 @@
 #include <orbitforge/core/propagation/solar_radiation_pressure.hpp>
 #include <orbitforge/core/propagation/solid_tides.hpp>
 #include <orbitforge/core/propagation/state_provider.hpp>
+#include <orbitforge/core/propagation/tabulated_orbit.hpp>
 #include <orbitforge/core/propagation/third_body.hpp>
 #include <string_view>
 #include <vector>
@@ -150,4 +151,17 @@ struct HpopEnvironment {
 // tolerance or work limit. Cancellation checkpoints may throw; no partial result.
 [[nodiscard]] std::shared_ptr<const IStateProvider>
 make_hpop(CartesianState initial, HpopOptions options = {}, HpopEnvironment environment = {});
+// Propagate one coast from initial.epoch to end, in either direction. Returned arcs own
+// GCRF / TAI / SI nodes, sorted chronologically, with duplicate shared weather boundaries.
+// A reporting step of zero retains accepted integration endpoints (GJ startup internals are
+// not output nodes). A positive integer-nanosecond step forces integration to stop on an
+// initial-epoch-anchored reporting grid; output includes both endpoints and weather jumps.
+// No stages are evaluated outside this coast. Cannot cross a maneuver: the caller must
+// start a new coast with the post-impulse state. Node generation does not choose/reduce an
+// interpolation order. Same resource checks and 366-day / 200000-attempt limit as HPOP;
+// reporting steps must be 0..86400 s and resolvable in relative double time.
+// Cancellation/failure returns no partial ephemeris and changes no existing provider.
+[[nodiscard]] std::vector<OrbitEphemerisArc> propagate_hpop_ephemeris(
+    CartesianState initial, Epoch end, HpopOptions options = {}, HpopEnvironment environment = {},
+    std::int64_t reporting_step_nanoseconds = 0, const std::function<void()> &checkpoint = {});
 } // namespace orbitforge::core

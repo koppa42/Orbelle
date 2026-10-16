@@ -1,5 +1,6 @@
 #include <orbitforge/runtime/analysis.hpp>
 #include <orbitforge/runtime/data_catalog.hpp>
+#include <orbitforge/runtime/hpop.hpp>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl/filesystem.h>
@@ -284,4 +285,41 @@ void bind_analysis(py::module_ &module) {
                                py::return_value_policy::copy)
         .def("prepare", &runtime::AnalysisPlan::prepare, py::arg("accept_data_changes") = false,
              py::call_guard<py::gil_scoped_release>());
+    module.def(
+        "propagate_hpop_ephemeris",
+        [](application::OrbitInput input, core::Epoch end, std::int64_t report_ns,
+           runtime::DataSnapshot data, py::object callback) {
+            if (input.propagator != application::OrbitPropagator::hpop)
+                throw std::invalid_argument(
+                    "Ephemeris generation requires one HPOP coast; split missions at impulses");
+            const auto cancelled = cancellation(callback);
+            py::gil_scoped_release release;
+            return core::propagate_hpop_ephemeris(input.initial, end, input.hpop,
+                                                  data.force_environment(input), report_ns, [&] {
+                                                      if (cancelled && cancelled())
+                                                          throw runtime::AnalysisCancelled{};
+                                                  });
+        },
+        py::arg("input"), py::arg("end"), py::kw_only(), py::arg("reporting_step_nanoseconds") = 0,
+        py::arg("data") = runtime::DataSnapshot{}, py::arg("cancelled") = py::none());
+    module.def(
+        "make_hpop_ephemeris_session",
+        [](application::OrbitInput input, core::Epoch end,
+           core::OrbitInterpolationOptions interpolation, std::int64_t report_ns,
+           runtime::DataSnapshot data, std::uint64_t revision, py::object callback) {
+            if (input.propagator != application::OrbitPropagator::hpop)
+                throw std::invalid_argument(
+                    "Ephemeris generation requires one HPOP coast; split missions at impulses");
+            const auto cancelled = cancellation(callback);
+            py::gil_scoped_release release;
+            return runtime::make_hpop_ephemeris_session(
+                input.initial, end, input.hpop, data.force_environment(input), interpolation,
+                report_ns, input.object_id, revision, [&] {
+                    if (cancelled && cancelled())
+                        throw runtime::AnalysisCancelled{};
+                });
+        },
+        py::arg("input"), py::arg("end"), py::arg("interpolation"), py::kw_only(),
+        py::arg("reporting_step_nanoseconds") = 0, py::arg("data") = runtime::DataSnapshot{},
+        py::arg("input_revision") = 1, py::arg("cancelled") = py::none());
 }

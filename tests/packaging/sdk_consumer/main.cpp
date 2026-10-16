@@ -7,6 +7,7 @@
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/demo.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
+#include <orbitforge/runtime/hpop.hpp>
 #include <orbitforge/runtime/j4.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/report.hpp>
@@ -15,6 +16,26 @@
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 int main(int argc, char **argv) try {
+    {
+        using namespace orbitforge::core;
+        HpopOptions options;
+        options.gravity_degree = options.gravity_order = 0;
+        const CartesianState initial{Epoch{0},
+                                     OriginId::earth,
+                                     FrameId::gcrf,
+                                     {7e6, 0, 0},
+                                     {0, std::sqrt(egm96_mu / 7e6), 0}};
+        const auto nodes = propagate_hpop_ephemeris(initial, Epoch{600'000'000'000LL}, options, {},
+                                                    30'000'000'000LL);
+        if (nodes.size() != 1 || nodes[0].size() != 21)
+            return 44;
+        const auto session = orbitforge::runtime::make_hpop_ephemeris_session(
+            initial, Epoch{600'000'000'000LL}, options, {}, {OrbitInterpolationMethod::hermite, 7},
+            30'000'000'000LL);
+        const auto state = session.sample(std::array{Epoch{17'123'456'789LL}}).states().front();
+        if (!std::isfinite(state.position_m[0]))
+            return 45;
+    }
     {
         using namespace orbitforge::core;
         const OrbitEphemerisArc nodes{
