@@ -177,7 +177,8 @@ std::string report_input_sha256(const application::Project &project) {
         s.model_path.clear();
         s.model_diameter_m = 1'000'000;
         s.orbit.input_frame = core::FrameId::gcrf;
-        s.orbit.step_seconds = 60;
+        if (!s.orbit.uses_hpop() || !s.orbit.hpop.report_ephemeris_on_fixed_step)
+            s.orbit.step_seconds = 60;
         if (s.orbit.propagator == OrbitPropagator::sgp4)
             s.orbit.initial = OrbitInput{}.initial; // Inactive manual draft is not a TLE input.
         for (auto &segment : s.orbit.mission.segments)

@@ -19,7 +19,7 @@ class ProjectFormatTests(unittest.TestCase):
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 34)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 35)
         self.path.write_bytes(self.raw)
         project = of.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
@@ -34,6 +34,9 @@ class ProjectFormatTests(unittest.TestCase):
         self.assertEqual(hpop.integrator, "gauss_jackson")
         self.assertEqual(hpop.correction, "pseudo")
         self.assertEqual(hpop.step_control, "fixed")
+        self.assertEqual(hpop.interpolation, "hermite")
+        self.assertEqual(hpop.interpolation_order, 5)
+        self.assertTrue(hpop.report_ephemeris_on_fixed_step)
         self.assertEqual(hpop.drag_area_m2, 37.5)
         self.assertEqual(hpop.srp_area_m2, 37.5)
         drag = hpop.drag
@@ -66,14 +69,14 @@ class ProjectFormatTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(),raw)
 
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(34), 35, 0xFFFFFFFF):
+        for version in (*range(35), 36, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (of.load_project_data, of.load_project,
                                  of.Project.open, of.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 34"):
+                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 35"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 
@@ -213,6 +216,21 @@ class ProjectFormatTests(unittest.TestCase):
                        for tag, version, original in sections]
             with self.subTest(offset=offset, value=value):
                 self.path.write_bytes(with_sections(self.raw, altered))
+                with self.assertRaises(of.ProjectError):
+                    of.load_project_data(self.path)
+
+    def test_invalid_interpolation_fields_with_valid_crcs_are_rejected(self):
+        prefix = struct.pack("<IIBdIII7d", 30, 12, 0, 1250, 4, 1, 1, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
+        for offset, encoding, value in ((0, "I", 2), (4, "I", 4), (4, "I", 30), (4, "I", 0xFFFFFFFF), (8, "B", 2)):
+            with self.subTest(offset=offset, value=value):
+                sections = []
+                for tag, version, original in read_sections(self.raw):
+                    body = bytearray(original)
+                    if tag == b"OBJS":
+                        self.assertEqual(body.count(prefix), 1)
+                        struct.pack_into("<" + encoding, body, body.index(prefix) + len(prefix) + offset, value)
+                    sections.append((tag, version, body))
+                self.path.write_bytes(with_sections(self.raw, sections))
                 with self.assertRaises(of.ProjectError):
                     of.load_project_data(self.path)
 

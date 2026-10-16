@@ -61,6 +61,8 @@ struct OrbitInput {
     }
     std::string object_id = "satellite-1";
     core::Epoch first{0}, last{7'200'000'000'000};
+    // Display sampling; also the scientific ephemeris grid when HPOP fixed reporting is enabled.
+    // Currently whole SI seconds in [1, 60], independent of report/query sampling.
     int step_seconds = 60;
 };
 enum class LineStyle : std::uint32_t { solid, dashed, dotted, dash_dot };

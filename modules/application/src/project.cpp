@@ -25,7 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 34;
+constexpr std::uint32_t project_version = 35;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -43,7 +43,7 @@ struct SectionSchema {
 // One current schema, shared by the reader and writer. Null means an optional section.
 constexpr std::array section_schemas{
     SectionSchema{scene_tag, 1, "Missing scene section"},
-    SectionSchema{objects_tag, 25, "Missing satellites section"},
+    SectionSchema{objects_tag, 26, "Missing satellites section"},
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
     SectionSchema{sensors_tag, 1, "Missing sensors section"},
@@ -391,6 +391,11 @@ std::string analysis_input_sha256(const Project &project) {
             out.number(o.include_relativistic_accelerations, 1);
             out.number(static_cast<unsigned>(o.integrator), 4);
             out.real(o.minimum_altitude_m);
+            out.number(static_cast<unsigned>(o.interpolation.method), 4);
+            out.number(static_cast<unsigned>(o.interpolation.order), 4);
+            out.number(o.report_ephemeris_on_fixed_step, 1);
+            if (o.report_ephemeris_on_fixed_step)
+                out.number(static_cast<unsigned>(orbit.step_seconds), 4);
             if (o.integrator == core::HpopIntegrator::gauss_jackson)
                 out.number(static_cast<unsigned>(o.correction), 4);
             out.number(o.uses_fixed_step(), 1);
@@ -498,7 +503,7 @@ void validate_project(const Project &project, bool relationships) {
             check(std::isfinite(value), "Nonfinite project position");
         for (const auto value : input.initial.velocity_mps)
             check(std::isfinite(value), "Nonfinite project velocity");
-        check(input.step_seconds >= 1 && input.step_seconds <= 60, "Invalid display step");
+        check(input.step_seconds >= 1 && input.step_seconds <= 60, "Invalid orbit step");
         if (input.propagator == OrbitPropagator::mission) {
             try {
                 const auto end = core::validate_mission(input.initial.epoch, input.mission);
@@ -812,6 +817,9 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
                              o.min_step_seconds, o.max_step_seconds, o.fixed_step_seconds,
                              o.minimum_altitude_m})
                 objects.real(v);
+            objects.number(static_cast<unsigned>(o.interpolation.method), 4);
+            objects.number(static_cast<unsigned>(o.interpolation.order), 4);
+            objects.number(o.report_ephemeris_on_fixed_step, 1);
             write_srp(objects, o.srp);
             write_drag(objects, o.drag);
         }
@@ -1023,6 +1031,13 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             o.max_step_seconds = objects.real();
             o.fixed_step_seconds = objects.real();
             o.minimum_altitude_m = objects.real();
+            const auto interpolation = objects.number(4);
+            check(interpolation <= 1, "Unsupported HPOP interpolation method");
+            o.interpolation.method = static_cast<core::OrbitInterpolationMethod>(interpolation);
+            const auto interpolation_order = objects.number(4);
+            check(interpolation_order <= 29, "Unsupported HPOP interpolation order");
+            o.interpolation.order = static_cast<int>(interpolation_order);
+            o.report_ephemeris_on_fixed_step = objects.boolean();
             o.srp = read_srp(objects);
             o.drag = read_drag(objects);
         }

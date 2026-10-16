@@ -65,11 +65,20 @@ application::Session make_orbit_session(const application::OrbitInput &input,
                 "SGP4 requires an explicit time provider for the TLE epoch");
         return make_sgp4_session(input.tle, *time, input.object_id, revision);
     case application::OrbitPropagator::hpop:
-        return make_hpop_session(input.initial, input.hpop, std::move(environment), input.object_id,
-                                 revision);
+        return make_hpop_interpolated_session(
+            input.initial, input.first, input.last, input.hpop, std::move(environment),
+            input.hpop.report_ephemeris_on_fixed_step
+                ? static_cast<std::int64_t>(input.step_seconds) * 1'000'000'000LL
+                : 0,
+            input.object_id, revision);
     case application::OrbitPropagator::mission:
         return make_mission_session(input.initial, input.mission, input.hpop,
-                                    std::move(environment), input.object_id, revision);
+                                    std::move(environment), input.object_id, revision,
+                                    input.hpop.report_ephemeris_on_fixed_step
+                                        ? static_cast<std::int64_t>(input.step_seconds) *
+                                              1'000'000'000LL
+                                        : 0,
+                                    input.last);
     }
     throw std::invalid_argument("Unsupported orbit propagator");
 }

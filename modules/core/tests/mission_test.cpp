@@ -26,7 +26,9 @@ CartesianState initial() {
     return {Epoch{0}, OriginId::earth, FrameId::gcrf, {7e6, 0, 0}, {0, 7500, 0}};
 }
 CoastFactory linear() {
-    return [](CartesianState state) { return std::make_shared<LinearCoast>(state); };
+    return [](CartesianState state, Epoch, const std::function<void()> &) {
+        return std::make_shared<LinearCoast>(state);
+    };
 }
 } // namespace
 TEST(Mission, SequentialImpulsesAreRightContinuousAndQueriesIndependent) {
@@ -125,7 +127,9 @@ TEST(Mission, HpopPointMassHohmannTransferMatchesAnalyticApoapsisAndCircularizat
     for (auto integrator : {HpopIntegrator::rkf78, HpopIntegrator::gauss_jackson}) {
         options.integrator = integrator;
         const auto provider = make_mission(
-            start, plan, [options](CartesianState state) { return make_hpop(state, options); });
+            start, plan, [options](CartesianState state, Epoch, const std::function<void()> &) {
+                return make_hpop(state, options);
+            });
         const auto apo = provider->state_at(Epoch{transfer.count()});
         EXPECT_NEAR(apo.position_m[0], -r2, 0.02);
         EXPECT_NEAR(apo.position_m[1], 0, 0.02);

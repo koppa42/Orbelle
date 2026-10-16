@@ -1,6 +1,6 @@
 # 科学轨道星历插值
 
-`core::make_tabulated_orbit` 与 `runtime::make_tabulated_orbit_session` 接收显式的 `OrbitEphemerisArc` 数组，拥有不可变节点副本。桌面显示轨迹不进入这个接口；它是科学查询的计算基础。`propagate_hpop_ephemeris` 已能生成真实 HPOP 节点，`make_hpop_ephemeris_session` 将其接到同一插值实现，详见下文。当前普通项目 HPOP、项目分析及报告仍使用原来的直接积分，尚未自动使用这些显式工厂，也没有新增可点击的 HPOP 插值配置。
+`core::make_tabulated_orbit` 与 `runtime::make_tabulated_orbit_session` 接收显式的 `OrbitEphemerisArc` 数组，拥有不可变节点副本。桌面显示轨迹不进入这个接口；它是科学查询的计算基础。`propagate_hpop_ephemeris` 已能生成真实 HPOP 节点，`make_hpop_ephemeris_session` 将其接到同一插值实现，详见下文。普通项目、任务 HPOP 滑行、分析与报告已自动使用有界科学星历；积分器页配置插值方法、阶数与固定输出。直接积分工厂保留为数值内核和对照入口。
 
 ## 数学语义
 
@@ -20,7 +20,7 @@
 - `discontinuities()` 返回段连接/缺口边界；零阶额外返回各跳变节点。当前接口不从任意节点猜测机动或生成 `ManeuverEvent`。
 - 创建时校验全部输入，取消或失败不发布对象；查询无可变缓存，随机顺序及并发读取互不影响。复制进入接口的数组、原始 Session 或选项之后修改，均不影响已发布对象。结果保有查询历元和来源信息。
 
-来源字符串记录算法版本、方法和阶数，调用者提供对象 ID 和输入修订。它不是外部节点文件的内容哈希，也不会把一份任意表接入项目的数据引用。HPOP 显式工厂已记录节点输出、分段、插值及区间身份；普通项目接入仍需要参数身份、持久化、UI、报告和取消流程的完整验收。
+来源字符串记录算法版本、方法和阶数，调用者提供对象 ID 和输入修订。它不是外部节点文件的内容哈希，也不会把一份任意表接入项目的数据引用。HPOP 显式工厂已记录节点输出、分段、插值及区间身份；项目身份、持久化、UI 与报告采用同一配置，首次生成通过可取消的查询路径执行。
 
 ## C++ 与 Python
 
@@ -56,9 +56,9 @@ assert state.velocity_mps == [3, 0, 0]
 
 `runtime::make_hpop_ephemeris_session` 先生成完整滑行段，再构造不可变插值 Session。它要求显式的插值方法与阶数；每个天气段都必须有足够节点，否则构造失败。它不自动降阶、延长传播或在查询时切回积分。此工厂是一次有界、可取消的传播操作，失败不返回部分结果；已生成 Session 的查询没有后续力模型求值。来源记录初始/结束 TAI 纳秒、固定输出间隔、方法、阶数及实际力环境身份。
 
-两种入口均限定距初始历元最多 366 天、整次生成最多 200000 次积分尝试，输出间隔为 0–86400 s。输出网格不能在相对 double 秒中分辨时明确报错，不能复制前一状态冒充新积分结果。所有积分阶段均限于请求的滑行区间；结束历元保留精确整数纳秒，长区间浮点取整不会向外扩展力模型覆盖。不为补齐插值点向外查询数据。接口仅接受单段 HPOP；任务序列的自动分段装配仍待接入。调用者手动接续机动时，应在机动历元结束该段，用机动后状态创建下一段。
+两种入口均限定距初始历元最多 366 天、整次生成最多 200000 次积分尝试，输出间隔为 0–86400 s。输出网格不能在相对 double 秒中分辨时明确报错，不能复制前一状态冒充新积分结果。所有积分阶段均限于请求的滑行区间；结束历元保留精确整数纳秒，长区间浮点取整不会向外扩展力模型覆盖。不为补齐插值点向外查询数据。这两个显式接口仅接受单段 HPOP；任务序列通过下述有界工厂自动装配各滑行段。调用者手动接续机动时，应在机动历元结束该段，用机动后状态创建下一段。
 
-Python 使用同名入口，`input` 为低层 `OrbitInput`，必须选择 HPOP；资源通过显式 `DataSnapshot` 捕获，`cancelled` 为返回 bool 的回调。传播范围由 `input.initial.epoch` 与显式 `end` 决定，不使用 `input.first`、`input.last` 或 `input.step_seconds`；输出间隔通过上述纳秒参数单独指定。高层 `Project.prepare()` 的默认查询路径暂不改变：
+Python 使用同名入口，`input` 为低层 `OrbitInput`，必须选择 HPOP；资源通过显式 `DataSnapshot` 捕获，`cancelled` 为返回 bool 的回调。传播范围由 `input.initial.epoch` 与显式 `end` 决定，不使用 `input.first`、`input.last` 或 `input.step_seconds`；输出间隔通过上述纳秒参数单独指定。这是低层显式输出入口；高层 `Project.prepare()` 按对象保存的设置装配，见后文：
 
 ```python
 import math
@@ -82,3 +82,17 @@ state = session.sample([of.Epoch(17_123_456_789)]).states[0]
 ```
 
 这是一段显式的点质量测试轨道。非中心引力、第三体、阻力、光压等照常要求对应的数据快照，不隐式下载或查找本机数据。输入与资源在调用时捕获；后续修改输入、取消另一次生成或销毁原数组均不影响已生成 Session。
+
+## 项目、机动与桌面
+
+`core::make_hpop_interpolated(initial, first, last, options, environment, reporting_step_nanoseconds)` 与 Runtime 同名 Session 工厂只允许在 `[first,last]` 内查询。构造检查从初始历元至整个区间的资源覆盖和参数；首次状态或间断查询才生成完整前向/反向滑行段，并发布不可变节点。取消与失败不发布半成品，之后可重试；发布后查询不再求力。可取消入口包括 `state_at(epoch, checkpoint)`、`discontinuities(checkpoint)`、报告与桌面后台准备；Python 单点 `Analysis.state()` 仍是同步接口。
+
+接受节点模式在短滑行或短天气段内增加实际积分终点，以满足指定阶数所需点数。触发条件为该段长度小于 `(所需点数−1) × 有效最大步长`；内部支持时刻按整数纳秒等分，保留初始固定积分网格及真实接受端点。所有点位于该段内，不延长资源覆盖、不降阶。过短而不能表示足够独立纳秒时刻的段明确失败。这个支持点政策是 OrbitForge 的实现，尚未取得 STK 实机对照。
+
+固定输出模式严格使用显式网格和天气边界，不补额外支持点。如果任一天气段或机动滑行段的点数不足以满足所选阶数，生成失败；用户需减小轨道步长或选择合法的较低阶数。零时长且等于初始历元的段返回精确初态，允许同一时刻连续机动和最终机动，不构造假节点。
+
+任务工厂将每次脉冲的精确历元传给 `CoastFactory(initial, end, checkpoint)`；下一段从机动后状态重新生成。项目只计算到自己的结束历元，结束时的全部同历元脉冲仍按顺序执行。天气边界、插值跳变和机动历元合并到间断列表，插值窗口不跨这些边界。任务计划在项目结束之后的部分仍保存并验证结构，但不向那部分请求力模型资源。
+
+`HpopOptions.interpolation` 默认 Hermite 7，`report_ephemeris_on_fixed_step` 默认关闭。高层 Python 使用 `Hpop(interpolation="lagrange", interpolation_order=7, report_ephemeris_on_fixed_step=True)`；开启固定输出时，`Orbit.step_seconds`（目前 1–60 整数秒）决定星历节点网格，可通过 `dataclasses.replace(orbit, step_seconds=5)` 设置。报告和 `analysis.states()` 的查询步长仍各自独立。显式低层工厂以自己的输出间隔参数为准。
+
+桌面积分器页支持两种方法、合法阶数和固定输出开关，方法切换保留各自未应用的阶数草稿；确认时统一校验，取消不改输入。轨道页名称为“轨道步长”。插值方法/阶数、输出开关随项目 v35 / OBJS26 保存；固定输出启用时轨道步长同时进入分析和报告身份，关闭时仅是显示设置。旧分析持有原配置与资源，编辑不改变已有查询结果。VOP、协方差插值与 STK 同配置数值验收仍未完成。

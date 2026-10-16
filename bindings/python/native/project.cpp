@@ -290,6 +290,9 @@ void bind_project(py::module_ &module) {
         .def_readwrite("min_step_seconds", &core::HpopOptions::min_step_seconds)
         .def_readwrite("max_step_seconds", &core::HpopOptions::max_step_seconds)
         .def_readwrite("fixed_step_seconds", &core::HpopOptions::fixed_step_seconds)
+        .def_readwrite("interpolation", &core::HpopOptions::interpolation)
+        .def_readwrite("report_ephemeris_on_fixed_step",
+                       &core::HpopOptions::report_ephemeris_on_fixed_step)
         .def_readwrite("minimum_altitude_m", &core::HpopOptions::minimum_altitude_m)
         .def("validate", &core::validate_hpop_options);
     py::class_<application::OrbitInput>(module, "OrbitInput")

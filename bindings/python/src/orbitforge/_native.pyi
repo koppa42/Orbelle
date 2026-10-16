@@ -1071,6 +1071,8 @@ class HpopOptions:
     min_step_seconds: float
     max_step_seconds: float
     fixed_step_seconds: float
+    interpolation: OrbitInterpolationOptions
+    report_ephemeris_on_fixed_step: bool
     minimum_altitude_m: float
     def validate(self) -> None: ...
 

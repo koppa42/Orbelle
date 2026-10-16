@@ -645,6 +645,35 @@ TEST_F(WeatherFiles, HpopEphemerisSplitsTheLeapSecondWeatherJumpInBothDirections
                     }
                 }
             }
+            // Force an interpolation stencil inside each three-second weather arc.
+            // No support point may be borrowed from the opposite side of the jump.
+            const core::Epoch short_first{boundary.tai_nanoseconds() - 3'000'000'000},
+                short_last{boundary.tai_nanoseconds() + 3'000'000'000};
+            auto short_initial = input.initial;
+            short_initial.epoch = reverse ? short_last : short_first;
+            auto fine = input.hpop;
+            fine.integrator = HpopIntegrator::rkv89;
+            fine.step_control = HpopStepControl::relative_error;
+            fine.max_step_seconds = .2;
+            fine.min_step_seconds = 1e-6;
+            const auto reference = runtime::make_hpop_session(short_initial, fine, env);
+            for (auto method :
+                 {OrbitInterpolationMethod::lagrange, OrbitInterpolationMethod::hermite}) {
+                auto options = input.hpop;
+                options.interpolation = {method, 7};
+                const auto session = make_hpop_interpolated_session(short_initial, short_first,
+                                                                    short_last, options, env);
+                EXPECT_EQ(session.discontinuities(), (std::vector<core::Epoch>{boundary}));
+                for (auto shift : {-1LL, 0LL, 1LL}) {
+                    const std::array epochs{core::Epoch{boundary.tai_nanoseconds() + shift}};
+                    const auto actual = session.sample(epochs).states()[0],
+                               expected = reference.sample(epochs).states()[0];
+                    for (std::size_t axis = 0; axis < 3; ++axis) {
+                        EXPECT_NEAR(actual.position_m[axis], expected.position_m[axis], .001);
+                        EXPECT_NEAR(actual.velocity_mps[axis], expected.velocity_mps[axis], 1e-6);
+                    }
+                }
+            }
         }
     }
 }

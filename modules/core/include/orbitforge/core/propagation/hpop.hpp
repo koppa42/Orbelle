@@ -120,6 +120,11 @@ struct HpopOptions {
     double position_tolerance_m = 1e-3, velocity_tolerance_mps = 1e-6;
     double min_step_seconds = 0.001, max_step_seconds = 60;
     double fixed_step_seconds = 10; // Effective fixed mode; no truncation error control.
+    // Scientific state queries in project/mission sessions use this interpolation.
+    // The direct make_hpop kernel remains available for integration/reference queries.
+    OrbitInterpolationOptions interpolation;
+    // Uses OrbitInput.step_seconds as the reporting interval when enabled.
+    bool report_ephemeris_on_fixed_step = false;
     // Geocentric altitude above the selected model's reference sphere, at each force evaluation.
     double minimum_altitude_m = 0;
     bool operator==(const HpopOptions &) const = default;
@@ -164,4 +169,14 @@ make_hpop(CartesianState initial, HpopOptions options = {}, HpopEnvironment envi
 [[nodiscard]] std::vector<OrbitEphemerisArc> propagate_hpop_ephemeris(
     CartesianState initial, Epoch end, HpopOptions options = {}, HpopEnvironment environment = {},
     std::int64_t reporting_step_nanoseconds = 0, const std::function<void()> &checkpoint = {});
+// Captures validated resources and lazily generates complete coasts covering [first, last]
+// on the first query. All queries use scientific interpolation afterwards. Generation can
+// be cancelled through state_at/discontinuities checkpoints; a failed cache is never published.
+// Accepted-node mode adds in-coast integration stops where needed to support the requested
+// order. Fixed reporting mode preserves its grid and rejects arcs with too few nodes.
+// Instantaneous [initial, initial] coasts return that exact state without interpolation.
+[[nodiscard]] std::shared_ptr<const IStateProvider>
+make_hpop_interpolated(CartesianState initial, Epoch first, Epoch last, HpopOptions options = {},
+                       HpopEnvironment environment = {},
+                       std::int64_t reporting_step_nanoseconds = 0);
 } // namespace orbitforge::core

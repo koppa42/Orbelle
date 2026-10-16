@@ -407,9 +407,9 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     step_->setObjectName("displayStep");
     step_->set_range(1, 60, Unit::second);
     step_->set_quantum(1, Unit::second);
-    step_->set_label(QStringLiteral("显示步长"));
+    step_->set_label(QStringLiteral("轨道步长"));
     step_->setMaximumWidth(QWIDGETSIZE_MAX);
-    form->addRow(QStringLiteral("显示步长"), step_);
+    form->addRow(QStringLiteral("轨道步长"), step_);
     span_group->add_help(QStringLiteral("分析时段由所属场景统一管理，可在场景设置中修改。"));
     time_row(QStringLiteral("起点"), first_);
     time_row(QStringLiteral("终点"), last_);

@@ -19,4 +19,11 @@ namespace orbitforge::runtime {
     core::HpopEnvironment environment, core::OrbitInterpolationOptions interpolation,
     std::int64_t reporting_step_nanoseconds = 0, std::string object_id = "satellite-1",
     std::uint64_t input_revision = 1, const std::function<void()> &checkpoint = {});
+// Project/mission query path: lazily prepare bounded scientific interpolation, using
+// options.interpolation; reporting step zero retains accepted nodes. See the Core contract.
+[[nodiscard]] application::Session make_hpop_interpolated_session(
+    core::CartesianState initial, core::Epoch first, core::Epoch last,
+    core::HpopOptions options = {}, core::HpopEnvironment environment = {},
+    std::int64_t reporting_step_nanoseconds = 0, std::string object_id = "satellite-1",
+    std::uint64_t input_revision = 1);
 } // namespace orbitforge::runtime

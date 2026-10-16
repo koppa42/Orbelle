@@ -1133,6 +1133,40 @@ bool edit_hpop_settings(
     help(integration, QStringLiteral("输出采样间隔独立设置。容差约束单步数值误差，不代表轨道预报的"
                                      "实际精度。固定步长不进行误差控制；RK4 和 Gauss–Jackson "
                                      "仅支持固定步长，Bulirsch–Stoer 固定模式使用 18 阶外推。"));
+    auto *interpolation_form =
+        section(integration_page, QStringLiteral("星历插值"), "hpopInterpolationSection");
+    auto *interpolation = new QComboBox;
+    interpolation->setObjectName("hpopInterpolation");
+    interpolation->addItems(
+        {QStringLiteral("Lagrange · 拉格朗日"), QStringLiteral("Hermitian · 埃尔米特")});
+    interpolation->setCurrentIndex(static_cast<int>(options.interpolation.method));
+    interpolation_form->addRow(QStringLiteral("方法"), interpolation);
+    auto *interpolation_order = new QSpinBox;
+    interpolation_order->setObjectName("hpopInterpolationOrder");
+    std::array<int, 2> interpolation_drafts{7, 7};
+    interpolation_drafts[static_cast<std::size_t>(interpolation->currentIndex())] =
+        options.interpolation.order;
+    const auto update_interpolation = [=, &interpolation_drafts] {
+        const QSignalBlocker blocker(interpolation_order);
+        const bool hermite = interpolation->currentIndex() == 1;
+        interpolation_order->setRange(hermite ? 3 : 0, 29);
+        interpolation_order->setSingleStep(hermite ? 2 : 1);
+        interpolation_order->setValue(
+            interpolation_drafts[static_cast<std::size_t>(interpolation->currentIndex())]);
+    };
+    QObject::connect(interpolation, &QComboBox::currentIndexChanged, &dialog, update_interpolation);
+    QObject::connect(interpolation_order, &QSpinBox::valueChanged, &dialog, [&](int value) {
+        interpolation_drafts[static_cast<std::size_t>(interpolation->currentIndex())] = value;
+    });
+    update_interpolation();
+    interpolation_form->addRow(QStringLiteral("阶数"), interpolation_order);
+    auto *fixed_ephemeris = new QCheckBox(QStringLiteral("按轨道步长固定输出星历"));
+    fixed_ephemeris->setObjectName("hpopFixedEphemeris");
+    fixed_ephemeris->setChecked(options.report_ephemeris_on_fixed_step);
+    interpolation_form->addRow(fixed_ephemeris);
+    help(interpolation_form, QStringLiteral("Lagrange 分别插值位置和速度；Hermitian "
+                                            "联合使用位置与速度，阶数必须为奇数。固定输出使用轨道页"
+                                            "的步长；关闭时使用实际积分端点。"));
     auto *stop = section(integration_page, QStringLiteral("停止条件"), "hpopStopSection");
     auto *altitude =
         quantity(stop, QStringLiteral("最低地心高度"), "hpopMinimumAltitude", Unit::metre,
@@ -1719,6 +1753,11 @@ bool edit_hpop_settings(
             } else {
                 candidate.fixed_step_seconds = read(fixed, Unit::second);
             }
+            validation_field = interpolation_order;
+            candidate.interpolation = {
+                static_cast<core::OrbitInterpolationMethod>(interpolation->currentIndex()),
+                interpolation_order->value()};
+            candidate.report_ephemeris_on_fixed_step = fixed_ephemeris->isChecked();
             core::validate_hpop_options(candidate);
             options = candidate;
             dialog.accept();

@@ -813,8 +813,13 @@ class Hpop final : public IStateProvider {
         forward_.push_back(value);
         backward_.push_back(value);
     }
+    void validate_range(Epoch first, Epoch last) const {
+        validate_interval(first);
+        validate_interval(last);
+    }
     std::vector<OrbitEphemerisArc> ephemeris(Epoch end, std::int64_t reporting_step,
-                                             const std::function<void()> &checkpoint) const {
+                                             const std::function<void()> &checkpoint,
+                                             std::size_t minimum_nodes = 1) const {
         if (checkpoint)
             checkpoint();
         if (reporting_step < 0 || reporting_step > 86400'000'000'000LL)
@@ -836,11 +841,45 @@ class Hpop final : public IStateProvider {
         history.state = value;
         std::size_t attempts = 0;
         double at = 0, continued_step = 0;
+        std::vector<std::int64_t> support_gates;
+        if (minimum_nodes > 1 && !reporting_step) {
+            // Short coasts/weather arcs still need a complete polynomial stencil. Add
+            // real integration endpoints inside that arc, without extending coverage or
+            // lowering the selected order. Longer arcs retain the configured step grid.
+            const auto intervals = static_cast<std::int64_t>(minimum_nodes - 1);
+            const double ceiling = options_.uses_fixed_step() ? options_.fixed_step_seconds
+                                                              : options_.max_step_seconds;
+            std::int64_t begin = 0;
+            while (begin < duration) {
+                if (checkpoint)
+                    checkpoint();
+                const Epoch begin_epoch{initial_.epoch.tai_nanoseconds() + sign * begin};
+                const auto boundary =
+                    weather_boundary(begin_epoch.seconds_since(initial_.epoch), finish);
+                const auto stop = boundary ? sign * (epoch_at(*boundary).tai_nanoseconds() -
+                                                     initial_.epoch.tai_nanoseconds())
+                                           : duration;
+                if (stop <= begin || stop > duration)
+                    throw PropagationError("HPOP support interval cannot advance time");
+                const auto span = stop - begin;
+                if (static_cast<double>(span) * 1e-9 < intervals * ceiling) {
+                    if (span < intervals)
+                        throw PropagationError(
+                            "HPOP coast has too few distinct epochs for interpolation order");
+                    for (std::int64_t i = 1; i < intervals; ++i)
+                        support_gates.push_back(begin + span * i / intervals);
+                }
+                support_gates.push_back(stop);
+                begin = stop;
+            }
+        }
+        std::size_t gate_index = 0;
         std::int64_t elapsed = 0;
         while (elapsed < duration) {
-            const auto next = reporting_step == 0
-                                  ? duration
-                                  : elapsed + std::min(reporting_step, duration - elapsed);
+            const auto next =
+                reporting_step == 0
+                    ? (support_gates.empty() ? duration : support_gates.at(gate_index++))
+                    : elapsed + std::min(reporting_step, duration - elapsed);
             const Epoch gate{initial_.epoch.tai_nanoseconds() + sign * next};
             const double until = gate.seconds_since(initial_.epoch);
             if (until == at)
@@ -951,6 +990,80 @@ class Hpop final : public IStateProvider {
                 {value[3], value[4], value[5]}};
     }
 };
+class InterpolatedHpop final : public IStateProvider {
+  public:
+    InterpolatedHpop(CartesianState initial, Epoch first, Epoch last, HpopOptions options,
+                     HpopEnvironment environment, std::int64_t reporting)
+        : initial_(initial), first_(first), last_(last), options_(std::move(options)),
+          environment_(std::move(environment)), reporting_(reporting) {
+        if (first.tai_nanoseconds() > last.tai_nanoseconds())
+            throw std::invalid_argument("HPOP interpolation interval must be ordered");
+        if (reporting < 0 || reporting > 86400'000'000'000LL)
+            throw std::invalid_argument("HPOP reporting step must be 0..86400 seconds");
+        Hpop(initial_, options_, environment_).validate_range(first, last);
+    }
+    CartesianState state_at(Epoch epoch) const override { return state_at(epoch, {}); }
+    CartesianState state_at(Epoch epoch, const std::function<void()> &checkpoint) const override {
+        if (checkpoint)
+            checkpoint();
+        if (epoch.tai_nanoseconds() < first_.tai_nanoseconds() ||
+            epoch.tai_nanoseconds() > last_.tai_nanoseconds())
+            throw PropagationError("Epoch is outside the HPOP interpolation interval");
+        if (first_ == initial_.epoch && last_ == initial_.epoch)
+            return initial_;
+        return prepared(checkpoint)->state_at(epoch, checkpoint);
+    }
+    std::vector<Epoch> discontinuities() const override { return discontinuities({}); }
+    std::vector<Epoch> discontinuities(const std::function<void()> &checkpoint) const override {
+        if (checkpoint)
+            checkpoint();
+        if (first_ == initial_.epoch && last_ == initial_.epoch)
+            return {};
+        auto result = prepared(checkpoint)->discontinuities(checkpoint);
+        std::erase_if(result, [&](Epoch e) {
+            return e.tai_nanoseconds() < first_.tai_nanoseconds() ||
+                   e.tai_nanoseconds() > last_.tai_nanoseconds();
+        });
+        return result;
+    }
+
+  private:
+    std::shared_ptr<const IStateProvider> prepared(const std::function<void()> &checkpoint) const {
+        std::lock_guard lock(mutex_);
+        if (checkpoint)
+            checkpoint();
+        if (!prepared_) {
+            std::vector<OrbitEphemerisArc> arcs;
+            const auto count = static_cast<std::size_t>(options_.interpolation.method ==
+                                                                OrbitInterpolationMethod::hermite
+                                                            ? (options_.interpolation.order + 1) / 2
+                                                            : options_.interpolation.order + 1);
+            const auto append = [&](Epoch end) {
+                auto part = Hpop(initial_, options_, environment_, end)
+                                .ephemeris(end, reporting_, checkpoint, count);
+                for (auto &arc : part)
+                    arcs.push_back(std::move(arc));
+            };
+            if (first_.tai_nanoseconds() < initial_.epoch.tai_nanoseconds())
+                append(first_);
+            if (last_.tai_nanoseconds() > initial_.epoch.tai_nanoseconds())
+                append(last_);
+            auto candidate =
+                make_tabulated_orbit(std::move(arcs), options_.interpolation, checkpoint);
+            if (checkpoint)
+                checkpoint();
+            prepared_ = std::move(candidate);
+        }
+        return prepared_;
+    }
+    CartesianState initial_;
+    Epoch first_, last_;
+    HpopOptions options_;
+    HpopEnvironment environment_;
+    std::int64_t reporting_;
+    mutable std::mutex mutex_;
+    mutable std::shared_ptr<const IStateProvider> prepared_;
+};
 } // namespace
 void HpopEnvironment::validate_ephemeris_interval(const HpopOptions &options, Epoch first,
                                                   Epoch last) const {
@@ -986,6 +1099,7 @@ double HpopOptions::srp_area_m2() const {
     return compatible_area(satellite_mass_kg, srp.area_mass_ratio_m2_per_kg);
 }
 void validate_hpop_options(const HpopOptions &o) {
+    validate_orbit_interpolation(o.interpolation);
     (void)o.drag_area_m2();
     (void)o.srp_area_m2();
     validate_solid_tide_options(o.solid_tides);
@@ -1083,5 +1197,11 @@ std::vector<OrbitEphemerisArc> propagate_hpop_ephemeris(CartesianState initial, 
         checkpoint();
     return Hpop(initial, std::move(options), std::move(environment), end)
         .ephemeris(end, reporting_step_nanoseconds, checkpoint);
+}
+std::shared_ptr<const IStateProvider>
+make_hpop_interpolated(CartesianState initial, Epoch first, Epoch last, HpopOptions options,
+                       HpopEnvironment environment, std::int64_t reporting_step_nanoseconds) {
+    return std::make_shared<InterpolatedHpop>(initial, first, last, std::move(options),
+                                              std::move(environment), reporting_step_nanoseconds);
 }
 } // namespace orbitforge::core

@@ -2,6 +2,8 @@
 #include <future>
 #include <gtest/gtest.h>
 #include <orbitforge/orbitforge.hpp>
+#include <orbitforge/runtime/project.hpp>
+#include <orbitforge/runtime/report.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 
 using namespace orbitforge;
@@ -180,4 +182,222 @@ TEST(HpopEphemerisSession, StagesStayInTheExactCoastAndQueriesNeedNoForceProvide
             EXPECT_EQ(moon->calls, calls);
         }
     }
+}
+
+TEST(HpopProjectInterpolation, ShortForwardBackwardAndSplitIntervalsMatchCspice) {
+    if (!runtime::two_body_available()) {
+        GTEST_SKIP();
+    }
+    double max_r = 0, max_v = 0;
+    for (auto method : {OrbitInterpolationMethod::lagrange, OrbitInterpolationMethod::hermite}) {
+        for (auto integrator : {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+                                HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
+            for (auto bounds :
+                 {std::pair{-45LL, -30LL}, {-1LL, 1LL}, {30LL, 45LL}, {0LL, 1LL}, {-1LL, 0LL}}) {
+                SCOPED_TRACE(static_cast<int>(method));
+                SCOPED_TRACE(static_cast<int>(integrator));
+                SCOPED_TRACE(bounds.first);
+                SCOPED_TRACE(bounds.second);
+                application::OrbitInput input;
+                input.propagator = OrbitPropagator::hpop;
+                input.initial = {Epoch{8'000'000'000'000'000'000LL},
+                                 core::OriginId::earth,
+                                 FrameId::gcrf,
+                                 {7e6, 0, 0},
+                                 {0, std::sqrt(core::egm96_mu / 7e6), 0}};
+                input.first =
+                    Epoch{input.initial.epoch.tai_nanoseconds() + bounds.first * 1'000'000'000};
+                input.last =
+                    Epoch{input.initial.epoch.tai_nanoseconds() + bounds.second * 1'000'000'000};
+                input.hpop.gravity_degree = input.hpop.gravity_order = 0;
+                input.hpop.integrator = integrator;
+                input.hpop.fixed_step_seconds = 2;
+                input.hpop.interpolation = {method, 7};
+                const auto session = runtime::make_orbit_session(input);
+                EXPECT_NE(session.provenance().algorithm.find("bounded-accepted-support-v1"),
+                          std::string::npos);
+                const auto truth = runtime::make_two_body_session(
+                    input.initial, core::GravitationalParameter{core::egm96_mu}, "cspice");
+                const auto a = input.first.tai_nanoseconds(), b = input.last.tai_nanoseconds();
+                for (auto ns : {a, a + 1, a + (b - a) / 2, b - 1, b}) {
+                    const std::array epochs{Epoch{ns}};
+                    const auto actual = session.sample(epochs).states()[0],
+                               expected = truth.sample(epochs).states()[0];
+                    const auto r = std::hypot(actual.position_m[0] - expected.position_m[0],
+                                              actual.position_m[1] - expected.position_m[1],
+                                              actual.position_m[2] - expected.position_m[2]);
+                    const auto v = std::hypot(actual.velocity_mps[0] - expected.velocity_mps[0],
+                                              actual.velocity_mps[1] - expected.velocity_mps[1],
+                                              actual.velocity_mps[2] - expected.velocity_mps[2]);
+                    EXPECT_LT(r, .001);
+                    EXPECT_LT(v, 1e-6);
+                    max_r = std::max(max_r, r);
+                    max_v = std::max(max_v, v);
+                }
+                EXPECT_THROW((void)session.sample(std::array{Epoch{a - 1}}),
+                             core::PropagationError);
+                EXPECT_THROW((void)session.sample(std::array{Epoch{b + 1}}),
+                             core::PropagationError);
+            }
+        }
+    }
+    RecordProperty("max_position_error_m", max_r);
+    RecordProperty("max_velocity_error_mps", max_v);
+}
+TEST(HpopProjectInterpolation, MissionBurnsAndStoppedPrefixMatchIndependentCspiceCoasts) {
+    if (!runtime::two_body_available()) {
+        GTEST_SKIP();
+    }
+    using namespace std::chrono_literals;
+    const auto burn = 137'123'456'789ns, coast = 8'123'456'789ns;
+    const Epoch stop{(burn + coast).count()};
+    const core::CartesianState initial{Epoch{0},
+                                       core::OriginId::earth,
+                                       FrameId::gcrf,
+                                       {7e6, 0, 0},
+                                       {0, std::sqrt(core::egm96_mu / 7e6), 0}};
+    const std::array da{1., 2., 3.}, db{4., -5., 6.}, dc{-.1, .2, -.3}, dd{7., 8., 9.};
+    auto after_initial = initial;
+    for (std::size_t axis = 0; axis < 3; ++axis)
+        after_initial.velocity_mps[axis] += da[axis];
+    const auto first_truth = runtime::make_two_body_session(
+        after_initial, core::GravitationalParameter{core::egm96_mu}, "cspice");
+    auto after_middle = first_truth.sample(std::array{Epoch{burn.count()}}).states()[0];
+    for (std::size_t axis = 0; axis < 3; ++axis)
+        after_middle.velocity_mps[axis] += db[axis] + dc[axis];
+    const auto second_truth = runtime::make_two_body_session(
+        after_middle, core::GravitationalParameter{core::egm96_mu}, "cspice");
+    auto after_final = second_truth.sample(std::array{stop}).states()[0];
+    for (std::size_t axis = 0; axis < 3; ++axis)
+        after_final.velocity_mps[axis] += dd[axis];
+    double max_r = 0, max_v = 0;
+    for (auto method : {OrbitInterpolationMethod::lagrange, OrbitInterpolationMethod::hermite}) {
+        for (auto integrator : {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+                                HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
+            SCOPED_TRACE(static_cast<int>(method));
+            SCOPED_TRACE(static_cast<int>(integrator));
+            application::OrbitInput input;
+            input.initial = initial;
+            input.first = initial.epoch;
+            input.last = stop;
+            input.propagator = OrbitPropagator::mission;
+            input.mission = {
+                MissionCoastModel::hpop,
+                {MissionSegment::impulse(da, ManeuverFrame::gcrf), MissionSegment::coast(burn),
+                 MissionSegment::impulse(db, ManeuverFrame::gcrf),
+                 MissionSegment::impulse(dc, ManeuverFrame::gcrf), MissionSegment::coast(coast),
+                 MissionSegment::impulse(dd, ManeuverFrame::gcrf), MissionSegment::coast(500s)}};
+            input.hpop.gravity_degree = input.hpop.gravity_order = 0;
+            input.hpop.integrator = integrator;
+            input.hpop.fixed_step_seconds = 2;
+            input.hpop.interpolation = {method, 7};
+            const auto session = runtime::make_orbit_session(input);
+            EXPECT_EQ(session.discontinuities(),
+                      (std::vector{Epoch{0}, Epoch{burn.count()}, stop}));
+            for (auto ns :
+                 std::array<std::int64_t, 7>{0, 1, burn.count() - 1, burn.count(), burn.count() + 1,
+                                             stop.tai_nanoseconds() - 1, stop.tai_nanoseconds()}) {
+                const std::array epochs{Epoch{ns}};
+                const auto actual = session.sample(epochs).states()[0];
+                const auto expected = ns == stop.tai_nanoseconds()
+                                          ? after_final
+                                          : (ns < burn.count() ? first_truth : second_truth)
+                                                .sample(epochs)
+                                                .states()[0];
+                const auto r = std::hypot(actual.position_m[0] - expected.position_m[0],
+                                          actual.position_m[1] - expected.position_m[1],
+                                          actual.position_m[2] - expected.position_m[2]);
+                const auto v = std::hypot(actual.velocity_mps[0] - expected.velocity_mps[0],
+                                          actual.velocity_mps[1] - expected.velocity_mps[1],
+                                          actual.velocity_mps[2] - expected.velocity_mps[2]);
+                EXPECT_LT(r, .005);
+                EXPECT_LT(v, 5e-6);
+                max_r = std::max(max_r, r);
+                max_v = std::max(max_v, v);
+            }
+            const auto events = session.maneuvers(Epoch{0}, stop);
+            ASSERT_EQ(events.size(), 4U);
+            EXPECT_EQ(events[1].after.velocity_mps, events[2].before.velocity_mps);
+            EXPECT_EQ(events.back().after.velocity_mps,
+                      session.sample(std::array{stop}).states()[0].velocity_mps);
+            EXPECT_THROW((void)session.sample(std::array{Epoch{stop.tai_nanoseconds() + 1}}),
+                         core::PropagationError);
+        }
+    }
+    RecordProperty("max_position_error_m", max_r);
+    RecordProperty("max_velocity_error_mps", max_v);
+}
+TEST(HpopProjectInterpolation, LazyGenerationCancelsAndRetainsItsImmutableScientificCache) {
+    application::OrbitInput input;
+    input.propagator = OrbitPropagator::hpop;
+    input.last = Epoch{600'000'000'000};
+    input.hpop.gravity_degree = input.hpop.gravity_order = 0;
+    input.hpop.third_body(core::ThirdBody::moon).enabled = true;
+    auto moon = std::make_shared<BoundedMoon>(input.first, input.last);
+    core::HpopEnvironment environment;
+    environment.ephemeris = moon;
+    const auto session = runtime::make_orbit_session(input, 1, nullptr, environment);
+    const auto initial_calls = moon->calls;
+    EXPECT_EQ(initial_calls, 1U);
+    int checkpoints = 0;
+    EXPECT_THROW((void)session.discontinuities([&] {
+        if (++checkpoints == 10)
+            throw std::runtime_error("cancel lazy generation");
+    }),
+                 std::runtime_error);
+    EXPECT_GT(moon->calls, initial_calls);
+    const std::array times{Epoch{123'123'456'789}, Epoch{1}, input.last};
+    const auto before = session.sample(times);
+    const auto calls = moon->calls;
+    moon->queries_disabled = true;
+    auto concurrent = std::async(std::launch::async, [&] { return session.sample(times); });
+    EXPECT_NO_THROW((void)session.discontinuities());
+    EXPECT_EQ(session.sample(times).states()[0].position_m, before.states()[0].position_m);
+    EXPECT_EQ(concurrent.get().states()[0].position_m, before.states()[0].position_m);
+    EXPECT_EQ(moon->calls, calls);
+}
+TEST(HpopProjectInterpolation, PersistenceHashesReportsAndExactOutputGridUseTheSameConfiguration) {
+    application::Project input{"Interpolation", Epoch{0}, Epoch{600'000'000'000}};
+    application::ProjectSatellite satellite;
+    satellite.orbit.propagator = OrbitPropagator::hpop;
+    satellite.orbit.first = input.first;
+    satellite.orbit.last = input.last;
+    satellite.orbit.step_seconds = 5;
+    auto &options = satellite.orbit.hpop;
+    options.gravity_degree = options.gravity_order = 0;
+    options.interpolation = {OrbitInterpolationMethod::hermite, 5};
+    options.report_ephemeris_on_fixed_step = true;
+    input.satellites.push_back(satellite);
+    const auto hash = application::analysis_input_sha256(input);
+    const auto report_hash = runtime::report_input_sha256(input);
+    auto restored = application::decode_project(application::encode_project(input));
+    EXPECT_EQ(restored.satellites[0].orbit.hpop, options);
+    auto project = Project::from_data(restored);
+    const auto object = project.objects().get("satellite-1");
+    const auto analysis = project.prepare();
+    const Epoch at{123'123'456'789};
+    const auto state = analysis.state(object, at, FrameId::gcrf);
+    const auto report =
+        analysis.report({.kind = ReportKind::cartesian_state,
+                         .object_ids = {object.id()},
+                         .follow_scenario = false,
+                         .first = at,
+                         .last = at,
+                         .frame = FrameId::gcrf},
+                        {.columns = {{"state.x", "m", ""}}, .time_scale = ReportTimeScale::tai});
+    ASSERT_EQ(report.table.rows().size(), 1U);
+    EXPECT_EQ(std::get<double>(report.table.rows()[0][0]), state.position_m[0]);
+    restored.satellites[0].orbit.step_seconds = 10;
+    EXPECT_NE(application::analysis_input_sha256(restored), hash);
+    EXPECT_NE(runtime::report_input_sha256(restored), report_hash);
+    restored.satellites[0].orbit.hpop.report_ephemeris_on_fixed_step = false;
+    const auto accepted_hash = application::analysis_input_sha256(restored);
+    restored.satellites[0].orbit.step_seconds = 5;
+    EXPECT_EQ(application::analysis_input_sha256(restored), accepted_hash);
+    restored.satellites[0].orbit.hpop.interpolation.order = 7;
+    EXPECT_NE(application::analysis_input_sha256(restored), accepted_hash);
+    EXPECT_EQ(analysis.state(object, at, FrameId::gcrf).position_m, state.position_m);
+    const auto explicit_session = runtime::make_hpop_ephemeris_session(
+        satellite.orbit.initial, input.last, options, {}, options.interpolation, 5'000'000'000);
+    EXPECT_EQ(explicit_session.sample(std::array{at}).states()[0].position_m, state.position_m);
 }

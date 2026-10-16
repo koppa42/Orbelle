@@ -278,12 +278,13 @@ TEST_F(MonthlyWeather, HpopConvergesAcrossLeapAndForecastNodesAndReopensFrozenDa
             orbit.initial.velocity_mps = {0, 6300, 4300};
             auto &h = orbit.hpop;
             h.gravity_degree = h.gravity_order = 0;
-            h.max_step_seconds = 60;
-            // Seventh-order advancement needs these local tolerances for the unchanged
-            // global 1 mm / 1e-6 m/s refinement bounds over six hours.
+            h.max_step_seconds = 30;
+            // Continuous seventh-order coasts have no artificial 300 s integration restarts.
+            // A 30 s ceiling and tighter absolute control retain the six-hour global
+            // 1 mm / 1e-6 m/s refinement bounds; local tolerance alone cannot guarantee them.
             h.relative_tolerance = 1e-14;
-            h.position_tolerance_m = 1e-7;
-            h.velocity_tolerance_mps = 1e-10;
+            h.position_tolerance_m = 1e-8;
+            h.velocity_tolerance_mps = 1e-11;
             h.drag.enabled = true;
             h.drag.atmosphere = model;
             h.drag.weather_model = "forecast";

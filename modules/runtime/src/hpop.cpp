@@ -175,6 +175,7 @@ application::Session make_hpop_ephemeris_session(core::CartesianState initial, c
                                                  std::string object_id, std::uint64_t revision,
                                                  const std::function<void()> &checkpoint) {
     core::validate_orbit_interpolation(interpolation);
+    options.interpolation = interpolation;
     auto algorithm =
         hpop_algorithm(options, environment) + ";ephemeris=continuous-accepted-gated-v1;from=" +
         std::to_string(initial.epoch.tai_nanoseconds()) +
@@ -187,6 +188,25 @@ application::Session make_hpop_ephemeris_session(core::CartesianState initial, c
     auto arcs = core::propagate_hpop_ephemeris(initial, end, options, std::move(environment),
                                                reporting_step_nanoseconds, checkpoint);
     return {core::make_tabulated_orbit(std::move(arcs), interpolation, checkpoint),
+            {std::move(object_id), revision, std::move(algorithm)}};
+}
+application::Session make_hpop_interpolated_session(core::CartesianState initial, core::Epoch first,
+                                                    core::Epoch last, core::HpopOptions options,
+                                                    core::HpopEnvironment environment,
+                                                    std::int64_t reporting_step_nanoseconds,
+                                                    std::string object_id, std::uint64_t revision) {
+    auto algorithm =
+        hpop_algorithm(options, environment) + ";ephemeris=bounded-accepted-support-v1;initial=" +
+        std::to_string(initial.epoch.tai_nanoseconds()) +
+        ";first=" + std::to_string(first.tai_nanoseconds()) +
+        ";last=" + std::to_string(last.tai_nanoseconds()) +
+        ";report-ns=" + std::to_string(reporting_step_nanoseconds) +
+        ";interpolation=bracketed-nearest-v1;method=" +
+        (options.interpolation.method == core::OrbitInterpolationMethod::lagrange ? "lagrange"
+                                                                                  : "hermite") +
+        ";interpolation-order=" + std::to_string(options.interpolation.order);
+    return {core::make_hpop_interpolated(initial, first, last, options, std::move(environment),
+                                         reporting_step_nanoseconds),
             {std::move(object_id), revision, std::move(algorithm)}};
 }
 } // namespace orbitforge::runtime

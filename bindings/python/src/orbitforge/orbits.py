@@ -342,8 +342,15 @@ class HpopSettings:
     include_secular_variations: bool = False
     correction: Literal["full", "pseudo"] = "full"
     step_control: Literal["relative_error", "fixed"] = "relative_error"
+    interpolation: Literal["lagrange", "hermite"] = "hermite"
+    interpolation_order: int = 7
+    report_ephemeris_on_fixed_step: bool = False
 
     def __post_init__(self) -> None:
+        if type(self.report_ephemeris_on_fixed_step) is not bool:
+            raise TypeError("report_ephemeris_on_fixed_step must be bool")
+        if type(self.interpolation_order) is not int:
+            raise TypeError("interpolation_order must be int")
         if type(self.include_secular_variations) is not bool:
             raise TypeError("include_secular_variations must be bool")
         if type(self.include_relativistic_accelerations) is not bool:
@@ -381,8 +388,15 @@ class HpopSettings:
         if self.integrator not in ("rkf78", "rk4", "rkv89", "bulirsch_stoer", "gauss_jackson"):
             raise ValueError("integrator must be 'rkf78', 'rk4', 'rkv89', 'bulirsch_stoer' or 'gauss_jackson'")
         for name in self.__dataclass_fields__:
-            if name not in ("integrator", "correction", "step_control", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides"):
+            if name not in ("integrator", "correction", "step_control", "interpolation", "interpolation_order", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides"):
                 setattr(value, name, getattr(self, name))
+        if self.interpolation not in ("lagrange", "hermite"):
+            raise ValueError("interpolation must be lagrange or hermite")
+        interpolation = n.OrbitInterpolationOptions()
+        interpolation.method = {"lagrange": n.OrbitInterpolationMethod.LAGRANGE,
+                                "hermite": n.OrbitInterpolationMethod.HERMITE}[self.interpolation]
+        interpolation.order = self.interpolation_order
+        value.interpolation = interpolation
         if self.step_control not in ("relative_error", "fixed"):
             raise ValueError("step_control must be relative_error or fixed")
         value.step_control = {"relative_error": n.HpopStepControl.RELATIVE_ERROR,
@@ -411,7 +425,10 @@ class HpopSettings:
     @classmethod
     def _read(cls, value: n.HpopOptions) -> "HpopSettings":
         fields = {name: getattr(value, name) for name in cls.__dataclass_fields__
-                  if name not in ("integrator", "correction", "step_control", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides")}
+                  if name not in ("integrator", "correction", "step_control", "interpolation", "interpolation_order", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides")}
+        fields["interpolation"] = {n.OrbitInterpolationMethod.LAGRANGE: "lagrange",
+                                   n.OrbitInterpolationMethod.HERMITE: "hermite"}[value.interpolation.method]
+        fields["interpolation_order"] = value.interpolation.order
         rows = value.third_bodies
         fields["third_bodies"] = tuple(b for b, row in zip(THIRD_BODY_NAMES, rows) if row.enabled)
         sources = {n.ThirdBodyGravitySource.JPL_DE: "jpl_de",
@@ -529,7 +546,9 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          satellite_mass_kg: float = 1000.0, ocean_tides: OceanTideSettings | None = None,
          include_secular_variations: bool = False,
          correction: Literal["full", "pseudo"] = "full",
-         step_control: Literal["relative_error", "fixed"] = "relative_error") -> Orbit:
+         step_control: Literal["relative_error", "fixed"] = "relative_error",
+         interpolation: Literal["lagrange", "hermite"] = "hermite", interpolation_order: int = 7,
+         report_ephemeris_on_fixed_step: bool = False) -> Orbit:
     """Cowell orbit with gravity, tides, third bodies, drag, spherical SRP and RKF78/RKV89/Bulirsch-Stoer or fixed RK4/Gauss-Jackson 12.
     step_control selects relative_error or fixed; RK4/Gauss-Jackson always use fixed steps.
     Fixed Bulirsch-Stoer uses eighteenth-order extrapolation without error control.
@@ -541,7 +560,9 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
     third_bodies=("sun", "moon") requires explicitly supplied DE440s ephemerides.
     sun_mu and moon_mu are optional overrides in m^3/s^2; None uses DE440 constants.
 
-    Output sampling is set on analysis.states(), independently of integration steps.
+    Scientific queries use the selected Lagrange or Hermite interpolation.
+    Fixed ephemeris reporting uses Orbit.step_seconds and truncates integration steps
+    to those output times. Query sampling on analysis.states() remains independent.
     Omitted gravity_order uses gravity_degree; order=0 retains only zonal terms.
     """
     if isinstance(initial, Keplerian):
@@ -560,6 +581,7 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
         SolidTideSettings() if solid_tides is None else require(solid_tides, SolidTideSettings, "solid_tides"),
         include_relativistic_accelerations, satellite_mass_kg,
         OceanTideSettings() if ocean_tides is None else require(ocean_tides, OceanTideSettings, "ocean_tides"),
-        include_secular_variations, correction, step_control)
+        include_secular_variations, correction, step_control, interpolation, interpolation_order,
+        report_ephemeris_on_fixed_step)
     settings._native()  # Fail at construction, before changing a project.
     return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)

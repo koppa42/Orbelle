@@ -49,6 +49,7 @@ using runtime::export_aer_csv;
 using runtime::export_report_csv;
 using runtime::export_trajectory_csv;
 using runtime::make_hpop_ephemeris_session;
+using runtime::make_hpop_interpolated_session;
 using runtime::make_tabulated_orbit_session;
 using runtime::ReportResult;
 } // namespace orbitforge

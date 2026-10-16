@@ -2997,4 +2997,85 @@ TEST_F(QuantityTest, HpopGaussJacksonCorrectionControlsValidatePersistAndCancel)
     }
 }
 
+TEST_F(QuantityTest, HpopInterpolationValidatesPreservesDraftsAndReopensAtNarrowWidths) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    core::HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(1);
+        auto *method = dialog->findChild<QComboBox *>("hpopInterpolation");
+        auto *order = dialog->findChild<QSpinBox *>("hpopInterpolationOrder");
+        auto *fixed = dialog->findChild<QCheckBox *>("hpopFixedEphemeris");
+        ASSERT_TRUE(method);
+        ASSERT_TRUE(order);
+        ASSERT_TRUE(fixed);
+        EXPECT_EQ(method->currentIndex(), 1);
+        EXPECT_EQ(order->value(), 7);
+        order->setValue(8);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        EXPECT_TRUE(dialog->isVisible());
+        EXPECT_TRUE(dialog->findChild<QLabel *>("errorText")->isVisible());
+        order->setValue(9);
+        method->setCurrentIndex(0);
+        order->setValue(6);
+        method->setCurrentIndex(1);
+        EXPECT_EQ(order->value(), 9);
+        method->setCurrentIndex(0);
+        EXPECT_EQ(order->value(), 6);
+        fixed->setChecked(true);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+    });
+    ASSERT_TRUE(edit_hpop_settings(options, nullptr));
+    EXPECT_EQ(options.interpolation.method, core::OrbitInterpolationMethod::lagrange);
+    EXPECT_EQ(options.interpolation.order, 6);
+    EXPECT_TRUE(options.report_ephemeris_on_fixed_step);
+    const auto saved = options;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(1);
+        auto *method = dialog->findChild<QComboBox *>("hpopInterpolation");
+        auto *order = dialog->findChild<QSpinBox *>("hpopInterpolationOrder");
+        auto *fixed = dialog->findChild<QCheckBox *>("hpopFixedEphemeris");
+        EXPECT_EQ(method->currentIndex(), 0);
+        EXPECT_EQ(order->value(), 6);
+        EXPECT_TRUE(fixed->isChecked());
+        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        std::cout << "HPOP interpolation DPR " << dialog->devicePixelRatioF() << '\n';
+        for (int selected : {0, 1}) {
+            method->setCurrentIndex(selected);
+            if (selected == 1) {
+                order->setFocus();
+                QKeyEvent key(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
+                QApplication::sendEvent(order, &key);
+                EXPECT_EQ(order->value(), 9);
+            }
+            for (int width : {430, 720}) {
+                dialog->resize(width, 620);
+                QEventLoop settled;
+                QTimer::singleShot(60, &settled, &QEventLoop::quit);
+                settled.exec();
+                auto *scroll = dialog->findChild<QScrollArea *>("hpopIntegratorPage");
+                scroll->ensureWidgetVisible(order);
+                QApplication::processEvents();
+                EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+                EXPECT_EQ(order->value(), selected == 0 ? 6 : 9);
+                EXPECT_TRUE(
+                    dialog->rect().contains(dialog->findChild<QDialogButtonBox *>()->geometry()));
+                if (!capture.isEmpty()) {
+                    EXPECT_TRUE(QDir{}.mkpath(capture));
+                    EXPECT_TRUE(dialog->grab().save(
+                        capture +
+                        QString("/hpop-interpolation-%1-%2.png").arg(selected).arg(width)));
+                }
+            }
+        }
+        fixed->setChecked(false);
+        dialog->reject();
+    });
+    EXPECT_FALSE(edit_hpop_settings(options, nullptr));
+    EXPECT_EQ(options, saved);
+}
 } // namespace orbitforge::desktop

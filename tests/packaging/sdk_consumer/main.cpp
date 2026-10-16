@@ -35,6 +35,13 @@ int main(int argc, char **argv) try {
         const auto state = session.sample(std::array{Epoch{17'123'456'789LL}}).states().front();
         if (!std::isfinite(state.position_m[0]))
             return 45;
+        options.interpolation = {OrbitInterpolationMethod::lagrange, 7};
+        const auto bounded = orbitforge::runtime::make_hpop_interpolated_session(
+            initial, Epoch{-1'000'000'000}, Epoch{1'000'000'000}, options);
+        const auto short_state = bounded.sample(std::array{Epoch{123'456'789}}).states().front();
+        if (!std::isfinite(short_state.position_m[0]) ||
+            bounded.provenance().algorithm.find("bounded-accepted-support-v1") == std::string::npos)
+            return 46;
     }
     {
         using namespace orbitforge::core;
