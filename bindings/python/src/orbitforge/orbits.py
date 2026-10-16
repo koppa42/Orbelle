@@ -306,6 +306,13 @@ class HpopSettings:
     Fixed steps and adaptive Min/Max Step are 1e-6..86400 TAI seconds. The adaptive
     ceiling is not a fixed step or an accuracy guarantee; local dynamics seed the first
     trial, then error control chooses subsequent steps. Output/weather tails may be shorter.
+    time_regularization integrates dS=sqrt(mu)*r**(-n)*dt, with finite 0<n<=10 and a
+    positive int steps_per_orbit. It requires a nonradial bound initial ellipse and
+    resets its scale after each mission impulse. n=1 corresponds to eccentric anomaly;
+    n=2 to true anomaly. The initial 1.5/120 settings follow STK's documented example.
+    Fixed mode uses uniform regularized steps; adaptive mode retains physical Min/Max
+    Step bounds. fixed_step_seconds is inactive while regularization is enabled.
+    Disabled regularization parameters are saved as valid drafts, excluded from identity.
     include_secular_variations applies the selected file's explicit epoch and coefficient
     rates per Julian year. Static files without these data cannot enable it; the flag
     remains an inactive draft for gravity degree 0. No secular defaults are inferred.
@@ -345,8 +352,15 @@ class HpopSettings:
     interpolation: Literal["lagrange", "hermite"] = "hermite"
     interpolation_order: int = 7
     report_ephemeris_on_fixed_step: bool = False
+    time_regularization: bool = False
+    regularization_exponent: float = 1.5
+    steps_per_orbit: int = 120
 
     def __post_init__(self) -> None:
+        if type(self.time_regularization) is not bool:
+            raise TypeError("time_regularization must be bool")
+        if type(self.steps_per_orbit) is not int:
+            raise TypeError("steps_per_orbit must be int")
         if type(self.report_ephemeris_on_fixed_step) is not bool:
             raise TypeError("report_ephemeris_on_fixed_step must be bool")
         if type(self.interpolation_order) is not int:
@@ -548,11 +562,15 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          correction: Literal["full", "pseudo"] = "full",
          step_control: Literal["relative_error", "fixed"] = "relative_error",
          interpolation: Literal["lagrange", "hermite"] = "hermite", interpolation_order: int = 7,
-         report_ephemeris_on_fixed_step: bool = False) -> Orbit:
+         report_ephemeris_on_fixed_step: bool = False,
+         time_regularization: bool = False, regularization_exponent: float = 1.5,
+         steps_per_orbit: int = 120) -> Orbit:
     """Cowell orbit with gravity, tides, third bodies, drag, spherical SRP and RKF78/RKV89/Bulirsch-Stoer or fixed RK4/Gauss-Jackson 12.
     step_control selects relative_error or fixed; RK4/Gauss-Jackson always use fixed steps.
     Fixed Bulirsch-Stoer uses eighteenth-order extrapolation without error control.
     Gauss-Jackson correction selects the post-convergence full or two-body-only force update.
+    Time regularization uses a finite exponent 0<n<=10 and positive steps_per_orbit;
+    see HpopSettings for the bound-ellipse requirement and physical step bounds.
 
     Built-in EGM96 supports up to degree 20; installed gravity files up to 2190 (EGM2008 order limit 2159).
     Satellite mass is in kg (finite and positive); spherical forces retain their explicit
@@ -582,6 +600,7 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
         include_relativistic_accelerations, satellite_mass_kg,
         OceanTideSettings() if ocean_tides is None else require(ocean_tides, OceanTideSettings, "ocean_tides"),
         include_secular_variations, correction, step_control, interpolation, interpolation_order,
-        report_ephemeris_on_fixed_step)
+        report_ephemeris_on_fixed_step, time_regularization, regularization_exponent,
+        steps_per_orbit)
     settings._native()  # Fail at construction, before changing a project.
     return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)

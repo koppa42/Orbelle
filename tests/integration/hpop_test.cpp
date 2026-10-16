@@ -153,3 +153,53 @@ TEST(HpopProject, RejectsMissingDataAndInitialEpochOutsideCoverageBeforeQueries)
     EXPECT_EQ(interval.second, input.last);
     EXPECT_THROW((void)Project::from_data(input).prepare(data), core::EopCoverageError);
 }
+
+TEST(HpopProject, RegularizationPersistsAndOnlyActiveParametersChangeIdentity) {
+    for (auto method : {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+                        HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
+        auto input = hpop_project();
+        auto &orbit = input.satellites[0].orbit;
+        auto &o = orbit.hpop;
+        o.integrator = method;
+        const auto identity = [&] {
+            return std::pair{application::analysis_input_sha256(input),
+                             runtime::report_input_sha256(input)};
+        };
+        const auto disabled = identity();
+        const auto original_algorithm =
+            runtime::make_hpop_session(orbit.initial, o).provenance().algorithm;
+        o.regularization_exponent = 1.25;
+        o.steps_per_orbit = 240;
+        EXPECT_EQ(identity(), disabled);
+        EXPECT_EQ(runtime::make_hpop_session(orbit.initial, o).provenance().algorithm,
+                  original_algorithm);
+        o.time_regularization = true;
+        const auto active = identity();
+        EXPECT_NE(active.first, disabled.first);
+        EXPECT_NE(active.second, disabled.second);
+        const auto source = runtime::make_hpop_session(orbit.initial, o).provenance().algorithm;
+        EXPECT_NE(source.find("time=sundman-initial-ellipse-bounded-v1"), std::string::npos);
+        EXPECT_NE(source.find("steps-per-orbit=240"), std::string::npos);
+        o.fixed_step_seconds = 47;
+        EXPECT_EQ(identity(), active);
+        EXPECT_EQ(runtime::make_hpop_session(orbit.initial, o).provenance().algorithm, source);
+        o.regularization_exponent = 2;
+        EXPECT_NE(identity().first, active.first);
+        EXPECT_NE(identity().second, active.second);
+        o.regularization_exponent = 1.25;
+        o.steps_per_orbit = 480;
+        EXPECT_NE(identity().first, active.first);
+        EXPECT_NE(identity().second, active.second);
+        const auto persisted = application::decode_project(application::encode_project(input));
+        EXPECT_EQ(persisted.satellites[0].orbit.hpop, o);
+        const auto bounds = identity();
+        o.min_step_seconds = .002;
+        o.max_step_seconds = 30;
+        if (o.uses_fixed_step()) {
+            EXPECT_EQ(identity(), bounds);
+        } else {
+            EXPECT_NE(identity().first, bounds.first);
+            EXPECT_NE(identity().second, bounds.second);
+        }
+    }
+}

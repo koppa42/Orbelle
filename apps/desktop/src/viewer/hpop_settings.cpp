@@ -1110,10 +1110,29 @@ bool edit_hpop_settings(
                           QStringLiteral("Pseudo Correction · 伪校正")});
     correction->setCurrentIndex(static_cast<int>(options.correction));
     integration->addRow(QStringLiteral("预测校正方式"), correction);
+    auto *regularization_form =
+        section(integration_page, QStringLiteral("时间正则化"), "hpopRegularizationSection");
+    auto *regularization = new QCheckBox(QStringLiteral("启用时间正则化"));
+    regularization->setObjectName("hpopTimeRegularization");
+    regularization->setChecked(options.time_regularization);
+    regularization_form->addRow(regularization);
+    auto *exponent = quantity(
+        regularization_form, QStringLiteral("指数"), "hpopRegularizationExponent", Unit::one,
+        options.regularization_exponent, std::numeric_limits<double>::min(), 10);
+    auto *steps_per_orbit = new QSpinBox;
+    steps_per_orbit->setObjectName("hpopStepsPerOrbit");
+    steps_per_orbit->setRange(1, std::numeric_limits<int>::max());
+    steps_per_orbit->setValue(options.steps_per_orbit);
+    regularization_form->addRow(QStringLiteral("每圈步数"), steps_per_orbit);
+    help(regularization_form,
+         QStringLiteral("需要椭圆初轨道。指数 1 对应偏近点角，2 对应真近点角；每圈步数设置"
+                        "正则化时间步长。相对误差模式的最小、最大步长仍以秒计。"));
     const auto update_step_control = [=] {
         const bool is_fixed = step_control->currentIndex() == 1;
         adaptive_widget->setVisible(!is_fixed);
-        integration->setRowVisible(fixed, is_fixed);
+        integration->setRowVisible(fixed, is_fixed && !regularization->isChecked());
+        exponent->setEnabled(regularization->isChecked());
+        steps_per_orbit->setEnabled(regularization->isChecked());
         integration->setRowVisible(correction, method->currentIndex() == 4);
     };
     const auto update_method = [=, &step_control_draft] {
@@ -1124,6 +1143,7 @@ bool edit_hpop_settings(
         update_step_control();
     };
     QObject::connect(method, &QComboBox::currentIndexChanged, &dialog, update_method);
+    QObject::connect(regularization, &QCheckBox::toggled, &dialog, update_step_control);
     QObject::connect(step_control, &QComboBox::currentIndexChanged, &dialog,
                      [&, update_step_control](int index) {
                          step_control_draft = index;
@@ -1237,20 +1257,23 @@ bool edit_hpop_settings(
             summary_role, value_text(satellite_mass) + QStringLiteral(" ") +
                               unit_symbol(satellite_mass->unit()) +
                               (relativity->isChecked() ? QStringLiteral(" · 相对论") : QString{}));
-        integrator_item->setData(summary_role, step_control->currentIndex() == 0
-                                                   ? part(method, 0) +
-                                                         QStringLiteral(" · 相对容差 ") +
-                                                         value_text(relative)
-                                                   : part(method, 0) + QStringLiteral(" · 步长 ") +
-                                                         value_text(fixed) + QStringLiteral(" s"));
+        integrator_item->setData(
+            summary_role,
+            regularization->isChecked()
+                ? part(method, 0) +
+                      QStringLiteral(" · 正则化 · %1 步/圈").arg(steps_per_orbit->value())
+                : (step_control->currentIndex() == 0
+                       ? part(method, 0) + QStringLiteral(" · 相对容差 ") + value_text(relative)
+                       : part(method, 0) + QStringLiteral(" · 步长 ") + value_text(fixed) +
+                             QStringLiteral(" s")));
         covariance_item->setData(summary_role, QStringLiteral("尚未实现"));
     };
     QObject::connect(secular_use, &QCheckBox::toggled, &dialog, refresh_summaries);
     for (auto *box : {model, density_model, srp_shadow, method, step_control, solid_mode})
         QObject::connect(box, &QComboBox::currentIndexChanged, &dialog, refresh_summaries);
-    for (auto *spin : {degree, order})
+    for (auto *spin : {degree, order, steps_per_orbit})
         QObject::connect(spin, &QSpinBox::valueChanged, &dialog, refresh_summaries);
-    for (auto *check : {drag_use, srp_use, solid_truncate, relativity})
+    for (auto *check : {drag_use, srp_use, solid_truncate, relativity, regularization})
         QObject::connect(check, &QCheckBox::toggled, &dialog, refresh_summaries);
     for (auto &row : fields)
         QObject::connect(row.enabled, &QCheckBox::toggled, &dialog, refresh_summaries);
@@ -1741,6 +1764,11 @@ bool edit_hpop_settings(
             candidate.correction = static_cast<core::HpopCorrection>(correction->currentIndex());
             candidate.step_control = static_cast<core::HpopStepControl>(step_control_draft);
             validation_page = 1;
+            candidate.time_regularization = regularization->isChecked();
+            if (candidate.time_regularization) {
+                candidate.regularization_exponent = read(exponent, Unit::one);
+                candidate.steps_per_orbit = steps_per_orbit->value();
+            }
             candidate.minimum_altitude_m = read(altitude, Unit::metre);
             if (!candidate.uses_fixed_step()) {
                 candidate.min_step_seconds = read(minimum, Unit::second);
@@ -1750,7 +1778,7 @@ bool edit_hpop_settings(
                 candidate.relative_tolerance = read(relative, Unit::one);
                 candidate.position_tolerance_m = read(position, Unit::metre);
                 candidate.velocity_tolerance_mps = read(velocity, Unit::metres_per_second);
-            } else {
+            } else if (!candidate.time_regularization) {
                 candidate.fixed_step_seconds = read(fixed, Unit::second);
             }
             validation_field = interpolation_order;

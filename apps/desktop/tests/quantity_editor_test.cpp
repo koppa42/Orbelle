@@ -3078,4 +3078,92 @@ TEST_F(QuantityTest, HpopInterpolationValidatesPreservesDraftsAndReopensAtNarrow
     EXPECT_FALSE(edit_hpop_settings(options, nullptr));
     EXPECT_EQ(options, saved);
 }
+TEST_F(QuantityTest, HpopRegularizationControlsPreserveDraftsCancelAndNarrowLayouts) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    for (int selected = 0; selected < 5; ++selected) {
+        core::HpopOptions options;
+        options.gravity_degree = options.gravity_order = 0;
+        options.integrator = static_cast<core::HpopIntegrator>(selected);
+        options.step_control = core::HpopStepControl::fixed;
+        QTimer::singleShot(0, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            ASSERT_TRUE(dialog);
+            dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(1);
+            auto *enabled = dialog->findChild<QCheckBox *>("hpopTimeRegularization");
+            auto *exponent = dialog->findChild<QuantityEditor *>("hpopRegularizationExponent");
+            auto *count = dialog->findChild<QSpinBox *>("hpopStepsPerOrbit");
+            auto *fixed = dialog->findChild<QuantityEditor *>("hpopFixedStep");
+            auto *control = dialog->findChild<QComboBox *>("hpopStepControl");
+            ASSERT_TRUE(enabled);
+            ASSERT_TRUE(exponent);
+            ASSERT_TRUE(count);
+            EXPECT_FALSE(enabled->isChecked());
+            EXPECT_FALSE(exponent->isEnabled());
+            EXPECT_FALSE(count->isEnabled());
+            EXPECT_TRUE(fixed->isVisible());
+            enabled->setChecked(true);
+            EXPECT_TRUE(exponent->isEnabled());
+            EXPECT_TRUE(count->isEnabled());
+            EXPECT_FALSE(fixed->isVisible());
+            exponent->set_value(1.75, Unit::one);
+            count->setValue(1024);
+            enabled->setChecked(false);
+            EXPECT_TRUE(fixed->isVisible());
+            enabled->setChecked(true);
+            EXPECT_EQ(count->value(), 1024);
+            if (control->isEnabled()) {
+                control->setCurrentIndex(0);
+                EXPECT_TRUE(dialog->findChild<QuantityEditor *>("hpopMaxStep")->isVisible());
+                EXPECT_FALSE(fixed->isVisible());
+                control->setCurrentIndex(1);
+            }
+            // An inactive ordinary-step draft must not block a valid regularized edit.
+            fixed->findChild<QLineEdit *>()->setText("invalid inactive draft");
+            dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        });
+        ASSERT_TRUE(edit_hpop_settings(options, nullptr));
+        EXPECT_TRUE(options.time_regularization);
+        EXPECT_EQ(options.regularization_exponent, 1.75);
+        EXPECT_EQ(options.steps_per_orbit, 1024);
+        EXPECT_EQ(options.fixed_step_seconds, 10);
+        const auto saved = options;
+        QTimer::singleShot(0, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            ASSERT_TRUE(dialog);
+            dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(1);
+            auto *enabled = dialog->findChild<QCheckBox *>("hpopTimeRegularization");
+            auto *count = dialog->findChild<QSpinBox *>("hpopStepsPerOrbit");
+            EXPECT_TRUE(enabled->isChecked());
+            EXPECT_EQ(count->value(), 1024);
+            count->setFocus();
+            QKeyEvent key(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
+            QApplication::sendEvent(count, &key);
+            EXPECT_EQ(count->value(), 1025);
+            const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+            std::cout << "HPOP regularization DPR " << dialog->devicePixelRatioF() << '\n';
+            for (int width : {430, 720}) {
+                dialog->resize(width, 620);
+                QEventLoop settled;
+                QTimer::singleShot(60, &settled, &QEventLoop::quit);
+                settled.exec();
+                auto *scroll = dialog->findChild<QScrollArea *>("hpopIntegratorPage");
+                scroll->ensureWidgetVisible(count);
+                QApplication::processEvents();
+                EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+                EXPECT_EQ(count->value(), 1025);
+                EXPECT_TRUE(
+                    dialog->rect().contains(dialog->findChild<QDialogButtonBox *>()->geometry()));
+                if (!capture.isEmpty() && selected == 4) {
+                    EXPECT_TRUE(QDir{}.mkpath(capture));
+                    EXPECT_TRUE(dialog->grab().save(
+                        capture + QString("/hpop-regularization-%1.png").arg(width)));
+                }
+            }
+            enabled->setChecked(false);
+            dialog->reject();
+        });
+        EXPECT_FALSE(edit_hpop_settings(options, nullptr));
+        EXPECT_EQ(options, saved);
+    }
+}
 } // namespace orbitforge::desktop

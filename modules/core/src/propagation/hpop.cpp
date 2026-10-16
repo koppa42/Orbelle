@@ -1,5 +1,6 @@
 #include "integrators/gauss_jackson.hpp"
 #include "integrators/one_step.hpp"
+#include "integrators/sundman_propagation.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -13,6 +14,8 @@ namespace orbitforge::core {
 namespace {
 using State = std::array<double, 6>;
 using AcceptedStep = std::function<void(double, const State &, bool)>;
+using RegularizedAcceptedStep =
+    std::function<void(double, const State &, bool, std::optional<Epoch>)>;
 std::function<double(Epoch)> sun_distance(const IThirdBodyEphemeris *ephemeris) {
     if (!ephemeris)
         return {};
@@ -32,6 +35,7 @@ class Hpop final : public IStateProvider {
     HpopOptions options_;
     HpopEnvironment environment_;
     std::optional<Epoch> ephemeris_end_;
+    std::optional<detail::SundmanPropagation> regularization_;
     // Caches only full, epoch-anchored integration blocks. Partial queries cannot
     // alter the solution used by later queries. Both directions start at t=0.
     mutable std::mutex mutex_;
@@ -594,6 +598,50 @@ class Hpop final : public IStateProvider {
         return gauss_jackson_integrate(history, at, t, index * nodes, attempts, checkpoint).state;
     }
 
+    State regularized_output(double time, const State &state, Epoch when,
+                             std::optional<Epoch> weather) const {
+        // Accepted transformed nodes need not fall on integer nanoseconds. Transport
+        // the output state to its precise Epoch instead of relabeling the state:
+        // otherwise micrometre position jitter is amplified by Hermite derivatives.
+        // Split whole seconds so even a long coast retains its fractional nanosecond.
+        const auto ns = when.tai_nanoseconds() - initial_.epoch.tai_nanoseconds();
+        const double shift = std::fma(static_cast<double>(ns % 1'000'000'000), 1e-9,
+                                      static_cast<double>(ns / 1'000'000'000) - time);
+        if (shift == 0)
+            return state;
+        const auto rate = derivative(time, state, weather);
+        auto output = state;
+        for (std::size_t axis = 0; axis < output.size(); ++axis)
+            output[axis] = std::fma(shift, rate[axis], state[axis]);
+        validate_state(output);
+        return output;
+    }
+    detail::SundmanPropagation::State
+    integrate_regularized(detail::SundmanPropagation::State state, double end,
+                          std::size_t &attempts, const std::function<void()> &checkpoint,
+                          const RegularizedAcceptedStep &accepted = {}) const {
+        while (state.time() != end) {
+            const auto boundary = weather_boundary(state.time(), end);
+            const double until = boundary.value_or(end), begin = state.segment_begin;
+            state = regularization_->propagate(
+                std::move(state), until,
+                [&](double time, const State &value) {
+                    const auto rate = derivative(time, value, weather_stage(time, begin, until));
+                    return std::array{rate[3], rate[4], rate[5]};
+                },
+                attempts, checkpoint,
+                [&](double time, const State &value) {
+                    validate_state(value);
+                    if (accepted)
+                        accepted(time, value, boundary && time == until,
+                                 weather_stage(time, begin, until));
+                });
+            if (boundary)
+                state.restart_force_segment();
+        }
+        return state;
+    }
+
   public:
     Hpop(CartesianState initial, HpopOptions options, HpopEnvironment environment,
          std::optional<Epoch> ephemeris_end = {})
@@ -637,6 +685,9 @@ class Hpop final : public IStateProvider {
             value[i + 3] = initial.velocity_mps[i];
         }
         (void)derivative(0, value);
+        if (options_.time_regularization)
+            regularization_.emplace(value, options_.gravity_mu, options_.regularization_exponent,
+                                    static_cast<std::size_t>(options_.steps_per_orbit), options_);
         forward_.push_back(value);
         backward_.push_back(value);
     }
@@ -666,6 +717,8 @@ class Hpop final : public IStateProvider {
         }
         detail::GaussJackson12 history;
         history.state = value;
+        auto regular_state = regularization_ ? regularization_->initial_state()
+                                             : detail::SundmanPropagation::State{};
         std::size_t attempts = 0;
         double at = 0, continued_step = 0;
         std::vector<std::int64_t> support_gates;
@@ -689,7 +742,9 @@ class Hpop final : public IStateProvider {
                 if (stop <= begin || stop > duration)
                     throw PropagationError("HPOP support interval cannot advance time");
                 const auto span = stop - begin;
-                if (static_cast<double>(span) * 1e-9 < intervals * ceiling) {
+                // A fixed q grid has no constant physical spacing. Provide an
+                // explicit in-segment stencil for every regularized force arc.
+                if (regularization_ || static_cast<double>(span) * 1e-9 < intervals * ceiling) {
                     if (span < intervals)
                         throw PropagationError(
                             "HPOP coast has too few distinct epochs for interpolation order");
@@ -711,28 +766,45 @@ class Hpop final : public IStateProvider {
             const double until = gate.seconds_since(initial_.epoch);
             if (until == at)
                 throw PropagationError("HPOP reporting step is unresolved in relative time");
-            const auto accepted = [&](double time, const State &state, bool boundary) {
+            const auto accepted = [&](double time, const State &state, bool boundary,
+                                      std::optional<Epoch> weather = {}) {
                 if (reporting_step && !boundary && time != until)
                     return;
                 // Reporting gates and the requested stop retain their exact integer epochs.
                 const auto when = time == until ? gate : epoch_at(time);
                 const auto previous = arcs.back().back().epoch.tai_nanoseconds();
-                if ((sign > 0 && when.tai_nanoseconds() <= previous) ||
-                    (sign < 0 && when.tai_nanoseconds() >= previous))
+                if (regularization_ && when.tai_nanoseconds() == previous) {
+                    // Transformed nodes can round to the same integer nanosecond.
+                    // Keep an exact output/force boundary over the preceding interior
+                    // node; otherwise preserve the already published initial/boundary.
+                    if (time != until && !boundary)
+                        return;
+                    if (arcs.back().size() <= 1)
+                        throw PropagationError("HPOP output boundary has no distinct epoch");
+                    arcs.back().pop_back();
+                } else if ((sign > 0 && when.tai_nanoseconds() <= previous) ||
+                           (sign < 0 && when.tai_nanoseconds() >= previous)) {
                     throw PropagationError("HPOP accepted ephemeris nodes are not distinct");
+                }
                 if ((sign > 0 && when.tai_nanoseconds() > end.tai_nanoseconds()) ||
                     (sign < 0 && when.tai_nanoseconds() < end.tai_nanoseconds()))
                     throw PropagationError("HPOP accepted node exceeds the requested coast");
+                const auto output =
+                    regularization_ ? regularized_output(time, state, when, weather) : state;
                 CartesianState node{when,
                                     OriginId::earth,
                                     FrameId::gcrf,
-                                    {state[0], state[1], state[2]},
-                                    {state[3], state[4], state[5]}};
+                                    {output[0], output[1], output[2]},
+                                    {output[3], output[4], output[5]}};
                 arcs.back().push_back(node);
                 if (boundary && when != end)
                     arcs.push_back({node});
             };
-            if (options_.uses_fixed_step()) {
+            if (regularization_) {
+                regular_state = integrate_regularized(std::move(regular_state), until, attempts,
+                                                      checkpoint, accepted);
+                value = regular_state.cartesian();
+            } else if (options_.uses_fixed_step()) {
                 auto first_node = static_cast<std::size_t>(
                     std::floor(std::abs(at) / options_.fixed_step_seconds));
                 const auto grid = [&](std::size_t n) { return n * options_.fixed_step_seconds; };
@@ -772,6 +844,25 @@ class Hpop final : public IStateProvider {
         if (epoch == initial_.epoch)
             return initial_;
         validate_interval(epoch);
+        if (regularization_) {
+            // Bound epoch conversion to this query, including its exact integer-ns
+            // endpoint. Recompute direct queries; interpolated providers prepare and
+            // cache a full declared coast instead of sharing partial query histories.
+            const Hpop coast(initial_, options_, environment_, epoch);
+            std::size_t attempts = 0;
+            const auto integrated =
+                coast
+                    .integrate_regularized(coast.regularization_->initial_state(), t, attempts,
+                                           checkpoint)
+                    .cartesian();
+            const auto value =
+                coast.regularized_output(t, integrated, epoch, coast.weather_stage(t, 0, t));
+            return {epoch,
+                    OriginId::earth,
+                    FrameId::gcrf,
+                    {value[0], value[1], value[2]},
+                    {value[3], value[4], value[5]}};
+        }
         if (options_.uses_fixed_step()) {
             std::size_t attempts = 0;
             const auto value = options_.integrator == HpopIntegrator::gauss_jackson
@@ -981,6 +1072,11 @@ void validate_hpop_options(const HpopOptions &o) {
         throw std::invalid_argument("Unsupported HPOP step size control");
     if (o.correction != HpopCorrection::full && o.correction != HpopCorrection::pseudo)
         throw std::invalid_argument("Unsupported HPOP predictor corrector scheme");
+    if (!std::isfinite(o.regularization_exponent) || o.regularization_exponent <= 0 ||
+        o.regularization_exponent > 10)
+        throw std::invalid_argument("HPOP regularization exponent must be in (0, 10]");
+    if (o.steps_per_orbit <= 0)
+        throw std::invalid_argument("HPOP steps per orbit must be positive");
     positive(o.position_tolerance_m, "HPOP position tolerance must be finite and positive");
     positive(o.velocity_tolerance_mps, "HPOP velocity tolerance must be finite and positive");
     if (!std::isfinite(o.relative_tolerance) || o.relative_tolerance < 1e-14 ||

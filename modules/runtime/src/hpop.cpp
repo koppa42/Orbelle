@@ -27,8 +27,18 @@ std::string hpop_algorithm(const core::HpopOptions &options,
                                        : options.gravity_model) +
         ";degree=" + std::to_string(options.gravity_degree) +
         ";order=" + std::to_string(options.gravity_order);
-    algorithm +=
-        options.uses_fixed_step() ? ";steps=fixed-grid-v1" : ";steps=relative-mixed-max-span-v2";
+    if (options.time_regularization) {
+        std::ostringstream config;
+        config.imbue(std::locale::classic());
+        config << std::hexfloat << ";time=sundman-initial-ellipse-bounded-v1;exponent="
+               << options.regularization_exponent << ";steps-per-orbit=" << options.steps_per_orbit
+               << (options.uses_fixed_step() ? ";steps=sundman-fixed-phase-v1"
+                                             : ";steps=sundman-relative-physical-bounds-v1");
+        algorithm += config.str();
+    } else {
+        algorithm += options.uses_fixed_step() ? ";steps=fixed-grid-v1"
+                                               : ";steps=relative-mixed-max-span-v2";
+    }
     if (options.uses_secular_gravity())
         algorithm += ";secular=file-linear-julian-year-v1";
     if (options.uses_eop_force() && environment.eop)

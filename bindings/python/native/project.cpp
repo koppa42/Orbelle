@@ -290,6 +290,9 @@ void bind_project(py::module_ &module) {
         .def_readwrite("min_step_seconds", &core::HpopOptions::min_step_seconds)
         .def_readwrite("max_step_seconds", &core::HpopOptions::max_step_seconds)
         .def_readwrite("fixed_step_seconds", &core::HpopOptions::fixed_step_seconds)
+        .def_readwrite("time_regularization", &core::HpopOptions::time_regularization)
+        .def_readwrite("regularization_exponent", &core::HpopOptions::regularization_exponent)
+        .def_readwrite("steps_per_orbit", &core::HpopOptions::steps_per_orbit)
         .def_readwrite("interpolation", &core::HpopOptions::interpolation)
         .def_readwrite("report_ephemeris_on_fixed_step",
                        &core::HpopOptions::report_ephemeris_on_fixed_step)

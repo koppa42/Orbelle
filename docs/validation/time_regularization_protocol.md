@@ -1,6 +1,6 @@
-# HPOP 时间正则化内核验证
+# HPOP 时间正则化验证
 
-本协议验证内部 Sundman 方程、共用积分内核及有界物理时间端点适配。公共 HPOP 仍按普通时间传播；整数 TAI、真实天气/机动、API、项目保存及界面尚未接入。本项不能代替 STK 同配置轨迹验收。方程、尺度和后续边界见[内部契约](../architecture/time_regularization.md)。
+本协议验证 Sundman 方程、共用积分内核、有界物理时间端点及公开 HPOP 管线。C++ / Python / 项目保存 / Integrator 页共用配置，覆盖整数 TAI、真实天气分段、任务脉冲和科学插值；独立参考来自 Hipparchus 与 CSPICE。本项不替代尚未进行的 STK 同配置实测。方程、尺度、非椭圆限制与控制政策见[计算契约](../architecture/time_regularization.md)。
 
 ## 独立参考
 
@@ -62,11 +62,11 @@
 | BS 固定 | 8.05966e-05 | 4.88595e-08 | 6.0507e-05 | 3.66803e-08 |
 | GJ Full | 0.00097228 | 5.89426e-07 | 0.000495529 | 3.00983e-07 |
 | GJ Pseudo | 0.000960898 | 5.82525e-07 | 0.000500119 | 3.0377e-07 |
-| RKF 自适应 | 2.76939e-05 | 1.31804e-08 | 1.30076e-05 | 7.88554e-09 |
-| RKV 自适应 | 0.000121546 | 7.3685e-08 | 0.00013022 | 7.8944e-08 |
-| BS 自适应 | 8.73256e-05 | 2.42755e-08 | 7.65656e-05 | 2.25333e-08 |
+| RKF 自适应 | 2.69267e-05 | 8.15546e-09 | 1.76073e-05 | 2.30695e-09 |
+| RKV 自适应 | 0.000123081 | 7.46152e-08 | 0.000130911 | 7.93618e-08 |
+| BS 自适应 | 8.80643e-05 | 2.34351e-08 | 8.01535e-05 | 2.11466e-08 |
 
-每条粗细轨迹均满足原 **5 mm / 5e−6 m/s** 绝对门槛和 **1 mm / 1e−6 m/s** 收敛门槛。终点秒与输入双精度值精确相等；这并不替代大历元下整数纳秒映射的后续验收。两种 GJ 每条轨迹均完成超过 100 个真实多步推进，各自累计 1924367 步，避免只检验起步器。
+每条粗细轨迹均满足原 **5 mm / 5e−6 m/s** 绝对门槛和 **1 mm / 1e−6 m/s** 收敛门槛。终点秒与输入双精度值精确相等；大历元下整数纳秒映射另由下述公开入口验收。两种 GJ 每条轨迹均完成超过 100 个真实多步推进，各自累计 1924367 步，避免只检验起步器。
 
 `SundmanBounded` 另验全部五种方法的 ±1 ns 端点、取消不修改输入历史、预算耗尽前不调用力，以及拒绝直接反转旧历史。分段常加速度的正反向解析案例，在 ±315.123456789 s 重置力段后继续到 ±700.987654321 s，检查单侧力覆盖、精确终点、严格单调输出与 1e−5 m / 1e−8 m/s 误差。它是事件边界的受控测试，不冒充真实天气数据或机动管线验收。
 
@@ -74,13 +74,34 @@
 
 `AdaptivePhysicalLimitsTakePrecedenceOverTheNominalRegularizedScale` 用独立 Kepler 方程与圆锥曲线几何验收物理步长政策：三种自适应方法 × e=0/.7 × 正反向 × 20/20 s 与 20/35 s 两组边界，共 24 例。名义每圈步数分别为 100000000 和 120，覆盖名义 q 对应时间小于 Min Step 与大于 Max Step；在连续段内验证真实接受间隔，末端截短保留精确终点，位置/速度门槛为 1e−5 m / 1e−8 m/s。
 
-`AdaptiveMinimumStepRejectsUnresolvedOscillatoryForce` 为三种算法加入 `sin(100t)` m/s² 摄动，分别用 20/20 s 和 20/35 s 约束；六例均须在 100 次尝试内诊断无法满足最小步长，不得等到 200000 次预算耗尽。输入状态保持不变。上述显式优先级和切换规则属于本项目实现，不能据此宣称 STK 内部控制器或公共 Time Regularization 已完成。
+`AdaptiveMinimumStepRejectsUnresolvedOscillatoryForce` 为三种算法加入 `sin(100t)` m/s² 摄动，分别用 20/20 s 和 20/35 s 约束；六例均须在 100 次尝试内诊断无法满足最小步长，不得等到 200000 次预算耗尽。输入状态保持不变。上述显式优先级和切换规则属于本项目实现，不能据此宣称与 STK 内部控制器完全相同。
 
 ## 普通 HPOP 回归与身份
 
-为降低高阶外推的舍入放大，固定十八阶 BS 和 GJ 十四至十八阶起步器改用 2/4/6/8/12/16/24/32/48 子步，外推局部状态增量。普通自适应 BS 的 2/4/…/18 序列及其控制器保留。对应算法来源升级至 `bulirsch-stoer-midpoint-richardson-fixed18-v2`、`gauss-jackson12-summed-bs14to18-startup-full-v3` 和 `gauss-jackson12-summed-bs14to18-startup-pseudo-v3`；GJ v3 还保留起步和求和重建的舍入补偿。项目仍为 v35 / OBJS26。
+为降低高阶外推的舍入放大，固定十八阶 BS 和 GJ 十四至十八阶起步器改用 2/4/6/8/12/16/24/32/48 子步，外推局部状态增量。普通自适应 BS 的 2/4/…/18 序列及其控制器保留。对应算法来源升级至 `bulirsch-stoer-midpoint-richardson-fixed18-v2`、`gauss-jackson12-summed-bs14to18-startup-full-v3` 和 `gauss-jackson12-summed-bs14to18-startup-pseudo-v3`；GJ v3 还保留起步和求和重建的舍入补偿。当前项目为 v36 / OBJS27。
 
-普通时间的固定步长、Hipparchus/Orekit 轨迹、天气、缓存、科学插值、任务和 API 测试保持原门槛；GJ v3 的普通时间数值见 [HPOP 协议](hpop_protocol.md#gj-起步与求和补偿-v3)。本次 Windows/MSVC Release 本地验证 Core 全套 132/132 通过，最后最小步长失败路径调整后另复核 16 项相关测试，集成 177 通过 / 2 项完整资源条件跳过，独立 Python 3.13 安装 217 通过 / 5 项可选 NumPy/pandas 跳过，安装后 SDK 2/2。没有新增界面，未重跑本轮无关的 DPI 验收。逐次 XML、日志、参考收敛输出及汇总保存在 `out/validation/`，不提交运行产物。
+普通时间的固定步长、Hipparchus/Orekit 轨迹、天气、缓存、科学插值、任务和 API 测试保持原门槛；GJ v3 的普通时间数值见 [HPOP 协议](hpop_protocol.md#gj-起步与求和补偿-v3)。
+
+## 公开入口、科学插值与整数历元
+
+公开状态查询使用同一份不可变 Hipparchus 文件的 27 条点质量轨迹，覆盖 9 种方法/模式（五种方法、GJ 两种校正及三种自适应模式），共 **243** 个终点。初始历元为 int64 最大值减 40 天；RK4 每圈 131072 步，其余 4096 步，指数 1/1.5/2、偏心率 0/.7/.98、正反向与超过一圈。相对容差 1e−14、位置/速度绝对容差 1e−8 m / 1e−11 m/s，最大物理步长 150 s。最大位置差 **0.000970826496 m**，最大速度差 **5.88544664e−7 m/s**，原门槛仍为 5 mm / 5e−6 m/s。
+
+项目和科学星历以独立 CSPICE 二体解对照；以下最大值包含普通与正则化两条路径，均未放宽原门槛。
+
+| 路径 | 覆盖 | 最大位置差 m | 最大速度差 m/s | 门槛 |
+| --- | --- | --- | --- | --- |
+| 科学星历 | 两种插值、五种积分器、e=0/.72、±6000 s、接受节点与固定报告 | 4.35430874e−6 | 2.51573367e−8 | 5 mm / 5e−6 m/s |
+| 短滑行与大历元 | 五种积分器、两种插值、初始 TAI 8e18 ns、初态前后/跨初态/1 s 段 | 2.88710308e−8 | 2.27418010e−7 | 1 mm / 1e−6 m/s |
+| 任务脉冲 | 初始、同历元连续及最终脉冲；脉冲两侧 ±1 ns；后续计划不得越过项目结束 | 4.20547851e−9 | 2.20739913e−11 | 5 mm / 5e−6 m/s |
+
+另验 1 ns 滑行、Lagrange 0/29、Hermite 3/29、精确报告网格、256 天端点、有限力数据范围、取消/重试及生成后不再调用力。真实 NRLMSISE-00/CelesTrak 三小时跳变跨 2016 闰秒，检查两侧共享边界、正反向和每侧仅 3 s 的科学插值；与普通时间 RKV 小步长结果维持 1 mm / 1e−6 m/s。
+
+回归覆盖两个具体失效：浮点秒节点直接标记为圆整纳秒会产生微米级坐标抖动，Hermite 求导将其放大；输出使用连续力段导数作不足数纳秒的时间输运。物理输出门限的短逆方程前缀不得覆盖下一次自适应 q 提议，避免形成不必要的密集节点；完整步依然检查误差和物理 Min/Max。原问题可分别使速度差达到 5.58e−6 与 2.39e−6 m/s；现有独立对照在原容限下通过，参考字节保持不变。
+
+v36 / OBJS27 固定项目样例由独立 `struct.pack("<BdI", 1, 1.25, 240)` 插入三个字段并重算 CRC，1484 字节、SHA-256 为 `288fa30c1acd71d1f7c1202d3e015b6ecd6a2219c0eb97659aa8473138499dab`。C++ 与 Python 精确重写；所有旧/未知版本、非布尔开关、非法指数和越界步数拒绝且保留源文件。关闭后的合法草稿、启用后的普通固定秒步长不参与分析/报告身份；活动指数和步数参与，既有分析保持原状态。
+
+Windows/MSVC Release 完整构建通过：Core **136/136**，集成 **179 通过 / 2 项完整资源条件跳过**，独立 Python 3.13 **221 通过 / 5 项可选 NumPy/pandas 跳过**，安装后 SDK **2/2**。Qt HPOP offscreen **33/33**；原生 Windows DPR **1.5/2.25**、430/720 逻辑宽度检查参数联动、键盘、取消、重开和动态摘要，未出现横向溢出。完整 EGM2008/FES 条件跳过不计为本轮全资源验证。命令、XML、原生截图、失败诊断与最终汇总保存在 `out/validation/hpop-public-regularization-20261017/`，不提交运行产物。
+
 
 ## 复现
 
@@ -94,7 +115,7 @@ javac -cp $classpath -d out/validation/sundman/classes tools/validation/orekit/O
 java -Xmx768m -cp ("out/validation/sundman/classes" + [IO.Path]::PathSeparator + $classpath) OrbitForgeSundmanReference out/validation/sundman/sundman.txt
 Get-FileHash -Algorithm SHA256 -LiteralPath out/validation/sundman/sundman.txt
 cmake --build --preset desktop-graphics
-ctest --preset desktop-graphics -R 'core\.(Sundman|GaussJacksonKernel|All/SundmanMethods|All/SundmanBoundaries)'
+ctest --preset desktop-graphics -R 'core\.(Sundman|HpopRegularization|GaussJacksonKernel|All/SundmanMethods|All/SundmanBoundaries)'
 ctest --preset desktop-graphics -R 'core\.(Hpop|Mission)'
 ```
 

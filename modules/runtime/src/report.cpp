@@ -215,15 +215,19 @@ std::string report_input_sha256(const application::Project &project) {
             options.step_control = options.uses_fixed_step()
                                        ? core::HpopStepControl::fixed
                                        : core::HpopStepControl::relative_error;
+            const core::HpopOptions defaults;
+            if (!options.time_regularization) {
+                options.regularization_exponent = defaults.regularization_exponent;
+                options.steps_per_orbit = defaults.steps_per_orbit;
+            }
+            if (options.time_regularization || !options.uses_fixed_step())
+                options.fixed_step_seconds = defaults.fixed_step_seconds;
             if (options.uses_fixed_step()) {
-                const core::HpopOptions defaults;
                 options.relative_tolerance = defaults.relative_tolerance;
                 options.position_tolerance_m = defaults.position_tolerance_m;
                 options.velocity_tolerance_mps = defaults.velocity_tolerance_mps;
                 options.min_step_seconds = defaults.min_step_seconds;
                 options.max_step_seconds = defaults.max_step_seconds;
-            } else {
-                options.fixed_step_seconds = core::HpopOptions{}.fixed_step_seconds;
             }
         }
     }

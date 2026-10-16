@@ -38,6 +38,7 @@ class ReportsTest(unittest.TestCase):
             orbit = satellite.orbit
             settings = orbit.hpop
             settings.integrator = method
+            settings.time_regularization = False
             settings.step_control = of.HpopStepControl.FIXED
             def identity():
                 orbit.hpop = settings
@@ -191,7 +192,7 @@ class ReportsTest(unittest.TestCase):
             path = Path(directory) / 'derived.orbitforge'
             project.save(path)
             raw = path.read_bytes()
-            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 35)
+            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 36)
             self.assertEqual(of.load_project(path).reports[0].query.kind, of.ReportKind.GEODETIC_POSITION)
 
 

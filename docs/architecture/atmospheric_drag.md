@@ -61,7 +61,7 @@ density = of.evaluate_atmosphere(of.AtmosphereModel.NRLMSISE00, inputs)
 
 依照 STK 对 MSIS 不使用插值的说明，NRLMSISE 在该选择下沿用未插值的七项 Ap 历史、`SW[9]=-1`，其有效身份等同三小时取样。JR 与低空 NRL 混合时，两者仍分别取样；前者使用样条，后者使用原生历史。设置草稿保留选择，手动天气或禁用阻力时该项不改变结果身份。现有 UTC 步边界策略仍生效。
 
-C++ / Python 的枚举新增 `three_hourly_cubic_spline` / `THREE_HOURLY_CUBIC_SPLINE`；高层 `DragSettings` 使用同名字符串。项目 v35 / OBJS26 保存自然三次样条枚举 3，拒绝旧格式和未知值；参考样例独立构造并覆盖未启用草稿。JR 文件样条的算法标识包含 `natural-utc-midpoint-runs-v1;overshoot=error`。
+C++ / Python 的枚举新增 `three_hourly_cubic_spline` / `THREE_HOURLY_CUBIC_SPLINE`；高层 `DragSettings` 使用同名字符串。项目 v36 / OBJS27 保存自然三次样条枚举 3，拒绝旧格式和未知值；参考样例独立构造并覆盖未启用草稿。JR 文件样条的算法标识包含 `natural-utc-midpoint-runs-v1;overshoot=error`。
 
 ## 三小时保持均值插值
 
@@ -73,7 +73,7 @@ C++ / Python 的枚举新增 `three_hourly_cubic_spline` / `THREE_HOURLY_CUBIC_S
 
 窗口按 UTC 的 00:00、03:00、…、24:00 划分，采用左闭右开区间；局部坐标使用该窗口实际 TAI 时长，因此包含正闰秒的 10801 s 窗口也保持时间平均值。JR 施加 24120 s 地磁滞后，再对所选 Ap/Kp 插值，最后才转换指数；均值保持针对所选原始量，非线性转换后的量不声称均值相等。NRLMSISE 主模型和 JR 的低空 NRL 分支均沿用原生七项 Ap 历史、`SW[9]=-1`；主模型 NRL 的有效身份等同 3-Hourly，设置草稿仍保留所选项。
 
-桌面按 Daily、3-Hourly、3-Hourly Interp、3-Hourly Cubic Spline 排列。项目 v35 / OBJS26 将四项分别保存为 0、1、2、3，拒绝所有非当前版本。JR 文件模式算法标识包含 `geomag-interp=natural-primitive-quadratic-utc-runs-v1;bounds=cell-mean-scaling`。Core 无新增外部依赖；SciPy 只用于独立参考生成。
+桌面按 Daily、3-Hourly、3-Hourly Interp、3-Hourly Cubic Spline 排列。项目 v36 / OBJS27 将四项分别保存为 0、1、2、3，拒绝所有非当前版本。JR 文件模式算法标识包含 `geomag-interp=natural-primitive-quadratic-utc-runs-v1;bounds=cell-mean-scaling`。Core 无新增外部依赖；SciPy 只用于独立参考生成。
 
 ## STK FXM 文件
 
@@ -83,7 +83,7 @@ FXM 只有 1 AU 调整通量。`SpaceWeatherInfo.solar_flux_adjusted` 明确此�
 
 低层 C++ / Python `sample`、`validate_interval` 增加可选 `sun_distance_m(Epoch) -> metres` 参数。FXM 要求该函数；其他文件不调用它。回调必须来自本次计算冻结的几何星历，距离须有限且为正。HPOP 自动使用已经捕获的 Sun 星历，独立于密度的“Use Apparent Sun Position”方向选择；不访问网络。准备阶段检查包含模型滞后在内的每个必需通量节点，故星历仅覆盖传播起止时刻仍可能不足。换算结果超出模型 `(0, 1000] sfu` 输入范围时明确失败。
 
-观测段的八个 Ap/Kp 支持现有每日、三小时、保持均值插值及自然样条取样。FXM 预测段只提供日 Ap，支持 **Daily + Ap**；不伪造三小时值或 Kp，缺少所选模式需要的字段时给出覆盖错误。分开的预测段存在日期缺口也不补值或外推。桌面数据中心的天气导入支持 `.fxm`；自动下载仍使用 CelesTrak CSV。FXM 数据解释标识增加 `flux=adjusted-au-geometric-utc20-v1`，原始天气与冻结星历都参与项目数据引用；当前项目格式为 v35 / OBJS26。
+观测段的八个 Ap/Kp 支持现有每日、三小时、保持均值插值及自然样条取样。FXM 预测段只提供日 Ap，支持 **Daily + Ap**；不伪造三小时值或 Kp，缺少所选模式需要的字段时给出覆盖错误。分开的预测段存在日期缺口也不补值或外推。桌面数据中心的天气导入支持 `.fxm`；自动下载仍使用 CelesTrak CSV。FXM 数据解释标识增加 `flux=adjusted-au-geometric-utc20-v1`，原始天气与冻结星历都参与项目数据引用；当前项目格式为 v36 / OBJS27。
 
 ## 月预报与 CSSI Predicts
 
@@ -97,7 +97,7 @@ CSSI 没有单独的平均通量列。当前约定先在每个 UTC 日期的 20:
 
 JR 的四种更新选择在月预报段均使用连续月曲线，经模型地磁滞后后求值；观测段仍使用所选的日/三小时算法。NRL 的 Daily 使用月曲线当前 Ap，三种三小时选择使用七项历史模式：在各实际时间滞后处取月曲线值，转换所选指数后再求两组八项平均。月曲线只提供预报取样，不向原始记录伪造八个观测槽；跨观测/预报边界的历史按各段自己的取样方式组装。
 
-数据中心支持导入 `.dat`，`SpaceWeatherInfo.cssi_predictions` 和目录重开后的元数据一致。所有天气数据解释标识升级为 `spaceweather-utc20-linear-jr-msis-lags-monthly-linear-v2`；CSSI 额外记录 `cssi=nominal-ap-only;average=centered-81-utc-days-v1`，FXM 保留原改正标识。项目结构仍为 v35 / OBJS26；旧天气解释引用触发既有数据变化确认，已准备分析继续持有原不可变数据。独立 SciPy / NumPy / GMAT 对照见[验证协议](../validation/atmospheric_drag_protocol.md)。
+数据中心支持导入 `.dat`，`SpaceWeatherInfo.cssi_predictions` 和目录重开后的元数据一致。所有天气数据解释标识升级为 `spaceweather-utc20-linear-jr-msis-lags-monthly-linear-v2`；CSSI 额外记录 `cssi=nominal-ap-only;average=centered-81-utc-days-v1`，FXM 保留原改正标识。项目结构仍为 v36 / OBJS27；旧天气解释引用触发既有数据变化确认，已准备分析继续持有原不可变数据。独立 SciPy / NumPy / GMAT 对照见[验证协议](../validation/atmospheric_drag_protocol.md)。
 
 ## 数据与持久化
 
@@ -105,7 +105,7 @@ JR 的四种更新选择在月预报段均使用连续月曲线，经模型地�
 
 默认使用几何太阳。`use_apparent_sun_position=True` 使用 CSPICE 对地球接收观测的 `LT+S` 太阳方向；此约定影响密度中的当地太阳时/赤纬，不修改第三体引力或光压的几何太阳。准备计算时额外认证区间起点前 600 s 的太阳与地球核覆盖，边界不足明确拒绝。自定义星历必须提供相应查询和区间认证接口，不能将几何方向冒充视方向。
 
-项目格式为 v35 / OBJS v26，只读写当前版本。禁用模型时保存合法参数草稿，计算身份忽略这些草稿；启用时计入实际密度模型、天气、Cd、面积质量比、高度算法、太阳方法及 UTC/EOP/星历来源。NRLMSISE 主模型的低空草稿和未启用的拼接范围不改变结果身份。
+项目格式为 v36 / OBJS v27，只读写当前版本。禁用模型时保存合法参数草稿，计算身份忽略这些草稿；启用时计入实际密度模型、天气、Cd、面积质量比、高度算法、太阳方法及 UTC/EOP/星历来源。NRLMSISE 主模型的低空草稿和未启用的拼接范围不改变结果身份。
 
 ```python
 import orbitforge as of

@@ -748,4 +748,149 @@ TEST(SundmanBounded, RejectsInvalidStepCountsWorkExhaustionAndReversedHistory) {
                  std::invalid_argument);
     EXPECT_EQ(advanced.time(), 100);
 }
+
+TEST(HpopRegularization, PublicStateQueriesMatchIndependentHipparchusAtLargeTaiEpochs) {
+    constexpr std::array methods{HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+                                 HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson};
+    constexpr std::int64_t initial_ns =
+        std::numeric_limits<std::int64_t>::max() - 40LL * 86400 * 1000000000;
+    double max_r = 0, max_v = 0;
+    for (int selection = 0; selection < 9; ++selection) {
+        const bool adaptive = selection >= 6;
+        const int method = adaptive ? selection - 5 : std::min(selection, 4);
+        for (const auto &ref : references()) {
+            if (ref.kind != 0)
+                continue;
+            SCOPED_TRACE(::testing::Message()
+                         << "selection=" << selection << " e=" << ref.eccentricity
+                         << " n=" << ref.exponent << " t=" << ref.time);
+            HpopOptions options;
+            options.gravity_degree = options.gravity_order = 0;
+            options.integrator = methods[method];
+            options.step_control =
+                adaptive ? HpopStepControl::relative_error : HpopStepControl::fixed;
+            options.correction = selection == 5 ? HpopCorrection::pseudo : HpopCorrection::full;
+            options.time_regularization = true;
+            options.regularization_exponent = ref.exponent;
+            options.steps_per_orbit = method == 0 ? 131072 : 4096;
+            options.relative_tolerance = 1e-14;
+            options.position_tolerance_m = 1e-8;
+            options.velocity_tolerance_mps = 1e-11;
+            options.max_step_seconds = 150;
+            const CartesianState source{Epoch{initial_ns},
+                                        OriginId::earth,
+                                        FrameId::gcrf,
+                                        {ref.initial[0], ref.initial[1], ref.initial[2]},
+                                        {ref.initial[3], ref.initial[4], ref.initial[5]}};
+            const Epoch end{initial_ns + static_cast<std::int64_t>(std::llround(ref.time * 1e9))};
+            const auto orbit = make_hpop(source, options);
+            auto output = source;
+            ASSERT_NO_THROW(output = orbit->state_at(end));
+            EXPECT_EQ(output.epoch, end);
+            const Cartesian result{output.position_m[0],   output.position_m[1],
+                                   output.position_m[2],   output.velocity_mps[0],
+                                   output.velocity_mps[1], output.velocity_mps[2]};
+            max_r = std::max(max_r, error(result, ref.final, 0));
+            max_v = std::max(max_v, error(result, ref.final, 3));
+            EXPECT_LT(error(result, ref.final, 0), .005);
+            EXPECT_LT(error(result, ref.final, 3), 5e-6);
+        }
+    }
+    std::ostringstream position, velocity;
+    position << std::setprecision(17) << max_r;
+    velocity << std::setprecision(17) << max_v;
+    RecordProperty("max_position_m", position.str());
+    RecordProperty("max_velocity_mps", velocity.str());
+}
+TEST(HpopRegularization, ExactTaiReportingCancellationAndInactiveOrdinaryStepDrafts) {
+    const auto vector = initial(.7);
+    const CartesianState source{Epoch{8000000000000000000LL},
+                                OriginId::earth,
+                                FrameId::gcrf,
+                                {vector[0], vector[1], vector[2]},
+                                {vector[3], vector[4], vector[5]}};
+    for (auto method : {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+                        HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
+        HpopOptions options;
+        options.gravity_degree = options.gravity_order = 0;
+        options.integrator = method;
+        options.time_regularization = true;
+        options.steps_per_orbit = 4096;
+        options.relative_tolerance = 1e-14;
+        options.position_tolerance_m = 1e-8;
+        options.velocity_tolerance_mps = 1e-11;
+        for (std::int64_t sign : {-1, 1}) {
+            constexpr std::int64_t span = 3600'000'000'017LL, report = 60'000'000'001LL;
+            const Epoch end{source.epoch.tai_nanoseconds() + sign * span};
+            const auto arcs = propagate_hpop_ephemeris(source, end, options, {}, report);
+            ASSERT_EQ(arcs.size(), 1);
+            EXPECT_EQ(arcs[0].front().epoch, sign > 0 ? source.epoch : end);
+            EXPECT_EQ(arcs[0].back().epoch, sign > 0 ? end : source.epoch);
+            EXPECT_EQ(arcs[0].size(), 61);
+            for (std::size_t i = 0; i < arcs[0].size(); ++i) {
+                const auto &node = arcs[0][sign > 0 ? i : arcs[0].size() - 1 - i];
+                const auto offset = std::min(span, static_cast<std::int64_t>(i) * report);
+                EXPECT_EQ(node.epoch.tai_nanoseconds(),
+                          source.epoch.tai_nanoseconds() + sign * offset);
+            }
+            auto draft = options;
+            draft.fixed_step_seconds = 37;
+            const auto same = propagate_hpop_ephemeris(source, end, draft, {}, report);
+            EXPECT_EQ(arcs[0].back().position_m, same[0].back().position_m);
+            EXPECT_EQ(arcs[0].front().velocity_mps, same[0].front().velocity_mps);
+            const auto orbit = make_hpop(source, options);
+            int checks = 0;
+            EXPECT_THROW((void)orbit->state_at(end,
+                                               [&] {
+                                                   if (++checks == 20)
+                                                       throw std::runtime_error("cancel");
+                                               }),
+                         std::runtime_error);
+            const auto after = orbit->state_at(end),
+                       fresh = make_hpop(source, options)->state_at(end);
+            EXPECT_EQ(after.position_m, fresh.position_m);
+            EXPECT_EQ(after.velocity_mps, fresh.velocity_mps);
+        }
+    }
+}
+TEST(HpopRegularization, RejectsInvalidParametersAndNonperiodicActiveStates) {
+    HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    for (double n : {0., -1., 10.01, std::numeric_limits<double>::infinity()}) {
+        options.regularization_exponent = n;
+        EXPECT_THROW(validate_hpop_options(options), std::invalid_argument);
+    }
+    options.regularization_exponent = 1.5;
+    options.steps_per_orbit = 0;
+    EXPECT_THROW(validate_hpop_options(options), std::invalid_argument);
+    options.steps_per_orbit = 120;
+    CartesianState escape{Epoch{0}, OriginId::earth, FrameId::gcrf, {7e6, 0, 0}, {0, 15000, 0}};
+    EXPECT_NO_THROW((void)make_hpop(escape, options));
+    options.time_regularization = true;
+    EXPECT_THROW((void)make_hpop(escape, options), std::invalid_argument);
+}
 } // namespace
+
+TEST(SundmanBounded, ReportingGatesDoNotSeedArtificialClustersOfAdaptiveNodes) {
+    for (auto method :
+         {HpopIntegrator::rkf78, HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer}) {
+        HpopOptions options;
+        options.integrator = method;
+        const auto source = initial(0);
+        SundmanPropagation propagation(source, mu, 1.5, 8192, options);
+        auto state = propagation.initial_state();
+        std::size_t attempts = 0, published = 0;
+        for (double end : {.333333333, .666666666, 1.}) {
+            state = propagation.propagate(
+                state, end, [](double t, const Cartesian &s) { return force(0, t, s); }, attempts,
+                {},
+                [&](double t, const Cartesian &) {
+                    ++published;
+                    EXPECT_EQ(t, end);
+                });
+            EXPECT_EQ(state.time(), end);
+            EXPECT_EQ(state.next_step, propagation.nominal_step());
+        }
+        EXPECT_EQ(published, 3U);
+    }
+}

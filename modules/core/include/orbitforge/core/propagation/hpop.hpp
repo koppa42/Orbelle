@@ -119,7 +119,16 @@ struct HpopOptions {
     double relative_tolerance = 1e-12;
     double position_tolerance_m = 1e-3, velocity_tolerance_mps = 1e-6;
     double min_step_seconds = 0.001, max_step_seconds = 60;
-    double fixed_step_seconds = 10; // Effective fixed mode; no truncation error control.
+    double fixed_step_seconds = 10; // Inactive when time_regularization is enabled.
+    // dS = sqrt(mu) r^-n dt. Uses the initial osculating nonradial bound ellipse
+    // to normalize steps per orbit, independently for each coast after an impulse.
+    // Fixed methods use a uniform regularized grid; adaptive methods retain its
+    // nominal scale while enforcing physical Min/Max Step. Endpoints can be shorter.
+    // Finite 0 < exponent <= 10 and positive step count, including inactive drafts.
+    // These initial values follow STK's example, not a claimed STK default.
+    bool time_regularization = false;
+    double regularization_exponent = 1.5;
+    int steps_per_orbit = 120;
     // Scientific state queries in project/mission sessions use this interpolation.
     // The direct make_hpop kernel remains available for integration/reference queries.
     OrbitInterpolationOptions interpolation;
@@ -150,7 +159,10 @@ struct HpopEnvironment {
     void validate_weather_interval(const DragOptions &drag, Epoch first, Epoch last) const;
 };
 // Cowell equations in GCRF, TAI seconds. Initial state is osculating, not mean elements.
-// Deterministic checkpoints are independent of query order and output sampling.
+// Results are independent of query order and output sampling. Ordinary-time
+// integration uses deterministic checkpoints. Direct regularized queries integrate
+// from the initial state so a short query cannot reuse stages beyond its endpoint;
+// project/mission scientific providers use make_hpop_interpolated for cached queries.
 // Supports forward/backward propagation within 366 days of the initial epoch.
 // No implicit data loading or extrapolation. PropagationError on impact, a failed
 // tolerance or work limit. Cancellation checkpoints may throw; no partial result.

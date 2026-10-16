@@ -64,9 +64,9 @@ constexpr std::array<double, 13> rkf_b7{
 template <std::size_t N, class Derivative>
 TrialStep<N> rk4_trial(double t, const std::array<double, N> &s, double h,
                        const Derivative &derivative) {
-    using State = std::array<double, N>;
+    using StepState = std::array<double, N>;
     const auto k1 = derivative(t, s);
-    State tmp{};
+    StepState tmp{};
     for (std::size_t i = 0; i < s.size(); ++i)
         tmp[i] = s[i] + h * 0.5 * k1[i];
     const auto k2 = derivative(t + h * 0.5, tmp);
@@ -76,7 +76,7 @@ TrialStep<N> rk4_trial(double t, const std::array<double, N> &s, double h,
     for (std::size_t i = 0; i < s.size(); ++i)
         tmp[i] = s[i] + h * k3[i];
     const auto k4 = derivative(t + h, tmp);
-    State increment{};
+    StepState increment{};
     for (std::size_t i = 0; i < s.size(); ++i) {
         increment[i] = h / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
         tmp[i] = s[i] + increment[i];
@@ -91,8 +91,8 @@ std::array<double, N> rk4(double t, const std::array<double, N> &s, double h,
 template <std::size_t N, class Derivative>
 TrialStep<N> rkf78(double t, const std::array<double, N> &s, double h, const Derivative &derivative,
                    const ErrorControl<N> &control) {
-    using State = std::array<double, N>;
-    std::array<State, 13> k;
+    using StepState = std::array<double, N>;
+    std::array<StepState, 13> k;
     for (std::size_t stage = 0; stage < 13; ++stage) {
         auto value = s;
         for (std::size_t i = 0; i < s.size(); ++i) {
@@ -103,7 +103,7 @@ TrialStep<N> rkf78(double t, const std::array<double, N> &s, double h, const Der
         }
         k[stage] = derivative(t + rkf_c[stage] * h, value);
     }
-    State result = s, increment{};
+    StepState result = s, increment{};
     double error = 0;
     for (std::size_t i = 0; i < s.size(); ++i) {
         double sum = 0;
@@ -123,8 +123,8 @@ TrialStep<N> rkf78(double t, const std::array<double, N> &s, double h, const Der
 template <std::size_t N, class Derivative>
 TrialStep<N> rkv89(double t, const std::array<double, N> &s, double h, const Derivative &derivative,
                    const ErrorControl<N> &control) {
-    using State = std::array<double, N>;
-    std::array<State, 16> k;
+    using StepState = std::array<double, N>;
+    std::array<StepState, 16> k;
     for (std::size_t stage = 0; stage < k.size(); ++stage) {
         auto value = s;
         for (std::size_t i = 0; i < s.size(); ++i) {
@@ -136,7 +136,7 @@ TrialStep<N> rkv89(double t, const std::array<double, N> &s, double h, const Der
         const double at = t + rkv_c[stage] * h;
         k[stage] = derivative(at, value);
     }
-    State result = s, increment{};
+    StepState result = s, increment{};
     double error = 0;
     for (std::size_t i = 0; i < s.size(); ++i) {
         double advance = 0, difference = 0;
@@ -157,7 +157,7 @@ template <std::size_t N, class Derivative>
 TrialStep<N> bulirsch_stoer(double t, const std::array<double, N> &s, double h,
                             const Derivative &derivative, const ErrorControl<N> &control,
                             const std::function<void()> &checkpoint = {}, bool startup = false) {
-    using State = std::array<double, N>;
+    using StepState = std::array<double, N>;
     // Smoothed modified midpoint, polynomial Richardson extrapolation in 1/n^2.
     // Even substep counts preserve the even-power expansion: orders 4..18.
     constexpr std::size_t levels = 9;
@@ -171,22 +171,22 @@ TrialStep<N> bulirsch_stoer(double t, const std::array<double, N> &s, double h,
     // High-order extrapolation of absolute coordinates amplifies cancellation,
     // particularly in GJ's order 14..18 starter. Extrapolate local increments.
     const bool offsets = fixed || startup || control.local_increments;
-    const auto absolute_state = [&](const State &value) {
+    const auto absolute_state = [&](const StepState &value) {
         if (!offsets)
             return value;
-        State absolute = s;
+        StepState absolute = s;
         for (std::size_t i = 0; i < s.size(); ++i)
             absolute[i] += value[i];
         return absolute;
     };
-    const auto trial = [&](const State &estimate, double error, double exponent) {
-        State increment = estimate;
+    const auto trial = [&](const StepState &estimate, double error, double exponent) {
+        StepState increment = estimate;
         if (!offsets)
             for (std::size_t i = 0; i < s.size(); ++i)
                 increment[i] -= s[i];
         return TrialStep<N>{absolute_state(estimate), error, exponent, increment};
     };
-    std::array<State, levels> table{};
+    std::array<StepState, levels> table{};
     const auto first = derivative(t, s);
     TrialStep<N> best{}, rejected{};
     bool accepted = false;
@@ -195,7 +195,7 @@ TrialStep<N> bulirsch_stoer(double t, const std::array<double, N> &s, double h,
     for (std::size_t level = 0; level < levels; ++level) {
         const int n = substeps[level];
         const double substep = h / n;
-        State previous = offsets ? State{} : s, current = previous;
+        StepState previous = offsets ? StepState{} : s, current = previous;
         for (std::size_t i = 0; i < s.size(); ++i)
             current[i] += substep * first[i];
         for (int j = 1; j < n; ++j) {
@@ -212,7 +212,7 @@ TrialStep<N> bulirsch_stoer(double t, const std::array<double, N> &s, double h,
         if (checkpoint)
             checkpoint();
         const auto last = derivative(t + h, absolute_state(current));
-        State estimate{}, correction{};
+        StepState estimate{}, correction{};
         for (std::size_t i = 0; i < s.size(); ++i)
             estimate[i] = .5 * (previous[i] + current[i] + substep * last[i]);
         evaluations += n;

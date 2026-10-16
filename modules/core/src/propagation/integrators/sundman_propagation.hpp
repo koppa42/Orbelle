@@ -158,8 +158,13 @@ class SundmanPropagation {
                 // whose augmented clock lies just before the initial force segment.
                 // The q grid is retained; this bridge never crosses its next node.
                 const double span = std::min(std::abs(end - state.time()), .25 * g * std::abs(h));
+                const double proposed_step = state.next_step;
                 state = bridge(std::move(state), end, span, std::abs(h), checked_force, attempts,
                                checkpoint);
+                // This prefix was shortened to fit a physical gate, not selected
+                // as the next regularized error-control step. Retain that proposal;
+                // the next full trial still checks its error and physical bounds.
+                state.next_step = proposed_step;
             }
             if (accepted && (!boundary || state.time() == end))
                 accepted(state.time(), state.cartesian());

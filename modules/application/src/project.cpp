@@ -25,7 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 35;
+constexpr std::uint32_t project_version = 36;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -43,7 +43,7 @@ struct SectionSchema {
 // One current schema, shared by the reader and writer. Null means an optional section.
 constexpr std::array section_schemas{
     SectionSchema{scene_tag, 1, "Missing scene section"},
-    SectionSchema{objects_tag, 26, "Missing satellites section"},
+    SectionSchema{objects_tag, 27, "Missing satellites section"},
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
     SectionSchema{sensors_tag, 1, "Missing sensors section"},
@@ -398,9 +398,15 @@ std::string analysis_input_sha256(const Project &project) {
                 out.number(static_cast<unsigned>(orbit.step_seconds), 4);
             if (o.integrator == core::HpopIntegrator::gauss_jackson)
                 out.number(static_cast<unsigned>(o.correction), 4);
+            out.number(o.time_regularization, 1);
+            if (o.time_regularization) {
+                out.real(o.regularization_exponent);
+                out.number(static_cast<unsigned>(o.steps_per_orbit), 4);
+            }
             out.number(o.uses_fixed_step(), 1);
             if (o.uses_fixed_step()) {
-                out.real(o.fixed_step_seconds);
+                if (!o.time_regularization)
+                    out.real(o.fixed_step_seconds);
             } else {
                 out.real(o.relative_tolerance);
                 out.real(o.position_tolerance_m);
@@ -820,6 +826,9 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
             objects.number(static_cast<unsigned>(o.interpolation.method), 4);
             objects.number(static_cast<unsigned>(o.interpolation.order), 4);
             objects.number(o.report_ephemeris_on_fixed_step, 1);
+            objects.number(o.time_regularization, 1);
+            objects.real(o.regularization_exponent);
+            objects.number(static_cast<unsigned>(o.steps_per_orbit), 4);
             write_srp(objects, o.srp);
             write_drag(objects, o.drag);
         }
@@ -1038,6 +1047,13 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             check(interpolation_order <= 29, "Unsupported HPOP interpolation order");
             o.interpolation.order = static_cast<int>(interpolation_order);
             o.report_ephemeris_on_fixed_step = objects.boolean();
+            o.time_regularization = objects.boolean();
+            o.regularization_exponent = objects.real();
+            const auto steps_per_orbit = objects.number(4);
+            check(steps_per_orbit >= 1 &&
+                      steps_per_orbit <= static_cast<unsigned>(std::numeric_limits<int>::max()),
+                  "HPOP steps per orbit must be a positive int");
+            o.steps_per_orbit = static_cast<int>(steps_per_orbit);
             o.srp = read_srp(objects);
             o.drag = read_drag(objects);
         }

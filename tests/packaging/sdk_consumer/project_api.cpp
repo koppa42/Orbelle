@@ -68,6 +68,9 @@ int main(int argc, char **argv) try {
     numerical.hpop.integrator = of::HpopIntegrator::gauss_jackson;
     numerical.hpop.correction = of::HpopCorrection::pseudo;
     numerical.hpop.step_control = of::HpopStepControl::fixed;
+    numerical.hpop.time_regularization = true;
+    numerical.hpop.regularization_exponent = 1.75;
+    numerical.hpop.steps_per_orbit = 1024;
     numerical.hpop.drag.geomagnetic_update = of::core::GeomagneticUpdate::three_hourly_interpolated;
     const auto satellite =
         reopened.objects().create(of::objects::Satellite{.name = "HPOP", .orbit = numerical});
@@ -77,6 +80,10 @@ int main(int argc, char **argv) try {
         numerical_result.provenance().algorithm.find(
             "gauss-jackson12-summed-bs14to18-startup-pseudo-v3") == std::string::npos)
         return 5;
+    if (numerical_result.provenance().algorithm.find("time=sundman-initial-ellipse-bounded-v1") ==
+            std::string::npos ||
+        numerical_result.provenance().algorithm.find("steps-per-orbit=1024") == std::string::npos)
+        return 39;
     reopened.save(path, numerical_analysis, true);
     auto numerical_file = of::Project::open(path);
     if (numerical_file.to_data().satellites.at(0).orbit.hpop != numerical.hpop)

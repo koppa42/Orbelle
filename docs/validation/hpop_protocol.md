@@ -1,6 +1,6 @@
 # HPOP 验证协议
 
-当前项目格式为 v35 / OBJS26，项目科学插值及任务路由见[插值验证协议](orbit_interpolation_protocol.md)。下文各独立算法增量中记录的格式版本和截图仅描述当时验证，不替代当前文件契约。
+当前项目格式为 v36 / OBJS27，项目科学插值及任务路由见[插值验证协议](orbit_interpolation_protocol.md)。下文各独立算法增量中记录的格式版本和截图仅描述当时验证，不替代当前文件契约。
 
 模型、输入约定与 STK 对照范围见[传播器](../architecture/propagators.md)。数值容限不等于真实轨道预报误差；当前没有 STK 直接参考结果。
 

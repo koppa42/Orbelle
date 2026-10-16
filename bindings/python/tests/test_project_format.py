@@ -19,7 +19,7 @@ class ProjectFormatTests(unittest.TestCase):
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 35)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 36)
         self.path.write_bytes(self.raw)
         project = of.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
@@ -37,6 +37,9 @@ class ProjectFormatTests(unittest.TestCase):
         self.assertEqual(hpop.interpolation, "hermite")
         self.assertEqual(hpop.interpolation_order, 5)
         self.assertTrue(hpop.report_ephemeris_on_fixed_step)
+        self.assertTrue(hpop.time_regularization)
+        self.assertEqual(hpop.regularization_exponent, 1.25)
+        self.assertEqual(hpop.steps_per_orbit, 240)
         self.assertEqual(hpop.drag_area_m2, 37.5)
         self.assertEqual(hpop.srp_area_m2, 37.5)
         drag = hpop.drag
@@ -69,14 +72,14 @@ class ProjectFormatTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(),raw)
 
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(35), 36, 0xFFFFFFFF):
+        for version in (*range(36), 37, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (of.load_project_data, of.load_project,
                                  of.Project.open, of.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 35"):
+                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 36"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 
@@ -233,6 +236,30 @@ class ProjectFormatTests(unittest.TestCase):
                 self.path.write_bytes(with_sections(self.raw, sections))
                 with self.assertRaises(of.ProjectError):
                     of.load_project_data(self.path)
+
+
+    def test_invalid_regularization_fields_with_valid_crcs_preserve_source(self):
+        prefix = struct.pack("<IIBdIII7dIIB", 30, 12, 0, 1250, 4, 1, 1, 2e-12, .002, 2e-6,
+                             .005, 45, 12, 1000, 1, 5, 1)
+        for enabled in (0, 1):
+            for offset, encoding, value in ((0, "B", 2), (1, "d", 0), (1, "d", -1),
+                    (1, "d", 10.001), (1, "d", float("nan")), (1, "d", float("inf")),
+                    (9, "I", 0), (9, "I", 0x80000000), (9, "I", 0xFFFFFFFF)):
+                with self.subTest(enabled=enabled, offset=offset, value=value):
+                    sections = []
+                    for tag, version, original in read_sections(self.raw):
+                        body = bytearray(original)
+                        if tag == b"OBJS":
+                            self.assertEqual(body.count(prefix), 1)
+                            start = body.index(prefix) + len(prefix)
+                            struct.pack_into("<B", body, start, enabled)
+                            struct.pack_into("<" + encoding, body, start + offset, value)
+                        sections.append((tag, version, body))
+                    altered = with_sections(self.raw, sections)
+                    self.path.write_bytes(altered)
+                    with self.assertRaises(of.ProjectError):
+                        of.Project.open(self.path)
+                    self.assertEqual(self.path.read_bytes(), altered)
 
 
 if __name__ == "__main__":
