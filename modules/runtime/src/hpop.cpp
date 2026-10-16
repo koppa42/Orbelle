@@ -16,12 +16,12 @@ std::string hpop_algorithm(const core::HpopOptions &options,
          : options.integrator == core::HpopIntegrator::rkv89
              ? "rkv89-efficient-8th-rklib-a1bf2d26-v1;"
          : options.integrator == core::HpopIntegrator::bulirsch_stoer
-             ? (options.uses_fixed_step() ? "bulirsch-stoer-midpoint-richardson-fixed18-v1;"
+             ? (options.uses_fixed_step() ? "bulirsch-stoer-midpoint-richardson-fixed18-v2;"
                                           : "bulirsch-stoer-midpoint-richardson-4to18-cost-v1;")
          : options.integrator == core::HpopIntegrator::gauss_jackson
              ? (options.correction == core::HpopCorrection::full
-                    ? "gauss-jackson12-summed-bs14to18-startup-full-v1;"
-                    : "gauss-jackson12-summed-bs14to18-startup-pseudo-v1;")
+                    ? "gauss-jackson12-summed-bs14to18-startup-full-v2;"
+                    : "gauss-jackson12-summed-bs14to18-startup-pseudo-v2;")
              : "rk4-fixed-grid-v2;") +
         (options.gravity_model.empty() ? std::string(core::egm96_model_id())
                                        : options.gravity_model) +

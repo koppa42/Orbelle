@@ -75,7 +75,7 @@ int main(int argc, char **argv) try {
     const auto numerical_result = numerical_analysis.states(satellite, 30s, of::FrameId::gcrf);
     if (numerical_result.states().size() != 5 ||
         numerical_result.provenance().algorithm.find(
-            "gauss-jackson12-summed-bs14to18-startup-pseudo-v1") == std::string::npos)
+            "gauss-jackson12-summed-bs14to18-startup-pseudo-v2") == std::string::npos)
         return 5;
     reopened.save(path, numerical_analysis, true);
     auto numerical_file = of::Project::open(path);

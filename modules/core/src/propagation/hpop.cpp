@@ -1,4 +1,5 @@
 #include "integrators/gauss_jackson.hpp"
+#include "integrators/one_step.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -20,30 +21,6 @@ std::function<double(Epoch)> sun_distance(const IThirdBodyEphemeris *ephemeris) 
         return std::hypot(position[0], position[1], position[2]);
     };
 }
-// Fehlberg, NASA TR R-287 (1968), Table X, p. 65. Advance the seventh-order
-// member, as in STK RKF 7(8); estimate error using the embedded eighth-order
-// member. All stage epochs stay within a step.
-constexpr std::array<double, 13> c{0,       2.0 / 27, 1.0 / 9, 1.0 / 6, 5.0 / 12, 0.5, 5.0 / 6,
-                                   1.0 / 6, 2.0 / 3,  1.0 / 3, 1,       0,        1};
-constexpr double a[13][13] = {
-    {},
-    {2.0 / 27},
-    {1.0 / 36, 1.0 / 12},
-    {1.0 / 24, 0, 1.0 / 8},
-    {5.0 / 12, 0, -25.0 / 16, 25.0 / 16},
-    {1.0 / 20, 0, 0, 1.0 / 4, 1.0 / 5},
-    {-25.0 / 108, 0, 0, 125.0 / 108, -65.0 / 27, 125.0 / 54},
-    {31.0 / 300, 0, 0, 0, 61.0 / 225, -2.0 / 9, 13.0 / 900},
-    {2, 0, 0, -53.0 / 6, 704.0 / 45, -107.0 / 9, 67.0 / 90, 3},
-    {-91.0 / 108, 0, 0, 23.0 / 108, -976.0 / 135, 311.0 / 54, -19.0 / 60, 17.0 / 6, -1.0 / 12},
-    {2383.0 / 4100, 0, 0, -341.0 / 164, 4496.0 / 1025, -301.0 / 82, 2133.0 / 4100, 45.0 / 82,
-     45.0 / 164, 18.0 / 41},
-    {3.0 / 205, 0, 0, 0, 0, -6.0 / 41, -3.0 / 205, -3.0 / 41, 3.0 / 41, 6.0 / 41},
-    {-1777.0 / 4100, 0, 0, -341.0 / 164, 4496.0 / 1025, -289.0 / 82, 2193.0 / 4100, 51.0 / 82,
-     33.0 / 164, 12.0 / 41, 0, 1}};
-constexpr std::array<double, 13> b7{
-    41.0 / 840, 0, 0, 0, 0, 34.0 / 105, 9.0 / 35, 9.0 / 35, 9.0 / 280, 9.0 / 280, 41.0 / 840, 0, 0};
-#include "integrators/rkv89_coefficients.inc"
 constexpr double checkpoint_seconds = 300;
 constexpr std::size_t max_attempts = 200000;
 void positive(double v, const char *message) {
@@ -318,188 +295,36 @@ class Hpop final : public IStateProvider {
         }
         return {s[3], s[4], s[5], acceleration[0], acceleration[1], acceleration[2]};
     }
-    State rk4(double t, const State &s, double h) const {
-        const auto k1 = derivative(t, s, weather_stage(t, t, t + h));
-        State tmp{};
+    using TrialStep = detail::TrialStep<6>;
+    detail::ErrorControl<6> error_control(bool startup = false) const {
+        detail::ErrorControl<6> result;
+        result.fixed = !startup && options_.uses_fixed_step();
+        result.relative = startup ? 1e-14 : options_.relative_tolerance;
+        result.max_step = options_.max_step_seconds;
         for (std::size_t i = 0; i < 6; ++i)
-            tmp[i] = s[i] + h * 0.5 * k1[i];
-        const auto k2 = derivative(t + h * 0.5, tmp, weather_stage(t + h * 0.5, t, t + h));
-        for (std::size_t i = 0; i < 6; ++i)
-            tmp[i] = s[i] + h * 0.5 * k2[i];
-        const auto k3 = derivative(t + h * 0.5, tmp, weather_stage(t + h * 0.5, t, t + h));
-        for (std::size_t i = 0; i < 6; ++i)
-            tmp[i] = s[i] + h * k3[i];
-        const auto k4 = derivative(t + h, tmp, weather_stage(t + h, t, t + h));
-        for (std::size_t i = 0; i < 6; ++i)
-            tmp[i] = s[i] + h / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
-        return tmp;
+            result.absolute[i] =
+                startup ? (i < 3 ? 1e-9 : 1e-12)
+                        : (i < 3 ? options_.position_tolerance_m : options_.velocity_tolerance_mps);
+        return result;
     }
-    struct TrialStep {
-        State value{};
-        double error = 0, exponent = 0;
-    };
+    auto step_derivative(double begin, double end) const {
+        return [this, begin, end](double at, const State &state) {
+            return derivative(at, state, weather_stage(at, begin, end));
+        };
+    }
+    State rk4(double t, const State &s, double h) const {
+        return detail::rk4(t, s, h, step_derivative(t, t + h));
+    }
     TrialStep rkf78(double t, const State &s, double h) const {
-        std::array<State, 13> k;
-        for (std::size_t stage = 0; stage < 13; ++stage) {
-            auto value = s;
-            for (std::size_t i = 0; i < 6; ++i) {
-                double sum = 0;
-                for (std::size_t j = 0; j < stage; ++j)
-                    sum += a[stage][j] * k[j][i];
-                value[i] += h * sum;
-            }
-            k[stage] =
-                derivative(t + c[stage] * h, value, weather_stage(t + c[stage] * h, t, t + h));
-        }
-        State result = s;
-        double error = 0;
-        for (std::size_t i = 0; i < 6; ++i) {
-            double sum = 0;
-            for (std::size_t j = 0; j < 13; ++j)
-                sum += b7[j] * k[j][i];
-            result[i] += h * sum;
-            if (options_.uses_fixed_step())
-                continue;
-            const double estimate =
-                std::abs(h * (41.0 / 840) * (k[11][i] + k[12][i] - k[0][i] - k[10][i]));
-            const double absolute =
-                i < 3 ? options_.position_tolerance_m : options_.velocity_tolerance_mps;
-            const double scale = absolute + options_.relative_tolerance *
-                                                std::max(std::abs(s[i]), std::abs(result[i]));
-            error = std::max(error, estimate / scale);
-        }
-        return {result, error, -1.0 / 8};
+        return detail::rkf78(t, s, h, step_derivative(t, t + h), error_control());
     }
     TrialStep rkv89(double t, const State &s, double h) const {
-        std::array<State, 16> k;
-        for (std::size_t stage = 0; stage < k.size(); ++stage) {
-            auto value = s;
-            for (std::size_t i = 0; i < s.size(); ++i) {
-                double sum = 0;
-                for (std::size_t j = 0; j < stage; ++j)
-                    sum += rkv_a[stage][j] * k[j][i];
-                value[i] += h * sum;
-            }
-            const double at = t + rkv_c[stage] * h;
-            k[stage] = derivative(at, value, weather_stage(at, t, t + h));
-        }
-        State result = s;
-        double error = 0;
-        for (std::size_t i = 0; i < s.size(); ++i) {
-            double advance = 0, difference = 0;
-            for (std::size_t j = 0; j < k.size(); ++j) {
-                advance += rkv_b8[j] * k[j][i];
-                difference += rkv_error[j] * k[j][i];
-            }
-            result[i] += h * advance;
-            if (options_.uses_fixed_step())
-                continue;
-            const double absolute =
-                i < 3 ? options_.position_tolerance_m : options_.velocity_tolerance_mps;
-            const double scale = absolute + options_.relative_tolerance *
-                                                std::max(std::abs(s[i]), std::abs(result[i]));
-            error = std::max(error, std::abs(h * difference) / scale);
-        }
-        return {result, error, -1.0 / 9};
+        return detail::rkv89(t, s, h, step_derivative(t, t + h), error_control());
     }
     TrialStep bulirsch_stoer(double t, const State &s, double h,
                              const std::function<void()> &checkpoint, bool startup = false) const {
-        // Smoothed modified midpoint, polynomial Richardson extrapolation in 1/n^2.
-        // Even substep counts preserve the even-power expansion: orders 4..18.
-        constexpr std::size_t levels = 9;
-        const bool fixed = !startup && options_.uses_fixed_step();
-        // At fixed order 18, extrapolating absolute orbital coordinates amplifies
-        // cancellation. Integrate/extrapolate offsets from the step's initial state.
-        const auto absolute_state = [&](const State &value) {
-            if (!fixed)
-                return value;
-            State absolute = s;
-            for (std::size_t i = 0; i < s.size(); ++i)
-                absolute[i] += value[i];
-            return absolute;
-        };
-        std::array<State, levels> table{};
-        const auto first = derivative(t, s, weather_stage(t, t, t + h));
-        TrialStep best{}, rejected{};
-        bool accepted = false;
-        double best_work = std::numeric_limits<double>::infinity();
-        int evaluations = 1;
-        for (std::size_t level = 0; level < levels; ++level) {
-            const int n = 2 * (static_cast<int>(level) + 1);
-            const double substep = h / n;
-            State previous = fixed ? State{} : s, current = previous;
-            for (std::size_t i = 0; i < s.size(); ++i)
-                current[i] += substep * first[i];
-            for (int j = 1; j < n; ++j) {
-                if (checkpoint)
-                    checkpoint();
-                const double at = t + h * (static_cast<double>(j) / n);
-                const auto slope =
-                    derivative(at, absolute_state(current), weather_stage(at, t, t + h));
-                auto next = previous;
-                for (std::size_t i = 0; i < s.size(); ++i)
-                    next[i] += 2 * substep * slope[i];
-                previous = current;
-                current = next;
-            }
-            if (checkpoint)
-                checkpoint();
-            const auto last =
-                derivative(t + h, absolute_state(current), weather_stage(t + h, t, t + h));
-            State estimate{}, correction{};
-            for (std::size_t i = 0; i < s.size(); ++i)
-                estimate[i] = .5 * (previous[i] + current[i] + substep * last[i]);
-            evaluations += n;
-            for (std::size_t column = 0; column < level; ++column) {
-                const auto lower = estimate;
-                const double ratio = static_cast<double>(level + 1) / (level - column);
-                for (std::size_t i = 0; i < s.size(); ++i) {
-                    correction[i] = (estimate[i] - table[column][i]) / (ratio * ratio - 1);
-                    estimate[i] += correction[i];
-                }
-                table[column] = lower;
-            }
-            table[level] = estimate;
-            if (fixed) {
-                // Fixed-step BS uses all nine midpoint sequences: order 18,
-                // independent of inactive tolerances, with no rejection or step adjustment.
-                if (level + 1 == levels)
-                    return {absolute_state(estimate), 0, 0};
-                continue;
-            }
-            if (level == 0 || (startup && level < 6))
-                continue; // GJ startup uses at least order 14; normal BS needs an error estimate.
-            double error = 0;
-            for (std::size_t i = 0; i < s.size(); ++i) {
-                if (!std::isfinite(estimate[i]) || !std::isfinite(correction[i]))
-                    throw PropagationError("HPOP extrapolation produced a nonfinite result");
-                const double absolute = startup ? (i < 3 ? 1e-9 : 1e-12)
-                                                : (i < 3 ? options_.position_tolerance_m
-                                                         : options_.velocity_tolerance_mps);
-                const double scale = absolute + (startup ? 1e-14 : options_.relative_tolerance) *
-                                                    std::max(std::abs(s[i]), std::abs(estimate[i]));
-                error = std::max(error, std::abs(correction[i]) / scale);
-            }
-            TrialStep candidate{estimate, error, -1.0 / (2 * level + 1)};
-            rejected = candidate;
-            const bool lookahead = accepted;
-            if (error <= 1) {
-                const double factor =
-                    error == 0 ? 4 : std::clamp(.9 * std::pow(error, candidate.exponent), .1, 4.);
-                // One lookahead column compares force evaluations per attainable next second.
-                const double limit = startup ? std::abs(h) : options_.max_step_seconds;
-                const double proposed = std::min(std::abs(h) * factor, limit);
-                const double work = evaluations / proposed;
-                if (work < best_work) {
-                    best = candidate;
-                    best_work = work;
-                }
-                accepted = true;
-            }
-            if (lookahead)
-                return best;
-        }
-        return accepted ? best : rejected;
+        return detail::bulirsch_stoer(t, s, h, step_derivative(t, t + h), error_control(startup),
+                                      checkpoint, startup);
     }
     TrialStep trial_step(double t, const State &s, double h,
                          const std::function<void()> &checkpoint) const {
@@ -546,7 +371,9 @@ class Hpop final : public IStateProvider {
             const double h = std::copysign(magnitude, end - t);
             if (t + h == t)
                 throw PropagationError("HPOP integration step cannot advance time");
-            auto [next, error, exponent] = trial_step(t, state, h, checkpoint);
+            const auto trial = trial_step(t, state, h, checkpoint);
+            const auto &next = trial.value;
+            const double error = trial.error, exponent = trial.exponent;
             if (!std::isfinite(error) ||
                 !std::all_of(next.begin(), next.end(), [](double v) { return std::isfinite(v); }))
                 throw PropagationError("HPOP integration produced a nonfinite result");

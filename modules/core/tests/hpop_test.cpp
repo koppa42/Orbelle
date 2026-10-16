@@ -980,7 +980,7 @@ TEST(Hpop, GaussJacksonPreservesGridHistoryAndConvergesAtTwelfthOrder) {
     EXPECT_THROW(validate_hpop_options(options), std::invalid_argument);
 }
 
-TEST(Hpop, GaussJacksonPseudoCorrectionSavesOnlyTheFinalFullForceEvaluation) {
+TEST(Hpop, GaussJacksonPseudoCorrectionPreservesTrajectoryAndReducesForceEvaluations) {
     std::array states{circular(), circular()};
     std::array<std::size_t, 2> evaluations{};
     for (std::size_t mode = 0; mode < 2; ++mode) {
@@ -998,8 +998,9 @@ TEST(Hpop, GaussJacksonPseudoCorrectionSavesOnlyTheFinalFullForceEvaluation) {
         evaluations[mode] = frames->evaluations.load();
     }
     EXPECT_LT(evaluations[1], evaluations[0]);
-    // Pseudo skips the final full force call; a few extra EC iterations can be needed.
-    EXPECT_LE(evaluations[0] - evaluations[1], 20u);
+    // Across different propagated histories either mode can need another EC
+    // iteration near the convergence threshold. The exact one-call saving is
+    // checked on cloned histories by GaussJacksonKernel, not inferred from totals.
     EXPECT_LT(position_error(states[0], states[1]), 1e-5);
     RecordProperty("full_force_evaluations", std::to_string(evaluations[0]));
     RecordProperty("pseudo_force_evaluations", std::to_string(evaluations[1]));

@@ -44,9 +44,9 @@ EGM96 取自 [ICGEM 原始系数](https://icgem.gfz.de/getmodel/gfc/971b0a3b49a4
 
 缓存网格通过完整区间索引计算端点，避免重复加法漂移。查询不会为填满缓存读取请求区间之外的数据，尾段不回写，取消保留已经完成的整段。当前科学查询仍积分缓存尾段；大上限下密集查询可能重复计算较长尾段，尚无科学插值加速。一天固定步长只在合适的长周期数值问题中验证，不是低轨步长建议；独立对照及范围压力测试见[大步长验证](../validation/hpop_protocol.md#大步长与自适应缓存)。
 
-显式单段工厂已提供 HPOP 接受节点或固定 TAI 输出、天气分段及 Lagrange / Hermite Session，见[科学轨道星历插值](orbit_interpolation.md)。普通项目 HPOP 仍按上述直接积分查询；项目 / 任务自动装配、UI、保存及报告接入尚未完成。
+显式单段工厂、普通项目及任务滑行均已接入 HPOP 接受节点或固定 TAI 输出、天气分段及 Lagrange / Hermite 科学插值；方法、阶数和输出配置贯通 UI、保存及报告，见[科学轨道星历插值](orbit_interpolation.md)。
 
-固定 Bulirsch–Stoer 采用全部九行外推，固定十八阶；中点过程和外推均使用相对当前步起点的状态增量，降低高阶大坐标消去误差。不根据误差拒步、调整步长或选择阶数，来源为 `bulirsch-stoer-midpoint-richardson-fixed18-v1`。此固定阶数是本项目的明确选择，STK 未公开其对应内部策略；不能据此宣称与 STK 逐位相同。相对误差模式保留已验证的自动 4–18 阶与混合绝对/相对分量尺度。
+固定 Bulirsch–Stoer 采用 2/4/6/8/12/16/24/32/48 子步序列的全部九行外推，固定十八阶；中点过程和外推均使用相对当前步起点的状态增量，降低高阶大坐标消去误差。不根据误差拒步、调整步长或选择阶数，来源为 `bulirsch-stoer-midpoint-richardson-fixed18-v2`。此固定阶数是本项目的明确选择，STK 未公开其对应内部策略；不能据此宣称与 STK 逐位相同。相对误差模式保留已验证的自动 4–18 阶与混合绝对/相对分量尺度。
 
 [HPOP 帮助](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)明确 RKV 的嵌入误差控制；[Connect 页](https://help.agi.com/stk/SubSystems/connectCmds/Content/cmd_HPOPIntegrator.htm)的 RelativeError 行仍只列 RKF78/BS。本实现依据前者为 RKV 保留自适应并新增固定模式；STK 实机有效组合、误差范数、步长范围和默认值仍待核对。当前工程参数范围为 1e−6–86400 s，已覆盖参考配置的一天上限；这不是对 STK 全部合法范围或出厂默认值的断言，默认值保持显式配置。
 
@@ -58,9 +58,9 @@ Gauss–Jackson 12 使用 [STK 规定的固定步长和两种校正方式](https
 
 Python 使用 `integrator="gauss_jackson"` 和 `correction="full"` / `"pseudo"`；C++ 为 `HpopIntegrator::gauss_jackson` 与 `HpopCorrection`。Full 默认开启，每次校正收敛后重算全部加速度；Pseudo 只更新所选中心场 GM 对应的二体项，保留最后一次迭代的摄动。两种方式的校正迭代均计算完整力，最多 12 次；位置/速度变化按各自三维范数的 `64 × double epsilon` 检查，使用至少 1 m / 1 m/s 尺度。未收敛明确报错，要求减小固定步长，不把迭代收敛当作截断误差保证。
 
-历史启动以及非网格查询的尾段使用至少十四阶、最高十八阶的 Bulirsch–Stoer，固定内部相对容差 1e−14、位置/速度绝对容差 1e−9 m / 1e−12 m/s，最小拒绝步为 1 ns。只在传播方向的已请求区间取样，不为启动要求额外前后星历。缓存间隔为 `ceil(300 / h) × h`，保存状态、求和及加速度历史；尾段副本不回写，保证查询顺序和输出网格不改变后续积分。已知天气跳变以单侧启动器过渡并清空历史；每个机动后的 HPOP 滑行创建新的历史。阴影专用事件仍待实现，非光滑力段的高阶误差不能由局部迭代收敛保证。
+历史启动以及非网格查询的尾段使用至少十四阶、最高十八阶的 Bulirsch–Stoer，采用同一 2/4/6/8/12/16/24/32/48 序列并外推局部增量以降低舍入放大，固定内部相对容差 1e−14、位置/速度绝对容差 1e−9 m / 1e−12 m/s，最小拒绝步为 1 ns。只在传播方向的已请求区间取样，不为启动要求额外前后星历。缓存间隔为 `ceil(300 / h) × h`，保存状态、求和及加速度历史；尾段副本不回写，保证查询顺序和输出网格不改变后续积分。已知天气跳变以单侧启动器过渡并清空历史；每个机动后的 HPOP 滑行创建新的历史。阴影专用事件仍待实现，非光滑力段的高阶误差不能由局部迭代收敛保证。
 
-Gauss–Jackson 的自适应参数只保留草稿，RK 方法的校正选项同样不参与计算身份。项目 v35 / OBJS26 保存两种设置，结果来源区分 `gauss-jackson12-summed-bs14to18-startup-full-v1` 与 `gauss-jackson12-summed-bs14to18-startup-pseudo-v1`。这套启动与收敛策略是本项目明确的实现，不宣称与 STK 的内部策略相同；高偏心轨道须做固定步长收敛检查，见[数值对照](../validation/hpop_protocol.md#gaussjackson-12)。
+Gauss–Jackson 的自适应参数只保留草稿，RK 方法的校正选项同样不参与计算身份。项目 v35 / OBJS26 保存两种设置，结果来源区分 `gauss-jackson12-summed-bs14to18-startup-full-v2` 与 `gauss-jackson12-summed-bs14to18-startup-pseudo-v2`。这套启动与收敛策略是本项目明确的实现，不宣称与 STK 的内部策略相同；高偏心轨道须做固定步长收敛检查，见[数值对照](../validation/hpop_protocol.md#gaussjackson-12)。
 
 
 RKF 7(8) 系数来自 Fehlberg [NASA TR R-287](https://ntrs.nasa.gov/citations/19680027281) 第 65 页 Table X，按 STK 的定义推进七阶解，以嵌入八阶解估计误差，步长控制指数为 1/8。结果算法标识为 `rkf78-7th-fehlberg-r287-v1`，避免与之前八阶推进的结果混用；公开枚举 `rkf78` 不变。不宣称逐位复现 STK 的步长控制器。直接积分工厂的自适应模式从初始历元向前后独立建立宽度为 `max(300, max_step_seconds)` 秒的完整计算段，余段单独积分；改变采样、乱序、重复和并发查询不改变结果。共享缓存加锁，取消保留已完成段，不发布部分结果。每次查询最多 200000 次积分尝试，距离初始历元最多 366 天；这是资源边界，不是精度保证。显示插值不参与科学查询。普通项目及任务滑行采用连续有界星历，Lagrange / Hermite 方法与阶数可配置；固定输出开启时使用轨道页步长，见[科学插值契约](orbit_interpolation.md)。首次查询在捕获的资源上生成完整滑行段，之后查询使用不可变插值节点。
@@ -132,3 +132,5 @@ SGP4 的约定输出速度并非其近似位置公式的精确导数。显示缓
 
 
 HPOP `include_secular_variations` 使用所选重力资源的显式参考历元和线性变化率，每个积分阶段重新求值，并与固体潮、海潮的系数修正相加。非中心重力启用该项而文件没有相应元数据时明确失败；0/0 保留非活动草稿。长期变化仅使用 TAI/TT 连续时差，不额外要求 UTC 或星历。静态 EGM 产品暂不按名称推断默认演化参数；完整语义与当前范围见[引力系数长期变化](gravity_secular.md)。
+
+时间正则化的共用积分内核与方程已进入内部数值验收，公共 HPOP 配置和桌面尚未启用；当前契约与待接入边界见[时间正则化](time_regularization.md)。

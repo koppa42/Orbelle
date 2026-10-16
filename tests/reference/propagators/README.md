@@ -195,3 +195,15 @@ SHA-256 (raw .grv bytes; canonical LF reference output):
 - `weather_cssi.dat` / `weather_monthly.csv` / `weather_monthly.txt`：独立合成的 CSSI 月中和 CelesTrak 月初输入、1056 组 SciPy / NumPy 天气与历史取样、32 组原始 GMAT JR 密度；含中心 81 日均值、闰日/闰秒及来源强制规则。生成器 `tools/validation/monthly_weather_reference.py`；格式、散列、命令与容限见[阻力验证协议](../../../docs/validation/atmospheric_drag_protocol.md)。这些文件不是 STK 导出结果。
 
 - `orbit_interpolation.txt`：Hipparchus 4.0.2 的 Lagrange / Hermite 全阶数参考，118 组、826 查询，含不等间隔节点和端点 1 ns；LF SHA-256 `8d8122d657c6ba438690e617c9e3ee22bd46a60207b22c42a818c87b6d6162fa`。生成器 `tools/validation/orekit/OrbitForgeInterpolationReference.java`，依赖散列、复现及验收界限见[插值协议](../../../docs/validation/orbit_interpolation_protocol.md)。
+
+`sundman.txt` contains 36 normalized-period and 54 seven-dimensional trajectory
+references from unmodified Hipparchus 4.0.2 Legendre-Gauss quadrature and
+`DormandPrince853FieldIntegrator<Dfp>` with `DfpField(32)`. The generator is
+`tools/validation/orekit/OrbitForgeSundmanReference.java`; JAR hashes are pinned
+in `dependencies.json`. It compares two q step ceilings and a separate
+physical-time integration before writing ASCII/LF output. No OrbitForge code
+is used. Inputs, budgets, convergence and reproduction commands are in the
+[time regularization protocol](../../../docs/validation/time_regularization_protocol.md).
+This validates internal kernels; public time regularization is not yet enabled.
+Canonical LF SHA-256:
+`8817fd254063bc4a8c635358b580f31e616b15832e6ac378ad34de8e0993478a`.
