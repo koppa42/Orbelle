@@ -625,6 +625,107 @@ TEST(SundmanBounded, ForceDiscontinuitiesUseOneSidedCoverageAndExactPhysicalGate
         }
     }
 }
+TEST(SundmanBounded, AdaptivePhysicalLimitsTakePrecedenceOverTheNominalRegularizedScale) {
+    for (auto method :
+         {HpopIntegrator::rkf78, HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer}) {
+        for (double e : {0., .7}) {
+            const auto source = initial(e);
+            const double axis = 7e6 / (1 - e), omega = std::sqrt(mu / std::pow(axis, 3));
+            for (double direction : {-1., 1.}) {
+                for (bool equal_bounds : {false, true}) {
+                    HpopOptions options;
+                    options.gravity_degree = options.gravity_order = 0;
+                    options.integrator = method;
+                    options.relative_tolerance = 1e-14;
+                    options.position_tolerance_m = 1e-8;
+                    options.velocity_tolerance_mps = 1e-11;
+                    options.min_step_seconds = 20;
+                    options.max_step_seconds = equal_bounds ? 20 : 35;
+                    // Cover a q scale below Min Step and one above Max Step.
+                    // Explicit physical limits take precedence over that nominal scale.
+                    SundmanPropagation propagation(source, mu, 1.5, equal_bounds ? 100000000 : 120,
+                                                   options);
+                    std::size_t attempts = 0, nodes = 0;
+                    const double begin = direction * 100, end = direction * 223.123456789;
+                    const auto acceleration = [&](double t, const Cartesian &v) {
+                        EXPECT_GE(t, std::min(0., end));
+                        EXPECT_LE(t, std::max(0., end));
+                        return force(0, t, v);
+                    };
+                    auto result = propagation.propagate(propagation.initial_state(), begin,
+                                                        acceleration, attempts);
+                    double previous = begin;
+                    result = propagation.propagate(
+                        result, end, acceleration, attempts, {}, [&](double at, const Cartesian &) {
+                            const double span = direction * (at - previous);
+                            EXPECT_GT(span, 0);
+                            if (at != end) {
+                                EXPECT_GE(span, options.min_step_seconds - 1e-10);
+                            }
+                            EXPECT_LE(span, options.max_step_seconds + 1e-10);
+                            previous = at;
+                            ++nodes;
+                        });
+                    EXPECT_EQ(result.time(), end);
+                    EXPECT_GT(nodes, 2);
+                    // Independent Kepler equation and conic geometry, in the
+                    // initial periapsis axes (p,q), rather than another ODE solver.
+                    const double mean = omega * end, beta = std::sqrt(1 - e * e);
+                    double eccentric = mean;
+                    for (int iteration = 0; iteration < 20; ++iteration)
+                        eccentric -= (eccentric - e * std::sin(eccentric) - mean) /
+                                     (1 - e * std::cos(eccentric));
+                    const double radius = axis * (1 - e * std::cos(eccentric));
+                    const double speed = std::hypot(source[3], source[4], source[5]);
+                    Cartesian expected{};
+                    for (std::size_t i = 0; i < 3; ++i) {
+                        const double p_axis = source[i] / 7e6, q_axis = source[i + 3] / speed;
+                        expected[i] = axis * ((std::cos(eccentric) - e) * p_axis +
+                                              beta * std::sin(eccentric) * q_axis);
+                        expected[i + 3] =
+                            std::sqrt(mu * axis) / radius *
+                            (-std::sin(eccentric) * p_axis + beta * std::cos(eccentric) * q_axis);
+                    }
+                    EXPECT_LT(error(result.cartesian(), expected, 0), 1e-5);
+                    EXPECT_LT(error(result.cartesian(), expected, 3), 1e-8);
+                }
+            }
+        }
+    }
+}
+TEST(SundmanBounded, AdaptiveMinimumStepRejectsUnresolvedOscillatoryForce) {
+    for (auto method :
+         {HpopIntegrator::rkf78, HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer}) {
+        for (double maximum : {20., 35.}) {
+            HpopOptions options;
+            options.gravity_degree = options.gravity_order = 0;
+            options.integrator = method;
+            options.relative_tolerance = 1e-14;
+            options.position_tolerance_m = 1e-8;
+            options.velocity_tolerance_mps = 1e-11;
+            options.min_step_seconds = 20;
+            options.max_step_seconds = maximum;
+            SundmanPropagation propagation(initial(.7), mu, 1.5, 100000000, options);
+            const auto source = propagation.initial_state();
+            std::size_t attempts = 0;
+            EXPECT_THROW((void)propagation.propagate(
+                             source, 1000,
+                             [](double t, const Cartesian &v) {
+                                 auto a = force(0, t, v);
+                                 a[0] += std::sin(100 * t);
+                                 return a;
+                             },
+                             attempts),
+                         PropagationError);
+            EXPECT_EQ(source.time(), 0);
+            EXPECT_EQ(source.q, 0);
+            // A minimum-step error is diagnosed before the work limit; repeated
+            // rejection of the same clamped q step must not exhaust that budget.
+            EXPECT_LT(attempts, 100);
+        }
+    }
+}
+
 TEST(SundmanBounded, RejectsInvalidStepCountsWorkExhaustionAndReversedHistory) {
     HpopOptions options;
     options.gravity_degree = options.gravity_order = 0;

@@ -78,10 +78,12 @@ class SundmanPropagation {
             check_work(attempts, checkpoint);
             const bool fixed = options_.uses_fixed_step();
             const double g = transform_.clock_rate(state.solution.value);
+            const bool at_minimum = !fixed && state.next_step <= options_.min_step_seconds / g;
             const double target =
                 fixed ? direction * static_cast<double>(state.grid + 1) * fixed_q_
-                      : state.q +
-                            direction * std::min(state.next_step, options_.max_step_seconds / g);
+                      : state.q + direction * std::clamp(state.next_step,
+                                                         options_.min_step_seconds / g,
+                                                         options_.max_step_seconds / g);
             // Uniform GJ differences require the identical floating step every time.
             // Subtracting adjacent rounded q grid coordinates would vary it by ulps.
             const double h = fixed && state.on_grid ? direction * fixed_q_ : target - state.q;
@@ -115,13 +117,29 @@ class SundmanPropagation {
                 const double elapsed = direction * (candidate.time() - state.time());
                 if (!(elapsed > 0))
                     throw OutsideInterval{}; // Resolve a sub-ulp clock interval in physical time.
-                if (!fixed && (error > 1 || elapsed > options_.max_step_seconds)) {
-                    if (error > 1 && elapsed <= options_.min_step_seconds)
+                const bool enforce_minimum =
+                    elapsed < options_.min_step_seconds || (at_minimum && error > 1);
+                if (!fixed && (enforce_minimum || elapsed > options_.max_step_seconds)) {
+                    // g changes during a step, so converting a physical bound using
+                    // only its initial value does not enforce that bound. Integrate
+                    // the equivalent inverse ODE to the binding physical time.
+                    const double remaining = std::abs(end - state.time());
+                    const double span =
+                        std::min(remaining, enforce_minimum ? options_.min_step_seconds
+                                                            : options_.max_step_seconds);
+                    const double stop = span == remaining ? end : state.time() + direction * span;
+                    state = bridge(std::move(state), stop, span,
+                                   std::numeric_limits<double>::infinity(), checked_force, attempts,
+                                   checkpoint, std::min(span, options_.min_step_seconds));
+                    ++state.regular_steps;
+                    if (accepted)
+                        accepted(state.time(), state.cartesian());
+                    continue;
+                }
+                if (!fixed && error > 1) {
+                    if (elapsed <= options_.min_step_seconds)
                         throw PropagationError("Sundman cannot meet tolerance at the minimum step");
-                    const double factor =
-                        error > 1 ? growth(error, exponent)
-                                  : std::clamp(.9 * options_.max_step_seconds / elapsed, .1, .9);
-                    state.next_step = std::abs(h) * factor;
+                    state.next_step = std::abs(h) * growth(error, exponent);
                     continue;
                 }
                 candidate.q = target;
@@ -305,7 +323,8 @@ class SundmanPropagation {
     }
     template <class Force>
     State bridge(State state, double end, double magnitude, double q_remaining, const Force &force,
-                 std::size_t &attempts, const std::function<void()> &checkpoint) const {
+                 std::size_t &attempts, const std::function<void()> &checkpoint,
+                 double minimum = 0) const {
         const double begin = state.time(), remaining = std::abs(end - begin);
         const bool starter = options_.integrator == HpopIntegrator::gauss_jackson;
         auto control = primary_control(!starter && options_.uses_fixed_step());
@@ -346,15 +365,22 @@ class SundmanPropagation {
                 state.solution.value[6] = finish;
                 state.solution.compensation[6] = 0;
                 state.q += increment;
+                if (!options_.uses_fixed_step())
+                    state.next_step = std::min(fixed_q_, std::abs(increment) *
+                                                             growth(trial.error, trial.exponent));
                 state.on_grid = false;
                 state.history.reset();
                 ++state.boundary_steps;
                 return state;
             }
-            if (trial.error > 1 && magnitude <= (starter ? 1e-9 : options_.min_step_seconds))
+            const double floor =
+                minimum > 0 ? minimum : (starter ? 1e-9 : options_.min_step_seconds);
+            if (trial.error > 1 && magnitude <= floor)
                 throw PropagationError(
                     "Sundman boundary cannot meet tolerance at the minimum step");
             magnitude *= trial.error > 1 ? std::min(.5, growth(trial.error, trial.exponent)) : .5;
+            if (minimum > 0)
+                magnitude = std::max(minimum, magnitude);
         }
     }
 };

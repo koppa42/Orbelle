@@ -87,7 +87,7 @@
 | Integrator | Fixed/Relative Error；Tolerance；Min/Max Step | 部分：独立 Fixed/Relative Error 选择已实现；RK4/GJ 强制固定，RKF/RKV/BS 两模式，固定网格及 BS 十八阶外推已验证。固定/自适应范围已扩至 1e−6–86400 s，自适应缓存不再截短配置上限，并有局部动力学首步估计及长弧独立对照。相对误差仍为混合绝对/相对分量尺度；STK 误差范数、完整合法范围/默认值及实机组合仍待核对，截图仅参考 |
 | Integrator | Interpolation 方法；Order；VOP μ | 部分：Lagrange / Hermite、项目自动装配、机动分段、UI / 持久化 / 分析及报告已接入并有独立参考，见[科学插值](orbit_interpolation.md)；VOP 与其 μ 尚未实现，STK 同配置验收仍待完成 |
 | Integrator | Allow PosVel Covariance Interpolation | 待实现：协方差传播完成后验证插值、对称性与半正定性 |
-| Integrator | Time Regularization；Exponent；Steps Per Orbit | 部分：内部 Sundman 方程、每圈归一化、五种算法固定 q 与有界物理时间端点已通过独立对照，含三种自适应算法及分段力；整数 TAI、真实天气/机动、完整最小步长政策、公共 API / 持久化 / UI 尚待接入，见[内部契约](time_regularization.md) |
+| Integrator | Time Regularization；Exponent；Steps Per Orbit | 部分：内部 Sundman 方程、每圈归一化、五种算法固定 q 与有界物理时间端点已通过独立对照，含三种自适应算法、物理 Min/Max Step 及分段力；整数 TAI、真实天气/机动、公共 API / 持久化 / UI 尚待接入，见[内部契约](time_regularization.md) |
 | Integrator | Report Ephemeris on a Fixed Time Step | 部分：显式工厂及普通项目均支持接受端点或让积分步停在固定 TAI 输出网格，保留天气边界；UI、保存与报告已接入。项目轨道步长当前限于 1–60 整数秒，完整合法范围及短段策略仍待 STK 实测核对 |
 | Integrator | Do not propagate below altitude | 已有按力评估停止的参考球面地心高度；STK 比较须核对其高度参考面 |
 | Covariance | Compute Covariance；6×6 初始矩阵 | 待实现：变分方程、单位、对称性和正定性政策；关闭不影响确定性轨迹 |
