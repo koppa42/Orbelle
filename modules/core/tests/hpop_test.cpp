@@ -589,10 +589,12 @@ TEST(Hpop, AdaptiveCacheAllowsFullDayStepsAndPreservesCancellationAndQueryOrder)
         const auto first = provider->state_at(Epoch{86400'000'000'000});
         // One complete accepted day step; no hidden 300 s or one-hour limit.
         const auto evaluations = frames->evaluations.load();
-        if (integrator == HpopIntegrator::rkf78)
+        if (integrator == HpopIntegrator::rkf78) {
             EXPECT_EQ(evaluations, 14U);
-        if (integrator == HpopIntegrator::rkv89)
+        }
+        if (integrator == HpopIntegrator::rkv89) {
             EXPECT_EQ(evaluations, 17U);
+        }
         EXPECT_LT(evaluations, 100U);
         int calls = 0;
         EXPECT_THROW((void)provider->state_at(Epoch{4 * 86400'000'000'000LL},
