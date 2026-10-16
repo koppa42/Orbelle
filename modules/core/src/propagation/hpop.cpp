@@ -316,6 +316,8 @@ class Hpop final : public IStateProvider {
             for (std::size_t j = 0; j < 13; ++j)
                 sum += b7[j] * k[j][i];
             result[i] += h * sum;
+            if (options_.uses_fixed_step())
+                continue;
             const double estimate =
                 std::abs(h * (41.0 / 840) * (k[11][i] + k[12][i] - k[0][i] - k[10][i]));
             const double absolute =
@@ -348,6 +350,8 @@ class Hpop final : public IStateProvider {
                 difference += rkv_error[j] * k[j][i];
             }
             result[i] += h * advance;
+            if (options_.uses_fixed_step())
+                continue;
             const double absolute =
                 i < 3 ? options_.position_tolerance_m : options_.velocity_tolerance_mps;
             const double scale = absolute + options_.relative_tolerance *
@@ -361,6 +365,17 @@ class Hpop final : public IStateProvider {
         // Smoothed modified midpoint, polynomial Richardson extrapolation in 1/n^2.
         // Even substep counts preserve the even-power expansion: orders 4..18.
         constexpr std::size_t levels = 9;
+        const bool fixed = !startup && options_.uses_fixed_step();
+        // At fixed order 18, extrapolating absolute orbital coordinates amplifies
+        // cancellation. Integrate/extrapolate offsets from the step's initial state.
+        const auto absolute_state = [&](const State &value) {
+            if (!fixed)
+                return value;
+            State absolute = s;
+            for (std::size_t i = 0; i < s.size(); ++i)
+                absolute[i] += value[i];
+            return absolute;
+        };
         std::array<State, levels> table{};
         const auto first = derivative(t, s, weather_stage(t, t, t + h));
         TrialStep best{}, rejected{};
@@ -370,14 +385,15 @@ class Hpop final : public IStateProvider {
         for (std::size_t level = 0; level < levels; ++level) {
             const int n = 2 * (static_cast<int>(level) + 1);
             const double substep = h / n;
-            State previous = s, current = s;
+            State previous = fixed ? State{} : s, current = previous;
             for (std::size_t i = 0; i < s.size(); ++i)
                 current[i] += substep * first[i];
             for (int j = 1; j < n; ++j) {
                 if (checkpoint)
                     checkpoint();
                 const double at = t + h * (static_cast<double>(j) / n);
-                const auto slope = derivative(at, current, weather_stage(at, t, t + h));
+                const auto slope =
+                    derivative(at, absolute_state(current), weather_stage(at, t, t + h));
                 auto next = previous;
                 for (std::size_t i = 0; i < s.size(); ++i)
                     next[i] += 2 * substep * slope[i];
@@ -386,7 +402,8 @@ class Hpop final : public IStateProvider {
             }
             if (checkpoint)
                 checkpoint();
-            const auto last = derivative(t + h, current, weather_stage(t + h, t, t + h));
+            const auto last =
+                derivative(t + h, absolute_state(current), weather_stage(t + h, t, t + h));
             State estimate{}, correction{};
             for (std::size_t i = 0; i < s.size(); ++i)
                 estimate[i] = .5 * (previous[i] + current[i] + substep * last[i]);
@@ -401,6 +418,13 @@ class Hpop final : public IStateProvider {
                 table[column] = lower;
             }
             table[level] = estimate;
+            if (fixed) {
+                // Fixed-step BS uses all nine midpoint sequences: order 18,
+                // independent of inactive tolerances, with no rejection or step adjustment.
+                if (level + 1 == levels)
+                    return {absolute_state(estimate), 0, 0};
+                continue;
+            }
             if (level == 0 || (startup && level < 6))
                 continue; // GJ startup uses at least order 14; normal BS needs an error estimate.
             double error = 0;
@@ -489,6 +513,61 @@ class Hpop final : public IStateProvider {
             }
         }
         return state;
+    }
+
+    State integrate_fixed(State state, double t, double end, std::size_t first_node,
+                          std::size_t &attempts, const std::function<void()> &checkpoint) const {
+        const double step = std::copysign(options_.fixed_step_seconds, end - t);
+        std::size_t node = first_node;
+        while (t != end) {
+            const double nominal = static_cast<double>(++node) * step;
+            const double stop = step > 0 ? std::min(nominal, end) : std::max(nominal, end);
+            // A known force discontinuity splits the current grid cell; the next cell
+            // still ends on the original epoch-anchored grid.
+            while (t != stop) {
+                if (checkpoint)
+                    checkpoint();
+                if (++attempts > max_attempts)
+                    throw PropagationError(
+                        "HPOP exceeded 200000 integration attempts in one query");
+                const double target = weather_boundary(t, stop).value_or(stop);
+                const double h = target - t;
+                if (h == 0 || t + h == t)
+                    throw PropagationError("HPOP fixed integration step cannot advance time");
+                state = trial_step(t, state, h, checkpoint).value;
+                (void)derivative(target, state);
+                t = target;
+            }
+        }
+        return state;
+    }
+    State fixed_at(double t, std::size_t &attempts, const std::function<void()> &checkpoint) const {
+        const auto nodes = static_cast<std::size_t>(
+            std::max(1., std::ceil(checkpoint_seconds / options_.fixed_step_seconds)));
+        const double interval = nodes * options_.fixed_step_seconds;
+        const double sign = t < 0 ? -1 : 1;
+        auto index = static_cast<std::size_t>(std::floor(std::abs(t) / interval));
+        const auto grid = [&](std::size_t block) {
+            return static_cast<double>(block * nodes) * options_.fixed_step_seconds;
+        };
+        if (index > 0 && grid(index) > std::abs(t))
+            --index;
+        if (grid(index + 1) <= std::abs(t))
+            ++index;
+        State value;
+        {
+            const std::lock_guard lock{mutex_};
+            auto &cache = t < 0 ? backward_ : forward_;
+            while (cache.size() <= index) {
+                const auto block = cache.size() - 1;
+                const auto next =
+                    integrate_fixed(cache.back(), sign * grid(block), sign * grid(block + 1),
+                                    block * nodes, attempts, checkpoint);
+                cache.push_back(next);
+            }
+            value = cache[index];
+        }
+        return integrate_fixed(value, sign * grid(index), t, index * nodes, attempts, checkpoint);
     }
 
     State gauss_jackson_startup(State state, double t, double end, std::size_t &attempts,
@@ -685,9 +764,11 @@ class Hpop final : public IStateProvider {
                 "HPOP integration requires EOP covering the initial and query epochs");
         if (options_.uses_utc_force())
             (void)environment_.time->to_utc(epoch);
-        if (options_.integrator == HpopIntegrator::gauss_jackson) {
+        if (options_.uses_fixed_step()) {
             std::size_t attempts = 0;
-            const auto value = gauss_jackson_at(t, attempts, checkpoint);
+            const auto value = options_.integrator == HpopIntegrator::gauss_jackson
+                                   ? gauss_jackson_at(t, attempts, checkpoint)
+                                   : fixed_at(t, attempts, checkpoint);
             return {epoch,
                     OriginId::earth,
                     FrameId::gcrf,
@@ -804,6 +885,9 @@ void validate_hpop_options(const HpopOptions &o) {
         o.integrator != HpopIntegrator::rkv89 && o.integrator != HpopIntegrator::bulirsch_stoer &&
         o.integrator != HpopIntegrator::gauss_jackson)
         throw std::invalid_argument("Unsupported HPOP integrator");
+    if (o.step_control != HpopStepControl::relative_error &&
+        o.step_control != HpopStepControl::fixed)
+        throw std::invalid_argument("Unsupported HPOP step size control");
     if (o.correction != HpopCorrection::full && o.correction != HpopCorrection::pseudo)
         throw std::invalid_argument("Unsupported HPOP predictor corrector scheme");
     positive(o.position_tolerance_m, "HPOP position tolerance must be finite and positive");

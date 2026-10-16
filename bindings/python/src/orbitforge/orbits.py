@@ -338,6 +338,7 @@ class HpopSettings:
     ocean_tides: OceanTideSettings = field(default_factory=OceanTideSettings)
     include_secular_variations: bool = False
     correction: Literal["full", "pseudo"] = "full"
+    step_control: Literal["relative_error", "fixed"] = "relative_error"
 
     def __post_init__(self) -> None:
         if type(self.include_secular_variations) is not bool:
@@ -377,8 +378,12 @@ class HpopSettings:
         if self.integrator not in ("rkf78", "rk4", "rkv89", "bulirsch_stoer", "gauss_jackson"):
             raise ValueError("integrator must be 'rkf78', 'rk4', 'rkv89', 'bulirsch_stoer' or 'gauss_jackson'")
         for name in self.__dataclass_fields__:
-            if name not in ("integrator", "correction", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides"):
+            if name not in ("integrator", "correction", "step_control", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides"):
                 setattr(value, name, getattr(self, name))
+        if self.step_control not in ("relative_error", "fixed"):
+            raise ValueError("step_control must be relative_error or fixed")
+        value.step_control = {"relative_error": n.HpopStepControl.RELATIVE_ERROR,
+                              "fixed": n.HpopStepControl.FIXED}[self.step_control]
         if self.correction not in ("full", "pseudo"):
             raise ValueError("correction must be full or pseudo")
         value.correction = {"full": n.HpopCorrection.FULL, "pseudo": n.HpopCorrection.PSEUDO}[self.correction]
@@ -403,7 +408,7 @@ class HpopSettings:
     @classmethod
     def _read(cls, value: n.HpopOptions) -> "HpopSettings":
         fields = {name: getattr(value, name) for name in cls.__dataclass_fields__
-                  if name not in ("integrator", "correction", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides")}
+                  if name not in ("integrator", "correction", "step_control", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides")}
         rows = value.third_bodies
         fields["third_bodies"] = tuple(b for b, row in zip(THIRD_BODY_NAMES, rows) if row.enabled)
         sources = {n.ThirdBodyGravitySource.JPL_DE: "jpl_de",
@@ -423,7 +428,9 @@ class HpopSettings:
                        n.HpopIntegrator.BULIRSCH_STOER: "bulirsch_stoer",
                        n.HpopIntegrator.GAUSS_JACKSON: "gauss_jackson"}
         return cls(**fields, integrator=integrators[value.integrator],
-                   correction={n.HpopCorrection.FULL: "full", n.HpopCorrection.PSEUDO: "pseudo"}[value.correction])
+                   correction={n.HpopCorrection.FULL: "full", n.HpopCorrection.PSEUDO: "pseudo"}[value.correction],
+                   step_control={n.HpopStepControl.RELATIVE_ERROR: "relative_error",
+                                 n.HpopStepControl.FIXED: "fixed"}[value.step_control])
 
 
 @dataclass(frozen=True, slots=True)
@@ -518,8 +525,11 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          include_relativistic_accelerations: bool = False,
          satellite_mass_kg: float = 1000.0, ocean_tides: OceanTideSettings | None = None,
          include_secular_variations: bool = False,
-         correction: Literal["full", "pseudo"] = "full") -> Orbit:
-    """Cowell orbit with gravity, tides, third bodies, drag, spherical SRP and adaptive RKF78/RKV89/Bulirsch-Stoer or fixed RK4/Gauss-Jackson 12.
+         correction: Literal["full", "pseudo"] = "full",
+         step_control: Literal["relative_error", "fixed"] = "relative_error") -> Orbit:
+    """Cowell orbit with gravity, tides, third bodies, drag, spherical SRP and RKF78/RKV89/Bulirsch-Stoer or fixed RK4/Gauss-Jackson 12.
+    step_control selects relative_error or fixed; RK4/Gauss-Jackson always use fixed steps.
+    Fixed Bulirsch-Stoer uses eighteenth-order extrapolation without error control.
     Gauss-Jackson correction selects the post-convergence full or two-body-only force update.
 
     Built-in EGM96 supports up to degree 20; installed gravity files up to 2190 (EGM2008 order limit 2159).
@@ -547,6 +557,6 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
         SolidTideSettings() if solid_tides is None else require(solid_tides, SolidTideSettings, "solid_tides"),
         include_relativistic_accelerations, satellite_mass_kg,
         OceanTideSettings() if ocean_tides is None else require(ocean_tides, OceanTideSettings, "ocean_tides"),
-        include_secular_variations, correction)
+        include_secular_variations, correction, step_control)
     settings._native()  # Fail at construction, before changing a project.
     return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)

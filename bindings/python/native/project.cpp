@@ -91,6 +91,9 @@ void bind_project(py::module_ &module) {
                 return core::validate_mission(initial, plan);
             },
             py::arg("initial"));
+    py::enum_<core::HpopStepControl>(module, "HpopStepControl")
+        .value("RELATIVE_ERROR", core::HpopStepControl::relative_error)
+        .value("FIXED", core::HpopStepControl::fixed);
     py::enum_<core::HpopCorrection>(module, "HpopCorrection")
         .value("FULL", core::HpopCorrection::full)
         .value("PSEUDO", core::HpopCorrection::pseudo);
@@ -279,6 +282,8 @@ void bind_project(py::module_ &module) {
         .def_readwrite("gravity_order", &core::HpopOptions::gravity_order)
         .def_readwrite("integrator", &core::HpopOptions::integrator)
         .def_readwrite("correction", &core::HpopOptions::correction)
+        .def_readwrite("step_control", &core::HpopOptions::step_control)
+        .def("uses_fixed_step", &core::HpopOptions::uses_fixed_step)
         .def_readwrite("relative_tolerance", &core::HpopOptions::relative_tolerance)
         .def_readwrite("position_tolerance_m", &core::HpopOptions::position_tolerance_m)
         .def_readwrite("velocity_tolerance_mps", &core::HpopOptions::velocity_tolerance_mps)

@@ -802,6 +802,10 @@ class ManeuverSeries:
     def data_sha256(self) -> str: ...
     def __len__(self) -> int: ...
 
+class HpopStepControl:
+    RELATIVE_ERROR: HpopStepControl
+    FIXED: HpopStepControl
+
 class HpopCorrection:
     FULL: HpopCorrection
     PSEUDO: HpopCorrection
@@ -1059,6 +1063,8 @@ class HpopOptions:
     include_secular_variations: bool
     integrator: HpopIntegrator
     correction: HpopCorrection
+    step_control: HpopStepControl
+    def uses_fixed_step(self) -> bool: ...
     relative_tolerance: float
     position_tolerance_m: float
     velocity_tolerance_mps: float

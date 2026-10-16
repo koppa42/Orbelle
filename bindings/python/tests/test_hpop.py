@@ -17,6 +17,44 @@ class HpopTests(unittest.TestCase):
         satellite = project.objects.satellite("HPOP", orbit=of.orbits.Hpop(initial=initial, **options))
         return project, satellite
 
+    def test_step_control_roundtrip_and_inactive_tolerance_identity(self):
+        for method in ("rkf78", "rkv89", "bulirsch_stoer", "rk4", "gauss_jackson"):
+            with self.subTest(method=method):
+                project, satellite = self.make(gravity_degree=0, integrator=method,
+                                               step_control="fixed", fixed_step_seconds=7.1)
+                first = project.prepare()
+                state = first.state(satellite, at=project.last)
+                captured = first.states(satellite, step=u.s(600))
+                self.assertEqual(satellite.orbit.hpop._native().step_control, of.HpopStepControl.FIXED)
+                self.assertTrue(satellite.orbit.hpop._native().uses_fixed_step())
+                satellite.orbit = replace(satellite.orbit, hpop=replace(satellite.orbit.hpop,
+                    relative_tolerance=1e-14, position_tolerance_m=1e-200,
+                    velocity_tolerance_mps=1e-200, min_step_seconds=1e-6, max_step_seconds=1e-6))
+                current = project.prepare()
+                self.assertEqual(current.states(satellite, step=u.s(600)).input_sha256, captured.input_sha256)
+                self.assertEqual(current.state(satellite, at=project.last).position_m, state.position_m)
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "fixed.orbitforge"
+                    project.save(path, analysis=current)
+                    loaded = of.Project.open(path)
+                    restored = loaded.objects[satellite.id]
+                    self.assertEqual(restored.orbit.hpop, satellite.orbit.hpop)
+                    self.assertEqual(restored.orbit.hpop.step_control, "fixed")
+                    self.assertEqual(loaded.prepare().state(restored, at=loaded.last).position_m, state.position_m)
+                self.assertEqual(first.state(satellite, at=project.last).position_m, state.position_m)
+                satellite.orbit = replace(satellite.orbit, hpop=replace(satellite.orbit.hpop,
+                    step_control="relative_error", relative_tolerance=1e-12,
+                    position_tolerance_m=.001, velocity_tolerance_mps=1e-6,
+                    min_step_seconds=.001, max_step_seconds=60))
+                switched = project.prepare().states(satellite, step=u.s(600))
+                if method in ("rk4", "gauss_jackson"):
+                    self.assertEqual(switched.input_sha256, captured.input_sha256)
+                    self.assertEqual(switched.position.values, captured.position.values)
+                else:
+                    self.assertNotEqual(switched.input_sha256, captured.input_sha256)
+        with self.assertRaises(ValueError):
+            self.make(step_control="automatic")
+
     def test_easy_constructor_copy_edit_and_current_file_roundtrip(self):
         project, satellite = self.make(gravity_degree=0, max_step_seconds=45)
         settings = satellite.orbit.hpop

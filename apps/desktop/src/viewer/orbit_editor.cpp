@@ -921,14 +921,14 @@ void OrbitEditor::update_state_labels() {
              : QString{}) +
         (hpop_.srp.enabled ? QStringLiteral(" + 太阳辐射压") : QString{}) +
         (hpop_.drag.enabled ? QStringLiteral(" + 大气阻力") : QString{}) +
-        (hpop_.integrator == core::HpopIntegrator::rkf78 ? QStringLiteral(" · RKF 7(8) 自适应")
-         : hpop_.integrator == core::HpopIntegrator::rkv89
-             ? QStringLiteral(" · RKV 8(9) Efficient 自适应")
+        (hpop_.integrator == core::HpopIntegrator::rkf78   ? QStringLiteral(" · RKF 7(8)")
+         : hpop_.integrator == core::HpopIntegrator::rkv89 ? QStringLiteral(" · RKV 8(9) Efficient")
          : hpop_.integrator == core::HpopIntegrator::bulirsch_stoer
-             ? QStringLiteral(" · Bulirsch–Stoer 自适应")
+             ? QStringLiteral(" · Bulirsch–Stoer")
          : hpop_.integrator == core::HpopIntegrator::gauss_jackson
-             ? QStringLiteral(" · Gauss–Jackson 12 固定步长")
-             : QStringLiteral(" · RK4 固定步长")));
+             ? QStringLiteral(" · Gauss–Jackson 12")
+             : QStringLiteral(" · RK4")) +
+        (hpop_.uses_fixed_step() ? QStringLiteral(" 固定步长") : QStringLiteral(" 相对误差")));
     if (propagator_kind_ == OrbitPropagator::mission) {
         model_button_->setText(QStringLiteral("规划…"));
         model_button_->setToolTip(QStringLiteral("编辑滑行与脉冲机动序列"));

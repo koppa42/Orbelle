@@ -211,8 +211,10 @@ std::string report_input_sha256(const application::Project &project) {
                 options.ephemeris_model = core::HpopOptions{}.ephemeris_model;
             if (options.integrator != core::HpopIntegrator::gauss_jackson)
                 options.correction = core::HpopCorrection::full;
-            if (options.integrator == core::HpopIntegrator::rk4 ||
-                options.integrator == core::HpopIntegrator::gauss_jackson) {
+            options.step_control = options.uses_fixed_step()
+                                       ? core::HpopStepControl::fixed
+                                       : core::HpopStepControl::relative_error;
+            if (options.uses_fixed_step()) {
                 const core::HpopOptions defaults;
                 options.relative_tolerance = defaults.relative_tolerance;
                 options.position_tolerance_m = defaults.position_tolerance_m;

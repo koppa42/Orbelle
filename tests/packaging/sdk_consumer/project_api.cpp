@@ -67,6 +67,7 @@ int main(int argc, char **argv) try {
     numerical.hpop.gravity_degree = numerical.hpop.gravity_order = 0;
     numerical.hpop.integrator = of::HpopIntegrator::gauss_jackson;
     numerical.hpop.correction = of::HpopCorrection::pseudo;
+    numerical.hpop.step_control = of::HpopStepControl::fixed;
     numerical.hpop.drag.geomagnetic_update = of::core::GeomagneticUpdate::three_hourly_interpolated;
     const auto satellite =
         reopened.objects().create(of::objects::Satellite{.name = "HPOP", .orbit = numerical});

@@ -1066,12 +1066,18 @@ bool edit_hpop_settings(
         section(integration_page, QStringLiteral("积分方法"), "hpopIntegratorMethodSection");
     auto *method = new QComboBox;
     method->setObjectName("hpopIntegrator");
-    method->addItems({QStringLiteral("RKF 7(8) · 自适应步长"), QStringLiteral("RK4 · 固定步长"),
-                      QStringLiteral("RKV 8(9) Efficient · 自适应步长"),
-                      QStringLiteral("Bulirsch–Stoer · 自适应步长"),
-                      QStringLiteral("Gauss–Jackson 12 · 固定步长")});
+    method->addItems({QStringLiteral("RKF 7(8)"), QStringLiteral("RK4"),
+                      QStringLiteral("RKV 8(9) Efficient"), QStringLiteral("Bulirsch–Stoer"),
+                      QStringLiteral("Gauss–Jackson 12")});
     method->setCurrentIndex(static_cast<int>(options.integrator));
     integration->addRow(QStringLiteral("积分器"), method);
+    auto *step_control = new QComboBox;
+    step_control->setObjectName("hpopStepControl");
+    step_control->addItems(
+        {QStringLiteral("Relative Error · 相对误差"), QStringLiteral("Fixed Step · 固定步长")});
+    int step_control_draft = static_cast<int>(options.step_control);
+    integration->addRow(QStringLiteral("步长控制"), step_control);
+
     auto *adaptive_widget = new QWidget;
     auto *adaptive = new QFormLayout(adaptive_widget);
     adaptive->setContentsMargins(0, 0, 0, 0);
@@ -1104,16 +1110,29 @@ bool edit_hpop_settings(
                           QStringLiteral("Pseudo Correction · 伪校正")});
     correction->setCurrentIndex(static_cast<int>(options.correction));
     integration->addRow(QStringLiteral("预测校正方式"), correction);
-    const auto update_method = [=] {
-        const bool fixed_method = method->currentIndex() == 1 || method->currentIndex() == 4;
-        adaptive_widget->setVisible(!fixed_method);
-        integration->setRowVisible(fixed, fixed_method);
+    const auto update_step_control = [=] {
+        const bool is_fixed = step_control->currentIndex() == 1;
+        adaptive_widget->setVisible(!is_fixed);
+        integration->setRowVisible(fixed, is_fixed);
         integration->setRowVisible(correction, method->currentIndex() == 4);
     };
+    const auto update_method = [=, &step_control_draft] {
+        const bool forced = method->currentIndex() == 1 || method->currentIndex() == 4;
+        const QSignalBlocker blocker(step_control);
+        step_control->setCurrentIndex(forced ? 1 : step_control_draft);
+        step_control->setEnabled(!forced);
+        update_step_control();
+    };
     QObject::connect(method, &QComboBox::currentIndexChanged, &dialog, update_method);
+    QObject::connect(step_control, &QComboBox::currentIndexChanged, &dialog,
+                     [&, update_step_control](int index) {
+                         step_control_draft = index;
+                         update_step_control();
+                     });
     update_method();
     help(integration, QStringLiteral("输出采样间隔独立设置。容差约束单步数值误差，不代表轨道预报的"
-                                     "实际精度。RK4 和 Gauss–Jackson 不进行步长误差控制。"));
+                                     "实际精度。固定步长不进行误差控制；RK4 和 Gauss–Jackson "
+                                     "仅支持固定步长，Bulirsch–Stoer 固定模式使用 18 阶外推。"));
     auto *stop = section(integration_page, QStringLiteral("停止条件"), "hpopStopSection");
     auto *altitude =
         quantity(stop, QStringLiteral("最低地心高度"), "hpopMinimumAltitude", Unit::metre,
@@ -1184,16 +1203,16 @@ bool edit_hpop_settings(
             summary_role, value_text(satellite_mass) + QStringLiteral(" ") +
                               unit_symbol(satellite_mass->unit()) +
                               (relativity->isChecked() ? QStringLiteral(" · 相对论") : QString{}));
-        integrator_item->setData(summary_role,
-                                 method->currentIndex() != 1 && method->currentIndex() != 4
-                                     ? part(method, 0) + QStringLiteral(" · 相对容差 ") +
-                                           value_text(relative)
-                                     : part(method, 0) + QStringLiteral(" · 步长 ") +
-                                           value_text(fixed) + QStringLiteral(" s"));
+        integrator_item->setData(summary_role, step_control->currentIndex() == 0
+                                                   ? part(method, 0) +
+                                                         QStringLiteral(" · 相对容差 ") +
+                                                         value_text(relative)
+                                                   : part(method, 0) + QStringLiteral(" · 步长 ") +
+                                                         value_text(fixed) + QStringLiteral(" s"));
         covariance_item->setData(summary_role, QStringLiteral("尚未实现"));
     };
     QObject::connect(secular_use, &QCheckBox::toggled, &dialog, refresh_summaries);
-    for (auto *box : {model, density_model, srp_shadow, method, solid_mode})
+    for (auto *box : {model, density_model, srp_shadow, method, step_control, solid_mode})
         QObject::connect(box, &QComboBox::currentIndexChanged, &dialog, refresh_summaries);
     for (auto *spin : {degree, order})
         QObject::connect(spin, &QSpinBox::valueChanged, &dialog, refresh_summaries);
@@ -1686,10 +1705,10 @@ bool edit_hpop_settings(
                     "相对论加速度需要太阳位置与速度星历，请先在数据中心准备。");
             candidate.integrator = static_cast<core::HpopIntegrator>(method->currentIndex());
             candidate.correction = static_cast<core::HpopCorrection>(correction->currentIndex());
+            candidate.step_control = static_cast<core::HpopStepControl>(step_control_draft);
             validation_page = 1;
             candidate.minimum_altitude_m = read(altitude, Unit::metre);
-            if (candidate.integrator != core::HpopIntegrator::rk4 &&
-                candidate.integrator != core::HpopIntegrator::gauss_jackson) {
+            if (!candidate.uses_fixed_step()) {
                 candidate.min_step_seconds = read(minimum, Unit::second);
                 candidate.max_step_seconds = read(maximum, Unit::second);
                 if (candidate.min_step_seconds > candidate.max_step_seconds)

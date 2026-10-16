@@ -2745,6 +2745,24 @@ TEST_F(QuantityTest, HpopAdaptiveIntegratorsValidatePersistAndPreserveCancelledD
             }
             EXPECT_EQ(method->currentIndex(), method_index);
             EXPECT_TRUE(method->currentText().contains(label));
+            auto *control = dialog->findChild<QComboBox *>("hpopStepControl");
+            ASSERT_TRUE(control);
+            EXPECT_TRUE(control->isEnabled());
+            control->setCurrentIndex(1);
+            EXPECT_TRUE(fixed->isVisible());
+            EXPECT_FALSE(maximum->isVisible());
+            method->setCurrentIndex(4);
+            EXPECT_FALSE(control->isEnabled());
+            EXPECT_EQ(control->currentIndex(), 1);
+            method->setCurrentIndex(method_index);
+            EXPECT_TRUE(control->isEnabled());
+            EXPECT_EQ(control->currentIndex(), 1);
+            control->setCurrentIndex(0);
+            method->setCurrentIndex(1);
+            EXPECT_FALSE(control->isEnabled());
+            EXPECT_EQ(control->currentIndex(), 1);
+            method->setCurrentIndex(method_index);
+            EXPECT_EQ(control->currentIndex(), 0);
             EXPECT_TRUE(maximum->isVisible());
             EXPECT_FALSE(fixed->isVisible());
             minimum->set_value(50, Unit::second);
@@ -2803,6 +2821,73 @@ TEST_F(QuantityTest, HpopAdaptiveIntegratorsValidatePersistAndPreserveCancelledD
             }
             dialog->findChild<QComboBox *>("hpopIntegrator")->setCurrentIndex(1);
             dialog->findChild<QuantityEditor *>("hpopFixedStep")->set_value(7, Unit::second);
+            dialog->reject();
+        });
+        EXPECT_FALSE(edit_hpop_settings(options, nullptr));
+        EXPECT_EQ(options, saved);
+    }
+}
+
+TEST_F(QuantityTest, HpopFixedStepControlAppliesAndRestoresDrafts) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    for (const auto method_kind : {core::HpopIntegrator::rkf78, core::HpopIntegrator::rkv89,
+                                   core::HpopIntegrator::bulirsch_stoer}) {
+        core::HpopOptions options;
+        options.gravity_degree = options.gravity_order = 0;
+        options.integrator = method_kind;
+        const int method_index = static_cast<int>(method_kind);
+        QTimer::singleShot(0, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            ASSERT_TRUE(dialog);
+            dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(1);
+            auto *control = dialog->findChild<QComboBox *>("hpopStepControl");
+            control->setCurrentIndex(1);
+            auto *method = dialog->findChild<QComboBox *>("hpopIntegrator");
+            method->setCurrentIndex(4);
+            EXPECT_FALSE(control->isEnabled());
+            method->setCurrentIndex(method_index);
+            EXPECT_TRUE(control->isEnabled());
+            EXPECT_EQ(control->currentIndex(), 1);
+            auto *fixed = dialog->findChild<QuantityEditor *>("hpopFixedStep");
+            fixed->set_value(7.1, Unit::second);
+            EXPECT_TRUE(fixed->isVisible());
+            auto *maximum = dialog->findChild<QuantityEditor *>("hpopMaxStep");
+            EXPECT_FALSE(maximum->isVisible());
+            dialog->findChild<QuantityEditor *>("hpopMinStep")->set_value(50, Unit::second);
+            maximum->set_value(10, Unit::second);
+            dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        });
+        ASSERT_TRUE(edit_hpop_settings(options, nullptr));
+        EXPECT_EQ(options.integrator, method_kind);
+        EXPECT_EQ(options.step_control, core::HpopStepControl::fixed);
+        EXPECT_EQ(options.fixed_step_seconds, 7.1);
+        EXPECT_EQ(options.max_step_seconds, 60);
+        const auto saved = options;
+        QTimer::singleShot(0, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            ASSERT_TRUE(dialog);
+            dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(1);
+            auto *control = dialog->findChild<QComboBox *>("hpopStepControl");
+            EXPECT_EQ(control->currentIndex(), 1);
+            const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+            for (int width : {430, 720}) {
+                dialog->resize(width, 620);
+                QEventLoop settled;
+                QTimer::singleShot(60, &settled, &QEventLoop::quit);
+                settled.exec();
+                auto *scroll = dialog->findChild<QScrollArea *>("hpopIntegratorPage");
+                scroll->ensureWidgetVisible(control);
+                QApplication::processEvents();
+                EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+                EXPECT_TRUE(
+                    dialog->rect().contains(dialog->findChild<QDialogButtonBox *>()->geometry()));
+                if (!capture.isEmpty()) {
+                    EXPECT_TRUE(QDir{}.mkpath(capture));
+                    EXPECT_TRUE(dialog->grab().save(
+                        capture + QString("/hpop-fixed-%1-%2.png").arg(method_index).arg(width)));
+                }
+            }
+            control->setCurrentIndex(0);
             dialog->reject();
         });
         EXPECT_FALSE(edit_hpop_settings(options, nullptr));

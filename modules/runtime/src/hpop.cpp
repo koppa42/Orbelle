@@ -16,16 +16,18 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
          : options.integrator == core::HpopIntegrator::rkv89
              ? "rkv89-efficient-8th-rklib-a1bf2d26-v1;"
          : options.integrator == core::HpopIntegrator::bulirsch_stoer
-             ? "bulirsch-stoer-midpoint-richardson-4to18-cost-v1;"
+             ? (options.uses_fixed_step() ? "bulirsch-stoer-midpoint-richardson-fixed18-v1;"
+                                          : "bulirsch-stoer-midpoint-richardson-4to18-cost-v1;")
          : options.integrator == core::HpopIntegrator::gauss_jackson
              ? (options.correction == core::HpopCorrection::full
                     ? "gauss-jackson12-summed-bs14to18-startup-full-v1;"
                     : "gauss-jackson12-summed-bs14to18-startup-pseudo-v1;")
-             : "rk4-v1;") +
+             : "rk4-fixed-grid-v2;") +
         (options.gravity_model.empty() ? std::string(core::egm96_model_id())
                                        : options.gravity_model) +
         ";degree=" + std::to_string(options.gravity_degree) +
         ";order=" + std::to_string(options.gravity_order);
+    algorithm += options.uses_fixed_step() ? ";steps=fixed-grid-v1" : ";steps=relative-mixed-v1";
     if (options.uses_secular_gravity())
         algorithm += ";secular=file-linear-julian-year-v1";
     if (options.uses_eop_force() && environment.eop)

@@ -25,6 +25,7 @@ using core::GroundStationLocation;
 using core::HpopCorrection;
 using core::HpopIntegrator;
 using core::HpopOptions;
+using core::HpopStepControl;
 using core::ManeuverEvent;
 using core::ManeuverFrame;
 using core::MissionCoastModel;
