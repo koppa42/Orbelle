@@ -44,6 +44,8 @@ EGM96 取自 [ICGEM 原始系数](https://icgem.gfz.de/getmodel/gfc/971b0a3b49a4
 
 缓存网格通过完整区间索引计算端点，避免重复加法漂移。查询不会为填满缓存读取请求区间之外的数据，尾段不回写，取消保留已经完成的整段。当前科学查询仍积分缓存尾段；大上限下密集查询可能重复计算较长尾段，尚无科学插值加速。一天固定步长只在合适的长周期数值问题中验证，不是低轨步长建议；独立对照及范围压力测试见[大步长验证](../validation/hpop_protocol.md#大步长与自适应缓存)。
 
+科学插值的基础接口已提供显式分段星历的 Lagrange / Hermite 计算，见[科学轨道星历插值](orbit_interpolation.md)。普通 HPOP 仍按上述直接积分查询；自动内部节点、UI、保存及报告接入尚未完成。
+
 固定 Bulirsch–Stoer 采用全部九行外推，固定十八阶；中点过程和外推均使用相对当前步起点的状态增量，降低高阶大坐标消去误差。不根据误差拒步、调整步长或选择阶数，来源为 `bulirsch-stoer-midpoint-richardson-fixed18-v1`。此固定阶数是本项目的明确选择，STK 未公开其对应内部策略；不能据此宣称与 STK 逐位相同。相对误差模式保留已验证的自动 4–18 阶与混合绝对/相对分量尺度。
 
 [HPOP 帮助](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)明确 RKV 的嵌入误差控制；[Connect 页](https://help.agi.com/stk/SubSystems/connectCmds/Content/cmd_HPOPIntegrator.htm)的 RelativeError 行仍只列 RKF78/BS。本实现依据前者为 RKV 保留自适应并新增固定模式；STK 实机有效组合、误差范数、步长范围和默认值仍待核对。当前工程参数范围为 1e−6–86400 s，已覆盖参考配置的一天上限；这不是对 STK 全部合法范围或出厂默认值的断言，默认值保持显式配置。

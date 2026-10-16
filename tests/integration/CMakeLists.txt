@@ -1,4 +1,4 @@
-add_executable(orbitforge_integration_tests runtime_test.cpp scenario_test.cpp project_test.cpp report_test.cpp
+add_executable(orbitforge_integration_tests runtime_test.cpp tabulated_orbit_test.cpp scenario_test.cpp project_test.cpp report_test.cpp
     propagators_test.cpp access_test.cpp project_document_test.cpp analysis_test.cpp catalog_analysis_test.cpp
     project_analysis_persistence_test.cpp analysis_access_test.cpp project_facade_test.cpp hpop_test.cpp mission_test.cpp gravity_test.cpp third_body_test.cpp solar_radiation_pressure_test.cpp atmospheric_drag_test.cpp space_weather_test.cpp mean_weather_test.cpp monthly_weather_test.cpp fxm_weather_test.cpp ocean_tides_test.cpp secular_gravity_test.cpp)
 target_link_libraries(orbitforge_integration_tests PRIVATE OrbitForge::Runtime GTest::gtest_main)

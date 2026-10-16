@@ -85,7 +85,7 @@
 | Integrator | Integration 方法 | 部分：RK4、RKF78、RKV 8(9) Efficient、Bulirsch–Stoer、Gauss–Jackson 12 已实现；RKV 已做 SciPy DOP853 / Orekit 数值对照及八阶收敛验证；Bulirsch–Stoer 已做 Hipparchus GBS / Orekit 对照、自动升阶及步长收敛；Gauss–Jackson 已做 Hipparchus GBS / Orekit 对照、固定步长收敛与两种校正验证；RKF 7(8) 已按官方定义改为七阶推进，并通过 Hipparchus / Orekit 对照和七阶收敛验证；STK 同配置验收仍待完成 |
 | Integrator | VOP；Predictor Corrector Scheme | 部分：Gauss–Jackson 的 Full/Pseudo Correction、有效组合和机动后重启已接入；VOP 通用变量方程仍待实现 |
 | Integrator | Fixed/Relative Error；Tolerance；Min/Max Step | 部分：独立 Fixed/Relative Error 选择已实现；RK4/GJ 强制固定，RKF/RKV/BS 两模式，固定网格及 BS 十八阶外推已验证。固定/自适应范围已扩至 1e−6–86400 s，自适应缓存不再截短配置上限，并有局部动力学首步估计及长弧独立对照。相对误差仍为混合绝对/相对分量尺度；STK 误差范数、完整合法范围/默认值及实机组合仍待核对，截图仅参考 |
-| Integrator | Interpolation 方法；Order；VOP μ | 待实现：Lagrange、Hermite、VOP；误差、位置速度一致性及禁止跨脉冲插值 |
+| Integrator | Interpolation 方法；Order；VOP μ | 部分基础：显式分段星历的 Lagrange / Hermite 计算、C++ / Python Session 与独立参考已接入，见[科学插值](orbit_interpolation.md)；HPOP 内部节点、UI / 持久化 / 报告路由及 VOP 仍待实现，该项尚未完成 |
 | Integrator | Allow PosVel Covariance Interpolation | 待实现：协方差传播完成后验证插值、对称性与半正定性 |
 | Integrator | Time Regularization；Exponent；Steps Per Orbit | 待实现：正则化时间变换及高偏心轨道、正反向和边界事件 |
 | Integrator | Report Ephemeris on a Fixed Time Step | 部分：已有独立固定网格查询；仍须明确可选内部节点输出，与积分及插值契约联动 |

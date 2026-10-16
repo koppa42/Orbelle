@@ -3,6 +3,7 @@
 #include <orbitforge/project.hpp>
 #include <orbitforge/runtime/gravity.hpp>
 #include <orbitforge/runtime/ocean_tides.hpp>
+#include <orbitforge/runtime/tabulated_orbit.hpp>
 
 namespace orbitforge {
 using application::DataLock;
@@ -32,6 +33,9 @@ using core::MissionCoastModel;
 using core::MissionPlan;
 using core::MissionSegment;
 using core::MissionSegmentKind;
+using core::OrbitEphemerisArc;
+using core::OrbitInterpolationMethod;
+using core::OrbitInterpolationOptions;
 using core::OriginId;
 using results::AccessWindows;
 using results::AerSeries;
@@ -42,5 +46,6 @@ using runtime::export_access_csv;
 using runtime::export_aer_csv;
 using runtime::export_report_csv;
 using runtime::export_trajectory_csv;
+using runtime::make_tabulated_orbit_session;
 using runtime::ReportResult;
 } // namespace orbitforge

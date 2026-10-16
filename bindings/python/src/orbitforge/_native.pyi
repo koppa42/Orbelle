@@ -1544,3 +1544,21 @@ def report_input_sha256(project: Project) -> str: ...
 def generate_report(project: Project, definition: ReportDefinition,
                     eop_manifest: str | PathLike[str] | None = None,
                     time_file: str | PathLike[str] | None = None) -> ReportResult: ...
+
+class OrbitInterpolationMethod:
+    LAGRANGE: OrbitInterpolationMethod
+    HERMITE: OrbitInterpolationMethod
+    @property
+    def name(self) -> str: ...
+
+class OrbitInterpolationOptions:
+    def __init__(self) -> None: ...
+    method: OrbitInterpolationMethod
+    order: int
+
+def make_tabulated_orbit_session(
+    arcs: Sequence[Sequence[CartesianState]],
+    options: OrbitInterpolationOptions = ...,
+    object_id: str = "satellite-1",
+    input_revision: int = 1,
+) -> Session: ...

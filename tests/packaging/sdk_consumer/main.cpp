@@ -11,9 +11,22 @@
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/report.hpp>
 #include <orbitforge/runtime/sgp4.hpp>
+#include <orbitforge/runtime/tabulated_orbit.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 int main(int argc, char **argv) try {
+    {
+        using namespace orbitforge::core;
+        const OrbitEphemerisArc nodes{
+            {Epoch{0}, OriginId::earth, FrameId::gcrf, {0, 0, 0}, {0, 0, 0}},
+            {Epoch{2'000'000'000}, OriginId::earth, FrameId::gcrf, {8, 0, 0}, {12, 0, 0}}};
+        const auto session = orbitforge::runtime::make_tabulated_orbit_session(
+            {nodes}, {OrbitInterpolationMethod::hermite, 3});
+        const auto state = session.sample(std::array{Epoch{1'000'000'000}}).states().front();
+        if (std::abs(state.position_m[0] - 1) > 1e-12 ||
+            std::abs(state.velocity_mps[0] - 3) > 1e-12)
+            return 43;
+    }
     {
         using namespace orbitforge::core;
         const GravityModel field(
