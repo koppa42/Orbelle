@@ -926,6 +926,8 @@ void OrbitEditor::update_state_labels() {
              ? QStringLiteral(" · RKV 8(9) Efficient 自适应")
          : hpop_.integrator == core::HpopIntegrator::bulirsch_stoer
              ? QStringLiteral(" · Bulirsch–Stoer 自适应")
+         : hpop_.integrator == core::HpopIntegrator::gauss_jackson
+             ? QStringLiteral(" · Gauss–Jackson 12 固定步长")
              : QStringLiteral(" · RK4 固定步长")));
     if (propagator_kind_ == OrbitPropagator::mission) {
         model_button_->setText(QStringLiteral("规划…"));

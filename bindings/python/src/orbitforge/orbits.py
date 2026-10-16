@@ -317,7 +317,7 @@ class HpopSettings:
     """
     gravity_degree: int = 8
     gravity_order: int = 8
-    integrator: Literal["rkf78", "rk4", "rkv89", "bulirsch_stoer"] = "rkf78"
+    integrator: Literal["rkf78", "rk4", "rkv89", "bulirsch_stoer", "gauss_jackson"] = "rkf78"
     relative_tolerance: float = 1e-12
     position_tolerance_m: float = 1e-3
     velocity_tolerance_mps: float = 1e-6
@@ -337,6 +337,7 @@ class HpopSettings:
     satellite_mass_kg: float = 1000.0
     ocean_tides: OceanTideSettings = field(default_factory=OceanTideSettings)
     include_secular_variations: bool = False
+    correction: Literal["full", "pseudo"] = "full"
 
     def __post_init__(self) -> None:
         if type(self.include_secular_variations) is not bool:
@@ -373,11 +374,14 @@ class HpopSettings:
 
     def _native(self) -> n.HpopOptions:
         value = n.HpopOptions()
-        if self.integrator not in ("rkf78", "rk4", "rkv89", "bulirsch_stoer"):
-            raise ValueError("integrator must be 'rkf78', 'rk4', 'rkv89' or 'bulirsch_stoer'")
+        if self.integrator not in ("rkf78", "rk4", "rkv89", "bulirsch_stoer", "gauss_jackson"):
+            raise ValueError("integrator must be 'rkf78', 'rk4', 'rkv89', 'bulirsch_stoer' or 'gauss_jackson'")
         for name in self.__dataclass_fields__:
-            if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides"):
+            if name not in ("integrator", "correction", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides"):
                 setattr(value, name, getattr(self, name))
+        if self.correction not in ("full", "pseudo"):
+            raise ValueError("correction must be full or pseudo")
+        value.correction = {"full": n.HpopCorrection.FULL, "pseudo": n.HpopCorrection.PSEUDO}[self.correction]
         rows = list(value.third_bodies)
         for item in self.body_gravity:
             rows[THIRD_BODY_NAMES.index(item.body)] = item._native()
@@ -391,14 +395,15 @@ class HpopSettings:
         value.ocean_tides = self.ocean_tides._native()
         value.integrator = {"rkf78": n.HpopIntegrator.RKF78, "rk4": n.HpopIntegrator.RK4,
                             "rkv89": n.HpopIntegrator.RKV89,
-                            "bulirsch_stoer": n.HpopIntegrator.BULIRSCH_STOER}[self.integrator]
+                            "bulirsch_stoer": n.HpopIntegrator.BULIRSCH_STOER,
+                            "gauss_jackson": n.HpopIntegrator.GAUSS_JACKSON}[self.integrator]
         value.validate()
         return value
 
     @classmethod
     def _read(cls, value: n.HpopOptions) -> "HpopSettings":
         fields = {name: getattr(value, name) for name in cls.__dataclass_fields__
-                  if name not in ("integrator", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides")}
+                  if name not in ("integrator", "correction", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides")}
         rows = value.third_bodies
         fields["third_bodies"] = tuple(b for b, row in zip(THIRD_BODY_NAMES, rows) if row.enabled)
         sources = {n.ThirdBodyGravitySource.JPL_DE: "jpl_de",
@@ -415,8 +420,10 @@ class HpopSettings:
         fields["ocean_tides"] = OceanTideSettings._read(value.ocean_tides)
         integrators = {n.HpopIntegrator.RKF78: "rkf78", n.HpopIntegrator.RK4: "rk4",
                        n.HpopIntegrator.RKV89: "rkv89",
-                       n.HpopIntegrator.BULIRSCH_STOER: "bulirsch_stoer"}
-        return cls(**fields, integrator=integrators[value.integrator])
+                       n.HpopIntegrator.BULIRSCH_STOER: "bulirsch_stoer",
+                       n.HpopIntegrator.GAUSS_JACKSON: "gauss_jackson"}
+        return cls(**fields, integrator=integrators[value.integrator],
+                   correction={n.HpopCorrection.FULL: "full", n.HpopCorrection.PSEUDO: "pseudo"}[value.correction])
 
 
 @dataclass(frozen=True, slots=True)
@@ -500,7 +507,7 @@ def Sgp4(*, tle: n.Tle) -> Orbit:
 def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          gravity_model: str = "", gravity_mu: float = 3.986004415e14,
          gravity_degree: int = 8, gravity_order: int | None = None,
-         integrator: Literal["rkf78", "rk4", "rkv89", "bulirsch_stoer"] = "rkf78", max_step_seconds: float = 60,
+         integrator: Literal["rkf78", "rk4", "rkv89", "bulirsch_stoer", "gauss_jackson"] = "rkf78", max_step_seconds: float = 60,
          min_step_seconds: float = 0.001, fixed_step_seconds: float = 10,
          relative_tolerance: float = 1e-12, position_tolerance_m: float = 1e-3,
          velocity_tolerance_mps: float = 1e-6, minimum_altitude_m: float = 0,
@@ -510,8 +517,10 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          drag: DragSettings | None = None, solid_tides: SolidTideSettings | None = None,
          include_relativistic_accelerations: bool = False,
          satellite_mass_kg: float = 1000.0, ocean_tides: OceanTideSettings | None = None,
-         include_secular_variations: bool = False) -> Orbit:
-    """Cowell orbit with gravity, tides, third bodies, drag, spherical SRP and adaptive RKF78/RKV89/Bulirsch-Stoer or fixed RK4.
+         include_secular_variations: bool = False,
+         correction: Literal["full", "pseudo"] = "full") -> Orbit:
+    """Cowell orbit with gravity, tides, third bodies, drag, spherical SRP and adaptive RKF78/RKV89/Bulirsch-Stoer or fixed RK4/Gauss-Jackson 12.
+    Gauss-Jackson correction selects the post-convergence full or two-body-only force update.
 
     Built-in EGM96 supports up to degree 20; installed gravity files up to 2190 (EGM2008 order limit 2159).
     Satellite mass is in kg (finite and positive); spherical forces retain their explicit
@@ -538,6 +547,6 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
         SolidTideSettings() if solid_tides is None else require(solid_tides, SolidTideSettings, "solid_tides"),
         include_relativistic_accelerations, satellite_mass_kg,
         OceanTideSettings() if ocean_tides is None else require(ocean_tides, OceanTideSettings, "ocean_tides"),
-        include_secular_variations)
+        include_secular_variations, correction)
     settings._native()  # Fail at construction, before changing a project.
     return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)

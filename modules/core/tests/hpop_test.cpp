@@ -1,3 +1,4 @@
+#include <atomic>
 #include <cmath>
 #include <fstream>
 #include <future>
@@ -21,7 +22,9 @@ HpopOptions point_mass() {
 }
 class FixedFrames final : public IFrameProvider {
   public:
+    mutable std::atomic<std::size_t> evaluations{0};
     PositionRotation gcrf_to_itrf(Epoch epoch, const EarthOrientationSample &) const override {
+        ++evaluations;
         return {epoch,
                 OriginId::earth,
                 FrameId::gcrf,
@@ -84,8 +87,8 @@ TEST(Hpop, SatelliteMassValidatesCompatibleAreasEvenForDisabledForceDrafts) {
 }
 TEST(Hpop, PointMassMatchesCircularAnalyticSolutionForwardBackwardAndNearEpochLimits) {
     const double rate = std::sqrt(egm96_mu / std::pow(7e6, 3));
-    for (auto integrator :
-         {HpopIntegrator::rkf78, HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer})
+    for (auto integrator : {HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+                            HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson})
         for (auto origin : {0LL, 8'000'000'000'000'000'000LL}) {
             auto initial = circular();
             initial.epoch = Epoch{origin};
@@ -215,8 +218,8 @@ TEST(Hpop, MatchesIndependentOrekitHolmesFeatherstoneAndDp853Reference) {
         SCOPED_TRACE(line);
         const auto acceleration =
             egm96_acceleration(initial.position_m, options.gravity_degree, options.gravity_order);
-        for (auto integrator :
-             {HpopIntegrator::rkf78, HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer}) {
+        for (auto integrator : {HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+                                HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
             options.integrator = integrator;
             const auto actual = make_hpop(initial, options, environment)
                                     ->state_at(Epoch{static_cast<std::int64_t>(elapsed * 1e9)});
@@ -409,7 +412,8 @@ TEST(Hpop, Rkv89AdvancesTheEighthOrderMemberAndControlsRejectedSteps) {
     EXPECT_LT(position_error(adaptive, expected), 1e-4);
 }
 TEST(Hpop, AdaptiveCancellationAndQueryOrderPreserveDeterministicCheckpoints) {
-    for (auto integrator : {HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer}) {
+    for (auto integrator :
+         {HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
         auto options = point_mass();
         options.integrator = integrator;
         const auto provider = make_hpop(circular(), options),
@@ -422,6 +426,18 @@ TEST(Hpop, AdaptiveCancellationAndQueryOrderPreserveDeterministicCheckpoints) {
                                               }),
                      std::runtime_error);
         EXPECT_EQ(calls, 20);
+        if (integrator == HpopIntegrator::gauss_jackson) {
+            (void)provider->state_at(Epoch{1200'000'000'000});
+            calls = 0;
+            EXPECT_THROW((void)provider->state_at(Epoch{9000'000'000'000},
+                                                  [&] {
+                                                      if (++calls == 5)
+                                                          throw std::runtime_error(
+                                                              "cancel with established history");
+                                                  }),
+                         std::runtime_error);
+            EXPECT_EQ(calls, 5);
+        }
         for (auto ns : {777'000'000'000LL, -199'000'000'000LL, 1LL})
             (void)provider->state_at(Epoch{ns});
         auto job = std::async(std::launch::async,
@@ -464,4 +480,141 @@ TEST(Hpop, BulirschStoerAdaptsOrderAndRejectsUnresolvedMinimumSteps) {
     EXPECT_NO_THROW((void)make_hpop(fast, options)->state_at(Epoch{300'000'000'000}));
     RecordProperty("loose_work", loose_work);
     RecordProperty("tight_work", tight_work);
+}
+
+TEST(Hpop, GaussJacksonMatchesIndependentHipparchusForBothCorrections) {
+    for (auto correction : {HpopCorrection::full, HpopCorrection::pseudo}) {
+        std::ifstream file{ORBITFORGE_BS_REFERENCE};
+        ASSERT_TRUE(file.good());
+        HpopEnvironment environment{std::make_shared<FixedFrames>(), std::make_shared<FixedEop>()};
+        environment.ephemeris = std::make_shared<MovingMoon>();
+        std::string line;
+        int count = 0;
+        double max_position = 0, max_velocity = 0, max_refined = 0, max_change = 0;
+        while (std::getline(file, line)) {
+            if (line.empty() || line[0] == '#')
+                continue;
+            SCOPED_TRACE(line);
+            std::istringstream row{line};
+            int kind;
+            double seconds;
+            auto initial = circular(), expected = initial;
+            row >> kind >> seconds;
+            for (auto &v : initial.position_m)
+                row >> v;
+            for (auto &v : initial.velocity_mps)
+                row >> v;
+            for (auto &v : expected.position_m)
+                row >> v;
+            for (auto &v : expected.velocity_mps)
+                row >> v;
+            ASSERT_FALSE(row.fail());
+            expected.epoch = Epoch{std::llround(seconds * 1e9)};
+            auto options = point_mass();
+            options.integrator = HpopIntegrator::gauss_jackson;
+            options.correction = correction;
+            options.fixed_step_seconds = 30;
+            options.gravity_degree = kind ? 2 : 0;
+            options.relative_tolerance = 1e-14;
+            options.position_tolerance_m = 1e-8;
+            options.velocity_tolerance_mps = 1e-11;
+            options.max_step_seconds = 300;
+            options.third_bodies[static_cast<std::size_t>(ThirdBody::moon)].enabled = kind == 2;
+            const auto actual = make_hpop(initial, options, environment)->state_at(expected.epoch);
+            const double er = position_error(actual, expected);
+            const double ev = std::hypot(actual.velocity_mps[0] - expected.velocity_mps[0],
+                                         actual.velocity_mps[1] - expected.velocity_mps[1],
+                                         actual.velocity_mps[2] - expected.velocity_mps[2]);
+            max_position = std::max(max_position, er);
+            max_velocity = std::max(max_velocity, ev);
+            EXPECT_LT(er, .005);
+            EXPECT_LT(ev, 5e-6);
+            options.fixed_step_seconds = 15;
+            const auto refined = make_hpop(initial, options, environment)->state_at(expected.epoch);
+            max_refined = std::max(max_refined, position_error(refined, expected));
+            max_change = std::max(max_change, position_error(refined, actual));
+            EXPECT_LT(position_error(refined, expected), .005);
+            EXPECT_LT(position_error(refined, actual), .001);
+            ++count;
+        }
+        EXPECT_EQ(count, 60);
+        std::ostringstream metrics_r, metrics_v;
+        metrics_r << std::setprecision(17) << max_position;
+        metrics_v << std::setprecision(17) << max_velocity;
+        RecordProperty(correction == HpopCorrection::full ? "full_refined_error_m"
+                                                          : "pseudo_refined_error_m",
+                       std::to_string(max_refined));
+        RecordProperty(correction == HpopCorrection::full ? "full_step_halving_change_m"
+                                                          : "pseudo_step_halving_change_m",
+                       std::to_string(max_change));
+        RecordProperty(correction == HpopCorrection::full ? "full_position_error_m"
+                                                          : "pseudo_position_error_m",
+                       metrics_r.str());
+        RecordProperty(correction == HpopCorrection::full ? "full_velocity_error_mps"
+                                                          : "pseudo_velocity_error_mps",
+                       metrics_v.str());
+    }
+}
+
+TEST(Hpop, GaussJacksonPreservesGridHistoryAndConvergesAtTwelfthOrder) {
+    auto options = point_mass();
+    options.integrator = HpopIntegrator::gauss_jackson;
+    const auto initial = circular();
+    const double seconds = 60000;
+    const double angle = std::sqrt(egm96_mu / std::pow(7e6, 3)) * seconds;
+    auto expected = initial;
+    expected.epoch = Epoch{static_cast<std::int64_t>(seconds * 1e9)};
+    expected.position_m = {7e6 * std::cos(angle), 7e6 * std::sin(angle), 0};
+    options.fixed_step_seconds = 200;
+    const auto coarse = make_hpop(initial, options)->state_at(expected.epoch);
+    options.fixed_step_seconds = 160;
+    const auto fine = make_hpop(initial, options)->state_at(expected.epoch);
+    const double coarse_error = position_error(coarse, expected);
+    const double fine_error = position_error(fine, expected);
+    RecordProperty("coarse_position_error_m", std::to_string(coarse_error));
+    RecordProperty("fine_position_error_m", std::to_string(fine_error));
+    const double observed_order = std::log(coarse_error / fine_error) / std::log(1.25);
+    RecordProperty("observed_order", std::to_string(observed_order));
+    EXPECT_LT(fine_error, .001);
+    // These two steps stay above the floating point error floor.
+    EXPECT_GT(observed_order, 11);
+    EXPECT_LT(observed_order, 14);
+    // Neither query order nor fractional checkpoint spacing can change saved history.
+    for (double step : {7., 60., 10.3}) {
+        options.fixed_step_seconds = step;
+        const auto used = make_hpop(initial, options), fresh = make_hpop(initial, options);
+        for (auto ns : {899'000'000'001LL, 333'333'333'333LL, -310'000'000'001LL})
+            (void)used->state_at(Epoch{ns});
+        const auto a = used->state_at(Epoch{8100'123'456'789});
+        const auto b = fresh->state_at(a.epoch);
+        EXPECT_EQ(a.position_m, b.position_m);
+        EXPECT_EQ(a.velocity_mps, b.velocity_mps);
+    }
+    options.correction = static_cast<HpopCorrection>(123);
+    EXPECT_THROW(validate_hpop_options(options), std::invalid_argument);
+}
+
+TEST(Hpop, GaussJacksonPseudoCorrectionSavesOnlyTheFinalFullForceEvaluation) {
+    std::array states{circular(), circular()};
+    std::array<std::size_t, 2> evaluations{};
+    for (std::size_t mode = 0; mode < 2; ++mode) {
+        auto frames = std::make_shared<FixedFrames>();
+        HpopEnvironment environment{frames, std::make_shared<FixedEop>()};
+        auto options = point_mass();
+        options.gravity_degree = 2;
+        options.integrator = HpopIntegrator::gauss_jackson;
+        options.correction = mode == 0 ? HpopCorrection::full : HpopCorrection::pseudo;
+        options.fixed_step_seconds = 30;
+        const auto provider = make_hpop(circular(), options, environment);
+        (void)provider->state_at(Epoch{1200'000'000'000});
+        frames->evaluations = 0;
+        states[mode] = provider->state_at(Epoch{1800'000'000'000});
+        evaluations[mode] = frames->evaluations.load();
+    }
+    EXPECT_LT(evaluations[1], evaluations[0]);
+    // Pseudo skips the final full force call; a few extra EC iterations can be needed.
+    EXPECT_LE(evaluations[0] - evaluations[1], 20u);
+    EXPECT_LT(position_error(states[0], states[1]), 1e-5);
+    RecordProperty("full_force_evaluations", std::to_string(evaluations[0]));
+    RecordProperty("pseudo_force_evaluations", std::to_string(evaluations[1]));
 }

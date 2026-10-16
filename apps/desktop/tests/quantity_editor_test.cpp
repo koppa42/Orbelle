@@ -2731,14 +2731,14 @@ TEST_F(QuantityTest, HpopAdaptiveIntegratorsValidatePersistAndPreserveCancelledD
             auto *minimum = dialog->findChild<QuantityEditor *>("hpopMinStep");
             auto *maximum = dialog->findChild<QuantityEditor *>("hpopMaxStep");
             auto *fixed = dialog->findChild<QuantityEditor *>("hpopFixedStep");
-            ASSERT_EQ(method->count(), 4);
+            ASSERT_EQ(method->count(), 5);
             method->setCurrentIndex(1);
             EXPECT_FALSE(maximum->isVisible());
             EXPECT_TRUE(fixed->isVisible());
             method->setFocus();
             QKeyEvent end_key(QEvent::KeyPress, Qt::Key_End, Qt::NoModifier);
             QApplication::sendEvent(method, &end_key);
-            if (method_index == 2) {
+            for (int index = 4; index > method_index; --index) {
                 QKeyEvent up_key(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
                 QApplication::sendEvent(method, &up_key);
             }
@@ -2802,6 +2802,104 @@ TEST_F(QuantityTest, HpopAdaptiveIntegratorsValidatePersistAndPreserveCancelledD
             }
             dialog->findChild<QComboBox *>("hpopIntegrator")->setCurrentIndex(1);
             dialog->findChild<QuantityEditor *>("hpopFixedStep")->set_value(7, Unit::second);
+            dialog->reject();
+        });
+        EXPECT_FALSE(edit_hpop_settings(options, nullptr));
+        EXPECT_EQ(options, saved);
+    }
+}
+
+TEST_F(QuantityTest, HpopGaussJacksonCorrectionControlsValidatePersistAndCancel) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    for (int scheme : {0, 1}) {
+        core::HpopOptions options;
+        options.gravity_degree = options.gravity_order = 0;
+        QTimer::singleShot(0, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            ASSERT_TRUE(dialog);
+            dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(1);
+            auto *method = dialog->findChild<QComboBox *>("hpopIntegrator");
+            auto *correction = dialog->findChild<QComboBox *>("hpopCorrection");
+            auto *fixed = dialog->findChild<QuantityEditor *>("hpopFixedStep");
+            auto *maximum = dialog->findChild<QuantityEditor *>("hpopMaxStep");
+            ASSERT_TRUE(correction);
+            EXPECT_FALSE(correction->isVisible());
+            method->setFocus();
+            QKeyEvent end_key(QEvent::KeyPress, Qt::Key_End, Qt::NoModifier);
+            QApplication::sendEvent(method, &end_key);
+            EXPECT_EQ(method->currentIndex(), 4);
+            EXPECT_FALSE(maximum->isVisible());
+            EXPECT_TRUE(fixed->isVisible());
+            EXPECT_TRUE(correction->isVisible());
+            correction->setCurrentIndex(scheme);
+            fixed->findChild<QLineEdit *>("quantityValue")->setText("0");
+            dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            EXPECT_TRUE(dialog->isVisible());
+            EXPECT_TRUE(dialog->findChild<QLabel *>("errorText")->isVisible());
+            fixed->set_value(30, Unit::second);
+            method->setCurrentIndex(0);
+            EXPECT_FALSE(correction->isVisible());
+            method->setCurrentIndex(4);
+            EXPECT_EQ(correction->currentIndex(), scheme);
+            EXPECT_EQ(fixed->value(Unit::second), 30);
+            dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        });
+        ASSERT_TRUE(edit_hpop_settings(options, nullptr));
+        EXPECT_EQ(options.integrator, core::HpopIntegrator::gauss_jackson);
+        EXPECT_EQ(options.correction, static_cast<core::HpopCorrection>(scheme));
+        EXPECT_EQ(options.fixed_step_seconds, 30);
+        const auto saved = options;
+        OrbitInput input;
+        input.propagator = OrbitPropagator::hpop;
+        input.hpop = options;
+        OrbitEditor editor(input);
+        bool summary_matches = false;
+        for (const auto *text_label : editor.findChildren<QLabel *>())
+            summary_matches |= text_label->text().contains("Gauss–Jackson 12");
+        EXPECT_TRUE(summary_matches);
+        QTimer::singleShot(0, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            ASSERT_TRUE(dialog);
+            dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(1);
+            auto *correction = dialog->findChild<QComboBox *>("hpopCorrection");
+            auto *fixed = dialog->findChild<QuantityEditor *>("hpopFixedStep");
+            EXPECT_EQ(correction->currentIndex(), scheme);
+            EXPECT_EQ(fixed->value(Unit::second), 30);
+            auto *navigation = dialog->findChild<QListWidget *>("hpopNavigation");
+            ASSERT_TRUE(navigation);
+            bool fixed_summary = false;
+            for (int row = 0; row < navigation->count(); ++row) {
+                const auto summary = navigation->item(row)->data(Qt::UserRole + 1).toString();
+                if (summary.contains("Gauss–Jackson")) {
+                    EXPECT_TRUE(summary.contains(QStringLiteral("步长 30 s")));
+                    EXPECT_FALSE(summary.contains(QStringLiteral("相对容差")));
+                    fixed_summary = true;
+                }
+            }
+            EXPECT_TRUE(fixed_summary);
+            const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+            std::cout << "HPOP Gauss-Jackson " << scheme << " DPR " << dialog->devicePixelRatioF()
+                      << '\n';
+            for (int width : {720, 430}) {
+                dialog->resize(width, 620);
+                QEventLoop settled;
+                QTimer::singleShot(60, &settled, &QEventLoop::quit);
+                settled.exec();
+                auto *scroll = dialog->findChild<QScrollArea *>("hpopIntegratorPage");
+                scroll->ensureWidgetVisible(correction);
+                QApplication::processEvents();
+                EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+                EXPECT_EQ(correction->currentIndex(), scheme);
+                EXPECT_TRUE(
+                    dialog->rect().contains(dialog->findChild<QDialogButtonBox *>()->geometry()));
+                if (!capture.isEmpty()) {
+                    EXPECT_TRUE(QDir{}.mkpath(capture));
+                    EXPECT_TRUE(dialog->grab().save(
+                        capture + QString("/hpop-gj-%1-%2.png").arg(scheme).arg(width)));
+                }
+            }
+            correction->setCurrentIndex(1 - scheme);
+            fixed->set_value(7, Unit::second);
             dialog->reject();
         });
         EXPECT_FALSE(edit_hpop_settings(options, nullptr));

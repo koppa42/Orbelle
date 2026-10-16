@@ -16,6 +16,10 @@ application::Session make_hpop_session(core::CartesianState initial, core::HpopO
                           ? "rkv89-efficient-8th-rklib-a1bf2d26-v1;"
                       : options.integrator == core::HpopIntegrator::bulirsch_stoer
                           ? "bulirsch-stoer-midpoint-richardson-4to18-cost-v1;"
+                      : options.integrator == core::HpopIntegrator::gauss_jackson
+                          ? (options.correction == core::HpopCorrection::full
+                                 ? "gauss-jackson12-summed-bs14to18-startup-full-v1;"
+                                 : "gauss-jackson12-summed-bs14to18-startup-pseudo-v1;")
                           : "rk4-v1;") +
                      (options.gravity_model.empty() ? std::string(core::egm96_model_id())
                                                     : options.gravity_model) +

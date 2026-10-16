@@ -802,7 +802,12 @@ class ManeuverSeries:
     def data_sha256(self) -> str: ...
     def __len__(self) -> int: ...
 
+class HpopCorrection:
+    FULL: HpopCorrection
+    PSEUDO: HpopCorrection
+
 class HpopIntegrator:
+    GAUSS_JACKSON: HpopIntegrator
     BULIRSCH_STOER: HpopIntegrator
     RKV89: HpopIntegrator
     RKF78: HpopIntegrator
@@ -1053,6 +1058,7 @@ class HpopOptions:
     include_relativistic_accelerations: bool
     include_secular_variations: bool
     integrator: HpopIntegrator
+    correction: HpopCorrection
     relative_tolerance: float
     position_tolerance_m: float
     velocity_tolerance_mps: float

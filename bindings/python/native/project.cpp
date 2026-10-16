@@ -91,7 +91,11 @@ void bind_project(py::module_ &module) {
                 return core::validate_mission(initial, plan);
             },
             py::arg("initial"));
+    py::enum_<core::HpopCorrection>(module, "HpopCorrection")
+        .value("FULL", core::HpopCorrection::full)
+        .value("PSEUDO", core::HpopCorrection::pseudo);
     py::enum_<core::HpopIntegrator>(module, "HpopIntegrator")
+        .value("GAUSS_JACKSON", core::HpopIntegrator::gauss_jackson)
         .value("BULIRSCH_STOER", core::HpopIntegrator::bulirsch_stoer)
         .value("RKV89", core::HpopIntegrator::rkv89)
         .value("RKF78", core::HpopIntegrator::rkf78)
@@ -274,6 +278,7 @@ void bind_project(py::module_ &module) {
         .def_readwrite("gravity_degree", &core::HpopOptions::gravity_degree)
         .def_readwrite("gravity_order", &core::HpopOptions::gravity_order)
         .def_readwrite("integrator", &core::HpopOptions::integrator)
+        .def_readwrite("correction", &core::HpopOptions::correction)
         .def_readwrite("relative_tolerance", &core::HpopOptions::relative_tolerance)
         .def_readwrite("position_tolerance_m", &core::HpopOptions::position_tolerance_m)
         .def_readwrite("velocity_tolerance_mps", &core::HpopOptions::velocity_tolerance_mps)

@@ -65,7 +65,8 @@ int main(int argc, char **argv) try {
     of::OrbitInput numerical;
     numerical.propagator = of::OrbitPropagator::hpop;
     numerical.hpop.gravity_degree = numerical.hpop.gravity_order = 0;
-    numerical.hpop.integrator = of::HpopIntegrator::bulirsch_stoer;
+    numerical.hpop.integrator = of::HpopIntegrator::gauss_jackson;
+    numerical.hpop.correction = of::HpopCorrection::pseudo;
     numerical.hpop.drag.geomagnetic_update = of::core::GeomagneticUpdate::three_hourly_interpolated;
     const auto satellite =
         reopened.objects().create(of::objects::Satellite{.name = "HPOP", .orbit = numerical});
@@ -73,7 +74,7 @@ int main(int argc, char **argv) try {
     const auto numerical_result = numerical_analysis.states(satellite, 30s, of::FrameId::gcrf);
     if (numerical_result.states().size() != 5 ||
         numerical_result.provenance().algorithm.find(
-            "bulirsch-stoer-midpoint-richardson-4to18-cost-v1") == std::string::npos)
+            "gauss-jackson12-summed-bs14to18-startup-pseudo-v1") == std::string::npos)
         return 5;
     reopened.save(path, numerical_analysis, true);
     auto numerical_file = of::Project::open(path);

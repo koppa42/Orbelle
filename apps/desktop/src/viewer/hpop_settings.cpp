@@ -1068,7 +1068,8 @@ bool edit_hpop_settings(
     method->setObjectName("hpopIntegrator");
     method->addItems({QStringLiteral("RKF78 · 自适应步长"), QStringLiteral("RK4 · 固定步长"),
                       QStringLiteral("RKV 8(9) Efficient · 自适应步长"),
-                      QStringLiteral("Bulirsch–Stoer · 自适应步长")});
+                      QStringLiteral("Bulirsch–Stoer · 自适应步长"),
+                      QStringLiteral("Gauss–Jackson 12 · 固定步长")});
     method->setCurrentIndex(static_cast<int>(options.integrator));
     integration->addRow(QStringLiteral("积分器"), method);
     auto *adaptive_widget = new QWidget;
@@ -1095,14 +1096,24 @@ bool edit_hpop_settings(
     integration->addRow(adaptive_widget);
     auto *fixed = quantity(integration, QStringLiteral("固定步长"), "hpopFixedStep", Unit::second,
                            options.fixed_step_seconds, 1e-6, 3600);
+    auto *correction = new QComboBox;
+    correction->setObjectName("hpopCorrection");
+    correction->setToolTip(
+        QStringLiteral("完整校正在收敛后更新全部加速度；伪校正只更新二体引力，计算较快。"));
+    correction->addItems({QStringLiteral("Full Correction · 完整校正"),
+                          QStringLiteral("Pseudo Correction · 伪校正")});
+    correction->setCurrentIndex(static_cast<int>(options.correction));
+    integration->addRow(QStringLiteral("预测校正方式"), correction);
     const auto update_method = [=] {
-        adaptive_widget->setVisible(method->currentIndex() != 1);
-        integration->setRowVisible(fixed, method->currentIndex() == 1);
+        const bool fixed_method = method->currentIndex() == 1 || method->currentIndex() == 4;
+        adaptive_widget->setVisible(!fixed_method);
+        integration->setRowVisible(fixed, fixed_method);
+        integration->setRowVisible(correction, method->currentIndex() == 4);
     };
     QObject::connect(method, &QComboBox::currentIndexChanged, &dialog, update_method);
     update_method();
     help(integration, QStringLiteral("输出采样间隔独立设置。容差约束单步数值误差，不代表轨道预报的"
-                                     "实际精度。RK4 不进行误差控制。"));
+                                     "实际精度。RK4 和 Gauss–Jackson 不进行步长误差控制。"));
     auto *stop = section(integration_page, QStringLiteral("停止条件"), "hpopStopSection");
     auto *altitude =
         quantity(stop, QStringLiteral("最低地心高度"), "hpopMinimumAltitude", Unit::metre,
@@ -1173,12 +1184,12 @@ bool edit_hpop_settings(
             summary_role, value_text(satellite_mass) + QStringLiteral(" ") +
                               unit_symbol(satellite_mass->unit()) +
                               (relativity->isChecked() ? QStringLiteral(" · 相对论") : QString{}));
-        integrator_item->setData(summary_role, method->currentIndex() != 1
-                                                   ? part(method, 0) +
-                                                         QStringLiteral(" · 相对容差 ") +
-                                                         value_text(relative)
-                                                   : part(method, 0) + QStringLiteral(" · 步长 ") +
-                                                         value_text(fixed) + QStringLiteral(" s"));
+        integrator_item->setData(summary_role,
+                                 method->currentIndex() != 1 && method->currentIndex() != 4
+                                     ? part(method, 0) + QStringLiteral(" · 相对容差 ") +
+                                           value_text(relative)
+                                     : part(method, 0) + QStringLiteral(" · 步长 ") +
+                                           value_text(fixed) + QStringLiteral(" s"));
         covariance_item->setData(summary_role, QStringLiteral("尚未实现"));
     };
     QObject::connect(secular_use, &QCheckBox::toggled, &dialog, refresh_summaries);
@@ -1674,9 +1685,11 @@ bool edit_hpop_settings(
                 throw std::runtime_error(
                     "相对论加速度需要太阳位置与速度星历，请先在数据中心准备。");
             candidate.integrator = static_cast<core::HpopIntegrator>(method->currentIndex());
+            candidate.correction = static_cast<core::HpopCorrection>(correction->currentIndex());
             validation_page = 1;
             candidate.minimum_altitude_m = read(altitude, Unit::metre);
-            if (candidate.integrator != core::HpopIntegrator::rk4) {
+            if (candidate.integrator != core::HpopIntegrator::rk4 &&
+                candidate.integrator != core::HpopIntegrator::gauss_jackson) {
                 candidate.min_step_seconds = read(minimum, Unit::second);
                 candidate.max_step_seconds = read(maximum, Unit::second);
                 if (candidate.min_step_seconds > candidate.max_step_seconds)

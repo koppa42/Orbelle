@@ -20,7 +20,8 @@ inline constexpr double egm96_radius_m = 6378136.3;
 inline constexpr int egm96_max_degree = 20;
 inline constexpr double hpop_max_duration_seconds = 366.0 * 86400;
 // RKV uses Verner's efficient 16-stage pair, advancing its eighth-order member.
-enum class HpopIntegrator { rkf78, rk4, rkv89, bulirsch_stoer };
+enum class HpopIntegrator { rkf78, rk4, rkv89, bulirsch_stoer, gauss_jackson };
+enum class HpopCorrection { full, pseudo };
 struct HpopOptions {
     // Catalog selection, never a file path. Empty selects the built-in 20x20 EGM96.
     std::string gravity_model{};
@@ -102,10 +103,12 @@ struct HpopOptions {
     // actual order limit.
     int gravity_degree = 8, gravity_order = 8;
     HpopIntegrator integrator = HpopIntegrator::rkf78;
+    // Final force update after Gauss-Jackson corrector convergence; inactive otherwise.
+    HpopCorrection correction = HpopCorrection::full;
     double relative_tolerance = 1e-12;
     double position_tolerance_m = 1e-3, velocity_tolerance_mps = 1e-6;
     double min_step_seconds = 0.001, max_step_seconds = 60;
-    double fixed_step_seconds = 10; // RK4 only; no error control.
+    double fixed_step_seconds = 10; // RK4 / Gauss-Jackson; no truncation error control.
     // Geocentric altitude above the selected model's reference sphere, at each force evaluation.
     double minimum_altitude_m = 0;
     bool operator==(const HpopOptions &) const = default;

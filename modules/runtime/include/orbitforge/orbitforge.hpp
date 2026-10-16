@@ -22,6 +22,7 @@ using application::ReportUnits;
 using core::CartesianState;
 using core::FrameId;
 using core::GroundStationLocation;
+using core::HpopCorrection;
 using core::HpopIntegrator;
 using core::HpopOptions;
 using core::ManeuverEvent;

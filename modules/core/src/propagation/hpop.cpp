@@ -1,3 +1,4 @@
+#include "integrators/gauss_jackson.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -55,6 +56,7 @@ class Hpop final : public IStateProvider {
     // alter the solution used by later queries. Both directions start at t=0.
     mutable std::mutex mutex_;
     mutable std::vector<State> forward_, backward_;
+    mutable std::vector<detail::GaussJackson12> gj_forward_, gj_backward_;
     Epoch epoch_at(double seconds) const {
         const auto offset = static_cast<std::int64_t>(std::llround(seconds * 1e9));
         const auto start = initial_.epoch.tai_nanoseconds();
@@ -73,7 +75,7 @@ class Hpop final : public IStateProvider {
         const auto at = epoch_at(t);
         const auto until = epoch_at(end);
         const int period = d.geomagnetic_update == GeomagneticUpdate::daily ? 24 : 3;
-        const auto boundary = [&](AtmosphereModel model) {
+        const auto boundary = [&](AtmosphereModel model) -> std::optional<double> {
             const std::int64_t lag =
                 model == AtmosphereModel::jacchia_roberts ? 24120000000000LL : 0;
             if (std::min(at.tai_nanoseconds(), until.tai_nanoseconds()) <
@@ -88,7 +90,7 @@ class Hpop final : public IStateProvider {
                 std::chrono::year{utc.year} / std::chrono::month{static_cast<unsigned>(utc.month)} /
                 std::chrono::day{static_cast<unsigned>(utc.day)}};
             int hour = utc.hour / period * period + (forward ? period : 0);
-            const auto instant = [&](int h) {
+            const auto instant = [&](int h) -> std::optional<double> {
                 const int delta = h >= 0 ? h / 24 : (h - 23) / 24;
                 const std::chrono::year_month_day date{day + std::chrono::days{delta}};
                 const UtcDateTime boundary_utc{
@@ -103,7 +105,7 @@ class Hpop final : public IStateProvider {
                 // coverage; never query it when the requested integration ends earlier.
                 if (forward ? fields(boundary_utc) > fields(limit)
                             : fields(boundary_utc) < fields(limit))
-                    return end;
+                    return {};
                 const auto e = environment_.time->from_utc(boundary_utc);
                 if (e.tai_nanoseconds() > std::numeric_limits<std::int64_t>::max() - lag)
                     throw PropagationError("Weather boundary exceeds the Epoch range");
@@ -112,7 +114,7 @@ class Hpop final : public IStateProvider {
             auto next = instant(hour);
             // Compare in the integrator's relative time, so rounding to nanoseconds
             // at an accepted boundary cannot create a zero-length next step.
-            if (forward ? next <= t : next >= t)
+            if (next && (forward ? *next <= t : *next >= t))
                 next = instant(hour + (forward ? period : -period));
             return next;
         };
@@ -120,7 +122,8 @@ class Hpop final : public IStateProvider {
         if (d.atmosphere == AtmosphereModel::jacchia_roberts &&
             d.low_altitude_model == LowAltitudeDensityModel::nrlmsise00) {
             const auto low = boundary(AtmosphereModel::nrlmsise00);
-            next = forward ? std::min(next, low) : std::max(next, low);
+            if (low)
+                next = next ? (forward ? std::min(*next, *low) : std::max(*next, *low)) : low;
         }
         return next;
     }
@@ -136,14 +139,17 @@ class Hpop final : public IStateProvider {
         // weather limit in both directions, rather than averaging across a jump.
         return Epoch{std::clamp(epoch_at(t).tai_nanoseconds(), lower, upper - 1)};
     }
-    State derivative(double t, const State &s, std::optional<Epoch> weather_at = {}) const {
+    void validate_state(const State &s) const {
         for (double value : s)
             if (!std::isfinite(value))
                 throw PropagationError("HPOP encountered a nonfinite state");
-        const std::array r{s[0], s[1], s[2]};
-        if (std::hypot(r[0], r[1], r[2]) <=
+        if (std::hypot(s[0], s[1], s[2]) <=
             environment_.gravity->info().radius_m + options_.minimum_altitude_m)
             throw PropagationError("HPOP reached its minimum geocentric altitude");
+    }
+    State derivative(double t, const State &s, std::optional<Epoch> weather_at = {}) const {
+        validate_state(s);
+        const std::array r{s[0], s[1], s[2]};
         std::array<double, 3> acceleration;
         if (!options_.uses_earth_fixed_gravity()) {
             acceleration = environment_.gravity->acceleration(r, 0, 0);
@@ -350,7 +356,7 @@ class Hpop final : public IStateProvider {
         return {result, error, -1.0 / 9};
     }
     TrialStep bulirsch_stoer(double t, const State &s, double h,
-                             const std::function<void()> &checkpoint) const {
+                             const std::function<void()> &checkpoint, bool startup = false) const {
         // Smoothed modified midpoint, polynomial Richardson extrapolation in 1/n^2.
         // Even substep counts preserve the even-power expansion: orders 4..18.
         constexpr std::size_t levels = 9;
@@ -394,15 +400,16 @@ class Hpop final : public IStateProvider {
                 table[column] = lower;
             }
             table[level] = estimate;
-            if (level == 0)
-                continue; // A single second-order result has no error estimate.
+            if (level == 0 || (startup && level < 6))
+                continue; // GJ startup uses at least order 14; normal BS needs an error estimate.
             double error = 0;
             for (std::size_t i = 0; i < s.size(); ++i) {
                 if (!std::isfinite(estimate[i]) || !std::isfinite(correction[i]))
                     throw PropagationError("HPOP extrapolation produced a nonfinite result");
-                const double absolute =
-                    i < 3 ? options_.position_tolerance_m : options_.velocity_tolerance_mps;
-                const double scale = absolute + options_.relative_tolerance *
+                const double absolute = startup ? (i < 3 ? 1e-9 : 1e-12)
+                                                : (i < 3 ? options_.position_tolerance_m
+                                                         : options_.velocity_tolerance_mps);
+                const double scale = absolute + (startup ? 1e-14 : options_.relative_tolerance) *
                                                     std::max(std::abs(s[i]), std::abs(estimate[i]));
                 error = std::max(error, std::abs(correction[i]) / scale);
             }
@@ -413,8 +420,9 @@ class Hpop final : public IStateProvider {
                 const double factor =
                     error == 0 ? 4 : std::clamp(.9 * std::pow(error, candidate.exponent), .1, 4.);
                 // One lookahead column compares force evaluations per attainable next second.
-                const double proposed =
-                    std::min({std::abs(h) * factor, options_.max_step_seconds, checkpoint_seconds});
+                const double limit =
+                    startup ? std::abs(h) : std::min(options_.max_step_seconds, checkpoint_seconds);
+                const double proposed = std::min(std::abs(h) * factor, limit);
                 const double work = evaluations / proposed;
                 if (work < best_work) {
                     best = candidate;
@@ -438,6 +446,8 @@ class Hpop final : public IStateProvider {
             return bulirsch_stoer(t, s, h, checkpoint);
         case HpopIntegrator::rk4:
             return {rk4(t, s, h), 0, 0};
+        case HpopIntegrator::gauss_jackson:
+            break; // Multistep history is handled by gauss_jackson_integrate.
         }
         throw std::invalid_argument("Unsupported HPOP integrator");
     }
@@ -478,6 +488,138 @@ class Hpop final : public IStateProvider {
             }
         }
         return state;
+    }
+
+    State gauss_jackson_startup(State state, double t, double end, std::size_t &attempts,
+                                const std::function<void()> &checkpoint) const {
+        // Accurate one-sided seeding and fractional output. It never obtains history
+        // before the initial epoch or after the requested interval.
+        double step = std::abs(end - t);
+        while (t != end) {
+            if (checkpoint)
+                checkpoint();
+            if (++attempts > max_attempts)
+                throw PropagationError("HPOP exceeded 200000 integration attempts in one query");
+            const double remaining = std::abs(end - t);
+            const double magnitude = std::min(step, remaining);
+            const double h = std::copysign(magnitude, end - t);
+            if (t + h == t)
+                throw PropagationError("HPOP startup step cannot advance time");
+            const auto result = bulirsch_stoer(t, state, h, checkpoint, true);
+            validate_state(result.value);
+            if (!std::isfinite(result.error))
+                throw PropagationError("HPOP startup produced a nonfinite error estimate");
+            if (result.error <= 1) {
+                state = result.value;
+                t = magnitude == remaining ? end : t + h;
+            } else if (magnitude <= 1e-9) {
+                throw PropagationError(
+                    "HPOP cannot initialize Gauss-Jackson at nanosecond resolution");
+            }
+            const double factor =
+                result.error == 0
+                    ? 4
+                    : std::clamp(.9 * std::pow(result.error, result.exponent), .1, 4.);
+            step = std::max(1e-9, magnitude * factor);
+        }
+        return state;
+    }
+    detail::GaussJackson12 gauss_jackson_integrate(detail::GaussJackson12 history, double begin,
+                                                   double end, std::size_t first_node,
+                                                   std::size_t &attempts,
+                                                   const std::function<void()> &checkpoint) const {
+        const double h = std::copysign(options_.fixed_step_seconds, end - begin);
+        double t = begin;
+        std::size_t node = 0;
+        while (t != end) {
+            if (checkpoint)
+                checkpoint();
+            const double nominal = static_cast<double>(first_node + ++node) * h;
+            const double until = h > 0 ? std::min(nominal, end) : std::max(nominal, end);
+            if (until == t)
+                throw PropagationError("HPOP fixed step cannot advance time");
+            // Weather jumps invalidate all backward differences. Bridge every such
+            // interval with a one-sided starter, then build a new history on the grid.
+            bool bridge = until != nominal;
+            while (const auto boundary = weather_boundary(t, until)) {
+                history.state =
+                    gauss_jackson_startup(history.state, t, *boundary, attempts, checkpoint);
+                history.reset();
+                t = *boundary;
+                bridge = true;
+                if (t == until)
+                    break;
+            }
+            if (t == until)
+                continue;
+            if (bridge) {
+                history.state =
+                    gauss_jackson_startup(history.state, t, until, attempts, checkpoint);
+                history.reset();
+            } else {
+                const auto force = [&](double at, const State &s) {
+                    if (checkpoint)
+                        checkpoint();
+                    const auto d = derivative(at, s, weather_stage(at, t, until));
+                    return detail::GaussJackson12::Acceleration{d[3], d[4], d[5]};
+                };
+                if (history.count == 0)
+                    history.seed(history.state, force(t, history.state), h);
+                if (history.count < history.history.size()) {
+                    const auto next =
+                        gauss_jackson_startup(history.state, t, until, attempts, checkpoint);
+                    history.seed(next, force(until, next), h);
+                } else {
+                    if (++attempts > max_attempts)
+                        throw PropagationError(
+                            "HPOP exceeded 200000 integration attempts in one query");
+                    history.advance(h, options_.gravity_mu,
+                                    options_.correction == HpopCorrection::full,
+                                    [&](const State &s) { return force(until, s); });
+                    validate_state(history.state);
+                }
+            }
+            t = until;
+        }
+        return history;
+    }
+    State gauss_jackson_at(double t, std::size_t &attempts,
+                           const std::function<void()> &checkpoint) const {
+        // Cache boundaries lie on the fixed grid. A checkpoint includes the sums and
+        // acceleration history, so 300 s cache boundaries never restart the method.
+        const auto nodes = static_cast<std::size_t>(
+            std::max(1., std::ceil(checkpoint_seconds / options_.fixed_step_seconds)));
+        const double interval = nodes * options_.fixed_step_seconds;
+        const double sign = t < 0 ? -1 : 1;
+        auto index = static_cast<std::size_t>(std::floor(std::abs(t) / interval));
+        const auto grid = [&](std::size_t block) {
+            return static_cast<double>(block * nodes) * options_.fixed_step_seconds;
+        };
+        if (index > 0 && grid(index) > std::abs(t))
+            --index;
+        if (grid(index + 1) <= std::abs(t))
+            ++index;
+        detail::GaussJackson12 history;
+        double at;
+        {
+            const std::lock_guard lock{mutex_};
+            auto &cache = t < 0 ? gj_backward_ : gj_forward_;
+            if (cache.empty()) {
+                detail::GaussJackson12 initial;
+                initial.state = forward_.front();
+                cache.push_back(initial);
+            }
+            while (cache.size() <= index) {
+                const double begin = sign * grid(cache.size() - 1);
+                const double end = sign * grid(cache.size());
+                const auto next = gauss_jackson_integrate(
+                    cache.back(), begin, end, (cache.size() - 1) * nodes, attempts, checkpoint);
+                cache.push_back(next);
+            }
+            history = cache[index];
+            at = sign * grid(index);
+        }
+        return gauss_jackson_integrate(history, at, t, index * nodes, attempts, checkpoint).state;
     }
 
   public:
@@ -542,6 +684,15 @@ class Hpop final : public IStateProvider {
                 "HPOP integration requires EOP covering the initial and query epochs");
         if (options_.uses_utc_force())
             (void)environment_.time->to_utc(epoch);
+        if (options_.integrator == HpopIntegrator::gauss_jackson) {
+            std::size_t attempts = 0;
+            const auto value = gauss_jackson_at(t, attempts, checkpoint);
+            return {epoch,
+                    OriginId::earth,
+                    FrameId::gcrf,
+                    {value[0], value[1], value[2]},
+                    {value[3], value[4], value[5]}};
+        }
         const double sign = t < 0 ? -1 : 1;
         const auto index = static_cast<std::size_t>(std::floor(std::abs(t) / checkpoint_seconds));
         State value;
@@ -649,8 +800,11 @@ void validate_hpop_options(const HpopOptions &o) {
         throw std::invalid_argument(
             "HPOP gravity degree must be 0 or 2..model limit; order must be 0..degree");
     if (o.integrator != HpopIntegrator::rkf78 && o.integrator != HpopIntegrator::rk4 &&
-        o.integrator != HpopIntegrator::rkv89 && o.integrator != HpopIntegrator::bulirsch_stoer)
+        o.integrator != HpopIntegrator::rkv89 && o.integrator != HpopIntegrator::bulirsch_stoer &&
+        o.integrator != HpopIntegrator::gauss_jackson)
         throw std::invalid_argument("Unsupported HPOP integrator");
+    if (o.correction != HpopCorrection::full && o.correction != HpopCorrection::pseudo)
+        throw std::invalid_argument("Unsupported HPOP predictor corrector scheme");
     positive(o.position_tolerance_m, "HPOP position tolerance must be finite and positive");
     positive(o.velocity_tolerance_mps, "HPOP velocity tolerance must be finite and positive");
     if (!std::isfinite(o.relative_tolerance) || o.relative_tolerance < 1e-14 ||

@@ -124,10 +124,14 @@ class WeatherTests(unittest.TestCase):
                 target=of.Epoch(initial.tai_nanoseconds+direction*300*10**9)
                 first,last=(initial,target) if direction==1 else (target,initial)
                 positions=[]
-                for integrator,step in (("rkf78",60),("rkf78",7),("rkf78",1),("rkv89",60),("rkv89",7),("bulirsch_stoer",60),("bulirsch_stoer",7),("rk4",.5)):
+                methods = [(name,step,"full") for name,step in
+                           (("rkf78",60),("rkf78",7),("rkf78",1),("rkv89",60),("rkv89",7),
+                            ("bulirsch_stoer",60),("bulirsch_stoer",7))]
+                methods += [("gauss_jackson",1,"full"),("gauss_jackson",.7,"pseudo"),("rk4",.5,"full")]
+                for integrator,step,correction in methods:
                     project=of.Project('Storm',first,last)
                     orbit=of.orbits.Hpop(initial=of.orbits.Cartesian(initial,(6628137,0,0),(0,7750,0)),
-                        gravity_degree=0,integrator=integrator,max_step_seconds=step,fixed_step_seconds=step,relative_tolerance=1e-13,
+                        gravity_degree=0,integrator=integrator,correction=correction,max_step_seconds=step,fixed_step_seconds=step,relative_tolerance=1e-13,
                         position_tolerance_m=1e-5,velocity_tolerance_mps=1e-8,
                         drag=of.orbits.DragSettings(enabled=True,atmosphere='nrlmsise00',weather_model='celestrak',geomagnetic_update='three_hourly'))
                     sat=project.objects.satellite('Sat',orbit=orbit)

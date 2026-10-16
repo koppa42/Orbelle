@@ -122,16 +122,19 @@ TEST(Mission, HpopPointMassHohmannTransferMatchesAnalyticApoapsisAndCircularizat
     MissionPlan plan{MissionCoastModel::hpop,
                      {MissionSegment::impulse({dv1, 0, 0}), MissionSegment::coast(transfer),
                       MissionSegment::impulse({dv2, 0, 0}), MissionSegment::coast(3600s)}};
-    const auto provider = make_mission(
-        start, plan, [options](CartesianState state) { return make_hpop(state, options); });
-    const auto apo = provider->state_at(Epoch{transfer.count()});
-    EXPECT_NEAR(apo.position_m[0], -r2, 0.02);
-    EXPECT_NEAR(apo.position_m[1], 0, 0.02);
-    EXPECT_NEAR(apo.velocity_mps[0], 0, 2e-5);
-    EXPECT_NEAR(apo.velocity_mps[1], -std::sqrt(egm96_mu / r2), 2e-5);
-    const auto later = provider->state_at(Epoch{transfer.count() + 3600'000'000'000LL});
-    EXPECT_NEAR(std::hypot(later.position_m[0], later.position_m[1], later.position_m[2]), r2,
-                0.05);
-    EXPECT_NEAR(provider->maneuvers(start.epoch, later.epoch).back().cumulative_delta_v_mps,
-                dv1 + dv2, 1e-9);
+    for (auto integrator : {HpopIntegrator::rkf78, HpopIntegrator::gauss_jackson}) {
+        options.integrator = integrator;
+        const auto provider = make_mission(
+            start, plan, [options](CartesianState state) { return make_hpop(state, options); });
+        const auto apo = provider->state_at(Epoch{transfer.count()});
+        EXPECT_NEAR(apo.position_m[0], -r2, 0.02);
+        EXPECT_NEAR(apo.position_m[1], 0, 0.02);
+        EXPECT_NEAR(apo.velocity_mps[0], 0, 2e-5);
+        EXPECT_NEAR(apo.velocity_mps[1], -std::sqrt(egm96_mu / r2), 2e-5);
+        const auto later = provider->state_at(Epoch{transfer.count() + 3600'000'000'000LL});
+        EXPECT_NEAR(std::hypot(later.position_m[0], later.position_m[1], later.position_m[2]), r2,
+                    0.05);
+        EXPECT_NEAR(provider->maneuvers(start.epoch, later.epoch).back().cumulative_delta_v_mps,
+                    dv1 + dv2, 1e-9);
+    }
 }

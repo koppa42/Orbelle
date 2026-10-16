@@ -11,7 +11,7 @@
 | 能力 | 当前范围 |
 | --- | --- |
 | 场景与对象 | 统一分析时段；多卫星、WGS84 地面站；插入、编辑、重命名、复制和删除 |
-| 轨道计算 | 二体、J2/J4 长期项、SGP4/TLE、HPOP 静态重力（内置 EGM96、文件模型至 2190 阶、RKF78/RKV89/Bulirsch–Stoer/RK4）；GCRF / ITRF / TEME 状态变换 |
+| 轨道计算 | 二体、J2/J4 长期项、SGP4/TLE、HPOP 静态重力（内置 EGM96、文件模型至 2190 阶、RKF78/RKV89/Bulirsch–Stoer/Gauss–Jackson 12/RK4）；GCRF / ITRF / TEME 状态变换 |
 | 机动规划 | [任务序列](docs/architecture/missions.md)：定时滑行、GCRF/VNC/LVLH 脉冲 Δv；二体或 HPOP 滑行、机动前后状态与累计 Δv |
 | 时间与星历 | UTC / TAI / TT / TDB 转换；ERFA、IERS 与 CSPICE 接口；数据中心下载完整 DE440s 太阳系星历 |
 | 二维与三维 | 地面地图与地球视图共享时间和选择；昼夜显示、局部轨迹缓存、可拖动和弹出的工作区 |

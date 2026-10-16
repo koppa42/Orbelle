@@ -63,6 +63,44 @@ class HpopTests(unittest.TestCase):
             _, explicit = self.make(gravity_degree=0, integrator=integrator)
             self.assertEqual(explicit.orbit.hpop.integrator, integrator)
 
+    def test_gauss_jackson_corrections_active_identity_and_roundtrip(self):
+        for correction, native in (("full", of.HpopCorrection.FULL), ("pseudo", of.HpopCorrection.PSEUDO)):
+            project, satellite = self.make(gravity_degree=0, integrator="gauss_jackson",
+                                           fixed_step_seconds=30, correction=correction)
+            settings = satellite.orbit.hpop
+            self.assertEqual(settings._native().integrator, of.HpopIntegrator.GAUSS_JACKSON)
+            self.assertEqual(settings._native().correction, native)
+            prepared = project.prepare()
+            original = prepared.states(satellite, step=u.s(600))
+            satellite.orbit = replace(satellite.orbit, hpop=replace(settings,
+                max_step_seconds=100, relative_tolerance=1e-6))
+            inactive = project.prepare().states(satellite, step=u.s(600))
+            self.assertEqual(inactive.input_sha256, original.input_sha256)
+            self.assertEqual(inactive.position.values, original.position.values)
+            with tempfile.TemporaryDirectory() as folder:
+                path = Path(folder)/"gauss-jackson.orbitforge"
+                project.save(path)
+                reopened = of.Project.open(path)
+                restored = reopened.objects[satellite.id]
+                self.assertEqual(restored.orbit.hpop.correction, correction)
+                self.assertEqual(reopened.prepare().states(restored, step=u.s(600)).position.values,
+                                 original.position.values)
+            other = "pseudo" if correction == "full" else "full"
+            satellite.orbit = replace(satellite.orbit, hpop=replace(settings, correction=other))
+            switched = project.prepare().states(satellite, step=u.s(600))
+            self.assertNotEqual(switched.input_sha256, original.input_sha256)
+            self.assertEqual(prepared.states(satellite, step=u.s(600)).position.values, original.position.values)
+            for a,b in zip(switched.position.values, original.position.values):
+                self.assertLess(math.dist(a,b), 1e-4)
+            satellite.orbit = replace(satellite.orbit, hpop=replace(settings, fixed_step_seconds=15))
+            self.assertNotEqual(project.prepare().states(satellite, step=u.s(600)).input_sha256, original.input_sha256)
+        project, satellite = self.make(gravity_degree=0)
+        original = project.prepare().states(satellite, step=u.s(600))
+        satellite.orbit = replace(satellite.orbit, hpop=replace(satellite.orbit.hpop, correction="pseudo"))
+        self.assertEqual(project.prepare().states(satellite, step=u.s(600)).input_sha256, original.input_sha256)
+        with self.assertRaisesRegex(ValueError, "correction"):
+            self.make(gravity_degree=0, correction="invalid")
+
     def test_mass_is_shared_validated_and_persisted_without_changing_spherical_ratios(self):
         project, satellite = self.make(gravity_degree=0, satellite_mass_kg=1250,
             srp=of.orbits.SrpSettings(area_mass_ratio_m2_per_kg=.03))
