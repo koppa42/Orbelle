@@ -16,7 +16,7 @@ class SrpTests(unittest.TestCase):
         settings = of.orbits.SrpSettings(enabled=True, cr=1.7, shadow_model="none")
         with self.assertRaises(FrozenInstanceError):
             settings.cr = 2
-        for kwargs in ({"enabled": 1}, {"earth_shadow": 0}, {"moon_shadow": "true"},
+        for kwargs in ({"enabled": 1}, {"earth_shadow": 0}, {"moon_shadow": "true"}, {"boundary_mitigation": 1},
                        {"shadow_model": "wrong"}, {"sun_position_method": "wrong"}, {"cr": 101}, {"cr": float("nan")},
                        {"area_mass_ratio_m2_per_kg": -1}, {"atmospheric_altitude_m": -1},
                        {"pressure_at_reference_pa": 0}, {"reference_distance_m": 0}):
@@ -39,7 +39,7 @@ class SrpTests(unittest.TestCase):
         initial = of.orbits.Cartesian(of.Epoch(0), (7e6, 0, 0), (0, 6200, 5300))
         srp = of.orbits.SrpSettings(cr=1.25, area_mass_ratio_m2_per_kg=.03,
                                    atmospheric_altitude_m=23000, moon_shadow=False,
-                                   sun_radius_m=696000000, sun_position_method="apparent")
+                                   sun_radius_m=696000000, sun_position_method="apparent", boundary_mitigation=True)
         orbit = of.orbits.Hpop(initial=initial, gravity_degree=0, srp=srp)
         with self.assertRaises(TypeError):
             of.orbits.Hpop(initial=initial, srp=of.SrpOptions())
@@ -49,7 +49,7 @@ class SrpTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "srp.orbitforge"
             project.save(path)
-            self.assertEqual(int.from_bytes(path.read_bytes()[8:12], "little"), 37)
+            self.assertEqual(int.from_bytes(path.read_bytes()[8:12], "little"), 38)
             restored = of.Project.open(path)
             self.assertEqual(restored.objects[sat.id].orbit.hpop.srp, srp)
         sat.orbit = replace(orbit, hpop=replace(orbit.hpop, srp=replace(srp, cr=1.5)))
@@ -109,6 +109,11 @@ class SrpTests(unittest.TestCase):
             sat = project.objects.satellite("Sat",orbit=orbit)
             analysis = project.prepare(data=data)
             states = analysis.states(sat,step=u.s(30))
+            mitigated = replace(settings, boundary_mitigation=True)
+            sat.orbit = replace(orbit,hpop=replace(orbit.hpop,srp=mitigated))
+            with_boundary = project.prepare(data=data).states(sat,step=u.s(30))
+            self.assertNotEqual(states.input_sha256,with_boundary.input_sha256)
+            self.assertEqual(analysis.states(sat,step=u.s(30)).position.values,states.position.values)
             sat.orbit = replace(orbit,hpop=replace(orbit.hpop,srp=replace(settings,additional_eclipsing_bodies=bodies[::-1])))
             reversed_states=project.prepare(data=data).states(sat,step=u.s(30))
             self.assertEqual(states.input_sha256,reversed_states.input_sha256)
@@ -124,10 +129,10 @@ class SrpTests(unittest.TestCase):
                 project.prepare(data=data)
             self.assertEqual(analysis.states(sat,step=u.s(30)).position.values,states.position.values)
             # Disabled shadows keep unsupported-body drafts, without querying them.
-            no_shadow=replace(sat.orbit.hpop.srp,shadow_model="none")
+            no_shadow=replace(sat.orbit.hpop.srp,shadow_model="none",boundary_mitigation=True)
             sat.orbit=replace(orbit,hpop=replace(orbit.hpop,srp=no_shadow))
             one=project.prepare(data=data).states(sat,step=u.s(30))
-            sat.orbit=replace(orbit,hpop=replace(orbit.hpop,srp=replace(no_shadow,additional_eclipsing_bodies=())))
+            sat.orbit=replace(orbit,hpop=replace(orbit.hpop,srp=replace(no_shadow,additional_eclipsing_bodies=(),boundary_mitigation=False)))
             two=project.prepare(data=data).states(sat,step=u.s(30))
             self.assertEqual(one.input_sha256,two.input_sha256)
             self.assertEqual(one.position.values,two.position.values)

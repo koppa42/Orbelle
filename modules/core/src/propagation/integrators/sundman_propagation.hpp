@@ -29,6 +29,10 @@ class SundmanPropagation {
             segment_begin = time();
         }
     };
+    // Return an integrated prefix to stop at a state-dependent force boundary.
+    // The callback must not publish the provisional endpoint. It is also applied
+    // to physical-time bridges, so no path can step over a shadow contact.
+    using StepBoundary = std::function<std::optional<State>(const State &, const State &)>;
     SundmanPropagation(const Cartesian &initial, double mu, double exponent,
                        std::size_t steps_per_orbit, const HpopOptions &options)
         : transform_(initial, mu, exponent), options_(options) {
@@ -54,7 +58,9 @@ class SundmanPropagation {
     template <class Force>
     State propagate(State state, double end, const Force &force, std::size_t &attempts,
                     const std::function<void()> &checkpoint = {},
-                    const std::function<void(double, const Cartesian &)> &accepted = {}) const {
+                    const std::function<void(double, const Cartesian &)> &accepted = {},
+                    const StepBoundary &step_boundary = {},
+                    const std::function<bool(double, const Cartesian &)> &correction = {}) const {
         if (!std::isfinite(end))
             throw std::invalid_argument("Sundman endpoint must be finite");
         if (state.time() == end)
@@ -90,10 +96,11 @@ class SundmanPropagation {
             if (!std::isfinite(h) || direction * h <= 0 || state.q + h == state.q)
                 throw PropagationError("Sundman step cannot advance its independent variable");
             bool boundary = false;
+            const bool accurate = correction && correction(state.time(), state.cartesian());
             try {
                 State candidate = state;
                 double error = 0, exponent = 0;
-                if (options_.integrator == HpopIntegrator::gauss_jackson) {
+                if (options_.integrator == HpopIntegrator::gauss_jackson && !accurate) {
                     advance_gj(candidate, h, checked_force, attempts, checkpoint);
                 } else {
                     const double begin = state.time();
@@ -104,9 +111,13 @@ class SundmanPropagation {
                             return checked_force(begin + offset, v);
                         });
                     };
-                    auto control = primary_control(fixed);
+                    auto control = accurate ? correction_control() : primary_control(fixed);
                     control.max_step = options_.max_step_seconds / g;
-                    const auto trial = step(0, local, h, derivative, control, checkpoint);
+                    const auto trial = step(0, local, h, derivative, control, checkpoint, accurate);
+                    if (accurate && trial.error > 1)
+                        throw OutsideInterval{};
+                    if (accurate)
+                        candidate.history.reset();
                     error = trial.error;
                     exponent = trial.exponent;
                     candidate.solution.advance(trial.increment);
@@ -128,9 +139,13 @@ class SundmanPropagation {
                         std::min(remaining, enforce_minimum ? options_.min_step_seconds
                                                             : options_.max_step_seconds);
                     const double stop = span == remaining ? end : state.time() + direction * span;
-                    state = bridge(std::move(state), stop, span,
-                                   std::numeric_limits<double>::infinity(), checked_force, attempts,
-                                   checkpoint, std::min(span, options_.min_step_seconds));
+                    auto prefix = bridge(state, stop, span, std::numeric_limits<double>::infinity(),
+                                         checked_force, attempts, checkpoint,
+                                         std::min(span, options_.min_step_seconds), accurate);
+                    if (step_boundary)
+                        if (auto contact = step_boundary(state, prefix))
+                            return *contact;
+                    state = std::move(prefix);
                     ++state.regular_steps;
                     if (accepted)
                         accepted(state.time(), state.cartesian());
@@ -149,6 +164,9 @@ class SundmanPropagation {
                 else
                     candidate.next_step = std::min(fixed_q_, std::abs(h) * growth(error, exponent));
                 ++candidate.regular_steps;
+                if (step_boundary)
+                    if (auto contact = step_boundary(state, candidate))
+                        return *contact;
                 state = std::move(candidate);
             } catch (const OutsideInterval &) {
                 boundary = true;
@@ -159,8 +177,12 @@ class SundmanPropagation {
                 // The q grid is retained; this bridge never crosses its next node.
                 const double span = std::min(std::abs(end - state.time()), .25 * g * std::abs(h));
                 const double proposed_step = state.next_step;
-                state = bridge(std::move(state), end, span, std::abs(h), checked_force, attempts,
-                               checkpoint);
+                auto prefix = bridge(state, end, span, std::abs(h), checked_force, attempts,
+                                     checkpoint, 0, accurate);
+                if (step_boundary)
+                    if (auto contact = step_boundary(state, prefix))
+                        return *contact;
+                state = std::move(prefix);
                 // This prefix was shortened to fit a physical gate, not selected
                 // as the next regularized error-control step. Retain that proposal;
                 // the next full trial still checks its error and physical bounds.
@@ -168,6 +190,27 @@ class SundmanPropagation {
             }
             if (accepted && (!boundary || state.time() == end))
                 accepted(state.time(), state.cartesian());
+        }
+        return state;
+    }
+
+    // A state-dependent event lies inside the current accepted q step. Integrate
+    // its physical-time prefix directly instead of repeatedly colliding with the
+    // same q-grid endpoint. This integrates (r,v,q), preserving the real clock
+    // relation; it does not interpolate or project the candidate state.
+    template <class Force>
+    State boundary_prefix(State state, double end, const Force &force, std::size_t &attempts,
+                          const std::function<void()> &checkpoint = {},
+                          bool accurate = false) const {
+        while (state.time() != end)
+            state = bridge(state, end, std::abs(end - state.time()),
+                           std::numeric_limits<double>::infinity(), force, attempts, checkpoint, 0,
+                           accurate);
+        if (options_.uses_fixed_step()) {
+            // Roundoff in inverse integration may cross the old q endpoint by an
+            // ulp. Retain the integrated q and choose the next untouched grid cell.
+            while (std::abs(state.q) >= static_cast<double>(state.grid + 1) * fixed_q_)
+                ++state.grid;
         }
         return state;
     }
@@ -204,6 +247,12 @@ class SundmanPropagation {
         // The one-step clock is rebased to zero; tolerance cannot grow with the
         // elapsed coast duration. The physical-time adapter has no clock state.
         control.absolute[6] = 1e-11;
+        return control;
+    }
+    ErrorControl<7> correction_control() const {
+        auto control = primary_control(false);
+        control.relative = 1e-15;
+        control.absolute = {1e-10, 1e-10, 1e-10, 1e-13, 1e-13, 1e-13, 1e-12};
         return control;
     }
     template <class Derivative>
@@ -328,15 +377,17 @@ class SundmanPropagation {
     }
     template <class Force>
     State bridge(State state, double end, double magnitude, double q_remaining, const Force &force,
-                 std::size_t &attempts, const std::function<void()> &checkpoint,
-                 double minimum = 0) const {
+                 std::size_t &attempts, const std::function<void()> &checkpoint, double minimum = 0,
+                 bool accurate = false) const {
         const double begin = state.time(), remaining = std::abs(end - begin);
-        const bool starter = options_.integrator == HpopIntegrator::gauss_jackson;
+        const bool starter = accurate || options_.integrator == HpopIntegrator::gauss_jackson;
         auto control = primary_control(!starter && options_.uses_fixed_step());
         if (starter) {
             control.relative = 1e-14;
             control.absolute = {1e-9, 1e-9, 1e-9, 1e-12, 1e-12, 1e-12, 1e-11};
         }
+        if (accurate)
+            control = correction_control();
         control.absolute[6] /= transform_.clock_rate(state.solution.value);
         control.max_step = options_.max_step_seconds;
         auto local = state.solution.value;

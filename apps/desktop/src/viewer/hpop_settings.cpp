@@ -921,6 +921,12 @@ bool edit_hpop_settings(
                           QStringLiteral("Dual Cone · 双锥")});
     srp_shadow->setCurrentIndex(static_cast<int>(options.srp.shadow_model));
     srp_shadow_section->addRow(QStringLiteral("阴影模型"), srp_shadow);
+    auto *srp_boundary = new QCheckBox(QStringLiteral("阴影边界修正"));
+    srp_boundary->setObjectName("hpopSrpBoundaryMitigation");
+    srp_boundary->setChecked(options.srp.boundary_mitigation);
+    srp_boundary->setToolTip(QStringLiteral("Use Boundary Mitigation：在入影、出影处切分积分步，"
+                                            "降低跨越阴影边界的计算误差。"));
+    srp_shadow_section->addRow(QString{}, srp_boundary);
     auto srp_assignments = options.srp;
     auto *srp_assigned_summary = new QLabel;
     srp_assigned_summary->setObjectName("hpopSrpEclipsingSummary");
@@ -1002,8 +1008,7 @@ bool edit_hpop_settings(
         group->set_summary(QStringLiteral("标准太阳与地月常数"));
         group->set_collapsible(false);
     }
-    caution(srp_page, QStringLiteral("椭球轮廓与 STK Boundary Mitigation 尚未实现。"
-                                     "阴影边界附近应检查减小最大步长后的轨迹收敛。"));
+    caution(srp_page, QStringLiteral("当前遮挡轮廓采用球面，椭球轮廓尚未实现。"));
     const auto update_srp = [&] {
         const bool enabled = srp_use->isChecked(), shadows = srp_shadow->currentIndex() != 0;
         for (auto *form : {srp_model, srp_shadow_section, srp_sun, srp_constants}) {
@@ -1012,6 +1017,9 @@ bool edit_hpop_settings(
         }
         srp_off->setVisible(!enabled);
         srp_select_bodies->setEnabled(shadows);
+        srp_boundary->setEnabled(shadows &&
+                                 (srp_assignments.earth_shadow || srp_assignments.moon_shadow ||
+                                  !srp_assignments.additional_eclipsing_bodies.empty()));
         srp_altitude->setEnabled(shadows && srp_assignments.earth_shadow);
         srp_earth_radius->setEnabled(shadows && srp_assignments.earth_shadow);
         srp_moon_radius->setEnabled(shadows && srp_assignments.moon_shadow);
@@ -1874,6 +1882,7 @@ bool edit_hpop_settings(
             validation_force_page = 2;
             auto &srp = candidate.srp;
             srp.enabled = srp_use->isChecked();
+            srp.boundary_mitigation = srp_boundary->isChecked();
             srp.shadow_model = static_cast<core::SrpShadowModel>(srp_shadow->currentIndex());
             srp.sun_position_method =
                 static_cast<core::SrpSunPositionMethod>(srp_sun_method->currentIndex());

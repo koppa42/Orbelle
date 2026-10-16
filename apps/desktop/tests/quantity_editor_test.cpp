@@ -1558,6 +1558,10 @@ TEST_F(QuantityTest, HpopSrpUnitsShadowAssignmentsResizeAndCancelPreserveExactDr
         EXPECT_EQ(sun->count(), 3);
         EXPECT_EQ(sun->currentIndex(), 1);
         use->setChecked(true);
+        auto *boundary = dialog->findChild<QCheckBox *>("hpopSrpBoundaryMitigation");
+        ASSERT_TRUE(boundary);
+        EXPECT_FALSE(boundary->isChecked());
+        boundary->setChecked(true);
         EXPECT_TRUE(sun->isVisible());
         sun->setFocus();
         QKeyEvent next(QEvent::KeyPress, Qt::Key_Down, Qt::NoModifier);
@@ -1568,9 +1572,12 @@ TEST_F(QuantityTest, HpopSrpUnitsShadowAssignmentsResizeAndCancelPreserveExactDr
         altitude->set_unit(Unit::kilometre);
         altitude->set_value(23, Unit::kilometre);
         shadow->setCurrentIndex(0);
+        EXPECT_FALSE(boundary->isEnabled());
+        EXPECT_TRUE(boundary->isChecked());
         EXPECT_FALSE(select_bodies->isEnabled());
         EXPECT_FALSE(altitude->isEnabled());
         shadow->setCurrentIndex(2);
+        EXPECT_TRUE(boundary->isEnabled());
         QTimer::singleShot(0, [&] {
             auto *selection = qobject_cast<QDialog *>(QApplication::activeModalWidget());
             ASSERT_TRUE(selection);
@@ -1631,6 +1638,7 @@ TEST_F(QuantityTest, HpopSrpUnitsShadowAssignmentsResizeAndCancelPreserveExactDr
     });
     EXPECT_TRUE(edit_hpop_settings(options, nullptr, {}, {entry}));
     EXPECT_TRUE(options.srp.enabled);
+    EXPECT_TRUE(options.srp.boundary_mitigation);
     EXPECT_EQ(options.srp.sun_position_method, core::SrpSunPositionMethod::apparent);
     EXPECT_NEAR(options.srp.area_mass_ratio_m2_per_kg, .03, 1e-16);
     EXPECT_EQ(options.srp.atmospheric_altitude_m, 23000);

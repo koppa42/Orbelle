@@ -1,3 +1,4 @@
+#include "srp_shadow.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -205,6 +206,11 @@ SrpOptions effective_srp_options(SrpOptions options) {
         options.earth_shadow = options.moon_shadow = false;
         options.additional_eclipsing_bodies.clear();
     }
+    if (options.shadow_model == SrpShadowModel::none ||
+        (!options.earth_shadow && !options.moon_shadow &&
+         options.additional_eclipsing_bodies.empty()) ||
+        options.cr == 0 || options.area_mass_ratio_m2_per_kg == 0)
+        options.boundary_mitigation = false;
     std::ranges::sort(options.additional_eclipsing_bodies, {}, &SrpEclipsingBody::body);
     if (!options.earth_shadow) {
         options.earth_radius_m = defaults.earth_radius_m;
@@ -214,22 +220,17 @@ SrpOptions effective_srp_options(SrpOptions options) {
         options.moon_radius_m = defaults.moon_radius_m;
     return options;
 }
-SrpEvaluation evaluate_srp(const Vector &satellite, const Vector &sun, const SrpOptions &options,
+namespace {
+struct ShadowBodies {
+    std::array<std::pair<Vector, double>, third_body_count> values;
+    std::size_t count = 0;
+};
+ShadowBodies shadow_bodies(const Vector &satellite, const SrpOptions &options,
                            const std::optional<Vector> &moon,
                            std::span<const SrpBodyPosition> additional) {
-    validate_srp_options(options);
-    if (!options.enabled)
-        return {};
-    finite_vector(satellite);
-    finite_vector(sun);
-    const auto to_sun = subtract(sun, satellite);
-    const double sun_distance = norm(to_sun);
-    if (!std::isfinite(sun_distance) || sun_distance <= options.sun_radius_m)
-        throw PropagationError("SRP observer must be outside the solar sphere");
-    const auto direction = unit(to_sun, sun_distance);
-    double lighting = 1;
-    std::array<std::pair<Vector, double>, third_body_count> bodies;
-    std::size_t body_count = 0;
+    ShadowBodies result;
+    auto &bodies = result.values;
+    auto &body_count = result.count;
     if (options.shadow_model != SrpShadowModel::none) {
         if (options.earth_shadow)
             bodies[body_count++] = {subtract(Vector{}, satellite),
@@ -265,6 +266,24 @@ SrpEvaluation evaluate_srp(const Vector &satellite, const Vector &sun, const Srp
             bodies[body_count++] = {subtract(position->position_m, satellite), setting->radius_m};
         }
     }
+    return result;
+}
+} // namespace
+SrpEvaluation evaluate_srp(const Vector &satellite, const Vector &sun, const SrpOptions &options,
+                           const std::optional<Vector> &moon,
+                           std::span<const SrpBodyPosition> additional) {
+    validate_srp_options(options);
+    if (!options.enabled)
+        return {};
+    finite_vector(satellite);
+    finite_vector(sun);
+    const auto to_sun = subtract(sun, satellite);
+    const double sun_distance = norm(to_sun);
+    if (!std::isfinite(sun_distance) || sun_distance <= options.sun_radius_m)
+        throw PropagationError("SRP observer must be outside the solar sphere");
+    const auto direction = unit(to_sun, sun_distance);
+    double lighting = 1;
+    const auto bodies = shadow_bodies(satellite, options, moon, additional);
     std::array<Disk, third_body_count> disks;
     std::size_t disk_count = 0;
     const double sun_angle = std::asin(options.sun_radius_m / sun_distance);
@@ -272,7 +291,7 @@ SrpEvaluation evaluate_srp(const Vector &satellite, const Vector &sun, const Srp
     auto x_axis = cross(direction, axis);
     x_axis = unit(x_axis, norm(x_axis));
     const auto y_axis = cross(direction, x_axis);
-    for (const auto &[to_body, radius] : std::span{bodies}.first(body_count)) {
+    for (const auto &[to_body, radius] : std::span{bodies.values}.first(bodies.count)) {
         const double distance = norm(to_body);
         if (!std::isfinite(distance) || distance <= radius)
             throw PropagationError("SRP observer must be outside the assigned occulting sphere");
@@ -305,5 +324,44 @@ SrpEvaluation evaluate_srp(const Vector &satellite, const Vector &sun, const Srp
                         -magnitude * direction[2]};
     finite_vector(acceleration);
     return {acceleration, lighting};
+}
+detail::ShadowContacts detail::srp_shadow_contacts(const Vector &satellite, const Vector &sun,
+                                                   const SrpOptions &options,
+                                                   const std::optional<Vector> &moon,
+                                                   std::span<const SrpBodyPosition> additional) {
+    validate_srp_options(options);
+    ShadowContacts result;
+    if (!options.enabled || options.shadow_model == SrpShadowModel::none)
+        return result;
+    finite_vector(satellite);
+    finite_vector(sun);
+    const auto to_sun = subtract(sun, satellite);
+    const double sun_distance = norm(to_sun);
+    if (!std::isfinite(sun_distance) || sun_distance <= options.sun_radius_m)
+        throw PropagationError("SRP observer must be outside the solar sphere");
+    const auto direction = unit(to_sun, sun_distance);
+    const double solar = options.shadow_model == SrpShadowModel::dual_cone
+                             ? std::asin(options.sun_radius_m / sun_distance)
+                             : 0;
+    const auto bodies = shadow_bodies(satellite, options, moon, additional);
+    for (const auto &[to_body, radius] : std::span{bodies.values}.first(bodies.count)) {
+        const double distance = norm(to_body);
+        if (!std::isfinite(distance) || distance <= radius)
+            throw PropagationError("SRP observer must be outside the assigned occulting sphere");
+        const auto body_direction = unit(to_body, distance);
+        const double along = dot(body_direction, direction);
+        const double separation = std::atan2(norm(cross(direction, body_direction)), along);
+        const double limb = std::asin(radius / distance);
+        // Match the force evaluator's front/depth tests as well as the limb. The
+        // max keeps the sign continuous at those gates, including synthetic cases
+        // where a selectable sphere passes behind the Sun or the observer.
+        const double gate = std::max(-along, (distance - sun_distance) / sun_distance);
+        result.values[result.size++] = std::max(separation - limb - solar, gate);
+        if (options.shadow_model == SrpShadowModel::dual_cone) {
+            result.values[result.size++] = std::max(separation - limb + solar, gate);
+            result.values[result.size++] = std::max(separation + limb - solar, gate);
+        }
+    }
+    return result;
 }
 } // namespace orbitforge::core

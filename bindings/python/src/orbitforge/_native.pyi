@@ -1002,6 +1002,7 @@ class SrpOptions:
     sun_position_method: SrpSunPositionMethod
     earth_shadow: bool
     moon_shadow: bool
+    boundary_mitigation: bool
     additional_eclipsing_bodies: Sequence[SrpEclipsingBody]
     atmospheric_altitude_m: float
     pressure_at_reference_pa: float

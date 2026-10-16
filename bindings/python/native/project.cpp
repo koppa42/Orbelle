@@ -206,6 +206,7 @@ void bind_project(py::module_ &module) {
         .def_readwrite("sun_position_method", &core::SrpOptions::sun_position_method)
         .def_readwrite("earth_shadow", &core::SrpOptions::earth_shadow)
         .def_readwrite("moon_shadow", &core::SrpOptions::moon_shadow)
+        .def_readwrite("boundary_mitigation", &core::SrpOptions::boundary_mitigation)
         .def_readwrite("additional_eclipsing_bodies",
                        &core::SrpOptions::additional_eclipsing_bodies)
         .def_readwrite("atmospheric_altitude_m", &core::SrpOptions::atmospheric_altitude_m)

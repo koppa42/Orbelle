@@ -1,5 +1,6 @@
 #include "integrators/gauss_jackson.hpp"
 #include "integrators/one_step.hpp"
+#include "integrators/shadow_boundary.hpp"
 #include "integrators/sundman_propagation.hpp"
 #include <algorithm>
 #include <chrono>
@@ -171,7 +172,117 @@ class Hpop final : public IStateProvider {
             environment_.gravity->info().radius_m + options_.minimum_altitude_m)
             throw PropagationError("HPOP reached its minimum geocentric altitude");
     }
-    State derivative(double t, const State &s, std::optional<Epoch> weather_at = {}) const {
+    struct SrpGeometry {
+        std::array<double, 3> sun;
+        std::optional<std::array<double, 3>> moon;
+        std::array<SrpBodyPosition, third_body_count - 2> additional{};
+        std::size_t count = 0;
+    };
+    SrpGeometry srp_geometry(double t, const State &state) const {
+        const auto epoch = epoch_at(t);
+        const std::array<double, 3> r{state[0], state[1], state[2]};
+        SrpGeometry result;
+        switch (options_.srp.sun_position_method) {
+        case SrpSunPositionMethod::geometric:
+            result.sun = environment_.ephemeris->position(ThirdBody::sun, epoch);
+            break;
+        case SrpSunPositionMethod::apparent_to_true_cb:
+            result.sun = environment_.ephemeris->apparent_sun_from_earth(epoch);
+            break;
+        case SrpSunPositionMethod::apparent:
+            result.sun = environment_.ephemeris->apparent_sun_from_spacecraft(
+                epoch, r, {state[3], state[4], state[5]});
+            for (std::size_t i = 0; i < 3; ++i)
+                result.sun[i] += r[i];
+            break;
+        default:
+            throw std::invalid_argument("Unsupported SRP Sun position method");
+        }
+        if (options_.srp.shadow_model != SrpShadowModel::none) {
+            if (options_.srp.moon_shadow)
+                result.moon = environment_.ephemeris->position(ThirdBody::moon, epoch);
+            for (const auto &body : options_.srp.additional_eclipsing_bodies)
+                result.additional[result.count++] = {
+                    body.body, environment_.ephemeris->eclipsing_body_position(body.body, epoch)};
+        }
+        return result;
+    }
+    bool mitigates_shadow() const {
+        const auto &o = options_.srp;
+        return o.boundary_mitigation && o.enabled && o.shadow_model != SrpShadowModel::none &&
+               o.cr != 0 && o.area_mass_ratio_m2_per_kg != 0 &&
+               (o.earth_shadow || o.moon_shadow || !o.additional_eclipsing_bodies.empty());
+    }
+    detail::ShadowContacts shadow_contacts(double t, const State &state) const {
+        const auto geometry = srp_geometry(t, state);
+        return detail::srp_shadow_contacts({state[0], state[1], state[2]}, geometry.sun,
+                                           options_.srp, geometry.moon,
+                                           std::span{geometry.additional}.first(geometry.count));
+    }
+    std::optional<double> cylinder_lighting(double begin, const State &state, double end) const {
+        if (!mitigates_shadow() || options_.srp.shadow_model != SrpShadowModel::cylindrical)
+            return {};
+        // Choose the outgoing regime at a located contact. Keep this infinitesimal
+        // probe inside the requested interval; it never changes the propagated state.
+        const double dt = std::copysign(
+            std::min(std::abs(end - begin), 4 * detail::shadow_time_resolution(begin, end)),
+            end - begin);
+        State ahead = state;
+        for (std::size_t i = 0; i < 3; ++i)
+            ahead[i] = std::fma(dt, state[i + 3], state[i]);
+        const auto geometry = srp_geometry(begin + dt, ahead);
+        return evaluate_srp({ahead[0], ahead[1], ahead[2]}, geometry.sun, options_.srp,
+                            geometry.moon, std::span{geometry.additional}.first(geometry.count))
+            .lighting_ratio;
+    }
+    template <class Probe>
+    std::optional<double>
+    shadow_boundary(double begin, const State &initial, double end, const State &final,
+                    const Probe &probe, std::size_t &attempts,
+                    const std::function<void()> &checkpoint, bool probe_counts_work = false) const {
+        if (!mitigates_shadow())
+            return {};
+        return detail::first_shadow_boundary(begin, end, [&](double at) {
+            if (checkpoint)
+                checkpoint();
+            State value;
+            if (at == end)
+                value = final;
+            else if (std::abs(at - begin) <= 8 * detail::shadow_time_resolution(begin, end)) {
+                // Only the outgoing-side epsilon sample uses a local Taylor
+                // position. Its O(dt^2) error is below double position resolution;
+                // avoid solving a nanosecond Sundman coast just to choose a side.
+                value = initial;
+                for (std::size_t i = 0; i < 3; ++i)
+                    value[i] = std::fma(at - begin, initial[i + 3], initial[i]);
+            } else {
+                if (!probe_counts_work && ++attempts > max_attempts)
+                    throw PropagationError(
+                        "HPOP exceeded 200000 integration attempts in one query");
+                value = probe(at);
+            }
+            validate_state(value);
+            return shadow_contacts(at, value);
+        });
+    }
+    bool correct_penumbra(double time, const State &value) const {
+        if (!mitigates_shadow() || options_.srp.shadow_model != SrpShadowModel::dual_cone)
+            return false;
+        const auto geometry = srp_geometry(time, value);
+        const auto ratio =
+            evaluate_srp({value[0], value[1], value[2]}, geometry.sun, options_.srp, geometry.moon,
+                         std::span{geometry.additional}.first(geometry.count))
+                .lighting_ratio;
+        if (ratio > 0 && ratio < 1)
+            return true;
+        const auto contacts = shadow_contacts(time, value);
+        for (std::size_t i = 0; i < contacts.size; ++i)
+            if (std::abs(contacts.values[i]) < 2e-9)
+                return true;
+        return false;
+    }
+    State derivative(double t, const State &s, std::optional<Epoch> weather_at = {},
+                     std::optional<double> shadow_lighting = {}) const {
         validate_state(s);
         const std::array r{s[0], s[1], s[2]};
         std::array<double, 3> acceleration;
@@ -243,35 +354,16 @@ class Hpop final : public IStateProvider {
                     add(body, third_body_mu(options_.third_body(body), body, info));
         }
         if (options_.srp.enabled) {
-            const auto epoch = epoch_at(t);
-            std::optional<std::array<double, 3>> moon;
-            if (options_.srp.moon_shadow && options_.srp.shadow_model != SrpShadowModel::none)
-                moon = environment_.ephemeris->position(ThirdBody::moon, epoch);
-            auto sun = [&] {
-                switch (options_.srp.sun_position_method) {
-                case SrpSunPositionMethod::geometric:
-                    return environment_.ephemeris->position(ThirdBody::sun, epoch);
-                case SrpSunPositionMethod::apparent_to_true_cb:
-                    return environment_.ephemeris->apparent_sun_from_earth(epoch);
-                case SrpSunPositionMethod::apparent: {
-                    auto received = environment_.ephemeris->apparent_sun_from_spacecraft(
-                        epoch, r, {s[3], s[4], s[5]});
-                    for (std::size_t i = 0; i < 3; ++i)
-                        received[i] += r[i]; // Geometry evaluator takes a geocentric Sun endpoint.
-                    return received;
-                }
-                }
-                throw std::invalid_argument("Unsupported SRP Sun position method");
-            }();
-            std::array<SrpBodyPosition, third_body_count - 2> additional{};
-            std::size_t count = 0;
-            if (options_.srp.shadow_model != SrpShadowModel::none)
-                for (const auto &body : options_.srp.additional_eclipsing_bodies)
-                    additional[count++] = {
-                        body.body,
-                        environment_.ephemeris->eclipsing_body_position(body.body, epoch)};
-            const auto force =
-                evaluate_srp(r, sun, options_.srp, moon, std::span{additional}.first(count));
+            const auto geometry = srp_geometry(t, s);
+            auto force = evaluate_srp(r, geometry.sun, options_.srp, geometry.moon,
+                                      std::span{geometry.additional}.first(geometry.count));
+            if (shadow_lighting) {
+                auto unshadowed = options_.srp;
+                unshadowed.shadow_model = SrpShadowModel::none;
+                force = evaluate_srp(r, geometry.sun, unshadowed);
+                for (auto &component : force.acceleration_mps2)
+                    component *= *shadow_lighting;
+            }
             for (int i = 0; i < 3; ++i)
                 acceleration[i] += force.acceleration_mps2[i];
         }
@@ -311,32 +403,38 @@ class Hpop final : public IStateProvider {
     detail::ErrorControl<6> error_control(bool startup = false) const {
         detail::ErrorControl<6> result;
         result.fixed = !startup && options_.uses_fixed_step();
-        result.relative = startup ? 1e-14 : options_.relative_tolerance;
+        result.relative =
+            startup ? (mitigates_shadow() ? 1e-15 : 1e-14) : options_.relative_tolerance;
         result.max_step = options_.max_step_seconds;
         for (std::size_t i = 0; i < 6; ++i)
             result.absolute[i] =
-                startup ? (i < 3 ? 1e-9 : 1e-12)
+                startup ? (i < 3 ? (mitigates_shadow() ? 1e-10 : 1e-9)
+                                 : (mitigates_shadow() ? 1e-13 : 1e-12))
                         : (i < 3 ? options_.position_tolerance_m : options_.velocity_tolerance_mps);
         return result;
     }
-    auto step_derivative(double begin, double end) const {
-        return [this, begin, end](double at, const State &state) {
-            return derivative(at, state, weather_stage(at, begin, end));
+    auto step_derivative(double begin, double end, const State &initial,
+                         std::optional<double> lighting = {}) const {
+        if (!lighting)
+            lighting = cylinder_lighting(begin, initial, end);
+        return [this, begin, end, lighting](double at, const State &state) {
+            return derivative(at, state, weather_stage(at, begin, end), lighting);
         };
     }
     State rk4(double t, const State &s, double h) const {
-        return detail::rk4(t, s, h, step_derivative(t, t + h));
+        return detail::rk4(t, s, h, step_derivative(t, t + h, s));
     }
     TrialStep rkf78(double t, const State &s, double h) const {
-        return detail::rkf78(t, s, h, step_derivative(t, t + h), error_control());
+        return detail::rkf78(t, s, h, step_derivative(t, t + h, s), error_control());
     }
     TrialStep rkv89(double t, const State &s, double h) const {
-        return detail::rkv89(t, s, h, step_derivative(t, t + h), error_control());
+        return detail::rkv89(t, s, h, step_derivative(t, t + h, s), error_control());
     }
     TrialStep bulirsch_stoer(double t, const State &s, double h,
-                             const std::function<void()> &checkpoint, bool startup = false) const {
-        return detail::bulirsch_stoer(t, s, h, step_derivative(t, t + h), error_control(startup),
-                                      checkpoint, startup);
+                             const std::function<void()> &checkpoint, bool startup = false,
+                             std::optional<double> lighting = {}) const {
+        return detail::bulirsch_stoer(t, s, h, step_derivative(t, t + h, s, lighting),
+                                      error_control(startup), checkpoint, startup);
     }
     TrialStep trial_step(double t, const State &s, double h,
                          const std::function<void()> &checkpoint) const {
@@ -380,23 +478,50 @@ class Hpop final : public IStateProvider {
             const auto boundary = weather_boundary(t, end);
             if (boundary)
                 magnitude = std::min(magnitude, std::abs(*boundary - t));
-            const double h = std::copysign(magnitude, end - t);
+            double h = std::copysign(magnitude, end - t);
             if (t + h == t)
                 throw PropagationError("HPOP integration step cannot advance time");
-            const auto trial = trial_step(t, state, h, checkpoint);
+            bool correction = correct_penumbra(t, state);
+            const auto evaluate = [&](double at) -> TrialStep {
+                if (correction)
+                    return {one_sided_startup(state, t, at, attempts, checkpoint), 0, 0};
+                return trial_step(t, state, at - t, checkpoint);
+            };
+            auto trial = evaluate(t + h);
+            std::optional<double> shadow;
+            if (trial.error <= 1) {
+                const double target = magnitude == remaining ? end : t + h;
+                shadow = shadow_boundary(
+                    t, state, target, trial.value, [&](double at) { return evaluate(at).value; },
+                    attempts, checkpoint, correction);
+                if (shadow && !correction &&
+                    options_.srp.shadow_model == SrpShadowModel::dual_cone) {
+                    correction = true;
+                    trial = evaluate(target);
+                    shadow = shadow_boundary(
+                        t, state, target, trial.value,
+                        [&](double at) { return evaluate(at).value; }, attempts, checkpoint, true);
+                }
+                if (shadow) {
+                    h = *shadow - t;
+                    magnitude = std::abs(h);
+                    trial = evaluate(*shadow);
+                }
+            }
             const auto &next = trial.value;
             const double error = trial.error, exponent = trial.exponent;
             if (!std::isfinite(error) ||
                 !std::all_of(next.begin(), next.end(), [](double v) { return std::isfinite(v); }))
                 throw PropagationError("HPOP integration produced a nonfinite result");
             if (error <= 1) {
-                const bool at_boundary = boundary && magnitude == std::abs(*boundary - t);
+                const bool at_boundary =
+                    shadow || (boundary && magnitude == std::abs(*boundary - t));
                 state = next;
-                t = magnitude == remaining ? end : t + h;
+                t = shadow ? *shadow : (magnitude == remaining ? end : t + h);
                 // Validate the accepted endpoint as well as all RK stages.
                 (void)derivative(t, state);
                 if (accepted)
-                    accepted(at_boundary ? *boundary : t, state, at_boundary);
+                    accepted(t, state, at_boundary);
             } else if (magnitude <= options_.min_step_seconds) {
                 throw PropagationError("HPOP cannot meet tolerance at the minimum step");
             }
@@ -427,15 +552,37 @@ class Hpop final : public IStateProvider {
                     throw PropagationError(
                         "HPOP exceeded 200000 integration attempts in one query");
                 const auto boundary = weather_boundary(t, stop);
-                const double target = boundary.value_or(stop);
+                double target = boundary.value_or(stop);
                 const double h = target - t;
                 if (h == 0 || t + h == t)
                     throw PropagationError("HPOP fixed integration step cannot advance time");
-                state = trial_step(t, state, h, checkpoint).value;
+                // The 3/2-power circular-segment onset is not a smooth ODE.
+                // Correct penumbra/adjacent contact steps with a high-accuracy
+                // one-sided BS bridge. Smooth arcs retain the selected method.
+                bool correction = correct_penumbra(t, state);
+                const auto evaluate = [&](double at) {
+                    return correction ? one_sided_startup(state, t, at, attempts, checkpoint)
+                                      : trial_step(t, state, at - t, checkpoint).value;
+                };
+                auto next = evaluate(target);
+                auto shadow = shadow_boundary(t, state, target, next, evaluate, attempts,
+                                              checkpoint, correction);
+                if (shadow && !correction &&
+                    options_.srp.shadow_model == SrpShadowModel::dual_cone) {
+                    correction = true;
+                    next = evaluate(target);
+                    shadow = shadow_boundary(t, state, target, next, evaluate, attempts, checkpoint,
+                                             true);
+                }
+                if (shadow) {
+                    target = *shadow;
+                    next = evaluate(target);
+                }
+                state = next;
                 (void)derivative(target, state);
                 t = target;
                 if (accepted)
-                    accepted(t, state, boundary.has_value());
+                    accepted(t, state, shadow || (boundary && t == *boundary));
             }
         }
         return state;
@@ -469,8 +616,11 @@ class Hpop final : public IStateProvider {
         return integrate_fixed(value, sign * grid(index), t, index * nodes, attempts, checkpoint);
     }
 
-    State gauss_jackson_startup(State state, double t, double end, std::size_t &attempts,
-                                const std::function<void()> &checkpoint) const {
+    State one_sided_startup(State state, double t, double end, std::size_t &attempts,
+                            const std::function<void()> &checkpoint,
+                            std::optional<double> lighting = {}) const {
+        if (!lighting)
+            lighting = cylinder_lighting(t, state, end);
         // Accurate one-sided seeding and fractional output. It never obtains history
         // before the initial epoch or after the requested interval.
         double step = std::abs(end - t);
@@ -484,7 +634,7 @@ class Hpop final : public IStateProvider {
             const double h = std::copysign(magnitude, end - t);
             if (t + h == t)
                 throw PropagationError("HPOP startup step cannot advance time");
-            const auto result = bulirsch_stoer(t, state, h, checkpoint, true);
+            const auto result = bulirsch_stoer(t, state, h, checkpoint, true, lighting);
             validate_state(result.value);
             if (!std::isfinite(result.error))
                 throw PropagationError("HPOP startup produced a nonfinite error estimate");
@@ -512,58 +662,67 @@ class Hpop final : public IStateProvider {
         double t = begin;
         std::size_t node = 0;
         while (t != end) {
-            if (checkpoint)
-                checkpoint();
             const double nominal = static_cast<double>(first_node + ++node) * h;
             const double until = h > 0 ? std::min(nominal, end) : std::max(nominal, end);
             if (until == t)
                 throw PropagationError("HPOP fixed step cannot advance time");
-            // Weather jumps invalidate all backward differences. Bridge every such
-            // interval with a one-sided starter, then build a new history on the grid.
-            bool bridge = until != nominal || t != static_cast<double>(first_node + node - 1) * h;
-            while (const auto boundary = weather_boundary(t, until)) {
-                history.state =
-                    gauss_jackson_startup(history.state, t, *boundary, attempts, checkpoint);
-                history.reset();
-                t = *boundary;
-                if (accepted)
-                    accepted(t, history.state, true);
-                bridge = true;
-                if (t == until)
-                    break;
-            }
-            if (t == until)
-                continue;
-            if (bridge) {
-                history.state =
-                    gauss_jackson_startup(history.state, t, until, attempts, checkpoint);
-                history.reset();
-            } else {
-                const auto force = [&](double at, const State &s) {
-                    if (checkpoint)
-                        checkpoint();
-                    const auto d = derivative(at, s, weather_stage(at, t, until));
-                    return detail::GaussJackson12::Acceleration{d[3], d[4], d[5]};
-                };
-                if (history.count == 0)
-                    history.seed(history.state, force(t, history.state), h);
-                if (history.count < history.history.size()) {
-                    const auto next =
-                        gauss_jackson_startup(history.state, t, until, attempts, checkpoint);
-                    history.seed(next, force(until, next), h);
+            while (t != until) {
+                if (checkpoint)
+                    checkpoint();
+                const auto weather = weather_boundary(t, until);
+                double target = weather.value_or(until);
+                const auto lighting = cylinder_lighting(t, history.state, target);
+                auto candidate = history;
+                const bool bridge = correct_penumbra(t, history.state) || target != nominal ||
+                                    t != static_cast<double>(first_node + node - 1) * h;
+                if (bridge) {
+                    candidate.state =
+                        one_sided_startup(history.state, t, target, attempts, checkpoint, lighting);
+                    candidate.reset();
                 } else {
-                    if (++attempts > max_attempts)
-                        throw PropagationError(
-                            "HPOP exceeded 200000 integration attempts in one query");
-                    history.advance(h, options_.gravity_mu,
-                                    options_.correction == HpopCorrection::full,
-                                    [&](const State &s) { return force(until, s); });
-                    validate_state(history.state);
+                    const auto force = [&](double at, const State &value) {
+                        if (checkpoint)
+                            checkpoint();
+                        const auto d =
+                            derivative(at, value, weather_stage(at, t, target), lighting);
+                        return detail::GaussJackson12::Acceleration{d[3], d[4], d[5]};
+                    };
+                    if (candidate.count == 0)
+                        candidate.seed(candidate.state, force(t, candidate.state), h);
+                    if (candidate.count < candidate.history.size()) {
+                        const auto next = one_sided_startup(candidate.state, t, target, attempts,
+                                                            checkpoint, lighting);
+                        candidate.seed(next, force(target, next), h);
+                    } else {
+                        if (++attempts > max_attempts)
+                            throw PropagationError(
+                                "HPOP exceeded 200000 integration attempts in one query");
+                        candidate.advance(h, options_.gravity_mu,
+                                          options_.correction == HpopCorrection::full,
+                                          [&](const State &value) { return force(target, value); });
+                        validate_state(candidate.state);
+                    }
                 }
+                const auto shadow = shadow_boundary(
+                    t, history.state, target, candidate.state,
+                    [&](double at) {
+                        return one_sided_startup(history.state, t, at, attempts, checkpoint,
+                                                 lighting);
+                    },
+                    attempts, checkpoint, true);
+                if (shadow) {
+                    target = *shadow;
+                    candidate.state =
+                        one_sided_startup(history.state, t, target, attempts, checkpoint, lighting);
+                }
+                const bool boundary = shadow || (weather && target == *weather);
+                if (boundary)
+                    candidate.reset();
+                history = std::move(candidate);
+                t = target;
+                if (accepted)
+                    accepted(t, history.state, boundary);
             }
-            t = until;
-            if (accepted)
-                accepted(t, history.state, false);
         }
         return history;
     }
@@ -606,9 +765,9 @@ class Hpop final : public IStateProvider {
         return gauss_jackson_integrate(history, at, t, index * nodes, attempts, checkpoint).state;
     }
 
-    State regularized_output(double time, const State &state, Epoch when,
-                             std::optional<Epoch> weather) const {
-        // Accepted transformed nodes need not fall on integer nanoseconds. Transport
+    State epoch_output(double time, const State &state, Epoch when,
+                       std::optional<Epoch> weather) const {
+        // Accepted transformed/shadow nodes need not fall on integer nanoseconds. Transport
         // the output state to its precise Epoch instead of relabeling the state:
         // otherwise micrometre position jitter is amplified by Hermite derivatives.
         // Split whole seconds so even a long coast retains its fractional nanosecond.
@@ -631,20 +790,50 @@ class Hpop final : public IStateProvider {
         while (state.time() != end) {
             const auto boundary = weather_boundary(state.time(), end);
             const double until = boundary.value_or(end), begin = state.segment_begin;
+            const auto lighting = cylinder_lighting(state.time(), state.cartesian(), until);
+            const auto force = [&](double time, const State &value) {
+                const auto rate =
+                    derivative(time, value, weather_stage(time, begin, until), lighting);
+                return std::array{rate[3], rate[4], rate[5]};
+            };
+            bool shadow = false;
+            detail::SundmanPropagation::StepBoundary detect;
+            if (mitigates_shadow())
+                detect = [&](const detail::SundmanPropagation::State &first,
+                             const detail::SundmanPropagation::State &last)
+                    -> std::optional<detail::SundmanPropagation::State> {
+                    const auto contact = shadow_boundary(
+                        first.time(), first.cartesian(), last.time(), last.cartesian(),
+                        [&](double at) {
+                            return regularization_
+                                ->boundary_prefix(first, at, force, attempts, checkpoint,
+                                                  options_.srp.shadow_model ==
+                                                      SrpShadowModel::dual_cone)
+                                .cartesian();
+                        },
+                        attempts, checkpoint, true);
+                    if (!contact)
+                        return {};
+                    auto prefix = regularization_->boundary_prefix(
+                        first, *contact, force, attempts, checkpoint,
+                        options_.srp.shadow_model == SrpShadowModel::dual_cone);
+                    shadow = true;
+                    return prefix;
+                };
             state = regularization_->propagate(
-                std::move(state), until,
-                [&](double time, const State &value) {
-                    const auto rate = derivative(time, value, weather_stage(time, begin, until));
-                    return std::array{rate[3], rate[4], rate[5]};
-                },
-                attempts, checkpoint,
+                std::move(state), until, force, attempts, checkpoint,
                 [&](double time, const State &value) {
                     validate_state(value);
                     if (accepted)
                         accepted(time, value, boundary && time == until,
                                  weather_stage(time, begin, until));
-                });
-            if (boundary)
+                },
+                detect,
+                [&](double time, const State &value) { return correct_penumbra(time, value); });
+            if (shadow && accepted)
+                accepted(state.time(), state.cartesian(), true,
+                         weather_stage(state.time(), begin, until));
+            if (shadow || boundary)
                 state.restart_force_segment();
         }
         return state;
@@ -703,9 +892,11 @@ class Hpop final : public IStateProvider {
         validate_interval(first);
         validate_interval(last);
     }
-    std::vector<OrbitEphemerisArc> ephemeris(Epoch end, std::int64_t reporting_step,
-                                             const std::function<void()> &checkpoint,
-                                             std::size_t minimum_nodes = 1) const {
+    std::vector<OrbitEphemerisArc> ephemeris_once(Epoch end, std::int64_t reporting_step,
+                                                  const std::function<void()> &checkpoint,
+                                                  std::size_t minimum_nodes,
+                                                  const std::vector<std::int64_t> &extra_gates,
+                                                  std::size_t &attempts) const {
         if (checkpoint)
             checkpoint();
         if (reporting_step < 0 || reporting_step > 86400'000'000'000LL)
@@ -727,7 +918,6 @@ class Hpop final : public IStateProvider {
         history.state = value;
         auto regular_state = regularization_ ? regularization_->initial_state()
                                              : detail::SundmanPropagation::State{};
-        std::size_t attempts = 0;
         double at = 0, continued_step = 0;
         std::vector<std::int64_t> support_gates;
         if (minimum_nodes > 1 && !reporting_step) {
@@ -763,6 +953,13 @@ class Hpop final : public IStateProvider {
                 begin = stop;
             }
         }
+        if (!extra_gates.empty()) {
+            support_gates.insert(support_gates.end(), extra_gates.begin(), extra_gates.end());
+            support_gates.push_back(duration);
+            std::ranges::sort(support_gates);
+            support_gates.erase(std::unique(support_gates.begin(), support_gates.end()),
+                                support_gates.end());
+        }
         std::size_t gate_index = 0;
         std::int64_t elapsed = 0;
         while (elapsed < duration) {
@@ -797,8 +994,9 @@ class Hpop final : public IStateProvider {
                 if ((sign > 0 && when.tai_nanoseconds() > end.tai_nanoseconds()) ||
                     (sign < 0 && when.tai_nanoseconds() < end.tai_nanoseconds()))
                     throw PropagationError("HPOP accepted node exceeds the requested coast");
-                const auto output =
-                    regularization_ ? regularized_output(time, state, when, weather) : state;
+                const auto output = (regularization_ || mitigates_shadow())
+                                        ? epoch_output(time, state, when, weather)
+                                        : state;
                 CartesianState node{when,
                                     OriginId::earth,
                                     FrameId::gcrf,
@@ -844,6 +1042,93 @@ class Hpop final : public IStateProvider {
         }
         return arcs;
     }
+    std::vector<OrbitEphemerisArc> ephemeris(Epoch end, std::int64_t reporting_step,
+                                             const std::function<void()> &checkpoint,
+                                             std::size_t minimum_nodes = 1) const {
+        std::size_t attempts = 0;
+        auto arcs = ephemeris_once(end, reporting_step, checkpoint, minimum_nodes, {}, attempts);
+        if (!mitigates_shadow() || minimum_nodes <= 1 || reporting_step)
+            return arcs;
+        std::vector<std::int64_t> gates;
+        const std::int64_t sign = end.tai_nanoseconds() < initial_.epoch.tai_nanoseconds() ? -1 : 1;
+        for (unsigned refinement = 0; refinement < 8; ++refinement) {
+            bool complete = true;
+            for (const auto &arc : arcs) {
+                if (arc.size() >= minimum_nodes)
+                    continue;
+                complete = false;
+                const auto a =
+                    sign * (arc.front().epoch.tai_nanoseconds() - initial_.epoch.tai_nanoseconds());
+                const auto b =
+                    sign * (arc.back().epoch.tai_nanoseconds() - initial_.epoch.tai_nanoseconds());
+                const auto first = std::min(a, b), span = std::abs(b - a);
+                const auto intervals = static_cast<std::int64_t>(minimum_nodes + 1);
+                if (span < intervals)
+                    throw PropagationError(
+                        "HPOP shadow arc has too few distinct epochs for interpolation order");
+                for (std::int64_t i = 1; i < intervals; ++i)
+                    gates.push_back(first + span * i / intervals);
+            }
+            if (complete) {
+                const auto interpolated = make_tabulated_orbit(arcs, options_.interpolation);
+                // Endpoint interpolation of the non-smooth penumbra needs more
+                // than a node-count check, particularly for Lagrange velocities.
+                // Check the first/last stencil against independent BS prefixes and
+                // refine only failing gaps. These are real integration gates.
+                for (const auto &arc : arcs) {
+                    for (std::size_t i = 0; i + 1 < arc.size(); ++i) {
+                        if (i >= minimum_nodes && i + minimum_nodes + 1 < arc.size())
+                            continue;
+                        const auto left_ns = arc[i].epoch.tai_nanoseconds();
+                        const auto right_ns = arc[i + 1].epoch.tai_nanoseconds();
+                        if (right_ns - left_ns < 2)
+                            continue;
+                        const Epoch middle{left_ns + (right_ns - left_ns) / 2};
+                        const double begin = arc[i].epoch.seconds_since(initial_.epoch);
+                        const double until = middle.seconds_since(initial_.epoch);
+                        if (begin == until)
+                            continue;
+                        State start;
+                        for (std::size_t axis = 0; axis < 3; ++axis) {
+                            start[axis] = arc[i].position_m[axis];
+                            start[axis + 3] = arc[i].velocity_mps[axis];
+                        }
+                        auto truth = one_sided_startup(start, begin, until, attempts, checkpoint);
+                        truth =
+                            epoch_output(until, truth, middle, weather_stage(until, begin, until));
+                        const auto approximate = interpolated->state_at(middle, checkpoint);
+                        bool resolved = true;
+                        for (std::size_t axis = 0; axis < 3; ++axis) {
+                            const double p_scale =
+                                options_.position_tolerance_m +
+                                options_.relative_tolerance * std::abs(truth[axis]);
+                            const double v_scale =
+                                options_.velocity_tolerance_mps +
+                                options_.relative_tolerance * std::abs(truth[axis + 3]);
+                            resolved = resolved &&
+                                       std::abs(approximate.position_m[axis] - truth[axis]) <=
+                                           .1 * p_scale &&
+                                       std::abs(approximate.velocity_mps[axis] - truth[axis + 3]) <=
+                                           .1 * v_scale;
+                        }
+                        if (!resolved) {
+                            complete = false;
+                            gates.push_back(sign * (middle.tai_nanoseconds() -
+                                                    initial_.epoch.tai_nanoseconds()));
+                        }
+                    }
+                }
+            }
+            if (complete)
+                return arcs;
+            // A discovery pass only supplies interior output gates. Contact times
+            // are located again on the actual refined integration, never imposed
+            // from a different trajectory or filled by cross-boundary interpolation.
+            arcs = ephemeris_once(end, 0, checkpoint, minimum_nodes, gates, attempts);
+        }
+        throw PropagationError(
+            "HPOP shadow interpolation did not converge within eight refinements");
+    }
     CartesianState state_at(Epoch epoch) const override { return state_at(epoch, {}); }
     CartesianState state_at(Epoch epoch, const std::function<void()> &checkpoint) const override {
         if (checkpoint)
@@ -864,7 +1149,7 @@ class Hpop final : public IStateProvider {
                                            checkpoint)
                     .cartesian();
             const auto value =
-                coast.regularized_output(t, integrated, epoch, coast.weather_stage(t, 0, t));
+                coast.epoch_output(t, integrated, epoch, coast.weather_stage(t, 0, t));
             return {epoch,
                     OriginId::earth,
                     FrameId::gcrf,

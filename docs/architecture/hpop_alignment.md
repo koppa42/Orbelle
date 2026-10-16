@@ -75,7 +75,7 @@
 | Drag | Use Approximate Altitude；Use Apparent Sun Position | 已实现：精确 WGS84 高度/椭球径向近似可选，几何/地心 LT+S 视太阳已生效；仍待 STK 同配置数值验收 |
 | SRP | Use SRP；Spherical；Cr；Area/Mass | 已实现球形光压、距离平方缩放与独立面积质量比；见[光压契约](solar_radiation_pressure.md) |
 | SRP | Shadow Model，含 Dual Cone | 已实现无阴影／圆柱／球面双锥、全照／半影／本影／环食；独立几何和轨迹对照通过，椭球轮廓及专用事件时刻待实现 |
-| SRP | Use Boundary Mitigation | 待实现：可复核的边界算法、标识及步长收敛，不能声称复刻未公开内部算法 |
+| SRP | Use Boundary Mitigation | 已接入球面接触定位、圆柱单侧光压、双锥高精度边界校正、五种积分器及时间正则化重启、科学插值分段；与 Orekit / Hipparchus 对照事件和轨迹，保留步长减半验证；仍待 STK 实测，不声称复刻内部算法 |
 | SRP | Method to Compute Sun，含 Apparent To True CB | 已实现 True、地心视太阳与卫星视太阳，接收型 LT+S、速度时间尺度和历史链校验；遮挡体视位置及 STK 同配置验收待完成 |
 | SRP | Atmospheric Altitude；Eclipsing Central Bodies 增删 | 部分：地球／月球独立分配、大气等效半径、多体遮挡并集已实现；可搜索 Available / Assigned 窗口、七颗行星及冥王星的球面配置与十体并集已接入并有 SciPy 对照；DE440s 可直接提供地月／水星／金星本体，火星、外行星及冥王星可导入本体 SPK（逐段过滤、按区间认证、JPLEPHEM 对照）；更多卫星和小天体仍待实现 |
 | Additional | Albedo；Thermal；Ck；Area/Mass；Ground Reflection Model | 待实现：各自开关、地表反射/发射率资源、可见地表积分 |
@@ -87,7 +87,7 @@
 | Integrator | Fixed/Relative Error；Tolerance；Min/Max Step | 部分：独立 Fixed/Relative Error 选择已实现；RK4/GJ 强制固定，RKF/RKV/BS 两模式，固定网格及 BS 十八阶外推已验证。固定/自适应范围已扩至 1e−6–86400 s，自适应缓存不再截短配置上限，并有局部动力学首步估计及长弧独立对照。相对误差仍为混合绝对/相对分量尺度；STK 误差范数、完整合法范围/默认值及实机组合仍待核对，截图仅参考 |
 | Integrator | Interpolation 方法；Order；VOP μ | 部分：Lagrange / Hermite、项目自动装配、机动分段、UI / 持久化 / 分析及报告已接入并有独立参考，见[科学插值](orbit_interpolation.md)；VOP 与其 μ 尚未实现，STK 同配置验收仍待完成 |
 | Integrator | Allow PosVel Covariance Interpolation | 待实现：协方差传播完成后验证插值、对称性与半正定性 |
-| Integrator | Time Regularization；Exponent；Steps Per Orbit | 已接入：Sundman 方程、初始椭圆每圈尺度、五种积分器、物理 Min/Max Step、整数 TAI、天气分段、机动重启及科学插值；C++ / Python / 项目 v37 / UI 共用配置。非椭圆归一化明确拒绝；尚无 STK 同配置实测，见[时间正则化契约](time_regularization.md) |
+| Integrator | Time Regularization；Exponent；Steps Per Orbit | 已接入：Sundman 方程、初始椭圆每圈尺度、五种积分器、物理 Min/Max Step、整数 TAI、天气分段、机动重启及科学插值；C++ / Python / 项目 v38 / UI 共用配置。非椭圆归一化明确拒绝；尚无 STK 同配置实测，见[时间正则化契约](time_regularization.md) |
 | Integrator | Report Ephemeris on a Fixed Time Step | 部分：显式工厂及普通项目均支持接受端点或让积分步停在固定 TAI 输出网格，保留天气边界；UI、保存与报告已接入。项目轨道步长当前限于 1–60 整数秒，完整合法范围及短段策略仍待 STK 实测核对 |
 | Integrator | Do not propagate below altitude | 已有按力评估停止的参考球面地心高度；STK 比较须核对其高度参考面 |
 | Covariance | Compute Covariance；6×6 初始矩阵 | 待实现：变分方程、单位、对称性和正定性政策；关闭不影响确定性轨迹 |

@@ -33,6 +33,8 @@ struct SrpOptions {
     SrpShadowModel shadow_model = SrpShadowModel::dual_cone;
     SrpSunPositionMethod sun_position_method = SrpSunPositionMethod::apparent_to_true_cb;
     bool earth_shadow = true, moon_shadow = true;
+    // Locate spherical shadow contacts and restart the HPOP force segment.
+    bool boundary_mitigation = false;
     double atmospheric_altitude_m = 0;
     double pressure_at_reference_pa = 4.56e-6;
     double reference_distance_m = 149597870700.0;
@@ -64,8 +66,9 @@ struct SrpEvaluation {
 // Throws invalid_argument for missing required Moon geometry; PropagationError for
 // nonfinite positions/force or an observer inside the Sun/assigned occultor.
 // Moon is required only with SRP and a non-none shadow model assigning the Moon.
-// Disabled SRP does not inspect positions. No ellipsoidal limb, atmospheric
-// refraction or STK boundary mitigation is implied.
+// Disabled SRP does not inspect positions. No ellipsoidal limb or atmospheric
+// refraction is implied. boundary_mitigation is consumed by the HPOP integrator;
+// it does not change this instantaneous force evaluator.
 [[nodiscard]] SrpEvaluation
 evaluate_srp(const std::array<double, 3> &satellite_m, const std::array<double, 3> &sun_m,
              const SrpOptions &options, const std::optional<std::array<double, 3>> &moon_m = {},

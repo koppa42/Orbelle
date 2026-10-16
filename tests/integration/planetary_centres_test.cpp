@@ -83,8 +83,8 @@ TEST_F(PlanetaryCentres, OriginalMarsMatchesIndependentJplephemAndLeavesBaseBodi
     core::HpopOptions options;
     options.gravity_degree = options.gravity_order = 0;
     options.srp.enabled = true;
-    options.srp.additional_eclipsing_bodies = {
-        core::default_srp_eclipsing_body(core::ThirdBody::mars)};
+    options.srp.additional_eclipsing_bodies.push_back(
+        core::default_srp_eclipsing_body(core::ThirdBody::mars));
     const core::CartesianState initial{
         at, core::OriginId::earth, core::FrameId::gcrf, {7e6, 0, 0}, {0, 7500, 0}};
     core::HpopEnvironment environment;

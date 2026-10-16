@@ -169,10 +169,10 @@ struct HpopEnvironment {
 [[nodiscard]] std::shared_ptr<const IStateProvider>
 make_hpop(CartesianState initial, HpopOptions options = {}, HpopEnvironment environment = {});
 // Propagate one coast from initial.epoch to end, in either direction. Returned arcs own
-// GCRF / TAI / SI nodes, sorted chronologically, with duplicate shared weather boundaries.
+// GCRF / TAI / SI nodes, sorted chronologically, with shared weather/shadow boundaries.
 // A reporting step of zero retains accepted integration endpoints (GJ startup internals are
 // not output nodes). A positive integer-nanosecond step forces integration to stop on an
-// initial-epoch-anchored reporting grid; output includes both endpoints and weather jumps.
+// initial-epoch-anchored reporting grid; output includes both endpoints, weather jumps and enabled shadow contacts.
 // No stages are evaluated outside this coast. Cannot cross a maneuver: the caller must
 // start a new coast with the post-impulse state. Node generation does not choose/reduce an
 // interpolation order. Same resource checks and 366-day / 200000-attempt limit as HPOP;

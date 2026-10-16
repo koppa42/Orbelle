@@ -126,7 +126,8 @@ class SrpSettings:
     occultations use the union of assigned spheres and geometric body centres.
     Sun methods are true, geocentric apparent (default), and spacecraft apparent
     (received LT+S).
-    No ellipsoidal limb or STK boundary mitigation is implied. Disabled drafts are
+    Boundary mitigation splits shadow contacts and corrects penumbra integration.
+    No ellipsoidal limb or reproduction of STK internals is implied. Disabled drafts are
     retained but do not affect results.
     """
     enabled: bool = False
@@ -136,6 +137,7 @@ class SrpSettings:
     sun_position_method: Literal["true", "apparent_to_true_cb", "apparent"] = "apparent_to_true_cb"
     earth_shadow: bool = True
     moon_shadow: bool = True
+    boundary_mitigation: bool = False
     atmospheric_altitude_m: float = 0.0
     pressure_at_reference_pa: float = 4.56e-6
     reference_distance_m: float = 149597870700.0
@@ -145,7 +147,7 @@ class SrpSettings:
     additional_eclipsing_bodies: tuple[SrpEclipsingBody, ...] = ()
 
     def __post_init__(self) -> None:
-        for name in ("enabled", "earth_shadow", "moon_shadow"):
+        for name in ("enabled", "earth_shadow", "moon_shadow", "boundary_mitigation"):
             if not isinstance(getattr(self, name), bool):
                 raise TypeError(f"{name} requires bool")
         object.__setattr__(self, "additional_eclipsing_bodies", tuple(self.additional_eclipsing_bodies))

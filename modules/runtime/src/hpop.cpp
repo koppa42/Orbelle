@@ -123,6 +123,8 @@ std::string hpop_algorithm(const core::HpopOptions &options,
                << ";reference-distance=" << o.reference_distance_m
                << ";sun-radius=" << o.sun_radius_m << ";earth-radius=" << o.earth_radius_m
                << ";moon-radius=" << o.moon_radius_m;
+        if (o.boundary_mitigation)
+            config << ";srp-boundary=contacts-one-sided-bs-v1;check=60s;root=1ns-or-16ulp";
         for (const auto &body : o.additional_eclipsing_bodies)
             config << ";occultor-centre=" << core::srp_eclipsing_body_naif_id(body.body)
                    << ";radius=" << body.radius_m;

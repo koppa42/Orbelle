@@ -19,7 +19,7 @@ class ProjectFormatTests(unittest.TestCase):
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 37)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 38)
         self.path.write_bytes(self.raw)
         project = of.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
@@ -29,6 +29,7 @@ class ProjectFormatTests(unittest.TestCase):
         self.assertEqual(project.objects["satellite-b"].orbit.hpop.srp.sun_position_method, "apparent")
         hpop = project.objects["satellite-b"].orbit.hpop
         self.assertEqual(hpop.ocean_tides, of.orbits.OceanTideSettings(False, "fixture-ocean", 30, 12))
+        self.assertTrue(hpop.srp.boundary_mitigation)
         self.assertTrue(hpop.include_secular_variations)
         self.assertEqual(hpop.satellite_mass_kg, 1250)
         self.assertEqual(hpop.srp.additional_eclipsing_bodies, (
@@ -74,6 +75,22 @@ class ProjectFormatTests(unittest.TestCase):
                 of.Project.open(self.path)
             self.assertEqual(self.path.read_bytes(),raw)
 
+    def test_invalid_shadow_boundary_flag_preserves_source(self):
+        marker=struct.pack("<8d",1.25,.03,23000,4.56e-6,149597870700,696000000,6378137,1737400)
+        sections=[]
+        for tag,version,body in read_sections(self.raw):
+            if tag==b"OBJS":
+                body=bytearray(body)
+                self.assertEqual(body.count(marker),1)
+                self.assertEqual(body[body.index(marker)-1],1)
+                body[body.index(marker)-1]=2
+            sections.append((tag,version,body))
+        raw=with_sections(self.raw,sections)
+        self.path.write_bytes(raw)
+        with self.assertRaises(of.ProjectError):
+            of.Project.open(self.path)
+        self.assertEqual(self.path.read_bytes(),raw)
+
     def test_invalid_additional_occultors_preserve_source_after_crc_repair(self):
         marker=struct.pack("<8d",1.25,.03,23000,4.56e-6,149597870700,696000000,6378137,1737400)
         for offset,fmt,value in ((0,"I",9),(0,"I",0xFFFFFFFF),(4,"I",0),(4,"I",1),
@@ -92,14 +109,14 @@ class ProjectFormatTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(),altered)
 
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(37), 38, 0xFFFFFFFF):
+        for version in (*range(38), 39, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (of.load_project_data, of.load_project,
                                  of.Project.open, of.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 37"):
+                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 38"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 
@@ -203,7 +220,7 @@ class ProjectFormatTests(unittest.TestCase):
 
     def test_invalid_srp_sun_method_is_rejected_with_valid_crcs(self):
         sections = read_sections(self.raw)
-        marker = struct.pack("<BIIBB8d", 0, 2, 2, 1, 0, 1.25, .03, 23000,
+        marker = struct.pack("<BIIBBB8d", 0, 2, 2, 1, 0, 1, 1.25, .03, 23000,
                              4.56e-6, 149597870700, 696000000, 6378137, 1737400)
         altered = []
         for tag, version, body in sections:
