@@ -921,7 +921,7 @@ void OrbitEditor::update_state_labels() {
              : QString{}) +
         (hpop_.srp.enabled ? QStringLiteral(" + 太阳辐射压") : QString{}) +
         (hpop_.drag.enabled ? QStringLiteral(" + 大气阻力") : QString{}) +
-        (hpop_.integrator == core::HpopIntegrator::rkf78 ? QStringLiteral(" · RKF78 自适应")
+        (hpop_.integrator == core::HpopIntegrator::rkf78 ? QStringLiteral(" · RKF 7(8) 自适应")
          : hpop_.integrator == core::HpopIntegrator::rkv89
              ? QStringLiteral(" · RKV 8(9) Efficient 自适应")
          : hpop_.integrator == core::HpopIntegrator::bulirsch_stoer

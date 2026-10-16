@@ -19,8 +19,9 @@ std::function<double(Epoch)> sun_distance(const IThirdBodyEphemeris *ephemeris) 
         return std::hypot(position[0], position[1], position[2]);
     };
 }
-// Fehlberg, NASA TR R-287 (1968), Table XI. Eighth order accepted solution,
-// embedded seventh order error estimate; all stage epochs stay within a step.
+// Fehlberg, NASA TR R-287 (1968), Table X, p. 65. Advance the seventh-order
+// member, as in STK RKF 7(8); estimate error using the embedded eighth-order
+// member. All stage epochs stay within a step.
 constexpr std::array<double, 13> c{0,       2.0 / 27, 1.0 / 9, 1.0 / 6, 5.0 / 12, 0.5, 5.0 / 6,
                                    1.0 / 6, 2.0 / 3,  1.0 / 3, 1,       0,        1};
 constexpr double a[13][13] = {
@@ -39,8 +40,8 @@ constexpr double a[13][13] = {
     {3.0 / 205, 0, 0, 0, 0, -6.0 / 41, -3.0 / 205, -3.0 / 41, 3.0 / 41, 6.0 / 41},
     {-1777.0 / 4100, 0, 0, -341.0 / 164, 4496.0 / 1025, -289.0 / 82, 2193.0 / 4100, 51.0 / 82,
      33.0 / 164, 12.0 / 41, 0, 1}};
-constexpr std::array<double, 13> b{
-    0, 0, 0, 0, 0, 34.0 / 105, 9.0 / 35, 9.0 / 35, 9.0 / 280, 9.0 / 280, 0, 41.0 / 840, 41.0 / 840};
+constexpr std::array<double, 13> b7{
+    41.0 / 840, 0, 0, 0, 0, 34.0 / 105, 9.0 / 35, 9.0 / 35, 9.0 / 280, 9.0 / 280, 41.0 / 840, 0, 0};
 #include "integrators/rkv89_coefficients.inc"
 constexpr double checkpoint_seconds = 300;
 constexpr std::size_t max_attempts = 200000;
@@ -313,7 +314,7 @@ class Hpop final : public IStateProvider {
         for (std::size_t i = 0; i < 6; ++i) {
             double sum = 0;
             for (std::size_t j = 0; j < 13; ++j)
-                sum += b[j] * k[j][i];
+                sum += b7[j] * k[j][i];
             result[i] += h * sum;
             const double estimate =
                 std::abs(h * (41.0 / 840) * (k[11][i] + k[12][i] - k[0][i] - k[10][i]));

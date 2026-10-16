@@ -331,6 +331,59 @@ TEST(Hpop, Rkv89MatchesIndependentScipyDop853ForEccentricJ2AndTimeVaryingForces)
     RecordProperty("max_position_error_m", metrics_r.str());
     RecordProperty("max_velocity_error_mps", metrics_v.str());
 }
+TEST(Hpop, Rkf78MatchesIndependentHipparchusForEccentricJ2AndTimeVaryingForces) {
+    std::ifstream file{ORBITFORGE_BS_REFERENCE};
+    ASSERT_TRUE(file.good());
+    HpopEnvironment environment{std::make_shared<FixedFrames>(), std::make_shared<FixedEop>()};
+    environment.ephemeris = std::make_shared<MovingMoon>();
+    std::string line;
+    int count = 0;
+    double max_position = 0, max_velocity = 0;
+    while (std::getline(file, line)) {
+        if (line.empty() || line[0] == '#')
+            continue;
+        SCOPED_TRACE(line);
+        std::istringstream row{line};
+        int kind;
+        double seconds;
+        auto initial = circular(), expected = initial;
+        row >> kind >> seconds;
+        for (auto &v : initial.position_m)
+            row >> v;
+        for (auto &v : initial.velocity_mps)
+            row >> v;
+        for (auto &v : expected.position_m)
+            row >> v;
+        for (auto &v : expected.velocity_mps)
+            row >> v;
+        ASSERT_FALSE(row.fail());
+        expected.epoch = Epoch{std::llround(seconds * 1e9)};
+        auto options = point_mass();
+        options.integrator = HpopIntegrator::rkf78;
+        options.gravity_degree = kind ? 2 : 0;
+        options.relative_tolerance = 1e-14;
+        options.position_tolerance_m = 1e-8;
+        options.velocity_tolerance_mps = 1e-11;
+        options.max_step_seconds = 300;
+        options.third_bodies[static_cast<std::size_t>(ThirdBody::moon)].enabled = kind == 2;
+        const auto actual = make_hpop(initial, options, environment)->state_at(expected.epoch);
+        const double er = position_error(actual, expected);
+        const double ev = std::hypot(actual.velocity_mps[0] - expected.velocity_mps[0],
+                                     actual.velocity_mps[1] - expected.velocity_mps[1],
+                                     actual.velocity_mps[2] - expected.velocity_mps[2]);
+        max_position = std::max(max_position, er);
+        max_velocity = std::max(max_velocity, ev);
+        EXPECT_LT(er, .005);
+        EXPECT_LT(ev, 5e-6);
+        ++count;
+    }
+    EXPECT_EQ(count, 60);
+    std::ostringstream metrics_r, metrics_v;
+    metrics_r << std::setprecision(17) << max_position;
+    metrics_v << std::setprecision(17) << max_velocity;
+    RecordProperty("max_position_error_m", metrics_r.str());
+    RecordProperty("max_velocity_error_mps", metrics_v.str());
+}
 TEST(Hpop, BulirschStoerMatchesIndependentHipparchusForEccentricJ2AndTimeVaryingForces) {
     std::ifstream file{ORBITFORGE_BS_REFERENCE};
     ASSERT_TRUE(file.good());
@@ -384,6 +437,35 @@ TEST(Hpop, BulirschStoerMatchesIndependentHipparchusForEccentricJ2AndTimeVarying
     RecordProperty("max_position_error_m", metrics_r.str());
     RecordProperty("max_velocity_error_mps", metrics_v.str());
 }
+TEST(Hpop, Rkf78AdvancesTheSeventhOrderMemberAndControlsRejectedSteps) {
+    const auto initial = eccentric_analytic(0), expected = eccentric_analytic(600);
+    auto options = point_mass();
+    options.integrator = HpopIntegrator::rkf78;
+    // Loose tolerances force equal steps for the order test, with no error rejection.
+    options.relative_tolerance = 1e-3;
+    options.position_tolerance_m = 1;
+    options.velocity_tolerance_mps = .001;
+    options.min_step_seconds = options.max_step_seconds = 150;
+    const auto coarse = make_hpop(initial, options)->state_at(expected.epoch);
+    options.min_step_seconds = options.max_step_seconds = 75;
+    const auto fine = make_hpop(initial, options)->state_at(expected.epoch);
+    const double ratio = position_error(coarse, expected) / position_error(fine, expected);
+    EXPECT_GT(ratio, 115); // Seventh order predicts 2^7; eighth-order advancement is excluded.
+    EXPECT_LT(ratio, 150);
+    EXPECT_LT(position_error(fine, expected), 1e-5);
+    RecordProperty("coarse_position_error_m", std::to_string(position_error(coarse, expected)));
+    RecordProperty("fine_position_error_m", std::to_string(position_error(fine, expected)));
+    RecordProperty("step_halving_error_ratio", std::to_string(ratio));
+    options.relative_tolerance = 1e-14;
+    options.position_tolerance_m = 1e-10;
+    options.velocity_tolerance_mps = 1e-13;
+    options.min_step_seconds = options.max_step_seconds = 300;
+    EXPECT_THROW((void)make_hpop(initial, options)->state_at(Epoch{300'000'000'000}),
+                 PropagationError);
+    options.min_step_seconds = .001;
+    const auto adaptive = make_hpop(initial, options)->state_at(expected.epoch);
+    EXPECT_LT(position_error(adaptive, expected), 1e-4);
+}
 TEST(Hpop, Rkv89AdvancesTheEighthOrderMemberAndControlsRejectedSteps) {
     const auto initial = eccentric_analytic(0), expected = eccentric_analytic(6000);
     auto options = point_mass();
@@ -412,8 +494,8 @@ TEST(Hpop, Rkv89AdvancesTheEighthOrderMemberAndControlsRejectedSteps) {
     EXPECT_LT(position_error(adaptive, expected), 1e-4);
 }
 TEST(Hpop, AdaptiveCancellationAndQueryOrderPreserveDeterministicCheckpoints) {
-    for (auto integrator :
-         {HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
+    for (auto integrator : {HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+                            HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
         auto options = point_mass();
         options.integrator = integrator;
         const auto provider = make_hpop(circular(), options),

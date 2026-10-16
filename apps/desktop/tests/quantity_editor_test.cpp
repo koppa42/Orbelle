@@ -2715,11 +2715,12 @@ TEST_F(QuantityTest, HpopSecularFileCapabilityKeyboardDraftAndValidation) {
 
 TEST_F(QuantityTest, HpopAdaptiveIntegratorsValidatePersistAndPreserveCancelledDrafts) {
     apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
-    for (const auto integrator :
-         {core::HpopIntegrator::rkv89, core::HpopIntegrator::bulirsch_stoer}) {
+    for (const auto integrator : {core::HpopIntegrator::rkf78, core::HpopIntegrator::rkv89,
+                                  core::HpopIntegrator::bulirsch_stoer}) {
         const int method_index = static_cast<int>(integrator);
-        const auto label = method_index == 2 ? QStringLiteral("RKV 8(9) Efficient")
-                                             : QStringLiteral("Bulirsch–Stoer");
+        const auto label = method_index == 0   ? QStringLiteral("RKF 7(8)")
+                           : method_index == 2 ? QStringLiteral("RKV 8(9) Efficient")
+                                               : QStringLiteral("Bulirsch–Stoer");
         core::HpopOptions options;
         options.gravity_degree = options.gravity_order = 0;
         options.fixed_step_seconds = 12;

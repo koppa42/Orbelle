@@ -20,6 +20,16 @@ java -cp "out/validation/hpop;$classpath" OrbitForgeHpopReference out/research/h
 
 极点本身由点质量加 J2 闭式梯度测试，避免依赖参考实现的轴上球坐标奇点。另测圆轨道解析极限、RK4 减半步长的四阶收敛、靠近 Epoch 范围端点的时间、1 ns 查询、乱序/重复/并发、取消后重用、错误容差、缺资源、最低高度和工作量上限。
 
+## RKF 7(8)
+
+按 [STK 13.1 Integrator](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm) 的定义推进七阶解，以八阶嵌入解估计误差。系数核对 [Fehlberg NASA TR R-287](https://ntrs.nasa.gov/api/citations/19680027281/downloads/19680027281.pdf) 的 Table X（印刷第 65 页，PDF 第 72 页）；原 PDF SHA-256 为 `5553a2a3eb53785a461762cc2b29428015f1b32c3ad0a5cb57f85a421256a0c8`。零基阶段 0、10 的七阶权重为 41/840，阶段 11、12 为 0；误差用 `abs(h × 41/840 × (k11 + k12 − k0 − k10))`，控制指数为 1/8。运行时来源为 `rkf78-7th-fehlberg-r287-v1`，明确区别先前的八阶推进；不改变公开 `rkf78` 枚举或项目 v33 / OBJS24 的布局。
+
+成熟算法对照复用下述 Hipparchus 4.0.2 GBS 的 60 组固定输出和独立生成器，SHA-256 为 `62e89df62c29838d5fd03e37ce73ffac28632be40467cafeb4bbccb93ce6885b`。包含圆轨道、偏心率 0.7/0.98、J2、随时间变化的月球差分引力、正反向一天、非整数秒和 1 ns；GBS 参考已通过 60/30 s 收敛和 SciPy DOP853 交叉核验。生产 RKF 使用最大 300 s、相对容差 1e−14、位置/速度绝对容差 1e−8 m / 1e−11 m/s，保持 5 mm / 5e−6 m/s 三维验收线。Windows/MSVC 最大位置差 2.475 mm、速度差 2.619e−6 m/s。既有 Orekit Holmes–Featherstone/DP853 的 60 组重力轨迹使用默认容差也通过原验收线。
+
+独立 Kepler 解析解采用偏心率 0.7、近地点 7000 km、600 s 弧段。以松容差和相同的最小/最大步长确保 150/75 s 两组等步积分，误差比须在 115–150 内，七阶预期为 128；实测约 133.411，细步位置误差约 7 µm。先用旧八阶生产权重运行同一测试，得到 243.105 并失败，确认该测试能区分推进成员。另验证拒步、无法达到精度的最小步报错、取消后的完整缓存复用、乱序/并发、大 Epoch 和纳秒查询。该阶次测试不是公开的固定步长模式，后者仍待实现。
+
+Qt 沿用自适应积分器交互验收，增加 RKF 7(8) 的键盘顺序、摘要、非法步长、取消/重开及 430/720 逻辑宽度；Windows 实际 DPR 1.5/2.25 的四张 RKF 截图均已检查。误差范数、步长控制器和 STK 同配置轨迹尚未直接对照，七阶推进对齐不能代替完整 STK 验收。
+
 ## RKV 8(9) Efficient
 
 系数来自 rklib 的 `rkv98e`，固定提交 `a1bf2d26ba2c37d049b448d28d4e9800a0ee4b58`；源文件 `src/rklib_variable_steps.f90` 的 SHA-256 为 `815a58549a72675c871f88abe127ad4444bcecfa20d9ef0a7b11ea58f8deb33e`。保留其 BSD-3-Clause 许可并随 Python、SDK、Windows 包交付。按照 STK 的八阶推进描述，生产使用原表的 `d` 权重，而原 rklib 常规九阶推进使用 `c` 权重；误差为 `h Σ(c−d)k`。STK 的内部控制器和同配置轨迹尚无直接对照结果。
@@ -114,7 +124,7 @@ ctest --test-dir out/build/desktop-graphics -C Release --output-on-failure -R 'G
 
 `tests/reference/propagators/third_body.txt` 是独立 Orekit 13.1.2 `ThirdBodyAttraction` / Hipparchus 4.0.2 DP853 的 32 组输出。生成器 `tools/validation/orekit/OrbitForgeThirdBodyReference.java` 使用显式定义的移动太阳/月球、点质量地球，隔离差分引力和积分的实现；不依赖 OrbitForge 力值或 STK 输出。
 
-覆盖太阳单独、月球单独、组合、两者 GM 覆盖四种情况，LEO / GEO 初值及 ±6000 s / ±86400 s。参考每分量容限：初始第三体加速度 3e-18 m/s²，传播位置 2 mm、速度 2 µm/s。生产积分在此对照使用收紧的容差，具体数值固定在 `third_body_test.cpp`；不把该回归精度宣称为真实预报精度。另测毫米位移的潮汐极限、地心零差分、奇点、非法 GM、禁用无查询、取消后重用及覆盖先于力评估失败。
+覆盖太阳单独、月球单独、组合、两者 GM 覆盖四种情况，LEO / GEO 初值及 ±6000 s / ±86400 s。参考每分量容限：初始第三体加速度 3e-18 m/s²，传播位置 2 mm、速度 2 µm/s。生产 RKF 7(8) 使用相对容差 1e−13、位置/速度绝对容差 1e−5 m / 1e−8 m/s，最大步长分别为 30/15 s；两组都检查原有独立参考容限，另要求每分量位置的步长收敛差小于 0.1 mm。Windows/MSVC 实测最大位置误差 1.968e−5 m、速度误差 1.191e−8 m/s，30/15 s 最大位置差 2.362e−5 m。此前七阶推进在 60 s 下的一天弧位置误差约 2.27 mm，超出 2 mm 标准，因此用步长收敛降低积分误差，保持参考值及验收阈值。具体数值固定在 `third_body_test.cpp`；不把该回归精度宣称为真实预报精度。另测毫米位移的潮汐极限、地心零差分、奇点、非法 GM、禁用无查询、取消后重用及覆盖先于力评估失败。
 
 ```powershell
 javac -cp $classpath -d out/validation/hpop tools/validation/orekit/OrbitForgeThirdBodyReference.java

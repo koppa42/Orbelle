@@ -102,6 +102,7 @@ struct HpopOptions {
     // 0/0 selects the chosen model's monopole. File models support up to degree 2190, within their
     // actual order limit.
     int gravity_degree = 8, gravity_order = 8;
+    // RKF 7(8) advances order 7; RKV 8(9) advances order 8. Both use embedded error control.
     HpopIntegrator integrator = HpopIntegrator::rkf78;
     // Final force update after Gauss-Jackson corrector convergence; inactive otherwise.
     HpopCorrection correction = HpopCorrection::full;

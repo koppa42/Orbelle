@@ -1066,7 +1066,7 @@ bool edit_hpop_settings(
         section(integration_page, QStringLiteral("积分方法"), "hpopIntegratorMethodSection");
     auto *method = new QComboBox;
     method->setObjectName("hpopIntegrator");
-    method->addItems({QStringLiteral("RKF78 · 自适应步长"), QStringLiteral("RK4 · 固定步长"),
+    method->addItems({QStringLiteral("RKF 7(8) · 自适应步长"), QStringLiteral("RK4 · 固定步长"),
                       QStringLiteral("RKV 8(9) Efficient · 自适应步长"),
                       QStringLiteral("Bulirsch–Stoer · 自适应步长"),
                       QStringLiteral("Gauss–Jackson 12 · 固定步长")});

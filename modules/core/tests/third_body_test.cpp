@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -57,6 +58,7 @@ TEST(ThirdBody, MovingSunAndMoonMatchIndependentOrekitIntegration) {
     ASSERT_TRUE(source);
     std::string line;
     std::size_t cases = 0;
+    double maximum_position = 0, maximum_velocity = 0, maximum_refinement = 0;
     while (std::getline(source, line)) {
         if (line.empty() || line[0] == '#')
             continue;
@@ -81,6 +83,8 @@ TEST(ThirdBody, MovingSunAndMoonMatchIndependentOrekitIntegration) {
         options.gravity_degree = options.gravity_order = 0;
         options.third_body(orbitforge::core::ThirdBody::sun).enabled = mode != 1;
         options.third_body(orbitforge::core::ThirdBody::moon).enabled = mode != 0;
+        // Isolate the force comparison from the seventh-order long-arc truncation error.
+        options.max_step_seconds = 30;
         options.relative_tolerance = 1e-13;
         options.position_tolerance_m = 1e-5;
         options.velocity_tolerance_mps = 1e-8;
@@ -112,10 +116,26 @@ TEST(ThirdBody, MovingSunAndMoonMatchIndependentOrekitIntegration) {
         const auto provider = make_hpop(initial, options, {nullptr, nullptr, nullptr, bodies});
         expected.epoch = Epoch{static_cast<std::int64_t>(seconds * 1e9)};
         const auto result = provider->state_at(expected.epoch);
+        options.max_step_seconds = 15;
+        const auto refined = make_hpop(initial, options, {nullptr, nullptr, nullptr, bodies})
+                                 ->state_at(expected.epoch);
         SCOPED_TRACE(line);
         for (int i = 0; i < 3; ++i) {
             EXPECT_NEAR(result.position_m[i], expected.position_m[i], .002);
             EXPECT_NEAR(result.velocity_mps[i], expected.velocity_mps[i], 2e-6);
+            EXPECT_NEAR(refined.position_m[i], expected.position_m[i], .002);
+            EXPECT_NEAR(refined.velocity_mps[i], expected.velocity_mps[i], 2e-6);
+            EXPECT_NEAR(result.position_m[i], refined.position_m[i], 1e-4);
+            maximum_position =
+                std::max(maximum_position,
+                         std::max(std::abs(result.position_m[i] - expected.position_m[i]),
+                                  std::abs(refined.position_m[i] - expected.position_m[i])));
+            maximum_velocity =
+                std::max(maximum_velocity,
+                         std::max(std::abs(result.velocity_mps[i] - expected.velocity_mps[i]),
+                                  std::abs(refined.velocity_mps[i] - expected.velocity_mps[i])));
+            maximum_refinement = std::max(maximum_refinement,
+                                          std::abs(result.position_m[i] - refined.position_m[i]));
         }
         EXPECT_EQ(provider->state_at(expected.epoch).position_m, result.position_m);
         EXPECT_EQ(bodies->sun_calls > 1,
@@ -125,6 +145,9 @@ TEST(ThirdBody, MovingSunAndMoonMatchIndependentOrekitIntegration) {
         ++cases;
     }
     EXPECT_EQ(cases, 32U);
+    RecordProperty("maximum_position_error_m", maximum_position);
+    RecordProperty("maximum_velocity_error_mps", maximum_velocity);
+    RecordProperty("maximum_step_refinement_m", maximum_refinement);
 }
 TEST(ThirdBody, ResourceCoverageAndCancellationAreEnforcedBeforePublishingResults) {
     HpopOptions options;

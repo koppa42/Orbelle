@@ -82,9 +82,9 @@
 | Additional | Relativistic Accelerations；Satellite Mass | 已接入 IERS 2003 三项相对论、TAI 星历速度、自转轴方向与共享卫星质量；质量用于球形对应面积换算，不覆盖各自显式给定的面积质量比；相对论和球形质量语义分别与 Orekit 对照。见[相对论契约](relativity.md) |
 | Additional | Use Plugin；Plugin 选择；Plugin Settings | 待实现：注册、具名设置、生命周期、加速度及偏导契约、可复现配置和错误隔离 |
 | Additional | Advanced 子窗口 | 待实现：继续逐项核对官方高级设置；须与力模型版本和数值含义对应，不能放一个空入口 |
-| Integrator | Integration 方法 | 部分：RK4、RKF78、RKV 8(9) Efficient、Bulirsch–Stoer、Gauss–Jackson 12 已实现；RKV 已做 SciPy DOP853 / Orekit 数值对照及八阶收敛验证；Bulirsch–Stoer 已做 Hipparchus GBS / Orekit 对照、自动升阶及步长收敛；Gauss–Jackson 已做 Hipparchus GBS / Orekit 对照、固定步长收敛与两种校正验证；RKF 7(8) 的推进阶次语义及 STK 同配置验收仍待对齐 |
+| Integrator | Integration 方法 | 部分：RK4、RKF78、RKV 8(9) Efficient、Bulirsch–Stoer、Gauss–Jackson 12 已实现；RKV 已做 SciPy DOP853 / Orekit 数值对照及八阶收敛验证；Bulirsch–Stoer 已做 Hipparchus GBS / Orekit 对照、自动升阶及步长收敛；Gauss–Jackson 已做 Hipparchus GBS / Orekit 对照、固定步长收敛与两种校正验证；RKF 7(8) 已按官方定义改为七阶推进，并通过 Hipparchus / Orekit 对照和七阶收敛验证；STK 同配置验收仍待完成 |
 | Integrator | VOP；Predictor Corrector Scheme | 部分：Gauss–Jackson 的 Full/Pseudo Correction、有效组合和机动后重启已接入；VOP 通用变量方程仍待实现 |
-| Integrator | Fixed/Relative Error；Tolerance；Min/Max Step | 部分：RK4 / Gauss–Jackson 固定、RKF78 / RKV89 / Bulirsch–Stoer 混合绝对/相对控制；需对齐各方法语义并验证截图 1–86400 s 范围 |
+| Integrator | Fixed/Relative Error；Tolerance；Min/Max Step | 部分：RK4 / Gauss–Jackson 固定、RKF78 / RKV89 / Bulirsch–Stoer 混合绝对/相对控制；需按 STK 官方定义对齐各方法的有效组合与步长约束；截图范围只作参考 |
 | Integrator | Interpolation 方法；Order；VOP μ | 待实现：Lagrange、Hermite、VOP；误差、位置速度一致性及禁止跨脉冲插值 |
 | Integrator | Allow PosVel Covariance Interpolation | 待实现：协方差传播完成后验证插值、对称性与半正定性 |
 | Integrator | Time Regularization；Exponent；Steps Per Orbit | 待实现：正则化时间变换及高偏心轨道、正反向和边界事件 |
@@ -164,7 +164,7 @@ a_drag = −0.5 ρ Cd (A_drag / m) |v_relative| v_relative
 
 ## 4. 积分与结果输出
 
-力模型、积分算法、方程形式、误差控制、输出采样和插值分别配置。已验证的 RKF78 继续保留，但公开其八阶推进方式与误差估计；不能把它与 STK 文档所述的 RKF7(8) 控制行为视为逐位相同。
+力模型、积分算法、方程形式、误差控制、输出采样和插值分别配置。RKF 7(8) 已按官方定义使用七阶推进、八阶嵌入误差估计；采用独立成熟参考和解析收敛验证。误差范数与步长控制器仍是本项目实现，不能据此声称与 STK 逐位相同。
 
 目标包括 RK4、RKF7(8)、RKV8(9)、Bulirsch–Stoer、Gauss–Jackson；VOP 和时间正则化是额外的方程设置，不能作为几个算法的同义名称。每项实现需独立阶数 / 收敛测试，固定步长与自适应控制的有效组合由模型描述规定。Gauss–Jackson 特别验证起步、反向积分与机动后重启。[STK 积分设置](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)
 
