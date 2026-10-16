@@ -492,8 +492,9 @@ TEST_P(SundmanBoundaries, PhysicalEndpointsMatchIndependentReferenceWithoutOutOf
             max_v = std::max(max_v, error(result.cartesian(), ref.final, 3));
             boundary_count += result.boundary_steps;
             multisteps += result.multisteps;
-            if (method == 4)
+            if (method == 4) {
                 EXPECT_GT(result.multisteps, 100);
+            }
             return result.cartesian();
         };
         Cartesian coarse{}, fine{};
@@ -618,8 +619,9 @@ TEST(SundmanBounded, ForceDiscontinuitiesUseOneSidedCoverageAndExactPhysicalGate
             EXPECT_GT(nodes, 100);
             EXPECT_LT(error(result.cartesian(), expected, 0), 1e-5);
             EXPECT_LT(error(result.cartesian(), expected, 3), 1e-8);
-            if (method == HpopIntegrator::gauss_jackson)
+            if (method == HpopIntegrator::gauss_jackson) {
                 EXPECT_GT(result.multisteps, 100);
+            }
         }
     }
 }
