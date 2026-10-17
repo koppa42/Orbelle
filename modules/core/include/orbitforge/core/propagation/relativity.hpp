@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <orbitforge/core/propagation/force_differential.hpp>
 
 namespace orbitforge::core {
 struct RelativityEvaluation {
@@ -21,4 +22,18 @@ evaluate_relativity(const std::array<double, 3> &position_m,
                     const std::array<double, 3> &sun_position_m,
                     const std::array<double, 3> &sun_velocity_mps, double sun_mu,
                     const std::array<double, 3> &earth_pole);
+struct RelativityDifferential {
+    ForceDifferential schwarzschild, lense_thirring, de_sitter, total;
+};
+// Analytic spacecraft position/velocity derivatives of all three terms above.
+// The force epoch, Earth pole and geometric Sun state are fixed, in the same
+// inertial axes and SI units as evaluate_relativity(). No ephemeris time or
+// parameter derivatives are included. Invalid/singular inputs or nonfinite
+// derivatives throw invalid_argument, without returning partial results.
+[[nodiscard]] RelativityDifferential
+relativity_differential(const std::array<double, 3> &position_m,
+                        const std::array<double, 3> &velocity_mps, double earth_mu,
+                        const std::array<double, 3> &sun_position_m,
+                        const std::array<double, 3> &sun_velocity_mps, double sun_mu,
+                        const std::array<double, 3> &earth_pole);
 } // namespace orbitforge::core

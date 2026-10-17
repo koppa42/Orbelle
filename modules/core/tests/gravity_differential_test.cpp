@@ -206,7 +206,7 @@ TEST(GravityDifferential, MonopoleMatchesClosedFormAndRejectsInvalidInputs) {
         invariants(actual);
     }
     const Vector position{7e6, 0, 0};
-    for (const auto size : {std::pair{-1, 0}, {1, 0}, {21, 20}, {20, 21}, {20, -1}}) {
+    for (const auto &size : {std::pair{-1, 0}, {1, 0}, {21, 20}, {20, 21}, {20, -1}}) {
         EXPECT_THROW((void)model->differential(position, size.first, size.second),
                      std::invalid_argument);
     }

@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <optional>
+#include <orbitforge/core/propagation/force_differential.hpp>
 #include <orbitforge/core/time/epoch.hpp>
 #include <span>
 #include <stdexcept>
@@ -118,4 +119,11 @@ class IThirdBodyEphemeris {
 [[nodiscard]] std::array<double, 3> third_body_acceleration(const std::array<double, 3> &satellite,
                                                             const std::array<double, 3> &body,
                                                             double mu);
+// Analytic derivative with respect to the spacecraft state, holding body position
+// and GM fixed at the force epoch. Includes the same geocentric differential
+// acceleration; its origin term has zero state derivative. The velocity block
+// is exactly zero. Throws invalid_argument on invalid or singular inputs/results.
+[[nodiscard]] ForceDifferential third_body_differential(const std::array<double, 3> &satellite,
+                                                        const std::array<double, 3> &body,
+                                                        double mu);
 } // namespace orbitforge::core

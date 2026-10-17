@@ -83,4 +83,21 @@ std::array<double, 3> third_body_acceleration(const std::array<double, 3> &r,
     }
     return result;
 }
+ForceDifferential third_body_differential(const std::array<double, 3> &r,
+                                          const std::array<double, 3> &rb, double mu) {
+    ForceDifferential result;
+    result.acceleration_mps2 = third_body_acceleration(r, rb, mu);
+    const std::array delta{r[0] - rb[0], r[1] - rb[1], r[2] - rb[2]};
+    const double separation = std::hypot(delta[0], delta[1], delta[2]);
+    const double scale = mu / separation / separation / separation;
+    for (std::size_t i = 0; i < 3; ++i)
+        for (std::size_t j = i; j < 3; ++j) {
+            const double value =
+                scale * (3 * (delta[i] / separation) * (delta[j] / separation) - (i == j ? 1 : 0));
+            if (!std::isfinite(value))
+                throw std::invalid_argument("Third-body gravity differential is not finite");
+            result.position_jacobian_per_s2[i][j] = result.position_jacobian_per_s2[j][i] = value;
+        }
+    return result;
+}
 } // namespace orbitforge::core

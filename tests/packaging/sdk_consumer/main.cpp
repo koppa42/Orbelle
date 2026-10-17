@@ -2,6 +2,7 @@
 #include <iostream>
 #include <orbitforge/application/project_document.hpp>
 #include <orbitforge/application/scenario.hpp>
+#include <orbitforge/core/propagation/relativity.hpp>
 #include <orbitforge/runtime/access.hpp>
 #include <orbitforge/runtime/analysis.hpp>
 #include <orbitforge/runtime/data_catalog.hpp>
@@ -90,6 +91,14 @@ int main(int argc, char **argv) try {
         if (gravity_max_degree != 2190 || !std::isfinite(full[2]) ||
             std::abs(full[2] - truncated[2]) < 1e-8)
             return 34;
+        const auto third = third_body_differential({}, {0, 1e8, 0}, 1e12);
+        const auto rel = relativity_differential({7e6, 0, 0}, {}, 3.986004415e14, {1.496e11, 0, 0},
+                                                 {0, 30000, 0}, 1.3271244004127942e20, {0, 0, 1});
+        if (std::abs(third.position_jacobian_per_s2[1][1] - 2e-12) > 1e-27 ||
+            rel.lense_thirring.acceleration_mps2 != std::array<double, 3>{} ||
+            rel.lense_thirring.velocity_jacobian_per_s[0][1] == 0 ||
+            rel.de_sitter.velocity_jacobian_per_s[0][1] == 0)
+            return 57;
         const auto differential = field.differential({6378146.3, 0, 0}, 2190, 2159);
         const auto &jacobian = differential.position_jacobian_per_s2;
         if (differential.acceleration_mps2 != full || !std::isfinite(jacobian[0][2]) ||
