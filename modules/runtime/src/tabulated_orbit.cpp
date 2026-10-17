@@ -1,3 +1,4 @@
+#include "interpolation_identity.hpp"
 #include <orbitforge/runtime/tabulated_orbit.hpp>
 #include <utility>
 
@@ -11,8 +12,11 @@ application::Session make_tabulated_orbit_session(std::vector<core::OrbitEphemer
     const std::string algorithm = std::string("tabulated-orbit-tai-bracketed-nearest-v1;") +
                                   (options.method == core::OrbitInterpolationMethod::lagrange
                                        ? "lagrange-independent-barycentric"
-                                       : "hermite-posvel-newton") +
-                                  ";order=" + std::to_string(options.order);
+                                   : options.method == core::OrbitInterpolationMethod::hermite
+                                       ? "hermite-posvel-newton"
+                                       : "vop-universal-transport-v1") +
+                                  ";order=" + std::to_string(options.order) +
+                                  detail::interpolation_mu_identity(options);
     return {std::move(provider), {std::move(object_id), input_revision, algorithm}};
 }
 } // namespace orbitforge::runtime

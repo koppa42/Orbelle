@@ -1,3 +1,4 @@
+#include "interpolation_identity.hpp"
 #include <orbitforge/application/project.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
@@ -191,15 +192,15 @@ application::Session make_hpop_ephemeris_session(core::CartesianState initial, c
                                                  const std::function<void()> &checkpoint) {
     core::validate_orbit_interpolation(interpolation);
     options.interpolation = interpolation;
-    auto algorithm =
-        hpop_algorithm(options, environment) + ";ephemeris=continuous-accepted-gated-v1;from=" +
-        std::to_string(initial.epoch.tai_nanoseconds()) +
-        ";to=" + std::to_string(end.tai_nanoseconds()) +
-        ";report-ns=" + std::to_string(reporting_step_nanoseconds) +
-        ";interpolation=bracketed-nearest-v1;method=" +
-        (interpolation.method == core::OrbitInterpolationMethod::lagrange ? "lagrange"
-                                                                          : "hermite") +
-        ";interpolation-order=" + std::to_string(interpolation.order);
+    auto algorithm = hpop_algorithm(options, environment) +
+                     ";ephemeris=continuous-accepted-gated-v1;from=" +
+                     std::to_string(initial.epoch.tai_nanoseconds()) +
+                     ";to=" + std::to_string(end.tai_nanoseconds()) +
+                     ";report-ns=" + std::to_string(reporting_step_nanoseconds) +
+                     ";interpolation=bracketed-nearest-v1;method=" +
+                     detail::interpolation_name(interpolation.method) +
+                     ";interpolation-order=" + std::to_string(interpolation.order) +
+                     detail::interpolation_mu_identity(interpolation);
     auto arcs = core::propagate_hpop_ephemeris(initial, end, options, std::move(environment),
                                                reporting_step_nanoseconds, checkpoint);
     return {core::make_tabulated_orbit(std::move(arcs), interpolation, checkpoint),
@@ -210,16 +211,16 @@ application::Session make_hpop_interpolated_session(core::CartesianState initial
                                                     core::HpopEnvironment environment,
                                                     std::int64_t reporting_step_nanoseconds,
                                                     std::string object_id, std::uint64_t revision) {
-    auto algorithm =
-        hpop_algorithm(options, environment) + ";ephemeris=bounded-accepted-support-v1;initial=" +
-        std::to_string(initial.epoch.tai_nanoseconds()) +
-        ";first=" + std::to_string(first.tai_nanoseconds()) +
-        ";last=" + std::to_string(last.tai_nanoseconds()) +
-        ";report-ns=" + std::to_string(reporting_step_nanoseconds) +
-        ";interpolation=bracketed-nearest-v1;method=" +
-        (options.interpolation.method == core::OrbitInterpolationMethod::lagrange ? "lagrange"
-                                                                                  : "hermite") +
-        ";interpolation-order=" + std::to_string(options.interpolation.order);
+    auto algorithm = hpop_algorithm(options, environment) +
+                     ";ephemeris=bounded-accepted-support-v1;initial=" +
+                     std::to_string(initial.epoch.tai_nanoseconds()) +
+                     ";first=" + std::to_string(first.tai_nanoseconds()) +
+                     ";last=" + std::to_string(last.tai_nanoseconds()) +
+                     ";report-ns=" + std::to_string(reporting_step_nanoseconds) +
+                     ";interpolation=bracketed-nearest-v1;method=" +
+                     detail::interpolation_name(options.interpolation.method) +
+                     ";interpolation-order=" + std::to_string(options.interpolation.order) +
+                     detail::interpolation_mu_identity(options.interpolation);
     return {core::make_hpop_interpolated(initial, first, last, options, std::move(environment),
                                          reporting_step_nanoseconds),
             {std::move(object_id), revision, std::move(algorithm)}};

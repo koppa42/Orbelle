@@ -69,7 +69,8 @@ TEST(HpopEphemerisSession, BothInterpolatorsMatchCspiceForCircularAndEccentricCo
                     options.position_tolerance_m = 1e-8;
                     options.velocity_tolerance_mps = 1e-11;
                     for (auto method :
-                         {OrbitInterpolationMethod::lagrange, OrbitInterpolationMethod::hermite}) {
+                         {OrbitInterpolationMethod::lagrange, OrbitInterpolationMethod::hermite,
+                          OrbitInterpolationMethod::vop}) {
                         for (auto report : {0LL, 30'000'000'000LL}) {
                             SCOPED_TRACE(static_cast<int>(integrator));
                             SCOPED_TRACE(e);
@@ -209,8 +210,8 @@ TEST(HpopProjectInterpolation, ShortForwardBackwardAndSplitIntervalsMatchCspice)
             GTEST_SKIP();
         }
         double max_r = 0, max_v = 0;
-        for (auto method :
-             {OrbitInterpolationMethod::lagrange, OrbitInterpolationMethod::hermite}) {
+        for (auto method : {OrbitInterpolationMethod::lagrange, OrbitInterpolationMethod::hermite,
+                            OrbitInterpolationMethod::vop}) {
             for (auto integrator :
                  {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
                   HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
@@ -302,8 +303,8 @@ TEST(HpopProjectInterpolation, MissionBurnsAndStoppedPrefixMatchIndependentCspic
         for (std::size_t axis = 0; axis < 3; ++axis)
             after_final.velocity_mps[axis] += dd[axis];
         double max_r = 0, max_v = 0;
-        for (auto method :
-             {OrbitInterpolationMethod::lagrange, OrbitInterpolationMethod::hermite}) {
+        for (auto method : {OrbitInterpolationMethod::lagrange, OrbitInterpolationMethod::hermite,
+                            OrbitInterpolationMethod::vop}) {
             for (auto integrator :
                  {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
                   HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
@@ -462,7 +463,9 @@ TEST(HpopProjectInterpolation, RegularizedTinyEpochsAndMaximumOrderStayInsideThe
                  {core::OrbitInterpolationOptions{OrbitInterpolationMethod::lagrange, 0},
                   core::OrbitInterpolationOptions{OrbitInterpolationMethod::hermite, 3},
                   core::OrbitInterpolationOptions{OrbitInterpolationMethod::lagrange, 29},
-                  core::OrbitInterpolationOptions{OrbitInterpolationMethod::hermite, 29}}) {
+                  core::OrbitInterpolationOptions{OrbitInterpolationMethod::hermite, 29},
+                  core::OrbitInterpolationOptions{OrbitInterpolationMethod::vop, 0},
+                  core::OrbitInterpolationOptions{OrbitInterpolationMethod::vop, 29}}) {
                 SCOPED_TRACE(::testing::Message()
                              << static_cast<int>(integrator) << " sign=" << sign
                              << " method=" << static_cast<int>(interpolation.method)
@@ -499,5 +502,33 @@ TEST(HpopProjectInterpolation, RegularizedTinyEpochsAndMaximumOrderStayInsideThe
                           actual.states()[1].position_m);
             }
         }
+    }
+}
+
+TEST(HpopProjectInterpolation,
+     VopMuOnlyChangesEffectiveAnalysisReportAndSessionIdentityWhenActive) {
+    for (auto method : {OrbitInterpolationMethod::lagrange, OrbitInterpolationMethod::hermite,
+                        OrbitInterpolationMethod::vop}) {
+        application::Project project{"VOP GM", Epoch{0}, Epoch{600'000'000'000}};
+        application::ProjectSatellite satellite;
+        satellite.orbit.propagator = OrbitPropagator::hpop;
+        satellite.orbit.first = project.first;
+        satellite.orbit.last = project.last;
+        satellite.orbit.hpop.gravity_degree = satellite.orbit.hpop.gravity_order = 0;
+        satellite.orbit.hpop.interpolation = {method, 7, 3.986004415e14};
+        project.satellites.push_back(satellite);
+        const auto input = application::analysis_input_sha256(project);
+        const auto report = runtime::report_input_sha256(project);
+        const auto algorithm =
+            runtime::make_orbit_session(project.satellites[0].orbit).provenance().algorithm;
+        project.satellites[0].orbit.hpop.interpolation.vop_mu = 4.1e14;
+        const bool active = method == OrbitInterpolationMethod::vop;
+        EXPECT_EQ(application::analysis_input_sha256(project) != input, active);
+        EXPECT_EQ(runtime::report_input_sha256(project) != report, active);
+        EXPECT_EQ(runtime::make_orbit_session(project.satellites[0].orbit).provenance().algorithm !=
+                      algorithm,
+                  active);
+        const auto restored = application::decode_project(application::encode_project(project));
+        EXPECT_EQ(restored.satellites[0].orbit.hpop.interpolation.vop_mu, 4.1e14);
     }
 }

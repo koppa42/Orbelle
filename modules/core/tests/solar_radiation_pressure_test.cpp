@@ -779,7 +779,8 @@ TEST(SrpBoundary, ScientificInterpolationUsesWithinArcNodesAndCancellationPublis
     environment.ephemeris = std::make_shared<MovingSolarSystem>();
     for (bool regularized : {false, true})
         for (auto interpolation :
-             {OrbitInterpolationMethod::hermite, OrbitInterpolationMethod::lagrange})
+             {OrbitInterpolationMethod::hermite, OrbitInterpolationMethod::lagrange,
+              OrbitInterpolationMethod::vop})
             for (int direction : {-1, 1}) {
                 SCOPED_TRACE(regularized);
                 SCOPED_TRACE(direction);

@@ -1,3 +1,4 @@
+#include "universal_kepler.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -10,13 +11,16 @@
 namespace orbitforge::core {
 void validate_orbit_interpolation(const OrbitInterpolationOptions &options) {
     if (options.method != OrbitInterpolationMethod::lagrange &&
-        options.method != OrbitInterpolationMethod::hermite)
+        options.method != OrbitInterpolationMethod::hermite &&
+        options.method != OrbitInterpolationMethod::vop)
         throw std::invalid_argument("Unknown orbit interpolation method");
     if (options.order < 0 || options.order > 29 ||
         (options.method == OrbitInterpolationMethod::hermite &&
          (options.order < 3 || options.order % 2 != 1)))
         throw std::invalid_argument(
-            "Lagrange order must be 0..29; Hermite order must be odd 3..29");
+            "Lagrange/VOP order must be 0..29; Hermite order must be odd 3..29");
+    if (!std::isfinite(options.vop_mu) || options.vop_mu <= 0)
+        throw std::invalid_argument("VOP interpolation GM must be finite and positive");
 }
 namespace {
 std::int64_t ticks(const CartesianState &state) { return state.epoch.tai_nanoseconds(); }
@@ -55,6 +59,9 @@ class TabulatedOrbit final : public IStateProvider {
         const auto &first = arcs_.front().front();
         if (!valid_frame(first.frame) || first.origin != OriginId::earth)
             throw std::invalid_argument("Unsupported ephemeris origin/frame");
+        if (options_.method == OrbitInterpolationMethod::vop && first.frame != FrameId::gcrf &&
+            first.frame != FrameId::spice_j2000)
+            throw std::invalid_argument("VOP interpolation requires GCRF or SPICE J2000 axes");
         for (std::size_t a = 0; a < arcs_.size(); ++a) {
             const auto &arc = arcs_[a];
             if (checkpoint)
@@ -75,6 +82,8 @@ class TabulatedOrbit final : public IStateProvider {
                 if (!finite(arc[i]) || arc[i].frame != first.frame || arc[i].origin != first.origin)
                     throw std::invalid_argument(
                         "Ephemeris nodes require finite states in one origin/frame");
+                if (options_.method == OrbitInterpolationMethod::vop)
+                    (void)transport(arc[i], arc[i].epoch, checkpoint);
                 if (i && ticks(arc[i]) <= ticks(arc[i - 1]))
                     throw std::invalid_argument(
                         "Ephemeris nodes must have strictly increasing epochs");
@@ -105,6 +114,8 @@ class TabulatedOrbit final : public IStateProvider {
         if (right != arc.end() && ticks(*right) == t)
             return *right;
         if (options_.order == 0) {
+            if (options_.method == OrbitInterpolationMethod::vop)
+                return transport(*std::prev(right), epoch, checkpoint);
             auto held = *std::prev(right);
             held.epoch = epoch;
             return held;
@@ -131,9 +142,20 @@ class TabulatedOrbit final : public IStateProvider {
             if (std::abs(x[i]) < std::abs(x[anchor]))
                 anchor = i;
         }
-        auto result = options_.method == OrbitInterpolationMethod::lagrange
-                          ? lagrange(window, x, anchor, epoch)
-                          : hermite(window, x, anchor, scale, epoch);
+        auto result = window[anchor];
+        if (options_.method == OrbitInterpolationMethod::vop) {
+            // The query epoch is the common reference for the osculating parameters.
+            // Use original node times for the polynomial; only the states are transported.
+            OrbitEphemerisArc parameters;
+            parameters.reserve(count_);
+            for (std::size_t i = 0; i < count_; ++i)
+                parameters.push_back(transport(window[i], epoch, checkpoint));
+            result = lagrange(parameters, x, anchor, epoch);
+        } else {
+            result = options_.method == OrbitInterpolationMethod::lagrange
+                         ? lagrange(window, x, anchor, epoch)
+                         : hermite(window, x, anchor, scale, epoch);
+        }
         if (!finite(result))
             throw PropagationError("Ephemeris interpolation produced a nonfinite state");
         if (checkpoint)
@@ -142,6 +164,19 @@ class TabulatedOrbit final : public IStateProvider {
     }
 
   private:
+    CartesianState transport(const CartesianState &node, Epoch epoch,
+                             const std::function<void()> &checkpoint) const {
+        const auto &r = node.position_m;
+        const auto &v = node.velocity_mps;
+        const auto state =
+            detail::universal_kepler({r[0], r[1], r[2], v[0], v[1], v[2]},
+                                     epoch.seconds_since(node.epoch), options_.vop_mu, checkpoint);
+        return {epoch,
+                node.origin,
+                node.frame,
+                {state[0], state[1], state[2]},
+                {state[3], state[4], state[5]}};
+    }
     CartesianState lagrange(std::span<const CartesianState> nodes, const std::array<double, 30> &x,
                             std::size_t anchor, Epoch epoch) const {
         std::array<double, 30> weights{};

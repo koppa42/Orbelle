@@ -189,6 +189,8 @@ std::string report_input_sha256(const application::Project &project) {
             core::validate_hpop_options(options);
             // Spherical accelerations use explicit A/m, independent of compatible area and mass.
             options.satellite_mass_kg = core::HpopOptions{}.satellite_mass_kg;
+            if (options.interpolation.method != core::OrbitInterpolationMethod::vop)
+                options.interpolation.vop_mu = core::OrbitInterpolationOptions{}.vop_mu;
             for (auto &body : options.third_bodies) {
                 if (!body.enabled)
                     body = {};

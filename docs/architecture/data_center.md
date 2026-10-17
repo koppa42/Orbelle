@@ -132,7 +132,7 @@ project.save("sun-moon.orbitforge", analysis=analysis)
 
 C++ 可用 `catalog.load_ephemeris("de440s")` 装配 `DataSnapshot::with_ephemeris()`，或设置 `HpopEnvironment::ephemeris` 后调用 `make_hpop()`；`HpopOptions::third_body(body)` 保存逐天体启用和 GM 来源（JPL DE / Cb file / User Specified）。Cb 常数是显式导入后捕获的配置值，位置仍来自统一管理的 DE440s，详见[第三体引力](third_body_gravity.md)。桌面、项目报告和任务序列 HPOP 滑行复用同一实现。
 
-项目 v38 记录 `ephemeris/<选择 ID>` 的清单内容与解释哈希，解释包含几何位置、轴、GM 常数集、TAI 速度导数约定及 CSPICE 版本；下载时间和本机路径不参与身份。数据变化先确认，拒绝则停止打开或重算。覆盖检查包含初始状态到查询/场景的完整积分路径，检查内部空洞，不仅检查两个端点。运行中的分析持有不可变资源。
+项目 v39 记录 `ephemeris/<选择 ID>` 的清单内容与解释哈希，解释包含几何位置、轴、GM 常数集、TAI 速度导数约定及 CSPICE 版本；下载时间和本机路径不参与身份。数据变化先确认，拒绝则停止打开或重算。覆盖检查包含初始状态到查询/场景的完整积分路径，检查内部空洞，不仅检查两个端点。运行中的分析持有不可变资源。
 
 ## 覆盖不足与有限外推
 

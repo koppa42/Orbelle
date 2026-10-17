@@ -125,11 +125,13 @@ PYBIND11_MODULE(_native, module) {
         py::arg("input_revision") = 1, py::call_guard<py::gil_scoped_release>());
     py::enum_<core::OrbitInterpolationMethod>(module, "OrbitInterpolationMethod")
         .value("LAGRANGE", core::OrbitInterpolationMethod::lagrange)
-        .value("HERMITE", core::OrbitInterpolationMethod::hermite);
+        .value("HERMITE", core::OrbitInterpolationMethod::hermite)
+        .value("VOP", core::OrbitInterpolationMethod::vop);
     py::class_<core::OrbitInterpolationOptions>(module, "OrbitInterpolationOptions")
         .def(py::init<>())
         .def_readwrite("method", &core::OrbitInterpolationOptions::method)
-        .def_readwrite("order", &core::OrbitInterpolationOptions::order);
+        .def_readwrite("order", &core::OrbitInterpolationOptions::order)
+        .def_readwrite("vop_mu", &core::OrbitInterpolationOptions::vop_mu);
     module.def(
         "make_tabulated_orbit_session",
         [](std::vector<core::OrbitEphemerisArc> arcs, core::OrbitInterpolationOptions options,

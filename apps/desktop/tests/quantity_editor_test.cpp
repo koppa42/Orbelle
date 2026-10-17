@@ -3280,4 +3280,82 @@ TEST_F(QuantityTest, HpopSrpBodyAssignmentSearchRadiusDraftsNestedCancelAndNarro
               (core::SrpEclipsingBody{core::ThirdBody::venus, 6000125}));
 }
 
+TEST_F(QuantityTest, HpopVopInterpolationMuDraftsUnitsValidationAndNarrowLayouts) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    core::HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    for (int pass = 0; pass < 3; ++pass) {
+        const auto saved = options;
+        QTimer::singleShot(0, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            ASSERT_TRUE(dialog);
+            dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(1);
+            auto *method = dialog->findChild<QComboBox *>("hpopInterpolation");
+            auto *order = dialog->findChild<QSpinBox *>("hpopInterpolationOrder");
+            auto *mu = dialog->findChild<QuantityEditor *>("hpopInterpolationMu");
+            ASSERT_TRUE(mu);
+            if (pass == 0) {
+                EXPECT_FALSE(mu->isEnabled());
+                method->setCurrentIndex(2);
+                EXPECT_TRUE(mu->isEnabled());
+                order->setValue(8);
+                mu->findChild<QLineEdit *>("quantityValue")->setText("0");
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+                EXPECT_TRUE(dialog->isVisible());
+                EXPECT_TRUE(dialog->findChild<QLabel *>("errorText")->isVisible());
+                mu->set_value(4.1e14, Unit::metres_cubed_per_second_squared);
+                method->setCurrentIndex(1);
+                EXPECT_FALSE(mu->isEnabled());
+                EXPECT_EQ(order->value(), 7);
+                method->setCurrentIndex(2);
+                EXPECT_TRUE(mu->isEnabled());
+                EXPECT_EQ(order->value(), 8);
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            } else {
+                EXPECT_EQ(method->currentIndex(), 2);
+                EXPECT_EQ(order->value(), 8);
+                EXPECT_DOUBLE_EQ(mu->value(Unit::metres_cubed_per_second_squared), 4.1e14);
+                mu->set_unit(Unit::metres_cubed_per_second_squared);
+                EXPECT_DOUBLE_EQ(mu->value(Unit::metres_cubed_per_second_squared), 4.1e14);
+                mu->set_unit(Unit::kilometres_cubed_per_second_squared);
+                for (int width : {430, 720}) {
+                    dialog->resize(width, 620);
+                    QEventLoop settled;
+                    QTimer::singleShot(60, &settled, &QEventLoop::quit);
+                    settled.exec();
+                    auto *scroll = dialog->findChild<QScrollArea *>("hpopIntegratorPage");
+                    scroll->ensureWidgetVisible(mu);
+                    QApplication::processEvents();
+                    EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+                    EXPECT_TRUE(dialog->rect().contains(
+                        dialog->findChild<QDialogButtonBox *>()->geometry()));
+                    const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+                    if (!capture.isEmpty()) {
+                        EXPECT_TRUE(QDir{}.mkpath(capture));
+                        EXPECT_TRUE(
+                            dialog->grab().save(capture + QString("/hpop-vop-%1.png").arg(width)));
+                    }
+                }
+                std::cout << "HPOP VOP DPR " << dialog->devicePixelRatioF() << '\n';
+                if (pass == 1) {
+                    mu->set_value(4.2e14, Unit::metres_cubed_per_second_squared);
+                    dialog->reject();
+                } else {
+                    method->setCurrentIndex(0);
+                    dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+                }
+            }
+        });
+        EXPECT_EQ(edit_hpop_settings(options, nullptr), pass != 1);
+        if (pass == 1)
+            EXPECT_EQ(options, saved);
+        else
+            EXPECT_DOUBLE_EQ(options.interpolation.vop_mu, 4.1e14);
+        if (pass == 0)
+            EXPECT_EQ(options.interpolation.method, core::OrbitInterpolationMethod::vop);
+        if (pass == 2)
+            EXPECT_EQ(options.interpolation.method, core::OrbitInterpolationMethod::lagrange);
+    }
+}
+
 } // namespace orbitforge::desktop

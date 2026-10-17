@@ -239,7 +239,7 @@ Core 的 `EveryBodyAndSourceActuallyChangesTheIntegratedForce` 将十个天体�
 - `Spice.MovingSunCertifiesHistoryAndGaps` 检查接收端点有数据而过去 Sun 链有洞、过去 Earth 数据缺失但不需要、接收区间内部缺口、反序和策略越界。远距离观测者所需发光时刻越界必须失败；失败后合法查询仍可用。
 - `SolarRadiationPressure.SunMethodsUseStageObserversAndKeepGravityGeometric` 检查三种方法真实进入正反向传播、卫星状态按积分阶段更新、第三体几何引力查询独立；不支持视太阳的 Provider 必须拒绝对应方法。
 - Python `test_srp.py` 使用固定 DE440s：三个方法分别改变轨迹/身份，保存重开精确复现，旧分析保持不变；运动与静止观测者不能返回相同视方向。原有 Orekit 几何基准显式选择 True，不用改基准值掩盖默认方法变化。
-- 当前 v38 / OBJS29 独立固定样例保存禁用的 Apparent 草稿；重算 CRC 后的未知太阳方法依然拒绝。安装后 SDK 调用新接口；桌面验证三选项、默认值、键盘切换、宽窄/DPI、保存后重开和取消。
+- 当前 v39 / OBJS30 独立固定样例保存禁用的 Apparent 草稿；重算 CRC 后的未知太阳方法依然拒绝。安装后 SDK 调用新接口；桌面验证三选项、默认值、键盘切换、宽窄/DPI、保存后重开和取消。
 
 上述为公开 NAIF 模型及路由验证；STK HPOP 同版本、同配置的轨迹验收仍未完成，遮挡体自身的视位置修正仍待实现。Boundary Mitigation 的球面实现及独立对照见下文[阴影边界修正](#srp-阴影边界修正)。
 
@@ -331,7 +331,7 @@ python -X utf8 tools/validation/generate_srp_multi_reference.py --output tests/r
 python -X utf8 tools/validation/generate_srp_multi_reference.py --trajectories --output tests/reference/propagators/srp_multi_trajectories.txt
 ```
 
-CSPICE 固定 DE440s 样例检查水星／金星物理中心与原生 `geometric_state` 一致；木星系统质心可读但 599 缺失时必须拒绝。另用独立构造的 599→5→0 合成 SPK 验证完整链和内部缺口。Python、SDK、v38 独立样例及修复 CRC 后的坏配置覆盖公共接口、身份、旧分析不可变和保存失败保留源文件。Qt 测试覆盖搜索、增删、半径单位、错误不提交、两层取消及 430/720 逻辑宽度；原生截图记录实际 DPR。
+CSPICE 固定 DE440s 样例检查水星／金星物理中心与原生 `geometric_state` 一致；木星系统质心可读但 599 缺失时必须拒绝。另用独立构造的 599→5→0 合成 SPK 验证完整链和内部缺口。Python、SDK、v39 独立样例及修复 CRC 后的坏配置覆盖公共接口、身份、旧分析不可变和保存失败保留源文件。Qt 测试覆盖搜索、增删、半径单位、错误不提交、两层取消及 430/720 逻辑宽度；原生截图记录实际 DPR。
 
 ## SRP 阴影边界修正
 

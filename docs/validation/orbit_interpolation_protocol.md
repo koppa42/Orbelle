@@ -1,6 +1,6 @@
 # 科学插值验证协议
 
-实现与 STK 参数语义见[科学轨道星历插值](../architecture/orbit_interpolation.md)。本协议验证显式表、HPOP 节点生成、普通项目与报告路由、任务序列分段，以及 C++ / Python Session 和桌面配置；VOP 与 STK 同配置结果尚未验收。
+实现与 STK 参数语义见[科学轨道星历插值](../architecture/orbit_interpolation.md)。本协议验证显式表、HPOP 节点生成、普通项目与报告路由、任务序列分段，以及 C++ / Python Session 和桌面配置；VOP 已有独立算法对照；STK 同配置结果尚未实测验收。
 
 ## 独立参考
 
@@ -50,7 +50,34 @@ Linux 将 classpath 分隔符 `;` 换为 `:`。先核验 JAR SHA-256，再生成
 - 上述两组实测最大位置/速度范数差分别为 `9.9730092046591679e-8 m` / `8.4433079570627125e-8 m/s`，以及 `1.9489929502716854e-7 m` / `1.8875521222523257e-10 m/s`。指标只适用于这些短弧配置。
 - `WeatherFiles.HpopEphemerisSplitsTheLeapSecondWeatherJumpInBothDirections` 另覆盖跳变两侧各 3 s 的短天气段：两种七阶插值、全部五种积分器、正反向、边界 ±1 ns。支持点必须落在各自段内；相对 RKV89 最大 0.2 s 的直接积分保持逐分量 `1 mm` / `1 µm/s` 门槛。这是分段和收敛测试，独立密度对照沿用大气协议。
 - 构造只验证环境；首次数值生成可以取消，随后重试成功。测试 Provider 在发布缓存后拒绝求力，乱序与并发查询仍成功；桌面通过带检查点的 `discontinuities` 生成间断列表。
-- 普通状态、单点报告与显式固定输出 Session 逐位相同；启用固定输出时修改轨道步长改变分析/报告身份，关闭时不改变；旧分析不可变。当前 v36 / OBJS27 固定样例由 `struct.pack` 独立组装，插值 `<IIB>` 与正则化 `<BdI>` 字段均有双层 CRC 及逐字节重写检查，精确字节与 SHA-256 见[样例说明](../../tests/integration/fixtures/README.md)。非法方法、阶数、布尔值及所有非当前版本拒绝。
+- 普通状态、单点报告与显式固定输出 Session 逐位相同；启用固定输出时修改轨道步长改变分析/报告身份，关闭时不改变；旧分析不可变。当前 v39 / OBJS30 固定样例由 `struct.pack` 独立组装，插值 `<IIdB>` 与正则化 `<BdI>` 字段均有双层 CRC 及逐字节重写检查，精确字节与 SHA-256 见[样例说明](../../tests/integration/fixtures/README.md)。非法方法、阶数、布尔值及所有非当前版本拒绝。
 - Qt offscreen 检查全部 HPOP 控件。新增交互覆盖偶数 Hermite 拒绝、切换保留各自草稿、键盘步进、应用、取消、重开和 430/720 逻辑宽度；原生 Windows 实际 DPR 1.5 / 2.25 各生成四张截图，人工核对代表性宽窄布局。独立 Python 3.13 与安装后 SDK 检查同一配置、公开入口和取消重试。
 
 命令、错误诊断、数值属性、独立安装和截图保留于 `out/validation/hpop-project-interpolation-20261017/`。短段支持点、固定输出点数不足时拒绝和局部窗口策略属于 OrbitForge 的公开政策，不能以本项通过代替 STK 实机数值验收。
+
+## VOP 通用变量与独立 μ
+
+固定 JAR 版本仍为 Orekit 13.1.2 / Hipparchus 4.0.2，SHA-256 由 `tools/validation/orekit/dependencies.json` 核验。新生成器不调用 OrbitForge，不增加运行依赖，输出 ASCII/LF；两次生成应逐字节相同。
+
+```text
+javac -cp <jars>/* -d <classes> tools/validation/orekit/OrbitForgeUniversalKeplerReference.java tools/validation/orekit/OrbitForgeVopInterpolationReference.java
+java -cp <classes>;<jars>/* OrbitForgeUniversalKeplerReference > universal_kepler.txt
+java -cp <classes>;<jars>/* OrbitForgeVopInterpolationReference vop_interpolation.txt
+```
+
+Linux 使用 `:` 分隔 classpath。通用变量基元对照 Orekit Cartesian NumericalPropagator + Hipparchus DP853 的直接 Newtonian 积分；参考不使用生产 Stumpff 求根器。80 组包含圆轨道、偏心率 .01/.7/.95/.999999/1/1.000001/1.4、倾斜方向、GEO、非零径向速度，以及正反向 1 ns、123.456789/6000/86400 s。参考自身用最大步长 10/5 s 检查，最大分量差 `1.16136e-5 m` / `1.18525e-8 m/s`；生产与参考以及来回映射的每轴门限均为 `5e-4 m` / `5e-7 m/s`。固定文件 `universal_kepler.txt` SHA-256 为 `ccce99eb79a1fa79b5d15d960ecc2eab6cb03d5f3d5f8bbce7b46f656bea8b93`。
+
+VOP 插值生成器使用 Orekit KeplerianPropagator 搬移节点，以 Hipparchus Neville 插值计算共同历元的参数，独立于生产重心算法。这是对 OrbitForge 公开配方的独立核对，不是 STK 导出的真值。153 组 / 1059 查询覆盖全部 0–29 阶、非均匀节点、圆/椭圆/双曲轨道、J2、正确 μ 和偏离底场 1% 的独立 μ、端点及内侧 1 ns。Core 和安装 Python 使用相同固定输入；绝对历元加上 `8000000000000000123 ns`。位置/速度范数差门限为 `2e-4 m` / `2e-7 m/s`，并分别验证纯二体真值。固定文件 `vop_interpolation.txt` SHA-256 为 `ed1d3d0ebcaf1869c25114e742ce64fc5d86deffd03505edef3e7750044de1f5`。
+
+另用 Orekit `J2OnlyPerturbation` 与 DP853 直接轨迹验证实际插值误差：GM `3.986004415e14 m³/s²`、参考半径 `6378136.3 m`、J2 `1.0826266835531513e-3`、固定 GCRF 对称轴、初态 `[7e6,0,0;0,6800,3000]` SI，七阶、17 个节点，间隔 600/300/150 s。参考自身最大步长 10/5 s 差为 `1.86265e-9 m` / `1.81899e-12 m/s`。两次减半均要求位置和速度误差至少减小 64 倍；150 s 的门限为 `2e-3 m` / `2e-6 m/s`。不预设 VOP 对任意轨道或普通 Lagrange 的固定改善倍数。
+
+固定样例实测：通用变量基元最大分量差 `1.11890e-5 m` / `1.19699e-8 m/s`，来回位置差 `3.69223e-6 m`；VOP 插值最大范数差 `1.55328e-6 m` / `2.76762e-9 m/s`。J2 600/300/150 s 的位置范数误差分别约 `79.5952 m`、`0.316210 m`、`0.00101074 m`，速度误差约 `0.0670958`、`0.000320939`、`1.07987e-6 m/s`。同一 300 s 样例普通 Lagrange 的位置误差为 `1.20329 m`，仅作为此配置的比较数据。这些是固定模型下的数值误差，不代表观测轨道预报精度。
+
+行为与集成检查包括：
+
+- 地心 GCRF / SPICE J2000，拒绝非惯性轴、零半径、径向轨道、非法 μ；精确整数节点、零阶二体推进、右连续机动、缺口及覆盖外拒绝、取消重试与并发。
+- VOP 扩展到全部五种积分器、普通/正则化时间、正反向短弧、机动、最高阶及纳秒短段，独立 CSPICE `prop2b` 门限沿用原协议。天气跳变、阴影接触段两侧及取消路径也覆盖三种插值；不跨分段补点。
+- 活动 μ 改变分析、报告及 Session 身份，非活动 μ 保存但不改变这些身份；旧分析保持不变。v39 / OBJS30 固定样例由 `struct.pack` 独立编码 μ，跨 C++ / Python 逐字节重写；CRC 修复后的非法字段及全部非当前版本仍拒绝。
+- Qt offscreen 和原生 Windows 验证独立 μ 的单位切换、灰显草稿、非法输入、方法各自阶数、确认/取消/重开；430/720 逻辑宽度、实际 DPR 1.5 / 2.25，人工核对窄宽截图。独立安装 Python 3.13、C++ SDK 消费端和九个示例均通过。
+
+完整日志、初次接入问题及修正后的结果保存在 `out/validation/hpop-vop-20261017/`。本增量只完成 VOP **插值**及独立 μ；VOP 积分方程与协方差插值仍待实现。

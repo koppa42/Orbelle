@@ -46,6 +46,15 @@ int main(int argc, char **argv) try {
         const auto state = session.sample(std::array{Epoch{17'123'456'789LL}}).states().front();
         if (!std::isfinite(state.position_m[0]))
             return 45;
+        const auto vop = orbitforge::runtime::make_tabulated_orbit_session(
+            nodes, {OrbitInterpolationMethod::vop, 1, egm96_mu});
+        const double dt = 17.123456789, phase = std::sqrt(egm96_mu / (7e6 * 7e6 * 7e6)) * dt;
+        const auto vop_state = vop.sample(std::array{Epoch{17'123'456'789LL}}).states().front();
+        if (std::hypot(vop_state.position_m[0] - 7e6 * std::cos(phase),
+                       vop_state.position_m[1] - 7e6 * std::sin(phase),
+                       vop_state.position_m[2]) > .001 ||
+            vop.provenance().algorithm.find("vop-mu=") == std::string::npos)
+            return 52;
         options.interpolation = {OrbitInterpolationMethod::lagrange, 7};
         const auto bounded = orbitforge::runtime::make_hpop_interpolated_session(
             initial, Epoch{-1'000'000'000}, Epoch{1'000'000'000}, options);

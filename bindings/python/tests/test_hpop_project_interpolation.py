@@ -69,7 +69,7 @@ class HpopProjectInterpolationTests(unittest.TestCase):
     def test_invalid_configuration_fails_before_project_mutation(self):
         project, satellite, _ = self.make()
         revision = project.revision
-        for values in ({"interpolation": "vop"}, {"interpolation_order": 6},
+        for values in ({"interpolation": "unknown"}, {"interpolation_order": 6},
                        {"interpolation_order": 31}, {"interpolation_order": True},
                        {"report_ephemeris_on_fixed_step": 1}):
             with self.subTest(values=values), self.assertRaises((TypeError, ValueError)):

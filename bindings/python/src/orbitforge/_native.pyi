@@ -1570,6 +1570,7 @@ def generate_report(project: Project, definition: ReportDefinition,
 class OrbitInterpolationMethod:
     LAGRANGE: OrbitInterpolationMethod
     HERMITE: OrbitInterpolationMethod
+    VOP: OrbitInterpolationMethod
     @property
     def name(self) -> str: ...
 
@@ -1577,6 +1578,7 @@ class OrbitInterpolationOptions:
     def __init__(self) -> None: ...
     method: OrbitInterpolationMethod
     order: int
+    vop_mu: float
 
 def make_tabulated_orbit_session(
     arcs: Sequence[Sequence[CartesianState]],

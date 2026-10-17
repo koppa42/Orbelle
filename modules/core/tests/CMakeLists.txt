@@ -1,5 +1,7 @@
-add_executable(orbitforge_core_tests circular_two_body_test.cpp tabulated_orbit_test.cpp ground_station_test.cpp hpop_test.cpp sundman_test.cpp mission_test.cpp gravity_test.cpp solid_tides_test.cpp ocean_tides_test.cpp relativity_test.cpp third_body_test.cpp solar_radiation_pressure_test.cpp atmospheric_drag_test.cpp)
+add_executable(orbitforge_core_tests universal_kepler_test.cpp vop_interpolation_test.cpp circular_two_body_test.cpp tabulated_orbit_test.cpp ground_station_test.cpp hpop_test.cpp sundman_test.cpp mission_test.cpp gravity_test.cpp solid_tides_test.cpp ocean_tides_test.cpp relativity_test.cpp third_body_test.cpp solar_radiation_pressure_test.cpp atmospheric_drag_test.cpp)
 target_compile_definitions(orbitforge_core_tests PRIVATE
+    ORBITFORGE_VOP_INTERPOLATION_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/vop_interpolation.txt"
+    ORBITFORGE_UNIVERSAL_KEPLER_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/universal_kepler.txt"
     ORBITFORGE_SRP_BOUNDARY_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/srp_boundaries.txt"
     ORBITFORGE_SUNDMAN_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/sundman.txt"
     ORBITFORGE_INTERPOLATION_REFERENCE=\"${PROJECT_SOURCE_DIR}/tests/reference/propagators/orbit_interpolation.txt\"

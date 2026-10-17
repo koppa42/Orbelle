@@ -390,8 +390,9 @@ class HpopSettings:
     include_secular_variations: bool = False
     correction: Literal["full", "pseudo"] = "full"
     step_control: Literal["relative_error", "fixed"] = "relative_error"
-    interpolation: Literal["lagrange", "hermite"] = "hermite"
+    interpolation: Literal["lagrange", "hermite", "vop"] = "hermite"
     interpolation_order: int = 7
+    interpolation_mu: float = 3.986004415e14
     report_ephemeris_on_fixed_step: bool = False
     time_regularization: bool = False
     regularization_exponent: float = 1.5
@@ -443,14 +444,16 @@ class HpopSettings:
         if self.integrator not in ("rkf78", "rk4", "rkv89", "bulirsch_stoer", "gauss_jackson"):
             raise ValueError("integrator must be 'rkf78', 'rk4', 'rkv89', 'bulirsch_stoer' or 'gauss_jackson'")
         for name in self.__dataclass_fields__:
-            if name not in ("integrator", "correction", "step_control", "interpolation", "interpolation_order", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides"):
+            if name not in ("integrator", "correction", "step_control", "interpolation", "interpolation_order", "interpolation_mu", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides"):
                 setattr(value, name, getattr(self, name))
-        if self.interpolation not in ("lagrange", "hermite"):
-            raise ValueError("interpolation must be lagrange or hermite")
+        if self.interpolation not in ("lagrange", "hermite", "vop"):
+            raise ValueError("interpolation must be lagrange, hermite or vop")
         interpolation = n.OrbitInterpolationOptions()
         interpolation.method = {"lagrange": n.OrbitInterpolationMethod.LAGRANGE,
-                                "hermite": n.OrbitInterpolationMethod.HERMITE}[self.interpolation]
+                                "hermite": n.OrbitInterpolationMethod.HERMITE,
+                                "vop": n.OrbitInterpolationMethod.VOP}[self.interpolation]
         interpolation.order = self.interpolation_order
+        interpolation.vop_mu = self.interpolation_mu
         value.interpolation = interpolation
         if self.step_control not in ("relative_error", "fixed"):
             raise ValueError("step_control must be relative_error or fixed")
@@ -480,10 +483,12 @@ class HpopSettings:
     @classmethod
     def _read(cls, value: n.HpopOptions) -> "HpopSettings":
         fields = {name: getattr(value, name) for name in cls.__dataclass_fields__
-                  if name not in ("integrator", "correction", "step_control", "interpolation", "interpolation_order", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides")}
+                  if name not in ("integrator", "correction", "step_control", "interpolation", "interpolation_order", "interpolation_mu", "third_bodies", "ephemeris", "body_gravity", "srp", "drag", "solid_tides", "ocean_tides")}
         fields["interpolation"] = {n.OrbitInterpolationMethod.LAGRANGE: "lagrange",
-                                   n.OrbitInterpolationMethod.HERMITE: "hermite"}[value.interpolation.method]
+                                   n.OrbitInterpolationMethod.HERMITE: "hermite",
+                                   n.OrbitInterpolationMethod.VOP: "vop"}[value.interpolation.method]
         fields["interpolation_order"] = value.interpolation.order
+        fields["interpolation_mu"] = value.interpolation.vop_mu
         rows = value.third_bodies
         fields["third_bodies"] = tuple(b for b, row in zip(THIRD_BODY_NAMES, rows) if row.enabled)
         sources = {n.ThirdBodyGravitySource.JPL_DE: "jpl_de",
@@ -602,7 +607,8 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          include_secular_variations: bool = False,
          correction: Literal["full", "pseudo"] = "full",
          step_control: Literal["relative_error", "fixed"] = "relative_error",
-         interpolation: Literal["lagrange", "hermite"] = "hermite", interpolation_order: int = 7,
+         interpolation: Literal["lagrange", "hermite", "vop"] = "hermite", interpolation_order: int = 7,
+         interpolation_mu: float = 3.986004415e14,
          report_ephemeris_on_fixed_step: bool = False,
          time_regularization: bool = False, regularization_exponent: float = 1.5,
          steps_per_orbit: int = 120) -> Orbit:
@@ -619,7 +625,9 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
     third_bodies=("sun", "moon") requires explicitly supplied DE440s ephemerides.
     sun_mu and moon_mu are optional overrides in m^3/s^2; None uses DE440 constants.
 
-    Scientific queries use the selected Lagrange or Hermite interpolation.
+    Scientific queries use Lagrange, Hermite or VOP interpolation (order 0..29; Hermite odd 3..29).
+    VOP uses independent interpolation_mu in m^3/s^2 to transport osculating states
+    to the query epoch; it does not change the force model or the integration equations.
     Fixed ephemeris reporting uses Orbit.step_seconds and truncates integration steps
     to those output times. Query sampling on analysis.states() remains independent.
     Omitted gravity_order uses gravity_degree; order=0 retains only zonal terms.
@@ -641,7 +649,7 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
         include_relativistic_accelerations, satellite_mass_kg,
         OceanTideSettings() if ocean_tides is None else require(ocean_tides, OceanTideSettings, "ocean_tides"),
         include_secular_variations, correction, step_control, interpolation, interpolation_order,
-        report_ephemeris_on_fixed_step, time_regularization, regularization_exponent,
+        interpolation_mu, report_ephemeris_on_fixed_step, time_regularization, regularization_exponent,
         steps_per_orbit)
     settings._native()  # Fail at construction, before changing a project.
     return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)

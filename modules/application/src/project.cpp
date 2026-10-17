@@ -25,7 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 38;
+constexpr std::uint32_t project_version = 39;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -43,7 +43,7 @@ struct SectionSchema {
 // One current schema, shared by the reader and writer. Null means an optional section.
 constexpr std::array section_schemas{
     SectionSchema{scene_tag, 1, "Missing scene section"},
-    SectionSchema{objects_tag, 29, "Missing satellites section"},
+    SectionSchema{objects_tag, 30, "Missing satellites section"},
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
     SectionSchema{sensors_tag, 1, "Missing sensors section"},
@@ -412,6 +412,8 @@ std::string analysis_input_sha256(const Project &project) {
             out.real(o.minimum_altitude_m);
             out.number(static_cast<unsigned>(o.interpolation.method), 4);
             out.number(static_cast<unsigned>(o.interpolation.order), 4);
+            if (o.interpolation.method == core::OrbitInterpolationMethod::vop)
+                out.real(o.interpolation.vop_mu);
             out.number(o.report_ephemeris_on_fixed_step, 1);
             if (o.report_ephemeris_on_fixed_step)
                 out.number(static_cast<unsigned>(orbit.step_seconds), 4);
@@ -844,6 +846,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
                 objects.real(v);
             objects.number(static_cast<unsigned>(o.interpolation.method), 4);
             objects.number(static_cast<unsigned>(o.interpolation.order), 4);
+            objects.real(o.interpolation.vop_mu);
             objects.number(o.report_ephemeris_on_fixed_step, 1);
             objects.number(o.time_regularization, 1);
             objects.real(o.regularization_exponent);
@@ -1060,11 +1063,12 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             o.fixed_step_seconds = objects.real();
             o.minimum_altitude_m = objects.real();
             const auto interpolation = objects.number(4);
-            check(interpolation <= 1, "Unsupported HPOP interpolation method");
+            check(interpolation <= 2, "Unsupported HPOP interpolation method");
             o.interpolation.method = static_cast<core::OrbitInterpolationMethod>(interpolation);
             const auto interpolation_order = objects.number(4);
             check(interpolation_order <= 29, "Unsupported HPOP interpolation order");
             o.interpolation.order = static_cast<int>(interpolation_order);
+            o.interpolation.vop_mu = objects.real();
             o.report_ephemeris_on_fixed_step = objects.boolean();
             o.time_regularization = objects.boolean();
             o.regularization_exponent = objects.real();

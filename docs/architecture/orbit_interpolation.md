@@ -1,16 +1,24 @@
 # 科学轨道星历插值
 
-`core::make_tabulated_orbit` 与 `runtime::make_tabulated_orbit_session` 接收显式的 `OrbitEphemerisArc` 数组，拥有不可变节点副本。桌面显示轨迹不进入这个接口；它是科学查询的计算基础。`propagate_hpop_ephemeris` 已能生成真实 HPOP 节点，`make_hpop_ephemeris_session` 将其接到同一插值实现，详见下文。普通项目、任务 HPOP 滑行、分析与报告已自动使用有界科学星历；积分器页配置插值方法、阶数与固定输出。直接积分工厂保留为数值内核和对照入口。
+`core::make_tabulated_orbit` 与 `runtime::make_tabulated_orbit_session` 接收显式的 `OrbitEphemerisArc` 数组，拥有不可变节点副本。桌面显示轨迹不进入这个接口；它是科学查询的计算基础。`propagate_hpop_ephemeris` 已能生成真实 HPOP 节点，`make_hpop_ephemeris_session` 将其接到同一插值实现，详见下文。普通项目、任务 HPOP 滑行、分析与报告已自动使用有界科学星历；积分器页配置插值方法、阶数、VOP μ 与固定输出。直接积分工厂保留为数值内核和对照入口。
 
 ## 数学语义
 
 按 [STK Integrator](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm) 的定义，`lagrange` 对位置和速度各分量分别插值；输出速度一般不等于位置多项式的导数。`hermite` 同时约束节点位置与速度，输出同一个位置多项式及其对 TAI 秒的导数。调用者必须提供该参考系中相对于 TAI 秒的坐标导数，不能将 TDB 速度或不同坐标系混入。
 
-[STK Connect](https://help.agi.com/stk/SubSystems/connectCmds/Content/cmd_HPOPIntegrator.htm) 的阶数范围对应多项式次数：Lagrange 为 0–29，需要 `order+1` 点；Hermite 为奇数 3–29，需要 `(order+1)/2` 点。`OrbitInterpolationOptions` 默认 Hermite 7 是本接口的选择，不声称是 STK 默认值。VOP 插值及其 μ 尚未实现。
+[STK Connect](https://help.agi.com/stk/SubSystems/connectCmds/Content/cmd_HPOPIntegrator.htm) 的阶数范围对应多项式次数：Lagrange / VOP 为 0–29，需要 `order+1` 点；Hermite 为奇数 3–29，需要 `(order+1)/2` 点。`OrbitInterpolationOptions` 默认 Hermite 7 是本接口的选择，不声称是 STK 默认值。VOP 使用独立、有限且正的 `vop_mu`（m³/s²），默认 `3.986004415e14`；此默认是 OrbitForge 的选择，不覆盖底场 GM。VOP 插值独立于积分方程，当前积分仍采用 Cowell。
 
 查询先保留左右包围节点，再按距离补齐连续窗口，距离相同优先较早节点；这样不等间隔采样也不会在局部窗口外求值。窗口在同一段内向端点移动，不减少阶数。Lagrange 0 阶按左节点保持，并将节点时刻标为间断。精确命中任一整数纳秒节点时直接返回原状态，包括输入速度。这些窗口、零阶及端点约定是 OrbitForge 的明确政策，仍需 STK 同配置实测核对。
 
 计算先求局部 TAI 秒差，以窗口跨度归一化，避免大绝对历元损失相邻纳秒。Lagrange 用第二重心公式、权重归一化及补偿求和，并减去邻近节点的状态常数。Hermite 用合流 Newton 差商，先扣除邻近节点的直线运动，再用同一嵌套多项式同时求值及导数。无法分辨的浮点节点、病态重心权重或非有限结果明确报错。高阶并不保证高精度；调用者仍须用减半采样间隔和独立轨迹检验误差。
+
+## VOP 插值
+
+选择 `OrbitInterpolationMethod::vop` 时，以查询历元为共同参考，先将每个窗口节点 `X_i` 通过通用变量二体映射 `Φ(t−t_i, X_i; μ)` 搬移至查询时刻，再用原节点时刻的 Lagrange 权重分别插值六个 Cartesian 参数：`X(t)=Σ L_i(t) Φ(t−t_i, X_i; μ)`。正向、反向、椭圆、抛物和双曲映射使用半径归一化的 Stumpff 方程及有界求根；椭圆多圈时间按周期约减。它不查询力模型或外部数据，也不改变积分器的方程形式。
+
+该配方满足公开 VOP 参数语义，并有独立 Orekit / Hipparchus 对照；STK 未公开此插值器的全部实现细节，不能据此声称逐位复现 STK。窗口及端点规则与 Lagrange 相同；零阶将左节点按二体运动传播到查询时刻，不保持原位置。精确节点直接返回输入。仅接受地心 GCRF / SPICE J2000 惯性轴下非零半径、数值可分辨的非径向轨道；拒绝 ITRF、TEME、径向碰撞和数值不可分辨的状态。速度作为搬移后的独立参数插值，不承诺等于最终位置表达式的导数。
+
+未选 VOP 时 μ 是有效草稿，保存但不参与计算和身份。选择 VOP 后，μ 与 `vop-universal-transport-v1` 算法标识共同进入来源及分析/报告身份。两个节点之间的变化越偏离二体运动，越需要缩短节点间隔；阶数提高或选用 VOP 本身均不构成误差保证。
 
 ## 时间段与所有权
 
@@ -20,7 +28,7 @@
 - `discontinuities()` 返回段连接/缺口边界；零阶额外返回各跳变节点。当前接口不从任意节点猜测机动或生成 `ManeuverEvent`。
 - 创建时校验全部输入，取消或失败不发布对象；查询无可变缓存，随机顺序及并发读取互不影响。复制进入接口的数组、原始 Session 或选项之后修改，均不影响已发布对象。结果保有查询历元和来源信息。
 
-来源字符串记录算法版本、方法和阶数，调用者提供对象 ID 和输入修订。它不是外部节点文件的内容哈希，也不会把一份任意表接入项目的数据引用。HPOP 显式工厂已记录节点输出、分段、插值及区间身份；项目身份、持久化、UI 与报告采用同一配置，首次生成通过可取消的查询路径执行。
+来源字符串记录算法版本、方法、阶数与活动 VOP μ，调用者提供对象 ID 和输入修订。它不是外部节点文件的内容哈希，也不会把一份任意表接入项目的数据引用。HPOP 显式工厂已记录节点输出、分段、插值及区间身份；项目身份、持久化、UI 与报告采用同一配置，首次生成通过可取消的查询路径执行。
 
 ## C++ 与 Python
 
@@ -95,4 +103,14 @@ state = session.sample([of.Epoch(17_123_456_789)]).states[0]
 
 `HpopOptions.interpolation` 默认 Hermite 7，`report_ephemeris_on_fixed_step` 默认关闭。高层 Python 使用 `Hpop(interpolation="lagrange", interpolation_order=7, report_ephemeris_on_fixed_step=True)`；开启固定输出时，`Orbit.step_seconds`（目前 1–60 整数秒）决定星历节点网格，可通过 `dataclasses.replace(orbit, step_seconds=5)` 设置。报告和 `analysis.states()` 的查询步长仍各自独立。显式低层工厂以自己的输出间隔参数为准。
 
-桌面积分器页支持两种方法、合法阶数和固定输出开关，方法切换保留各自未应用的阶数草稿；确认时统一校验，取消不改输入。轨道页名称为“轨道步长”。插值方法/阶数、输出开关随项目 v38 / OBJS29 保存；固定输出启用时轨道步长同时进入分析和报告身份，关闭时仅是显示设置。旧分析持有原配置与资源，编辑不改变已有查询结果。VOP、协方差插值与 STK 同配置数值验收仍未完成。
+桌面积分器页支持三种方法及 VOP 独立 μ、合法阶数和固定输出开关，方法切换保留各自未应用的阶数草稿；确认时统一校验，取消不改输入。轨道页名称为“轨道步长”。插值方法/阶数、μ 草稿和输出开关随项目 v39 / OBJS30 保存；固定输出启用时轨道步长同时进入分析和报告身份，关闭时仅是显示设置。旧分析持有原配置与资源，编辑不改变已有查询结果。VOP 积分方程、协方差插值与 STK 同配置数值验收仍未完成。
+
+高层 Python 的 VOP 配置示例（`initial` 为显式地心 GCRF 初态）：
+
+```python
+orbit = of.orbits.Hpop(initial=initial, gravity_degree=0,
+                      interpolation="vop", interpolation_order=7,
+                      interpolation_mu=3.986004415e14)
+```
+
+低层 `OrbitInterpolationOptions` 对应 `method=OrbitInterpolationMethod.VOP`、`order` 和 `vop_mu`，与 HPOP 的 `gravity_mu` 独立。

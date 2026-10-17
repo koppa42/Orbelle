@@ -665,7 +665,8 @@ TEST_F(WeatherFiles, HpopEphemerisSplitsTheLeapSecondWeatherJumpInBothDirections
                 fine.min_step_seconds = 1e-6;
                 const auto reference = runtime::make_hpop_session(short_initial, fine, env);
                 for (auto method :
-                     {OrbitInterpolationMethod::lagrange, OrbitInterpolationMethod::hermite}) {
+                     {OrbitInterpolationMethod::lagrange, OrbitInterpolationMethod::hermite,
+                      OrbitInterpolationMethod::vop}) {
                     auto options = input.hpop;
                     options.interpolation = {method, 7};
                     const auto session = make_hpop_interpolated_session(short_initial, short_first,

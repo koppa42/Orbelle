@@ -40,7 +40,7 @@
 | Integrator | RKF7(8)，VOP 关闭；相对误差 1e-13，步长 1–86400 s；Lagrange 7 阶插值；时间正则化关闭；固定步长输出开启；停止高度 10 km |
 | Covariance | Compute Covariance 关闭；页面仍应能表达初始矩阵、参考系、独立重力截断和 consider 参数 |
 
-当前已支持 EGM2008、21 阶及日月引力，但仍不能完整表达这组配置：缺少潮汐及光压高级设置；Cb 常数文件仅导入 GM 子集，全部位置使用 DE440s；固定/自适应步长已支持至 86400 s；科学插值已接入，VOP 和协方差配置仍缺失。重构不能只把数值上限放宽，必须随相应模型和收敛验证一起交付。
+当前已支持 EGM2008、21 阶及日月引力，但仍不能完整表达这组配置：缺少潮汐及光压高级设置；Cb 常数文件仅导入 GM 子集，全部位置使用 DE440s；固定/自适应步长已支持至 86400 s；科学插值及独立 VOP μ 已接入，VOP 积分方程和协方差配置仍缺失。重构不能只把数值上限放宽，必须随相应模型和收敛验证一起交付。
 
 截图未提供初始状态、分析时段、实际重力系数文件、Cb 常数文件、星历、EOP 与参考轨迹，因此它是配置参照，而非数值真值。正式比较应从实际场景导出精确参数和资源，不用截图中显示的舍入数值代替它们。
 
@@ -85,9 +85,9 @@
 | Integrator | Integration 方法 | 部分：RK4、RKF78、RKV 8(9) Efficient、Bulirsch–Stoer、Gauss–Jackson 12 已实现；RKV 已做 SciPy DOP853 / Orekit 数值对照及八阶收敛验证；Bulirsch–Stoer 已做 Hipparchus GBS / Orekit 对照、自动升阶及步长收敛；Gauss–Jackson 已做 Hipparchus GBS / Orekit 对照、固定步长收敛与两种校正验证；RKF 7(8) 已按官方定义改为七阶推进，并通过 Hipparchus / Orekit 对照和七阶收敛验证；STK 同配置验收仍待完成 |
 | Integrator | VOP；Predictor Corrector Scheme | 部分：Gauss–Jackson 的 Full/Pseudo Correction、有效组合和机动后重启已接入；VOP 通用变量方程仍待实现 |
 | Integrator | Fixed/Relative Error；Tolerance；Min/Max Step | 部分：独立 Fixed/Relative Error 选择已实现；RK4/GJ 强制固定，RKF/RKV/BS 两模式，固定网格及 BS 十八阶外推已验证。固定/自适应范围已扩至 1e−6–86400 s，自适应缓存不再截短配置上限，并有局部动力学首步估计及长弧独立对照。相对误差仍为混合绝对/相对分量尺度；STK 误差范数、完整合法范围/默认值及实机组合仍待核对，截图仅参考 |
-| Integrator | Interpolation 方法；Order；VOP μ | 部分：Lagrange / Hermite、项目自动装配、机动分段、UI / 持久化 / 分析及报告已接入并有独立参考，见[科学插值](orbit_interpolation.md)；VOP 与其 μ 尚未实现，STK 同配置验收仍待完成 |
+| Integrator | Interpolation 方法；Order；VOP μ | 部分：Lagrange / Hermite / VOP、独立插值 μ、项目自动装配、机动分段、UI / 持久化 / 分析及报告已接入并有独立参考，见[科学插值](orbit_interpolation.md)；VOP 通用变量搬移与 Hipparchus 插值、J2 步长收敛对照已接入，STK 同配置验收仍待完成 |
 | Integrator | Allow PosVel Covariance Interpolation | 待实现：协方差传播完成后验证插值、对称性与半正定性 |
-| Integrator | Time Regularization；Exponent；Steps Per Orbit | 已接入：Sundman 方程、初始椭圆每圈尺度、五种积分器、物理 Min/Max Step、整数 TAI、天气分段、机动重启及科学插值；C++ / Python / 项目 v38 / UI 共用配置。非椭圆归一化明确拒绝；尚无 STK 同配置实测，见[时间正则化契约](time_regularization.md) |
+| Integrator | Time Regularization；Exponent；Steps Per Orbit | 已接入：Sundman 方程、初始椭圆每圈尺度、五种积分器、物理 Min/Max Step、整数 TAI、天气分段、机动重启及科学插值；C++ / Python / 项目 v39 / UI 共用配置。非椭圆归一化明确拒绝；尚无 STK 同配置实测，见[时间正则化契约](time_regularization.md) |
 | Integrator | Report Ephemeris on a Fixed Time Step | 部分：显式工厂及普通项目均支持接受端点或让积分步停在固定 TAI 输出网格，保留天气边界；UI、保存与报告已接入。项目轨道步长当前限于 1–60 整数秒，完整合法范围及短段策略仍待 STK 实测核对 |
 | Integrator | Do not propagate below altitude | 已有按力评估停止的参考球面地心高度；STK 比较须核对其高度参考面 |
 | Covariance | Compute Covariance；6×6 初始矩阵 | 待实现：变分方程、单位、对称性和正定性政策；关闭不影响确定性轨迹 |
