@@ -25,6 +25,10 @@ void bind_ephemeris(py::module_ &module) {
         .def_readonly("velocity_time_scale", &core::EphemerisState::velocity_time_scale)
         .def_readonly("tdb", &core::EphemerisState::tdb)
         .def_readonly("source_id", &core::EphemerisState::source_id);
+    py::class_<core::ApparentSunDifferential>(module, "ApparentSunDifferential")
+        .def_readonly("position_m", &core::ApparentSunDifferential::position_m)
+        .def_readonly("position_jacobian", &core::ApparentSunDifferential::position_jacobian)
+        .def_readonly("velocity_jacobian_s", &core::ApparentSunDifferential::velocity_jacobian_s);
     py::class_<core::KernelDataInfo>(module, "KernelDataInfo")
         .def_readonly("file", &core::KernelDataInfo::file)
         .def_readonly("kind", &core::KernelDataInfo::kind)
@@ -54,6 +58,10 @@ void bind_ephemeris(py::module_ &module) {
              py::arg("epoch"), py::call_guard<py::gil_scoped_release>())
         .def("apparent_sun_from_spacecraft",
              &core::IEphemerisProvider::apparent_sun_from_spacecraft, py::arg("epoch"),
+             py::arg("position_earth_m"), py::arg("velocity_earth_tai_mps"),
+             py::call_guard<py::gil_scoped_release>())
+        .def("apparent_sun_from_spacecraft_differential",
+             &core::IEphemerisProvider::apparent_sun_from_spacecraft_differential, py::arg("epoch"),
              py::arg("position_earth_m"), py::arg("velocity_earth_tai_mps"),
              py::call_guard<py::gil_scoped_release>())
         .def("validate_spacecraft_apparent_sun_interval",

@@ -341,4 +341,4 @@ CSPICE 固定 DE440s 样例检查水星／金星物理中心与原生 `geometric
 
 ## 光压局部偏导
 
-固定几何状态块、太阳位置块及 K 参数偏导的 641 组独立参考、病态参考结果审计与复现方法见[SRP 偏导验证](srp_differential_protocol.md)。完整 STM／协方差和卫星视太阳的链式偏导尚待实现。
+固定几何状态块、太阳位置块及 K 参数偏导的 641 组独立参考、病态参考结果审计与复现方法见[SRP 偏导验证](srp_differential_protocol.md)。卫星视太阳的解析状态链已接入完整局部 SRP 偏导，CSPICE 独立差分与安装接口验证见[视太阳偏导协议](apparent_sun_differential_protocol.md)。完整 STM／协方差及事件变分仍待实现。

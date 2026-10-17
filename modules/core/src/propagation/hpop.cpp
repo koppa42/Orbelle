@@ -3,6 +3,7 @@
 #include "integrators/shadow_boundary.hpp"
 #include "integrators/sundman_propagation.hpp"
 #include "integrators/vop.hpp"
+#include "srp_geometry.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -173,40 +174,10 @@ class Hpop final : public IStateProvider {
             environment_.gravity->info().radius_m + options_.minimum_altitude_m)
             throw PropagationError("HPOP reached its minimum geocentric altitude");
     }
-    struct SrpGeometry {
-        std::array<double, 3> sun;
-        std::optional<std::array<double, 3>> moon;
-        std::array<SrpBodyPosition, third_body_count - 2> additional{};
-        std::size_t count = 0;
-    };
-    SrpGeometry srp_geometry(double t, const State &state) const {
-        const auto epoch = epoch_at(t);
-        const std::array<double, 3> r{state[0], state[1], state[2]};
-        SrpGeometry result;
-        switch (options_.srp.sun_position_method) {
-        case SrpSunPositionMethod::geometric:
-            result.sun = environment_.ephemeris->position(ThirdBody::sun, epoch);
-            break;
-        case SrpSunPositionMethod::apparent_to_true_cb:
-            result.sun = environment_.ephemeris->apparent_sun_from_earth(epoch);
-            break;
-        case SrpSunPositionMethod::apparent:
-            result.sun = environment_.ephemeris->apparent_sun_from_spacecraft(
-                epoch, r, {state[3], state[4], state[5]});
-            for (std::size_t i = 0; i < 3; ++i)
-                result.sun[i] += r[i];
-            break;
-        default:
-            throw std::invalid_argument("Unsupported SRP Sun position method");
-        }
-        if (options_.srp.shadow_model != SrpShadowModel::none) {
-            if (options_.srp.moon_shadow)
-                result.moon = environment_.ephemeris->position(ThirdBody::moon, epoch);
-            for (const auto &body : options_.srp.additional_eclipsing_bodies)
-                result.additional[result.count++] = {
-                    body.body, environment_.ephemeris->eclipsing_body_position(body.body, epoch)};
-        }
-        return result;
+    detail::SrpGeometry srp_geometry(double t, const State &state) const {
+        return detail::resolve_srp_geometry(epoch_at(t), {state[0], state[1], state[2]},
+                                            {state[3], state[4], state[5]}, options_.srp,
+                                            *environment_.ephemeris);
     }
     bool mitigates_shadow() const {
         const auto &o = options_.srp;

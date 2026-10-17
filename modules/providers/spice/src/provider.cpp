@@ -374,54 +374,12 @@ class Snapshot final : public core::IEphemerisProvider {
     std::array<double, 3>
     apparent_sun_from_spacecraft(core::Epoch epoch, const std::array<double, 3> &position,
                                  const std::array<double, 3> &velocity) const override {
-        check_epoch(epoch);
-        for (std::size_t i = 0; i < 3; ++i)
-            if (!std::isfinite(position[i]) || !std::isfinite(velocity[i]))
-                throw std::invalid_argument("Apparent Sun observer state must be finite");
-        std::scoped_lock guard(engine().mutex);
-        activate();
-        const auto earth = state_unlocked(399, 0, epoch);
-        const double et = earth.tdb.seconds_past_j2000;
-        const double rate = tai_per_tdb_unlocked(et);
-        double observer[6]{};
-        for (std::size_t i = 0; i < 3; ++i) {
-            observer[i] = (earth.position_m[i] + position[i]) / 1000;
-            observer[i + 3] = (earth.velocity_mps[i] + velocity[i] * rate) / 1000;
-            if (!std::isfinite(observer[i]) || !std::isfinite(observer[i + 3]))
-                throw std::invalid_argument("Apparent Sun observer state overflows");
-        }
-        if (std::hypot(observer[3], observer[4], observer[5]) >= clight_c())
-            throw std::invalid_argument("Apparent Sun observer speed must be below light speed");
-        double sun[3]{}, ignored = 0;
-        spkgps_c(10, et, "J2000", 0, sun, &ignored);
-        check_spice();
-        const double light_time =
-            std::hypot(sun[0] - observer[0], sun[1] - observer[1], sun[2] - observer[2]) /
-            clight_c();
-        const double emission = et - light_time;
-        if (!std::isfinite(emission) ||
-            emission < tdb_unlocked(info_.first_epoch).seconds_past_j2000 || emission > et)
-            throw core::EphemerisCoverageError(
-                "Spacecraft apparent Sun emission epoch is outside the selected snapshot; "
-                "select earlier ephemeris coverage");
-        // Explicit single-iteration reception LT, as in spkapo(..., "LT+S").
-        // Check the emission epoch BEFORE querying so hidden SPICE reads cannot
-        // escape the snapshot policy window. Stellar aberration uses the full
-        // moving observer velocity, not a fixed geocentric offset.
-        spkgps_c(10, emission, "J2000", 0, sun, &ignored);
-        check_spice();
-        for (std::size_t i = 0; i < 3; ++i)
-            sun[i] -= observer[i];
-        double apparent[3]{};
-        stelab_c(sun, observer + 3, apparent);
-        check_spice();
-        std::array<double, 3> result{};
-        for (std::size_t i = 0; i < 3; ++i) {
-            result[i] = apparent[i] * 1000;
-            if (!std::isfinite(result[i]))
-                throw core::EphemerisQueryError("CSPICE returned a nonfinite apparent Sun");
-        }
-        return result;
+        return spacecraft_sun(epoch, position, velocity, false).position_m;
+    }
+    core::ApparentSunDifferential apparent_sun_from_spacecraft_differential(
+        core::Epoch epoch, const std::array<double, 3> &position,
+        const std::array<double, 3> &velocity) const override {
+        return spacecraft_sun(epoch, position, velocity, true);
     }
     void validate_spacecraft_apparent_sun_interval(core::Epoch first,
                                                    core::Epoch last) const override {
@@ -479,6 +437,116 @@ class Snapshot final : public core::IEphemerisProvider {
     }
 
   private:
+    core::ApparentSunDifferential spacecraft_sun(core::Epoch epoch,
+                                                 const std::array<double, 3> &position,
+                                                 const std::array<double, 3> &velocity,
+                                                 bool derivatives) const {
+        check_epoch(epoch);
+        for (std::size_t i = 0; i < 3; ++i)
+            if (!std::isfinite(position[i]) || !std::isfinite(velocity[i]))
+                throw std::invalid_argument("Apparent Sun observer state must be finite");
+        std::scoped_lock guard(engine().mutex);
+        activate();
+        const auto earth = state_unlocked(399, 0, epoch);
+        const double et = earth.tdb.seconds_past_j2000;
+        const double rate = tai_per_tdb_unlocked(et);
+        double observer[6]{};
+        for (std::size_t i = 0; i < 3; ++i) {
+            observer[i] = (earth.position_m[i] + position[i]) / 1000;
+            observer[i + 3] = (earth.velocity_mps[i] + velocity[i] * rate) / 1000;
+            if (!std::isfinite(observer[i]) || !std::isfinite(observer[i + 3]))
+                throw std::invalid_argument("Apparent Sun observer state overflows");
+        }
+        if (std::hypot(observer[3], observer[4], observer[5]) >= clight_c())
+            throw std::invalid_argument("Apparent Sun observer speed must be below light speed");
+        double sun[3]{}, ignored = 0;
+        spkgps_c(10, et, "J2000", 0, sun, &ignored);
+        check_spice();
+        const double light_time =
+            std::hypot(sun[0] - observer[0], sun[1] - observer[1], sun[2] - observer[2]) /
+            clight_c();
+        std::array<double, 3> initial_direction{};
+        if (derivatives) {
+            if (!(light_time > 0) || !std::isfinite(light_time))
+                throw core::EphemerisQueryError("Apparent Sun derivative requires a nonzero ray");
+            for (unsigned i = 0; i < 3; ++i)
+                initial_direction[i] = (sun[i] - observer[i]) / (light_time * clight_c());
+        }
+        const double emission = et - light_time;
+        if (!std::isfinite(emission) ||
+            emission < tdb_unlocked(info_.first_epoch).seconds_past_j2000 || emission > et)
+            throw core::EphemerisCoverageError(
+                "Spacecraft apparent Sun emission epoch is outside the selected snapshot; "
+                "select earlier ephemeris coverage");
+        // Explicit single-iteration reception LT, as in spkapo(..., "LT+S").
+        // Check the emission epoch BEFORE querying so hidden SPICE reads cannot
+        // escape the snapshot policy window. Stellar aberration uses the full
+        // moving observer velocity, not a fixed geocentric offset.
+        spkgps_c(10, emission, "J2000", 0, sun, &ignored);
+        check_spice();
+        for (std::size_t i = 0; i < 3; ++i)
+            sun[i] -= observer[i];
+        double apparent[3]{};
+        stelab_c(sun, observer + 3, apparent);
+        check_spice();
+        core::ApparentSunDifferential result;
+        for (std::size_t i = 0; i < 3; ++i) {
+            result.position_m[i] = apparent[i] * 1000;
+            if (!std::isfinite(result.position_m[i]))
+                throw core::EphemerisQueryError("CSPICE returned a nonfinite apparent Sun");
+        }
+        if (!derivatives)
+            return result;
+        // Same checked emission epoch. Geometric SPK velocities are per TDB second.
+        double emitted_state[6]{};
+        spkgeo_c(10, emission, "J2000", 0, emitted_state, &ignored);
+        check_spice();
+        const double distance = std::hypot(sun[0], sun[1], sun[2]);
+        if (!(distance > 0) || !std::isfinite(distance))
+            throw core::EphemerisQueryError(
+                "Apparent Sun derivative requires a finite nonzero ray");
+        std::array<double, 3> n{}, beta{}, transverse{};
+        double parallel = 0, transverse_squared = 0;
+        for (unsigned i = 0; i < 3; ++i) {
+            n[i] = sun[i] / distance;
+            beta[i] = observer[i + 3] / clight_c();
+            parallel += beta[i] * n[i];
+        }
+        for (unsigned i = 0; i < 3; ++i) {
+            transverse[i] = beta[i] - parallel * n[i];
+            transverse_squared += transverse[i] * transverse[i];
+        }
+        const double cosine = std::sqrt(1 - transverse_squared);
+        if (!(cosine > 0) || !std::isfinite(cosine))
+            throw core::EphemerisQueryError("Apparent Sun aberration derivative is singular");
+        std::array<std::array<double, 3>, 3> ray_jacobian{};
+        for (unsigned i = 0; i < 3; ++i)
+            for (unsigned j = 0; j < 3; ++j) {
+                // d[d*(sqrt(1-|beta_perp|^2)*n + beta_perp)] / d(ray).
+                ray_jacobian[i][j] = (cosine * n[i] + transverse[i]) * n[j];
+                for (unsigned k = 0; k < 3; ++k)
+                    ray_jacobian[i][j] += ((cosine - parallel) * (i == k ? 1. : 0.) +
+                                           n[i] * (parallel * transverse[k] / cosine - beta[k])) *
+                                          ((k == j ? 1. : 0.) - n[k] * n[j]);
+                // km-to-m factors cancel between output and input velocity.
+                result.velocity_jacobian_s[i][j] =
+                    distance * rate / clight_c() *
+                    ((i == j ? 1. : 0.) - n[i] * (n[j] + transverse[j] / cosine));
+            }
+        for (unsigned i = 0; i < 3; ++i)
+            for (unsigned j = 0; j < 3; ++j) {
+                // Single LT iteration: d(t_emit)/d(observer_position) = n0/c.
+                for (unsigned k = 0; k < 3; ++k)
+                    result.position_jacobian[i][j] +=
+                        ray_jacobian[i][k] *
+                        (emitted_state[k + 3] / clight_c() * initial_direction[j] -
+                         (k == j ? 1. : 0.));
+                if (!std::isfinite(result.position_jacobian[i][j]) ||
+                    !std::isfinite(result.velocity_jacobian_s[i][j]))
+                    throw core::EphemerisQueryError("Apparent Sun state derivative is nonfinite");
+            }
+        return result;
+    }
     void validate_chains_unlocked(double begin, double end,
                                   const std::map<std::int32_t, std::int32_t> &chains) const {
         std::map<std::int32_t, std::vector<std::pair<double, double>>> coverage;

@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <optional>
+#include <orbitforge/core/ephemeris/apparent_sun.hpp>
 #include <orbitforge/core/propagation/force_differential.hpp>
 #include <orbitforge/core/time/epoch.hpp>
 #include <span>
@@ -89,6 +90,15 @@ class IThirdBodyEphemeris {
                                  const std::array<double, 3> &) const {
         throw std::invalid_argument(
             "This ephemeris does not support spacecraft apparent Sun positions");
+    }
+    // Same apparent-vector contract, plus derivatives with respect to the
+    // moving observer state, including light time and stellar aberration.
+    // Unsupported providers reject explicitly; no implicit numerical derivative.
+    [[nodiscard]] virtual ApparentSunDifferential
+    apparent_sun_from_spacecraft_differential(Epoch, const std::array<double, 3> &,
+                                              const std::array<double, 3> &) const {
+        throw std::invalid_argument(
+            "This ephemeris does not provide apparent Sun state derivatives");
     }
     // Certifies Earth chains throughout the receiving interval and Sun chains
     // from the snapshot start through its end. The actual emission epoch is also

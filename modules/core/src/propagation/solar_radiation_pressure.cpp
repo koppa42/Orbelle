@@ -1,3 +1,4 @@
+#include "srp_geometry.hpp"
 #include "srp_shadow.hpp"
 #include <algorithm>
 #include <cmath>
@@ -537,6 +538,45 @@ SrpDifferential srp_differential(const Vector &satellite, const Vector &sun,
     finite_vector(result.lighting_position_gradient_per_m);
     finite_vector(result.lighting_sun_gradient_per_m);
     finite_vector(result.srp_parameter_jacobian_pa);
+    return result;
+}
+
+SrpStateDifferential srp_state_differential(const CartesianState &state, const SrpOptions &options,
+                                            const IThirdBodyEphemeris &ephemeris) {
+    validate_srp_options(options);
+    if (!options.enabled)
+        return {};
+    if (state.origin != OriginId::earth || state.frame != FrameId::gcrf)
+        throw std::invalid_argument("SRP state derivative requires Earth-centred GCRF state");
+    finite_vector(state.position_m);
+    finite_vector(state.velocity_mps);
+    ApparentSunDifferential sun_partials;
+    const auto geometry = detail::resolve_srp_geometry(
+        state.epoch, state.position_m, state.velocity_mps, options, ephemeris, &sun_partials);
+    const auto local = srp_differential(state.position_m, geometry.sun, options, geometry.moon,
+                                        std::span{geometry.additional}.first(geometry.count));
+    SrpStateDifferential result{local.nominal, local.force, local.srp_parameter_jacobian_pa};
+    if (options.sun_position_method == SrpSunPositionMethod::apparent) {
+        for (unsigned i = 0; i < 3; ++i) {
+            finite_vector(sun_partials.position_jacobian[i]);
+            finite_vector(sun_partials.velocity_jacobian_s[i]);
+        }
+        for (unsigned i = 0; i < 3; ++i)
+            for (unsigned j = 0; j < 3; ++j)
+                for (unsigned k = 0; k < 3; ++k) {
+                    // The geometry evaluator takes geocentric S = r + apparent_ray.
+                    result.force.position_jacobian_per_s2[i][j] +=
+                        local.sun_position_jacobian_per_s2[i][k] *
+                        (sun_partials.position_jacobian[k][j] + (k == j ? 1. : 0.));
+                    result.force.velocity_jacobian_per_s[i][j] +=
+                        local.sun_position_jacobian_per_s2[i][k] *
+                        sun_partials.velocity_jacobian_s[k][j];
+                }
+        for (unsigned i = 0; i < 3; ++i) {
+            finite_vector(result.force.position_jacobian_per_s2[i]);
+            finite_vector(result.force.velocity_jacobian_per_s[i]);
+        }
+    }
     return result;
 }
 

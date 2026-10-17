@@ -39,7 +39,7 @@ d_a/d_K = −Q f n
 STK 的太阳位置方法仍由 HPOP 在每个积分阶段解析，低层函数只消费已经选好的 S。[STK SRP 参数](https://help.agi.com/stk/Content/hpop/hpopSRP.htm)
 
 - True 与地心视太阳在固定历元对卫星状态独立，可以直接使用上述状态块。
-- 卫星视太阳同时依赖 r 与 v，未来装配时必须使用 `Jr + Js·∂S/∂r` 和 `Js·∂S/∂v`；不能把低层的零速度块当作该模式的完整导数。
-- 完整星历链、阴影事件的变分处理、STM 与 consider 协方差尚待接入。名义传播已有的 Boundary Mitigation 不等于变分方程的事件处理。
+- 卫星视太阳同时依赖 r 与 v；`srp_state_differential` 已通过 [CSPICE 解析星历链](apparent_sun_differential.md)装配 `Jr + Js·∂S/∂r` 和 `Js·∂S/∂v`。低层零速度块仍只属于固定所选太阳的局部接口。
+- 阴影事件的变分处理、STM 与 consider 协方差尚待接入。名义传播已有的 Boundary Mitigation 不等于变分方程的事件处理。
 
 独立 Orekit、mpmath 和 SciPy 对照、参考算法的数值限制及容限见[验证协议](../validation/srp_differential_protocol.md)。当前没有 STK 同配置实测数据，不据此宣称与其内部算法完全相同。

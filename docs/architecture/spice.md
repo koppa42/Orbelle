@@ -80,3 +80,7 @@ Python 计算和加载释放 GIL，再由此锁串行管理 CSPICE。这允许�
 `install_ephemeris_snapshot(manifest)` 导入完整的显式数据包，须同时通过 Provider 和 HPOP 的 DE440s 主星历约束、全部引力目标链连续覆盖认证。补充文件自身覆盖可小于主清单窗口，HPOP 按所选遮挡体及实际传播区间检查整条链与内部缺口。普通 DE440s 保持 v3 解释身份；存在补充文件时采用 `body-centres=filtered-spk-v1` 的 v4 身份。
 
 两类导入均先准备独立副本，再验证、原子发布。取消、损坏或准备期间目录收据被另一写入者更新时保留当前有效数据；后一种情况明确要求基于最新快照重试。已有分析继续持有原快照。更新完整 DE440s 时保留本体补充文件。原始 `SPK` 角色仍仅接收 DE440s 来源；不能仅靠改写角色使任意主星历绕过限制。来源哈希只追踪内容，不是来源真实性认证。
+
+## 卫星视太阳状态偏导
+
+`apparent_sun_from_spacecraft_differential` 返回原有接收型 LT+S 视向量及固定接收历元的位置／速度 Jacobian，C++、Runtime 与 Python 共用不可变快照和 CSPICE 锁。输入速度按 TAI 秒，内部按 TDB 秒换算；结果矩阵单位分别为无量纲和 s。完整公式、失败边界及 SRP 装配见[视太阳偏导](apparent_sun_differential.md)，独立对照见[验证协议](../validation/apparent_sun_differential_protocol.md)。

@@ -276,3 +276,58 @@ TEST(SrpDifferential, PhysicalDuplicatesAreSmoothButDifferentDistanceCoincidence
     EXPECT_NO_THROW((void)evaluate_srp(r, sun, options, moon, different));
     EXPECT_THROW((void)srp_differential(r, sun, options, moon, different), PropagationError);
 }
+
+namespace {
+class GeometryOnlyDerivativeSun final : public IThirdBodyEphemeris {
+    ThirdBodyDataInfo info_{};
+
+  public:
+    mutable unsigned queries = 0;
+    const ThirdBodyDataInfo &data_info() const noexcept override { return info_; }
+    void validate_interval(Epoch, Epoch, std::span<const ThirdBody>) const override {}
+    Vector position(ThirdBody, Epoch) const override {
+        ++queries;
+        return {149597870700., 0, 0};
+    }
+    Vector apparent_sun_from_earth(Epoch) const override {
+        ++queries;
+        return {149597870700., 1e8, 0};
+    }
+};
+} // namespace
+TEST(SrpStateDifferential, FixedSunMethodsShareLocalBlocksAndMissingDerivativesFail) {
+    GeometryOnlyDerivativeSun ephemeris;
+    const CartesianState state{
+        Epoch{0}, OriginId::earth, FrameId::gcrf, {7e6, 1e6, 2e6}, {0, 7200, 1000}};
+    SrpOptions options;
+    options.enabled = true;
+    options.moon_shadow = false;
+    for (auto method :
+         {SrpSunPositionMethod::geometric, SrpSunPositionMethod::apparent_to_true_cb}) {
+        options.sun_position_method = method;
+        const Vector sun{149597870700., method == SrpSunPositionMethod::geometric ? 0 : 1e8, 0};
+        const auto local = srp_differential(state.position_m, sun, options);
+        const auto actual = srp_state_differential(state, options, ephemeris);
+        EXPECT_EQ(actual.nominal.acceleration_mps2, local.nominal.acceleration_mps2);
+        EXPECT_EQ(actual.force.position_jacobian_per_s2, local.force.position_jacobian_per_s2);
+        EXPECT_EQ(actual.force.velocity_jacobian_per_s, Matrix{});
+        EXPECT_EQ(actual.srp_parameter_jacobian_pa, local.srp_parameter_jacobian_pa);
+    }
+    options.sun_position_method = SrpSunPositionMethod::apparent;
+    EXPECT_THROW((void)srp_state_differential(state, options, ephemeris), std::invalid_argument);
+}
+TEST(SrpStateDifferential, InvalidStateAndDisabledModelHaveExplicitQueryBoundaries) {
+    GeometryOnlyDerivativeSun ephemeris;
+    CartesianState state{Epoch{0}, OriginId::earth, FrameId::itrf, {7e6, 0, 0}, {}};
+    SrpOptions options;
+    EXPECT_EQ(srp_state_differential(state, options, ephemeris).force.position_jacobian_per_s2,
+              Matrix{});
+    EXPECT_EQ(ephemeris.queries, 0U);
+    options.enabled = true;
+    options.moon_shadow = false;
+    EXPECT_THROW((void)srp_state_differential(state, options, ephemeris), std::invalid_argument);
+    state.frame = FrameId::gcrf;
+    state.velocity_mps[1] = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_THROW((void)srp_state_differential(state, options, ephemeris), PropagationError);
+    EXPECT_EQ(ephemeris.queries, 0U);
+}

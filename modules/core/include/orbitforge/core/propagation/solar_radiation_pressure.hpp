@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <optional>
+#include <orbitforge/core/frames/state.hpp>
 #include <orbitforge/core/propagation/force_differential.hpp>
 #include <orbitforge/core/propagation/third_body.hpp>
 #include <span>
@@ -96,4 +97,20 @@ struct SrpDifferential {
 srp_differential(const std::array<double, 3> &satellite_m, const std::array<double, 3> &sun_m,
                  const SrpOptions &options, const std::optional<std::array<double, 3>> &moon_m = {},
                  std::span<const SrpBodyPosition> additional_positions = {});
+struct SrpStateDifferential {
+    SrpEvaluation nominal{};
+    ForceDifferential force{};
+    std::array<double, 3> srp_parameter_jacobian_pa{};
+};
+// Full local r/v derivative at a fixed receiving epoch, resolving the selected
+// Sun method through ephemeris and chaining spacecraft LT+S when requested.
+// Uses the same Earth-centred GCRF/ICRF-aligned Newtonian convention as HPOP.
+// K = Cr*A/m remains independent of r/v. Shadow-contact limitations of
+// srp_differential apply; this does not integrate an STM or event jump.
+// Disabled SRP validates options but does not inspect state or query ephemeris.
+// Unsupported apparent derivative providers reject, rather than returning a
+// fixed-Sun approximation. Invalid frames/observer velocities are rejected.
+[[nodiscard]] SrpStateDifferential srp_state_differential(const CartesianState &state,
+                                                          const SrpOptions &options,
+                                                          const IThirdBodyEphemeris &ephemeris);
 } // namespace orbitforge::core

@@ -157,6 +157,11 @@ class ThirdBodyEphemeris final : public core::IThirdBodyEphemeris {
                                  const std::array<double, 3> &velocity) const override {
         return source_->apparent_sun_from_spacecraft(at, position, velocity);
     }
+    core::ApparentSunDifferential apparent_sun_from_spacecraft_differential(
+        core::Epoch at, const std::array<double, 3> &position,
+        const std::array<double, 3> &velocity) const override {
+        return source_->apparent_sun_from_spacecraft_differential(at, position, velocity);
+    }
     void validate_spacecraft_apparent_sun_interval(core::Epoch first,
                                                    core::Epoch last) const override {
         source_->validate_spacecraft_apparent_sun_interval(first, last);
