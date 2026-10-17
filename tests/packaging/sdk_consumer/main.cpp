@@ -2,6 +2,7 @@
 #include <iostream>
 #include <orbitforge/application/project_document.hpp>
 #include <orbitforge/application/scenario.hpp>
+#include <orbitforge/core/propagation/hpop_force.hpp>
 #include <orbitforge/core/propagation/relativity.hpp>
 #include <orbitforge/runtime/access.hpp>
 #include <orbitforge/runtime/analysis.hpp>
@@ -478,6 +479,17 @@ int main(int argc, char **argv) try {
             orbitforge::core::srp_state_differential(derivative_state, options.srp, *ephemeris);
         if (!std::isfinite(srp_partials.force.velocity_jacobian_per_s[0][0]))
             throw std::runtime_error("Installed full SRP state derivative failed");
+        const orbitforge::core::HpopEnvironment force_environment{nullptr, nullptr, nullptr,
+                                                                  ephemeris};
+        const auto combined =
+            orbitforge::core::hpop_force_differential(derivative_state, options, force_environment);
+        const auto nominal = orbitforge::core::evaluate_hpop_acceleration(derivative_state, options,
+                                                                          force_environment);
+        if (combined.force.acceleration_mps2 != nominal ||
+            combined.force.velocity_jacobian_per_s != srp_partials.force.velocity_jacobian_per_s ||
+            combined.srp_parameter_jacobian_pa != srp_partials.srp_parameter_jacobian_pa)
+            throw std::runtime_error("Installed combined HPOP force differential API failed");
+
         const auto full_light = orbitforge::core::evaluate_srp(
             {7e6, 0, 0}, {149597870700, 0, 0}, options.srp, std::array{0., 384400000., 0.});
         if (full_light.lighting_ratio != 1 || full_light.acceleration_mps2[0] >= 0)

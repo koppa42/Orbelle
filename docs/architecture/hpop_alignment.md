@@ -90,7 +90,7 @@
 | Integrator | Time Regularization；Exponent；Steps Per Orbit | 已接入：Sundman 方程、初始椭圆每圈尺度、五种积分器、物理 Min/Max Step、整数 TAI、天气分段、机动重启及科学插值；C++ / Python / 项目 v40 / UI 共用配置。非椭圆归一化明确拒绝；尚无 STK 同配置实测，见[时间正则化契约](time_regularization.md) |
 | Integrator | Report Ephemeris on a Fixed Time Step | 部分：显式工厂及普通项目均支持接受端点或让积分步停在固定 TAI 输出网格，保留天气边界；UI、保存与报告已接入。项目轨道步长当前限于 1–60 整数秒，完整合法范围及短段策略仍待 STK 实测核对 |
 | Integrator | Do not propagate below altitude | 已有按力评估停止的参考球面地心高度；STK 比较须核对其高度参考面 |
-| Covariance | Compute Covariance；6×6 初始矩阵 | 待实现变分方程与矩阵配置；计算基础已完成中心引力、第三体与三项相对论的解析状态偏导及独立数值对照，见[力状态偏导](force_differential.md)。阻力及球面 SRP 的局部状态／D、K 偏导已提供；[卫星视太阳状态链](apparent_sun_differential.md)已完成；事件跳变、协方差单位和正定性政策仍待接入；关闭不影响确定性轨迹 |
+| Covariance | Compute Covariance；6×6 初始矩阵 | 待实现变分方程与矩阵配置；计算基础已完成中心引力、第三体与三项相对论的解析状态偏导及独立数值对照，见[力状态偏导](force_differential.md)。阻力及球面 SRP 的局部状态／D、K 偏导已提供；[卫星视太阳状态链](apparent_sun_differential.md)已完成；[总力状态块及 D/K 装配](hpop_force.md)已接入共用力入口；事件跳变、协方差单位和正定性政策仍待接入；关闭不影响确定性轨迹 |
 | Covariance | Frame；Representation | 待实现：J2000/TOD/LVLH/Frenet，Cartesian 及适用的 FG 表示；完整 Jacobian |
 | Covariance | 独立 Gravity Degree / Order | 待接入变分方程；基础已完成：最高 2190 阶解析引力 Hessian、极轴及固定历元潮汐/长期变化系数偏导，通过 Orekit 与高精度解析值对照，见[引力空间偏导](gravity_differential.md)。尚不能配置或传播协方差，后续独立截断不得改变名义轨迹 |
 | Covariance | Include Consider Analysis；Use / Value / x,y,z,vx,vy,vz | Drag / SRP 的 D、K 力参数偏导已完成；全局参数敏感度、参数方差及状态交叉协方差仍待实现，OutGasTimeConstant、OutGasMagnitude、ThrustX/Y/Z 还需对应的名义力及参数定义 |
@@ -198,7 +198,7 @@ P(t) = Φ(t) P0 Φ(t)ᵀ              （无过程噪声）
 - `ForceEvaluator`：统一求总加速度、分项加速度和需要的偏导；传播、报告、对照工具及机动滑行复用此入口。
 - `NumericalPropagator`：推进状态及可选变分方程，管理事件、缓存、诊断和取消，不承担目录查找及联网。
 
-上述名称是重构中的职责名称，不是 0.2.1 已存在的 API。Core 继续只依赖标准库和抽象接口；外部大气算法、资源导入与 CSPICE 适配进入 Provider / Runtime。不能把更多模型直接堆入当前 `Hpop::derivative()`。
+当前 `evaluate_hpop_acceleration` / `hpop_force_differential` 已实现[共用总力与局部偏导](hpop_force.md)，名义传播也经过此装配；分项报告和完整变分传播仍待接入。上述职责名称并非全部对应现有类名。Core 继续只依赖标准库和抽象接口；外部大气算法、资源导入与 CSPICE 适配进入 Provider / Runtime。不能把更多模型直接堆入当前 `Hpop::derivative()`。
 
 ### 数据中心
 

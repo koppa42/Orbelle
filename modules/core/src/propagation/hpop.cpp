@@ -1,3 +1,4 @@
+#include "hpop_force.hpp"
 #include "integrators/gauss_jackson.hpp"
 #include "integrators/one_step.hpp"
 #include "integrators/shadow_boundary.hpp"
@@ -167,12 +168,8 @@ class Hpop final : public IStateProvider {
         return Epoch{std::clamp(epoch_at(t).tai_nanoseconds(), lower, upper - 1)};
     }
     void validate_state(const State &s) const {
-        for (double value : s)
-            if (!std::isfinite(value))
-                throw PropagationError("HPOP encountered a nonfinite state");
-        if (std::hypot(s[0], s[1], s[2]) <=
-            environment_.gravity->info().radius_m + options_.minimum_altitude_m)
-            throw PropagationError("HPOP reached its minimum geocentric altitude");
+        detail::validate_hpop_force_state({s[0], s[1], s[2]}, {s[3], s[4], s[5]}, options_,
+                                          environment_);
     }
     detail::SrpGeometry srp_geometry(double t, const State &state) const {
         return detail::resolve_srp_geometry(epoch_at(t), {state[0], state[1], state[2]},
@@ -256,119 +253,10 @@ class Hpop final : public IStateProvider {
     State derivative(double t, const State &s, std::optional<Epoch> weather_at = {},
                      std::optional<double> shadow_lighting = {}) const {
         validate_state(s);
-        const std::array r{s[0], s[1], s[2]};
-        std::array<double, 3> acceleration;
-        if (!options_.uses_earth_fixed_gravity()) {
-            acceleration = environment_.gravity->acceleration(r, 0, 0);
-        } else {
-            const auto epoch = epoch_at(t);
-            const auto eop = environment_.eop->at(epoch).sample;
-            const auto rotation = environment_.frames->gcrf_to_itrf(epoch, eop);
-            std::array<TideRaisingBody, 2> bodies{};
-            if (options_.uses_full_solid_tides()) {
-                const auto &info = environment_.ephemeris->data_info();
-                bodies = {{{rotation.apply_position(
-                                environment_.ephemeris->position(ThirdBody::sun, epoch)),
-                            info.sun_mu},
-                           {rotation.apply_position(
-                                environment_.ephemeris->position(ThirdBody::moon, epoch)),
-                            info.moon_mu}}};
-            }
-            auto corrections = solid_tide_corrections(
-                environment_.gravity->info(), options_.solid_tides, options_.gravity_degree,
-                options_.gravity_order, bodies, &eop, environment_.time.get());
-            if (options_.ocean_tides.active()) {
-                auto ocean = environment_.ocean_tides->corrections(environment_.gravity->info(),
-                                                                   eop, options_.ocean_tides.degree,
-                                                                   options_.ocean_tides.order);
-                // Solid tides have at most ten terms. Merge equal indices before evaluating
-                // the field; ocean truncation is independent of both the base and solid tides.
-                for (const auto &solid : corrections) {
-                    const auto found = std::ranges::find_if(ocean, [&](const auto &term) {
-                        return term.degree == solid.degree && term.order == solid.order;
-                    });
-                    if (found == ocean.end())
-                        ocean.push_back(solid);
-                    else {
-                        found->c += solid.c;
-                        found->s += solid.s;
-                    }
-                }
-                corrections = std::move(ocean);
-            }
-            acceleration = rotation.inverse_position(environment_.gravity->acceleration(
-                rotation.apply_position(r), options_.gravity_degree, options_.gravity_order,
-                corrections,
-                options_.uses_secular_gravity() ? std::optional{epoch} : std::nullopt));
-        }
-        if (options_.include_relativistic_accelerations) {
-            const auto epoch = epoch_at(t);
-            const auto rotation =
-                environment_.frames->gcrf_to_itrf(epoch, environment_.eop->at(epoch).sample);
-            const auto sun = environment_.ephemeris->geometric_state(ThirdBody::sun, epoch);
-            const auto force = evaluate_relativity(
-                r, {s[3], s[4], s[5]}, options_.gravity_mu, sun.position_m, sun.velocity_mps,
-                environment_.ephemeris->data_info().sun_mu, rotation.inverse_position({0, 0, 1}));
-            for (std::size_t i = 0; i < 3; ++i)
-                acceleration[i] += force.acceleration_mps2[i];
-        }
-        if (options_.uses_third_bodies()) {
-            const auto epoch = epoch_at(t);
-            const auto &info = environment_.ephemeris->data_info();
-            const auto add = [&](ThirdBody body, double mu) {
-                const auto force =
-                    third_body_acceleration(r, environment_.ephemeris->position(body, epoch), mu);
-                for (int i = 0; i < 3; ++i)
-                    acceleration[i] += force[i];
-            };
-            for (auto body : third_body_list)
-                if (options_.third_body(body).enabled)
-                    add(body, third_body_mu(options_.third_body(body), body, info));
-        }
-        if (options_.srp.enabled) {
-            const auto geometry = srp_geometry(t, s);
-            auto force = evaluate_srp(r, geometry.sun, options_.srp, geometry.moon,
-                                      std::span{geometry.additional}.first(geometry.count));
-            if (shadow_lighting) {
-                auto unshadowed = options_.srp;
-                unshadowed.shadow_model = SrpShadowModel::none;
-                force = evaluate_srp(r, geometry.sun, unshadowed);
-                for (auto &component : force.acceleration_mps2)
-                    component *= *shadow_lighting;
-            }
-            for (int i = 0; i < 3; ++i)
-                acceleration[i] += force.acceleration_mps2[i];
-        }
-        if (options_.drag.enabled) {
-            const auto epoch = epoch_at(t);
-            const auto transform =
-                environment_.frames->gcrf_to_itrf_state(epoch, environment_.eop->at(epoch));
-            const auto fixed =
-                transform.apply({epoch, OriginId::earth, FrameId::gcrf, r, {s[3], s[4], s[5]}});
-            const auto sun = options_.drag.use_apparent_sun_position
-                                 ? environment_.ephemeris->apparent_sun_from_earth(epoch)
-                                 : environment_.ephemeris->position(ThirdBody::sun, epoch);
-            std::optional<SpaceWeatherSample> weather, lower;
-            if (!options_.drag.weather_model.empty()) {
-                const auto &d = options_.drag;
-                weather = environment_.weather->sample(weather_at.value_or(epoch),
-                                                       *environment_.time, d.atmosphere,
-                                                       d.geomagnetic_update, d.geomagnetic_source,
-                                                       sun_distance(environment_.ephemeris.get()));
-                if (d.atmosphere == AtmosphereModel::jacchia_roberts &&
-                    d.low_altitude_model == LowAltitudeDensityModel::nrlmsise00)
-                    lower = environment_.weather->sample(
-                        weather_at.value_or(epoch), *environment_.time, AtmosphereModel::nrlmsise00,
-                        d.geomagnetic_update, d.geomagnetic_source,
-                        sun_distance(environment_.ephemeris.get()));
-            }
-            const auto force = evaluate_drag(
-                fixed.position_m, fixed.velocity_mps, transform.rotation.apply_position(sun),
-                environment_.time->to_utc(epoch), options_.drag, weather, lower);
-            const auto inertial = transform.rotation.inverse_position(force.acceleration_itrf_mps2);
-            for (int i = 0; i < 3; ++i)
-                acceleration[i] += inertial[i];
-        }
+        const CartesianState state{
+            epoch_at(t), OriginId::earth, FrameId::gcrf, {s[0], s[1], s[2]}, {s[3], s[4], s[5]}};
+        const auto acceleration = detail::hpop_acceleration_unchecked(state, options_, environment_,
+                                                                      weather_at, shadow_lighting);
         return {s[3], s[4], s[5], acceleration[0], acceleration[1], acceleration[2]};
     }
     using TrialStep = detail::TrialStep<6>;
@@ -837,35 +725,7 @@ class Hpop final : public IStateProvider {
         validate_hpop_options(options_);
         if (ephemeris_end_)
             validate_duration(*ephemeris_end_);
-        environment_.validate_ephemeris_interval(options_, initial.epoch, initial.epoch);
-        if (options_.gravity_model.empty())
-            environment_.gravity = builtin_egm96();
-        if (!environment_.gravity)
-            throw std::invalid_argument(
-                "Selected gravity model is missing; download or import it in Data Center");
-        if (options_.uses_secular_gravity() && !environment_.gravity->info().secular_variations)
-            throw std::invalid_argument(
-                "Selected gravity file has no secular reference epoch and rates");
-        if (environment_.gravity->info().mu != options_.gravity_mu)
-            throw std::invalid_argument(
-                "HPOP gravity GM differs from the selected file; update model settings");
-        if (initial.origin != OriginId::earth || initial.frame != FrameId::gcrf)
-            throw std::invalid_argument("HPOP requires an Earth-centered GCRF initial state");
-        if (options.uses_eop_force() && (!environment_.eop || !environment_.frames))
-            throw std::invalid_argument("HPOP gravity corrections, drag and relativity require "
-                                        "explicit EOP and frame providers");
-        if (options.uses_eop_force() && !eop_covers(environment_.eop->data_info(), initial.epoch))
-            throw EopCoverageError("HPOP initial epoch is outside selected EOP coverage");
-        if (options.uses_utc_force()) {
-            if (!environment_.time || environment_.time->data_info().sha256 !=
-                                          environment_.eop->data_info().time_data.sha256)
-                throw std::invalid_argument("HPOP forces require the EOP's confirmed UTC provider");
-            (void)environment_.time->to_utc(initial.epoch);
-        }
-        if (options_.ocean_tides.active() && !environment_.ocean_tides)
-            throw std::invalid_argument(
-                "Selected ocean tide model is missing; download or import it in Data Center");
-        environment_.validate_weather_interval(options_.drag, initial.epoch, initial.epoch);
+        detail::prepare_hpop_force_environment(initial, options_, environment_);
         State value{};
         for (std::size_t i = 0; i < 3; ++i) {
             value[i] = initial.position_m[i];

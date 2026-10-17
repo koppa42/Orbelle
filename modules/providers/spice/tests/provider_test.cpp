@@ -8,7 +8,7 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <nlohmann/json.hpp>
-#include <orbitforge/core/propagation/solar_radiation_pressure.hpp>
+#include <orbitforge/core/propagation/hpop_force.hpp>
 #include <orbitforge/providers/spice/provider.hpp>
 #include <picosha2.h>
 #ifdef ORBITFORGE_SPICE_TEST_ERFA
@@ -629,6 +629,13 @@ class DifferentialSolarSystem final : public core::IThirdBodyEphemeris {
 
   public:
     explicit DifferentialSolarSystem(const core::IEphemerisProvider &p) : provider_(p) {}
+    void validate_spacecraft_apparent_sun_interval(core::Epoch a, core::Epoch b) const override {
+        provider_.validate_spacecraft_apparent_sun_interval(a, b);
+    }
+    void validate_apparent_sun_interval(core::Epoch a, core::Epoch b) const override {
+        provider_.validate_apparent_sun_interval(a, b);
+    }
+
     const core::ThirdBodyDataInfo &data_info() const noexcept override { return info_; }
     void validate_interval(core::Epoch, core::Epoch,
                            std::span<const core::ThirdBody>) const override {}
@@ -764,6 +771,28 @@ TEST(Spice, SrpStateChainMatchesIndependentApparentSunAndForceDifferences) {
                         state.position_m[i] =
                             radius * (-std::cos(angle) * n[i] + std::sin(angle) * tangent[i]);
                     const auto actual = core::srp_state_differential(state, options, ephemeris);
+                    core::HpopOptions combined_options;
+                    combined_options.gravity_degree = combined_options.gravity_order = 0;
+                    combined_options.srp = options;
+                    core::HpopEnvironment combined_environment;
+                    combined_environment.ephemeris =
+                        std::make_shared<DifferentialSolarSystem>(*provider);
+                    const auto combined = core::hpop_force_differential(state, combined_options,
+                                                                        combined_environment);
+                    const auto central =
+                        core::builtin_egm96()->differential(state.position_m, 0, 0);
+                    EXPECT_EQ(combined.force.acceleration_mps2,
+                              core::evaluate_hpop_acceleration(state, combined_options,
+                                                               combined_environment));
+                    EXPECT_EQ(combined.force.velocity_jacobian_per_s,
+                              actual.force.velocity_jacobian_per_s);
+                    EXPECT_EQ(combined.srp_parameter_jacobian_pa, actual.srp_parameter_jacobian_pa);
+                    for (unsigned i = 0; i < 3; ++i)
+                        for (unsigned j = 0; j < 3; ++j)
+                            EXPECT_EQ(combined.force.position_jacobian_per_s2[i][j],
+                                      central.position_jacobian_per_s2[i][j] +
+                                          actual.force.position_jacobian_per_s2[i][j]);
+
                     if (method == core::SrpSunPositionMethod::apparent &&
                         observer_velocity[0] > 1e6) {
                         auto selected_sun =

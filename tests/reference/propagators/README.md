@@ -214,3 +214,9 @@ stability using Orekit automatic differentiation, unmodified GMAT/author NRL,
 and a high-precision transcription of the original GMAT equations. Sources,
 scopes, hashes and reproduction are in the
 [drag differential protocol](../../../docs/validation/drag_differential_protocol.md).
+
+`hpop_force.txt` contains 216 combined-force references from unmodified Orekit
+13.1.2 and Hipparchus 4.0.2 eight-variable automatic differentiation, including
+rotating-frame state coupling and the D/K consider parameters. Generator,
+inputs, scope, tolerances and canonical LF SHA-256 are documented in the
+[combined HPOP force protocol](../../../docs/validation/hpop_force_protocol.md).
