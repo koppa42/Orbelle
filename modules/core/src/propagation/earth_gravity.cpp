@@ -4,31 +4,48 @@
 
 namespace orbitforge::core {
 namespace {
-// Cartesian solid harmonics with first derivatives. Differentiating the recurrence
-// avoids longitude/latitude divisions (including at x=y=0), and finite differences.
-struct Jet {
+// Cartesian solid harmonics; compile out all second-derivative work on the
+// ordinary force path. Symmetric Hessians use xx,xy,xz,yy,yz,zz storage.
+constexpr std::size_t second_index(std::size_t i, std::size_t j) { return i * (5 - i) / 2 + j; }
+template <bool Second> struct Jet {
     double value = 0;
     std::array<double, 3> gradient{};
+    std::array<double, Second ? 6 : 0> hessian{};
 };
-Jet operator+(const Jet &a, const Jet &b) {
-    Jet r{a.value + b.value};
+template <bool Second> Jet<Second> operator+(const Jet<Second> &a, const Jet<Second> &b) {
+    Jet<Second> r{a.value + b.value};
     for (std::size_t i = 0; i < 3; ++i)
         r.gradient[i] = a.gradient[i] + b.gradient[i];
+    if constexpr (Second)
+        for (std::size_t i = 0; i < 6; ++i)
+            r.hessian[i] = a.hessian[i] + b.hessian[i];
     return r;
 }
-Jet operator-(const Jet &a, const Jet &b) {
-    Jet r{a.value - b.value};
+template <bool Second> Jet<Second> operator-(const Jet<Second> &a, const Jet<Second> &b) {
+    Jet<Second> r{a.value - b.value};
     for (std::size_t i = 0; i < 3; ++i)
         r.gradient[i] = a.gradient[i] - b.gradient[i];
+    if constexpr (Second)
+        for (std::size_t i = 0; i < 6; ++i)
+            r.hessian[i] = a.hessian[i] - b.hessian[i];
     return r;
 }
-Jet operator*(const Jet &a, const Jet &b) {
-    Jet r{a.value * b.value};
+template <bool Second> Jet<Second> operator*(const Jet<Second> &a, const Jet<Second> &b) {
+    Jet<Second> r{a.value * b.value};
     for (std::size_t i = 0; i < 3; ++i)
         r.gradient[i] = a.gradient[i] * b.value + a.value * b.gradient[i];
+    if constexpr (Second)
+        for (std::size_t i = 0; i < 3; ++i)
+            for (std::size_t j = i; j < 3; ++j) {
+                const auto k = second_index(i, j);
+                r.hessian[k] = a.hessian[k] * b.value + a.value * b.hessian[k] +
+                               a.gradient[i] * b.gradient[j] + a.gradient[j] * b.gradient[i];
+            }
     return r;
 }
-Jet operator*(double a, const Jet &b) { return Jet{a} * b; }
+template <bool Second> Jet<Second> operator*(double a, const Jet<Second> &b) {
+    return Jet<Second>{a} * b;
+}
 using Coefficient = GravityCoefficient;
 // Fully normalized coefficients. Generated from the pinned ICGEM EGM96 source;
 // see tools/data/import_egm96.py and docs/architecture/propagators.md.
@@ -136,6 +153,23 @@ std::array<double, 3> GravityModel::acceleration(const std::array<double, 3> &r,
                                                  int order,
                                                  std::span<const GravityCoefficient> corrections,
                                                  std::optional<Epoch> secular_at) const {
+    return evaluate<false>(r, degree, order, corrections, secular_at, {}).acceleration_mps2;
+}
+GravityDifferential GravityModel::differential(const std::array<double, 3> &r, int degree,
+                                               int order,
+                                               std::span<const GravityCoefficient> corrections,
+                                               std::optional<Epoch> secular_at,
+                                               const std::function<void()> &checkpoint) const {
+    return evaluate<true>(r, degree, order, corrections, secular_at, checkpoint);
+}
+template <bool Second>
+GravityDifferential GravityModel::evaluate(const std::array<double, 3> &r, int degree, int order,
+                                           std::span<const GravityCoefficient> corrections,
+                                           std::optional<Epoch> secular_at,
+                                           const std::function<void()> &checkpoint) const {
+    if constexpr (Second)
+        if (checkpoint)
+            checkpoint();
     if (degree < 0 || degree == 1 || degree > std::min(info_.degree, gravity_max_degree) ||
         order < 0 || order > std::min(degree, info_.order))
         throw std::invalid_argument("Gravity truncation exceeds the model or computation limit");
@@ -181,12 +215,25 @@ std::array<double, 3> GravityModel::acceleration(const std::array<double, 3> &r,
     const double inverse2 = 1 / (radius * radius);
     if (effective_degree == 0) {
         const double factor = -info_.mu * inverse2 / radius;
-        return {factor * r[0], factor * r[1], factor * r[2]};
+        GravityDifferential result{{factor * r[0], factor * r[1], factor * r[2]}, {}};
+        if constexpr (Second) {
+            for (std::size_t i = 0; i < 3; ++i)
+                for (std::size_t j = i; j < 3; ++j) {
+                    const double value =
+                        -factor * (3 * (r[i] / radius) * (r[j] / radius) - (i == j ? 1 : 0));
+                    if (!std::isfinite(value))
+                        throw PropagationError(
+                            "Gravity differential is not finite at this position");
+                    result.position_jacobian_per_s2[i][j] = result.position_jacobian_per_s2[j][i] =
+                        value;
+                }
+        }
+        return result;
     }
     const double inverse_radius = 1 / radius;
     const std::array<double, 3> direction{r[0] * inverse_radius, r[1] * inverse_radius,
                                           r[2] * inverse_radius};
-    Jet x{direction[0]}, y{direction[1]}, u{std::abs(direction[2])};
+    Jet<Second> x{direction[0]}, y{direction[1]}, u{std::abs(direction[2])};
     for (std::size_t i = 0; i < 3; ++i) {
         x.gradient[i] = ((i == 0 ? 1 : 0) - direction[0] * direction[i]) * inverse_radius;
         y.gradient[i] = ((i == 1 ? 1 : 0) - direction[1] * direction[i]) * inverse_radius;
@@ -194,7 +241,30 @@ std::array<double, 3> GravityModel::acceleration(const std::array<double, 3> &r,
     }
     const double transverse2 = direction[0] * direction[0] + direction[1] * direction[1];
     u.gradient[2] = (r[2] < 0 ? -1 : 1) * transverse2 * inverse_radius;
-    Jet u_minus_one = u;
+    if constexpr (Second) {
+        for (std::size_t axis = 0; axis < 3; ++axis) {
+            auto &coordinate = axis == 0 ? x : (axis == 1 ? y : u);
+            const double sign = axis == 2 && r[2] < 0 ? -1 : 1;
+            double transverse = 0;
+            for (std::size_t i = 0; i < 3; ++i)
+                if (i != axis)
+                    transverse += direction[i] * direction[i];
+            for (std::size_t i = 0; i < 3; ++i)
+                for (std::size_t j = i; j < 3; ++j) {
+                    // Avoid 1-direction^2 cancellation in the axis-aligned limit.
+                    double value;
+                    if (i == axis && j == axis)
+                        value = -3 * direction[axis] * transverse;
+                    else if (i == axis || j == axis)
+                        value = direction[i == axis ? j : i] * (2 - 3 * transverse);
+                    else
+                        value =
+                            direction[axis] * (3 * direction[i] * direction[j] - (i == j ? 1 : 0));
+                    coordinate.hessian[second_index(i, j)] = sign * value * inverse2;
+                }
+        }
+    }
+    Jet<Second> u_minus_one = u;
     u_minus_one.value = -transverse2 / (1 + u.value);
     const bool polar = u.value > .75;
     // Keep the radial powers out of the angular recurrence. This avoids repeated
@@ -207,10 +277,12 @@ std::array<double, 3> GravityModel::acceleration(const std::array<double, 3> &r,
     for (int n = 0; n <= effective_degree; ++n)
         weights[static_cast<std::size_t>(n)] =
             ratio * std::exp(n * log_ratio) * std::sqrt(2.0 * n + 1);
-    Jet diagonal_v{1}, diagonal_w{};
+    Jet<Second> diagonal_v{1}, diagonal_w{};
     std::array<double, 3> acceleration{}, compensation{};
+    std::array<double, Second ? 6 : 0> hessian{}, hessian_compensation{};
     // Cartesian angular harmonics avoid longitude divisions, including x=y=0.
     // Two previous degrees suffice; the radial weights use O(degree) workspace.
+    std::size_t visited_terms = 0;
     for (int m = 0; m <= effective_order; ++m) {
         if (m > 0) {
             const double scale = m == 1 ? 1 : std::sqrt((2.0 * m - 1) / (2.0 * m));
@@ -218,9 +290,17 @@ std::array<double, 3> GravityModel::acceleration(const std::array<double, 3> &r,
             diagonal_w = scale * (x * diagonal_w + y * diagonal_v);
             diagonal_v = next_v;
         }
-        Jet v = diagonal_v, w = diagonal_w, previous_v{}, previous_w{};
+        Jet<Second> v = diagonal_v, w = diagonal_w, previous_v{}, previous_w{};
+        // Near the axis a Hessian grows quadratically with degree. Retain its
+        // first difference directly instead of subtracting rounded successive
+        // Hessians; compensated updates avoid accumulating pole-limit drift.
+        auto increment_v = v.hessian, increment_w = w.hessian;
+        std::array<double, Second ? 6 : 0> compensation_v{}, compensation_w{};
         for (int n = m; n <= effective_degree; ++n) {
             const auto i = index(n, m);
+            if constexpr (Second)
+                if (checkpoint && (++visited_terms % 4096 == 0))
+                    checkpoint();
             Term term{};
             if (i < terms_.size())
                 term = terms_[i];
@@ -232,14 +312,28 @@ std::array<double, 3> GravityModel::acceleration(const std::array<double, 3> &r,
             }
             if (n > m) {
                 const double a = 1 + term.b + term.offset;
-                const auto next = [&](const Jet &current, const Jet &previous) {
-                    if (polar)
-                        return current + term.b * (current - previous) +
-                               (Jet{term.offset} + a * u_minus_one) * current;
+                const auto next = [&](const Jet<Second> &current, const Jet<Second> &previous,
+                                      [[maybe_unused]] auto &increment,
+                                      [[maybe_unused]] auto &compensation) {
+                    if (polar) {
+                        const auto correction =
+                            (Jet<Second>{term.offset} + a * u_minus_one) * current;
+                        auto result = current + term.b * (current - previous) + correction;
+                        if constexpr (Second) {
+                            for (std::size_t k = 0; k < 6; ++k) {
+                                increment[k] = term.b * increment[k] + correction.hessian[k];
+                                const double adjusted = increment[k] - compensation[k];
+                                const double sum = current.hessian[k] + adjusted;
+                                compensation[k] = (sum - current.hessian[k]) - adjusted;
+                                result.hessian[k] = sum;
+                            }
+                        }
+                        return result;
+                    }
                     return a * (u * current) - term.b * previous;
                 };
-                const auto next_v = next(v, previous_v);
-                const auto next_w = next(w, previous_w);
+                const auto next_v = next(v, previous_v, increment_v, compensation_v);
+                const auto next_w = next(w, previous_w, increment_w, compensation_w);
                 previous_v = v;
                 previous_w = w;
                 v = next_v;
@@ -266,6 +360,26 @@ std::array<double, 3> GravityModel::acceleration(const std::array<double, 3> &r,
                 compensation[axis] = (sum - acceleration[axis]) - adjusted;
                 acceleration[axis] = sum;
             }
+            if constexpr (Second) {
+                const double k = n + 1;
+                for (std::size_t a = 0; a < 3; ++a)
+                    for (std::size_t b = a; b < 3; ++b) {
+                        const auto entry = second_index(a, b);
+                        const double contribution =
+                            weight *
+                            (angular.hessian[entry] -
+                             k * inverse_radius *
+                                 (direction[a] * angular.gradient[b] +
+                                  direction[b] * angular.gradient[a]) +
+                             k * inverse2 *
+                                 ((k + 2) * direction[a] * direction[b] - (a == b ? 1 : 0)) *
+                                 angular.value);
+                        const double adjusted = contribution - hessian_compensation[entry];
+                        const double sum = hessian[entry] + adjusted;
+                        hessian_compensation[entry] = (sum - hessian[entry]) - adjusted;
+                        hessian[entry] = sum;
+                    }
+            }
         }
     }
     for (auto &component : acceleration) {
@@ -273,7 +387,20 @@ std::array<double, 3> GravityModel::acceleration(const std::array<double, 3> &r,
         if (!std::isfinite(component))
             throw PropagationError("Gravity acceleration is not finite at this position");
     }
-    return acceleration;
+    GravityDifferential result{acceleration, {}};
+    if constexpr (Second) {
+        for (std::size_t a = 0; a < 3; ++a)
+            for (std::size_t b = a; b < 3; ++b) {
+                const double value = hessian[second_index(a, b)] * (info_.mu / info_.radius_m);
+                if (!std::isfinite(value))
+                    throw PropagationError("Gravity differential is not finite at this position");
+                result.position_jacobian_per_s2[a][b] = result.position_jacobian_per_s2[b][a] =
+                    value;
+            }
+        if (checkpoint)
+            checkpoint();
+    }
+    return result;
 }
 std::array<double, 3> egm96_acceleration(const std::array<double, 3> &r, int degree, int order) {
     return builtin_egm96()->acceleration(r, degree, order);

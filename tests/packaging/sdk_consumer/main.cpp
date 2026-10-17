@@ -90,6 +90,12 @@ int main(int argc, char **argv) try {
         if (gravity_max_degree != 2190 || !std::isfinite(full[2]) ||
             std::abs(full[2] - truncated[2]) < 1e-8)
             return 34;
+        const auto differential = field.differential({6378146.3, 0, 0}, 2190, 2159);
+        const auto &jacobian = differential.position_jacobian_per_s2;
+        if (differential.acceleration_mps2 != full || !std::isfinite(jacobian[0][2]) ||
+            jacobian[0][2] != jacobian[2][0] ||
+            std::abs(jacobian[0][0] + jacobian[1][1] + jacobian[2][2]) > 1e-18)
+            return 56;
         try {
             (void)field.acceleration({6378146.3, 0, 0}, 2190, 2160);
             return 35;

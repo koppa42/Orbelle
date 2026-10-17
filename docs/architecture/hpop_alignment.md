@@ -92,7 +92,7 @@
 | Integrator | Do not propagate below altitude | 已有按力评估停止的参考球面地心高度；STK 比较须核对其高度参考面 |
 | Covariance | Compute Covariance；6×6 初始矩阵 | 待实现：变分方程、单位、对称性和正定性政策；关闭不影响确定性轨迹 |
 | Covariance | Frame；Representation | 待实现：J2000/TOD/LVLH/Frenet，Cartesian 及适用的 FG 表示；完整 Jacobian |
-| Covariance | 独立 Gravity Degree / Order | 待实现：仅变分方程截断，不能改变名义轨迹 |
+| Covariance | 独立 Gravity Degree / Order | 待接入变分方程；基础已完成：最高 2190 阶解析引力 Hessian、极轴及固定历元潮汐/长期变化系数偏导，通过 Orekit 与高精度解析值对照，见[引力空间偏导](gravity_differential.md)。尚不能配置或传播协方差，后续独立截断不得改变名义轨迹 |
 | Covariance | Include Consider Analysis；Use / Value / x,y,z,vx,vy,vz | 待实现：Drag、SRP、OutGasTimeConstant、OutGasMagnitude、ThrustX/Y/Z 的参数定义、敏感度、参数方差及状态交叉协方差 |
 | Covariance | Include Consider Cross Correlation；Row/Column/Value；Add/Remove | 待实现：参数间协方差、联合矩阵校验及输出来源 |
 

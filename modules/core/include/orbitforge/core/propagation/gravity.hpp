@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <orbitforge/core/time/epoch.hpp>
@@ -31,6 +32,12 @@ struct GravityInfo {
     double solid_tide_k20 = 0.30190;
     std::optional<GravitySecularVariations> secular_variations{};
 };
+// Spatial differential at a fixed force epoch and fixed coefficient corrections.
+// The Jacobian is d(acceleration_i)/d(position_j), in the same Earth-fixed axes.
+struct GravityDifferential {
+    std::array<double, 3> acceleration_mps2{};
+    std::array<std::array<double, 3>, 3> position_jacobian_per_s2{};
+};
 // Immutable, Earth-centered reference potential, including its monopole. SI units;
 // input/output axes are Earth-fixed. Optional additive normalized corrections are supplied
 // by the caller at the force epoch; they never mutate the immutable base field.
@@ -42,12 +49,26 @@ class GravityModel {
     acceleration(const std::array<double, 3> &position_m, int degree, int order,
                  std::span<const GravityCoefficient> corrections = {},
                  std::optional<Epoch> secular_at = {}) const;
+    // Analytic potential Hessian, including the monopole, through the full supported
+    // degree/order and at the poles. No finite-difference displacement. Cancellation
+    // throws without modifying this immutable field; normal acceleration calls do
+    // not evaluate the extra derivatives. Invalid inputs follow acceleration().
+    [[nodiscard]] GravityDifferential
+    differential(const std::array<double, 3> &position_m, int degree, int order,
+                 std::span<const GravityCoefficient> corrections = {},
+                 std::optional<Epoch> secular_at = {},
+                 const std::function<void()> &checkpoint = {}) const;
     // Select only rates inside the base field truncation. Throws if metadata is absent,
     // truncation is invalid, or the evolved corrections are not finite. No UTC is needed.
     [[nodiscard]] std::vector<GravityCoefficient> secular_corrections(Epoch at, int degree,
                                                                       int order) const;
 
   private:
+    template <bool Second>
+    GravityDifferential evaluate(const std::array<double, 3> &position_m, int degree, int order,
+                                 std::span<const GravityCoefficient> corrections,
+                                 std::optional<Epoch> secular_at,
+                                 const std::function<void()> &checkpoint) const;
     GravityInfo info_;
     struct Term {
         double c = 0, s = 0, offset = 0, b = 0;
