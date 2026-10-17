@@ -46,6 +46,7 @@ struct GEOPARMS {
 class JacchiaRoberts {
   public:
     double root1 = 0, root2 = 0, x_root = 0, y_root = 0, t_infinity = 0, tx = 0, sum = 0;
+    double high_temperature_exponent = 0;
     double cbPolarRadius = 6378.137 * (1 - 1 / 298.257223563),
            cbPolarSquared = cbPolarRadius * cbPolarRadius;
     static constexpr double RHO_ZERO = 3.46e-9;
@@ -137,9 +138,9 @@ Real JacchiaRoberts::exotherm(Real space_craft[2], Real sun[3], GEOPARMS *geo, R
             sum = CON_L[i] + sum * t_infinity;
         }
 
-        exotemp = t_infinity -
-                  (t_infinity - tx) * exp(-(tx - TZERO) / (t_infinity - tx) * (height - 125.0) /
-                                          35.0 * sum / (cbPolarRadius + height));
+        high_temperature_exponent = -(tx - TZERO) / (t_infinity - tx) * (height - 125.0) / 35.0 *
+                                    sum / (cbPolarRadius + height);
+        exotemp = t_infinity - (t_infinity - tx) * exp(high_temperature_exponent);
     } else
         exotemp = tx;
 
@@ -376,15 +377,19 @@ Real JacchiaRoberts::rho_high(Real height, Real temperature, Real t_500, Real su
         }
 
         if (height > 500.0 && i == 5) {
+            const double exponent500 = -(tx - TZERO) / (t_infinity - tx) * (500.0 - 125.0) / 35.0 *
+                                       sum / (cbPolarRadius + 500.0);
             r = MOL_MASS[5] * pow(10.0, 73.13 - (39.4 - 5.5 * log10(t_500)) * log10(t_500)) *
                 pow(t_500 / temperature, exp1) *
-                pow((t_infinity - temperature) / (t_infinity - t_500), gamma) / AVOGADRO;
+                exp(gamma * (high_temperature_exponent - exponent500)) / AVOGADRO;
             rho_out += r;
 
         } else if (i <= 4) {
 
+            // T approaches T_infinity at high altitude. Evaluate their ratio
+            // from the original temperature exponent, never subtract rounded T's.
             r = f * MOL_MASS[i] * di * pow(tx / temperature, exp1) *
-                pow((t_infinity - temperature) / (t_infinity - tx), gamma);
+                exp(gamma * high_temperature_exponent);
             rho_out += r;
         }
     }

@@ -8,7 +8,9 @@ drag force are in `atmospheric_drag.cpp`; resources are injected by HPOP/Runtime
 [`c9b78bd1c8499845cb78fde315e1f761b6b06f1c`](https://github.com/nasa/GMAT/blob/c9b78bd1c8499845cb78fde315e1f761b6b06f1c/src/base/solarsys/JacchiaRobertsAtmosphere.cpp).
 It retains GMAT's fitted constants and WGS84 polar radius; it removes GMAT's
 object/file integration, uses finite noon/midnight/pole/equinox limits, and bounds
-polynomial-root iteration. The scalar 90–100 km regime is exposed; GMAT's outer
+polynomial-root iteration. High-altitude density temperature ratios are evaluated
+from the original exponential directly, avoiding subtraction of rounded near-equal
+temperatures. The original equations are independently checked at 80/100 digits. The scalar 90–100 km regime is exposed; GMAT's outer
 `Density` method disables that regime, so the independent reference harness
 calls its original scalar `JacchiaRoberts` method directly.
 

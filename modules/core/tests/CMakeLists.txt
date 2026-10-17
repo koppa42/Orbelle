@@ -1,5 +1,8 @@
-add_executable(orbitforge_core_tests universal_kepler_test.cpp vop_interpolation_test.cpp circular_two_body_test.cpp tabulated_orbit_test.cpp ground_station_test.cpp hpop_test.cpp sundman_test.cpp mission_test.cpp force_differential_test.cpp gravity_differential_test.cpp gravity_test.cpp solid_tides_test.cpp ocean_tides_test.cpp relativity_test.cpp third_body_test.cpp solar_radiation_pressure_test.cpp atmospheric_drag_test.cpp)
+add_executable(orbitforge_core_tests universal_kepler_test.cpp vop_interpolation_test.cpp circular_two_body_test.cpp tabulated_orbit_test.cpp ground_station_test.cpp hpop_test.cpp sundman_test.cpp mission_test.cpp drag_differential_test.cpp force_differential_test.cpp gravity_differential_test.cpp gravity_test.cpp solid_tides_test.cpp ocean_tides_test.cpp relativity_test.cpp third_body_test.cpp solar_radiation_pressure_test.cpp atmospheric_drag_test.cpp)
 target_compile_definitions(orbitforge_core_tests PRIVATE
+    ORBITFORGE_DRAG_DIFFERENTIAL_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/drag_differential.txt"
+    ORBITFORGE_DRAG_DENSITY_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/drag_density_differential.txt"
+    ORBITFORGE_DRAG_DENSITY_HIGH_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/drag_density_high.txt"
     ORBITFORGE_FORCE_DIFFERENTIAL_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/force_differential.txt"
     ORBITFORGE_GRAVITY_DIFFERENTIAL_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/gravity_differential.txt"
     ORBITFORGE_GRAVITY_DIFFERENTIAL_POLE_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/gravity_differential_poles.txt"
@@ -25,7 +28,7 @@ target_compile_definitions(orbitforge_core_tests PRIVATE
     ORBITFORGE_SRP_GEOMETRY_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/srp_geometry.txt"
     ORBITFORGE_NRLMSISE_AP_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/nrlmsise00_ap.txt"
     ORBITFORGE_NRLMSISE_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/nrlmsise00.txt"
-    ORBITFORGE_JR_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/jacchia_roberts.txt"
+    ORBITFORGE_JR_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/jacchia_roberts_precise.txt"
     ORBITFORGE_MASS_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/mass.txt"
     ORBITFORGE_DRAG_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/drag.txt"
     ORBITFORGE_HPOP_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/hpop.txt")

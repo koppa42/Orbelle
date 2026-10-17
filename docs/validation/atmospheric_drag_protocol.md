@@ -8,6 +8,8 @@
 
 `jacchia_roberts.txt` 有 576 个未修改 NASA GMAT 标量模型参考，提交为 `c9b78bd1c8499845cb78fde315e1f761b6b06f1c`。覆盖同样日期、16 个分段高度（90…2500 km，含 100/125/200/500 km 附近）、4 个几何条件和 3 组天气。API-only stubs 不执行时间/高度换算，标量入口直接接受 UTC JD−2430000、WGS84 大地纬度、椭球高、太阳方向；未调用的外层时间和测地函数会抛异常。参考不声明等同于 GMAT 全部外层传播配置。
 
+当前 Core/Python 的 576 组 JR 验收读取 `jacchia_roberts_precise.txt`：12 列输入保持相同，≤125 km 保留原 GMAT 结果，>125 km 使用保留原方程温度相减的 80/100 位高精度结果。原 double 实现在高空会因温度相减损失精度，部分低太阳活动输入给出零密度；本实现通过直接指数比值修正，密度容限仍为 2e−10。原 `jacchia_roberts.txt` 留作可重现的来源输入，详见[偏导与高空稳定性验证](drag_differential_protocol.md)。
+
 `nrlmsise00_ap.txt` 另含 1056 个同一原作者 C `gtd7d` 参考，覆盖 3 个日期、11 个高度、4 组几何和 8 组地磁输入：3 组原生日 Ap（含非 Kp 表节点的 15.25）、5 组历史 Ap（全零、恒定、最大值、上升和衰减磁暴）。历史模式显式设置原生 `SW[9]=-1`；测试完整密度及两个温度。历史均值包含非整数，不舍入到离散 Kp 表。参考 SHA-256 为 `da884507a21fc53dd8f5c0002bedb6270f289fbf88fbb254366b71eb219e9037`。
 
 生成器为 `tools/validation/nrlmsise_reference.c`、`nrlmsise_ap_reference.c` 和 `jacchia_roberts_reference.cpp`；上游文件 URL 与原始字节 SHA-256 固定于 `density_sources.json`。`atmosphere_reference.py` 下载后校验字节、独立编译并在指定目录写候选文件，不能自动覆盖参考：

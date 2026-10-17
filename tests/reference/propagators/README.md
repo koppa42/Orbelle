@@ -207,3 +207,10 @@ is used. Inputs, budgets, convergence and reproduction commands are in the
 This validates internal kernels; public time regularization is not yet enabled.
 Canonical LF SHA-256:
 `8817fd254063bc4a8c635358b580f31e616b15832e6ac378ad34de8e0993478a`.
+
+`drag_differential.txt`, `drag_density_differential.txt`, `drag_density_high.txt`,
+and `jacchia_roberts_precise.txt` validate fixed-epoch drag partials and JR density
+stability using Orekit automatic differentiation, unmodified GMAT/author NRL,
+and a high-precision transcription of the original GMAT equations. Sources,
+scopes, hashes and reproduction are in the
+[drag differential protocol](../../../docs/validation/drag_differential_protocol.md).

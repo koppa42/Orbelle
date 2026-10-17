@@ -2,6 +2,7 @@
 #include <array>
 #include <optional>
 #include <orbitforge/core/frames/geodetic.hpp>
+#include <orbitforge/core/propagation/force_differential.hpp>
 #include <orbitforge/core/propagation/space_weather.hpp>
 #include <orbitforge/core/time/time_provider.hpp>
 
@@ -72,4 +73,27 @@ evaluate_drag(const std::array<double, 3> &position_itrf_m,
               const std::array<double, 3> &sun_itrf_m, const UtcDateTime &utc,
               const DragOptions &options, const std::optional<SpaceWeatherSample> &weather = {},
               const std::optional<SpaceWeatherSample> &low_weather = {});
+struct DragDifferential {
+    DragEvaluation nominal{};
+    ForceDifferential force{};
+    std::array<double, 3> density_gradient_kg_m4{};
+    // Derivative with respect to STK's D = Cd * Area/Mass [m^2/kg], in Pa.
+    // This is not a Cd-only derivative and remains nonzero when D is zero.
+    std::array<double, 3> drag_parameter_jacobian_pa{};
+};
+// Fixed UTC, Sun, weather and model parameters. Both state blocks use ITRF axes;
+// velocity is relative to co-rotating air, as for evaluate_drag. Density position
+// derivatives use fourth-order finite differences; velocity and D are analytic.
+// Historical-Ap latitude derivatives keep their hemisphere (north at zero).
+// One-sided density derivatives at outer altitude limits; rejects interior model
+// branch boundaries (within 1e-5 m), angular cuts (within 1e-12 rad), and
+// longitude poles (|cos(latitude)| < 1e-8).
+// Full inertial partials also need the position-to-velocity rotation-rate coupling.
+// Disabled drag returns zero; invalid input or non-finite derivatives throw.
+[[nodiscard]] DragDifferential
+drag_differential(const std::array<double, 3> &position_itrf_m,
+                  const std::array<double, 3> &velocity_itrf_mps,
+                  const std::array<double, 3> &sun_itrf_m, const UtcDateTime &utc,
+                  const DragOptions &options, const std::optional<SpaceWeatherSample> &weather = {},
+                  const std::optional<SpaceWeatherSample> &low_weather = {});
 } // namespace orbitforge::core

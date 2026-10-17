@@ -151,6 +151,13 @@ int main(int argc, char **argv) try {
     if (!std::isfinite(density.density_kg_m3) || density.density_kg_m3 <= 0 ||
         force.acceleration_itrf_mps2[1] >= 0 || orbitforge::core::kp_to_ap(3) != 15)
         return 29;
+    const auto drag_partials = orbitforge::core::drag_differential(
+        {6778137, 0, 0}, {0, 7500, 0}, {149597870700, 0, 0}, atmosphere.utc, drag);
+    if (drag_partials.force.acceleration_mps2 != force.acceleration_itrf_mps2 ||
+        drag_partials.drag_parameter_jacobian_pa[1] >= 0 ||
+        drag_partials.force.velocity_jacobian_per_s[1][1] >= 0 ||
+        !std::isfinite(drag_partials.density_gradient_kg_m4[0]))
+        return 34;
     atmosphere.daily_ap = 15;
     if (orbitforge::core::evaluate_atmosphere(drag.atmosphere, atmosphere).density_kg_m3 !=
         density.density_kg_m3)

@@ -26,7 +26,7 @@ class DragTests(unittest.TestCase):
             with self.assertRaises((TypeError, ValueError)):
                 of.orbits.DragSettings(**kwargs)
         self.assertEqual(of.kp_to_ap(3), 15)
-        for model, name in ((of.AtmosphereModel.JACCHIA_ROBERTS, "jacchia_roberts.txt"),
+        for model, name in ((of.AtmosphereModel.JACCHIA_ROBERTS, "jacchia_roberts_precise.txt"),
                             (of.AtmosphereModel.NRLMSISE00, "nrlmsise00.txt")):
             rows = [line.split() for line in (ROOT / "tests/reference/propagators" / name)
                     .read_text().splitlines() if line and not line.startswith("#")]
@@ -43,6 +43,23 @@ class DragTests(unittest.TestCase):
                 inputs.f107, inputs.f107_average, inputs.kp = values[9:12]
                 actual = of.evaluate_atmosphere(model, inputs)
                 self.assertAlmostEqual(actual.density_kg_m3 / values[12], 1, delta=2e-10)
+
+    def test_high_altitude_roberts_matches_high_precision_original_equations(self):
+        source = ROOT / "tests/reference/propagators/drag_density_high.txt"
+        rows = [list(map(float, line.split())) for line in source.read_text().splitlines()
+                if line and not line.startswith("#")]
+        self.assertEqual(len(rows), 216)
+        for row in rows:
+            mode, approximate = map(int, row[:2])
+            options = of.DragOptions()
+            options.enabled = True
+            options.use_approximate_altitude = bool(approximate)
+            options.f107, options.f107_average, options.kp = (
+                (150, 150, 3), (180, 165, 5.5), (70, 80, 0))[mode]
+            actual = of.evaluate_drag(row[2:5], (1234, -6234, 3456), (1.4e11, -5e10, 3e10),
+                                      of.UtcDateTime(2000, 2, 29, 13, 23, 12, 500000000), options)
+            with self.subTest(mode=mode, approximate=approximate, position=row[2:5]):
+                self.assertAlmostEqual(actual.density_kg_m3 / row[5], 1, delta=3e-11)
 
     def test_explicit_daily_and_history_ap_match_author_reference(self):
         rows = (ROOT / "tests/reference/propagators/nrlmsise00_ap.txt").read_text().splitlines()

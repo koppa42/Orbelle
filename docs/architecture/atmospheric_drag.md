@@ -20,6 +20,8 @@ Jacchia–Roberts 适用 90…2500 km，保留 NASA GMAT 标量模型的拟合�
 
 JR 可选择 NRLMSISE-00 作为低空模型。低于 90 km 使用低空模型；在 `90 km…90 km+拼接范围` 内，以 `w=t²(3−2t)` 对质量密度加权，在其上使用 JR。正范围拼接具有连续的一阶权重；零范围表示明确的硬切换。有效拼接范围至多 910 km，防止低空模型查询超出 1000 km。NRLMSISE 为主模型时低空设置不生效，但合法草稿仍保存。该拼接定义为 OrbitForge 的公开约定，仍需 STK 数值核对。
 
+JR 的高空温度比值使用直接指数求值，避免 `T∞−T` 相减后丢失有效数字或得到零密度；模型常数和分段保持原定义。新增 C++ [阻力偏导接口](drag_differential.md)，用于后续协方差和 D 参数敏感度传播；其密度梯度和模型边界限制有独立契约。
+
 ## 原生 Ap 密度接口
 
 `evaluate_atmosphere(NRLMSISE00, input)` 可通过 `AtmosphereInput.daily_ap` 直接使用原生日 Ap，或通过 `ap_history` 使用七项历史数组；二者互斥，均省略时沿用 Kp→日 Ap。显式 Ap 模式不读取 Kp。所有 Ap 值必须有限且在 `[0,400]` 内，JR 拒绝显式 Ap，避免误把 Ap 当成 Kp。

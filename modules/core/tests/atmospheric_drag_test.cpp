@@ -220,7 +220,7 @@ TEST(AtmosphericDrag, JrNoonMidnightEquinoxAndPolarLimitsAreFiniteAndConcurrent)
     EXPECT_EQ(a.get(), expected.density_kg_m3);
     EXPECT_EQ(b.get(), expected.density_kg_m3);
 }
-TEST(AtmosphericDrag, JrDensityMatchesUnmodifiedGmatScalarModelAcrossRegimesAndSeasonalDates) {
+TEST(AtmosphericDrag, JrDensityMatchesGmatAndHighPrecisionOriginalEquationsAcrossRegimesAndSeasonalDates) {
     std::ifstream source(ORBITFORGE_JR_REFERENCE);
     ASSERT_TRUE(source);
     std::string line;
@@ -253,7 +253,7 @@ TEST(AtmosphericDrag, JrDensityMatchesUnmodifiedGmatScalarModelAcrossRegimesAndS
         ++count;
     }
     EXPECT_EQ(count, 576U);
-    std::cout << "JR GMAT reference: max relative density error " << maximum << '\n';
+    std::cout << "JR GMAT/high-precision reference: max relative density error " << maximum << '\n';
 }
 TEST(AtmosphericDrag, RelativeVelocityDirectionAreaAndLowAltitudeBlendActuallyAffectTheForce) {
     DragOptions options;

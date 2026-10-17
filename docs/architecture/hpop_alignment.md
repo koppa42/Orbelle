@@ -174,6 +174,8 @@ a_drag = −0.5 ρ Cd (A_drag / m) |v_relative| v_relative
 
 ## 5. 协方差
 
+已提供全阶引力 Hessian、第三体／相对论解析状态块，以及[阻力局部状态块和 `D=Cd×A/m` 偏导](drag_differential.md)，均有独立成熟算法或高精度原方程对照。阻力的模型边界及极点变分处理、SRP 偏导、完整 STM、参数传播和协方差装配仍待完成；这些底层接口不代表协方差功能已启用。
+
 协方差是独立能力，不能只增加一个矩阵编辑框。第一层为 6×6 初始状态协方差与状态转移矩阵：
 
 ```text
@@ -185,7 +187,7 @@ P(t) = Φ(t) P0 Φ(t)ᵀ              （无过程噪声）
 
 初始矩阵检查有限性、对称性、单位、半正定性和所选算法的退化矩阵政策。输出坐标转换采用完整 6×6 状态变换 Jacobian，含旋转率；不能只对位置块做旋转。LVLH 与 Frenet 使用明确的轴定义。
 
-第二层再接 Cd / Cr 等参数敏感度、参数协方差、状态与参数交叉协方差、consider analysis 及可选过程噪声，报告区分这些来源。轨迹、状态协方差和敏感度共享积分历元与事件处理。脉冲处需明确状态跳变 Jacobian 和机动执行误差，未定义误差模型时不补造噪声。[STK 协方差说明](https://help.agi.com/stk/Content/hpop/hpop-covariance.htm)
+第二层再接 `D=Cd×DragArea/Mass` / `K=Cr×SRPArea/Mass` 等参数敏感度、参数协方差、状态与参数交叉协方差、consider analysis 及可选过程噪声，报告区分这些来源。轨迹、状态协方差和敏感度共享积分历元与事件处理。脉冲处需明确状态跳变 Jacobian 和机动执行误差，未定义误差模型时不补造噪声。[STK 协方差说明](https://help.agi.com/stk/Content/hpop/hpop-covariance.htm)
 
 ## 6. 数据与模块改造
 
