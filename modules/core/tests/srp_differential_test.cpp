@@ -265,7 +265,7 @@ TEST(SrpDifferential, PhysicalDuplicatesAreSmoothButDifferentDistanceCoincidence
     options.moon_radius_m = 1e6;
     const Vector r{}, sun{149597870700., 0, 0}, moon{4e8, 0, 0};
     const auto single = srp_differential(r, sun, options, moon);
-    options.additional_eclipsing_bodies = {{ThirdBody::venus, 1e6}};
+    options.additional_eclipsing_bodies.push_back({ThirdBody::venus, 1e6});
     const std::array duplicate{SrpBodyPosition{ThirdBody::venus, moon}};
     const auto both = srp_differential(r, sun, options, moon, duplicate);
     EXPECT_EQ(both.nominal.lighting_ratio, single.nominal.lighting_ratio);
