@@ -15,6 +15,19 @@ template <std::size_t N> struct ErrorControl {
     double relative = 0;
     std::array<double, N> absolute{};
     double max_step = std::numeric_limits<double>::infinity();
+    // An equation formulation may measure a signed local defect in physical coordinates.
+    using State = std::array<double, N>;
+    std::function<double(const State &, const State &, const State &)> mapped_error;
+    double error(const State &before, const State &after, const State &defect) const {
+        if (fixed)
+            return 0;
+        if (mapped_error)
+            return mapped_error(before, after, defect);
+        double value = 0;
+        for (std::size_t i = 0; i < N; ++i)
+            value = std::max(value, std::abs(defect[i]) / scale(i, before[i], after[i]));
+        return value;
+    }
     double scale(std::size_t i, double before, double after) const {
         return absolute[i] + relative * std::max(std::abs(before), std::abs(after));
     }
@@ -103,8 +116,7 @@ TrialStep<N> rkf78(double t, const std::array<double, N> &s, double h, const Der
         }
         k[stage] = derivative(t + rkf_c[stage] * h, value);
     }
-    StepState result = s, increment{};
-    double error = 0;
+    StepState result = s, increment{}, defect{};
     for (std::size_t i = 0; i < s.size(); ++i) {
         double sum = 0;
         for (std::size_t j = 0; j < 13; ++j)
@@ -113,12 +125,9 @@ TrialStep<N> rkf78(double t, const std::array<double, N> &s, double h, const Der
         result[i] += increment[i];
         if (control.fixed)
             continue;
-        const double estimate =
-            std::abs(h * (41.0 / 840) * (k[11][i] + k[12][i] - k[0][i] - k[10][i]));
-        const double scale = control.scale(i, s[i], result[i]);
-        error = std::max(error, estimate / scale);
+        defect[i] = h * (41.0 / 840) * (k[11][i] + k[12][i] - k[0][i] - k[10][i]);
     }
-    return {result, error, -1.0 / 8, increment};
+    return {result, control.error(s, result, defect), -1.0 / 8, increment};
 }
 template <std::size_t N, class Derivative>
 TrialStep<N> rkv89(double t, const std::array<double, N> &s, double h, const Derivative &derivative,
@@ -235,14 +244,11 @@ TrialStep<N> bulirsch_stoer(double t, const std::array<double, N> &s, double h,
         }
         if (level == 0 || (startup && level < 6))
             continue; // GJ startup uses at least order 14; normal BS needs an error estimate.
-        double error = 0;
         const auto result = absolute_state(estimate);
-        for (std::size_t i = 0; i < s.size(); ++i) {
+        for (std::size_t i = 0; i < s.size(); ++i)
             if (!std::isfinite(estimate[i]) || !std::isfinite(correction[i]))
                 throw PropagationError("HPOP extrapolation produced a nonfinite result");
-            const double scale = control.scale(i, s[i], result[i]);
-            error = std::max(error, std::abs(correction[i]) / scale);
-        }
+        const double error = control.error(s, result, correction);
         const auto candidate = trial(estimate, error, -1.0 / (2 * level + 1));
         rejected = candidate;
         const bool lookahead = accepted;

@@ -128,8 +128,9 @@ TEST(VopInterpolation, InertialFramesZeroOrderGapsManeuversAndCancellation) {
             const auto p = make_tabulated_orbit({before, after, later},
                                                 {OrbitInterpolationMethod::vop, order, mu});
             for (const auto &node : before)
-                if (node.epoch != before.back().epoch)
+                if (node.epoch != before.back().epoch) {
                     EXPECT_EQ(p->state_at(node.epoch).position_m, node.position_m);
+                }
             EXPECT_EQ(p->state_at(after.front().epoch).velocity_mps, after.front().velocity_mps);
             EXPECT_THROW((void)p->state_at(Epoch{base - 1}), PropagationError);
             EXPECT_THROW((void)p->state_at(Epoch{base + 2100'000'000'000LL}), PropagationError);

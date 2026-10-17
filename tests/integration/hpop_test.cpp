@@ -203,3 +203,47 @@ TEST(HpopProject, RegularizationPersistsAndOnlyActiveParametersChangeIdentity) {
         }
     }
 }
+
+TEST(HpopProject, VopPersistsButOnlySupportedMethodsChangeAnalysisReportAndSessionIdentity) {
+    for (auto method :
+         {core::HpopIntegrator::rk4, core::HpopIntegrator::rkf78, core::HpopIntegrator::rkv89,
+          core::HpopIntegrator::bulirsch_stoer, core::HpopIntegrator::gauss_jackson}) {
+        auto input = hpop_project();
+        auto &orbit = input.satellites[0].orbit;
+        auto &o = orbit.hpop;
+        o.integrator = method;
+        const auto identity = [&] {
+            return std::pair{application::analysis_input_sha256(input),
+                             runtime::report_input_sha256(input)};
+        };
+        const auto before = identity();
+        const auto source = runtime::make_hpop_session(orbit.initial, o).provenance().algorithm;
+        o.vop = true;
+        const auto active = identity();
+        const auto algorithm = runtime::make_hpop_session(orbit.initial, o).provenance().algorithm;
+        if (method == core::HpopIntegrator::rkf78 ||
+            method == core::HpopIntegrator::bulirsch_stoer) {
+            EXPECT_NE(before.first, active.first);
+            EXPECT_NE(before.second, active.second);
+            EXPECT_NE(source, algorithm);
+            EXPECT_EQ(algorithm.find("hpop-vop-universal-osculating-gcrf-tai-v1;"), 0U);
+        } else {
+            EXPECT_EQ(before, active);
+            EXPECT_EQ(source, algorithm);
+        }
+        EXPECT_EQ(application::decode_project(application::encode_project(input))
+                      .satellites[0]
+                      .orbit.hpop,
+                  o);
+        o.interpolation.vop_mu = 4.2e14;
+        EXPECT_EQ(identity(), active);
+        EXPECT_EQ(runtime::make_hpop_session(orbit.initial, o).provenance().algorithm, algorithm);
+        o.interpolation.method = core::OrbitInterpolationMethod::vop;
+        const auto both = identity();
+        o.interpolation.vop_mu = 4.3e14;
+        EXPECT_NE(identity().first, both.first);
+        EXPECT_NE(identity().second, both.second);
+        // Integration is independent of interpolation, including its GM.
+        EXPECT_EQ(runtime::make_hpop_session(orbit.initial, o).provenance().algorithm, algorithm);
+    }
+}

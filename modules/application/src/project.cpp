@@ -25,7 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 39;
+constexpr std::uint32_t project_version = 40;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -43,7 +43,7 @@ struct SectionSchema {
 // One current schema, shared by the reader and writer. Null means an optional section.
 constexpr std::array section_schemas{
     SectionSchema{scene_tag, 1, "Missing scene section"},
-    SectionSchema{objects_tag, 30, "Missing satellites section"},
+    SectionSchema{objects_tag, 31, "Missing satellites section"},
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
     SectionSchema{sensors_tag, 1, "Missing sensors section"},
@@ -409,6 +409,7 @@ std::string analysis_input_sha256(const Project &project) {
             }
             out.number(o.include_relativistic_accelerations, 1);
             out.number(static_cast<unsigned>(o.integrator), 4);
+            out.number(o.uses_vop(), 1);
             out.real(o.minimum_altitude_m);
             out.number(static_cast<unsigned>(o.interpolation.method), 4);
             out.number(static_cast<unsigned>(o.interpolation.order), 4);
@@ -838,6 +839,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
             objects.number(o.include_relativistic_accelerations, 1);
             objects.real(o.satellite_mass_kg);
             objects.number(static_cast<unsigned>(o.integrator), 4);
+            objects.number(o.vop, 1);
             objects.number(static_cast<unsigned>(o.correction), 4);
             objects.number(static_cast<unsigned>(o.step_control), 4);
             for (double v : {o.relative_tolerance, o.position_tolerance_m, o.velocity_tolerance_mps,
@@ -1049,6 +1051,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             const auto integrator = objects.number(4);
             check(integrator <= 4, "Unsupported HPOP integrator");
             o.integrator = static_cast<core::HpopIntegrator>(integrator);
+            o.vop = objects.boolean();
             const auto correction = objects.number(4);
             check(correction <= 1, "Unsupported HPOP predictor corrector scheme");
             o.correction = static_cast<core::HpopCorrection>(correction);

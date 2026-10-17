@@ -385,79 +385,87 @@ TEST(AtmosphericDrag, ApproximateAltitudeEquatorPolesDomainsAndLowAltitudeSelect
     EXPECT_NEAR(blend.density_kg_m3, expected, bound);
 }
 TEST(AtmosphericDrag, CoRotatingWgs84NrlmsisePropagationMatchesIndependentOrekit) {
-    std::ifstream source(ORBITFORGE_DRAG_REFERENCE);
-    ASSERT_TRUE(source);
-    std::string line;
-    std::size_t count = 0;
-    double max_position = 0, max_velocity = 0;
-    const auto env = environment();
-    while (std::getline(source, line)) {
-        if (line.empty() || line[0] == '#')
-            continue;
-        SCOPED_TRACE(line);
-        std::istringstream row(line);
-        int mode;
-        double seconds;
-        CartesianState initial{Epoch{0}, OriginId::earth, FrameId::gcrf, {}, {}},
-            expected = initial;
-        std::array<double, 3> acceleration;
-        ASSERT_TRUE(row >> mode >> seconds);
-        for (auto &v : initial.position_m)
-            ASSERT_TRUE(row >> v);
-        for (auto &v : initial.velocity_mps)
-            ASSERT_TRUE(row >> v);
-        for (auto &v : expected.position_m)
-            ASSERT_TRUE(row >> v);
-        for (auto &v : expected.velocity_mps)
-            ASSERT_TRUE(row >> v);
-        for (auto &v : acceleration)
-            ASSERT_TRUE(row >> v);
-        expected.epoch = Epoch{static_cast<std::int64_t>(seconds * 1e9)};
-        HpopOptions options;
-        options.gravity_degree = options.gravity_order = 0;
-        options.max_step_seconds = 2.5;
-        options.min_step_seconds = 1e-6;
-        options.relative_tolerance = 1e-14;
-        options.position_tolerance_m = 1e-8;
-        options.velocity_tolerance_mps = 1e-11;
-        options.drag.enabled = true;
-        options.drag.atmosphere = AtmosphereModel::nrlmsise00;
-        if (mode == 1) {
-            options.drag.f107 = 70;
-            options.drag.f107_average = 80;
-            options.drag.kp = 0;
+    for (bool vop : {false, true})
+        for (auto method : {HpopIntegrator::rkf78, HpopIntegrator::bulirsch_stoer}) {
+            SCOPED_TRACE(vop);
+
+            std::ifstream source(ORBITFORGE_DRAG_REFERENCE);
+            ASSERT_TRUE(source);
+            std::string line;
+            std::size_t count = 0;
+            double max_position = 0, max_velocity = 0;
+            const auto env = environment();
+            while (std::getline(source, line)) {
+                if (line.empty() || line[0] == '#')
+                    continue;
+                SCOPED_TRACE(line);
+                std::istringstream row(line);
+                int mode;
+                double seconds;
+                CartesianState initial{Epoch{0}, OriginId::earth, FrameId::gcrf, {}, {}},
+                    expected = initial;
+                std::array<double, 3> acceleration;
+                ASSERT_TRUE(row >> mode >> seconds);
+                for (auto &v : initial.position_m)
+                    ASSERT_TRUE(row >> v);
+                for (auto &v : initial.velocity_mps)
+                    ASSERT_TRUE(row >> v);
+                for (auto &v : expected.position_m)
+                    ASSERT_TRUE(row >> v);
+                for (auto &v : expected.velocity_mps)
+                    ASSERT_TRUE(row >> v);
+                for (auto &v : acceleration)
+                    ASSERT_TRUE(row >> v);
+                expected.epoch = Epoch{static_cast<std::int64_t>(seconds * 1e9)};
+                HpopOptions options;
+                options.vop = vop;
+                options.integrator = method;
+                options.gravity_degree = options.gravity_order = 0;
+                options.max_step_seconds = 2.5;
+                options.min_step_seconds = 1e-6;
+                options.relative_tolerance = 1e-14;
+                options.position_tolerance_m = 1e-8;
+                options.velocity_tolerance_mps = 1e-11;
+                options.drag.enabled = true;
+                options.drag.atmosphere = AtmosphereModel::nrlmsise00;
+                if (mode == 1) {
+                    options.drag.f107 = 70;
+                    options.drag.f107_average = 80;
+                    options.drag.kp = 0;
+                }
+                if (mode == 2) {
+                    options.drag.f107 = 250;
+                    options.drag.f107_average = 220;
+                    options.drag.kp = 8.5;
+                    options.drag.cd = 2.7;
+                    options.drag.area_mass_ratio_m2_per_kg = .035;
+                }
+                const auto transform =
+                    env.frames->gcrf_to_itrf_state(initial.epoch, env.eop->at(initial.epoch));
+                const auto fixed = transform.apply(initial);
+                const auto force =
+                    evaluate_drag(fixed.position_m, fixed.velocity_mps,
+                                  transform.rotation.apply_position(
+                                      env.ephemeris->position(ThirdBody::sun, initial.epoch)),
+                                  env.time->to_utc(initial.epoch), options.drag);
+                const auto inertial_force =
+                    transform.rotation.inverse_position(force.acceleration_itrf_mps2);
+                const auto actual = make_hpop(initial, options, env)->state_at(expected.epoch);
+                for (std::size_t i = 0; i < 3; ++i) {
+                    EXPECT_NEAR(inertial_force[i], acceleration[i], 1e-17);
+                    EXPECT_NEAR(actual.position_m[i], expected.position_m[i], .0005);
+                    EXPECT_NEAR(actual.velocity_mps[i], expected.velocity_mps[i], 5e-7);
+                    max_position = std::max(
+                        max_position, std::abs(actual.position_m[i] - expected.position_m[i]));
+                    max_velocity = std::max(
+                        max_velocity, std::abs(actual.velocity_mps[i] - expected.velocity_mps[i]));
+                }
+                ++count;
+            }
+            EXPECT_EQ(count, 24U);
+            std::cout << "Drag Orekit reference: max position component " << max_position
+                      << " m; velocity " << max_velocity << " m/s\n";
         }
-        if (mode == 2) {
-            options.drag.f107 = 250;
-            options.drag.f107_average = 220;
-            options.drag.kp = 8.5;
-            options.drag.cd = 2.7;
-            options.drag.area_mass_ratio_m2_per_kg = .035;
-        }
-        const auto transform =
-            env.frames->gcrf_to_itrf_state(initial.epoch, env.eop->at(initial.epoch));
-        const auto fixed = transform.apply(initial);
-        const auto force = evaluate_drag(fixed.position_m, fixed.velocity_mps,
-                                         transform.rotation.apply_position(env.ephemeris->position(
-                                             ThirdBody::sun, initial.epoch)),
-                                         env.time->to_utc(initial.epoch), options.drag);
-        const auto inertial_force =
-            transform.rotation.inverse_position(force.acceleration_itrf_mps2);
-        const auto actual = make_hpop(initial, options, env)->state_at(expected.epoch);
-        for (std::size_t i = 0; i < 3; ++i) {
-            EXPECT_NEAR(inertial_force[i], acceleration[i], 1e-17);
-            EXPECT_NEAR(actual.position_m[i], expected.position_m[i], .0005);
-            EXPECT_NEAR(actual.velocity_mps[i], expected.velocity_mps[i], 5e-7);
-            max_position =
-                std::max(max_position, std::abs(actual.position_m[i] - expected.position_m[i]));
-            max_velocity =
-                std::max(max_velocity, std::abs(actual.velocity_mps[i] - expected.velocity_mps[i]));
-        }
-        ++count;
-    }
-    EXPECT_EQ(count, 24U);
-    std::cout << "Drag Orekit reference: max position component " << max_position << " m; velocity "
-              << max_velocity << " m/s\n";
 }
 TEST(AtmosphericDrag, SharedMassAndIndependentAreasMatchOrekitCombinedForcesAndPropagation) {
     std::ifstream source(ORBITFORGE_MASS_REFERENCE);

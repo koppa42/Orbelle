@@ -668,107 +668,114 @@ TEST(SrpBoundary, EveryIntegratorAndTimeRegularizationSegmentThePhysicalContacts
 }
 
 TEST(SrpBoundary, EventsAndTrajectoriesMatchOrekitAndConvergeForEveryIntegrator) {
-    struct Expected {
-        int kind;
-        double time;
-        std::array<double, 6> state;
-    };
-    std::map<std::tuple<int, int, int>, std::vector<Expected>> cases;
-    std::ifstream source(ORBITFORGE_SRP_BOUNDARY_REFERENCE);
-    ASSERT_TRUE(source);
-    std::string line;
-    while (std::getline(source, line)) {
-        if (line.empty() || line[0] == '#')
-            continue;
-        std::istringstream row(line);
-        int model, orbit, direction;
-        Expected e;
-        ASSERT_TRUE(row >> model >> orbit >> direction >> e.kind >> e.time);
-        for (auto &x : e.state)
-            ASSERT_TRUE(row >> x);
-        cases[{model, orbit, direction}].push_back(e);
-    }
-    ASSERT_EQ(cases.size(), 8u);
-    HpopEnvironment environment;
-    environment.ephemeris = std::make_shared<MovingSolarSystem>();
-    for (auto method : {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
-                        HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
-        double worst_position = 0, worst_velocity = 0, worst_time = 0;
-        for (bool regularized : {false, true}) {
-            for (const auto &[key, expected] : cases) {
-                const auto [model, orbit, direction] = key;
-                SCOPED_TRACE(static_cast<int>(method));
-                SCOPED_TRACE(regularized);
-                SCOPED_TRACE(model);
-                SCOPED_TRACE(orbit);
-                SCOPED_TRACE(direction);
-                const double r = orbit == 0 ? 7e6 : 42164000;
-                const CartesianState initial{
-                    Epoch{0},
-                    OriginId::earth,
-                    FrameId::gcrf,
-                    {r, 0, 0},
-                    orbit == 0 ? std::array{0., 6200., 5300.}
-                               : std::array{0., std::sqrt(3.986004415e14 / r), 0.}};
-                HpopOptions options;
-                options.gravity_degree = options.gravity_order = 0;
-                options.integrator = method;
-                options.time_regularization = regularized;
-                options.min_step_seconds = 1e-6;
-                options.relative_tolerance = 1e-13;
-                options.position_tolerance_m = 1e-7;
-                options.velocity_tolerance_mps = 1e-10;
-                options.srp.enabled = options.srp.boundary_mitigation = true;
-                options.srp.shadow_model =
-                    model == 0 ? SrpShadowModel::cylindrical : SrpShadowModel::dual_cone;
-                options.srp.sun_position_method = SrpSunPositionMethod::geometric;
-                options.srp.moon_shadow = false;
-                options.srp.cr = 1.7;
-                options.srp.area_mass_ratio_m2_per_kg = 20;
-                double coarse_error = 0;
-                for (int scale : {1, 2}) {
-                    options.max_step_seconds = 60. / scale;
-                    options.fixed_step_seconds = 10. / scale;
-                    options.steps_per_orbit = (orbit == 0 ? 800 : 12000) * scale;
-                    const auto end =
-                        Epoch{direction * (orbit == 0 ? 6000'000'000'000LL : 90000'000'000'000LL)};
-                    const auto arcs = propagate_hpop_ephemeris(initial, end, options, environment);
-                    ASSERT_EQ(arcs.size(), expected.size());
-                    std::vector<CartesianState> nodes;
-                    for (std::size_t i = 0; i + 1 < arcs.size(); ++i)
-                        nodes.push_back(arcs[i].back());
-                    if (direction < 0)
-                        std::ranges::reverse(nodes);
-                    nodes.push_back(direction > 0 ? arcs.back().back() : arcs.front().front());
-                    double error = 0;
-                    for (std::size_t i = 0; i < expected.size(); ++i) {
-                        const double dt =
-                            std::abs(nodes[i].epoch.seconds_since(Epoch{0}) - expected[i].time);
-                        worst_time = std::max(worst_time, dt);
-                        EXPECT_LT(dt, method == HpopIntegrator::rk4 ? 3e-5 : 3e-7);
-                        for (std::size_t axis = 0; axis < 3; ++axis) {
-                            const double dp =
-                                std::abs(nodes[i].position_m[axis] - expected[i].state[axis]);
-                            const double dv =
-                                std::abs(nodes[i].velocity_mps[axis] - expected[i].state[axis + 3]);
-                            error = std::max(error, dp);
-                            worst_position = std::max(worst_position, dp);
-                            worst_velocity = std::max(worst_velocity, dv);
-                            EXPECT_LT(dp, method == HpopIntegrator::rk4 ? .2 : .001);
-                            EXPECT_LT(dv, method == HpopIntegrator::rk4 ? 2e-4 : 1e-6);
+    for (bool vop : {false, true}) {
+        SCOPED_TRACE(vop);
+
+        struct Expected {
+            int kind;
+            double time;
+            std::array<double, 6> state;
+        };
+        std::map<std::tuple<int, int, int>, std::vector<Expected>> cases;
+        std::ifstream source(ORBITFORGE_SRP_BOUNDARY_REFERENCE);
+        ASSERT_TRUE(source);
+        std::string line;
+        while (std::getline(source, line)) {
+            if (line.empty() || line[0] == '#')
+                continue;
+            std::istringstream row(line);
+            int model, orbit, direction;
+            Expected e;
+            ASSERT_TRUE(row >> model >> orbit >> direction >> e.kind >> e.time);
+            for (auto &x : e.state)
+                ASSERT_TRUE(row >> x);
+            cases[{model, orbit, direction}].push_back(e);
+        }
+        ASSERT_EQ(cases.size(), 8u);
+        HpopEnvironment environment;
+        environment.ephemeris = std::make_shared<MovingSolarSystem>();
+        for (auto method : {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+                            HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
+            double worst_position = 0, worst_velocity = 0, worst_time = 0;
+            for (bool regularized : {false, true}) {
+                for (const auto &[key, expected] : cases) {
+                    const auto [model, orbit, direction] = key;
+                    SCOPED_TRACE(static_cast<int>(method));
+                    SCOPED_TRACE(regularized);
+                    SCOPED_TRACE(model);
+                    SCOPED_TRACE(orbit);
+                    SCOPED_TRACE(direction);
+                    const double r = orbit == 0 ? 7e6 : 42164000;
+                    const CartesianState initial{
+                        Epoch{0},
+                        OriginId::earth,
+                        FrameId::gcrf,
+                        {r, 0, 0},
+                        orbit == 0 ? std::array{0., 6200., 5300.}
+                                   : std::array{0., std::sqrt(3.986004415e14 / r), 0.}};
+                    HpopOptions options;
+                    options.gravity_degree = options.gravity_order = 0;
+                    options.integrator = method;
+                    options.vop = vop;
+                    options.time_regularization = regularized;
+                    options.min_step_seconds = 1e-6;
+                    options.relative_tolerance = 1e-13;
+                    options.position_tolerance_m = 1e-7;
+                    options.velocity_tolerance_mps = 1e-10;
+                    options.srp.enabled = options.srp.boundary_mitigation = true;
+                    options.srp.shadow_model =
+                        model == 0 ? SrpShadowModel::cylindrical : SrpShadowModel::dual_cone;
+                    options.srp.sun_position_method = SrpSunPositionMethod::geometric;
+                    options.srp.moon_shadow = false;
+                    options.srp.cr = 1.7;
+                    options.srp.area_mass_ratio_m2_per_kg = 20;
+                    double coarse_error = 0;
+                    for (int scale : {1, 2}) {
+                        options.max_step_seconds = 60. / scale;
+                        options.fixed_step_seconds = 10. / scale;
+                        options.steps_per_orbit = (orbit == 0 ? 800 : 12000) * scale;
+                        const auto end = Epoch{
+                            direction * (orbit == 0 ? 6000'000'000'000LL : 90000'000'000'000LL)};
+                        const auto arcs =
+                            propagate_hpop_ephemeris(initial, end, options, environment);
+                        ASSERT_EQ(arcs.size(), expected.size());
+                        std::vector<CartesianState> nodes;
+                        for (std::size_t i = 0; i + 1 < arcs.size(); ++i)
+                            nodes.push_back(arcs[i].back());
+                        if (direction < 0)
+                            std::ranges::reverse(nodes);
+                        nodes.push_back(direction > 0 ? arcs.back().back() : arcs.front().front());
+                        double error = 0;
+                        for (std::size_t i = 0; i < expected.size(); ++i) {
+                            const double dt =
+                                std::abs(nodes[i].epoch.seconds_since(Epoch{0}) - expected[i].time);
+                            worst_time = std::max(worst_time, dt);
+                            EXPECT_LT(dt, method == HpopIntegrator::rk4 ? 3e-5 : 3e-7);
+                            for (std::size_t axis = 0; axis < 3; ++axis) {
+                                const double dp =
+                                    std::abs(nodes[i].position_m[axis] - expected[i].state[axis]);
+                                const double dv = std::abs(nodes[i].velocity_mps[axis] -
+                                                           expected[i].state[axis + 3]);
+                                error = std::max(error, dp);
+                                worst_position = std::max(worst_position, dp);
+                                worst_velocity = std::max(worst_velocity, dv);
+                                EXPECT_LT(dp, method == HpopIntegrator::rk4 ? .2 : .001);
+                                EXPECT_LT(dv, method == HpopIntegrator::rk4 ? 2e-4 : 1e-6);
+                            }
                         }
+                        if (scale == 1)
+                            coarse_error = error;
+                        else if (method == HpopIntegrator::rk4)
+                            EXPECT_LT(error, std::max(1e-4, coarse_error / 8));
+                        else
+                            EXPECT_LT(error, std::max(1e-4, 1.5 * coarse_error));
                     }
-                    if (scale == 1)
-                        coarse_error = error;
-                    else if (method == HpopIntegrator::rk4)
-                        EXPECT_LT(error, std::max(1e-4, coarse_error / 8));
-                    else
-                        EXPECT_LT(error, std::max(1e-4, 1.5 * coarse_error));
                 }
             }
+            std::cout << "SRP boundary method " << static_cast<int>(method) << ": "
+                      << worst_position << " m, " << worst_velocity << " m/s, " << worst_time
+                      << " s\n";
         }
-        std::cout << "SRP boundary method " << static_cast<int>(method) << ": " << worst_position
-                  << " m, " << worst_velocity << " m/s, " << worst_time << " s\n";
     }
 }
 
@@ -862,56 +869,62 @@ TEST(SrpBoundary, InactiveDraftsDoNotChangeForcesOrAddEvents) {
 }
 
 TEST(SrpBoundary, FixedHigherOrderStepsAlsoMatchIndependentOrekit) {
-    std::ifstream source(ORBITFORGE_SRP_BOUNDARY_REFERENCE);
-    ASSERT_TRUE(source);
-    std::string line;
-    std::size_t count = 0;
-    HpopEnvironment environment;
-    environment.ephemeris = std::make_shared<MovingSolarSystem>();
-    while (std::getline(source, line)) {
-        if (line.empty() || line[0] == '#')
-            continue;
-        std::istringstream row(line);
-        int model, orbit, direction, kind;
-        double time;
-        ASSERT_TRUE(row >> model >> orbit >> direction >> kind >> time);
-        if (orbit != 0 || kind != 9)
-            continue;
-        std::array<double, 6> expected;
-        for (auto &v : expected)
-            ASSERT_TRUE(row >> v);
-        for (auto method :
-             {HpopIntegrator::rkf78, HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer}) {
-            for (bool regularized : {false, true}) {
-                SCOPED_TRACE(line);
-                SCOPED_TRACE(static_cast<int>(method));
-                SCOPED_TRACE(regularized);
-                HpopOptions options;
-                options.gravity_degree = options.gravity_order = 0;
-                options.integrator = method;
-                options.step_control = HpopStepControl::fixed;
-                options.fixed_step_seconds = 5;
-                options.time_regularization = regularized;
-                options.steps_per_orbit = 1600;
-                options.min_step_seconds = 1e-6;
-                options.srp.enabled = options.srp.boundary_mitigation = true;
-                options.srp.shadow_model =
-                    model == 0 ? SrpShadowModel::cylindrical : SrpShadowModel::dual_cone;
-                options.srp.sun_position_method = SrpSunPositionMethod::geometric;
-                options.srp.moon_shadow = false;
-                options.srp.cr = 1.7;
-                options.srp.area_mass_ratio_m2_per_kg = 20;
-                const CartesianState initial{
-                    Epoch{0}, OriginId::earth, FrameId::gcrf, {7e6, 0, 0}, {0, 6200, 5300}};
-                const auto actual = make_hpop(initial, options, environment)
-                                        ->state_at(Epoch{static_cast<std::int64_t>(time * 1e9)});
-                for (std::size_t i = 0; i < 3; ++i) {
-                    EXPECT_NEAR(actual.position_m[i], expected[i], .001);
-                    EXPECT_NEAR(actual.velocity_mps[i], expected[i + 3], 1e-6);
+    for (bool vop : {false, true}) {
+        SCOPED_TRACE(vop);
+
+        std::ifstream source(ORBITFORGE_SRP_BOUNDARY_REFERENCE);
+        ASSERT_TRUE(source);
+        std::string line;
+        std::size_t count = 0;
+        HpopEnvironment environment;
+        environment.ephemeris = std::make_shared<MovingSolarSystem>();
+        while (std::getline(source, line)) {
+            if (line.empty() || line[0] == '#')
+                continue;
+            std::istringstream row(line);
+            int model, orbit, direction, kind;
+            double time;
+            ASSERT_TRUE(row >> model >> orbit >> direction >> kind >> time);
+            if (orbit != 0 || kind != 9)
+                continue;
+            std::array<double, 6> expected;
+            for (auto &v : expected)
+                ASSERT_TRUE(row >> v);
+            for (auto method :
+                 {HpopIntegrator::rkf78, HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer}) {
+                for (bool regularized : {false, true}) {
+                    SCOPED_TRACE(line);
+                    SCOPED_TRACE(static_cast<int>(method));
+                    SCOPED_TRACE(regularized);
+                    HpopOptions options;
+                    options.gravity_degree = options.gravity_order = 0;
+                    options.integrator = method;
+                    options.vop = vop;
+                    options.step_control = HpopStepControl::fixed;
+                    options.fixed_step_seconds = 5;
+                    options.time_regularization = regularized;
+                    options.steps_per_orbit = 1600;
+                    options.min_step_seconds = 1e-6;
+                    options.srp.enabled = options.srp.boundary_mitigation = true;
+                    options.srp.shadow_model =
+                        model == 0 ? SrpShadowModel::cylindrical : SrpShadowModel::dual_cone;
+                    options.srp.sun_position_method = SrpSunPositionMethod::geometric;
+                    options.srp.moon_shadow = false;
+                    options.srp.cr = 1.7;
+                    options.srp.area_mass_ratio_m2_per_kg = 20;
+                    const CartesianState initial{
+                        Epoch{0}, OriginId::earth, FrameId::gcrf, {7e6, 0, 0}, {0, 6200, 5300}};
+                    const auto actual =
+                        make_hpop(initial, options, environment)
+                            ->state_at(Epoch{static_cast<std::int64_t>(time * 1e9)});
+                    for (std::size_t i = 0; i < 3; ++i) {
+                        EXPECT_NEAR(actual.position_m[i], expected[i], .001);
+                        EXPECT_NEAR(actual.velocity_mps[i], expected[i + 3], 1e-6);
+                    }
+                    ++count;
                 }
-                ++count;
             }
         }
+        EXPECT_EQ(count, 24u);
     }
-    EXPECT_EQ(count, 24u);
 }

@@ -3358,4 +3358,75 @@ TEST_F(QuantityTest, HpopVopInterpolationMuDraftsUnitsValidationAndNarrowLayouts
     }
 }
 
+TEST_F(QuantityTest, HpopVopIntegrationSupportsOnlyRkfBsPreservesDraftAndCancels) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    core::HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    for (int pass = 0; pass < 4; ++pass) {
+        const auto saved = options;
+        QTimer::singleShot(0, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            ASSERT_TRUE(dialog);
+            dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(1);
+            auto *method = dialog->findChild<QComboBox *>("hpopIntegrator");
+            auto *vop = dialog->findChild<QCheckBox *>("hpopVop");
+            auto *interpolation = dialog->findChild<QComboBox *>("hpopInterpolation");
+            ASSERT_TRUE(vop);
+            EXPECT_EQ(interpolation->currentIndex(), 1);
+            if (pass == 0) {
+                EXPECT_FALSE(vop->isChecked());
+                EXPECT_TRUE(vop->isEnabled());
+                vop->setFocus();
+                QKeyEvent press(QEvent::KeyPress, Qt::Key_Space, Qt::NoModifier);
+                QKeyEvent release(QEvent::KeyRelease, Qt::Key_Space, Qt::NoModifier);
+                QApplication::sendEvent(vop, &press);
+                QApplication::sendEvent(vop, &release);
+                EXPECT_TRUE(vop->isChecked());
+                for (int selected : {1, 2, 4, 0, 3}) {
+                    method->setCurrentIndex(selected);
+                    EXPECT_EQ(vop->isEnabled(), selected == 0 || selected == 3);
+                    EXPECT_TRUE(vop->isChecked());
+                }
+            } else {
+                EXPECT_TRUE(vop->isChecked());
+                EXPECT_EQ(method->currentIndex(), pass == 3 ? 2 : 3);
+                EXPECT_EQ(vop->isEnabled(), pass != 3);
+                for (int width : {430, 720}) {
+                    dialog->resize(width, 620);
+                    QEventLoop settled;
+                    QTimer::singleShot(60, &settled, &QEventLoop::quit);
+                    settled.exec();
+                    auto *scroll = dialog->findChild<QScrollArea *>("hpopIntegratorPage");
+                    scroll->ensureWidgetVisible(vop);
+                    QApplication::processEvents();
+                    EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+                    EXPECT_TRUE(dialog->rect().contains(
+                        dialog->findChild<QDialogButtonBox *>()->geometry()));
+                    const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+                    if (!capture.isEmpty() && pass == 1) {
+                        EXPECT_TRUE(QDir{}.mkpath(capture));
+                        EXPECT_TRUE(dialog->grab().save(
+                            capture + QString("/hpop-vop-integration-%1.png").arg(width)));
+                    }
+                }
+                RecordProperty("device_pixel_ratio", dialog->devicePixelRatioF());
+                if (pass == 1) {
+                    vop->setChecked(false);
+                    dialog->reject();
+                    return;
+                }
+                method->setCurrentIndex(pass == 2 ? 2 : 0);
+            }
+            dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        });
+        EXPECT_EQ(edit_hpop_settings(options, nullptr), pass != 1);
+        if (pass == 1) {
+            EXPECT_EQ(options, saved);
+        }
+        EXPECT_TRUE(options.vop);
+        EXPECT_EQ(options.uses_vop(), pass != 2);
+        EXPECT_EQ(options.interpolation.method, core::OrbitInterpolationMethod::hermite);
+    }
+}
+
 } // namespace orbitforge::desktop

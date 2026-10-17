@@ -694,34 +694,39 @@ TEST(SundmanBounded, AdaptivePhysicalLimitsTakePrecedenceOverTheNominalRegulariz
     }
 }
 TEST(SundmanBounded, AdaptiveMinimumStepRejectsUnresolvedOscillatoryForce) {
-    for (auto method :
-         {HpopIntegrator::rkf78, HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer}) {
-        for (double maximum : {20., 35.}) {
-            HpopOptions options;
-            options.gravity_degree = options.gravity_order = 0;
-            options.integrator = method;
-            options.relative_tolerance = 1e-14;
-            options.position_tolerance_m = 1e-8;
-            options.velocity_tolerance_mps = 1e-11;
-            options.min_step_seconds = 20;
-            options.max_step_seconds = maximum;
-            SundmanPropagation propagation(initial(.7), mu, 1.5, 100000000, options);
-            const auto source = propagation.initial_state();
-            std::size_t attempts = 0;
-            EXPECT_THROW((void)propagation.propagate(
-                             source, 1000,
-                             [](double t, const Cartesian &v) {
-                                 auto a = force(0, t, v);
-                                 a[0] += std::sin(100 * t);
-                                 return a;
-                             },
-                             attempts),
-                         PropagationError);
-            EXPECT_EQ(source.time(), 0);
-            EXPECT_EQ(source.q, 0);
-            // A minimum-step error is diagnosed before the work limit; repeated
-            // rejection of the same clamped q step must not exhaust that budget.
-            EXPECT_LT(attempts, 100);
+    for (bool vop : {false, true}) {
+        SCOPED_TRACE(vop);
+
+        for (auto method :
+             {HpopIntegrator::rkf78, HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer}) {
+            for (double maximum : {20., 35.}) {
+                HpopOptions options;
+                options.gravity_degree = options.gravity_order = 0;
+                options.integrator = method;
+                options.vop = vop;
+                options.relative_tolerance = 1e-14;
+                options.position_tolerance_m = 1e-8;
+                options.velocity_tolerance_mps = 1e-11;
+                options.min_step_seconds = 20;
+                options.max_step_seconds = maximum;
+                SundmanPropagation propagation(initial(.7), mu, 1.5, 100000000, options);
+                const auto source = propagation.initial_state();
+                std::size_t attempts = 0;
+                EXPECT_THROW((void)propagation.propagate(
+                                 source, 1000,
+                                 [](double t, const Cartesian &v) {
+                                     auto a = force(0, t, v);
+                                     a[0] += std::sin(100 * t);
+                                     return a;
+                                 },
+                                 attempts),
+                             PropagationError);
+                EXPECT_EQ(source.time(), 0);
+                EXPECT_EQ(source.q, 0);
+                // A minimum-step error is diagnosed before the work limit; repeated
+                // rejection of the same clamped q step must not exhaust that budget.
+                EXPECT_LT(attempts, 100);
+            }
         }
     }
 }

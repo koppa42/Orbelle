@@ -1077,6 +1077,8 @@ class HpopOptions:
     include_relativistic_accelerations: bool
     include_secular_variations: bool
     integrator: HpopIntegrator
+    vop: bool
+    def uses_vop(self) -> bool: ...
     correction: HpopCorrection
     step_control: HpopStepControl
     def uses_fixed_step(self) -> bool: ...

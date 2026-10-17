@@ -35,8 +35,12 @@ inline std::array<double, 2> stumpff(double z) {
     const double half = std::sinh(.5 * x);
     return {2 * half * half / (-z), (std::sinh(x) - x) / (x * (-z))};
 }
-inline KeplerState universal_kepler(const KeplerState &initial, double seconds, double mu,
-                                    const std::function<void()> &checkpoint = {}) {
+struct KeplerFlowData {
+    KeplerState state;
+    double radius = 0, beta = 0, tau = 0, anomaly = 0, cycles = 0;
+};
+inline KeplerFlowData universal_kepler_data(const KeplerState &initial, double seconds, double mu,
+                                            const std::function<void()> &checkpoint = {}) {
     if (checkpoint)
         checkpoint();
     if (!std::isfinite(mu) || mu <= 0 || !std::isfinite(seconds) ||
@@ -61,19 +65,22 @@ inline KeplerState universal_kepler(const KeplerState &initial, double seconds, 
     if (!std::isfinite(v2) ||
         h <= 64 * std::numeric_limits<double>::epsilon() * std::max(1., std::sqrt(v2)))
         throw std::invalid_argument("Universal Kepler flow cannot resolve a non-radial orbit");
-    if (seconds == 0)
-        return initial;
     const double beta = 2 - v2;
+    if (seconds == 0)
+        return {initial, radius, beta, 0, 0, 0};
     double tau = seconds / time_scale;
     if (!std::isfinite(tau))
         throw PropagationError("Universal Kepler time is outside numerical range");
+    double cycles = 0;
     if (beta > 0) {
         const double period = 2 * std::numbers::pi / (beta * std::sqrt(beta));
-        if (std::isfinite(period))
+        if (std::isfinite(period)) {
+            cycles = std::nearbyint(tau / period);
             tau = std::remainder(tau, period);
+        }
     }
     if (tau == 0)
-        return initial;
+        return {initial, radius, beta, tau, 0, cycles};
     const double sign = std::copysign(1., tau), target = std::abs(tau);
     const auto equation = [&](double x) {
         const double u = sign * x, z = beta * u * u;
@@ -136,6 +143,10 @@ inline KeplerState universal_kepler(const KeplerState &initial, double seconds, 
         result[k + 3] = std::fma(fdot, initial[k], gdot * initial[k + 3]);
     if (!std::ranges::all_of(result, [](double v) { return std::isfinite(v); }))
         throw PropagationError("Universal Kepler flow produced a nonfinite state");
-    return result;
+    return {result, radius, beta, tau, u, cycles};
+}
+inline KeplerState universal_kepler(const KeplerState &initial, double seconds, double mu,
+                                    const std::function<void()> &checkpoint = {}) {
+    return universal_kepler_data(initial, seconds, mu, checkpoint).state;
 }
 } // namespace orbitforge::core::detail

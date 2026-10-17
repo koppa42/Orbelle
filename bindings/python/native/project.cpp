@@ -301,6 +301,8 @@ void bind_project(py::module_ &module) {
         .def_readwrite("gravity_degree", &core::HpopOptions::gravity_degree)
         .def_readwrite("gravity_order", &core::HpopOptions::gravity_order)
         .def_readwrite("integrator", &core::HpopOptions::integrator)
+        .def_readwrite("vop", &core::HpopOptions::vop)
+        .def("uses_vop", &core::HpopOptions::uses_vop)
         .def_readwrite("correction", &core::HpopOptions::correction)
         .def_readwrite("step_control", &core::HpopOptions::step_control)
         .def("uses_fixed_step", &core::HpopOptions::uses_fixed_step)

@@ -31,6 +31,9 @@ int main(int argc, char **argv) try {
         using namespace orbitforge::core;
         HpopOptions options;
         options.gravity_degree = options.gravity_order = 0;
+        options.vop = true;
+        if (!options.uses_vop())
+            return 53;
         const CartesianState initial{Epoch{0},
                                      OriginId::earth,
                                      FrameId::gcrf,
@@ -44,7 +47,9 @@ int main(int argc, char **argv) try {
             initial, Epoch{600'000'000'000LL}, options, {}, {OrbitInterpolationMethod::hermite, 7},
             30'000'000'000LL);
         const auto state = session.sample(std::array{Epoch{17'123'456'789LL}}).states().front();
-        if (!std::isfinite(state.position_m[0]))
+        if (!std::isfinite(state.position_m[0]) ||
+            session.provenance().algorithm.find("hpop-vop-universal-osculating") ==
+                std::string::npos)
             return 45;
         const auto vop = orbitforge::runtime::make_tabulated_orbit_session(
             nodes, {OrbitInterpolationMethod::vop, 1, egm96_mu});

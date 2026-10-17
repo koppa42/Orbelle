@@ -1241,6 +1241,12 @@ bool edit_hpop_settings(
                       QStringLiteral("Gauss–Jackson 12")});
     method->setCurrentIndex(static_cast<int>(options.integrator));
     integration->addRow(QStringLiteral("积分器"), method);
+    auto *vop = new QCheckBox(QStringLiteral("VOP · 通用变量变参数法"));
+    vop->setObjectName("hpopVop");
+    vop->setChecked(options.vop);
+    vop->setToolTip(
+        QStringLiteral("适用于 RKF 7(8) 和 Bulirsch–Stoer，使用引力模型的 GM。星历插值单独设置。"));
+    integration->addRow(vop);
     auto *step_control = new QComboBox;
     step_control->setObjectName("hpopStepControl");
     step_control->addItems(
@@ -1306,6 +1312,7 @@ bool edit_hpop_settings(
         integration->setRowVisible(correction, method->currentIndex() == 4);
     };
     const auto update_method = [=, &step_control_draft] {
+        vop->setEnabled(method->currentIndex() == 0 || method->currentIndex() == 3);
         const bool forced = method->currentIndex() == 1 || method->currentIndex() == 4;
         const QSignalBlocker blocker(step_control);
         step_control->setCurrentIndex(forced ? 1 : step_control_draft);
@@ -1436,14 +1443,17 @@ bool edit_hpop_settings(
             summary_role, value_text(satellite_mass) + QStringLiteral(" ") +
                               unit_symbol(satellite_mass->unit()) +
                               (relativity->isChecked() ? QStringLiteral(" · 相对论") : QString{}));
+        const QString integration_name =
+            part(method, 0) +
+            (vop->isEnabled() && vop->isChecked() ? QStringLiteral(" · VOP") : QString{});
         integrator_item->setData(
             summary_role,
             regularization->isChecked()
-                ? part(method, 0) +
+                ? integration_name +
                       QStringLiteral(" · 正则化 · %1 步/圈").arg(steps_per_orbit->value())
                 : (step_control->currentIndex() == 0
-                       ? part(method, 0) + QStringLiteral(" · 相对容差 ") + value_text(relative)
-                       : part(method, 0) + QStringLiteral(" · 步长 ") + value_text(fixed) +
+                       ? integration_name + QStringLiteral(" · 相对容差 ") + value_text(relative)
+                       : integration_name + QStringLiteral(" · 步长 ") + value_text(fixed) +
                              QStringLiteral(" s")));
         covariance_item->setData(summary_role, QStringLiteral("尚未实现"));
     };
@@ -1452,7 +1462,7 @@ bool edit_hpop_settings(
         QObject::connect(box, &QComboBox::currentIndexChanged, &dialog, refresh_summaries);
     for (auto *spin : {degree, order, steps_per_orbit})
         QObject::connect(spin, &QSpinBox::valueChanged, &dialog, refresh_summaries);
-    for (auto *check : {drag_use, srp_use, solid_truncate, relativity, regularization})
+    for (auto *check : {drag_use, srp_use, solid_truncate, relativity, regularization, vop})
         QObject::connect(check, &QCheckBox::toggled, &dialog, refresh_summaries);
     for (auto &row : fields)
         QObject::connect(row.enabled, &QCheckBox::toggled, &dialog, refresh_summaries);
@@ -1942,6 +1952,7 @@ bool edit_hpop_settings(
                 throw std::runtime_error(
                     "相对论加速度需要太阳位置与速度星历，请先在数据中心准备。");
             candidate.integrator = static_cast<core::HpopIntegrator>(method->currentIndex());
+            candidate.vop = vop->isChecked();
             candidate.correction = static_cast<core::HpopCorrection>(correction->currentIndex());
             candidate.step_control = static_cast<core::HpopStepControl>(step_control_draft);
             validation_page = 1;

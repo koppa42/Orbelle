@@ -108,6 +108,13 @@ struct HpopOptions {
     int gravity_degree = 8, gravity_order = 8;
     // RKF 7(8) advances order 7; RKV 8(9) advances order 8. Both use embedded error control.
     HpopIntegrator integrator = HpopIntegrator::rkf78;
+    // Universal-variable variation of parameters; only effective for RKF78 / Bulirsch-Stoer.
+    // Other methods retain this inactive draft. Independent of VOP ephemeris interpolation.
+    bool vop = false;
+    [[nodiscard]] bool uses_vop() const noexcept {
+        return vop && (integrator == HpopIntegrator::rkf78 ||
+                       integrator == HpopIntegrator::bulirsch_stoer);
+    }
     // Final force update after Gauss-Jackson corrector convergence; inactive otherwise.
     HpopCorrection correction = HpopCorrection::full;
     // RK4 and Gauss-Jackson always use fixed steps; retain the other methods' draft.
@@ -158,7 +165,9 @@ struct HpopEnvironment {
     // Validates complete weather paths, both models when a low-altitude model is selected.
     void validate_weather_interval(const DragOptions &drag, Epoch first, Epoch last) const;
 };
-// Cowell equations in GCRF, TAI seconds. Initial state is osculating, not mean elements.
+// Cowell or universal-variable VOP equations in GCRF, TAI seconds. Initial state is
+// osculating, not mean elements. VOP requires a numerically non-radial orbit, uses
+// gravity_mu, and supports all conics; time regularization still requires an ellipse.
 // Results are independent of query order and output sampling. Ordinary-time
 // integration uses deterministic checkpoints. Direct regularized queries integrate
 // from the initial state so a short query cannot reuse stages beyond its endpoint;
@@ -172,9 +181,9 @@ make_hpop(CartesianState initial, HpopOptions options = {}, HpopEnvironment envi
 // GCRF / TAI / SI nodes, sorted chronologically, with shared weather/shadow boundaries.
 // A reporting step of zero retains accepted integration endpoints (GJ startup internals are
 // not output nodes). A positive integer-nanosecond step forces integration to stop on an
-// initial-epoch-anchored reporting grid; output includes both endpoints, weather jumps and enabled shadow contacts.
-// No stages are evaluated outside this coast. Cannot cross a maneuver: the caller must
-// start a new coast with the post-impulse state. Node generation does not choose/reduce an
+// initial-epoch-anchored reporting grid; output includes both endpoints, weather jumps and enabled
+// shadow contacts. No stages are evaluated outside this coast. Cannot cross a maneuver: the caller
+// must start a new coast with the post-impulse state. Node generation does not choose/reduce an
 // interpolation order. Same resource checks and 366-day / 200000-attempt limit as HPOP;
 // reporting steps must be 0..86400 s and resolvable in relative double time.
 // Cancellation/failure returns no partial ephemeris and changes no existing provider.

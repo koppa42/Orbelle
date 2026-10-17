@@ -2,6 +2,7 @@
 #include "integrators/one_step.hpp"
 #include "integrators/shadow_boundary.hpp"
 #include "integrators/sundman_propagation.hpp"
+#include "integrators/vop.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -424,8 +425,18 @@ class Hpop final : public IStateProvider {
     State rk4(double t, const State &s, double h) const {
         return detail::rk4(t, s, h, step_derivative(t, t + h, s));
     }
-    TrialStep rkf78(double t, const State &s, double h) const {
-        return detail::rkf78(t, s, h, step_derivative(t, t + h, s), error_control());
+    TrialStep rkf78(double t, const State &s, double h,
+                    const std::function<void()> &checkpoint) const {
+        const auto force = step_derivative(t, t + h, s);
+        const auto control = error_control();
+        if (options_.uses_vop())
+            return detail::vop_step(
+                t, s, h, options_.gravity_mu, false, force,
+                [&](const auto &derivative, const auto &scales) {
+                    return detail::rkf78(0, s, h, derivative, scales);
+                },
+                control, checkpoint);
+        return detail::rkf78(t, s, h, force, control);
     }
     TrialStep rkv89(double t, const State &s, double h) const {
         return detail::rkv89(t, s, h, step_derivative(t, t + h, s), error_control());
@@ -433,14 +444,22 @@ class Hpop final : public IStateProvider {
     TrialStep bulirsch_stoer(double t, const State &s, double h,
                              const std::function<void()> &checkpoint, bool startup = false,
                              std::optional<double> lighting = {}) const {
-        return detail::bulirsch_stoer(t, s, h, step_derivative(t, t + h, s, lighting),
-                                      error_control(startup), checkpoint, startup);
+        const auto force = step_derivative(t, t + h, s, lighting);
+        const auto control = error_control(startup);
+        if (options_.uses_vop())
+            return detail::vop_step(
+                t, s, h, options_.gravity_mu, false, force,
+                [&](const auto &derivative, const auto &scales) {
+                    return detail::bulirsch_stoer(0, s, h, derivative, scales, checkpoint, startup);
+                },
+                control, checkpoint);
+        return detail::bulirsch_stoer(t, s, h, force, control, checkpoint, startup);
     }
     TrialStep trial_step(double t, const State &s, double h,
                          const std::function<void()> &checkpoint) const {
         switch (options_.integrator) {
         case HpopIntegrator::rkf78:
-            return rkf78(t, s, h);
+            return rkf78(t, s, h, checkpoint);
         case HpopIntegrator::rkv89:
             return rkv89(t, s, h);
         case HpopIntegrator::bulirsch_stoer:
@@ -882,6 +901,8 @@ class Hpop final : public IStateProvider {
             value[i + 3] = initial.velocity_mps[i];
         }
         (void)derivative(0, value);
+        if (options_.uses_vop())
+            (void)detail::universal_kepler_linearized(value, 0, options_.gravity_mu);
         if (options_.time_regularization)
             regularization_.emplace(value, options_.gravity_mu, options_.regularization_exponent,
                                     static_cast<std::size_t>(options_.steps_per_orbit), options_);

@@ -794,44 +794,50 @@ TEST(Hpop, Rkv89AdvancesTheEighthOrderMemberAndControlsRejectedSteps) {
     EXPECT_LT(position_error(adaptive, expected), 1e-4);
 }
 TEST(Hpop, BothStepModesPreserveCancellationAndQueryOrder) {
-    for (auto control : {HpopStepControl::relative_error, HpopStepControl::fixed}) {
-        for (auto integrator : {HpopIntegrator::rkf78, HpopIntegrator::rkv89,
-                                HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
-            auto options = point_mass();
-            options.integrator = integrator;
-            options.step_control = control;
-            const auto provider = make_hpop(circular(), options),
-                       fresh = make_hpop(circular(), options);
-            int calls = 0;
-            EXPECT_THROW((void)provider->state_at(Epoch{9000'000'000'000},
-                                                  [&] {
-                                                      if (++calls == 20)
-                                                          throw std::runtime_error("cancel");
-                                                  }),
-                         std::runtime_error);
-            EXPECT_EQ(calls, 20);
-            if (integrator == HpopIntegrator::gauss_jackson) {
-                (void)provider->state_at(Epoch{1200'000'000'000});
-                calls = 0;
-                EXPECT_THROW(
-                    (void)provider->state_at(Epoch{9000'000'000'000},
-                                             [&] {
-                                                 if (++calls == 5)
-                                                     throw std::runtime_error(
-                                                         "cancel with established history");
-                                             }),
-                    std::runtime_error);
-                EXPECT_EQ(calls, 5);
+    for (bool vop : {false, true}) {
+        SCOPED_TRACE(vop);
+
+        for (auto control : {HpopStepControl::relative_error, HpopStepControl::fixed}) {
+            for (auto integrator :
+                 {HpopIntegrator::rkf78, HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer,
+                  HpopIntegrator::gauss_jackson}) {
+                auto options = point_mass();
+                options.integrator = integrator;
+                options.vop = vop;
+                options.step_control = control;
+                const auto provider = make_hpop(circular(), options),
+                           fresh = make_hpop(circular(), options);
+                int calls = 0;
+                EXPECT_THROW((void)provider->state_at(Epoch{9000'000'000'000},
+                                                      [&] {
+                                                          if (++calls == 20)
+                                                              throw std::runtime_error("cancel");
+                                                      }),
+                             std::runtime_error);
+                EXPECT_EQ(calls, 20);
+                if (integrator == HpopIntegrator::gauss_jackson) {
+                    (void)provider->state_at(Epoch{1200'000'000'000});
+                    calls = 0;
+                    EXPECT_THROW(
+                        (void)provider->state_at(Epoch{9000'000'000'000},
+                                                 [&] {
+                                                     if (++calls == 5)
+                                                         throw std::runtime_error(
+                                                             "cancel with established history");
+                                                 }),
+                        std::runtime_error);
+                    EXPECT_EQ(calls, 5);
+                }
+                for (auto ns : {777'000'000'000LL, -199'000'000'000LL, 1LL})
+                    (void)provider->state_at(Epoch{ns});
+                auto job = std::async(std::launch::async,
+                                      [&] { return provider->state_at(Epoch{-8123'456'789'012}); });
+                EXPECT_EQ(provider->state_at(Epoch{9000'000'000'000}).position_m,
+                          fresh->state_at(Epoch{9000'000'000'000}).position_m);
+                const auto actual = job.get(), expected = fresh->state_at(Epoch{-8123'456'789'012});
+                EXPECT_EQ(actual.position_m, expected.position_m);
+                EXPECT_EQ(actual.velocity_mps, expected.velocity_mps);
             }
-            for (auto ns : {777'000'000'000LL, -199'000'000'000LL, 1LL})
-                (void)provider->state_at(Epoch{ns});
-            auto job = std::async(std::launch::async,
-                                  [&] { return provider->state_at(Epoch{-8123'456'789'012}); });
-            EXPECT_EQ(provider->state_at(Epoch{9000'000'000'000}).position_m,
-                      fresh->state_at(Epoch{9000'000'000'000}).position_m);
-            const auto actual = job.get(), expected = fresh->state_at(Epoch{-8123'456'789'012});
-            EXPECT_EQ(actual.position_m, expected.position_m);
-            EXPECT_EQ(actual.velocity_mps, expected.velocity_mps);
         }
     }
 }
@@ -1077,39 +1083,45 @@ TEST(HpopEphemeris, AcceptedAndReportedEndpointsMatchIndependentHipparchus) {
     }
 }
 TEST(HpopEphemeris, FixedGridOutputAndExactNanosecondEndpointsWorkInBothDirections) {
-    for (const auto integrator : {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
-                                  HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
-        auto o = point_mass();
-        o.integrator = integrator;
-        o.step_control = HpopStepControl::fixed;
-        o.fixed_step_seconds = 10;
-        for (auto start : {-8'000'000'000'000'000'000LL, 8'000'000'000'000'000'000LL}) {
-            for (auto direction : {-1LL, 1LL}) {
-                auto initial = circular();
-                initial.epoch = Epoch{start};
-                const Epoch end{start + direction * 123'123'456'789LL};
-                const auto accepted = propagate_hpop_ephemeris(initial, end, o);
-                ASSERT_EQ(accepted.size(), 1U);
-                EXPECT_EQ(accepted[0].size(), 14U);
-                const auto reported =
-                    propagate_hpop_ephemeris(initial, end, o, {}, 7'100'000'000LL);
-                ASSERT_EQ(reported.size(), 1U);
-                ASSERT_EQ(reported[0].size(), 19U);
-                for (std::size_t i = 0; i < reported[0].size(); ++i) {
-                    const auto n = direction > 0 ? i : reported[0].size() - 1 - i;
-                    const auto offset =
-                        std::min(static_cast<std::int64_t>(n) * 7'100'000'000LL, 123'123'456'789LL);
-                    EXPECT_EQ(reported[0][i].epoch, Epoch{start + direction * offset});
+    for (bool vop : {false, true}) {
+        SCOPED_TRACE(vop);
+
+        for (const auto integrator :
+             {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+              HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
+            auto o = point_mass();
+            o.integrator = integrator;
+            o.vop = vop;
+            o.step_control = HpopStepControl::fixed;
+            o.fixed_step_seconds = 10;
+            for (auto start : {-8'000'000'000'000'000'000LL, 8'000'000'000'000'000'000LL}) {
+                for (auto direction : {-1LL, 1LL}) {
+                    auto initial = circular();
+                    initial.epoch = Epoch{start};
+                    const Epoch end{start + direction * 123'123'456'789LL};
+                    const auto accepted = propagate_hpop_ephemeris(initial, end, o);
+                    ASSERT_EQ(accepted.size(), 1U);
+                    EXPECT_EQ(accepted[0].size(), 14U);
+                    const auto reported =
+                        propagate_hpop_ephemeris(initial, end, o, {}, 7'100'000'000LL);
+                    ASSERT_EQ(reported.size(), 1U);
+                    ASSERT_EQ(reported[0].size(), 19U);
+                    for (std::size_t i = 0; i < reported[0].size(); ++i) {
+                        const auto n = direction > 0 ? i : reported[0].size() - 1 - i;
+                        const auto offset = std::min(static_cast<std::int64_t>(n) * 7'100'000'000LL,
+                                                     123'123'456'789LL);
+                        EXPECT_EQ(reported[0][i].epoch, Epoch{start + direction * offset});
+                    }
                 }
             }
         }
+        auto o = point_mass();
+        o.integrator = HpopIntegrator::rkf78;
+        const auto tiny = propagate_hpop_ephemeris(circular(), Epoch{31}, o, {}, 1);
+        ASSERT_EQ(tiny[0].size(), 32U);
+        for (std::size_t i = 0; i < tiny[0].size(); ++i)
+            EXPECT_EQ(tiny[0][i].epoch, Epoch{static_cast<std::int64_t>(i)});
     }
-    auto o = point_mass();
-    o.integrator = HpopIntegrator::rkf78;
-    const auto tiny = propagate_hpop_ephemeris(circular(), Epoch{31}, o, {}, 1);
-    ASSERT_EQ(tiny[0].size(), 32U);
-    for (std::size_t i = 0; i < tiny[0].size(); ++i)
-        EXPECT_EQ(tiny[0][i].epoch, Epoch{static_cast<std::int64_t>(i)});
 }
 TEST(HpopEphemeris, RejectsInvalidCoverageAndCancellationWithoutPartialPublication) {
     auto o = point_mass();
@@ -1151,4 +1163,134 @@ TEST(HpopEphemeris, RejectsInvalidCoverageAndCancellationWithoutPartialPublicati
     EXPECT_THROW((void)propagate_hpop_ephemeris(initial, Epoch{256LL * 86400'000'000'000LL + 1}, o,
                                                 {}, 86400'000'000'000LL),
                  PropagationError);
+}
+
+TEST(HpopVop, MatchesIndependentHipparchusWithPerturbationsAndRegularization) {
+    for (auto integrator : {HpopIntegrator::rkf78, HpopIntegrator::bulirsch_stoer})
+        for (bool regularized : {false, true})
+            for (bool fixed : {false, true}) {
+                SCOPED_TRACE(static_cast<int>(integrator));
+                SCOPED_TRACE(regularized);
+                SCOPED_TRACE(fixed);
+                std::ifstream file{ORBITFORGE_BS_REFERENCE};
+                ASSERT_TRUE(file);
+                HpopEnvironment environment{std::make_shared<FixedFrames>(),
+                                            std::make_shared<FixedEop>()};
+                environment.ephemeris = std::make_shared<MovingMoon>();
+                std::string line;
+                int count = 0;
+                double max_r = 0, max_v = 0;
+                while (std::getline(file, line)) {
+                    if (line.empty() || line[0] == '#')
+                        continue;
+                    SCOPED_TRACE(line);
+                    std::istringstream row{line};
+                    int kind;
+                    double seconds;
+                    auto initial = circular(), expected = initial;
+                    row >> kind >> seconds;
+                    for (auto &v : initial.position_m)
+                        row >> v;
+                    for (auto &v : initial.velocity_mps)
+                        row >> v;
+                    for (auto &v : expected.position_m)
+                        row >> v;
+                    for (auto &v : expected.velocity_mps)
+                        row >> v;
+                    ASSERT_TRUE(row);
+                    expected.epoch = Epoch{std::llround(seconds * 1e9)};
+                    auto options = point_mass();
+                    options.integrator = integrator;
+                    options.vop = true;
+                    options.time_regularization = regularized;
+                    options.steps_per_orbit = 240;
+                    options.step_control =
+                        fixed ? HpopStepControl::fixed : HpopStepControl::relative_error;
+                    options.fixed_step_seconds = 30;
+                    options.gravity_degree = kind ? 2 : 0;
+                    options.relative_tolerance = 1e-14;
+                    options.position_tolerance_m = 1e-8;
+                    options.velocity_tolerance_mps = 1e-11;
+                    options.max_step_seconds = 300;
+                    options.third_body(ThirdBody::moon).enabled = kind == 2;
+                    const auto arcs =
+                        propagate_hpop_ephemeris(initial, expected.epoch, options, environment);
+                    ASSERT_EQ(arcs.size(), 1U);
+                    const auto &actual = seconds > 0 ? arcs.front().back() : arcs.front().front();
+                    EXPECT_EQ(actual.epoch, expected.epoch);
+                    const double er = position_error(actual, expected);
+                    const double ev = std::hypot(actual.velocity_mps[0] - expected.velocity_mps[0],
+                                                 actual.velocity_mps[1] - expected.velocity_mps[1],
+                                                 actual.velocity_mps[2] - expected.velocity_mps[2]);
+                    EXPECT_LT(er, .005);
+                    EXPECT_LT(ev, 5e-6);
+                    max_r = std::max(max_r, er);
+                    max_v = std::max(max_v, ev);
+                    ++count;
+                }
+                EXPECT_EQ(count, 60);
+                const auto key = std::to_string(static_cast<int>(integrator)) + "_" +
+                                 std::to_string(regularized) + "_" + std::to_string(fixed);
+                RecordProperty(key + "_position_m", max_r);
+                RecordProperty(key + "_velocity_mps", max_v);
+            }
+}
+TEST(HpopVop, OneLargeStepMatchesOrekitAcrossAllConics) {
+    for (auto integrator : {HpopIntegrator::rkf78, HpopIntegrator::bulirsch_stoer}) {
+        std::ifstream input(ORBITFORGE_UNIVERSAL_KEPLER_REFERENCE);
+        ASSERT_TRUE(input);
+        std::string line;
+        int count = 0;
+        while (std::getline(input, line)) {
+            if (line.empty() || line.front() == '#')
+                continue;
+            SCOPED_TRACE(line);
+            int kind;
+            double mu, seconds;
+            auto initial = circular(), expected = initial;
+            std::istringstream row(line);
+            row >> kind >> mu >> seconds;
+            for (auto &v : initial.position_m)
+                row >> v;
+            for (auto &v : initial.velocity_mps)
+                row >> v;
+            for (auto &v : expected.position_m)
+                row >> v;
+            for (auto &v : expected.velocity_mps)
+                row >> v;
+            ASSERT_TRUE(row);
+            expected.epoch = Epoch{std::llround(seconds * 1e9)};
+            auto options = point_mass();
+            options.integrator = integrator;
+            options.vop = true;
+            options.gravity_mu = mu;
+            options.step_control = HpopStepControl::fixed;
+            options.fixed_step_seconds = 86400;
+            const auto arcs = propagate_hpop_ephemeris(initial, expected.epoch, options);
+            ASSERT_EQ(arcs.size(), 1U);
+            ASSERT_EQ(arcs.front().size(), 2U);
+            const auto &actual = seconds > 0 ? arcs.front().back() : arcs.front().front();
+            EXPECT_LT(position_error(actual, expected), 5e-4);
+            for (int i = 0; i < 3; ++i)
+                EXPECT_NEAR(actual.velocity_mps[i], expected.velocity_mps[i], 5e-7);
+            ++count;
+        }
+        EXPECT_EQ(count, 80);
+    }
+}
+
+TEST(HpopVop, RejectsRadialGeometryOnlyWhenTheFormulationIsActive) {
+    for (auto method : {HpopIntegrator::rkf78, HpopIntegrator::bulirsch_stoer}) {
+        auto options = point_mass();
+        options.integrator = method;
+        options.vop = true;
+        auto radial = circular();
+        radial.velocity_mps = {1000, 0, 0};
+        EXPECT_THROW((void)make_hpop(radial, options), std::invalid_argument);
+        options.vop = false;
+        EXPECT_NO_THROW((void)make_hpop(radial, options));
+        options.vop = true;
+        options.integrator = HpopIntegrator::rk4;
+        EXPECT_NO_THROW((void)make_hpop(radial, options));
+    }
 }

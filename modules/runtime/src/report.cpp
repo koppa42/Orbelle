@@ -203,6 +203,7 @@ std::string report_input_sha256(const application::Project &project) {
                         body.cb->name = "Cb file"; // Display name is not a calculation input.
                 }
             }
+            options.vop = options.uses_vop();
             options.include_secular_variations = options.uses_secular_gravity();
             options.solid_tides =
                 core::effective_solid_tide_options(options.solid_tides, options.gravity_degree);

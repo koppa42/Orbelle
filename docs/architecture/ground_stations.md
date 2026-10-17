@@ -17,7 +17,7 @@
 
 ## 场景与文件
 
-`ProjectGroundStation` 保存稳定 ID、显示名称、`GroundStationLocation` 和最低仰角；ID 在所有对象间必须唯一。文件层 `application::Project.ground_stations`（Python `ProjectData.ground_stations`）保存站点集合；当前项目 v39 的必需 `GSTN` v2 段保存精确弧度、米值及最低仰角。开发阶段只读写当前格式，非当前版本或缺失必需段均拒绝，不从旧格式补默认值。
+`ProjectGroundStation` 保存稳定 ID、显示名称、`GroundStationLocation` 和最低仰角；ID 在所有对象间必须唯一。文件层 `application::Project.ground_stations`（Python `ProjectData.ground_stations`）保存站点集合；当前项目 v40 的必需 `GSTN` v2 段保存精确弧度、米值及最低仰角。开发阶段只读写当前格式，非当前版本或缺失必需段均拒绝，不从旧格式补默认值。
 
 Runtime 构建固定 ITRF Session，模型标识为 `ground-station-wgs84-fixed-itrf-v1`。同一 Scenario 可同时包含 GCRF 卫星和 ITRF 地面站；每条 `StateSeries` 的参考系必须显式检查后再做相对位置计算。位置编辑增加该站点输入修订；重命名、场景时段编辑以及其他对象的操作保留存续数值 Session。复制使用新 ID 和修订 1，重新从文件打开也从修订 1 开始。
 

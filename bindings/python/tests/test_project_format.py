@@ -19,7 +19,7 @@ class ProjectFormatTests(unittest.TestCase):
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 39)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 40)
         self.path.write_bytes(self.raw)
         project = of.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
@@ -36,6 +36,8 @@ class ProjectFormatTests(unittest.TestCase):
             of.orbits.SrpEclipsingBody("mercury", 2440000.125),
             of.orbits.SrpEclipsingBody("venus", 6051800)))
         self.assertEqual(hpop.integrator, "gauss_jackson")
+        self.assertTrue(hpop.vop)
+        self.assertFalse(hpop._native().uses_vop())
         self.assertEqual(hpop.correction, "pseudo")
         self.assertEqual(hpop.step_control, "fixed")
         self.assertEqual(hpop.interpolation, "hermite")
@@ -110,14 +112,14 @@ class ProjectFormatTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(),altered)
 
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(39), 40, 0xFFFFFFFF):
+        for version in (*range(40), 41, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (of.load_project_data, of.load_project,
                                  of.Project.open, of.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 39"):
+                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 40"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 
@@ -140,7 +142,7 @@ class ProjectFormatTests(unittest.TestCase):
                         of.load_project_data(self.path)
 
     def test_unknown_tide_mode_and_nonboolean_tides_or_relativity_rejected_with_valid_crcs(self):
-        marker = struct.pack("<IIBIBBBI", 0, 0, 1, 2, 1, 1, 0, 13) + b"fixture-ocean" + struct.pack("<IIBdIII7d", 30, 12, 0, 1250, 4, 1, 1, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
+        marker = struct.pack("<IIBIBBBI", 0, 0, 1, 2, 1, 1, 0, 13) + b"fixture-ocean" + struct.pack("<IIBdIBII7d", 30, 12, 0, 1250, 4, 1, 1, 1, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
         for offset, fmt, value in ((8, "B", 2), (9, "I", 3), (13, "B", 2), (14, "B", 2), (15, "B", 2), (41, "B", 2), (33, "I", 2191), (37, "I", 31)):
             sections = []
             for tag, version, body in read_sections(self.raw):
@@ -156,7 +158,7 @@ class ProjectFormatTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(), corrupted)
 
     def test_unknown_integrator_is_rejected_with_valid_crcs(self):
-        marker = struct.pack("<IIBdIII7d", 30, 12, 0, 1250, 4, 1, 1, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
+        marker = struct.pack("<IIBdIBII7d", 30, 12, 0, 1250, 4, 1, 1, 1, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
         for value in (5, 0xFFFFFFFF):
             sections = []
             for tag, version, body in read_sections(self.raw):
@@ -171,15 +173,31 @@ class ProjectFormatTests(unittest.TestCase):
                 of.Project.open(self.path)
             self.assertEqual(self.path.read_bytes(), corrupted)
 
+    def test_invalid_vop_boolean_is_rejected_with_valid_crcs(self):
+        marker = struct.pack("<IIBdIBII7d", 30, 12, 0, 1250, 4, 1, 1, 1, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
+        for value in (2, 255):
+            sections = []
+            for tag, version, body in read_sections(self.raw):
+                if tag == b"OBJS":
+                    self.assertEqual(body.count(marker), 1)
+                    body = bytearray(body)
+                    body[body.index(marker) + 21] = value
+                sections.append((tag, version, body))
+            corrupted = with_sections(self.raw, sections)
+            self.path.write_bytes(corrupted)
+            with self.assertRaises(of.ProjectError):
+                of.Project.open(self.path)
+            self.assertEqual(self.path.read_bytes(), corrupted)
+
     def test_unknown_correction_is_rejected_with_valid_crcs(self):
-        marker = struct.pack("<IIBdIII7d", 30, 12, 0, 1250, 4, 1, 1, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
+        marker = struct.pack("<IIBdIBII7d", 30, 12, 0, 1250, 4, 1, 1, 1, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
         for value in (2, 0xFFFFFFFF):
             sections = []
             for tag, version, body in read_sections(self.raw):
                 if tag == b"OBJS":
                     self.assertEqual(body.count(marker), 1)
                     body = bytearray(body)
-                    struct.pack_into("<I", body, body.index(marker) + 21, value)
+                    struct.pack_into("<I", body, body.index(marker) + 22, value)
                 sections.append((tag, version, body))
             corrupted = with_sections(self.raw, sections)
             self.path.write_bytes(corrupted)
@@ -188,14 +206,14 @@ class ProjectFormatTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(), corrupted)
 
     def test_unknown_step_control_is_rejected_with_valid_crcs(self):
-        marker = struct.pack("<IIBdIII7d", 30, 12, 0, 1250, 4, 1, 1, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
+        marker = struct.pack("<IIBdIBII7d", 30, 12, 0, 1250, 4, 1, 1, 1, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
         for value in (2, 0xFFFFFFFF):
             sections = []
             for tag, version, body in read_sections(self.raw):
                 if tag == b"OBJS":
                     self.assertEqual(body.count(marker), 1)
                     body = bytearray(body)
-                    struct.pack_into("<I", body, body.index(marker) + 25, value)
+                    struct.pack_into("<I", body, body.index(marker) + 26, value)
                 sections.append((tag, version, body))
             corrupted = with_sections(self.raw, sections)
             self.path.write_bytes(corrupted)
@@ -204,7 +222,7 @@ class ProjectFormatTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(), corrupted)
 
     def test_invalid_mass_is_rejected_even_with_valid_crcs_and_disabled_forces(self):
-        marker = struct.pack("<IIBIBBBI", 0, 0, 1, 2, 1, 1, 0, 13) + b"fixture-ocean" + struct.pack("<IIBdIII7d", 30, 12, 0, 1250, 4, 1, 1, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
+        marker = struct.pack("<IIBIBBBI", 0, 0, 1, 2, 1, 1, 0, 13) + b"fixture-ocean" + struct.pack("<IIBdIBII7d", 30, 12, 0, 1250, 4, 1, 1, 1, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
         for mass in (0, -1, float("nan"), float("inf"), 5e-324):
             sections = []
             for tag, version, body in read_sections(self.raw):
@@ -261,7 +279,7 @@ class ProjectFormatTests(unittest.TestCase):
                     of.load_project_data(self.path)
 
     def test_invalid_interpolation_fields_with_valid_crcs_are_rejected(self):
-        prefix = struct.pack("<IIBdIII7d", 30, 12, 0, 1250, 4, 1, 1, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
+        prefix = struct.pack("<IIBdIBII7d", 30, 12, 0, 1250, 4, 1, 1, 1, 2e-12, .002, 2e-6, .005, 45, 12, 1000)
         for offset, encoding, value in ((0, "I", 3), (4, "I", 4), (4, "I", 30), (4, "I", 0xFFFFFFFF),
                 (8, "d", 0), (8, "d", -1), (8, "d", float("nan")), (8, "d", float("inf")), (16, "B", 2)):
             with self.subTest(offset=offset, value=value):
@@ -278,7 +296,7 @@ class ProjectFormatTests(unittest.TestCase):
 
 
     def test_invalid_regularization_fields_with_valid_crcs_preserve_source(self):
-        prefix = struct.pack("<IIBdIII7dIIdB", 30, 12, 0, 1250, 4, 1, 1, 2e-12, .002, 2e-6,
+        prefix = struct.pack("<IIBdIBII7dIIdB", 30, 12, 0, 1250, 4, 1, 1, 1, 2e-12, .002, 2e-6,
                              .005, 45, 12, 1000, 1, 5, 4.1e14, 1)
         for enabled in (0, 1):
             for offset, encoding, value in ((0, "B", 2), (1, "d", 0), (1, "d", -1),

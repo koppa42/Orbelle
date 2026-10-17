@@ -2,6 +2,7 @@
 #include "gauss_jackson.hpp"
 #include "one_step.hpp"
 #include "sundman.hpp"
+#include "vop.hpp"
 #include <orbitforge/core/propagation/hpop.hpp>
 
 namespace orbitforge::core::detail {
@@ -35,7 +36,7 @@ class SundmanPropagation {
     using StepBoundary = std::function<std::optional<State>(const State &, const State &)>;
     SundmanPropagation(const Cartesian &initial, double mu, double exponent,
                        std::size_t steps_per_orbit, const HpopOptions &options)
-        : transform_(initial, mu, exponent), options_(options) {
+        : transform_(initial, mu, exponent), options_(options), mu_(mu) {
         if (steps_per_orbit == 0)
             throw std::invalid_argument("Sundman steps per orbit must be positive");
         validate_hpop_options(options_);
@@ -219,7 +220,7 @@ class SundmanPropagation {
     struct OutsideInterval {};
     SundmanTransform transform_;
     HpopOptions options_;
-    double fixed_q_;
+    double fixed_q_, mu_;
     Vector initial_;
     static void validate(const Vector &value) {
         if (!std::all_of(value.begin(), value.end(), [](double v) { return std::isfinite(v); }))
@@ -258,19 +259,27 @@ class SundmanPropagation {
     template <class Derivative>
     TrialStep<7> step(double t, const Vector &s, double h, const Derivative &derivative,
                       const ErrorControl<7> &control, const std::function<void()> &checkpoint,
-                      bool starter = false) const {
-        if (starter || options_.integrator == HpopIntegrator::bulirsch_stoer)
-            return bulirsch_stoer(t, s, h, derivative, control, checkpoint, starter);
-        switch (options_.integrator) {
-        case HpopIntegrator::rk4:
-            return rk4_trial(t, s, h, derivative);
-        case HpopIntegrator::rkf78:
-            return rkf78(t, s, h, derivative, control);
-        case HpopIntegrator::rkv89:
-            return rkv89(t, s, h, derivative, control);
-        default:
-            throw std::logic_error("Invalid Sundman one-step method");
-        }
+                      bool starter = false, bool embedded_time = true) const {
+        const auto integrate = [&](double start, const auto &slope, const auto &scales) {
+            if (starter || options_.integrator == HpopIntegrator::bulirsch_stoer)
+                return bulirsch_stoer(start, s, h, slope, scales, checkpoint, starter);
+            switch (options_.integrator) {
+            case HpopIntegrator::rk4:
+                return rk4_trial(start, s, h, slope);
+            case HpopIntegrator::rkf78:
+                return rkf78(start, s, h, slope, scales);
+            case HpopIntegrator::rkv89:
+                return rkv89(start, s, h, slope, scales);
+            default:
+                throw std::logic_error("Invalid Sundman one-step method");
+            }
+        };
+        if (options_.uses_vop())
+            return vop_step(
+                t, s, h, mu_, embedded_time, derivative,
+                [&](const auto &slope, const auto &scales) { return integrate(0, slope, scales); },
+                control, checkpoint);
+        return integrate(t, derivative, control);
     }
     template <class Force>
     void advance_gj(State &state, double h, const Force &force, std::size_t &attempts,
@@ -408,7 +417,7 @@ class SundmanPropagation {
                 const auto a = force(time, SundmanTransform::cartesian_first(s));
                 return Vector{s[3], s[4], s[5], a[0], a[1], a[2], 1 / transform_.clock_rate(s)};
             };
-            const auto trial = step(0, local, h, derivative, control, checkpoint, starter);
+            const auto trial = step(0, local, h, derivative, control, checkpoint, starter, false);
             validate(trial.value);
             const double increment = trial.increment[6];
             if (trial.error <= 1 && increment * state.direction > 0 &&

@@ -342,7 +342,10 @@ class OceanTideSettings:
 
 @dataclass(frozen=True, slots=True)
 class HpopSettings:
-    """File or built-in gravity and Cowell integration with local error tolerances.
+    """File or built-in gravity with Cowell or universal-variable VOP equations.
+    vop is active only for RKF78/Bulirsch-Stoer and uses gravity_mu; unsupported
+    methods retain the inactive draft. Interpolation is independently configured.
+    VOP requires a numerically non-radial osculating orbit and supports all conics.
 
     Fixed steps and adaptive Min/Max Step are 1e-6..86400 TAI seconds. The adaptive
     ceiling is not a fixed step or an accuracy guarantee; local dynamics seed the first
@@ -397,8 +400,11 @@ class HpopSettings:
     time_regularization: bool = False
     regularization_exponent: float = 1.5
     steps_per_orbit: int = 120
+    vop: bool = False
 
     def __post_init__(self) -> None:
+        if type(self.vop) is not bool:
+            raise TypeError("vop must be bool")
         if type(self.time_regularization) is not bool:
             raise TypeError("time_regularization must be bool")
         if type(self.steps_per_orbit) is not int:
@@ -611,8 +617,11 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          interpolation_mu: float = 3.986004415e14,
          report_ephemeris_on_fixed_step: bool = False,
          time_regularization: bool = False, regularization_exponent: float = 1.5,
-         steps_per_orbit: int = 120) -> Orbit:
-    """Cowell orbit with gravity, tides, third bodies, drag, spherical SRP and RKF78/RKV89/Bulirsch-Stoer or fixed RK4/Gauss-Jackson 12.
+         steps_per_orbit: int = 120, vop: bool = False) -> Orbit:
+    """HPOP orbit with gravity, tides, third bodies, drag, spherical SRP and numerical integration.
+    vop selects universal-variable variation of parameters for RKF78/Bulirsch-Stoer.
+    Other methods retain the inactive draft; VOP integration uses gravity_mu, independently
+    of interpolation and interpolation_mu. Disabling vop uses Cartesian Cowell equations.
     step_control selects relative_error or fixed; RK4/Gauss-Jackson always use fixed steps.
     Fixed Bulirsch-Stoer uses eighteenth-order extrapolation without error control.
     Gauss-Jackson correction selects the post-convergence full or two-body-only force update.
@@ -650,6 +659,6 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
         OceanTideSettings() if ocean_tides is None else require(ocean_tides, OceanTideSettings, "ocean_tides"),
         include_secular_variations, correction, step_control, interpolation, interpolation_order,
         interpolation_mu, report_ephemeris_on_fixed_step, time_regularization, regularization_exponent,
-        steps_per_orbit)
+        steps_per_orbit, vop)
     settings._native()  # Fail at construction, before changing a project.
     return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)
