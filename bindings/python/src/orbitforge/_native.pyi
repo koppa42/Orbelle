@@ -1599,6 +1599,34 @@ def make_tabulated_orbit_session(
     input_revision: int = 1,
 ) -> Session: ...
 
+class HpopGravityTruncation:
+    degree: int
+    order: int
+    @overload
+    def __init__(self) -> None: ...
+    @overload
+    def __init__(self, degree: int, order: int) -> None: ...
+
+class HpopVariationalOptions:
+    def __init__(self) -> None: ...
+    gravity: HpopGravityTruncation | None
+    absolute_tolerance: float
+
+class HpopVariationalState:
+    @property
+    def state(self) -> CartesianState: ...
+    @property
+    def state_transition(self) -> list[list[float]]: ...
+    @property
+    def drag_sensitivity(self) -> list[float]: ...
+    @property
+    def srp_sensitivity(self) -> list[float]: ...
+
+def propagate_hpop_variational(
+    input: OrbitInput, end: Epoch, *, options: HpopVariationalOptions = ...,
+    data: DataSnapshot = ..., cancelled: Callable[[], bool] | None = None,
+) -> HpopVariationalState: ...
+
 def propagate_hpop_ephemeris(
     input: OrbitInput, end: Epoch, *, reporting_step_nanoseconds: int = 0,
     data: DataSnapshot = ..., cancelled: Callable[[], bool] | None = None,

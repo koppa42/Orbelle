@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <orbitforge/core/propagation/hpop_variational.hpp>
 #include <orbitforge/runtime/analysis.hpp>
 #include <orbitforge/runtime/data_catalog.hpp>
 #include <orbitforge/runtime/hpop.hpp>
@@ -285,6 +287,45 @@ void bind_analysis(py::module_ &module) {
                                py::return_value_policy::copy)
         .def("prepare", &runtime::AnalysisPlan::prepare, py::arg("accept_data_changes") = false,
              py::call_guard<py::gil_scoped_release>());
+    py::class_<core::HpopGravityTruncation>(module, "HpopGravityTruncation")
+        .def(py::init<>())
+        .def(py::init<int, int>(), py::arg("degree"), py::arg("order"))
+        .def_readwrite("degree", &core::HpopGravityTruncation::degree)
+        .def_readwrite("order", &core::HpopGravityTruncation::order);
+    py::class_<core::HpopVariationalOptions>(module, "HpopVariationalOptions")
+        .def(py::init<>())
+        .def_readwrite("gravity", &core::HpopVariationalOptions::gravity)
+        .def_readwrite("absolute_tolerance", &core::HpopVariationalOptions::absolute_tolerance);
+    py::class_<core::HpopVariationalState>(module, "HpopVariationalState")
+        .def_property_readonly("state", [](const core::HpopVariationalState &v) { return v.state; })
+        .def_readonly("state_transition", &core::HpopVariationalState::state_transition)
+        .def_readonly("drag_sensitivity", &core::HpopVariationalState::drag_sensitivity)
+        .def_readonly("srp_sensitivity", &core::HpopVariationalState::srp_sensitivity);
+    module.def(
+        "propagate_hpop_variational",
+        [](application::OrbitInput input, core::Epoch end, core::HpopVariationalOptions options,
+           runtime::DataSnapshot data, py::object callback) {
+            if (input.propagator != application::OrbitPropagator::hpop)
+                throw std::invalid_argument("Variational propagation requires one HPOP coast");
+            const auto cancelled = cancellation(callback);
+            py::gil_scoped_release release;
+            // Covariance gravity may activate tide resources absent from a nominal 0/0 field.
+            auto resources = input;
+            if (options.gravity) {
+                resources.hpop.gravity_degree =
+                    std::max(input.hpop.gravity_degree, options.gravity->degree);
+                resources.hpop.gravity_order =
+                    std::max(input.hpop.gravity_order, options.gravity->order);
+            }
+            return core::propagate_hpop_variational(
+                input.initial, end, input.hpop, data.force_environment(resources), options, [&] {
+                    if (cancelled && cancelled())
+                        throw runtime::AnalysisCancelled{};
+                });
+        },
+        py::arg("input"), py::arg("end"), py::kw_only(),
+        py::arg("options") = core::HpopVariationalOptions{},
+        py::arg("data") = runtime::DataSnapshot{}, py::arg("cancelled") = py::none());
     module.def(
         "propagate_hpop_ephemeris",
         [](application::OrbitInput input, core::Epoch end, std::int64_t report_ns,

@@ -8,42 +8,43 @@
 #include <stdexcept>
 
 namespace orbitforge::core::detail {
-// STK's dS = sqrt(mu) r^-n dt, with a constant nondimensionalization:
-// q = S / a0^(3/2-n), dt/dq = sqrt(a0^3/mu) (r/a0)^n.
+// STK's dS = sqrt(gravitational_parameter) r^-n dt, with a constant nondimensionalization:
+// q = S / a0^(3/2-n), dt/dq = sqrt(a0^3/gravitational_parameter) (r/a0)^n.
 // a0 and e0 are the initial osculating ellipse. One unperturbed revolution spans
 // period() in q; its fixed step is period()/steps_per_orbit. Forces always receive
 // physical SI time and velocity. This transform does not choose/clip event times.
-class SundmanTransform {
+template <std::size_t Extra = 0> class SundmanSystemTransform {
   public:
-    using Cartesian = std::array<double, 6>;
-    using FirstOrder = std::array<double, 7>;   // r, v, physical seconds
-    using SecondOrder = std::array<double, 7>;  // r, dr/dq, physical seconds
-    using Acceleration = std::array<double, 4>; // d2r/dq2, dt/dq
+    using Cartesian = std::array<double, 6 + Extra>;
+    using FirstOrder = std::array<double, 7 + Extra>;   // r, v, physical seconds
+    using SecondOrder = std::array<double, 7 + Extra>;  // r, dr/dq, physical seconds
+    using Acceleration = std::array<double, 4 + Extra>; // d2r/dq2, dt/dq
 
-    SundmanTransform(const Cartesian &initial, double mu, double exponent)
-        : mu_(mu), exponent_(exponent) {
-        if (!std::isfinite(mu) || mu <= 0 || !std::isfinite(exponent) || exponent <= 0 ||
-            exponent > 10 || !finite(initial))
+    SundmanSystemTransform(const Cartesian &initial, double gravitational_parameter,
+                           double exponent)
+        : mu_(gravitational_parameter), exponent_(exponent) {
+        if (!std::isfinite(gravitational_parameter) || gravitational_parameter <= 0 ||
+            !std::isfinite(exponent) || exponent <= 0 || exponent > 10 || !finite(initial))
             throw std::invalid_argument(
                 "Invalid Sundman gravitational parameter, exponent or state");
         const double r = std::hypot(initial[0], initial[1], initial[2]);
         const double v = std::hypot(initial[3], initial[4], initial[5]);
         if (!(r > 0))
             throw std::invalid_argument("Sundman initial radius must be positive");
-        const double inverse_a = 2 / r - v * (v / mu);
+        const double inverse_a = 2 / r - v * (v / gravitational_parameter);
         const std::array<double, 3> h{initial[1] * initial[5] - initial[2] * initial[4],
                                       initial[2] * initial[3] - initial[0] * initial[5],
                                       initial[0] * initial[4] - initial[1] * initial[3]};
-        const std::array<double, 3> e{(initial[4] * h[2] - initial[5] * h[1]) / mu - initial[0] / r,
-                                      (initial[5] * h[0] - initial[3] * h[2]) / mu - initial[1] / r,
-                                      (initial[3] * h[1] - initial[4] * h[0]) / mu -
-                                          initial[2] / r};
+        const std::array<double, 3> e{
+            (initial[4] * h[2] - initial[5] * h[1]) / gravitational_parameter - initial[0] / r,
+            (initial[5] * h[0] - initial[3] * h[2]) / gravitational_parameter - initial[1] / r,
+            (initial[3] * h[1] - initial[4] * h[0]) / gravitational_parameter - initial[2] / r};
         eccentricity_ = std::hypot(e[0], e[1], e[2]);
         if (!(inverse_a > 0) || !(eccentricity_ < 1) || !(std::hypot(h[0], h[1], h[2]) > 0))
             throw std::invalid_argument(
                 "Sundman steps per orbit require a nonradial bound initial orbit");
         a_ = 1 / inverse_a;
-        time_scale_ = a_ / std::sqrt(mu / a_);
+        time_scale_ = a_ / std::sqrt(gravitational_parameter / a_);
         period_ = kepler_period(exponent_, eccentricity_);
         if (!std::isfinite(a_) || !std::isfinite(time_scale_) || time_scale_ <= 0 ||
             !std::isfinite(period_) || period_ <= 0)
@@ -64,20 +65,29 @@ class SundmanTransform {
         return value;
     }
     static FirstOrder first_order(const Cartesian &s, double time) {
-        return {s[0], s[1], s[2], s[3], s[4], s[5], time};
+        FirstOrder result{s[0], s[1], s[2], s[3], s[4], s[5], time};
+        std::copy(s.begin() + 6, s.end(), result.begin() + 7);
+        return result;
     }
     SecondOrder second_order(const Cartesian &s, double time) const {
         const double g = clock_rate(s);
-        return {s[0], s[1], s[2], s[3] * g, s[4] * g, s[5] * g, time};
+        auto result = first_order(s, time);
+        for (std::size_t i = 3; i < 6; ++i)
+            result[i] *= g;
+        return result;
     }
     static Cartesian cartesian_first(const FirstOrder &s) {
-        return {s[0], s[1], s[2], s[3], s[4], s[5]};
+        Cartesian result{s[0], s[1], s[2], s[3], s[4], s[5]};
+        std::copy(s.begin() + 7, s.end(), result.begin() + 6);
+        return result;
     }
     Cartesian cartesian_second(const SecondOrder &s) const {
         if (!finite(s))
             throw PropagationError("Sundman second-order state is not finite");
         const double g = clock_rate(s);
-        const Cartesian result{s[0], s[1], s[2], s[3] / g, s[4] / g, s[5] / g};
+        auto result = cartesian_first(s);
+        for (std::size_t i = 3; i < 6; ++i)
+            result[i] /= g;
         if (!finite(result))
             throw PropagationError("Sundman physical velocity is not finite");
         return result;
@@ -87,13 +97,16 @@ class SundmanTransform {
             throw PropagationError("Sundman state is not finite");
         const double g = clock_rate(s);
         const auto acceleration = force(s[6], cartesian_first(s));
-        return {s[3] * g,
-                s[4] * g,
-                s[5] * g,
-                acceleration[0] * g,
-                acceleration[1] * g,
-                acceleration[2] * g,
-                g};
+        FirstOrder result{s[3] * g,
+                          s[4] * g,
+                          s[5] * g,
+                          acceleration[0] * g,
+                          acceleration[1] * g,
+                          acceleration[2] * g,
+                          g};
+        for (std::size_t i = 0; i < Extra; ++i)
+            result[i + 7] = acceleration[i + 3] * g;
+        return result;
     }
     template <class Force>
     Acceleration acceleration(const SecondOrder &s, const Force &force) const {
@@ -109,10 +122,11 @@ class SundmanTransform {
         const auto state = cartesian_second(after);
         const double old_kinematic = kinematic(before), old_clock = clock_rate(before);
         const auto old_central = central(before), new_central = central(state);
-        std::array<double, 3> physical{};
+        std::array<double, 3 + Extra> physical{};
         for (std::size_t i = 0; i < 3; ++i)
             physical[i] = (previous[i] - old_kinematic * before[i + 3]) / old_clock / old_clock -
                           old_central[i] + new_central[i];
+        // The caller refreshes first-order equations at the corrected state.
         return transform_acceleration(after, physical);
     }
 
@@ -136,10 +150,13 @@ class SundmanTransform {
         return exponent_ * radial;
     }
     Acceleration transform_acceleration(const SecondOrder &s,
-                                        const std::array<double, 3> &physical) const {
+                                        const std::array<double, 3 + Extra> &physical) const {
         const double k = kinematic(s), g = clock_rate(s);
-        return {physical[0] * g * g + k * s[3], physical[1] * g * g + k * s[4],
-                physical[2] * g * g + k * s[5], g};
+        Acceleration result{physical[0] * g * g + k * s[3], physical[1] * g * g + k * s[4],
+                            physical[2] * g * g + k * s[5], g};
+        for (std::size_t i = 0; i < Extra; ++i)
+            result[i + 4] = physical[i + 3] * g;
+        return result;
     }
     template <class F>
     static double quadrature(const F &f, double left, double right, double fl, double fm, double fr,
@@ -179,4 +196,5 @@ class SundmanTransform {
         return 2 * scale * integral;
     }
 };
+using SundmanTransform = SundmanSystemTransform<>;
 } // namespace orbitforge::core::detail

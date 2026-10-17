@@ -90,10 +90,10 @@
 | Integrator | Time Regularization；Exponent；Steps Per Orbit | 已接入：Sundman 方程、初始椭圆每圈尺度、五种积分器、物理 Min/Max Step、整数 TAI、天气分段、机动重启及科学插值；C++ / Python / 项目 v40 / UI 共用配置。非椭圆归一化明确拒绝；尚无 STK 同配置实测，见[时间正则化契约](time_regularization.md) |
 | Integrator | Report Ephemeris on a Fixed Time Step | 部分：显式工厂及普通项目均支持接受端点或让积分步停在固定 TAI 输出网格，保留天气边界；UI、保存与报告已接入。项目轨道步长当前限于 1–60 整数秒，完整合法范围及短段策略仍待 STK 实测核对 |
 | Integrator | Do not propagate below altitude | 已有按力评估停止的参考球面地心高度；STK 比较须核对其高度参考面 |
-| Covariance | Compute Covariance；6×6 初始矩阵 | 待实现变分方程与矩阵配置；计算基础已完成中心引力、第三体与三项相对论的解析状态偏导及独立数值对照，见[力状态偏导](force_differential.md)。阻力及球面 SRP 的局部状态／D、K 偏导已提供；[卫星视太阳状态链](apparent_sun_differential.md)已完成；[总力状态块及 D/K 装配](hpop_force.md)已接入共用力入口；事件跳变、协方差单位和正定性政策仍待接入；关闭不影响确定性轨迹 |
+| Covariance | Compute Covariance；6×6 初始矩阵 | [状态转移与 D/K 常参数变分传播](hpop_variational.md)已提供 C++ / Python / SDK 单段接口；协方差矩阵配置、传播输出及 UI 待接入。计算基础已完成中心引力、第三体与三项相对论的解析状态偏导及独立数值对照，见[力状态偏导](force_differential.md)。阻力及球面 SRP 的局部状态／D、K 偏导已提供；[卫星视太阳状态链](apparent_sun_differential.md)已完成；[总力状态块及 D/K 装配](hpop_force.md)已接入共用力入口；圆柱／硬密度切换的事件跳变、协方差单位和正定性政策仍待接入；关闭不影响确定性轨迹 |
 | Covariance | Frame；Representation | 待实现：J2000/TOD/LVLH/Frenet，Cartesian 及适用的 FG 表示；完整 Jacobian |
-| Covariance | 独立 Gravity Degree / Order | 待接入变分方程；基础已完成：最高 2190 阶解析引力 Hessian、极轴及固定历元潮汐/长期变化系数偏导，通过 Orekit 与高精度解析值对照，见[引力空间偏导](gravity_differential.md)。尚不能配置或传播协方差，后续独立截断不得改变名义轨迹 |
-| Covariance | Include Consider Analysis；Use / Value / x,y,z,vx,vy,vz | Drag / SRP 的 D、K 力参数偏导已完成；全局参数敏感度、参数方差及状态交叉协方差仍待实现，OutGasTimeConstant、OutGasMagnitude、ThrustX/Y/Z 还需对应的名义力及参数定义 |
+| Covariance | 独立 Gravity Degree / Order | 已接入单段变分方程的独立阶／次，保持名义力模型；协方差 UI 待接入。基础已完成：最高 2190 阶解析引力 Hessian、极轴及固定历元潮汐/长期变化系数偏导，通过 Orekit 与高精度解析值对照，见[引力空间偏导](gravity_differential.md)。尚不能配置或传播协方差矩阵，独立截断不改变名义加速度 |
+| Covariance | Include Consider Analysis；Use / Value / x,y,z,vx,vy,vz | Drag / SRP 的 D、K 力参数偏导已完成；全局 D/K 参数敏感度已接入；参数方差及状态交叉协方差仍待实现，OutGasTimeConstant、OutGasMagnitude、ThrustX/Y/Z 还需对应的名义力及参数定义 |
 | Covariance | Include Consider Cross Correlation；Row/Column/Value；Add/Remove | 待实现：参数间协方差、联合矩阵校验及输出来源 |
 
 OutGas 与 Thrust 参数必须有对应的名义加速度和偏导定义，不能只存名称或向矩阵添加任意噪声。高级窗口、模型下拉选项的进一步细分须继续依据官方说明和可获得的实际配置核对；核对未完成时保持待实现，不推定已支持。
@@ -174,7 +174,7 @@ a_drag = −0.5 ρ Cd (A_drag / m) |v_relative| v_relative
 
 ## 5. 协方差
 
-已提供全阶引力 Hessian、第三体／相对论解析状态块，以及[阻力局部状态块和 `D=Cd×A/m` 偏导](drag_differential.md)，均有独立成熟算法或高精度原方程对照。[SRP 固定几何状态／太阳／K 偏导](srp_differential.md)也已完成并经 Orekit、高精度两圆面积与 SciPy 多体积分对照；[卫星视太阳状态链](apparent_sun_differential.md)已完成并与 CSPICE 独立差分对照；阻力模型边界及极点、完整 STM、参数传播和协方差装配仍待完成；这些底层接口不代表协方差功能已启用。
+已提供全阶引力 Hessian、第三体／相对论解析状态块，以及[阻力局部状态块和 `D=Cd×A/m` 偏导](drag_differential.md)，均有独立成熟算法或高精度原方程对照。[SRP 固定几何状态／太阳／K 偏导](srp_differential.md)也已完成并经 Orekit、高精度两圆面积与 SciPy 多体积分对照；[卫星视太阳状态链](apparent_sun_differential.md)已完成并与 CSPICE 独立差分对照；[单段 STM、D/K 常参数敏感度及独立引力截断](hpop_variational.md)已接入五种积分器、VOP 和 Sundman。协方差矩阵装配、坐标变换、状态相关力跳变及 UI 仍待完成；这些计算接口不代表协方差页面已启用。
 
 协方差是独立能力，不能只增加一个矩阵编辑框。第一层为 6×6 初始状态协方差与状态转移矩阵：
 

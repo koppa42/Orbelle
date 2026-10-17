@@ -138,14 +138,18 @@ template <std::size_t N, std::size_t K = 0> struct GaussJacksonSystem12 {
 // Ordinary Cartesian-time adapter retains the established convergence and
 // pseudo-correction semantics. Other formulations supply their own scales and
 // transformed two-body term, including their kinematic clock terms.
-struct GaussJackson12 : GaussJacksonSystem12<3> {
-    static Acceleration central(const State &s, double mu) {
+template <std::size_t Extra = 0> struct CartesianGaussJackson12 : GaussJacksonSystem12<3, Extra> {
+    using Base = GaussJacksonSystem12<3, Extra>;
+    using State = typename Base::State;
+    using Acceleration = typename Base::Acceleration;
+    static Acceleration central(const State &s, double gravitational_parameter) {
         const double r = std::hypot(s[0], s[1], s[2]);
-        const double scale = -mu / (r * r * r);
+        const double scale = -gravitational_parameter / (r * r * r);
         return {scale * s[0], scale * s[1], scale * s[2]};
     }
     template <class Force>
-    void advance(double h, double mu, bool full_correction, const Force &force) {
+    void advance(double h, double gravitational_parameter, bool full_correction,
+                 const Force &force) {
         const auto converged = [](const State &estimate, const State &corrected) {
             double position_change = 0, velocity_change = 0;
             for (std::size_t i = 0; i < 3; ++i) {
@@ -158,16 +162,27 @@ struct GaussJackson12 : GaussJacksonSystem12<3> {
                 std::max(1., std::hypot(corrected[0], corrected[1], corrected[2]));
             const double velocity_scale =
                 std::max(1., std::hypot(corrected[3], corrected[4], corrected[5]));
+            for (std::size_t i = 6; i < 6 + Extra; ++i)
+                if (std::abs(corrected[i] - estimate[i]) >
+                    convergence * std::max(1e-6, std::abs(corrected[i])))
+                    return false;
             return position_change <= convergence * position_scale &&
                    velocity_change <= convergence * velocity_scale;
         };
-        const auto correction = [mu](const State &before, const State &after, Acceleration value) {
-            const auto old_central = central(before, mu), new_central = central(after, mu);
+        const auto correction = [&, gravitational_parameter](
+                                    const State &before, const State &after, Acceleration value) {
+            const auto old_central = central(before, gravitational_parameter),
+                       new_central = central(after, gravitational_parameter);
             for (std::size_t i = 0; i < 3; ++i)
                 value[i] += new_central[i] - old_central[i];
+            if constexpr (Extra > 0) {
+                const auto updated = force(after);
+                std::copy(updated.begin() + 3, updated.end(), value.begin() + 3);
+            }
             return value;
         };
-        GaussJacksonSystem12<3>::advance(h, full_correction, force, correction, converged);
+        Base::advance(h, full_correction, force, correction, converged);
     }
 };
+using GaussJackson12 = CartesianGaussJackson12<>;
 } // namespace orbitforge::core::detail

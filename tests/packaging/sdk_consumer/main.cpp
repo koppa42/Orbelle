@@ -3,6 +3,7 @@
 #include <orbitforge/application/project_document.hpp>
 #include <orbitforge/application/scenario.hpp>
 #include <orbitforge/core/propagation/hpop_force.hpp>
+#include <orbitforge/core/propagation/hpop_variational.hpp>
 #include <orbitforge/core/propagation/relativity.hpp>
 #include <orbitforge/runtime/access.hpp>
 #include <orbitforge/runtime/analysis.hpp>
@@ -489,6 +490,22 @@ int main(int argc, char **argv) try {
             combined.force.velocity_jacobian_per_s != srp_partials.force.velocity_jacobian_per_s ||
             combined.srp_parameter_jacobian_pa != srp_partials.srp_parameter_jacobian_pa)
             throw std::runtime_error("Installed combined HPOP force differential API failed");
+
+        const auto variational_end =
+            orbitforge::core::Epoch{epoch.tai_nanoseconds() + 30'000'000'000};
+        const auto sensitivity = orbitforge::core::propagate_hpop_variational(
+            derivative_state, variational_end, options, force_environment);
+        const auto endpoint = orbitforge::core::propagate_hpop_ephemeris(
+                                  derivative_state, variational_end, options, force_environment)
+                                  .back()
+                                  .back();
+        if (sensitivity.state.epoch != variational_end ||
+            !std::isfinite(sensitivity.state_transition[0][3]) ||
+            sensitivity.srp_sensitivity == std::array<double, 6>{})
+            throw std::runtime_error("Installed HPOP variational API failed");
+        for (std::size_t axis = 0; axis < 3; ++axis)
+            if (std::abs(sensitivity.state.position_m[axis] - endpoint.position_m[axis]) > 1e-5)
+                throw std::runtime_error("Installed variational nominal state differs");
 
         const auto full_light = orbitforge::core::evaluate_srp(
             {7e6, 0, 0}, {149597870700, 0, 0}, options.srp, std::array{0., 384400000., 0.});

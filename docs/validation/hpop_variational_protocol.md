@@ -1,0 +1,51 @@
+# HPOP 变分传播验证
+
+验证对象是[物理时刻的状态转移及 D/K 参数敏感度](../architecture/hpop_variational.md)。局部偏导的原有 Orekit、GMAT、作者 NRL、CSPICE 与高精度参考继续保留；本协议检查完整滑行段及其与积分方法、时间坐标和资源边界的组合。没有 STK 同版本、同数据配置的实测结果。
+
+## 独立输入与复现
+
+使用固定 JAR：Orekit 13.1.2、Hipparchus 4.0.2，散列见 `tools/validation/orekit/dependencies.json`。编译同目录的 `OrbitForgeRelativityReference.java`、`OrbitForgeHpopForceReference.java`、`OrbitForgeHpopVariationalReference.java`，运行最后一个类，唯一必需参数为输出路径。两次独立运行必须产生相同 ASCII/LF 字节，才更新 `tests/reference/propagators/hpop_variational.txt`。附加 `--zero-shadow` 仅供零参数审计，不生成完整测试输入。
+
+固定文件的 ASCII / LF SHA-256：
+
+```text
+409e9d3b37838d74fb3d70ebbde35afad542916c4e285f9004fdb764b3ecc023
+```
+
+36 组包含：
+
+- 30 组 ±1200 s 的原始 Orekit 力模型和 Hipparchus `Gradient` 场积分。八个变量是初始 Cartesian 状态、D、K；DP853 上限 20 / 10 s，名义绝对容限 1e−8 m / 1e−11 m/s、相对 2e−14。分别启用重力、相对论、日月、光压、NRLMSISE-00 阻力和全部力，含正／零／负 Cd、Cr。
+- 6 组 ±6000 s 地球双锥食影，含正／零／负 Cr。名义 2×2 重力和均匀太阳圆盘；地球半径 6378137 m、太阳半径 695700000 m，无月球遮挡。
+- 全部力的部分案例仅将协方差重力改为 2×0：参考保留 2×2 名义加速度值，使用 Orekit 2×0 的自动导数，检验明确选定的近似变分方程。
+
+初始高度 750 km、WGS84 纬度 0.6 rad、经度 1.2 rad；速度沿地固东向、大小为所处地心半径的圆轨道速度。地固轴绕 z 以 7.292115e−5 rad/s 旋转，初相位 0.3 rad。初始为 TAI 2000-01-01 12:00:00，合成 UTC 与 TAI 相同。GM、归一化 2×2 系数、月球位置和圆周太阳参数沿用[总力参考](hpop_force_protocol.md)，太阳随时间移动。NRL 使用手动通量 150 sfu、Ap=15，关闭参考库的密度有限差分。模型与系数都不来自 OrbitForge 的计算函数。
+
+## 食影参考的数值条件
+
+球面在 Orekit 截面计算中有重复特征轴。参考在当前点的标准平面调用原始 `SolarRadiationPressure.getLightingRatio`，保留完整 Cartesian 自动导数；标量照明与坐标旋转无关。此局部基底在求导时固定，与[光压偏导参考](srp_differential_protocol.md)的独立张量旋转原则一致，没有替换光压公式。
+
+对食影案例，把 `Gradient` 的值和八个导数装入 54 维实数状态，使未修改的 DP853 误差控制器同时检查全部导数。以位置 1e6 m、速度 1e3 m/s、参数 1 m²/kg 归一化；STM 绝对容限 1e−14，较小的 D/K 列为 1e−19，相对 2e−15。名义绝对容限为 1e−9 m / 1e−12 m/s，独立比较 5 / 2.5 s 积分上限。统一使用较大的附加绝对容限会使 K 列自身收敛不足；同时将 STM 的近零分量压到参数列的尺度，则会追逐球面切点的浮点噪声。该选择由参考自身的两档收敛检查确认，不改变生产实现的验收界限。
+
+K=0 时，原始自动微分仍给出 `∂(K f)/∂K=f`；完整敏感度随食影变化，不因为名义光压为零而被忽略。
+
+参考必须先通过自身收敛：末端位置 2e−6 m、速度 2e−9 m/s；缩放 STM 逐项差小于 2e−11，食影为 5e−11。参数列使用整个六维列的最大范数，速度加权 1000 s，以参考范数与 1e−7 的较大值为分母；两档结果差小于 2e−8。避免用可过零的单分量做相对误差分母。全部参考均使用原始 Orekit 力模型与 Hipparchus 自动微分／积分器，不调用 OrbitForge 算法。
+
+## 生产实现验收
+
+`HpopVariational.CombinedCoastsMatchIndependentOrekitFieldDerivatives` 对 36 组参考执行 14 种积分配置，共 504 组：五种方法、适用方法的 VOP，以及普通时间／Sundman；正／零系数使用 GJ Full，负系数使用 Pseudo。RK4 固定步长 2 s，GJ 为 20 s；正则化分别每圈 6000 / 600 步，指数 1.5。相对容限 1e−13，名义绝对容限 1e−6 m / 1e−9 m/s。
+
+验收位置 1e−3 m、速度 1e−6 m/s；STM 用 `|ΔΦij| sj/si`，位置尺度 1e6 m、速度尺度 1e3 m/s，逐项小于 3e−9。D/K 六维列使用上述物理范数，相对差小于 2e−7。这些是计算复现容限，不是实际轨道误差。
+
+当前 MSVC 的 504 组最大差分别为：位置分量 `2.055e−5 m`、缩放 STM `5.822e−11`、D 列 `7.772e−10`、K 列 `3.729e−8`；D/K 为上述整列相对范数。它们衡量对齐模型的算法差异，不代表实际轨道预报精度。
+
+另复用 `universal_kepler_stm.txt` 的独立 Orekit Cartesian 数值 STM，选择倾斜圆轨道、椭圆、双曲线及 GEO，正反向 6000 s，共 98 个方法／时间组合。双曲线只用普通时间；位置、速度、缩放 STM 分别限 5e−4 m、5e−7 m/s、5e−9。无扰动力的 D/K 列严格为零。
+
+其余验证检查：
+
+- 初始恒等矩阵与零参数列、非法阶次／容限、取消及重试、圆柱食影及硬密度切换拒绝。
+- 独立重力阶次改变 STM；相同 RK4 网格的名义位置／速度与原传播、完整阶次逐位一致。
+- 真实 UTC / EOP / DE440s 与日 Ap 磁暴阶跃：正反向闰秒两侧，RKF78 / VOP、GJ 和 Sundman 检查 `Φba=ΦbΦa`、`SDba=ΦbSDa+SDb`，外部时间跳变不加状态相关跳变矩阵。这是边界装配回归，不冒充独立力模型参考。
+- 安装 Python 3.13 对独立二体参考、只读结果复制、并发、取消、输入捕获和变分专用潮汐资源装配进行验证；安装 SDK 实际传播带卫星视太阳的滑行并读取 STM / K。
+- 现有 Core、CSPICE、HPOP 集成及旧／新安装 SDK 名义端点回归，保留条件跳过的外部完整重力／海潮文件项目。
+
+逐次结果、误差最大值、工具链、散列与日志写入新的 `out/validation/` 目录。完整协方差矩阵、PSD/PD 政策、Frame/Representation、Consider Analysis 输入与 UI 尚待实现。

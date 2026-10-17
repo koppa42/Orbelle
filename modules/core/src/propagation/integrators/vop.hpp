@@ -6,17 +6,17 @@ namespace orbitforge::core::detail {
 // Re-anchor universal-variable osculating Cartesian parameters at each trial start.
 // y = Phi(dt,c); dc/dt = D(Phi)^-1 [0,a_pert]. Hamiltonian two-body motion is
 // symplectic: only the position Jacobian blocks are needed, dc = [-B^T a, A^T a].
-// N=7 supports either physical time in the last state (Sundman q steps), or q in
-// the last state with physical time independent (boundary bridges).
+// An optional clock occupies index 6. Further first-order states are physical
+// dependent variables, carried unchanged by the osculating-coordinate map.
 template <std::size_t N, class Derivative, class Stepper>
 TrialStep<N> vop_step(double time, const std::array<double, N> &initial, double h, double mu,
                       bool embedded_time, const Derivative &physical_derivative,
                       const Stepper &stepper, const ErrorControl<N> &physical_control,
                       const std::function<void()> &checkpoint = {}) {
-    static_assert(N == 6 || N == 7);
+    static_assert(N >= 6);
     using ParameterState = std::array<double, N>;
     const auto elapsed = [&](double at, [[maybe_unused]] const ParameterState &parameters) {
-        if constexpr (N == 7)
+        if constexpr (N >= 7)
             if (embedded_time)
                 return parameters[6] - initial[6];
         return at;
@@ -39,7 +39,7 @@ TrialStep<N> vop_step(double time, const std::array<double, N> &initial, double 
         std::copy(mapping.state.begin(), mapping.state.end(), physical.begin());
         const auto slope = physical_derivative(time + at, physical);
         double clock = 1;
-        if constexpr (N == 7)
+        if constexpr (N >= 7)
             if (embedded_time)
                 clock = slope[6];
         const auto monopole = central(mapping.state);
@@ -51,8 +51,8 @@ TrialStep<N> vop_step(double time, const std::array<double, N> &initial, double 
                 result[i + 3] = std::fma(mapping.jacobian[axis][i], perturbation, result[i + 3]);
             }
         }
-        if constexpr (N == 7)
-            result[6] = slope[6];
+        for (std::size_t i = 6; i < N; ++i)
+            result[i] = slope[i];
         return result;
     };
     auto control = physical_control;
@@ -67,13 +67,13 @@ TrialStep<N> vop_step(double time, const std::array<double, N> &initial, double 
         for (std::size_t i = 0; i < 6; ++i) {
             for (std::size_t j = 0; j < 6; ++j)
                 difference[i] = std::fma(mapping.jacobian[i][j], defect[j], difference[i]);
-            if constexpr (N == 7)
+            if constexpr (N >= 7)
                 if (embedded_time)
                     difference[i] = std::fma(i < 3 ? mapping.state[i + 3] : acceleration[i - 3],
                                              defect[6], difference[i]);
         }
-        if constexpr (N == 7)
-            difference[6] = defect[6];
+        for (std::size_t i = 6; i < N; ++i)
+            difference[i] = defect[i];
         if (!std::ranges::all_of(difference, [](double v) { return std::isfinite(v); }))
             throw PropagationError("VOP produced a nonfinite physical error estimate");
         return physical_control.error(initial, physical, difference);

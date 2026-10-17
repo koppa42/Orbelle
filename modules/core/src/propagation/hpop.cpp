@@ -11,15 +11,12 @@
 #include <limits>
 #include <mutex>
 #include <orbitforge/core/propagation/hpop.hpp>
+#include <orbitforge/core/propagation/hpop_variational.hpp>
 #include <tuple>
 #include <vector>
 
 namespace orbitforge::core {
 namespace {
-using State = std::array<double, 6>;
-using AcceptedStep = std::function<void(double, const State &, bool)>;
-using RegularizedAcceptedStep =
-    std::function<void(double, const State &, bool, std::optional<Epoch>)>;
 std::function<double(Epoch)> sun_distance(const IThirdBodyEphemeris *ephemeris) {
     if (!ephemeris)
         return {};
@@ -34,17 +31,29 @@ void positive(double v, const char *message) {
     if (!std::isfinite(v) || v <= 0)
         throw std::invalid_argument(message);
 }
-class Hpop final : public IStateProvider {
+template <bool Variational = false> class HpopSystem final : public IStateProvider {
+    static constexpr std::size_t extra = Variational ? 48 : 0, dimension = 6 + extra;
+    using State = std::array<double, dimension>;
+    using AcceptedStep = std::function<void(double, const State &, bool)>;
+    using RegularizedAcceptedStep =
+        std::function<void(double, const State &, bool, std::optional<Epoch>)>;
+    using History = detail::CartesianGaussJackson12<extra>;
+    using Regularization = detail::SundmanSystemPropagation<extra>;
+    static constexpr double scale(std::size_t i) { return i < 3 ? 1e6 : (i < 6 ? 1e3 : 1); }
+    HpopVariationalOptions variational_;
+    HpopOptions differential_options_;
+    std::function<void()> variational_checkpoint_;
+
     CartesianState initial_;
     HpopOptions options_;
     HpopEnvironment environment_;
     std::optional<Epoch> ephemeris_end_;
-    std::optional<detail::SundmanPropagation> regularization_;
+    std::optional<Regularization> regularization_;
     // Caches only full, epoch-anchored integration blocks. Partial queries cannot
     // alter the solution used by later queries. Both directions start at t=0.
     mutable std::mutex mutex_;
     mutable std::vector<State> forward_, backward_;
-    mutable std::vector<detail::GaussJackson12> gj_forward_, gj_backward_;
+    mutable std::vector<History> gj_forward_, gj_backward_;
     void validate_duration(Epoch epoch) const {
         const auto first = initial_.epoch.tai_nanoseconds(), last = epoch.tai_nanoseconds();
         // Unsigned subtraction gives the exact distance, including opposite Epoch limits.
@@ -70,6 +79,16 @@ class Hpop final : public IStateProvider {
                 "HPOP integration requires EOP covering the initial and query epochs");
         if (options_.uses_utc_force())
             (void)environment_.time->to_utc(epoch);
+        if constexpr (Variational) {
+            environment_.validate_ephemeris_interval(differential_options_,
+                                                     t < 0 ? epoch : initial_.epoch,
+                                                     t < 0 ? initial_.epoch : epoch);
+            if (differential_options_.uses_eop_force() &&
+                !eop_covers(environment_.eop->data_info(), epoch))
+                throw EopCoverageError("HPOP variational gravity requires EOP coverage");
+            if (differential_options_.uses_utc_force())
+                (void)environment_.time->to_utc(epoch);
+        }
     }
     Epoch epoch_at(double seconds) const {
         const auto start = initial_.epoch.tai_nanoseconds();
@@ -168,6 +187,9 @@ class Hpop final : public IStateProvider {
         return Epoch{std::clamp(epoch_at(t).tai_nanoseconds(), lower, upper - 1)};
     }
     void validate_state(const State &s) const {
+        if constexpr (Variational)
+            if (!std::ranges::all_of(s, [](double v) { return std::isfinite(v); }))
+                throw PropagationError("HPOP variational state is nonfinite");
         detail::validate_hpop_force_state({s[0], s[1], s[2]}, {s[3], s[4], s[5]}, options_,
                                           environment_);
     }
@@ -179,7 +201,7 @@ class Hpop final : public IStateProvider {
     bool mitigates_shadow() const {
         const auto &o = options_.srp;
         return o.boundary_mitigation && o.enabled && o.shadow_model != SrpShadowModel::none &&
-               o.cr != 0 && o.area_mass_ratio_m2_per_kg != 0 &&
+               (Variational || (o.cr != 0 && o.area_mass_ratio_m2_per_kg != 0)) &&
                (o.earth_shadow || o.moon_shadow || !o.additional_eclipsing_bodies.empty());
     }
     detail::ShadowContacts shadow_contacts(double t, const State &state) const {
@@ -255,13 +277,43 @@ class Hpop final : public IStateProvider {
         validate_state(s);
         const CartesianState state{
             epoch_at(t), OriginId::earth, FrameId::gcrf, {s[0], s[1], s[2]}, {s[3], s[4], s[5]}};
-        const auto acceleration = detail::hpop_acceleration_unchecked(state, options_, environment_,
-                                                                      weather_at, shadow_lighting);
-        return {s[3], s[4], s[5], acceleration[0], acceleration[1], acceleration[2]};
+        if constexpr (Variational) {
+            const auto force = detail::hpop_differential_unchecked(
+                state, options_, environment_, weather_at,
+                (differential_options_.gravity_degree != options_.gravity_degree ||
+                 differential_options_.gravity_order != options_.gravity_order)
+                    ? &differential_options_
+                    : nullptr,
+                variational_checkpoint_);
+            const auto &a = force.force.acceleration_mps2;
+            State result{s[3], s[4], s[5], a[0], a[1], a[2]};
+            for (std::size_t i = 0; i < 3; ++i)
+                for (std::size_t col = 0; col < 8; ++col) {
+                    result[6 + 8 * i + col] = s[6 + 8 * (i + 3) + col] * scale(i + 3) / scale(i);
+                    double rate = 0;
+                    for (std::size_t j = 0; j < 3; ++j) {
+                        rate = std::fma(force.force.position_jacobian_per_s2[i][j] * scale(j) /
+                                            scale(i + 3),
+                                        s[6 + 8 * j + col], rate);
+                        rate = std::fma(force.force.velocity_jacobian_per_s[i][j],
+                                        s[6 + 8 * (j + 3) + col], rate);
+                    }
+                    if (col == 6)
+                        rate += force.drag_parameter_jacobian_pa[i] / scale(i + 3);
+                    if (col == 7)
+                        rate += force.srp_parameter_jacobian_pa[i] / scale(i + 3);
+                    result[6 + 8 * (i + 3) + col] = rate;
+                }
+            return result;
+        } else {
+            const auto acceleration = detail::hpop_acceleration_unchecked(
+                state, options_, environment_, weather_at, shadow_lighting);
+            return {s[3], s[4], s[5], acceleration[0], acceleration[1], acceleration[2]};
+        }
     }
-    using TrialStep = detail::TrialStep<6>;
-    detail::ErrorControl<6> error_control(bool startup = false) const {
-        detail::ErrorControl<6> result;
+    using TrialStep = detail::TrialStep<dimension>;
+    detail::ErrorControl<dimension> error_control(bool startup = false) const {
+        detail::ErrorControl<dimension> result;
         result.fixed = !startup && options_.uses_fixed_step();
         result.relative =
             startup ? (mitigates_shadow() ? 1e-15 : 1e-14) : options_.relative_tolerance;
@@ -271,6 +323,9 @@ class Hpop final : public IStateProvider {
                 startup ? (i < 3 ? (mitigates_shadow() ? 1e-10 : 1e-9)
                                  : (mitigates_shadow() ? 1e-13 : 1e-12))
                         : (i < 3 ? options_.position_tolerance_m : options_.velocity_tolerance_mps);
+        for (std::size_t i = 6; i < dimension; ++i)
+            result.absolute[i] = startup ? std::min(variational_.absolute_tolerance, 1e-15)
+                                         : variational_.absolute_tolerance;
         return result;
     }
     auto step_derivative(double begin, double end, const State &initial,
@@ -531,11 +586,10 @@ class Hpop final : public IStateProvider {
         }
         return state;
     }
-    detail::GaussJackson12 gauss_jackson_integrate(detail::GaussJackson12 history, double begin,
-                                                   double end, std::size_t first_node,
-                                                   std::size_t &attempts,
-                                                   const std::function<void()> &checkpoint,
-                                                   const AcceptedStep &accepted = {}) const {
+    History gauss_jackson_integrate(History history, double begin, double end,
+                                    std::size_t first_node, std::size_t &attempts,
+                                    const std::function<void()> &checkpoint,
+                                    const AcceptedStep &accepted = {}) const {
         const double h = std::copysign(options_.fixed_step_seconds, end - begin);
         double t = begin;
         std::size_t node = 0;
@@ -563,7 +617,9 @@ class Hpop final : public IStateProvider {
                             checkpoint();
                         const auto d =
                             derivative(at, value, weather_stage(at, t, target), lighting);
-                        return detail::GaussJackson12::Acceleration{d[3], d[4], d[5]};
+                        typename History::Acceleration result{};
+                        std::copy(d.begin() + 3, d.end(), result.begin());
+                        return result;
                     };
                     if (candidate.count == 0)
                         candidate.seed(candidate.state, force(t, candidate.state), h);
@@ -620,13 +676,13 @@ class Hpop final : public IStateProvider {
             --index;
         if (grid(index + 1) <= std::abs(t))
             ++index;
-        detail::GaussJackson12 history;
+        History history;
         double at;
         {
             const std::lock_guard lock{mutex_};
             auto &cache = t < 0 ? gj_backward_ : gj_forward_;
             if (cache.empty()) {
-                detail::GaussJackson12 initial;
+                History initial;
                 initial.state = forward_.front();
                 cache.push_back(initial);
             }
@@ -661,9 +717,9 @@ class Hpop final : public IStateProvider {
         validate_state(output);
         return output;
     }
-    detail::SundmanPropagation::State
-    integrate_regularized(detail::SundmanPropagation::State state, double end,
-                          std::size_t &attempts, const std::function<void()> &checkpoint,
+    typename Regularization::State
+    integrate_regularized(typename Regularization::State state, double end, std::size_t &attempts,
+                          const std::function<void()> &checkpoint,
                           const RegularizedAcceptedStep &accepted = {}) const {
         while (state.time() != end) {
             const auto boundary = weather_boundary(state.time(), end);
@@ -672,14 +728,16 @@ class Hpop final : public IStateProvider {
             const auto force = [&](double time, const State &value) {
                 const auto rate =
                     derivative(time, value, weather_stage(time, begin, until), lighting);
-                return std::array{rate[3], rate[4], rate[5]};
+                std::array<double, 3 + extra> result{};
+                std::copy(rate.begin() + 3, rate.end(), result.begin());
+                return result;
             };
             bool shadow = false;
-            detail::SundmanPropagation::StepBoundary detect;
+            typename Regularization::StepBoundary detect;
             if (mitigates_shadow())
-                detect = [&](const detail::SundmanPropagation::State &first,
-                             const detail::SundmanPropagation::State &last)
-                    -> std::optional<detail::SundmanPropagation::State> {
+                detect = [&](const typename Regularization::State &first,
+                             const typename Regularization::State &last)
+                    -> std::optional<typename Regularization::State> {
                     const auto contact = shadow_boundary(
                         first.time(), first.cartesian(), last.time(), last.cartesian(),
                         [&](double at) {
@@ -718,27 +776,94 @@ class Hpop final : public IStateProvider {
     }
 
   public:
-    Hpop(CartesianState initial, HpopOptions options, HpopEnvironment environment,
-         std::optional<Epoch> ephemeris_end = {})
-        : initial_(initial), options_(options), environment_(std::move(environment)),
-          ephemeris_end_(ephemeris_end) {
+    HpopSystem(CartesianState initial, HpopOptions options, HpopEnvironment environment,
+               std::optional<Epoch> ephemeris_end = {}, HpopVariationalOptions variational = {},
+               std::function<void()> variational_checkpoint = {})
+        : variational_(std::move(variational)), differential_options_(options),
+          variational_checkpoint_(std::move(variational_checkpoint)), initial_(initial),
+          options_(options), environment_(std::move(environment)), ephemeris_end_(ephemeris_end) {
         validate_hpop_options(options_);
         if (ephemeris_end_)
             validate_duration(*ephemeris_end_);
         detail::prepare_hpop_force_environment(initial, options_, environment_);
+        if constexpr (Variational) {
+            if (!std::isfinite(variational_.absolute_tolerance) ||
+                variational_.absolute_tolerance < 1e-16 || variational_.absolute_tolerance > 1)
+                throw std::invalid_argument("Variational absolute tolerance must be 1e-16..1");
+            if (options_.srp.enabled && options_.srp.shadow_model == SrpShadowModel::cylindrical &&
+                (options_.srp.earth_shadow || options_.srp.moon_shadow ||
+                 !options_.srp.additional_eclipsing_bodies.empty()))
+                throw std::invalid_argument(
+                    "Cylindrical shadow variational propagation requires saltation");
+            if (options_.drag.enabled &&
+                options_.drag.atmosphere == AtmosphereModel::jacchia_roberts &&
+                options_.drag.low_altitude_model != LowAltitudeDensityModel::none &&
+                options_.drag.blending_range_m == 0)
+                throw std::invalid_argument(
+                    "Hard atmosphere switching requires variational saltation");
+            if (variational_.gravity) {
+                differential_options_.gravity_degree = variational_.gravity->degree;
+                differential_options_.gravity_order = variational_.gravity->order;
+                detail::prepare_hpop_force_environment(initial, differential_options_,
+                                                       environment_);
+            }
+        }
         State value{};
         for (std::size_t i = 0; i < 3; ++i) {
             value[i] = initial.position_m[i];
             value[i + 3] = initial.velocity_mps[i];
         }
+        if constexpr (Variational)
+            for (std::size_t i = 0; i < 6; ++i)
+                value[6 + 8 * i + i] = 1;
         (void)derivative(0, value);
         if (options_.uses_vop())
-            (void)detail::universal_kepler_linearized(value, 0, options_.gravity_mu);
+            (void)detail::universal_kepler_linearized(
+                {value[0], value[1], value[2], value[3], value[4], value[5]}, 0,
+                options_.gravity_mu);
         if (options_.time_regularization)
             regularization_.emplace(value, options_.gravity_mu, options_.regularization_exponent,
-                                    static_cast<std::size_t>(options_.steps_per_orbit), options_);
+                                    static_cast<std::size_t>(options_.steps_per_orbit), options_,
+                                    variational_.absolute_tolerance);
         forward_.push_back(value);
         backward_.push_back(value);
+    }
+    HpopVariationalState variational_at(Epoch end, const std::function<void()> &checkpoint) const
+        requires Variational
+    {
+        validate_interval(end);
+        const double t = end.seconds_since(initial_.epoch);
+        std::size_t attempts = 0;
+        State value = forward_.front();
+        if (end != initial_.epoch) {
+            if (regularization_)
+                value =
+                    integrate_regularized(regularization_->initial_state(), t, attempts, checkpoint)
+                        .cartesian();
+            else if (options_.integrator == HpopIntegrator::gauss_jackson) {
+                History history;
+                history.state = value;
+                value = gauss_jackson_integrate(history, 0, t, 0, attempts, checkpoint).state;
+            } else if (options_.uses_fixed_step())
+                value = integrate_fixed(value, 0, t, 0, attempts, checkpoint);
+            else
+                value = integrate(value, 0, t, attempts, checkpoint);
+            value = epoch_output(t, value, end, weather_stage(t, 0, t));
+        }
+        if (checkpoint)
+            checkpoint();
+        HpopVariationalState result{{end,
+                                     OriginId::earth,
+                                     FrameId::gcrf,
+                                     {value[0], value[1], value[2]},
+                                     {value[3], value[4], value[5]}}};
+        for (std::size_t i = 0; i < 6; ++i) {
+            for (std::size_t j = 0; j < 6; ++j)
+                result.state_transition[i][j] = value[6 + 8 * i + j] * scale(i) / scale(j);
+            result.drag_sensitivity[i] = value[6 + 8 * i + 6] * scale(i);
+            result.srp_sensitivity[i] = value[6 + 8 * i + 7] * scale(i);
+        }
+        return result;
     }
     void validate_range(Epoch first, Epoch last) const {
         validate_interval(first);
@@ -766,10 +891,10 @@ class Hpop final : public IStateProvider {
             value[i] = initial_.position_m[i];
             value[i + 3] = initial_.velocity_mps[i];
         }
-        detail::GaussJackson12 history;
+        History history;
         history.state = value;
-        auto regular_state = regularization_ ? regularization_->initial_state()
-                                             : detail::SundmanPropagation::State{};
+        auto regular_state =
+            regularization_ ? regularization_->initial_state() : typename Regularization::State{};
         double at = 0, continued_step = 0;
         std::vector<std::int64_t> support_gates;
         if (minimum_nodes > 1 && !reporting_step) {
@@ -993,7 +1118,7 @@ class Hpop final : public IStateProvider {
             // Bound epoch conversion to this query, including its exact integer-ns
             // endpoint. Recompute direct queries; interpolated providers prepare and
             // cache a full declared coast instead of sharing partial query histories.
-            const Hpop coast(initial_, options_, environment_, epoch);
+            const HpopSystem coast(initial_, options_, environment_, epoch);
             std::size_t attempts = 0;
             const auto integrated =
                 coast
@@ -1053,6 +1178,7 @@ class Hpop final : public IStateProvider {
                 {value[3], value[4], value[5]}};
     }
 };
+using Hpop = HpopSystem<>;
 class InterpolatedHpop final : public IStateProvider {
   public:
     InterpolatedHpop(CartesianState initial, Epoch first, Epoch last, HpopOptions options,
@@ -1244,6 +1370,16 @@ void validate_hpop_options(const HpopOptions &o) {
         throw std::invalid_argument("HPOP fixed step must be between 1e-6 and 86400 seconds");
     if (!std::isfinite(o.minimum_altitude_m) || o.minimum_altitude_m < 0)
         throw std::invalid_argument("HPOP minimum altitude must be finite and nonnegative");
+}
+HpopVariationalState propagate_hpop_variational(CartesianState initial, Epoch end,
+                                                HpopOptions options, HpopEnvironment environment,
+                                                HpopVariationalOptions variational,
+                                                const std::function<void()> &checkpoint) {
+    if (checkpoint)
+        checkpoint();
+    return HpopSystem<true>(initial, std::move(options), std::move(environment), end,
+                            std::move(variational), checkpoint)
+        .variational_at(end, checkpoint);
 }
 std::shared_ptr<const IStateProvider> make_hpop(CartesianState initial, HpopOptions options,
                                                 HpopEnvironment environment) {

@@ -1,4 +1,5 @@
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <orbitforge/orbitforge.hpp>
@@ -695,4 +696,77 @@ TEST_F(WeatherFiles, HpopEphemerisSplitsTheLeapSecondWeatherJumpInBothDirections
             }
         }
     }
+}
+
+TEST_F(WeatherFiles, VariationalStatesComposeContinuouslyAcrossTheLeapWeatherJump) {
+    if (!runtime::time_frames_available() || !runtime::ephemeris_available())
+        GTEST_SKIP();
+    auto csv = daily_file();
+    auto start = csv.find("2017-01-01");
+    ASSERT_NE(start, std::string::npos);
+    auto values = csv.find(",15,15,15,15,15,15,15,15,15,", start);
+    ASSERT_NE(values, std::string::npos);
+    csv.replace(values, 28, ",400,400,400,400,400,400,400,400,400,");
+    const auto data =
+        runtime::DataSnapshot::load(ORBITFORGE_DRAG_EOP)
+            .with_ephemeris("de440s",
+                            runtime::make_third_body_ephemeris(
+                                runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root)))
+            .with_space_weather_file("celestrak", write(csv));
+    const auto boundary = data.time()->from_utc({2017, 1, 1, 0, 0, 0, 0});
+    for (auto integrator : {HpopIntegrator::rkf78, HpopIntegrator::gauss_jackson})
+        for (bool regular : {false, true})
+            for (bool reverse : {false, true}) {
+                SCOPED_TRACE(::testing::Message() << static_cast<int>(integrator) << " regular="
+                                                  << regular << " reverse=" << reverse);
+                const auto first =
+                    core::Epoch{boundary.tai_nanoseconds() + (reverse ? 30 : -30) * 1000000000LL};
+                const auto end =
+                    core::Epoch{boundary.tai_nanoseconds() + (reverse ? -30 : 30) * 1000000000LL};
+                application::OrbitInput input;
+                input.propagator = application::OrbitPropagator::hpop;
+                input.initial = {first,
+                                 core::OriginId::earth,
+                                 core::FrameId::gcrf,
+                                 {6778137, 0, 0},
+                                 {0, 6300, 4300}};
+                auto &o = input.hpop;
+                o.gravity_degree = o.gravity_order = 0;
+                o.integrator = integrator;
+                o.vop = true;
+                o.time_regularization = regular;
+                o.steps_per_orbit = 8192;
+                o.fixed_step_seconds = 2;
+                o.max_step_seconds = 5;
+                o.relative_tolerance = 1e-13;
+                o.position_tolerance_m = 1e-6;
+                o.velocity_tolerance_mps = 1e-9;
+                o.drag.enabled = true;
+                o.drag.atmosphere = Model::nrlmsise00;
+                o.drag.weather_model = "celestrak";
+                o.drag.geomagnetic_update = Update::three_hourly;
+                o.drag.geomagnetic_source = Source::ap;
+                const auto env = data.force_environment(input);
+                const auto whole = core::propagate_hpop_variational(input.initial, end, o, env);
+                const auto a = core::propagate_hpop_variational(input.initial, boundary, o, env);
+                const auto b = core::propagate_hpop_variational(a.state, end, o, env);
+                for (std::size_t i = 0; i < 6; ++i) {
+                    const double scale = i < 3 ? 1 : 1000;
+                    const double x =
+                        i < 3 ? whole.state.position_m[i] : whole.state.velocity_mps[i - 3];
+                    const double y = i < 3 ? b.state.position_m[i] : b.state.velocity_mps[i - 3];
+                    EXPECT_LE(std::abs(x - y) * scale, 1e-5);
+                    double d = b.drag_sensitivity[i];
+                    for (std::size_t j = 0; j < 6; ++j)
+                        d = std::fma(b.state_transition[i][j], a.drag_sensitivity[j], d);
+                    EXPECT_LE(std::abs(whole.drag_sensitivity[i] - d) * scale, 1e-8);
+                    for (std::size_t j = 0; j < 6; ++j) {
+                        double phi = 0;
+                        for (std::size_t k = 0; k < 6; ++k)
+                            phi = std::fma(b.state_transition[i][k], a.state_transition[k][j], phi);
+                        const double normalized = (i < 3 ? 1e6 : 1e3) / (j < 3 ? 1e6 : 1e3);
+                        EXPECT_LE(std::abs(phi - whole.state_transition[i][j]) / normalized, 1e-10);
+                    }
+                }
+            }
 }

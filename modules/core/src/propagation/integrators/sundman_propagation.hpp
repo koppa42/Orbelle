@@ -10,13 +10,14 @@ namespace orbitforge::core::detail {
 // stage never calls the force outside the coast/force segment. At a boundary we
 // integrate the equivalent inverse equations (r,v,q) in physical time, using the
 // selected method (the high-order starter for GJ). No clock/state projection is used.
-class SundmanPropagation {
+template <std::size_t Extra = 0> class SundmanSystemPropagation {
   public:
-    using Cartesian = SundmanTransform::Cartesian;
-    using Vector = SundmanTransform::FirstOrder;
-    using History = GaussJacksonSystem12<3, 1>;
+    using Transform = SundmanSystemTransform<Extra>;
+    using Cartesian = typename Transform::Cartesian;
+    using Vector = typename Transform::FirstOrder;
+    using History = GaussJacksonSystem12<3, 1 + Extra>;
     struct State {
-        CompensatedState<7> solution;
+        CompensatedState<7 + Extra> solution;
         History history;
         Vector startup_compensation{};
         double q = 0, next_step = 0, segment_begin = 0;
@@ -24,7 +25,7 @@ class SundmanPropagation {
         int direction = 0;
         bool on_grid = true;
         double time() const { return solution.value[6]; }
-        Cartesian cartesian() const { return SundmanTransform::cartesian_first(solution.value); }
+        Cartesian cartesian() const { return Transform::cartesian_first(solution.value); }
         void restart_force_segment() {
             history.reset();
             segment_begin = time();
@@ -34,9 +35,11 @@ class SundmanPropagation {
     // The callback must not publish the provisional endpoint. It is also applied
     // to physical-time bridges, so no path can step over a shadow contact.
     using StepBoundary = std::function<std::optional<State>(const State &, const State &)>;
-    SundmanPropagation(const Cartesian &initial, double mu, double exponent,
-                       std::size_t steps_per_orbit, const HpopOptions &options)
-        : transform_(initial, mu, exponent), options_(options), mu_(mu) {
+    SundmanSystemPropagation(const Cartesian &initial, double gravitational_parameter,
+                             double exponent, std::size_t steps_per_orbit,
+                             const HpopOptions &options, double auxiliary_tolerance = 1e-14)
+        : transform_(initial, gravitational_parameter, exponent), options_(options),
+          mu_(gravitational_parameter), auxiliary_tolerance_(auxiliary_tolerance) {
         if (steps_per_orbit == 0)
             throw std::invalid_argument("Sundman steps per orbit must be positive");
         validate_hpop_options(options_);
@@ -218,9 +221,9 @@ class SundmanPropagation {
 
   private:
     struct OutsideInterval {};
-    SundmanTransform transform_;
+    Transform transform_;
     HpopOptions options_;
-    double fixed_q_, mu_;
+    double fixed_q_, mu_, auxiliary_tolerance_;
     Vector initial_;
     static void validate(const Vector &value) {
         if (!std::all_of(value.begin(), value.end(), [](double v) { return std::isfinite(v); }))
@@ -237,8 +240,8 @@ class SundmanPropagation {
             throw PropagationError("Sundman produced a nonfinite error estimate");
         return error == 0 ? 4 : std::clamp(.9 * std::pow(error, exponent), .1, 4.);
     }
-    ErrorControl<7> primary_control(bool fixed) const {
-        ErrorControl<7> control;
+    ErrorControl<7 + Extra> primary_control(bool fixed) const {
+        ErrorControl<7 + Extra> control;
         control.fixed = fixed;
         control.local_increments = true;
         control.relative = options_.relative_tolerance;
@@ -248,18 +251,22 @@ class SundmanPropagation {
         // The one-step clock is rebased to zero; tolerance cannot grow with the
         // elapsed coast duration. The physical-time adapter has no clock state.
         control.absolute[6] = 1e-11;
+        std::fill(control.absolute.begin() + 7, control.absolute.end(), auxiliary_tolerance_);
         return control;
     }
-    ErrorControl<7> correction_control() const {
+    ErrorControl<7 + Extra> correction_control() const {
         auto control = primary_control(false);
         control.relative = 1e-15;
         control.absolute = {1e-10, 1e-10, 1e-10, 1e-13, 1e-13, 1e-13, 1e-12};
+        std::fill(control.absolute.begin() + 7, control.absolute.end(),
+                  std::min(auxiliary_tolerance_, 1e-15));
         return control;
     }
     template <class Derivative>
-    TrialStep<7> step(double t, const Vector &s, double h, const Derivative &derivative,
-                      const ErrorControl<7> &control, const std::function<void()> &checkpoint,
-                      bool starter = false, bool embedded_time = true) const {
+    TrialStep<7 + Extra> step(double t, const Vector &s, double h, const Derivative &derivative,
+                              const ErrorControl<7 + Extra> &control,
+                              const std::function<void()> &checkpoint, bool starter = false,
+                              bool embedded_time = true) const {
         const auto integrate = [&](double start, const auto &slope, const auto &scales) {
             if (starter || options_.integrator == HpopIntegrator::bulirsch_stoer)
                 return bulirsch_stoer(start, s, h, slope, scales, checkpoint, starter);
@@ -291,13 +298,15 @@ class SundmanPropagation {
         // The global physical clock is accumulated separately with compensation.
         if (history.count) {
             if (history.count == history.history.size()) {
-                History::Acceleration shift{0, 0, 0, -history.state[6]};
+                typename History::Acceleration shift{0, 0, 0, -history.state[6]};
                 History::add(history.sum1, history.compensation1, shift);
             }
             history.state[6] = 0;
         } else {
             history.state = transform_.second_order(state.cartesian(), 0);
             state.startup_compensation = {};
+            std::copy(state.solution.compensation.begin() + 7, state.solution.compensation.end(),
+                      state.startup_compensation.begin() + 7);
             const double g = transform_.clock_rate(state.solution.value);
             for (std::size_t i = 0; i < 3; ++i) {
                 state.startup_compensation[i] = state.solution.compensation[i];
@@ -317,16 +326,19 @@ class SundmanPropagation {
         if (history.count < history.history.size() || !state.on_grid) {
             // Continue the existing r, dr/dq state through startup. Reconstructing
             // dr/dq from (dr/dq)/g and multiplying by g at every seed loses bits.
-            CompensatedState<7> accumulated{history.state, state.startup_compensation};
+            CompensatedState<7 + Extra> accumulated{history.state, state.startup_compensation};
             accumulated.compensation[6] = 0;
             const auto derivative = [&](double, const Vector &s) {
                 const auto a = acceleration(s);
-                return Vector{s[3], s[4], s[5], a[0], a[1], a[2], a[3]};
+                Vector result{s[3], s[4], s[5], a[0], a[1], a[2], a[3]};
+                std::copy(a.begin() + 4, a.end(), result.begin() + 7);
+                return result;
             };
             auto control = primary_control(false);
             control.relative = 1e-14;
             const double g = transform_.clock_rate(accumulated.value);
             control.absolute = {1e-9, 1e-9, 1e-9, 1e-12 * g, 1e-12 * g, 1e-12 * g, 1e-11};
+            std::fill(control.absolute.begin() + 7, control.absolute.end(), auxiliary_tolerance_);
             double at = 0, magnitude = std::abs(h);
             while (at != h) {
                 check_work(attempts, checkpoint);
@@ -357,7 +369,12 @@ class SundmanPropagation {
             history.advance(
                 h, options_.correction == HpopCorrection::full, acceleration,
                 [&](const Vector &before, const Vector &after, const auto &a) {
-                    return transform_.pseudo_correction(before, after, a);
+                    auto result = transform_.pseudo_correction(before, after, a);
+                    if constexpr (Extra > 0) {
+                        const auto updated = acceleration(after);
+                        std::copy(updated.begin() + 4, updated.end(), result.begin() + 4);
+                    }
+                    return result;
                 },
                 [](const Vector &a, const Vector &b) {
                     constexpr double epsilon = 8 * std::numeric_limits<double>::epsilon();
@@ -368,6 +385,9 @@ class SundmanPropagation {
                                 epsilon * std::max(1., std::hypot(b[3], b[4], b[5])))
                             return false;
                     }
+                    for (std::size_t i = 7; i < 7 + Extra; ++i)
+                        if (std::abs(a[i] - b[i]) > epsilon * std::max(1e-6, std::abs(b[i])))
+                            return false;
                     return std::abs(a[6] - b[6]) <= epsilon * std::max(1., std::abs(b[6]));
                 });
             ++state.multisteps;
@@ -377,6 +397,10 @@ class SundmanPropagation {
         state.solution.advance(clock);
         const auto cartesian = transform_.cartesian_second(history.state);
         const double g = transform_.clock_rate(history.state);
+        for (std::size_t i = 7; i < 7 + Extra; ++i) {
+            state.solution.value[i] = history.state[i];
+            state.solution.compensation[i] = 0;
+        }
         for (std::size_t i = 0; i < 6; ++i) {
             state.solution.value[i] = cartesian[i];
             // Preserve the division residual if a physical-time bridge follows.
@@ -394,6 +418,7 @@ class SundmanPropagation {
         if (starter) {
             control.relative = 1e-14;
             control.absolute = {1e-9, 1e-9, 1e-9, 1e-12, 1e-12, 1e-12, 1e-11};
+            std::fill(control.absolute.begin() + 7, control.absolute.end(), auxiliary_tolerance_);
         }
         if (accurate)
             control = correction_control();
@@ -414,8 +439,10 @@ class SundmanPropagation {
                                         ? finish
                                         : std::clamp(begin + offset, std::min(begin, finish),
                                                      std::max(begin, finish));
-                const auto a = force(time, SundmanTransform::cartesian_first(s));
-                return Vector{s[3], s[4], s[5], a[0], a[1], a[2], 1 / transform_.clock_rate(s)};
+                const auto a = force(time, Transform::cartesian_first(s));
+                Vector result{s[3], s[4], s[5], a[0], a[1], a[2], 1 / transform_.clock_rate(s)};
+                std::copy(a.begin() + 3, a.end(), result.begin() + 7);
+                return result;
             };
             const auto trial = step(0, local, h, derivative, control, checkpoint, starter, false);
             validate(trial.value);
@@ -449,4 +476,5 @@ class SundmanPropagation {
         }
     }
 };
+using SundmanPropagation = SundmanSystemPropagation<>;
 } // namespace orbitforge::core::detail

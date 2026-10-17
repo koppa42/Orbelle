@@ -44,10 +44,8 @@ void finite(const Vector &values) {
             throw PropagationError("HPOP force or derivative is nonfinite");
 }
 template <bool Differential>
-auto evaluate_force(const CartesianState &state, const HpopOptions &options,
-                    const HpopEnvironment &environment, std::optional<Epoch> weather_at,
-                    std::optional<double> shadow_lighting,
-                    const std::function<void()> &checkpoint = {}) {
+auto evaluate_gravity(const CartesianState &state, const HpopOptions &options,
+                      const HpopEnvironment &environment, const std::function<void()> &checkpoint) {
     using Result = std::conditional_t<Differential, HpopForceDifferential, Vector>;
     Result result{};
     Vector &acceleration = [&]() -> Vector & {
@@ -56,15 +54,8 @@ auto evaluate_force(const CartesianState &state, const HpopOptions &options,
         else
             return result;
     }();
-    const auto check = [&] {
-        if constexpr (Differential)
-            if (checkpoint)
-                checkpoint();
-    };
     const auto &r = state.position_m;
-    const auto &v = state.velocity_mps;
     const auto epoch = state.epoch;
-    check();
     if (!options.uses_earth_fixed_gravity()) {
         if constexpr (Differential) {
             const auto part = environment.gravity->differential(r, 0, 0, {}, {}, checkpoint);
@@ -120,6 +111,36 @@ auto evaluate_force(const CartesianState &state, const HpopOptions &options,
                 corrections, secular));
         }
     }
+    return result;
+}
+template <bool Differential>
+auto evaluate_force(const CartesianState &state, const HpopOptions &options,
+                    const HpopEnvironment &environment, std::optional<Epoch> weather_at,
+                    std::optional<double> shadow_lighting,
+                    const std::function<void()> &checkpoint = {},
+                    const HpopOptions *differential_gravity = nullptr) {
+    using Result = std::conditional_t<Differential, HpopForceDifferential, Vector>;
+    if (checkpoint)
+        checkpoint();
+    Result result = evaluate_gravity<Differential>(
+        state, differential_gravity ? *differential_gravity : options, environment, checkpoint);
+    Vector &acceleration = [&]() -> Vector & {
+        if constexpr (Differential)
+            return result.force.acceleration_mps2;
+        else
+            return result;
+    }();
+    const auto check = [&] {
+        if constexpr (Differential)
+            if (checkpoint)
+                checkpoint();
+    };
+    if constexpr (Differential)
+        if (differential_gravity)
+            acceleration = evaluate_gravity<false>(state, options, environment, checkpoint);
+    const auto &r = state.position_m;
+    const auto &v = state.velocity_mps;
+    const auto epoch = state.epoch;
     check();
     if (options.include_relativistic_accelerations) {
         const auto rotation =
@@ -291,6 +312,15 @@ Vector detail::hpop_acceleration_unchecked(const CartesianState &state, const Hp
                                            std::optional<Epoch> weather_at,
                                            std::optional<double> shadow_lighting) {
     return evaluate_force<false>(state, options, environment, weather_at, shadow_lighting);
+}
+HpopForceDifferential detail::hpop_differential_unchecked(const CartesianState &state,
+                                                          const HpopOptions &options,
+                                                          const HpopEnvironment &environment,
+                                                          std::optional<Epoch> weather_at,
+                                                          const HpopOptions *differential_gravity,
+                                                          const std::function<void()> &checkpoint) {
+    return evaluate_force<true>(state, options, environment, weather_at, {}, checkpoint,
+                                differential_gravity);
 }
 Vector evaluate_hpop_acceleration(const CartesianState &state, const HpopOptions &options,
                                   HpopEnvironment environment) {

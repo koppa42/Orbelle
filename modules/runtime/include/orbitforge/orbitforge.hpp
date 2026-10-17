@@ -1,5 +1,6 @@
 #pragma once
 // Everyday SDK entry point. Link OrbitForge::Runtime; no Qt or Python dependency.
+#include <orbitforge/core/propagation/hpop_variational.hpp>
 #include <orbitforge/project.hpp>
 #include <orbitforge/runtime/gravity.hpp>
 #include <orbitforge/runtime/hpop.hpp>
@@ -25,9 +26,12 @@ using core::CartesianState;
 using core::FrameId;
 using core::GroundStationLocation;
 using core::HpopCorrection;
+using core::HpopGravityTruncation;
 using core::HpopIntegrator;
 using core::HpopOptions;
 using core::HpopStepControl;
+using core::HpopVariationalOptions;
+using core::HpopVariationalState;
 using core::ManeuverEvent;
 using core::ManeuverFrame;
 using core::MissionCoastModel;
@@ -39,6 +43,7 @@ using core::OrbitInterpolationMethod;
 using core::OrbitInterpolationOptions;
 using core::OriginId;
 using core::propagate_hpop_ephemeris;
+using core::propagate_hpop_variational;
 using results::AccessWindows;
 using results::AerSeries;
 using results::ManeuverSeries;

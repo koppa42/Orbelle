@@ -220,3 +220,10 @@ scopes, hashes and reproduction are in the
 rotating-frame state coupling and the D/K consider parameters. Generator,
 inputs, scope, tolerances and canonical LF SHA-256 are documented in the
 [combined HPOP force protocol](../../../docs/validation/hpop_force_protocol.md).
+
+`hpop_variational.txt` contains 36 full-coast state-transition and D/K parameter
+sensitivity references from Orekit 13.1.2 / Hipparchus 4.0.2. Smooth cases use
+field automatic differentiation; eclipses use canonical-plane Orekit lighting
+and separate STM/parameter error budgets. All results are at fixed physical TAI
+endpoints. Inputs, reproduction, independent-gravity semantics and acceptance
+bounds are in the [variational protocol](../../../docs/validation/hpop_variational_protocol.md).

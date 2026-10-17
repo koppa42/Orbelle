@@ -1,6 +1,6 @@
 # HPOP 总力与局部变分入口
 
-C++ / SDK `evaluate_hpop_acceleration(state, options, environment)` 返回与传播器相同的总加速度；`hpop_force_differential(...)` 返回总加速度、3×3 位置与速度 Jacobian，以及 [STK consider 参数](https://help.agi.com/stk/Content/hpop/hpop-covariance.htm) `D=Cd×DragArea/Mass`、`K=Cr×SRPArea/Mass` 的局部力偏导。它们尚不积分 STM、参数敏感度或协方差。
+C++ / SDK `evaluate_hpop_acceleration(state, options, environment)` 返回与传播器相同的总加速度；`hpop_force_differential(...)` 返回总加速度、3×3 位置与速度 Jacobian，以及 [STK consider 参数](https://help.agi.com/stk/Content/hpop/hpop-covariance.htm) `D=Cd×DragArea/Mass`、`K=Cr×SRPArea/Mass` 的局部力偏导。它们是单历元接口；[单段变分传播](hpop_variational.md)使用相同装配积分 STM 和参数敏感度，协方差矩阵另行接入。
 
 输入为 Earth / GCRF、TAI 接收历元和 SI 状态。输出仍为同一惯性轴：加速度 m/s²、位置 Jacobian s⁻²、速度 Jacobian s⁻¹、D/K 偏导 Pa；矩阵行为加速度分量，列为输入分量。固定外部星历、时间、地球定向、天气、资源和模型参数；卫星视太阳本身的状态依赖仍按[视太阳状态链](apparent_sun_differential.md)求导。
 
@@ -32,6 +32,6 @@ d_a/d_D = Rᵀ d_a_f/d_D
 
 名义传播内部继续接收天气段的单侧取样历元和圆柱阴影单侧照明值；独立瞬时 API 使用该点的正常模型定义，没有用于伪造事件侧的公开覆盖参数。偏导保留[阻力的分界及极点限制](drag_differential.md)和[SRP 接触限制](srp_differential.md)，遇到不支持的偏导明确失败。
 
-当前总力与偏导使用相同的重力阶次。STK 协方差的独立重力截断、完整变分积分、事件跳变、参数全局传播及协方差矩阵政策仍待接入。本入口也不是对积分算法、VOP 坐标或 Sundman 时钟的导数。项目结构保持 v40 / OBJS31；没有新增桌面开关。低层组合 API 随 SDK 导出，Python 现有传播继续使用同一名义路径；完整 Python 力偏导／协方差接口仍待提供。
+本单历元接口使用相同的重力阶次；变分传播另外支持独立阶次，只改变空间偏导。圆柱／硬密度切换的事件跳变及协方差矩阵政策仍待接入。本入口也不是对积分算法、VOP 坐标或 Sundman 时钟的导数。项目结构保持 v40 / OBJS31；没有新增桌面开关。低层组合 API 随 SDK 导出，Python 现有传播继续使用同一名义路径；完整 Python 力偏导／协方差接口仍待提供。
 
 独立 Orekit 组合对照、潮汐装配检查和名义重构回归见[验证协议](../validation/hpop_force_protocol.md)。
