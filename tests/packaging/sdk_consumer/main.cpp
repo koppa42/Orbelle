@@ -21,6 +21,25 @@ int main(int argc, char **argv) try {
         using namespace orbitforge::core;
         SrpOptions options;
         options.enabled = true;
+        options.shadow_model = SrpShadowModel::none;
+        const double distance = options.reference_distance_m - 7e6;
+        const double pressure =
+            options.pressure_at_reference_pa * std::pow(options.reference_distance_m / distance, 2);
+        const auto partials =
+            srp_differential({7e6, 0, 0}, {options.reference_distance_m, 0, 0}, options);
+        if (std::abs(partials.srp_parameter_jacobian_pa[0] + pressure) > 1e-20 ||
+            std::abs(partials.force.position_jacobian_per_s2[0][0] +
+                     2 * pressure * options.cr * options.area_mass_ratio_m2_per_kg / distance) >
+                1e-30 ||
+            partials.force.velocity_jacobian_per_s[0][0] != 0 ||
+            partials.sun_position_jacobian_per_s2[0][0] !=
+                -partials.force.position_jacobian_per_s2[0][0])
+            throw std::runtime_error("Installed SRP differential API failed");
+    }
+    {
+        using namespace orbitforge::core;
+        SrpOptions options;
+        options.enabled = true;
         options.earth_shadow = options.moon_shadow = false;
         options.additional_eclipsing_bodies = {default_srp_eclipsing_body(ThirdBody::venus)};
         const std::array positions{SrpBodyPosition{ThirdBody::venus, {1e8, 0, 0}}};

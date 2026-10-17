@@ -1,6 +1,6 @@
 # HPOP 验证协议
 
-当前项目格式为 v36 / OBJS27，项目科学插值及任务路由见[插值验证协议](orbit_interpolation_protocol.md)。下文各独立算法增量中记录的格式版本和截图仅描述当时验证，不替代当前文件契约。
+当前项目格式为 v40 / OBJS31，项目科学插值及任务路由见[插值验证协议](orbit_interpolation_protocol.md)。下文各独立算法增量中记录的格式版本和截图仅描述当时验证，不替代当前文件契约。
 
 模型、输入约定与 STK 对照范围见[传播器](../architecture/propagators.md)。数值容限不等于真实轨道预报误差；当前没有 STK 直接参考结果。
 
@@ -338,3 +338,7 @@ CSPICE 固定 DE440s 样例检查水星／金星物理中心与原生 `geometric
 事件与轨迹参考使用 `OrbitForgeSrpBoundaryReference.java`，与同目录 `OrbitForgeSrpReference.java` 一起用 Orekit 13.1.2 / Hipparchus 4.0.2 编译。运行主类 `OrbitForgeSrpBoundaryReference`，标准输出对应 `tests/reference/propagators/srp_boundaries.txt`；生成器内部先验证 2/1 s 最大步长收敛，不通过则失败退出。常数、圆柱方向区别、误差限和适用范围见[光压契约](../architecture/solar_radiation_pressure.md#阴影边界修正)。
 
 `SrpBoundary.*` 覆盖 160 条两档步长的事件/轨迹对照、24 条高阶方法显式固定步长对照、掠影、正反向、短弧科学插值、整数历元状态一致性、取消后重试和非活动草稿。保留 `SolarRadiationPressure.*` 原有参考以及 `Sundman*` 的独立时间正则化参考；不能以新增测试取代这些回归。Python 检查生效身份、不可变旧分析和关闭阴影的草稿；当前二进制样例独立打包新的布尔字段，并以修复 CRC 的非法布尔值验证拒绝路径。Qt offscreen 加两档原生 DPI 检查开关、灰显草稿、重开/取消及窄宽布局。
+
+## 光压局部偏导
+
+固定几何状态块、太阳位置块及 K 参数偏导的 641 组独立参考、病态参考结果审计与复现方法见[SRP 偏导验证](srp_differential_protocol.md)。完整 STM／协方差和卫星视太阳的链式偏导尚待实现。

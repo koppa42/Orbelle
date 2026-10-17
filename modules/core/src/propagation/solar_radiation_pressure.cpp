@@ -46,7 +46,11 @@ double angle(double value) {
 }
 // Green's theorem integrates the exposed boundary arcs of the clipped disk union.
 // Circle intersections partition each boundary into arcs with constant membership.
-double covered_area(std::span<const Disk> occultors) {
+double covered_area(std::span<const Disk> occultors,
+                    std::array<Vector, third_body_count> *derivatives = nullptr) {
+    if (derivatives)
+        *derivatives = {};
+    std::array<std::size_t, third_body_count + 1> source{};
     std::array<Disk, third_body_count + 1> storage{
         {{0, 0, 1}}}; // Sun + Earth/Moon + eight planets.
     std::size_t count = 1;
@@ -74,8 +78,10 @@ double covered_area(std::span<const Disk> occultors) {
                 break;
             }
         }
-        if (!contained)
+        if (!contained) {
+            source[count] = i;
             storage[count++] = disk;
+        }
     }
     const auto circles = std::span{storage}.first(count);
     double area = 0;
@@ -125,13 +131,104 @@ double covered_area(std::span<const Disk> occultors) {
                         break;
                 }
             }
-            if (boundary)
+            if (boundary) {
                 area += 0.5 * (circle.radius * circle.radius * (end - start) +
                                circle.radius * circle.x * (std::sin(end) - std::sin(start)) +
                                circle.radius * circle.y * (std::cos(start) - std::cos(end)));
+                if (derivatives && i != 0) {
+                    // Shape derivative: integrate the outward normal velocity
+                    // along exposed occultor arcs. The fixed solar limb contributes
+                    // zero; moving intersection endpoints cancel between arcs.
+                    auto &gradient = (*derivatives)[source[i]];
+                    const double sine_end = end == turn ? 0 : std::sin(end);
+                    gradient[0] += circle.radius * (sine_end - std::sin(start));
+                    gradient[1] += circle.radius * (std::cos(start) - std::cos(end));
+                    gradient[2] += circle.radius * (end - start);
+                }
+            }
         }
     }
     return std::clamp(area, 0.0, pi);
+}
+struct SrpScalar {
+    double value = 0;
+    std::array<double, 6> gradient{}; // satellite xyz, selected Sun xyz
+    SrpScalar(double v = 0) : value(v) {}
+};
+SrpScalar operator+(const SrpScalar &a, const SrpScalar &b) {
+    SrpScalar out(a.value + b.value);
+    for (unsigned i = 0; i < 6; ++i)
+        out.gradient[i] = a.gradient[i] + b.gradient[i];
+    return out;
+}
+SrpScalar operator-(const SrpScalar &a, const SrpScalar &b) {
+    SrpScalar out(a.value - b.value);
+    for (unsigned i = 0; i < 6; ++i)
+        out.gradient[i] = a.gradient[i] - b.gradient[i];
+    return out;
+}
+SrpScalar operator*(const SrpScalar &a, const SrpScalar &b) {
+    SrpScalar out(a.value * b.value);
+    for (unsigned i = 0; i < 6; ++i)
+        out.gradient[i] = a.gradient[i] * b.value + a.value * b.gradient[i];
+    return out;
+}
+SrpScalar operator/(const SrpScalar &a, const SrpScalar &b) {
+    SrpScalar out(a.value / b.value);
+    for (unsigned i = 0; i < 6; ++i)
+        out.gradient[i] = (a.gradient[i] - out.value * b.gradient[i]) / b.value;
+    return out;
+}
+using SrpVector = std::array<SrpScalar, 3>;
+SrpScalar scalar_norm(const SrpVector &v) {
+    SrpScalar out(std::hypot(v[0].value, v[1].value, v[2].value));
+    if (out.value > 0)
+        for (unsigned i = 0; i < 6; ++i)
+            for (unsigned j = 0; j < 3; ++j)
+                out.gradient[i] += (v[j].value / out.value) * v[j].gradient[i];
+    return out;
+}
+SrpVector scalar_unit(const SrpVector &v, const SrpScalar &distance) {
+    return {v[0] / distance, v[1] / distance, v[2] / distance};
+}
+SrpScalar scalar_dot(const SrpVector &a, const SrpVector &b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+SrpVector scalar_cross(const SrpVector &a, const SrpVector &b) {
+    return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+}
+SrpScalar scalar_asin(const SrpScalar &a) {
+    SrpScalar out(std::asin(a.value));
+    const double factor = 1 / std::sqrt((1 - a.value) * (1 + a.value));
+    for (unsigned i = 0; i < 6; ++i)
+        out.gradient[i] = factor * a.gradient[i];
+    return out;
+}
+SrpScalar scalar_atan2(const SrpScalar &y, const SrpScalar &x) {
+    SrpScalar out(std::atan2(y.value, x.value));
+    const double denominator = x.value * x.value + y.value * y.value;
+    for (unsigned i = 0; i < 6; ++i)
+        out.gradient[i] = (x.value * y.gradient[i] - y.value * x.gradient[i]) / denominator;
+    return out;
+}
+struct DifferentialDisk {
+    SrpScalar x, y, radius;
+    Disk value() const { return {x.value, y.value, radius.value}; }
+};
+bool incompatible_coincident_disks(const DifferentialDisk &a, const DifferentialDisk &b) {
+    const double tolerance = 64 * std::numeric_limits<double>::epsilon() *
+                             std::max({1., a.radius.value, b.radius.value});
+    if (std::hypot(a.x.value - b.x.value, a.y.value - b.y.value) > tolerance ||
+        std::abs(a.radius.value - b.radius.value) > tolerance)
+        return false;
+    for (const auto &pair :
+         {std::pair{&a.x, &b.x}, std::pair{&a.y, &b.y}, std::pair{&a.radius, &b.radius}})
+        for (unsigned i = 0; i < 6; ++i) {
+            const double x = pair.first->gradient[i], y = pair.second->gradient[i];
+            if (std::abs(x - y) > 1e-12 * std::max(std::abs(x), std::abs(y)))
+                return true;
+        }
+    return false;
 }
 } // namespace
 std::int32_t srp_eclipsing_body_naif_id(ThirdBody body) {
@@ -325,6 +422,124 @@ SrpEvaluation evaluate_srp(const Vector &satellite, const Vector &sun, const Srp
     finite_vector(acceleration);
     return {acceleration, lighting};
 }
+SrpDifferential srp_differential(const Vector &satellite, const Vector &sun,
+                                 const SrpOptions &options, const std::optional<Vector> &moon,
+                                 std::span<const SrpBodyPosition> additional) {
+    SrpDifferential result;
+    result.nominal = evaluate_srp(satellite, sun, options, moon, additional);
+    if (!options.enabled)
+        return result;
+    result.force.acceleration_mps2 = result.nominal.acceleration_mps2;
+    SrpVector to_sun;
+    for (unsigned i = 0; i < 3; ++i) {
+        to_sun[i].value = sun[i] - satellite[i];
+        to_sun[i].gradient[i] = -1;
+        to_sun[i].gradient[i + 3] = 1;
+    }
+    const auto sun_distance = scalar_norm(to_sun);
+    const auto direction = scalar_unit(to_sun, sun_distance);
+    std::array<double, 6> lighting_gradient{};
+    if (options.shadow_model != SrpShadowModel::none) {
+        const auto bodies = shadow_bodies(satellite, options, moon, additional);
+        const auto solar = scalar_asin(SrpScalar(options.sun_radius_m) / sun_distance);
+        const SrpVector axis =
+            std::abs(direction[2].value) < .8 ? SrpVector{0, 0, 1} : SrpVector{0, 1, 0};
+        auto x_axis = scalar_cross(direction, axis);
+        x_axis = scalar_unit(x_axis, scalar_norm(x_axis));
+        const auto y_axis = scalar_cross(direction, x_axis);
+        std::array<DifferentialDisk, third_body_count> differential_disks{};
+        std::array<Disk, third_body_count> disks{};
+        std::size_t count = 0;
+        for (const auto &[value, radius] : std::span{bodies.values}.first(bodies.count)) {
+            SrpVector body;
+            for (unsigned i = 0; i < 3; ++i) {
+                body[i].value = value[i];
+                body[i].gradient[i] = -1;
+            }
+            const auto distance = scalar_norm(body);
+            const auto along = scalar_dot(body, direction);
+            if (along.value <= 0)
+                continue;
+            if (std::abs(distance.value - sun_distance.value) <=
+                64 * std::numeric_limits<double>::epsilon() * sun_distance.value)
+                throw PropagationError(
+                    "SRP depth-gate contact requires variational event handling");
+            if (distance.value >= sun_distance.value)
+                continue;
+            if (options.shadow_model == SrpShadowModel::cylindrical) {
+                const auto transverse = scalar_norm(scalar_cross(body, direction));
+                if (std::abs(transverse.value - radius) <=
+                    64 * std::numeric_limits<double>::epsilon() * std::max(radius, distance.value))
+                    throw PropagationError(
+                        "Cylindrical shadow contact requires a state-transition jump");
+                continue;
+            }
+            const auto body_direction = scalar_unit(body, distance);
+            const auto cosine = scalar_dot(direction, body_direction);
+            const auto sine = scalar_norm(scalar_cross(direction, body_direction));
+            const auto separation = scalar_atan2(sine, cosine);
+            const auto apparent = scalar_asin(SrpScalar(radius) / distance);
+            if (separation.value >= solar.value + apparent.value)
+                continue;
+            const auto tx = scalar_dot(body_direction, x_axis),
+                       ty = scalar_dot(body_direction, y_axis);
+            const auto squared = tx * tx + ty * ty;
+            SrpScalar scale;
+            if (squared.value < 1e-8) {
+                // asin(t)/t has a smooth value and derivative at concentric disks.
+                scale = (SrpScalar(1) + squared / 6 + squared * squared * (3. / 40)) / solar;
+            } else {
+                const auto transverse = scalar_norm(SrpVector{tx, ty, 0});
+                scale = separation / (transverse * solar);
+            }
+            DifferentialDisk disk{tx * scale, ty * scale, apparent / solar};
+            if (incompatible_coincident_disks(disk, DifferentialDisk{0, 0, 1}))
+                throw PropagationError(
+                    "Coincident solar and occultor disks have no unique derivative");
+            for (std::size_t j = 0; j < count; ++j)
+                if (incompatible_coincident_disks(disk, differential_disks[j]))
+                    throw PropagationError(
+                        "Coincident SRP disks have incompatible first variations");
+            differential_disks[count] = disk;
+            disks[count++] = disk.value();
+        }
+        if (options.shadow_model == SrpShadowModel::dual_cone) {
+            std::array<Vector, third_body_count> area_gradient;
+            (void)covered_area(std::span{disks}.first(count), &area_gradient);
+            for (std::size_t i = 0; i < count; ++i)
+                for (unsigned j = 0; j < 6; ++j)
+                    lighting_gradient[j] -=
+                        (area_gradient[i][0] * differential_disks[i].x.gradient[j] +
+                         area_gradient[i][1] * differential_disks[i].y.gradient[j] +
+                         area_gradient[i][2] * differential_disks[i].radius.gradient[j]) /
+                        pi;
+        }
+    }
+    const double distance = sun_distance.value, ratio = options.reference_distance_m / distance;
+    const double pressure = options.pressure_at_reference_pa * ratio * ratio;
+    const double k = options.cr * options.area_mass_ratio_m2_per_kg;
+    for (unsigned i = 0; i < 3; ++i) {
+        result.lighting_position_gradient_per_m[i] = lighting_gradient[i];
+        result.lighting_sun_gradient_per_m[i] = lighting_gradient[i + 3];
+        result.srp_parameter_jacobian_pa[i] =
+            -result.nominal.lighting_ratio * pressure * direction[i].value;
+        for (unsigned j = 0; j < 3; ++j) {
+            const double radial = result.nominal.lighting_ratio / distance *
+                                  ((i == j ? 1. : 0) - 3 * direction[i].value * direction[j].value);
+            result.force.position_jacobian_per_s2[i][j] =
+                k * pressure * (radial - direction[i].value * lighting_gradient[j]);
+            result.sun_position_jacobian_per_s2[i][j] =
+                k * pressure * (-radial - direction[i].value * lighting_gradient[j + 3]);
+        }
+        finite_vector(result.force.position_jacobian_per_s2[i]);
+        finite_vector(result.sun_position_jacobian_per_s2[i]);
+    }
+    finite_vector(result.lighting_position_gradient_per_m);
+    finite_vector(result.lighting_sun_gradient_per_m);
+    finite_vector(result.srp_parameter_jacobian_pa);
+    return result;
+}
+
 detail::ShadowContacts detail::srp_shadow_contacts(const Vector &satellite, const Vector &sun,
                                                    const SrpOptions &options,
                                                    const std::optional<Vector> &moon,

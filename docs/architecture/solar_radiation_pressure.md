@@ -89,3 +89,7 @@ C++ 使用 `HpopOptions::srp`／`SrpOptions`，通过显式 `HpopEnvironment` �
 固定参考 `tests/reference/propagators/srp_boundaries.txt` 由 `tools/validation/orekit/OrbitForgeSrpBoundaryReference.java` 生成，依赖同目录 `OrbitForgeSrpReference.java` 的合成移动太阳：Orekit 13.1.2、Hipparchus 4.0.2 DP853、TAI/GCRF、球形地球，Cr=1.7、A/m=20 m²/kg，显式放大光压以检验边界误差。LEO/GEO 各含正反向和圆柱/双锥，共 8 条轨迹及所有接触状态。圆柱参考使用 Orekit `EclipseDetector` 的零半径发光源，保留 STK 指定的卫星至太阳方向；不能直接替换为使用地心太阳方向的 `CylindricalShadowEclipseDetector`。
 
 参考自身将最大步长从 2 s 减至 1 s，最大状态分量变化 1.930e−5 m / 8.284e−9 m/s，事件变化 1.776e−9 s。OrbitForge 对五种积分器、普通/正则化时间、两档步长比较 160 条传播；高阶方法的固定验收限为 1 mm、1 µm/s、0.3 µs，RK4 为 0.2 m、0.2 mm/s、30 µs。RK4 减半后误差须至少缩小八倍（1e−4 m 参考/浮点底限）；其他方法要求减半不出现超过固定底限的恶化。当前最大差异：高阶方法 2.556e−5 m / 1.435e−8 m/s / 2.322e−9 s；RK4 粗步长 0.041574 m / 2.331e−5 m/s / 3.513e−6 s。另有 24 条 RKF/RKV/BS 显式固定步长、普通/正则化时间的独立轨迹对照。既有太阳/多体并集、天气跳变和时间正则化参考继续独立保留。
+
+## 变分计算基础
+
+C++ / SDK 提供 `srp_differential`，返回固定所选太阳和几何遮挡体时的状态块、太阳位置块、照明梯度及 `K=Cr×A/m` 偏导。支持现有十体球面并集，并有 Orekit、独立高精度圆盘面积和 SciPy 对照。接口范围及卫星视太阳链、事件处理、协方差尚待接入的边界见[SRP 局部偏导](srp_differential.md)。

@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <optional>
+#include <orbitforge/core/propagation/force_differential.hpp>
 #include <orbitforge/core/propagation/third_body.hpp>
 #include <span>
 #include <vector>
@@ -73,4 +74,26 @@ struct SrpEvaluation {
 evaluate_srp(const std::array<double, 3> &satellite_m, const std::array<double, 3> &sun_m,
              const SrpOptions &options, const std::optional<std::array<double, 3>> &moon_m = {},
              std::span<const SrpBodyPosition> additional_positions = {});
+struct SrpDifferential {
+    SrpEvaluation nominal{};
+    ForceDifferential force{};
+    std::array<double, 3> lighting_position_gradient_per_m{};
+    std::array<double, 3> lighting_sun_gradient_per_m{};
+    std::array<std::array<double, 3>, 3> sun_position_jacobian_per_s2{};
+    // STK consider parameter K = Cr * SRPArea/Mass [m^2/kg]; derivative in Pa.
+    std::array<double, 3> srp_parameter_jacobian_pa{};
+};
+// Same geometry contract as evaluate_srp. Fixed receiving epoch, selected Sun
+// vector and occultor centres; velocity block is zero at fixed geometry. Returns
+// analytic local derivatives, including the uniform-disk union's area variation.
+// The separate Sun-position block must be chained with the ephemeris derivatives
+// for spacecraft-apparent Sun (which depends on spacecraft position AND velocity).
+// Does not resolve that apparent ephemeris or perform shadow-event jump handling.
+// Cylindrical contacts, depth-gate contacts and coincident apparent disks with
+// different first variations throw PropagationError; no finite Jacobian describes
+// those switches. Disabled SRP returns zero derivatives without inspecting positions.
+[[nodiscard]] SrpDifferential
+srp_differential(const std::array<double, 3> &satellite_m, const std::array<double, 3> &sun_m,
+                 const SrpOptions &options, const std::optional<std::array<double, 3>> &moon_m = {},
+                 std::span<const SrpBodyPosition> additional_positions = {});
 } // namespace orbitforge::core
