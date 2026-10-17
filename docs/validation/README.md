@@ -8,6 +8,7 @@
 | CSPICE | [时间、几何星历与内核生命周期](p0_spice_protocol.md) |
 | 通用二体 | [解析性质、边界与误差](p1_two_body_protocol.md) |
 | HPOP | [静态球谐重力、独立数值参考、API 与 UI](hpop_protocol.md) |
+| HPOP 联合协方差 | [Orekit、NumPy/SciPy 与高精度矩阵对照](hpop_covariance_protocol.md) |
 | HPOP 状态转移与常参数敏感度 | [Orekit 全弧参考、时间坐标与边界](hpop_variational_protocol.md) |
 | HPOP 总力与局部变分装配 | [Orekit 组合自动微分、状态变换与名义回归](hpop_force_protocol.md) |
 | HPOP 视太阳与光压状态链 | [CSPICE 独立差分、时标及完整局部状态链](apparent_sun_differential_protocol.md) |

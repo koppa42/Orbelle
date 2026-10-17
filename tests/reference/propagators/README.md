@@ -227,3 +227,9 @@ field automatic differentiation; eclipses use canonical-plane Orekit lighting
 and separate STM/parameter error budgets. All results are at fixed physical TAI
 endpoints. Inputs, reproduction, independent-gravity semantics and acceptance
 bounds are in the [variational protocol](../../../docs/validation/hpop_variational_protocol.md).
+
+`hpop_covariance.txt` contains 72 active joint-state/consider covariance cases.
+The dynamics come from the pinned Orekit field references; NumPy/SciPy and
+80/100-digit mpmath independently check direct covariance algebra and its
+contributions. Inputs, units, source hash, reproduction and acceptance bounds
+are in the [covariance protocol](../../../docs/validation/hpop_covariance_protocol.md).

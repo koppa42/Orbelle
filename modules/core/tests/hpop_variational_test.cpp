@@ -3,8 +3,9 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <limits>
+#include <map>
 #include <numbers>
-#include <orbitforge/core/propagation/hpop_variational.hpp>
+#include <orbitforge/core/propagation/hpop_covariance.hpp>
 #include <sstream>
 
 using namespace orbitforge::core;
@@ -373,4 +374,151 @@ TEST(HpopVariational, IndependentGravityDoesNotAlterNominalFixedStepCoast) {
     o.drag.low_altitude_model = LowAltitudeDensityModel::nrlmsise00;
     o.drag.blending_range_m = 0;
     EXPECT_THROW((void)propagate_hpop_variational(initial, end, o, env), std::invalid_argument);
+}
+
+TEST(HpopCovariance, JointPropagationMatchesIndependentOrekitNumpyAndHighPrecision) {
+    struct Reference {
+        int mask{}, order{};
+        double coefficient{}, seconds{};
+        Vector initial{};
+        HpopVariationalState variational{cartesian({})};
+    };
+    std::map<int, Reference> references;
+    std::ifstream dynamics(ORBITFORGE_HPOP_VARIATIONAL_REFERENCE);
+    ASSERT_TRUE(dynamics);
+    for (std::string line; std::getline(dynamics, line);) {
+        if (line.empty() || line[0] == '#')
+            continue;
+        int id;
+        Reference r;
+        Vector endpoint{};
+        std::istringstream row(line);
+        row >> id >> r.mask >> r.coefficient >> r.order >> r.seconds;
+        for (auto &x : r.initial)
+            row >> x;
+        for (auto &x : endpoint)
+            row >> x;
+        r.variational.state =
+            cartesian(endpoint, Epoch{static_cast<std::int64_t>(r.seconds * 1e9)});
+        for (auto &values : r.variational.state_transition)
+            for (auto &x : values)
+                row >> x;
+        for (auto &x : r.variational.drag_sensitivity)
+            row >> x;
+        for (auto &x : r.variational.srp_sensitivity)
+            row >> x;
+        ASSERT_TRUE(row);
+        references.emplace(id, r);
+    }
+    std::ifstream file(ORBITFORGE_HPOP_COVARIANCE_REFERENCE);
+    ASSERT_TRUE(file);
+    std::size_t count = 0;
+    double max_algebra = 0, max_total = 0, max_parameter = 0, max_cross = 0;
+    for (std::string line; std::getline(file, line);) {
+        if (line.empty() || line[0] == '#')
+            continue;
+        std::istringstream row(line);
+        int id, ref, mask;
+        std::array<std::array<double, 8>, 8> original{}, expected{};
+        HpopCovarianceContributions contributions;
+        row >> id >> ref >> mask;
+        for (auto &r : original)
+            for (auto &x : r)
+                row >> x;
+        for (auto &r : expected)
+            for (auto &x : r)
+                row >> x;
+        for (auto *matrix : {&contributions.initial_state, &contributions.consider_parameters,
+                             &contributions.state_parameter_cross})
+            for (auto &r : *matrix)
+                for (auto &x : r)
+                    row >> x;
+        ASSERT_TRUE(row);
+        ASSERT_TRUE(references.contains(ref));
+        const auto &reference = references.at(ref);
+        HpopCovarianceInput input;
+        for (std::size_t i = 0; i < 6; ++i)
+            std::copy_n(original[i].begin(), 6, input.state[i].begin());
+        if (mask & 1) {
+            input.drag = HpopConsiderParameter{original[6][6], {}};
+            std::copy_n(original[6].begin(), 6, input.drag->state_cross_covariance.begin());
+        }
+        if (mask & 2) {
+            input.srp = HpopConsiderParameter{original[7][7], {}};
+            std::copy_n(original[7].begin(), 6, input.srp->state_cross_covariance.begin());
+        }
+        input.drag_srp_covariance = original[6][7];
+        auto options = full_options(reference.mask, reference.coefficient);
+        options.integrator = methods[static_cast<std::size_t>(id) % methods.size()];
+        options.vop = options.integrator == HpopIntegrator::rkf78 ||
+                      options.integrator == HpopIntegrator::bulirsch_stoer;
+        options.time_regularization = (id / 5) % 2 != 0;
+        options.steps_per_orbit = options.integrator == HpopIntegrator::rk4 ? 6000 : 600;
+        options.fixed_step_seconds = options.integrator == HpopIntegrator::rk4 ? 2 : 20;
+        HpopVariationalOptions vo;
+        vo.gravity = HpopGravityTruncation{2, reference.order};
+        SCOPED_TRACE(::testing::Message() << id << " reference=" << ref << " active=" << mask);
+        const auto algebra = transport_hpop_covariance(input, reference.variational);
+        const auto actual = propagate_hpop_covariance(cartesian(reference.initial),
+                                                      reference.variational.state.epoch, input,
+                                                      options, full_environment(), vo);
+        const auto compare = [&](const HpopCovarianceState &value, bool propagated) {
+            double maximum = 0;
+            for (std::size_t i = 0; i < 8; ++i) {
+                if (i >= 6 && !(mask & (1 << (i - 6))))
+                    continue;
+                for (std::size_t j = 0; j < 8; ++j) {
+                    if (j >= 6 && !(mask & (1 << (j - 6))))
+                        continue;
+                    const auto &c = value.covariance;
+                    const double v = i < 6 && j < 6 ? c.state[i][j]
+                                     : i < 6  ? (j == 6 ? c.drag : c.srp)->state_cross_covariance[i]
+                                     : j < 6  ? (i == 6 ? c.drag : c.srp)->state_cross_covariance[j]
+                                     : i != j ? c.drag_srp_covariance
+                                              : (i == 6 ? c.drag : c.srp)->variance;
+                    const double error = std::abs(v - expected[i][j]) / std::sqrt(expected[i][i]) /
+                                         std::sqrt(expected[j][j]);
+                    maximum = std::max(maximum, error);
+                    EXPECT_LE(error, propagated ? 3e-9 : 3e-14);
+                }
+            }
+            if (propagated)
+                max_total = std::max(max_total, maximum);
+            else
+                max_algebra = std::max(max_algebra, maximum);
+            const auto part = [&](const Matrix &a, const Matrix &b, double tolerance) {
+                double error = 0, norm = 0;
+                for (std::size_t i = 0; i < 6; ++i)
+                    for (std::size_t j = 0; j < 6; ++j) {
+                        const double unit = (i < 3 ? 1 : 1000) * (j < 3 ? 1. : 1000.);
+                        error = std::max(error, std::abs(a[i][j] - b[i][j]) * unit);
+                        norm = std::max(norm, std::abs(b[i][j]) * unit);
+                    }
+                const double relative = norm == 0 ? error : error / norm;
+                EXPECT_LE(relative, tolerance);
+                return relative;
+            };
+            part(value.contributions.initial_state, contributions.initial_state,
+                 propagated ? 3e-9 : 3e-14);
+            const double parameter =
+                part(value.contributions.consider_parameters, contributions.consider_parameters,
+                     propagated ? 2e-7 : 3e-14);
+            const double cross =
+                part(value.contributions.state_parameter_cross, contributions.state_parameter_cross,
+                     propagated ? 2e-7 : 3e-14);
+            if (propagated) {
+                max_parameter = std::max(max_parameter, parameter);
+                max_cross = std::max(max_cross, cross);
+            }
+        };
+        compare(algebra, false);
+        compare(actual, true);
+        ++count;
+    }
+    EXPECT_EQ(count, 72U);
+    RecordProperty("cases", count);
+    RecordProperty("max_algebra_correlation_scaled_error", max_algebra);
+    RecordProperty("max_propagated_correlation_scaled_error", max_total);
+    RecordProperty("max_parameter_relative_error", max_parameter);
+    RecordProperty("max_cross_relative_error", max_cross);
 }

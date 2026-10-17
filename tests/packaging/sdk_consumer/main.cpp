@@ -2,8 +2,8 @@
 #include <iostream>
 #include <orbitforge/application/project_document.hpp>
 #include <orbitforge/application/scenario.hpp>
+#include <orbitforge/core/propagation/hpop_covariance.hpp>
 #include <orbitforge/core/propagation/hpop_force.hpp>
-#include <orbitforge/core/propagation/hpop_variational.hpp>
 #include <orbitforge/core/propagation/relativity.hpp>
 #include <orbitforge/runtime/access.hpp>
 #include <orbitforge/runtime/analysis.hpp>
@@ -506,6 +506,17 @@ int main(int argc, char **argv) try {
         for (std::size_t axis = 0; axis < 3; ++axis)
             if (std::abs(sensitivity.state.position_m[axis] - endpoint.position_m[axis]) > 1e-5)
                 throw std::runtime_error("Installed variational nominal state differs");
+
+        orbitforge::core::HpopCovarianceInput covariance;
+        for (std::size_t axis = 0; axis < 6; ++axis)
+            covariance.state[axis][axis] = axis < 3 ? 100 : 1;
+        covariance.srp = orbitforge::core::HpopConsiderParameter{1e-4, {.01, 0, 0, 0, 0, 0}};
+        const auto uncertainty = orbitforge::core::propagate_hpop_covariance(
+            derivative_state, variational_end, covariance, options, force_environment);
+        if (uncertainty.covariance.srp->variance != covariance.srp->variance ||
+            uncertainty.contributions.consider_parameters[0][0] <= 0 ||
+            uncertainty.covariance.state[0][3] != uncertainty.covariance.state[3][0])
+            throw std::runtime_error("Installed joint HPOP covariance API failed");
 
         const auto full_light = orbitforge::core::evaluate_srp(
             {7e6, 0, 0}, {149597870700, 0, 0}, options.srp, std::array{0., 384400000., 0.});

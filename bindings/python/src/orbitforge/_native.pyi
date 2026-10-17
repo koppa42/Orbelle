@@ -1627,6 +1627,42 @@ def propagate_hpop_variational(
     data: DataSnapshot = ..., cancelled: Callable[[], bool] | None = None,
 ) -> HpopVariationalState: ...
 
+class HpopConsiderParameter:
+    def __init__(self) -> None: ...
+    variance: float
+    state_cross_covariance: list[float]
+
+class HpopCovarianceInput:
+    def __init__(self) -> None: ...
+    state: list[list[float]]
+    drag: HpopConsiderParameter | None
+    srp: HpopConsiderParameter | None
+    drag_srp_covariance: float
+
+class HpopCovarianceContributions:
+    @property
+    def initial_state(self) -> list[list[float]]: ...
+    @property
+    def consider_parameters(self) -> list[list[float]]: ...
+    @property
+    def state_parameter_cross(self) -> list[list[float]]: ...
+
+class HpopCovarianceState:
+    @property
+    def variational(self) -> HpopVariationalState: ...
+    @property
+    def covariance(self) -> HpopCovarianceInput: ...
+    @property
+    def contributions(self) -> HpopCovarianceContributions: ...
+
+def validate_hpop_covariance(input: HpopCovarianceInput) -> None: ...
+def transport_hpop_covariance(input: HpopCovarianceInput, variational: HpopVariationalState) -> HpopCovarianceState: ...
+def propagate_hpop_covariance(
+    input: OrbitInput, end: Epoch, covariance: HpopCovarianceInput, *,
+    options: HpopVariationalOptions = ..., data: DataSnapshot = ...,
+    cancelled: Callable[[], bool] | None = None,
+) -> HpopCovarianceState: ...
+
 def propagate_hpop_ephemeris(
     input: OrbitInput, end: Epoch, *, reporting_step_nanoseconds: int = 0,
     data: DataSnapshot = ..., cancelled: Callable[[], bool] | None = None,

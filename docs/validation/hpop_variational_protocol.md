@@ -48,4 +48,4 @@ K=0 时，原始自动微分仍给出 `∂(K f)/∂K=f`；完整敏感度随食�
 - 安装 Python 3.13 对独立二体参考、只读结果复制、并发、取消、输入捕获和变分专用潮汐资源装配进行验证；安装 SDK 实际传播带卫星视太阳的滑行并读取 STM / K。
 - 现有 Core、CSPICE、HPOP 集成及旧／新安装 SDK 名义端点回归，保留条件跳过的外部完整重力／海潮文件项目。
 
-逐次结果、误差最大值、工具链、散列与日志写入新的 `out/validation/` 目录。完整协方差矩阵、PSD/PD 政策、Frame/Representation、Consider Analysis 输入与 UI 尚待实现。
+逐次结果、误差最大值、工具链、散列与日志写入新的 `out/validation/` 目录。联合协方差矩阵、正定政策及 D/K 考虑输入见[独立协议](hpop_covariance_protocol.md)；Frame/Representation、项目与 UI 尚待实现。
