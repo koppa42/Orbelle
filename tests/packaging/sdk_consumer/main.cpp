@@ -511,8 +511,16 @@ int main(int argc, char **argv) try {
         for (std::size_t axis = 0; axis < 6; ++axis)
             covariance.state[axis][axis] = axis < 3 ? 100 : 1;
         covariance.srp = orbitforge::core::HpopConsiderParameter{1e-4, {.01, 0, 0, 0, 0, 0}};
+        const auto local_covariance = orbitforge::core::convert_hpop_covariance(
+            derivative_state, covariance,
+            {orbitforge::core::HpopCovarianceFrame::frenet,
+             orbitforge::core::HpopCovarianceVelocity::rotating},
+            orbitforge::core::evaluate_hpop_acceleration(derivative_state, options,
+                                                         force_environment));
         const auto uncertainty = orbitforge::core::propagate_hpop_covariance(
-            derivative_state, variational_end, covariance, options, force_environment);
+            derivative_state, variational_end, local_covariance, options, force_environment);
+        if (uncertainty.covariance.coordinates.frame != orbitforge::core::HpopCovarianceFrame::gcrf)
+            throw std::runtime_error("Installed covariance frame conversion failed");
         if (uncertainty.covariance.srp->variance != covariance.srp->variance ||
             uncertainty.contributions.consider_parameters[0][0] <= 0 ||
             uncertainty.covariance.state[0][3] != uncertainty.covariance.state[3][0])

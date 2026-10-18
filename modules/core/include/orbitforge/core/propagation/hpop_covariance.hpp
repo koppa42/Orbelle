@@ -3,16 +3,39 @@
 
 namespace orbitforge::core {
 using HpopStateCovariance = std::array<std::array<double, 6>, 6>;
+// STK LVLH = (radial, in-track, orbit normal), NOT CCSDS LVLH/VVLH.
+// STK Frenet = (N,T,C): T along inertial velocity, C along r cross v.
+enum class HpopCovarianceFrame { gcrf, lvlh, frenet };
+// projected: components of inertial position/velocity errors along the axes.
+// rotating: velocity is the time derivative relative to the rotating axes.
+enum class HpopCovarianceVelocity { projected, rotating };
+struct HpopCovarianceCoordinates {
+    HpopCovarianceFrame frame = HpopCovarianceFrame::gcrf;
+    HpopCovarianceVelocity velocity = HpopCovarianceVelocity::projected;
+    bool operator==(const HpopCovarianceCoordinates &) const = default;
+};
+// Cartesian error-state Jacobian at one fixed nominal reference state. Blocks
+// have units 1, s, 1/s, 1. Axes are held at the nominal trajectory, not recomputed
+// from each perturbed sample. Earth/GCRF reference, TAI seconds and SI.
+// A rotating local frame requires the actual nominal inertial acceleration;
+// no Kepler acceleration is guessed. Projected frames need only r and v.
+// Nonfinite/zero r or v and unresolved |rhat cross vhat| <= 64*epsilon fail.
+// GCRF projected/rotating coincide. Invalid input throws invalid_argument;
+// nonrepresentable finite-range results throw PropagationError.
+[[nodiscard]] HpopStateCovariance
+hpop_covariance_frame_jacobian(const CartesianState &reference, HpopCovarianceCoordinates from,
+                               HpopCovarianceCoordinates to,
+                               std::optional<std::array<double, 3>> acceleration_mps2 = {});
 struct HpopConsiderParameter {
     // Self-covariance of D or K, (m^2/kg)^2, NOT sigma or a correlation coefficient.
     double variance = 0;
-    // Cov(parameter, [r,v]) in Earth/GCRF: m^3/kg, m^3/(kg*s).
+    // Cov(parameter, [r,v]) in input.coordinates: m^3/kg, m^3/(kg*s).
     std::array<double, 6> state_cross_covariance{};
     bool operator==(const HpopConsiderParameter &) const = default;
 };
 struct HpopCovarianceInput {
     // Symmetric Cartesian covariance, row/column order rx,ry,rz,vx,vy,vz.
-    // SI blocks m^2, m^2/s, m^2/s^2; Earth/GCRF at the initial state epoch.
+    // SI blocks m^2, m^2/s, m^2/s^2; Earth-centred, at the initial state epoch.
     // Zero initialization is deliberately invalid: no uncertainty is invented.
     HpopStateCovariance state{};
     // Absence excludes the parameter. Active joint covariance must be positive
@@ -20,6 +43,7 @@ struct HpopCovarianceInput {
     std::optional<HpopConsiderParameter> drag, srp;
     // Cov(D,K), (m^2/kg)^2. Nonzero requires both parameters to be present.
     double drag_srp_covariance = 0;
+    HpopCovarianceCoordinates coordinates{};
     bool operator==(const HpopCovarianceInput &) const = default;
 };
 struct HpopCovarianceContributions {
@@ -27,7 +51,7 @@ struct HpopCovarianceContributions {
 };
 struct HpopCovarianceState {
     HpopVariationalState variational;
-    // Same structure at variational.state.epoch. Parameter variances and Cov(D,K)
+    // Earth/GCRF projected, at variational.state.epoch. Parameter variances and Cov(D,K)
     // stay constant; parameter/state cross covariances evolve and can be reused
     // as the next coast's input. No process noise or maneuver noise is added.
     HpopCovarianceInput covariance;
@@ -41,6 +65,16 @@ struct HpopCovarianceState {
 // that roundoff. Diagonal scaling precedes Cholesky. No jitter, clipping, nearest
 // PSD repair or implicit removal of a requested parameter; throws invalid_argument.
 void validate_hpop_covariance(const HpopCovarianceInput &input);
+// Re-express the complete active joint covariance at reference.epoch. D/K
+// variances and their mutual covariance stay exact; their state cross terms
+// transform with the same Jacobian. Caller associates the matrix with this
+// nominal reference state/epoch. Does not propagate time or change the orbit.
+// Input is captured before callbacks; no partial result on cancellation/failure.
+[[nodiscard]] HpopCovarianceInput
+convert_hpop_covariance(CartesianState reference, HpopCovarianceInput input,
+                        HpopCovarianceCoordinates target,
+                        std::optional<std::array<double, 3>> acceleration_mps2 = {},
+                        const std::function<void()> &checkpoint = {});
 // Apply the supplied physical fixed-time STM and D/K sensitivities to input.
 // Caller must associate them with this initial covariance's epoch/state/model.
 // Earth/GCRF only. Nonfinite or numerically non-PD output throws PropagationError.
@@ -50,8 +84,11 @@ void validate_hpop_covariance(const HpopCovarianceInput &input);
 transport_hpop_covariance(HpopCovarianceInput input, HpopVariationalState variational,
                           const std::function<void()> &checkpoint = {});
 // One bounded coast with the same methods, resources, event restrictions and
-// cancellation contract as propagate_hpop_variational. No interpolation or frame
-// conversion; returns the complete active joint covariance at the physical endpoint.
+// cancellation contract as propagate_hpop_variational. No covariance
+// interpolation. Local-frame input is explicitly converted at the initial state;
+// rotating axes use the actual instantaneous nominal HPOP acceleration at that
+// epoch (no event-side override). Output and all three contributions are GCRF.
+// Returns the complete active joint covariance at the physical endpoint.
 [[nodiscard]] HpopCovarianceState
 propagate_hpop_covariance(CartesianState initial, Epoch end, HpopCovarianceInput covariance,
                           HpopOptions options = {}, HpopEnvironment environment = {},

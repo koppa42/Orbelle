@@ -1627,6 +1627,33 @@ def propagate_hpop_variational(
     data: DataSnapshot = ..., cancelled: Callable[[], bool] | None = None,
 ) -> HpopVariationalState: ...
 
+class HpopCovarianceFrame:
+    GCRF: HpopCovarianceFrame
+    LVLH: HpopCovarianceFrame
+    FRENET: HpopCovarianceFrame
+
+class HpopCovarianceVelocity:
+    PROJECTED: HpopCovarianceVelocity
+    ROTATING: HpopCovarianceVelocity
+
+class HpopCovarianceCoordinates:
+    @overload
+    def __init__(self) -> None: ...
+    @overload
+    def __init__(self, frame: HpopCovarianceFrame, velocity: HpopCovarianceVelocity) -> None: ...
+    frame: HpopCovarianceFrame
+    velocity: HpopCovarianceVelocity
+
+def hpop_covariance_frame_jacobian(
+    reference: CartesianState, source: HpopCovarianceCoordinates,
+    target: HpopCovarianceCoordinates, *, acceleration_mps2: Sequence[float] | None = None,
+) -> list[list[float]]: ...
+
+def convert_hpop_covariance(
+    reference: CartesianState, input: HpopCovarianceInput, target: HpopCovarianceCoordinates, *,
+    acceleration_mps2: Sequence[float] | None = None,
+) -> HpopCovarianceInput: ...
+
 class HpopConsiderParameter:
     def __init__(self) -> None: ...
     variance: float
@@ -1634,6 +1661,7 @@ class HpopConsiderParameter:
 
 class HpopCovarianceInput:
     def __init__(self) -> None: ...
+    coordinates: HpopCovarianceCoordinates
     state: list[list[float]]
     drag: HpopConsiderParameter | None
     srp: HpopConsiderParameter | None

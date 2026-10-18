@@ -328,6 +328,22 @@ void bind_analysis(py::module_ &module) {
         py::arg("input"), py::arg("end"), py::kw_only(),
         py::arg("options") = core::HpopVariationalOptions{},
         py::arg("data") = runtime::DataSnapshot{}, py::arg("cancelled") = py::none());
+    py::enum_<core::HpopCovarianceFrame>(module, "HpopCovarianceFrame")
+        .value("GCRF", core::HpopCovarianceFrame::gcrf)
+        .value("LVLH", core::HpopCovarianceFrame::lvlh)
+        .value("FRENET", core::HpopCovarianceFrame::frenet);
+    py::enum_<core::HpopCovarianceVelocity>(module, "HpopCovarianceVelocity")
+        .value("PROJECTED", core::HpopCovarianceVelocity::projected)
+        .value("ROTATING", core::HpopCovarianceVelocity::rotating);
+    py::class_<core::HpopCovarianceCoordinates>(module, "HpopCovarianceCoordinates")
+        .def(py::init<>())
+        .def(py::init<core::HpopCovarianceFrame, core::HpopCovarianceVelocity>(), py::arg("frame"),
+             py::arg("velocity"))
+        .def_readwrite("frame", &core::HpopCovarianceCoordinates::frame)
+        .def_readwrite("velocity", &core::HpopCovarianceCoordinates::velocity);
+    module.def("hpop_covariance_frame_jacobian", &core::hpop_covariance_frame_jacobian,
+               py::arg("reference"), py::arg("source"), py::arg("target"), py::kw_only(),
+               py::arg("acceleration_mps2") = py::none());
     py::class_<core::HpopConsiderParameter>(module, "HpopConsiderParameter")
         .def(py::init<>())
         .def_readwrite("variance", &core::HpopConsiderParameter::variance)
@@ -336,6 +352,7 @@ void bind_analysis(py::module_ &module) {
     py::class_<core::HpopCovarianceInput>(module, "HpopCovarianceInput")
         .def(py::init<>())
         .def_readwrite("state", &core::HpopCovarianceInput::state)
+        .def_readwrite("coordinates", &core::HpopCovarianceInput::coordinates)
         .def_readwrite("drag", &core::HpopCovarianceInput::drag)
         .def_readwrite("srp", &core::HpopCovarianceInput::srp)
         .def_readwrite("drag_srp_covariance", &core::HpopCovarianceInput::drag_srp_covariance);
@@ -353,6 +370,16 @@ void bind_analysis(py::module_ &module) {
         .def_property_readonly("contributions",
                                [](const core::HpopCovarianceState &s) { return s.contributions; });
     module.def("validate_hpop_covariance", &core::validate_hpop_covariance, py::arg("input"));
+    module.def(
+        "convert_hpop_covariance",
+        [](core::CartesianState reference, core::HpopCovarianceInput input,
+           core::HpopCovarianceCoordinates target,
+           std::optional<std::array<double, 3>> acceleration) {
+            py::gil_scoped_release release;
+            return core::convert_hpop_covariance(reference, input, target, acceleration);
+        },
+        py::arg("reference"), py::arg("input"), py::arg("target"), py::kw_only(),
+        py::arg("acceleration_mps2") = py::none());
     module.def(
         "transport_hpop_covariance",
         [](core::HpopCovarianceInput input, core::HpopVariationalState state) {

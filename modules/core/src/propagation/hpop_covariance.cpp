@@ -3,6 +3,7 @@
 #include <limits>
 #include <numeric>
 #include <orbitforge/core/propagation/hpop_covariance.hpp>
+#include <orbitforge/core/propagation/hpop_force.hpp>
 #include <utility>
 
 namespace orbitforge::core {
@@ -73,6 +74,13 @@ Matrix cholesky(Matrix &covariance, std::size_t size) {
     return factor;
 }
 Joint prepare(const HpopCovarianceInput &input) {
+    if (input.coordinates.frame != HpopCovarianceFrame::gcrf &&
+        input.coordinates.frame != HpopCovarianceFrame::lvlh &&
+        input.coordinates.frame != HpopCovarianceFrame::frenet)
+        throw std::invalid_argument("Unsupported HPOP covariance frame");
+    if (input.coordinates.velocity != HpopCovarianceVelocity::projected &&
+        input.coordinates.velocity != HpopCovarianceVelocity::rotating)
+        throw std::invalid_argument("Unsupported HPOP covariance velocity convention");
     Joint joint;
     for (std::size_t i = 0; i < 6; ++i)
         std::copy(input.state[i].begin(), input.state[i].end(), joint.covariance[i].begin());
@@ -167,33 +175,42 @@ Matrix transition(const HpopVariationalState &value, const Joint &joint) {
         result[i][i] = 1;
     return result;
 }
+HpopCovarianceInput apply_joint(const HpopCovarianceInput &input, const Joint &joint,
+                                const Matrix &f) {
+    auto total =
+        gram(multiply(f, joint.factor, joint.size, joint.size, joint.size), joint.size, joint.size);
+    auto result = input;
+    result.state = state_block(total);
+    const auto cross = [&](HpopConsiderParameter &parameter, std::size_t index) {
+        std::copy_n(total[index].begin(), 6, parameter.state_cross_covariance.begin());
+    };
+    if (joint.drag)
+        cross(*result.drag, *joint.drag);
+    if (joint.srp)
+        cross(*result.srp, *joint.srp);
+    // Constant parameter variances are preserved exactly, including Cov(D,K).
+    // Reject an output whose rounded entries no longer resolve a positive joint
+    // matrix, rather than silently adding noise or reporting an invalid matrix.
+    try {
+        (void)prepare(result);
+    } catch (const std::invalid_argument &) {
+        throw PropagationError("Propagated joint covariance is not numerically positive definite");
+    }
+    return result;
+}
 } // namespace
 void validate_hpop_covariance(const HpopCovarianceInput &input) { (void)prepare(input); }
 HpopCovarianceState transport_hpop_covariance(HpopCovarianceInput input,
                                               HpopVariationalState variational,
                                               const std::function<void()> &checkpoint) {
     check(checkpoint);
+    if (input.coordinates.frame != HpopCovarianceFrame::gcrf)
+        throw std::invalid_argument(
+            "Convert initial covariance to GCRF before applying a GCRF STM");
     const auto joint = prepare(input);
     const auto f = transition(variational, joint);
-    auto total =
-        gram(multiply(f, joint.factor, joint.size, joint.size, joint.size), joint.size, joint.size);
-    HpopCovarianceState result{variational, input, {}};
-    result.covariance.state = state_block(total);
-    const auto cross = [&](HpopConsiderParameter &parameter, std::size_t index) {
-        std::copy_n(total[index].begin(), 6, parameter.state_cross_covariance.begin());
-    };
-    if (joint.drag)
-        cross(*result.covariance.drag, *joint.drag);
-    if (joint.srp)
-        cross(*result.covariance.srp, *joint.srp);
-    // Constant parameter variances are preserved exactly, including Cov(D,K).
-    // Reject an output whose rounded entries no longer resolve a positive joint
-    // matrix, rather than silently adding noise or reporting an invalid matrix.
-    try {
-        (void)prepare(result.covariance);
-    } catch (const std::invalid_argument &) {
-        throw PropagationError("Propagated joint covariance is not numerically positive definite");
-    }
+    HpopCovarianceState result{variational, apply_joint(input, joint, f), {}};
+    result.covariance.coordinates = {};
     check(checkpoint);
     result.contributions.initial_state =
         state_block(gram(multiply(f, joint.factor, 6, 6, 6), 6, 6));
@@ -223,6 +240,24 @@ HpopCovarianceState transport_hpop_covariance(HpopCovarianceInput input,
     check(checkpoint);
     return result;
 }
+HpopCovarianceInput convert_hpop_covariance(CartesianState reference, HpopCovarianceInput input,
+                                            HpopCovarianceCoordinates target,
+                                            std::optional<std::array<double, 3>> acceleration_mps2,
+                                            const std::function<void()> &checkpoint) {
+    check(checkpoint);
+    const auto joint = prepare(input);
+    const auto jacobian =
+        hpop_covariance_frame_jacobian(reference, input.coordinates, target, acceleration_mps2);
+    Matrix f{};
+    for (std::size_t i = 0; i < 6; ++i)
+        std::copy(jacobian[i].begin(), jacobian[i].end(), f[i].begin());
+    for (std::size_t i = 6; i < joint.size; ++i)
+        f[i][i] = 1;
+    auto result = apply_joint(input, joint, f);
+    result.coordinates = target;
+    check(checkpoint);
+    return result;
+}
 HpopCovarianceState propagate_hpop_covariance(CartesianState initial, Epoch end,
                                               HpopCovarianceInput covariance, HpopOptions options,
                                               HpopEnvironment environment,
@@ -230,6 +265,12 @@ HpopCovarianceState propagate_hpop_covariance(CartesianState initial, Epoch end,
                                               const std::function<void()> &checkpoint) {
     check(checkpoint);
     validate_hpop_covariance(covariance);
+    if (covariance.coordinates.frame != HpopCovarianceFrame::gcrf) {
+        std::optional<std::array<double, 3>> acceleration;
+        if (covariance.coordinates.velocity == HpopCovarianceVelocity::rotating)
+            acceleration = evaluate_hpop_acceleration(initial, options, environment);
+        covariance = convert_hpop_covariance(initial, covariance, {}, acceleration, checkpoint);
+    }
     const auto state =
         propagate_hpop_variational(initial, end, std::move(options), std::move(environment),
                                    std::move(variational), checkpoint);

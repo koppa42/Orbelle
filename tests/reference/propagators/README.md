@@ -233,3 +233,5 @@ The dynamics come from the pinned Orekit field references; NumPy/SciPy and
 80/100-digit mpmath independently check direct covariance algebra and its
 contributions. Inputs, units, source hash, reproduction and acceptance bounds
 are in the [covariance protocol](../../../docs/validation/hpop_covariance_protocol.md).
+
+`hpop_covariance_frames.txt` 包含 200 组 Orekit 13.1.2 / Hipparchus 4.0.2 的 GCRF、STK LVLH、Frenet projected/rotating 变换，以及 NumPy/SciPy 和 mpmath 80/100 位的联合协方差参考。来源、单位、SHA-256、复现命令与容限见[局部系验证](../../../docs/validation/hpop_covariance_frames_protocol.md)。

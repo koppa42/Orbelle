@@ -35,4 +35,4 @@ python tools/validation/hpop_covariance_reference.py <输出文件>
 - 安装 Python 对独立 Orekit 开普勒参考、结果所有权、并发、验证和取消进行测试；真实 UTC/EOP/DE440s 的零 Cd/Cr 阻力与光压验证参数敏感度仍产生协方差贡献及分段复合。
 - 安装 SDK 消费端调用带卫星视太阳的完整协方差 API，检查 K 项贡献、交叉项与参数方差。
 
-逐次命令、工具链、散列和误差最大值保存于 `out/validation/`。项目格式、桌面、帧转换、FG 表示、协方差插值与跨机动传播在相应功能接入时另行验收。
+逐次命令、工具链、散列和误差最大值保存于 `out/validation/`。局部帧转换另见[专门协议](hpop_covariance_frames_protocol.md)；项目格式、桌面、J2000/TOD、FG 表示、协方差插值与跨机动传播在相应功能接入时另行验收。
