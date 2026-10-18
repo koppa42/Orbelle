@@ -1397,3 +1397,118 @@ TEST(ReportDialog, OrbitalEventsSummaryTimeSeekAndResponsiveLayout) {
 }
 
 } // namespace orbitforge::desktop
+
+namespace orbitforge::desktop {
+TEST(ReportDialog, IntersatellitePairCurvesExtremaSeekAndResponsiveLayout) {
+    (void)test_app();
+    if (!runtime::two_body_available())
+        GTEST_SKIP();
+    std::shared_ptr<const core::ITimeProvider> time = runtime::make_builtin_time_provider();
+    std::shared_ptr<const core::IEarthOrientationProvider> eop =
+        runtime::load_eop_snapshot(ORBITFORGE_ACCESS_EOP);
+    std::shared_ptr<const core::IFrameProvider> frames = runtime::make_frame_provider();
+    const auto data = runtime::DataSnapshot::from_providers(time, frames, eop);
+    application::Project project{"Intersatellite", core::Epoch{0}, core::Epoch{600'000'000'000}};
+    project.earth_orientation = eop->data_info();
+    application::ProjectSatellite a, b;
+    a.orbit.object_id = "primary";
+    b.orbit.object_id = "target";
+    a.display_name = "LEO · 基准卫星";
+    b.display_name = "LEO · 目标卫星";
+    a.orbit.first = b.orbit.first = project.first;
+    a.orbit.last = b.orbit.last = project.last;
+    a.orbit.initial = {
+        project.first, core::OriginId::earth, core::FrameId::gcrf, {7e6, 0, 0}, {0, 7500, 100}};
+    b.orbit.initial = {
+        project.first, core::OriginId::earth, core::FrameId::gcrf, {7.5e6, 0, 0}, {0, -7000, 1000}};
+    project.satellites = {a, b};
+    std::shared_ptr<const runtime::ReportResult> published;
+    core::Epoch sought{-1};
+    int preparations = 0;
+    ReportDialog dialog(
+        project, time,
+        [&](const application::ReportQuery &, auto ready) {
+            ++preparations;
+            ready(ReportInput{project, data}, {});
+        },
+        [&](auto reports) { project.reports = std::move(reports); },
+        [&](auto epoch) { sought = epoch; });
+    dialog.result_published = [&](auto r, const auto &) { published = r; };
+    dialog.select_object("primary", application::ReportKind::relative_motion);
+    dialog.resize(1140, 780);
+    dialog.show();
+    auto *primary = dialog.findChild<ObjectSelectionField *>("accessStation");
+    auto *target = dialog.findChild<ObjectSelectionField *>("accessTarget");
+    EXPECT_EQ(primary->id(), "primary");
+    EXPECT_EQ(target->id(), "target");
+    EXPECT_EQ(primary->accessibleName(), QStringLiteral("基准卫星"));
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    ASSERT_TRUE(published);
+    ASSERT_TRUE(published->intersatellite_statistics);
+    EXPECT_EQ(published->definition.query.object_ids,
+              (std::vector<std::string>{"primary", "target"}));
+    auto *table = dialog.findChild<QTableView *>("reportTable");
+    auto *views = dialog.findChild<QTabBar *>("reportViews");
+    EXPECT_EQ(table->model()->rowCount(), 11);
+    EXPECT_TRUE(views->isTabEnabled(1));
+    auto *notice = dialog.findChild<QLabel *>("orbitalEventNotice");
+    QMetaObject::invokeMethod(notice, "linkActivated", Qt::DirectConnection,
+                              Q_ARG(QString, QString("closest-approach")));
+    EXPECT_EQ(sought, published->intersatellite_statistics->minimum_range.epoch);
+    const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    if (!capture.isEmpty())
+        QDir().mkpath(capture);
+    const auto screenshots = [&](const QString &name) {
+        for (int width : {1140, 420}) {
+            dialog.resize(width, 780);
+            for (int i = 0; i < 5; ++i) {
+                QCoreApplication::processEvents();
+                QThread::msleep(10);
+            }
+            EXPECT_LE(dialog.minimumSizeHint().width(), 420);
+            EXPECT_EQ(primary->id(), "primary");
+            EXPECT_EQ(target->id(), "target");
+            if (!capture.isEmpty())
+                dialog.grab().save(capture + QString("/%1-%2.png").arg(name).arg(width));
+        }
+    };
+    screenshots("relative-table");
+    auto *toggle=dialog.findChild<QPushButton *>("reportToggleSettings");
+    toggle->click(); QCoreApplication::processEvents();
+    EXPECT_TRUE(primary->isVisible()); EXPECT_TRUE(target->isVisible());
+    if(!capture.isEmpty()) dialog.grab().save(capture + "/relative-settings-420.png");
+    toggle->click(); QCoreApplication::processEvents();
+    views->setCurrentIndex(1);
+    screenshots("relative-curve");
+    EXPECT_FALSE(
+        static_cast<ReportPlot *>(dialog.findChild<QWidget *>("reportPlot"))->image(1).isNull());
+    dialog.findChild<QComboBox *>("reportUnits")->setCurrentIndex(1);
+    EXPECT_EQ(preparations, 1);
+    choose_report(dialog, static_cast<int>(application::ReportKind::intersatellite_access));
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    ASSERT_TRUE(published);
+    EXPECT_EQ(preparations, 2);
+    EXPECT_FALSE(views->isTabEnabled(1));
+    ASSERT_GT(table->model()->rowCount(), 0);
+    const auto nearest = std::get<core::Epoch>(published->table.rows()[0][8]);
+    QMetaObject::invokeMethod(table, "doubleClicked", Qt::DirectConnection,
+                              Q_ARG(QModelIndex, table->model()->index(0, 7)));
+    EXPECT_EQ(sought, nearest);
+    screenshots("intersatellite-access");
+    const auto rows = published->table.rows();
+    target->set_id("primary");
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    EXPECT_EQ(preparations, 2);
+    EXPECT_EQ(published->table.rows(), rows);
+    target->set_id("target");
+    project.satellites.pop_back();
+    dialog.update_project(project, time);
+    EXPECT_EQ(target->id(), "target");
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    EXPECT_EQ(published->table.rows(), rows);
+}
+} // namespace orbitforge::desktop

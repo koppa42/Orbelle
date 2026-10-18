@@ -4,6 +4,7 @@
 #include <orbitforge/application/scenario.hpp>
 #include <orbitforge/core/propagation/hpop_covariance.hpp>
 #include <orbitforge/core/propagation/hpop_force.hpp>
+#include <orbitforge/core/propagation/relative_motion.hpp>
 #include <orbitforge/core/propagation/relativity.hpp>
 #include <orbitforge/runtime/access.hpp>
 #include <orbitforge/runtime/analysis.hpp>
@@ -19,6 +20,19 @@
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 int main(int argc, char **argv) try {
+    {
+        using namespace orbitforge::core;
+        CartesianState primary{Epoch{0}, OriginId::earth, FrameId::gcrf, {7e6, 0, 0}, {0, 7500, 0}};
+        auto target = primary;
+        target.position_m[0] += 1000;
+        const auto relative = relative_motion(primary, target);
+        if (relative.range_m != 1000 || relative.ric_position_m[0] != 1000 ||
+            *relative.range_rate_mps != 0)
+            return 70;
+        primary.frame = target.frame = FrameId::itrf;
+        if (intersatellite_clearance(primary, target) <= 0)
+            return 71;
+    }
     {
         using namespace orbitforge::core;
         SrpOptions options;

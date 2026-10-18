@@ -1,3 +1,4 @@
+#include "intersatellite_report.hpp"
 #include "report_execution.hpp"
 #include <algorithm>
 #include <chrono>
@@ -288,7 +289,9 @@ std::size_t estimate_report_rows(const Project &p, const ReportDefinition &d) {
     check(span / step < max_report_rows,
           "Report exceeds 200000 rows; increase the step or shorten the interval");
     const auto count = span / step + 1 + (span % step != 0 ? 1 : 0);
-    const auto objects = report_is_access(d.query.kind) ? 1 : selected.size();
+    const auto objects = report_is_access(d.query.kind) || report_is_intersatellite(d.query.kind)
+                             ? 1
+                             : selected.size();
     check(count <= max_report_rows / objects,
           "Report exceeds 200000 rows; select fewer objects or increase the step");
     return static_cast<std::size_t>(count * objects);
@@ -342,6 +345,7 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
     std::optional<results::AccessStatistics> access_statistics;
     std::optional<results::LightingStatistics> lighting_statistics;
     std::optional<results::OrbitalEventStatistics> orbital_event_statistics;
+    std::optional<results::IntersatelliteStatistics> intersatellite_statistics;
     rows.reserve(total);
     const auto selected =
         report_is_access(d.query.kind) ? std::vector<Selection>{} : select(context.project, d);
@@ -351,7 +355,11 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
             progress(rows.size(), total);
         execution.check_cancelled();
     };
-    if (report_is_access(d.query.kind)) {
+    if (report_is_intersatellite(d.query.kind)) {
+        auto data = intersatellite_report(context, d, first, last, total, execution, progress);
+        rows = std::move(data.rows);
+        intersatellite_statistics = std::move(data.statistics);
+    } else if (report_is_access(d.query.kind)) {
         const auto access = execution.access(d.query.object_ids);
         if (d.query.kind == ReportKind::access_intervals) {
             std::size_t completed = 0;
@@ -672,6 +680,9 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                         first,
                         last,
                         context.time};
+    result.intersatellite_statistics = std::move(intersatellite_statistics);
+    if (report_is_intersatellite(d.query.kind))
+        result.algorithm = "intersatellite-wgs84-gcrf-ric-v1;range-extrema-golden-v1";
     result.access_statistics = access_statistics;
     result.lighting_statistics = lighting_statistics;
     result.orbital_event_statistics = orbital_event_statistics;
@@ -681,7 +692,7 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
         result.algorithm = "geometric-lighting-earth-sphere-v1;uniform-solar-disk-v1;ephemeris=" +
                            d.query.lighting_ephemeris;
     if (d.query.kind == ReportKind::lighting_intervals ||
-        d.query.kind == ReportKind::orbital_events)
+        d.query.kind == ReportKind::orbital_events || report_is_intersatellite(d.query.kind))
         result.algorithm += d.query.event_search_mode == core::AccessSearchMode::fixed_grid
                                 ? ";fixed-grid-bisection-v1"
                                 : ";extremum-assisted-bisection-v1";

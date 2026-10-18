@@ -21,7 +21,9 @@ void bind_reports(py::module_ &module) {
         .value("STATE_COVARIANCE", application::ReportKind::state_covariance)
         .value("LIGHTING_INTERVALS", application::ReportKind::lighting_intervals)
         .value("LIGHTING_STATE", application::ReportKind::lighting_state)
-        .value("ORBITAL_EVENTS", application::ReportKind::orbital_events);
+        .value("ORBITAL_EVENTS", application::ReportKind::orbital_events)
+        .value("RELATIVE_MOTION", application::ReportKind::relative_motion)
+        .value("INTERSATELLITE_ACCESS", application::ReportKind::intersatellite_access);
     py::class_<core::GroundObservation>(module, "GroundObservation")
         .def_readonly("azimuth_rad", &core::GroundObservation::azimuth_rad)
         .def_readonly("elevation_rad", &core::GroundObservation::elevation_rad)
@@ -134,6 +136,11 @@ void bind_reports(py::module_ &module) {
                       &results::OrbitalEventStatistics::near_circular_objects)
         .def_readonly("near_equatorial_objects",
                       &results::OrbitalEventStatistics::near_equatorial_objects);
+    py::class_<results::IntersatelliteStatistics>(module, "IntersatelliteStatistics")
+        .def_readonly("minimum_range", &results::IntersatelliteStatistics::minimum_range)
+        .def_readonly("maximum_range", &results::IntersatelliteStatistics::maximum_range)
+        .def_readonly("visibility", &results::IntersatelliteStatistics::visibility)
+        .def_readonly("windows", &results::IntersatelliteStatistics::windows);
     py::class_<application::ReportDefinition>(module, "ReportDefinition")
         .def(py::init<>())
         .def_readwrite("id", &application::ReportDefinition::id)
@@ -162,6 +169,8 @@ void bind_reports(py::module_ &module) {
         .def_readonly("access_statistics", &runtime::ReportResult::access_statistics)
         .def_readonly("lighting_statistics", &runtime::ReportResult::lighting_statistics)
         .def_readonly("orbital_event_statistics", &runtime::ReportResult::orbital_event_statistics)
+        .def_readonly("intersatellite_statistics",
+                      &runtime::ReportResult::intersatellite_statistics)
         .def_readonly("algorithm", &runtime::ReportResult::algorithm)
         .def_readonly("first", &runtime::ReportResult::first)
         .def_readonly("last", &runtime::ReportResult::last)

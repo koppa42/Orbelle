@@ -105,6 +105,9 @@ class StepSpinBox final : public QDoubleSpinBox {
     }
 };
 QString text(const std::string &value) { return QString::fromStdString(value); }
+bool pair_report(ReportKind kind) {
+    return report_is_access(kind) || report_is_intersatellite(kind);
+}
 QString kind_name(ReportKind kind) {
     switch (kind) {
     case ReportKind::scenario_summary:
@@ -131,6 +134,10 @@ QString kind_name(ReportKind kind) {
         return QStringLiteral("太阳光照比例");
     case ReportKind::orbital_events:
         return QStringLiteral("轨道事件 · 近远地点 / 交点");
+    case ReportKind::relative_motion:
+        return QStringLiteral("星间相对运动 · RIC");
+    case ReportKind::intersatellite_access:
+        return QStringLiteral("星间可见时段");
     case ReportKind::state_covariance:
         return QStringLiteral("HPOP · 位置速度协方差");
     }
@@ -190,6 +197,10 @@ QString localized(QString value) {
         {"Maximum elevation time", QStringLiteral("最大仰角时刻")},
         {"Minimum range", QStringLiteral("最近距离")},
         {"Minimum range time", QStringLiteral("最近距离时刻")},
+        {"Inertial relative speed", QStringLiteral("惯性相对速率")},
+        {"RIC radial", QStringLiteral("RIC 径向")},
+        {"RIC in-track", QStringLiteral("RIC 沿轨")},
+        {"RIC cross-track", QStringLiteral("RIC 法向")},
         {"Range rate", QStringLiteral("距离变化率")},
         {"Visible", QStringLiteral("可见（1 / 0）")},
         {"Off boresight", QStringLiteral("离轴角")},
@@ -857,7 +868,7 @@ struct ReportDialog::Impl {
             QObject::connect(combo, &QComboBox::currentIndexChanged, owner, [this] { edit(); });
         for (auto *field : {access_station, access_target})
             QObject::connect(field, &ObjectSelectionField::selectionChanged, owner, [this] {
-                if (!loading && report_is_access(draft.query.kind)) {
+                if (!loading && pair_report(draft.query.kind)) {
                     scope_ids = {access_station->id(), access_target->id()};
                     all_objects = false;
                     refresh_scope();
@@ -877,6 +888,8 @@ struct ReportDialog::Impl {
                 step_label->setText(access_mode->currentIndex() == 0
                                         ? QStringLiteral("搜索步长")
                                         : QStringLiteral("最大检查间隔"));
+            if (draft.query.kind == ReportKind::relative_motion)
+                step_label->setText(QStringLiteral("采样 / 检查间隔"));
             edit();
         });
         for (auto *editor : {first, last})
@@ -950,6 +963,11 @@ struct ReportDialog::Impl {
             }
             menu.exec(table->viewport()->mapToGlobal(point));
         });
+        QObject::connect(event_notice, &QLabel::linkActivated, owner, [this](const QString &link) {
+            if (link == "closest-approach" && model->result &&
+                model->result->intersatellite_statistics)
+                seek_result(model->result->intersatellite_statistics->minimum_range.epoch);
+        });
         auto *timer = new QTimer(owner);
         timer->setInterval(80);
         QObject::connect(timer, &QTimer::timeout, owner, [this] { poll(); });
@@ -1019,6 +1037,12 @@ struct ReportDialog::Impl {
             case ReportKind::orbital_events:
                 return QStringLiteral("近地点、远地点、升交点和降交点的精确时刻、地心距离与速率。交"
                                       "点采用 GCRF 赤道面，近圆 / 近赤道情况明确提示。");
+            case ReportKind::relative_motion:
+                return QStringLiteral(
+                    "基准卫星 RIC 相对位置、星间距离、距离变化率和惯性相对速率，附地球遮挡状态。");
+            case ReportKind::intersatellite_access:
+                return QStringLiteral(
+                    "WGS84 椭球遮挡下的星间可见时段、持续时间和每段最近距离。双击定位时刻。");
             case ReportKind::state_covariance:
                 return QStringLiteral("传播已启用的 HPOP 协方差，输出 GCRF 位置速度矩阵的下三角。");
             }
@@ -1033,6 +1057,7 @@ struct ReportDialog::Impl {
             case ReportKind::ground_stations:
                 return QStringLiteral("站点坐标表");
             case ReportKind::access_intervals:
+            case ReportKind::intersatellite_access:
                 return QStringLiteral("可见时间区间表");
             case ReportKind::lighting_intervals:
                 return QStringLiteral("光照时间区间表 · 分类统计");
@@ -1067,7 +1092,8 @@ struct ReportDialog::Impl {
                  kind_name(kind),
                  kind_name(kind),
                  description(kind),
-                 report_is_access(kind)
+                 report_is_intersatellite(kind) ? QStringLiteral("基准卫星 → 目标卫星 · 有序对象对")
+                 : report_is_access(kind)
                      ? QStringLiteral("地面站 → 卫星 / 传感器；保留当前对象，随后选择配对对象")
                      : report_scope(scope_ids, all_objects),
                  false,
@@ -1135,6 +1161,8 @@ struct ReportDialog::Impl {
                                      [](const auto &s) { return s.orbit.computes_covariance(); })
                                : !scope_ids.empty() && std::ranges::all_of(scope_ids, eligible);
         }
+        if (report_is_intersatellite(kind))
+            return project.satellites.size() >= 2;
         if (report_is_access(kind))
             return !project.ground_stations.empty() && !project.satellites.empty();
         if (std::ranges::any_of(project.sensors, [&](const auto &s) {
@@ -1267,19 +1295,52 @@ struct ReportDialog::Impl {
     }
     void fill_access_pair(bool preserve_missing) {
         const QSignalBlocker station_guard(access_station), target_guard(access_target);
-        access_station->set_objects(project_object_choices(project, {ObjectKind::ground_station}));
-        access_target->set_objects(
-            project_object_choices(project, {ObjectKind::satellite, ObjectKind::sensor}));
-        if (preserve_missing && scope_ids.size() == 2) {
+        const bool intersatellite = report_is_intersatellite(draft.query.kind);
+        auto *form = static_cast<QFormLayout *>(access_pair->layout());
+        static_cast<QLabel *>(form->labelForField(access_station))
+            ->setText(intersatellite ? QStringLiteral("基准卫星") : QStringLiteral("地面站"));
+        static_cast<QLabel *>(form->labelForField(access_target))
+            ->setText(intersatellite ? QStringLiteral("目标卫星")
+                                     : QStringLiteral("卫星 / 传感器"));
+        access_station->set_options({intersatellite ? QStringLiteral("选择 RIC 基准卫星")
+                                                    : QStringLiteral("选择可见性分析的地面站"),
+                                     false,
+                                     {}});
+        access_target->set_options({intersatellite ? QStringLiteral("选择目标卫星")
+                                                   : QStringLiteral("选择可见性分析的卫星或传感器"),
+                                    false,
+                                    {}});
+        access_station->setAccessibleName(intersatellite ? QStringLiteral("基准卫星")
+                                                         : QStringLiteral("可见性分析地面站"));
+        access_target->setAccessibleName(intersatellite ? QStringLiteral("目标卫星")
+                                                        : QStringLiteral("可见性分析目标"));
+        access_station->set_objects(project_object_choices(
+            project, intersatellite ? std::initializer_list{ObjectKind::satellite}
+                                    : std::initializer_list{ObjectKind::ground_station}));
+        access_target->set_objects(project_object_choices(
+            project, intersatellite
+                         ? std::initializer_list{ObjectKind::satellite}
+                         : std::initializer_list{ObjectKind::satellite, ObjectKind::sensor}));
+        if (scope_ids.size() == 2 &&
+            (preserve_missing ||
+             (access_station->contains(scope_ids[0]) && access_target->contains(scope_ids[1])))) {
             access_station->set_id(scope_ids[0]);
             access_target->set_id(scope_ids[1]);
         } else {
             for (auto *field : {access_station, access_target}) {
                 field->set_id(field->objects().empty() ? "" : field->objects().front().id);
                 for (const auto &id : scope_ids)
-                    if (field->contains(id))
+                    if (field->contains(id)) {
                         field->set_id(id);
+                        break;
+                    }
             }
+            if (intersatellite && access_station->id() == access_target->id())
+                for (const auto &object : access_target->objects())
+                    if (object.id != access_station->id()) {
+                        access_target->set_id(object.id);
+                        break;
+                    }
         }
         scope_ids = {access_station->id(), access_target->id()};
         all_objects = false;
@@ -1307,7 +1368,7 @@ struct ReportDialog::Impl {
             scope_ids = draft.query.object_ids;
             all_objects = draft.query.scope == ReportScope::all_compatible;
         }
-        const bool access = report_is_access(draft.query.kind);
+        const bool access = pair_report(draft.query.kind);
         access_options->setVisible(report_uses_event_search(draft.query.kind));
         access_mode->setCurrentIndex(static_cast<int>(draft.query.event_search_mode));
         access_tolerance->setValue(static_cast<double>(draft.query.event_tolerance_nanoseconds) /
@@ -1321,6 +1382,11 @@ struct ReportDialog::Impl {
                              ? QStringLiteral("事件搜索的最大检查间隔；快速变化时减半核对收敛。事件"
                                               "时刻自动细化，不限于检查节点。")
                              : QStringLiteral("报告独立采样，始终包含起止时刻。"));
+        if (draft.query.kind == ReportKind::relative_motion) {
+            step_label->setText(QStringLiteral("采样 / 检查间隔"));
+            step->setToolTip(QStringLiteral("采样输出包含起止时刻；此间隔也用于可见性和连续距离极值"
+                                            "搜索。快速变化时减半检查收敛。"));
+        }
         step->setMinimum(access ? .001 : .000000001);
         access_pair->setVisible(access);
         scope_label->setVisible(!access);
@@ -1386,12 +1452,24 @@ struct ReportDialog::Impl {
                 "地心距离的极值与 GCRF 赤道面穿越。e ≤ 1e-8 时不定义近远地点；|sin(i)| ≤ 1e-8 "
                 "时不定义交点。不支持含机动的任务序列。快速变化时减小检查间隔并核对收敛。"));
         }
+        if (report_is_intersatellite(draft.query.kind)) {
+            template_description->setText(
+                draft.query.kind == ReportKind::relative_motion
+                    ? QStringLiteral("距离与 RIC 相对位置 · 基准 → "
+                                     "目标\n距离变化率向外为正；可见性采用 WGS84 椭球。")
+                    : QStringLiteral("星间视线 · WGS84 "
+                                     "椭球\n可见时段、持续时间与每段最近距离；双击定位时刻。"));
+            template_description->setToolTip(QStringLiteral(
+                "连续距离极值包含不可见时段。RIC "
+                "径向向外、沿轨由法向与径向确定、法向为基准轨道角动量方向。惯性相对速率不是 RIC "
+                "坐标导数。不含地形、折射或光行时；暂不支持任务序列。"));
+        }
         if (report_is_lighting(draft.query.kind))
             template_description->setText(
                 QStringLiteral(
                     "地球球面 · 几何太阳 · %1\n全光照 / 半影 / 本影；与卫星的光压力开关无关。")
                     .arg(text(draft.query.lighting_ephemeris)));
-        if (access)
+        if (report_is_access(draft.query.kind))
             template_description->setText(
                 draft.query.kind == ReportKind::access_intervals
                     ? QStringLiteral("地球遮挡 · 最低仰角 · "
@@ -1419,7 +1497,7 @@ struct ReportDialog::Impl {
         d.query.object_ids =
             d.query.kind == ReportKind::scenario_summary ? std::vector<std::string>{} : scope_ids;
         d.query.scope = all_objects ? ReportScope::all_compatible : ReportScope::objects;
-        if (report_is_access(d.query.kind))
+        if (pair_report(d.query.kind))
             d.query.object_ids = {access_station->id(), access_target->id()};
         d.query.follow_scenario = follow->isChecked();
         if (report_is_sampled(d.query.kind) && !d.query.follow_scenario) {
@@ -1467,7 +1545,8 @@ struct ReportDialog::Impl {
         changed = false;
         pass_summary->setVisible(result->access_statistics.has_value() ||
                                  result->lighting_statistics.has_value() ||
-                                 result->orbital_event_statistics.has_value());
+                                 result->orbital_event_statistics.has_value() ||
+                                 result->intersatellite_statistics.has_value());
         event_notice->hide();
         for (auto *value : pass_values)
             value->setToolTip({});
@@ -1490,6 +1569,28 @@ struct ReportDialog::Impl {
                 QStringLiteral("按当前分析区间统计，包含被区间边界截断的过境。最短过境：%"
                                "1。双击最大仰角或最近距离可定位到对应时刻。")
                     .arg(s.count ? duration(s.shortest_duration_s) : QStringLiteral("无")));
+        }
+        if (result->intersatellite_statistics) {
+            const auto &s = *result->intersatellite_statistics;
+            const std::array captions{QStringLiteral("最近距离"), QStringLiteral("最远距离"),
+                                      QStringLiteral("可见时段"), QStringLiteral("总可见时长")};
+            for (int i = 0; i < 4; ++i)
+                pass_captions[i]->setText(captions[i]);
+            const bool si = result->definition.format.units == ReportUnits::si;
+            pass_values[0]->setText(QStringLiteral("%1 %2")
+                                        .arg(s.minimum_range.value / (si ? 1 : 1000), 0, 'f', 3)
+                                        .arg(si ? "m" : "km"));
+            pass_values[1]->setText(QStringLiteral("%1 %2")
+                                        .arg(s.maximum_range.value / (si ? 1 : 1000), 0, 'f', 3)
+                                        .arg(si ? "m" : "km"));
+            pass_values[2]->setText(QString::number(s.visibility.count));
+            pass_values[3]->setText(
+                QStringLiteral("%1 min").arg(s.visibility.total_duration_s / 60, 0, 'f', 2));
+            pass_summary->setToolTip(QStringLiteral(
+                "距离极值覆盖整个分析区间，包含不可见时段；时段统计包含分析边界截断部分。"));
+            event_notice->setText(QStringLiteral(
+                "<a href=\"closest-approach\">定位全区间最近时刻</a> · 距离极值包含不可见时段"));
+            event_notice->show();
         }
         if (result->lighting_statistics) {
             const auto &s = *result->lighting_statistics;
@@ -1541,7 +1642,8 @@ struct ReportDialog::Impl {
                     (result->table.columns()[c].id == "object.id" ||
                      result->table.columns()[c].id == "lighting.start_clipped" ||
                      result->table.columns()[c].id == "lighting.stop_clipped" ||
-                     (result->definition.query.kind == ReportKind::access_intervals &&
+                     ((result->definition.query.kind == ReportKind::access_intervals ||
+                       result->definition.query.kind == ReportKind::intersatellite_access) &&
                       (result->table.columns()[c].id == "object.name" ||
                        result->table.columns()[c].id == "access.start_clipped" ||
                        result->table.columns()[c].id == "access.stop_clipped" ||
@@ -1745,7 +1847,8 @@ struct ReportDialog::Impl {
         const auto name_column = std::ranges::find(columns, "object.name", &results::Column::id);
         const bool sampled =
             report_is_sampled(r.definition.query.kind) &&
-            !report_uses_event_search(r.definition.query.kind) && id_column != columns.end() &&
+            !report_is_interval(r.definition.query.kind) &&
+            r.definition.query.kind != ReportKind::orbital_events && id_column != columns.end() &&
             name_column != columns.end() &&
             std::ranges::find(columns, "time.epoch", &results::Column::id) != columns.end() &&
             !r.table.rows().empty();
@@ -1800,6 +1903,8 @@ struct ReportDialog::Impl {
                 index = plot_field->findData("geodetic.height", Qt::UserRole + 1);
             if (index < 0 && r.definition.query.kind == ReportKind::aer)
                 index = plot_field->findData("aer.elevation", Qt::UserRole + 1);
+            if (index < 0 && r.definition.query.kind == ReportKind::relative_motion)
+                index = plot_field->findData("relative.range", Qt::UserRole + 1);
             plot_field->setCurrentIndex(std::max(0, index));
         }
         plot->set_result(model->result, static_cast<std::size_t>(plot_field->currentData().toInt()),
@@ -1953,7 +2058,7 @@ struct ReportDialog::Impl {
         }
         fill_library();
         refresh_scope();
-        if (report_is_access(draft.query.kind))
+        if (pair_report(draft.query.kind))
             fill_access_pair(true);
         update_interval();
         update_estimate();

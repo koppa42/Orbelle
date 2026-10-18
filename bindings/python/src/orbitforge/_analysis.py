@@ -563,7 +563,8 @@ class Analysis:
         """Generate a built-in report from this snapshot, with no file/data rereads.
 
         Select objects explicitly (reports.ALL for all compatible objects), or
-        station/target for AER and access reports. A template controls presentation.
+        station/target for AER and access reports. Intersatellite reports require
+        objects=[primary, target] and prepared EOP data. A template controls presentation.
         SCENARIO_SUMMARY needs no selection. Sampled reports require step. TAI is
         the default display scale; UTC requires data selected when preparing.
         """
@@ -595,6 +596,9 @@ class Analysis:
                     raise ValueError("Select at least one report object")
                 if len(selection) > 10000:
                     raise ValueError("Report selection exceeds 10000 objects")
+        if kind in (n.ReportKind.RELATIVE_MOTION, n.ReportKind.INTERSATELLITE_ACCESS):
+            if len(selection) != 2 or not all(isinstance(s, SatelliteHandle) for s in selection):
+                raise TypeError("Intersatellite reports require objects=[primary satellite, target satellite]")
         snapshot = self._native.snapshot
         ids = []
         for object in selection:
@@ -611,7 +615,8 @@ class Analysis:
         definition.query.object_ids = ids
         definition.query.frame = require(frame, n.FrameId, "frame")
         if event_search_mode is not None or boundary_tolerance is not None:
-            if kind not in (n.ReportKind.ACCESS_INTERVALS, n.ReportKind.LIGHTING_INTERVALS, n.ReportKind.ORBITAL_EVENTS):
+            if kind not in (n.ReportKind.ACCESS_INTERVALS, n.ReportKind.LIGHTING_INTERVALS, n.ReportKind.ORBITAL_EVENTS,
+                            n.ReportKind.RELATIVE_MOTION, n.ReportKind.INTERSATELLITE_ACCESS):
                 raise TypeError("Search mode and boundary tolerance are only used by event or interval reports")
             if event_search_mode is not None:
                 definition.query.event_search_mode = require(event_search_mode, n.AccessSearchMode, "event_search_mode")

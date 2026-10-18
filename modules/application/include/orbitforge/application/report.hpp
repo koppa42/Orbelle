@@ -20,22 +20,38 @@ enum class ReportKind {
     state_covariance,
     lighting_intervals,
     lighting_state,
-    orbital_events
+    orbital_events,
+    relative_motion,
+    intersatellite_access
 };
-inline constexpr std::array report_kinds{
-    ReportKind::scenario_summary, ReportKind::object_summary,     ReportKind::cartesian_state,
-    ReportKind::ground_stations,  ReportKind::classical_elements, ReportKind::geodetic_position,
-    ReportKind::orbital_motion,   ReportKind::access_intervals,   ReportKind::aer,
-    ReportKind::state_covariance, ReportKind::lighting_intervals, ReportKind::lighting_state,
-    ReportKind::orbital_events};
+inline constexpr std::array report_kinds{ReportKind::scenario_summary,
+                                         ReportKind::object_summary,
+                                         ReportKind::cartesian_state,
+                                         ReportKind::ground_stations,
+                                         ReportKind::classical_elements,
+                                         ReportKind::geodetic_position,
+                                         ReportKind::orbital_motion,
+                                         ReportKind::access_intervals,
+                                         ReportKind::aer,
+                                         ReportKind::state_covariance,
+                                         ReportKind::lighting_intervals,
+                                         ReportKind::lighting_state,
+                                         ReportKind::orbital_events,
+                                         ReportKind::relative_motion,
+                                         ReportKind::intersatellite_access};
+[[nodiscard]] constexpr bool report_is_intersatellite(ReportKind kind) {
+    return kind == ReportKind::relative_motion || kind == ReportKind::intersatellite_access;
+}
 [[nodiscard]] constexpr bool report_is_lighting(ReportKind kind) {
     return kind == ReportKind::lighting_intervals || kind == ReportKind::lighting_state;
 }
 [[nodiscard]] constexpr bool report_is_interval(ReportKind kind) {
-    return kind == ReportKind::access_intervals || kind == ReportKind::lighting_intervals;
+    return kind == ReportKind::access_intervals || kind == ReportKind::lighting_intervals ||
+           kind == ReportKind::intersatellite_access;
 }
 [[nodiscard]] constexpr bool report_uses_event_search(ReportKind kind) {
-    return report_is_interval(kind) || kind == ReportKind::orbital_events;
+    return report_is_interval(kind) || kind == ReportKind::orbital_events ||
+           report_is_intersatellite(kind);
 }
 [[nodiscard]] constexpr bool report_is_access(ReportKind kind) {
     return kind == ReportKind::access_intervals || kind == ReportKind::aer;
@@ -44,18 +60,20 @@ inline constexpr std::array report_kinds{
     return kind == ReportKind::cartesian_state || kind == ReportKind::classical_elements ||
            kind == ReportKind::geodetic_position || kind == ReportKind::orbital_motion ||
            report_is_access(kind) || kind == ReportKind::state_covariance ||
-           report_is_lighting(kind) || kind == ReportKind::orbital_events;
+           report_is_lighting(kind) || kind == ReportKind::orbital_events ||
+           report_is_intersatellite(kind);
 }
 [[nodiscard]] constexpr bool report_satellites_only(ReportKind kind) {
     return kind == ReportKind::classical_elements || kind == ReportKind::orbital_motion ||
            kind == ReportKind::state_covariance || report_is_lighting(kind) ||
-           kind == ReportKind::orbital_events;
+           kind == ReportKind::orbital_events || report_is_intersatellite(kind);
 }
 enum class ReportUnits { si, engineering };
 enum class ReportTimeScale { utc, tai, tt };
 enum class ReportScope { objects, all_compatible };
 // Object IDs are bindings, never display names. All-object selection is explicit.
 // Access/AER require exactly [ground station ID, satellite or sensor ID].
+// Intersatellite reports require [primary satellite ID, target satellite ID].
 struct ReportQuery {
     ReportKind kind = ReportKind::cartesian_state;
     ReportScope scope = ReportScope::objects;

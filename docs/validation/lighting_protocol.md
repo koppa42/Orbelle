@@ -24,7 +24,7 @@ ctest --test-dir out/build/desktop-graphics -C Release -R Lighting --output-on-f
 
 固定文件：`tests/reference/propagators/lighting_orekit.txt`，SHA-256 `bd574b6518b749120dd329bd55026d3605fa5fed8ee206ca74cf82dd2acf4ccc`。生成元数据包含 Java/高精度脚本和固定结果散列；例行 CI 读取固定值，无需 Java/mpmath 或联网。JUnit `maximum_reference_errors` 记录本次误差。
 
-此外验证无太阳资源、身份不匹配、覆盖不足、非法区间/步长、非有限几何、取消、快照不可变、多卫星统计、显示模板重用、CSV、v44 保存及 Python 独立安装。Qt 检查摘要、曲线、时刻跳转、失效对象和宽窄布局，并在 Windows 100%/150% DPI 保存实际截图。共用 SRP 改动须运行既有 SRP 数值与导数回归。
+此外验证无太阳资源、身份不匹配、覆盖不足、非法区间/步长、非有限几何、取消、快照不可变、多卫星统计、显示模板重用、CSV、v45 保存及 Python 独立安装。Qt 检查摘要、曲线、时刻跳转、失效对象和宽窄布局，并在 Windows 100%/150% DPI 保存实际截图。共用 SRP 改动须运行既有 SRP 数值与导数回归。
 
 ## 限制与来源
 
