@@ -140,9 +140,10 @@ TEST(Lighting, IntervalsFractionsAndStatisticsMatchIndependentOrekit) {
                           core::lighting_phase_name(static_cast<core::LightingPhase>(phase)));
                 EXPECT_EQ(std::get<std::int64_t>(row[6]), static_cast<int>(r[3]));
                 EXPECT_EQ(std::get<std::int64_t>(row[7]), static_cast<int>(r[4]));
-                if (i)
+                if (i) {
                     EXPECT_EQ(std::get<core::Epoch>(row[2]),
                               std::get<core::Epoch>(result.table.rows()[i - 1][3]));
+                }
                 const auto duration = r[1] - r[0];
                 auto &s = expected[phase];
                 ++s.count;
