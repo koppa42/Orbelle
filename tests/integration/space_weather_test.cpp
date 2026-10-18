@@ -576,7 +576,11 @@ TEST_F(WeatherFiles, InterpolatedTrajectoriesConvergeAndSurviveProjectReopen) {
     }
 }
 
-TEST_F(WeatherFiles, HpopEphemerisSplitsTheLeapSecondWeatherJumpInBothDirections) {
+// Separate processes let CTest schedule the five integrators independently. Each
+// process still exercises both directions, formulations and regularization modes.
+class WeatherEphemeris : public WeatherFiles,
+                         public ::testing::WithParamInterface<HpopIntegrator> {};
+TEST_P(WeatherEphemeris, HpopEphemerisSplitsTheLeapSecondWeatherJumpInBothDirections) {
     if (!runtime::time_frames_available() || !runtime::ephemeris_available()) {
         GTEST_SKIP();
     }
@@ -596,100 +600,98 @@ TEST_F(WeatherFiles, HpopEphemerisSplitsTheLeapSecondWeatherJumpInBothDirections
     const auto boundary = data.time()->from_utc({2017, 1, 1, 0, 0, 0, 0});
     const auto last = data.time()->from_utc({2017, 1, 1, 0, 10, 0, 0});
     EXPECT_DOUBLE_EQ(boundary.seconds_since(first), 601);
-    for (bool regularized : {false, true}) {
-        SCOPED_TRACE(regularized);
-        for (auto integrator : {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
-                                HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
-            for (bool vop : {false, true}) {
-                SCOPED_TRACE(vop);
+    const std::array epochs{core::Epoch{boundary.tai_nanoseconds() - 1}, boundary,
+                            core::Epoch{boundary.tai_nanoseconds() + 1}};
+    const core::Epoch short_first{boundary.tai_nanoseconds() - 3'000'000'000},
+        short_last{boundary.tai_nanoseconds() + 3'000'000'000};
+    const auto integrator = GetParam();
+    for (bool vop : {false, true}) {
+        SCOPED_TRACE(vop);
+        for (bool reverse : {false, true}) {
+            SCOPED_TRACE(reverse);
+            application::OrbitInput input;
+            input.propagator = application::OrbitPropagator::hpop;
+            input.initial = {reverse ? last : first,
+                             core::OriginId::earth,
+                             core::FrameId::gcrf,
+                             {6778137, 0, 0},
+                             {0, 6300, 4300}};
+            input.hpop.gravity_degree = input.hpop.gravity_order = 0;
+            input.hpop.integrator = integrator;
+            input.hpop.vop = vop;
+            input.hpop.steps_per_orbit = 8192;
+            input.hpop.fixed_step_seconds = integrator == HpopIntegrator::rk4 ? 2 : 10;
+            input.hpop.drag.enabled = true;
+            input.hpop.drag.atmosphere = Model::nrlmsise00;
+            input.hpop.drag.weather_model = "celestrak";
+            input.hpop.drag.geomagnetic_update = Update::three_hourly;
+            input.hpop.drag.geomagnetic_source = Source::ap;
+            const auto env = data.force_environment(input);
+            const auto end = reverse ? first : last;
 
-                SCOPED_TRACE(static_cast<int>(integrator));
-                for (bool reverse : {false, true}) {
-                    application::OrbitInput input;
-                    input.propagator = application::OrbitPropagator::hpop;
-                    input.initial = {reverse ? last : first,
-                                     core::OriginId::earth,
-                                     core::FrameId::gcrf,
-                                     {6778137, 0, 0},
-                                     {0, 6300, 4300}};
-                    input.hpop.gravity_degree = input.hpop.gravity_order = 0;
-                    input.hpop.integrator = integrator;
-                    input.hpop.vop = vop;
-                    input.hpop.time_regularization = regularized;
-                    input.hpop.steps_per_orbit = 8192;
-                    input.hpop.fixed_step_seconds = integrator == HpopIntegrator::rk4 ? 2 : 10;
-                    input.hpop.drag.enabled = true;
-                    input.hpop.drag.atmosphere = Model::nrlmsise00;
-                    input.hpop.drag.weather_model = "celestrak";
-                    input.hpop.drag.geomagnetic_update = Update::three_hourly;
-                    input.hpop.drag.geomagnetic_source = Source::ap;
-                    const auto env = data.force_environment(input);
-                    const auto end = reverse ? first : last;
-                    for (auto report : {0LL, 37'000'000'000LL}) {
-                        const auto arcs = core::propagate_hpop_ephemeris(input.initial, end,
-                                                                         input.hpop, env, report);
-                        ASSERT_EQ(arcs.size(), 2U);
-                        EXPECT_EQ(arcs[0].front().epoch, first);
-                        EXPECT_EQ(arcs[1].back().epoch, last);
-                        EXPECT_EQ(arcs[0].back().epoch, boundary);
-                        EXPECT_EQ(arcs[1].front().epoch, boundary);
-                        EXPECT_EQ(arcs[0].back().position_m, arcs[1].front().position_m);
-                        EXPECT_EQ(arcs[0].back().velocity_mps, arcs[1].front().velocity_mps);
-                        const auto session = make_hpop_ephemeris_session(
-                            input.initial, end, input.hpop, env,
-                            {OrbitInterpolationMethod::hermite, 7}, report);
-                        EXPECT_EQ(session.discontinuities(), (std::vector<core::Epoch>{boundary}));
-                        auto fine = input.hpop;
-                        fine.time_regularization = false;
-                        fine.max_step_seconds = 7;
-                        fine.integrator = HpopIntegrator::rkv89;
-                        fine.step_control = HpopStepControl::relative_error;
-                        const auto reference = runtime::make_hpop_session(input.initial, fine, env);
-                        for (auto shift : {-1LL, 0LL, 1LL}) {
-                            const std::array epochs{
-                                core::Epoch{boundary.tai_nanoseconds() + shift}};
-                            const auto actual = session.sample(epochs).states()[0],
-                                       expected = reference.sample(epochs).states()[0];
-                            for (std::size_t axis = 0; axis < 3; ++axis) {
-                                EXPECT_NEAR(actual.position_m[axis], expected.position_m[axis],
-                                            .001);
-                                EXPECT_NEAR(actual.velocity_mps[axis], expected.velocity_mps[axis],
-                                            1e-6);
-                            }
+            // The direct reference does not use reporting/interpolation, and explicitly
+            // disables regularization. Evaluate the same three epochs once for all those
+            // variants; keep direction, VOP and all numerical settings unchanged.
+            auto fine = input.hpop;
+            fine.time_regularization = false;
+            fine.max_step_seconds = 7;
+            fine.integrator = HpopIntegrator::rkv89;
+            fine.step_control = HpopStepControl::relative_error;
+            const auto expected =
+                runtime::make_hpop_session(input.initial, fine, env).sample(epochs);
+            auto short_initial = input.initial;
+            short_initial.epoch = reverse ? short_last : short_first;
+            fine.max_step_seconds = .2;
+            fine.min_step_seconds = 1e-6;
+            const auto short_expected =
+                runtime::make_hpop_session(short_initial, fine, env).sample(epochs);
+
+            for (bool regularized : {false, true}) {
+                SCOPED_TRACE(regularized);
+                input.hpop.time_regularization = regularized;
+                for (auto report : {0LL, 37'000'000'000LL}) {
+                    SCOPED_TRACE(report);
+                    const auto arcs =
+                        core::propagate_hpop_ephemeris(input.initial, end, input.hpop, env, report);
+                    ASSERT_EQ(arcs.size(), 2U);
+                    EXPECT_EQ(arcs[0].front().epoch, first);
+                    EXPECT_EQ(arcs[1].back().epoch, last);
+                    EXPECT_EQ(arcs[0].back().epoch, boundary);
+                    EXPECT_EQ(arcs[1].front().epoch, boundary);
+                    EXPECT_EQ(arcs[0].back().position_m, arcs[1].front().position_m);
+                    EXPECT_EQ(arcs[0].back().velocity_mps, arcs[1].front().velocity_mps);
+                    const auto session =
+                        make_hpop_ephemeris_session(input.initial, end, input.hpop, env,
+                                                    {OrbitInterpolationMethod::hermite, 7}, report);
+                    EXPECT_EQ(session.discontinuities(), (std::vector<core::Epoch>{boundary}));
+                    for (std::size_t k = 0; k < epochs.size(); ++k) {
+                        const auto actual = session.sample(std::array{epochs[k]}).states()[0];
+                        for (std::size_t axis = 0; axis < 3; ++axis) {
+                            EXPECT_NEAR(actual.position_m[axis],
+                                        expected.states()[k].position_m[axis], .001);
+                            EXPECT_NEAR(actual.velocity_mps[axis],
+                                        expected.states()[k].velocity_mps[axis], 1e-6);
                         }
                     }
-                    // Force an interpolation stencil inside each three-second weather arc.
-                    // No support point may be borrowed from the opposite side of the jump.
-                    const core::Epoch short_first{boundary.tai_nanoseconds() - 3'000'000'000},
-                        short_last{boundary.tai_nanoseconds() + 3'000'000'000};
-                    auto short_initial = input.initial;
-                    short_initial.epoch = reverse ? short_last : short_first;
-                    auto fine = input.hpop;
-                    fine.time_regularization = false;
-                    fine.integrator = HpopIntegrator::rkv89;
-                    fine.step_control = HpopStepControl::relative_error;
-                    fine.max_step_seconds = .2;
-                    fine.min_step_seconds = 1e-6;
-                    const auto reference = runtime::make_hpop_session(short_initial, fine, env);
-                    for (auto method :
-                         {OrbitInterpolationMethod::lagrange, OrbitInterpolationMethod::hermite,
-                          OrbitInterpolationMethod::vop}) {
-                        auto options = input.hpop;
-                        options.interpolation = {method, 7};
-                        const auto session = make_hpop_interpolated_session(
-                            short_initial, short_first, short_last, options, env);
-                        EXPECT_EQ(session.discontinuities(), (std::vector<core::Epoch>{boundary}));
-                        for (auto shift : {-1LL, 0LL, 1LL}) {
-                            const std::array epochs{
-                                core::Epoch{boundary.tai_nanoseconds() + shift}};
-                            const auto actual = session.sample(epochs).states()[0],
-                                       expected = reference.sample(epochs).states()[0];
-                            for (std::size_t axis = 0; axis < 3; ++axis) {
-                                EXPECT_NEAR(actual.position_m[axis], expected.position_m[axis],
-                                            .001);
-                                EXPECT_NEAR(actual.velocity_mps[axis], expected.velocity_mps[axis],
-                                            1e-6);
-                            }
+                }
+                // Force an interpolation stencil inside each three-second weather arc.
+                // No support point may be borrowed from the opposite side of the jump.
+                for (auto method :
+                     {OrbitInterpolationMethod::lagrange, OrbitInterpolationMethod::hermite,
+                      OrbitInterpolationMethod::vop}) {
+                    SCOPED_TRACE(static_cast<int>(method));
+                    auto options = input.hpop;
+                    options.interpolation = {method, 7};
+                    const auto session = make_hpop_interpolated_session(short_initial, short_first,
+                                                                        short_last, options, env);
+                    EXPECT_EQ(session.discontinuities(), (std::vector<core::Epoch>{boundary}));
+                    for (std::size_t k = 0; k < epochs.size(); ++k) {
+                        const auto actual = session.sample(std::array{epochs[k]}).states()[0];
+                        for (std::size_t axis = 0; axis < 3; ++axis) {
+                            EXPECT_NEAR(actual.position_m[axis],
+                                        short_expected.states()[k].position_m[axis], .001);
+                            EXPECT_NEAR(actual.velocity_mps[axis],
+                                        short_expected.states()[k].velocity_mps[axis], 1e-6);
                         }
                     }
                 }
@@ -697,6 +699,25 @@ TEST_F(WeatherFiles, HpopEphemerisSplitsTheLeapSecondWeatherJumpInBothDirections
         }
     }
 }
+INSTANTIATE_TEST_SUITE_P(AllIntegrators, WeatherEphemeris,
+                         ::testing::Values(HpopIntegrator::rk4, HpopIntegrator::rkf78,
+                                           HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer,
+                                           HpopIntegrator::gauss_jackson),
+                         [](const ::testing::TestParamInfo<HpopIntegrator> &info) {
+                             switch (info.param) {
+                             case HpopIntegrator::rk4:
+                                 return "RK4";
+                             case HpopIntegrator::rkf78:
+                                 return "RKF78";
+                             case HpopIntegrator::rkv89:
+                                 return "RKV89";
+                             case HpopIntegrator::bulirsch_stoer:
+                                 return "BulirschStoer";
+                             case HpopIntegrator::gauss_jackson:
+                                 return "GaussJackson";
+                             }
+                             return "Unknown";
+                         });
 
 TEST_F(WeatherFiles, VariationalStatesComposeContinuouslyAcrossTheLeapWeatherJump) {
     if (!runtime::time_frames_available() || !runtime::ephemeris_available())

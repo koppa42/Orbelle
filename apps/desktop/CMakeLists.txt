@@ -50,6 +50,8 @@ if(ORBITFORGE_WITH_VSG)
         ORBITFORGE_DESKTOP_GRAPHICS
         ORBITFORGE_ROCKY_VERSION="${rocky_VERSION}"
         ORBITFORGE_VSGQT_VERSION="${vsgQt_VERSION}")
+    # Serialize desktop interaction/timing tests while numerical tests run alongside them.
+    # A resource lock leaves the other CTest slots available (unlike RUN_SERIAL).
     if(BUILD_TESTING)
         add_executable(orbitforge_object_selection_tests tests/object_selection_test.cpp
             src/viewer/object_selection.cpp src/viewer/object_selection.hpp src/viewer/workbench_style.cpp)
@@ -61,7 +63,7 @@ if(ORBITFORGE_WITH_VSG)
         orbitforge_warnings(orbitforge_object_selection_tests)
         orbitforge_copy_runtime_dlls(orbitforge_object_selection_tests)
         gtest_discover_tests(orbitforge_object_selection_tests DISCOVERY_MODE PRE_TEST
-            TEST_PREFIX "desktop." PROPERTIES TIMEOUT 20
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbitforge_desktop_tests TIMEOUT 20
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbitforge_welcome_tests tests/welcome_page_test.cpp
@@ -72,7 +74,7 @@ if(ORBITFORGE_WITH_VSG)
         orbitforge_warnings(orbitforge_welcome_tests)
         orbitforge_copy_runtime_dlls(orbitforge_welcome_tests)
         gtest_discover_tests(orbitforge_welcome_tests DISCOVERY_MODE PRE_TEST
-            TEST_PREFIX "desktop." PROPERTIES TIMEOUT 10
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbitforge_desktop_tests TIMEOUT 10
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbitforge_data_center_tests tests/data_center_test.cpp src/viewer/eop_catalog.cpp)
@@ -84,7 +86,7 @@ if(ORBITFORGE_WITH_VSG)
         target_link_libraries(orbitforge_data_center_tests PRIVATE OrbitForge::Runtime Qt6::Network GTest::gtest_main)
         orbitforge_warnings(orbitforge_data_center_tests)
         orbitforge_copy_runtime_dlls(orbitforge_data_center_tests)
-        gtest_discover_tests(orbitforge_data_center_tests DISCOVERY_MODE PRE_TEST TEST_PREFIX "desktop." PROPERTIES TIMEOUT 30)
+        gtest_discover_tests(orbitforge_data_center_tests DISCOVERY_MODE PRE_TEST TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbitforge_desktop_tests TIMEOUT 30)
         add_executable(orbitforge_data_center_ui_tests tests/data_center_dialog_test.cpp
             src/viewer/eop_catalog.cpp src/viewer/data_center_dialog.cpp src/viewer/workbench_style.cpp
             src/viewer/initial_data_setup.cpp)
@@ -100,7 +102,7 @@ if(ORBITFORGE_WITH_VSG)
         orbitforge_warnings(orbitforge_data_center_ui_tests)
         orbitforge_copy_runtime_dlls(orbitforge_data_center_ui_tests)
         gtest_discover_tests(orbitforge_data_center_ui_tests DISCOVERY_MODE PRE_TEST
-            TEST_PREFIX "desktop." PROPERTIES TIMEOUT 20
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbitforge_desktop_tests TIMEOUT 20
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
     endif()
@@ -114,7 +116,7 @@ if(ORBITFORGE_WITH_VSG)
         orbitforge_copy_runtime_dlls(orbitforge_orbit_scene_tests)
         # Discover after the build: Windows cold starts can exceed 5 s under compiler load.
         gtest_discover_tests(orbitforge_orbit_scene_tests DISCOVERY_MODE PRE_TEST
-            DISCOVERY_TIMEOUT 30 TEST_PREFIX "desktop." PROPERTIES TIMEOUT 60)
+            DISCOVERY_TIMEOUT 30 TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbitforge_desktop_tests TIMEOUT 60)
         add_executable(orbitforge_quantity_tests tests/quantity_editor_test.cpp
             src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
             src/viewer/ground_station_editor.cpp src/viewer/sensor_editor.cpp
@@ -131,7 +133,7 @@ if(ORBITFORGE_WITH_VSG)
         orbitforge_warnings(orbitforge_quantity_tests)
         orbitforge_copy_runtime_dlls(orbitforge_quantity_tests)
         gtest_discover_tests(orbitforge_quantity_tests DISCOVERY_MODE PRE_TEST
-            TEST_PREFIX "desktop." PROPERTIES TIMEOUT 10
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbitforge_desktop_tests TIMEOUT 10
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
     endif()
@@ -148,7 +150,7 @@ if(ORBITFORGE_WITH_VSG)
         orbitforge_warnings(orbitforge_report_ui_tests)
         orbitforge_copy_runtime_dlls(orbitforge_report_ui_tests)
         gtest_discover_tests(orbitforge_report_ui_tests DISCOVERY_MODE PRE_TEST
-            TEST_PREFIX "desktop." PROPERTIES TIMEOUT 20
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbitforge_desktop_tests TIMEOUT 20
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbitforge_ground_map_tests tests/ground_map_test.cpp
@@ -158,7 +160,7 @@ if(ORBITFORGE_WITH_VSG)
         orbitforge_warnings(orbitforge_ground_map_tests)
         orbitforge_copy_runtime_dlls(orbitforge_ground_map_tests)
         gtest_discover_tests(orbitforge_ground_map_tests DISCOVERY_MODE PRE_TEST
-            TEST_PREFIX "desktop." PROPERTIES TIMEOUT 10
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbitforge_desktop_tests TIMEOUT 10
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbitforge_timeline_tests tests/timeline_test.cpp
@@ -169,7 +171,7 @@ if(ORBITFORGE_WITH_VSG)
         orbitforge_warnings(orbitforge_timeline_tests)
         orbitforge_copy_runtime_dlls(orbitforge_timeline_tests)
         gtest_discover_tests(orbitforge_timeline_tests DISCOVERY_MODE PRE_TEST
-            TEST_PREFIX "desktop." PROPERTIES TIMEOUT 10
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbitforge_desktop_tests TIMEOUT 10
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
     endif()

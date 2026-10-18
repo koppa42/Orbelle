@@ -24,7 +24,7 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--test-dependencies", type=Path)
     parser.add_argument("--version", required=True)
-    parser.add_argument("--generator", default="Visual Studio 17 2022")
+    parser.add_argument("--generator", default=os.environ.get("CMAKE_GENERATOR", "Visual Studio 17 2022"))
     args = parser.parse_args()
     if args.release != bool(args.output):
         parser.error("--release and --output must be supplied together")
@@ -37,8 +37,15 @@ def main():
     output = args.output.resolve() if args.output else None
     for path in (work, reports) + ((output,) if output else ()):
         path.mkdir(parents=True, exist_ok=False)
+    if args.generator != "Ninja Multi-Config" and not args.generator.startswith("Visual Studio "):
+        parser.error("Use a Visual Studio or Ninja Multi-Config generator (Release output layout)")
+    architecture = ["-A", "x64"] if args.generator.startswith("Visual Studio ") else []
     environment = dict(os.environ, CMAKE_PREFIX_PATH=str(prefix), CMAKE_GENERATOR=args.generator,
-                       CMAKE_GENERATOR_PLATFORM="x64", PYTHONDONTWRITEBYTECODE="1")
+                       PYTHONDONTWRITEBYTECODE="1")
+    if architecture:
+        environment["CMAKE_GENERATOR_PLATFORM"] = "x64"
+    else:
+        environment.pop("CMAKE_GENERATOR_PLATFORM", None)
     environment["PATH"] = str(prefix / "bin") + os.pathsep + environment["PATH"]
     for key in ("PYTHONPATH", "PYTHONHOME", "QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH"):
         environment.pop(key, None)
@@ -61,7 +68,8 @@ def main():
 
     desktop = work / "desktop"
     run("desktop-configure", "cmake", "--preset", "desktop-graphics", "-S", source, "-B", desktop,
-        "-G", args.generator, "-A", "x64", f"-DCMAKE_PREFIX_PATH={prefix}")
+        "-G", args.generator, *architecture, f"-DCMAKE_PREFIX_PATH={prefix}",
+        "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
     run("desktop-build", "cmake", "--build", desktop, "--config", "Release")
     run("desktop-tests", "ctest", "--test-dir", desktop, "-C", "Release", "--output-on-failure",
         "--no-tests=error", "--output-junit", reports / "desktop-tests.xml")
@@ -97,7 +105,8 @@ def main():
     wheel_build = work / "wheel-build"
     run("wheel-build", builder, "-m", "pip", "wheel", wheel_source, "--no-deps", "--no-build-isolation",
         "--no-index", "--wheel-dir", output, f"--config-settings=build-dir={wheel_build}",
-        "--config-settings=cmake.define.ORBITFORGE_INSTALL_SDK=ON")
+        "--config-settings=cmake.define.ORBITFORGE_INSTALL_SDK=ON",
+        "--config-settings=cmake.define.CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
     sdk = work / "sdk"
     run("sdk-install", "cmake", "--install", wheel_build, "--config", "Release", "--component", "SDK",
         "--prefix", sdk)
@@ -117,8 +126,9 @@ def main():
     sdk_environment = dict(clean, PATH=str(installed / "dependencies/bin") + os.pathsep + clean["PATH"])
     stage_validation_inputs(source, relocated)
     run("sdk-consumer-configure", "cmake", "-S", relocated / "tests/packaging/sdk_consumer",
-        "-B", work / "sdk-consumer", "-G", args.generator, "-A", "x64",
+        "-B", work / "sdk-consumer", "-G", args.generator, *architecture,
         f"-DCMAKE_PREFIX_PATH={installed};{installed / 'dependencies'}",
+        "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>",
         "-DORBITFORGE_EXPECT_TIME_FRAMES=ON", "-DORBITFORGE_EXPECT_SPICE=ON",
         f"-DORBITFORGE_EOP_MANIFEST={installed / 'share/OrbitForge/data/eop/iers_c04_2016_12_28_2017_01_04/manifest.json'}",
         f"-DORBITFORGE_SPICE_MANIFEST={installed / 'share/OrbitForge/data/spice/de440s_2016_leap/manifest.json'}",

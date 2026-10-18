@@ -39,7 +39,10 @@ def main():
         environment.pop(name, None)
     if os.name == "nt":
         environment.setdefault("CMAKE_GENERATOR", "Visual Studio 17 2022")
-        environment["CMAKE_GENERATOR_PLATFORM"] = "x64"
+        if environment["CMAKE_GENERATOR"].startswith("Visual Studio "):
+            environment["CMAKE_GENERATOR_PLATFORM"] = "x64"
+        else:
+            environment.pop("CMAKE_GENERATOR_PLATFORM", None)
     records = []
 
     def run(name, *command, env=None):
@@ -80,7 +83,9 @@ def main():
     run("consumer-venv", sys.executable, "-m", "venv", work / "consumer", env=clean)
     if args.release:
         run("wheel-build", builder, "-m", "pip", "wheel", source, "--no-deps", "--no-build-isolation",
-            "--no-index", "--wheel-dir", output, f"--config-settings=build-dir={work / 'build'}")
+            "--no-index", "--wheel-dir", output, f"--config-settings=build-dir={work / 'build'}",
+            *(["--config-settings=cmake.define.CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>"]
+              if os.name == "nt" else []))
         wheels = list(output.glob("orbitforge-*.whl"))
         tag = "cp" + python_version.replace(".", "")
         if len(wheels) != 1 or f"-{tag}-{tag}-" not in wheels[0].name:
@@ -94,6 +99,7 @@ def main():
         build = work / "build"
         run("python-configure", "cmake", "-S", source, "-B", build,
             "-DCMAKE_BUILD_TYPE=Release", f"-DPython_EXECUTABLE={builder}",
+            *(["-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>"] if os.name == "nt" else []),
             f"-Dpybind11_DIR={pybind_dir}", f"-DCMAKE_PREFIX_PATH={prefix}",
             *(f"-D{name}={value}" for name, value in definitions.items()))
         run("python-build", "cmake", "--build", build, "--config", "Release", "--target", "_native")

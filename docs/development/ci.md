@@ -21,7 +21,7 @@ ASan/UBSan 仅在 **Actions → Sanitizers → Run workflow** 中手动执行；
 
 PR、`main` 与发布安装验证通过 `tools/ci/validation_inputs.py` 整理相同的独立测试目录，包含 Python 测试、九个示例、SDK 消费端、固定参考值、项目文件样例及测试使用的 EOP / 闰秒 / SPICE 片段数据。测试目录保留相对路径，但不复制 Python 包源码或 C++ 实现；计算能力必须来自被测安装。普通 Python CI 也从此目录运行，提前发现发布验证输入遗漏。
 
-PR 的 `linux-python-dependencies` 和 `windows-python-dependencies` 仅供其他 Python 版本复用已编译依赖，内容不包括 OrbitForge 安装包。诊断日志另行保留。标签流程还传递 `linux-delivery`，供没有源码检出的新 runner 验证 SDK 和 wheel，然后整理发布附件。
+PR 的 `linux-python-dependencies` 和 `windows-python-dependencies` 由各平台独立的轻量依赖作业生成，仅供其他 Python 版本复用已编译的无界面依赖，内容不包括 OrbitForge 安装包。诊断日志另行保留。标签流程还传递 `linux-delivery`，供没有源码检出的新 runner 验证 SDK 和 wheel，然后整理发布附件。
 
 PR 使用 GitHub 默认的[模拟合并引用](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)运行。合并后在实际 `main` 提交上执行基准测试，同时更新可供后续 PR 使用的依赖缓存。多版本兼容性在合并前完成；目标分支变化时先更新 PR 并等待新的检查结果。若启用合并队列，需先接入 `merge_group` 事件。
 
@@ -41,11 +41,13 @@ GitHub 的 `main` 分支规则应要求通过 PR 合并、**CI passed** 成功�
 
 可审阅的服务器规则配置保存在 [main.json](../../.github/rulesets/main.json) 和 [version-tags.json](../../.github/rulesets/version-tags.json)。管理员在 GitHub 应用或更新对应规则集：`main` 必须走 PR，必需的 `CI passed` 限定由 GitHub Actions 提供，合并前要求与目标分支保持最新；`v*` 标签允许新建，但禁止修改和删除。两套规则均不配置绕过名单。规则文件的修改也走 PR，文件本身不会自动调用管理 API。
 
-Linux 和 Windows 原生作业在前置工具检查通过后并行执行；各平台的 Python 矩阵只等待本平台的原生作业，通过同一份可复用工作流执行。`CI passed` 检查两平台及相应 Python 测试。手动 `Sanitizers` 使用独立工作流和检查名称，其结果不能替代 PR 必需的 `CI passed`。
+Linux 和 Windows 原生作业与两平台的 Python 依赖准备在前置工具检查通过后同时启动。Python 矩阵只等待本平台的轻量依赖包，不再等待原生编译、HPOP 回归或基准 Python；依赖准备按固定 vcpkg 基线恢复或构建 ERFA、CSPICE、SQLite 等无界面依赖，每个平台只准备一次，通过同一份可复用工作流供各解释器使用。`CI passed` 检查两平台及相应 Python 测试。手动 `Sanitizers` 使用独立工作流和检查名称，其结果不能替代 PR 必需的 `CI passed`。
 
 actionlint 在原生构建前运行，固定工具版本与 SHA-256，检查所有工作流及其 shell 脚本。更新版本时同步核验上游发布文件和校验值。
 
 ## 缓存与耗时
+
+项目 C/C++ 编译使用固定版本的 [sccache](https://github.com/mozilla/sccache) 和 GitHub Actions 缓存；每次仍重新配置、链接并执行全部测试，只复用编译器、参数和源文件内容匹配的编译结果，不缓存测试结果或整个构建目录。Windows 使用 MSVC 2022 x64 与 Ninja Multi-Config，保留 `Release` 输出布局；Linux 使用 Ninja。原生构建与各 Python 扩展构建都启用编译缓存，任务结束记录命中、未命中及不可缓存统计。首次运行主要建立缓存，后续效果以实际命中率和阶段耗时为准。
 
 依赖使用仓库固定的 vcpkg 基线与 overlay，并缓存编译结果。Windows CI 使用专用的 `x64-windows-release` triplet，固定 v143 工具链，只构建实际用于测试和发布的 Release 依赖。本地默认 triplet 不变。首次 Windows 构建需要从源码编译 Qt、VSG、Rocky、GDAL 等依赖，耗时会明显长于后续运行；即使后续依赖失败，已完成的包也会保存到部分缓存，供下次继续使用。缓存区分 runner 镜像和依赖配置，vcpkg 另按编译器及包 ABI 校验是否可复用。这里的 Release 是编译配置，不代表生成或发布安装包。失败诊断保留 14 天，跨作业依赖和标签发布产物保留 7 天。
 
@@ -54,6 +56,10 @@ GitHub 将 PR 生成的缓存限制在该 PR 的合并引用中，其他 PR 和 
 排查耗时时先区分依赖安装、项目编译、测试和标签流程的打包。查看缓存是否命中、vcpkg 恢复了多少包、哪些包重新编译；不要用减少 Python 支持版本或跳过行为测试来掩盖依赖冷启动问题。取消日常发布包构建可以减少重复工作，但不会消除测试所需的编译。
 
 完整 Release 数值回归及手动 ASan/UBSan 都执行预设中的全量用例，保留原算法、参考数据、断言与精度容限；新增测试自动纳入。两者使用 `--no-tests=error` 拒绝空测试运行。
+
+常规 CI 通过 `CTEST_PARALLEL_LEVEL=4` 在每个平台内最多并行四个测试进程，不新增分片作业或测试筛选。桌面测试共享 `orbitforge_desktop_tests` 资源锁，彼此串行，仍可与数值测试并行；手动 sanitizer 保持原并发设置。CSPICE 的进程内状态不会跨 CTest 进程共享；测试只读固定参考数据，写入各自的临时目录或具名 fixture 子目录。不要同时启动多个 CTest 操作同一个构建目录。
+
+天气跳变的 HPOP 星历回归按五种积分器参数化，仍覆盖正反向、Cowell/VOP、时间正则化开关、两种报告步长、三种插值方式及跳变前后 1 ns 和边界本身。相同配置的直接 RKV89 参考结果在每个方向和表示方式内复用；两条被测星历生成入口仍分别执行。时间范围、步长、输入、参考算法和 1 mm / 1e-6 m/s 门槛不变。其他长时天气收敛用例中的重新打开、冻结数据和新数据计算是不同的行为验证，继续保留。
 
 `linux-sanitizer-reports` 保存手动检查的环境、命令耗时、构建配置和 JUnit；普通 Linux 报告保存在 `linux-build-reports`。原生 Linux 上限 180 分钟，sanitizer 上限 360 分钟，以实际命令记录评估耗时；不在同一构建目录中并发运行有共享文件的测试。
 

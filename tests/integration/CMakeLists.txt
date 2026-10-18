@@ -25,6 +25,7 @@ if(ORBITFORGE_BUILD_VISUALIZATION)
 endif()
 orbitforge_warnings(orbitforge_integration_tests)
 orbitforge_copy_runtime_dlls(orbitforge_integration_tests)
-gtest_discover_tests(orbitforge_integration_tests DISCOVERY_MODE PRE_TEST TEST_PREFIX "integration.")
+gtest_discover_tests(orbitforge_integration_tests DISCOVERY_MODE PRE_TEST
+    NO_PRETTY_VALUES TEST_PREFIX "integration.")
 
 target_include_directories(orbitforge_integration_tests PRIVATE "${PROJECT_SOURCE_DIR}/tests/support")
