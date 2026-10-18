@@ -1,5 +1,8 @@
+#include <algorithm>
+#include <orbitforge/core/propagation/hpop_covariance.hpp>
 #include <orbitforge/runtime/analysis.hpp>
 #include <orbitforge/runtime/data_catalog.hpp>
+#include <orbitforge/runtime/hpop.hpp>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl/filesystem.h>
@@ -31,6 +34,15 @@ std::function<void(std::size_t, std::size_t)> progress_callback(const py::object
         callback(current, total);
     };
 }
+application::OrbitInput variational_resources(application::OrbitInput input,
+                                              const core::HpopVariationalOptions &options) {
+    // Covariance gravity may activate tide resources absent from a nominal 0/0 field.
+    if (options.gravity) {
+        input.hpop.gravity_degree = std::max(input.hpop.gravity_degree, options.gravity->degree);
+        input.hpop.gravity_order = std::max(input.hpop.gravity_order, options.gravity->order);
+    }
+    return input;
+}
 } // namespace
 void bind_analysis(py::module_ &module) {
     module.attr("MAX_ANALYSIS_SAMPLES") = runtime::max_analysis_samples;
@@ -48,6 +60,14 @@ void bind_analysis(py::module_ &module) {
     py::class_<runtime::DataSnapshot>(module, "DataSnapshot")
         .def(py::init<>())
         .def_property_readonly("selection_notes", &runtime::DataSnapshot::selection_notes)
+        .def("with_space_weather", &runtime::DataSnapshot::with_space_weather_file,
+             py::arg("model"), py::arg("file"), py::call_guard<py::gil_scoped_release>())
+        .def("with_ocean_tides", &runtime::DataSnapshot::with_ocean_tide_file, py::arg("model"),
+             py::arg("file"), py::call_guard<py::gil_scoped_release>())
+        .def("with_gravity", &runtime::DataSnapshot::with_gravity_file, py::arg("model"),
+             py::arg("file"), py::call_guard<py::gil_scoped_release>())
+        .def("with_ephemeris", &runtime::DataSnapshot::with_ephemeris_file, py::arg("model"),
+             py::arg("manifest"), py::arg("workspace"), py::call_guard<py::gil_scoped_release>())
         .def_static("builtin_time", &runtime::DataSnapshot::builtin_time,
                     py::call_guard<py::gil_scoped_release>())
         .def_static("load", &runtime::DataSnapshot::load, py::kw_only(),
@@ -166,6 +186,15 @@ void bind_analysis(py::module_ &module) {
         .def("__len__", [](const results::ManeuverSeries &value) { return value.events().size(); });
     py::class_<runtime::Analysis>(module, "Analysis")
         .def(
+            "covariance",
+            [](runtime::Analysis analysis, application::ObjectRef ref, core::Epoch at,
+               const py::object &cancelled) {
+                const auto check = cancellation(cancelled);
+                py::gil_scoped_release release;
+                return analysis.covariance(ref, at, check);
+            },
+            py::arg("satellite"), py::arg("at"), py::arg("cancelled") = py::none())
+        .def(
             "maneuvers",
             [](const runtime::Analysis &analysis, const application::ObjectRef &ref,
                const py::object &cancelled) {
@@ -276,4 +305,187 @@ void bind_analysis(py::module_ &module) {
                                py::return_value_policy::copy)
         .def("prepare", &runtime::AnalysisPlan::prepare, py::arg("accept_data_changes") = false,
              py::call_guard<py::gil_scoped_release>());
+    py::class_<core::HpopGravityTruncation>(module, "HpopGravityTruncation")
+        .def(py::init<>())
+        .def(py::init<int, int>(), py::arg("degree"), py::arg("order"))
+        .def_readwrite("degree", &core::HpopGravityTruncation::degree)
+        .def_readwrite("order", &core::HpopGravityTruncation::order);
+    py::class_<core::HpopVariationalOptions>(module, "HpopVariationalOptions")
+        .def(py::init<>())
+        .def_readwrite("gravity", &core::HpopVariationalOptions::gravity)
+        .def_readwrite("absolute_tolerance", &core::HpopVariationalOptions::absolute_tolerance);
+    py::class_<core::HpopVariationalState>(module, "HpopVariationalState")
+        .def_property_readonly("state", [](const core::HpopVariationalState &v) { return v.state; })
+        .def_readonly("state_transition", &core::HpopVariationalState::state_transition)
+        .def_readonly("drag_sensitivity", &core::HpopVariationalState::drag_sensitivity)
+        .def_readonly("srp_sensitivity", &core::HpopVariationalState::srp_sensitivity);
+    module.def(
+        "propagate_hpop_variational",
+        [](application::OrbitInput input, core::Epoch end, core::HpopVariationalOptions options,
+           runtime::DataSnapshot data, py::object callback) {
+            if (input.propagator != application::OrbitPropagator::hpop)
+                throw std::invalid_argument("Variational propagation requires one HPOP coast");
+            const auto cancelled = cancellation(callback);
+            py::gil_scoped_release release;
+            return core::propagate_hpop_variational(
+                input.initial, end, input.hpop,
+                data.force_environment(variational_resources(input, options)), options, [&] {
+                    if (cancelled && cancelled())
+                        throw runtime::AnalysisCancelled{};
+                });
+        },
+        py::arg("input"), py::arg("end"), py::kw_only(),
+        py::arg("options") = core::HpopVariationalOptions{},
+        py::arg("data") = runtime::DataSnapshot{}, py::arg("cancelled") = py::none());
+    py::enum_<core::HpopCovarianceFrame>(module, "HpopCovarianceFrame")
+        .value("GCRF", core::HpopCovarianceFrame::gcrf)
+        .value("LVLH", core::HpopCovarianceFrame::lvlh)
+        .value("FRENET", core::HpopCovarianceFrame::frenet)
+        .value("FK5_J2000", core::HpopCovarianceFrame::fk5_j2000)
+        .value("TRUE_OF_DATE", core::HpopCovarianceFrame::true_of_date);
+    py::enum_<core::HpopCovarianceVelocity>(module, "HpopCovarianceVelocity")
+        .value("PROJECTED", core::HpopCovarianceVelocity::projected)
+        .value("ROTATING", core::HpopCovarianceVelocity::rotating);
+    py::class_<core::HpopCovarianceCoordinates>(module, "HpopCovarianceCoordinates")
+        .def(py::init<>())
+        .def(py::init<core::HpopCovarianceFrame, core::HpopCovarianceVelocity>(), py::arg("frame"),
+             py::arg("velocity"))
+        .def_readwrite("frame", &core::HpopCovarianceCoordinates::frame)
+        .def_readwrite("velocity", &core::HpopCovarianceCoordinates::velocity);
+    module.def(
+        "hpop_covariance_frame_jacobian",
+        [](core::CartesianState reference, core::HpopCovarianceCoordinates source,
+           core::HpopCovarianceCoordinates target,
+           std::optional<std::array<double, 3>> acceleration, runtime::DataSnapshot data) {
+            py::gil_scoped_release release;
+            return core::hpop_covariance_frame_jacobian(reference, source, target, acceleration,
+                                                        {data.frames(), data.eop()});
+        },
+        py::arg("reference"), py::arg("source"), py::arg("target"), py::kw_only(),
+        py::arg("acceleration_mps2") = py::none(), py::arg("data") = runtime::DataSnapshot{});
+    py::class_<core::HpopConsiderParameter>(module, "HpopConsiderParameter")
+        .def(py::init<>())
+        .def_readwrite("variance", &core::HpopConsiderParameter::variance)
+        .def_readwrite("state_cross_covariance",
+                       &core::HpopConsiderParameter::state_cross_covariance);
+    py::class_<core::HpopCovarianceInput>(module, "HpopCovarianceInput")
+        .def(py::init<>())
+        .def_readwrite("state", &core::HpopCovarianceInput::state)
+        .def_readwrite("coordinates", &core::HpopCovarianceInput::coordinates)
+        .def_readwrite("drag", &core::HpopCovarianceInput::drag)
+        .def_readwrite("srp", &core::HpopCovarianceInput::srp)
+        .def_readwrite("drag_srp_covariance", &core::HpopCovarianceInput::drag_srp_covariance);
+    py::class_<core::HpopCovarianceContributions>(module, "HpopCovarianceContributions")
+        .def_readonly("initial_state", &core::HpopCovarianceContributions::initial_state)
+        .def_readonly("consider_parameters",
+                      &core::HpopCovarianceContributions::consider_parameters)
+        .def_readonly("state_parameter_cross",
+                      &core::HpopCovarianceContributions::state_parameter_cross);
+    py::class_<core::HpopCovarianceState>(module, "HpopCovarianceState")
+        .def_property_readonly("variational",
+                               [](const core::HpopCovarianceState &s) { return s.variational; })
+        .def_property_readonly("covariance",
+                               [](const core::HpopCovarianceState &s) { return s.covariance; })
+        .def_property_readonly("contributions",
+                               [](const core::HpopCovarianceState &s) { return s.contributions; });
+    py::class_<application::HpopCovarianceSettings>(module, "HpopCovarianceSettings")
+        .def(py::init<>())
+        .def_readwrite("enabled", &application::HpopCovarianceSettings::enabled)
+        .def_readwrite("state", &application::HpopCovarianceSettings::state)
+        .def_readwrite("coordinates", &application::HpopCovarianceSettings::coordinates)
+        .def_readwrite("independent_gravity",
+                       &application::HpopCovarianceSettings::independent_gravity)
+        .def_readwrite("gravity", &application::HpopCovarianceSettings::gravity)
+        .def_readwrite("absolute_tolerance",
+                       &application::HpopCovarianceSettings::absolute_tolerance)
+        .def_readwrite("consider_analysis", &application::HpopCovarianceSettings::consider_analysis)
+        .def_readwrite("drag_enabled", &application::HpopCovarianceSettings::drag_enabled)
+        .def_readwrite("srp_enabled", &application::HpopCovarianceSettings::srp_enabled)
+        .def_readwrite("drag", &application::HpopCovarianceSettings::drag)
+        .def_readwrite("srp", &application::HpopCovarianceSettings::srp)
+        .def_readwrite("consider_cross_correlation",
+                       &application::HpopCovarianceSettings::consider_cross_correlation)
+        .def_readwrite("drag_srp_covariance",
+                       &application::HpopCovarianceSettings::drag_srp_covariance)
+        .def("active_input", &application::HpopCovarianceSettings::active_input)
+        .def("variational_options", &application::HpopCovarianceSettings::variational_options)
+        .def("validate", &application::validate_hpop_covariance_settings,
+             py::arg("force") = core::HpopOptions{});
+    module.def("validate_hpop_covariance", &core::validate_hpop_covariance, py::arg("input"));
+    module.def(
+        "convert_hpop_covariance",
+        [](core::CartesianState reference, core::HpopCovarianceInput input,
+           core::HpopCovarianceCoordinates target,
+           std::optional<std::array<double, 3>> acceleration, runtime::DataSnapshot data) {
+            py::gil_scoped_release release;
+            return core::convert_hpop_covariance(reference, input, target, acceleration, {},
+                                                 {data.frames(), data.eop()});
+        },
+        py::arg("reference"), py::arg("input"), py::arg("target"), py::kw_only(),
+        py::arg("acceleration_mps2") = py::none(), py::arg("data") = runtime::DataSnapshot{});
+    module.def(
+        "transport_hpop_covariance",
+        [](core::HpopCovarianceInput input, core::HpopVariationalState state) {
+            py::gil_scoped_release release;
+            return core::transport_hpop_covariance(input, state);
+        },
+        py::arg("input"), py::arg("variational"));
+    module.def(
+        "propagate_hpop_covariance",
+        [](application::OrbitInput input, core::Epoch end, core::HpopCovarianceInput covariance,
+           core::HpopVariationalOptions options, runtime::DataSnapshot data, py::object callback) {
+            if (input.propagator != application::OrbitPropagator::hpop)
+                throw std::invalid_argument("Covariance propagation requires one HPOP coast");
+            const auto cancelled = cancellation(callback);
+            py::gil_scoped_release release;
+            const auto check = [&] {
+                if (cancelled && cancelled())
+                    throw runtime::AnalysisCancelled{};
+            };
+            check();
+            core::validate_hpop_covariance(covariance);
+            return core::propagate_hpop_covariance(
+                input.initial, end, covariance, input.hpop,
+                data.force_environment(variational_resources(input, options)), options, check);
+        },
+        py::arg("input"), py::arg("end"), py::arg("covariance"), py::kw_only(),
+        py::arg("options") = core::HpopVariationalOptions{},
+        py::arg("data") = runtime::DataSnapshot{}, py::arg("cancelled") = py::none());
+    module.def(
+        "propagate_hpop_ephemeris",
+        [](application::OrbitInput input, core::Epoch end, std::int64_t report_ns,
+           runtime::DataSnapshot data, py::object callback) {
+            if (input.propagator != application::OrbitPropagator::hpop)
+                throw std::invalid_argument(
+                    "Ephemeris generation requires one HPOP coast; split missions at impulses");
+            const auto cancelled = cancellation(callback);
+            py::gil_scoped_release release;
+            return core::propagate_hpop_ephemeris(input.initial, end, input.hpop,
+                                                  data.force_environment(input), report_ns, [&] {
+                                                      if (cancelled && cancelled())
+                                                          throw runtime::AnalysisCancelled{};
+                                                  });
+        },
+        py::arg("input"), py::arg("end"), py::kw_only(), py::arg("reporting_step_nanoseconds") = 0,
+        py::arg("data") = runtime::DataSnapshot{}, py::arg("cancelled") = py::none());
+    module.def(
+        "make_hpop_ephemeris_session",
+        [](application::OrbitInput input, core::Epoch end,
+           core::OrbitInterpolationOptions interpolation, std::int64_t report_ns,
+           runtime::DataSnapshot data, std::uint64_t revision, py::object callback) {
+            if (input.propagator != application::OrbitPropagator::hpop)
+                throw std::invalid_argument(
+                    "Ephemeris generation requires one HPOP coast; split missions at impulses");
+            const auto cancelled = cancellation(callback);
+            py::gil_scoped_release release;
+            return runtime::make_hpop_ephemeris_session(
+                input.initial, end, input.hpop, data.force_environment(input), interpolation,
+                report_ns, input.object_id, revision, [&] {
+                    if (cancelled && cancelled())
+                        throw runtime::AnalysisCancelled{};
+                });
+        },
+        py::arg("input"), py::arg("end"), py::arg("interpolation"), py::kw_only(),
+        py::arg("reporting_step_nanoseconds") = 0, py::arg("data") = runtime::DataSnapshot{},
+        py::arg("input_revision") = 1, py::arg("cancelled") = py::none());
 }

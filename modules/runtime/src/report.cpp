@@ -7,8 +7,12 @@
 #include <locale>
 #include <numbers>
 #include <orbitforge/runtime/access.hpp>
+#include <orbitforge/runtime/ephemeris.hpp>
+#include <orbitforge/runtime/gravity.hpp>
+#include <orbitforge/runtime/ocean_tides.hpp>
 #include <orbitforge/runtime/project.hpp>
 #include <orbitforge/runtime/report.hpp>
+#include <orbitforge/runtime/space_weather.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 #include <picosha2.h>
@@ -43,7 +47,8 @@ std::vector<Selection> select(const Project &project, const ReportDefinition &d)
     };
     if (d.query.kind != ReportKind::ground_stations)
         for (const auto &s : project.satellites)
-            if (wanted(s.orbit.object_id))
+            if ((d.query.kind != ReportKind::state_covariance || s.orbit.computes_covariance()) &&
+                wanted(s.orbit.object_id))
                 values.push_back({s.orbit.object_id, s.name(), "Satellite", nullptr, &s});
     if (!report_satellites_only(d.query.kind))
         for (const auto &s : project.ground_stations)
@@ -115,6 +120,12 @@ std::string unit(const ReportDefinition &d, std::string value) {
             return "km/s";
         if (value == "rad")
             return "deg";
+        if (value == "m^2")
+            return "km^2";
+        if (value == "m^2/s")
+            return "km^2/s";
+        if (value == "m^2/s^2")
+            return "km^2/s^2";
     }
     return value;
 }
@@ -128,6 +139,41 @@ void csv_field(std::ostream &out, const std::string &value) {
     out << '"';
 }
 } // namespace
+core::HpopEnvironment ReportContext::force_environment(const application::OrbitInput &input) const {
+    core::HpopEnvironment environment{frames, eop};
+    environment.time = time;
+    if (!input.uses_hpop())
+        return environment;
+    if (!input.hpop.gravity_model.empty()) {
+        const auto found = gravity.find(input.hpop.gravity_model);
+        check(found != gravity.end() && found->second, "Missing selected gravity provider");
+        validate_gravity_reference(project.force_data, input.hpop.gravity_model,
+                                   found->second->info());
+        environment.gravity = found->second;
+    }
+    if (input.hpop_resource_options().uses_ephemeris()) {
+        const auto found = ephemerides.find(input.hpop.ephemeris_model);
+        check(found != ephemerides.end() && found->second, "Missing selected ephemeris provider");
+        validate_ephemeris_reference(project.force_data, input.hpop.ephemeris_model,
+                                     found->second->data_info());
+        environment.ephemeris = found->second;
+    }
+    if (input.hpop.drag.enabled && !input.hpop.drag.weather_model.empty()) {
+        const auto found = weather.find(input.hpop.drag.weather_model);
+        check(found != weather.end() && found->second, "Missing selected weather provider");
+        validate_space_weather_reference(project.force_data, input.hpop.drag.weather_model,
+                                         found->second->info());
+        environment.weather = found->second;
+    }
+    if (input.hpop.ocean_tides.active()) {
+        const auto found = ocean_tides.find(input.hpop.ocean_tides.model);
+        check(found != ocean_tides.end() && found->second, "Missing selected ocean tide model");
+        validate_ocean_tide_reference(project.force_data, input.hpop.ocean_tides.model,
+                                      found->second->info());
+        environment.ocean_tides = found->second;
+    }
+    return environment;
+}
 std::string report_input_sha256(const application::Project &project) {
     auto p = project;
     p.reports.clear();
@@ -138,23 +184,81 @@ std::string report_input_sha256(const application::Project &project) {
         s.model_path.clear();
         s.model_diameter_m = 1'000'000;
         s.orbit.input_frame = core::FrameId::gcrf;
-        s.orbit.step_seconds = 60;
+        if (!s.orbit.uses_hpop() || !s.orbit.hpop.report_ephemeris_on_fixed_step)
+            s.orbit.step_seconds = 60;
         if (s.orbit.propagator == OrbitPropagator::sgp4)
             s.orbit.initial = OrbitInput{}.initial; // Inactive manual draft is not a TLE input.
         for (auto &segment : s.orbit.mission.segments)
             segment.name.clear();
         if (s.orbit.uses_hpop()) {
             // Persist both integrators' drafts, but identify only the active calculation.
+            auto &covariance = s.orbit.covariance;
+            if (!covariance.enabled)
+                covariance = {};
+            else {
+                if (!covariance.independent_gravity)
+                    covariance.gravity = {};
+                if (!covariance.consider_analysis) {
+                    covariance.drag_enabled = covariance.srp_enabled = false;
+                    covariance.consider_cross_correlation = false;
+                }
+                if (!covariance.drag_enabled)
+                    covariance.drag = {};
+                if (!covariance.srp_enabled)
+                    covariance.srp = {};
+                covariance.consider_cross_correlation = covariance.consider_cross_correlation &&
+                                                        covariance.drag_enabled &&
+                                                        covariance.srp_enabled;
+                if (!covariance.consider_cross_correlation)
+                    covariance.drag_srp_covariance = 0;
+            }
             auto &options = s.orbit.hpop;
-            if (options.integrator == core::HpopIntegrator::rk4) {
-                const core::HpopOptions defaults;
+            core::validate_hpop_options(options);
+            // Spherical accelerations use explicit A/m, independent of compatible area and mass.
+            options.satellite_mass_kg = core::HpopOptions{}.satellite_mass_kg;
+            if (options.interpolation.method != core::OrbitInterpolationMethod::vop)
+                options.interpolation.vop_mu = core::OrbitInterpolationOptions{}.vop_mu;
+            for (auto &body : options.third_bodies) {
+                if (!body.enabled)
+                    body = {};
+                else {
+                    if (body.source != core::ThirdBodyGravitySource::user_specified)
+                        body.user_mu.reset();
+                    if (body.source != core::ThirdBodyGravitySource::cb_file)
+                        body.cb.reset();
+                    else if (body.cb)
+                        body.cb->name = "Cb file"; // Display name is not a calculation input.
+                }
+            }
+            options.vop = options.uses_vop();
+            const auto resources = s.orbit.hpop_resource_options();
+            options.include_secular_variations = resources.uses_secular_gravity();
+            options.solid_tides =
+                core::effective_solid_tide_options(options.solid_tides, resources.gravity_degree);
+            if (!options.ocean_tides.active())
+                options.ocean_tides = {};
+            options.srp = core::effective_srp_options(options.srp);
+            options.drag = core::effective_drag_options(options.drag);
+            if (!resources.uses_ephemeris())
+                options.ephemeris_model = core::HpopOptions{}.ephemeris_model;
+            if (options.integrator != core::HpopIntegrator::gauss_jackson)
+                options.correction = core::HpopCorrection::full;
+            options.step_control = options.uses_fixed_step()
+                                       ? core::HpopStepControl::fixed
+                                       : core::HpopStepControl::relative_error;
+            const core::HpopOptions defaults;
+            if (!options.time_regularization) {
+                options.regularization_exponent = defaults.regularization_exponent;
+                options.steps_per_orbit = defaults.steps_per_orbit;
+            }
+            if (options.time_regularization || !options.uses_fixed_step())
+                options.fixed_step_seconds = defaults.fixed_step_seconds;
+            if (options.uses_fixed_step()) {
                 options.relative_tolerance = defaults.relative_tolerance;
                 options.position_tolerance_m = defaults.position_tolerance_m;
                 options.velocity_tolerance_mps = defaults.velocity_tolerance_mps;
                 options.min_step_seconds = defaults.min_step_seconds;
                 options.max_step_seconds = defaults.max_step_seconds;
-            } else {
-                options.fixed_step_seconds = core::HpopOptions{}.fixed_step_seconds;
             }
         }
     }
@@ -193,7 +297,7 @@ ReportResult generate_report(const ReportContext &context, const ReportDefinitio
             return object.station
                        ? make_ground_station_session(*object.station)
                        : make_orbit_session(object.satellite->orbit, 1, context.time.get(),
-                                            {context.frames, context.eop});
+                                            context.force_environment(object.satellite->orbit));
         },
         [&](const std::vector<std::string> &ids) {
             AccessSession session{context, ids[0], ids[1]};
@@ -306,6 +410,32 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                 rows.push_back({object.id, object.name, location.longitude_rad,
                                 location.latitude_rad, location.height_m, p[0], p[1], p[2]});
             }
+        } else if (d.query.kind == ReportKind::state_covariance) {
+            const auto per_object = total / selected.size();
+            for (const auto &object : selected) {
+                execution.check_cancelled();
+                const auto &input = object.satellite->orbit;
+                const auto environment = context.force_environment(input);
+                // Preflight full resource coverage through the same prepared-session route.
+                (void)execution.session(object, core::FrameId::gcrf);
+                auto epoch = first;
+                for (std::size_t sample = 0; sample < per_object; ++sample) {
+                    tick();
+                    const auto value = core::propagate_hpop_covariance(
+                        input.initial, epoch, input.covariance.active_input(), input.hpop,
+                        environment, input.covariance.variational_options(),
+                        execution.check_cancelled);
+                    Row row{object.id, object.name, epoch, std::string("GCRF")};
+                    for (std::size_t i = 0; i < 6; ++i)
+                        for (std::size_t j = 0; j <= i; ++j)
+                            row.push_back(value.covariance.state[i][j]);
+                    rows.push_back(std::move(row));
+                    epoch = ticks_between(epoch, last) <=
+                                    static_cast<std::uint64_t>(d.query.step_nanoseconds)
+                                ? last
+                                : core::Epoch{epoch.tai_nanoseconds() + d.query.step_nanoseconds};
+                }
+            }
         } else {
             // Derived templates have a fixed physical reference frame, independent of the
             // Cartesian template's frame preference saved in the definition.
@@ -386,7 +516,9 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                         context.project.data_lock().sha256(),
                         context.time ? context.time->data_info().sha256 : "",
                         report_is_access(d.query.kind) ? "geometric-access-wgs84-v1"
-                                                       : "builtin-reports-v2",
+                        : d.query.kind == ReportKind::state_covariance
+                            ? "hpop-joint-covariance-direct-coast-v1"
+                            : "builtin-reports-v2",
                         first,
                         last,
                         context.time};
@@ -472,6 +604,10 @@ std::optional<double> ReportResult::numeric_value(std::size_t row, std::size_t c
     if ((dimension == "m" && display_unit == "km") ||
         (dimension == "m/s" && display_unit == "km/s"))
         value /= 1000;
+    if ((dimension == "m^2" && display_unit == "km^2") ||
+        (dimension == "m^2/s" && display_unit == "km^2/s") ||
+        (dimension == "m^2/s^2" && display_unit == "km^2/s^2"))
+        value /= 1e6;
     if (dimension == "rad" && display_unit == "deg")
         value *= 180 / std::numbers::pi;
     return value;

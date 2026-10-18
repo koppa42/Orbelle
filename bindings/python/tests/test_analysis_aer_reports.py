@@ -175,12 +175,21 @@ class AnalysisAerTests(unittest.TestCase):
 class AnalysisReportTests(unittest.TestCase):
     def test_all_templates_and_explicit_display_units(self):
         project, station, sat, sensor, data = scene()
+        covariance = of.orbits.CovarianceSettings(
+            enabled=True,
+            state=tuple(tuple((10000.0 if i < 3 else 1.0) if i == j else 0.0
+                              for j in range(6)) for i in range(6)),
+        )
+        uncertain = project.objects.satellite("Uncertain", orbit=of.orbits.Hpop(
+            initial=sat.orbit.initial, gravity_degree=0, covariance=covariance))
         analysis = project.prepare(data=data)
         for kind in of.ReportKind.__members__.values():
             with self.subTest(kind=kind):
                 options = {}
                 if kind in (of.ReportKind.AER, of.ReportKind.ACCESS_INTERVALS):
                     options.update(station=station, target=sensor, step=u.s(10))
+                elif kind == of.ReportKind.STATE_COVARIANCE:
+                    options.update(objects=uncertain, step=u.s(60), last=project.first)
                 elif kind != of.ReportKind.SCENARIO_SUMMARY:
                     options["objects"] = station if kind == of.ReportKind.GROUND_STATIONS else sat
                     if kind not in (of.ReportKind.OBJECT_SUMMARY, of.ReportKind.GROUND_STATIONS):
@@ -190,6 +199,9 @@ class AnalysisReportTests(unittest.TestCase):
                 self.assertGreater(report.table.row_count, 0)
                 self.assertEqual(report.input_revision, analysis.revision)
                 self.assertEqual(report.data_sha256, data.data_lock.sha256)
+                if kind == of.ReportKind.STATE_COVARIANCE:
+                    self.assertEqual(report.table.row_count, 1)
+                    self.assertEqual(report.numeric_value(0, 4), 0.01)
         report = analysis.report(of.ReportKind.CARTESIAN_STATE, objects=[sat], step=u.s(30), last=of.Epoch(3))
         self.assertEqual(report.table.row_count, 2)
         self.assertEqual(report.numeric_value(0, 4), 7000)
@@ -207,6 +219,8 @@ class AnalysisReportTests(unittest.TestCase):
                         {"objects": sat, "step": u.s(1)}):
             with self.assertRaises((TypeError, ValueError)):
                 analysis.report(of.ReportKind.OBJECT_SUMMARY, **options)
+        with self.assertRaisesRegex(ValueError, "incompatible"):
+            analysis.report(of.ReportKind.STATE_COVARIANCE, objects=sat, step=u.s(60))
         with self.assertRaises(TypeError):
             analysis.report(of.ReportKind.CARTESIAN_STATE, objects=sat)
         with self.assertRaises(TypeError):

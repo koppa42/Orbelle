@@ -19,3 +19,5 @@ TAI 零点与 J2000 TT 分别验证，TAI→TT 的时间差容限为 2e-11 s（�
 额外错误案例覆盖：非法日历/时钟、非闰秒日期的第 60 秒、纳秒越界、快照两端、极端整数输入、EOP 缺少来源、错误历元、非有限数值和明显超出定义域的 EOP。
 
 真实 EOP、dX/dY 及完整状态变换使用固定 IERS 快照和 Orekit 独立交叉校验，范围与容限见 [EOP 验证方法](../../../docs/validation/p0_eop_state_protocol.md)。本目录的 ERFA 参考值仍只承担同源回归，不能代替独立验证。
+
+`hpop_celestial_frames.txt` 的来源、生成命令、SHA-256 与容限见[天文系协议](../../../docs/validation/hpop_celestial_frames_protocol.md)。

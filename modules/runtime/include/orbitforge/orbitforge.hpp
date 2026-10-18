@@ -1,9 +1,15 @@
 #pragma once
 // Everyday SDK entry point. Link OrbitForge::Runtime; no Qt or Python dependency.
+#include <orbitforge/core/propagation/hpop_covariance.hpp>
 #include <orbitforge/project.hpp>
+#include <orbitforge/runtime/gravity.hpp>
+#include <orbitforge/runtime/hpop.hpp>
+#include <orbitforge/runtime/ocean_tides.hpp>
+#include <orbitforge/runtime/tabulated_orbit.hpp>
 
 namespace orbitforge {
 using application::DataLock;
+using application::HpopCovarianceSettings;
 using application::LineStyle;
 using application::OrbitDisplay;
 using application::OrbitInput;
@@ -18,17 +24,40 @@ using application::ReportTemplate;
 using application::ReportTimeScale;
 using application::ReportUnits;
 using core::CartesianState;
+using core::convert_hpop_covariance;
 using core::FrameId;
 using core::GroundStationLocation;
+using core::hpop_covariance_frame_jacobian;
+using core::HpopConsiderParameter;
+using core::HpopCorrection;
+using core::HpopCovarianceContributions;
+using core::HpopCovarianceCoordinates;
+using core::HpopCovarianceFrame;
+using core::HpopCovarianceInput;
+using core::HpopCovarianceState;
+using core::HpopCovarianceVelocity;
+using core::HpopGravityTruncation;
 using core::HpopIntegrator;
 using core::HpopOptions;
+using core::HpopStateCovariance;
+using core::HpopStepControl;
+using core::HpopVariationalOptions;
+using core::HpopVariationalState;
 using core::ManeuverEvent;
 using core::ManeuverFrame;
 using core::MissionCoastModel;
 using core::MissionPlan;
 using core::MissionSegment;
 using core::MissionSegmentKind;
+using core::OrbitEphemerisArc;
+using core::OrbitInterpolationMethod;
+using core::OrbitInterpolationOptions;
 using core::OriginId;
+using core::propagate_hpop_covariance;
+using core::propagate_hpop_ephemeris;
+using core::propagate_hpop_variational;
+using core::transport_hpop_covariance;
+using core::validate_hpop_covariance;
 using results::AccessWindows;
 using results::AerSeries;
 using results::ManeuverSeries;
@@ -38,5 +67,8 @@ using runtime::export_access_csv;
 using runtime::export_aer_csv;
 using runtime::export_report_csv;
 using runtime::export_trajectory_csv;
+using runtime::make_hpop_ephemeris_session;
+using runtime::make_hpop_interpolated_session;
+using runtime::make_tabulated_orbit_session;
 using runtime::ReportResult;
 } // namespace orbitforge

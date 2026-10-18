@@ -1,6 +1,7 @@
 #pragma once
 #include <chrono>
 #include <functional>
+#include <map>
 #include <orbitforge/application/project_document.hpp>
 #include <orbitforge/core/frames/frame_provider.hpp>
 #include <orbitforge/results/access_windows.hpp>
@@ -47,6 +48,33 @@ class DataSnapshot {
     [[nodiscard]] const auto &time() const { return time_; }
     [[nodiscard]] const auto &frames() const { return frames_; }
     [[nodiscard]] const auto &eop() const { return eop_; }
+    [[nodiscard]] DataSnapshot with_gravity(const std::string &selection,
+                                            std::shared_ptr<const core::GravityModel> model) const;
+    [[nodiscard]] DataSnapshot with_gravity_file(const std::string &selection,
+                                                 const std::filesystem::path &file) const;
+    [[nodiscard]] const auto &gravity_models() const { return gravity_; }
+    [[nodiscard]] DataSnapshot
+    with_ephemeris(const std::string &selection,
+                   std::shared_ptr<const core::IThirdBodyEphemeris> ephemeris) const;
+    [[nodiscard]] DataSnapshot with_ephemeris_file(const std::string &selection,
+                                                   const std::filesystem::path &manifest,
+                                                   const std::filesystem::path &workspace) const;
+    [[nodiscard]] const auto &ephemerides() const { return ephemerides_; }
+    [[nodiscard]] DataSnapshot
+    with_space_weather(const std::string &selection,
+                       std::shared_ptr<const core::SpaceWeather> weather) const;
+    [[nodiscard]] DataSnapshot with_space_weather_file(const std::string &selection,
+                                                       const std::filesystem::path &file) const;
+    [[nodiscard]] const auto &weather_sources() const { return weather_; }
+    [[nodiscard]] DataSnapshot
+    with_ocean_tides(const std::string &selection,
+                     std::shared_ptr<const core::OceanTideModel> model) const;
+    [[nodiscard]] DataSnapshot with_ocean_tide_file(const std::string &selection,
+                                                    const std::filesystem::path &file) const;
+    [[nodiscard]] const auto &ocean_tide_models() const { return ocean_tides_; }
+
+    [[nodiscard]] core::HpopEnvironment
+    force_environment(const application::OrbitInput &input) const;
     [[nodiscard]] const application::DataLock &data_lock() const { return lock_; }
     // Catalog diagnostics do not participate in the calculation identity.
     [[nodiscard]] const std::vector<std::string> &selection_notes() const {
@@ -60,6 +88,10 @@ class DataSnapshot {
     std::shared_ptr<const core::ITimeProvider> time_;
     std::shared_ptr<const core::IFrameProvider> frames_;
     std::shared_ptr<const core::IEarthOrientationProvider> eop_;
+    std::map<std::string, std::shared_ptr<const core::GravityModel>> gravity_;
+    std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> ephemerides_;
+    std::map<std::string, std::shared_ptr<const core::SpaceWeather>> weather_;
+    std::map<std::string, std::shared_ptr<const core::OceanTideModel>> ocean_tides_;
     application::DataLock lock_;
     std::vector<std::string> selection_notes_;
     friend class DataCatalog;
@@ -76,6 +108,12 @@ class Analysis {
     [[nodiscard]] const DataSnapshot &data() const;
     [[nodiscard]] core::CartesianState state(const application::ObjectRef &object, core::Epoch at,
                                              core::FrameId frame) const;
+    // Uses the captured project's enabled covariance, at its initial state epoch.
+    // One HPOP coast, exact requested TAI endpoint, Earth/GCRF/SI output.
+    // No interpolation or maneuver crossing; cancellation publishes no partial result.
+    [[nodiscard]] core::HpopCovarianceState
+    covariance(const application::ObjectRef &satellite, core::Epoch at,
+               const std::function<bool()> &cancelled = {}) const;
     // Explicit queries preserve order and duplicates, and accept an empty span.
     [[nodiscard]] results::Trajectory states(const application::ObjectRef &object,
                                              std::span<const core::Epoch> times,

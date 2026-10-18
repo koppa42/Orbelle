@@ -125,6 +125,8 @@ QString kind_name(ReportKind kind) {
         return QStringLiteral("可见时段 · Access");
     case ReportKind::aer:
         return QStringLiteral("AER · 方位 / 仰角 / 距离");
+    case ReportKind::state_covariance:
+        return QStringLiteral("HPOP · 位置速度协方差");
     }
     return {};
 }
@@ -308,7 +310,7 @@ struct ReportDialog::Impl {
         auto *heading = new QWidget(owner);
         heading->setObjectName("reportHeading");
         auto *heading_layout = new QHBoxLayout(heading);
-        heading_layout->setContentsMargins(18, 10, 18, 10);
+        heading_layout->setContentsMargins(24, 12, 24, 12);
         auto *title = new QLabel(QStringLiteral("报告与图表"), heading);
         title->setObjectName("reportHeadingTitle");
         heading_layout->addWidget(title);
@@ -337,7 +339,7 @@ struct ReportDialog::Impl {
         settings->setObjectName("reportSettings");
         scroll->setWidget(settings);
         auto *config = new QVBoxLayout(settings);
-        config->setContentsMargins(20, 20, 20, 20);
+        config->setContentsMargins(theme::space::panel);
         config->setSpacing(10);
         const auto section = [&](const QString &label) {
             if (config->count())
@@ -410,7 +412,7 @@ struct ReportDialog::Impl {
         config->addWidget(template_description);
         sampling = new QWidget(settings);
         auto *sampling_layout = new QVBoxLayout(sampling);
-        sampling_layout->setContentsMargins(0, 10, 0, 0);
+        sampling_layout->setContentsMargins(0, 8, 0, 0);
         sampling_layout->setSpacing(10);
         auto *sampling_title = new QLabel(QStringLiteral("时间与采样"), sampling);
         sampling_title->setObjectName("reportSectionTitle");
@@ -495,7 +497,7 @@ struct ReportDialog::Impl {
         auto *actions = new QWidget(settings_panel);
         actions->setObjectName("reportGenerateActions");
         auto *actions_layout = new QVBoxLayout(actions);
-        actions_layout->setContentsMargins(16, 12, 16, 14);
+        actions_layout->setContentsMargins(16, 12, 16, 16);
         actions_layout->setSpacing(10);
         estimate = note({}, actions);
         estimate->setObjectName("reportEstimate");
@@ -514,7 +516,7 @@ struct ReportDialog::Impl {
         result_panel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         result_panel->setObjectName("reportResultPanel");
         auto *result_layout = new QVBoxLayout(result_panel);
-        result_layout->setContentsMargins(18, 16, 18, 12);
+        result_layout->setContentsMargins(16, 16, 16, 12);
         result_layout->setSpacing(10);
         auto *result_heading = new QHBoxLayout;
         result_title = new ReportTitle(QStringLiteral("报告结果"), result_panel);
@@ -572,6 +574,15 @@ struct ReportDialog::Impl {
         auto *empty_layout = new QVBoxLayout(empty);
         empty_layout->setContentsMargins(20, 20, 20, 20);
         empty_layout->addStretch();
+        empty_layout->setSpacing(6);
+        auto *empty_icon = new QLabel(empty);
+        empty_icon->setObjectName("reportEmptyIcon");
+        empty_icon->setFixedSize(52, 52);
+        empty_icon->setAlignment(Qt::AlignCenter);
+        empty_icon->setPixmap(
+            workbench_icon(WorkbenchIcon::properties, theme::color(theme::accent)).pixmap(24, 24));
+        empty_layout->addWidget(empty_icon, 0, Qt::AlignHCenter);
+        empty_layout->addSpacing(8);
         auto *empty_title = new QLabel(QStringLiteral("还没有报告结果"), empty);
         empty_title->setObjectName("reportEmptyTitle");
         empty_title->setAlignment(Qt::AlignCenter);
@@ -694,7 +705,7 @@ struct ReportDialog::Impl {
         root->addWidget(progress);
         status = note(QStringLiteral("就绪"), owner);
         status->setObjectName("reportStatus");
-        status->setContentsMargins(18, 7, 18, 7);
+        status->setContentsMargins(24, 6, 24, 6);
         root->addWidget(status);
         QObject::connect(library, &QPushButton::clicked, owner, [this] { choose_report(); });
         QObject::connect(scope_button, &QPushButton::clicked, owner, [this] { choose_scope(); });
@@ -819,6 +830,8 @@ struct ReportDialog::Impl {
                                       "传感器的可见时段，考虑地球遮挡、最低仰角与传感器视场。");
             case ReportKind::aer:
                 return QStringLiteral("地面站观测目标的方位角、仰角、斜距与可见标记。");
+            case ReportKind::state_covariance:
+                return QStringLiteral("传播已启用的 HPOP 协方差，输出 GCRF 位置速度矩阵的下三角。");
             }
             return {};
         };
@@ -918,6 +931,17 @@ struct ReportDialog::Impl {
         choose(row);
     }
     bool compatible(ReportKind kind) const {
+        if (kind == ReportKind::state_covariance) {
+            const auto eligible = [&](const std::string &id) {
+                return std::ranges::any_of(project.satellites, [&](const auto &s) {
+                    return s.orbit.object_id == id && s.orbit.computes_covariance();
+                });
+            };
+            return all_objects ? std::ranges::any_of(
+                                     project.satellites,
+                                     [](const auto &s) { return s.orbit.computes_covariance(); })
+                               : !scope_ids.empty() && std::ranges::all_of(scope_ids, eligible);
+        }
         if (report_is_access(kind))
             return !project.ground_stations.empty() && !project.satellites.empty();
         if (std::ranges::any_of(project.sensors, [&](const auto &s) {
@@ -1137,6 +1161,8 @@ struct ReportDialog::Impl {
         template_description->setToolTip(template_description->text());
         if (draft.query.kind == ReportKind::classical_elements)
             template_description->setText(QStringLiteral("瞬时六根数 · GCRF"));
+        if (draft.query.kind == ReportKind::state_covariance)
+            template_description->setText(QStringLiteral("位置速度协方差下三角 · GCRF"));
         if (draft.query.kind == ReportKind::orbital_motion)
             template_description->setText(QStringLiteral("地心距离、速率与航迹倾角 · GCRF"));
         if (draft.query.kind == ReportKind::geodetic_position)

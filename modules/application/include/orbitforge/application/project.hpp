@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <optional>
 #include <orbitforge/application/data_lock.hpp>
+#include <orbitforge/application/hpop_covariance.hpp>
 #include <orbitforge/application/report.hpp>
 #include <orbitforge/core/frames/eop_provider.hpp>
 #include <orbitforge/core/frames/state.hpp>
@@ -43,16 +44,36 @@ struct OrbitInput {
     // TLE epoch is interpreted with the calculation's explicit time provider.
     core::Tle tle;
     core::HpopOptions hpop;
+    HpopCovarianceSettings covariance;
     core::MissionPlan mission;
     [[nodiscard]] bool uses_hpop() const {
         return propagator == OrbitPropagator::hpop ||
                (propagator == OrbitPropagator::mission &&
                 mission.coast_model == core::MissionCoastModel::hpop);
     }
-    [[nodiscard]] bool uses_eop_force() const { return uses_hpop() && hpop.gravity_degree > 0; }
+    [[nodiscard]] bool computes_covariance() const {
+        return propagator == OrbitPropagator::hpop && covariance.enabled;
+    }
+    // Union of nominal and covariance resources; never replaces nominal forces.
+    [[nodiscard]] core::HpopOptions hpop_resource_options() const {
+        auto result = hpop;
+        if (computes_covariance() && covariance.independent_gravity) {
+            if (covariance.gravity.degree > result.gravity_degree)
+                result.gravity_degree = covariance.gravity.degree;
+            if (covariance.gravity.order > result.gravity_order)
+                result.gravity_order = covariance.gravity.order;
+        }
+        return result;
+    }
+    [[nodiscard]] bool uses_eop_force() const {
+        return uses_hpop() && hpop_resource_options().uses_eop_force();
+    }
+    [[nodiscard]] bool requires_eop() const {
+        return uses_eop_force() || (computes_covariance() && covariance.uses_celestial_frame());
+    }
     [[nodiscard]] double mu() const {
         if (uses_hpop())
-            return core::egm96_mu;
+            return hpop.gravity_mu;
         if (propagator == OrbitPropagator::j4_secular)
             return core::j4_earth().mu.metres_cubed_per_second_squared;
         if (propagator == OrbitPropagator::sgp4)
@@ -61,6 +82,8 @@ struct OrbitInput {
     }
     std::string object_id = "satellite-1";
     core::Epoch first{0}, last{7'200'000'000'000};
+    // Display sampling; also the scientific ephemeris grid when HPOP fixed reporting is enabled.
+    // Currently whole SI seconds in [1, 60], independent of report/query sampling.
     int step_seconds = 60;
 };
 enum class LineStyle : std::uint32_t { solid, dashed, dotted, dash_dot };
@@ -128,6 +151,7 @@ struct Project {
     std::optional<core::EopDataInfo> earth_orientation;
     // Standalone UTC provenance when EOP is absent. EOP carries its own UTC identity.
     std::optional<core::TimeDataInfo> time_data;
+    std::vector<DataReference> force_data;
     std::optional<AnalysisRecord> analysis_record;
     [[nodiscard]] std::optional<core::TimeDataInfo> time_data_info() const;
     [[nodiscard]] AnalysisStatus analysis_status() const;

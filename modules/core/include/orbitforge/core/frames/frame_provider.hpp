@@ -37,6 +37,16 @@ class IFrameProvider {
     gcrf_to_itrf(Epoch epoch, const EarthOrientationSample &eop) const = 0;
     [[nodiscard]] virtual StateTransform
     gcrf_to_itrf_state(Epoch epoch, const EarthOrientationState &eop) const = 0;
+    // FK5 J2000 / TrueOfDate through the pseudo-fixed frame. Model and EOP
+    // identity are returned explicitly; these are not aliases for GCRF/SPICE.
+    [[nodiscard]] virtual PositionRotation gcrf_to_celestial(Epoch, const EarthOrientationSample &,
+                                                             FrameId) const {
+        throw std::logic_error("This frame provider does not support FK5 celestial frames");
+    }
+    [[nodiscard]] virtual StateTransform
+    gcrf_to_celestial_state(Epoch, const EarthOrientationState &, FrameId) const {
+        throw std::logic_error("This frame provider does not support FK5 celestial frames");
+    }
     // TEME of date: GMST82 to the pseudo Earth-fixed frame, then polar motion.
     [[nodiscard]] virtual PositionRotation teme_to_itrf(Epoch,
                                                         const EarthOrientationSample &) const {
@@ -47,7 +57,8 @@ class IFrameProvider {
         throw std::logic_error("This frame provider does not support TEME");
     }
 };
-// Explicit routing through ITRF, including rotation-rate velocity terms. Never aliases TEME/GCRF.
+// GCRF/ITRF/TEME route through ITRF; FK5 endpoints route through GCRF.
+// Includes rotation-rate velocity terms. Never aliases different reference frames.
 [[nodiscard]] CartesianState transform_state(const CartesianState &state, FrameId target,
                                              const IFrameProvider &frames,
                                              const EarthOrientationState &eop);

@@ -16,7 +16,7 @@
 
 测试需要先编译 C++ 和 Python 原生扩展，但不需要创建可分发的安装包。普通 PR 和 `main` 不生成桌面 ZIP、SDK 发布归档或 wheel，不创建 Release，也不上传 `*-release-assets`。Python 测试按 `pyproject.toml` 的相同功能配置直接使用 CMake 编译扩展，将扩展及配套 Python 文件放入独立虚拟环境，再运行 API 测试与示例。wheel 元数据、打包布局和安装行为另由标签流程验证。
 
-PR、`main` 与发布安装验证通过 `tools/ci/validation_inputs.py` 整理相同的独立测试目录，包含 Python 测试、九个示例、SDK 消费端、固定参考值、项目文件样例及测试使用的 EOP / 闰秒数据。测试目录保留相对路径，但不复制 Python 包源码或 C++ 实现；计算能力必须来自被测安装。普通 Python CI 也从此目录运行，提前发现发布验证输入遗漏。
+PR、`main` 与发布安装验证通过 `tools/ci/validation_inputs.py` 整理相同的独立测试目录，包含 Python 测试、九个示例、SDK 消费端、固定参考值、项目文件样例及测试使用的 EOP / 闰秒 / SPICE 片段数据。测试目录保留相对路径，但不复制 Python 包源码或 C++ 实现；计算能力必须来自被测安装。普通 Python CI 也从此目录运行，提前发现发布验证输入遗漏。
 
 PR 的 `linux-python-dependencies` 和 `windows-python-dependencies` 仅供其他 Python 版本复用已编译依赖，内容不包括 OrbitForge 安装包。诊断日志另行保留。标签流程还传递 `linux-delivery`，供没有源码检出的新 runner 验证 SDK 和 wheel，然后整理发布附件。
 
@@ -48,6 +48,8 @@ actionlint 在原生构建前运行，固定工具版本与 SHA-256，检查所�
 GitHub 将 PR 生成的缓存限制在该 PR 的合并引用中，其他 PR 和 `main` 不能读取；PR 可以读取目标分支的缓存，详见[缓存访问范围](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache)。`main` 的基准测试在验证合并结果的同时维护共享依赖缓存。首次建立缓存、依赖变化或 runner 工具链变化仍可能需要较长编译，不能承诺每次都命中缓存。
 
 排查耗时时先区分依赖安装、项目编译、测试和标签流程的打包。查看缓存是否命中、vcpkg 恢复了多少包、哪些包重新编译；不要用减少 Python 支持版本或跳过行为测试来掩盖依赖冷启动问题。取消日常发布包构建可以减少重复工作，但不会消除测试所需的编译。
+
+Linux 作业依次执行完整普通构建与 ASan/UBSan 回归；高阶重力及空间天气轨迹用例的插桩开销明显，作业上限为 360 分钟。该时限保留完整测试范围，实际耗时以命令记录为准。
 
 Windows、Linux 和 Python 的 `commands.json` 记录每条命令的 UTC 开始时间、耗时与退出码，Actions 作业摘要展示分阶段用时，失败命令同样保留。父任务中的 Python 总耗时包含其嵌套报告，不能跨表重复求和。依赖缓存命中率和安装时间查看对应 Actions 步骤；项目编译缓存需根据这些记录再评估，当前不缓存项目构建目录。
 

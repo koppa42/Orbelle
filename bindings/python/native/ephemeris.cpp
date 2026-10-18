@@ -25,6 +25,10 @@ void bind_ephemeris(py::module_ &module) {
         .def_readonly("velocity_time_scale", &core::EphemerisState::velocity_time_scale)
         .def_readonly("tdb", &core::EphemerisState::tdb)
         .def_readonly("source_id", &core::EphemerisState::source_id);
+    py::class_<core::ApparentSunDifferential>(module, "ApparentSunDifferential")
+        .def_readonly("position_m", &core::ApparentSunDifferential::position_m)
+        .def_readonly("position_jacobian", &core::ApparentSunDifferential::position_jacobian)
+        .def_readonly("velocity_jacobian_s", &core::ApparentSunDifferential::velocity_jacobian_s);
     py::class_<core::KernelDataInfo>(module, "KernelDataInfo")
         .def_readonly("file", &core::KernelDataInfo::file)
         .def_readonly("kind", &core::KernelDataInfo::kind)
@@ -45,9 +49,27 @@ void bind_ephemeris(py::module_ &module) {
              py::call_guard<py::gil_scoped_release>())
         .def("from_tdb", &core::IEphemerisProvider::from_tdb, py::arg("time"),
              py::call_guard<py::gil_scoped_release>())
+        .def("tdb_seconds_per_tai_second", &core::IEphemerisProvider::tdb_seconds_per_tai_second,
+             py::arg("epoch"), py::call_guard<py::gil_scoped_release>())
         .def("geometric_state", &core::IEphemerisProvider::geometric_state,
              py::arg("target_naif_id"), py::arg("observer_naif_id"), py::arg("epoch"),
              py::call_guard<py::gil_scoped_release>())
+        .def("apparent_sun_from_earth", &core::IEphemerisProvider::apparent_sun_from_earth,
+             py::arg("epoch"), py::call_guard<py::gil_scoped_release>())
+        .def("apparent_sun_from_spacecraft",
+             &core::IEphemerisProvider::apparent_sun_from_spacecraft, py::arg("epoch"),
+             py::arg("position_earth_m"), py::arg("velocity_earth_tai_mps"),
+             py::call_guard<py::gil_scoped_release>())
+        .def("apparent_sun_from_spacecraft_differential",
+             &core::IEphemerisProvider::apparent_sun_from_spacecraft_differential, py::arg("epoch"),
+             py::arg("position_earth_m"), py::arg("velocity_earth_tai_mps"),
+             py::call_guard<py::gil_scoped_release>())
+        .def("validate_spacecraft_apparent_sun_interval",
+             &core::IEphemerisProvider::validate_spacecraft_apparent_sun_interval, py::arg("first"),
+             py::arg("last"), py::call_guard<py::gil_scoped_release>())
+        .def("validate_apparent_sun_interval",
+             &core::IEphemerisProvider::validate_apparent_sun_interval, py::arg("first"),
+             py::arg("last"), py::call_guard<py::gil_scoped_release>())
         .def(
             "geometric_states",
             [](const core::IEphemerisProvider &provider, std::int32_t target, std::int32_t observer,

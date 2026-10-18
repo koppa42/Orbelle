@@ -49,14 +49,27 @@ CartesianState StateTransform::inverse(const CartesianState &state) const {
 }
 CartesianState transform_state(const CartesianState &state, FrameId target,
                                const IFrameProvider &frames, const EarthOrientationState &eop) {
-    const auto supported = [](FrameId frame) {
-        return frame == FrameId::gcrf || frame == FrameId::itrf || frame == FrameId::teme;
+    const auto celestial = [](FrameId frame) {
+        return frame == FrameId::fk5_j2000 || frame == FrameId::true_of_date;
+    };
+    const auto supported = [&](FrameId frame) {
+        return frame == FrameId::gcrf || frame == FrameId::itrf || frame == FrameId::teme ||
+               celestial(frame);
     };
     if (!supported(state.frame) || !supported(target) || state.origin != OriginId::earth ||
         state.epoch != eop.sample.epoch)
         throw std::invalid_argument("Unsupported reference frame, origin or EOP epoch");
     if (state.frame == target)
         return state;
+    if (celestial(state.frame) || celestial(target)) {
+        const auto inertial =
+            celestial(state.frame)
+                ? frames.gcrf_to_celestial_state(state.epoch, eop, state.frame).inverse(state)
+                : transform_state(state, FrameId::gcrf, frames, eop);
+        return celestial(target)
+                   ? frames.gcrf_to_celestial_state(state.epoch, eop, target).apply(inertial)
+                   : transform_state(inertial, target, frames, eop);
+    }
     auto fixed = state;
     if (state.frame == FrameId::gcrf)
         fixed = frames.gcrf_to_itrf_state(state.epoch, eop).apply(state);

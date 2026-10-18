@@ -110,7 +110,9 @@ class EphemerisApiTests(unittest.TestCase):
         second = of.load_spice_snapshot(path, self.workspace)
         def query(provider):
             state = provider.geometric_state(10, 399, self.epoch)
-            return state.position_m, state.velocity_mps, state.tdb.seconds_past_j2000, state.source_id
+            partials = provider.apparent_sun_from_spacecraft_differential(self.epoch, [7e6, 0, 0], [0, 7500, 0])
+            return (state.position_m, state.velocity_mps, state.tdb.seconds_past_j2000,
+                    state.source_id, partials.position_m, partials.position_jacobian, partials.velocity_jacobian_s)
         expected = [query(self.provider), query(second)]
         self.assertNotEqual(expected[0][2], expected[1][2])
         providers = [self.provider, second]
@@ -118,6 +120,26 @@ class EphemerisApiTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=8) as pool:
             actual = list(pool.map(lambda i: query(providers[i]), indices))
         self.assertEqual(actual, [expected[i] for i in indices])
+
+    def test_apparent_sun_derivative_values_units_readonly_and_recovery(self):
+        position, velocity = [7e6, 2e6, -1e6], [1000, 7500, -2000]
+        result = self.provider.apparent_sun_from_spacecraft_differential(self.epoch, position, velocity)
+        self.assertIsInstance(result, of.ApparentSunDifferential)
+        self.assertEqual(result.position_m,
+                         self.provider.apparent_sun_from_spacecraft(self.epoch, position, velocity))
+        self.assertEqual((len(result.position_jacobian), len(result.velocity_jacobian_s)), (3, 3))
+        self.assertTrue(all(math.isfinite(v) for row in result.position_jacobian for v in row))
+        self.assertGreater(max(abs(v) for row in result.velocity_jacobian_s for v in row), 100)
+        with self.assertRaises(AttributeError):
+            result.position_jacobian = [[0]*3]*3
+        copied = result.position_jacobian
+        copied[0][0] = 123
+        self.assertNotEqual(result.position_jacobian[0][0], 123)
+        with self.assertRaises(ValueError):
+            self.provider.apparent_sun_from_spacecraft_differential(self.epoch, [float("nan"), 0, 0], velocity)
+        again = self.provider.apparent_sun_from_spacecraft_differential(self.epoch, position, velocity)
+        self.assertEqual(again.position_jacobian, result.position_jacobian)
+        self.assertEqual(again.velocity_jacobian_s, result.velocity_jacobian_s)
 
 
 if __name__ == "__main__":

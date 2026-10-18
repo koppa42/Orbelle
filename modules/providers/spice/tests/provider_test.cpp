@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cspice/SpiceUsr.h>
 #include <filesystem>
@@ -6,6 +8,7 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <nlohmann/json.hpp>
+#include <orbitforge/core/propagation/hpop_force.hpp>
 #include <orbitforge/providers/spice/provider.hpp>
 #include <picosha2.h>
 #ifdef ORBITFORGE_SPICE_TEST_ERFA
@@ -107,6 +110,52 @@ TEST(Spice, AnalyticSpkHasExplicitUnitsAxesAndVelocityScale) {
         EXPECT_NE(state.source_id.find(provider->data_info().manifest_sha256), std::string::npos);
         analytic(state);
     }
+}
+
+TEST(Spice, ThirdBodyCoverageRejectsInteriorGapsAndChecksEveryRequiredChain) {
+    Fixture input;
+    const auto file = input.root / "third.bsp";
+    std::filesystem::remove(file);
+    SpiceInt handle = 0;
+    spkopn_c(file.string().c_str(), "synthetic DE chains with interior gap", 0, &handle);
+    spice_ok();
+    const double coefficients[]{10000, 0, 0, 0, 1000, 0, 0, 0, 2000, 0, 0, 0};
+    for (int body : {1, 3, 5, 10, 199, 399, 301, 599}) {
+        for (const auto &interval : {std::pair{-3600., -100.}, std::pair{100., 3600.}}) {
+            spkw02_c(handle, body,
+                     body < 11     ? 0
+                     : body == 199 ? 1
+                     : body == 599 ? 5
+                                   : 3,
+                     "J2000", interval.first, interval.second, "synthetic segment",
+                     interval.second - interval.first, 1, 3, coefficients, interval.first);
+            spice_ok();
+        }
+    }
+    spkcls_c(handle);
+    spice_ok();
+    input.document["kernels"][1] = input.kernel("third.bsp", "SPK");
+    input.save();
+    const auto provider = input.load();
+    const core::Epoch before{-1000000000000}, after{1000000000000};
+    EXPECT_NO_THROW((void)provider->geometric_state(10, 399, before));
+    EXPECT_NO_THROW((void)provider->geometric_state(10, 399, after));
+    EXPECT_THROW(provider->validate_earth_gravity_interval(before, after, true, true),
+                 core::EphemerisCoverageError);
+    EXPECT_NO_THROW(provider->validate_earth_gravity_interval(after, after, true, true));
+    EXPECT_NO_THROW(
+        provider->validate_earth_gravity_interval(core::Epoch{200000000000}, after, false, true));
+    EXPECT_THROW(provider->validate_earth_gravity_interval(after, before, true, true),
+                 core::EphemerisCoverageError);
+    for (auto target : {199, 5, 599}) {
+        const std::array targets{std::int32_t(target)};
+        EXPECT_THROW(provider->validate_earth_gravity_interval(before, after, targets),
+                     core::EphemerisCoverageError);
+        EXPECT_NO_THROW(provider->validate_earth_gravity_interval(after, after, targets));
+    }
+    const std::array missing{std::int32_t{6}};
+    EXPECT_THROW(provider->validate_earth_gravity_interval(after, after, missing),
+                 core::EphemerisCoverageError);
 }
 
 TEST(Spice, TaiTdbRoundTripAndEpochZeroAreCorrect) {
@@ -287,3 +336,580 @@ TEST(Spice, RealSnapshotSunMoonAndIndependentTdbModel) {
     }
 }
 #endif
+
+namespace {
+constexpr std::array<double, 3> sun_origin{-8e7, 1e7, 2e7}, sun_velocity{.01, -.02, .03};
+constexpr std::array<double, 3> earth_origin{2e7, 4e7, -3e7}, earth_velocity{20, -15, 3};
+void linear_sun_kernel(Fixture &fixture, bool sun_gap = false, double earth_first = -4000) {
+    const auto path = fixture.root / "a.bsp";
+    std::filesystem::remove(path);
+    SpiceInt handle = 0;
+    spkopn_c(path.string().c_str(), "Linear Sun and Earth", 0, &handle);
+    spice_ok();
+    const auto segment = [&](int body, int centre, double first, double last,
+                             const std::array<double, 3> &position,
+                             const std::array<double, 3> &velocity) {
+        double coefficients[6]{};
+        for (std::size_t i = 0; i < 3; ++i) {
+            coefficients[2 * i] = position[i] + velocity[i] * (first + last) / 2;
+            coefficients[2 * i + 1] = velocity[i] * (last - first) / 2;
+        }
+        spkw02_c(handle, body, centre, "J2000", first, last, "Linear reference", last - first, 1, 1,
+                 coefficients, first);
+        spice_ok();
+    };
+    segment(3, 0, earth_first, 4000, earth_origin, earth_velocity);
+    segment(399, 3, earth_first, 4000, {}, {});
+    if (sun_gap) {
+        segment(10, 0, -4000, -700, sun_origin, sun_velocity);
+        segment(10, 0, -100, 4000, sun_origin, sun_velocity);
+    } else
+        segment(10, 0, -4000, 4000, sun_origin, sun_velocity);
+    spkcls_c(handle);
+    spice_ok();
+    fixture.document["kernels"] =
+        Json::array({fixture.kernel("naif0012.tls", "LSK"), fixture.kernel("a.bsp", "SPK")});
+    fixture.save();
+}
+} // namespace
+TEST(Spice, MovingSunLightTimeAndAberration) {
+    for (bool custom_clock : {false, true}) {
+        SCOPED_TRACE(custom_clock);
+        Fixture fixture;
+        if (custom_clock) {
+            // Amplify the rate difference to detect omission or reversal of the
+            // TAI/TDB velocity derivative. This is an artificial clock model.
+            std::ofstream(fixture.root / "naif0012.tls", std::ios::app)
+                << "\n\\begindata\nDELTET/K = 5\nDELTET/EB = 0.1\n"
+                   "DELTET/M = (0.4 0.002)\n\\begintext\n";
+        }
+        linear_sun_kernel(fixture);
+        const auto provider = fixture.load();
+        provider->validate_spacecraft_apparent_sun_interval(core::Epoch{0},
+                                                            core::Epoch{100000000000});
+        for (double sign : {-1., 0., 1.}) {
+            const std::array<double, 3> position{7e6, 2e6, -1e6};
+            const std::array<double, 3> velocity{sign * 1000, sign * 7500, sign * -2000};
+            const auto actual =
+                provider->apparent_sun_from_spacecraft(core::Epoch{0}, position, velocity);
+            const long double et = provider->to_tdb(core::Epoch{0}).seconds_past_j2000;
+            const long double k = custom_clock ? 5 : 1.657e-3;
+            const long double eb = custom_clock ? .1 : 1.671e-2;
+            const long double m0 = custom_clock ? .4 : 6.239996;
+            const long double m1 = custom_clock ? .002 : 1.99096871e-7;
+            const auto mean = m0 + m1 * et;
+            const auto rate =
+                1 - k * std::cos(mean + eb * std::sin(mean)) * m1 * (1 + eb * std::cos(mean));
+            EXPECT_NEAR(provider->tdb_seconds_per_tai_second(core::Epoch{0}),
+                        static_cast<double>(1 / rate), 3e-16);
+            EXPECT_THROW((void)provider->tdb_seconds_per_tai_second(core::Epoch{3600000000001LL}),
+                         core::EphemerisCoverageError);
+            constexpr long double light_speed = 299792.458L; // km / TDB second.
+            std::array<long double, 3> observer{}, beta{}, ray{};
+            long double distance2 = 0;
+            for (std::size_t i = 0; i < 3; ++i) {
+                observer[i] = earth_origin[i] + earth_velocity[i] * et + position[i] / 1000;
+                beta[i] = (earth_velocity[i] + velocity[i] * rate / 1000) / light_speed;
+                ray[i] = sun_origin[i] + sun_velocity[i] * et - observer[i];
+                distance2 += ray[i] * ray[i];
+            }
+            // One Newtonian light-time iteration, with an analytic moving Sun.
+            const auto emission = et - std::sqrt(distance2) / light_speed;
+            distance2 = 0;
+            for (std::size_t i = 0; i < 3; ++i) {
+                ray[i] = sun_origin[i] + sun_velocity[i] * emission - observer[i];
+                distance2 += ray[i] * ray[i];
+            }
+            const auto distance = std::sqrt(distance2);
+            long double parallel = 0, transverse2 = 0;
+            for (std::size_t i = 0; i < 3; ++i) {
+                ray[i] /= distance;
+                parallel += beta[i] * ray[i];
+            }
+            for (std::size_t i = 0; i < 3; ++i) {
+                beta[i] -= parallel * ray[i];
+                transverse2 += beta[i] * beta[i];
+            }
+            for (std::size_t i = 0; i < 3; ++i) {
+                const auto expected =
+                    distance * (ray[i] * std::sqrt(1 - transverse2) + beta[i]) * 1000;
+                // Millimetre bound is ~10^-14 relative: double SPK/rotation roundoff.
+                EXPECT_NEAR(actual[i], static_cast<double>(expected), 1e-3);
+            }
+        }
+        const auto centre = provider->apparent_sun_from_spacecraft(core::Epoch{0}, {}, {});
+        const auto earth = provider->apparent_sun_from_earth(core::Epoch{0});
+        for (std::size_t i = 0; i < 3; ++i)
+            EXPECT_NEAR(centre[i], earth[i], 1e-3);
+        EXPECT_THROW((void)provider->apparent_sun_from_spacecraft(core::Epoch{0}, {2e15, 0, 0}, {}),
+                     core::EphemerisCoverageError);
+        EXPECT_THROW((void)provider->apparent_sun_from_spacecraft(
+                         core::Epoch{0}, {std::numeric_limits<double>::quiet_NaN(), 0, 0}, {}),
+                     std::invalid_argument);
+        EXPECT_THROW((void)provider->apparent_sun_from_spacecraft(core::Epoch{0}, {}, {4e8, 0, 0}),
+                     std::invalid_argument);
+        EXPECT_EQ(provider->apparent_sun_from_spacecraft(core::Epoch{0}, {}, {}), centre);
+    }
+}
+TEST(Spice, MovingSunCertifiesHistoryAndGaps) {
+    Fixture fixture;
+    linear_sun_kernel(fixture, true);
+    {
+        const auto provider = fixture.load();
+        // Receiving endpoints are covered, but retarded Sun history has a hole.
+        provider->validate_earth_gravity_interval(core::Epoch{0}, core::Epoch{100000000000}, true,
+                                                  false);
+        EXPECT_THROW(provider->validate_spacecraft_apparent_sun_interval(core::Epoch{0},
+                                                                         core::Epoch{100000000000}),
+                     core::EphemerisCoverageError);
+        EXPECT_THROW((void)provider->apparent_sun_from_spacecraft(core::Epoch{0}, {}, {}),
+                     core::EphemerisCoverageError);
+    }
+    linear_sun_kernel(fixture, false, -100);
+    const auto provider = fixture.load();
+    // Earth is needed at reception only; requiring ancient Earth data would be
+    // spurious when the full past Sun chain is available.
+    EXPECT_NO_THROW(provider->validate_spacecraft_apparent_sun_interval(core::Epoch{0},
+                                                                        core::Epoch{100000000000}));
+    EXPECT_NO_THROW((void)provider->apparent_sun_from_spacecraft(core::Epoch{0}, {}, {}));
+    EXPECT_THROW(provider->validate_spacecraft_apparent_sun_interval(core::Epoch{-1000000000000},
+                                                                     core::Epoch{0}),
+                 core::EphemerisCoverageError);
+    EXPECT_THROW(provider->validate_spacecraft_apparent_sun_interval(core::Epoch{100000000000},
+                                                                     core::Epoch{0}),
+                 core::EphemerisCoverageError);
+    EXPECT_THROW(provider->validate_spacecraft_apparent_sun_interval(core::Epoch{-3600000000001},
+                                                                     core::Epoch{0}),
+                 core::EphemerisCoverageError);
+}
+
+namespace {
+void planetary_test_kernel(const std::filesystem::path &path, int bad_centre = 0,
+                           const char *frame = "J2000", bool include_planets = true) {
+    std::filesystem::remove(path);
+    SpiceInt handle = 0;
+    spkopn_c(path.string().c_str(), "Synthetic planetary subset", 0, &handle);
+    spice_ok();
+    const double coefficients[]{7000, 10, 2, .5, -1200, .2, 3, 0, 500, -.3, 0, .6};
+    for (int id : {10, 4, 499, 599, 699, 799, 899, 999}) {
+        if (!include_planets && id >= 499)
+            continue;
+        const int centre = id < 499 ? 0 : (id == 599 && bad_centre ? bad_centre : id / 100);
+        spkw02_c(handle, id, centre, frame, -3600, 3600, "Original synthetic segment", 7200, 1, 3,
+                 coefficients, -3600);
+        spice_ok();
+    }
+    spkcls_c(handle);
+    spice_ok();
+}
+} // namespace
+TEST(Spice, PlanetarySubsetsRetainSixCentresAndMatchIndependentChebyshevValues) {
+    Fixture input;
+    const auto source = input.root / "planets.bsp";
+    planetary_test_kernel(source);
+    const auto directory =
+        input.root /
+        ("subset-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto ids = providers::spice::extract_planetary_centres(source, directory);
+    ASSERT_EQ(ids, (std::vector<std::int32_t>{499, 599, 699, 799, 899, 999}));
+    input.document["kernels"] = Json::array({input.kernel("naif0012.tls", "LSK")});
+    for (auto id : ids) {
+        const auto name = "centre-" + std::to_string(id) + ".bsp";
+        std::filesystem::copy_file(directory / name, input.root / name,
+                                   std::filesystem::copy_options::overwrite_existing);
+        input.document["kernels"].push_back(input.kernel(name, "SPK_BODY_CENTRES"));
+    }
+    input.save();
+    const auto provider = input.load();
+    for (auto id : ids)
+        for (auto ns : {-3000000000000LL, 0LL, 1234567890123LL, 3000000000000LL})
+            analytic(provider->geometric_state(id, id / 100, core::Epoch(ns)));
+    EXPECT_THROW((void)provider->geometric_state(10, 0, core::Epoch{0}),
+                 core::EphemerisCoverageError);
+    const auto original = read(directory / "centre-499.bsp");
+    EXPECT_THROW((void)providers::spice::extract_planetary_centres(source, directory),
+                 core::EphemerisDataError);
+    EXPECT_EQ(read(directory / "centre-499.bsp"), original);
+    // A role declaration cannot authorize unrelated targets to override the base chain.
+    std::filesystem::copy_file(source, input.root / "centre-599.bsp",
+                               std::filesystem::copy_options::overwrite_existing);
+    input.document["kernels"] = Json::array(
+        {input.kernel("naif0012.tls", "LSK"), input.kernel("centre-599.bsp", "SPK_BODY_CENTRES")});
+    input.save();
+    EXPECT_THROW((void)input.load(), core::EphemerisDataError);
+    analytic(provider->geometric_state(599, 5, core::Epoch{0}));
+}
+TEST(Spice, PlanetaryExtractionRejectsWrongChainsAxesAndCleansOnlyItsCreatedFiles) {
+    Fixture input;
+    const auto source = input.root / "planet-source.bsp";
+    const auto directory =
+        input.root /
+        ("partial-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(directory);
+    std::ofstream(directory / "keep.txt") << "caller-owned";
+    for (const auto wrong : {1, 2, 3}) {
+        planetary_test_kernel(source, wrong == 1 ? 4 : 0, wrong == 2 ? "ECLIPJ2000" : "J2000",
+                              wrong != 3);
+        EXPECT_THROW((void)providers::spice::extract_planetary_centres(source, directory),
+                     core::EphemerisDataError);
+        EXPECT_EQ(std::distance(std::filesystem::directory_iterator(directory),
+                                std::filesystem::directory_iterator{}),
+                  1);
+        EXPECT_EQ(read(directory / "keep.txt"), "caller-owned");
+    }
+    planetary_test_kernel(source);
+    unsigned checks = 0;
+    EXPECT_THROW((void)providers::spice::extract_planetary_centres(
+                     source, directory,
+                     [&] {
+                         if (++checks == 5)
+                             throw std::runtime_error("cancel after writing two planets");
+                     }),
+                 std::runtime_error);
+    EXPECT_EQ(checks, 5U);
+    EXPECT_EQ(std::distance(std::filesystem::directory_iterator(directory),
+                            std::filesystem::directory_iterator{}),
+              1);
+}
+
+namespace {
+using SunVector = std::array<double, 3>;
+using SunMatrix = std::array<SunVector, 3>;
+double maximum(const SunMatrix &a) {
+    double result = 0;
+    for (const auto &row : a)
+        for (double x : row)
+            result = std::max(result, std::abs(x));
+    return result;
+}
+// The caller has activated its immutable kernel set. Reference calls use the
+// original CSPICE spkapo, not the provider's explicit LT/stelab implementation.
+SunVector reference_apparent(double et, const SunVector &r, const SunVector &v, double rate,
+                             const char *correction = "LT+S") {
+    double observer[6]{}, output[3]{}, light_time = 0;
+    spkssb_c(399, et, "J2000", observer);
+    spice_ok();
+    for (unsigned i = 0; i < 3; ++i) {
+        observer[i] += r[i] / 1000;
+        observer[i + 3] += v[i] * rate / 1000;
+    }
+    spkapo_c(10, et, "J2000", observer, correction, output, &light_time);
+    spice_ok();
+    return {output[0] * 1000, output[1] * 1000, output[2] * 1000};
+}
+double reference_rate(double et, bool custom) {
+    // Independently specified LSK constants, including the exaggerated test clock.
+    const long double k = custom ? 5 : 1.657e-3;
+    const long double eb = custom ? .1 : 1.671e-2;
+    const long double m0 = custom ? .4 : 6.239996;
+    const long double m1 = custom ? .002 : 1.99096871e-7;
+    const auto mean = m0 + m1 * et;
+    return static_cast<double>(1 - k * std::cos(mean + eb * std::sin(mean)) * m1 *
+                                       (1 + eb * std::cos(mean)));
+}
+template <class Function>
+SunMatrix independent_sun_difference(Function function, SunVector r, SunVector v, double h,
+                                     bool velocity) {
+    SunMatrix result{};
+    constexpr std::array weights{4. / 5, -1. / 5, 4. / 105, -1. / 280};
+    for (unsigned j = 0; j < 3; ++j)
+        for (unsigned k = 0; k < weights.size(); ++k) {
+            auto rp = r, rm = r, vp = v, vm = v;
+            (velocity ? vp : rp)[j] += (k + 1) * h;
+            (velocity ? vm : rm)[j] -= (k + 1) * h;
+            const auto plus = function(rp, vp), minus = function(rm, vm);
+            for (unsigned i = 0; i < 3; ++i)
+                result[i][j] += weights[k] * (plus[i] - minus[i]) / h;
+        }
+    return result;
+}
+class DifferentialSolarSystem final : public core::IThirdBodyEphemeris {
+    const core::IEphemerisProvider &provider_;
+    core::ThirdBodyDataInfo info_{};
+
+  public:
+    explicit DifferentialSolarSystem(const core::IEphemerisProvider &p) : provider_(p) {}
+    void validate_spacecraft_apparent_sun_interval(core::Epoch a, core::Epoch b) const override {
+        provider_.validate_spacecraft_apparent_sun_interval(a, b);
+    }
+    void validate_apparent_sun_interval(core::Epoch a, core::Epoch b) const override {
+        provider_.validate_apparent_sun_interval(a, b);
+    }
+
+    const core::ThirdBodyDataInfo &data_info() const noexcept override { return info_; }
+    void validate_interval(core::Epoch, core::Epoch,
+                           std::span<const core::ThirdBody>) const override {}
+    SunVector position(core::ThirdBody body, core::Epoch epoch) const override {
+        return provider_.geometric_state(core::third_body_naif_id(body), 399, epoch).position_m;
+    }
+    SunVector apparent_sun_from_earth(core::Epoch epoch) const override {
+        return provider_.apparent_sun_from_earth(epoch);
+    }
+    SunVector apparent_sun_from_spacecraft(core::Epoch epoch, const SunVector &r,
+                                           const SunVector &v) const override {
+        return provider_.apparent_sun_from_spacecraft(epoch, r, v);
+    }
+    core::ApparentSunDifferential
+    apparent_sun_from_spacecraft_differential(core::Epoch epoch, const SunVector &r,
+                                              const SunVector &v) const override {
+        return provider_.apparent_sun_from_spacecraft_differential(epoch, r, v);
+    }
+};
+void check_apparent_derivatives(const core::IEphemerisProvider &provider, core::Epoch epoch,
+                                bool custom_clock, double &max_r, double &max_v) {
+    const auto et = provider.to_tdb(epoch).seconds_past_j2000;
+    const auto rate = reference_rate(et, custom_clock);
+    for (const auto &r : std::array{SunVector{7e6, 2e6, -1e6}, SunVector{-4.2e7, 1e7, -2e7},
+                                    SunVector{1e10, -2e10, 3e10}})
+        for (double sign : {-1., 0., 1.}) {
+            SCOPED_TRACE(sign);
+            const SunVector v{sign * 1000, sign * 7500, sign * -2000};
+            const auto actual = provider.apparent_sun_from_spacecraft_differential(epoch, r, v);
+            EXPECT_EQ(actual.position_m, provider.apparent_sun_from_spacecraft(epoch, r, v));
+            const auto reference = [&](const SunVector &rr, const SunVector &vv) {
+                return reference_apparent(et, rr, vv, rate);
+            };
+            const auto nominal = reference(r, v);
+            for (unsigned i = 0; i < 3; ++i)
+                EXPECT_NEAR(actual.position_m[i], nominal[i], 1e-3);
+            for (bool velocity : {false, true}) {
+                const double step = velocity ? 128 : 50000;
+                const auto coarse = independent_sun_difference(reference, r, v, 2 * step, velocity);
+                const auto fine = independent_sun_difference(reference, r, v, step, velocity);
+                const auto &matrix =
+                    velocity ? actual.velocity_jacobian_s : actual.position_jacobian;
+                const double scale = maximum(fine);
+                for (unsigned i = 0; i < 3; ++i)
+                    for (unsigned j = 0; j < 3; ++j) {
+                        EXPECT_NEAR(coarse[i][j], fine[i][j], 3e-9 * scale + 1e-10);
+                        EXPECT_NEAR(matrix[i][j], fine[i][j], 5e-9 * scale + 1e-10);
+                        auto &max = velocity ? max_v : max_r;
+                        max = std::max(max, std::abs(matrix[i][j] - fine[i][j]) / scale);
+                    }
+            }
+        }
+}
+} // namespace
+TEST(Spice, ApparentSunDerivativesMatchIndependentSpkapoCartesianDifferences) {
+    double max_r = 0, max_v = 0;
+    for (bool custom : {false, true}) {
+        SCOPED_TRACE(custom);
+        Fixture fixture;
+        if (custom)
+            std::ofstream(fixture.root / "naif0012.tls", std::ios::app)
+                << "\n\\begindata\nDELTET/K = 5\nDELTET/EB = 0.1\n"
+                   "DELTET/M = (0.4 0.002)\n\\begintext\n";
+        linear_sun_kernel(fixture);
+        const auto provider = fixture.load();
+        for (std::int64_t seconds : {-900, 0, 1800})
+            check_apparent_derivatives(*provider, core::Epoch{seconds * 1000000000}, custom, max_r,
+                                       max_v);
+    }
+    const auto provider = providers::spice::load_snapshot(
+        ORBITFORGE_SPICE_SAMPLE,
+        std::filesystem::path(ORBITFORGE_SPICE_TEST_DIR) / "apparent-derivative-real");
+    for (double fraction : {.1, .5, .9}) {
+        const auto &info = provider->data_info();
+        const auto epoch =
+            core::Epoch{info.first_epoch.tai_nanoseconds() +
+                        static_cast<std::int64_t>(
+                            (info.last_epoch.seconds_since(info.first_epoch) * fraction) * 1e9)};
+        check_apparent_derivatives(*provider, epoch, false, max_r, max_v);
+    }
+    RecordProperty("cases", 81);
+    RecordProperty("max_scaled_position_jacobian_error", max_r);
+    RecordProperty("max_scaled_velocity_jacobian_error", max_v);
+}
+TEST(Spice, SrpStateChainMatchesIndependentApparentSunAndForceDifferences) {
+    const auto provider = providers::spice::load_snapshot(
+        ORBITFORGE_SPICE_SAMPLE,
+        std::filesystem::path(ORBITFORGE_SPICE_TEST_DIR) / "srp-apparent-chain-real");
+    const auto epoch =
+        core::Epoch{provider->data_info().first_epoch.tai_nanoseconds() + 900000000000};
+    DifferentialSolarSystem ephemeris(*provider);
+    const auto geometric = ephemeris.position(core::ThirdBody::sun, epoch);
+    const double length = std::hypot(geometric[0], geometric[1], geometric[2]);
+    const double et = provider->to_tdb(epoch).seconds_past_j2000;
+    const double rate = reference_rate(et, false);
+    unsigned count = 0;
+    double max_r = 0, max_v = 0, chain_fraction = 0;
+    // The synthetic high speed makes the position light-time/aberration chain
+    // resolvable separately from the much larger fixed-Sun position block.
+    for (const auto &observer_velocity :
+         std::array{SunVector{2000, 6500, -1000}, SunVector{4e7, 3e7, -2e7}})
+        for (auto method : {core::SrpSunPositionMethod::geometric,
+                            core::SrpSunPositionMethod::apparent_to_true_cb,
+                            core::SrpSunPositionMethod::apparent})
+            for (double radius : {7e6, 42164000.})
+                for (double offset : {-2., -.5, .5, 2.}) {
+                    SCOPED_TRACE(static_cast<int>(method));
+                    SCOPED_TRACE(radius);
+                    SCOPED_TRACE(offset);
+                    core::SrpOptions options;
+                    options.enabled = true;
+                    options.moon_shadow = false;
+                    options.sun_position_method = method;
+                    options.area_mass_ratio_m2_per_kg = 10;
+                    auto axis_sun = geometric;
+                    if (method == core::SrpSunPositionMethod::apparent)
+                        axis_sun = reference_apparent(et, {}, observer_velocity, rate);
+                    SunVector n{}, tangent{0, 0, 1};
+                    const double axis_length = std::hypot(axis_sun[0], axis_sun[1], axis_sun[2]);
+                    for (unsigned i = 0; i < 3; ++i)
+                        n[i] = axis_sun[i] / axis_length;
+                    for (unsigned i = 0; i < 3; ++i)
+                        tangent[i] -= n[2] * n[i];
+                    const double tangent_length = std::hypot(tangent[0], tangent[1], tangent[2]);
+                    for (double &value : tangent)
+                        value /= tangent_length;
+                    const double angle =
+                        std::asin(options.earth_radius_m / radius) +
+                        offset * std::asin(options.sun_radius_m / (length + radius));
+                    core::CartesianState state{
+                        epoch, core::OriginId::earth, core::FrameId::gcrf, {}, observer_velocity};
+                    for (unsigned i = 0; i < 3; ++i)
+                        state.position_m[i] =
+                            radius * (-std::cos(angle) * n[i] + std::sin(angle) * tangent[i]);
+                    const auto actual = core::srp_state_differential(state, options, ephemeris);
+                    core::HpopOptions combined_options;
+                    combined_options.gravity_degree = combined_options.gravity_order = 0;
+                    combined_options.srp = options;
+                    core::HpopEnvironment combined_environment;
+                    combined_environment.ephemeris =
+                        std::make_shared<DifferentialSolarSystem>(*provider);
+                    const auto combined = core::hpop_force_differential(state, combined_options,
+                                                                        combined_environment);
+                    const auto central =
+                        core::builtin_egm96()->differential(state.position_m, 0, 0);
+                    EXPECT_EQ(combined.force.acceleration_mps2,
+                              core::evaluate_hpop_acceleration(state, combined_options,
+                                                               combined_environment));
+                    EXPECT_EQ(combined.force.velocity_jacobian_per_s,
+                              actual.force.velocity_jacobian_per_s);
+                    EXPECT_EQ(combined.srp_parameter_jacobian_pa, actual.srp_parameter_jacobian_pa);
+                    for (unsigned i = 0; i < 3; ++i)
+                        for (unsigned j = 0; j < 3; ++j)
+                            EXPECT_EQ(combined.force.position_jacobian_per_s2[i][j],
+                                      central.position_jacobian_per_s2[i][j] +
+                                          actual.force.position_jacobian_per_s2[i][j]);
+
+                    if (method == core::SrpSunPositionMethod::apparent &&
+                        observer_velocity[0] > 1e6) {
+                        auto selected_sun =
+                            reference_apparent(et, state.position_m, state.velocity_mps, rate);
+                        for (unsigned i = 0; i < 3; ++i)
+                            selected_sun[i] += state.position_m[i];
+                        const auto local =
+                            core::srp_differential(state.position_m, selected_sun, options);
+                        const double scale = maximum(actual.force.position_jacobian_per_s2);
+                        if (scale > 0)
+                            for (unsigned i = 0; i < 3; ++i)
+                                for (unsigned j = 0; j < 3; ++j)
+                                    chain_fraction = std::max(
+                                        chain_fraction,
+                                        std::abs(actual.force.position_jacobian_per_s2[i][j] -
+                                                 local.force.position_jacobian_per_s2[i][j]) /
+                                            scale);
+                    }
+                    // Complete nominal force, with the Sun obtained independently via CSPICE.
+                    // The disk evaluator has its own 641 independent reference cases.
+                    const auto reference = [&](const SunVector &r, const SunVector &v) {
+                        SunVector sun = geometric;
+                        if (method == core::SrpSunPositionMethod::apparent_to_true_cb)
+                            sun = reference_apparent(et, {}, {}, rate);
+                        if (method == core::SrpSunPositionMethod::apparent) {
+                            sun = reference_apparent(et, r, v, rate);
+                            for (unsigned i = 0; i < 3; ++i)
+                                sun[i] += r[i];
+                        }
+                        return core::evaluate_srp(r, sun, options).acceleration_mps2;
+                    };
+                    const auto nominal = reference(state.position_m, state.velocity_mps);
+                    for (unsigned i = 0; i < 3; ++i)
+                        EXPECT_NEAR(actual.force.acceleration_mps2[i], nominal[i], 2e-14);
+                    for (bool velocity : {false, true}) {
+                        const double step = 128;
+                        const auto fine = independent_sun_difference(
+                            reference, state.position_m, state.velocity_mps, step, velocity);
+                        const auto coarse = independent_sun_difference(
+                            reference, state.position_m, state.velocity_mps, 2 * step, velocity);
+                        const auto &matrix = velocity ? actual.force.velocity_jacobian_per_s
+                                                      : actual.force.position_jacobian_per_s2;
+                        const double scale = maximum(fine);
+                        for (unsigned i = 0; i < 3; ++i)
+                            for (unsigned j = 0; j < 3; ++j) {
+                                EXPECT_NEAR(coarse[i][j], fine[i][j], 5e-7 * scale + 2e-23);
+                                EXPECT_NEAR(matrix[i][j], fine[i][j], 1e-6 * scale + 2e-23);
+                                auto &max = velocity ? max_v : max_r;
+                                max = std::max(max, std::abs(matrix[i][j] - fine[i][j]) /
+                                                        (scale + 2e-17));
+                            }
+                    }
+                    ++count;
+                }
+    EXPECT_EQ(count, 48U);
+    EXPECT_GT(chain_fraction, 1e-5);
+    RecordProperty("resolved_position_chain_fraction", chain_fraction);
+    RecordProperty("max_scaled_force_position_jacobian_error", max_r);
+    RecordProperty("max_scaled_force_velocity_jacobian_error", max_v);
+}
+
+TEST(Spice, ApparentSunDerivativeFailuresPreserveUsableProvider) {
+    Fixture fixture;
+    linear_sun_kernel(fixture);
+    const auto provider = fixture.load();
+    const auto good = provider->apparent_sun_from_spacecraft_differential(core::Epoch{0}, {}, {});
+    EXPECT_THROW((void)provider->apparent_sun_from_spacecraft_differential(
+                     core::Epoch{0}, {std::numeric_limits<double>::quiet_NaN(), 0, 0}, {}),
+                 std::invalid_argument);
+    EXPECT_THROW(
+        (void)provider->apparent_sun_from_spacecraft_differential(core::Epoch{0}, {}, {4e8, 0, 0}),
+        std::invalid_argument);
+    EXPECT_THROW(
+        (void)provider->apparent_sun_from_spacecraft_differential(core::Epoch{0}, {2e15, 0, 0}, {}),
+        core::EphemerisCoverageError);
+    EXPECT_THROW((void)provider->apparent_sun_from_spacecraft_differential(
+                     core::Epoch{-3599000000000LL}, {}, {}),
+                 core::EphemerisCoverageError);
+    const auto again = provider->apparent_sun_from_spacecraft_differential(core::Epoch{0}, {}, {});
+    EXPECT_EQ(again.position_m, good.position_m);
+    EXPECT_EQ(again.position_jacobian, good.position_jacobian);
+    EXPECT_EQ(again.velocity_jacobian_s, good.velocity_jacobian_s);
+    EXPECT_GT(maximum(good.velocity_jacobian_s), 100);
+}
+
+TEST(Spice, ApparentSunPartialsRemainSmoothAtZeroAndParallelBarycentricVelocity) {
+    Fixture fixture;
+    linear_sun_kernel(fixture);
+    const auto provider = fixture.load();
+    const core::Epoch epoch{0};
+    const SunVector r{7e6, 2e6, -1e6};
+    const auto earth = provider->geometric_state(399, 0, epoch);
+    const double et = earth.tdb.seconds_past_j2000, rate = reference_rate(et, false);
+    const auto ray = reference_apparent(et, r, {}, rate, "LT");
+    const double distance = std::hypot(ray[0], ray[1], ray[2]);
+    for (double speed : {0., -.5, .5}) {
+        SCOPED_TRACE(speed);
+        SunVector v{};
+        for (unsigned i = 0; i < 3; ++i)
+            v[i] = (speed * 299792458. * ray[i] / distance - earth.velocity_mps[i]) / rate;
+        const auto actual = provider->apparent_sun_from_spacecraft_differential(epoch, r, v);
+        EXPECT_GT(maximum(actual.velocity_jacobian_s), 100);
+        for (unsigned i = 0; i < 3; ++i)
+            EXPECT_NEAR(actual.position_m[i], ray[i], 1e-3);
+        const auto reference = [&](const SunVector &rr, const SunVector &vv) {
+            return reference_apparent(et, rr, vv, rate);
+        };
+        for (bool velocity : {false, true}) {
+            const double step = velocity ? 128 : 50000;
+            const auto fine = independent_sun_difference(reference, r, v, step, velocity);
+            const auto coarse = independent_sun_difference(reference, r, v, 2 * step, velocity);
+            const auto &matrix = velocity ? actual.velocity_jacobian_s : actual.position_jacobian;
+            for (unsigned i = 0; i < 3; ++i)
+                for (unsigned j = 0; j < 3; ++j) {
+                    EXPECT_NEAR(coarse[i][j], fine[i][j], 3e-9 * maximum(fine) + 1e-10);
+                    EXPECT_NEAR(matrix[i][j], fine[i][j], 5e-9 * maximum(fine) + 1e-10);
+                }
+        }
+    }
+}

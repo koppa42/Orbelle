@@ -101,6 +101,11 @@ void bind_time_frames(py::module_ &module) {
         .def("apply_position", &core::PositionRotation::apply_position, py::arg("position_m"))
         .def("inverse_position", &core::PositionRotation::inverse_position, py::arg("position_m"));
     py::class_<core::IFrameProvider>(module, "FrameProvider")
+        .def("gcrf_to_celestial", &core::IFrameProvider::gcrf_to_celestial, py::arg("epoch"),
+             py::arg("eop"), py::arg("target"), py::call_guard<py::gil_scoped_release>())
+        .def("gcrf_to_celestial_state", &core::IFrameProvider::gcrf_to_celestial_state,
+             py::arg("epoch"), py::arg("eop"), py::arg("target"),
+             py::call_guard<py::gil_scoped_release>())
         .def("gcrf_to_itrf", &core::IFrameProvider::gcrf_to_itrf, py::arg("epoch"), py::arg("eop"),
              py::call_guard<py::gil_scoped_release>())
         .def("gcrf_to_itrf_state", &core::IFrameProvider::gcrf_to_itrf_state, py::arg("epoch"),
