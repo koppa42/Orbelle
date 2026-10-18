@@ -2,18 +2,18 @@
 
 所有改动先推送主题分支，再通过 Pull Request 进入 `main`；禁止直接推送 `main`。合并前更新到最新目标分支，确认当前提交的 **CI passed** 成功，再由维护者确认合并。提交或推送分支不代表授权合并。
 
-## 触发与分层
+## 触发与测试范围
 
 | 触发 | 执行范围 |
 | --- | --- |
-| 代码、测试、CI、依赖或资源 PR | Windows / Linux 完整数值与行为回归、Python 3.11–3.15 API 测试；独立并行的常规 ASan/UBSan；不构建发布包 |
+| 代码、测试、CI、依赖或资源 PR | Windows / Linux 完整数值与行为回归、Python 3.11–3.15 API 测试；不构建发布包 |
 | 纯文档 PR / 纯文档合并到 `main` | 工作流静态检查、版本一致性及工具测试；跳过原生构建和 Python 矩阵 |
 | 其他 `main` 更新 | 两平台完整 C++ / 桌面回归和基准 Python 3.13 测试；不重复 sanitizer 和其他 Python 版本，不构建发布包 |
-| 手动运行，`mode=sanitizers`（默认） | 版本 / 工具检查和全量 ASan/UBSan；不重复原生 Release 或 Python 矩阵 |
-| 手动运行，`mode=all` | 完整原生与 Python 矩阵测试，并行全量 ASan/UBSan；不构建发布包 |
-| `vX.Y.Z` 标签 | 完整数值与行为回归、常规 ASan/UBSan、发布包构建、安装与迁移验证；全部成功后创建 GitHub Release |
+| 手动运行 `CI` | 与代码 PR 相同的完整常规测试；不构建发布包 |
+| 手动运行 `Sanitizers` | 独立执行全量 ASan/UBSan；不重复原生 Release 或 Python 矩阵 |
+| `vX.Y.Z` 标签 | 完整数值与行为回归、发布包构建、安装与迁移验证；全部成功后创建 GitHub Release |
 
-不配置定时任务。全量 ASan/UBSan 仅由手动运行触发，核心改动或发布标签也不会自动升级为全量；需要复核时在 **Actions → CI → Run workflow** 中选择分支和 `mode=sanitizers`。普通 PR 推送只执行常规层，同一 PR 的新提交取消过期运行；纯文档不触发原生或 sanitizer 构建。
+ASan/UBSan 仅在 **Actions → Sanitizers → Run workflow** 中手动执行；PR、`main` 和发布标签均不自动触发，也不配置定时任务。手动运行直接检查全量用例，无分层选项或排除清单。修改内存管理、文件解析、原生接口、重大重构或发布前，按风险手动补充检查。同一 PR 的新提交继续取消过期 CI 运行。
 
 纯文档的范围限于根目录 `README.md`、`AGENTS.md` 和 `docs/` 下的 Markdown 文件。PR 分类对比模拟合并提交与其目标分支父提交；`main` 分类对比 push 事件的 `before..after`，校验当前检出等于 `after` 且推送为快进。两者均包含整个变更范围及重命名前后的路径，不能仅凭最后一次提交或文件扩展名跳过测试。其他路径、空差异、历史缺失或无法确定的差异，PR 保留完整测试，`main` 保留基准测试。
 
@@ -31,18 +31,17 @@ PR 使用 GitHub 默认的[模拟合并引用](https://docs.github.com/en/action
 | --- | --- |
 | Versions and tooling | actionlint 工作流静态检查；CMake、Python、vcpkg 版本一致性；数据导入、CI 规划、交付与发布脚本测试；标签提交归属检查 |
 | Linux C++ and Python 3.13 | Ubuntu 24.04：完整无界面 C++ 数值与行为测试、Python API、九个示例和 C++/Python 对照；标签流程额外构建 SDK 和基准 wheel |
-| Linux ASan/UBSan (routine / full) | 独立 Ubuntu 24.04 作业；常规层执行除明确延后用例以外的全部测试，全量层不加筛选；记录选中 / 延后清单和 JUnit |
+| Linux ASan/UBSan | 独立的手动 `Sanitizers` 工作流；Ubuntu 24.04，全量用例，不加筛选；保存命令、构建配置和 JUnit |
 | Linux SDK and installed Python API | 仅标签流程：新 runner 不检出源码，校验交付散列、迁移 SDK、离线安装 wheel，运行消费端、API、示例和 C++/Python 对照 |
 | Windows desktop and Python 3.13 | Windows Server 2022 / VS 2022：桌面编译、CTest 与 Qt offscreen、Python API 及示例；标签流程额外构建便携包、SDK 和基准 wheel，验证 SDK 解压迁移及 wheel 安装 |
-| Python 3.11 / 3.12 / 3.14 / 3.15 × Windows / Linux | PR、手动 `mode=all` 及标签流程执行；复用相应平台的原生依赖，编译各解释器扩展，运行 API 测试及九个示例；标签流程改为构建、安装 wheel 后测试 |
-| CI passed | 按本次范围检查全部预期作业（包含计划执行的 sanitizer）；失败、取消或意外跳过都会失败，仅允许该范围明确计划的跳过 |
-| Manual sanitizers passed | 仅手动 `mode=sanitizers`：验证工具与全量 sanitizer 成功、其他作业按计划跳过；使用独立名称，不能替代 PR 必需的 **CI passed** |
+| Python 3.11 / 3.12 / 3.14 / 3.15 × Windows / Linux | PR、手动 `CI` 及标签流程执行；复用相应平台的原生依赖，编译各解释器扩展，运行 API 测试及九个示例；标签流程改为构建、安装 wheel 后测试 |
+| CI passed | 按本次范围检查全部预期常规作业；失败、取消或意外跳过都会失败，仅允许该范围明确计划的跳过 |
 
 GitHub 的 `main` 分支规则应要求通过 PR 合并、**CI passed** 成功，并要求分支合并前保持最新；禁用绕过和强制推送。仓库中的规范和工作流不会自动修改 GitHub 分支保护设置。
 
 可审阅的服务器规则配置保存在 [main.json](../../.github/rulesets/main.json) 和 [version-tags.json](../../.github/rulesets/version-tags.json)。管理员在 GitHub 应用或更新对应规则集：`main` 必须走 PR，必需的 `CI passed` 限定由 GitHub Actions 提供，合并前要求与目标分支保持最新；`v*` 标签允许新建，但禁止修改和删除。两套规则均不配置绕过名单。规则文件的修改也走 PR，文件本身不会自动调用管理 API。
 
-Linux 原生、Windows 原生和 ASan/UBSan 仅等待前置工具检查，然后并行执行。Linux 和 Windows 的 Python 矩阵分别只等待本平台的原生任务，通过同一份可复用工作流执行，不等待 sanitizer。`CI passed` 同时检查两个平台矩阵；拆分不改变支持版本和必需测试。
+Linux 和 Windows 原生作业在前置工具检查通过后并行执行；各平台的 Python 矩阵只等待本平台的原生作业，通过同一份可复用工作流执行。`CI passed` 检查两平台及相应 Python 测试。手动 `Sanitizers` 使用独立工作流和检查名称，其结果不能替代 PR 必需的 `CI passed`。
 
 actionlint 在原生构建前运行，固定工具版本与 SHA-256，检查所有工作流及其 shell 脚本。更新版本时同步核验上游发布文件和校验值。
 
@@ -54,11 +53,11 @@ GitHub 将 PR 生成的缓存限制在该 PR 的合并引用中，其他 PR 和 
 
 排查耗时时先区分依赖安装、项目编译、测试和标签流程的打包。查看缓存是否命中、vcpkg 恢复了多少包、哪些包重新编译；不要用减少 Python 支持版本或跳过行为测试来掩盖依赖冷启动问题。取消日常发布包构建可以减少重复工作，但不会消除测试所需的编译。
 
-完整 Release 数值回归不做筛选，不改算法、参考数据或精度容限。ASan/UBSan 的分层只改变重复插桩运行的范围，仍使用同一套测试及断言。常规层默认包含所有现有和新增用例，只按 [select_sanitizers.py](../../tools/ci/select_sanitizers.py) 中的精确名称延后 12 个长轨迹或高阶密集参考比较；保留 2190 阶极点、系数修正、并发、解析、错误输入、积分器及协方差等边界检查。不能用整个模块或通配符排除用例。用例改名、清单过期、错误构建预设、空选择均报错。
+完整 Release 数值回归及手动 ASan/UBSan 都执行预设中的全量用例，保留原算法、参考数据、断言与精度容限；新增测试自动纳入。两者使用 `--no-tests=error` 拒绝空测试运行。
 
-每次 sanitizer 运行生成 `sanitizers-selection.json`，列出配置的测试总数、实际选择、延后原因及 CTest 参数；全量层没有排除参数。`linux-sanitizer-reports` 独立保存环境、命令耗时、构建配置、选择清单和 JUnit，普通 Linux 报告仍保存在 `linux-build-reports`。原生 Linux 上限 180 分钟，sanitizer 上限 360 分钟，以实际命令记录评估耗时；不在同一构建目录中并发运行有共享文件的测试。
+`linux-sanitizer-reports` 保存手动检查的环境、命令耗时、构建配置和 JUnit；普通 Linux 报告保存在 `linux-build-reports`。原生 Linux 上限 180 分钟，sanitizer 上限 360 分钟，以实际命令记录评估耗时；不在同一构建目录中并发运行有共享文件的测试。
 
-这两个 Linux 作业独立恢复同一类 vcpkg 二进制依赖缓存，避免为了共享构建目录而串行等待。没有新增项目构建缓存，也没有取消 ASan 内存泄漏检测或 UBSan 的遇错失败设置。
+常规 Linux 与手动 sanitizer 作业独立恢复同一类 vcpkg 二进制依赖缓存。ASan 保留内存泄漏检测，ASan/UBSan 均遇错失败。
 
 Windows、Linux 和 Python 的 `commands.json` 记录每条命令的 UTC 开始时间、耗时与退出码，Actions 作业摘要展示分阶段用时，失败命令同样保留。父任务中的 Python 总耗时包含其嵌套报告，不能跨表重复求和。依赖缓存命中率和安装时间查看对应 Actions 步骤；项目编译缓存需根据这些记录再评估，当前不缓存项目构建目录。
 
