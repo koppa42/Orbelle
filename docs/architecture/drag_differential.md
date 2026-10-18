@@ -2,7 +2,7 @@
 
 `drag_differential(...)` 与 `evaluate_drag(...)` 接收同样的 ITRF 位置、相对共转大气的速度、太阳位置、UTC、阻力配置及天气快照。结果包含名义 `DragEvaluation`、`ForceDifferential`、密度位置梯度（kg/m⁴）和对 `D = Cd × Area/Mass` 的加速度偏导（Pa）。D 沿用 [STK consider analysis](https://help.agi.com/stk/Content/hpop/hpop-covariance.htm) 的定义，不是单独 Cd，也不是其倒数形式的弹道系数。
 
-这是随 C++ SDK 安装的单历元计算基础。Python 和桌面仍通过现有入口使用修正后的名义阻力；完整 STM、协方差、参数传播和事件处理尚未接入，协方差页面不因此启用。
+这是随 C++ SDK 安装的单历元计算基础，已通过[总力装配](hpop_force.md)接入[STM / D、K 参数传播](hpop_variational.md)与[联合协方差](hpop_covariance.md)。Python、项目与桌面使用同一实现；零宽度密度硬切换的状态跳变尚不支持协方差。
 
 ## 固定输入与方程
 
@@ -25,7 +25,7 @@ Jr_I = Rᵀ (Jr_B R + Jv_B R_dot)
 Jv_I = Rᵀ Jv_B R
 ```
 
-不能只旋转两个 3×3 块而遗漏旋转率耦合。本接口本身返回 B=ITRF 的块；惯性变分方程装配仍待实现。
+不能只旋转两个 3×3 块而遗漏旋转率耦合。本接口本身返回 B=ITRF 的块；[总力装配](hpop_force.md)转换完整惯性状态块并用于变分传播。
 
 ## 密度位置梯度
 

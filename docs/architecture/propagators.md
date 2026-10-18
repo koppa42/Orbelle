@@ -8,7 +8,7 @@
 | J2 secular | 平均椭圆，含平近点角 M | GCRF | 一阶长期趋势 |
 | J4 secular | 平均椭圆，含平近点角 M | GCRF | 含 J2、J2²、J4 的长期趋势 |
 | SGP4 | 一组固定的 TLE，两行各 69 个 ASCII 字符 | TEME of date | 与 TLE 配套的近地/深空预报 |
-| HPOP（开发中） | GCRF 瞬时位置/速度或经典根数；力模型与积分设置 | GCRF | 静态球谐、可选太阳系第三体引力与球形太阳辐射压的数值传播 |
+| HPOP | GCRF 瞬时位置/速度或经典根数；力模型、积分及可选初始协方差 | GCRF | 球谐与潮汐、第三体、阻力、球形太阳辐射压和相对论；单滑行段协方差 |
 
 此分工参考 [STK 预报器说明](https://help.agi.com/stk/12.7.1/Content/stk/vehSat_orbitProp_choose.htm)。新增模型不改变已有二体/J2 的模型常数或算法。
 
@@ -16,13 +16,13 @@
 
 ## HPOP
 
-当前支持静态重力、太阳系第三体与[球形太阳辐射压](solar_radiation_pressure.md)数值传播。通用地球轨道所需的完整力模型、积分高级能力与协方差目标见 [HPOP 与 STK 的对照及重构要求](hpop_alignment.md)；其中规划能力尚未进入本节的已实现范围。
+当前支持地球重力与潮汐、太阳系第三体、[球形阻力](atmospheric_drag.md)、[球形太阳辐射压](solar_radiation_pressure.md)、相对论、五种积分器及[单滑行段协方差](hpop_covariance.md)。本轮以常用功能和完整项目工作流交付首版；未完成的高级能力延期，详见 [HPOP 首版范围与长期对齐清单](hpop_alignment.md)。
 
 参考 STK 的[力模型分层](https://help.agi.com/stk/Content/hpop/hpopForceMods.htm)和[积分设置](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)，在 GCRF 中以连续 TAI 秒积分 Cowell 六维方程，RKF78 / Bulirsch–Stoer 还可选择 [VOP 通用变量方程](vop_integration.md)。输入为瞬时状态，不能把 J2/J4 平均根数当作等价瞬时初值。当前支持：
 
 | 配置 | 实现与默认值 | 边界 |
 | --- | --- | --- |
-| 地球引力 | 桌面新配置默认 EGM2008、21×21，缺少数据时首次打开设置自动下载；SDK 默认内置 EGM96 8×8、最高 20×20；可下载完整 EGM96 / EGM2008，或导入静态 `.gfc` / `.grv`；文件模型计算最高 2190×2190，EGM2008 完整 2190×2159，0/0 为所选模型点质量 | 阶数与次数按文件实际范围独立限幅；支持[永久潮／完整固体潮](solid_tides.md)；支持[FES2014bv1 海潮与海洋极潮](ocean_tides.md)及独立截断；文件显式长期变化已支持；静态场默认长期演化、潮汐幅度筛选和次要分潮推算待实现 |
+| 地球引力 | 桌面新配置默认 EGM2008、21×21，首次启动准备完整数据，后续缺失可在设置页下载；SDK 默认内置 EGM96 8×8、最高 20×20；可下载完整 EGM96 / EGM2008，或导入静态 `.gfc` / `.grv`；文件模型计算最高 2190×2190，EGM2008 完整 2190×2159，0/0 为所选模型点质量 | 阶数与次数按文件实际范围独立限幅；支持[永久潮／完整固体潮](solid_tides.md)；支持[FES2014bv1 海潮与海洋极潮](ocean_tides.md)及独立截断；文件显式长期变化已支持；静态场默认长期演化、潮汐幅度筛选和次要分潮推算待实现 |
 | 第三体引力 | 日月、七行星及冥王星独立启用，默认关闭；DE440s 地心几何位置，GM 来源为 JPL DE / Cb file / User Specified | 每个积分阶段求值；覆盖不足报错，不外推 |
 | 积分器 | RKF78 / RKV 8(9) Efficient / Bulirsch–Stoer 可选固定或相对误差控制；RK4 / Gauss–Jackson 12 强制固定 | RKF78 / Bulirsch–Stoer 支持独立的 VOP 开关；其他方法保留非活动草稿 |
 | 自适应容差 | 相对 1e-12，位置绝对 1e-3 m，速度绝对 1e-6 m/s | 分量误差尺度为 `atol + rtol × max(abs(old), abs(new))`；是局部数值误差，不是预报精度 |
@@ -42,7 +42,7 @@ EGM96 取自 [ICGEM 原始系数](https://icgem.gfz.de/getmodel/gfc/971b0a3b49a4
 
 固定步长及自适应 Min/Max Step 都支持 1e−6–86400 TAI 秒（C++ 上限常量 `hpop_max_step_seconds`）。自适应缓存段宽度为 `max(300, max_step_seconds)`，以初始历元为原点；不再用内部 300 秒缓存限制实际步长。首个试步取 `0.1 × min(r / sqrt(μ/r), r / |v|)`，再约束到配置 Min/Max，速度为零时只用引力时间尺度。该估计只决定每个计算段的首步，后续由误差控制增减；大上限不会直接作为低轨首步。误差控制、停止高度和资源覆盖仍逐阶段生效。运行时来源升级为 `steps=relative-mixed-max-span-v2`，固定模式来源保持不变。
 
-缓存网格通过完整区间索引计算端点，避免重复加法漂移。查询不会为填满缓存读取请求区间之外的数据，尾段不回写，取消保留已经完成的整段。当前科学查询仍积分缓存尾段；大上限下密集查询可能重复计算较长尾段，尚无科学插值加速。一天固定步长只在合适的长周期数值问题中验证，不是低轨步长建议；独立对照及范围压力测试见[大步长验证](../validation/hpop_protocol.md#大步长与自适应缓存)。
+缓存网格通过完整区间索引计算端点，避免重复加法漂移。查询不会为填满缓存读取请求区间之外的数据，尾段不回写，取消保留已经完成的整段。直接积分工厂的查询仍积分缓存尾段，大上限下密集查询可能重复计算较长尾段；普通项目使用下述连续科学星历。一天固定步长只在合适的长周期数值问题中验证，不是低轨步长建议；独立对照及范围压力测试见[大步长验证](../validation/hpop_protocol.md#大步长与自适应缓存)。
 
 显式单段工厂、普通项目及任务滑行均已接入 HPOP 接受节点或固定 TAI 输出、天气分段及 Lagrange / Hermite / VOP 科学插值；方法、阶数和输出配置贯通 UI、保存及报告，见[科学轨道星历插值](orbit_interpolation.md)。
 
@@ -50,15 +50,15 @@ EGM96 取自 [ICGEM 原始系数](https://icgem.gfz.de/getmodel/gfc/971b0a3b49a4
 
 [HPOP 帮助](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)明确 RKV 的嵌入误差控制；[Connect 页](https://help.agi.com/stk/SubSystems/connectCmds/Content/cmd_HPOPIntegrator.htm)的 RelativeError 行仍只列 RKF78/BS。本实现依据前者为 RKV 保留自适应并新增固定模式；STK 实机有效组合、误差范数、步长范围和默认值仍待核对。当前工程参数范围为 1e−6–86400 s，已覆盖参考配置的一天上限；这不是对 STK 全部合法范围或出厂默认值的断言，默认值保持显式配置。
 
-RKV 8(9) Efficient 使用 Verner 的 16 阶段高效 9(8) 嵌入对，按 [STK 的八阶推进定义](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)推进八阶成员，以九阶与八阶之差估计局部误差。系数固定于 [rklib `rkv98e`](https://github.com/jacobwilliams/rklib/blob/a1bf2d26ba2c37d049b448d28d4e9800a0ee4b58/src/rklib_variable_steps.f90)（BSD-3-Clause）；其原实现推进九阶成员，OrbitForge 显式选择八阶权重。每步使用 16 次阶段力评估，所有阶段在该步闭区间内，另验证接受端点。控制器使用上述分量混合绝对/相对误差的最大范数，接受阈值 1，安全因子 0.9、缩放范围 0.1–4、指数 −1/9，随后约束到最小/最大步长。天气边界及末段可短于最小步长；若误差仍超限则报错。它与 RKF78 共用分段缓存和取消边界；固定步长模式已提供；稠密插值和 FSAL 缓存仍待实现。Python 使用 `integrator="rkv89"`，C++ 为 `HpopIntegrator::rkv89`，结果来源包含 `rkv89-efficient-8th-rklib-a1bf2d26-v1`。控制器并不宣称与 STK 内部实现相同；局部容差不能保证整段轨道误差，见[数值对照](../validation/hpop_protocol.md#rkv-89-efficient)。
+RKV 8(9) Efficient 使用 Verner 的 16 阶段高效 9(8) 嵌入对，按 [STK 的八阶推进定义](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)推进八阶成员，以九阶与八阶之差估计局部误差。系数固定于 [rklib `rkv98e`](https://github.com/jacobwilliams/rklib/blob/a1bf2d26ba2c37d049b448d28d4e9800a0ee4b58/src/rklib_variable_steps.f90)（BSD-3-Clause）；其原实现推进九阶成员，OrbitForge 显式选择八阶权重。每步使用 16 次阶段力评估，所有阶段在该步闭区间内，另验证接受端点。控制器使用上述分量混合绝对/相对误差的最大范数，接受阈值 1，安全因子 0.9、缩放范围 0.1–4、指数 −1/9，随后约束到最小/最大步长。天气边界及末段可短于最小步长；若误差仍超限则报错。它与 RKF78 共用分段缓存和取消边界；固定步长模式已提供；项目使用独立的科学插值层，积分器内部连续输出和 FSAL 优化留待后续扩展。Python 使用 `integrator="rkv89"`，C++ 为 `HpopIntegrator::rkv89`，结果来源包含 `rkv89-efficient-8th-rklib-a1bf2d26-v1`。控制器并不宣称与 STK 内部实现相同；局部容差不能保证整段轨道误差，见[数值对照](../validation/hpop_protocol.md#rkv-89-efficient)。
 
-Bulirsch–Stoer 的相对误差模式按 [STK 定义](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)使用 Richardson 外推和自动步长。实现采用平滑改良中点、偶数子步序列 2/4/…/18，以及关于 `1/n²` 的多项式外推，候选阶数为 4–18。最后一列外推修正使用相同分量绝对/相对尺度估计误差；第 k 行（从 0 计）的步长控制指数为 `−1/(2k+1)`。每次尝试从低阶开始，到首个满足误差要求的候选后再计算一列，以累计力评估次数 / 下一步可达到时长比较成本，在合格候选中选择；下一步受配置上限、当前计算段剩余时长和已知天气边界限制；计算段宽度至少为配置上限。最高阶仍不满足要求则缩步，在最小步长或更短边界段仍不满足要求时明确报错。所有中点阶段限制在该步时间范围内，并在子步检查取消；天气边界采用同一单侧求值规则。Python 为 `integrator="bulirsch_stoer"`，C++ 为 `HpopIntegrator::bulirsch_stoer`，来源为 `bulirsch-stoer-midpoint-richardson-4to18-cost-v1`。此选择策略和误差控制不宣称复现 STK 的内部细节；VOP 积分方程仍待接入；科学插值已接入项目，见下文。独立对照见[验证协议](../validation/hpop_protocol.md#bulirschstoer)。
+Bulirsch–Stoer 的相对误差模式按 [STK 定义](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)使用 Richardson 外推和自动步长。实现采用平滑改良中点、偶数子步序列 2/4/…/18，以及关于 `1/n²` 的多项式外推，候选阶数为 4–18。最后一列外推修正使用相同分量绝对/相对尺度估计误差；第 k 行（从 0 计）的步长控制指数为 `−1/(2k+1)`。每次尝试从低阶开始，到首个满足误差要求的候选后再计算一列，以累计力评估次数 / 下一步可达到时长比较成本，在合格候选中选择；下一步受配置上限、当前计算段剩余时长和已知天气边界限制；计算段宽度至少为配置上限。最高阶仍不满足要求则缩步，在最小步长或更短边界段仍不满足要求时明确报错。所有中点阶段限制在该步时间范围内，并在子步检查取消；天气边界采用同一单侧求值规则。Python 为 `integrator="bulirsch_stoer"`，C++ 为 `HpopIntegrator::bulirsch_stoer`，来源为 `bulirsch-stoer-midpoint-richardson-4to18-cost-v1`。此选择策略和误差控制不宣称复现 STK 的内部细节；VOP 积分方程与科学插值均已接入，见 [VOP 积分](vop_integration.md)及下文。独立对照见[验证协议](../validation/hpop_protocol.md#bulirschstoer)。
 
 Gauss–Jackson 12 使用 [STK 规定的固定步长和两种校正方式](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)。位置采用二重求和、速度采用求和 Adams，保留 13 个等距加速度值；四组预测/校正权重由 [Berry–Healy 的差分算子关系](https://hdl.handle.net/1903/2202)用有理数生成。`tools/validation/gauss_jackson_coefficients.py --check` 核对固定表、论文八阶表中的独立条目和 52 个多项式一致性条件。求和保留 SI 尺度并补偿舍入，系数点积先扣除公共加速度项。
 
 Python 使用 `integrator="gauss_jackson"` 和 `correction="full"` / `"pseudo"`；C++ 为 `HpopIntegrator::gauss_jackson` 与 `HpopCorrection`。Full 默认开启，每次校正收敛后重算全部加速度；Pseudo 只更新所选中心场 GM 对应的二体项，保留最后一次迭代的摄动。两种方式的校正迭代均计算完整力，最多 12 次；位置/速度变化按各自三维范数的 `64 × double epsilon` 检查，使用至少 1 m / 1 m/s 尺度。未收敛明确报错，要求减小固定步长，不把迭代收敛当作截断误差保证。
 
-历史启动以及非网格查询的尾段使用至少十四阶、最高十八阶的 Bulirsch–Stoer，采用同一 2/4/6/8/12/16/24/32/48 序列并外推局部增量以降低舍入放大，固定内部相对容差 1e−14、位置/速度绝对容差 1e−9 m / 1e−12 m/s，最小拒绝步为 1 ns。只在传播方向的已请求区间取样，不为启动要求额外前后星历。缓存间隔为 `ceil(300 / h) × h`，保存状态、求和及加速度历史；尾段副本不回写，保证查询顺序和输出网格不改变后续积分。已知天气跳变以单侧启动器过渡并清空历史；每个机动后的 HPOP 滑行创建新的历史。阴影专用事件仍待实现，非光滑力段的高阶误差不能由局部迭代收敛保证。
+历史启动以及非网格查询的尾段使用至少十四阶、最高十八阶的 Bulirsch–Stoer，采用同一 2/4/6/8/12/16/24/32/48 序列并外推局部增量以降低舍入放大，固定内部相对容差 1e−14、位置/速度绝对容差 1e−9 m / 1e−12 m/s，最小拒绝步为 1 ns。只在传播方向的已请求区间取样，不为启动要求额外前后星历。缓存间隔为 `ceil(300 / h) × h`，保存状态、求和及加速度历史；尾段副本不回写，保证查询顺序和输出网格不改变后续积分。已知天气跳变以单侧启动器过渡并清空历史；每个机动后的 HPOP 滑行创建新的历史。启用球面阴影边界修正时，事件定位、单侧过渡及历史重启已接入；非光滑力段的高阶误差仍须用网格收敛检查，不能只依据局部校正收敛。
 
 Gauss–Jackson 的自适应参数只保留草稿，RK 方法的校正选项同样不参与计算身份。项目 v41 / OBJS32 保存两种设置，结果来源区分 `gauss-jackson12-summed-bs14to18-startup-full-v3` 与 `gauss-jackson12-summed-bs14to18-startup-pseudo-v3`。这套启动与收敛策略是本项目明确的实现，不宣称与 STK 的内部策略相同；高偏心轨道须做固定步长收敛检查，见[数值对照](../validation/hpop_protocol.md#gaussjackson-12)。
 
@@ -79,7 +79,7 @@ RK4 使用 `integrator="rk4", fixed_step_seconds=10`；点质量使用 `gravity_
 
 C++ 设置 `OrbitInput.propagator = OrbitPropagator::hpop`、`OrbitInput.hpop`（`HpopOptions`），通过 `Project::prepare(data)` 查询。低层工厂 `runtime::make_hpop_session(initial, options, environment, id)` 持有不可变 UTC、Frame/EOP、重力、星历、空间天气和海潮 Provider 的共享所有权。核心只依赖标准库；Runtime 的 DE440s 装配需要 CSPICE。桌面选择 HPOP 后，“配置…”左侧导航分“力模型”（引力、阻力、太阳辐射压、其他）和“数值”（积分器、协方差）两组，每项下方实时显示当前草稿摘要，如“EGM2008 · 21 × 21 · 第三体 2”；窄窗口改为顶部页签。各页按标题分组，标签列对齐；补充说明收在分组标题旁的说明标记中，页面只保留限制与数据要求。阻力与光压以开关启用，关闭时只显示一行说明；光压的太阳位置方法直接显示，模型常数默认折叠为一行摘要。引力页将中心天体引力、固体潮、海潮与第三体引力放在同一滚动页面；第三体区域用 Name / Use / Source / GM 四列表格配置日月、七颗行星及冥王星，支持搜索和独立的 Cb file / JPL DE / User Specified 来源。光压页提供球形模型、独立 Cr 与面积质量比、三种阴影模式、地球／月球分配及等效大气高度；太阳位置提供 True、Apparent to True CB 和 Apparent，默认地心视太阳；遮挡体中心仍使用几何位置。最低停止高度、插值方法/阶数和固定星历输出放在积分器页。阻力页提供球形 Cd/面积质量比、JR/NRLMSISE-00、手动 F10.7/Kp 或 CelesTrak 文件（日/三小时 Ap/Kp）、低空拼接和视太阳，详见[阻力契约](atmospheric_drag.md)。“其他”页已接入 IERS 2003 三项相对论加速度，默认关闭，详见[相对论契约](relativity.md)；卫星质量默认 1000 kg，支持 kg/g/t，按 STK 球形模型语义换算对应面积而不改变各自 A/m 或加速度；地球辐射与插件仍显示能力状态；[联合协方差](hpop_covariance.md)已接入项目、矩阵编辑器、Analysis 与 GCRF 下三角报告，支持独立重力截断及 D/K 方差和交叉项。切换内外页、调整窗口或单位不重建输入；校验失败返回相应页并定位字段。保存设置仅改变属性草稿，轨道页的“应用”才计算并发布。参数随项目 v41 保存。
 
-独立回归使用 Orekit 13.1.2 Holmes–Featherstone 重力和 Hipparchus 4.0.2 DP853：五类轨道 × 三组阶次 × ±6000 s/±1 天共 60 个状态，检查位置每分量 0.15 m、速度 0.15 mm/s、初始加速度 5e-13 m/s²。参考刻意采用静态同轴重力系，隔离球谐与积分；真实 EOP 路由另由集成测试验证。尚无同配置 STK 导出数据直接对照，见 [HPOP 验证](../validation/hpop_protocol.md)。后续按完整截图清单继续完善光压、空间天气、大气并接入潮汐、附加力、积分高级选项和协方差；未实现的力不提供无效开关。
+独立回归使用 Orekit 13.1.2 Holmes–Featherstone 重力和 Hipparchus 4.0.2 DP853：五类轨道 × 三组阶次 × ±6000 s/±1 天共 60 个状态，检查位置每分量 0.15 m、速度 0.15 mm/s、初始加速度 5e-13 m/s²。参考刻意采用静态同轴重力系，隔离球谐与积分；真实 EOP 路由另由集成测试验证。尚无同配置 STK 导出数据直接对照，见 [HPOP 验证](../validation/hpop_protocol.md)。阻力、天气、光压、潮汐、相对论、其他积分器和基础协方差均有各自的独立协议；未实现的高级项按[延期范围](hpop_alignment.md#延期范围)处理，不阻塞首版验收。
 
 阻力的 `use_approximate_altitude` 可选择 WGS84 椭球径向近似，默认关闭并使用精确大地高；密度、低空拼接和高度域检查使用同一个选择。位置报告仍返回精确大地高，低层 `DragEvaluation.density_altitude_m` 可核对实际密度输入，详见[阻力契约](atmospheric_drag.md)。
 

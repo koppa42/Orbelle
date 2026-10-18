@@ -47,7 +47,7 @@ True 与地心视太阳在固定历元与卫星状态独立，直接复用低层
 - 原有名义视向量与新增结果的 `position_m` 使用同一求值路径。普通轨迹不求导，也不额外查询发光太阳速度。CSPICE 批次仍持有全局锁并激活不可变快照；Python 调用释放 GIL。
 - 查询发光状态前先核对清单窗口；实际 SPK 缺口由查询失败报告。输入非有限、SSB 速度达到光速、无效视线或非有限偏导明确失败。新增接口沿用 Provider 错误类型，失败后合法查询仍可复用。
 - 不支持视太阳偏导的第三方 Provider 明确拒绝。启用的完整 SRP 状态入口要求地心 GCRF 和有限状态；禁用时校验选项后返回零，不检查状态或查询星历。
-- [阴影接触和重合圆盘限制](srp_differential.md#阴影面积变化)仍适用。名义 Boundary Mitigation 不代替变分方程的事件处理；完整 STM 和协方差接口仍待实现。
-- 项目没有新增设置，继续使用当前 v41 / OBJS32。此计算接口尚未接入 Python 的完整力偏导／协方差 API；Python 已导出星历层结果和 Provider 方法。
+- [阴影接触和重合圆盘限制](srp_differential.md#阴影面积变化)仍适用。本状态链已进入[STM](hpop_variational.md)与[联合协方差](hpop_covariance.md)。连续双锥支持边界分段；圆柱力跳变仍被拒绝，不能用名义 Boundary Mitigation 代替其变分条件。
+- 项目没有新增设置，继续使用当前 v41 / OBJS32。Python 的变分／协方差 API 使用此状态链，星历层结果和 Provider 方法也已导出；瞬时完整力偏导接口尚未单独绑定。
 
 独立 CSPICE 差分、合成时标和安装后接口验证见[验证协议](../validation/apparent_sun_differential_protocol.md)。

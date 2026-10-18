@@ -25,7 +25,7 @@
 ## 重构路线
 
 - [统一对象 API 与数据驱动设计](architecture/object_api_design.md)：Python / C++ 接口、对象事务、分析快照、界面联动与迁移路线；对象编辑阶段已实现，计算与桌面适配按阶段推进。
-- [HPOP 与 STK 的对照及重构要求](architecture/hpop_alignment.md)：完整力模型、数据依赖、积分、协方差、桌面分组与分阶段数值验收；目标能力与 0.2.1 现状分开说明。
+- [HPOP 与 STK 的对照及重构要求](architecture/hpop_alignment.md)：首版力模型、积分、基础协方差和项目工作流；延期能力、长期 STK 对齐目标及独立数值验收。
 
 ## 开发与验证
 

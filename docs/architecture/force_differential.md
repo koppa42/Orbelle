@@ -2,7 +2,7 @@
 
 `ForceDifferential` 保存单历元加速度及其 3×3 位置、速度 Jacobian。行是加速度分量，列是位置或速度分量；单位依次为 m/s²、s⁻²、s⁻¹。输入和输出沿用各力模型的地心惯性轴，固定力历元、外部几何星历、地球极轴、GM 和模型参数。这里计算的是对航天器状态的偏导，不包含星历、时间或参数偏导。
 
-这些 C++ 函数是 HPOP 协方差变分方程的计算基础，随 SDK 安装。[共用总力入口](hpop_force.md)已将它们与引力、阻力和完整局部 SRP 状态链装配。名义加速度入口保持原实现和求值顺序；新接口只在显式请求时求偏导。Python 和桌面的完整协方差入口仍待接入，这些单点接口与[已接入的单段 STM / D、K 变分传播](hpop_variational.md)分别提供；[联合协方差矩阵](hpop_covariance.md)已有单段接口，完整帧转换与 UI 仍未完成。
+这些 C++ 函数是 HPOP 协方差变分方程的计算基础，随 SDK 安装。[共用总力入口](hpop_force.md)已将它们与引力、阻力和完整局部 SRP 状态链装配。名义加速度入口保持原实现和求值顺序；新接口只在显式请求时求偏导。这些单点接口用于[单段 STM / D、K 变分传播](hpop_variational.md)与[联合协方差矩阵](hpop_covariance.md)；Python、项目保存、桌面编辑、Analysis 与矩阵报告均已接入。支持的帧转换和延期范围见协方差契约。
 
 中心引力的全阶 Hessian 使用[独立接口](gravity_differential.md)。所有启用力项的状态偏导完成后，才能装配完整变分矩阵；[阻力的局部状态块及 D 偏导](drag_differential.md)已提供；[SRP 局部状态／太阳／K 偏导](srp_differential.md)也已提供；[卫星视太阳的星历状态链](apparent_sun_differential.md)已完成；全局 D/K 传播已接入，圆柱食影／机动／硬密度切换的跳变处理仍在开发范围内。
 

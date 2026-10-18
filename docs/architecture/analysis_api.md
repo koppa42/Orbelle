@@ -225,7 +225,7 @@ summary = analysis.report(of.ReportKind.OBJECT_SUMMARY, objects=sat)
 state_report.export_csv("states-report.csv")
 ```
 
-支持现有九类内置报告：场景摘要、对象摘要、地面站、笛卡尔状态、经典轨道根数、地理坐标、轨道运动、可见区间和 AER。前三类无需步长；其余显式提供 `step`，可用 `first` / `last` 限定子区间。派生报告使用各自的物理参考系，与桌面规则一致。
+支持十类内置报告：场景摘要、对象摘要、地面站、笛卡尔状态、经典轨道根数、地理坐标、轨道运动、可见区间、AER 和 HPOP 位置速度协方差。前三类无需步长；其余显式提供 `step`，可用 `first` / `last` 限定子区间。派生报告使用各自的物理参考系，与桌面规则一致。
 
 Python 直接接收对象句柄，不需要构造 `ReportDefinition` 或填写 ID、名称。普通报告必须显式指定单个对象、对象集合或 `of.reports.ALL`；空集合报错，不扩展为全部对象；场景摘要不接受对象筛选。Access/AER 使用明确的 `station` / `target` 参数。选择按分析快照验证，当前已删除的旧对象仍可查询，其他项目或准备后新增的对象报错。
 

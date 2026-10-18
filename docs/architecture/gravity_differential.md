@@ -2,7 +2,7 @@
 
 `GravityModel::differential(position_m, degree, order, corrections, secular_at, checkpoint)` 在固定历元返回加速度和 `position_jacobian_per_s2[i][j] = ∂a_i/∂r_j`。输入位置为米，两个输出分别为 m/s² 和 s⁻²；全部使用同一地心地固轴。Jacobian 是引力势的 Hessian，包含单极项，矩阵行是加速度分量、列是位置分量。
 
-这是协方差变分方程的基础。它尚未接入 HPOP 的完整协方差传播，不提供可启用的桌面协方差开关，也没有新增 Python 协方差 API。公开 C++ 头文件随 SDK 安装，消费端验证实际链接和调用。现有 Python 传播接口继续使用原名义加速度。
+这是[变分方程](hpop_variational.md)和[联合协方差](hpop_covariance.md)使用的重力偏导，支持独立的协方差重力阶次；Python、项目与桌面入口已接入。公开 C++ 头文件随 SDK 安装，消费端验证实际链接和调用。名义轨迹仍使用原力模型阶次。
 
 ## 范围与输入
 

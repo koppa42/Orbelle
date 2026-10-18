@@ -92,4 +92,4 @@ C++ 使用 `HpopOptions::srp`／`SrpOptions`，通过显式 `HpopEnvironment` �
 
 ## 变分计算基础
 
-C++ / SDK 提供 `srp_differential`，返回固定所选太阳和几何遮挡体时的状态块、太阳位置块、照明梯度及 `K=Cr×A/m` 偏导。支持现有十体球面并集，并有 Orekit、独立高精度圆盘面积和 SciPy 对照。`srp_state_differential` 进一步按所选太阳方法装配完整局部状态块，卫星视太阳的光行时、光行差与 TAI/TDB 状态链见[视太阳偏导](apparent_sun_differential.md)。阴影事件变分、STM 和协方差仍待接入。
+C++ / SDK 提供 `srp_differential`，返回固定所选太阳和几何遮挡体时的状态块、太阳位置块、照明梯度及 `K=Cr×A/m` 偏导。支持现有十体球面并集，并有 Orekit、独立高精度圆盘面积和 SciPy 对照。`srp_state_differential` 进一步按所选太阳方法装配完整局部状态块，卫星视太阳的光行时、光行差与 TAI/TDB 状态链见[视太阳偏导](apparent_sun_differential.md)。[STM 与 D/K 参数敏感度](hpop_variational.md)、[联合协方差](hpop_covariance.md)已接入；连续双锥采用边界分段，圆柱力跳变尚不支持协方差。

@@ -1,6 +1,6 @@
 # 太阳辐射压局部偏导
 
-`srp_differential` 是 HPOP 变分计算的 C++ / SDK 基础接口，沿用 `evaluate_srp` 的同历元、同惯性轴几何与参数约定，返回名义光压、位置／速度状态块、所选太阳位置块、照明梯度及 `K=Cr×SRPArea/Mass` 参数偏导。K 的定义依据 [STK consider analysis](https://help.agi.com/stk/Content/hpop/hpop-covariance.htm)。它尚未接入完整 STM、协方差传播或 Python 协方差入口。
+`srp_differential` 是 HPOP 变分计算的 C++ / SDK 基础接口，沿用 `evaluate_srp` 的同历元、同惯性轴几何与参数约定，返回名义光压、位置／速度状态块、所选太阳位置块、照明梯度及 `K=Cr×SRPArea/Mass` 参数偏导。K 的定义依据 [STK consider analysis](https://help.agi.com/stk/Content/hpop/hpop-covariance.htm)。它已通过[总力装配](hpop_force.md)接入 STM、D/K 参数敏感度和[联合协方差](hpop_covariance.md)，Python 与桌面使用同一传播实现。
 
 ## 固定量与单位
 
@@ -40,6 +40,6 @@ STK 的太阳位置方法仍由 HPOP 在每个积分阶段解析，低层函数�
 
 - True 与地心视太阳在固定历元对卫星状态独立，可以直接使用上述状态块。
 - 卫星视太阳同时依赖 r 与 v；`srp_state_differential` 已通过 [CSPICE 解析星历链](apparent_sun_differential.md)装配 `Jr + Js·∂S/∂r` 和 `Js·∂S/∂v`。低层零速度块仍只属于固定所选太阳的局部接口。
-- 阴影事件的变分处理、STM 与 consider 协方差尚待接入。名义传播已有的 Boundary Mitigation 不等于变分方程的事件处理。
+- STM 与 D/K 联合协方差已接入，支持现有连续双锥力及其边界分段。圆柱阴影的状态相关力跳变仍缺少 saltation，启用协方差时明确拒绝；名义 Boundary Mitigation 不代替这一跳变条件。
 
 独立 Orekit、mpmath 和 SciPy 对照、参考算法的数值限制及容限见[验证协议](../validation/srp_differential_protocol.md)。当前没有 STK 同配置实测数据，不据此宣称与其内部算法完全相同。
