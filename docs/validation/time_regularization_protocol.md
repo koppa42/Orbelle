@@ -78,7 +78,7 @@
 
 ## 普通 HPOP 回归与身份
 
-为降低高阶外推的舍入放大，固定十八阶 BS 和 GJ 十四至十八阶起步器改用 2/4/6/8/12/16/24/32/48 子步，外推局部状态增量。普通自适应 BS 的 2/4/…/18 序列及其控制器保留。对应算法来源升级至 `bulirsch-stoer-midpoint-richardson-fixed18-v2`、`gauss-jackson12-summed-bs14to18-startup-full-v3` 和 `gauss-jackson12-summed-bs14to18-startup-pseudo-v3`；GJ v3 还保留起步和求和重建的舍入补偿。当前项目为 v36 / OBJS27。
+为降低高阶外推的舍入放大，固定十八阶 BS 和 GJ 十四至十八阶起步器改用 2/4/6/8/12/16/24/32/48 子步，外推局部状态增量。普通自适应 BS 的 2/4/…/18 序列及其控制器保留。对应算法来源升级至 `bulirsch-stoer-midpoint-richardson-fixed18-v2`、`gauss-jackson12-summed-bs14to18-startup-full-v3` 和 `gauss-jackson12-summed-bs14to18-startup-pseudo-v3`；GJ v3 还保留起步和求和重建的舍入补偿。当前项目为 v41 / OBJS32。
 
 普通时间的固定步长、Hipparchus/Orekit 轨迹、天气、缓存、科学插值、任务和 API 测试保持原门槛；GJ v3 的普通时间数值见 [HPOP 协议](hpop_protocol.md#gj-起步与求和补偿-v3)。
 
@@ -98,7 +98,7 @@
 
 回归覆盖两个具体失效：浮点秒节点直接标记为圆整纳秒会产生微米级坐标抖动，Hermite 求导将其放大；输出使用连续力段导数作不足数纳秒的时间输运。物理输出门限的短逆方程前缀不得覆盖下一次自适应 q 提议，避免形成不必要的密集节点；完整步依然检查误差和物理 Min/Max。原问题可分别使速度差达到 5.58e−6 与 2.39e−6 m/s；现有独立对照在原容限下通过，参考字节保持不变。
 
-v36 / OBJS27 固定项目样例由独立 `struct.pack("<BdI", 1, 1.25, 240)` 插入三个字段并重算 CRC，1484 字节、SHA-256 为 `288fa30c1acd71d1f7c1202d3e015b6ecd6a2219c0eb97659aa8473138499dab`。C++ 与 Python 精确重写；所有旧/未知版本、非布尔开关、非法指数和越界步数拒绝且保留源文件。关闭后的合法草稿、启用后的普通固定秒步长不参与分析/报告身份；活动指数和步数参与，既有分析保持原状态。
+当前固定项目样例的时间正则化字段由独立 `struct.pack("<BdI", 1, 1.25, 240)` 编码并重算 CRC；完整布局、大小和 SHA-256 见[固定样例说明](../../tests/integration/fixtures/README.md)。C++ 与 Python 精确重写；所有旧/未知版本、非布尔开关、非法指数和越界步数拒绝且保留源文件。关闭后的合法草稿、启用后的普通固定秒步长不参与分析/报告身份；活动指数和步数参与，既有分析保持原状态。
 
 Windows/MSVC Release 完整构建通过：Core **136/136**，集成 **179 通过 / 2 项完整资源条件跳过**，独立 Python 3.13 **221 通过 / 5 项可选 NumPy/pandas 跳过**，安装后 SDK **2/2**。Qt HPOP offscreen **33/33**；原生 Windows DPR **1.5/2.25**、430/720 逻辑宽度检查参数联动、键盘、取消、重开和动态摘要，未出现横向溢出。完整 EGM2008/FES 条件跳过不计为本轮全资源验证。命令、XML、原生截图、失败诊断与最终汇总保存在 `out/validation/hpop-public-regularization-20261017/`，不提交运行产物。
 

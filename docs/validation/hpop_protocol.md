@@ -35,9 +35,9 @@ java -cp "out/validation/hpop;$classpath" OrbitForgeHpopReference out/research/h
 
 以上为 v1 的 Windows/MSVC 独立对照记录；当前 v2 的固定 BS 复核见[共用内核与外推 v2](#共用内核与外推-v2)。初版固定十八阶直接外推完整状态时，30/15 s 最大差 4.973 mm，未通过既定 1 mm 线；改为相对起点的状态增量后通过，未放宽标准。固定阶数和中点序列是本项目策略，不代表已取得 STK 内部实现。
 
-另验证 7.1 s 非整步长的正反向/乱序查询、全体五方法容差草稿变化后逐位不变、三个 700 s 步不会被 300 s 缓存拆短，以及两模式取消后的缓存复用和并发。Python 磁暴测试新增三种显式固定模式，跨 15→400 Ap 的非网格跳变仍与 RK4 0.5 s 比较，位置差须小于 0.1 mm。分析与报告输入哈希分别检查非活动容差、有效固定步长、强制固定方法的草稿及模式切换；项目 v34 / OBJS25 固定样例独立插入 StepControl u32 并重算两层 CRC，未知枚举和前后版本拒绝。
+另验证 7.1 s 非整步长的正反向/乱序查询、全体五方法容差草稿变化后逐位不变、三个 700 s 步不会被 300 s 缓存拆短，以及两模式取消后的缓存复用和并发。Python 磁暴测试新增三种显式固定模式，跨 15→400 Ap 的非网格跳变仍与 RK4 0.5 s 比较，位置差须小于 0.1 mm。分析与报告输入哈希分别检查非活动容差、有效固定步长、强制固定方法的草稿及模式切换；项目 v41 / OBJS32 固定样例独立插入 StepControl u32 并重算两层 CRC，未知枚举和前后版本拒绝。
 
-原生 Qt 两种模式覆盖 RKF/RKV/BS、430/720 逻辑宽度、实际 DPR 1.5/2.25，生成 24 张截图并检查六张代表性截图；验证无横向溢出、可达按钮、强制固定方法的草稿恢复、应用与取消。输出尾步可截短但不改变固定网格，尚未实现科学插值；相对误差范数及 STK 完整合法范围/默认值仍待核对；一天步长增量见下节。
+原生 Qt 两种模式覆盖 RKF/RKV/BS、430/720 逻辑宽度、实际 DPR 1.5/2.25，生成 24 张截图并检查六张代表性截图；验证无横向溢出、可达按钮、强制固定方法的草稿恢复、应用与取消。输出尾步可截短但不改变固定网格；科学插值按[独立协议](orbit_interpolation_protocol.md)验收；相对误差范数及 STK 完整合法范围/默认值仍待核对；一天步长增量见下节。
 
 ## 大步长与自适应缓存
 
@@ -60,11 +60,11 @@ java -cp "out/validation/long-steps;$classpath" OrbitForgeLongStepReference out/
 
 `FullDayFixedStepsMatchIndependentLongPeriodReference` 以 86400/43200 s 比较全部五种固定方法，使用半长轴 1e10 m 的四组二体参考；最差位置差 0.178 mm、速度差 2.294e−12 m/s，满足 5 mm / 5e−8 m/s 线。该远距离孤立地球场是步长范围的数学压力测试，不代表地球势力范围以外的实际轨道模型。16 天输出保证 Gauss–Jackson 完成启动后也实际执行完整步。
 
-另在非中心场计数验证 RKF/RKV 接受一个完整 86400 s 步（分别 14/17 次含端点的力评估），避免仅扩大输入范围；所有三种自适应方法检查取消后重用、乱序/并发、缓存边界 ±1 ns，越界数值明确拒绝。Python 磁暴测试加入 86400 s 上限，仍与 RK4 0.5 s 对照并保持 0.1 mm 线。桌面验证超界输入后恢复、应用/取消及重开；项目仍为 v34 / OBJS25，SDK/Python 和报告身份同步，算法标识变为 `steps=relative-mixed-max-span-v2`。
+另在非中心场计数验证 RKF/RKV 接受一个完整 86400 s 步（分别 14/17 次含端点的力评估），避免仅扩大输入范围；所有三种自适应方法检查取消后重用、乱序/并发、缓存边界 ±1 ns，越界数值明确拒绝。Python 磁暴测试加入 86400 s 上限，仍与 RK4 0.5 s 对照并保持 0.1 mm 线。桌面验证超界输入后恢复、应用/取消及重开；项目使用当前 v41 / OBJS32，SDK/Python 和报告身份同步，算法标识变为 `steps=relative-mixed-max-span-v2`。
 
 ## RKF 7(8)
 
-按 [STK 13.1 Integrator](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm) 的定义推进七阶解，以八阶嵌入解估计误差。系数核对 [Fehlberg NASA TR R-287](https://ntrs.nasa.gov/api/citations/19680027281/downloads/19680027281.pdf) 的 Table X（印刷第 65 页，PDF 第 72 页）；原 PDF SHA-256 为 `5553a2a3eb53785a461762cc2b29428015f1b32c3ad0a5cb57f85a421256a0c8`。零基阶段 0、10 的七阶权重为 41/840，阶段 11、12 为 0；误差用 `abs(h × 41/840 × (k11 + k12 − k0 − k10))`，控制指数为 1/8。运行时来源为 `rkf78-7th-fehlberg-r287-v1`，明确区别先前的八阶推进；不改变公开 `rkf78` 枚举或项目 v34 / OBJS25 的布局。
+按 [STK 13.1 Integrator](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm) 的定义推进七阶解，以八阶嵌入解估计误差。系数核对 [Fehlberg NASA TR R-287](https://ntrs.nasa.gov/api/citations/19680027281/downloads/19680027281.pdf) 的 Table X（印刷第 65 页，PDF 第 72 页）；原 PDF SHA-256 为 `5553a2a3eb53785a461762cc2b29428015f1b32c3ad0a5cb57f85a421256a0c8`。零基阶段 0、10 的七阶权重为 41/840，阶段 11、12 为 0；误差用 `abs(h × 41/840 × (k11 + k12 − k0 − k10))`，控制指数为 1/8。运行时来源为 `rkf78-7th-fehlberg-r287-v1`，明确区别先前的八阶推进；不改变公开 `rkf78` 枚举或项目 v41 / OBJS32 的布局。
 
 成熟算法对照复用下述 Hipparchus 4.0.2 GBS 的 60 组固定输出和独立生成器，SHA-256 为 `62e89df62c29838d5fd03e37ce73ffac28632be40467cafeb4bbccb93ce6885b`。包含圆轨道、偏心率 0.7/0.98、J2、随时间变化的月球差分引力、正反向一天、非整数秒和 1 ns；GBS 参考已通过 60/30 s 收敛和 SciPy DOP853 交叉核验。生产 RKF 使用最大 300 s、相对容差 1e−14、位置/速度绝对容差 1e−8 m / 1e−11 m/s，保持 5 mm / 5e−6 m/s 三维验收线。局部动力学首步估计增量后，Windows/MSVC 最大位置差 2.519 mm、速度差 2.677e−6 m/s。既有 Orekit Holmes–Featherstone/DP853 的 60 组重力轨迹使用默认容差也通过原验收线。
 
@@ -87,7 +87,7 @@ python tools/validation/rkv89_reference.py out/validation/rkv89-reference
 ctest --preset desktop-graphics -R "core.Hpop."
 ```
 
-项目 v34 / OBJS25 保存 RKV 枚举 2；公共接口测试单独往返 RKV 设置，当前 Gauss–Jackson 固定样例由 C++ / Python 逐字节往返；未知枚举和旧格式拒绝且不改源文件。Python / SDK 验证公共枚举、高层设置、分析身份、旧快照不变和重开重现；Qt 验证 RKV 自适应字段、非法步长提示、键盘选择、取消与重开、轨道摘要以及 430 / 720 逻辑像素和 DPR 1 / 1.5。安装检查还核验 rklib 许可原始字节。
+项目 v41 / OBJS32 保存 RKV 枚举 2；公共接口测试单独往返 RKV 设置，当前 Gauss–Jackson 固定样例由 C++ / Python 逐字节往返；未知枚举和旧格式拒绝且不改源文件。Python / SDK 验证公共枚举、高层设置、分析身份、旧快照不变和重开重现；Qt 验证 RKV 自适应字段、非法步长提示、键盘选择、取消与重开、轨道摘要以及 430 / 720 逻辑像素和 DPR 1 / 1.5。安装检查还核验 rklib 许可原始字节。
 
 ## Bulirsch–Stoer
 
@@ -103,7 +103,7 @@ java -cp "out/validation/bs;$classpath" OrbitForgeBsReference tests/reference/pr
 ctest --preset desktop-graphics -R "core.Hpop."
 ```
 
-项目 v34 / OBJS25 保存 Bulirsch–Stoer 枚举 3，公共接口测试单独往返其配置；当前固定样例使用 Gauss–Jackson，并独立核对两层 CRC；未知枚举与旧版本拒绝。Python 与安装 SDK 核验保存、计算身份及旧分析不变；Qt 同时验证两种新增自适应方法、键盘顺序、非法步长、取消/重开、摘要和窄窗/DPI。STK 同配置轨迹、VOP、STK 固定步长内部策略及科学插值未计入本项完成范围。
+项目 v41 / OBJS32 保存 Bulirsch–Stoer 枚举 3，公共接口测试单独往返其配置；当前固定样例使用 Gauss–Jackson，并独立核对两层 CRC；未知枚举与旧版本拒绝。Python 与安装 SDK 核验保存、计算身份及旧分析不变；Qt 同时验证两种新增自适应方法、键盘顺序、非法步长、取消/重开、摘要和窄窗/DPI。VOP 积分和科学插值分别按[积分协议](vop_integration_protocol.md)和[插值协议](orbit_interpolation_protocol.md)验收；STK 同配置轨迹及固定步长内部策略尚未直接对照。
 
 ## 文件与高阶重力
 
@@ -130,28 +130,28 @@ Core 另检查固定网格缓存跨段、7 s / 10.3 s 等不整除 300 s 的步�
 
 Python 把 NRLMSISE-00 15→400 Ap 跳变前后的完整链与 RK4 0.5 s 对比，Gauss–Jackson 使用 1 s Full、0.7 s Pseudo，跳变前已有完整多步历史；正反向位置变化限保持 0.1 mm。公共接口检查高层字符串与原生枚举、冻结分析、保存重开、活动固定步长/校正方式的身份变化，以及无效自适应草稿不改变结果和报告缓存。
 
-项目 v34 / OBJS25 的独立 1458-byte 样例使用 Gauss–Jackson + Pseudo，C++/Python 逐字节往返并拒绝未知校正枚举、旧版本及 CRC 完整的损坏输入。SDK 消费端检查相同模式及算法身份。Qt 检查仅该方法显示的校正选项、固定步长错误、键盘选择、草稿保留、取消和重开；Windows 原生窗口覆盖 430 / 720 逻辑像素，实际 DPR 以日志为准。
+[当前项目固定样例](../../tests/integration/fixtures/README.md)使用 Gauss–Jackson + Pseudo，C++/Python 逐字节往返并拒绝未知校正枚举、旧版本及 CRC 完整的损坏输入。SDK 消费端检查相同模式及算法身份。Qt 检查仅该方法显示的校正选项、固定步长错误、键盘选择、草稿保留、取消和重开；Windows 原生窗口覆盖 430 / 720 逻辑像素，实际 DPR 以日志为准。
 
 ```powershell
 python tools/validation/gauss_jackson_coefficients.py --check
 ctest --preset desktop-graphics -R "core.(Hpop|Mission).|QuantityTest.Hpop"
 ```
 
-STK 原始轨迹、阴影专用事件、VOP、时间正则化、科学插值以及 86400 s 上限仍不属于此项已验收范围。运行命令、指标 XML、失败与修正日志、原生窗口截图进入 `out/validation/`。
+本节记录对应普通时间的 GJ 积分；阴影事件、VOP、时间正则化、科学插值以及 86400 s 上限由各专项协议验收，尚无 STK 原始轨迹直接对照。运行命令、指标 XML、失败与修正日志、原生窗口截图进入 `out/validation/`。
 
 ## 共用内核与外推 v2
 
-时间正则化的七维方程复用普通时间的 RK4、RKF7(8)、RKV8(9)、BS 和 GJ；完整数学与独立高精度比较见[时间正则化内核协议](time_regularization_protocol.md)。公共正则化参数及真实 TAI 边界尚未接入。
+时间正则化的七维方程复用普通时间的 RK4、RKF7(8)、RKV8(9)、BS 和 GJ；完整数学与独立高精度比较见[时间正则化内核协议](time_regularization_protocol.md)。公共正则化参数、真实 TAI 边界、项目和桌面接入已由同一协议覆盖。
 
 固定十八阶 BS 和 GJ 十四至十八阶起步器使用 2/4/6/8/12/16/24/32/48 子步序列与局部状态增量外推，降低高阶舍入放大；对应计算来源升级为 `fixed18-v2`、`startup-full-v2` 和 `startup-pseudo-v2`。普通自适应 BS 的序列与控制器保留。前述 v1 数字是历史验收记录，不冒充当前版本的重新测量值。
 
 当前 Windows/MSVC 以相同 Hipparchus 60 组完整状态、相同步长及原门槛复核：固定 BS 的 30 s 最大位置/速度范数差为 4.36952e−5 m / 4.69831e−8 m/s，30/15 s 最大位置变化 2.71951e−6 m；GJ Full / Pseudo 的 30 s 最大位置差分别为 4.33562e−4 / 4.33563e−4 m，最大速度差 4.38116e−8 / 4.37790e−8 m/s，15 s 最大位置差约 41 µm，步长减半最大变化约 0.434 mm。原 5 mm / 5e−6 m/s 和 1 mm 收敛界限保持。200/160 s 的 GJ 观察阶数为 12.4164，细步位置误差约 0.164 mm，仍满足 11–14 阶及 1 mm 门槛。
 
-普通 Core、集成、天气与科学插值回归、独立安装 Python 3.13 及 SDK 均已复核；项目结构仍为 v35 / OBJS26。Pseudo 的端到端总力调用数保持少于 Full，状态差仍小于 1e−5 m；另在克隆的同一历史上验证单步恰少一次完整力调用。两种模式分别传播时迭代次数可以不同，不再对总次数差施加无依据的逐步上限。
+普通 Core、集成、天气与科学插值回归、独立安装 Python 3.13 及 SDK 均已复核；项目结构为当前 v41 / OBJS32。Pseudo 的端到端总力调用数保持少于 Full，状态差仍小于 1e−5 m；另在克隆的同一历史上验证单步恰少一次完整力调用。两种模式分别传播时迭代次数可以不同，不再对总次数差施加无依据的逐步上限。
 
 ## GJ 起步与求和补偿 v3
 
-GJ 起步状态带入求和时保留乘法、减法及起步器状态补偿；预测和校正重建也计入补偿。普通时间和 Sundman 混合系统共用此内核，算法来源更新为 `gauss-jackson12-summed-bs14to18-startup-full-v3` / `gauss-jackson12-summed-bs14to18-startup-pseudo-v3`。固定 BS 仍为 v2；项目结构 v35 / OBJS26 与固定参考字节不变。
+GJ 起步状态带入求和时保留乘法、减法及起步器状态补偿；预测和校正重建也计入补偿。普通时间和 Sundman 混合系统共用此内核，算法来源更新为 `gauss-jackson12-summed-bs14to18-startup-full-v3` / `gauss-jackson12-summed-bs14to18-startup-pseudo-v3`。固定 BS 仍为 v2；该数值改进不改变当前项目字段布局及既有固定数值参考。
 
 当前 Windows/MSVC Release 以相同 Hipparchus 60 组状态及原门槛复核：Full/Pseudo 的 30 s 最大位置范数差均为 4.33550e−4 m，最大速度差分别为 4.37863e−8 / 4.39405e−8 m/s；15 s 位置差约 41 µm，步长减半最大变化约 0.433 mm。200/160 s 观察阶数为 12.4137，细步位置误差约 0.164 mm。克隆相同历史的单步 Pseudo 仍恰好少一次完整力评估。
 
@@ -211,12 +211,12 @@ python tools/validation/generate_srp_geometry_reference.py
 
 `srp_geometry.txt` 有 182 个独立均匀视圆盘面积参考，含太阳／地球／月球三圆交与并集、重合、包含、内外切、环食及大小相差悬殊的随机配置。独立 Python 生成器沿垂直截面积分，与生产 Green 定理圆弧积分采用不同方法；照明比例绝对容限 2e-9。Core 另检查距离平方、带符号 Cr、零面积、圆柱、大气高度、奇点、缺月球、无阴影不查询月球，以及光压单独启用时的完整星历覆盖。
 
-`SrpPersistence.*`／`SrpFiles.*` 和 `test_srp.py` 检查共享会话／分析／报告、真实 DE440s 路由、v34 保存与重开、有效参数身份及原分析不可变。桌面 `QuantityTest.HpopSrp*` 检查单位转换、有效遮挡体组合、窄窗、草稿、错误路由及取消；截图使用 `ORBITFORGE_HPOP_UI_CAPTURE`，Windows 原生平台分别设置 `QT_SCALE_FACTOR=1`／`1.5`，日志记录实际窗口 DPR。
+`SrpPersistence.*`／`SrpFiles.*` 和 `test_srp.py` 检查共享会话／分析／报告、真实 DE440s 路由、当前格式保存与重开、有效参数身份及原分析不可变。桌面 `QuantityTest.HpopSrp*` 检查单位转换、有效遮挡体组合、窄窗、草稿、错误路由及取消；截图使用 `ORBITFORGE_HPOP_UI_CAPTURE`，Windows 原生平台分别设置 `QT_SCALE_FACTOR=1`／`1.5`，日志记录实际窗口 DPR。
 
 ## 集成与交付
 
 - `HpopProject.*`：真实 ERFA/IERS 帧转换、原生 GCRF 的 EOP 身份、报告/AER 复用、初始历元覆盖与取消。
-- `test_hpop.py`：Python 易用入口、不可变配置、Keplerian 的模型 μ、输出网格无关性、编辑前验证、准备结果独立和 v34 保存/打开。
+- `test_hpop.py`：Python 易用入口、不可变配置、Keplerian 的模型 μ、输出网格无关性、编辑前验证、准备结果独立和当前格式保存/打开。
 - `project-current.orbitforge`：独立二进制固定输入中的 HPOP 参数精确往返；非当前版本拒绝。
 - 安装后的 SDK 消费端：通过公共头文件创建 HPOP、查询并保存/重开，不依赖源码路径。
 - `QuantityTest.HpopSettingsValidateCancelAndRoundTripWithoutApplyingTheOrbit`：配置草稿、阶次约束、错误校验、取消和重开；可用 `ORBITFORGE_HPOP_UI_CAPTURE` 输出宽/窄窗口截图，配合 DPI 设置检查。
@@ -267,7 +267,7 @@ IERS 2003 三项修正的公式、时间/坐标约定、独立 Orekit 生成器�
 
 `AtmosphericDrag.SharedMassAndIndependentAreasMatchOrekitCombinedForcesAndPropagation` 使用 RKF78（最大步长 2.5 s），核对分项加速度及组合传播；容限沿用阻力协议：每分量 1e-17 m/s²、0.5 mm、5e-7 m/s。另将质量改为 9876 kg，固定各自 A/m，确认轨迹逐位相同。质量有限性、正值、乘积上溢/下溢和零面积由 `Hpop.SatelliteMass*` 覆盖。
 
-项目 v34 / OBJS25 固定样例独立插入 1250 kg；C++/Python 精确字节往返，损坏质量即使重算 CRC 也拒绝。Python 真实 EOP/SPICE 组合力场景验证质量变更保存、计算身份、旧分析不变以及 A/m 改变后的轨迹变化；安装后 SDK 调用派生面积接口。Qt `HpopSatelliteMass*` 检查单位与键盘、430/720 逻辑宽度、不同 DPI、取消、重开和错误定位，截图路径由 `ORBITFORGE_HPOP_UI_CAPTURE` 指定。
+项目 v41 / OBJS32 固定样例独立插入 1250 kg；C++/Python 精确字节往返，损坏质量即使重算 CRC 也拒绝。Python 真实 EOP/SPICE 组合力场景验证质量变更保存、计算身份、旧分析不变以及 A/m 改变后的轨迹变化；安装后 SDK 调用派生面积接口。Qt `HpopSatelliteMass*` 检查单位与键盘、430/720 逻辑宽度、不同 DPI、取消、重开和错误定位，截图路径由 `ORBITFORGE_HPOP_UI_CAPTURE` 指定。
 
 
 ## 海潮与组合潮汐
@@ -292,7 +292,7 @@ classpath 分隔符随平台使用 `;` 或 `:`；固定输出只规范为 UTF-8 
 
 `OceanTides.*` 另检查常相位解析系数、GM/R 缩放后的物理加速度不变、自动海洋极潮、非有限 EOP、不同分潮范围、最高 2190×0、缺项/重复/溢出拒绝和并发只读。`OceanTideFiles.*` 检查原始字节哈希、单位、坏头、取消及原子发布、固定官方身份、不可变旧分析和真实 EOP 场景/报告/存档。
 
-Python `test_ocean_tides.py` 验证不可变易用配置、显式 DataSnapshot 与目录装配相同、原始文件变化确认、真实 EOP 传播/报告、保存重开和关闭/0/1 阶草稿身份。项目 v34 / OBJS25 使用独立 `struct.pack` 样例精确往返；非当前版本拒绝。安装后的 SDK 直接构造常相位海潮并核对解析系数。
+Python `test_ocean_tides.py` 验证不可变易用配置、显式 DataSnapshot 与目录装配相同、原始文件变化确认、真实 EOP 传播/报告、保存重开和关闭/0/1 阶草稿身份。项目 v41 / OBJS32 使用独立 `struct.pack` 样例精确往返；非当前版本拒绝。安装后的 SDK 直接构造常相位海潮并核对解析系数。
 
 桌面 `Hpop*Ocean*` 与 `DataCenterDialog.OceanGroup*` 检查独立阶次、文件上限、键盘、430/720 逻辑宽度、草稿重开/取消、自有下载取消/重试、排队取消不影响其他下载，以及不显示“已安装”。使用 Windows 原生 Qt、`QT_SCALE_FACTOR=1` / `1.5`，由 `ORBITFORGE_HPOP_UI_CAPTURE` 与 `ORBITFORGE_DATA_UI_CAPTURE` 保存布局截图并记录实际 DPR；同时执行相关 offscreen 回归。`DataCenterTest.*Ocean*` 另外验证后台导入、失败/取消保留；设置 `ORBITFORGE_FULL_OCEAN_FILE` 时将完整固定原文作为 loopback HTTP 响应，核验实际传输、304 条件重查及损坏替换不影响旧资源。
 
@@ -316,7 +316,7 @@ java -cp <classes-and-jars> org.orekit.forces.gravity.potential.OrbitForgeSecula
 
 组合参考有 8 条正反向一天轨迹。两个文件、底场 2/0 或 8/4，长期变化开启；IERS 2003 完整固体潮不截断，频率/固体极潮关闭；FES2014bv1 4×4 包含全部 36 个显式分潮和 IERS 2010 海洋极潮。UT1−TAI=−31.7 s、xp=0.12″、yp=0.25″，日月位置沿用固体潮生成器。Orekit 把底场/长期变化、固体潮、海潮作为三个独立力叠加，检验生产代码的重叠系数相加与独立截断；位置/速度沿用上述容限。
 
-`SecularGravity.*` / `SecularFiles.*` 覆盖上述数值、最高 2190 阶率截断、百年时差、纳秒历元、非有限及溢出拒绝、重复/损坏块、导入取消、资源冻结、重准备确认及报告身份。Python `test_gravity.py` 检查只读元数据、真实 EOP 场景、保存重开、变化确认、0/0 非活动草稿和严格布尔输入；SDK 消费端调用公开率和加速度 API。项目 v34 / OBJS25 的独立固定样例与损坏测试属于本项验收。
+`SecularGravity.*` / `SecularFiles.*` 覆盖上述数值、最高 2190 阶率截断、百年时差、纳秒历元、非有限及溢出拒绝、重复/损坏块、导入取消、资源冻结、重准备确认及报告身份。Python `test_gravity.py` 检查只读元数据、真实 EOP 场景、保存重开、变化确认、0/0 非活动草稿和严格布尔输入；SDK 消费端调用公开率和加速度 API。项目 v41 / OBJS32 的独立固定样例与损坏测试属于本项验收。
 
 Qt `QuantityTest.HpopSecularFileCapabilityKeyboardDraftAndValidation` 检查有/无元数据、键盘操作、错误路由、取消/重开和 0/0 草稿；用 Windows 原生 Qt、`QT_SCALE_FACTOR=1` / `1.5` 检查 430/720 逻辑宽度，并通过 `ORBITFORGE_HPOP_UI_CAPTURE` 保存实际 DPR 截图。运行日志放入新的 `out/validation/`。静态 EGM96/EGM2008 的 STK 默认演化仍待核对，尚无 STK 同配置轨迹真值。
 
@@ -341,8 +341,8 @@ CSPICE 固定 DE440s 样例检查水星／金星物理中心与原生 `geometric
 
 ## 光压局部偏导
 
-固定几何状态块、太阳位置块及 K 参数偏导的 641 组独立参考、病态参考结果审计与复现方法见[SRP 偏导验证](srp_differential_protocol.md)。卫星视太阳的解析状态链已接入完整局部 SRP 偏导，CSPICE 独立差分与安装接口验证见[视太阳偏导协议](apparent_sun_differential_protocol.md)。完整 STM／协方差及事件变分仍待实现。
+固定几何状态块、太阳位置块及 K 参数偏导的 641 组独立参考、病态参考结果审计与复现方法见[SRP 偏导验证](srp_differential_protocol.md)。卫星视太阳的解析状态链已接入完整局部 SRP 偏导，CSPICE 独立差分与安装接口验证见[视太阳偏导协议](apparent_sun_differential_protocol.md)。单滑行段 STM 与 D/K 敏感度已由[变分协议](hpop_variational_protocol.md)验证，联合矩阵及项目接入分别见[协方差协议](hpop_covariance_protocol.md)和[项目协议](hpop_covariance_project_protocol.md)；圆柱阴影与零宽度密度切换的事件变分延期。
 
 ## 总力与局部状态块装配
 
-传播器与瞬时名义／偏导入口共用总力装配，包含全部当前力项、完整 ITRF 状态耦合、SRP 视太阳链及 D/K 参数偏导。216 组 Orekit 八变量自动微分、潮汐组合与旧版名义短弧比较见[总力验证](hpop_force_protocol.md)。完整变分积分和协方差仍待接入。
+传播器与瞬时名义／偏导入口共用总力装配，包含全部当前力项、完整 ITRF 状态耦合、SRP 视太阳链及 D/K 参数偏导。216 组 Orekit 八变量自动微分、潮汐组合与旧版名义短弧比较见[总力验证](hpop_force_protocol.md)。完整单滑行段变分积分与联合协方差已接入，分别按[变分协议](hpop_variational_protocol.md)和[矩阵协议](hpop_covariance_protocol.md)验收。

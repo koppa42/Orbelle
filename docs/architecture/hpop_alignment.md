@@ -107,7 +107,7 @@
 | Integrator | VOP；Predictor Corrector Scheme | 已接入：Gauss–Jackson Full/Pseudo Correction；RKF78 / Bulirsch–Stoer 可选独立的 VOP 通用变量方程，支持固定、自适应及时间正则化，并有 Orekit/Hipparchus 对照；STK 内部实现和同配置实测仍未取得，见 [VOP 积分](vop_integration.md) |
 | Integrator | Fixed/Relative Error；Tolerance；Min/Max Step | 部分：独立 Fixed/Relative Error 选择已实现；RK4/GJ 强制固定，RKF/RKV/BS 两模式，固定网格及 BS 十八阶外推已验证。固定/自适应范围已扩至 1e−6–86400 s，自适应缓存不再截短配置上限，并有局部动力学首步估计及长弧独立对照。相对误差仍为混合绝对/相对分量尺度；STK 误差范数、完整合法范围/默认值及实机组合仍待核对，截图仅参考 |
 | Integrator | Interpolation 方法；Order；VOP μ | 部分：Lagrange / Hermite / VOP、独立插值 μ、项目自动装配、机动分段、UI / 持久化 / 分析及报告已接入并有独立参考，见[科学插值](orbit_interpolation.md)；VOP 通用变量搬移与 Hipparchus 插值、J2 步长收敛对照已接入，STK 同配置验收仍待完成 |
-| Integrator | Allow PosVel Covariance Interpolation | 待实现：协方差传播完成后验证插值、对称性与半正定性 |
+| Integrator | Allow PosVel Covariance Interpolation | 延期：在现有协方差传播上验证插值、对称性与半正定性 |
 | Integrator | Time Regularization；Exponent；Steps Per Orbit | 已接入：Sundman 方程、初始椭圆每圈尺度、五种积分器、物理 Min/Max Step、整数 TAI、天气分段、机动重启及科学插值；C++ / Python / 项目 v41 / UI 共用配置。非椭圆归一化明确拒绝；尚无 STK 同配置实测，见[时间正则化契约](time_regularization.md) |
 | Integrator | Report Ephemeris on a Fixed Time Step | 部分：显式工厂及普通项目均支持接受端点或让积分步停在固定 TAI 输出网格，保留天气边界；UI、保存与报告已接入。项目轨道步长当前限于 1–60 整数秒，完整合法范围及短段策略仍待 STK 实测核对 |
 | Integrator | Do not propagate below altitude | 已有按力评估停止的参考球面地心高度；STK 比较须核对其高度参考面 |

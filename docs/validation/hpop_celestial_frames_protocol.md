@@ -79,7 +79,7 @@ ctest --preset desktop-graphics -R "erfa.|core.HpopCovariance"
 将生成结果与固定文件逐字节比较。独立安装后运行
 `test_hpop_celestial_frames.py`、既有协方差/变分/时间参考系测试和 SDK consumer。
 完整运行证据写入新的 `out/validation/` 子目录。
-STK 实机、默认 JPL 章动文件、FG、项目矩阵保存与桌面编辑尚未验收。
+项目矩阵保存、桌面编辑及 Analysis/报告接入由[项目验证协议](hpop_covariance_project_protocol.md)覆盖。STK 实机、默认 JPL 章动文件及 FG 仍按[延期范围](../architecture/hpop_alignment.md#延期范围)处理。
 
 ## 固定参考身份与已测误差
 

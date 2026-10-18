@@ -1,6 +1,6 @@
 # HPOP 总力与状态块装配验证
 
-[总力入口](../architecture/hpop_force.md)将已经各自验证的力模型装配到同一地心惯性状态。验证区分独立模型结果、坐标／参数链、共用入口的回归；本文只验证局部状态块；全弧 STM 与 D/K 敏感度另见[变分传播验证](hpop_variational_protocol.md)，[联合协方差](hpop_covariance_protocol.md)另行验证，完整帧转换与 UI 尚未完成。
+[总力入口](../architecture/hpop_force.md)将已经各自验证的力模型装配到同一地心惯性状态。验证区分独立模型结果、坐标／参数链、共用入口的回归；本文只验证局部状态块；全弧 STM 与 D/K 敏感度另见[变分传播验证](hpop_variational_protocol.md)，[联合协方差](hpop_covariance_protocol.md)另行验证；局部及天文帧转换分别由[局部帧协议](hpop_covariance_frames_protocol.md)和[天文帧协议](hpop_celestial_frames_protocol.md)验证，项目、桌面和报告接入见[项目验证协议](hpop_covariance_project_protocol.md)。
 
 ## Orekit 独立组合参考
 
@@ -35,6 +35,6 @@
 - 错误测试检查无效状态、缺 UTC、极点偏导拒绝、无效星历 GM 先于位置查询、取消与重试，以及内置重力解析不修改调用方环境。名义与偏导加速度逐位一致。
 - 对重构前后各自安装的 SDK 使用相同冻结合成环境，24 组带符号参数配置分别传播 ±10 s，共 48 个末端状态，位置／速度的 17 位文本逐字节一致。冻结矩阵与输入用于重构回归，不作为真实轨道的独立精度结论。
 - 完整 Core 回归保留全部积分器、VOP、时间正则化、阴影和组合轨迹；集成回归覆盖天气／闰秒／预报节点、项目重开和资源冻结。完整 EGM2008 / FES 外部原文测试仅在显式提供文件时运行，条件跳过不能记作通过。
-- 安装后的 SDK 实际调用总力接口与 Runtime 视太阳适配器，Python 回归检查现有 HPOP/SRP/VOP/时间正则化入口。项目格式和界面未变；联合协方差接口另见[矩阵验证协议](hpop_covariance_protocol.md)，持久化与 UI 尚待接入。
+- 安装后的 SDK 实际调用总力接口与 Runtime 视太阳适配器，Python 回归检查现有 HPOP/SRP/VOP/时间正则化入口。本局部总力入口不另设桌面开关；联合协方差接口另见[矩阵验证协议](hpop_covariance_protocol.md)，当前 v41 / OBJS32 的保存重开、桌面编辑与报告由[项目验证协议](hpop_covariance_project_protocol.md)覆盖。
 
 日志、XML、安装测试和逐次基线输出写入新的 `out/validation/` 目录；固定参考与生成器保留在仓库。尚无 STK 同版本、同数据配置的实测验收。
