@@ -29,7 +29,9 @@ PYBIND11_MODULE(_native, module) {
         .value("GCRF", core::FrameId::gcrf)
         .value("ITRF", core::FrameId::itrf)
         .value("SPICE_J2000", core::FrameId::spice_j2000)
-        .value("TEME", core::FrameId::teme);
+        .value("TEME", core::FrameId::teme)
+        .value("FK5_J2000", core::FrameId::fk5_j2000)
+        .value("TRUE_OF_DATE", core::FrameId::true_of_date);
     py::enum_<core::OriginId>(module, "OriginId").value("EARTH", core::OriginId::earth);
     py::class_<core::CartesianState>(module, "CartesianState")
         .def(py::init<core::Epoch, core::OriginId, core::FrameId, std::array<double, 3>,

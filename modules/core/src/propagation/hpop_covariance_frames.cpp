@@ -29,18 +29,37 @@ Vector transverse(const Vector &v, const Vector &unit) {
 double norm(const Vector &v) { return std::hypot(v[0], v[1], v[2]); }
 void coordinates(HpopCovarianceCoordinates value) {
     if (value.frame != HpopCovarianceFrame::gcrf && value.frame != HpopCovarianceFrame::lvlh &&
-        value.frame != HpopCovarianceFrame::frenet)
+        value.frame != HpopCovarianceFrame::frenet &&
+        value.frame != HpopCovarianceFrame::fk5_j2000 &&
+        value.frame != HpopCovarianceFrame::true_of_date)
         throw std::invalid_argument("Unsupported HPOP covariance frame");
     if (value.velocity != HpopCovarianceVelocity::projected &&
         value.velocity != HpopCovarianceVelocity::rotating)
         throw std::invalid_argument("Unsupported HPOP covariance velocity convention");
 }
 Axes axes(const CartesianState &reference, HpopCovarianceCoordinates coordinate,
-          const std::optional<Vector> &acceleration) {
+          const std::optional<Vector> &acceleration,
+          const HpopCovarianceFrameEnvironment &environment,
+          const std::optional<EarthOrientationState> &eop) {
     Axes result;
     if (coordinate.frame == HpopCovarianceFrame::gcrf) {
         for (std::size_t i = 0; i < 3; ++i)
             result.rotation[i][i] = 1;
+        return result;
+    }
+    if (coordinate.frame == HpopCovarianceFrame::fk5_j2000 ||
+        coordinate.frame == HpopCovarianceFrame::true_of_date) {
+        const auto target = coordinate.frame == HpopCovarianceFrame::fk5_j2000
+                                ? FrameId::fk5_j2000
+                                : FrameId::true_of_date;
+        if (coordinate.velocity == HpopCovarianceVelocity::projected) {
+            result.rotation =
+                environment.frames->gcrf_to_celestial(reference.epoch, eop->sample, target).matrix;
+        } else {
+            const auto transform =
+                environment.frames->gcrf_to_celestial_state(reference.epoch, *eop, target);
+            result = {transform.rotation.matrix, transform.rotation_rate_per_second};
+        }
         return result;
     }
     const auto r = norm(reference.position_m), v = norm(reference.velocity_mps);
@@ -94,7 +113,8 @@ Axes axes(const CartesianState &reference, HpopCovarianceCoordinates coordinate,
 HpopStateCovariance
 hpop_covariance_frame_jacobian(const CartesianState &reference, HpopCovarianceCoordinates from,
                                HpopCovarianceCoordinates to,
-                               std::optional<std::array<double, 3>> acceleration_mps2) {
+                               std::optional<std::array<double, 3>> acceleration_mps2,
+                               HpopCovarianceFrameEnvironment environment) {
     coordinates(from);
     coordinates(to);
     if (reference.origin != OriginId::earth || reference.frame != FrameId::gcrf)
@@ -103,8 +123,18 @@ hpop_covariance_frame_jacobian(const CartesianState &reference, HpopCovarianceCo
     finite(reference.velocity_mps);
     if (acceleration_mps2)
         finite(*acceleration_mps2);
-    const auto source = axes(reference, from, acceleration_mps2);
-    const auto target = axes(reference, to, acceleration_mps2);
+    const auto celestial = [](HpopCovarianceFrame frame) {
+        return frame == HpopCovarianceFrame::fk5_j2000 ||
+               frame == HpopCovarianceFrame::true_of_date;
+    };
+    std::optional<EarthOrientationState> eop;
+    if (celestial(from.frame) || celestial(to.frame)) {
+        if (!environment.frames || !environment.eop)
+            throw std::invalid_argument("Celestial covariance axes require frames and EOP");
+        eop = environment.eop->at(reference.epoch);
+    }
+    const auto source = axes(reference, from, acceleration_mps2, environment, eop);
+    const auto target = axes(reference, to, acceleration_mps2, environment, eop);
     HpopStateCovariance result{};
     Matrix3 rotation{}, source_spin{};
     for (std::size_t i = 0; i < 3; ++i)

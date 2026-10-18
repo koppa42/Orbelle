@@ -1,3 +1,4 @@
+#include "iers1996_nutation.hpp"
 #include "leap_seconds.hpp"
 #include <algorithm>
 #include <cmath>
@@ -259,8 +260,162 @@ core::Matrix3 spin(double angle) {
     const auto c = std::cos(angle), s = std::sin(angle);
     return {{{c, s, 0}, {-s, c, 0}, {0, 0, 1}}};
 }
+
+constexpr double arcsec = std::numbers::pi / (180 * 3600);
+constexpr std::int64_t c7_start = -89726370000000000;
+core::Matrix3 transpose(const core::Matrix3 &a) {
+    core::Matrix3 result{};
+    for (std::size_t i = 0; i < 3; ++i)
+        for (std::size_t j = 0; j < 3; ++j)
+            result[i][j] = a[j][i];
+    return result;
+}
+core::Matrix3 spin_x(double angle) {
+    const auto c = std::cos(angle), s = std::sin(angle);
+    return {{{1, 0, 0}, {0, c, s}, {0, -s, c}}};
+}
+// All angles follow IERS 1996, including its Omega coefficient (not IERS 2003).
+core::Matrix3 fk5_rotation(core::Epoch epoch, const core::EarthOrientationState &eop,
+                           core::FrameId target, double dt) {
+    auto tt = tt_jd(epoch);
+    tt.fraction += dt / 86400;
+    const double t = ((tt.day - 2451545.0) + tt.fraction) / 36525;
+    constexpr std::array<std::array<double, 5>, 5> arguments{
+        {{134.96340251 * 3600, 1717915923.2178, 31.8792, .051635, -.00024470},
+         {357.52910918 * 3600, 129596581.0481, -.5532, .000136, -.00001149},
+         {93.27209062 * 3600, 1739527262.8478, -12.7512, -.001037, .00000417},
+         {297.85019547 * 3600, 1602961601.2090, -6.3706, .006593, -.00003169},
+         {125.04455501 * 3600, -6962890.2665, 7.4722, .007702, -.00005939}}};
+    std::array<double, 5> argument{};
+    for (std::size_t i = 0; i < 5; ++i) {
+        const auto &a = arguments[i];
+        argument[i] =
+            std::remainder(((((a[4] * t + a[3]) * t + a[2]) * t + a[1]) * t + a[0]) * arcsec,
+                           2 * std::numbers::pi);
+    }
+    double psi = 0, eps = 0;
+    // Sum the smallest terms first.
+    for (auto it = detail::nutation1996.rbegin(); it != detail::nutation1996.rend(); ++it) {
+        double phase = 0;
+        for (std::size_t i = 0; i < 5; ++i)
+            phase += it->multiplier[i] * argument[i];
+        psi += (it->longitude + it->longitude_rate * t) * std::sin(phase);
+        eps += (it->obliquity + it->obliquity_rate * t) * std::cos(phase);
+    }
+    psi *= arcsec * 1e-4;
+    eps *= arcsec * 1e-4;
+    const double mean = (84381.448 + (-46.8150 + (-.00059 + .001813 * t) * t) * t) * arcsec;
+    double equation = psi * std::cos(mean);
+    // Keep the selected side for the derivative stencil; never query outside EOP coverage.
+    if (epoch.tai_nanoseconds() >= c7_start)
+        equation += arcsec * (.00264 * std::sin(argument[4]) + .000063 * std::sin(2 * argument[4]));
+    const auto tai = tai_jd(epoch);
+    const double ut = ((tai.day - 2451545.0) + tai.fraction +
+                       (eop.sample.ut1_minus_tai_seconds +
+                        dt * (1 + eop.rates.ut1_minus_tai_seconds_per_second)) /
+                           86400) /
+                      36525;
+    // GMST82 - ERA00 with the common fast Earth rotation algebraically cancelled.
+    // Avoid differencing two wrapped sidereal angles when computing their tiny rate.
+    const double gmst_minus_era =
+        (67310.54841 - 86400 * .7790572732640 +
+         ((8640184.812866 - 86400 * .00273781191135448 * 36525) + (.093104 - .0000062 * ut) * ut) *
+             ut) *
+        (2 * std::numbers::pi / 86400);
+    const auto c = slow_rotations(tt_jd(epoch), eop, dt).celestial;
+    auto rotation = multiply(spin(-gmst_minus_era - equation), c);
+    if (target == core::FrameId::true_of_date)
+        return rotation;
+    // Lieske precession in the IERS 1996 psi_A, omega_A, chi_A representation.
+    const double pa = ((-.001147 * t - 1.07259) * t + 5038.7784) * t * arcsec;
+    const double oa = (84381.448 + (.05127 - .007726 * t) * t * t) * arcsec;
+    const double ca = ((-.001125 * t - 2.38064) * t + 10.5526) * t * arcsec;
+    const auto precession =
+        multiply(multiply(multiply(spin(ca), spin_x(-oa)), spin(-pa)), spin_x(84381.448 * arcsec));
+    double n[3][3]{};
+    eraNumat(mean, psi, eps, n);
+    return multiply(transpose(multiply(matrix_value(n), precession)), rotation);
+}
+void validate_celestial(core::Epoch epoch, const core::EarthOrientationSample &eop,
+                        core::FrameId target) {
+    validate_eop(epoch, eop);
+    if (target != core::FrameId::fk5_j2000 && target != core::FrameId::true_of_date)
+        throw std::invalid_argument("Celestial target must be FK5 J2000 or TrueOfDate");
+}
+
 class FrameProvider final : public core::IFrameProvider {
   public:
+    core::PositionRotation gcrf_to_celestial(core::Epoch epoch,
+                                             const core::EarthOrientationSample &eop,
+                                             core::FrameId target) const override {
+        validate_celestial(epoch, eop, target);
+        return {epoch,
+                core::OriginId::earth,
+                core::FrameId::gcrf,
+                target,
+                fk5_rotation(epoch, {eop, {}}, target, 0),
+                "erfa-2.0.1-iau2006-2000a-to-fk5-iers1996-c7-pseudo-fixed",
+                eop.source_id};
+    }
+    core::StateTransform gcrf_to_celestial_state(core::Epoch epoch,
+                                                 const core::EarthOrientationState &eop,
+                                                 core::FrameId target) const override {
+        validate_celestial(epoch, eop.sample, target);
+        for (const auto value :
+             {eop.rates.ut1_minus_tai_seconds_per_second, eop.rates.polar_motion_x_rad_per_second,
+              eop.rates.polar_motion_y_rad_per_second, eop.rates.celestial_pole_dx_rad_per_second,
+              eop.rates.celestial_pole_dy_rad_per_second})
+            if (!std::isfinite(value) || std::abs(value) > .001)
+                throw std::invalid_argument(
+                    "EOP rates must be finite and at most 0.001 SI units/s");
+        if (epoch.tai_nanoseconds() == c7_start)
+            throw std::invalid_argument(
+                "FK5 velocity is undefined at the IAU 1994 C7 model transition");
+        auto rotation = gcrf_to_celestial(epoch, eop.sample, target);
+        // Differentiate observed pole offsets analytically. Finite differencing
+        // large CPO rates forces short stencils and loses the tiny FK5 spin rate.
+        auto slow_eop = eop;
+        slow_eop.rates.celestial_pole_dx_rad_per_second = 0;
+        slow_eop.rates.celestial_pole_dy_rad_per_second = 0;
+        constexpr double h = 32;
+        const auto m2 = fk5_rotation(epoch, slow_eop, target, -2 * h),
+                   m1 = fk5_rotation(epoch, slow_eop, target, -h),
+                   p1 = fk5_rotation(epoch, slow_eop, target, h),
+                   p2 = fk5_rotation(epoch, slow_eop, target, 2 * h);
+        core::Matrix3 derivative{};
+        for (std::size_t i = 0; i < 3; ++i)
+            for (std::size_t j = 0; j < 3; ++j)
+                derivative[i][j] = (8 * (p1[i][j] - m1[i][j]) - (p2[i][j] - m2[i][j])) / (12 * h);
+        const auto tt = tt_jd(epoch);
+        double x = 0, y = 0, s = 0;
+        eraXys06a(tt.day, tt.fraction, &x, &y, &s);
+        x += eop.sample.celestial_pole_dx_rad;
+        y += eop.sample.celestial_pole_dy_rad;
+        const auto dx = eop.rates.celestial_pole_dx_rad_per_second,
+                   dy = eop.rates.celestial_pole_dy_rad_per_second;
+        const double z = std::sqrt(1 - x * x - y * y), a = 1 / (1 + z);
+        const double dz = -(x * dx + y * dy) / z, da = -a * a * dz;
+        const double xy = -da * x * y - a * (dx * y + x * dy);
+        const core::Matrix3 qdot{{{-da * x * x - 2 * a * x * dx, xy, -dx},
+                                  {xy, -da * y * y - 2 * a * y * dy, -dy},
+                                  {dx, dy, dz}}};
+        const auto celestial = slow_rotations(tt, eop, 0).celestial;
+        const auto factor = multiply(rotation.matrix, transpose(celestial));
+        const auto cpo = multiply(factor, multiply(spin(-s), qdot));
+        for (std::size_t i = 0; i < 3; ++i)
+            for (std::size_t j = 0; j < 3; ++j)
+                derivative[i][j] += cpo[i][j];
+        // Remove roundoff normal to SO(3), preserving the full angular velocity.
+        const auto tangent = multiply(derivative, transpose(rotation.matrix));
+        core::Matrix3 omega{};
+        for (std::size_t i = 0; i < 3; ++i)
+            for (std::size_t j = 0; j < 3; ++j)
+                omega[i][j] = .5 * (tangent[i][j] - tangent[j][i]);
+        derivative = multiply(omega, rotation.matrix);
+        return {std::move(rotation), derivative,
+                "analytic-cpo-plus-fk5-slow-fd4-32s-local-tangent"};
+    }
+
     core::PositionRotation teme_to_itrf(core::Epoch epoch,
                                         const core::EarthOrientationSample &eop) const override {
         validate_eop(epoch, eop);

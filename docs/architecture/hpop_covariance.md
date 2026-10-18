@@ -1,6 +1,6 @@
 # HPOP 联合协方差与考虑参数
 
-`propagate_hpop_covariance` 在单个滑行段内传播初始状态协方差，并可考虑常参数 `D=Cd×DragArea/Mass`、`K=Cr×SRPArea/Mass` 的不确定度。C++、Python、安装 SDK 共用 Core 实现。输入支持带标记的 GCRF / LVLH / Frenet Cartesian，输出统一地心 GCRF，时间与单位为 TAI 和 SI；项目持久化、桌面矩阵编辑、J2000/TOD 与 FG 表示、科学插值及跨机动传播仍需继续接入，不能把本接口当作完整协方差页面。
+`propagate_hpop_covariance` 在单个滑行段内传播初始状态协方差，并可考虑常参数 `D=Cd×DragArea/Mass`、`K=Cr×SRPArea/Mass` 的不确定度。C++、Python、安装 SDK 共用 Core 实现。输入支持带标记的 GCRF / LVLH / Frenet / FK5 J2000 / TrueOfDate Cartesian，输出统一地心 GCRF，时间与单位为 TAI 和 SI；项目持久化、桌面矩阵编辑、JPLFile 章动模式与 FG 表示、科学插值及跨机动传播仍需继续接入，不能把本接口当作完整协方差页面。
 
 参数含义来自 [STK HPOP Covariance](https://help.agi.com/stk/Content/hpop/hpop-covariance.htm)。Value 是方差，不是标准差；交叉值是有单位的协方差，不是无量纲相关系数。未选择的参数用空 optional 表示；没有考虑参数时只传播 6×6 状态矩阵。选定 D 或 K 时增加对应维度，两者均选定时允许 `Cov(D,K)`。现有力被关闭时，其参数敏感度为零；参数本身的方差仍按常参数保留。
 
@@ -34,6 +34,8 @@ Cholesky 前以各维标准差缩放为相关矩阵，避免米、米每秒与�
 | `gcrf` | 地心 GCRF |
 | `lvlh` | STK LVLH：R=r/|r|，C=(r×v)/|r×v|，I=C×R；轴为 (R,I,C) |
 | `frenet` | STK Frenet：T=v/|v|，N=T×C；轴为 (N,T,C) |
+| `fk5_j2000` | 通过 pseudo-fixed 实现的 FK5 J2000，IERS1996 章动 |
+| `true_of_date` | 同一 FK5 链的真赤道、真春分点 of date |
 
 遵循 [STK 参考系](https://help.agi.com/stk/Content/stk/referenceframesvgt.htm)和 [HPOP Frenet 定义](https://help.agi.com/stk/Content/hpop/hpop-covariance.htm)。STK LVLH 与 CCSDS LVLH / STK VVLH 的轴排列不同；这里不混用同名定义。
 
@@ -54,7 +56,11 @@ Pzz' = J Pzz Jᵀ;   Pwz' = Pwz Jᵀ;   Pww' = Pww
 
 `propagate_hpop_covariance` 接受上述局部输入，在初始时刻转入 GCRF；转动模式使用完整名义 HPOP 力求得的瞬时加速度，独立变分引力截断不改变它。初始事件点沿用 `evaluate_hpop_acceleration` 的时间取样，不自动选择传播方向的单侧极限。需要指定单侧定义时，先用该侧加速度显式转换。传播结果、STM、敏感度及三个贡献项均为 GCRF；可在末端用相应名义加速度重新转换结果矩阵。
 
-非法参考系、非有限状态／加速度、局部系的零 r/v 或 `|rhat×vhat| <= 64 ε` 会被拒绝；这个门槛只排除双精度无法分辨的径向退化，不设置轨道倾角／偏心率限制。矩阵转换不推进时间；局部轴不增加数据资源。J2000 / TrueOfDate 仍需独立的天文转换，不能把已有 GCRF 或 SPICE J2000 改名替代。
+非法参考系、非有限状态／加速度、局部系的零 r/v 或 `|rhat×vhat| <= 64 ε` 会被拒绝；这个门槛只排除双精度无法分辨的径向退化，不设置轨道倾角／偏心率限制。矩阵转换不推进时间；局部轴不增加数据资源。J2000 / TrueOfDate 使用独立的天文转换，不能把 GCRF 或 SPICE J2000 改名替代。
+
+天文系通过 `HpopCovarianceFrameEnvironment` 注入不可变 Frame/EOP Provider；Python 从 `data=DataSnapshot` 捕获同样资源。一次转换只读取初始历元的一次 EOP，派生速度使用该点局部变化率，不在覆盖范围外查询。缺少数据、历元越界或 Provider 不支持时明确失败。同系转换也验证所需数据。`propagate_hpop_covariance` 复用力环境的 Provider，在积分前转入 GCRF；天文系不需要轨道加速度。
+
+实现遵循 STK 的两条 pseudo-fixed 路径：现代 GCRF 使用 IAU2006/2000A、ERA 与 dX/dY，FK5 使用 IERS1996 的 IAU1980 章动、Lieske 岁差、GMST82 及分点方程。极移在这个转换中不参与；J2000 差异随时间变化。返回的 `PositionRotation.model` 保留模型标识。这是 STK 支持的 **IERS1996 模式**；STK 默认 JPLFile/DE405 章动及实机逐位比较仍待实现/验收。数据和边界见[天文系验证协议](../validation/hpop_celestial_frames_protocol.md)。
 
 参考生成、200 组成熟算法对照与误差门槛见[局部系验证协议](../validation/hpop_covariance_frames_protocol.md)。
 

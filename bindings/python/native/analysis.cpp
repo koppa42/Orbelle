@@ -331,7 +331,9 @@ void bind_analysis(py::module_ &module) {
     py::enum_<core::HpopCovarianceFrame>(module, "HpopCovarianceFrame")
         .value("GCRF", core::HpopCovarianceFrame::gcrf)
         .value("LVLH", core::HpopCovarianceFrame::lvlh)
-        .value("FRENET", core::HpopCovarianceFrame::frenet);
+        .value("FRENET", core::HpopCovarianceFrame::frenet)
+        .value("FK5_J2000", core::HpopCovarianceFrame::fk5_j2000)
+        .value("TRUE_OF_DATE", core::HpopCovarianceFrame::true_of_date);
     py::enum_<core::HpopCovarianceVelocity>(module, "HpopCovarianceVelocity")
         .value("PROJECTED", core::HpopCovarianceVelocity::projected)
         .value("ROTATING", core::HpopCovarianceVelocity::rotating);
@@ -341,9 +343,17 @@ void bind_analysis(py::module_ &module) {
              py::arg("velocity"))
         .def_readwrite("frame", &core::HpopCovarianceCoordinates::frame)
         .def_readwrite("velocity", &core::HpopCovarianceCoordinates::velocity);
-    module.def("hpop_covariance_frame_jacobian", &core::hpop_covariance_frame_jacobian,
-               py::arg("reference"), py::arg("source"), py::arg("target"), py::kw_only(),
-               py::arg("acceleration_mps2") = py::none());
+    module.def(
+        "hpop_covariance_frame_jacobian",
+        [](core::CartesianState reference, core::HpopCovarianceCoordinates source,
+           core::HpopCovarianceCoordinates target,
+           std::optional<std::array<double, 3>> acceleration, runtime::DataSnapshot data) {
+            py::gil_scoped_release release;
+            return core::hpop_covariance_frame_jacobian(reference, source, target, acceleration,
+                                                        {data.frames(), data.eop()});
+        },
+        py::arg("reference"), py::arg("source"), py::arg("target"), py::kw_only(),
+        py::arg("acceleration_mps2") = py::none(), py::arg("data") = runtime::DataSnapshot{});
     py::class_<core::HpopConsiderParameter>(module, "HpopConsiderParameter")
         .def(py::init<>())
         .def_readwrite("variance", &core::HpopConsiderParameter::variance)
@@ -374,12 +384,13 @@ void bind_analysis(py::module_ &module) {
         "convert_hpop_covariance",
         [](core::CartesianState reference, core::HpopCovarianceInput input,
            core::HpopCovarianceCoordinates target,
-           std::optional<std::array<double, 3>> acceleration) {
+           std::optional<std::array<double, 3>> acceleration, runtime::DataSnapshot data) {
             py::gil_scoped_release release;
-            return core::convert_hpop_covariance(reference, input, target, acceleration);
+            return core::convert_hpop_covariance(reference, input, target, acceleration, {},
+                                                 {data.frames(), data.eop()});
         },
         py::arg("reference"), py::arg("input"), py::arg("target"), py::kw_only(),
-        py::arg("acceleration_mps2") = py::none());
+        py::arg("acceleration_mps2") = py::none(), py::arg("data") = runtime::DataSnapshot{});
     module.def(
         "transport_hpop_covariance",
         [](core::HpopCovarianceInput input, core::HpopVariationalState state) {

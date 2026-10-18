@@ -27,3 +27,5 @@
 /modules/core/src/propagation/integrators/rklib-LICENSE.txt -text
 
 /data/samples/spice/mar099s_2016_leap/*.txt text eol=lf
+
+/tests/reference/time_frames/hpop_celestial_frames.txt text eol=lf

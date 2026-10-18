@@ -16,6 +16,8 @@ class FrameId:
     ITRF: FrameId
     SPICE_J2000: FrameId
     TEME: FrameId
+    FK5_J2000: FrameId
+    TRUE_OF_DATE: FrameId
     @property
     def name(self) -> str: ...
 
@@ -368,6 +370,10 @@ class PositionRotation:
     def inverse_position(self, position_m: Sequence[float]) -> list[float]: ...
 
 class FrameProvider:
+    def gcrf_to_celestial(self, epoch: Epoch, eop: EarthOrientationSample,
+                         target: FrameId) -> PositionRotation: ...
+    def gcrf_to_celestial_state(self, epoch: Epoch, eop: EarthOrientationState,
+                               target: FrameId) -> StateTransform: ...
     def gcrf_to_itrf(self, epoch: Epoch, eop: EarthOrientationSample) -> PositionRotation: ...
     def gcrf_to_itrf_state(self, epoch: Epoch, eop: EarthOrientationState) -> StateTransform: ...
     def teme_to_itrf(self, epoch: Epoch, eop: EarthOrientationSample) -> PositionRotation: ...
@@ -1631,6 +1637,8 @@ class HpopCovarianceFrame:
     GCRF: HpopCovarianceFrame
     LVLH: HpopCovarianceFrame
     FRENET: HpopCovarianceFrame
+    FK5_J2000: HpopCovarianceFrame
+    TRUE_OF_DATE: HpopCovarianceFrame
 
 class HpopCovarianceVelocity:
     PROJECTED: HpopCovarianceVelocity
@@ -1647,11 +1655,12 @@ class HpopCovarianceCoordinates:
 def hpop_covariance_frame_jacobian(
     reference: CartesianState, source: HpopCovarianceCoordinates,
     target: HpopCovarianceCoordinates, *, acceleration_mps2: Sequence[float] | None = None,
+    data: DataSnapshot = ...,
 ) -> list[list[float]]: ...
 
 def convert_hpop_covariance(
     reference: CartesianState, input: HpopCovarianceInput, target: HpopCovarianceCoordinates, *,
-    acceleration_mps2: Sequence[float] | None = None,
+    acceleration_mps2: Sequence[float] | None = None, data: DataSnapshot = ...,
 ) -> HpopCovarianceInput: ...
 
 class HpopConsiderParameter:

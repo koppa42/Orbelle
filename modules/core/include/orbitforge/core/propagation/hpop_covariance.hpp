@@ -5,7 +5,11 @@ namespace orbitforge::core {
 using HpopStateCovariance = std::array<std::array<double, 6>, 6>;
 // STK LVLH = (radial, in-track, orbit normal), NOT CCSDS LVLH/VVLH.
 // STK Frenet = (N,T,C): T along inertial velocity, C along r cross v.
-enum class HpopCovarianceFrame { gcrf, lvlh, frenet };
+enum class HpopCovarianceFrame { gcrf, lvlh, frenet, fk5_j2000, true_of_date };
+struct HpopCovarianceFrameEnvironment {
+    std::shared_ptr<const IFrameProvider> frames;
+    std::shared_ptr<const IEarthOrientationProvider> eop;
+};
 // projected: components of inertial position/velocity errors along the axes.
 // rotating: velocity is the time derivative relative to the rotating axes.
 enum class HpopCovarianceVelocity { projected, rotating };
@@ -20,12 +24,16 @@ struct HpopCovarianceCoordinates {
 // A rotating local frame requires the actual nominal inertial acceleration;
 // no Kepler acceleration is guessed. Projected frames need only r and v.
 // Nonfinite/zero r or v and unresolved |rhat cross vhat| <= 64*epsilon fail.
+// FK5 J2000 and TrueOfDate require explicit frames/EOP, even for identity;
+// the selected provider defines the nutation model and data coverage. No local
+// acceleration is needed for celestial axes. Environment is captured by value.
 // GCRF projected/rotating coincide. Invalid input throws invalid_argument;
 // nonrepresentable finite-range results throw PropagationError.
 [[nodiscard]] HpopStateCovariance
 hpop_covariance_frame_jacobian(const CartesianState &reference, HpopCovarianceCoordinates from,
                                HpopCovarianceCoordinates to,
-                               std::optional<std::array<double, 3>> acceleration_mps2 = {});
+                               std::optional<std::array<double, 3>> acceleration_mps2 = {},
+                               HpopCovarianceFrameEnvironment environment = {});
 struct HpopConsiderParameter {
     // Self-covariance of D or K, (m^2/kg)^2, NOT sigma or a correlation coefficient.
     double variance = 0;
@@ -70,11 +78,10 @@ void validate_hpop_covariance(const HpopCovarianceInput &input);
 // transform with the same Jacobian. Caller associates the matrix with this
 // nominal reference state/epoch. Does not propagate time or change the orbit.
 // Input is captured before callbacks; no partial result on cancellation/failure.
-[[nodiscard]] HpopCovarianceInput
-convert_hpop_covariance(CartesianState reference, HpopCovarianceInput input,
-                        HpopCovarianceCoordinates target,
-                        std::optional<std::array<double, 3>> acceleration_mps2 = {},
-                        const std::function<void()> &checkpoint = {});
+[[nodiscard]] HpopCovarianceInput convert_hpop_covariance(
+    CartesianState reference, HpopCovarianceInput input, HpopCovarianceCoordinates target,
+    std::optional<std::array<double, 3>> acceleration_mps2 = {},
+    const std::function<void()> &checkpoint = {}, HpopCovarianceFrameEnvironment environment = {});
 // Apply the supplied physical fixed-time STM and D/K sensitivities to input.
 // Caller must associate them with this initial covariance's epoch/state/model.
 // Earth/GCRF only. Nonfinite or numerically non-PD output throws PropagationError.

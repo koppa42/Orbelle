@@ -76,7 +76,9 @@ Matrix cholesky(Matrix &covariance, std::size_t size) {
 Joint prepare(const HpopCovarianceInput &input) {
     if (input.coordinates.frame != HpopCovarianceFrame::gcrf &&
         input.coordinates.frame != HpopCovarianceFrame::lvlh &&
-        input.coordinates.frame != HpopCovarianceFrame::frenet)
+        input.coordinates.frame != HpopCovarianceFrame::frenet &&
+        input.coordinates.frame != HpopCovarianceFrame::fk5_j2000 &&
+        input.coordinates.frame != HpopCovarianceFrame::true_of_date)
         throw std::invalid_argument("Unsupported HPOP covariance frame");
     if (input.coordinates.velocity != HpopCovarianceVelocity::projected &&
         input.coordinates.velocity != HpopCovarianceVelocity::rotating)
@@ -243,11 +245,12 @@ HpopCovarianceState transport_hpop_covariance(HpopCovarianceInput input,
 HpopCovarianceInput convert_hpop_covariance(CartesianState reference, HpopCovarianceInput input,
                                             HpopCovarianceCoordinates target,
                                             std::optional<std::array<double, 3>> acceleration_mps2,
-                                            const std::function<void()> &checkpoint) {
+                                            const std::function<void()> &checkpoint,
+                                            HpopCovarianceFrameEnvironment environment) {
     check(checkpoint);
     const auto joint = prepare(input);
-    const auto jacobian =
-        hpop_covariance_frame_jacobian(reference, input.coordinates, target, acceleration_mps2);
+    const auto jacobian = hpop_covariance_frame_jacobian(reference, input.coordinates, target,
+                                                         acceleration_mps2, environment);
     Matrix f{};
     for (std::size_t i = 0; i < 6; ++i)
         std::copy(jacobian[i].begin(), jacobian[i].end(), f[i].begin());
@@ -267,9 +270,12 @@ HpopCovarianceState propagate_hpop_covariance(CartesianState initial, Epoch end,
     validate_hpop_covariance(covariance);
     if (covariance.coordinates.frame != HpopCovarianceFrame::gcrf) {
         std::optional<std::array<double, 3>> acceleration;
-        if (covariance.coordinates.velocity == HpopCovarianceVelocity::rotating)
+        if ((covariance.coordinates.frame == HpopCovarianceFrame::lvlh ||
+             covariance.coordinates.frame == HpopCovarianceFrame::frenet) &&
+            covariance.coordinates.velocity == HpopCovarianceVelocity::rotating)
             acceleration = evaluate_hpop_acceleration(initial, options, environment);
-        covariance = convert_hpop_covariance(initial, covariance, {}, acceleration, checkpoint);
+        covariance = convert_hpop_covariance(initial, covariance, {}, acceleration, checkpoint,
+                                             {environment.frames, environment.eop});
     }
     const auto state =
         propagate_hpop_variational(initial, end, std::move(options), std::move(environment),

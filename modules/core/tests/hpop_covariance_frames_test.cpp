@@ -155,10 +155,12 @@ TEST(HpopCovarianceFrames, MatchesOrekitAndIndependentJointMatrixReferences) {
         const double delta = error(joint_matrix(actual), expected);
         max_covariance = std::max(max_covariance, delta);
         EXPECT_LE(delta, 5e-13);
-        if (covariance.drag)
+        if (covariance.drag) {
             EXPECT_EQ(actual.drag->variance, covariance.drag->variance);
-        if (covariance.srp)
+        }
+        if (covariance.srp) {
             EXPECT_EQ(actual.srp->variance, covariance.srp->variance);
+        }
         EXPECT_EQ(actual.drag_srp_covariance, covariance.drag_srp_covariance);
         const auto back = convert_hpop_covariance(state, actual, coordinate(from), acceleration);
         const double roundtrip = error(joint_matrix(back), initial);

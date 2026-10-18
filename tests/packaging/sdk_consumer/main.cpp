@@ -480,8 +480,13 @@ int main(int argc, char **argv) try {
             orbitforge::core::srp_state_differential(derivative_state, options.srp, *ephemeris);
         if (!std::isfinite(srp_partials.force.velocity_jacobian_per_s[0][0]))
             throw std::runtime_error("Installed full SRP state derivative failed");
-        const orbitforge::core::HpopEnvironment force_environment{nullptr, nullptr, nullptr,
-                                                                  ephemeris};
+        orbitforge::core::HpopEnvironment force_environment{nullptr, nullptr, nullptr, ephemeris};
+        if (ORBITFORGE_EXPECT_TIME_FRAMES) {
+            const auto frame_data = orbitforge::runtime::DataSnapshot::load(argv[1]);
+            force_environment.frames = frame_data.frames();
+            force_environment.eop = frame_data.eop();
+            force_environment.time = frame_data.time();
+        }
         const auto combined =
             orbitforge::core::hpop_force_differential(derivative_state, options, force_environment);
         const auto nominal = orbitforge::core::evaluate_hpop_acceleration(derivative_state, options,
@@ -517,8 +522,18 @@ int main(int argc, char **argv) try {
              orbitforge::core::HpopCovarianceVelocity::rotating},
             orbitforge::core::evaluate_hpop_acceleration(derivative_state, options,
                                                          force_environment));
+        auto celestial_covariance = local_covariance;
+        if (ORBITFORGE_EXPECT_TIME_FRAMES) {
+            celestial_covariance = orbitforge::core::convert_hpop_covariance(
+                derivative_state, local_covariance,
+                {orbitforge::core::HpopCovarianceFrame::fk5_j2000,
+                 orbitforge::core::HpopCovarianceVelocity::rotating},
+                orbitforge::core::evaluate_hpop_acceleration(derivative_state, options,
+                                                             force_environment),
+                {}, {force_environment.frames, force_environment.eop});
+        }
         const auto uncertainty = orbitforge::core::propagate_hpop_covariance(
-            derivative_state, variational_end, local_covariance, options, force_environment);
+            derivative_state, variational_end, celestial_covariance, options, force_environment);
         if (uncertainty.covariance.coordinates.frame != orbitforge::core::HpopCovarianceFrame::gcrf)
             throw std::runtime_error("Installed covariance frame conversion failed");
         if (uncertainty.covariance.srp->variance != covariance.srp->variance ||

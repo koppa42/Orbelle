@@ -26,3 +26,5 @@
 每次执行应记录提交版本、依赖版本、环境、输入哈希、原始结果和失败原因。图形集成预检、计时工具接入与正式性能验收分别判断，不能由某项测试成功推定全部通过。
 
 日志、截图、JSON/CSV/XML 报告及环境清单写入新的 `out/validation/<运行名称>/`；便携包、wheel 和交付目录放在 `out/releases/` 或 `out/dist/`。这些目录由 Git 忽略，不将逐次结果、开发过程记录或源码副本放进文档目录。
+
+- [HPOP J2000/TrueOfDate 与联合协方差](hpop_celestial_frames_protocol.md)：IERS1996、Orekit 自动微分及 96 组联合矩阵对照。

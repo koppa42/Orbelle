@@ -91,3 +91,12 @@ Runtime 始终公开能力查询 `time_frames_available()`；禁用 Provider 的
 ## TEME
 
 SGP4 输出显式 `FrameId::teme`（of date）。ERFA 的 `teme_to_itrf` / `teme_to_itrf_state` 使用 GMST82 与极移；`core::transform_state` 通过 ITRF 与现有 GCRF 模型连接，包含完整速度项。详见[模型和验证约定](propagators.md#teme-与现有场景)。
+
+## FK5 J2000 与 TrueOfDate
+
+计算接口新增 FrameId::fk5_j2000 / true_of_date 与 gcrf_to_celestial[_state]。
+ERFA Provider 通过 pseudo-fixed 两条路径连接现代 GCRF 与 IERS1996 FK5；
+模型、数据、导数与边界见[验证协议](../validation/hpop_celestial_frames_protocol.md)。
+transform_state 对新增端点经 GCRF 路由，保留完整速度项；既有 GCRF/ITRF/TEME 路由不变。
+这些新枚举供显式计算与协方差转换使用；项目轨道输入、报告框架列表和桌面选择尚未扩大，
+现有校验继续拒绝未接入的项目输入。
