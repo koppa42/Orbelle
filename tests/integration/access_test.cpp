@@ -353,11 +353,11 @@ TEST(Access, SearchSettingsRoundTripAndInvalidModesAreRejected) {
         GTEST_SKIP();
     auto context = circular();
     auto d = report(application::ReportKind::access_intervals);
-    d.query.access_search_mode = core::AccessSearchMode::fixed_grid;
-    d.query.access_tolerance_nanoseconds = 12345;
+    d.query.event_search_mode = core::AccessSearchMode::fixed_grid;
+    d.query.event_tolerance_nanoseconds = 12345;
     context.project.reports.push_back(d);
     const auto decoded = application::decode_project(application::encode_project(context.project));
     EXPECT_EQ(decoded.reports[0].query, d.query);
-    d.query.access_tolerance_nanoseconds = d.query.step_nanoseconds + 1;
+    d.query.event_tolerance_nanoseconds = d.query.step_nanoseconds + 1;
     EXPECT_THROW(application::validate_report_definition(d), std::invalid_argument);
 }

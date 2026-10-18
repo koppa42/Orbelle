@@ -1,19 +1,19 @@
 # Current project format fixture
 
-`project-current.orbitforge` is a fixed v42 input assembled independently with Python's `struct.pack` from the [documented binary layout](../../../docs/architecture/project_files.md), without calling OrbitForge's writer. C++ and Python must read it and reproduce its bytes exactly. It guards against reader and writer drifting together.
+`project-current.orbitforge` is a fixed v43 input assembled independently with Python's `struct.pack` from the [documented binary layout](../../../docs/architecture/project_files.md), without calling OrbitForge's writer. C++ and Python must read it and reproduce its bytes exactly. It guards against reader and writer drifting together.
 
-- 1972 bytes; SHA-256 `e5f8daf68fc13c98075b1f9be551a49bab7a0826c570af90bf8010ad376ee935`.
+- 1987 bytes; SHA-256 `42077eb0ad1738072f4551283a496c2a232dad8a4361d7f413fd30a3d27e4c4f`.
 - `Schema fixture`, TAI nanoseconds `[123, 600000000123]`, current time `1000000123`.
 - Two-body `satellite-a` named `观测卫星 A`, and mission sequence `satellite-b` with an empty display name (use its ID). Both use GCRF state `[7000000, 0, 0]` m and `[0, 6200, 5300]` m/s at TAI nanosecond 123.
 - Mission uses HPOP point-mass coasts: `Drift` (200000000001 ns), `Raise` (VNC delta-v `[12, -3, 0.5]` m/s), `Coast` (399999999999 ns). The sequence covers the scenario exactly.
-- The VOP integration boolean is independently packed as `<B` immediately after the integrator, with value 1. It remains inactive with Gauss–Jackson, is preserved on save, and does not affect calculation identity. The v42 / OBJS32 payload and both CRC layers are rebuilt without calling the production writer.
+- The VOP integration boolean is independently packed as `<B` immediately after the integrator, with value 1. It remains inactive with Gauss–Jackson, is preserved on save, and does not affect calculation identity. The v43 / OBJS32 payload and both CRC layers are rebuilt without calling the production writer.
 - HPOP stores an empty gravity selection (built-in EGM96), GM `3.986004415e14 m³/s²`, and uses Gauss–Jackson 12 with Pseudo Correction and explicit Fixed Step control, inactive relative tolerance `2e-12`, position tolerance `0.002 m`, velocity tolerance `2e-6 m/s`, minimum/maximum steps `0.005/45 s`, fixed step `12 s`, minimum geocentric altitude `1000 m`.
-- Hermite interpolation uses polynomial order 5, inactive VOP GM `4.1e14 m³/s²` and fixed ephemeris reporting. The GM is independently packed as `<d` after method/order; OBJS32 and both CRC layers are updated without the production writer. The v42 / OBJS32 regularization fields follow these fields: independent `struct.pack("<BdI", 1, 1.25, 240)`, with both CRC layers recomputed without calling the production writer. Time regularization is enabled with exponent 1.25 and 240 steps per orbit; the ordinary 12-second step remains an inactive draft.
+- Hermite interpolation uses polynomial order 5, inactive VOP GM `4.1e14 m³/s²` and fixed ephemeris reporting. The GM is independently packed as `<d` after method/order; OBJS32 and both CRC layers are updated without the production writer. The v43 / OBJS32 regularization fields follow these fields: independent `struct.pack("<BdI", 1, 1.25, 240)`, with both CRC layers recomputed without calling the production writer. Time regularization is enabled with exponent 1.25 and 240 steps per orbit; the ordinary 12-second step remains an inactive draft.
 - Relativistic accelerations are disabled. Satellite mass is `1250 kg`; both inactive spherical areas are `37.5 m²` from their explicit ratios.
 - Solid tide draft is Full with truncation and time-dependent terms on; it is inactive for 0/0 gravity.
 - Secular variations are enabled as an inactive draft for the 0/0 base gravity; no reference epoch/rates are inferred.
 - Ocean tides are disabled; the draft retains model `fixture-ocean` and independent 30×12 truncation.
-- SRP boundary mitigation is true as an inactive draft; the v42 / OBJS32 boolean is independently packed between Moon shadow and Cr, with both CRC layers recomputed.
+- SRP boundary mitigation is true as an inactive draft; the v43 / OBJS32 boolean is independently packed between Moon shadow and Cr, with both CRC layers recomputed.
 - SRP is disabled; its draft preserves Cr `1.25`, area/mass `0.03 m²/kg`, dual cone, spacecraft apparent Sun, Earth shadow on / Moon shadow off, atmospheric height `23000 m`, pressure `4.56e-6 Pa` at `149597870700 m`, Sun/Earth/Moon radii `696000000/6378137/1737400 m`.
 - SRP adds two inactive physical-centre occultors: Mercury radius `2440000.125 m` and Venus radius `6051800 m`, independently packed as `<IIdId` after the existing SRP constants; both CRC layers were recomputed.
 - Drag is disabled; its draft preserves Cd `2.3`, area/mass `0.03 m²/kg`, NRLMSISE-00, inactive low-altitude NRLMSISE selection, blend `42000 m`, F10.7 `170 sfu`, average `150 sfu`, Kp `4.3`, apparent Sun on, file selection `fixture-weather`, three-hour natural cubic spline updates, Kp source and approximate altitude on.
@@ -32,6 +32,8 @@ consider analysis disabled, D/K Use true with variances 1e-4/2e-4, D/state cross
 `(.01,.02,.03,0,0,0)`, K/state cross `(-.01,0,0,.001,0,0)`, cross switch true,
 Cov(D,K)=5e-5. Dormant values must survive exactly.
 
-RPTS3 independently packs `<IQ` values `(1, 2000000)` immediately after the report step:
+RPTS4 independently packs `<IQ` values `(1, 2000000)` immediately after the report step:
 extremum-assisted mode and a non-default 2 ms tolerance, retained even on the AER template.
 Both the RPTS section CRC and the payload CRC are recalculated independently.
+
+RPTS4 appends UTF-8 `fixture-sun` with a little-endian u32 byte length after `<IQ>`. The v43 header, section CRC and payload CRC are independently rebuilt with Python struct/zlib, without the production writer.

@@ -194,6 +194,12 @@ class AnalysisReportTests(unittest.TestCase):
                     options["objects"] = station if kind == of.ReportKind.GROUND_STATIONS else sat
                     if kind not in (of.ReportKind.OBJECT_SUMMARY, of.ReportKind.GROUND_STATIONS):
                         options["step"] = u.s(60)
+                if kind in (of.ReportKind.LIGHTING_INTERVALS, of.ReportKind.LIGHTING_STATE):
+                    # This EOP-only snapshot deliberately has no solar ephemeris.
+                    # Successful lighting queries are covered by test_lighting.py.
+                    with self.assertRaisesRegex(ValueError, "prepared solar ephemeris"):
+                        analysis.report(kind, **options)
+                    continue
                 report = analysis.report(kind, **options)
                 self.assertIsInstance(report, of.ReportResult)
                 self.assertGreater(report.table.row_count, 0)

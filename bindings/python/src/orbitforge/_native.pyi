@@ -1461,6 +1461,8 @@ class DataCatalog:
 
 class ReportKind:
     STATE_COVARIANCE: ReportKind
+    LIGHTING_INTERVALS: ReportKind
+    LIGHTING_STATE: ReportKind
     ACCESS_INTERVALS: ReportKind
     AER: ReportKind
     SCENARIO_SUMMARY: ReportKind
@@ -1544,8 +1546,9 @@ class ReportScope:
     ALL_COMPATIBLE: ReportScope
 
 class ReportQuery:
-    access_search_mode: AccessSearchMode
-    access_tolerance_nanoseconds: int
+    lighting_ephemeris: str
+    event_search_mode: AccessSearchMode
+    event_tolerance_nanoseconds: int
     def __init__(self) -> None: ...
     kind: ReportKind
     scope: ReportScope
@@ -1593,7 +1596,29 @@ class ReportTable:
     @property
     def row_count(self) -> int: ...
 
+class LightingPhaseStatistics:
+    @property
+    def count(self) -> int: ...
+    @property
+    def total_duration_s(self) -> float: ...
+    @property
+    def longest_duration_s(self) -> float: ...
+    @property
+    def fraction(self) -> float: ...
+
+class LightingStatistics:
+    @property
+    def object_count(self) -> int: ...
+    @property
+    def sunlight(self) -> LightingPhaseStatistics: ...
+    @property
+    def penumbra(self) -> LightingPhaseStatistics: ...
+    @property
+    def umbra(self) -> LightingPhaseStatistics: ...
+
 class ReportResult:
+    @property
+    def lighting_statistics(self) -> LightingStatistics | None: ...
     @property
     def access_statistics(self) -> AccessStatistics | None: ...
     @property

@@ -37,6 +37,7 @@
 #include <QTreeWidget>
 #include <QWheelEvent>
 #include <gtest/gtest.h>
+#include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 
@@ -106,8 +107,9 @@ TEST(ReportDialog, StalePreparationGenerationAndCancellationPreservePublishedRes
     project.ground_stations.push_back({"station", "Station", {0, 0, 0}});
     ReportDialog::Ready pending;
     ReportDialog dialog(
-        project, data.time(), [&](auto ready) { pending = std::move(ready); }, [](auto) {},
-        [](auto) {});
+        project, data.time(),
+        [&](const application::ReportQuery &, auto ready) { pending = std::move(ready); },
+        [](auto) {}, [](auto) {});
     int publications = 0;
     dialog.result_published = [&](auto result, const runtime::Analysis &analysis) {
         ++publications;
@@ -188,8 +190,9 @@ TEST(ReportDialog, AnalysisDoesNotSilentlyAcceptChangedDataAndUsesConfirmedPrefl
     project.ground_stations.push_back({"station", "Station", {0, 0, 0}});
     ReportDialog::Ready pending;
     ReportDialog dialog(
-        project, data.time(), [&](auto ready) { pending = std::move(ready); }, [](auto) {},
-        [](auto) {});
+        project, data.time(),
+        [&](const application::ReportQuery &, auto ready) { pending = std::move(ready); },
+        [](auto) {}, [](auto) {});
     int publications = 0;
     dialog.result_published = [&](auto, const runtime::Analysis &analysis) {
         ++publications;
@@ -230,8 +233,9 @@ TEST(ReportDialog, LatePreflightAfterWindowDestructionIsIgnored) {
     ReportDialog::Ready pending;
     {
         ReportDialog dialog(
-            project, data.time(), [&](auto ready) { pending = std::move(ready); }, [](auto) {},
-            [](auto) {});
+            project, data.time(),
+            [&](const application::ReportQuery &, auto ready) { pending = std::move(ready); },
+            [](auto) {}, [](auto) {});
         dialog.findChild<QPushButton *>("generateReport")->click();
         ASSERT_TRUE(pending);
     }
@@ -244,7 +248,8 @@ TEST(ReportDialog, PreparingTemplatesAndDockingDoesNotShowTemporaryWindows) {
     application::Project project("Scenario", core::Epoch{0}, core::Epoch{120'000'000'000});
     project.ground_stations.push_back({"station", "Station", {1.2, 0.6, 350}});
     ReportDialog dialog(
-        project, runtime::make_builtin_time_provider(), [](ReportDialog::Ready) {}, [](auto) {},
+        project, runtime::make_builtin_time_provider(),
+        [](const application::ReportQuery &, ReportDialog::Ready) {}, [](auto) {},
         [](core::Epoch) {});
     auto *library = dialog.findChild<QPushButton *>("reportLibrary");
     ASSERT_NE(library, nullptr);
@@ -277,7 +282,10 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
     std::optional<core::Epoch> sought;
     Workspace workspace;
     ReportDialog dialog(
-        project, time, [&](ReportDialog::Ready ready) { pending = std::move(ready); },
+        project, time,
+        [&](const application::ReportQuery &, ReportDialog::Ready ready) {
+            pending = std::move(ready);
+        },
         [&](auto reports) { project.reports = std::move(reports); },
         [&](core::Epoch epoch) { sought = epoch; });
     dialog.show();
@@ -455,7 +463,7 @@ TEST(ReportDialog, ObjectScopeSurvivesTemplateChangesSavedConfigurationsAndProje
     project.satellites.push_back(satellite);
     ReportDialog dialog(
         project, time,
-        [&](ReportDialog::Ready ready) {
+        [&](const application::ReportQuery &, ReportDialog::Ready ready) {
             ready(ReportInput{project, runtime::DataSnapshot::from_providers(time)}, {});
         },
         [&](auto reports) { project.reports = std::move(reports); }, [](auto) {});
@@ -564,7 +572,7 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
     std::optional<core::Epoch> sought;
     ReportDialog dialog(
         project, time,
-        [&](ReportDialog::Ready ready) {
+        [&](const application::ReportQuery &, ReportDialog::Ready ready) {
             ++preparations;
             ready(ReportInput{project, runtime::DataSnapshot::from_providers(time)}, {});
         },
@@ -826,7 +834,9 @@ TEST(ReportDialog, ReportChoiceCancellationSameSelectionAndLiveTemplateUpdates) 
         definition.query.frame = core::FrameId::itrf;
         project.reports.push_back(definition);
     }
-    ReportDialog dialog(project, time, [](ReportDialog::Ready) {}, [](auto) {}, [](auto) {});
+    ReportDialog dialog(
+        project, time, [](const application::ReportQuery &, ReportDialog::Ready) {}, [](auto) {},
+        [](auto) {});
     dialog.show();
     dialog.select_object("east", application::ReportKind::cartesian_state);
     auto *step = dialog.findChild<QDoubleSpinBox *>("reportStep");
@@ -968,7 +978,7 @@ TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
     std::shared_ptr<const runtime::ReportResult> pass_result;
     ReportDialog dialog(
         project, time,
-        [&](ReportDialog::Ready ready) {
+        [&](const application::ReportQuery &, ReportDialog::Ready ready) {
             ready(ReportInput{project, runtime::DataSnapshot::from_providers(time, frames, eop)},
                   {});
         },
@@ -1107,7 +1117,7 @@ TEST(ReportDialog, TemplateUnitsReuseResultsAndReorderedFieldsKeepPlotsAndSelect
     std::shared_ptr<const runtime::ReportResult> published;
     ReportDialog dialog(
         project, time,
-        [&](ReportDialog::Ready ready) {
+        [&](const application::ReportQuery &, ReportDialog::Ready ready) {
             ++preparations;
             ready(ReportInput{project, runtime::DataSnapshot::from_providers(time)}, {});
         },
@@ -1150,6 +1160,109 @@ TEST(ReportDialog, TemplateUnitsReuseResultsAndReorderedFieldsKeepPlotsAndSelect
     EXPECT_TRUE(table->model()->headerData(0, Qt::Horizontal).toString().contains("(m)"));
     EXPECT_EQ(preparations, 1);
 }
+
+TEST(ReportDialog, LightingIntervalsAndCurveShareResultsAndPreserveNarrowLayout) {
+    (void)test_app();
+    if (!runtime::two_body_available())
+        GTEST_SKIP();
+    class Sun final : public core::IThirdBodyEphemeris {
+      public:
+        core::ThirdBodyDataInfo info{
+            "UI solar fixture",   std::string(64, 'a'),          "fixed-sun-v1",
+            core::Epoch{0},       core::Epoch{20000000000000LL}, 1.3271244004127942e20,
+            4.9028001184575496e12};
+        std::array<double, 3> position(core::ThirdBody, core::Epoch) const override {
+            return {149597870700., 0, 0};
+        }
+        void validate_interval(core::Epoch, core::Epoch,
+                               std::span<const core::ThirdBody>) const override {}
+        const core::ThirdBodyDataInfo &data_info() const noexcept override { return info; }
+    };
+    auto sun = std::make_shared<Sun>();
+    const auto data = runtime::DataSnapshot::builtin_time().with_ephemeris("de440s", sun);
+    application::Project project("Lighting", core::Epoch{0}, core::Epoch{12000000000000LL});
+    application::ProjectSatellite sat;
+    sat.display_name = "LEO · 观测一号";
+    sat.orbit.first = project.first;
+    sat.orbit.last = project.last;
+    sat.orbit.initial = {project.first,
+                         core::OriginId::earth,
+                         core::FrameId::gcrf,
+                         {7e6, 0, 0},
+                         {0, 7546.053290107542, 0}};
+    project.satellites.push_back(sat);
+    project.force_data.push_back(runtime::ephemeris_reference("de440s", sun->info));
+    int preparations = 0;
+    std::shared_ptr<const runtime::ReportResult> published;
+    core::Epoch sought{-1};
+    ReportDialog dialog(
+        project, data.time(),
+        [&](const application::ReportQuery &query, auto ready) {
+            EXPECT_TRUE(application::report_is_lighting(query.kind));
+            EXPECT_EQ(query.lighting_ephemeris, "de440s");
+            ++preparations;
+            ready(ReportInput{project, data}, {});
+        },
+        [](auto) {}, [&](auto at) { sought = at; });
+    dialog.result_published = [&](auto value, const auto &) { published = value; };
+    dialog.select_object(sat.orbit.object_id, application::ReportKind::lighting_intervals);
+    dialog.resize(1140, 780);
+    dialog.show();
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    ASSERT_TRUE(published);
+    ASSERT_TRUE(published->lighting_statistics);
+    auto *table = dialog.findChild<QTableView *>("reportTable");
+    auto *views = dialog.findChild<QTabBar *>("reportViews");
+    EXPECT_GT(table->model()->rowCount(), 8);
+    EXPECT_FALSE(views->isTabEnabled(1));
+    EXPECT_TRUE(dialog.findChild<QLabel *>("accessMetric0")->text().contains("%"));
+    EXPECT_TRUE(table->isColumnHidden(6));
+    EXPECT_TRUE(table->isColumnHidden(7));
+    const auto end = std::get<core::Epoch>(published->table.rows()[1][3]);
+    QMetaObject::invokeMethod(table, "doubleClicked", Qt::DirectConnection,
+                              Q_ARG(QModelIndex, table->model()->index(1, 3)));
+    EXPECT_EQ(sought, end);
+    const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    if (!capture.isEmpty())
+        QDir().mkpath(capture);
+    const auto settle = [] {
+        for (int i = 0; i < 5; ++i) {
+            QCoreApplication::processEvents();
+            QThread::msleep(10);
+        }
+    };
+    for (const auto width : {1140, 420}) {
+        dialog.resize(width, 780);
+        settle();
+        EXPECT_EQ(table->model()->rowCount(), static_cast<int>(published->table.rows().size()));
+        if (!capture.isEmpty())
+            dialog.grab().save(capture + QString("/lighting-intervals-%1.png").arg(width));
+    }
+    dialog.resize(1140, 780);
+    settle();
+    choose_report(dialog, static_cast<int>(application::ReportKind::lighting_state));
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    ASSERT_EQ(preparations, 2);
+    ASSERT_FALSE(published->lighting_statistics);
+    EXPECT_TRUE(views->isTabEnabled(1));
+    views->setCurrentIndex(1);
+    auto *plot = static_cast<ReportPlot *>(dialog.findChild<QWidget *>("reportPlot"));
+    EXPECT_FALSE(plot->image(1).isNull());
+    for (const auto width : {1140, 420}) {
+        dialog.resize(width, 780);
+        settle();
+        if (!capture.isEmpty())
+            dialog.grab().save(capture + QString("/lighting-curve-%1.png").arg(width));
+    }
+    const auto rows = published->table.rows();
+    project.satellites.clear();
+    dialog.update_project(project, data.time());
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    EXPECT_EQ(published->table.rows(), rows);
+}
 TEST(ReportDialog, CovarianceUsesSavedSettingsAndPublishesSharedResult) {
     (void)test_app();
     const auto data = runtime::DataSnapshot::builtin_time();
@@ -1166,7 +1279,7 @@ TEST(ReportDialog, CovarianceUsesSavedSettingsAndPublishesSharedResult) {
     int preparations = 0;
     ReportDialog dialog(
         project, data.time(),
-        [&](auto ready) {
+        [&](const application::ReportQuery &, auto ready) {
             ++preparations;
             ready(ReportInput{project, data}, {});
         },
@@ -1205,7 +1318,8 @@ TEST(ReportDialog, CovarianceUsesSavedSettingsAndPublishesSharedResult) {
     EXPECT_FALSE(plot->image(1).isNull());
     project.satellites[0].orbit.covariance.enabled = false;
     dialog.update_project(project, data.time());
-    EXPECT_FALSE(report_available(dialog, static_cast<int>(application::report_kinds.size()) - 1));
+    EXPECT_FALSE(
+        report_available(dialog, static_cast<int>(application::ReportKind::state_covariance)));
 }
 } // namespace
 } // namespace orbitforge::desktop

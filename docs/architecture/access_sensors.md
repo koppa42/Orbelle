@@ -38,7 +38,7 @@
 
 复制卫星同时复制子传感器并生成新 ID；删除卫星同时删除子传感器。传感器可单独重命名、复制和删除。被 Targeted 传感器引用的站点不能直接删除，须先修改指向或删除传感器。无效父对象、目标、非有限半角和重复 ID 均在发布／保存前拒绝。
 
-当前项目 v42 使用 GSTN v2 保存最低仰角、必需的 SNSR v1 保存传感器，并支持报告类型 7（Access）和 8（AER）。开发阶段仅读写当前格式，不从旧文件补默认值；详见[文件布局](project_files.md)。Access 配置可保存为报告模板，计算结果仍按报告契约导出，不写入项目。
+当前项目 v43 使用 GSTN v2 保存最低仰角、必需的 SNSR v1 保存传感器，并支持报告类型 7（Access）和 8（AER）。开发阶段仅读写当前格式，不从旧文件补默认值；详见[文件布局](project_files.md)。Access 配置可保存为报告模板，计算结果仍按报告契约导出，不写入项目。
 
 ## SDK 与 Python
 
@@ -54,4 +54,4 @@
 
 自动验证包含圆轨道地平线解析解、圆锥边界解析解、ENU 与距离变化率、端点截断、零长度接触、发现步长限制、取消、数据不匹配、所有权、当前项目往返及非当前格式拒绝。桌面回归检查对象绑定、删除后不改绑、AER 曲线、子对象属性、关闭草稿、保存重开与时间跳转。真实 GPU smoke 沿用[图形验证入口](../development/build.md)，新增传感器与 Access 交互案例。
 
-新增过境极值、摘要、CSV 和搜索模式由 C++ / Python 共用。`Analysis.access(..., search_mode=AccessSearchMode.EXTREMUM_ASSISTED)` 返回 `window.extrema.maximum_elevation`、`minimum_range`（各含 `epoch` / `value`）和 `windows.statistics`；也可显式选择 `FIXED_GRID`。`Analysis.report(ACCESS_INTERVALS, ..., access_search_mode=..., boundary_tolerance=...)` 使用相同计算路径。独立数值验证和复现命令见[过境验证协议](../validation/access_pass_protocol.md)。
+新增过境极值、摘要、CSV 和搜索模式由 C++ / Python 共用。`Analysis.access(..., search_mode=AccessSearchMode.EXTREMUM_ASSISTED)` 返回 `window.extrema.maximum_elevation`、`minimum_range`（各含 `epoch` / `value`）和 `windows.statistics`；也可显式选择 `FIXED_GRID`。`Analysis.report(ACCESS_INTERVALS, ..., event_search_mode=..., boundary_tolerance=...)` 使用相同计算路径。独立数值验证和复现命令见[过境验证协议](../validation/access_pass_protocol.md)。

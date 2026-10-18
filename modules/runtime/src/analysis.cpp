@@ -522,6 +522,18 @@ AnalysisPlan::AnalysisPlan(const ProjectDocument &project, const DataCatalog &ca
           const auto captured = project.snapshot();
           const auto [first, last] = calculation_data_interval(*captured.project);
           auto data = catalog.snapshot(first, last);
+          for (const auto &ref : captured.project->force_data)
+              if (ref.role.starts_with("ephemeris/")) {
+                  const auto id = ref.role.substr(std::string("ephemeris/").size());
+                  if (!data.ephemerides().contains(id))
+                      data = data.with_ephemeris(id, catalog.load_ephemeris(id));
+              }
+          for (const auto &report : captured.project->reports)
+              if (application::report_is_lighting(report.query.kind) &&
+                  !data.ephemerides().contains(report.query.lighting_ephemeris))
+                  data =
+                      data.with_ephemeris(report.query.lighting_ephemeris,
+                                          catalog.load_ephemeris(report.query.lighting_ephemeris));
           for (const auto &satellite : captured.project->satellites) {
               const auto &input = satellite.orbit;
               if (input.uses_hpop() && input.hpop_resource_options().uses_ephemeris() &&

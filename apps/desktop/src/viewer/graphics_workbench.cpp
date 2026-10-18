@@ -1734,18 +1734,25 @@ class Workbench final : public QMainWindow {
     selected_ephemerides(const application::Project &project) const {
         std::vector<runtime::CatalogEphemeris> result;
         const auto installed = eop_catalog_->data().ephemerides();
-        for (const auto &satellite : project.satellites) {
-            const auto &input = satellite.orbit;
-            if (!input.uses_hpop() || !input.hpop_resource_options().uses_ephemeris())
-                continue;
-            const auto &id = input.hpop.ephemeris_model;
+        std::vector<std::string> ids;
+        for (const auto &ref : project.force_data)
+            if (ref.role.starts_with("ephemeris/"))
+                ids.push_back(ref.role.substr(10));
+        for (const auto &report : project.reports)
+            if (application::report_is_lighting(report.query.kind))
+                ids.push_back(report.query.lighting_ephemeris);
+        for (const auto &satellite : project.satellites)
+            if (satellite.orbit.uses_hpop() &&
+                satellite.orbit.hpop_resource_options().uses_ephemeris())
+                ids.push_back(satellite.orbit.hpop.ephemeris_model);
+        for (const auto &id : ids) {
             if (std::any_of(result.begin(), result.end(),
                             [&](const auto &v) { return v.selection == id; }))
                 continue;
             const auto found = std::find_if(installed.begin(), installed.end(),
                                             [&](const auto &v) { return v.selection == id; });
             if (found == installed.end())
-                throw std::runtime_error("缺少日月星历，请在数据中心 → 太阳系星历下载：" + id);
+                throw std::runtime_error("缺少太阳系星历，请在数据中心下载或导入：" + id);
             result.push_back(*found);
         }
         return result;
@@ -1824,19 +1831,36 @@ class Workbench final : public QMainWindow {
         if (!report_dialog_) {
             report_dialog_ = new ReportDialog(
                 project_snapshot(project_path_), active_time(),
-                [this](ReportDialog::Ready done) {
+                [this](const application::ReportQuery &query, ReportDialog::Ready done) {
                     try {
                         if (busy()) {
                             done({}, QStringLiteral("场景正在更新，请完成后再生成报告。"));
                             return;
                         }
+                        auto requested = project_snapshot(project_path_);
+                        if (application::report_is_lighting(query.kind)) {
+                            const auto role = "ephemeris/" + query.lighting_ephemeris;
+                            if (std::none_of(requested.force_data.begin(),
+                                             requested.force_data.end(),
+                                             [&](const auto &ref) { return ref.role == role; })) {
+                                const auto installed = eop_catalog_->data().ephemerides();
+                                const auto found = std::find_if(
+                                    installed.begin(), installed.end(), [&](const auto &v) {
+                                        return v.selection == query.lighting_ephemeris;
+                                    });
+                                if (found == installed.end())
+                                    throw std::runtime_error(
+                                        "光照分析需要太阳系星历，请在数据中心下载 DE440s。");
+                                requested.force_data.push_back(
+                                    runtime::ephemeris_reference(found->selection, found->info));
+                            }
+                        }
                         const auto [data_first, data_last] =
-                            application::calculation_data_interval(project_snapshot(project_path_));
+                            application::calculation_data_interval(requested);
                         const auto current = data_for_interval(data_first, data_last);
                         if (scenario_->data_lock() !=
-                            selected_data_lock(project_snapshot(project_path_),
-                                               current->data_info())) {
-                            if (start_project(project_snapshot(project_path_), project_path_, true,
+                            selected_data_lock(requested, current->data_info())) {
+                            if (start_project(std::move(requested), project_path_, true,
                                               selected_marker_index()))
                                 pending_report_input_ = std::move(done);
                             else

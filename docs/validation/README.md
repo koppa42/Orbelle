@@ -30,3 +30,5 @@
 - [HPOP J2000/TrueOfDate 与联合协方差](hpop_celestial_frames_protocol.md)：IERS1996、Orekit 自动微分及 96 组联合矩阵对照。
 
 - [可见性与过境分析](access_pass_protocol.md)：Orekit/Hipparchus 独立事件、连续极值与统计对照，短窗口／擦边与 UI 验收。
+
+光照与地影事件、比例及统计的独立数值对照见[光照验证协议](lighting_protocol.md)。

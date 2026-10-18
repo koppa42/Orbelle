@@ -125,6 +125,10 @@ QString kind_name(ReportKind kind) {
         return QStringLiteral("可见时段 · Access");
     case ReportKind::aer:
         return QStringLiteral("AER · 方位 / 仰角 / 距离");
+    case ReportKind::lighting_intervals:
+        return QStringLiteral("光照与地影时段");
+    case ReportKind::lighting_state:
+        return QStringLiteral("太阳光照比例");
     case ReportKind::state_covariance:
         return QStringLiteral("HPOP · 位置速度协方差");
     }
@@ -165,6 +169,11 @@ QString localized(QString value) {
         {"Satellite", QStringLiteral("卫星")},
         {"Ground station", QStringLiteral("地面站")},
         {"Duration", QStringLiteral("持续时间")},
+        {"Lighting", QStringLiteral("光照状态")},
+        {"Solar disk illumination", QStringLiteral("太阳光照比例")},
+        {"Sunlight", QStringLiteral("全光照")},
+        {"Penumbra", QStringLiteral("半影")},
+        {"Umbra", QStringLiteral("本影")},
         {"Start clipped", QStringLiteral("开始于分析边界")},
         {"Stop clipped", QStringLiteral("结束于分析边界")},
         {"Azimuth", QStringLiteral("方位角")},
@@ -205,27 +214,37 @@ class ReportModel final : public QAbstractTableModel {
         if (role == Qt::TextAlignmentRole &&
             (std::holds_alternative<double>(cell) || std::holds_alternative<std::int64_t>(cell)))
             return static_cast<int>(Qt::AlignRight | Qt::AlignVCenter);
+        if (role == Qt::ForegroundRole &&
+            result->table.columns().at(index.column()).id == "lighting.phase") {
+            const auto phase = std::get<std::string>(cell);
+            return QColor(phase == "Sunlight"   ? "#edbd67"
+                          : phase == "Penumbra" ? "#b5a4ef"
+                                                : "#8db6e7");
+        }
         if (role != Qt::DisplayRole && role != Qt::ToolTipRole)
             return {};
         auto value = text(result->cell_text(index.row(), index.column()));
         const auto &field_id = result->table.columns().at(index.column()).id;
         bool clipped = false;
-        if (result->definition.query.kind == ReportKind::access_intervals &&
-            (field_id == "time.epoch" || field_id == "access.stop")) {
+        if (report_is_interval(result->definition.query.kind) &&
+            (field_id == "time.epoch" || field_id == "access.stop" ||
+             field_id == "lighting.stop")) {
             const auto &source = result->source_table ? *result->source_table : result->table;
-            const auto flag = std::ranges::find(source.columns(),
-                                                field_id == "time.epoch" ? "access.start_clipped"
-                                                                         : "access.stop_clipped",
-                                                &results::Column::id);
+            const auto flag = std::ranges::find(
+                source.columns(),
+                (result->definition.query.kind == ReportKind::lighting_intervals
+                     ? (field_id == "time.epoch" ? "lighting.start_clipped"
+                                                 : "lighting.stop_clipped")
+                     : (field_id == "time.epoch" ? "access.start_clipped" : "access.stop_clipped")),
+                &results::Column::id);
             if (flag != source.columns().end())
                 clipped = std::get<std::int64_t>(
                               source.rows()[index.row()][flag - source.columns().begin()]) != 0;
         }
         if (role == Qt::ToolTipRole && clipped)
-            return value +
-                   QStringLiteral("\n此边界由分析区间截断，不是实际进入或离开可见区间的时刻。");
+            return value + QStringLiteral("\n此边界由分析区间截断，不是实际状态切换的时刻。");
         if (role == Qt::DisplayRole && std::holds_alternative<double>(cell))
-            return result->definition.query.kind == ReportKind::access_intervals
+            return report_is_interval(result->definition.query.kind)
                        ? QString::number(value.toDouble(), 'f', 3)
                        : QString::number(value.toDouble(), 'g', 12);
         if (role == Qt::DisplayRole && std::holds_alternative<core::Epoch>(cell)) {
@@ -235,7 +254,7 @@ class ReportModel final : public QAbstractTableModel {
                 value.chop(1);
             if (value.endsWith('.'))
                 value.chop(1);
-            if (result->definition.query.kind == ReportKind::access_intervals) {
+            if (report_is_interval(result->definition.query.kind)) {
                 const auto dot = value.indexOf('.');
                 if (dot >= 0 && value.size() > dot + 4)
                     value.truncate(dot + 4);
@@ -243,8 +262,8 @@ class ReportModel final : public QAbstractTableModel {
             return value.replace('T', ' ') + (clipped ? QStringLiteral(" *") : QString{});
         }
         const auto &id = result->table.columns().at(index.column()).id;
-        if (id == "object.type" || id == "object.model" || id == "summary.field" ||
-            (id == "summary.value" && index.row() == 6))
+        if (id == "lighting.phase" || id == "object.type" || id == "object.model" ||
+            id == "summary.field" || (id == "summary.value" && index.row() == 6))
             return localized(value);
         return value;
     }
@@ -286,7 +305,7 @@ struct ReportDialog::Impl {
     QWidget *access_pair, *access_options, *pass_summary;
     QComboBox *access_mode;
     StepSpinBox *access_tolerance;
-    std::array<QLabel *, 4> pass_values{};
+    std::array<QLabel *, 4> pass_values{}, pass_captions{};
     EpochEditor *first, *last;
     QDoubleSpinBox *step;
     QLabel *status, *estimate, *result_label, *result_title, *scope_label, *scope_detail;
@@ -637,6 +656,7 @@ struct ReportDialog::Impl {
             card->setContentsMargins(12, 10, 12, 10);
             card->setSpacing(4);
             auto *caption = note(metric_names[i], cards[i]);
+            pass_captions[i] = caption;
             caption->setWordWrap(false);
             card->addWidget(caption);
             pass_values[i] = new QLabel(QStringLiteral("—"), cards[i]);
@@ -833,7 +853,7 @@ struct ReportDialog::Impl {
         QObject::connect(access_tolerance, &QDoubleSpinBox::valueChanged, owner,
                          [this] { edit(); });
         QObject::connect(access_mode, &QComboBox::currentIndexChanged, owner, [this] {
-            if (draft.query.kind == ReportKind::access_intervals)
+            if (report_is_interval(draft.query.kind))
                 step_label->setText(access_mode->currentIndex() == 0
                                         ? QStringLiteral("搜索步长")
                                         : QStringLiteral("最大检查间隔"));
@@ -890,16 +910,17 @@ struct ReportDialog::Impl {
             const auto &source = r.source_table ? *r.source_table : r.table;
             QMenu menu(owner);
             menu.addActions(table->actions());
-            if (r.definition.query.kind != ReportKind::access_intervals) {
+            if (!application::report_is_interval(r.definition.query.kind)) {
                 menu.exec(table->viewport()->mapToGlobal(point));
                 return;
             }
             menu.addSeparator();
             for (const auto &[id, label] : std::array{
-                     std::pair{"time.epoch", QStringLiteral("定位到过境开始")},
+                     std::pair{"time.epoch", QStringLiteral("定位到时段开始")},
                      std::pair{"access.max_elevation_time", QStringLiteral("定位到最大仰角")},
                      std::pair{"access.min_range_time", QStringLiteral("定位到最近距离")},
-                     std::pair{"access.stop", QStringLiteral("定位到过境结束")}}) {
+                     std::pair{"access.stop", QStringLiteral("定位到过境结束")},
+                     std::pair{"lighting.stop", QStringLiteral("定位到时段结束")}}) {
                 const auto field = std::ranges::find(source.columns(), id, &results::Column::id);
                 if (field != source.columns().end()) {
                     const auto epoch = std::get<core::Epoch>(
@@ -969,6 +990,12 @@ struct ReportDialog::Impl {
                                       "传感器的可见时段，考虑地球遮挡、最低仰角与传感器视场。");
             case ReportKind::aer:
                 return QStringLiteral("地面站观测目标的方位角、仰角、斜距与可见标记。");
+            case ReportKind::lighting_intervals:
+                return QStringLiteral(
+                    "全光照、半影与本影的连续时段、持续时间和占比。地球球面遮挡，使用几何太阳。");
+            case ReportKind::lighting_state:
+                return QStringLiteral("按时刻输出可见太阳圆盘的比例，支持光照曲线与 "
+                                      "CSV。地球球面遮挡，使用几何太阳。");
             case ReportKind::state_covariance:
                 return QStringLiteral("传播已启用的 HPOP 协方差，输出 GCRF 位置速度矩阵的下三角。");
             }
@@ -984,6 +1011,8 @@ struct ReportDialog::Impl {
                 return QStringLiteral("站点坐标表");
             case ReportKind::access_intervals:
                 return QStringLiteral("可见时间区间表");
+            case ReportKind::lighting_intervals:
+                return QStringLiteral("光照时间区间表 · 分类统计");
             default:
                 return QStringLiteral("时间序列 · 表格与曲线");
             }
@@ -1254,11 +1283,11 @@ struct ReportDialog::Impl {
             all_objects = draft.query.scope == ReportScope::all_compatible;
         }
         const bool access = report_is_access(draft.query.kind);
-        access_options->setVisible(draft.query.kind == ReportKind::access_intervals);
-        access_mode->setCurrentIndex(static_cast<int>(draft.query.access_search_mode));
-        access_tolerance->setValue(static_cast<double>(draft.query.access_tolerance_nanoseconds) /
+        access_options->setVisible(report_is_interval(draft.query.kind));
+        access_mode->setCurrentIndex(static_cast<int>(draft.query.event_search_mode));
+        access_tolerance->setValue(static_cast<double>(draft.query.event_tolerance_nanoseconds) /
                                    1e9);
-        step_label->setText(draft.query.kind == ReportKind::access_intervals
+        step_label->setText(report_is_interval(draft.query.kind)
                                 ? (access_mode->currentIndex() == 0
                                        ? QStringLiteral("搜索步长")
                                        : QStringLiteral("最大检查间隔"))
@@ -1280,13 +1309,20 @@ struct ReportDialog::Impl {
         if (report_satellites_only(draft.query.kind))
             frame->setCurrentIndex(0);
         frame_field->setVisible(draft.query.kind == ReportKind::cartesian_state);
+        units->setItemText(0, draft.query.kind == ReportKind::lighting_state
+                                  ? QStringLiteral("百分比 (%)")
+                                  : QStringLiteral("km / km·s⁻¹ / °"));
+        units->setItemText(1, draft.query.kind == ReportKind::lighting_state
+                                  ? QStringLiteral("比例 (0–1)")
+                                  : QStringLiteral("m / m·s⁻¹ / rad"));
         units->setCurrentIndex(draft.format.units == ReportUnits::engineering ? 0 : 1);
         scale->setCurrentIndex(static_cast<int>(draft.format.time_scale));
         update_interval();
         refresh_scope();
         sampling->setVisible(report_is_sampled(draft.query.kind));
-        units_field->setVisible(report_is_sampled(draft.query.kind) ||
-                                draft.query.kind == ReportKind::ground_stations);
+        units_field->setVisible(draft.query.kind != ReportKind::lighting_intervals &&
+                                (report_is_sampled(draft.query.kind) ||
+                                 draft.query.kind == ReportKind::ground_stations));
         scale_field->setVisible(report_is_sampled(draft.query.kind) ||
                                 draft.query.kind == ReportKind::scenario_summary);
         format_title->setVisible(draft.query.kind != ReportKind::object_summary);
@@ -1314,6 +1350,11 @@ struct ReportDialog::Impl {
             template_description->setText(QStringLiteral("地心距离、速率与航迹倾角 · GCRF"));
         if (draft.query.kind == ReportKind::geodetic_position)
             template_description->setText(QStringLiteral("经度、大地纬度与椭球高 · WGS84"));
+        if (report_is_lighting(draft.query.kind))
+            template_description->setText(
+                QStringLiteral(
+                    "地球球面 · 几何太阳 · %1\n全光照 / 半影 / 本影；与卫星的光压力开关无关。")
+                    .arg(text(draft.query.lighting_ephemeris)));
         if (access)
             template_description->setText(
                 draft.query.kind == ReportKind::access_intervals
@@ -1350,9 +1391,9 @@ struct ReportDialog::Impl {
             d.query.last = last->epoch();
         }
         d.query.step_nanoseconds = static_cast<std::int64_t>(std::llround(step->value() * 1e9));
-        d.query.access_search_mode =
+        d.query.event_search_mode =
             static_cast<core::AccessSearchMode>(access_mode->currentIndex());
-        d.query.access_tolerance_nanoseconds =
+        d.query.event_tolerance_nanoseconds =
             static_cast<std::int64_t>(std::llround(access_tolerance->value() * 1e9));
         d.query.frame = frame->currentIndex() == 0 ? core::FrameId::gcrf : core::FrameId::itrf;
         d.format.units = units->currentIndex() == 0 ? ReportUnits::engineering : ReportUnits::si;
@@ -1388,8 +1429,15 @@ struct ReportDialog::Impl {
         if (new_calculation && owner->result_published && result_is_current())
             owner->result_published(result, *result_analysis);
         changed = false;
-        pass_summary->setVisible(result->access_statistics.has_value());
+        pass_summary->setVisible(result->access_statistics.has_value() ||
+                                 result->lighting_statistics.has_value());
+        for (auto *value : pass_values)
+            value->setToolTip({});
         if (result->access_statistics) {
+            const std::array captions{QStringLiteral("可见过境"), QStringLiteral("总可见时长"),
+                                      QStringLiteral("最长过境"), QStringLiteral("平均时长")};
+            for (int i = 0; i < 4; ++i)
+                pass_captions[i]->setText(captions[i]);
             const auto &s = *result->access_statistics;
             pass_values[0]->setText(QString::number(s.count));
             const auto duration = [](double seconds) {
@@ -1405,12 +1453,34 @@ struct ReportDialog::Impl {
                                "1。双击最大仰角或最近距离可定位到对应时刻。")
                     .arg(s.count ? duration(s.shortest_duration_s) : QStringLiteral("无")));
         }
+        if (result->lighting_statistics) {
+            const auto &s = *result->lighting_statistics;
+            const std::array captions{QStringLiteral("全光照占比"), QStringLiteral("半影占比"),
+                                      QStringLiteral("本影占比"), QStringLiteral("最长本影")};
+            for (int i = 0; i < 4; ++i)
+                pass_captions[i]->setText(captions[i]);
+            for (int i = 0; i < 3; ++i) {
+                pass_values[i]->setText(
+                    QStringLiteral("%1 %").arg(100 * s.phases[i].fraction, 0, 'f', 2));
+                pass_values[i]->setToolTip(QStringLiteral("%1 段 · 累计 %2 秒")
+                                               .arg(s.phases[i].count)
+                                               .arg(s.phases[i].total_duration_s, 0, 'f', 6));
+            }
+            pass_values[3]->setText(
+                QStringLiteral("%1 min").arg(s.phases[2].longest_duration_s / 60, 0, 'f', 2));
+            pass_summary->setToolTip(QStringLiteral("按 %1 "
+                                                    "颗卫星分别累计，包含分析边界截断部分。占比以所"
+                                                    "选卫星的累计分析时长为分母。双击时刻定位。")
+                                         .arg(s.object_count));
+        }
         table->resizeColumnsToContents();
         for (std::size_t c = 0; c < result->table.columns().size(); ++c)
             table->setColumnHidden(
                 static_cast<int>(c),
                 result->definition.format.columns.empty() &&
                     (result->table.columns()[c].id == "object.id" ||
+                     result->table.columns()[c].id == "lighting.start_clipped" ||
+                     result->table.columns()[c].id == "lighting.stop_clipped" ||
                      (result->definition.query.kind == ReportKind::access_intervals &&
                       (result->table.columns()[c].id == "object.name" ||
                        result->table.columns()[c].id == "access.start_clipped" ||
@@ -1424,13 +1494,12 @@ struct ReportDialog::Impl {
         try {
             const auto d = definition();
             const auto rows = runtime::estimate_report_rows(project, d);
-            estimate->setText((d.query.kind == ReportKind::access_intervals
-                                   ? QStringLiteral("%1 个检查节点 · 自动细化%2")
-                                   : QStringLiteral("预计 %1 行%2"))
-                                  .arg(static_cast<qulonglong>(rows))
-                                  .arg(report_is_sampled(d.query.kind)
-                                           ? QStringLiteral(" · 含起止时刻")
-                                           : QString{}));
+            estimate->setText(
+                (report_is_interval(d.query.kind) ? QStringLiteral("%1 个检查节点 · 自动细化%2")
+                                                  : QStringLiteral("预计 %1 行%2"))
+                    .arg(static_cast<qulonglong>(rows))
+                    .arg(report_is_sampled(d.query.kind) ? QStringLiteral(" · 含起止时刻")
+                                                         : QString{}));
         } catch (const std::exception &error) {
             estimate->setText(QString::fromUtf8(error.what()));
         }
@@ -1486,7 +1555,7 @@ struct ReportDialog::Impl {
             progress->setRange(0, 0);
             status->setText(QStringLiteral("正在检查场景数据…"));
             const QPointer<ReportDialog> guard(owner);
-            prepare([guard, ticket, d](std::optional<ReportInput> context, QString error) {
+            prepare(d.query, [guard, ticket, d](std::optional<ReportInput> context, QString error) {
                 if (!guard)
                     return;
                 auto &self = *guard->impl_;
@@ -1615,7 +1684,7 @@ struct ReportDialog::Impl {
         const auto name_column = std::ranges::find(columns, "object.name", &results::Column::id);
         const bool sampled =
             report_is_sampled(r.definition.query.kind) &&
-            r.definition.query.kind != ReportKind::access_intervals && id_column != columns.end() &&
+            !report_is_interval(r.definition.query.kind) && id_column != columns.end() &&
             name_column != columns.end() &&
             std::ranges::find(columns, "time.epoch", &results::Column::id) != columns.end() &&
             !r.table.rows().empty();

@@ -179,6 +179,12 @@ void ReportPlot::layout_plot() {
     y_step_ = nice_step((high_ - low_) / 4);
     low_ = std::floor(low_ / y_step_) * y_step_;
     high_ = std::ceil(high_ / y_step_) * y_step_;
+    if (result_ && column_ < result_->table.columns().size() &&
+        result_->table.columns()[column_].id == "lighting.fraction") {
+        low_ = 0;
+        high_ = result_->column_unit(column_) == "%" ? 100 : 1;
+        y_step_ = high_ / 4;
+    }
     int axis_width = 48;
     const auto y_ticks = static_cast<int>(std::round((high_ - low_) / y_step_));
     for (int i = 0; i <= y_ticks; ++i)

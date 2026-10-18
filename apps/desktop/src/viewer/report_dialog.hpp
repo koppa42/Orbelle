@@ -15,7 +15,7 @@ struct ReportInput {
 class ReportDialog final : public QDialog {
   public:
     using Ready = std::function<void(std::optional<ReportInput>, QString)>;
-    using Prepare = std::function<void(Ready)>;
+    using Prepare = std::function<void(const application::ReportQuery &, Ready)>;
     using Save = std::function<void(std::vector<application::ReportDefinition>)>;
     ReportDialog(application::Project project, std::shared_ptr<const core::ITimeProvider> time,
                  Prepare prepare, Save save, std::function<void(core::Epoch)> seek,

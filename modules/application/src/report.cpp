@@ -18,6 +18,18 @@ std::vector<results::Column> report_columns(ReportKind kind) {
                                        {"state.x", "ITRF X", "m"},
                                        {"state.y", "ITRF Y", "m"},
                                        {"state.z", "ITRF Z", "m"}});
+    } else if (report_is_lighting(kind)) {
+        columns.push_back(
+            {"time.epoch", kind == ReportKind::lighting_intervals ? "Start" : "Time", "epoch"});
+        if (kind == ReportKind::lighting_intervals)
+            columns.insert(columns.end(), {{"lighting.stop", "Stop", "epoch"},
+                                           {"lighting.duration", "Duration", "s"},
+                                           {"lighting.phase", "Lighting", ""},
+                                           {"lighting.start_clipped", "Start clipped", ""},
+                                           {"lighting.stop_clipped", "Stop clipped", ""}});
+        else
+            columns.insert(columns.end(), {{"lighting.fraction", "Solar disk illumination", "1"},
+                                           {"lighting.phase", "Lighting", ""}});
     } else if (report_is_access(kind)) {
         columns.push_back({"time.epoch", kind == ReportKind::aer ? "Time" : "Start", "epoch"});
         if (kind == ReportKind::access_intervals)
@@ -99,7 +111,7 @@ bool report_uses_utc(const ReportTemplate &format, ReportKind kind) {
     return false;
 }
 void validate_report_query(const ReportQuery &d) {
-    if (d.kind < ReportKind::scenario_summary || d.kind > ReportKind::state_covariance ||
+    if (d.kind < ReportKind::scenario_summary || d.kind > ReportKind::lighting_state ||
         (d.scope != ReportScope::objects && d.scope != ReportScope::all_compatible) ||
         (d.frame != core::FrameId::gcrf && d.frame != core::FrameId::itrf) ||
         d.step_nanoseconds < 1 || d.step_nanoseconds > 86400LL * 1'000'000'000 ||
@@ -117,13 +129,14 @@ void validate_report_query(const ReportQuery &d) {
     if (report_is_access(d.kind) && (d.scope != ReportScope::objects || d.object_ids.size() != 2 ||
                                      d.step_nanoseconds < 1'000'000))
         throw std::invalid_argument("Access requires a station/target pair and step >= 1 ms");
-    if (d.access_tolerance_nanoseconds < 1 ||
-        d.access_tolerance_nanoseconds > 86400LL * 1'000'000'000 ||
-        (d.access_search_mode != core::AccessSearchMode::fixed_grid &&
-         d.access_search_mode != core::AccessSearchMode::extremum_assisted) ||
-        (d.kind == ReportKind::access_intervals &&
-         d.access_tolerance_nanoseconds > d.step_nanoseconds))
-        throw std::invalid_argument("Invalid Access search mode or boundary tolerance");
+    if (d.event_tolerance_nanoseconds < 1 ||
+        d.event_tolerance_nanoseconds > 86400LL * 1'000'000'000 ||
+        (d.event_search_mode != core::AccessSearchMode::fixed_grid &&
+         d.event_search_mode != core::AccessSearchMode::extremum_assisted) ||
+        (report_is_interval(d.kind) && d.event_tolerance_nanoseconds > d.step_nanoseconds))
+        throw std::invalid_argument("Invalid event search mode or boundary tolerance");
+    if (d.lighting_ephemeris.empty() || d.lighting_ephemeris.size() > 16384)
+        throw std::invalid_argument("Lighting ephemeris selection is required");
     std::set<std::string> ids;
     for (const auto &id : d.object_ids)
         if (id.empty() || id.size() > 16384 || !ids.insert(id).second)
@@ -143,9 +156,9 @@ void validate_report_template(const ReportTemplate &format, ReportKind kind) {
             throw std::invalid_argument("Unknown or duplicate report field, or invalid title");
         const auto &unit = column.unit;
         const auto &dimension = field->unit;
-        if (!unit.empty() && unit != dimension && !(dimension == "m" && unit == "km") &&
-            !(dimension == "m/s" && unit == "km/s") && !(dimension == "rad" && unit == "deg") &&
-            !(dimension == "m^2" && unit == "km^2") &&
+        if (!unit.empty() && unit != dimension && !(dimension == "1" && unit == "%") &&
+            !(dimension == "m" && unit == "km") && !(dimension == "m/s" && unit == "km/s") &&
+            !(dimension == "rad" && unit == "deg") && !(dimension == "m^2" && unit == "km^2") &&
             !(dimension == "m^2/s" && unit == "km^2/s") &&
             !(dimension == "m^2/s^2" && unit == "km^2/s^2") &&
             !(dimension == "epoch" && (unit == "UTC" || unit == "TAI" || unit == "TT")))
