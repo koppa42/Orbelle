@@ -44,41 +44,23 @@ class ScopeTests(unittest.TestCase):
                 self.assertEqual(plan.select_scope(event, ref), "full")
         self.assertEqual(plan.select_scope("push", "refs/tags/v0.1.0", release_tag="v0.1.0"), "release")
 
-    def test_manual_sanitizers_run_neither_native_nor_python_jobs(self):
-        self.assertEqual(plan.select_scope("workflow_dispatch", "refs/heads/main",
-                                          manual_mode="sanitizers"), "sanitizers")
-        self.assertEqual(plan.select_scope("workflow_dispatch", "refs/heads/main",
-                                          manual_mode="all"), "full")
-        for mode in ("", "routine", "skip", "unknown"):
-            with self.subTest(mode=mode), self.assertRaises(ValueError):
-                plan.select_scope("workflow_dispatch", "refs/heads/main", manual_mode=mode)
-        # A release call cannot omit package tests via a manual input.
-        self.assertEqual(plan.select_scope("workflow_call", "refs/tags/v0.1.0",
-                                          release_tag="v0.1.0", manual_mode="sanitizers"), "release")
-
-    def test_plan_outputs_full_instrumentation_only_for_manual_runs(self):
-        cases = [("workflow_dispatch", "sanitizers", "sanitizers", "full"),
-                 ("workflow_dispatch", "all", "full", "full"),
-                 ("pull_request", "sanitizers", "full", "routine"),
-                 ("push", "sanitizers", "baseline", "routine")]
+    def test_plan_outputs_only_the_regular_ci_scope(self):
+        cases = [("workflow_dispatch", "full"), ("pull_request", "full"), ("push", "baseline")]
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output.txt"
             summary = Path(directory) / "summary.md"
-            for event, mode, scope, profile in cases:
-                with self.subTest(event=event, mode=mode):
+            for event, scope in cases:
+                with self.subTest(event=event):
                     output.write_text("")
                     summary.write_text("")
                     env = {"GITHUB_EVENT_NAME": event, "GITHUB_REF": "refs/heads/main",
-                           "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary),
-                           "MANUAL_MODE": mode}
+                           "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary)}
                     with patch.dict(os.environ, env, clear=True), \
                          patch.object(sys, "argv", ["plan_ci.py", "plan"]), \
                          patch.object(plan, "pull_request_paths", return_value=["modules/core/new.cpp"]):
                         plan.main()
-                    self.assertEqual(dict(line.split("=", 1) for line in output.read_text().splitlines()),
-                                     {"scope": scope, "sanitizer-profile": profile})
-                    if scope != "baseline":
-                        self.assertIn(f"**{profile}**", summary.read_text())
+                    self.assertEqual(output.read_text(), f"scope={scope}\n")
+                    self.assertIn(plan.DESCRIPTIONS[scope], summary.read_text())
 
 
 class RequiredChecksTests(unittest.TestCase):
@@ -109,17 +91,12 @@ class RequiredChecksTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             plan.check_results("full", results)
 
-    def test_routine_and_manual_sanitizers_are_required_but_main_does_not_repeat_them(self):
-        for scope in ("full", "release", "sanitizers"):
-            self.assertIn("sanitizers", plan.REQUIRED[scope])
-        for scope in ("docs", "baseline"):
-            self.assertNotIn("sanitizers", plan.REQUIRED[scope])
-        manual = self.results("sanitizers")
-        self.assertEqual({name for name, result in manual.items() if result["result"] == "success"},
-                         {"metadata", "sanitizers"})
-        # A successful manual sanitizer run cannot impersonate successful PR CI.
+    def test_pr_keeps_both_platforms_and_the_complete_python_matrix(self):
+        self.assertEqual(plan.REQUIRED["full"],
+                         {"metadata", "linux", "windows", "python-linux", "python-windows"})
+        # The independent sanitizer workflow cannot stand in for regular CI.
         with self.assertRaises(ValueError):
-            plan.check_results("full", manual)
+            plan.check_results("sanitizers", {"sanitizers": {"result": "success"}})
 
     def test_unplanned_jobs_are_not_silently_ignored(self):
         results = self.results("docs")

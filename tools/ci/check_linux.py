@@ -126,7 +126,7 @@ class Check:
                  extra_env={"VCPKG_BINARY_SOURCES": f"clear;files,{deps / 'binary-cache'},readwrite"})
         shutil.copy2(deps / "installed/vcpkg/status", self.reports / "vcpkg-status.txt")
 
-    def build(self, sanitizer=False, install=True, sanitizer_profile="full"):
+    def build(self, sanitizer=False, install=True):
         name = "sanitizers" if sanitizer else "release"
         build = self.work / "build" / name
         # A fresh staging prefix prevents a previous install from hiding missing files.
@@ -140,16 +140,9 @@ class Check:
                  "-S", self.source, "-B", build, f"-DCMAKE_PREFIX_PATH={self.prefix}",
                  f"-DCMAKE_INSTALL_PREFIX={prefix}", cwd=self.source, extra_env=flags)
         self.run(f"{name}-build", "cmake", "--build", build, extra_env=flags)
-        selection_args = []
-        if sanitizer:
-            selection = self.reports / "sanitizers-selection.json"
-            self.run("sanitizers-selection", sys.executable,
-                     self.source / "tools/ci/select_sanitizers.py", "--build", build,
-                     "--profile", sanitizer_profile, "--output", selection, extra_env=flags)
-            selection_args = json.loads(selection.read_text(encoding="utf-8"))["ctest_args"]
         self.run(f"{name}-tests", "ctest", "--test-dir", build, "--output-on-failure",
                  "--no-tests=error", "--output-junit", self.reports / f"{name}-tests.xml",
-                 *selection_args, extra_env=flags)
+                 extra_env=flags)
         shutil.copy2(build / "CMakeCache.txt", self.reports / f"{name}-CMakeCache.txt")
         shutil.copy2(build / "compile_commands.json", self.reports / f"{name}-compile_commands.json")
         if not sanitizer:
@@ -315,7 +308,7 @@ def stages_for(stage):
     if stage == "all":
         return ("dependencies", "release", "sanitizers", "wheel", "export")
     if stage == "package":
-        # CI gates the separately running sanitizer job before publishing.
+        # Release packaging; sanitizers are an independent manual check.
         return ("dependencies", "release", "wheel", "export")
     if stage == "sanitizers":
         return ("dependencies", "sanitizers")
@@ -326,7 +319,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage", choices=("all", "tests", "dependencies", "release", "sanitizers",
                                            "wheel", "export", "consumer", "compute", "package"), default="all")
-    parser.add_argument("--sanitizer-profile", choices=("routine", "full"), default="full")
     parser.add_argument("--source", type=Path)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--reports", type=Path, required=True)
@@ -348,7 +340,7 @@ def main():
     stages = stages_for(args.stage)
     for stage in stages:
         if stage in ("release", "sanitizers"):
-            check.build(stage == "sanitizers", sanitizer_profile=args.sanitizer_profile)
+            check.build(stage == "sanitizers")
         else:
             getattr(check, stage)()
     if args.test_dependencies:
@@ -357,8 +349,7 @@ def main():
                   "--dependency-prefix", check.prefix, "--output", args.test_dependencies.resolve())
     check.verify_source()
     (check.reports / "passed.json").write_text(
-        json.dumps({"stages": stages, "passed": True,
-                    "sanitizer_profile": args.sanitizer_profile if "sanitizers" in stages else None}, indent=2) + "\n", encoding="utf-8")
+        json.dumps({"stages": stages, "passed": True}, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
