@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Full ASan/UBSan only, or all CI checks including full ASan/UBSan'
+        type: choice
+        options: [sanitizers, all]
+        default: sanitizers
   workflow_call:
     inputs:
       release-tag:
@@ -39,6 +45,7 @@ jobs:
       baseline-python: ${{ steps.version.outputs.baseline-python }}
       python-matrix: ${{ steps.version.outputs.python-matrix }}
       scope: ${{ steps.plan.outputs.scope }}
+      sanitizer-profile: ${{ steps.plan.outputs.sanitizer-profile }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -75,6 +82,7 @@ jobs:
         id: plan
         env:
           RELEASE_TAG: ${{ inputs.release-tag }}
+          MANUAL_MODE: ${{ inputs.mode }}
         run: python tools/ci/plan_ci.py plan
       - name: Test data and delivery tools
         run: |
@@ -82,13 +90,12 @@ jobs:
           python -m unittest discover -s tests/packaging -v
 
   linux:
-    name: Linux C++, sanitizers and Python ${{ needs.metadata.outputs.baseline-python }}
+    name: Linux C++ and Python ${{ needs.metadata.outputs.baseline-python }}
     needs: metadata
-    if: needs.metadata.outputs.scope != 'docs'
+    if: needs.metadata.outputs.scope == 'full' || needs.metadata.outputs.scope == 'baseline' || needs.metadata.outputs.scope == 'release'
     runs-on: ubuntu-24.04
-    # Full high-degree and weather regressions also run under ASan/UBSan;
-    # allow their measured instrumentation overhead without dropping cases.
-    timeout-minutes: 360
+    # Every Release numerical regression still runs with its original tolerances.
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -124,7 +131,7 @@ jobs:
         run: |
           args=(--stage tests)
           if [[ "$CI_SCOPE" == release ]]; then
-            args=(--stage all --delivery "$RUNNER_TEMP/delivery")
+            args=(--stage package --delivery "$RUNNER_TEMP/delivery")
           fi
           if [[ "$CI_SCOPE" != baseline ]]; then
             args+=(--test-dependencies "$RUNNER_TEMP/linux-python-dependencies.tar.gz")
@@ -166,6 +173,60 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: linux-build-reports
+          path: ${{ runner.temp }}/reports
+          overwrite: true
+          retention-days: 14
+
+  sanitizers:
+    name: Linux ASan/UBSan (${{ needs.metadata.outputs.sanitizer-profile }})
+    needs: metadata
+    if: needs.metadata.outputs.scope == 'full' || needs.metadata.outputs.scope == 'release' || needs.metadata.outputs.scope == 'sanitizers'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ needs.metadata.outputs.baseline-python }}
+      - name: Identify runner image
+        id: toolchain
+        run: echo "image=$ImageVersion" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ needs.metadata.outputs.vcpkg-baseline }}
+          path: out/tools/vcpkg
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache
+        with:
+          path: ${{ runner.temp }}/linux/dependencies/binary-cache
+          key: vcpkg-ubuntu24-x64-v1-${{ steps.toolchain.outputs.image }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/ports/**', 'tools/ci/check_linux.py') }}
+          restore-keys: |
+            vcpkg-ubuntu24-x64-v1-${{ steps.toolchain.outputs.image }}-
+            vcpkg-ubuntu24-x64-v1-
+      - name: Prepare toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential clang ninja-build ncompress pkg-config python3-dev python3-venv
+          out/tools/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+      - name: Compile and run the selected sanitizer tier
+        env:
+          SANITIZER_PROFILE: ${{ needs.metadata.outputs.sanitizer-profile }}
+        run: |
+          python tools/ci/check_linux.py --stage sanitizers --sanitizer-profile "$SANITIZER_PROFILE" \
+            --source "$GITHUB_WORKSPACE" --vcpkg-root "$GITHUB_WORKSPACE/out/tools/vcpkg" \
+            --work "$RUNNER_TEMP/linux" --reports "$RUNNER_TEMP/reports/linux-sanitizers"
+      - name: Summarize command timings
+        if: always()
+        run: python tools/ci/summarize_timings.py --reports "$RUNNER_TEMP/reports"
+      - name: Upload diagnostics and test selection
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: linux-sanitizer-reports
           path: ${{ runner.temp }}/reports
           overwrite: true
           retention-days: 14
@@ -227,7 +288,7 @@ jobs:
   windows:
     name: Windows desktop and Python ${{ needs.metadata.outputs.baseline-python }}
     needs: metadata
-    if: needs.metadata.outputs.scope != 'docs'
+    if: needs.metadata.outputs.scope == 'full' || needs.metadata.outputs.scope == 'baseline' || needs.metadata.outputs.scope == 'release'
     runs-on: windows-2022
     timeout-minutes: 180
     defaults:
@@ -358,9 +419,10 @@ jobs:
       release: ${{ inputs.release-tag != '' }}
 
   passed:
-    name: CI passed
+    # A sanitizer-only dispatch must never satisfy the PR's required CI check.
+    name: ${{ needs.metadata.outputs.scope == 'sanitizers' && 'Manual sanitizers passed' || 'CI passed' }}
     if: always()
-    needs: [metadata, linux, linux-consumer, windows, python-linux, python-windows]
+    needs: [metadata, linux, sanitizers, linux-consumer, windows, python-linux, python-windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

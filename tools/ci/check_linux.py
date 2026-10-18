@@ -126,7 +126,7 @@ class Check:
                  extra_env={"VCPKG_BINARY_SOURCES": f"clear;files,{deps / 'binary-cache'},readwrite"})
         shutil.copy2(deps / "installed/vcpkg/status", self.reports / "vcpkg-status.txt")
 
-    def build(self, sanitizer=False, install=True):
+    def build(self, sanitizer=False, install=True, sanitizer_profile="full"):
         name = "sanitizers" if sanitizer else "release"
         build = self.work / "build" / name
         # A fresh staging prefix prevents a previous install from hiding missing files.
@@ -140,9 +140,16 @@ class Check:
                  "-S", self.source, "-B", build, f"-DCMAKE_PREFIX_PATH={self.prefix}",
                  f"-DCMAKE_INSTALL_PREFIX={prefix}", cwd=self.source, extra_env=flags)
         self.run(f"{name}-build", "cmake", "--build", build, extra_env=flags)
+        selection_args = []
+        if sanitizer:
+            selection = self.reports / "sanitizers-selection.json"
+            self.run("sanitizers-selection", sys.executable,
+                     self.source / "tools/ci/select_sanitizers.py", "--build", build,
+                     "--profile", sanitizer_profile, "--output", selection, extra_env=flags)
+            selection_args = json.loads(selection.read_text(encoding="utf-8"))["ctest_args"]
         self.run(f"{name}-tests", "ctest", "--test-dir", build, "--output-on-failure",
                  "--no-tests=error", "--output-junit", self.reports / f"{name}-tests.xml",
-                 extra_env=flags)
+                 *selection_args, extra_env=flags)
         shutil.copy2(build / "CMakeCache.txt", self.reports / f"{name}-CMakeCache.txt")
         shutil.copy2(build / "compile_commands.json", self.reports / f"{name}-compile_commands.json")
         if not sanitizer:
@@ -154,7 +161,6 @@ class Check:
     def tests(self):
         self.dependencies()
         self.build(install=False)
-        self.build(sanitizer=True)
         self.run("python-api", sys.executable, self.source / "tools/ci/check_python.py",
                  "--dependency-prefix", self.prefix, "--work", self.work / "python",
                  "--reports", self.reports / "python", "--cpp-example",
@@ -305,10 +311,22 @@ class Check:
         self.run("sdk-consumer-dependencies", "ldd", build / "sdk_consumer")
 
 
+def stages_for(stage):
+    if stage == "all":
+        return ("dependencies", "release", "sanitizers", "wheel", "export")
+    if stage == "package":
+        # CI gates the separately running sanitizer job before publishing.
+        return ("dependencies", "release", "wheel", "export")
+    if stage == "sanitizers":
+        return ("dependencies", "sanitizers")
+    return (stage,)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage", choices=("all", "tests", "dependencies", "release", "sanitizers",
-                                           "wheel", "export", "consumer", "compute"), default="all")
+                                           "wheel", "export", "consumer", "compute", "package"), default="all")
+    parser.add_argument("--sanitizer-profile", choices=("routine", "full"), default="full")
     parser.add_argument("--source", type=Path)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--reports", type=Path, required=True)
@@ -327,10 +345,10 @@ def main():
         parser.error("Test dependency export requires --source")
     check = Check(args)
     check.environment()
-    stages = ("dependencies", "release", "sanitizers", "wheel", "export") if args.stage == "all" else (args.stage,)
+    stages = stages_for(args.stage)
     for stage in stages:
         if stage in ("release", "sanitizers"):
-            check.build(stage == "sanitizers")
+            check.build(stage == "sanitizers", sanitizer_profile=args.sanitizer_profile)
         else:
             getattr(check, stage)()
     if args.test_dependencies:
@@ -339,7 +357,8 @@ def main():
                   "--dependency-prefix", check.prefix, "--output", args.test_dependencies.resolve())
     check.verify_source()
     (check.reports / "passed.json").write_text(
-        json.dumps({"stages": stages, "passed": True}, indent=2) + "\n", encoding="utf-8")
+        json.dumps({"stages": stages, "passed": True,
+                    "sanitizer_profile": args.sanitizer_profile if "sanitizers" in stages else None}, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
