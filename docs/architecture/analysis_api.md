@@ -131,7 +131,7 @@ except of.DataChangedError as error:
 
 文件和文档共同遵守原子发布：候选校验、项目身份与修订检查通过后写入文件，成功后才更新内存来源、修订和已保存标记并通知观察者。覆盖默认关闭。写入失败或修订冲突不修改两者；观察者在保存成功后再次编辑，项目仍正确显示未保存。
 
-开发预览阶段只读写当前 `.orbitforge` v41；所有打开入口（包括 `load_project_data()`）在解析内容前拒绝非当前版本，并给出实际与支持的版本。没有旧格式迁移或缺字段补默认值的读取路径；输入项目仍可以不包含可选的分析准备记录。详见[项目文件](project_files.md)。
+开发预览阶段只读写当前 `.orbitforge` v42；所有打开入口（包括 `load_project_data()`）在解析内容前拒绝非当前版本，并给出实际与支持的版本。没有旧格式迁移或缺字段补默认值的读取路径；输入项目仍可以不包含可选的分析准备记录。详见[项目文件](project_files.md)。
 
 `Project.plan_open(path, data=...)` 固定解析后的文件和已验证资源；`name`、`data`、`data_changes` 可供确认界面读取。直接 `Project.open()` 和 `of.load_project()` 使用同一流程。已有来源依赖必须提供相应当前数据；不传数据只适合没有 UTC / EOP 依赖的原生坐标计算项目，SGP4 仍须显式提供 UTC。需要仅检查或导入原始输入而不准备计算时，使用 `load_project_data()`，再按需 `Project.from_data()`。
 
@@ -172,12 +172,13 @@ windows.to_csv("access.csv")
 
 | 参数 | 约定 |
 | --- | --- |
-| `search_step` | 必填的正 `Duration`，固定发现网格含精确终点，最多 200000 个网格点 |
+| `search_step` | 必填的正 `Duration`；增强模式的最大检查间隔／固定模式的步长，最多 200000 个粗检查节点 |
+| `search_mode` | 默认 `AccessSearchMode.EXTREMUM_ASSISTED`，可选 `FIXED_GRID`；增强模式在每个检查区间寻找约束峰谷 |
 | `boundary_tolerance` | 默认 `u.ms(1)`，必须为正且不超过 `search_step`，用于二分细化已发现的边界 |
 | `first` / `last` | 可选子区间，默认整个分析区间；必须有序并位于准备区间内 |
 | `cancelled` | 可选无参数、返回 `bool` 的函数，例如 `threading.Event().is_set`；查询开始、每次求值（含边界细化）及返回前检查 |
 
-短于发现步长的窗口或间隙仍可能遗漏；减小边界容限不能弥补遗漏。返回的非截断边界在可见一侧，距离发现的转换不超过细化容限；这项容限不是轨道或物理模型的准确度保证。取消抛出 `AnalysisCancelled`，回调异常原样传播，均不返回部分结果。计算阶段释放 Python GIL，只在调用 Python 取消函数时重新获取；这是同步查询，不是后台任务调度器。
+固定模式可能遗漏短于步长的窗口／间隙。增强模式加入区间内极值搜索，但检查间隔仍须分辨不同波瓣；缩小间隔检查收敛，不声称对任意快速振荡或不连续约束完备。两种模式均在可见区间内计算最大仰角／最近距离的连续极值及历元，见 `window.extrema`。`windows.statistics` 输出次数和总／平均／最短／最长时长，包含截断部分；空结果计数和时长为零。模式、容差保留在查询信息，CSV / pandas 同时导出极值与精确 TAI 纳秒历元。每次过境分析最多 2000000 个不同历元，超限或取消不返回部分结果。详见[搜索与验证契约](access_sensors.md)。
 
 对象归属、类型和存在性从固定快照检查。原对象删除后旧句柄仍可用于旧分析；跨项目句柄和准备后新增的对象被拒绝。缺少 UTC/EOP 抛出 `AnalysisCapabilityError`，不会隐式联网补齐。`AccessWindows` 独立持有窗口及来源，项目、分析和原始文件释放后仍可读取或导出。
 
@@ -233,7 +234,7 @@ Python 直接接收对象句柄，不需要构造 `ReportDefinition` 或填写 I
 
 `cancelled=callable` 必须返回 bool，取消抛出 `AnalysisCancelled`；`progress(done, total)` 提供同步进度，两者均可省略。即使在完成进度回调中取消，也不返回结果；回调异常传回调用方。生成时固定报告配置，回调修改原配置或当前项目不影响本次计算。报告查询不重建传播器、不重新读取数据文件，也不写入项目的已保存报告配置。
 
-报告查询与显示已拆为 `ReportQuery` / `ReportTemplate`。Python 可传 `template=of.reports.Template([...])`，或生成后用 `template.apply(result)` 重排列、切换单位和时间系统，不重新计算。C++ 支持 `Analysis::report(query, format)` 和 `ReportResult::with_template(format)`。原始 SI 表始终保留，可恢复被隐藏的列；逐列单位优先于默认单位。详见[报告](reports.md)。项目当前为 v41（RPTS v2），保存显式选择模式及显示模板；不增加旧格式兼容路径。
+报告查询与显示已拆为 `ReportQuery` / `ReportTemplate`。Python 可传 `template=of.reports.Template([...])`，或生成后用 `template.apply(result)` 重排列、切换单位和时间系统，不重新计算。C++ 支持 `Analysis::report(query, format)` 和 `ReportResult::with_template(format)`。原始 SI 表始终保留，可恢复被隐藏的列；逐列单位优先于默认单位。详见[报告](reports.md)。项目当前为 v42（RPTS v2），保存显式选择模式及显示模板；不增加旧格式兼容路径。
 
 ## C++ 入口与验证
 
@@ -286,7 +287,7 @@ Access 由 `AnalysisAccess.*`、`AccessResults.*`、Python `test_analysis_access
 
 AER 与统一报告还由 `test_analysis_aer_reports.py` 和 `AnalysisAccess.*` 验证：九类报告与原入口数值一致、ITRF 观测及距离数值差分、精确采样、不可见样本、对象删除与源文件移除、完成回调取消、明确对象选择、可选数组转换和已安装 SDK。`access.py` 同时演示 AER 和报告入口。
 
-报告模板由 `Reports.*`、`ReportDialog.TemplateUnitsReuseResultsAndReorderedFieldsKeepPlotsAndSelection`、Python `test_report_templates.py` 和安装后的 SDK 验证；覆盖逐列单位、重排与恢复字段、显式全选、UTC 按需校验、失效输入不自动重算，以及 v41 独立二进制样本精确往返。
+报告模板由 `Reports.*`、`ReportDialog.TemplateUnitsReuseResultsAndReorderedFieldsKeepPlotsAndSelection`、Python `test_report_templates.py` 和安装后的 SDK 验证；覆盖逐列单位、重排与恢复字段、显式全选、UTC 按需校验、失效输入不自动重算，以及 v42 独立二进制样本精确往返。
 
 ### 机动记录
 

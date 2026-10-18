@@ -95,6 +95,9 @@ void bind_reports(py::module_ &module) {
         .def_readwrite("first", &application::ReportQuery::first)
         .def_readwrite("last", &application::ReportQuery::last)
         .def_readwrite("step_nanoseconds", &application::ReportQuery::step_nanoseconds)
+        .def_readwrite("access_search_mode", &application::ReportQuery::access_search_mode)
+        .def_readwrite("access_tolerance_nanoseconds",
+                       &application::ReportQuery::access_tolerance_nanoseconds)
         .def_readwrite("frame", &application::ReportQuery::frame);
     py::class_<application::ReportColumnSpec>(module, "ReportColumnSpec")
         .def(py::init<std::string, std::string, std::string>(), py::arg("field"),
@@ -132,6 +135,7 @@ void bind_reports(py::module_ &module) {
         .def_readonly("input_revision", &runtime::ReportResult::input_revision)
         .def_readonly("data_sha256", &runtime::ReportResult::data_sha256)
         .def_readonly("time_sha256", &runtime::ReportResult::time_sha256)
+        .def_readonly("access_statistics", &runtime::ReportResult::access_statistics)
         .def_readonly("algorithm", &runtime::ReportResult::algorithm)
         .def_readonly("first", &runtime::ReportResult::first)
         .def_readonly("last", &runtime::ReportResult::last)

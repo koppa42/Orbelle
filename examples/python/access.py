@@ -17,10 +17,15 @@ with project.edit():
         field_of_view=Cone(half_angle=u.deg(45)), pointing=Pointing.track(station))
 
 analysis = project.prepare(data=data)
-windows = analysis.access(station, sensor, search_step=u.s(1))
+windows = analysis.access(station, sensor, search_step=u.s(60))
 for window in windows:
     print(window.start.tai_nanoseconds, window.end.tai_nanoseconds,
           window.duration.nanoseconds / 1e9, "seconds")
+    print("maximum elevation (rad):", window.extrema.maximum_elevation.value,
+          "at TAI ns:", window.extrema.maximum_elevation.epoch.tai_nanoseconds)
+    print("minimum range (m):", window.extrema.minimum_range.value,
+          "at TAI ns:", window.extrema.minimum_range.epoch.tai_nanoseconds)
+print("total visible seconds:", windows.statistics.total_duration_s)
 print(f"{len(windows)} windows; data SHA-256: {windows.data_sha256}")
 # windows.to_csv("access.csv")       # Export these results without recomputing.
 # table = windows.to_pandas()        # Optional pandas, with exact TAI nanoseconds.

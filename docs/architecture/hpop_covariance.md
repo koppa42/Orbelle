@@ -1,6 +1,6 @@
 # HPOP 联合协方差与考虑参数
 
-`propagate_hpop_covariance` 在单个滑行段内传播初始状态协方差，并可考虑常参数 `D=Cd×DragArea/Mass`、`K=Cr×SRPArea/Mass` 的不确定度。C++、Python、安装 SDK 共用 Core 实现。输入支持带标记的 GCRF / LVLH / Frenet / FK5 J2000 / TrueOfDate Cartesian，输出统一地心 GCRF，时间与单位为 TAI 和 SI；项目 v41 已保存完整协方差草稿；桌面 HPOP → 协方差提供初始矩阵、参考系、独立重力截断及 D/K 考虑参数编辑。项目 Analysis 与协方差报告共用 Core 传播。JPLFile 章动模式、FG 表示、科学插值、跨机动传播与更多考虑参数列入[延期范围](hpop_alignment.md#延期范围)，不作为首版完成条件。
+`propagate_hpop_covariance` 在单个滑行段内传播初始状态协方差，并可考虑常参数 `D=Cd×DragArea/Mass`、`K=Cr×SRPArea/Mass` 的不确定度。C++、Python、安装 SDK 共用 Core 实现。输入支持带标记的 GCRF / LVLH / Frenet / FK5 J2000 / TrueOfDate Cartesian，输出统一地心 GCRF，时间与单位为 TAI 和 SI；项目 v42 已保存完整协方差草稿；桌面 HPOP → 协方差提供初始矩阵、参考系、独立重力截断及 D/K 考虑参数编辑。项目 Analysis 与协方差报告共用 Core 传播。JPLFile 章动模式、FG 表示、科学插值、跨机动传播与更多考虑参数列入[延期范围](hpop_alignment.md#延期范围)，不作为首版完成条件。
 
 参数含义来自 [STK HPOP Covariance](https://help.agi.com/stk/Content/hpop/hpop-covariance.htm)。Value 是方差，不是标准差；交叉值是有单位的协方差，不是无量纲相关系数。未选择的参数用空 optional 表示；没有考虑参数时只传播 6×6 状态矩阵。选定 D 或 K 时增加对应维度，两者均选定时允许 `Cov(D,K)`。现有力被关闭时，其参数敏感度为零；参数本身的方差仍按常参数保留。
 

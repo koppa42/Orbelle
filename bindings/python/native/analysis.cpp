@@ -120,7 +120,23 @@ void bind_analysis(py::module_ &module) {
         .def("__len__", [](const results::Trajectory &value) { return value.states().size(); })
         .def("to_csv", &runtime::export_trajectory_csv, py::arg("path"),
              py::arg("overwrite") = false, py::call_guard<py::gil_scoped_release>());
+    py::enum_<core::AccessSearchMode>(module, "AccessSearchMode")
+        .value("FIXED_GRID", core::AccessSearchMode::fixed_grid)
+        .value("EXTREMUM_ASSISTED", core::AccessSearchMode::extremum_assisted);
+    py::class_<core::AccessExtremum>(module, "AccessExtremum")
+        .def_readonly("epoch", &core::AccessExtremum::epoch)
+        .def_readonly("value", &core::AccessExtremum::value);
+    py::class_<core::PassExtrema>(module, "PassExtrema")
+        .def_readonly("maximum_elevation", &core::PassExtrema::maximum_elevation)
+        .def_readonly("minimum_range", &core::PassExtrema::minimum_range);
+    py::class_<results::AccessStatistics>(module, "AccessStatistics")
+        .def_readonly("count", &results::AccessStatistics::count)
+        .def_readonly("total_duration_s", &results::AccessStatistics::total_duration_s)
+        .def_readonly("mean_duration_s", &results::AccessStatistics::mean_duration_s)
+        .def_readonly("shortest_duration_s", &results::AccessStatistics::shortest_duration_s)
+        .def_readonly("longest_duration_s", &results::AccessStatistics::longest_duration_s);
     py::class_<results::AccessWindow>(module, "AccessWindow")
+        .def_property_readonly("extrema", &results::AccessWindow::extrema)
         .def_property_readonly("start", &results::AccessWindow::start)
         .def_property_readonly("end", &results::AccessWindow::end)
         .def_property_readonly(
@@ -138,6 +154,9 @@ void bind_analysis(py::module_ &module) {
         .def_readonly("data_sha256", &results::AccessProvenance::data_sha256)
         .def_readonly("algorithm", &results::AccessProvenance::algorithm);
     py::class_<results::AccessWindows>(module, "AccessWindows")
+        .def_property_readonly(
+            "search_mode", [](const results::AccessWindows &v) { return v.query().search_mode; })
+        .def_property_readonly("statistics", &results::AccessWindows::statistics)
         .def_property_readonly("windows", &results::AccessWindows::windows)
         .def("__len__", [](const results::AccessWindows &value) { return value.windows().size(); })
         .def("window", [](const results::AccessWindows &value,
@@ -229,19 +248,21 @@ void bind_analysis(py::module_ &module) {
             "access",
             [](const runtime::Analysis &analysis, const application::ObjectRef &station,
                const application::ObjectRef &target, std::int64_t step, std::int64_t tolerance,
-               std::optional<core::Epoch> first, std::optional<core::Epoch> last,
-               const py::object &cancelled) {
+               core::AccessSearchMode mode, std::optional<core::Epoch> first,
+               std::optional<core::Epoch> last, const py::object &cancelled) {
                 const auto check = cancellation(cancelled);
                 py::gil_scoped_release release;
                 return analysis.access(station, target,
                                        {std::chrono::nanoseconds{step},
-                                        std::chrono::nanoseconds{tolerance}, first, last},
+                                        std::chrono::nanoseconds{tolerance}, first, last, mode},
                                        check);
             },
             py::arg("station"), py::arg("target"), py::kw_only(),
             py::arg("search_step_nanoseconds"),
-            py::arg("boundary_tolerance_nanoseconds") = 1'000'000, py::arg("first") = py::none(),
-            py::arg("last") = py::none(), py::arg("cancelled") = py::none())
+            py::arg("boundary_tolerance_nanoseconds") = 1'000'000,
+            py::arg("search_mode") = core::AccessSearchMode::extremum_assisted,
+            py::arg("first") = py::none(), py::arg("last") = py::none(),
+            py::arg("cancelled") = py::none())
         .def(
             "aer_at",
             [](const runtime::Analysis &analysis, const application::ObjectRef &station,

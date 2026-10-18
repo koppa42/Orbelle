@@ -28,3 +28,5 @@
 日志、截图、JSON/CSV/XML 报告及环境清单写入新的 `out/validation/<运行名称>/`；便携包、wheel 和交付目录放在 `out/releases/` 或 `out/dist/`。这些目录由 Git 忽略，不将逐次结果、开发过程记录或源码副本放进文档目录。
 
 - [HPOP J2000/TrueOfDate 与联合协方差](hpop_celestial_frames_protocol.md)：IERS1996、Orekit 自动微分及 96 组联合矩阵对照。
+
+- [可见性与过境分析](access_pass_protocol.md)：Orekit/Hipparchus 独立事件、连续极值与统计对照，短窗口／擦边与 UI 验收。

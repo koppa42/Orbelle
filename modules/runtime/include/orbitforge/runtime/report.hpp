@@ -7,6 +7,7 @@
 #include <orbitforge/application/project.hpp>
 #include <orbitforge/application/scenario.hpp>
 #include <orbitforge/core/frames/frame_provider.hpp>
+#include <orbitforge/results/access_windows.hpp>
 #include <orbitforge/results/table.hpp>
 #include <stdexcept>
 
@@ -41,6 +42,7 @@ struct ReportResult {
     std::uint64_t input_revision = 0;
     // Canonical SI table retained so a later template can restore omitted fields.
     std::shared_ptr<const results::Table> source_table = {};
+    std::optional<results::AccessStatistics> access_statistics = {};
     [[nodiscard]] ReportResult with_template(const application::ReportTemplate &format) const;
 };
 class ReportCancelled : public std::runtime_error {

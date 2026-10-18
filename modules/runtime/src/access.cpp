@@ -1,5 +1,7 @@
 #include "access_geometry.hpp"
 #include <algorithm>
+#include <cmath>
+#include <map>
 #include <orbitforge/runtime/access.hpp>
 #include <orbitforge/runtime/project.hpp>
 
@@ -74,6 +76,60 @@ application::Project detail::AccessGeometry::numerical_inputs(core::Epoch first,
 void validate_access_pair(const application::Project &project,
                           const std::vector<std::string> &ids) {
     (void)detail::AccessGeometry{project, ids};
+}
+std::vector<results::AccessWindow>
+calculate_access_passes(const application::Project &project, const std::vector<std::string> &ids,
+                        const results::AccessQuery &query,
+                        const std::function<AccessSample(core::Epoch)> &at) {
+    const detail::AccessGeometry geometry(project, ids);
+    if (query.search_mode != core::AccessSearchMode::fixed_grid &&
+        query.search_mode != core::AccessSearchMode::extremum_assisted)
+        throw std::invalid_argument("Invalid Access search mode");
+    std::map<std::int64_t, AccessSample> cache;
+    const auto sample = [&](core::Epoch t) -> const AccessSample & {
+        const auto key = t.tai_nanoseconds();
+        if (const auto found = cache.find(key); found != cache.end())
+            return found->second;
+        if (cache.size() >= 2'000'000)
+            throw std::invalid_argument(
+                "Pass analysis exceeds 2000000 evaluations; shorten the interval");
+        return cache.emplace(key, at(t)).first->second;
+    };
+    const auto step = query.search_step.count(), tolerance = query.boundary_tolerance.count();
+    const auto intervals =
+        query.search_mode == core::AccessSearchMode::fixed_grid
+            ? core::find_access_intervals(
+                  query.first, query.last, step, [&](auto t) { return sample(t).visible; },
+                  tolerance)
+            : core::find_constraint_intervals(
+                  query.first, query.last, step,
+                  [&](auto t) {
+                      const auto &s = sample(t);
+                      auto margin =
+                          s.observation.elevation_rad - geometry.station.minimum_elevation_rad;
+                      if (geometry.sensor)
+                          margin = std::min(margin,
+                                            geometry.sensor->half_angle_rad - *s.off_boresight_rad);
+                      // For above-surface stations with nonnegative minimum elevation, the
+                      // angular constraints imply ellipsoid clearance. Preserve the separate
+                      // segment test for below-ellipsoid stations and numerical tangency.
+                      if (!s.observation.line_of_sight)
+                          margin = std::min(margin, -1e-14);
+                      return margin;
+                  },
+                  tolerance);
+    std::vector<results::AccessWindow> result;
+    for (const auto &w : intervals) {
+        const auto elevation = core::find_access_extremum(
+            w.first, w.last, step, [&](auto t) { return sample(t).observation.elevation_rad; },
+            true, tolerance);
+        const auto range = core::find_access_extremum(
+            w.first, w.last, step, [&](auto t) { return sample(t).observation.range_m; }, false,
+            tolerance);
+        result.emplace_back(w.first, w.last, w.start_clipped, w.stop_clipped,
+                            core::PassExtrema{elevation, range});
+    }
+    return result;
 }
 struct AccessSession::Impl {
     ReportContext context;

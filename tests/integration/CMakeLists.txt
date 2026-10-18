@@ -10,6 +10,7 @@ target_compile_definitions(orbitforge_integration_tests PRIVATE
     ORBITFORGE_SECULAR_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators"
     ORBITFORGE_OCEAN_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators"
     ORBITFORGE_EGM2008_FULL_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/gravity_egm2008_full.txt"
+    ORBITFORGE_ACCESS_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/access_orekit.txt"
     ORBITFORGE_REPORT_EOP="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
     ORBITFORGE_DRAG_EOP="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_c04_2016_12_28_2017_01_04/manifest.json"
     ORBITFORGE_EXPECT_ERFA=$<BOOL:${ORBITFORGE_WITH_ERFA}>

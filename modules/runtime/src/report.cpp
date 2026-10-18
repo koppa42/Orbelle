@@ -335,6 +335,7 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
     }
     auto columns = report_columns(d.query.kind);
     std::vector<Row> rows;
+    std::optional<results::AccessStatistics> access_statistics;
     rows.reserve(total);
     const auto selected =
         report_is_access(d.query.kind) ? std::vector<Selection>{} : select(context.project, d);
@@ -348,8 +349,12 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
         const auto access = execution.access(d.query.object_ids);
         if (d.query.kind == ReportKind::access_intervals) {
             std::size_t completed = 0;
-            const auto intervals = core::find_access_intervals(
-                first, last, d.query.step_nanoseconds, [&](core::Epoch epoch) {
+            const results::AccessQuery query{
+                first, last, std::chrono::nanoseconds{d.query.step_nanoseconds},
+                std::chrono::nanoseconds{d.query.access_tolerance_nanoseconds},
+                d.query.access_search_mode};
+            auto windows = calculate_access_passes(
+                context.project, d.query.object_ids, query, [&](core::Epoch epoch) {
                     execution.check_cancelled();
                     completed = std::max(completed,
                                          static_cast<std::size_t>(
@@ -357,14 +362,18 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                                              static_cast<std::uint64_t>(d.query.step_nanoseconds)));
                     if (progress)
                         progress(completed, total);
-                    execution.check_cancelled();
-                    return access.at(epoch).visible;
+                    return access.at(epoch);
                 });
-            for (const auto &window : intervals)
-                rows.push_back({d.query.object_ids[1], access.name, window.first, window.last,
-                                window.last.seconds_since(window.first),
-                                std::int64_t(window.start_clipped),
-                                std::int64_t(window.stop_clipped)});
+            for (const auto &window : windows) {
+                const auto &extrema = *window.extrema();
+                rows.push_back({d.query.object_ids[1], access.name, window.start(), window.end(),
+                                std::chrono::duration<double>(window.duration()).count(),
+                                std::int64_t(window.start_clipped()),
+                                std::int64_t(window.end_clipped()), extrema.maximum_elevation.value,
+                                extrema.maximum_elevation.epoch, extrema.minimum_range.value,
+                                extrema.minimum_range.epoch});
+            }
+            access_statistics = results::AccessWindows{std::move(windows), query, {}}.statistics();
         } else {
             auto epoch = first;
             for (std::size_t i = 0; i < total; ++i) {
@@ -522,6 +531,11 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                         first,
                         last,
                         context.time};
+    result.access_statistics = access_statistics;
+    if (d.query.kind == ReportKind::access_intervals)
+        result.algorithm += d.query.access_search_mode == core::AccessSearchMode::fixed_grid
+                                ? ";fixed-grid-bisection-v1;pass-extrema-golden-v1"
+                                : ";extremum-assisted-bisection-v1;pass-extrema-golden-v1";
     auto formatted = result.with_template(d.format);
     execution.check_cancelled();
     return formatted;
