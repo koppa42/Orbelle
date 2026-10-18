@@ -34,7 +34,7 @@ d_a/d_K = −Q f n
 
 ## 与传播器的边界
 
-`nominal` 直接使用既有 `evaluate_srp`；名义力求值流程和项目格式 v43 / OBJS32 保持当前定义。普通轨迹不主动计算偏导。新增接口随 C++ SDK 导出，安装消费端实际调用；Python 的既有 SRP 配置、低层名义力和桌面界面继续复用相同名义模型。
+`nominal` 直接使用既有 `evaluate_srp`；名义力求值流程和项目格式 v44 / OBJS32 保持当前定义。普通轨迹不主动计算偏导。新增接口随 C++ SDK 导出，安装消费端实际调用；Python 的既有 SRP 配置、低层名义力和桌面界面继续复用相同名义模型。
 
 STK 的太阳位置方法仍由 HPOP 在每个积分阶段解析，低层函数只消费已经选好的 S。[STK SRP 参数](https://help.agi.com/stk/Content/hpop/hpopSRP.htm)
 

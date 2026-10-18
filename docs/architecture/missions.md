@@ -86,6 +86,6 @@ auto states = analysis.states(satellite, 60s, of::FrameId::gcrf);
 
 公共段类型位于 Core；`runtime::make_mission_session` 装配二体或 HPOP，桌面与两种 SDK 共用。`ManeuverSeries` 拥有结果、对象/修订/算法来源及输入和数据哈希；非任务序列卫星返回空记录，地面站和传感器不接受机动查询。取消回调可中止传播，失败不返回部分结果；已完成弧段可缓存，重试保持一致。
 
-`.orbitforge` v43 保存初态、滑行模型、全部有序段及活动 HPOP 配置，只读写当前格式。机动名称属于显示元数据，不改变计算输入哈希；时长、顺序、方向和 Δv 均影响哈希。固定二进制样本由独立 `struct.pack` 构造，精确校验纳秒字段。验证范围与容限见[机动验证协议](../validation/mission_protocol.md)。
+`.orbitforge` v44 保存初态、滑行模型、全部有序段及活动 HPOP 配置，只读写当前格式。机动名称属于显示元数据，不改变计算输入哈希；时长、顺序、方向和 Δv 均影响哈希。固定二进制样本由独立 `struct.pack` 构造，精确校验纳秒字段。验证范围与容限见[机动验证协议](../validation/mission_protocol.md)。
 
 HPOP 滑行使用[科学插值星历](orbit_interpolation.md)：每次脉冲处结束旧段，以机动后状态开始新段，并限制在项目结束时刻。Core `CoastFactory` 接收精确结束历元及取消检查点；`make_mission(..., stop)` 可指定计划前缀。结束历元上的全部脉冲仍执行，后续计划不传播。`discontinuities(checkpoint)` 合并天气、插值和机动边界，其首次生成可取消。

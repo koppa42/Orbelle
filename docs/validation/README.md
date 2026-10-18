@@ -32,3 +32,5 @@
 - [可见性与过境分析](access_pass_protocol.md)：Orekit/Hipparchus 独立事件、连续极值与统计对照，短窗口／擦边与 UI 验收。
 
 光照与地影事件、比例及统计的独立数值对照见[光照验证协议](lighting_protocol.md)。
+
+近远地点与 GCRF 赤道交点的独立 Orekit 对照见[轨道事件协议](orbital_events_protocol.md)。

@@ -129,6 +129,8 @@ QString kind_name(ReportKind kind) {
         return QStringLiteral("光照与地影时段");
     case ReportKind::lighting_state:
         return QStringLiteral("太阳光照比例");
+    case ReportKind::orbital_events:
+        return QStringLiteral("轨道事件 · 近远地点 / 交点");
     case ReportKind::state_covariance:
         return QStringLiteral("HPOP · 位置速度协方差");
     }
@@ -169,6 +171,11 @@ QString localized(QString value) {
         {"Satellite", QStringLiteral("卫星")},
         {"Ground station", QStringLiteral("地面站")},
         {"Duration", QStringLiteral("持续时间")},
+        {"Event", QStringLiteral("事件")},
+        {"Periapsis", QStringLiteral("近地点")},
+        {"Apoapsis", QStringLiteral("远地点")},
+        {"Ascending node", QStringLiteral("升交点")},
+        {"Descending node", QStringLiteral("降交点")},
         {"Lighting", QStringLiteral("光照状态")},
         {"Solar disk illumination", QStringLiteral("太阳光照比例")},
         {"Sunlight", QStringLiteral("全光照")},
@@ -221,6 +228,14 @@ class ReportModel final : public QAbstractTableModel {
                           : phase == "Penumbra" ? "#b5a4ef"
                                                 : "#8db6e7");
         }
+        if (role == Qt::ForegroundRole &&
+            result->table.columns().at(index.column()).id == "event.kind") {
+            const auto kind = std::get<std::string>(cell);
+            return QColor(kind == "Periapsis"        ? "#edbd67"
+                          : kind == "Apoapsis"       ? "#b5a4ef"
+                          : kind == "Ascending node" ? "#7ccdb7"
+                                                     : "#8db6e7");
+        }
         if (role != Qt::DisplayRole && role != Qt::ToolTipRole)
             return {};
         auto value = text(result->cell_text(index.row(), index.column()));
@@ -244,7 +259,7 @@ class ReportModel final : public QAbstractTableModel {
         if (role == Qt::ToolTipRole && clipped)
             return value + QStringLiteral("\n此边界由分析区间截断，不是实际状态切换的时刻。");
         if (role == Qt::DisplayRole && std::holds_alternative<double>(cell))
-            return report_is_interval(result->definition.query.kind)
+            return report_uses_event_search(result->definition.query.kind)
                        ? QString::number(value.toDouble(), 'f', 3)
                        : QString::number(value.toDouble(), 'g', 12);
         if (role == Qt::DisplayRole && std::holds_alternative<core::Epoch>(cell)) {
@@ -254,7 +269,7 @@ class ReportModel final : public QAbstractTableModel {
                 value.chop(1);
             if (value.endsWith('.'))
                 value.chop(1);
-            if (report_is_interval(result->definition.query.kind)) {
+            if (report_uses_event_search(result->definition.query.kind)) {
                 const auto dot = value.indexOf('.');
                 if (dot >= 0 && value.size() > dot + 4)
                     value.truncate(dot + 4);
@@ -262,8 +277,9 @@ class ReportModel final : public QAbstractTableModel {
             return value.replace('T', ' ') + (clipped ? QStringLiteral(" *") : QString{});
         }
         const auto &id = result->table.columns().at(index.column()).id;
-        if (id == "lighting.phase" || id == "object.type" || id == "object.model" ||
-            id == "summary.field" || (id == "summary.value" && index.row() == 6))
+        if (id == "event.kind" || id == "lighting.phase" || id == "object.type" ||
+            id == "object.model" || id == "summary.field" ||
+            (id == "summary.value" && index.row() == 6))
             return localized(value);
         return value;
     }
@@ -309,7 +325,7 @@ struct ReportDialog::Impl {
     EpochEditor *first, *last;
     QDoubleSpinBox *step;
     QLabel *status, *estimate, *result_label, *result_title, *scope_label, *scope_detail;
-    QLabel *interval_label, *template_description, *format_title, *step_label;
+    QLabel *interval_label, *template_description, *format_title, *step_label, *event_notice;
     QPushButton *generate, *export_csv, *cancel, *scope_button, *view_button;
     QToolButton *refresh_button, *config_menu, *result_more;
     QAction *source_button, *copy_button, *store, *update_template, *remove;
@@ -518,7 +534,7 @@ struct ReportDialog::Impl {
         access_tolerance->setValue(.001);
         access_tolerance->setSuffix(QStringLiteral(" 秒"));
         access_tolerance->setToolTip(
-            QStringLiteral("已发现边界与过境极值的时间搜索容差；不是轨道的物理精度。"));
+            QStringLiteral("已发现事件、边界与过境极值的时间搜索容差；不是轨道的物理精度。"));
         access_form->addRow(QStringLiteral("搜索方式"), access_mode);
         access_form->addRow(QStringLiteral("时间容差"), access_tolerance);
         sampling_form->addRow(access_options);
@@ -680,6 +696,10 @@ struct ReportDialog::Impl {
         });
         pass_summary->hide();
         result_layout->addWidget(pass_summary);
+        event_notice = note({}, result_panel);
+        event_notice->setObjectName("orbitalEventNotice");
+        event_notice->hide();
+        result_layout->addWidget(event_notice);
         result_stack = new QStackedWidget(result_panel);
         result_layout->addWidget(result_stack, 1);
         auto *empty = new QWidget(result_stack);
@@ -853,7 +873,7 @@ struct ReportDialog::Impl {
         QObject::connect(access_tolerance, &QDoubleSpinBox::valueChanged, owner,
                          [this] { edit(); });
         QObject::connect(access_mode, &QComboBox::currentIndexChanged, owner, [this] {
-            if (report_is_interval(draft.query.kind))
+            if (report_uses_event_search(draft.query.kind))
                 step_label->setText(access_mode->currentIndex() == 0
                                         ? QStringLiteral("搜索步长")
                                         : QStringLiteral("最大检查间隔"));
@@ -996,6 +1016,9 @@ struct ReportDialog::Impl {
             case ReportKind::lighting_state:
                 return QStringLiteral("按时刻输出可见太阳圆盘的比例，支持光照曲线与 "
                                       "CSV。地球球面遮挡，使用几何太阳。");
+            case ReportKind::orbital_events:
+                return QStringLiteral("近地点、远地点、升交点和降交点的精确时刻、地心距离与速率。交"
+                                      "点采用 GCRF 赤道面，近圆 / 近赤道情况明确提示。");
             case ReportKind::state_covariance:
                 return QStringLiteral("传播已启用的 HPOP 协方差，输出 GCRF 位置速度矩阵的下三角。");
             }
@@ -1013,6 +1036,8 @@ struct ReportDialog::Impl {
                 return QStringLiteral("可见时间区间表");
             case ReportKind::lighting_intervals:
                 return QStringLiteral("光照时间区间表 · 分类统计");
+            case ReportKind::orbital_events:
+                return QStringLiteral("事件时刻表 · 分类统计 · 时间定位");
             default:
                 return QStringLiteral("时间序列 · 表格与曲线");
             }
@@ -1283,15 +1308,19 @@ struct ReportDialog::Impl {
             all_objects = draft.query.scope == ReportScope::all_compatible;
         }
         const bool access = report_is_access(draft.query.kind);
-        access_options->setVisible(report_is_interval(draft.query.kind));
+        access_options->setVisible(report_uses_event_search(draft.query.kind));
         access_mode->setCurrentIndex(static_cast<int>(draft.query.event_search_mode));
         access_tolerance->setValue(static_cast<double>(draft.query.event_tolerance_nanoseconds) /
                                    1e9);
-        step_label->setText(report_is_interval(draft.query.kind)
+        step_label->setText(report_uses_event_search(draft.query.kind)
                                 ? (access_mode->currentIndex() == 0
                                        ? QStringLiteral("搜索步长")
                                        : QStringLiteral("最大检查间隔"))
                                 : QStringLiteral("采样间隔"));
+        step->setToolTip(report_uses_event_search(draft.query.kind)
+                             ? QStringLiteral("事件搜索的最大检查间隔；快速变化时减半核对收敛。事件"
+                                              "时刻自动细化，不限于检查节点。")
+                             : QStringLiteral("报告独立采样，始终包含起止时刻。"));
         step->setMinimum(access ? .001 : .000000001);
         access_pair->setVisible(access);
         scope_label->setVisible(!access);
@@ -1350,6 +1379,13 @@ struct ReportDialog::Impl {
             template_description->setText(QStringLiteral("地心距离、速率与航迹倾角 · GCRF"));
         if (draft.query.kind == ReportKind::geodetic_position)
             template_description->setText(QStringLiteral("经度、大地纬度与椭球高 · WGS84"));
+        if (draft.query.kind == ReportKind::orbital_events) {
+            template_description->setText(QStringLiteral(
+                "近远地点 · GCRF 赤道交点\n连续求根定位事件；双击结果可跳转场景时间。"));
+            template_description->setToolTip(QStringLiteral(
+                "地心距离的极值与 GCRF 赤道面穿越。e ≤ 1e-8 时不定义近远地点；|sin(i)| ≤ 1e-8 "
+                "时不定义交点。不支持含机动的任务序列。快速变化时减小检查间隔并核对收敛。"));
+        }
         if (report_is_lighting(draft.query.kind))
             template_description->setText(
                 QStringLiteral(
@@ -1430,7 +1466,9 @@ struct ReportDialog::Impl {
             owner->result_published(result, *result_analysis);
         changed = false;
         pass_summary->setVisible(result->access_statistics.has_value() ||
-                                 result->lighting_statistics.has_value());
+                                 result->lighting_statistics.has_value() ||
+                                 result->orbital_event_statistics.has_value());
+        event_notice->hide();
         for (auto *value : pass_values)
             value->setToolTip({});
         if (result->access_statistics) {
@@ -1473,6 +1511,28 @@ struct ReportDialog::Impl {
                                                     "选卫星的累计分析时长为分母。双击时刻定位。")
                                          .arg(s.object_count));
         }
+        if (result->orbital_event_statistics) {
+            const auto &s = *result->orbital_event_statistics;
+            const std::array captions{QStringLiteral("近地点"), QStringLiteral("远地点"),
+                                      QStringLiteral("升交点"), QStringLiteral("降交点")};
+            for (int i = 0; i < 4; ++i) {
+                pass_captions[i]->setText(captions[i]);
+                pass_values[i]->setText(QString::number(s.counts[i]));
+            }
+            pass_summary->setToolTip(
+                QStringLiteral(
+                    "%1 颗卫星的事件数量；交点参考面为 GCRF 赤道面。双击任意一行定位该事件时刻。")
+                    .arg(s.object_count));
+            QStringList notes;
+            if (s.near_circular_objects)
+                notes << QStringLiteral("%1 颗卫星存在近圆状态，相应近远地点不定义")
+                             .arg(s.near_circular_objects);
+            if (s.near_equatorial_objects)
+                notes << QStringLiteral("%1 颗卫星存在近赤道状态，相应交点不定义")
+                             .arg(s.near_equatorial_objects);
+            event_notice->setText(notes.join(QStringLiteral("；")));
+            event_notice->setVisible(!notes.isEmpty());
+        }
         table->resizeColumnsToContents();
         for (std::size_t c = 0; c < result->table.columns().size(); ++c)
             table->setColumnHidden(
@@ -1494,12 +1554,13 @@ struct ReportDialog::Impl {
         try {
             const auto d = definition();
             const auto rows = runtime::estimate_report_rows(project, d);
-            estimate->setText(
-                (report_is_interval(d.query.kind) ? QStringLiteral("%1 个检查节点 · 自动细化%2")
-                                                  : QStringLiteral("预计 %1 行%2"))
-                    .arg(static_cast<qulonglong>(rows))
-                    .arg(report_is_sampled(d.query.kind) ? QStringLiteral(" · 含起止时刻")
-                                                         : QString{}));
+            estimate->setText((report_uses_event_search(d.query.kind)
+                                   ? QStringLiteral("%1 个检查节点 · 自动细化%2")
+                                   : QStringLiteral("预计 %1 行%2"))
+                                  .arg(static_cast<qulonglong>(rows))
+                                  .arg(report_is_sampled(d.query.kind)
+                                           ? QStringLiteral(" · 含起止时刻")
+                                           : QString{}));
         } catch (const std::exception &error) {
             estimate->setText(QString::fromUtf8(error.what()));
         }
@@ -1684,7 +1745,7 @@ struct ReportDialog::Impl {
         const auto name_column = std::ranges::find(columns, "object.name", &results::Column::id);
         const bool sampled =
             report_is_sampled(r.definition.query.kind) &&
-            !report_is_interval(r.definition.query.kind) && id_column != columns.end() &&
+            !report_uses_event_search(r.definition.query.kind) && id_column != columns.end() &&
             name_column != columns.end() &&
             std::ranges::find(columns, "time.epoch", &results::Column::id) != columns.end() &&
             !r.table.rows().empty();

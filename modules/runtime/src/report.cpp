@@ -7,6 +7,7 @@
 #include <locale>
 #include <numbers>
 #include <orbitforge/core/propagation/lighting.hpp>
+#include <orbitforge/core/propagation/orbital_events.hpp>
 #include <orbitforge/runtime/access.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
@@ -340,6 +341,7 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
     std::vector<Row> rows;
     std::optional<results::AccessStatistics> access_statistics;
     std::optional<results::LightingStatistics> lighting_statistics;
+    std::optional<results::OrbitalEventStatistics> orbital_event_statistics;
     rows.reserve(total);
     const auto selected =
         report_is_access(d.query.kind) ? std::vector<Selection>{} : select(context.project, d);
@@ -422,6 +424,55 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                 const auto p = core::ground_station_position(location);
                 rows.push_back({object.id, object.name, location.longitude_rad,
                                 location.latitude_rad, location.height_m, p[0], p[1], p[2]});
+            }
+        } else if (d.query.kind == ReportKind::orbital_events) {
+            orbital_event_statistics = results::OrbitalEventStatistics{selected.size()};
+            std::size_t completed = 0;
+            for (const auto &object : selected) {
+                check(object.satellite->orbit.propagator != OrbitPropagator::mission,
+                      "Orbital events require a continuous trajectory; mission sequences are not "
+                      "supported");
+                execution.check_cancelled();
+                const auto session = execution.session(object, core::FrameId::gcrf);
+                const auto base = completed, count = total / selected.size();
+                const auto at = [&](core::Epoch epoch) {
+                    execution.check_cancelled();
+                    const auto visited = static_cast<std::size_t>(
+                        ticks_between(first, epoch) /
+                        static_cast<std::uint64_t>(d.query.step_nanoseconds));
+                    completed = std::max(completed, base + std::min(visited, count - 1));
+                    if (progress)
+                        progress(completed, total);
+                    execution.check_cancelled();
+                    auto state = session.sample(std::array{epoch}, execution.check_cancelled)
+                                     .states()
+                                     .front();
+                    if (state.frame != core::FrameId::gcrf) {
+                        check(context.eop && context.frames,
+                              "Orbital event frame conversion requires EOP data");
+                        state = core::transform_state(state, core::FrameId::gcrf, *context.frames,
+                                                      context.eop->at(epoch));
+                    }
+                    return state;
+                };
+                const auto events = core::find_orbital_events(
+                    first, last, d.query.step_nanoseconds, at,
+                    core::GravitationalParameter{object.satellite->orbit.mu()},
+                    d.query.event_tolerance_nanoseconds, d.query.event_search_mode);
+                check(events.events.size() <= max_report_rows - rows.size(),
+                      "Orbital events exceed 200000 rows");
+                for (const auto &event : events.events) {
+                    const auto &p = event.state.position_m, &v = event.state.velocity_mps;
+                    rows.push_back({object.id, object.name, event.state.epoch,
+                                    std::string(core::orbital_event_name(event.kind)),
+                                    std::hypot(p[0], p[1], p[2]), std::hypot(v[0], v[1], v[2])});
+                    ++orbital_event_statistics->counts[static_cast<std::size_t>(event.kind)];
+                }
+                orbital_event_statistics->near_circular_objects += events.near_circular;
+                orbital_event_statistics->near_equatorial_objects += events.near_equatorial;
+                completed = base + count;
+                if (progress)
+                    progress(completed, total);
             }
         } else if (report_is_lighting(d.query.kind)) {
             const auto found = context.ephemerides.find(d.query.lighting_ephemeris);
@@ -623,10 +674,14 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                         context.time};
     result.access_statistics = access_statistics;
     result.lighting_statistics = lighting_statistics;
+    result.orbital_event_statistics = orbital_event_statistics;
+    if (d.query.kind == ReportKind::orbital_events)
+        result.algorithm = "orbital-events-earth-gcrf-v1;e-min=1e-8;sin-i-min=1e-8";
     if (report_is_lighting(d.query.kind))
         result.algorithm = "geometric-lighting-earth-sphere-v1;uniform-solar-disk-v1;ephemeris=" +
                            d.query.lighting_ephemeris;
-    if (d.query.kind == ReportKind::lighting_intervals)
+    if (d.query.kind == ReportKind::lighting_intervals ||
+        d.query.kind == ReportKind::orbital_events)
         result.algorithm += d.query.event_search_mode == core::AccessSearchMode::fixed_grid
                                 ? ";fixed-grid-bisection-v1"
                                 : ";extremum-assisted-bisection-v1";

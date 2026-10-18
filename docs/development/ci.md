@@ -19,7 +19,7 @@ ASan/UBSan 仅在 **Actions → Sanitizers → Run workflow** 中手动执行；
 
 测试需要先编译 C++ 和 Python 原生扩展，但不需要创建可分发的安装包。普通 PR 和 `main` 不生成桌面 ZIP、SDK 发布归档或 wheel，不创建 Release，也不上传 `*-release-assets`。Python 测试按 `pyproject.toml` 的相同功能配置直接使用 CMake 编译扩展，将扩展及配套 Python 文件放入独立虚拟环境，再运行 API 测试与示例。wheel 元数据、打包布局和安装行为另由标签流程验证。
 
-PR、`main` 与发布安装验证通过 `tools/ci/validation_inputs.py` 整理相同的独立测试目录，包含 Python 测试、九个示例、SDK 消费端、固定参考值、项目文件样例及测试使用的 EOP / 闰秒 / SPICE 片段数据。测试目录保留相对路径，但不复制 Python 包源码或 C++ 实现；计算能力必须来自被测安装。普通 Python CI 也从此目录运行，提前发现发布验证输入遗漏。
+PR、`main` 与发布安装验证通过 `tools/ci/validation_inputs.py` 整理相同的独立测试目录，包含 Python 测试、十个示例、SDK 消费端、固定参考值、项目文件样例及测试使用的 EOP / 闰秒 / SPICE 片段数据。测试目录保留相对路径，但不复制 Python 包源码或 C++ 实现；计算能力必须来自被测安装。普通 Python CI 也从此目录运行，提前发现发布验证输入遗漏。
 
 PR 的 `linux-python-dependencies` 和 `windows-python-dependencies` 由各平台独立的轻量依赖作业生成，仅供其他 Python 版本复用已编译的无界面依赖，内容不包括 OrbitForge 安装包。诊断日志另行保留。标签流程还传递 `linux-delivery`，供没有源码检出的新 runner 验证 SDK 和 wheel，然后整理发布附件。
 
@@ -30,11 +30,11 @@ PR 使用 GitHub 默认的[模拟合并引用](https://docs.github.com/en/action
 | 检查 | 内容 |
 | --- | --- |
 | Versions and tooling | actionlint 工作流静态检查；CMake、Python、vcpkg 版本一致性；数据导入、CI 规划、交付与发布脚本测试；标签提交归属检查 |
-| Linux C++ and Python 3.13 | Ubuntu 24.04：完整无界面 C++ 数值与行为测试、Python API、九个示例和 C++/Python 对照；标签流程额外构建 SDK 和基准 wheel |
+| Linux C++ and Python 3.13 | Ubuntu 24.04：完整无界面 C++ 数值与行为测试、Python API、十个示例和 C++/Python 对照；标签流程额外构建 SDK 和基准 wheel |
 | Linux ASan/UBSan | 独立的手动 `Sanitizers` 工作流；Ubuntu 24.04，全量用例，不加筛选；保存命令、构建配置和 JUnit |
 | Linux SDK and installed Python API | 仅标签流程：新 runner 不检出源码，校验交付散列、迁移 SDK、离线安装 wheel，运行消费端、API、示例和 C++/Python 对照 |
 | Windows desktop and Python 3.13 | Windows Server 2022 / VS 2022：桌面编译、CTest 与 Qt offscreen、Python API 及示例；标签流程额外构建便携包、SDK 和基准 wheel，验证 SDK 解压迁移及 wheel 安装 |
-| Python 3.11 / 3.12 / 3.14 / 3.15 × Windows / Linux | PR、手动 `CI` 及标签流程执行；复用相应平台的原生依赖，编译各解释器扩展，运行 API 测试及九个示例；标签流程改为构建、安装 wheel 后测试 |
+| Python 3.11 / 3.12 / 3.14 / 3.15 × Windows / Linux | PR、手动 `CI` 及标签流程执行；复用相应平台的原生依赖，编译各解释器扩展，运行 API 测试及十个示例；标签流程改为构建、安装 wheel 后测试 |
 | CI passed | 按本次范围检查全部预期常规作业；失败、取消或意外跳过都会失败，仅允许该范围明确计划的跳过 |
 
 GitHub 的 `main` 分支规则应要求通过 PR 合并、**CI passed** 成功，并要求分支合并前保持最新；禁用绕过和强制推送。仓库中的规范和工作流不会自动修改 GitHub 分支保护设置。

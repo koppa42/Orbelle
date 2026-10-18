@@ -36,6 +36,7 @@
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QWheelEvent>
+#include <cmath>
 #include <gtest/gtest.h>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
@@ -1322,4 +1323,77 @@ TEST(ReportDialog, CovarianceUsesSavedSettingsAndPublishesSharedResult) {
         report_available(dialog, static_cast<int>(application::ReportKind::state_covariance)));
 }
 } // namespace
+} // namespace orbitforge::desktop
+
+namespace orbitforge::desktop {
+TEST(ReportDialog, OrbitalEventsSummaryTimeSeekAndResponsiveLayout) {
+    (void)test_app();
+    if (!runtime::two_body_available())
+        GTEST_SKIP();
+    const auto data = runtime::DataSnapshot::builtin_time();
+    application::Project project("Orbital events", core::Epoch{0}, core::Epoch{18000000000000LL});
+    application::ProjectSatellite sat;
+    sat.display_name = "LEO · 观测一号";
+    sat.orbit.first = project.first;
+    sat.orbit.last = project.last;
+    sat.orbit.initial = {
+        project.first, core::OriginId::earth, core::FrameId::gcrf, {7e6, 0, 0}, {0, 8000, 2000}};
+    project.satellites.push_back(sat);
+    std::shared_ptr<const runtime::ReportResult> published;
+    core::Epoch sought{-1};
+    ReportDialog dialog(
+        project, data.time(),
+        [&](const application::ReportQuery &, auto ready) {
+            ready(ReportInput{project, data}, {});
+        },
+        [](auto) {}, [&](auto at) { sought = at; });
+    dialog.result_published = [&](auto value, const auto &) { published = value; };
+    dialog.select_object(sat.orbit.object_id, application::ReportKind::orbital_events);
+    dialog.resize(1140, 780);
+    dialog.show();
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    ASSERT_TRUE(published);
+    ASSERT_TRUE(published->orbital_event_statistics);
+    auto *table = dialog.findChild<QTableView *>("reportTable");
+    EXPECT_GT(table->model()->rowCount(), 8);
+    EXPECT_FALSE(dialog.findChild<QTabBar *>("reportViews")->isTabEnabled(1));
+    EXPECT_EQ(dialog.findChild<QLabel *>("accessMetric0")->text().toULongLong(),
+              published->orbital_event_statistics->counts[0]);
+    EXPECT_TRUE(dialog.findChild<QLabel *>("orbitalEventNotice")->isHidden());
+    const auto epoch = std::get<core::Epoch>(published->table.rows()[2][2]);
+    QMetaObject::invokeMethod(table, "doubleClicked", Qt::DirectConnection,
+                              Q_ARG(QModelIndex, table->model()->index(2, 3)));
+    EXPECT_EQ(sought, epoch);
+    const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    if (!capture.isEmpty())
+        QDir().mkpath(capture);
+    for (const auto width : {1140, 420}) {
+        dialog.resize(width, 780);
+        for (int i = 0; i < 5; ++i) {
+            QCoreApplication::processEvents();
+            QThread::msleep(10);
+        }
+        EXPECT_EQ(table->model()->rowCount(), static_cast<int>(published->table.rows().size()));
+        EXPECT_LE(dialog.minimumSizeHint().width(), 420);
+        if (!capture.isEmpty())
+            dialog.grab().save(capture + QString("/orbital-events-%1.png").arg(width));
+    }
+    project.satellites[0].orbit.initial.velocity_mps = {0, std::sqrt(3.986004418e14 / 7e6), 0};
+    dialog.update_project(project, data.time());
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    ASSERT_TRUE(published);
+    EXPECT_TRUE(published->table.rows().empty());
+    EXPECT_FALSE(dialog.findChild<QLabel *>("orbitalEventNotice")->isHidden());
+    EXPECT_TRUE(
+        dialog.findChild<QLabel *>("orbitalEventNotice")->text().contains(QStringLiteral("近圆")));
+    const auto rows = published->table.rows();
+    project.satellites.clear();
+    dialog.update_project(project, data.time());
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    EXPECT_EQ(published->table.rows(), rows);
+}
+
 } // namespace orbitforge::desktop

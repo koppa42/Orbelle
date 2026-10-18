@@ -202,7 +202,10 @@ class AnalysisReportTests(unittest.TestCase):
                     continue
                 report = analysis.report(kind, **options)
                 self.assertIsInstance(report, of.ReportResult)
-                self.assertGreater(report.table.row_count, 0)
+                if kind == of.ReportKind.ORBITAL_EVENTS:
+                    self.assertIsNotNone(report.orbital_event_statistics)
+                else:
+                    self.assertGreater(report.table.row_count, 0)
                 self.assertEqual(report.input_revision, analysis.revision)
                 self.assertEqual(report.data_sha256, data.data_lock.sha256)
                 if kind == of.ReportKind.STATE_COVARIANCE:

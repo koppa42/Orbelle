@@ -9,6 +9,7 @@
 #include <orbitforge/core/frames/frame_provider.hpp>
 #include <orbitforge/results/access_windows.hpp>
 #include <orbitforge/results/lighting.hpp>
+#include <orbitforge/results/orbital_events.hpp>
 #include <orbitforge/results/table.hpp>
 #include <stdexcept>
 
@@ -45,6 +46,7 @@ struct ReportResult {
     std::shared_ptr<const results::Table> source_table = {};
     std::optional<results::AccessStatistics> access_statistics = {};
     std::optional<results::LightingStatistics> lighting_statistics = {};
+    std::optional<results::OrbitalEventStatistics> orbital_event_statistics = {};
     [[nodiscard]] ReportResult with_template(const application::ReportTemplate &format) const;
 };
 class ReportCancelled : public std::runtime_error {

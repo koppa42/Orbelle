@@ -18,9 +18,9 @@
 | 地面站联动 | 最低仰角、短窗口辅助搜索、过境极值与统计、AER；卫星圆锥子传感器、对地心 / 理想跟踪；时间轴与二维地图关联 |
 | 卫星显示 | 轨迹线型、颜色、粗细及即时预览；按对象保存；可选本地三维模型 |
 | 数据中心 | C04、finals2000A、UTC / 闰秒完整文件下载与自动更新；来源优先级、覆盖检查、有限 EOP 外推 |
-| 报告与曲线 | 十二种报告（含 Access / AER / 光照与地影 / HPOP 协方差）；对象范围、时间采样、多对象曲线、缩放与时刻定位、CSV / PNG 导出、项目内模板 |
+| 报告与曲线 | 十三种报告（含 Access / AER / 光照与地影 / 轨道事件 / HPOP 协方差）；对象范围、时间采样、多对象曲线、缩放与时刻定位、CSV / PNG 导出、项目内模板 |
 | 报告模板 API | Python/C++ 共用查询与模板模型；字段选择、顺序、逐列单位与标题，复用已有结果更换显示格式 |
-| 项目文件 | `.orbitforge` 版本化容器、完整性校验、原子保存；开发阶段仅读写当前 v43 / OBJS32，不兼容旧格式，API 支持数据确认和分析来源记录 |
+| 项目文件 | `.orbitforge` 版本化容器、完整性校验、原子保存；开发阶段仅读写当前 v44 / OBJS32，不兼容旧格式，API 支持数据确认和分析来源记录 |
 | 开发接口 | 模块化 C++20 库与 CMake SDK；pybind11 Python 包；桌面与脚本共用 Runtime |
 
 新场景使用当前计算数据；打开或重新计算时，数据发生变化须经用户确认。计算过程保持数据一致，项目记录实际使用的数据哈希供溯源。外部模型和 EOP 文件仍为独立依赖，详见[项目格式](docs/architecture/project_files.md)和[数据中心](docs/architecture/data_center.md)。
@@ -69,7 +69,7 @@ Python 对象统一通过 `project.objects` 创建，支持带类型的对象句
 
 C++ 包含 `<orbitforge/orbitforge.hpp>`，通过 `of::Project` 的 `objects()`、`prepare()`、`save()` 与 `Project::open()` 完成相同流程；创建对象使用 `of::objects::Satellite` 等配置值，事务显式提交。参见 [C++ 项目 API](docs/architecture/cpp_api.md)。
 
-`project.prepare()` 捕获固定分析输入，提供状态、可见区间、AER 和十类内置报告查询：`analysis.states(sat, step=u.s(30))`、`analysis.access(station, sensor, search_step=u.s(1))`、`analysis.aer(station, sensor, step=u.s(10))`、`analysis.report(of.ReportKind.CARTESIAN_STATE, objects=[sat], step=u.s(30))`。可见区间与 AER 需准备 UTC/EOP 数据；数据变化通过固定计划确认。结果可直接导出 CSV，NumPy/pandas 为可选适配。参见[分析 API](docs/architecture/analysis_api.md)、[状态示例](examples/python/analysis.py)及[可见区间、AER 与报告示例](examples/python/access.py)。
+`project.prepare()` 捕获固定分析输入，提供状态、可见区间、AER 和十三类内置报告查询：`analysis.states(sat, step=u.s(30))`、`analysis.access(station, sensor, search_step=u.s(1))`、`analysis.aer(station, sensor, step=u.s(10))`、`analysis.report(of.ReportKind.CARTESIAN_STATE, objects=[sat], step=u.s(30))`。可见区间与 AER 需准备 UTC/EOP 数据；数据变化通过固定计划确认。结果可直接导出 CSV，NumPy/pandas 为可选适配。参见[分析 API](docs/architecture/analysis_api.md)、[状态示例](examples/python/analysis.py)及[可见区间、AER 与报告示例](examples/python/access.py)。
 
 报告可通过 `template=of.reports.Template([...])` 选择字段和显示单位，也可用 `template.apply(result)` 复用已有结果。全部适用对象使用 `objects=of.reports.ALL`，空列表报错。详见[报告模板](docs/architecture/reports.md)和[可运行示例](examples/python/report_templates.py)。
 

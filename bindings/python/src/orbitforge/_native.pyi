@@ -1463,6 +1463,7 @@ class ReportKind:
     STATE_COVARIANCE: ReportKind
     LIGHTING_INTERVALS: ReportKind
     LIGHTING_STATE: ReportKind
+    ORBITAL_EVENTS: ReportKind
     ACCESS_INTERVALS: ReportKind
     AER: ReportKind
     SCENARIO_SUMMARY: ReportKind
@@ -1545,6 +1546,16 @@ class ReportScope:
     OBJECTS: ReportScope
     ALL_COMPATIBLE: ReportScope
 
+class OrbitalEventStatistics:
+    @property
+    def object_count(self) -> int: ...
+    @property
+    def counts(self) -> list[int]: ...
+    @property
+    def near_circular_objects(self) -> int: ...
+    @property
+    def near_equatorial_objects(self) -> int: ...
+
 class ReportQuery:
     lighting_ephemeris: str
     event_search_mode: AccessSearchMode
@@ -1619,6 +1630,8 @@ class LightingStatistics:
 class ReportResult:
     @property
     def lighting_statistics(self) -> LightingStatistics | None: ...
+    @property
+    def orbital_event_statistics(self) -> OrbitalEventStatistics | None: ...
     @property
     def access_statistics(self) -> AccessStatistics | None: ...
     @property
