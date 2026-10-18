@@ -210,7 +210,7 @@ TEST(Reports, SavedDefinitionsRoundTripAndMissingBindingsDoNotPreventProjectLoad
     d.format.time_scale = application::ReportTimeScale::tt;
     p.reports.push_back(d);
     const auto bytes = application::encode_project(p);
-    EXPECT_EQ(bytes[8], 44);
+    EXPECT_EQ(bytes[8], 45);
     const auto restored = application::decode_project(bytes);
     ASSERT_EQ(restored.reports.size(), 1U);
     EXPECT_EQ(application::encode_project(restored), bytes);
@@ -368,6 +368,10 @@ TEST(Reports, SatelliteGeodeticRequiresConfirmedEopAndNewTemplatesRoundTrip) {
         if (application::report_is_access(kind)) {
             d.query.scope = application::ReportScope::objects;
             d.query.object_ids = {"station", "satellite-1"};
+        }
+        if (application::report_is_intersatellite(kind)) {
+            d.query.scope = application::ReportScope::objects;
+            d.query.object_ids = {"satellite-1", "satellite-2"};
         }
         d.id = "template-" + std::to_string(static_cast<int>(kind));
         c.project.reports.push_back(d);

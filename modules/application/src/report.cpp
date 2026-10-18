@@ -18,6 +18,25 @@ std::vector<results::Column> report_columns(ReportKind kind) {
                                        {"state.x", "ITRF X", "m"},
                                        {"state.y", "ITRF Y", "m"},
                                        {"state.z", "ITRF Z", "m"}});
+    } else if (report_is_intersatellite(kind)) {
+        columns.push_back(
+            {"time.epoch", kind == ReportKind::relative_motion ? "Time" : "Start", "epoch"});
+        if (kind == ReportKind::intersatellite_access)
+            columns.insert(columns.end(),
+                           {{"access.stop", "Stop", "epoch"},
+                            {"access.duration", "Duration", "s"},
+                            {"access.start_clipped", "Start clipped", ""},
+                            {"access.stop_clipped", "Stop clipped", ""},
+                            {"access.min_range", "Minimum range", "m"},
+                            {"access.min_range_time", "Minimum range time", "epoch"}});
+        else
+            columns.insert(columns.end(), {{"relative.range", "Range", "m"},
+                                           {"relative.range_rate", "Range rate", "m/s"},
+                                           {"relative.speed", "Inertial relative speed", "m/s"},
+                                           {"relative.radial", "RIC radial", "m"},
+                                           {"relative.in_track", "RIC in-track", "m"},
+                                           {"relative.cross_track", "RIC cross-track", "m"},
+                                           {"access.visible", "Visible", ""}});
     } else if (kind == ReportKind::orbital_events) {
         columns.insert(columns.end(), {{"time.epoch", "Time", "epoch"},
                                        {"event.kind", "Event", ""},
@@ -116,7 +135,7 @@ bool report_uses_utc(const ReportTemplate &format, ReportKind kind) {
     return false;
 }
 void validate_report_query(const ReportQuery &d) {
-    if (d.kind < ReportKind::scenario_summary || d.kind > ReportKind::orbital_events ||
+    if (d.kind < ReportKind::scenario_summary || d.kind > ReportKind::intersatellite_access ||
         (d.scope != ReportScope::objects && d.scope != ReportScope::all_compatible) ||
         (d.frame != core::FrameId::gcrf && d.frame != core::FrameId::itrf) ||
         d.step_nanoseconds < 1 || d.step_nanoseconds > 86400LL * 1'000'000'000 ||
@@ -134,6 +153,9 @@ void validate_report_query(const ReportQuery &d) {
     if (report_is_access(d.kind) && (d.scope != ReportScope::objects || d.object_ids.size() != 2 ||
                                      d.step_nanoseconds < 1'000'000))
         throw std::invalid_argument("Access requires a station/target pair and step >= 1 ms");
+    if (report_is_intersatellite(d.kind) &&
+        (d.scope != ReportScope::objects || d.object_ids.size() != 2))
+        throw std::invalid_argument("Intersatellite reports require primary and target satellites");
     if (d.event_tolerance_nanoseconds < 1 ||
         d.event_tolerance_nanoseconds > 86400LL * 1'000'000'000 ||
         (d.event_search_mode != core::AccessSearchMode::fixed_grid &&

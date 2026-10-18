@@ -40,4 +40,4 @@ print(events.orbital_event_statistics.counts)
 events.export_csv("events.csv")
 ```
 
-完整示例：[orbital_events.py](../../examples/python/orbital_events.py)。C++ 使用相同 `ReportDefinition` 和 `Analysis::report`，低层求根入口为 `core::find_orbital_events`。项目格式 v44 / RPTS5 增加报告枚举 12，保留现有搜索字段；只读写当前格式，不迁移旧版。验证见[轨道事件协议](../validation/orbital_events_protocol.md)。
+完整示例：[orbital_events.py](../../examples/python/orbital_events.py)。C++ 使用相同 `ReportDefinition` 和 `Analysis::report`，低层求根入口为 `core::find_orbital_events`。当前项目格式 v45 / RPTS6 保存报告枚举 12，保留现有搜索字段；只读写当前格式，不迁移旧版。验证见[轨道事件协议](../validation/orbital_events_protocol.md)。

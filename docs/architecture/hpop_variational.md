@@ -1,6 +1,6 @@
 # HPOP 状态转移与常参数敏感度
 
-`propagate_hpop_variational` 从初始状态传播一个滑行段，返回末端名义状态、6×6 状态转移矩阵 Φ，以及 Drag / SRP 的六维参数敏感度。C++、安装 SDK 和 Python 使用同一 Core 实现。接口仍采用地心 GCRF、TAI `Epoch` 和 SI；[联合协方差接口](hpop_covariance.md)已接入矩阵输入、D/K 方差和交叉项；LVLH/Frenet 与 IERS1996 J2000/TOD 转换、项目查询、报告及桌面配置已接入；FG 表示、JPLFile 章动及跨机动仍待实现。项目结构保持 v44 / OBJS32。
+`propagate_hpop_variational` 从初始状态传播一个滑行段，返回末端名义状态、6×6 状态转移矩阵 Φ，以及 Drag / SRP 的六维参数敏感度。C++、安装 SDK 和 Python 使用同一 Core 实现。接口仍采用地心 GCRF、TAI `Epoch` 和 SI；[联合协方差接口](hpop_covariance.md)已接入矩阵输入、D/K 方差和交叉项；LVLH/Frenet 与 IERS1996 J2000/TOD 转换、项目查询、报告及桌面配置已接入；FG 表示、JPLFile 章动及跨机动仍待实现。项目结构保持 v45 / OBJS32。
 
 参数遵循 [STK HPOP Covariance](https://help.agi.com/stk/Content/hpop/hpop-covariance.htm)：D=Cd×DragArea/Mass、K=Cr×SRPArea/Mass，单位 m²/kg。返回的是对 D/K 的偏导，而非对 Cd/Cr 的偏导。名义参数为零仍保留对应敏感度；关闭某项力则其参数列为零。
 

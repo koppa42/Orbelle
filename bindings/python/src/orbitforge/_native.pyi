@@ -1464,6 +1464,8 @@ class ReportKind:
     LIGHTING_INTERVALS: ReportKind
     LIGHTING_STATE: ReportKind
     ORBITAL_EVENTS: ReportKind
+    RELATIVE_MOTION: ReportKind
+    INTERSATELLITE_ACCESS: ReportKind
     ACCESS_INTERVALS: ReportKind
     AER: ReportKind
     SCENARIO_SUMMARY: ReportKind
@@ -1556,6 +1558,16 @@ class OrbitalEventStatistics:
     @property
     def near_equatorial_objects(self) -> int: ...
 
+class IntersatelliteStatistics:
+    @property
+    def minimum_range(self) -> AccessExtremum: ...
+    @property
+    def maximum_range(self) -> AccessExtremum: ...
+    @property
+    def visibility(self) -> AccessStatistics: ...
+    @property
+    def windows(self) -> list[AccessInterval]: ...
+
 class ReportQuery:
     lighting_ephemeris: str
     event_search_mode: AccessSearchMode
@@ -1632,6 +1644,8 @@ class ReportResult:
     def lighting_statistics(self) -> LightingStatistics | None: ...
     @property
     def orbital_event_statistics(self) -> OrbitalEventStatistics | None: ...
+    @property
+    def intersatellite_statistics(self) -> IntersatelliteStatistics | None: ...
     @property
     def access_statistics(self) -> AccessStatistics | None: ...
     @property

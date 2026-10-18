@@ -22,7 +22,7 @@
 | 基础协方差 | 单滑行段 6×6 矩阵、独立重力截断、D/K 考虑参数及交叉项；GCRF / LVLH / Frenet / IERS1996 J2000、TOD 输入 | [变分传播](../validation/hpop_variational_protocol.md)、[联合矩阵](../validation/hpop_covariance_protocol.md)、[项目接入](../validation/hpop_covariance_project_protocol.md) |
 | 工作流 | 桌面分组设置、C++ / Python、项目保存重开、状态与协方差报告、曲线和 CSV；取消及失败保留有效状态 | 项目、Qt、独立安装 Python / SDK 测试及当前提交 CI |
 
-首版数值功能继续要求成熟算法或原始模型的独立对照，不能以延期高级功能为由降低容限。协方差限于单滑行段：圆柱食影和零宽度密度硬切换会明确拒绝；报告目前逐点从初始历元积分，密集长弧输出不作性能承诺。项目只读写当前 v44 / OBJS32。固定输出的轨道步长仍为 1–60 整数秒，停止高度相对重力参考球面。
+首版数值功能继续要求成熟算法或原始模型的独立对照，不能以延期高级功能为由降低容限。协方差限于单滑行段：圆柱食影和零宽度密度硬切换会明确拒绝；报告目前逐点从初始历元积分，密集长弧输出不作性能承诺。项目只读写当前 v45 / OBJS32。固定输出的轨道步长仍为 1–60 整数秒，停止高度相对重力参考球面。
 
 ### 延期范围
 
@@ -108,10 +108,10 @@
 | Integrator | Fixed/Relative Error；Tolerance；Min/Max Step | 部分：独立 Fixed/Relative Error 选择已实现；RK4/GJ 强制固定，RKF/RKV/BS 两模式，固定网格及 BS 十八阶外推已验证。固定/自适应范围已扩至 1e−6–86400 s，自适应缓存不再截短配置上限，并有局部动力学首步估计及长弧独立对照。相对误差仍为混合绝对/相对分量尺度；STK 误差范数、完整合法范围/默认值及实机组合仍待核对，截图仅参考 |
 | Integrator | Interpolation 方法；Order；VOP μ | 部分：Lagrange / Hermite / VOP、独立插值 μ、项目自动装配、机动分段、UI / 持久化 / 分析及报告已接入并有独立参考，见[科学插值](orbit_interpolation.md)；VOP 通用变量搬移与 Hipparchus 插值、J2 步长收敛对照已接入，STK 同配置验收仍待完成 |
 | Integrator | Allow PosVel Covariance Interpolation | 延期：在现有协方差传播上验证插值、对称性与半正定性 |
-| Integrator | Time Regularization；Exponent；Steps Per Orbit | 已接入：Sundman 方程、初始椭圆每圈尺度、五种积分器、物理 Min/Max Step、整数 TAI、天气分段、机动重启及科学插值；C++ / Python / 项目 v44 / UI 共用配置。非椭圆归一化明确拒绝；尚无 STK 同配置实测，见[时间正则化契约](time_regularization.md) |
+| Integrator | Time Regularization；Exponent；Steps Per Orbit | 已接入：Sundman 方程、初始椭圆每圈尺度、五种积分器、物理 Min/Max Step、整数 TAI、天气分段、机动重启及科学插值；C++ / Python / 项目 v45 / UI 共用配置。非椭圆归一化明确拒绝；尚无 STK 同配置实测，见[时间正则化契约](time_regularization.md) |
 | Integrator | Report Ephemeris on a Fixed Time Step | 部分：显式工厂及普通项目均支持接受端点或让积分步停在固定 TAI 输出网格，保留天气边界；UI、保存与报告已接入。项目轨道步长当前限于 1–60 整数秒，完整合法范围及短段策略仍待 STK 实测核对 |
 | Integrator | Do not propagate below altitude | 已有按力评估停止的参考球面地心高度；STK 比较须核对其高度参考面 |
-| Covariance | Compute Covariance；6×6 初始矩阵 | [状态转移与 D/K 常参数变分传播](hpop_variational.md)已提供 C++ / Python / SDK 单段接口；[GCRF 联合协方差](hpop_covariance.md)已接入矩阵输入、传播输出与考虑参数项；LVLH/Frenet 与 J2000/TOD（IERS1996）转换已接入；项目 v44、桌面编辑器及 Analysis/报告已接入。计算基础已完成中心引力、第三体与三项相对论的解析状态偏导及独立数值对照，见[力状态偏导](force_differential.md)。阻力及球面 SRP 的局部状态／D、K 偏导已提供；[卫星视太阳状态链](apparent_sun_differential.md)已完成；[总力状态块及 D/K 装配](hpop_force.md)已接入共用力入口；联合矩阵的 SI 单位与正定校验已明确；圆柱／硬密度切换的事件跳变仍待接入；关闭不影响确定性轨迹 |
+| Covariance | Compute Covariance；6×6 初始矩阵 | [状态转移与 D/K 常参数变分传播](hpop_variational.md)已提供 C++ / Python / SDK 单段接口；[GCRF 联合协方差](hpop_covariance.md)已接入矩阵输入、传播输出与考虑参数项；LVLH/Frenet 与 J2000/TOD（IERS1996）转换已接入；项目 v45、桌面编辑器及 Analysis/报告已接入。计算基础已完成中心引力、第三体与三项相对论的解析状态偏导及独立数值对照，见[力状态偏导](force_differential.md)。阻力及球面 SRP 的局部状态／D、K 偏导已提供；[卫星视太阳状态链](apparent_sun_differential.md)已完成；[总力状态块及 D/K 装配](hpop_force.md)已接入共用力入口；联合矩阵的 SI 单位与正定校验已明确；圆柱／硬密度切换的事件跳变仍待接入；关闭不影响确定性轨迹 |
 | Covariance | Frame；Representation | 部分：GCRF、STK LVLH=(R,I,C)、Frenet=(N,T,C) 的 Cartesian 转换已接入 C++/Python/SDK，显式区分 projected/rotating 并转换 D/K 交叉项；200 组 Orekit/高精度参考。J2000/TOD 的 IERS1996 模式已有 48 组旋转/导数及 96 组联合矩阵对照；项目/UI 已接入 Cartesian；JPLFile 章动、FG 和 STK 初始局部系速度约定仍待完成，见[协方差契约](hpop_covariance.md) |
 | Covariance | 独立 Gravity Degree / Order | 已接入单段变分方程的独立阶／次，保持名义力模型；协方差 UI 已接入。基础已完成：最高 2190 阶解析引力 Hessian、极轴及固定历元潮汐/长期变化系数偏导，通过 Orekit 与高精度解析值对照，见[引力空间偏导](gravity_differential.md)。单段接口已支持协方差矩阵；项目与 UI 已接入，独立截断不改变名义加速度 |
 | Covariance | Include Consider Analysis；Use / Value / x,y,z,vx,vy,vz | Drag / SRP 的 D、K 力参数偏导已完成；全局 D/K 参数敏感度已接入；D/K 参数方差、状态交叉协方差及其传播已接入；项目与 UI 已接入，OutGasTimeConstant、OutGasMagnitude、ThrustX/Y/Z 还需对应的名义力及参数定义 |

@@ -1,0 +1,47 @@
+{
+  "reference": "Orekit 13.1.2 / Hipparchus 4.0.2",
+  "dependencies": [
+    {
+      "filename": "hipparchus-core-4.0.2.jar",
+      "url": "https://repo.maven.apache.org/maven2/org/hipparchus/hipparchus-core/4.0.2/hipparchus-core-4.0.2.jar",
+      "sha256": "7c56992f3af64429d871c33c00808ee5db5d9ed56b395b5d3d31319c4ef7ba0a"
+    },
+    {
+      "filename": "hipparchus-filtering-4.0.2.jar",
+      "url": "https://repo.maven.apache.org/maven2/org/hipparchus/hipparchus-filtering/4.0.2/hipparchus-filtering-4.0.2.jar",
+      "sha256": "7f7d97b5141218f8d96765fbc96a87ed2064c48f80ccd48cc1286eff41fec21b"
+    },
+    {
+      "filename": "hipparchus-fitting-4.0.2.jar",
+      "url": "https://repo.maven.apache.org/maven2/org/hipparchus/hipparchus-fitting/4.0.2/hipparchus-fitting-4.0.2.jar",
+      "sha256": "4610b8ecfb6c083fd08b8698a022bb65afc1ceeeeec375eeee5f25441aade3ba"
+    },
+    {
+      "filename": "hipparchus-geometry-4.0.2.jar",
+      "url": "https://repo.maven.apache.org/maven2/org/hipparchus/hipparchus-geometry/4.0.2/hipparchus-geometry-4.0.2.jar",
+      "sha256": "4e8eede49aabd4fb71f08dd0b8b87297a9e78ed36f05c3caa4e63de5f469cceb"
+    },
+    {
+      "filename": "hipparchus-ode-4.0.2.jar",
+      "url": "https://repo.maven.apache.org/maven2/org/hipparchus/hipparchus-ode/4.0.2/hipparchus-ode-4.0.2.jar",
+      "sha256": "9d6fc6bc8d41068d5bc2a0880e31366e203890df8a49a9d16a39eea6595e6f7b"
+    },
+    {
+      "filename": "hipparchus-optim-4.0.2.jar",
+      "url": "https://repo.maven.apache.org/maven2/org/hipparchus/hipparchus-optim/4.0.2/hipparchus-optim-4.0.2.jar",
+      "sha256": "21fdb9ed87b14d7ae5c254e2d9db66b2b7984ab8c9123a26148c98f3e57716c4"
+    },
+    {
+      "filename": "hipparchus-stat-4.0.2.jar",
+      "url": "https://repo.maven.apache.org/maven2/org/hipparchus/hipparchus-stat/4.0.2/hipparchus-stat-4.0.2.jar",
+      "sha256": "1cae30333c2d6c9658a8bb0fd9381a27dcc03465c7b4bcefa49af9213ba4dd92"
+    },
+    {
+      "filename": "orekit-13.1.2.jar",
+      "url": "https://repo.maven.apache.org/maven2/org/orekit/orekit/13.1.2/orekit-13.1.2.jar",
+      "sha256": "89c2060c60dbe194a87dddcf3bb8343ebd16733958efe4dcc996cebbbeed655d"
+    }
+  ],
+  "source_sha256": "ba2a91ccd9eb6dd859d0e8e09435cda8762ee0c3e67074e9534f9f6a2157a5bc",
+  "reference_sha256": "48868b40321c20ab663d0c39314bb04892c4191782cd4f450e900d03f5b4b98e"
+}

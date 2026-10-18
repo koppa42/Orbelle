@@ -1662,7 +1662,7 @@ class Workbench final : public QMainWindow {
     }
     void mark_project_dirty(bool dirty = true) {
         project_dirty_ = dirty;
-        if (access_session_ && scenario_ &&
+        if (!access_hash_.empty() && scenario_ &&
             runtime::report_input_sha256(project_snapshot(project_path_)) != access_hash_)
             clear_access_display();
         if (report_dialog_ && scenario_)
@@ -1885,37 +1885,53 @@ class Workbench final : public QMainWindow {
                     seek_epoch(epoch);
                 },
                 this);
-            report_dialog_->result_published =
-                [this](std::shared_ptr<const runtime::ReportResult> result,
-                       const runtime::Analysis &analysis) {
-                    clear_access_display();
-                    if (!application::report_is_access(result->definition.query.kind))
-                        return;
-                    const auto &ids = result->definition.query.object_ids;
-                    // The map/timeline session uses the same confirmed resources as the report.
-                    const auto &data = analysis.data();
-                    access_session_.emplace(
-                        runtime::ReportContext{*analysis.snapshot().project, data.time(),
-                                               data.frames(), data.eop(), data.gravity_models(),
-                                               data.ephemerides(), data.weather_sources(),
-                                               data.ocean_tide_models()},
-                        ids[0], ids[1]);
-                    access_hash_ = runtime::report_input_sha256(*analysis.snapshot().project);
-                    access_ids_ = ids;
+            report_dialog_
+                ->result_published = [this](std::shared_ptr<const runtime::ReportResult> result,
+                                            const runtime::Analysis &analysis) {
+                clear_access_display();
+                if (result->intersatellite_statistics) {
                     std::vector<std::pair<qint64, qint64>> windows;
-                    if (result->definition.query.kind ==
-                        application::ReportKind::access_intervals) {
-                        const auto &source =
-                            result->source_table ? *result->source_table : result->table;
-                        for (const auto &row : source.rows())
-                            windows.emplace_back(
-                                std::get<core::Epoch>(row[2]).tai_nanoseconds() / 1'000'000,
-                                std::get<core::Epoch>(row[3]).tai_nanoseconds() / 1'000'000);
-                        timeline_->set_access_intervals(
-                            std::move(windows), QString::fromStdString(access_session_->name()));
-                    }
-                    update_access_display();
-                };
+                    for (const auto &w : result->intersatellite_statistics->windows)
+                        windows.emplace_back(w.first.tai_nanoseconds() / 1'000'000,
+                                             w.last.tai_nanoseconds() / 1'000'000);
+                    const auto &ids = result->definition.query.object_ids;
+                    const auto &satellites = analysis.snapshot().project->satellites;
+                    const auto name = [&](const std::string &id) {
+                        const auto found = std::ranges::find_if(
+                            satellites, [&](const auto &sat) { return sat.orbit.object_id == id; });
+                        return found == satellites.end() ? id : found->name();
+                    };
+                    access_hash_ = runtime::report_input_sha256(*analysis.snapshot().project);
+                    timeline_->set_access_intervals(
+                        std::move(windows),
+                        QString::fromStdString(name(ids[0]) + " → " + name(ids[1])));
+                    return;
+                }
+                if (!application::report_is_access(result->definition.query.kind))
+                    return;
+                const auto &ids = result->definition.query.object_ids;
+                // The map/timeline session uses the same confirmed resources as the report.
+                const auto &data = analysis.data();
+                access_session_.emplace(
+                    runtime::ReportContext{*analysis.snapshot().project, data.time(), data.frames(),
+                                           data.eop(), data.gravity_models(), data.ephemerides(),
+                                           data.weather_sources(), data.ocean_tide_models()},
+                    ids[0], ids[1]);
+                access_hash_ = runtime::report_input_sha256(*analysis.snapshot().project);
+                access_ids_ = ids;
+                std::vector<std::pair<qint64, qint64>> windows;
+                if (result->definition.query.kind == application::ReportKind::access_intervals) {
+                    const auto &source =
+                        result->source_table ? *result->source_table : result->table;
+                    for (const auto &row : source.rows())
+                        windows.emplace_back(
+                            std::get<core::Epoch>(row[2]).tai_nanoseconds() / 1'000'000,
+                            std::get<core::Epoch>(row[3]).tai_nanoseconds() / 1'000'000);
+                    timeline_->set_access_intervals(
+                        std::move(windows), QString::fromStdString(access_session_->name()));
+                }
+                update_access_display();
+            };
         }
         workspace_->open(report_dialog_, false);
     }
@@ -6238,7 +6254,7 @@ class Workbench final : public QMainWindow {
                 auto *priority = dialog->findChild<QListWidget *>("eopSourcePriority");
                 auto *pages = dialog->findChild<QTabWidget *>("dataPages");
                 require(pages && details && automatic && automatic->isChecked() && inventory &&
-                            inventory->topLevelItemCount() == 3 && priority &&
+                            inventory->topLevelItemCount() == 6 && priority &&
                             inventory->topLevelItem(0)->childCount() == 2 &&
                             priority->isVisible() &&
                             !dialog->findChild<QComboBox *>("eopSnapshots") &&
@@ -6331,7 +6347,7 @@ class Workbench final : public QMainWindow {
                     eop_->data_info().interpolation.starts_with("finals2000a") ? 0 : 1;
                 const auto imported =
                     eop_catalog_->inventory()[static_cast<std::size_t>(imported_row)];
-                require(inventory->topLevelItemCount() == 3 &&
+                require(inventory->topLevelItemCount() == 6 &&
                             inventory->currentItem() == group->child(imported_row) &&
                             imported.provider_index == 2 && imported.acquired_at &&
                             imported.acquisition == runtime::DataAcquisition::imported &&
@@ -7311,9 +7327,13 @@ class Workbench final : public QMainWindow {
                     ->setText(QStringLiteral("对地观测仪"));
                 sensor_editor_->findChild<QuantityEditor *>("sensorHalfAngle")
                     ->set_value(20, Unit::degree);
-                // Inspect the embedded layout on the next frame, after resize events settle.
+                // Embedding, responsive margins and the vertical scrollbar each queue
+                // layout work. Allow the same bounded settling period as other pane checks.
+                smoke_wait_frame_ = frame_count_ + 4;
                 break;
             }
+            if (frame_count_ < smoke_wait_frame_)
+                break;
             auto *scroll = sensor_editor_->findChild<QScrollArea *>("sensorScroll");
             auto *submit = sensor_editor_->findChild<QPushButton *>("applySensor");
             require(scroll && submit && scroll->horizontalScrollBar()->maximum() == 0,
@@ -7329,7 +7349,12 @@ class Workbench final : public QMainWindow {
                 ", contents=" + std::to_string(scroll->widget()->width());
             require(!scroll->horizontalScrollBar()->isVisible(), scroll_details.c_str());
             require(scroll->widget()->width() <= scroll->viewport()->width(),
-                    "Sensor form is wider than its workspace viewport");
+                    qPrintable(QString("Sensor form is wider than its workspace viewport: "
+                                       "contents=%1, viewport=%2, minimum=%3, hint=%4")
+                                   .arg(scroll->widget()->width())
+                                   .arg(scroll->viewport()->width())
+                                   .arg(scroll->widget()->minimumWidth())
+                                   .arg(scroll->widget()->minimumSizeHint().width())));
             record("sensor-editor-embedded-layout");
             submit->click();
             ++orbit_smoke_stage_;

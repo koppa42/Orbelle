@@ -188,6 +188,8 @@ class AnalysisReportTests(unittest.TestCase):
                 options = {}
                 if kind in (of.ReportKind.AER, of.ReportKind.ACCESS_INTERVALS):
                     options.update(station=station, target=sensor, step=u.s(10))
+                elif kind in (of.ReportKind.RELATIVE_MOTION, of.ReportKind.INTERSATELLITE_ACCESS):
+                    options.update(objects=[sat, uncertain], step=u.s(60), last=of.Epoch(60 * 10**9))
                 elif kind == of.ReportKind.STATE_COVARIANCE:
                     options.update(objects=uncertain, step=u.s(60), last=project.first)
                 elif kind != of.ReportKind.SCENARIO_SUMMARY:
