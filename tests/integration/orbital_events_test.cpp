@@ -292,7 +292,7 @@ TEST(OrbitalEvents, IsolatedEndpointRootsAreIncludedOnce) {
     };
     for (auto mode :
          {core::AccessSearchMode::fixed_grid, core::AccessSearchMode::extremum_assisted}) {
-        for (const auto limits : {std::pair{-10., 0.}, std::pair{0., 10.}, std::pair{-10., 10.}}) {
+        for (const auto &limits : {std::pair{-10., 0.}, std::pair{0., 10.}, std::pair{-10., 10.}}) {
             const auto result = core::find_orbital_events(
                 seconds(limits.first), seconds(limits.second), 20'000'000'000, at,
                 core::GravitationalParameter{3.986004418e14}, 1000, mode);
