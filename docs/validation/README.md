@@ -34,3 +34,5 @@
 光照与地影事件、比例及统计的独立数值对照见[光照验证协议](lighting_protocol.md)。
 
 近远地点与 GCRF 赤道交点的独立 Orekit 对照见[轨道事件协议](orbital_events_protocol.md)。
+
+区域覆盖与重访的 Orekit / Hipparchus 独立对照见[覆盖验证协议](coverage_protocol.md)。

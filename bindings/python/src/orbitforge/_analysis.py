@@ -557,6 +557,7 @@ class Analysis:
                template: reports.Template | None = None,
                event_search_mode: n.AccessSearchMode | None = None,
                lighting_ephemeris: str | None = None,
+               coverage: n.CoverageGrid | None = None,
                boundary_tolerance: Duration | None = None,
                cancelled: Callable[[], bool] | None = None,
                progress: Callable[[int, int], None] | None = None) -> n.ReportResult:
@@ -599,6 +600,10 @@ class Analysis:
         if kind in (n.ReportKind.RELATIVE_MOTION, n.ReportKind.INTERSATELLITE_ACCESS):
             if len(selection) != 2 or not all(isinstance(s, SatelliteHandle) for s in selection):
                 raise TypeError("Intersatellite reports require objects=[primary satellite, target satellite]")
+        is_coverage = kind in (n.ReportKind.COVERAGE_GRID, n.ReportKind.COVERAGE_TIME)
+        if is_coverage and (not 1 <= len(selection) <= 32 or
+                            not all(isinstance(s, (SatelliteHandle, SensorHandle)) for s in selection)):
+            raise TypeError("Coverage requires 1–32 explicit satellite or sensor assets")
         snapshot = self._native.snapshot
         ids = []
         for object in selection:
@@ -616,12 +621,17 @@ class Analysis:
         definition.query.frame = require(frame, n.FrameId, "frame")
         if event_search_mode is not None or boundary_tolerance is not None:
             if kind not in (n.ReportKind.ACCESS_INTERVALS, n.ReportKind.LIGHTING_INTERVALS, n.ReportKind.ORBITAL_EVENTS,
-                            n.ReportKind.RELATIVE_MOTION, n.ReportKind.INTERSATELLITE_ACCESS):
+                            n.ReportKind.RELATIVE_MOTION, n.ReportKind.INTERSATELLITE_ACCESS,
+                            n.ReportKind.COVERAGE_GRID, n.ReportKind.COVERAGE_TIME):
                 raise TypeError("Search mode and boundary tolerance are only used by event or interval reports")
             if event_search_mode is not None:
                 definition.query.event_search_mode = require(event_search_mode, n.AccessSearchMode, "event_search_mode")
             if boundary_tolerance is not None:
                 definition.query.event_tolerance_nanoseconds = require(boundary_tolerance, Duration, "boundary_tolerance").nanoseconds
+        if coverage is not None:
+            if not is_coverage:
+                raise TypeError("coverage is only used by coverage reports")
+            definition.query.coverage = require(coverage, n.CoverageGrid, "coverage")
         if lighting_ephemeris is not None:
             if kind not in (n.ReportKind.LIGHTING_INTERVALS, n.ReportKind.LIGHTING_STATE):
                 raise TypeError("lighting_ephemeris is only used by lighting reports")

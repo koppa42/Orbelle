@@ -33,6 +33,7 @@ from ._native import (
     DataCatalog, CatalogSnapshot, CatalogGravity, GravityInfo, GravityCoefficient, GravitySecularVariations, CatalogEphemeris, ThirdBodyDataInfo, DataAcquisition, EopProduct, data_catalog_available,
     ReportKind, ReportUnits, ReportTimeScale, ReportDefinition, ReportColumn, ReportTable,
     ReportResult, ReportScope, ReportQuery, ReportTemplate, ReportColumnSpec,
+    CoverageGrid, CoverageCell, CoverageTimeStatistics, CoveragePoint, CoverageStatistics,
     LightingStatistics, LightingPhaseStatistics, OrbitalEventStatistics, IntersatelliteStatistics,
 )
 
@@ -52,6 +53,7 @@ from ._analysis import (
 )
 
 __all__ = [
+    "CoverageGrid", "CoverageCell", "CoverageTimeStatistics", "CoveragePoint", "CoverageStatistics",
     "LightingStatistics", "LightingPhaseStatistics", "OrbitalEventStatistics", "IntersatelliteStatistics",
     "CatalogGravity", "GravityInfo", "GravityCoefficient", "GravitySecularVariations", "CatalogEphemeris", "ThirdBodyDataInfo",
     "Analysis", "AnalysisPlan", "ProjectOpenPlan", "AnalysisRecord", "AnalysisStatus", "DataSnapshot", "DataChange", "DataChangedError",

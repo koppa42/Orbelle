@@ -1,3 +1,4 @@
+#include "coverage_report.hpp"
 #include "intersatellite_report.hpp"
 #include "report_execution.hpp"
 #include <algorithm>
@@ -273,6 +274,22 @@ std::string report_input_sha256(const application::Project &project) {
 std::size_t estimate_report_rows(const Project &p, const ReportDefinition &d) {
     validate_project(p);
     validate_report_definition(d);
+    if (report_is_coverage(d.query.kind)) {
+        detail::validate_coverage_assets(p, d.query);
+        const auto cells = core::coverage_grid(d.query.coverage);
+        const auto [first, last] = interval(p, d);
+        check(first.tai_nanoseconds() < last.tai_nanoseconds(),
+              "Coverage requires a positive analysis interval");
+        const auto step = static_cast<std::uint64_t>(d.query.step_nanoseconds);
+        const auto span = ticks_between(first, last);
+        check(span / step < max_report_rows, "Coverage exceeds 200000 time nodes");
+        const auto nodes = span / step + 1 + (span % step != 0);
+        check(nodes <= max_report_rows, "Coverage exceeds 200000 time nodes");
+        check(nodes <= 50'000'000 / (cells.size() * d.query.object_ids.size()),
+              "Coverage grid, assets and interval exceed the evaluation budget");
+        return d.query.kind == ReportKind::coverage_grid ? cells.size()
+                                                         : static_cast<std::size_t>(nodes);
+    }
     const auto selected = report_is_access(d.query.kind) ? std::vector<Selection>{} : select(p, d);
     if (report_is_access(d.query.kind))
         validate_access_pair(p, d.query.object_ids);
@@ -346,16 +363,22 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
     std::optional<results::LightingStatistics> lighting_statistics;
     std::optional<results::OrbitalEventStatistics> orbital_event_statistics;
     std::optional<results::IntersatelliteStatistics> intersatellite_statistics;
+    std::optional<results::CoverageStatistics> coverage_statistics;
     rows.reserve(total);
-    const auto selected =
-        report_is_access(d.query.kind) ? std::vector<Selection>{} : select(context.project, d);
+    const auto selected = (report_is_access(d.query.kind) || report_is_coverage(d.query.kind))
+                              ? std::vector<Selection>{}
+                              : select(context.project, d);
     const auto tick = [&] {
         execution.check_cancelled();
         if (progress)
             progress(rows.size(), total);
         execution.check_cancelled();
     };
-    if (report_is_intersatellite(d.query.kind)) {
+    if (report_is_coverage(d.query.kind)) {
+        auto data = coverage_report(context, d, first, last, total, execution, progress);
+        rows = std::move(data.rows);
+        coverage_statistics = std::move(data.statistics);
+    } else if (report_is_intersatellite(d.query.kind)) {
         auto data = intersatellite_report(context, d, first, last, total, execution, progress);
         rows = std::move(data.rows);
         intersatellite_statistics = std::move(data.statistics);
@@ -680,6 +703,9 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                         first,
                         last,
                         context.time};
+    result.coverage_statistics = std::move(coverage_statistics);
+    if (report_is_coverage(d.query.kind))
+        result.algorithm = "coverage-wgs84-centre-grid-v1;area-weighted-union-v1;revisit-gaps-v1";
     result.intersatellite_statistics = std::move(intersatellite_statistics);
     if (report_is_intersatellite(d.query.kind))
         result.algorithm = "intersatellite-wgs84-gcrf-ric-v1;range-extrema-golden-v1";
@@ -692,7 +718,8 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
         result.algorithm = "geometric-lighting-earth-sphere-v1;uniform-solar-disk-v1;ephemeris=" +
                            d.query.lighting_ephemeris;
     if (d.query.kind == ReportKind::lighting_intervals ||
-        d.query.kind == ReportKind::orbital_events || report_is_intersatellite(d.query.kind))
+        d.query.kind == ReportKind::orbital_events || report_is_intersatellite(d.query.kind) ||
+        report_is_coverage(d.query.kind))
         result.algorithm += d.query.event_search_mode == core::AccessSearchMode::fixed_grid
                                 ? ";fixed-grid-bisection-v1"
                                 : ";extremum-assisted-bisection-v1";

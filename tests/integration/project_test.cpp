@@ -367,7 +367,12 @@ TEST(Project, CurrentSchemaFixturePreservesInputsRelationshipsAndExactEncoding) 
     EXPECT_EQ(project.sensors[0].parent_satellite_id, "satellite-a");
     EXPECT_EQ(project.sensors[0].target_station_id, "station-a");
     EXPECT_EQ(project.sensors[0].pointing, application::SensorPointing::targeted);
-    ASSERT_EQ(project.reports.size(), 4U);
+    ASSERT_EQ(project.reports.size(), 6U);
+    EXPECT_EQ(project.reports[4].query.kind, application::ReportKind::coverage_grid);
+    EXPECT_EQ(project.reports[5].query.kind, application::ReportKind::coverage_time);
+    EXPECT_DOUBLE_EQ(project.reports[4].query.coverage.south_rad, -.2);
+    EXPECT_DOUBLE_EQ(project.reports[4].query.coverage.east_rad, -2.9);
+    EXPECT_FALSE(project.reports[4].query.coverage.include_end_gaps);
     EXPECT_EQ(project.reports[2].query.kind, application::ReportKind::relative_motion);
     EXPECT_EQ(project.reports[3].query.kind, application::ReportKind::intersatellite_access);
     EXPECT_EQ(project.reports[2].query.object_ids,
@@ -439,8 +444,8 @@ TEST(Project, DataLocksHaveStableCanonicalOrderAndRejectDuplicateRoles) {
 }
 TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
     const auto bytes = application::encode_project(example());
-    for (std::uint32_t version = 0; version <= 46; ++version) {
-        if (version == 45)
+    for (std::uint32_t version = 0; version <= 47; ++version) {
+        if (version == 46)
             continue;
         SCOPED_TRACE(version);
         auto unsupported = bytes;
@@ -452,7 +457,7 @@ TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
         } catch (const application::ProjectError &error) {
             EXPECT_NE(std::string(error.what()).find("version " + std::to_string(version) + ";"),
                       std::string::npos);
-            EXPECT_NE(std::string(error.what()).find("reads only version 45"), std::string::npos);
+            EXPECT_NE(std::string(error.what()).find("reads only version 46"), std::string::npos);
         }
     }
 }

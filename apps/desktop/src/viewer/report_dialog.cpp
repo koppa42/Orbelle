@@ -1,4 +1,5 @@
 #include "report_dialog.hpp"
+#include "coverage_map.hpp"
 #include "epoch_editor.hpp"
 #include "object_selection.hpp"
 #include "report_plot.hpp"
@@ -46,6 +47,7 @@
 #include <cmath>
 #include <future>
 #include <map>
+#include <numbers>
 #include <orbitforge/project.hpp>
 
 namespace orbitforge::desktop {
@@ -138,6 +140,10 @@ QString kind_name(ReportKind kind) {
         return QStringLiteral("星间相对运动 · RIC");
     case ReportKind::intersatellite_access:
         return QStringLiteral("星间可见时段");
+    case ReportKind::coverage_grid:
+        return QStringLiteral("覆盖网格与重访");
+    case ReportKind::coverage_time:
+        return QStringLiteral("覆盖率时间曲线");
     case ReportKind::state_covariance:
         return QStringLiteral("HPOP · 位置速度协方差");
     }
@@ -145,6 +151,17 @@ QString kind_name(ReportKind kind) {
 }
 QString localized(QString value) {
     static const std::map<QString, QString> labels{
+        {"Latitude", QStringLiteral("大地纬度")},
+        {"Cell area", QStringLiteral("网格面积")},
+        {"Time covered", QStringLiteral("覆盖时长")},
+        {"Time covered fraction", QStringLiteral("覆盖时长占比")},
+        {"Coverage intervals", QStringLiteral("可见区间数")},
+        {"Maximum revisit time", QStringLiteral("最长无覆盖空档")},
+        {"Mean revisit time", QStringLiteral("平均无覆盖空档")},
+        {"Area covered", QStringLiteral("覆盖面积")},
+        {"Area covered fraction", QStringLiteral("覆盖面积占比")},
+        {"Cumulative area covered", QStringLiteral("累计覆盖面积")},
+        {"Cumulative area covered fraction", QStringLiteral("累计覆盖面积占比")},
         {"Property", QStringLiteral("属性")},
         {"Value", QStringLiteral("值")},
         {"Object ID", QStringLiteral("对象 ID")},
@@ -343,6 +360,14 @@ struct ReportDialog::Impl {
     QProgressBar *progress;
     QTableView *table;
     QTabBar *views;
+    QWidget *coverage_settings, *coverage_page;
+    std::array<QDoubleSpinBox *, 6> coverage_fields{};
+    QCheckBox *coverage_ends;
+    CoverageMap *coverage_map;
+    QComboBox *coverage_metric, *coverage_windows;
+    QLabel *coverage_point;
+    QPushButton *coverage_jump;
+    std::vector<core::Epoch> coverage_starts;
     QWidget *plot_page;
     ReportPlot *plot;
     QComboBox *plot_field;
@@ -486,6 +511,61 @@ struct ReportDialog::Impl {
         template_description = note({}, settings);
         template_description->setObjectName("reportTemplateDescription");
         config->addWidget(template_description);
+        coverage_settings = new QWidget(settings);
+        coverage_settings->setObjectName("coverageSettings");
+        auto *coverage_form = new QFormLayout(coverage_settings);
+        coverage_form->setContentsMargins(0, 8, 0, 0);
+        coverage_form->setRowWrapPolicy(QFormLayout::WrapAllRows);
+        const std::array labels{
+            QStringLiteral("南界 / 北界（北纬为正）"), QString{},
+            QStringLiteral("西界 / 东界（东经为正）"), QString{},
+            QStringLiteral("网格间隔（赤道处）"),      QStringLiteral("最低仰角")};
+        const std::array names{"coverageSouth", "coverageNorth",      "coverageWest",
+                               "coverageEast",  "coverageResolution", "coverageElevation"};
+        for (int i = 0; i < 6; ++i) {
+            coverage_fields[i] = new QDoubleSpinBox(coverage_settings);
+            coverage_fields[i]->setObjectName(names[i]);
+            coverage_fields[i]->setAccessibleName(QString::fromLatin1(names[i]));
+            coverage_fields[i]->setDecimals(4);
+            coverage_fields[i]->setRange(i == 4   ? .01
+                                         : i == 5 ? 0
+                                         : i < 2  ? -90
+                                                  : -180,
+                                         i < 2 || i == 5 ? 90 : 180);
+            coverage_fields[i]->setSuffix(QStringLiteral("°"));
+            coverage_fields[i]->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        }
+        for (int i : {0, 2}) {
+            auto *pair = new QHBoxLayout;
+            pair->addWidget(coverage_fields[i]);
+            pair->addWidget(coverage_fields[i + 1]);
+            coverage_form->addRow(labels[i], pair);
+        }
+        for (int i : {4, 5})
+            coverage_form->addRow(labels[i], coverage_fields[i]);
+        coverage_fields[2]->setToolTip(
+            QStringLiteral("西界大于东界时，区域跨越日期变更线。全球使用 −180° 至 180°。"));
+        auto *global = new QPushButton(QStringLiteral("使用全球范围"), coverage_settings);
+        global->setObjectName("coverageGlobal");
+        coverage_form->addRow(global);
+        coverage_ends = new QCheckBox(QStringLiteral("重访统计包含首尾空档"), coverage_settings);
+        coverage_ends->setObjectName("coverageEndGaps");
+        coverage_ends->setToolTip(QStringLiteral(
+            "首尾空档截断到分析区间；从未覆盖的网格点，其空档始终等于整个分析时长。"));
+        coverage_form->addRow(coverage_ends);
+        config->addWidget(coverage_settings);
+        for (auto *field : coverage_fields)
+            QObject::connect(field, &QDoubleSpinBox::valueChanged, owner, [this] { edit(); });
+        QObject::connect(coverage_ends, &QCheckBox::toggled, owner, [this] { edit(); });
+        QObject::connect(global, &QPushButton::clicked, owner, [this] {
+            loading = true;
+            coverage_fields[0]->setValue(-90);
+            coverage_fields[1]->setValue(90);
+            coverage_fields[2]->setValue(-180);
+            coverage_fields[3]->setValue(180);
+            loading = false;
+            edit();
+        });
         sampling = new QWidget(settings);
         auto *sampling_layout = new QVBoxLayout(sampling);
         sampling_layout->setContentsMargins(0, 8, 0, 0);
@@ -660,6 +740,8 @@ struct ReportDialog::Impl {
         views->setDrawBase(false);
         views->addTab(QStringLiteral("表格"));
         views->addTab(QStringLiteral("曲线"));
+        views->addTab(QStringLiteral("热力图"));
+        views->setTabEnabled(2, false);
         views->setTabEnabled(1, false);
         views->setTabToolTip(1, QStringLiteral("生成按时间采样的报告后，可查看曲线。"));
         result_meta->addWidget(views);
@@ -757,9 +839,10 @@ struct ReportDialog::Impl {
         table->setContextMenuPolicy(Qt::ActionsContextMenu);
         QObject::connect(copy, &QAction::triggered, owner, [this] { copy_rows(); });
         QObject::connect(copy_button, &QAction::triggered, owner, [this] {
-            if (views->currentIndex() == 1) {
-                QApplication::clipboard()->setImage(plot->image());
-                status->setText(QStringLiteral("曲线图已复制。"));
+            if (views->currentIndex() > 0) {
+                QApplication::clipboard()->setImage(
+                    views->currentIndex() == 2 ? coverage_map->image() : plot->image());
+                status->setText(QStringLiteral("图片已复制。"));
             } else
                 copy_rows();
         });
@@ -767,7 +850,7 @@ struct ReportDialog::Impl {
         QObject::connect(refresh_button, &QToolButton::clicked, owner, [this] { start(); });
         QObject::connect(table->selectionModel(), &QItemSelectionModel::selectionChanged, owner,
                          [this] {
-                             copy_button->setEnabled(views->currentIndex() == 1 ||
+                             copy_button->setEnabled(views->currentIndex() > 0 ||
                                                      table->selectionModel()->hasSelection());
                          });
         result_stack->addWidget(table);
@@ -825,6 +908,38 @@ struct ReportDialog::Impl {
             note(QStringLiteral("滚轮 / 框选缩放 · 右键还原 · 双击采样点定位场景时刻"), plot_page);
         plot_layout->addWidget(plot_note);
         result_stack->addWidget(plot_page);
+        coverage_page = new QWidget(result_stack);
+        auto *coverage_layout = new QVBoxLayout(coverage_page);
+        coverage_layout->setContentsMargins(0, 0, 0, 0);
+        coverage_metric = new QComboBox(coverage_page);
+        coverage_metric->setObjectName("coverageMetric");
+        coverage_metric->addItems(
+            {QStringLiteral("覆盖时长占比"), QStringLiteral("最长无覆盖空档")});
+        coverage_layout->addWidget(coverage_metric);
+        coverage_map = new CoverageMap(coverage_page);
+        coverage_layout->addWidget(coverage_map, 1);
+        coverage_point = note(QStringLiteral("选择网格点查看可见区间"), coverage_page);
+        coverage_point->setObjectName("coveragePointDetail");
+        coverage_layout->addWidget(coverage_point);
+        coverage_windows = new QComboBox(coverage_page);
+        coverage_windows->setObjectName("coverageWindows");
+        coverage_windows->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+        coverage_windows->setAccessibleName(QStringLiteral("网格点可见区间"));
+        coverage_layout->addWidget(coverage_windows);
+        coverage_jump = new QPushButton(QStringLiteral("定位所选区间开始时刻"), coverage_page);
+        coverage_jump->setObjectName("coverageJump");
+        coverage_layout->addWidget(coverage_jump);
+        coverage_layout->addWidget(note(
+            QStringLiteral("WGS84 网格中心采样 · 按网格面积加权 · 不含地形和折射"), coverage_page));
+        result_stack->addWidget(coverage_page);
+        coverage_map->selected = [this](std::size_t index) { select_coverage_point(index); };
+        QObject::connect(coverage_metric, &QComboBox::currentIndexChanged, owner,
+                         [this](int index) { coverage_map->set_metric(index); });
+        QObject::connect(coverage_jump, &QPushButton::clicked, owner, [this] {
+            const auto index = coverage_windows->currentIndex();
+            if (index >= 0 && static_cast<std::size_t>(index) < coverage_starts.size())
+                seek_result(coverage_starts[index]);
+        });
         QObject::connect(reset_plot, &QToolButton::clicked, owner, [this] { plot->reset_view(); });
         QObject::connect(plot_field, &QComboBox::currentIndexChanged, owner, [this] {
             if (plot_field->currentIndex() >= 0)
@@ -1043,6 +1158,12 @@ struct ReportDialog::Impl {
             case ReportKind::intersatellite_access:
                 return QStringLiteral(
                     "WGS84 椭球遮挡下的星间可见时段、持续时间和每段最近距离。双击定位时刻。");
+            case ReportKind::coverage_grid:
+                return QStringLiteral(
+                    "区域或全球网格的覆盖时长、覆盖比例与重访空档；多颗卫星 / 传感器联合覆盖。");
+            case ReportKind::coverage_time:
+                return QStringLiteral(
+                    "随时间变化的覆盖面积与累计覆盖比例；按 WGS84 网格面积加权。");
             case ReportKind::state_covariance:
                 return QStringLiteral("传播已启用的 HPOP 协方差，输出 GCRF 位置速度矩阵的下三角。");
             }
@@ -1050,6 +1171,10 @@ struct ReportDialog::Impl {
         };
         const auto output = [](ReportKind kind) -> QString {
             switch (kind) {
+            case ReportKind::coverage_grid:
+                return QStringLiteral("热力图 · 网格统计 · 可见区间");
+            case ReportKind::coverage_time:
+                return QStringLiteral("覆盖率曲线 · 面积统计 · 热力图");
             case ReportKind::scenario_summary:
                 return QStringLiteral("属性表");
             case ReportKind::object_summary:
@@ -1075,6 +1200,8 @@ struct ReportDialog::Impl {
                 return WorkbenchIcon::satellite;
             case ReportKind::ground_stations:
                 return WorkbenchIcon::ground_station;
+            case ReportKind::coverage_grid:
+            case ReportKind::coverage_time:
             case ReportKind::geodetic_position:
                 return WorkbenchIcon::map;
             case ReportKind::access_intervals:
@@ -1150,6 +1277,8 @@ struct ReportDialog::Impl {
         choose(row);
     }
     bool compatible(ReportKind kind) const {
+        if (report_is_coverage(kind))
+            return !project.satellites.empty();
         if (kind == ReportKind::state_covariance) {
             const auto eligible = [&](const std::string &id) {
                 return std::ranges::any_of(project.satellites, [&](const auto &s) {
@@ -1248,13 +1377,17 @@ struct ReportDialog::Impl {
     void choose_scope() {
         auto choices =
             project_object_choices(project, {ObjectKind::satellite, ObjectKind::ground_station});
-        if (draft.query.kind == ReportKind::ground_stations)
+        if (report_is_coverage(draft.query.kind))
+            choices = project_object_choices(project, {ObjectKind::satellite, ObjectKind::sensor});
+        else if (draft.query.kind == ReportKind::ground_stations)
             choices = project_object_choices(project, {ObjectKind::ground_station});
         else if (report_satellites_only(draft.query.kind))
             choices = project_object_choices(project, {ObjectKind::satellite});
         ObjectSelectionDialog chooser(std::move(choices),
                                       {QStringLiteral("选择报告适用对象"), true,
-                                       QStringLiteral("全部适用对象（含以后新增）")},
+                                       report_is_coverage(draft.query.kind)
+                                           ? QString{}
+                                           : QStringLiteral("全部适用对象（含以后新增）")},
                                       {scope_ids, all_objects}, owner);
         if (chooser.exec() != QDialog::Accepted)
             return;
@@ -1368,6 +1501,29 @@ struct ReportDialog::Impl {
             scope_ids = draft.query.object_ids;
             all_objects = draft.query.scope == ReportScope::all_compatible;
         }
+        const bool coverage = report_is_coverage(draft.query.kind);
+        coverage_settings->setVisible(coverage);
+        if (coverage && row < builtin_count) {
+            if (all_objects)
+                scope_ids.clear();
+            const auto choices =
+                project_object_choices(project, {ObjectKind::satellite, ObjectKind::sensor});
+            std::erase_if(scope_ids, [&](const auto &id) {
+                return std::ranges::find(choices, id, &ObjectChoice::id) == choices.end();
+            });
+            if (scope_ids.empty() && !project.satellites.empty())
+                scope_ids.push_back(project.satellites.front().orbit.object_id);
+            all_objects = false;
+        }
+        const auto &grid = draft.query.coverage;
+        const std::array angles{grid.south_rad, grid.north_rad,      grid.west_rad,
+                                grid.east_rad,  grid.resolution_rad, grid.minimum_elevation_rad};
+        for (int i = 0; i < 6; ++i) {
+            coverage_fields[i]->setValue(angles[i] * 180 / std::numbers::pi);
+            coverage_fields[i]->setProperty("originalRadians", angles[i]);
+            coverage_fields[i]->setProperty("originalDisplay", coverage_fields[i]->value());
+        }
+        coverage_ends->setChecked(grid.include_end_gaps);
         const bool access = pair_report(draft.query.kind);
         access_options->setVisible(report_uses_event_search(draft.query.kind));
         access_mode->setCurrentIndex(static_cast<int>(draft.query.event_search_mode));
@@ -1464,6 +1620,12 @@ struct ReportDialog::Impl {
                 "径向向外、沿轨由法向与径向确定、法向为基准轨道角动量方向。惯性相对速率不是 RIC "
                 "坐标导数。不含地形、折射或光行时；暂不支持任务序列。"));
         }
+        if (coverage) {
+            template_description->setText(QStringLiteral(
+                "联合覆盖 · WGS84 地表网格\n以网格中心可见性代表网格；减小间隔可核对空间收敛。"));
+            units->setItemText(0, QStringLiteral("km² / ° / %"));
+            units->setItemText(1, QStringLiteral("m² / rad / 比例"));
+        }
         if (report_is_lighting(draft.query.kind))
             template_description->setText(
                 QStringLiteral(
@@ -1512,6 +1674,20 @@ struct ReportDialog::Impl {
         d.query.frame = frame->currentIndex() == 0 ? core::FrameId::gcrf : core::FrameId::itrf;
         d.format.units = units->currentIndex() == 0 ? ReportUnits::engineering : ReportUnits::si;
         d.format.time_scale = static_cast<ReportTimeScale>(scale->currentIndex());
+        auto &g = d.query.coverage;
+        const auto angle = [&](int i) {
+            const auto *field = coverage_fields[i];
+            return field->value() == field->property("originalDisplay").toDouble()
+                       ? field->property("originalRadians").toDouble()
+                       : field->value() * std::numbers::pi / 180;
+        };
+        g.south_rad = angle(0);
+        g.north_rad = angle(1);
+        g.west_rad = angle(2);
+        g.east_rad = angle(3);
+        g.resolution_rad = angle(4);
+        g.minimum_elevation_rad = angle(5);
+        g.include_end_gaps = coverage_ends->isChecked();
         validate_report_definition(d);
         return d;
     }
@@ -1546,7 +1722,8 @@ struct ReportDialog::Impl {
         pass_summary->setVisible(result->access_statistics.has_value() ||
                                  result->lighting_statistics.has_value() ||
                                  result->orbital_event_statistics.has_value() ||
-                                 result->intersatellite_statistics.has_value());
+                                 result->intersatellite_statistics.has_value() ||
+                                 result->coverage_statistics.has_value());
         event_notice->hide();
         for (auto *value : pass_values)
             value->setToolTip({});
@@ -1634,6 +1811,26 @@ struct ReportDialog::Impl {
             event_notice->setText(notes.join(QStringLiteral("；")));
             event_notice->setVisible(!notes.isEmpty());
         }
+        views->setTabEnabled(2, result->coverage_statistics.has_value());
+        coverage_map->set_result(result, new_calculation);
+        if (result->coverage_statistics) {
+            const auto &s = *result->coverage_statistics;
+            const std::array captions{QStringLiteral("网格点"), QStringLiteral("曾覆盖面积占比"),
+                                      QStringLiteral("平均覆盖率"), QStringLiteral("最长空档")};
+            for (int i = 0; i < 4; ++i)
+                pass_captions[i]->setText(captions[i]);
+            pass_values[0]->setText(QString::number(s.points.size()));
+            pass_values[1]->setText(QStringLiteral("%1 %").arg(
+                100 * s.ever_covered_area_m2 / s.total_area_m2, 0, 'f', 2));
+            pass_values[2]->setText(
+                QStringLiteral("%1 %").arg(100 * s.mean_coverage_fraction, 0, 'f', 2));
+            pass_values[3]->setText(
+                QStringLiteral("%1 h").arg(s.maximum_gap_seconds / 3600, 0, 'f', 2));
+            pass_summary->setToolTip(QStringLiteral(
+                "按 WGS84 "
+                "网格面积加权；平均覆盖率为覆盖面积随时间的平均值。最长空档按所选首尾策略统计。"));
+            select_coverage_point(coverage_map->point_index());
+        }
         table->resizeColumnsToContents();
         for (std::size_t c = 0; c < result->table.columns().size(); ++c)
             table->setColumnHidden(
@@ -1651,11 +1848,54 @@ struct ReportDialog::Impl {
                        result->table.columns()[c].id == "access.min_range_time"))));
         result_status();
         prepare_plot();
+        if (new_calculation && result->coverage_statistics)
+            views->setCurrentIndex(result->definition.query.kind == ReportKind::coverage_grid ? 2
+                                                                                              : 1);
+    }
+    void select_coverage_point(std::size_t index) {
+        if (!model->result || !model->result->coverage_statistics)
+            return;
+        const auto &s = *model->result->coverage_statistics;
+        if (index >= s.points.size())
+            return;
+        const auto &p = s.points[index];
+        coverage_point->setText(
+            QStringLiteral("网格 %1 · 经度 %2° / 纬度 %3° · 面积 %4 km²")
+                .arg(index + 1)
+                .arg(p.cell.location.longitude_rad * 180 / std::numbers::pi, 0, 'f', 3)
+                .arg(p.cell.location.latitude_rad * 180 / std::numbers::pi, 0, 'f', 3)
+                .arg(p.cell.area_m2 / 1e6, 0, 'f', 1));
+        coverage_windows->clear();
+        coverage_starts.clear();
+        for (const auto &w : p.windows) {
+            coverage_starts.push_back(w.first);
+            const auto stamp = [&](core::Epoch e) {
+                return QString::number(e.seconds_since(model->result->first), 'f', 3);
+            };
+            coverage_windows->addItem(QStringLiteral("+%1 → +%2 s · %3 s%4")
+                                          .arg(stamp(w.first), stamp(w.last))
+                                          .arg(w.last.seconds_since(w.first), 0, 'f', 3)
+                                          .arg(w.start_clipped || w.stop_clipped
+                                                   ? QStringLiteral(" · 边界截断")
+                                                   : QString{}));
+        }
+        if (p.windows.empty())
+            coverage_windows->addItem(QStringLiteral("此网格点在分析时段内无覆盖"));
+        coverage_windows->setToolTip(
+            QStringLiteral("相对于分析开始时刻的秒数；多资产重叠区间已合并。"));
+        coverage_jump->setEnabled(!p.windows.empty());
     }
     void update_estimate() {
         try {
             const auto d = definition();
             const auto rows = runtime::estimate_report_rows(project, d);
+            if (report_is_coverage(d.query.kind)) {
+                estimate->setText(QStringLiteral("%1 个网格点 · %2 个资产 · %3 行输出")
+                                      .arg(core::coverage_grid(d.query.coverage).size())
+                                      .arg(d.query.object_ids.size())
+                                      .arg(rows));
+                return;
+            }
             estimate->setText((report_uses_event_search(d.query.kind)
                                    ? QStringLiteral("%1 个检查节点 · 自动细化%2")
                                    : QStringLiteral("预计 %1 行%2"))
@@ -1825,12 +2065,14 @@ struct ReportDialog::Impl {
         }
     }
     void select_view() {
-        const bool chart = views->currentIndex() == 1 && model->result;
+        const bool chart = views->currentIndex() > 0 && model->result;
         if (model->result)
-            result_stack->setCurrentWidget(chart ? plot_page : table);
+            result_stack->setCurrentWidget(views->currentIndex() == 2 ? coverage_page
+                                           : chart                    ? plot_page
+                                                                      : table);
         export_csv->setText(chart ? QStringLiteral("导出 PNG…") : QStringLiteral("导出 CSV…"));
-        copy_button->setText(chart ? QStringLiteral("复制曲线图") : QStringLiteral("复制选中行"));
-        copy_button->setToolTip(chart ? QStringLiteral("复制当前曲线图")
+        copy_button->setText(chart ? QStringLiteral("复制图片") : QStringLiteral("复制选中行"));
+        copy_button->setToolTip(chart ? QStringLiteral("复制当前图片")
                                       : QStringLiteral("复制所选行（Ctrl+C）"));
         copy_button->setEnabled(chart || table->selectionModel()->hasSelection());
     }
@@ -1905,20 +2147,22 @@ struct ReportDialog::Impl {
                 index = plot_field->findData("aer.elevation", Qt::UserRole + 1);
             if (index < 0 && r.definition.query.kind == ReportKind::relative_motion)
                 index = plot_field->findData("relative.range", Qt::UserRole + 1);
+            if (index < 0 && r.definition.query.kind == ReportKind::coverage_time)
+                index = plot_field->findData("coverage.fraction", Qt::UserRole + 1);
             plot_field->setCurrentIndex(std::max(0, index));
         }
         plot->set_result(model->result, static_cast<std::size_t>(plot_field->currentData().toInt()),
                          plot_field->currentText(), plot_object->id());
         views->setTabEnabled(1, sampled && plot_field->count() > 0);
-        if (!views->isTabEnabled(1))
+        if (!views->isTabEnabled(views->currentIndex()))
             views->setCurrentIndex(0);
         select_view();
     }
     void export_file() {
         if (!model->result)
             return;
-        if (views->currentIndex() == 1) {
-            QFileDialog chooser(owner, QStringLiteral("导出曲线图"));
+        if (views->currentIndex() > 0) {
+            QFileDialog chooser(owner, QStringLiteral("导出图片"));
             chooser.setAcceptMode(QFileDialog::AcceptSave);
             chooser.setFileMode(QFileDialog::AnyFile);
             chooser.setNameFilter("PNG (*.png)");
@@ -1928,8 +2172,10 @@ struct ReportDialog::Impl {
                 return;
             QSaveFile output(chooser.selectedFiles().value(0));
             const bool ok = output.open(QIODevice::WriteOnly) &&
-                            plot->image().save(&output, "PNG") && output.commit();
-            status->setText(ok ? QStringLiteral("曲线图已导出（2 倍分辨率）。")
+                            (views->currentIndex() == 2 ? coverage_map->image() : plot->image())
+                                .save(&output, "PNG") &&
+                            output.commit();
+            status->setText(ok ? QStringLiteral("图片已导出（2 倍分辨率）。")
                                : QStringLiteral("图片导出失败：%1").arg(output.errorString()));
             return;
         }

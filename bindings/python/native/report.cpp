@@ -23,7 +23,9 @@ void bind_reports(py::module_ &module) {
         .value("LIGHTING_STATE", application::ReportKind::lighting_state)
         .value("ORBITAL_EVENTS", application::ReportKind::orbital_events)
         .value("RELATIVE_MOTION", application::ReportKind::relative_motion)
-        .value("INTERSATELLITE_ACCESS", application::ReportKind::intersatellite_access);
+        .value("INTERSATELLITE_ACCESS", application::ReportKind::intersatellite_access)
+        .value("COVERAGE_GRID", application::ReportKind::coverage_grid)
+        .value("COVERAGE_TIME", application::ReportKind::coverage_time);
     py::class_<core::GroundObservation>(module, "GroundObservation")
         .def_readonly("azimuth_rad", &core::GroundObservation::azimuth_rad)
         .def_readonly("elevation_rad", &core::GroundObservation::elevation_rad)
@@ -91,6 +93,38 @@ void bind_reports(py::module_ &module) {
     py::enum_<application::ReportScope>(module, "ReportScope")
         .value("OBJECTS", application::ReportScope::objects)
         .value("ALL_COMPATIBLE", application::ReportScope::all_compatible);
+    py::class_<core::CoverageGrid>(module, "CoverageGrid")
+        .def(py::init<>())
+        .def_readwrite("south_rad", &core::CoverageGrid::south_rad)
+        .def_readwrite("north_rad", &core::CoverageGrid::north_rad)
+        .def_readwrite("west_rad", &core::CoverageGrid::west_rad)
+        .def_readwrite("east_rad", &core::CoverageGrid::east_rad)
+        .def_readwrite("resolution_rad", &core::CoverageGrid::resolution_rad)
+        .def_readwrite("minimum_elevation_rad", &core::CoverageGrid::minimum_elevation_rad)
+        .def_readwrite("include_end_gaps", &core::CoverageGrid::include_end_gaps);
+    py::class_<core::CoverageCell>(module, "CoverageCell")
+        .def_readonly("location", &core::CoverageCell::location)
+        .def_readonly("south_rad", &core::CoverageCell::south_rad)
+        .def_readonly("north_rad", &core::CoverageCell::north_rad)
+        .def_readonly("west_rad", &core::CoverageCell::west_rad)
+        .def_readonly("east_rad", &core::CoverageCell::east_rad)
+        .def_readonly("area_m2", &core::CoverageCell::area_m2);
+    py::class_<core::CoverageTimeStatistics>(module, "CoverageTimeStatistics")
+        .def_readonly("covered_seconds", &core::CoverageTimeStatistics::covered_seconds)
+        .def_readonly("maximum_gap_seconds", &core::CoverageTimeStatistics::maximum_gap_seconds)
+        .def_readonly("mean_gap_seconds", &core::CoverageTimeStatistics::mean_gap_seconds)
+        .def_readonly("gap_count", &core::CoverageTimeStatistics::gap_count);
+    py::class_<results::CoveragePoint>(module, "CoveragePoint")
+        .def_readonly("cell", &results::CoveragePoint::cell)
+        .def_readonly("windows", &results::CoveragePoint::windows)
+        .def_readonly("statistics", &results::CoveragePoint::statistics);
+    py::class_<results::CoverageStatistics>(module, "CoverageStatistics")
+        .def_readonly("points", &results::CoverageStatistics::points)
+        .def_readonly("total_area_m2", &results::CoverageStatistics::total_area_m2)
+        .def_readonly("ever_covered_area_m2", &results::CoverageStatistics::ever_covered_area_m2)
+        .def_readonly("mean_coverage_fraction",
+                      &results::CoverageStatistics::mean_coverage_fraction)
+        .def_readonly("maximum_gap_seconds", &results::CoverageStatistics::maximum_gap_seconds);
     py::class_<application::ReportQuery>(module, "ReportQuery")
         .def(py::init<>())
         .def_readwrite("kind", &application::ReportQuery::kind)
@@ -104,7 +138,8 @@ void bind_reports(py::module_ &module) {
         .def_readwrite("event_tolerance_nanoseconds",
                        &application::ReportQuery::event_tolerance_nanoseconds)
         .def_readwrite("frame", &application::ReportQuery::frame)
-        .def_readwrite("lighting_ephemeris", &application::ReportQuery::lighting_ephemeris);
+        .def_readwrite("lighting_ephemeris", &application::ReportQuery::lighting_ephemeris)
+        .def_readwrite("coverage", &application::ReportQuery::coverage);
     py::class_<application::ReportColumnSpec>(module, "ReportColumnSpec")
         .def(py::init<std::string, std::string, std::string>(), py::arg("field"),
              py::arg("unit") = "", py::arg("title") = "")
@@ -171,6 +206,7 @@ void bind_reports(py::module_ &module) {
         .def_readonly("orbital_event_statistics", &runtime::ReportResult::orbital_event_statistics)
         .def_readonly("intersatellite_statistics",
                       &runtime::ReportResult::intersatellite_statistics)
+        .def_readonly("coverage_statistics", &runtime::ReportResult::coverage_statistics)
         .def_readonly("algorithm", &runtime::ReportResult::algorithm)
         .def_readonly("first", &runtime::ReportResult::first)
         .def_readonly("last", &runtime::ReportResult::last)

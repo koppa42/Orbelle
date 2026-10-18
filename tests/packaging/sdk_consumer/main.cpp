@@ -2,6 +2,7 @@
 #include <iostream>
 #include <orbitforge/application/project_document.hpp>
 #include <orbitforge/application/scenario.hpp>
+#include <orbitforge/core/propagation/coverage.hpp>
 #include <orbitforge/core/propagation/hpop_covariance.hpp>
 #include <orbitforge/core/propagation/hpop_force.hpp>
 #include <orbitforge/core/propagation/relative_motion.hpp>
@@ -20,6 +21,13 @@
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
 int main(int argc, char **argv) try {
+    {
+        using namespace orbitforge::core;
+        const auto cells = coverage_grid(CoverageGrid{});
+        const auto gaps = coverage_time_statistics(Epoch{0}, Epoch{1000000000}, {}, false);
+        if (cells.empty() || cells.front().area_m2 <= 0 || gaps.maximum_gap_seconds != 1)
+            throw std::runtime_error("Installed coverage API failed");
+    }
     {
         using namespace orbitforge::core;
         CartesianState primary{Epoch{0}, OriginId::earth, FrameId::gcrf, {7e6, 0, 0}, {0, 7500, 0}};

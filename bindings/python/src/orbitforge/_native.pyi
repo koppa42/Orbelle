@@ -1466,6 +1466,8 @@ class ReportKind:
     ORBITAL_EVENTS: ReportKind
     RELATIVE_MOTION: ReportKind
     INTERSATELLITE_ACCESS: ReportKind
+    COVERAGE_GRID: ReportKind
+    COVERAGE_TIME: ReportKind
     ACCESS_INTERVALS: ReportKind
     AER: ReportKind
     SCENARIO_SUMMARY: ReportKind
@@ -1568,7 +1570,62 @@ class IntersatelliteStatistics:
     @property
     def windows(self) -> list[AccessInterval]: ...
 
+class CoverageGrid:
+    def __init__(self) -> None: ...
+    south_rad: float
+    north_rad: float
+    west_rad: float
+    east_rad: float
+    resolution_rad: float
+    minimum_elevation_rad: float
+    include_end_gaps: bool
+
+class CoverageCell:
+    @property
+    def location(self) -> GroundStationLocation: ...
+    @property
+    def south_rad(self) -> float: ...
+    @property
+    def north_rad(self) -> float: ...
+    @property
+    def west_rad(self) -> float: ...
+    @property
+    def east_rad(self) -> float: ...
+    @property
+    def area_m2(self) -> float: ...
+
+class CoverageTimeStatistics:
+    @property
+    def covered_seconds(self) -> float: ...
+    @property
+    def maximum_gap_seconds(self) -> float: ...
+    @property
+    def mean_gap_seconds(self) -> float: ...
+    @property
+    def gap_count(self) -> int: ...
+
+class CoveragePoint:
+    @property
+    def cell(self) -> CoverageCell: ...
+    @property
+    def windows(self) -> list[AccessInterval]: ...
+    @property
+    def statistics(self) -> CoverageTimeStatistics: ...
+
+class CoverageStatistics:
+    @property
+    def points(self) -> list[CoveragePoint]: ...
+    @property
+    def total_area_m2(self) -> float: ...
+    @property
+    def ever_covered_area_m2(self) -> float: ...
+    @property
+    def mean_coverage_fraction(self) -> float: ...
+    @property
+    def maximum_gap_seconds(self) -> float: ...
+
 class ReportQuery:
+    coverage: CoverageGrid
     lighting_ephemeris: str
     event_search_mode: AccessSearchMode
     event_tolerance_nanoseconds: int
@@ -1640,6 +1697,8 @@ class LightingStatistics:
     def umbra(self) -> LightingPhaseStatistics: ...
 
 class ReportResult:
+    @property
+    def coverage_statistics(self) -> CoverageStatistics | None: ...
     @property
     def lighting_statistics(self) -> LightingStatistics | None: ...
     @property

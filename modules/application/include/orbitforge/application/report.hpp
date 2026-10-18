@@ -2,6 +2,7 @@
 #include <array>
 #include <orbitforge/core/frames/state.hpp>
 #include <orbitforge/core/propagation/access.hpp>
+#include <orbitforge/core/propagation/coverage.hpp>
 #include <orbitforge/results/table.hpp>
 #include <string>
 #include <vector>
@@ -22,23 +23,20 @@ enum class ReportKind {
     lighting_state,
     orbital_events,
     relative_motion,
-    intersatellite_access
+    intersatellite_access,
+    coverage_grid,
+    coverage_time
 };
-inline constexpr std::array report_kinds{ReportKind::scenario_summary,
-                                         ReportKind::object_summary,
-                                         ReportKind::cartesian_state,
-                                         ReportKind::ground_stations,
-                                         ReportKind::classical_elements,
-                                         ReportKind::geodetic_position,
-                                         ReportKind::orbital_motion,
-                                         ReportKind::access_intervals,
-                                         ReportKind::aer,
-                                         ReportKind::state_covariance,
-                                         ReportKind::lighting_intervals,
-                                         ReportKind::lighting_state,
-                                         ReportKind::orbital_events,
-                                         ReportKind::relative_motion,
-                                         ReportKind::intersatellite_access};
+inline constexpr std::array report_kinds{
+    ReportKind::scenario_summary, ReportKind::object_summary,     ReportKind::cartesian_state,
+    ReportKind::ground_stations,  ReportKind::classical_elements, ReportKind::geodetic_position,
+    ReportKind::orbital_motion,   ReportKind::access_intervals,   ReportKind::aer,
+    ReportKind::state_covariance, ReportKind::lighting_intervals, ReportKind::lighting_state,
+    ReportKind::orbital_events,   ReportKind::relative_motion,    ReportKind::intersatellite_access,
+    ReportKind::coverage_grid,    ReportKind::coverage_time};
+[[nodiscard]] constexpr bool report_is_coverage(ReportKind kind) {
+    return kind == ReportKind::coverage_grid || kind == ReportKind::coverage_time;
+}
 [[nodiscard]] constexpr bool report_is_intersatellite(ReportKind kind) {
     return kind == ReportKind::relative_motion || kind == ReportKind::intersatellite_access;
 }
@@ -51,7 +49,7 @@ inline constexpr std::array report_kinds{ReportKind::scenario_summary,
 }
 [[nodiscard]] constexpr bool report_uses_event_search(ReportKind kind) {
     return report_is_interval(kind) || kind == ReportKind::orbital_events ||
-           report_is_intersatellite(kind);
+           report_is_intersatellite(kind) || report_is_coverage(kind);
 }
 [[nodiscard]] constexpr bool report_is_access(ReportKind kind) {
     return kind == ReportKind::access_intervals || kind == ReportKind::aer;
@@ -61,7 +59,7 @@ inline constexpr std::array report_kinds{ReportKind::scenario_summary,
            kind == ReportKind::geodetic_position || kind == ReportKind::orbital_motion ||
            report_is_access(kind) || kind == ReportKind::state_covariance ||
            report_is_lighting(kind) || kind == ReportKind::orbital_events ||
-           report_is_intersatellite(kind);
+           report_is_intersatellite(kind) || report_is_coverage(kind);
 }
 [[nodiscard]] constexpr bool report_satellites_only(ReportKind kind) {
     return kind == ReportKind::classical_elements || kind == ReportKind::orbital_motion ||
@@ -87,6 +85,7 @@ struct ReportQuery {
     std::int64_t event_tolerance_nanoseconds = 1'000'000;
     // Lighting uses an explicitly prepared, immutable solar ephemeris.
     std::string lighting_ephemeris = "de440s";
+    core::CoverageGrid coverage{};
     bool operator==(const ReportQuery &) const = default;
 };
 struct ReportColumnSpec {
