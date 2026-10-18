@@ -17,7 +17,8 @@ void bind_reports(py::module_ &module) {
         .value("GEODETIC_POSITION", application::ReportKind::geodetic_position)
         .value("ORBITAL_MOTION", application::ReportKind::orbital_motion)
         .value("ACCESS_INTERVALS", application::ReportKind::access_intervals)
-        .value("AER", application::ReportKind::aer);
+        .value("AER", application::ReportKind::aer)
+        .value("STATE_COVARIANCE", application::ReportKind::state_covariance);
     py::class_<core::GroundObservation>(module, "GroundObservation")
         .def_readonly("azimuth_rad", &core::GroundObservation::azimuth_rad)
         .def_readonly("elevation_rad", &core::GroundObservation::elevation_rad)

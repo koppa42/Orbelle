@@ -327,6 +327,7 @@ void bind_project(py::module_ &module) {
         .def_readwrite("input_frame", &application::OrbitInput::input_frame)
         .def_readwrite("tle", &application::OrbitInput::tle)
         .def_readwrite("hpop", &application::OrbitInput::hpop)
+        .def_readwrite("covariance", &application::OrbitInput::covariance)
         .def_readwrite("mission", &application::OrbitInput::mission)
         .def_readwrite("object_id", &application::OrbitInput::object_id)
         .def_readwrite("first", &application::OrbitInput::first)

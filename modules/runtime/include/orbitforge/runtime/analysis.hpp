@@ -108,6 +108,12 @@ class Analysis {
     [[nodiscard]] const DataSnapshot &data() const;
     [[nodiscard]] core::CartesianState state(const application::ObjectRef &object, core::Epoch at,
                                              core::FrameId frame) const;
+    // Uses the captured project's enabled covariance, at its initial state epoch.
+    // One HPOP coast, exact requested TAI endpoint, Earth/GCRF/SI output.
+    // No interpolation or maneuver crossing; cancellation publishes no partial result.
+    [[nodiscard]] core::HpopCovarianceState
+    covariance(const application::ObjectRef &satellite, core::Epoch at,
+               const std::function<bool()> &cancelled = {}) const;
     // Explicit queries preserve order and duplicates, and accept an empty span.
     [[nodiscard]] results::Trajectory states(const application::ObjectRef &object,
                                              std::span<const core::Epoch> times,

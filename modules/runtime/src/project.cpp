@@ -20,24 +20,24 @@ application::Session make_orbit_session(const application::OrbitInput &input,
                                         std::uint64_t revision, const core::ITimeProvider *time,
                                         core::HpopEnvironment environment) {
     const auto &body = core::central_body(input.initial.origin);
-    if (input.uses_hpop() && input.hpop.uses_ephemeris()) {
+    if (input.uses_hpop() && input.hpop_resource_options().uses_ephemeris()) {
         if (!environment.ephemeris)
             throw core::EphemerisDataError("Enabled HPOP forces require an ephemeris");
         const auto first = core::Epoch{
             std::min(input.initial.epoch.tai_nanoseconds(), input.first.tai_nanoseconds())};
         const auto last = core::Epoch{
             std::max(input.initial.epoch.tai_nanoseconds(), input.last.tai_nanoseconds())};
-        environment.validate_ephemeris_interval(input.hpop, first, last);
+        environment.validate_ephemeris_interval(input.hpop_resource_options(), first, last);
     }
-    if (input.uses_eop_force()) {
+    if (input.requires_eop()) {
         if (!environment.eop || !environment.frames)
             throw std::invalid_argument(
-                "HPOP noncentral gravity or drag requires selected EOP data");
+                "HPOP forces or covariance coordinates require selected EOP data");
         for (auto epoch : {input.initial.epoch, input.first, input.last})
             if (!core::eop_covers(environment.eop->data_info(), epoch))
                 throw core::EopCoverageError("HPOP needs EOP covering the entire integration "
                                              "interval, including the initial epoch");
-        if (input.hpop.uses_utc_force()) {
+        if (input.hpop_resource_options().uses_utc_force()) {
             if (!environment.time)
                 throw std::invalid_argument("HPOP forces require a retained UTC provider");
             for (auto epoch : {input.initial.epoch, input.first, input.last})
@@ -51,6 +51,15 @@ application::Session make_orbit_session(const application::OrbitInput &input,
                 std::min(input.initial.epoch.tai_nanoseconds(), input.first.tai_nanoseconds())},
             core::Epoch{
                 std::max(input.initial.epoch.tai_nanoseconds(), input.last.tai_nanoseconds())});
+    if (input.uses_hpop()) {
+        application::validate_hpop_covariance_settings(input.covariance, input.hpop);
+        if (input.covariance.enabled && !input.computes_covariance())
+            throw std::invalid_argument("Covariance across mission maneuvers is not supported");
+    }
+    if (input.computes_covariance())
+        (void)core::propagate_hpop_covariance(input.initial, input.initial.epoch,
+                                              input.covariance.active_input(), input.hpop,
+                                              environment, input.covariance.variational_options());
     switch (input.propagator) {
     case application::OrbitPropagator::two_body:
         return make_two_body_session(input.initial, body.mu, input.object_id, revision);
@@ -103,7 +112,7 @@ application::Scenario make_project_scenario(const application::Project &project,
     result = result.with_data_lock(project.data_lock());
     for (const auto &satellite : project.satellites) {
         const auto &input = satellite.orbit;
-        if (input.uses_hpop() && input.hpop.uses_ephemeris()) {
+        if (input.uses_hpop() && input.hpop_resource_options().uses_ephemeris()) {
             if (!environment.ephemeris)
                 throw application::ProjectError("Missing selected ephemeris");
             validate_ephemeris_reference(project.force_data, input.hpop.ephemeris_model,

@@ -1736,7 +1736,7 @@ class Workbench final : public QMainWindow {
         const auto installed = eop_catalog_->data().ephemerides();
         for (const auto &satellite : project.satellites) {
             const auto &input = satellite.orbit;
-            if (!input.uses_hpop() || !input.hpop.uses_ephemeris())
+            if (!input.uses_hpop() || !input.hpop_resource_options().uses_ephemeris())
                 continue;
             const auto &id = input.hpop.ephemeris_model;
             if (std::any_of(result.begin(), result.end(),
@@ -3306,7 +3306,8 @@ class Workbench final : public QMainWindow {
                 !gravity_.empty() || !ephemerides_.empty() || !weather_.empty() ||
                 !ocean_tides_.empty() ||
                 (input.uses_hpop() &&
-                 (!input.hpop.gravity_model.empty() || input.hpop.uses_ephemeris() ||
+                 (!input.hpop.gravity_model.empty() ||
+                  input.hpop_resource_options().uses_ephemeris() ||
                   input.hpop.ocean_tides.active() ||
                   (input.hpop.drag.enabled && !input.hpop.drag.weather_model.empty())))) {
                 // Publish all tracks and their provider together, never mix EOP revisions.

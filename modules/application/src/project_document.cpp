@@ -67,7 +67,8 @@ bool same_orbit(const OrbitInput &a, const OrbitInput &b) {
            a.initial.velocity_mps == b.initial.velocity_mps && a.propagator == b.propagator &&
            a.input_frame == b.input_frame && a.tle.line1 == b.tle.line1 &&
            a.tle.line2 == b.tle.line2 && a.first == b.first && a.last == b.last &&
-           a.step_seconds == b.step_seconds && (!a.uses_hpop() || a.hpop == b.hpop) &&
+           a.step_seconds == b.step_seconds &&
+           (!a.uses_hpop() || (a.hpop == b.hpop && a.covariance == b.covariance)) &&
            (a.propagator != OrbitPropagator::mission || a.mission == b.mission);
 }
 std::vector<std::string> fields(const ProjectSatellite &a, const ProjectSatellite &b) {

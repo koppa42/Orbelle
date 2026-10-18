@@ -65,6 +65,7 @@ class OrbitEditor final : public QWidget {
     core::FrameId input_frame_ = core::FrameId::gcrf;
     OrbitPropagator propagator_kind_ = OrbitPropagator::two_body;
     core::HpopOptions hpop_;
+    application::HpopCovarianceSettings covariance_;
     bool hpop_initialized_ = false;
     core::MissionPlan mission_;
     [[nodiscard]] bool uses_hpop() const {

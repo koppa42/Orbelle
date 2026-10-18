@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include <orbitforge/application/hpop_covariance.hpp>
 #include <orbitforge/core/propagation/hpop.hpp>
 #include <orbitforge/runtime/data_catalog.hpp>
 class QWidget;
@@ -19,5 +20,5 @@ bool edit_hpop_settings(
     const std::vector<runtime::CatalogGravity> &models = {},
     const std::vector<runtime::CatalogEphemeris> &ephemerides = {},
     const std::function<std::vector<runtime::CatalogEphemeris>()> &manage_ephemerides = {},
-    EopCatalog *catalog = nullptr);
+    EopCatalog *catalog = nullptr, application::HpopCovarianceSettings *covariance = nullptr);
 } // namespace orbitforge::desktop

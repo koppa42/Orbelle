@@ -53,7 +53,16 @@ std::vector<results::Column> report_columns(ReportKind kind) {
                             {"motion.radial_speed", "Radial speed", "m/s"},
                             {"motion.transverse_speed", "Transverse speed", "m/s"},
                             {"motion.flight_path_angle", "Flight path angle", "rad"}});
-        else if (kind == ReportKind::cartesian_state)
+        else if (kind == ReportKind::state_covariance) {
+            const std::array<std::string, 6> axes{"x", "y", "z", "vx", "vy", "vz"};
+            for (std::size_t i = 0; i < axes.size(); ++i)
+                for (std::size_t j = 0; j <= i; ++j)
+                    columns.push_back({"covariance." + axes[i] + "." + axes[j],
+                                       "Cov(" + axes[i] + "," + axes[j] + ")",
+                                       i < 3   ? "m^2"
+                                       : j < 3 ? "m^2/s"
+                                               : "m^2/s^2"});
+        } else if (kind == ReportKind::cartesian_state)
             columns.insert(columns.end(), {{"state.x", "X", "m"},
                                            {"state.y", "Y", "m"},
                                            {"state.z", "Z", "m"},
@@ -85,7 +94,7 @@ bool report_uses_utc(const ReportTemplate &format, ReportKind kind) {
     return false;
 }
 void validate_report_query(const ReportQuery &d) {
-    if (d.kind < ReportKind::scenario_summary || d.kind > ReportKind::aer ||
+    if (d.kind < ReportKind::scenario_summary || d.kind > ReportKind::state_covariance ||
         (d.scope != ReportScope::objects && d.scope != ReportScope::all_compatible) ||
         (d.frame != core::FrameId::gcrf && d.frame != core::FrameId::itrf) ||
         d.step_nanoseconds < 1 || d.step_nanoseconds > 86400LL * 1'000'000'000 ||
@@ -124,6 +133,9 @@ void validate_report_template(const ReportTemplate &format, ReportKind kind) {
         const auto &dimension = field->unit;
         if (!unit.empty() && unit != dimension && !(dimension == "m" && unit == "km") &&
             !(dimension == "m/s" && unit == "km/s") && !(dimension == "rad" && unit == "deg") &&
+            !(dimension == "m^2" && unit == "km^2") &&
+            !(dimension == "m^2/s" && unit == "km^2/s") &&
+            !(dimension == "m^2/s^2" && unit == "km^2/s^2") &&
             !(dimension == "epoch" && (unit == "UTC" || unit == "TAI" || unit == "TT")))
             throw std::invalid_argument("Incompatible report field unit");
         if (unit == "epoch")

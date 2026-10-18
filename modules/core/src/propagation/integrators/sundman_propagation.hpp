@@ -385,9 +385,8 @@ template <std::size_t Extra = 0> class SundmanSystemPropagation {
                                 epsilon * std::max(1., std::hypot(b[3], b[4], b[5])))
                             return false;
                     }
-                    for (std::size_t i = 7; i < 7 + Extra; ++i)
-                        if (std::abs(a[i] - b[i]) > epsilon * std::max(1e-6, std::abs(b[i])))
-                            return false;
+                    if (!variational_corrector_converged<Extra>(a, b, 7, epsilon))
+                        return false;
                     return std::abs(a[6] - b[6]) <= epsilon * std::max(1., std::abs(b[6]));
                 });
             ++state.multisteps;

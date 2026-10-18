@@ -40,7 +40,7 @@
 | Integrator | RKF7(8)，VOP 关闭；相对误差 1e-13，步长 1–86400 s；Lagrange 7 阶插值；时间正则化关闭；固定步长输出开启；停止高度 10 km |
 | Covariance | Compute Covariance 关闭；页面仍应能表达初始矩阵、参考系、独立重力截断和 consider 参数 |
 
-当前已支持 EGM2008、21 阶及日月引力，但仍不能完整表达这组配置：缺少潮汐及光压高级设置；Cb 常数文件仅导入 GM 子集，全部位置使用 DE440s；固定/自适应步长已支持至 86400 s；科学插值及独立 VOP μ 已接入，VOP 通用变量积分方程已接入；协方差配置仍缺失。重构不能只把数值上限放宽，必须随相应模型和收敛验证一起交付。
+当前已支持 EGM2008、21 阶及日月引力，但仍不能完整表达这组配置：缺少潮汐及光压高级设置；Cb 常数文件仅导入 GM 子集，全部位置使用 DE440s；固定/自适应步长已支持至 86400 s；科学插值及独立 VOP μ 已接入，VOP 通用变量积分方程已接入；协方差配置与 GCRF 矩阵报告已接入，FG/JPLFile 与跨机动仍缺失。重构不能只把数值上限放宽，必须随相应模型和收敛验证一起交付。
 
 截图未提供初始状态、分析时段、实际重力系数文件、Cb 常数文件、星历、EOP 与参考轨迹，因此它是配置参照，而非数值真值。正式比较应从实际场景导出精确参数和资源，不用截图中显示的舍入数值代替它们。
 
@@ -87,14 +87,14 @@
 | Integrator | Fixed/Relative Error；Tolerance；Min/Max Step | 部分：独立 Fixed/Relative Error 选择已实现；RK4/GJ 强制固定，RKF/RKV/BS 两模式，固定网格及 BS 十八阶外推已验证。固定/自适应范围已扩至 1e−6–86400 s，自适应缓存不再截短配置上限，并有局部动力学首步估计及长弧独立对照。相对误差仍为混合绝对/相对分量尺度；STK 误差范数、完整合法范围/默认值及实机组合仍待核对，截图仅参考 |
 | Integrator | Interpolation 方法；Order；VOP μ | 部分：Lagrange / Hermite / VOP、独立插值 μ、项目自动装配、机动分段、UI / 持久化 / 分析及报告已接入并有独立参考，见[科学插值](orbit_interpolation.md)；VOP 通用变量搬移与 Hipparchus 插值、J2 步长收敛对照已接入，STK 同配置验收仍待完成 |
 | Integrator | Allow PosVel Covariance Interpolation | 待实现：协方差传播完成后验证插值、对称性与半正定性 |
-| Integrator | Time Regularization；Exponent；Steps Per Orbit | 已接入：Sundman 方程、初始椭圆每圈尺度、五种积分器、物理 Min/Max Step、整数 TAI、天气分段、机动重启及科学插值；C++ / Python / 项目 v40 / UI 共用配置。非椭圆归一化明确拒绝；尚无 STK 同配置实测，见[时间正则化契约](time_regularization.md) |
+| Integrator | Time Regularization；Exponent；Steps Per Orbit | 已接入：Sundman 方程、初始椭圆每圈尺度、五种积分器、物理 Min/Max Step、整数 TAI、天气分段、机动重启及科学插值；C++ / Python / 项目 v41 / UI 共用配置。非椭圆归一化明确拒绝；尚无 STK 同配置实测，见[时间正则化契约](time_regularization.md) |
 | Integrator | Report Ephemeris on a Fixed Time Step | 部分：显式工厂及普通项目均支持接受端点或让积分步停在固定 TAI 输出网格，保留天气边界；UI、保存与报告已接入。项目轨道步长当前限于 1–60 整数秒，完整合法范围及短段策略仍待 STK 实测核对 |
 | Integrator | Do not propagate below altitude | 已有按力评估停止的参考球面地心高度；STK 比较须核对其高度参考面 |
-| Covariance | Compute Covariance；6×6 初始矩阵 | [状态转移与 D/K 常参数变分传播](hpop_variational.md)已提供 C++ / Python / SDK 单段接口；[GCRF 联合协方差](hpop_covariance.md)已接入矩阵输入、传播输出与考虑参数项；LVLH/Frenet 与 J2000/TOD（IERS1996）转换已接入；项目配置及 UI 待接入。计算基础已完成中心引力、第三体与三项相对论的解析状态偏导及独立数值对照，见[力状态偏导](force_differential.md)。阻力及球面 SRP 的局部状态／D、K 偏导已提供；[卫星视太阳状态链](apparent_sun_differential.md)已完成；[总力状态块及 D/K 装配](hpop_force.md)已接入共用力入口；联合矩阵的 SI 单位与正定校验已明确；圆柱／硬密度切换的事件跳变仍待接入；关闭不影响确定性轨迹 |
-| Covariance | Frame；Representation | 部分：GCRF、STK LVLH=(R,I,C)、Frenet=(N,T,C) 的 Cartesian 转换已接入 C++/Python/SDK，显式区分 projected/rotating 并转换 D/K 交叉项；200 组 Orekit/高精度参考。J2000/TOD 的 IERS1996 模式已有 48 组旋转/导数及 96 组联合矩阵对照；JPLFile 章动、FG、项目/UI 和 STK 初始局部系速度约定仍待完成，见[协方差契约](hpop_covariance.md) |
-| Covariance | 独立 Gravity Degree / Order | 已接入单段变分方程的独立阶／次，保持名义力模型；协方差 UI 待接入。基础已完成：最高 2190 阶解析引力 Hessian、极轴及固定历元潮汐/长期变化系数偏导，通过 Orekit 与高精度解析值对照，见[引力空间偏导](gravity_differential.md)。单段接口已支持协方差矩阵；项目与 UI 待接入，独立截断不改变名义加速度 |
-| Covariance | Include Consider Analysis；Use / Value / x,y,z,vx,vy,vz | Drag / SRP 的 D、K 力参数偏导已完成；全局 D/K 参数敏感度已接入；D/K 参数方差、状态交叉协方差及其传播已接入；项目与 UI 待接入，OutGasTimeConstant、OutGasMagnitude、ThrustX/Y/Z 还需对应的名义力及参数定义 |
-| Covariance | Include Consider Cross Correlation；Row/Column/Value；Add/Remove | D/K 间协方差、完整活动联合矩阵正定校验、分项输出已接入；UI 增删行和其他考虑参数仍待实现 |
+| Covariance | Compute Covariance；6×6 初始矩阵 | [状态转移与 D/K 常参数变分传播](hpop_variational.md)已提供 C++ / Python / SDK 单段接口；[GCRF 联合协方差](hpop_covariance.md)已接入矩阵输入、传播输出与考虑参数项；LVLH/Frenet 与 J2000/TOD（IERS1996）转换已接入；项目 v41、桌面编辑器及 Analysis/报告已接入。计算基础已完成中心引力、第三体与三项相对论的解析状态偏导及独立数值对照，见[力状态偏导](force_differential.md)。阻力及球面 SRP 的局部状态／D、K 偏导已提供；[卫星视太阳状态链](apparent_sun_differential.md)已完成；[总力状态块及 D/K 装配](hpop_force.md)已接入共用力入口；联合矩阵的 SI 单位与正定校验已明确；圆柱／硬密度切换的事件跳变仍待接入；关闭不影响确定性轨迹 |
+| Covariance | Frame；Representation | 部分：GCRF、STK LVLH=(R,I,C)、Frenet=(N,T,C) 的 Cartesian 转换已接入 C++/Python/SDK，显式区分 projected/rotating 并转换 D/K 交叉项；200 组 Orekit/高精度参考。J2000/TOD 的 IERS1996 模式已有 48 组旋转/导数及 96 组联合矩阵对照；项目/UI 已接入 Cartesian；JPLFile 章动、FG 和 STK 初始局部系速度约定仍待完成，见[协方差契约](hpop_covariance.md) |
+| Covariance | 独立 Gravity Degree / Order | 已接入单段变分方程的独立阶／次，保持名义力模型；协方差 UI 已接入。基础已完成：最高 2190 阶解析引力 Hessian、极轴及固定历元潮汐/长期变化系数偏导，通过 Orekit 与高精度解析值对照，见[引力空间偏导](gravity_differential.md)。单段接口已支持协方差矩阵；项目与 UI 已接入，独立截断不改变名义加速度 |
+| Covariance | Include Consider Analysis；Use / Value / x,y,z,vx,vy,vz | Drag / SRP 的 D、K 力参数偏导已完成；全局 D/K 参数敏感度已接入；D/K 参数方差、状态交叉协方差及其传播已接入；项目与 UI 已接入，OutGasTimeConstant、OutGasMagnitude、ThrustX/Y/Z 还需对应的名义力及参数定义 |
+| Covariance | Include Consider Cross Correlation；Row/Column/Value；Add/Remove | D/K 间协方差、完整活动联合矩阵正定校验、分项输出已接入；D/K 单对交叉项已接入 UI；通用增删行及其他考虑参数仍待实现 |
 
 OutGas 与 Thrust 参数必须有对应的名义加速度和偏导定义，不能只存名称或向矩阵添加任意噪声。高级窗口、模型下拉选项的进一步细分须继续依据官方说明和可获得的实际配置核对；核对未完成时保持待实现，不推定已支持。
 
@@ -234,7 +234,7 @@ C++ 共享同一份具名强类型定义，Python 不要求创建 `Update` 包�
 
 配置窗口使用清晰的导航分组：概览、重力、阻力、光压、附加模型、积分、协方差。内容参考 STK 的职责划分，视觉继续采用 OrbitForge 的深蓝灰 / 冰蓝主题、克制的樱粉点缀与响应式布局。
 
-桌面设置以左侧导航分“力模型”（引力、阻力、太阳辐射压、其他）和“数值”（积分器、协方差），每项显示当前取值摘要；窄窗口改用页签。中心天体引力与第三体位于引力页，最低停止高度位于积分器页。未实现的模型与协方差页显示能力状态，不提供伪生效开关；这次导航结构调整不代表对应数值功能已完成。
+桌面设置以左侧导航分“力模型”（引力、阻力、太阳辐射压、其他）和“数值”（积分器、协方差），每项显示当前取值摘要；窄窗口改用页签。中心天体引力与第三体位于引力页，最低停止高度位于积分器页。未实现的模型显示能力状态；协方差页已接入单滑行段的初始矩阵、参考系、独立重力阶次、D/K 考虑参数和报告。剩余范围以逐项验收清单为准。
 
 概览给出已启用模型、缺失资源和计算范围；详细页面只呈现相关参数。第三体使用可搜索表格，遮挡体使用统一对象 / 天体选择窗口。选择模型时同步单位、有效范围、需要的天气参数及是否支持低空拼接；不能把所有参数无差别地挤在一个表单中。
 
@@ -252,7 +252,7 @@ C++ 共享同一份具名强类型定义，Python 不要求创建 `Update` 包�
 | D：积分高级能力 | 其余积分器、VOP、时间正则化、科学插值和事件诊断 | 阶数与容差收敛、正反向、偏心轨道、阴影边界、机动重启及性能基准通过 |
 | E：不确定度 | STM、状态协方差、坐标变换、参数敏感度和 consider analysis | 有限差分参考、协方差性质、跨坐标系、机动跳变与独立结果比较通过 |
 
-每个阶段都以可用的计算、数据、API、持久化、桌面和验证闭环交付，不先放一整套可点击但不生效的设置。阶段 A 的静态重力与 DE440s 已完成；桌面分页完成，内部配置进一步解耦仍待推进。阶段 B 已实现太阳系第三体引力和球形光压／球面地月遮挡；球形阻力、JR/NRLMSISE-00、手动天气、近似高度、阻力地心视太阳已实现；CelesTrak 天气文件及历史取样已接入；光压三种太阳位置已接入；三小时自然样条已接入（节点/端点约定待 STK 验收）；FXM 观测与日 Ap 预测、1 AU 通量改正已接入（改正节点约定待 STK 验收）；保持窗口均值的插值已接入（边界/限制约定待 STK 验收）；CelesTrak 月预报和 CSSI Predicts 名义预报已接入（节点/平均构造待 STK 验收）；遮挡体视位置与阴影边界高级处理仍待实现。阶段 B 是“常用完整力环境”的最低门槛；完成 B 仍不代表潮汐、全部积分器和协方差已与 STK 全面对齐。完整验收以本文件逐项清单全部通过为准。
+每个阶段都以可用的计算、数据、API、持久化、桌面和验证闭环交付，不先放一整套可点击但不生效的设置。阶段 A 的静态重力与 DE440s 已完成；桌面分页完成，内部配置进一步解耦仍待推进。阶段 B 已实现太阳系第三体引力和球形光压／球面地月遮挡；球形阻力、JR/NRLMSISE-00、手动天气、近似高度、阻力地心视太阳已实现；CelesTrak 天气文件及历史取样已接入；光压三种太阳位置已接入；三小时自然样条已接入（节点/端点约定待 STK 验收）；FXM 观测与日 Ap 预测、1 AU 通量改正已接入（改正节点约定待 STK 验收）；保持窗口均值的插值已接入（边界/限制约定待 STK 验收）；CelesTrak 月预报和 CSSI Predicts 名义预报已接入（节点/平均构造待 STK 验收）；遮挡体视位置与椭球阴影轮廓仍待实现。阶段 B 是“常用完整力环境”的最低门槛；完成 B 仍不代表潮汐、全部积分器和协方差已与 STK 全面对齐。完整验收以本文件逐项清单全部通过为准。
 
 ### 数值比较
 

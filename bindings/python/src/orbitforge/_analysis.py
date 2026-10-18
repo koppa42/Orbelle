@@ -453,6 +453,16 @@ class AnalysisPlan:
 class Analysis:
     _native: n.Analysis
 
+    def covariance(self, satellite: SatelliteHandle, *, at: n.Epoch,
+                   cancelled: Callable[[], bool] | None = None) -> n.HpopCovarianceState:
+        """Propagate this snapshot's configured covariance to an exact TAI endpoint.
+
+        Returns the full active joint covariance, nominal state, STM and contributions
+        in Earth/GCRF SI units. Requires enabled covariance on a single HPOP coast.
+        """
+        return self._native.covariance(require(satellite, SatelliteHandle, "satellite")._ref,
+                                       require(at, n.Epoch, "at"), cancelled)
+
     def maneuvers(self, satellite: SatelliteHandle, *,
                   cancelled: Callable[[], bool] | None = None) -> n.ManeuverSeries:
         """Burns inside this scenario, with GCRF pre/post states and cumulative delta-v.

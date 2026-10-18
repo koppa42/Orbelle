@@ -194,6 +194,7 @@ class AerSeries:
     def to_csv(self, path: str | PathLike[str], overwrite: bool = False) -> None: ...
 
 class Analysis:
+    def covariance(self, satellite: ObjectRef, at: Epoch, cancelled: Callable[[], bool] | None = None) -> HpopCovarianceState: ...
     def maneuvers(self, satellite: ObjectRef, cancelled: Callable[[], bool] | None = None) -> ManeuverSeries: ...
     @property
     def snapshot(self) -> ProjectSnapshot: ...
@@ -1119,6 +1120,7 @@ class OrbitInput:
     input_frame: FrameId
     tle: Tle
     hpop: HpopOptions
+    covariance: HpopCovarianceSettings
     mission: MissionPlan
     object_id: str
     first: Epoch
@@ -1423,6 +1425,7 @@ class DataCatalog:
 
 
 class ReportKind:
+    STATE_COVARIANCE: ReportKind
     ACCESS_INTERVALS: ReportKind
     AER: ReportKind
     SCENARIO_SUMMARY: ReportKind
@@ -1675,6 +1678,25 @@ class HpopCovarianceInput:
     drag: HpopConsiderParameter | None
     srp: HpopConsiderParameter | None
     drag_srp_covariance: float
+
+class HpopCovarianceSettings:
+    def __init__(self) -> None: ...
+    enabled: bool
+    state: Sequence[Sequence[float]]
+    coordinates: HpopCovarianceCoordinates
+    independent_gravity: bool
+    gravity: HpopGravityTruncation
+    absolute_tolerance: float
+    consider_analysis: bool
+    drag_enabled: bool
+    srp_enabled: bool
+    drag: HpopConsiderParameter
+    srp: HpopConsiderParameter
+    consider_cross_correlation: bool
+    drag_srp_covariance: float
+    def active_input(self) -> HpopCovarianceInput: ...
+    def variational_options(self) -> HpopVariationalOptions: ...
+    def validate(self, force: HpopOptions = ...) -> None: ...
 
 class HpopCovarianceContributions:
     @property

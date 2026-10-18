@@ -705,6 +705,7 @@ void OrbitEditor::set_input(const OrbitInput &input) {
     body_ = input.initial.origin;
     propagator_kind_ = input.propagator;
     hpop_ = input.hpop;
+    covariance_ = input.covariance;
     mission_ = input.mission;
     hpop_initialized_ = uses_hpop() || hpop_ != core::HpopOptions{};
     manual_state_ = input.initial;
@@ -1043,7 +1044,7 @@ void OrbitEditor::open_propagator_details() {
                 hpop_, this,
                 gravity_models ? gravity_models() : std::vector<runtime::CatalogGravity>{},
                 ephemerides ? ephemerides() : std::vector<runtime::CatalogEphemeris>{},
-                manage_ephemerides, data_catalog))
+                manage_ephemerides, data_catalog, &covariance_))
             update_state_labels();
         return;
     }
@@ -1131,6 +1132,9 @@ void OrbitEditor::submit() {
         input.initial = read_state();
         input.propagator = propagator_kind_;
         input.hpop = hpop_;
+        input.covariance = covariance_;
+        if (propagator_kind_ != OrbitPropagator::hpop)
+            input.covariance.enabled = false;
         input.mission = mission_;
         if (propagator_kind_ == OrbitPropagator::sgp4) {
             input.tle = read_tle();

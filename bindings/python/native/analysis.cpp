@@ -186,6 +186,15 @@ void bind_analysis(py::module_ &module) {
         .def("__len__", [](const results::ManeuverSeries &value) { return value.events().size(); });
     py::class_<runtime::Analysis>(module, "Analysis")
         .def(
+            "covariance",
+            [](runtime::Analysis analysis, application::ObjectRef ref, core::Epoch at,
+               const py::object &cancelled) {
+                const auto check = cancellation(cancelled);
+                py::gil_scoped_release release;
+                return analysis.covariance(ref, at, check);
+            },
+            py::arg("satellite"), py::arg("at"), py::arg("cancelled") = py::none())
+        .def(
             "maneuvers",
             [](const runtime::Analysis &analysis, const application::ObjectRef &ref,
                const py::object &cancelled) {
@@ -379,6 +388,29 @@ void bind_analysis(py::module_ &module) {
                                [](const core::HpopCovarianceState &s) { return s.covariance; })
         .def_property_readonly("contributions",
                                [](const core::HpopCovarianceState &s) { return s.contributions; });
+    py::class_<application::HpopCovarianceSettings>(module, "HpopCovarianceSettings")
+        .def(py::init<>())
+        .def_readwrite("enabled", &application::HpopCovarianceSettings::enabled)
+        .def_readwrite("state", &application::HpopCovarianceSettings::state)
+        .def_readwrite("coordinates", &application::HpopCovarianceSettings::coordinates)
+        .def_readwrite("independent_gravity",
+                       &application::HpopCovarianceSettings::independent_gravity)
+        .def_readwrite("gravity", &application::HpopCovarianceSettings::gravity)
+        .def_readwrite("absolute_tolerance",
+                       &application::HpopCovarianceSettings::absolute_tolerance)
+        .def_readwrite("consider_analysis", &application::HpopCovarianceSettings::consider_analysis)
+        .def_readwrite("drag_enabled", &application::HpopCovarianceSettings::drag_enabled)
+        .def_readwrite("srp_enabled", &application::HpopCovarianceSettings::srp_enabled)
+        .def_readwrite("drag", &application::HpopCovarianceSettings::drag)
+        .def_readwrite("srp", &application::HpopCovarianceSettings::srp)
+        .def_readwrite("consider_cross_correlation",
+                       &application::HpopCovarianceSettings::consider_cross_correlation)
+        .def_readwrite("drag_srp_covariance",
+                       &application::HpopCovarianceSettings::drag_srp_covariance)
+        .def("active_input", &application::HpopCovarianceSettings::active_input)
+        .def("variational_options", &application::HpopCovarianceSettings::variational_options)
+        .def("validate", &application::validate_hpop_covariance_settings,
+             py::arg("force") = core::HpopOptions{});
     module.def("validate_hpop_covariance", &core::validate_hpop_covariance, py::arg("input"));
     module.def(
         "convert_hpop_covariance",

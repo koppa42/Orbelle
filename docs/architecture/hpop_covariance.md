@@ -1,6 +1,6 @@
 # HPOP 联合协方差与考虑参数
 
-`propagate_hpop_covariance` 在单个滑行段内传播初始状态协方差，并可考虑常参数 `D=Cd×DragArea/Mass`、`K=Cr×SRPArea/Mass` 的不确定度。C++、Python、安装 SDK 共用 Core 实现。输入支持带标记的 GCRF / LVLH / Frenet / FK5 J2000 / TrueOfDate Cartesian，输出统一地心 GCRF，时间与单位为 TAI 和 SI；项目持久化、桌面矩阵编辑、JPLFile 章动模式与 FG 表示、科学插值及跨机动传播仍需继续接入，不能把本接口当作完整协方差页面。
+`propagate_hpop_covariance` 在单个滑行段内传播初始状态协方差，并可考虑常参数 `D=Cd×DragArea/Mass`、`K=Cr×SRPArea/Mass` 的不确定度。C++、Python、安装 SDK 共用 Core 实现。输入支持带标记的 GCRF / LVLH / Frenet / FK5 J2000 / TrueOfDate Cartesian，输出统一地心 GCRF，时间与单位为 TAI 和 SI；项目 v41 已保存完整协方差草稿；桌面 HPOP → 协方差提供初始矩阵、参考系、独立重力截断及 D/K 考虑参数编辑。项目 Analysis 与协方差报告共用 Core 传播。JPLFile 章动模式、FG 表示、科学插值、跨机动传播与更多考虑参数仍需继续实现。
 
 参数含义来自 [STK HPOP Covariance](https://help.agi.com/stk/Content/hpop/hpop-covariance.htm)。Value 是方差，不是标准差；交叉值是有单位的协方差，不是无量纲相关系数。未选择的参数用空 optional 表示；没有考虑参数时只传播 6×6 状态矩阵。选定 D 或 K 时增加对应维度，两者均选定时允许 `Cov(D,K)`。现有力被关闭时，其参数敏感度为零；参数本身的方差仍按常参数保留。
 
@@ -82,3 +82,16 @@ p_end = result.covariance.state
 ```
 
 独立参考、矩阵尺度与验收见[联合协方差验证](../validation/hpop_covariance_protocol.md)。
+
+
+## 项目与桌面
+
+`OrbitInput.covariance` 使用 `application::HpopCovarianceSettings`。输入矩阵对应轨道初始历元；无默认不确定度，零矩阵只可作为禁用草稿。编辑下三角自动镜像上三角，切换参考系重新解释矩阵，不偷偷变换数值。桌面明确选择惯性速度分量投影或相对转动坐标系速度，不猜测 STK 初始矩阵页未公开的默认约定。J2000/TOD 使用 IERS1996。
+
+所有草稿都须有限，矩阵对称、对角非负；启用时检查整个活动联合矩阵正定。考虑分析、D/K 使用标记与参数间交叉开关分别保存；非活动草稿不进入分析/报告输入哈希。独立重力截断所激活的潮汐、UTC/EOP、星历资源参与准备与身份，不能仅检查名义 0×0 力模型。项目准备在初始点预检模型、偏导和坐标资源，失败不发布候选项目。任务序列启用协方差目前明确拒绝。
+
+`Analysis::covariance(satellite, at)` / Python `analysis.covariance(satellite, at=epoch)` 从不可变项目及数据快照读取配置，按精确 TAI 端点积分，返回完整联合协方差、STM 和分项结果；支持取消，不返回部分结果。旧快照不受后续编辑影响。
+
+“位置速度协方差”报告（`ReportKind::state_covariance`）仅选择已启用协方差的 HPOP 卫星，输出 GCRF 矩阵下三角的 21 个元素，可使用已有表格、曲线、模板与 CSV。SI 单位是 m²、m²/s、m²/s²；工程单位使用 km²、km²/s、km²/s²，均乘 10⁻⁶。每个报告点目前从初始历元独立积分，不插值，长时段密集输出仍需后续优化。报告保存配置及来源，不把显示缓存当作数值输入。
+
+验证见[项目协方差接入协议](../validation/hpop_covariance_project_protocol.md)。

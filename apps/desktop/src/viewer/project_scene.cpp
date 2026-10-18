@@ -72,7 +72,7 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
             gravity.contains(input.hpop.gravity_model))
             runtime::validate_gravity_reference(project.force_data, input.hpop.gravity_model,
                                                 gravity.at(input.hpop.gravity_model)->info());
-        if (input.uses_hpop() && input.hpop.uses_ephemeris() &&
+        if (input.uses_hpop() && input.hpop_resource_options().uses_ephemeris() &&
             ephemerides.contains(input.hpop.ephemeris_model))
             runtime::validate_ephemeris_reference(
                 project.force_data, input.hpop.ephemeris_model,

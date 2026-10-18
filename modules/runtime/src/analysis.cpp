@@ -111,7 +111,7 @@ DataSnapshot DataSnapshot::with_gravity_file(const std::string &selection,
 core::HpopEnvironment DataSnapshot::force_environment(const OrbitInput &input) const {
     std::shared_ptr<const core::GravityModel> model;
     std::shared_ptr<const core::IThirdBodyEphemeris> ephemeris;
-    if (input.uses_hpop() && input.hpop.uses_ephemeris()) {
+    if (input.uses_hpop() && input.hpop_resource_options().uses_ephemeris()) {
         const auto found = ephemerides_.find(input.hpop.ephemeris_model);
         if (found == ephemerides_.end())
             throw AnalysisCapabilityError("Missing ephemeris '" + input.hpop.ephemeris_model +
@@ -277,15 +277,16 @@ struct Analysis::Impl {
             numerical.satellites.back().display_name.clear();
             if (input.propagator != OrbitPropagator::sgp4)
                 numerical.satellites.back().orbit.tle = {}; // Inactive TLE draft is not an input.
-            entries.emplace(input.object_id,
-                            Entry{make_orbit_session(input, snapshot.revision, data.time().get(),
-                                                     data.force_environment(input)),
-                                  input.propagator == OrbitPropagator::sgp4 ? core::FrameId::teme
-                                                                            : core::FrameId::gcrf,
-                                  satellite.name(), report_input_sha256(numerical),
-                                  input.uses_eop_force() ||
-                                      (input.uses_hpop() && (!input.hpop.gravity_model.empty() ||
-                                                             input.hpop.uses_ephemeris()))});
+            entries.emplace(
+                input.object_id,
+                Entry{make_orbit_session(input, snapshot.revision, data.time().get(),
+                                         data.force_environment(input)),
+                      input.propagator == OrbitPropagator::sgp4 ? core::FrameId::teme
+                                                                : core::FrameId::gcrf,
+                      satellite.name(), report_input_sha256(numerical),
+                      input.uses_eop_force() ||
+                          (input.uses_hpop() && (!input.hpop.gravity_model.empty() ||
+                                                 input.hpop_resource_options().uses_ephemeris()))});
         }
         for (const auto &station : p.ground_stations) {
             Project numerical{"analysis-state-input-v1", p.first, p.last};
@@ -361,6 +362,23 @@ const DataSnapshot &Analysis::data() const { return impl_->data; }
 core::CartesianState Analysis::state(const ObjectRef &ref, core::Epoch at,
                                      core::FrameId frame) const {
     return states(ref, std::array{at}, frame).states().front();
+}
+core::HpopCovarianceState Analysis::covariance(const ObjectRef &ref, core::Epoch at,
+                                               const std::function<bool()> &cancelled) const {
+    check_cancelled(cancelled);
+    const auto object = snapshot().read(ref);
+    if (ref.kind() != ObjectKind::satellite)
+        throw AnalysisCapabilityError("Covariance queries require an HPOP satellite");
+    const auto &input = std::get<ProjectSatellite>(object).orbit;
+    if (!input.computes_covariance())
+        throw AnalysisCapabilityError("Enable covariance in this satellite's HPOP settings");
+    check_epoch(*snapshot().project, at);
+    auto result = core::propagate_hpop_covariance(
+        input.initial, at, input.covariance.active_input(), input.hpop,
+        data().force_environment(input), input.covariance.variational_options(),
+        [&] { check_cancelled(cancelled); });
+    check_cancelled(cancelled);
+    return result;
 }
 results::Trajectory Analysis::states(const ObjectRef &ref, std::span<const core::Epoch> times,
                                      core::FrameId frame) const {
@@ -510,7 +528,7 @@ AnalysisPlan::AnalysisPlan(const ProjectDocument &project, const DataCatalog &ca
           auto data = catalog.snapshot(first, last);
           for (const auto &satellite : captured.project->satellites) {
               const auto &input = satellite.orbit;
-              if (input.uses_hpop() && input.hpop.uses_ephemeris() &&
+              if (input.uses_hpop() && input.hpop_resource_options().uses_ephemeris() &&
                   !data.ephemerides().contains(input.hpop.ephemeris_model))
                   data = data.with_ephemeris(input.hpop.ephemeris_model,
                                              catalog.load_ephemeris(input.hpop.ephemeris_model));

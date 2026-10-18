@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <optional>
 #include <orbitforge/application/data_lock.hpp>
+#include <orbitforge/application/hpop_covariance.hpp>
 #include <orbitforge/application/report.hpp>
 #include <orbitforge/core/frames/eop_provider.hpp>
 #include <orbitforge/core/frames/state.hpp>
@@ -43,13 +44,33 @@ struct OrbitInput {
     // TLE epoch is interpreted with the calculation's explicit time provider.
     core::Tle tle;
     core::HpopOptions hpop;
+    HpopCovarianceSettings covariance;
     core::MissionPlan mission;
     [[nodiscard]] bool uses_hpop() const {
         return propagator == OrbitPropagator::hpop ||
                (propagator == OrbitPropagator::mission &&
                 mission.coast_model == core::MissionCoastModel::hpop);
     }
-    [[nodiscard]] bool uses_eop_force() const { return uses_hpop() && hpop.uses_eop_force(); }
+    [[nodiscard]] bool computes_covariance() const {
+        return propagator == OrbitPropagator::hpop && covariance.enabled;
+    }
+    // Union of nominal and covariance resources; never replaces nominal forces.
+    [[nodiscard]] core::HpopOptions hpop_resource_options() const {
+        auto result = hpop;
+        if (computes_covariance() && covariance.independent_gravity) {
+            if (covariance.gravity.degree > result.gravity_degree)
+                result.gravity_degree = covariance.gravity.degree;
+            if (covariance.gravity.order > result.gravity_order)
+                result.gravity_order = covariance.gravity.order;
+        }
+        return result;
+    }
+    [[nodiscard]] bool uses_eop_force() const {
+        return uses_hpop() && hpop_resource_options().uses_eop_force();
+    }
+    [[nodiscard]] bool requires_eop() const {
+        return uses_eop_force() || (computes_covariance() && covariance.uses_celestial_frame());
+    }
     [[nodiscard]] double mu() const {
         if (uses_hpop())
             return hpop.gravity_mu;

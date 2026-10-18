@@ -48,6 +48,6 @@ True 与地心视太阳在固定历元与卫星状态独立，直接复用低层
 - 查询发光状态前先核对清单窗口；实际 SPK 缺口由查询失败报告。输入非有限、SSB 速度达到光速、无效视线或非有限偏导明确失败。新增接口沿用 Provider 错误类型，失败后合法查询仍可复用。
 - 不支持视太阳偏导的第三方 Provider 明确拒绝。启用的完整 SRP 状态入口要求地心 GCRF 和有限状态；禁用时校验选项后返回零，不检查状态或查询星历。
 - [阴影接触和重合圆盘限制](srp_differential.md#阴影面积变化)仍适用。名义 Boundary Mitigation 不代替变分方程的事件处理；完整 STM 和协方差接口仍待实现。
-- 项目没有新增设置，继续使用当前 v40 / OBJS31。此计算接口尚未接入 Python 的完整力偏导／协方差 API；Python 已导出星历层结果和 Provider 方法。
+- 项目没有新增设置，继续使用当前 v41 / OBJS32。此计算接口尚未接入 Python 的完整力偏导／协方差 API；Python 已导出星历层结果和 Provider 方法。
 
 独立 CSPICE 差分、合成时标和安装后接口验证见[验证协议](../validation/apparent_sun_differential_protocol.md)。

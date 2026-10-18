@@ -72,6 +72,9 @@ int main(int argc, char **argv) try {
     numerical.hpop.regularization_exponent = 1.75;
     numerical.hpop.steps_per_orbit = 1024;
     numerical.hpop.drag.geomagnetic_update = of::core::GeomagneticUpdate::three_hourly_interpolated;
+    numerical.covariance.enabled = true;
+    for (std::size_t i = 0; i < 6; ++i)
+        numerical.covariance.state[i][i] = i < 3 ? 10000 : 1;
     const auto satellite =
         reopened.objects().create(of::objects::Satellite{.name = "HPOP", .orbit = numerical});
     const auto numerical_analysis = reopened.prepare();
@@ -84,9 +87,24 @@ int main(int argc, char **argv) try {
             std::string::npos ||
         numerical_result.provenance().algorithm.find("steps-per-orbit=1024") == std::string::npos)
         return 39;
+    const auto covariance_result = numerical_analysis.covariance(satellite, reopened.last());
+    if (covariance_result.variational.state.epoch != reopened.last() ||
+        covariance_result.covariance.state[0][0] <= 0)
+        return 40;
+    const auto covariance_report =
+        numerical_analysis.report({.kind = of::ReportKind::state_covariance,
+                                   .object_ids = {satellite.id()},
+                                   .follow_scenario = false,
+                                   .first = reopened.last(),
+                                   .last = reopened.last()},
+                                  {.time_scale = of::ReportTimeScale::tai});
+    if (covariance_report.table.rows().size() != 1 ||
+        covariance_report.numeric_value(0, 4) != covariance_result.covariance.state[0][0] / 1e6)
+        return 41;
     reopened.save(path, numerical_analysis, true);
     auto numerical_file = of::Project::open(path);
-    if (numerical_file.to_data().satellites.at(0).orbit.hpop != numerical.hpop)
+    if (numerical_file.to_data().satellites.at(0).orbit.hpop != numerical.hpop ||
+        numerical_file.to_data().satellites.at(0).orbit.covariance != numerical.covariance)
         return 6;
     std::filesystem::remove(path);
     of::OrbitInput mission;

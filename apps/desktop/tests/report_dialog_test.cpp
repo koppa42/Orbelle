@@ -20,6 +20,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPlainTextEdit>
@@ -27,7 +28,6 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSplitter>
-#include <QListWidget>
 #include <QTabBar>
 #include <QTableView>
 #include <QTemporaryDir>
@@ -957,9 +957,12 @@ TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
     const auto subpoint = runtime::itrf_to_wgs84(fixed);
     project.ground_stations.push_back(
         {"station", "测控站", {subpoint.longitude_rad, subpoint.latitude_rad, 0}});
-    project.sensors.push_back(
-        {"sensor", "观测仪", "satellite-1", 0.7853981633974483,
-         application::SensorPointing::nadir, {}});
+    project.sensors.push_back({"sensor",
+                               "观测仪",
+                               "satellite-1",
+                               0.7853981633974483,
+                               application::SensorPointing::nadir,
+                               {}});
     int published = 0;
     ReportDialog dialog(
         project, time,
@@ -1063,7 +1066,7 @@ TEST(ReportDialog, TemplateUnitsReuseResultsAndReorderedFieldsKeepPlotsAndSelect
         EXPECT_EQ(analysis.data().time(), time);
         published = std::move(result);
     };
-    choose_report(dialog, 9);
+    choose_report(dialog, static_cast<int>(application::report_kinds.size()));
     auto *generate = dialog.findChild<QPushButton *>("generateReport");
     auto *table = dialog.findChild<QTableView *>("reportTable");
     generate->click();
@@ -1095,6 +1098,63 @@ TEST(ReportDialog, TemplateUnitsReuseResultsAndReorderedFieldsKeepPlotsAndSelect
     dialog.findChild<QComboBox *>("reportUnits")->setCurrentIndex(0);
     EXPECT_TRUE(table->model()->headerData(0, Qt::Horizontal).toString().contains("(m)"));
     EXPECT_EQ(preparations, 1);
+}
+TEST(ReportDialog, CovarianceUsesSavedSettingsAndPublishesSharedResult) {
+    (void)test_app();
+    const auto data = runtime::DataSnapshot::builtin_time();
+    application::Project project("Covariance report", core::Epoch{0}, core::Epoch{60'000'000'000});
+    application::ProjectSatellite satellite;
+    satellite.orbit.propagator = application::OrbitPropagator::hpop;
+    satellite.orbit.first = project.first;
+    satellite.orbit.last = project.last;
+    satellite.orbit.hpop.gravity_degree = satellite.orbit.hpop.gravity_order = 0;
+    satellite.orbit.covariance.enabled = true;
+    for (std::size_t i = 0; i < 6; ++i)
+        satellite.orbit.covariance.state[i][i] = i < 3 ? 10000 : 1;
+    project.satellites.push_back(satellite);
+    int preparations = 0;
+    ReportDialog dialog(
+        project, data.time(),
+        [&](auto ready) {
+            ++preparations;
+            ready(ReportInput{project, data}, {});
+        },
+        [](auto) {}, [](auto) {});
+    std::shared_ptr<const runtime::ReportResult> published;
+    dialog.result_published = [&](auto result, const runtime::Analysis &analysis) {
+        published = result;
+        EXPECT_EQ(result->algorithm, "hpop-joint-covariance-direct-coast-v1");
+        EXPECT_EQ(result->table.rows().size(), 2);
+        EXPECT_EQ(analysis.snapshot().project->satellites.front().orbit.covariance,
+                  satellite.orbit.covariance);
+        const auto covariance = core::propagate_hpop_covariance(
+            satellite.orbit.initial, project.last, satellite.orbit.covariance.active_input(),
+            satellite.orbit.hpop, data.force_environment(satellite.orbit));
+        EXPECT_EQ(std::get<double>(result->table.rows().back()[4]),
+                  covariance.covariance.state[0][0]);
+    };
+    dialog.select_object(satellite.orbit.object_id, application::ReportKind::state_covariance);
+    dialog.show();
+    EXPECT_FALSE(dialog.findChild<QComboBox *>("reportFrame")->isVisible());
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    ASSERT_TRUE(published);
+    EXPECT_EQ(preparations, 1);
+    auto *table = dialog.findChild<QTableView *>("reportTable");
+    ASSERT_EQ(table->model()->columnCount(), 25);
+    ASSERT_EQ(table->model()->rowCount(), 2);
+    EXPECT_DOUBLE_EQ(table->model()->data(table->model()->index(0, 4)).toString().toDouble(), .01);
+    EXPECT_TRUE(table->model()->headerData(4, Qt::Horizontal).toString().contains("km^2"));
+    dialog.findChild<QComboBox *>("reportUnits")->setCurrentIndex(1);
+    EXPECT_EQ(preparations, 1);
+    EXPECT_DOUBLE_EQ(table->model()->data(table->model()->index(0, 4)).toString().toDouble(),
+                     10000);
+    EXPECT_TRUE(table->model()->headerData(4, Qt::Horizontal).toString().contains("m^2"));
+    auto *plot = static_cast<ReportPlot *>(dialog.findChild<QWidget *>("reportPlot"));
+    EXPECT_FALSE(plot->image(1).isNull());
+    project.satellites[0].orbit.covariance.enabled = false;
+    dialog.update_project(project, data.time());
+    EXPECT_FALSE(report_available(dialog, static_cast<int>(application::report_kinds.size()) - 1));
 }
 } // namespace
 } // namespace orbitforge::desktop

@@ -73,8 +73,10 @@ TEST(HpopVariational, KeplerStmMatchesIndependentOrekitAcrossIntegratorsAndTimeC
                     o.time_regularization = regular;
                     o.steps_per_orbit = method == HpopIntegrator::rk4 ? 6000 : 600;
                     o.regularization_exponent = 1.5;
-                    const auto actual = propagate_hpop_variational(
-                        cartesian(initial), Epoch{static_cast<std::int64_t>(seconds * 1e9)}, o);
+                    HpopVariationalState actual{cartesian(initial)};
+                    ASSERT_NO_THROW(actual = propagate_hpop_variational(
+                                        cartesian(initial),
+                                        Epoch{static_cast<std::int64_t>(seconds * 1e9)}, o));
                     for (std::size_t i = 0; i < 6; ++i) {
                         const double value =
                             i < 3 ? actual.state.position_m[i] : actual.state.velocity_mps[i - 3];
@@ -99,6 +101,114 @@ TEST(HpopVariational, KeplerStmMatchesIndependentOrekitAcrossIntegratorsAndTimeC
     RecordProperty("cases", count);
     RecordProperty("max_scaled_stm_error", maximum);
     RecordProperty("max_position_error_m", position_error);
+}
+TEST(HpopVariational, GaussJacksonRotatedOrekitReferencesConvergeAcrossZeroComponents) {
+    std::ifstream input(ORBITFORGE_UNIVERSAL_KEPLER_STM_REFERENCE);
+    ASSERT_TRUE(input);
+    std::size_t count = 0;
+    double maximum = 0;
+    for (std::string line; std::getline(input, line);) {
+        if (line.empty() || line[0] == '#')
+            continue;
+        std::istringstream row(line);
+        int id;
+        double mu, seconds;
+        Vector initial{}, expected{};
+        Matrix phi{};
+        row >> id >> mu >> seconds;
+        for (auto &x : initial)
+            row >> x;
+        for (auto &x : expected)
+            row >> x;
+        for (auto &r : phi)
+            for (auto &x : r)
+                row >> x;
+        ASSERT_TRUE(row);
+        if (id != 9 && id != 14 && id != 17 && id != 22 && id != 57 && id != 62 && id != 65 &&
+            id != 70)
+            continue;
+        // Rz(az) Ry(el): rigidly rotate an independent two-body reference, including
+        // both Cartesian blocks of its STM. No numerical reference is regenerated.
+        for (const int orientation : {16, 50, 54}) {
+            const double az = .123456789 * orientation, el = .09376543 * orientation;
+            const double cz = std::cos(az), sz = std::sin(az), cy = std::cos(el), sy = std::sin(el);
+            const std::array<std::array<double, 3>, 3> rotation{
+                {{cz * cy, -sz, cz * sy}, {sz * cy, cz, sz * sy}, {-sy, 0, cy}}};
+            Matrix transform{}, temporary{}, reference{};
+            for (std::size_t i = 0; i < 6; ++i)
+                for (std::size_t j = 0; j < 6; ++j)
+                    if (i / 3 == j / 3)
+                        transform[i][j] = rotation[i % 3][j % 3];
+            const auto rotate = [&](const Vector &value) {
+                Vector result{};
+                for (std::size_t i = 0; i < 6; ++i)
+                    for (std::size_t j = 0; j < 6; ++j)
+                        result[i] += transform[i][j] * value[j];
+                return result;
+            };
+            auto start = rotate(initial);
+            const auto end = rotate(expected);
+            if (id == 9 && orientation == 16) {
+                // Retain the input bits of the independently rotated failure case.
+                // A different summation/trig implementation can move it off the
+                // roundoff plateau even though the physical orbit is unchanged.
+                const Vector captured{-1615440.2785870458, 132392.43959846179,  -6809759.5367425252,
+                                      -7201.8554298514518, -1684.5297327487153, 1675.7050347341158};
+                for (std::size_t i = 0; i < 6; ++i) {
+                    double magnitude = 0;
+                    for (std::size_t j = 0; j < 6; ++j)
+                        magnitude += std::abs(transform[i][j] * initial[j]);
+                    EXPECT_NEAR(start[i], captured[i],
+                                8 * std::numeric_limits<double>::epsilon() *
+                                    std::max(1., magnitude));
+                }
+                start = captured;
+            }
+            for (std::size_t i = 0; i < 6; ++i)
+                for (std::size_t j = 0; j < 6; ++j)
+                    for (std::size_t k = 0; k < 6; ++k)
+                        temporary[i][j] += transform[i][k] * phi[k][j];
+            for (std::size_t i = 0; i < 6; ++i)
+                for (std::size_t j = 0; j < 6; ++j)
+                    for (std::size_t k = 0; k < 6; ++k)
+                        reference[i][j] += temporary[i][k] * transform[j][k];
+            for (auto correction : {HpopCorrection::full, HpopCorrection::pseudo})
+                for (int grid : {0, 1, 2}) {
+                    if (grid != 0 && (id == 57 || id == 62))
+                        continue;
+                    SCOPED_TRACE(::testing::Message()
+                                 << id << " orientation=" << orientation << " grid=" << grid
+                                 << " correction=" << static_cast<int>(correction));
+                    auto o = options(HpopIntegrator::gauss_jackson);
+                    o.gravity_mu = mu;
+                    o.correction = correction;
+                    o.fixed_step_seconds = 10;
+                    o.time_regularization = grid != 0;
+                    o.steps_per_orbit = grid == 2 ? 1200 : 600;
+                    o.regularization_exponent = 1.5;
+                    HpopVariationalState actual{cartesian(start)};
+                    ASSERT_NO_THROW(
+                        actual = propagate_hpop_variational(
+                            cartesian(start), Epoch{static_cast<std::int64_t>(seconds * 1e9)}, o));
+                    for (std::size_t i = 0; i < 6; ++i) {
+                        const double value =
+                            i < 3 ? actual.state.position_m[i] : actual.state.velocity_mps[i - 3];
+                        EXPECT_NEAR(value, end[i], i < 3 ? 5e-4 : 5e-7);
+                        for (std::size_t j = 0; j < 6; ++j) {
+                            const double error =
+                                std::abs(actual.state_transition[i][j] - reference[i][j]) *
+                                scale(j) / scale(i);
+                            EXPECT_LE(error, 5e-9);
+                            maximum = std::max(maximum, error);
+                        }
+                    }
+                    ++count;
+                }
+        }
+    }
+    EXPECT_EQ(count, 120U);
+    RecordProperty("cases", count);
+    RecordProperty("max_scaled_stm_error", maximum);
 }
 TEST(HpopVariational, InitialIdentityValidationAndCancellationDoNotPublishPartialResults) {
     const auto initial = cartesian({7e6, 1e6, 2e5, -1000, 7200, 1200});

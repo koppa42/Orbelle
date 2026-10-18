@@ -135,6 +135,31 @@ template <std::size_t N, std::size_t K = 0> struct GaussJacksonSystem12 {
             "HPOP Gauss-Jackson corrector did not converge; reduce the fixed step");
     }
 };
+// Optional row-major, scaled 6x8 variational block: STM then D/K sensitivities.
+// A column is one vector solution of the coupled variational equations. Its
+// components can cross zero without the vector becoming small. Testing each
+// component relatively would chase cancellation noise and depend on axis choice.
+// Keep each parameter column's own scale: a large STM must not hide a small D/K.
+template <std::size_t Extra, class State>
+bool variational_corrector_converged(const State &before, const State &after, std::size_t offset,
+                                     double epsilon) {
+    static_assert(Extra == 0 || Extra == 48);
+    if constexpr (Extra > 0) {
+        for (std::size_t column = 0; column < 8; ++column) {
+            double scale = 1e-6, change = 0;
+            for (std::size_t row = 0; row < 6; ++row) {
+                const auto i = offset + 8 * row + column;
+                if (!std::isfinite(before[i]) || !std::isfinite(after[i]))
+                    return false;
+                scale = std::max(scale, std::abs(after[i]));
+                change = std::max(change, std::abs(after[i] - before[i]));
+            }
+            if (change > epsilon * scale)
+                return false;
+        }
+    }
+    return true;
+}
 // Ordinary Cartesian-time adapter retains the established convergence and
 // pseudo-correction semantics. Other formulations supply their own scales and
 // transformed two-body term, including their kinematic clock terms.
@@ -162,10 +187,8 @@ template <std::size_t Extra = 0> struct CartesianGaussJackson12 : GaussJacksonSy
                 std::max(1., std::hypot(corrected[0], corrected[1], corrected[2]));
             const double velocity_scale =
                 std::max(1., std::hypot(corrected[3], corrected[4], corrected[5]));
-            for (std::size_t i = 6; i < 6 + Extra; ++i)
-                if (std::abs(corrected[i] - estimate[i]) >
-                    convergence * std::max(1e-6, std::abs(corrected[i])))
-                    return false;
+            if (!variational_corrector_converged<Extra>(estimate, corrected, 6, convergence))
+                return false;
             return position_change <= convergence * position_scale &&
                    velocity_change <= convergence * velocity_scale;
         };

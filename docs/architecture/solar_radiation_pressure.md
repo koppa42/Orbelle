@@ -38,7 +38,7 @@ OrbitForge 默认采用地心视太阳；几何太阳的独立 Orekit 参考显�
 
 光压启用时总是需要太阳星历，启用阴影且分配月球时还需要月球。第三体引力勾选状态与此独立，GM 不参与光压力值。每个积分阶段使用对应历元的 Provider；准备阶段检查完整传播区间与实际目标链。缺文件或覆盖不足会停止准备，不能自动关闭光压。太阳向量由现有 ICRF 对齐的 SPICE 力模型适配器提供；SDK 不隐式下载资源。地心视太阳认证起点前 600 秒的历史。卫星视太阳不假定固定地心距离：准备时验证整个接收区间的 Earth→EMB→SSB 链，以及从快照起点到接收区间终点的完整 Sun→SSB 链；每次求值另检查实际发光时刻。过去的太阳链有洞即拒绝准备，不能以只查接收端点替代；若实际距离所需历史早于快照起点，求值失败，不外推。
 
-会话和分析持有不可变星历；来源包含 `spherical-uniform-angular-union-v3`、太阳方法、`NONE` / `earth-LT+S-v1` / `spacecraft-LT+S-tai-rate-v1` 及 `occultors=geometric`、有效光压参数及星历解释／内容身份。禁用光压的草稿，以及无阴影或未分配遮挡体的半径草稿不改变分析和报告身份。项目 v40／OBJS31 保存全部有效草稿；不提供旧版本解码。
+会话和分析持有不可变星历；来源包含 `spherical-uniform-angular-union-v3`、太阳方法、`NONE` / `earth-LT+S-v1` / `spacecraft-LT+S-tai-rate-v1` 及 `occultors=geometric`、有效光压参数及星历解释／内容身份。禁用光压的草稿，以及无阴影或未分配遮挡体的半径草稿不改变分析和报告身份。项目 v41／OBJS32 保存全部有效草稿；不提供旧版本解码。
 
 ```python
 data = of.DataSnapshot.builtin_time().with_ephemeris("de440s", manifest, workspace)
@@ -84,7 +84,7 @@ C++ 使用 `HpopOptions::srp`／`SrpOptions`，通过显式 `HpopEnvironment` �
 - 圆柱光照比例在每个力段内保持单侧取值，求出边界后再切换。双锥圆弓形面积在接触处具有 3/2 次幂起始行为；半影及接触相邻步使用误差受控的 Bulirsch–Stoer 前缀校正（相对尺度 1e−15，位置/速度绝对尺度 1e−10 m / 1e−13 m/s）。全部物理力在该前缀一起积分，不平滑或削弱光压力。平滑日照/本影段继续使用所选方法。
 - 五种积分器、固定/相对误差控制、正反向传播和 Sundman 时间正则化共用事件语义。固定物理或 q 网格不因接触重新锚定；GJ 在接触或非光滑半影桥接后重新建立差分历史。正则化接触前缀积分等价的 `(r,v,q)` 方程，不投影时钟或伪造状态。真实积分工作继续计入每次查询 200000 次尝试上限，检测和求根支持取消。
 - 科学星历以接触时刻分弧，不能跨边界构造插值模板。浮点事件状态先按动力学输运到其整数纳秒历元，避免 Hermite 放大节点时间标注误差。接受节点模式遇到短半影弧时，在该弧内增加真实积分停止点并重新定位事件，在边界两侧的插值窗口以高精度 BS 前缀核对中点，误差超过配置分量尺度的十分之一时再细化；至多八次并共享每次查询的工作上限。无法满足所选阶数或精度时明确报错。固定报告网格继续保留原配置，短弧节点不足时报错，不静默降低插值阶数。
-- 界面位于 Force Models / SRP / 阴影；禁用条件保留草稿。关闭 SRP、None 阴影、无分配遮挡体、Cr 或 A/m 为零时，开关不参与有效计算身份。生效时来源包含 `srp-boundary=contacts-one-sided-bs-v1`、检查间隔和时间分辨率。项目使用 v40 / OBJS31。
+- 界面位于 Force Models / SRP / 阴影；禁用条件保留草稿。关闭 SRP、None 阴影、无分配遮挡体、Cr 或 A/m 为零时，开关不参与有效计算身份。生效时来源包含 `srp-boundary=contacts-one-sided-bs-v1`、检查间隔和时间分辨率。项目使用 v41 / OBJS32。
 
 固定参考 `tests/reference/propagators/srp_boundaries.txt` 由 `tools/validation/orekit/OrbitForgeSrpBoundaryReference.java` 生成，依赖同目录 `OrbitForgeSrpReference.java` 的合成移动太阳：Orekit 13.1.2、Hipparchus 4.0.2 DP853、TAI/GCRF、球形地球，Cr=1.7、A/m=20 m²/kg，显式放大光压以检验边界误差。LEO/GEO 各含正反向和圆柱/双锥，共 8 条轨迹及所有接触状态。圆柱参考使用 Orekit `EclipseDetector` 的零半径发光源，保留 STK 指定的卫星至太阳方向；不能直接替换为使用地心太阳方向的 `CylindricalShadowEclipseDetector`。
 

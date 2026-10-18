@@ -74,7 +74,7 @@ __all__ = [
     "HpopGravityTruncation", "HpopVariationalOptions", "HpopVariationalState", "propagate_hpop_variational",
     "HpopCovarianceFrame", "HpopCovarianceVelocity", "HpopCovarianceCoordinates",
     "hpop_covariance_frame_jacobian", "convert_hpop_covariance",
-    "HpopConsiderParameter", "HpopCovarianceInput", "HpopCovarianceContributions", "HpopCovarianceState",
+    "HpopConsiderParameter", "HpopCovarianceInput", "HpopCovarianceSettings", "HpopCovarianceContributions", "HpopCovarianceState",
     "validate_hpop_covariance", "transport_hpop_covariance", "propagate_hpop_covariance",
     "propagate_hpop_ephemeris", "make_hpop_ephemeris_session",
     "CentralBody", "central_body", "J2MeanElements", "J2SecularOptions",

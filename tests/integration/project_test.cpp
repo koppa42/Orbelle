@@ -317,6 +317,14 @@ TEST(Project, CurrentSchemaFixturePreservesInputsRelationshipsAndExactEncoding) 
     EXPECT_TRUE(project.satellites[1].orbit.hpop.time_regularization);
     EXPECT_EQ(project.satellites[1].orbit.hpop.regularization_exponent, 1.25);
     EXPECT_EQ(project.satellites[1].orbit.hpop.steps_per_orbit, 240);
+    const auto &covariance = project.satellites[1].orbit.covariance;
+    EXPECT_FALSE(covariance.enabled);
+    EXPECT_EQ(covariance.coordinates.frame, core::HpopCovarianceFrame::lvlh);
+    EXPECT_EQ(covariance.coordinates.velocity, core::HpopCovarianceVelocity::rotating);
+    EXPECT_EQ(covariance.gravity, (core::HpopGravityTruncation{12, 7}));
+    EXPECT_EQ(covariance.state[0][0], 25);
+    EXPECT_EQ(covariance.drag.variance, 1e-4);
+    EXPECT_EQ(covariance.drag_srp_covariance, 5e-5);
     EXPECT_EQ(project.satellites[1].orbit.hpop.integrator, core::HpopIntegrator::gauss_jackson);
     EXPECT_TRUE(project.satellites[1].orbit.hpop.vop);
     EXPECT_FALSE(project.satellites[1].orbit.hpop.uses_vop());
@@ -420,8 +428,8 @@ TEST(Project, DataLocksHaveStableCanonicalOrderAndRejectDuplicateRoles) {
 }
 TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
     const auto bytes = application::encode_project(example());
-    for (std::uint32_t version = 0; version <= 41; ++version) {
-        if (version == 40)
+    for (std::uint32_t version = 0; version <= 42; ++version) {
+        if (version == 41)
             continue;
         SCOPED_TRACE(version);
         auto unsupported = bytes;
@@ -433,7 +441,7 @@ TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
         } catch (const application::ProjectError &error) {
             EXPECT_NE(std::string(error.what()).find("version " + std::to_string(version) + ";"),
                       std::string::npos);
-            EXPECT_NE(std::string(error.what()).find("reads only version 40"), std::string::npos);
+            EXPECT_NE(std::string(error.what()).find("reads only version 41"), std::string::npos);
         }
     }
 }

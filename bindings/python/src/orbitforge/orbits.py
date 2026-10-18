@@ -520,6 +520,103 @@ class HpopSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class CovarianceConsider:
+    """D or K variance and cross covariances with (x,y,z,vx,vy,vz), in SI."""
+    enabled: bool = False
+    variance: float = 0.0
+    state_cross_covariance: tuple[float, ...] = (0.0,) * 6
+
+    def __post_init__(self) -> None:
+        require(self.enabled, bool, "enabled")
+        values = tuple(float(v) for v in self.state_cross_covariance)
+        if len(values) != 6:
+            raise ValueError("Consider cross covariance requires six values")
+        object.__setattr__(self, "state_cross_covariance", values)
+
+    def _native(self) -> n.HpopConsiderParameter:
+        value = n.HpopConsiderParameter()
+        value.variance = self.variance
+        value.state_cross_covariance = self.state_cross_covariance
+        return value
+
+
+@dataclass(frozen=True, slots=True)
+class CovarianceSettings:
+    """Initial Cartesian covariance at the orbit epoch, SI units, zero draft by default.
+
+    State is a symmetric 6x6 matrix. Enabling requires the entire active joint
+    matrix to be positive definite. Consider values are variances, not sigmas.
+    Disabled settings are retained without affecting calculation identity.
+    """
+    enabled: bool = False
+    state: tuple[tuple[float, ...], ...] = ((0.0,) * 6,) * 6
+    frame: Literal["gcrf", "j2000", "true_of_date", "lvlh", "frenet"] = "gcrf"
+    velocity: Literal["projected", "rotating"] = "projected"
+    independent_gravity: bool = False
+    gravity_degree: int = 4
+    gravity_order: int = 4
+    absolute_tolerance: float = 1e-14
+    consider_analysis: bool = False
+    drag: CovarianceConsider = CovarianceConsider()
+    srp: CovarianceConsider = CovarianceConsider()
+    consider_cross_correlation: bool = False
+    drag_srp_covariance: float = 0.0
+
+    def __post_init__(self) -> None:
+        matrix = tuple(tuple(float(v) for v in row) for row in self.state)
+        if len(matrix) != 6 or any(len(row) != 6 for row in matrix):
+            raise ValueError("State covariance requires a 6x6 matrix")
+        object.__setattr__(self, "state", matrix)
+        for field in ("enabled", "independent_gravity", "consider_analysis",
+                      "consider_cross_correlation"):
+            if type(getattr(self, field)) is not bool:
+                raise TypeError(f"{field} must be bool")
+        if type(self.gravity_degree) is not int or type(self.gravity_order) is not int:
+            raise TypeError("Covariance gravity degree/order must be integers")
+        self._native().validate()
+
+    def _native(self) -> n.HpopCovarianceSettings:
+        value = n.HpopCovarianceSettings()
+        frames = {"gcrf": n.HpopCovarianceFrame.GCRF,
+                  "j2000": n.HpopCovarianceFrame.FK5_J2000,
+                  "true_of_date": n.HpopCovarianceFrame.TRUE_OF_DATE,
+                  "lvlh": n.HpopCovarianceFrame.LVLH, "frenet": n.HpopCovarianceFrame.FRENET}
+        velocities = {"projected": n.HpopCovarianceVelocity.PROJECTED,
+                      "rotating": n.HpopCovarianceVelocity.ROTATING}
+        if self.frame not in frames or self.velocity not in velocities:
+            raise ValueError("Unsupported covariance frame or velocity convention")
+        value.coordinates = n.HpopCovarianceCoordinates(frames[self.frame], velocities[self.velocity])
+        for field in ("enabled", "state", "independent_gravity", "absolute_tolerance",
+                      "consider_analysis", "consider_cross_correlation", "drag_srp_covariance"):
+            setattr(value, field, getattr(self, field))
+        value.gravity = n.HpopGravityTruncation(self.gravity_degree, self.gravity_order)
+        for name in ("drag", "srp"):
+            parameter = require(getattr(self, name), CovarianceConsider, name)
+            setattr(value, name, parameter._native())
+            setattr(value, name + "_enabled", parameter.enabled)
+        return value
+
+    @classmethod
+    def _read(cls, value: n.HpopCovarianceSettings) -> "CovarianceSettings":
+        frames = {n.HpopCovarianceFrame.GCRF: "gcrf",
+                  n.HpopCovarianceFrame.FK5_J2000: "j2000",
+                  n.HpopCovarianceFrame.TRUE_OF_DATE: "true_of_date",
+                  n.HpopCovarianceFrame.LVLH: "lvlh", n.HpopCovarianceFrame.FRENET: "frenet"}
+        velocities = {n.HpopCovarianceVelocity.PROJECTED: "projected",
+                      n.HpopCovarianceVelocity.ROTATING: "rotating"}
+        fields = {name: getattr(value, name) for name in (
+            "enabled", "state", "independent_gravity", "absolute_tolerance",
+            "consider_analysis", "consider_cross_correlation", "drag_srp_covariance")}
+        for name in ("drag", "srp"):
+            p = getattr(value, name)
+            fields[name] = CovarianceConsider(getattr(value, name + "_enabled"), p.variance,
+                                             tuple(p.state_cross_covariance))
+        return cls(**fields, frame=frames[value.coordinates.frame],
+                   velocity=velocities[value.coordinates.velocity],
+                   gravity_degree=value.gravity.degree, gravity_order=value.gravity.order)
+
+
+@dataclass(frozen=True, slots=True)
 class Orbit:
     """Canonical configuration returned by orbit constructors and handle reads."""
     initial: Cartesian
@@ -529,6 +626,7 @@ class Orbit:
     step_seconds: int = 60
     hpop: HpopSettings = HpopSettings()
     mission: missions.Plan = missions.Plan()
+    covariance: CovarianceSettings = CovarianceSettings()
 
     def _native(self) -> n.OrbitInput:
         value = n.OrbitInput()
@@ -542,6 +640,8 @@ class Orbit:
             self.propagator == n.OrbitPropagator.MISSION and self.mission.propagation == "hpop"
         ):
             value.hpop = require(self.hpop, HpopSettings, "hpop")._native()
+            value.covariance = require(self.covariance, CovarianceSettings, "covariance")._native()
+            value.covariance.validate(value.hpop)
         return value
 
     @classmethod
@@ -550,7 +650,8 @@ class Orbit:
         require(value, n.OrbitInput, "orbit")
         return cls(Cartesian._read(value.initial), value.propagator, value.input_frame,
                    n.Tle(value.tle.line1, value.tle.line2), value.step_seconds,
-                   HpopSettings._read(value.hpop), missions.Plan._read(value.mission))
+                   HpopSettings._read(value.hpop), missions.Plan._read(value.mission),
+                   CovarianceSettings._read(value.covariance))
 
 
 def TwoBody(*, initial: Keplerian | Cartesian | n.CartesianState) -> Orbit:
@@ -617,7 +718,8 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
          interpolation_mu: float = 3.986004415e14,
          report_ephemeris_on_fixed_step: bool = False,
          time_regularization: bool = False, regularization_exponent: float = 1.5,
-         steps_per_orbit: int = 120, vop: bool = False) -> Orbit:
+         steps_per_orbit: int = 120, vop: bool = False,
+         covariance: CovarianceSettings = CovarianceSettings()) -> Orbit:
     """HPOP orbit with gravity, tides, third bodies, drag, spherical SRP and numerical integration.
     vop selects universal-variable variation of parameters for RKF78/Bulirsch-Stoer.
     Other methods retain the inactive draft; VOP integration uses gravity_mu, independently
@@ -661,4 +763,7 @@ def Hpop(*, initial: Keplerian | Cartesian | n.CartesianState,
         interpolation_mu, report_ephemeris_on_fixed_step, time_regularization, regularization_exponent,
         steps_per_orbit, vop)
     settings._native()  # Fail at construction, before changing a project.
-    return Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP, hpop=settings)
+    orbit = Orbit(require(initial, Cartesian, "initial"), n.OrbitPropagator.HPOP,
+                  hpop=settings, covariance=require(covariance, CovarianceSettings, "covariance"))
+    orbit._native()
+    return orbit

@@ -25,7 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 40;
+constexpr std::uint32_t project_version = 41;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -43,7 +43,7 @@ struct SectionSchema {
 // One current schema, shared by the reader and writer. Null means an optional section.
 constexpr std::array section_schemas{
     SectionSchema{scene_tag, 1, "Missing scene section"},
-    SectionSchema{objects_tag, 31, "Missing satellites section"},
+    SectionSchema{objects_tag, 32, "Missing satellites section"},
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
     SectionSchema{sensors_tag, 1, "Missing sensors section"},
@@ -225,6 +225,68 @@ core::SrpOptions read_srp(Reader &in) {
     }
     return o;
 }
+void write_covariance(Writer &out, const HpopCovarianceSettings &s, bool draft = true) {
+    out.number(s.enabled, 1);
+    if (!draft && !s.enabled)
+        return;
+    out.number(static_cast<unsigned>(s.coordinates.frame), 4);
+    out.number(static_cast<unsigned>(s.coordinates.velocity), 4);
+    for (const auto &row : s.state)
+        for (double value : row)
+            out.real(value);
+    out.number(s.independent_gravity, 1);
+    if (draft || s.independent_gravity) {
+        out.number(static_cast<unsigned>(s.gravity.degree), 4);
+        out.number(static_cast<unsigned>(s.gravity.order), 4);
+    }
+    out.real(s.absolute_tolerance);
+    out.number(s.consider_analysis, 1);
+    if (draft || s.consider_analysis) {
+        const auto parameter = [&](bool enabled, const core::HpopConsiderParameter &p) {
+            out.number(enabled, 1);
+            if (draft || enabled) {
+                out.real(p.variance);
+                for (double value : p.state_cross_covariance)
+                    out.real(value);
+            }
+        };
+        parameter(s.drag_enabled, s.drag);
+        parameter(s.srp_enabled, s.srp);
+        const bool cross = s.consider_cross_correlation && s.drag_enabled && s.srp_enabled;
+        out.number(draft ? s.consider_cross_correlation : cross, 1);
+        if (draft || cross)
+            out.real(s.drag_srp_covariance);
+    }
+}
+HpopCovarianceSettings read_covariance(Reader &in) {
+    HpopCovarianceSettings s;
+    s.enabled = in.boolean();
+    const auto frame = in.number(4), velocity = in.number(4);
+    check(frame <= 4 && velocity <= 1, "Unsupported covariance coordinates");
+    s.coordinates = {static_cast<core::HpopCovarianceFrame>(frame),
+                     static_cast<core::HpopCovarianceVelocity>(velocity)};
+    for (auto &row : s.state)
+        for (auto &value : row)
+            value = in.real();
+    s.independent_gravity = in.boolean();
+    const auto degree = in.number(4), order = in.number(4);
+    check(degree <= core::gravity_max_degree && order <= degree,
+          "Unsupported covariance gravity degree/order");
+    s.gravity = {static_cast<int>(degree), static_cast<int>(order)};
+    s.absolute_tolerance = in.real();
+    s.consider_analysis = in.boolean();
+    const auto parameter = [&](bool &enabled, core::HpopConsiderParameter &p) {
+        enabled = in.boolean();
+        p.variance = in.real();
+        for (auto &value : p.state_cross_covariance)
+            value = in.real();
+    };
+    parameter(s.drag_enabled, s.drag);
+    parameter(s.srp_enabled, s.srp);
+    s.consider_cross_correlation = in.boolean();
+    s.drag_srp_covariance = in.real();
+    return s;
+}
 void write_drag(Writer &out, const core::DragOptions &d, bool draft = true) {
     out.number(d.enabled, 1);
     if (!draft && !d.enabled)
@@ -369,6 +431,7 @@ std::string analysis_input_sha256(const Project &project) {
             write_mission(out, orbit.mission, false);
         if (orbit.uses_hpop()) {
             const auto &o = orbit.hpop;
+            const auto resources = orbit.hpop_resource_options();
             core::validate_hpop_options(o);
             out.text(o.gravity_model.empty() ? std::string(core::egm96_model_id())
                                              : o.gravity_model);
@@ -385,18 +448,19 @@ std::string analysis_input_sha256(const Project &project) {
                     out.text(body.cb->content_sha256);
                 }
             }
+            write_covariance(out, orbit.covariance, false);
             write_srp(out, core::effective_srp_options(o.srp), false);
             // Spherical accelerations depend on A/m. Mass changes only compatible areas.
             // Include mass here when a future mass-dependent model becomes active.
             write_drag(out, core::effective_drag_options(o.drag), false);
-            if (o.uses_ephemeris())
+            if (resources.uses_ephemeris())
                 out.text(o.ephemeris_model);
             out.number(static_cast<unsigned>(o.gravity_degree), 4);
             out.number(static_cast<unsigned>(o.gravity_order), 4);
-            out.number(o.uses_secular_gravity(), 1);
-            if (o.uses_earth_fixed_gravity()) {
+            out.number(resources.uses_secular_gravity(), 1);
+            if (resources.uses_earth_fixed_gravity()) {
                 const auto tides =
-                    core::effective_solid_tide_options(o.solid_tides, o.gravity_degree);
+                    core::effective_solid_tide_options(o.solid_tides, resources.gravity_degree);
                 out.number(static_cast<unsigned>(tides.mode), 4);
                 out.number(tides.truncate_to_gravity, 1);
                 out.number(tides.include_time_dependent_terms, 1);
@@ -478,7 +542,7 @@ std::pair<core::Epoch, core::Epoch> calculation_data_interval(const Project &pro
     auto first = project.first, last = project.last;
     for (const auto &satellite : project.satellites) {
         const auto &input = satellite.orbit;
-        if (!input.uses_eop_force())
+        if (!input.requires_eop())
             continue;
         if (input.initial.epoch.tai_nanoseconds() < first.tai_nanoseconds())
             first = input.initial.epoch;
@@ -547,6 +611,10 @@ void validate_project(const Project &project, bool relationships) {
         if (input.uses_hpop()) {
             try {
                 core::validate_hpop_options(input.hpop);
+                validate_hpop_covariance_settings(input.covariance, input.hpop);
+                if (input.covariance.enabled && !input.computes_covariance())
+                    throw std::invalid_argument(
+                        "Covariance across mission maneuvers is not supported");
             } catch (const std::invalid_argument &error) {
                 throw ProjectError(error.what());
             }
@@ -855,6 +923,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
             objects.number(static_cast<unsigned>(o.steps_per_orbit), 4);
             write_srp(objects, o.srp);
             write_drag(objects, o.drag);
+            write_covariance(objects, input.covariance);
         }
     }
     payload.section(objects_tag, objects);
@@ -1082,6 +1151,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             o.steps_per_orbit = static_cast<int>(steps_per_orbit);
             o.srp = read_srp(objects);
             o.drag = read_drag(objects);
+            input.covariance = read_covariance(objects);
         }
         project.satellites.push_back(std::move(satellite));
     }
@@ -1147,7 +1217,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             report.id = reports.text();
             report.name = reports.text();
             const auto kind = reports.number(4);
-            check(kind <= 8, "Unsupported report template");
+            check(kind <= 9, "Unsupported report template");
             report.query.kind = static_cast<ReportKind>(kind);
             const auto scope = reports.number(4);
             check(scope <= 1, "Unsupported report scope");

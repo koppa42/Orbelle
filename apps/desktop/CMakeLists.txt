@@ -32,7 +32,7 @@ if(ORBITFORGE_WITH_VSG)
     target_sources(orbitforge_desktop PRIVATE src/viewer/graphics_workbench.cpp
         src/viewer/report_dialog.cpp src/viewer/report_plot.cpp src/viewer/report_selection.cpp
         src/viewer/project_scene.cpp src/viewer/eop_catalog.cpp src/viewer/data_center_dialog.cpp
-        src/viewer/orbit_scene.cpp src/viewer/orbit_editor.cpp src/viewer/hpop_settings.cpp src/viewer/mission_editor.cpp src/viewer/track_style_editor.cpp src/viewer/workbench_style.cpp
+        src/viewer/orbit_scene.cpp src/viewer/orbit_editor.cpp src/viewer/hpop_settings.cpp src/viewer/hpop_covariance_editor.cpp src/viewer/mission_editor.cpp src/viewer/track_style_editor.cpp src/viewer/workbench_style.cpp
         src/viewer/satellite_model.cpp src/viewer/mission_timeline.cpp src/viewer/scenario_dialog.cpp
         src/viewer/insert_object_dialog.cpp src/viewer/insert_object_dialog.hpp
         src/viewer/ground_station_editor.cpp src/viewer/ground_station_editor.hpp
@@ -119,7 +119,7 @@ if(ORBITFORGE_WITH_VSG)
             src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
             src/viewer/ground_station_editor.cpp src/viewer/sensor_editor.cpp
             src/viewer/object_selection.cpp src/viewer/object_selection.hpp
-            src/viewer/orbit_editor.cpp src/viewer/hpop_settings.cpp src/viewer/data_center_dialog.cpp src/viewer/mission_editor.cpp src/viewer/track_style_editor.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp)
+            src/viewer/orbit_editor.cpp src/viewer/hpop_settings.cpp src/viewer/hpop_covariance_editor.cpp src/viewer/data_center_dialog.cpp src/viewer/mission_editor.cpp src/viewer/track_style_editor.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp)
         target_sources(orbitforge_quantity_tests PRIVATE src/viewer/eop_catalog.cpp)
         set_target_properties(orbitforge_quantity_tests PROPERTIES AUTOMOC ON)
         qt_add_resources(orbitforge_quantity_tests "quantity_icons" PREFIX "/orbitforge"

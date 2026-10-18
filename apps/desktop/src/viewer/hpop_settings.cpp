@@ -1,6 +1,7 @@
 #include "hpop_settings.hpp"
 #include "eop_catalog.hpp"
 #include "form_kit.hpp"
+#include "hpop_covariance_editor.hpp"
 #include "quantity_editor.hpp"
 #include "responsive_layout.hpp"
 #include "workbench_style.hpp"
@@ -90,7 +91,7 @@ bool edit_hpop_settings(
     core::HpopOptions &options, QWidget *parent, const std::vector<runtime::CatalogGravity> &models,
     const std::vector<runtime::CatalogEphemeris> &ephemerides,
     const std::function<std::vector<runtime::CatalogEphemeris>()> &manage_ephemerides,
-    EopCatalog *catalog) {
+    EopCatalog *catalog, application::HpopCovarianceSettings *covariance) {
     QPointer<EopCatalog> data = catalog;
     auto installed_models = data ? data->data().gravity_models() : models;
     if (data)
@@ -675,17 +676,6 @@ bool edit_hpop_settings(
     help(third,
          QStringLiteral(
              "位置星历：DE440s。Cb file 读取文件中的 Gm / SystemGm；火星与外行星使用系统质心。"));
-    const auto pending = [&](QTabWidget *owner, const QString &title, const char *name,
-                             const QString &description, const QString &scope) {
-        auto *form = page(owner, title, name);
-        auto *status = section(form, title, (std::string(name) + "Status").c_str());
-        auto *badge = new QLabel(QStringLiteral("尚未实现"));
-        badge->setObjectName("hpopPendingBadge");
-        status->addRow(badge);
-        note(status, description);
-        note(status, scope);
-        note(form, QStringLiteral("当前传播不包含此项，暂不可启用。"));
-    };
     auto *drag_page = page(force_tabs, QStringLiteral("阻力"), "hpopDragPage");
     auto *drag_use = new QCheckBox(QStringLiteral("使用大气阻力 Use Drag"));
     drag_use->setObjectName("hpopUseDrag");
@@ -1378,10 +1368,10 @@ bool edit_hpop_settings(
         quantity(stop, QStringLiteral("最低地心高度"), "hpopMinimumAltitude", Unit::metre,
                  options.minimum_altitude_m, 0, std::numeric_limits<double>::max());
     help(stop, QStringLiteral("高度相对所选重力场参考球面；积分中低于此高度会停止并报错。"));
-    pending(
-        tabs, QStringLiteral("协方差"), "hpopCovariancePage",
-        QStringLiteral("协方差传播尚未实现，当前只计算确定性轨迹。"),
-        QStringLiteral("初始 6 × 6 矩阵、参考系、独立重力截断与 consider 参数将集中在此配置。"));
+    auto *covariance_page = page(tabs, QStringLiteral("协方差"), "hpopCovariancePage");
+    auto *covariance_editor = new HpopCovarianceEditor(
+        covariance ? *covariance : application::HpopCovarianceSettings{}, covariance != nullptr);
+    covariance_page->addRow(covariance_editor);
     // Navigation: force models and numerics, each with a live summary of the current draft so
     // the whole configuration reads at a glance.
     struct Destination {
@@ -1455,9 +1445,13 @@ bool edit_hpop_settings(
                        ? integration_name + QStringLiteral(" · 相对容差 ") + value_text(relative)
                        : integration_name + QStringLiteral(" · 步长 ") + value_text(fixed) +
                              QStringLiteral(" s")));
-        covariance_item->setData(summary_role, QStringLiteral("尚未实现"));
+        covariance_item->setData(summary_role, covariance_editor->summary());
     };
     QObject::connect(secular_use, &QCheckBox::toggled, &dialog, refresh_summaries);
+    QObject::connect(covariance_editor->findChild<QCheckBox *>("hpopComputeCovariance"),
+                     &QCheckBox::toggled, &dialog, refresh_summaries);
+    QObject::connect(covariance_editor->findChild<QComboBox *>("hpopCovarianceFrame"),
+                     &QComboBox::currentIndexChanged, &dialog, refresh_summaries);
     for (auto *box : {model, density_model, srp_shadow, method, step_control, solid_mode})
         QObject::connect(box, &QComboBox::currentIndexChanged, &dialog, refresh_summaries);
     for (auto *spin : {degree, order, steps_per_orbit})
@@ -1980,16 +1974,24 @@ bool edit_hpop_settings(
                 interpolation_order->value(), vop_mu};
             candidate.report_ephemeris_on_fixed_step = fixed_ephemeris->isChecked();
             core::validate_hpop_options(candidate);
+            validation_page = 2;
+            validation_field = covariance_editor->findChild<QTableWidget *>("hpopCovarianceMatrix");
+            const auto covariance_candidate = covariance_editor->value();
+            if (covariance)
+                application::validate_hpop_covariance_settings(covariance_candidate, candidate);
             options = candidate;
+            if (covariance)
+                *covariance = covariance_candidate;
             dialog.accept();
         } catch (const std::exception &e) {
             tabs->setCurrentIndex(validation_page);
             auto *scroll = dialog.findChild<QScrollArea *>(
-                validation_page == 0 ? (validation_force_page == 3   ? "hpopAdditionalPage"
-                                        : validation_force_page == 2 ? "hpopSrpPage"
-                                        : validation_force_page == 1 ? "hpopDragPage"
-                                                                     : "hpopGravityPage")
-                                     : "hpopIntegratorPage");
+                validation_page == 0   ? (validation_force_page == 3   ? "hpopAdditionalPage"
+                                          : validation_force_page == 2 ? "hpopSrpPage"
+                                          : validation_force_page == 1 ? "hpopDragPage"
+                                                                       : "hpopGravityPage")
+                : validation_page == 2 ? "hpopCovariancePage"
+                                       : "hpopIntegratorPage");
             if (validation_page == 0) {
                 force_tabs->setCurrentIndex(validation_force_page);
                 if (validation_body) {

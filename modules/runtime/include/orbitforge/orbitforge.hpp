@@ -9,6 +9,7 @@
 
 namespace orbitforge {
 using application::DataLock;
+using application::HpopCovarianceSettings;
 using application::LineStyle;
 using application::OrbitDisplay;
 using application::OrbitInput;

@@ -125,6 +125,8 @@ QString kind_name(ReportKind kind) {
         return QStringLiteral("可见时段 · Access");
     case ReportKind::aer:
         return QStringLiteral("AER · 方位 / 仰角 / 距离");
+    case ReportKind::state_covariance:
+        return QStringLiteral("HPOP · 位置速度协方差");
     }
     return {};
 }
@@ -828,6 +830,8 @@ struct ReportDialog::Impl {
                                       "传感器的可见时段，考虑地球遮挡、最低仰角与传感器视场。");
             case ReportKind::aer:
                 return QStringLiteral("地面站观测目标的方位角、仰角、斜距与可见标记。");
+            case ReportKind::state_covariance:
+                return QStringLiteral("传播已启用的 HPOP 协方差，输出 GCRF 位置速度矩阵的下三角。");
             }
             return {};
         };
@@ -927,6 +931,17 @@ struct ReportDialog::Impl {
         choose(row);
     }
     bool compatible(ReportKind kind) const {
+        if (kind == ReportKind::state_covariance) {
+            const auto eligible = [&](const std::string &id) {
+                return std::ranges::any_of(project.satellites, [&](const auto &s) {
+                    return s.orbit.object_id == id && s.orbit.computes_covariance();
+                });
+            };
+            return all_objects ? std::ranges::any_of(
+                                     project.satellites,
+                                     [](const auto &s) { return s.orbit.computes_covariance(); })
+                               : !scope_ids.empty() && std::ranges::all_of(scope_ids, eligible);
+        }
         if (report_is_access(kind))
             return !project.ground_stations.empty() && !project.satellites.empty();
         if (std::ranges::any_of(project.sensors, [&](const auto &s) {
@@ -1146,6 +1161,8 @@ struct ReportDialog::Impl {
         template_description->setToolTip(template_description->text());
         if (draft.query.kind == ReportKind::classical_elements)
             template_description->setText(QStringLiteral("瞬时六根数 · GCRF"));
+        if (draft.query.kind == ReportKind::state_covariance)
+            template_description->setText(QStringLiteral("位置速度协方差下三角 · GCRF"));
         if (draft.query.kind == ReportKind::orbital_motion)
             template_description->setText(QStringLiteral("地心距离、速率与航迹倾角 · GCRF"));
         if (draft.query.kind == ReportKind::geodetic_position)
