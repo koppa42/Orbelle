@@ -54,9 +54,11 @@ jobs:
           ref: ${{ inputs.vcpkg-baseline }}
           path: out/tools/vcpkg
           persist-credentials: false
+      # Keep the native jobs' cache paths: cache versions include the path,
+      # so a fallback key alone cannot reuse an archive at another location.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ runner.temp }}/python-deps/binary-cache
+          path: ${{ runner.temp }}/${{ inputs.platform == 'linux' && 'linux/dependencies/binary-cache' || 'vcpkg-binary-cache' }}
           key: python-deps-${{ inputs.platform }}-v1-${{ steps.toolchain.outputs.image }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/ports/**', 'cmake/triplets/ci/**') }}
           restore-keys: |
             python-deps-${{ inputs.platform }}-v1-${{ steps.toolchain.outputs.image }}-
@@ -68,13 +70,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends build-essential ninja-build ncompress pkg-config
       - name: Restore or build headless dependencies
         shell: python {0}
+        env:
+          DEPENDENCY_CACHE: ${{ runner.temp }}/${{ inputs.platform == 'linux' && 'linux/dependencies/binary-cache' || 'vcpkg-binary-cache' }}
         run: |
           import os, pathlib, subprocess, sys
           source = pathlib.Path.cwd()
           work = pathlib.Path(os.environ['RUNNER_TEMP']) / 'python-deps'
           work.mkdir(parents=True, exist_ok=True)
-          cache = work / 'binary-cache'
-          cache.mkdir(exist_ok=True)
+          cache = pathlib.Path(os.environ['DEPENDENCY_CACHE'])
+          cache.mkdir(parents=True, exist_ok=True)
           vcpkg = source / 'out/tools/vcpkg'
           windows = os.name == 'nt'
           subprocess.run([str(vcpkg / ('bootstrap-vcpkg.bat' if windows else 'bootstrap-vcpkg.sh')),
