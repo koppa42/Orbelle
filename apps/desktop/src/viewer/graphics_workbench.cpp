@@ -6254,7 +6254,7 @@ class Workbench final : public QMainWindow {
                 auto *priority = dialog->findChild<QListWidget *>("eopSourcePriority");
                 auto *pages = dialog->findChild<QTabWidget *>("dataPages");
                 require(pages && details && automatic && automatic->isChecked() && inventory &&
-                            inventory->topLevelItemCount() == 3 && priority &&
+                            inventory->topLevelItemCount() == 6 && priority &&
                             inventory->topLevelItem(0)->childCount() == 2 &&
                             priority->isVisible() &&
                             !dialog->findChild<QComboBox *>("eopSnapshots") &&
@@ -6347,7 +6347,7 @@ class Workbench final : public QMainWindow {
                     eop_->data_info().interpolation.starts_with("finals2000a") ? 0 : 1;
                 const auto imported =
                     eop_catalog_->inventory()[static_cast<std::size_t>(imported_row)];
-                require(inventory->topLevelItemCount() == 3 &&
+                require(inventory->topLevelItemCount() == 6 &&
                             inventory->currentItem() == group->child(imported_row) &&
                             imported.provider_index == 2 && imported.acquired_at &&
                             imported.acquisition == runtime::DataAcquisition::imported &&
@@ -7327,9 +7327,13 @@ class Workbench final : public QMainWindow {
                     ->setText(QStringLiteral("对地观测仪"));
                 sensor_editor_->findChild<QuantityEditor *>("sensorHalfAngle")
                     ->set_value(20, Unit::degree);
-                // Inspect the embedded layout on the next frame, after resize events settle.
+                // Embedding, responsive margins and the vertical scrollbar each queue
+                // layout work. Allow the same bounded settling period as other pane checks.
+                smoke_wait_frame_ = frame_count_ + 4;
                 break;
             }
+            if (frame_count_ < smoke_wait_frame_)
+                break;
             auto *scroll = sensor_editor_->findChild<QScrollArea *>("sensorScroll");
             auto *submit = sensor_editor_->findChild<QPushButton *>("applySensor");
             require(scroll && submit && scroll->horizontalScrollBar()->maximum() == 0,
@@ -7345,7 +7349,12 @@ class Workbench final : public QMainWindow {
                 ", contents=" + std::to_string(scroll->widget()->width());
             require(!scroll->horizontalScrollBar()->isVisible(), scroll_details.c_str());
             require(scroll->widget()->width() <= scroll->viewport()->width(),
-                    "Sensor form is wider than its workspace viewport");
+                    qPrintable(QString("Sensor form is wider than its workspace viewport: "
+                                       "contents=%1, viewport=%2, minimum=%3, hint=%4")
+                                   .arg(scroll->widget()->width())
+                                   .arg(scroll->viewport()->width())
+                                   .arg(scroll->widget()->minimumWidth())
+                                   .arg(scroll->widget()->minimumSizeHint().width())));
             record("sensor-editor-embedded-layout");
             submit->click();
             ++orbit_smoke_stage_;
