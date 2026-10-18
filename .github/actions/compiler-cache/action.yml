@@ -1,0 +1,25 @@
+name: Project compiler cache
+description: Cache C/C++ compilation without caching test results or build directories.
+runs:
+  using: composite
+  steps:
+    - name: Select MSVC 2022 x64
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c # v1.13.0
+      with:
+        arch: x64
+        vsversion: '2022'
+    - name: Enable compiler launchers
+      shell: python {0}
+      run: |
+        import os
+        with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as output:
+            output.write('SCCACHE_GHA_ENABLED=true\n')
+            output.write('CMAKE_C_COMPILER_LAUNCHER=sccache\n')
+            output.write('CMAKE_CXX_COMPILER_LAUNCHER=sccache\n')
+            generator = 'Ninja Multi-Config' if os.name == 'nt' else 'Ninja'
+            output.write(f'CMAKE_GENERATOR={generator}\n')
+    - name: Set up sccache and report cache statistics
+      uses: mozilla-actions/sccache-action@fd02668681acd5f960e1372061bee5e3e987195c # v0.0.11
+      with:
+        version: v0.16.0

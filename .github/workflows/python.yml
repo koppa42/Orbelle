@@ -6,6 +6,12 @@ on:
       platform:
         type: string
         required: true
+      vcpkg-baseline:
+        type: string
+        required: true
+      baseline-python:
+        type: string
+        required: true
       python-versions:
         type: string
         required: true
@@ -24,7 +30,88 @@ env:
   CMAKE_BUILD_PARALLEL_LEVEL: '4'
 
 jobs:
+  dependencies:
+    name: Python dependencies / ${{ inputs.platform }}
+    runs-on: ${{ inputs.platform == 'linux' && 'ubuntu-24.04' || 'windows-2022' }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ inputs.baseline-python }}
+      - name: Identify runner image
+        id: toolchain
+        shell: python {0}
+        run: |
+          import os
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('image=' + os.environ['ImageVersion'] + '\n')
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ inputs.vcpkg-baseline }}
+          path: out/tools/vcpkg
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/python-deps/binary-cache
+          key: python-deps-${{ inputs.platform }}-v1-${{ steps.toolchain.outputs.image }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/ports/**', 'cmake/triplets/ci/**') }}
+          restore-keys: |
+            python-deps-${{ inputs.platform }}-v1-${{ steps.toolchain.outputs.image }}-
+            ${{ inputs.platform == 'linux' && 'vcpkg-ubuntu24-x64-v1-' || 'vcpkg-win2022-release-v2-' }}${{ steps.toolchain.outputs.image }}-
+      - name: Prepare Linux dependency tools
+        if: inputs.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential ninja-build ncompress pkg-config
+      - name: Restore or build headless dependencies
+        shell: python {0}
+        run: |
+          import os, pathlib, subprocess, sys
+          source = pathlib.Path.cwd()
+          work = pathlib.Path(os.environ['RUNNER_TEMP']) / 'python-deps'
+          work.mkdir(parents=True, exist_ok=True)
+          cache = work / 'binary-cache'
+          cache.mkdir(exist_ok=True)
+          vcpkg = source / 'out/tools/vcpkg'
+          windows = os.name == 'nt'
+          subprocess.run([str(vcpkg / ('bootstrap-vcpkg.bat' if windows else 'bootstrap-vcpkg.sh')),
+                          '-disableMetrics'], check=True)
+          triplet = 'x64-windows-release' if windows else 'x64-linux'
+          command = [str(vcpkg / ('vcpkg.exe' if windows else 'vcpkg')), 'install',
+              f'--x-manifest-root={source}', f'--x-install-root={work / "installed"}',
+              f'--x-buildtrees-root={work / "buildtrees"}', f'--x-packages-root={work / "packages"}',
+              f'--downloads-root={work / "downloads"}', f'--triplet={triplet}',
+              '--x-no-default-features', '--x-feature=time-frames', '--x-feature=spice',
+              '--x-feature=data-catalog', '--clean-after-build']
+          if windows:
+              command += [f'--overlay-triplets={source / "cmake/triplets/ci"}', f'--host-triplet={triplet}']
+          subprocess.run(command, check=True,
+              env=dict(os.environ, VCPKG_BINARY_SOURCES=f'clear;files,{cache},readwrite'))
+          subprocess.run([sys.executable, 'tools/ci/export_python_dependencies.py',
+              '--dependency-prefix', str(work / 'installed' / triplet),
+              '--output', str(work / 'python-dependencies.tar.gz')], check=True)
+      - name: Upload Python test dependencies
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ${{ inputs.platform }}-python-dependencies
+          path: ${{ runner.temp }}/python-deps/python-dependencies.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+      - name: Upload dependency diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: python-dependencies-${{ inputs.platform }}-reports
+          path: ${{ runner.temp }}/python-deps/buildtrees/**/*.log
+          retention-days: 14
+
   python:
+    needs: dependencies
     name: Python ${{ matrix.python }} / ${{ inputs.platform }}
     runs-on: ${{ inputs.platform == 'linux' && 'ubuntu-24.04' || 'windows-2022' }}
     timeout-minutes: 25
@@ -43,15 +130,15 @@ jobs:
         with:
           name: ${{ inputs.platform }}-python-dependencies
           path: ${{ runner.temp }}/input
+      - uses: ./.github/actions/compiler-cache
       - name: Test Python API; build and install a wheel only for release
         shell: python {0}
         env:
-          DEPENDENCY_ARCHIVE: ${{ inputs.platform }}-python-dependencies.tar.gz
           CI_SCOPE: ${{ inputs.release && 'release' || 'full' }}
         run: |
           import os, pathlib, subprocess, sys, tarfile
           root = pathlib.Path(os.environ['RUNNER_TEMP'])
-          with tarfile.open(root / 'input' / os.environ['DEPENDENCY_ARCHIVE']) as archive:
+          with tarfile.open(root / 'input/python-dependencies.tar.gz') as archive:
               archive.extractall(root / 'delivery', filter='data')
           command = [sys.executable, 'tools/ci/check_python.py',
               '--dependency-prefix', str(root / 'delivery/dependencies'),

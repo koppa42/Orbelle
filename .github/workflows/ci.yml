@@ -118,6 +118,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential clang ninja-build ncompress pkg-config python3-dev python3-venv
           out/tools/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+      - uses: ./.github/actions/compiler-cache
       - name: Compile and test; package only for a release tag
         env:
           CI_SCOPE: ${{ needs.metadata.outputs.scope }}
@@ -125,9 +126,6 @@ jobs:
           args=(--stage tests)
           if [[ "$CI_SCOPE" == release ]]; then
             args=(--stage package --delivery "$RUNNER_TEMP/delivery")
-          fi
-          if [[ "$CI_SCOPE" != baseline ]]; then
-            args+=(--test-dependencies "$RUNNER_TEMP/linux-python-dependencies.tar.gz")
           fi
           python tools/ci/check_linux.py --source "$GITHUB_WORKSPACE" \
             --vcpkg-root "$GITHUB_WORKSPACE/out/tools/vcpkg" \
@@ -143,16 +141,6 @@ jobs:
         with:
           name: linux-delivery
           path: ${{ runner.temp }}/linux-delivery.tar.gz
-          compression-level: 0
-          if-no-files-found: error
-          overwrite: true
-          retention-days: 7
-      - name: Upload Linux Python test dependencies
-        if: needs.metadata.outputs.scope != 'baseline'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: linux-python-dependencies
-          path: ${{ runner.temp }}/linux-python-dependencies.tar.gz
           compression-level: 0
           if-no-files-found: error
           overwrite: true
@@ -285,6 +273,7 @@ jobs:
         with:
           path: ${{ runner.temp }}/vcpkg-binary-cache
           key: ${{ steps.cache.outputs.cache-primary-key }}${{ steps.dependencies.outcome != 'success' && format('-partial-{0}-{1}', github.run_id, github.run_attempt) || '' }}
+      - uses: ./.github/actions/compiler-cache
       - name: Compile and test; package only for a release tag
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
@@ -296,9 +285,6 @@ jobs:
           if ($env:CI_SCOPE -eq 'release') {
             $checkArgs += @('--release', '--output', "$env:RUNNER_TEMP/assets")
           }
-          if ($env:CI_SCOPE -ne 'baseline') {
-            $checkArgs += @('--test-dependencies', "$env:RUNNER_TEMP/windows-python-dependencies.tar.gz")
-          }
           python tools/ci/check_windows.py @checkArgs
           if ($LASTEXITCODE) { throw 'Windows validation failed' }
       - name: Upload Windows release assets
@@ -307,16 +293,6 @@ jobs:
         with:
           name: windows-release-assets
           path: ${{ runner.temp }}/assets/*
-          compression-level: 0
-          if-no-files-found: error
-          overwrite: true
-          retention-days: 7
-      - name: Upload Windows Python test dependencies
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        if: needs.metadata.outputs.scope != 'baseline'
-        with:
-          name: windows-python-dependencies
-          path: ${{ runner.temp }}/windows-python-dependencies.tar.gz
           compression-level: 0
           if-no-files-found: error
           overwrite: true
@@ -339,21 +315,25 @@ jobs:
 
   python-linux:
     name: Linux compatibility
-    needs: [metadata, linux]
+    needs: metadata
     if: needs.metadata.outputs.scope == 'full' || needs.metadata.outputs.scope == 'release'
     uses: ./.github/workflows/python.yml
     with:
       platform: linux
+      vcpkg-baseline: ${{ needs.metadata.outputs.vcpkg-baseline }}
+      baseline-python: ${{ needs.metadata.outputs.baseline-python }}
       python-versions: ${{ needs.metadata.outputs.python-matrix }}
       release: ${{ inputs.release-tag != '' }}
 
   python-windows:
     name: Windows compatibility
-    needs: [metadata, windows]
+    needs: metadata
     if: needs.metadata.outputs.scope == 'full' || needs.metadata.outputs.scope == 'release'
     uses: ./.github/workflows/python.yml
     with:
       platform: windows
+      vcpkg-baseline: ${{ needs.metadata.outputs.vcpkg-baseline }}
+      baseline-python: ${{ needs.metadata.outputs.baseline-python }}
       python-versions: ${{ needs.metadata.outputs.python-matrix }}
       release: ${{ inputs.release-tag != '' }}
 
