@@ -23,6 +23,6 @@
 
 查询固定使用 `ReportQuery.lighting_ephemeris`（默认 `de440s`）。已准备快照必须含此 Provider 及匹配的数据锁，覆盖完整查询区间；失败和取消不发布部分结果。SGP4 的 TEME 状态通过明确注入的 EOP 转换后参与几何计算。几何不合法、资源缺失/不匹配或越界均报错。每次报告最多 200000 行，单对象事件搜索最多 2000000 次几何求值。
 
-`ReportResult.lighting_statistics` 仅时段报告存在。三个状态分别提供段数、累计时长、最长时长、时间占比；修改显示模板不改变统计。来源保留项目输入哈希、数据锁、太阳星历选择及算法标识。项目 v45 / RPTS6 保存查询设置，不保存计算表。
+`ReportResult.lighting_statistics` 仅时段报告存在。三个状态分别提供段数、累计时长、最长时长、时间占比；修改显示模板不改变统计。来源保留项目输入哈希、数据锁、太阳星历选择及算法标识。项目 v46 / RPTS7 保存查询设置，不保存计算表。
 
 Python 示例见 [lighting_analysis.py](../../examples/python/lighting_analysis.py)，数值参考和误差预算见[验证协议](../validation/lighting_protocol.md)。STK 设计来源：[Lighting Times](https://help.agi.com/stkEngineOnUNIX/Subsystems/dataProviders/Content/html/dataProviders/Lighting_Times~Vehicle.htm)、[Lighting 设置](https://help.agi.com/stk/content/stk/vehSat_eclipseBodiesTab.htm)。本机没有 STK，验证采用 Orekit，不宣称已与 STK 导出结果数值一致。

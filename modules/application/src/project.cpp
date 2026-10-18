@@ -25,7 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 45;
+constexpr std::uint32_t project_version = 46;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -47,7 +47,7 @@ constexpr std::array section_schemas{
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
     SectionSchema{sensors_tag, 1, "Missing sensors section"},
-    SectionSchema{reports_tag, 6, "Missing reports section"},
+    SectionSchema{reports_tag, 7, "Missing reports section"},
     SectionSchema{data_tag, 2, nullptr},
     SectionSchema{time_tag, 1, nullptr},
     SectionSchema{analysis_tag, 1, nullptr},
@@ -974,6 +974,11 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         reports.number(static_cast<unsigned>(report.query.event_search_mode), 4);
         reports.number(static_cast<std::uint64_t>(report.query.event_tolerance_nanoseconds));
         reports.text(report.query.lighting_ephemeris);
+        const auto &grid = report.query.coverage;
+        for (double value : {grid.south_rad, grid.north_rad, grid.west_rad, grid.east_rad,
+                             grid.resolution_rad, grid.minimum_elevation_rad})
+            reports.real(value);
+        reports.number(grid.include_end_gaps, 1);
         reports.number(report.query.frame == core::FrameId::gcrf ? 1 : 2, 4);
         reports.number(static_cast<unsigned>(report.format.units), 4);
         reports.number(static_cast<unsigned>(report.format.time_scale), 4);
@@ -1241,6 +1246,14 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             report.query.event_search_mode = static_cast<core::AccessSearchMode>(access_mode);
             report.query.event_tolerance_nanoseconds = static_cast<std::int64_t>(tolerance);
             report.query.lighting_ephemeris = reports.text();
+            auto &grid = report.query.coverage;
+            grid.south_rad = reports.real();
+            grid.north_rad = reports.real();
+            grid.west_rad = reports.real();
+            grid.east_rad = reports.real();
+            grid.resolution_rad = reports.real();
+            grid.minimum_elevation_rad = reports.real();
+            grid.include_end_gaps = reports.boolean();
             const auto frame = reports.number(4), units = reports.number(4),
                        scale = reports.number(4);
             check((frame == 1 || frame == 2) && units <= 1 && scale <= 2,

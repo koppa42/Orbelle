@@ -19,10 +19,14 @@ class ProjectFormatTests(unittest.TestCase):
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 45)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 46)
         self.path.write_bytes(self.raw)
         project = of.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
+        low = of.load_project_data(self.path)
+        self.assertEqual(low.reports[4].query.kind, of.ReportKind.COVERAGE_GRID)
+        self.assertEqual(low.reports[4].query.coverage.east_rad, -2.9)
+        self.assertFalse(low.reports[4].query.coverage.include_end_gaps)
         self.assertEqual(project.objects["satellite-b"].orbit.hpop.max_step_seconds, 45)
         self.assertEqual(project.objects["satellite-b"].orbit.hpop.solid_tides,
                          of.orbits.SolidTideSettings("full", True, True))
@@ -68,6 +72,23 @@ class ProjectFormatTests(unittest.TestCase):
         self.assertEqual(project.to_data().reports[2].query.object_ids, ["satellite-a", "satellite-b"])
         project.save(self.path, overwrite=True)
         self.assertEqual(self.path.read_bytes(), self.raw)
+
+    def test_coverage_records_reject_invalid_geometry_and_boolean_after_crc_repair(self):
+        marker = struct.pack("<6dB", -.2, .3, 2.9, -2.9, .1, .2, 0)
+        for offset, fmt, value in ((0, "d", float("nan")), (16, "d", 4),
+                                   (32, "d", 0), (48, "B", 2)):
+            sections = []
+            for tag, version, body in read_sections(self.raw):
+                if tag == b"RPTS":
+                    body = bytearray(body)
+                    self.assertEqual(body.count(marker), 2)
+                    struct.pack_into("<" + fmt, body, body.index(marker) + offset, value)
+                sections.append((tag, version, body))
+            raw = with_sections(self.raw, sections)
+            self.path.write_bytes(raw)
+            with self.subTest(offset=offset), self.assertRaises(of.ProjectError):
+                of.Project.open(self.path)
+            self.assertEqual(self.path.read_bytes(), raw)
 
     def test_unknown_weather_enum_is_rejected_with_valid_crcs(self):
         for value in (4, 0xFFFFFFFF):
@@ -118,14 +139,14 @@ class ProjectFormatTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(),altered)
 
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(45), 46, 0xFFFFFFFF):
+        for version in (*range(46), 47, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (of.load_project_data, of.load_project,
                                  of.Project.open, of.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 45"):
+                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 46"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 

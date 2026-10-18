@@ -30,7 +30,7 @@ if(ORBITFORGE_WITH_VSG)
     find_package(rocky 1.1.0 EXACT CONFIG REQUIRED)
     find_package(vsgXchange 1.1.13 EXACT CONFIG REQUIRED)
     target_sources(orbitforge_desktop PRIVATE src/viewer/graphics_workbench.cpp
-        src/viewer/report_dialog.cpp src/viewer/report_plot.cpp src/viewer/report_selection.cpp
+        src/viewer/report_dialog.cpp src/viewer/coverage_map.cpp src/viewer/report_plot.cpp src/viewer/report_selection.cpp
         src/viewer/project_scene.cpp src/viewer/eop_catalog.cpp src/viewer/data_center_dialog.cpp
         src/viewer/orbit_scene.cpp src/viewer/orbit_editor.cpp src/viewer/hpop_settings.cpp src/viewer/hpop_covariance_editor.cpp src/viewer/mission_editor.cpp src/viewer/track_style_editor.cpp src/viewer/workbench_style.cpp
         src/viewer/satellite_model.cpp src/viewer/mission_timeline.cpp src/viewer/scenario_dialog.cpp
@@ -139,7 +139,7 @@ if(ORBITFORGE_WITH_VSG)
     endif()
     if(BUILD_TESTING AND ORBITFORGE_WITH_ERFA)
         add_executable(orbitforge_report_ui_tests tests/report_dialog_test.cpp
-            src/viewer/report_dialog.cpp src/viewer/report_plot.cpp src/viewer/report_selection.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp src/viewer/workspace.cpp
+            src/viewer/report_dialog.cpp src/viewer/coverage_map.cpp src/viewer/report_plot.cpp src/viewer/report_selection.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp src/viewer/workspace.cpp
             src/viewer/object_selection.cpp src/viewer/object_selection.hpp)
         set_target_properties(orbitforge_report_ui_tests PROPERTIES AUTOMOC ON)
         qt_add_resources(orbitforge_report_ui_tests "report_icons" PREFIX "/orbitforge"

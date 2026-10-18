@@ -5,7 +5,7 @@ import shutil
 
 PYTHON_EXAMPLES = (
     "circular_orbit", "time_frames", "eop_state", "sun_moon", "two_body_scenario",
-    "propagators", "access", "report_templates", "mission", "orbital_events", "intersatellite",
+    "propagators", "access", "report_templates", "mission", "orbital_events", "intersatellite", "coverage",
 )
 
 

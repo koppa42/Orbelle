@@ -1,3 +1,4 @@
+#include "../src/viewer/coverage_map.hpp"
 #include "../src/viewer/epoch_editor.hpp"
 #include "../src/viewer/object_selection.hpp"
 #include "../src/viewer/report_dialog.hpp"
@@ -38,6 +39,7 @@
 #include <QWheelEvent>
 #include <cmath>
 #include <gtest/gtest.h>
+#include <numbers>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
@@ -91,11 +93,11 @@ bool report_available(ReportDialog &dialog, int row) {
     dialog.findChild<QPushButton *>("reportLibrary")->click();
     return available;
 }
-void wait_for_report(ReportDialog &dialog) {
+void wait_for_report(ReportDialog &dialog, int timeout = 5000) {
     const auto *generate = dialog.findChild<QPushButton *>("generateReport");
     QElapsedTimer timer;
     timer.start();
-    while (!generate->isEnabled() && timer.elapsed() < 5000) {
+    while (!generate->isEnabled() && timer.elapsed() < timeout) {
         QCoreApplication::processEvents();
         QThread::msleep(2);
     }
@@ -1474,11 +1476,15 @@ TEST(ReportDialog, IntersatellitePairCurvesExtremaSeekAndResponsiveLayout) {
         }
     };
     screenshots("relative-table");
-    auto *toggle=dialog.findChild<QPushButton *>("reportToggleSettings");
-    toggle->click(); QCoreApplication::processEvents();
-    EXPECT_TRUE(primary->isVisible()); EXPECT_TRUE(target->isVisible());
-    if(!capture.isEmpty()) dialog.grab().save(capture + "/relative-settings-420.png");
-    toggle->click(); QCoreApplication::processEvents();
+    auto *toggle = dialog.findChild<QPushButton *>("reportToggleSettings");
+    toggle->click();
+    QCoreApplication::processEvents();
+    EXPECT_TRUE(primary->isVisible());
+    EXPECT_TRUE(target->isVisible());
+    if (!capture.isEmpty())
+        dialog.grab().save(capture + "/relative-settings-420.png");
+    toggle->click();
+    QCoreApplication::processEvents();
     views->setCurrentIndex(1);
     screenshots("relative-curve");
     EXPECT_FALSE(
@@ -1510,5 +1516,125 @@ TEST(ReportDialog, IntersatellitePairCurvesExtremaSeekAndResponsiveLayout) {
     dialog.findChild<QPushButton *>("generateReport")->click();
     wait_for_report(dialog);
     EXPECT_EQ(published->table.rows(), rows);
+}
+TEST(ReportDialog, CoverageHeatmapPointWindowsTemplatesAndResponsiveLayout) {
+    (void)test_app();
+    if (!runtime::two_body_available())
+        GTEST_SKIP();
+    std::shared_ptr<const core::ITimeProvider> time = runtime::make_builtin_time_provider();
+    std::shared_ptr<const core::IEarthOrientationProvider> eop =
+        runtime::load_eop_snapshot(ORBITFORGE_ACCESS_EOP);
+    const auto data =
+        runtime::DataSnapshot::from_providers(time, runtime::make_frame_provider(), eop);
+    application::Project project{"Coverage · 区域与重访", core::Epoch{0},
+                                 core::Epoch{12000'000'000'000}};
+    project.earth_orientation = eop->data_info();
+    application::ProjectSatellite sat;
+    sat.orbit.object_id = "asset";
+    sat.display_name = "LEO · 覆盖卫星";
+    sat.orbit.first = project.first;
+    sat.orbit.last = project.last;
+    sat.orbit.initial = {
+        project.first, core::OriginId::earth, core::FrameId::gcrf, {7e6, 0, 0}, {0, 6200, 5300}};
+    project.satellites.push_back(sat);
+    int preparations = 0;
+    core::Epoch sought{-1};
+    std::shared_ptr<const runtime::ReportResult> result;
+    ReportDialog dialog(
+        project, time,
+        [&](const auto &, auto ready) {
+            ++preparations;
+            ready(ReportInput{project, data}, {});
+        },
+        [&](auto reports) { project.reports = std::move(reports); },
+        [&](auto epoch) { sought = epoch; });
+    dialog.result_published = [&](auto r, const auto &) { result = r; };
+    dialog.select_object("asset", application::ReportKind::coverage_grid);
+    dialog.show();
+    dialog.resize(1140, 820);
+    QCoreApplication::processEvents();
+    dialog.findChild<QPushButton *>("coverageGlobal")->click();
+    dialog.findChild<QDoubleSpinBox *>("coverageResolution")->setValue(20);
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog, 20000);
+    ASSERT_TRUE(result);
+    ASSERT_TRUE(result->coverage_statistics);
+    auto *views = dialog.findChild<QTabBar *>("reportViews");
+    EXPECT_EQ(views->currentIndex(), 2);
+    EXPECT_FALSE(views->isTabEnabled(1));
+    auto *map = static_cast<CoverageMap *>(dialog.findChild<QWidget *>("coverageMap"));
+    ASSERT_TRUE(map);
+    EXPECT_FALSE(map->image().isNull());
+    const auto &points = result->coverage_statistics->points;
+    auto found = std::ranges::find_if(points, [](const auto &p) { return !p.windows.empty(); });
+    ASSERT_NE(found, points.end());
+    const auto index = static_cast<std::size_t>(found - points.begin());
+    map->select_point(index);
+    EXPECT_EQ(dialog.findChild<QComboBox *>("coverageWindows")->count(),
+              static_cast<int>(found->windows.size()));
+    dialog.findChild<QPushButton *>("coverageJump")->click();
+    EXPECT_EQ(sought, found->windows.front().first);
+    QKeyEvent right(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier);
+    QApplication::sendEvent(map, &right);
+    EXPECT_TRUE(dialog.findChild<QLabel *>("coveragePointDetail")
+                    ->text()
+                    .contains(QString::number((index + 1) % points.size() + 1)));
+    const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    if (!capture.isEmpty())
+        QDir().mkpath(capture);
+    for (int width : {1140, 420}) {
+        dialog.resize(width, 820);
+        for (int i = 0; i < 5; ++i) {
+            QCoreApplication::processEvents();
+            QThread::msleep(10);
+        }
+        EXPECT_LE(dialog.minimumSizeHint().width(), 420);
+        EXPECT_LE(map->width(), dialog.width());
+        if (!capture.isEmpty())
+            dialog.grab().save(capture + QString("/coverage-map-%1.png").arg(width));
+    }
+    auto *toggle = dialog.findChild<QPushButton *>("reportToggleSettings");
+    toggle->click();
+    QCoreApplication::processEvents();
+    EXPECT_TRUE(dialog.findChild<QWidget *>("coverageSettings")->isVisible());
+    if (!capture.isEmpty())
+        dialog.grab().save(capture + "/coverage-settings-420.png");
+    toggle->click();
+    dialog.findChild<QComboBox *>("coverageMetric")->setCurrentIndex(1);
+    if (!capture.isEmpty())
+        dialog.grab().save(capture + "/coverage-revisit-420.png");
+    const auto selected_detail = dialog.findChild<QLabel *>("coveragePointDetail")->text();
+    dialog.findChild<QComboBox *>("reportUnits")->setCurrentIndex(1);
+    EXPECT_EQ(dialog.findChild<QLabel *>("coveragePointDetail")->text(), selected_detail);
+    EXPECT_EQ(preparations, 1);
+    save_template(dialog, QStringLiteral("全球覆盖"));
+    ASSERT_EQ(project.reports.size(), 1U);
+    EXPECT_EQ(project.reports[0].query.object_ids, (std::vector<std::string>{"asset"}));
+    EXPECT_DOUBLE_EQ(project.reports[0].query.coverage.west_rad, -std::numbers::pi);
+    choose_report(dialog, static_cast<int>(application::ReportKind::coverage_time));
+    dialog.findChild<QDoubleSpinBox *>("coverageResolution")->setValue(30);
+    dialog.findChild<QPushButton *>("coverageGlobal")->click();
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog, 20000);
+    ASSERT_EQ(result->definition.query.kind, application::ReportKind::coverage_time);
+    EXPECT_EQ(views->currentIndex(), 1);
+    EXPECT_TRUE(views->isTabEnabled(2));
+    dialog.resize(1140, 820);
+    QCoreApplication::processEvents();
+    if (!capture.isEmpty())
+        dialog.grab().save(capture + "/coverage-curve-1140.png");
+    auto previous = result;
+    dialog.findChild<QDoubleSpinBox *>("coverageNorth")->setValue(-90);
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    EXPECT_EQ(result, previous);
+    EXPECT_EQ(preparations, 2);
+    choose_report(dialog, static_cast<int>(application::report_kinds.size()));
+    project.satellites.clear();
+    dialog.update_project(project, time);
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    EXPECT_EQ(result, previous);
+    EXPECT_EQ(preparations, 2);
 }
 } // namespace orbitforge::desktop

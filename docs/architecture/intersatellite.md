@@ -37,4 +37,4 @@ passes = analysis.report(of.ReportKind.INTERSATELLITE_ACCESS,
 closest = relative.intersatellite_statistics.minimum_range  # value: m, epoch: TAI
 ```
 
-C++ 使用同名 `ReportKind::relative_motion` / `intersatellite_access` 与 `Analysis::report()`；Core 另提供 `relative_motion()` 和 `intersatellite_clearance()`。项目 **v45 / RPTS6** 保存有序双卫星绑定和查询参数，不保存计算结果；只读写当前版本。可运行示例见 [intersatellite.py](../../examples/python/intersatellite.py)。
+C++ 使用同名 `ReportKind::relative_motion` / `intersatellite_access` 与 `Analysis::report()`；Core 另提供 `relative_motion()` 和 `intersatellite_clearance()`。项目 **v46 / RPTS7** 保存有序双卫星绑定和查询参数，不保存计算结果；只读写当前版本。可运行示例见 [intersatellite.py](../../examples/python/intersatellite.py)。

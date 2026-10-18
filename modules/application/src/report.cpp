@@ -18,6 +18,24 @@ std::vector<results::Column> report_columns(ReportKind kind) {
                                        {"state.x", "ITRF X", "m"},
                                        {"state.y", "ITRF Y", "m"},
                                        {"state.z", "ITRF Z", "m"}});
+    } else if (report_is_coverage(kind)) {
+        if (kind == ReportKind::coverage_grid)
+            columns.insert(columns.end(), {{"coverage.longitude", "Longitude", "rad"},
+                                           {"coverage.latitude", "Latitude", "rad"},
+                                           {"coverage.area", "Cell area", "m^2"},
+                                           {"coverage.duration", "Time covered", "s"},
+                                           {"coverage.fraction", "Time covered fraction", "1"},
+                                           {"coverage.count", "Coverage intervals", ""},
+                                           {"coverage.max_gap", "Maximum revisit time", "s"},
+                                           {"coverage.mean_gap", "Mean revisit time", "s"}});
+        else
+            columns.insert(
+                columns.end(),
+                {{"time.epoch", "Time", "epoch"},
+                 {"coverage.area", "Area covered", "m^2"},
+                 {"coverage.fraction", "Area covered fraction", "1"},
+                 {"coverage.accumulated_area", "Cumulative area covered", "m^2"},
+                 {"coverage.accumulated_fraction", "Cumulative area covered fraction", "1"}});
     } else if (report_is_intersatellite(kind)) {
         columns.push_back(
             {"time.epoch", kind == ReportKind::relative_motion ? "Time" : "Start", "epoch"});
@@ -135,7 +153,7 @@ bool report_uses_utc(const ReportTemplate &format, ReportKind kind) {
     return false;
 }
 void validate_report_query(const ReportQuery &d) {
-    if (d.kind < ReportKind::scenario_summary || d.kind > ReportKind::intersatellite_access ||
+    if (d.kind < ReportKind::scenario_summary || d.kind > ReportKind::coverage_time ||
         (d.scope != ReportScope::objects && d.scope != ReportScope::all_compatible) ||
         (d.frame != core::FrameId::gcrf && d.frame != core::FrameId::itrf) ||
         d.step_nanoseconds < 1 || d.step_nanoseconds > 86400LL * 1'000'000'000 ||
@@ -162,6 +180,9 @@ void validate_report_query(const ReportQuery &d) {
          d.event_search_mode != core::AccessSearchMode::extremum_assisted) ||
         (report_uses_event_search(d.kind) && d.event_tolerance_nanoseconds > d.step_nanoseconds))
         throw std::invalid_argument("Invalid event search mode or boundary tolerance");
+    core::validate_coverage_grid(d.coverage);
+    if (report_is_coverage(d.kind) && (d.scope != ReportScope::objects || d.object_ids.size() > 32))
+        throw std::invalid_argument("Coverage requires 1 to 32 explicitly selected assets");
     if (d.lighting_ephemeris.empty() || d.lighting_ephemeris.size() > 16384)
         throw std::invalid_argument("Lighting ephemeris selection is required");
     std::set<std::string> ids;
