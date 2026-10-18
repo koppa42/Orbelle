@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <locale>
 #include <numbers>
+#include <orbitforge/core/propagation/lighting.hpp>
 #include <orbitforge/runtime/access.hpp>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/gravity.hpp>
@@ -114,6 +115,8 @@ std::string unit(const ReportDefinition &d, std::string value) {
                : d.format.time_scale == ReportTimeScale::tai ? "TAI"
                                                              : "TT";
     if (d.format.units == ReportUnits::engineering) {
+        if (value == "1")
+            return "%";
         if (value == "m")
             return "km";
         if (value == "m/s")
@@ -336,6 +339,7 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
     auto columns = report_columns(d.query.kind);
     std::vector<Row> rows;
     std::optional<results::AccessStatistics> access_statistics;
+    std::optional<results::LightingStatistics> lighting_statistics;
     rows.reserve(total);
     const auto selected =
         report_is_access(d.query.kind) ? std::vector<Selection>{} : select(context.project, d);
@@ -351,8 +355,8 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
             std::size_t completed = 0;
             const results::AccessQuery query{
                 first, last, std::chrono::nanoseconds{d.query.step_nanoseconds},
-                std::chrono::nanoseconds{d.query.access_tolerance_nanoseconds},
-                d.query.access_search_mode};
+                std::chrono::nanoseconds{d.query.event_tolerance_nanoseconds},
+                d.query.event_search_mode};
             auto windows = calculate_access_passes(
                 context.project, d.query.object_ids, query, [&](core::Epoch epoch) {
                     execution.check_cancelled();
@@ -419,6 +423,91 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                 rows.push_back({object.id, object.name, location.longitude_rad,
                                 location.latitude_rad, location.height_m, p[0], p[1], p[2]});
             }
+        } else if (report_is_lighting(d.query.kind)) {
+            const auto found = context.ephemerides.find(d.query.lighting_ephemeris);
+            check(found != context.ephemerides.end() && found->second,
+                  "Lighting requires an explicitly prepared solar ephemeris (DE440s)");
+            const auto &ephemeris = *found->second;
+            validate_ephemeris_reference(context.project.force_data, d.query.lighting_ephemeris,
+                                         ephemeris.data_info());
+            ephemeris.validate_interval(first, last, true, false);
+            if (d.query.kind == ReportKind::lighting_intervals)
+                lighting_statistics = results::LightingStatistics{selected.size()};
+            std::size_t completed = 0;
+            for (const auto &object : selected) {
+                execution.check_cancelled();
+                const auto session = execution.session(object, core::FrameId::gcrf);
+                const auto progress_base = completed;
+                const auto per_object = total / selected.size();
+                const auto at = [&](core::Epoch epoch) {
+                    execution.check_cancelled();
+                    if (d.query.kind == ReportKind::lighting_intervals) {
+                        const auto visited = static_cast<std::size_t>(
+                            ticks_between(first, epoch) /
+                            static_cast<std::uint64_t>(d.query.step_nanoseconds));
+                        completed =
+                            std::max(completed, progress_base + std::min(visited, per_object - 1));
+                        if (progress)
+                            progress(completed, total);
+                        execution.check_cancelled();
+                    }
+                    auto state = session.sample(std::array{epoch}, execution.check_cancelled)
+                                     .states()
+                                     .front();
+                    check(state.epoch == epoch && state.origin == core::OriginId::earth,
+                          "Invalid lighting state epoch or origin");
+                    if (state.frame != core::FrameId::gcrf) {
+                        check(context.eop && context.frames,
+                              "Lighting frame conversion requires EOP data");
+                        state = core::transform_state(state, core::FrameId::gcrf, *context.frames,
+                                                      context.eop->at(epoch));
+                    }
+                    return core::evaluate_lighting(state.position_m,
+                                                   ephemeris.position(core::ThirdBody::sun, epoch));
+                };
+                if (d.query.kind == ReportKind::lighting_intervals) {
+                    const auto intervals = core::find_lighting_intervals(
+                        first, last, d.query.step_nanoseconds, at,
+                        d.query.event_tolerance_nanoseconds, d.query.event_search_mode);
+                    check(intervals.size() <= max_report_rows - rows.size(),
+                          "Lighting exceeds 200000 intervals");
+                    for (const auto &i : intervals) {
+                        const auto duration = i.last.seconds_since(i.first);
+                        rows.push_back({object.id, object.name, i.first, i.last, duration,
+                                        std::string(core::lighting_phase_name(i.phase)),
+                                        std::int64_t(i.start_clipped),
+                                        std::int64_t(i.stop_clipped)});
+                        auto &stats =
+                            lighting_statistics->phases[static_cast<std::size_t>(i.phase)];
+                        ++stats.count;
+                        stats.total_duration_s += duration;
+                        stats.longest_duration_s = std::max(stats.longest_duration_s, duration);
+                    }
+                    completed = progress_base + per_object;
+                    if (progress)
+                        progress(completed, total);
+                } else {
+                    auto epoch = first;
+                    const auto count = total / selected.size();
+                    for (std::size_t i = 0; i < count; ++i) {
+                        tick();
+                        const auto value = at(epoch);
+                        rows.push_back({object.id, object.name, epoch, value.fraction,
+                                        std::string(core::lighting_phase_name(value.phase))});
+                        epoch =
+                            ticks_between(epoch, last) <=
+                                    static_cast<std::uint64_t>(d.query.step_nanoseconds)
+                                ? last
+                                : core::Epoch{epoch.tai_nanoseconds() + d.query.step_nanoseconds};
+                    }
+                }
+            }
+            if (lighting_statistics) {
+                const auto duration =
+                    last.seconds_since(first) * static_cast<double>(selected.size());
+                for (auto &stats : lighting_statistics->phases)
+                    stats.fraction = duration > 0 ? stats.total_duration_s / duration : 0;
+            }
         } else if (d.query.kind == ReportKind::state_covariance) {
             const auto per_object = total / selected.size();
             for (const auto &object : selected) {
@@ -437,7 +526,8 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                     Row row{object.id, object.name, epoch, std::string("GCRF")};
                     for (std::size_t i = 0; i < 6; ++i)
                         for (std::size_t j = 0; j <= i; ++j)
-                            row.push_back(value.covariance.state[i][j]);
+                            row.emplace_back(std::in_place_type<double>,
+                                             value.covariance.state[i][j]);
                     rows.push_back(std::move(row));
                     epoch = ticks_between(epoch, last) <=
                                     static_cast<std::uint64_t>(d.query.step_nanoseconds)
@@ -532,8 +622,16 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                         last,
                         context.time};
     result.access_statistics = access_statistics;
+    result.lighting_statistics = lighting_statistics;
+    if (report_is_lighting(d.query.kind))
+        result.algorithm = "geometric-lighting-earth-sphere-v1;uniform-solar-disk-v1;ephemeris=" +
+                           d.query.lighting_ephemeris;
+    if (d.query.kind == ReportKind::lighting_intervals)
+        result.algorithm += d.query.event_search_mode == core::AccessSearchMode::fixed_grid
+                                ? ";fixed-grid-bisection-v1"
+                                : ";extremum-assisted-bisection-v1";
     if (d.query.kind == ReportKind::access_intervals)
-        result.algorithm += d.query.access_search_mode == core::AccessSearchMode::fixed_grid
+        result.algorithm += d.query.event_search_mode == core::AccessSearchMode::fixed_grid
                                 ? ";fixed-grid-bisection-v1;pass-extrema-golden-v1"
                                 : ";extremum-assisted-bisection-v1;pass-extrema-golden-v1";
     auto formatted = result.with_template(d.format);
@@ -622,6 +720,8 @@ std::optional<double> ReportResult::numeric_value(std::size_t row, std::size_t c
         (dimension == "m^2/s" && display_unit == "km^2/s") ||
         (dimension == "m^2/s^2" && display_unit == "km^2/s^2"))
         value /= 1e6;
+    if (dimension == "1" && display_unit == "%")
+        value *= 100;
     if (dimension == "rad" && display_unit == "deg")
         value *= 180 / std::numbers::pi;
     return value;

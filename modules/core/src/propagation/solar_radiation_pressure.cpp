@@ -45,10 +45,32 @@ double angle(double value) {
     value = std::fmod(value, turn);
     return value < 0 ? value + turn : value;
 }
+// Circular-segment area in a unit circle, with no cancellation at a short arc.
+double segment_area(double a) {
+    if (a < .01) {
+        const double a2 = a * a;
+        return a * a2 * (2. / 3 + a2 * (-2. / 15 + a2 * (4. / 315 - a2 * 2. / 2835)));
+    }
+    return a - std::sin(a) * std::cos(a);
+}
+double single_disk_area(const Disk &disk) {
+    const double d = std::hypot(disk.x, disk.y), r = disk.radius;
+    if (d >= 1 + r)
+        return 0;
+    if (d <= std::abs(1 - r))
+        return pi * std::min(1.0, r * r);
+    // Factored difference of squares remains accurate near either contact.
+    const double x = std::clamp(((d - r) * (d + r) + 1) / (2 * d), -1.0, 1.0);
+    const double h = std::sqrt((1 - x) * (1 + x));
+    return std::clamp(segment_area(std::atan2(h, x)) + r * r * segment_area(std::atan2(h, d - x)),
+                      0.0, pi);
+}
 // Green's theorem integrates the exposed boundary arcs of the clipped disk union.
 // Circle intersections partition each boundary into arcs with constant membership.
 double covered_area(std::span<const Disk> occultors,
                     std::array<Vector, third_body_count> *derivatives = nullptr) {
+    if (occultors.size() == 1 && !derivatives)
+        return single_disk_area(occultors.front());
     if (derivatives)
         *derivatives = {};
     std::array<std::size_t, third_body_count + 1> source{};

@@ -18,7 +18,9 @@ void bind_reports(py::module_ &module) {
         .value("ORBITAL_MOTION", application::ReportKind::orbital_motion)
         .value("ACCESS_INTERVALS", application::ReportKind::access_intervals)
         .value("AER", application::ReportKind::aer)
-        .value("STATE_COVARIANCE", application::ReportKind::state_covariance);
+        .value("STATE_COVARIANCE", application::ReportKind::state_covariance)
+        .value("LIGHTING_INTERVALS", application::ReportKind::lighting_intervals)
+        .value("LIGHTING_STATE", application::ReportKind::lighting_state);
     py::class_<core::GroundObservation>(module, "GroundObservation")
         .def_readonly("azimuth_rad", &core::GroundObservation::azimuth_rad)
         .def_readonly("elevation_rad", &core::GroundObservation::elevation_rad)
@@ -95,10 +97,11 @@ void bind_reports(py::module_ &module) {
         .def_readwrite("first", &application::ReportQuery::first)
         .def_readwrite("last", &application::ReportQuery::last)
         .def_readwrite("step_nanoseconds", &application::ReportQuery::step_nanoseconds)
-        .def_readwrite("access_search_mode", &application::ReportQuery::access_search_mode)
-        .def_readwrite("access_tolerance_nanoseconds",
-                       &application::ReportQuery::access_tolerance_nanoseconds)
-        .def_readwrite("frame", &application::ReportQuery::frame);
+        .def_readwrite("event_search_mode", &application::ReportQuery::event_search_mode)
+        .def_readwrite("event_tolerance_nanoseconds",
+                       &application::ReportQuery::event_tolerance_nanoseconds)
+        .def_readwrite("frame", &application::ReportQuery::frame)
+        .def_readwrite("lighting_ephemeris", &application::ReportQuery::lighting_ephemeris);
     py::class_<application::ReportColumnSpec>(module, "ReportColumnSpec")
         .def(py::init<std::string, std::string, std::string>(), py::arg("field"),
              py::arg("unit") = "", py::arg("title") = "")
@@ -110,6 +113,19 @@ void bind_reports(py::module_ &module) {
         .def_readwrite("columns", &application::ReportTemplate::columns)
         .def_readwrite("units", &application::ReportTemplate::units)
         .def_readwrite("time_scale", &application::ReportTemplate::time_scale);
+    py::class_<results::LightingPhaseStatistics>(module, "LightingPhaseStatistics")
+        .def_readonly("count", &results::LightingPhaseStatistics::count)
+        .def_readonly("total_duration_s", &results::LightingPhaseStatistics::total_duration_s)
+        .def_readonly("longest_duration_s", &results::LightingPhaseStatistics::longest_duration_s)
+        .def_readonly("fraction", &results::LightingPhaseStatistics::fraction);
+    py::class_<results::LightingStatistics>(module, "LightingStatistics")
+        .def_readonly("object_count", &results::LightingStatistics::object_count)
+        .def_property_readonly("sunlight",
+                               [](const results::LightingStatistics &s) { return s.phases[0]; })
+        .def_property_readonly("penumbra",
+                               [](const results::LightingStatistics &s) { return s.phases[1]; })
+        .def_property_readonly("umbra",
+                               [](const results::LightingStatistics &s) { return s.phases[2]; });
     py::class_<application::ReportDefinition>(module, "ReportDefinition")
         .def(py::init<>())
         .def_readwrite("id", &application::ReportDefinition::id)
@@ -136,6 +152,7 @@ void bind_reports(py::module_ &module) {
         .def_readonly("data_sha256", &runtime::ReportResult::data_sha256)
         .def_readonly("time_sha256", &runtime::ReportResult::time_sha256)
         .def_readonly("access_statistics", &runtime::ReportResult::access_statistics)
+        .def_readonly("lighting_statistics", &runtime::ReportResult::lighting_statistics)
         .def_readonly("algorithm", &runtime::ReportResult::algorithm)
         .def_readonly("first", &runtime::ReportResult::first)
         .def_readonly("last", &runtime::ReportResult::last)

@@ -555,7 +555,8 @@ class Analysis:
                units: n.ReportUnits | None = None,
                time_scale: n.ReportTimeScale | None = None,
                template: reports.Template | None = None,
-               access_search_mode: n.AccessSearchMode | None = None,
+               event_search_mode: n.AccessSearchMode | None = None,
+               lighting_ephemeris: str | None = None,
                boundary_tolerance: Duration | None = None,
                cancelled: Callable[[], bool] | None = None,
                progress: Callable[[int, int], None] | None = None) -> n.ReportResult:
@@ -609,13 +610,17 @@ class Analysis:
                                   else n.ReportScope.OBJECTS)
         definition.query.object_ids = ids
         definition.query.frame = require(frame, n.FrameId, "frame")
-        if access_search_mode is not None or boundary_tolerance is not None:
-            if kind != n.ReportKind.ACCESS_INTERVALS:
-                raise TypeError("Search mode and boundary tolerance are only used by access interval reports")
-            if access_search_mode is not None:
-                definition.query.access_search_mode = require(access_search_mode, n.AccessSearchMode, "access_search_mode")
+        if event_search_mode is not None or boundary_tolerance is not None:
+            if kind not in (n.ReportKind.ACCESS_INTERVALS, n.ReportKind.LIGHTING_INTERVALS):
+                raise TypeError("Search mode and boundary tolerance are only used by interval reports")
+            if event_search_mode is not None:
+                definition.query.event_search_mode = require(event_search_mode, n.AccessSearchMode, "event_search_mode")
             if boundary_tolerance is not None:
-                definition.query.access_tolerance_nanoseconds = require(boundary_tolerance, Duration, "boundary_tolerance").nanoseconds
+                definition.query.event_tolerance_nanoseconds = require(boundary_tolerance, Duration, "boundary_tolerance").nanoseconds
+        if lighting_ephemeris is not None:
+            if kind not in (n.ReportKind.LIGHTING_INTERVALS, n.ReportKind.LIGHTING_STATE):
+                raise TypeError("lighting_ephemeris is only used by lighting reports")
+            definition.query.lighting_ephemeris = require(lighting_ephemeris, str, "lighting_ephemeris")
         if template is not None:
             if units is not None or time_scale is not None:
                 raise TypeError("Set units/time_scale in template when supplying a template")

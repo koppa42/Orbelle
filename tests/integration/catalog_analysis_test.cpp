@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <orbitforge/runtime/data_catalog.hpp>
+#include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 
 using namespace orbitforge;
@@ -85,4 +86,38 @@ TEST(CatalogAnalysis, FullCoveragePrecedesExtrapolationAndUnusedPolicyDoesNotCha
                  std::invalid_argument);
     EXPECT_THROW((void)runtime::select_eop_for_interval({}, first, last, time),
                  core::EopCoverageError);
+}
+
+TEST(CatalogAnalysis, LightingLoadsSavedOrRecordedSolarResourceWithoutSrp) {
+    if (!runtime::data_catalog_available() || !runtime::ephemeris_available())
+        GTEST_SKIP();
+    CatalogFolder folder;
+    runtime::DataCatalog catalog(folder.path);
+    const auto eop = catalog.install_eop(ORBITFORGE_DRAG_EOP);
+    catalog.activate_eop(eop.lock_sha256);
+    const auto solar = catalog.install_ephemeris_snapshot(ORBITFORGE_INTEGRATION_PLANETS);
+    const auto first = core::Epoch{solar.info.first.tai_nanoseconds() + 600000000000LL};
+    application::Project input{"Lighting", first,
+                               core::Epoch{first.tai_nanoseconds() + 60000000000LL}};
+    application::ProjectSatellite sat;
+    sat.orbit.initial.epoch = first;
+    sat.orbit.first = input.first;
+    sat.orbit.last = input.last;
+    input.satellites.push_back(sat);
+    application::ReportDefinition report;
+    report.id = report.name = "lighting";
+    report.query.kind = application::ReportKind::lighting_intervals;
+    report.query.object_ids = {sat.orbit.object_id};
+    report.format.time_scale = application::ReportTimeScale::tai;
+    input.reports.push_back(report);
+    application::ProjectDocument document{input};
+    const auto analysis = runtime::prepare(document, catalog);
+    EXPECT_TRUE(analysis.data().ephemerides().contains("de440s"));
+    EXPECT_FALSE(analysis.report(report).table.rows().empty());
+    const auto file = folder.path / "lighting.orbitforge";
+    runtime::save_project(document, file, analysis);
+    auto recorded = application::load_project(file);
+    recorded.reports.clear();
+    const auto repeated = runtime::prepare(application::ProjectDocument{recorded}, catalog);
+    EXPECT_EQ(repeated.report(report).table.rows(), analysis.report(report).table.rows());
 }
