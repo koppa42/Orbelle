@@ -104,7 +104,7 @@ docker run --rm --network none --mount "type=bind,source=$orbitRun/delivery,targ
 
 构建阶段依次安装 `x64-linux` 计算/测试依赖、运行 Release 和 ASan/UBSan 测试、生成 wheel、导出 SDK/依赖/测试数据。每轮 SDK 安装和 wheel 输出使用全新目录，避免上轮残留掩盖缺文件。wheel 从逐文件校验的源码副本构建，防止构建后端遍历庞大的本机 `out/`。消费端把导出文件移到新的路径，校验 SHA256，再从安装前缀构建 C++ 案例，并在新虚拟环境离线安装 wheel、运行 Python API 测试和五个示例。`commands.json` 保存每一步命令和退出码；只有全部选定步骤成功才生成 `passed.json`。输出目录已有证据时脚本拒绝覆盖。
 
-可用 `--stage dependencies|release|sanitizers|wheel|export|consumer` 单独执行相应阶段；复用构建卷时，为每次执行指定新的 `--reports`。`export` 需要先完成 Release 安装和 wheel 构建，并使用新的 `--delivery`。Sanitizer 检查范围是启用插桩的项目代码；vcpkg 中未插桩的第三方库不能据此宣称内部检查通过。
+可用 `--stage dependencies|release|sanitizers|wheel|export|consumer` 单独执行相应阶段；`sanitizers` 会先准备依赖，默认全量，显式 `--sanitizer-profile routine` 只执行常规插桩层。`--stage tests` 执行依赖、完整 Release 和基准 Python；CI 的 `--stage package` 执行依赖、Release、wheel 和导出，由独立 sanitizer 作业参与最终门禁，默认 `--stage all` 仍保留全量插桩的本地交付检查。复用构建卷时，为每次执行指定新的 `--reports`。`export` 需要先完成 Release 安装和 wheel 构建，并使用新的 `--delivery`。Sanitizer 检查范围是启用插桩的项目代码；vcpkg 中未插桩的第三方库不能据此宣称内部检查通过。
 
 已有 Linux 工具链和依赖时，也可直接运行 `linux-astronomy` / `linux-sanitizers` 的 CMake 构建和测试预设。这两个预设只在 Linux 显示，使用独立构建目录。Linux wheel 当前是本机构建的 `linux_x86_64` 包，此入口不提供 manylinux 兼容认证。
 

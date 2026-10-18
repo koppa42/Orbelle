@@ -9,18 +9,20 @@ import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[2]
-JOBS = {"metadata", "linux", "linux-consumer", "windows", "python-linux", "python-windows"}
+JOBS = {"metadata", "linux", "sanitizers", "linux-consumer", "windows", "python-linux", "python-windows"}
 REQUIRED = {
     "full": JOBS - {"linux-consumer"},
     "docs": {"metadata"},
     "baseline": {"metadata", "linux", "windows"},
     "release": JOBS,
+    "sanitizers": {"metadata", "sanitizers"},
 }
 DESCRIPTIONS = {
     "full": "Native and desktop tests plus every supported Python version; no release packages.",
     "docs": "Documentation-only change: workflow, version and tooling checks; native builds are skipped.",
     "baseline": "Main integration tests: native/desktop and baseline Python; no matrix or release packages.",
-    "release": "Full tests, release package builds and isolated installation checks.",
+    "release": "Full numerical tests, routine sanitizers, release builds and isolated installation checks.",
+    "sanitizers": "Manual full ASan/UBSan run; native Release and Python jobs are not repeated.",
 }
 
 
@@ -65,9 +67,13 @@ def push_paths(source, before, after):
     return [path.decode("utf-8") for path in paths.split(b"\0") if path]
 
 
-def select_scope(event, ref, source=ROOT, release_tag="", before="", after=""):
+def select_scope(event, ref, source=ROOT, release_tag="", before="", after="", manual_mode="all"):
     if release_tag:
         return "release"
+    if event == "workflow_dispatch":
+        if manual_mode not in {"all", "sanitizers"}:
+            raise ValueError(f"Unknown manual CI mode: {manual_mode!r}")
+        return "sanitizers" if manual_mode == "sanitizers" else "full"
     if event == "push" and ref == "refs/heads/main":
         try:
             if documentation_only(push_paths(source, before, after)):
@@ -81,7 +87,7 @@ def select_scope(event, ref, source=ROOT, release_tag="", before="", after=""):
                 return "docs"
         except (OSError, ValueError, subprocess.CalledProcessError) as error:
             print(f"Cannot classify the PR; keeping full checks: {error}")
-    # Manual runs, release tags and unfamiliar events always retain full checks.
+    # Unfamiliar events always retain full numerical and routine sanitizer checks.
     return "full"
 
 
@@ -120,14 +126,18 @@ def main():
     scope = select_scope(os.environ.get("GITHUB_EVENT_NAME", ""),
                          os.environ.get("GITHUB_REF", ""),
                          release_tag=os.environ.get("RELEASE_TAG", ""),
-                         before=event.get("before", ""), after=event.get("after", ""))
+                         before=event.get("before", ""), after=event.get("after", ""),
+                         manual_mode=os.environ.get("MANUAL_MODE", "all"))
+    sanitizer_profile = "full" if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" else "routine"
     print(f"CI scope: {scope}. {DESCRIPTIONS[scope]}")
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a", encoding="utf-8") as stream:
-            stream.write(f"scope={scope}\n")
+            stream.write(f"scope={scope}\nsanitizer-profile={sanitizer_profile}\n")
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         with Path(summary).open("a", encoding="utf-8") as stream:
             stream.write(f"## CI scope: {scope}\n\n{DESCRIPTIONS[scope]}\n")
+            if "sanitizers" in REQUIRED[scope]:
+                stream.write(f"\nASan/UBSan profile: **{sanitizer_profile}**.\n")
 
 
 if __name__ == "__main__":
