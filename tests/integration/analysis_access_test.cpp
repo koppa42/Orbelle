@@ -53,7 +53,9 @@ TEST_F(AnalysisAccess, MatchesReportsAndSensorConstraints) {
         runtime::AccessSession legacy{context, s.station.id(), target.id()};
         const auto expected = core::find_access_intervals(
             raw.first, raw.last, 10'000'000'000, [&](auto t) { return legacy.at(t).visible; });
-        const auto actual = analysis.access(s.station, target, {.search_step = 10s});
+        const auto actual = analysis.access(
+            s.station, target,
+            {.search_step = 10s, .search_mode = core::AccessSearchMode::fixed_grid});
         ASSERT_FALSE(actual.windows().empty());
         ASSERT_EQ(actual.windows().size(), expected.size());
         for (std::size_t i = 0; i < expected.size(); ++i) {
@@ -96,7 +98,9 @@ TEST_F(AnalysisAccess, AllPropagatorsUseTheirNativeFrameAndSelectedTimeData) {
                          "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667"};
         s.document.objects().update(s.satellite, app::objects::SatelliteUpdate{{}, input, {}});
         const auto analysis = runtime::prepare(s.document, s.data);
-        const auto actual = analysis.access(s.station, s.satellite, {30s});
+        const auto actual = analysis.access(
+            s.station, s.satellite,
+            {.search_step = 30s, .search_mode = core::AccessSearchMode::fixed_grid});
         auto raw = *s.document.snapshot().project;
         raw.earth_orientation = s.data.eop()->data_info();
         runtime::AccessSession legacy{

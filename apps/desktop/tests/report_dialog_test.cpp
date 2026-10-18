@@ -964,14 +964,20 @@ TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
                                application::SensorPointing::nadir,
                                {}});
     int published = 0;
+    std::optional<core::Epoch> sought;
+    std::shared_ptr<const runtime::ReportResult> pass_result;
     ReportDialog dialog(
         project, time,
         [&](ReportDialog::Ready ready) {
             ready(ReportInput{project, runtime::DataSnapshot::from_providers(time, frames, eop)},
                   {});
         },
-        [&](auto reports) { project.reports = std::move(reports); }, [](auto) {});
-    dialog.result_published = [&](auto, const auto &) { ++published; };
+        [&](auto reports) { project.reports = std::move(reports); },
+        [&](auto epoch) { sought = epoch; });
+    dialog.result_published = [&](auto result, const auto &) {
+        ++published;
+        pass_result = result;
+    };
     dialog.show();
     dialog.select_object("sensor", application::ReportKind::access_intervals);
     auto *station = dialog.findChild<ObjectSelectionField *>("accessStation");
@@ -1005,6 +1011,51 @@ TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
     };
     run();
     EXPECT_EQ(published, 1);
+    ASSERT_TRUE(pass_result);
+    ASSERT_TRUE(pass_result->access_statistics);
+    EXPECT_EQ(pass_result->access_statistics->count, 1U);
+    EXPECT_TRUE(dialog.findChild<QWidget *>("accessPassSummary")->isVisible());
+    EXPECT_EQ(dialog.findChild<QLabel *>("accessMetric0")->text(), "1");
+    auto *table = dialog.findChild<QTableView *>("reportTable");
+    ASSERT_TRUE(table);
+    const auto expected_epoch = std::get<core::Epoch>(pass_result->table.rows()[0][8]);
+    EXPECT_TRUE(QMetaObject::invokeMethod(table, "doubleClicked", Qt::DirectConnection,
+                                          Q_ARG(QModelIndex, table->model()->index(0, 7))));
+    ASSERT_TRUE(sought);
+    EXPECT_EQ(*sought, expected_epoch);
+    auto *search = dialog.findChild<QComboBox *>("accessSearchMode");
+    auto *tolerance = dialog.findChild<QDoubleSpinBox *>("accessTimeTolerance");
+    EXPECT_EQ(search->currentIndex(), 1);
+    const auto settle_layout = [] {
+        for (int i = 0; i < 8; ++i)
+            QCoreApplication::processEvents();
+    };
+    const auto access_capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    if (!access_capture.isEmpty())
+        QDir().mkpath(access_capture);
+    dialog.resize(1140, 780);
+    settle_layout();
+    if (!access_capture.isEmpty())
+        dialog.grab().save(access_capture + "/access-passes-wide.png");
+    dialog.resize(420, 700);
+    settle_layout();
+    EXPECT_EQ(search->currentIndex(), 1);
+    EXPECT_DOUBLE_EQ(tolerance->value(), .001);
+    EXPECT_EQ(table->model()->rowCount(), 1);
+    const auto *first_card = dialog.findChild<QLabel *>("accessMetric0")->parentWidget();
+    const auto *third_card = dialog.findChild<QLabel *>("accessMetric2")->parentWidget();
+    EXPECT_LT(first_card->geometry().top(), third_card->geometry().top());
+    if (!access_capture.isEmpty())
+        dialog.grab().save(access_capture + "/access-passes-narrow.png");
+    dialog.resize(1140, 780);
+    settle_layout();
+    EXPECT_EQ(first_card->geometry().top(), third_card->geometry().top());
+    // Invalid search settings keep the previous, valid result and its summary.
+    tolerance->setValue(61);
+    generate->click();
+    EXPECT_EQ(published, 1);
+    EXPECT_EQ(table->model()->rowCount(), 1);
+    tolerance->setValue(.001);
     auto *views = dialog.findChild<QTabBar *>("reportViews");
     EXPECT_FALSE(views->isTabEnabled(1));
     choose_report(dialog, static_cast<int>(application::ReportKind::aer));

@@ -103,7 +103,7 @@ state = session.sample([of.Epoch(17_123_456_789)]).states[0]
 
 `HpopOptions.interpolation` 默认 Hermite 7，`report_ephemeris_on_fixed_step` 默认关闭。高层 Python 使用 `Hpop(interpolation="lagrange", interpolation_order=7, report_ephemeris_on_fixed_step=True)`；开启固定输出时，`Orbit.step_seconds`（目前 1–60 整数秒）决定星历节点网格，可通过 `dataclasses.replace(orbit, step_seconds=5)` 设置。报告和 `analysis.states()` 的查询步长仍各自独立。显式低层工厂以自己的输出间隔参数为准。
 
-桌面积分器页支持三种方法及 VOP 独立 μ、合法阶数和固定输出开关，方法切换保留各自未应用的阶数草稿；确认时统一校验，取消不改输入。轨道页名称为“轨道步长”。插值方法/阶数、μ 草稿和输出开关随项目 v41 / OBJS32 保存；固定输出启用时轨道步长同时进入分析和报告身份，关闭时仅是显示设置。旧分析持有原配置与资源，编辑不改变已有查询结果。VOP 积分由独立开关控制，见 [VOP 积分](vop_integration.md)；协方差插值与 STK 同配置数值验收仍未完成。
+桌面积分器页支持三种方法及 VOP 独立 μ、合法阶数和固定输出开关，方法切换保留各自未应用的阶数草稿；确认时统一校验，取消不改输入。轨道页名称为“轨道步长”。插值方法/阶数、μ 草稿和输出开关随项目 v42 / OBJS32 保存；固定输出启用时轨道步长同时进入分析和报告身份，关闭时仅是显示设置。旧分析持有原配置与资源，编辑不改变已有查询结果。VOP 积分由独立开关控制，见 [VOP 积分](vop_integration.md)；协方差插值与 STK 同配置数值验收仍未完成。
 
 高层 Python 的 VOP 配置示例（`initial` 为显式地心 GCRF 初态）：
 

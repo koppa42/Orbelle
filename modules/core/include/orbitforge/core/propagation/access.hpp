@@ -28,4 +28,28 @@ struct AccessInterval {
 find_access_intervals(Epoch first, Epoch last, std::int64_t step_nanoseconds,
                       const std::function<bool(Epoch)> &visible,
                       std::int64_t tolerance_nanoseconds = 1'000'000);
+// Enhanced discovery searches the constraint maximum and minimum in every check
+// interval before refining crossings. Each check interval must resolve distinct
+// extrema (unimodal lobes); reduce max_step and check convergence for fast motion.
+// This is not a guarantee for arbitrary discontinuous or oscillatory functions.
+enum class AccessSearchMode { fixed_grid, extremum_assisted };
+struct AccessExtremum {
+    Epoch epoch;
+    double value;
+};
+struct PassExtrema {
+    AccessExtremum maximum_elevation; // rad, station-local geodetic elevation
+    AccessExtremum minimum_range;     // m, geometric slant range
+};
+[[nodiscard]] AccessExtremum find_access_extremum(Epoch first, Epoch last,
+                                                  std::int64_t max_step_nanoseconds,
+                                                  const std::function<double(Epoch)> &value,
+                                                  bool maximum,
+                                                  std::int64_t tolerance_nanoseconds = 1'000'000);
+// Nonnegative margin means visible. Every evaluation must be finite. Evaluator
+// exceptions propagate without publishing partial intervals. <= 2 million evaluations.
+[[nodiscard]] std::vector<AccessInterval>
+find_constraint_intervals(Epoch first, Epoch last, std::int64_t max_step_nanoseconds,
+                          const std::function<double(Epoch)> &margin,
+                          std::int64_t tolerance_nanoseconds = 1'000'000);
 } // namespace orbitforge::core

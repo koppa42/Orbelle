@@ -40,7 +40,7 @@ from ._native import (
 from ._native import ObjectNotFoundError, RevisionConflictError, EditClosedError, ChangeSet
 from ._values import Wgs84Location, OrbitStyle
 from . import objects, orbits, sensors, units, reports, missions
-from ._native import ManeuverEvent, ManeuverSeries
+from ._native import ManeuverEvent, ManeuverSeries, AccessSearchMode, AccessExtremum, PassExtrema, AccessStatistics
 from ._project import (
     Project, load_project, AccessSession, generate_report, estimate_report_rows, report_input_sha256,
 )
@@ -54,7 +54,7 @@ __all__ = [
     "CatalogGravity", "GravityInfo", "GravityCoefficient", "GravitySecularVariations", "CatalogEphemeris", "ThirdBodyDataInfo",
     "Analysis", "AnalysisPlan", "ProjectOpenPlan", "AnalysisRecord", "AnalysisStatus", "DataSnapshot", "DataChange", "DataChangedError",
     "AnalysisCapabilityError", "AnalysisCancelled", "Trajectory", "EpochColumn", "VectorColumn",
-    "AccessWindow", "AccessWindows", "AccessProvenance",
+    "AccessWindow", "AccessWindows", "AccessProvenance", "AccessSearchMode", "AccessExtremum", "PassExtrema", "AccessStatistics",
     "ScalarColumn", "AerSample", "AerSeries",
     "ProjectData", "load_project_data", "ObjectNotFoundError", "RevisionConflictError", "EditClosedError",
     "ChangeSet", "Wgs84Location", "OrbitStyle", "objects", "orbits", "sensors", "units",

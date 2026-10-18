@@ -371,6 +371,9 @@ TEST(Project, CurrentSchemaFixturePreservesInputsRelationshipsAndExactEncoding) 
     EXPECT_EQ(project.reports[0].query.object_ids,
               (std::vector<std::string>{"station-a", "sensor-a"}));
     EXPECT_EQ(project.reports[0].query.scope, application::ReportScope::objects);
+    EXPECT_EQ(project.reports[0].query.access_search_mode,
+              core::AccessSearchMode::extremum_assisted);
+    EXPECT_EQ(project.reports[0].query.access_tolerance_nanoseconds, 2'000'000);
     ASSERT_EQ(project.reports[0].format.columns.size(), 3U);
     EXPECT_EQ(project.reports[0].format.columns[2].field, "aer.range");
     EXPECT_EQ(project.reports[0].format.columns[2].unit, "km");
@@ -428,8 +431,8 @@ TEST(Project, DataLocksHaveStableCanonicalOrderAndRejectDuplicateRoles) {
 }
 TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
     const auto bytes = application::encode_project(example());
-    for (std::uint32_t version = 0; version <= 42; ++version) {
-        if (version == 41)
+    for (std::uint32_t version = 0; version <= 43; ++version) {
+        if (version == 42)
             continue;
         SCOPED_TRACE(version);
         auto unsupported = bytes;
@@ -441,7 +444,7 @@ TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
         } catch (const application::ProjectError &error) {
             EXPECT_NE(std::string(error.what()).find("version " + std::to_string(version) + ";"),
                       std::string::npos);
-            EXPECT_NE(std::string(error.what()).find("reads only version 41"), std::string::npos);
+            EXPECT_NE(std::string(error.what()).find("reads only version 42"), std::string::npos);
         }
     }
 }

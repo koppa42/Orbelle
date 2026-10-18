@@ -1,4 +1,4 @@
-from typing import Callable, Sequence, overload
+from typing import Callable, ClassVar, Sequence, overload
 from os import PathLike
 from pathlib import Path
 
@@ -137,7 +137,37 @@ class Trajectory:
     def __len__(self) -> int: ...
     def to_csv(self, path: str | PathLike[str], overwrite: bool = False) -> None: ...
 
+class AccessSearchMode:
+    FIXED_GRID: ClassVar[AccessSearchMode]
+    EXTREMUM_ASSISTED: ClassVar[AccessSearchMode]
+
+class AccessExtremum:
+    @property
+    def epoch(self) -> Epoch: ...
+    @property
+    def value(self) -> float: ...
+
+class PassExtrema:
+    @property
+    def maximum_elevation(self) -> AccessExtremum: ...
+    @property
+    def minimum_range(self) -> AccessExtremum: ...
+
+class AccessStatistics:
+    @property
+    def count(self) -> int: ...
+    @property
+    def total_duration_s(self) -> float: ...
+    @property
+    def mean_duration_s(self) -> float: ...
+    @property
+    def shortest_duration_s(self) -> float: ...
+    @property
+    def longest_duration_s(self) -> float: ...
+
 class AccessWindow:
+    @property
+    def extrema(self) -> PassExtrema | None: ...
     @property
     def start(self) -> Epoch: ...
     @property
@@ -168,6 +198,10 @@ class AccessProvenance:
     def algorithm(self) -> str: ...
 
 class AccessWindows:
+    @property
+    def statistics(self) -> AccessStatistics: ...
+    @property
+    def search_mode(self) -> AccessSearchMode: ...
     @property
     def windows(self) -> list[AccessWindow]: ...
     def __len__(self) -> int: ...
@@ -206,6 +240,7 @@ class Analysis:
                     first: Epoch | None = None, last: Epoch | None = None) -> Trajectory: ...
     def access(self, station: ObjectRef, target: ObjectRef, *, search_step_nanoseconds: int,
                boundary_tolerance_nanoseconds: int = 1_000_000,
+               search_mode: AccessSearchMode = AccessSearchMode.EXTREMUM_ASSISTED,
                first: Epoch | None = None, last: Epoch | None = None,
                cancelled: Callable[[], bool] | None = None) -> AccessWindows: ...
     def aer_at(self, station: ObjectRef, target: ObjectRef, times: Sequence[Epoch],
@@ -1509,6 +1544,8 @@ class ReportScope:
     ALL_COMPATIBLE: ReportScope
 
 class ReportQuery:
+    access_search_mode: AccessSearchMode
+    access_tolerance_nanoseconds: int
     def __init__(self) -> None: ...
     kind: ReportKind
     scope: ReportScope
@@ -1557,6 +1594,8 @@ class ReportTable:
     def row_count(self) -> int: ...
 
 class ReportResult:
+    @property
+    def access_statistics(self) -> AccessStatistics | None: ...
     @property
     def input_revision(self) -> int: ...
     @property

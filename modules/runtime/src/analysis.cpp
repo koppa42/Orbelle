@@ -431,24 +431,20 @@ results::AccessWindows Analysis::access(const ObjectRef &station, const ObjectRe
     const auto first = options.first.value_or(p.first), last = options.last.value_or(p.last);
     check_epoch(p, first);
     check_epoch(p, last);
-    const auto intervals = core::find_access_intervals(
-        first, last, options.search_step.count(),
-        [&](core::Epoch epoch) {
+    const results::AccessQuery query{first, last, options.search_step, options.boundary_tolerance,
+                                     options.search_mode};
+    auto windows =
+        calculate_access_passes(p, {station.id(), target.id()}, query, [&](core::Epoch epoch) {
             check_cancelled(cancelled);
-            return impl_->observe(geometry, epoch, cancelled).visible;
-        },
-        options.boundary_tolerance.count());
-    std::vector<results::AccessWindow> windows;
-    windows.reserve(intervals.size());
-    for (const auto &interval : intervals)
-        windows.emplace_back(interval.first, interval.last, interval.start_clipped,
-                             interval.stop_clipped);
+            return impl_->observe(geometry, epoch, cancelled);
+        });
     auto provenance = impl_->provenance(geometry);
-    provenance.algorithm += ";fixed-grid-bisection-v1";
+    provenance.algorithm += options.search_mode == core::AccessSearchMode::fixed_grid
+                                ? ";fixed-grid-bisection-v1"
+                                : ";extremum-assisted-bisection-v1";
+    provenance.algorithm += ";pass-extrema-golden-v1";
     check_cancelled(cancelled);
-    return {std::move(windows),
-            {first, last, options.search_step, options.boundary_tolerance},
-            std::move(provenance)};
+    return {std::move(windows), query, std::move(provenance)};
 }
 results::AerSeries Analysis::aer(const ObjectRef &station, const ObjectRef &target,
                                  std::span<const core::Epoch> times,
@@ -676,12 +672,22 @@ void export_access_csv(const results::AccessWindows &result, const std::filesyst
     std::vector<results::Row> rows;
     rows.reserve(result.windows().size());
     for (const auto &window : result.windows())
-        rows.push_back({provenance.station_id, provenance.target_id,
-                        window.start().tai_nanoseconds(), window.end().tai_nanoseconds(),
-                        window.duration().count(),
-                        std::chrono::duration<double>(window.duration()).count(),
-                        static_cast<std::int64_t>(window.start_clipped()),
-                        static_cast<std::int64_t>(window.end_clipped())});
+        rows.push_back(
+            {provenance.station_id, provenance.target_id, window.start().tai_nanoseconds(),
+             window.end().tai_nanoseconds(), window.duration().count(),
+             std::chrono::duration<double>(window.duration()).count(),
+             static_cast<std::int64_t>(window.start_clipped()),
+             static_cast<std::int64_t>(window.end_clipped()),
+             window.extrema() ? results::Cell{window.extrema()->maximum_elevation.value}
+                              : results::Cell{},
+             window.extrema()
+                 ? results::Cell{window.extrema()->maximum_elevation.epoch.tai_nanoseconds()}
+                 : results::Cell{},
+             window.extrema() ? results::Cell{window.extrema()->minimum_range.value}
+                              : results::Cell{},
+             window.extrema()
+                 ? results::Cell{window.extrema()->minimum_range.epoch.tai_nanoseconds()}
+                 : results::Cell{}});
     results::Table table{{{"station_id", "station_id", ""},
                           {"target_id", "target_id", ""},
                           {"start_tai_ns", "start_tai_ns", ""},
@@ -689,7 +695,11 @@ void export_access_csv(const results::AccessWindows &result, const std::filesyst
                           {"duration_ns", "duration_ns", ""},
                           {"duration_s", "duration_s", ""},
                           {"start_clipped", "start_clipped", ""},
-                          {"end_clipped", "end_clipped", ""}},
+                          {"end_clipped", "end_clipped", ""},
+                          {"max_elevation_rad", "max_elevation_rad", ""},
+                          {"max_elevation_tai_ns", "max_elevation_tai_ns", ""},
+                          {"min_range_m", "min_range_m", ""},
+                          {"min_range_tai_ns", "min_range_tai_ns", ""}},
                          std::move(rows)};
     ReportDefinition definition;
     definition.format.units = ReportUnits::si;

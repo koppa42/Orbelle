@@ -159,6 +159,11 @@ class AccessWindow:
     _native: n.AccessWindow
 
     @property
+    def extrema(self) -> n.PassExtrema | None:
+        """Continuous extrema and epochs: elevation in radians, slant range in metres."""
+        return self._native.extrema
+
+    @property
     def start(self) -> n.Epoch:
         return self._native.start
 
@@ -203,6 +208,15 @@ class AccessWindows:
         if not 0 <= offset < len(self):
             raise IndexError("Access window index out of range")
         return AccessWindow(self._native.window(offset))
+
+    @property
+    def statistics(self) -> n.AccessStatistics:
+        """Durations include clipped passes; empty results have count and durations zero."""
+        return self._native.statistics
+
+    @property
+    def search_mode(self) -> n.AccessSearchMode:
+        return self._native.search_mode
 
     @property
     def provenance(self) -> n.AccessProvenance:
@@ -253,11 +267,16 @@ class AccessWindows:
             "duration_s": pd.Series([w.duration.nanoseconds / 1e9 for w in windows], dtype="float64"),
             "start_clipped": pd.Series([w.start_clipped for w in windows], dtype="bool"),
             "end_clipped": pd.Series([w.end_clipped for w in windows], dtype="bool"),
+            "max_elevation_rad": pd.Series([w.extrema.maximum_elevation.value if w.extrema else None for w in windows], dtype="float64"),
+            "max_elevation_tai_ns": pd.Series([w.extrema.maximum_elevation.epoch.tai_nanoseconds if w.extrema else None for w in windows], dtype="Int64"),
+            "min_range_m": pd.Series([w.extrema.minimum_range.value if w.extrema else None for w in windows], dtype="float64"),
+            "min_range_tai_ns": pd.Series([w.extrema.minimum_range.epoch.tai_nanoseconds if w.extrema else None for w in windows], dtype="Int64"),
         }, copy=True)
         table.attrs = {
             "epoch_origin": "2000-01-01T12:00:00 TAI", "time_scale": "TAI",
             "first_tai_ns": self.first.tai_nanoseconds, "last_tai_ns": self.last.tai_nanoseconds,
             "search_step_ns": self.search_step.nanoseconds,
+            "search_mode": self.search_mode.name,
             "boundary_tolerance_ns": self.boundary_tolerance.nanoseconds,
             **{name: getattr(provenance, name) for name in (
                 "station_id", "station_name", "target_id", "target_name", "input_revision",
@@ -536,6 +555,8 @@ class Analysis:
                units: n.ReportUnits | None = None,
                time_scale: n.ReportTimeScale | None = None,
                template: reports.Template | None = None,
+               access_search_mode: n.AccessSearchMode | None = None,
+               boundary_tolerance: Duration | None = None,
                cancelled: Callable[[], bool] | None = None,
                progress: Callable[[int, int], None] | None = None) -> n.ReportResult:
         """Generate a built-in report from this snapshot, with no file/data rereads.
@@ -588,6 +609,13 @@ class Analysis:
                                   else n.ReportScope.OBJECTS)
         definition.query.object_ids = ids
         definition.query.frame = require(frame, n.FrameId, "frame")
+        if access_search_mode is not None or boundary_tolerance is not None:
+            if kind != n.ReportKind.ACCESS_INTERVALS:
+                raise TypeError("Search mode and boundary tolerance are only used by access interval reports")
+            if access_search_mode is not None:
+                definition.query.access_search_mode = require(access_search_mode, n.AccessSearchMode, "access_search_mode")
+            if boundary_tolerance is not None:
+                definition.query.access_tolerance_nanoseconds = require(boundary_tolerance, Duration, "boundary_tolerance").nanoseconds
         if template is not None:
             if units is not None or time_scale is not None:
                 raise TypeError("Set units/time_scale in template when supplying a template")
@@ -609,12 +637,15 @@ class Analysis:
 
     def access(self, station: GroundStationHandle, target: SatelliteHandle | SensorHandle, *,
                search_step: Duration, boundary_tolerance: Duration = Duration(1_000_000),
+               search_mode: n.AccessSearchMode = n.AccessSearchMode.EXTREMUM_ASSISTED,
                first: n.Epoch | None = None, last: n.Epoch | None = None,
                cancelled: Callable[[], bool] | None = None) -> AccessWindows:
         """Search this snapshot using station elevation/LOS and optional sensor FOV.
 
-        UTC/EOP data must be selected at prepare(). A fixed discovery grid can
-        miss windows or gaps shorter than search_step. Boundary tolerance only
+        UTC/EOP data must be selected at prepare(). Extremum-assisted discovery
+        searches peaks/troughs inside each maximum check interval. Distinct lobes
+        must be resolved by search_step; reduce it to check convergence. FIXED_GRID
+        can miss windows or gaps shorter than search_step. Boundary tolerance only
         refines discovered transitions. Cancellation raises AnalysisCancelled;
         no partial results are returned. A zero-length query returns no windows.
         """
@@ -623,6 +654,7 @@ class Analysis:
             raise TypeError("target must be a SatelliteHandle or SensorHandle")
         require(search_step, Duration, "search_step")
         require(boundary_tolerance, Duration, "boundary_tolerance")
+        require(search_mode, n.AccessSearchMode, "search_mode")
         if first is not None:
             require(first, n.Epoch, "first")
         if last is not None:
@@ -631,7 +663,7 @@ class Analysis:
             raise TypeError("cancelled must be callable or None")
         return AccessWindows(self._native.access(
             station._ref, target._ref, search_step_nanoseconds=search_step.nanoseconds,
-            boundary_tolerance_nanoseconds=boundary_tolerance.nanoseconds,
+            boundary_tolerance_nanoseconds=boundary_tolerance.nanoseconds, search_mode=search_mode,
             first=first, last=last, cancelled=cancelled))
 
     def states(self, object: SatelliteHandle | GroundStationHandle, *,

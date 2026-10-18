@@ -21,10 +21,15 @@ std::vector<results::Column> report_columns(ReportKind kind) {
     } else if (report_is_access(kind)) {
         columns.push_back({"time.epoch", kind == ReportKind::aer ? "Time" : "Start", "epoch"});
         if (kind == ReportKind::access_intervals)
-            columns.insert(columns.end(), {{"access.stop", "Stop", "epoch"},
-                                           {"access.duration", "Duration", "s"},
-                                           {"access.start_clipped", "Start clipped", ""},
-                                           {"access.stop_clipped", "Stop clipped", ""}});
+            columns.insert(columns.end(),
+                           {{"access.stop", "Stop", "epoch"},
+                            {"access.duration", "Duration", "s"},
+                            {"access.start_clipped", "Start clipped", ""},
+                            {"access.stop_clipped", "Stop clipped", ""},
+                            {"access.max_elevation", "Maximum elevation", "rad"},
+                            {"access.max_elevation_time", "Maximum elevation time", "epoch"},
+                            {"access.min_range", "Minimum range", "m"},
+                            {"access.min_range_time", "Minimum range time", "epoch"}});
         else
             columns.insert(columns.end(), {{"aer.azimuth", "Azimuth", "rad"},
                                            {"aer.elevation", "Elevation", "rad"},
@@ -112,6 +117,13 @@ void validate_report_query(const ReportQuery &d) {
     if (report_is_access(d.kind) && (d.scope != ReportScope::objects || d.object_ids.size() != 2 ||
                                      d.step_nanoseconds < 1'000'000))
         throw std::invalid_argument("Access requires a station/target pair and step >= 1 ms");
+    if (d.access_tolerance_nanoseconds < 1 ||
+        d.access_tolerance_nanoseconds > 86400LL * 1'000'000'000 ||
+        (d.access_search_mode != core::AccessSearchMode::fixed_grid &&
+         d.access_search_mode != core::AccessSearchMode::extremum_assisted) ||
+        (d.kind == ReportKind::access_intervals &&
+         d.access_tolerance_nanoseconds > d.step_nanoseconds))
+        throw std::invalid_argument("Invalid Access search mode or boundary tolerance");
     std::set<std::string> ids;
     for (const auto &id : d.object_ids)
         if (id.empty() || id.size() > 16384 || !ids.insert(id).second)

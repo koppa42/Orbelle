@@ -23,6 +23,7 @@ struct AccessOptions {
     std::chrono::nanoseconds search_step;
     std::chrono::nanoseconds boundary_tolerance{1'000'000};
     std::optional<core::Epoch> first = {}, last = {};
+    core::AccessSearchMode search_mode = core::AccessSearchMode::extremum_assisted;
 };
 
 // Already selected, immutable resources. No directory lookup or network during queries.
@@ -125,7 +126,8 @@ class Analysis {
                                              std::optional<core::Epoch> first = {},
                                              std::optional<core::Epoch> last = {}) const;
     // Station -> satellite/sensor. Reuses prepared sessions and selected UTC/EOP data.
-    // Fixed discovery grid; windows/gaps shorter than search_step may be missed.
+    // Extremum-assisted discovery by default; check interval must resolve distinct lobes.
+    // Fixed-grid mode can miss windows/gaps shorter than search_step. Returns continuous extrema.
     // Checks cancelled at each evaluation (including refinement); never returns partial results.
     [[nodiscard]] results::AccessWindows access(const application::ObjectRef &station,
                                                 const application::ObjectRef &target,

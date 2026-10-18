@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <orbitforge/core/frames/state.hpp>
+#include <orbitforge/core/propagation/access.hpp>
 #include <orbitforge/results/table.hpp>
 #include <string>
 #include <vector>
@@ -49,6 +50,8 @@ struct ReportQuery {
     std::int64_t step_nanoseconds = 60'000'000'000;
     // Used by Cartesian state only. Elements/motion fix GCRF; geodetic fixes ITRF/WGS84.
     core::FrameId frame = core::FrameId::gcrf;
+    core::AccessSearchMode access_search_mode = core::AccessSearchMode::extremum_assisted;
+    std::int64_t access_tolerance_nanoseconds = 1'000'000;
     bool operator==(const ReportQuery &) const = default;
 };
 struct ReportColumnSpec {

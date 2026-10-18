@@ -70,6 +70,38 @@ class AnalysisAccessTests(unittest.TestCase):
         gc.collect()
         self.assertEqual(narrow[0].end.tai_nanoseconds, old_end)
 
+    def test_pass_extrema_statistics_modes_and_report_export_agree(self):
+        project, station, satellite, _, data = scene()
+        analysis = project.prepare(data=data)
+        windows = analysis.access(station, satellite, search_step=u.s(60))
+        self.assertEqual(windows.search_mode, of.AccessSearchMode.EXTREMUM_ASSISTED)
+        stats = windows.statistics
+        self.assertEqual(stats.count, len(windows))
+        self.assertAlmostEqual(stats.total_duration_s, sum(w.duration.nanoseconds/1e9 for w in windows))
+        self.assertAlmostEqual(stats.mean_duration_s, stats.total_duration_s/len(windows))
+        fixed = analysis.access(station, satellite, search_step=u.s(1), search_mode=of.AccessSearchMode.FIXED_GRID)
+        self.assertEqual(len(windows), len(fixed))
+        for w, f in zip(windows, fixed):
+            self.assertLessEqual(abs(w.start.tai_nanoseconds-f.start.tai_nanoseconds), 1_000_000)
+            self.assertLessEqual(abs(w.end.tai_nanoseconds-f.end.tai_nanoseconds), 1_000_000)
+            self.assertIsNotNone(w.extrema)
+            for extremum in (w.extrema.maximum_elevation, w.extrema.minimum_range):
+                self.assertLessEqual(w.start.tai_nanoseconds, extremum.epoch.tai_nanoseconds)
+                self.assertLessEqual(extremum.epoch.tai_nanoseconds, w.end.tai_nanoseconds)
+            aer = analysis.aer(station,satellite,times=[w.extrema.maximum_elevation.epoch,w.extrema.minimum_range.epoch])
+            self.assertAlmostEqual(w.extrema.maximum_elevation.value,aer[0].elevation_rad)
+            self.assertAlmostEqual(w.extrema.minimum_range.value,aer[1].range_m)
+        report = analysis.report(of.ReportKind.ACCESS_INTERVALS,station=station,target=satellite,step=u.s(60))
+        self.assertEqual(report.access_statistics.count,stats.count)
+        self.assertEqual(report.access_statistics.total_duration_s,stats.total_duration_s)
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"passes.csv"
+            windows.to_csv(path)
+            with path.open(encoding="utf-8-sig",newline="") as stream:
+                rows=list(csv.DictReader(stream))
+            self.assertEqual(int(rows[0]["max_elevation_tai_ns"]),windows[0].extrema.maximum_elevation.epoch.tai_nanoseconds)
+            self.assertEqual(float(rows[0]["min_range_m"]),windows[0].extrema.minimum_range.value)
+
     def test_subinterval_and_empty_result_keep_schema(self):
         project, station, _, sensor, data = scene()
         analysis = project.prepare(data=data)
