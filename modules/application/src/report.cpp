@@ -18,6 +18,11 @@ std::vector<results::Column> report_columns(ReportKind kind) {
                                        {"state.x", "ITRF X", "m"},
                                        {"state.y", "ITRF Y", "m"},
                                        {"state.z", "ITRF Z", "m"}});
+    } else if (kind == ReportKind::orbital_events) {
+        columns.insert(columns.end(), {{"time.epoch", "Time", "epoch"},
+                                       {"event.kind", "Event", ""},
+                                       {"motion.radius", "Geocentric distance", "m"},
+                                       {"motion.speed", "Speed", "m/s"}});
     } else if (report_is_lighting(kind)) {
         columns.push_back(
             {"time.epoch", kind == ReportKind::lighting_intervals ? "Start" : "Time", "epoch"});
@@ -111,7 +116,7 @@ bool report_uses_utc(const ReportTemplate &format, ReportKind kind) {
     return false;
 }
 void validate_report_query(const ReportQuery &d) {
-    if (d.kind < ReportKind::scenario_summary || d.kind > ReportKind::lighting_state ||
+    if (d.kind < ReportKind::scenario_summary || d.kind > ReportKind::orbital_events ||
         (d.scope != ReportScope::objects && d.scope != ReportScope::all_compatible) ||
         (d.frame != core::FrameId::gcrf && d.frame != core::FrameId::itrf) ||
         d.step_nanoseconds < 1 || d.step_nanoseconds > 86400LL * 1'000'000'000 ||
@@ -133,7 +138,7 @@ void validate_report_query(const ReportQuery &d) {
         d.event_tolerance_nanoseconds > 86400LL * 1'000'000'000 ||
         (d.event_search_mode != core::AccessSearchMode::fixed_grid &&
          d.event_search_mode != core::AccessSearchMode::extremum_assisted) ||
-        (report_is_interval(d.kind) && d.event_tolerance_nanoseconds > d.step_nanoseconds))
+        (report_uses_event_search(d.kind) && d.event_tolerance_nanoseconds > d.step_nanoseconds))
         throw std::invalid_argument("Invalid event search mode or boundary tolerance");
     if (d.lighting_ephemeris.empty() || d.lighting_ephemeris.size() > 16384)
         throw std::invalid_argument("Lighting ephemeris selection is required");

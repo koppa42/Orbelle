@@ -611,8 +611,8 @@ class Analysis:
         definition.query.object_ids = ids
         definition.query.frame = require(frame, n.FrameId, "frame")
         if event_search_mode is not None or boundary_tolerance is not None:
-            if kind not in (n.ReportKind.ACCESS_INTERVALS, n.ReportKind.LIGHTING_INTERVALS):
-                raise TypeError("Search mode and boundary tolerance are only used by interval reports")
+            if kind not in (n.ReportKind.ACCESS_INTERVALS, n.ReportKind.LIGHTING_INTERVALS, n.ReportKind.ORBITAL_EVENTS):
+                raise TypeError("Search mode and boundary tolerance are only used by event or interval reports")
             if event_search_mode is not None:
                 definition.query.event_search_mode = require(event_search_mode, n.AccessSearchMode, "event_search_mode")
             if boundary_tolerance is not None:

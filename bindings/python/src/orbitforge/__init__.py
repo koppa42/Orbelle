@@ -33,7 +33,7 @@ from ._native import (
     DataCatalog, CatalogSnapshot, CatalogGravity, GravityInfo, GravityCoefficient, GravitySecularVariations, CatalogEphemeris, ThirdBodyDataInfo, DataAcquisition, EopProduct, data_catalog_available,
     ReportKind, ReportUnits, ReportTimeScale, ReportDefinition, ReportColumn, ReportTable,
     ReportResult, ReportScope, ReportQuery, ReportTemplate, ReportColumnSpec,
-    LightingStatistics, LightingPhaseStatistics,
+    LightingStatistics, LightingPhaseStatistics, OrbitalEventStatistics,
 )
 
 # Low-level mutable values remain available for file/runtime integrations.
@@ -52,7 +52,7 @@ from ._analysis import (
 )
 
 __all__ = [
-    "LightingStatistics", "LightingPhaseStatistics",
+    "LightingStatistics", "LightingPhaseStatistics", "OrbitalEventStatistics",
     "CatalogGravity", "GravityInfo", "GravityCoefficient", "GravitySecularVariations", "CatalogEphemeris", "ThirdBodyDataInfo",
     "Analysis", "AnalysisPlan", "ProjectOpenPlan", "AnalysisRecord", "AnalysisStatus", "DataSnapshot", "DataChange", "DataChangedError",
     "AnalysisCapabilityError", "AnalysisCancelled", "Trajectory", "EpochColumn", "VectorColumn",

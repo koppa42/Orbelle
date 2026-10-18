@@ -16,6 +16,7 @@
 | 可见性与传感器 | [Access、AER、子传感器、STK 对照与验证](architecture/access_sensors.md) |
 | 项目与数据引用 | [项目文件格式](architecture/project_files.md)、[场景数据一致性](architecture/scenario_data_lock.md) |
 | 数据中心 | [数据类型、下载更新、来源优先级与外推](architecture/data_center.md) |
+| 轨道事件 | [近远地点与 GCRF 赤道交点](architecture/orbital_events.md) |
 | 报告与曲线 | [数据接口、桌面交互、STK 对照及后续阶段](architecture/reports.md) |
 | 时间与参考系 | [时间尺度、EOP 与状态变换](architecture/time_frames.md) |
 | 星历 | [CSPICE 内核、时间与并发约定](architecture/spice.md) |

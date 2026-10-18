@@ -50,7 +50,7 @@ settings = of.orbits.OceanTideSettings(enabled=True, model="fes2014bv1", degree=
 
 `OceanTideSettings` 是不可变值；低层 `OceanTideOptions` 对应 C++ 参数，`OceanTideModel.info` 是只读元数据。目录可 `install_ocean_tides(path, selection)`；官方 ID 只接受固定完整原文，修改后的外部文件必须使用自己的 ID。
 
-项目 v43 / OBJS32 保存全部草稿，仅支持当前格式。活动参数进入输入身份，`ocean-tides/<ID>` 保存完整原文 SHA-256 与 `fes-potential-iers2010-original-mean-pole-v1` 解释身份，缩放常数进入配置哈希。重新准备时数据变化须确认；已经创建的分析、报告和轨迹持有原模型。设置取消不发布草稿，下载失败不替换已有数据。
+项目 v44 / OBJS32 保存全部草稿，仅支持当前格式。活动参数进入输入身份，`ocean-tides/<ID>` 保存完整原文 SHA-256 与 `fes-potential-iers2010-original-mean-pole-v1` 解释身份，缩放常数进入配置哈希。重新准备时数据变化须确认；已经创建的分析、报告和轨迹持有原模型。设置取消不发布草稿，下载失败不替换已有数据。
 
 ## 数值验证与未覆盖范围
 

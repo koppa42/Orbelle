@@ -20,7 +20,8 @@ void bind_reports(py::module_ &module) {
         .value("AER", application::ReportKind::aer)
         .value("STATE_COVARIANCE", application::ReportKind::state_covariance)
         .value("LIGHTING_INTERVALS", application::ReportKind::lighting_intervals)
-        .value("LIGHTING_STATE", application::ReportKind::lighting_state);
+        .value("LIGHTING_STATE", application::ReportKind::lighting_state)
+        .value("ORBITAL_EVENTS", application::ReportKind::orbital_events);
     py::class_<core::GroundObservation>(module, "GroundObservation")
         .def_readonly("azimuth_rad", &core::GroundObservation::azimuth_rad)
         .def_readonly("elevation_rad", &core::GroundObservation::elevation_rad)
@@ -126,6 +127,13 @@ void bind_reports(py::module_ &module) {
                                [](const results::LightingStatistics &s) { return s.phases[1]; })
         .def_property_readonly("umbra",
                                [](const results::LightingStatistics &s) { return s.phases[2]; });
+    py::class_<results::OrbitalEventStatistics>(module, "OrbitalEventStatistics")
+        .def_readonly("object_count", &results::OrbitalEventStatistics::object_count)
+        .def_readonly("counts", &results::OrbitalEventStatistics::counts)
+        .def_readonly("near_circular_objects",
+                      &results::OrbitalEventStatistics::near_circular_objects)
+        .def_readonly("near_equatorial_objects",
+                      &results::OrbitalEventStatistics::near_equatorial_objects);
     py::class_<application::ReportDefinition>(module, "ReportDefinition")
         .def(py::init<>())
         .def_readwrite("id", &application::ReportDefinition::id)
@@ -153,6 +161,7 @@ void bind_reports(py::module_ &module) {
         .def_readonly("time_sha256", &runtime::ReportResult::time_sha256)
         .def_readonly("access_statistics", &runtime::ReportResult::access_statistics)
         .def_readonly("lighting_statistics", &runtime::ReportResult::lighting_statistics)
+        .def_readonly("orbital_event_statistics", &runtime::ReportResult::orbital_event_statistics)
         .def_readonly("algorithm", &runtime::ReportResult::algorithm)
         .def_readonly("first", &runtime::ReportResult::first)
         .def_readonly("last", &runtime::ReportResult::last)

@@ -25,7 +25,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 43;
+constexpr std::uint32_t project_version = 44;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -47,7 +47,7 @@ constexpr std::array section_schemas{
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
     SectionSchema{sensors_tag, 1, "Missing sensors section"},
-    SectionSchema{reports_tag, 4, "Missing reports section"},
+    SectionSchema{reports_tag, 5, "Missing reports section"},
     SectionSchema{data_tag, 2, nullptr},
     SectionSchema{time_tag, 1, nullptr},
     SectionSchema{analysis_tag, 1, nullptr},
@@ -1220,7 +1220,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             report.id = reports.text();
             report.name = reports.text();
             const auto kind = reports.number(4);
-            check(kind <= 11, "Unsupported report template");
+            check(kind < report_kinds.size(), "Unsupported report template");
             report.query.kind = static_cast<ReportKind>(kind);
             const auto scope = reports.number(4);
             check(scope <= 1, "Unsupported report scope");

@@ -19,18 +19,23 @@ enum class ReportKind {
     aer,
     state_covariance,
     lighting_intervals,
-    lighting_state
+    lighting_state,
+    orbital_events
 };
 inline constexpr std::array report_kinds{
     ReportKind::scenario_summary, ReportKind::object_summary,     ReportKind::cartesian_state,
     ReportKind::ground_stations,  ReportKind::classical_elements, ReportKind::geodetic_position,
     ReportKind::orbital_motion,   ReportKind::access_intervals,   ReportKind::aer,
-    ReportKind::state_covariance, ReportKind::lighting_intervals, ReportKind::lighting_state};
+    ReportKind::state_covariance, ReportKind::lighting_intervals, ReportKind::lighting_state,
+    ReportKind::orbital_events};
 [[nodiscard]] constexpr bool report_is_lighting(ReportKind kind) {
     return kind == ReportKind::lighting_intervals || kind == ReportKind::lighting_state;
 }
 [[nodiscard]] constexpr bool report_is_interval(ReportKind kind) {
     return kind == ReportKind::access_intervals || kind == ReportKind::lighting_intervals;
+}
+[[nodiscard]] constexpr bool report_uses_event_search(ReportKind kind) {
+    return report_is_interval(kind) || kind == ReportKind::orbital_events;
 }
 [[nodiscard]] constexpr bool report_is_access(ReportKind kind) {
     return kind == ReportKind::access_intervals || kind == ReportKind::aer;
@@ -39,11 +44,12 @@ inline constexpr std::array report_kinds{
     return kind == ReportKind::cartesian_state || kind == ReportKind::classical_elements ||
            kind == ReportKind::geodetic_position || kind == ReportKind::orbital_motion ||
            report_is_access(kind) || kind == ReportKind::state_covariance ||
-           report_is_lighting(kind);
+           report_is_lighting(kind) || kind == ReportKind::orbital_events;
 }
 [[nodiscard]] constexpr bool report_satellites_only(ReportKind kind) {
     return kind == ReportKind::classical_elements || kind == ReportKind::orbital_motion ||
-           kind == ReportKind::state_covariance || report_is_lighting(kind);
+           kind == ReportKind::state_covariance || report_is_lighting(kind) ||
+           kind == ReportKind::orbital_events;
 }
 enum class ReportUnits { si, engineering };
 enum class ReportTimeScale { utc, tai, tt };
