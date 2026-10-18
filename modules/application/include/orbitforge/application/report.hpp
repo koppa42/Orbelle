@@ -85,7 +85,7 @@ struct ReportQuery {
     std::int64_t event_tolerance_nanoseconds = 1'000'000;
     // Lighting uses an explicitly prepared, immutable solar ephemeris.
     std::string lighting_ephemeris = "de440s";
-    core::CoverageGrid coverage;
+    core::CoverageGrid coverage{};
     bool operator==(const ReportQuery &) const = default;
 };
 struct ReportColumnSpec {
