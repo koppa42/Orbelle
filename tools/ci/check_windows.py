@@ -69,7 +69,7 @@ def main():
     desktop = work / "desktop"
     run("desktop-configure", "cmake", "--preset", "desktop-graphics", "-S", source, "-B", desktop,
         "-G", args.generator, *architecture, f"-DCMAKE_PREFIX_PATH={prefix}",
-        "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded")
+        "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
     run("desktop-build", "cmake", "--build", desktop, "--config", "Release")
     run("desktop-tests", "ctest", "--test-dir", desktop, "-C", "Release", "--output-on-failure",
         "--no-tests=error", "--output-junit", reports / "desktop-tests.xml")
@@ -106,7 +106,7 @@ def main():
     run("wheel-build", builder, "-m", "pip", "wheel", wheel_source, "--no-deps", "--no-build-isolation",
         "--no-index", "--wheel-dir", output, f"--config-settings=build-dir={wheel_build}",
         "--config-settings=cmake.define.ORBITFORGE_INSTALL_SDK=ON",
-        "--config-settings=cmake.define.CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded")
+        "--config-settings=cmake.define.CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
     sdk = work / "sdk"
     run("sdk-install", "cmake", "--install", wheel_build, "--config", "Release", "--component", "SDK",
         "--prefix", sdk)
@@ -128,7 +128,7 @@ def main():
     run("sdk-consumer-configure", "cmake", "-S", relocated / "tests/packaging/sdk_consumer",
         "-B", work / "sdk-consumer", "-G", args.generator, *architecture,
         f"-DCMAKE_PREFIX_PATH={installed};{installed / 'dependencies'}",
-        "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded",
+        "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>",
         "-DORBITFORGE_EXPECT_TIME_FRAMES=ON", "-DORBITFORGE_EXPECT_SPICE=ON",
         f"-DORBITFORGE_EOP_MANIFEST={installed / 'share/OrbitForge/data/eop/iers_c04_2016_12_28_2017_01_04/manifest.json'}",
         f"-DORBITFORGE_SPICE_MANIFEST={installed / 'share/OrbitForge/data/spice/de440s_2016_leap/manifest.json'}",

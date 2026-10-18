@@ -84,7 +84,7 @@ def main():
     if args.release:
         run("wheel-build", builder, "-m", "pip", "wheel", source, "--no-deps", "--no-build-isolation",
             "--no-index", "--wheel-dir", output, f"--config-settings=build-dir={work / 'build'}",
-            *(["--config-settings=cmake.define.CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"]
+            *(["--config-settings=cmake.define.CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>"]
               if os.name == "nt" else []))
         wheels = list(output.glob("orbitforge-*.whl"))
         tag = "cp" + python_version.replace(".", "")
@@ -99,7 +99,7 @@ def main():
         build = work / "build"
         run("python-configure", "cmake", "-S", source, "-B", build,
             "-DCMAKE_BUILD_TYPE=Release", f"-DPython_EXECUTABLE={builder}",
-            *(["-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"] if os.name == "nt" else []),
+            *(["-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>"] if os.name == "nt" else []),
             f"-Dpybind11_DIR={pybind_dir}", f"-DCMAKE_PREFIX_PATH={prefix}",
             *(f"-D{name}={value}" for name, value in definitions.items()))
         run("python-build", "cmake", "--build", build, "--config", "Release", "--target", "_native")

@@ -38,6 +38,8 @@ class WindowsGeneratorTests(unittest.TestCase):
                 commands = [call.args[0] for call in run.call_args_list]
                 configure, build, tests, python = commands
                 self.assertIn(generator, configure)
+                # Compiler probes can use Debug; Release must not gain debug symbols.
+                self.assertIn("-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>", configure)
                 self.assertEqual("-A" in configure, generator.startswith("Visual Studio "))
                 env = run.call_args_list[0].kwargs["env"]
                 self.assertEqual(env["CMAKE_CXX_COMPILER_LAUNCHER"], "sccache")
