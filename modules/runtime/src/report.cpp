@@ -526,7 +526,8 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                     Row row{object.id, object.name, epoch, std::string("GCRF")};
                     for (std::size_t i = 0; i < 6; ++i)
                         for (std::size_t j = 0; j <= i; ++j)
-                            row.push_back(value.covariance.state[i][j]);
+                            row.emplace_back(std::in_place_type<double>,
+                                             value.covariance.state[i][j]);
                     rows.push_back(std::move(row));
                     epoch = ticks_between(epoch, last) <=
                                     static_cast<std::uint64_t>(d.query.step_nanoseconds)
