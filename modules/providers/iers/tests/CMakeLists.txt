@@ -5,7 +5,7 @@ target_include_directories(orbitforge_iers_tests SYSTEM PRIVATE "${PICOSHA2_INCL
 target_compile_definitions(orbitforge_iers_tests PRIVATE
     ORBITFORGE_FINALS_SAMPLE="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json"
     ORBITFORGE_EOP_SAMPLE="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_c04_2016_12_28_2017_01_04/manifest.json"
-    ORBITFORGE_EOP_TEST_DIR="${CMAKE_CURRENT_BINARY_DIR}/fixtures")
+    ORBITFORGE_EOP_TEST_DIR="${PROJECT_BINARY_DIR}/fixtures/iers")
 orbitforge_warnings(orbitforge_iers_tests)
 orbitforge_copy_runtime_dlls(orbitforge_iers_tests)
 gtest_discover_tests(orbitforge_iers_tests DISCOVERY_MODE PRE_TEST TEST_PREFIX "iers.")
