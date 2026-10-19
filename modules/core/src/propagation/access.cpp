@@ -217,10 +217,11 @@ std::vector<AccessInterval> find_constraint_intervals(Epoch first, Epoch last, s
     std::vector<AccessInterval> result;
     auto start = begin;
     bool previous = f.at(begin) >= 0, clipped = previous;
-    // Copy the discovered nodes: bisection inserts further samples into the cache.
-    const auto nodes = f.samples;
     auto left = begin;
-    for (const auto &[right, value] : nodes) {
+    // Bisection only inserts strictly inside [left, right], behind this iterator.
+    // std::map preserves iterators on insertion, so newly sampled nodes need not
+    // be revisited and the potentially large discovery tree need not be copied.
+    for (const auto &[right, value] : f.samples) {
         if (right == begin)
             continue;
         const bool next = value >= 0;
