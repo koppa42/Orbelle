@@ -64,6 +64,13 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
     result->ephemerides = ephemerides;
     result->weather = weather;
     result->ocean_tides = ocean_tides;
+    std::map<std::string, const application::Session *> existing_sessions;
+    for (const auto &session : result->scenario.objects())
+        existing_sessions.emplace(session.provenance().object_id, &session);
+    std::vector<application::Session> updates;
+    updates.reserve(project.satellites.size() + project.ground_stations.size());
+    result->orbits.reserve(project.satellites.size());
+    result->models.reserve(project.satellites.size());
     for (auto &satellite : result->project.satellites) {
         if (cancelled.load())
             throw OrbitCancelled{};
@@ -88,10 +95,9 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
             runtime::validate_ocean_tide_reference(
                 project.force_data, input.hpop.ocean_tides.model,
                 ocean_tides.at(input.hpop.ocean_tides.model)->info());
-        const auto existing = std::find_if(
-            result->scenario.objects().begin(), result->scenario.objects().end(),
-            [&](const auto &s) { return s.provenance().object_id == satellite.orbit.object_id; });
-        const bool retained = existing != result->scenario.objects().end();
+        const auto found = existing_sessions.find(satellite.orbit.object_id);
+        const auto *existing = found == existing_sessions.end() ? nullptr : found->second;
+        const bool retained = existing != nullptr;
         // SGP4 epoch interpretation belongs to this calculation's confirmed time data.
         const bool recompute = (edited_object && *edited_object == satellite.orbit.object_id) ||
                                satellite.orbit.propagator == OrbitPropagator::sgp4 ||
@@ -140,25 +146,28 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
             model->addChild(make_satellite_model(model_path));
         }
         if (!retained || recompute)
-            result->scenario = result->scenario.with_object(std::move(session));
+            updates.push_back(std::move(session));
         result->orbits.push_back(std::move(orbit));
         result->models.push_back(std::move(model));
     }
     for (const auto &station : result->project.ground_stations) {
         if (cancelled.load())
             throw OrbitCancelled{};
-        const auto existing = std::find_if(
-            result->scenario.objects().begin(), result->scenario.objects().end(),
-            [&](const auto &s) { return s.provenance().object_id == station.object_id; });
-        const bool retained = existing != result->scenario.objects().end();
+        const auto found = existing_sessions.find(station.object_id);
+        const auto *existing = found == existing_sessions.end() ? nullptr : found->second;
+        const bool retained = existing != nullptr;
         const bool recompute = edited_object && *edited_object == station.object_id;
         if (retained && recompute &&
             existing->provenance().input_revision == std::numeric_limits<std::uint64_t>::max())
             throw std::overflow_error("Object input revision exhausted");
         if (!retained || recompute)
-            result->scenario = result->scenario.with_object(runtime::make_ground_station_session(
+            updates.push_back(runtime::make_ground_station_session(
                 station, retained ? existing->provenance().input_revision + 1 : 1));
     }
+    if (cancelled.load())
+        throw OrbitCancelled{};
+    // Existing pointers refer to the old scenario only; all reads precede this replacement.
+    result->scenario = result->scenario.with_objects(std::move(updates));
     result->ground_tracks = GroundMap::prepare_tracks(result->orbits);
     for (std::size_t i = 0; i < result->ground_tracks.size(); ++i)
         result->ground_tracks[i].name =

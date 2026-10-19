@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cctype>
 #include <limits>
+#include <map>
 #include <orbitforge/application/scenario.hpp>
 #include <stdexcept>
 
@@ -35,6 +36,40 @@ Scenario Scenario::with_object(Session session) const {
     else
         result.objects_[static_cast<std::size_t>(existing - objects_.begin())] = std::move(session);
     ++result.revision_;
+    return result;
+}
+Scenario Scenario::with_objects(std::vector<Session> sessions) const {
+    auto result = *this;
+    if (sessions.empty())
+        return result;
+    if (sessions.size() > result.objects_.max_size() - result.objects_.size())
+        throw std::length_error("Scenario object capacity exceeded");
+    result.objects_.reserve(result.objects_.size() + sessions.size());
+    // Own the keys: replacing a Session may destroy its previous provenance strings.
+    std::map<std::string, std::size_t> indices;
+    for (std::size_t i = 0; i < result.objects_.size(); ++i)
+        indices.emplace(result.objects_[i].provenance().object_id, i);
+    for (auto &session : sessions) {
+        const auto &p = session.provenance();
+        const auto found = indices.find(p.object_id);
+        if (found == indices.end()) {
+            if (p.input_revision != 1)
+                throw std::invalid_argument("New scenario objects must start at revision 1");
+        } else {
+            const auto previous = result.objects_[found->second].provenance().input_revision;
+            if (previous == std::numeric_limits<std::uint64_t>::max() ||
+                p.input_revision != previous + 1)
+                throw std::invalid_argument("Duplicate object ID or stale object revision");
+        }
+        if (result.revision_ == std::numeric_limits<std::uint64_t>::max())
+            throw std::overflow_error("Scenario revision exhausted");
+        if (found == indices.end()) {
+            indices.emplace(p.object_id, result.objects_.size());
+            result.objects_.push_back(std::move(session));
+        } else
+            result.objects_[found->second] = std::move(session);
+        ++result.revision_;
+    }
     return result;
 }
 Scenario Scenario::without_object(const std::string &object_id) const {

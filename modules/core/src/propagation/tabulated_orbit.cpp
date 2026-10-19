@@ -224,24 +224,37 @@ class TabulatedOrbit final : public IStateProvider {
             z[2 * i] = z[2 * i + 1] = x[i];
         auto result = nodes[anchor];
         result.epoch = epoch;
+        // All axes use the same epoch differences and confluent denominators.
+        // Interleave the axes while preserving each axis's subtraction/division order.
+        std::array<std::array<double, 3>, 30> q{};
+        const auto &r0 = nodes[anchor].position_m, &v0 = nodes[anchor].velocity_mps;
+        for (std::size_t i = 0; i < count_; ++i) {
+            const auto dt = nodes[i].epoch.seconds_since(nodes[anchor].epoch);
+            for (std::size_t axis = 0; axis < 3; ++axis)
+                q[2 * i][axis] = q[2 * i + 1][axis] =
+                    (nodes[i].position_m[axis] - r0[axis]) - v0[axis] * dt;
+        }
+        const auto size = 2 * count_;
+        for (std::size_t level = 1; level < size; ++level)
+            for (std::size_t i = size - 1; i >= level; --i) {
+                if (level == 1 && i % 2 == 1) {
+                    for (std::size_t axis = 0; axis < 3; ++axis)
+                        q[i][axis] = (nodes[i / 2].velocity_mps[axis] - v0[axis]) * scale;
+                } else {
+                    const auto denominator = z[i] - z[i - level];
+                    for (std::size_t axis = 0; axis < 3; ++axis)
+                        q[i][axis] = (q[i][axis] - q[i - 1][axis]) / denominator;
+                }
+            }
+        const auto dt = epoch.seconds_since(nodes[anchor].epoch);
         for (std::size_t axis = 0; axis < 3; ++axis) {
-            std::array<double, 30> q{};
-            const double r0 = nodes[anchor].position_m[axis], v0 = nodes[anchor].velocity_mps[axis];
-            for (std::size_t i = 0; i < count_; ++i)
-                q[2 * i] = q[2 * i + 1] = (nodes[i].position_m[axis] - r0) -
-                                          v0 * nodes[i].epoch.seconds_since(nodes[anchor].epoch);
-            const auto size = 2 * count_;
-            for (std::size_t level = 1; level < size; ++level)
-                for (std::size_t i = size - 1; i >= level; --i)
-                    q[i] = level == 1 && i % 2 == 1 ? (nodes[i / 2].velocity_mps[axis] - v0) * scale
-                                                    : (q[i] - q[i - 1]) / (z[i] - z[i - level]);
-            double value = q[size - 1], derivative = 0;
+            double value = q[size - 1][axis], derivative = 0;
             for (std::size_t i = size - 1; i-- > 0;) {
                 derivative = derivative * (-z[i]) + value;
-                value = value * (-z[i]) + q[i];
+                value = value * (-z[i]) + q[i][axis];
             }
-            result.position_m[axis] = r0 + v0 * epoch.seconds_since(nodes[anchor].epoch) + value;
-            result.velocity_mps[axis] = v0 + derivative / scale;
+            result.position_m[axis] = r0[axis] + v0[axis] * dt + value;
+            result.velocity_mps[axis] = v0[axis] + derivative / scale;
         }
         return result;
     }

@@ -2,6 +2,7 @@
 #include "access_geometry.hpp"
 #include <algorithm>
 #include <map>
+#include <unordered_map>
 
 namespace orbitforge::runtime::detail {
 namespace {
@@ -54,7 +55,8 @@ CoverageReportData coverage_report(const ReportContext &context,
                                                 d.query.coverage.minimum_elevation_rad});
     struct Orbit {
         application::Session session;
-        std::map<std::int64_t, core::CartesianState> cache;
+        // Exact epoch lookup only; search order is owned by the Access algorithm.
+        std::unordered_map<std::int64_t, core::CartesianState> cache;
     };
     std::map<std::string, Orbit> orbits;
     std::vector<AccessGeometry> assets;
@@ -70,10 +72,8 @@ CoverageReportData coverage_report(const ReportContext &context,
     }
     std::size_t state_count = 0, evaluations = 0, window_count = 0;
     constexpr std::size_t max_evaluations = 50'000'000, max_states = 500'000;
-    const auto state = [&](const std::string &id,
-                           core::Epoch epoch) -> const core::CartesianState & {
+    const auto state = [&](Orbit &orbit, core::Epoch epoch) -> const core::CartesianState & {
         execution.check_cancelled();
-        auto &orbit = orbits.at(id);
         const auto key = epoch.tai_nanoseconds();
         if (const auto it = orbit.cache.find(key); it != orbit.cache.end())
             return it->second;
@@ -96,12 +96,13 @@ CoverageReportData coverage_report(const ReportContext &context,
         std::vector<core::AccessInterval> windows;
         for (auto &asset : assets) {
             asset.station.location = cell.location;
+            auto &orbit = orbits.at(asset.satellite.orbit.object_id);
             const auto margin = [&](core::Epoch epoch) {
                 execution.check_cancelled();
                 check(++evaluations <= max_evaluations,
                       "Coverage exceeds 50 million geometry evaluations; coarsen the grid or "
                       "shorten the interval");
-                const auto sample = asset.at(state(asset.satellite.orbit.object_id, epoch));
+                const auto sample = asset.at(state(orbit, epoch));
                 auto value =
                     sample.observation.elevation_rad - d.query.coverage.minimum_elevation_rad;
                 if (asset.sensor)
