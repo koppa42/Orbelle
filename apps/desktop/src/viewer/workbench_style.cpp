@@ -474,7 +474,7 @@ void paint_list_row(QPainter *painter, const QStyleOptionViewItem &option, const
     painter->setBrush(selected ? theme::color(theme::accent_wash)
                       : hover  ? theme::color(theme::accent_hover)
                                : QColor(Qt::transparent));
-    painter->drawRoundedRect(row.adjusted(0.5, 0.5, -0.5, -0.5), 6, 6);
+    painter->drawRoundedRect(row.adjusted(0.5, 0.5, -0.5, -0.5), 2, 2);
     if (selected) {
         painter->setPen(Qt::NoPen);
         painter->setBrush(stripe);
@@ -487,9 +487,9 @@ void paint_list_row(QPainter *painter, const QStyleOptionViewItem &option, const
 void style_dock(QDockWidget *dock, WorkbenchIcon icon) {
     auto *bar = new QWidget(dock);
     bar->setObjectName("dockHeading");
-    bar->setFixedHeight(34);
+    bar->setFixedHeight(30);
     auto *layout = new QHBoxLayout(bar);
-    layout->setContentsMargins(6, 4, 4, 2);
+    layout->setContentsMargins(6, 2, 4, 2);
     layout->setSpacing(6);
     // The panel title reads as the selected tab of its panel, matching the workspace tabs.
     auto *title = new QLabel(dock->windowTitle());
@@ -548,9 +548,9 @@ void apply_workbench_style(QApplication &app) {
     QFontDatabase::addApplicationFallbackFontFamily(QChar::Script_Han, "Microsoft YaHei UI");
     app.setWindowIcon(workbench_icon(WorkbenchIcon::orbit, theme::color(theme::accent)));
     // Keep each raw literal below VS 2022's limit; C++ concatenates them unchanged.
-    // Desktop density: 12 px text, 26-28 px controls, 6 px gaps between panels.
-    // Radii: 4 fields · 5 buttons · 6 menus · 8 panels. Flat fills: depth comes from the
-    // surface tones and 1 px rules, not from gradients or bevelled edges.
+    // Desktop density: 12 px text, 26-28 px controls, 3 px dock splitters.
+    // Continuous square-edged work surfaces; small radii belong to interactive controls.
+    // Surface tones and single rules distinguish toolbars from documents.
     // Large headings use the regular weight: YaHei has no semibold, so 600 renders heavy.
     app.setStyleSheet(theme::resolve(QStringLiteral(
         R"QSS(
@@ -559,38 +559,42 @@ QLabel { qproperty-indent: 0; }
 QDialog { background: @surface; }
 QWidget#propertyFields { background: @surface; }
 QMainWindow { background: @canvas; }
-QMainWindow::separator { background: @canvas; width: 6px; height: 6px; }
+QMainWindow::separator { background: @canvas; width: 3px; height: 3px; }
 QMainWindow::separator:hover { background: @accentWash; }
-QWidget#titleBar { background: @chrome; border: 1px solid @line; border-radius: 8px; }
+QWidget#titleBar { background: @chrome; border: 0; }
 QLabel#brand { color: @text; font-family: "Segoe UI Variable Display", "Segoe UI Semibold", "Segoe UI"; font-size: 14px; font-weight: 600; padding: 0 10px 0 2px; }
 QLabel#brandMark { background: transparent; }
 QMenuBar#titleMenus { background: transparent; border: 0; padding: 0; color: @textSoft; }
 QMenuBar#titleMenus::item { padding: 5px 9px; border-radius: 4px; background: transparent; }
 QMenuBar#titleMenus::item:selected, QMenuBar#titleMenus::item:pressed { background: @accentHover; color: @text; }
-QFrame#workspaceChip { background: @field; border: 1px solid @line; border-radius: 12px; }
+QFrame#workspaceChip { background: transparent; border: 0; }
 QLabel#workspaceName { color: @textSoft; }
 QLabel#workspaceDot { background: @textFaint; border-radius: 3px; }
 QLabel#workspaceDot[active="true"] { background: @sakura; }
 QLabel#workspaceDot[warning="true"] { background: @warning; }
-QToolBar#commandBar { background: transparent; border: 0; padding: 0; spacing: 1px; }
+QToolBar#commandBar { background: @chrome; border: 0; border-bottom: 1px solid @line; padding: 1px 6px; spacing: 2px; }
 QToolBar#commandBar::separator { background: @line; width: 1px; margin: 9px 6px; }
-QToolBar#commandBar QToolButton { padding: 5px; min-width: 18px; min-height: 18px; border-radius: 5px; }
-QWidget#dockHeading { background: @chrome; border: 1px solid @line; border-bottom: 0; border-top-left-radius: 8px; border-top-right-radius: 8px; }
+QToolBar#commandBar QToolButton { padding: 3px 7px; min-width: 18px; min-height: 18px; border-radius: 3px; }
+QToolButton[captionButton="true"] { padding: 0; border: 1px solid transparent; border-radius: 4px; }
+QToolButton[captionButton="true"]:hover { background: @overlay; }
+QToolButton[captionButton="true"]:focus { border-color: @accent; }
+QToolButton#windowClose:hover { background: @dangerWash; border-color: @danger; }
+QWidget#dockHeading { background: @chrome; border: 0; border-bottom: 1px solid @line; }
 QWidget#dockHeading QToolButton { padding: 0; border-radius: 4px; }
-QLabel#dockTitle { color: @accentBright; background: @accentWash; border-radius: 4px; padding: 3px 9px; font-size: 12px; }
-QWidget#objectExplorer { background: @chrome; border: 1px solid @line; border-top: 0; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
+QLabel#dockTitle { color: @textSoft; background: transparent; padding: 3px 4px; font-size: 12px; }
+QWidget#objectExplorer { background: @chrome; border: 0; }
 QToolButton#explorerInsert { background: @raised; border: 1px solid @border; border-radius: 5px; padding: 0; }
 QToolButton#explorerInsert:hover { background: @overlay; border-color: @borderStrong; }
 QToolButton#explorerInsert:pressed { background: @accentWash; }
 QToolButton#explorerInsert:disabled { background: @panel; border-color: @line; }
-QWidget#workspacePane { background: @chrome; border: 1px solid @line; border-radius: 8px; }
-QWidget#workspaceHeading { background: @chrome; border-top-left-radius: 7px; border-top-right-radius: 7px; }
+QWidget#workspacePane { background: @chrome; border: 0; }
+QWidget#workspaceHeading { background: @chrome; border-bottom: 1px solid @line; }
 QWidget#workspaceHeading QToolButton, QTabBar QToolButton { padding: 0; border-radius: 4px; }
 QToolButton#closePage { border: 0; border-radius: 4px; }
 QToolButton#closePage:hover { background: @overlay; }
 QToolButton#closePage:focus { background: @accentHover; }
-QTabBar#workspaceTabs::tab { color: @textMuted; background: transparent; border: 0; border-radius: 4px; padding: 4px 10px; margin: 5px 2px 5px 0; }
-QTabBar#workspaceTabs::tab:selected { color: @accentBright; background: @accentWash; }
+QTabBar#workspaceTabs::tab { color: @textMuted; background: transparent; border: 0; border-right: 1px solid @line; border-bottom: 2px solid transparent; padding: 3px 10px; margin: 0; }
+QTabBar#workspaceTabs::tab:selected { color: @text; background: @surface; border-bottom-color: @accent; }
 QTabBar#workspaceTabs::tab:hover:!selected { color: @text; background: @accentHover; }
 QTabBar#propertyPageTabs::tab { color: @textMuted; background: transparent; border: 0; border-radius: 4px; padding: 4px 12px; margin-right: 2px; }
 QTabBar#propertyPageTabs::tab:selected { color: @accentBright; background: @accentWash; }
@@ -606,16 +610,16 @@ QWidget#viewHeading QComboBox:hover { background: @accentHover; border-color: @b
 QFrame#viewTools { background: transparent; border: 0; }
 QFrame#viewTools QToolButton { border-radius: 4px; padding: 2px; }
 QToolBar#timelineBar { background: @canvas; border: 0; padding: 0; spacing: 0; }
-QWidget#timelineCard { background: @chrome; border: 1px solid @line; border-radius: 8px; }
-QWidget#timelineControls { background: @chrome; border-top-left-radius: 7px; border-top-right-radius: 7px; border-bottom: 1px solid @line; }
+QWidget#timelineCard { background: @chrome; border: 0; border-top: 1px solid @line; }
+QWidget#timelineControls { background: @chrome; border-bottom: 1px solid @line; }
 QLabel#timelineTitle { color: @textMuted; padding-right: 8px; }
 QFrame#transportGroup { background: transparent; border: 0; }
 QFrame#transportGroup QToolButton { border-radius: 13px; padding: 3px; }
 QToolBar#timelineBar QToolButton { padding: 3px; }
 QToolBar#timelineBar QComboBox, QToolBar#timelineBar QDoubleSpinBox { min-height: 16px; padding-top: 2px; padding-bottom: 2px; }
 QToolButton#transportPlay { background: @accentDeep; border: 0; border-radius: 13px; }
-QToolButton#transportPlay:hover { background: #5d75d8; }
-QToolButton#transportPlay:pressed { background: #4659b0; }
+QToolButton#transportPlay:hover { background: @accentBright; }
+QToolButton#transportPlay:pressed { background: @sakuraDeep; }
 QToolButton#timeReadout { color: @accentBright; font-family: "Cascadia Mono", "Consolas"; font-size: 12px; padding: 3px 8px; border-radius: 4px; }
 QToolButton#timeReadout:hover { background: @accentHover; }
 QFrame#playbackRateField { background: @field; border: 1px solid @border; border-radius: 4px; }
@@ -670,7 +674,7 @@ QLineEdit#objectSearch:focus { border-color: @accent; }
 QLineEdit, QDateTimeEdit, QDoubleSpinBox, QSpinBox, QComboBox {
     background: @field; color: @text; border: 1px solid @border;
     border-radius: 4px; padding: 3px 8px; min-height: 20px; max-height: 20px;
-    selection-background-color: @accentDeep; selection-color: #ffffff;
+    selection-background-color: @accentDeep; selection-color: @onAccent;
 }
 QLineEdit:hover, QDoubleSpinBox:hover, QSpinBox:hover, QComboBox:hover, QDateTimeEdit:hover { border-color: @borderStrong; }
 QLineEdit:focus, QDateTimeEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus, QComboBox:focus { border-color: @accent; background: @field; }
@@ -698,7 +702,7 @@ QComboBox { padding-right: 24px; }
 QComboBox::drop-down { border: 0; width: 22px; }
 QComboBox::down-arrow { image: url(:/orbitforge/icons/chevron-down.png); width: 9px; height: 6px; }
 QComboBox QAbstractItemView { background: @raised; color: @textSoft; border: 1px solid @border; selection-background-color: @accentWash; selection-color: @accentBright; outline: 0; padding: 3px; }
-QPushButton { background: @raised; color: @textSoft; border: 1px solid @border; border-radius: 5px; padding: 4px 14px; min-height: 18px; }
+QPushButton { background: @raised; color: @textSoft; border: 1px solid @border; border-radius: 3px; padding: 4px 12px; min-height: 18px; }
 QPushButton:hover { background: @overlay; border-color: @borderStrong; color: @text; }
 QPushButton:pressed { background: @accentWash; }
 QPushButton:disabled { background: @panel; color: @textFaint; border-color: @line; }
@@ -709,9 +713,9 @@ QToolButton:checked { background: @accentWash; color: @accentBright; border-colo
 QToolButton:focus, QPushButton:focus { border-color: @accent; }
 QToolButton:disabled { color: @textFaint; }
 QToolButton::menu-indicator { image: none; }
-QPushButton#applyOrbit, QPushButton#insertObject, QPushButton[primary="true"], QPushButton#reportSelectionConfirm { background: @accentDeep; border: 1px solid @accentDeep; color: #ffffff; font-weight: 600; }
-QPushButton#applyOrbit:hover, QPushButton#insertObject:hover, QPushButton[primary="true"]:hover, QPushButton#reportSelectionConfirm:hover { background: #5d75d8; border-color: #5d75d8; }
-QPushButton#applyOrbit:pressed, QPushButton#insertObject:pressed, QPushButton[primary="true"]:pressed, QPushButton#reportSelectionConfirm:pressed { background: #4355ad; }
+QPushButton#applyOrbit, QPushButton#insertObject, QPushButton[primary="true"], QPushButton#reportSelectionConfirm { background: @accentDeep; border: 1px solid @accentDeep; color: @onAccent; font-weight: 600; }
+QPushButton#applyOrbit:hover, QPushButton#insertObject:hover, QPushButton[primary="true"]:hover, QPushButton#reportSelectionConfirm:hover { background: @accentBright; border-color: @accentBright; }
+QPushButton#applyOrbit:pressed, QPushButton#insertObject:pressed, QPushButton[primary="true"]:pressed, QPushButton#reportSelectionConfirm:pressed { background: @sakuraDeep; }
 QPushButton#applyOrbit:focus, QPushButton#insertObject:focus, QPushButton[primary="true"]:focus, QPushButton#reportSelectionConfirm:focus { border-color: @accentBright; }
 QPushButton#applyOrbit:disabled, QPushButton#insertObject:disabled, QPushButton[primary="true"]:disabled, QPushButton#reportSelectionConfirm:disabled { background: @raised; border-color: @line; color: @textFaint; }
 QPushButton#reportSelectionConfirm { padding: 5px 16px; }
@@ -770,7 +774,7 @@ QCalendarWidget QToolButton { padding: 5px; color: @textSoft; font-weight: 600; 
 QCalendarWidget QToolButton#qt_calendar_prevmonth { qproperty-icon: url(:/orbitforge/icons/chevron-left.png); }
 QCalendarWidget QToolButton#qt_calendar_nextmonth { qproperty-icon: url(:/orbitforge/icons/chevron-right.png); }
 QCalendarWidget QToolButton:hover { background: @accentHover; }
-QCalendarWidget QAbstractItemView { border: 0; outline: 0; color: @textSoft; background: @raised; selection-background-color: @accentDeep; selection-color: #ffffff; alternate-background-color: @overlay; }
+QCalendarWidget QAbstractItemView { border: 0; outline: 0; color: @textSoft; background: @raised; selection-background-color: @accentDeep; selection-color: @onAccent; alternate-background-color: @overlay; }
 QListWidget#missionSegments { background: transparent; border: 0; padding: 0; outline: 0; }
 QScrollArea#missionParameters { background: @panel; border: 1px solid @line; border-radius: 8px; }
 QScrollArea#missionParameters > QWidget, QWidget#missionParameterFields { background: transparent; }
@@ -815,27 +819,34 @@ QLabel#dataInventoryDetails { color: @textMuted; font-family: "Cascadia Mono", "
 QLabel#dataCenterStatus { color: @accent; }
 QLabel#dataCenterStatus[warning="true"] { color: @warning; }
 QWidget#dataFooter { background: @panel; border-top: 1px solid @line; }
-QWidget#reportHeading { background: @surface; border-bottom: 1px solid @line; }
-QLabel#reportHeadingTitle { color: @text; font-size: 16px; }
+QWidget#reportHeading { background: @chrome; border-bottom: 1px solid @line; }
 QWidget#reportSettingsPanel, QWidget#reportSettings { background: @panel; }
 QWidget#reportGenerateActions { background: @panel; border-top: 1px solid @line; }
-QLabel#reportSectionTitle { color: @textMuted; font-size: 11px; font-weight: 700; letter-spacing: 1px; }
-QLabel#reportScopeLabel { color: @text; font-weight: 600; }
+QLabel#reportSectionTitle { color: @textSoft; font-size: 12px; padding-bottom: 3px; border-bottom: 1px solid @line; }
+QLabel#reportScopeLabel { color: @text; }
 QLabel#reportScopeDetail, QLabel#reportInterval, QLabel#reportEstimate { color: @textMuted; font-size: 11px; }
 QLabel#reportInterval { font-family: "Cascadia Mono", "Consolas"; }
-QLabel#reportResultTitle { color: @text; font-size: 16px; }
+QLabel#reportResultTitle { color: @text; font-size: 12px; padding-left: 4px; }
 QLabel#reportResultLabel { color: @textMuted; font-size: 11px; }
-QLabel#reportEmptyTitle { color: @textSoft; font-size: 16px; }
-QLabel#reportEmptyIcon { background: @accentWash; border-radius: 26px; }
+QLabel#reportEmptyTitle { color: @textSoft; font-size: 13px; }
+QLabel#reportEmptyIcon { background: transparent; }
 QLabel#reportStatus { color: @textMuted; background: @chrome; border-top: 1px solid @line; font-size: 11px; }
-QTableView#reportTable { background: @field; alternate-background-color: @panel; border: 1px solid @line; border-radius: 6px; gridline-color: @line; selection-background-color: @accentWash; selection-color: @accentBright; }
-QWidget#reportHeading QPushButton, QWidget#reportSettings QPushButton { background: transparent; border-color: transparent; }
+QTableView#reportTable { background: @field; alternate-background-color: @panel; border: 0; border-radius: 0; gridline-color: @line; selection-background-color: @accentWash; selection-color: @accentBright; }
+QTableView#reportTable::item { padding: 2px 8px; border: 0; }
+QTableView#reportTable::item:hover:!selected { background: @accentHover; }
+QTableView#reportTable QHeaderView::section { padding: 5px 8px; }
+QToolBar#reportTableTools, QToolBar#reportPlotTools { background: @panel; border: 0; border-bottom: 1px solid @line; padding: 3px 5px; spacing: 3px; }
+QToolBar#reportTableTools QToolButton, QToolBar#reportPlotTools QToolButton { background: transparent; color: @textSoft; border: 1px solid transparent; border-radius: 3px; padding: 3px 6px; min-height: 18px; }
+QToolBar#reportTableTools QToolButton:hover, QToolBar#reportPlotTools QToolButton:hover { background: @accentHover; color: @text; }
+QToolBar#reportTableTools QToolButton:disabled, QToolBar#reportPlotTools QToolButton:disabled { color: @textFaint; }
+QToolBar#reportPlotTools QToolButton:checked { background: @accentWash; color: @accentBright; border-color: @border; }
+QComboBox#reportPrecision { background: @field; border: 1px solid @line; border-radius: 3px; padding: 2px 22px 2px 6px; min-height: 18px; font-size: 11px; }
+QWidget#reportViewBar, QWidget#accessPassSummary { background: @panel; border-bottom: 1px solid @line; }
+QWidget#reportHeading QPushButton { background: transparent; border-color: transparent; }
 QWidget#reportHeading QPushButton:hover, QWidget#reportSettings QPushButton:hover { background: @accentHover; }
 QWidget#reportSettings QComboBox, QWidget#reportSettings QLineEdit, QWidget#reportSettings QDoubleSpinBox { min-height: 18px; }
 QLabel#reportTemplateDescription { color: @textMuted; font-size: 11px; }
 QDialog#reportSelectionDialog { background: @surface; }
-QLabel#reportSelectionHeading { color: @text; font-size: 19px; }
-QLabel#reportSelectionSubtitle { color: @textMuted; font-size: 12px; }
 QLineEdit#reportSelectionSearch { background: @field; border: 1px solid @border; border-radius: 5px; padding: 6px 9px; min-width: 0; }
 QLineEdit#reportSelectionSearch:focus { border-color: @accent; }
 QTabBar#reportSelectionSource::tab { color: @textMuted; background: transparent; border: 0; border-bottom: 2px solid transparent; padding: 5px 10px; margin-right: 3px; font-size: 12px; }
@@ -844,11 +855,11 @@ QTabBar#reportSelectionSource::tab:hover:!selected { color: @textSoft; backgroun
 QListWidget#reportSelectionList { background: transparent; border: 0; padding: 0; outline: 0; }
 QSplitter#reportSelectionSplit::handle { background: transparent; }
 QSplitter#reportSelectionSplit::handle:hover { background: @accentWash; border-radius: 4px; }
-QScrollArea#reportSelectionPreview { background: @panel; border: 1px solid @line; border-radius: 8px; }
+QScrollArea#reportSelectionPreview { background: @panel; border: 0; border-left: 1px solid @line; }
 QScrollArea#reportSelectionPreview > QWidget, QWidget#reportSelectionDetails { background: transparent; }
-QLabel#reportSelectionSymbol { color: @accentBright; background: @accentWash; border-radius: 8px; }
+QLabel#reportSelectionSymbol { color: @accentBright; background: transparent; }
 QLabel#reportSelectionCategory { color: @sakura; font-size: 11px; font-weight: 600; }
-QLabel#reportSelectionTitle { color: @text; font-size: 18px; }
+QLabel#reportSelectionTitle { color: @text; font-size: 14px; }
 QLabel#reportSelectionDescription { color: @textSoft; font-size: 12px; }
 QFrame#reportSelectionDivider { background: @line; border: 0; }
 QLabel#reportSelectionFieldHeading { color: @textMuted; font-size: 11px; }
@@ -860,18 +871,23 @@ QToolButton#reportConfigMenu { color: @textSoft; background: transparent; border
 QToolButton#reportConfigMenu:hover { color: @accentBright; background: @accentHover; border-radius: 4px; }
 QPushButton#reportChangeScope { color: @accent; background: transparent; border: none; padding: 3px 6px; }
 QPushButton#reportChangeScope:hover { color: @accentBright; background: @accentHover; }
-QTabBar#reportViews::tab { color: @textMuted; background: transparent; border: none; border-radius: 4px; padding: 4px 14px; margin: 2px; min-width: 28px; }
-QTabBar#reportViews::tab:selected { color: @accentBright; background: @accentWash; }
+QTabBar#reportViews::tab { color: @textMuted; background: transparent; border: none; border-bottom: 2px solid transparent; padding: 4px 10px; margin: 0; min-width: 28px; }
+QTabBar#reportViews::tab:selected { color: @text; background: transparent; border-bottom-color: @accent; }
 QTabBar#reportViews::tab:hover:!selected { color: @text; background: @accentHover; }
 QTabBar#reportViews::tab:disabled { color: @textFaint; background: transparent; }
 QToolButton#refreshReport { font-size: 18px; padding: 0px; min-width: 28px; min-height: 28px; border: none; background: transparent; }
 QToolButton#reportResultMenu { font-size: 15px; padding: 2px 6px; border: none; background: transparent; }
 QToolButton#reportResultMenu::menu-indicator { image: none; }
-QPushButton#exportReportCsv { background: @accentWash; border: 1px solid @accentWash; color: @accentBright; border-radius: 5px; padding: 4px 12px; }
+QPushButton#exportReportCsv { background: transparent; border: 1px solid transparent; color: @textSoft; border-radius: 3px; padding: 3px 8px; }
 QPushButton#exportReportCsv:hover { background: @overlay; border-color: @accent; }
 QPushButton#exportReportCsv:disabled { color: @textFaint; background: transparent; border-color: @line; }
-QComboBox#reportPlotField { background: @raised; border: 1px solid @border; border-radius: 4px; padding: 3px 24px 3px 10px; min-height: 18px; }
-QComboBox#reportPlotField:hover { border-color: @borderStrong; }
+QPushButton#reportPlotFields { background: @raised; border: 1px solid @border; border-radius: 3px; padding: 3px 24px 3px 10px; min-height: 18px; text-align: left; }
+QPushButton#reportPlotFields:hover { border-color: @borderStrong; }
+QScrollArea#reportPlotScroll { background: @chrome; border: 0; }
+QDialog#reportCurveSelectionDialog { background: @panel; }
+QTreeWidget#reportCurveList { background: @field; alternate-background-color: @panel; border: 1px solid @line; border-radius: 0; }
+QTreeWidget#reportCurveList::item { height: 30px; padding: 2px 6px; }
+QLabel#reportCurveCount { color: @textMuted; font-size: 11px; }
 )QSS"
         R"QSS(QWidget#sensorFields, QScrollArea#sensorScroll { background: @surface; }
 QLabel#sensorTitle { color: @text; font-size: 16px; }
@@ -903,6 +919,8 @@ QLabel#welcomeCardText { color: @textMuted; font-size: 12px; background: transpa
 QLabel#welcomeCardIcon { background: @accentWash; border-radius: 6px; }
 QLabel#welcomeCardIcon[tone="sakura"] { background: @sakuraWash; }
 QLabel#welcomeCardIcon[tone="primary"] { background: @accentDeep; }
+QPushButton#welcomeCreate { background: @accentWash; border-color: @sakuraDeep; }
+QPushButton#welcomeCreate:hover { background: @accentHover; border-color: @accentBright; }
 QPushButton[objectSelector="true"] { background: @field; border: 1px solid @border; border-radius: 4px; text-align: left; padding: 4px 9px; min-height: 18px; }
 QPushButton[objectSelector="true"]:hover { background: @accentHover; border-color: @accent; }
 QPushButton[objectSelector="true"]:focus { border-color: @accentBright; }

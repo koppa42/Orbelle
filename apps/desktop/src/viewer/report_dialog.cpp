@@ -8,6 +8,7 @@
 #include "workbench_style.hpp"
 #include <QAbstractTableModel>
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
@@ -15,6 +16,7 @@
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
+#include <QFontDatabase>
 #include <QFormLayout>
 #include <QFrame>
 #include <QGridLayout>
@@ -33,6 +35,7 @@
 #include <QSaveFile>
 #include <QScrollArea>
 #include <QSignalBlocker>
+#include <QSortFilterProxyModel>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStyleOptionButton>
@@ -40,6 +43,7 @@
 #include <QTabBar>
 #include <QTableView>
 #include <QTimer>
+#include <QToolBar>
 #include <QToolButton>
 #include <QUuid>
 #include <QVBoxLayout>
@@ -231,6 +235,13 @@ class ReportModel final : public QAbstractTableModel {
   public:
     explicit ReportModel(QObject *parent) : QAbstractTableModel(parent) {}
     std::shared_ptr<const runtime::ReportResult> result;
+    int digits = 9;
+    void set_digits(int value) {
+        digits = value;
+        if (rowCount() && columnCount())
+            emit dataChanged(index(0, 0), index(rowCount() - 1, columnCount() - 1),
+                             {Qt::DisplayRole});
+    }
     void publish(std::shared_ptr<const runtime::ReportResult> next) {
         beginResetModel();
         result = std::move(next);
@@ -246,6 +257,26 @@ class ReportModel final : public QAbstractTableModel {
         if (!result || !index.isValid())
             return {};
         const auto &cell = result->table.rows().at(index.row()).at(index.column());
+        if (role == Qt::UserRole) {
+            if (const auto *value = std::get_if<double>(&cell))
+                return *value;
+            if (const auto *value = std::get_if<std::int64_t>(&cell))
+                return QVariant::fromValue<qlonglong>(*value);
+            if (const auto *value = std::get_if<core::Epoch>(&cell))
+                return QVariant::fromValue<qlonglong>(value->tai_nanoseconds());
+            if (const auto *value = std::get_if<std::string>(&cell))
+                return text(*value);
+            return {};
+        }
+        if (role == Qt::FontRole &&
+            (std::holds_alternative<double>(cell) || std::holds_alternative<std::int64_t>(cell) ||
+             std::holds_alternative<core::Epoch>(cell))) {
+            auto font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+            font.setFamilies(
+                {QStringLiteral("Cascadia Mono"), QStringLiteral("Consolas"), font.family()});
+            font.setPixelSize(12);
+            return font;
+        }
         if (role == Qt::TextAlignmentRole &&
             (std::holds_alternative<double>(cell) || std::holds_alternative<std::int64_t>(cell)))
             return static_cast<int>(Qt::AlignRight | Qt::AlignVCenter);
@@ -287,9 +318,9 @@ class ReportModel final : public QAbstractTableModel {
         if (role == Qt::ToolTipRole && clipped)
             return value + QStringLiteral("\n此边界由分析区间截断，不是实际状态切换的时刻。");
         if (role == Qt::DisplayRole && std::holds_alternative<double>(cell))
-            return report_uses_event_search(result->definition.query.kind)
+            return digits == 9 && report_uses_event_search(result->definition.query.kind)
                        ? QString::number(value.toDouble(), 'f', 3)
-                       : QString::number(value.toDouble(), 'g', 12);
+                       : QString::number(value.toDouble(), 'g', digits);
         if (role == Qt::DisplayRole && std::holds_alternative<core::Epoch>(cell)) {
             if (value.endsWith('Z'))
                 value.chop(1);
@@ -297,7 +328,7 @@ class ReportModel final : public QAbstractTableModel {
                 value.chop(1);
             if (value.endsWith('.'))
                 value.chop(1);
-            if (report_uses_event_search(result->definition.query.kind)) {
+            if (digits != 17 && report_uses_event_search(result->definition.query.kind)) {
                 const auto dot = value.indexOf('.');
                 if (dot >= 0 && value.size() > dot + 4)
                     value.truncate(dot + 4);
@@ -312,7 +343,16 @@ class ReportModel final : public QAbstractTableModel {
         return value;
     }
     QVariant headerData(int section, Qt::Orientation orientation, int role) const override {
-        if (!result || role != Qt::DisplayRole)
+        if (!result)
+            return {};
+        if (role == Qt::TextAlignmentRole && orientation == Qt::Horizontal) {
+            const bool numeric =
+                !result->table.rows().empty() &&
+                (std::holds_alternative<double>(result->table.rows().front()[section]) ||
+                 std::holds_alternative<std::int64_t>(result->table.rows().front()[section]));
+            return static_cast<int>((numeric ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter);
+        }
+        if (role != Qt::DisplayRole)
             return {};
         if (orientation == Qt::Vertical)
             return section + 1;
@@ -357,8 +397,11 @@ struct ReportDialog::Impl {
     QPushButton *generate, *export_csv, *cancel, *scope_button, *view_button;
     QToolButton *refresh_button, *config_menu, *result_more;
     QAction *source_button, *copy_button, *store, *update_template, *remove;
+    QAction *choose_curve_action;
     QProgressBar *progress;
     QTableView *table;
+    QWidget *table_page;
+    QSortFilterProxyModel *table_proxy;
     QTabBar *views;
     QWidget *coverage_settings, *coverage_page;
     std::array<QDoubleSpinBox *, 6> coverage_fields{};
@@ -370,7 +413,10 @@ struct ReportDialog::Impl {
     std::vector<core::Epoch> coverage_starts;
     QWidget *plot_page;
     ReportPlot *plot;
-    QComboBox *plot_field;
+    QPushButton *plot_field;
+    std::vector<ReportCurveField> curve_choices;
+    QStringList curve_ids;
+    std::map<ReportKind, QStringList> curve_preferences;
     ObjectSelectionField *plot_object;
     QLabel *plot_note;
     ReportModel *model;
@@ -411,11 +457,8 @@ struct ReportDialog::Impl {
         auto *heading = new QWidget(owner);
         heading->setObjectName("reportHeading");
         auto *heading_layout = new QHBoxLayout(heading);
-        heading_layout->setContentsMargins(24, 12, 24, 12);
-        auto *title = new QLabel(QStringLiteral("报告与图表"), heading);
-        title->setObjectName("reportHeadingTitle");
-        heading_layout->addWidget(title);
-        heading_layout->addStretch();
+        heading_layout->setContentsMargins(8, 3, 8, 3);
+        heading_layout->setSpacing(6);
         view_button = new QPushButton(QStringLiteral("收起设置"), heading);
         view_button->setObjectName("reportToggleSettings");
         heading_layout->addWidget(view_button);
@@ -440,11 +483,11 @@ struct ReportDialog::Impl {
         settings->setObjectName("reportSettings");
         scroll->setWidget(settings);
         auto *config = new QVBoxLayout(settings);
-        config->setContentsMargins(theme::space::panel);
-        config->setSpacing(10);
+        config->setContentsMargins(12, 10, 12, 12);
+        config->setSpacing(6);
         const auto section = [&](const QString &label) {
             if (config->count())
-                config->addSpacing(10);
+                config->addSpacing(8);
             auto *caption = new QLabel(label, settings);
             caption->setObjectName("reportSectionTitle");
             config->addWidget(caption);
@@ -499,7 +542,7 @@ struct ReportDialog::Impl {
         remove->setObjectName("deleteReport");
         config_menu->setMenu(menu);
         template_heading->addWidget(config_menu);
-        config->addSpacing(14);
+        config->addSpacing(8);
         config->addLayout(template_heading);
         library = new ReportSelectionButton(settings);
         library->setObjectName("reportLibrary");
@@ -569,7 +612,7 @@ struct ReportDialog::Impl {
         sampling = new QWidget(settings);
         auto *sampling_layout = new QVBoxLayout(sampling);
         sampling_layout->setContentsMargins(0, 8, 0, 0);
-        sampling_layout->setSpacing(10);
+        sampling_layout->setSpacing(6);
         auto *sampling_title = new QLabel(QStringLiteral("时间与采样"), sampling);
         sampling_title->setObjectName("reportSectionTitle");
         sampling_layout->addWidget(sampling_title);
@@ -596,7 +639,7 @@ struct ReportDialog::Impl {
         sampling_layout->addWidget(custom_times);
         auto *sampling_form = new QFormLayout;
         sampling_form->setHorizontalSpacing(12);
-        sampling_form->setVerticalSpacing(10);
+        sampling_form->setVerticalSpacing(6);
         sampling_form->setRowWrapPolicy(QFormLayout::WrapLongRows);
         step = new StepSpinBox(sampling);
         step->setObjectName("reportStep");
@@ -674,8 +717,8 @@ struct ReportDialog::Impl {
         auto *actions = new QWidget(settings_panel);
         actions->setObjectName("reportGenerateActions");
         auto *actions_layout = new QVBoxLayout(actions);
-        actions_layout->setContentsMargins(16, 12, 16, 16);
-        actions_layout->setSpacing(10);
+        actions_layout->setContentsMargins(12, 8, 12, 8);
+        actions_layout->setSpacing(6);
         estimate = note({}, actions);
         estimate->setObjectName("reportEstimate");
         actions_layout->addWidget(estimate);
@@ -683,37 +726,41 @@ struct ReportDialog::Impl {
         generate->setObjectName("generateReport");
         generate->setProperty("primary", true);
         generate->setDefault(true);
-        actions_layout->addWidget(generate);
+        auto *generation_buttons = new QHBoxLayout;
+        generation_buttons->addStretch();
+        generate->setMinimumWidth(104);
         cancel = new QPushButton(QStringLiteral("取消生成"), actions);
         cancel->setObjectName("cancelReport");
         cancel->hide();
-        actions_layout->addWidget(cancel);
+        generation_buttons->addWidget(cancel);
+        generation_buttons->addWidget(generate);
+        actions_layout->addLayout(generation_buttons);
         panel_layout->addWidget(actions);
         result_panel = new QWidget(split);
         result_panel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         result_panel->setObjectName("reportResultPanel");
         auto *result_layout = new QVBoxLayout(result_panel);
-        result_layout->setContentsMargins(16, 16, 16, 12);
-        result_layout->setSpacing(10);
-        auto *result_heading = new QHBoxLayout;
-        result_title = new ReportTitle(QStringLiteral("报告结果"), result_panel);
+        result_layout->setContentsMargins(0, 0, 0, 0);
+        result_layout->setSpacing(0);
+        // One document toolbar; keep the table's title and commands out of its data area.
+        result_title = new ReportTitle(QStringLiteral("报告"), heading);
         result_title->setObjectName("reportResultTitle");
         result_title->setTextFormat(Qt::PlainText);
         result_title->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-        result_heading->addWidget(result_title, 1);
-        refresh_button = new QToolButton(result_panel);
+        heading_layout->addWidget(result_title, 1);
+        refresh_button = new QToolButton(heading);
         refresh_button->setObjectName("refreshReport");
         refresh_button->setText(QStringLiteral("↻"));
         refresh_button->setAccessibleName(QStringLiteral("刷新报告"));
         refresh_button->setToolTip(QStringLiteral("按当前设置重新生成（F5）"));
         refresh_button->setShortcut(QKeySequence(Qt::Key_F5));
         refresh_button->setEnabled(false);
-        result_heading->addWidget(refresh_button);
-        export_csv = new QPushButton(QStringLiteral("导出 CSV…"), result_panel);
+        heading_layout->addWidget(refresh_button);
+        export_csv = new QPushButton(QStringLiteral("导出 CSV…"), heading);
         export_csv->setObjectName("exportReportCsv");
         export_csv->setEnabled(false);
-        result_heading->addWidget(export_csv);
-        result_more = new QToolButton(result_panel);
+        heading_layout->addWidget(export_csv);
+        result_more = new QToolButton(heading);
         result_more->setObjectName("reportResultMenu");
         result_more->setText(QStringLiteral("···"));
         result_more->setToolTip(QStringLiteral("复制与数据来源"));
@@ -727,13 +774,15 @@ struct ReportDialog::Impl {
         source_button->setObjectName("reportShowSource");
         source_button->setEnabled(false);
         result_more->setMenu(result_menu);
-        result_heading->addWidget(result_more);
-        result_layout->addLayout(result_heading);
+        heading_layout->addWidget(result_more);
         result_label = note(QStringLiteral("等待生成"), result_panel);
         result_label->setTextFormat(Qt::PlainText);
         result_label->setObjectName("reportResultLabel");
-        auto *result_meta = new QHBoxLayout;
-        result_meta->addWidget(result_label, 1);
+        auto *result_meta_bar = new QWidget(result_panel);
+        result_meta_bar->setObjectName("reportViewBar");
+        auto *result_meta = new QHBoxLayout(result_meta_bar);
+        result_meta->setContentsMargins(8, 0, 10, 0);
+        result_meta->setSpacing(8);
         views = new QTabBar(result_panel);
         views->setObjectName("reportViews");
         views->setExpanding(false);
@@ -743,27 +792,27 @@ struct ReportDialog::Impl {
         views->addTab(QStringLiteral("热力图"));
         views->setTabEnabled(2, false);
         views->setTabEnabled(1, false);
+        views->setTabVisible(2, false);
+        views->setTabVisible(1, false);
         views->setTabToolTip(1, QStringLiteral("生成按时间采样的报告后，可查看曲线。"));
         result_meta->addWidget(views);
-        result_layout->addLayout(result_meta);
+        result_meta->addWidget(result_label, 1);
+        result_label->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        result_layout->addWidget(result_meta_bar);
         pass_summary = new QWidget(result_panel);
         pass_summary->setObjectName("accessPassSummary");
         auto *metrics = new QGridLayout(pass_summary);
-        metrics->setContentsMargins(0, 2, 0, 6);
-        metrics->setSpacing(8);
+        metrics->setContentsMargins(8, 4, 8, 4);
+        metrics->setSpacing(0);
         const std::array metric_names{QStringLiteral("可见过境"), QStringLiteral("总可见时长"),
                                       QStringLiteral("最长过境"), QStringLiteral("平均时长")};
         std::array<QFrame *, 4> cards{};
         for (std::size_t i = 0; i < cards.size(); ++i) {
             cards[i] = new QFrame(pass_summary);
             cards[i]->setObjectName("accessMetric");
-            cards[i]->setStyleSheet(
-                QStringLiteral("QFrame#accessMetric { background: %1; border: 1px solid %2; "
-                               "border-radius: 8px; }")
-                    .arg(theme::color(theme::raised).name(), theme::color(theme::line).name()));
             auto *card = new QVBoxLayout(cards[i]);
-            card->setContentsMargins(12, 10, 12, 10);
-            card->setSpacing(4);
+            card->setContentsMargins(8, 3, 8, 3);
+            card->setSpacing(2);
             auto *caption = note(metric_names[i], cards[i]);
             pass_captions[i] = caption;
             caption->setWordWrap(false);
@@ -771,7 +820,7 @@ struct ReportDialog::Impl {
             pass_values[i] = new QLabel(QStringLiteral("—"), cards[i]);
             pass_values[i]->setObjectName(QStringLiteral("accessMetric%1").arg(i));
             pass_values[i]->setStyleSheet(
-                QStringLiteral("font-size: 18px; font-weight: 600; color: %1;")
+                QStringLiteral("font-size: 14px; color: %1;")
                     .arg(theme::color(i == 0 ? theme::accent : theme::text).name()));
             card->addWidget(pass_values[i]);
             metrics->addWidget(cards[i], 0, static_cast<int>(i));
@@ -803,7 +852,7 @@ struct ReportDialog::Impl {
         empty_layout->setSpacing(6);
         auto *empty_icon = new QLabel(empty);
         empty_icon->setObjectName("reportEmptyIcon");
-        empty_icon->setFixedSize(52, 52);
+        empty_icon->setFixedSize(32, 32);
         empty_icon->setAlignment(Qt::AlignCenter);
         empty_icon->setPixmap(
             workbench_icon(WorkbenchIcon::properties, theme::color(theme::accent)).pixmap(24, 24));
@@ -818,17 +867,47 @@ struct ReportDialog::Impl {
         empty_layout->addWidget(empty_note);
         empty_layout->addStretch();
         result_stack->addWidget(empty);
-        table = new QTableView(result_stack);
+        table_page = new QWidget(result_stack);
+        auto *table_layout = new QVBoxLayout(table_page);
+        table_layout->setContentsMargins(0, 0, 0, 0);
+        table_layout->setSpacing(0);
+        auto *table_tools = new QToolBar(table_page);
+        table_tools->setObjectName("reportTableTools");
+        table_tools->setMinimumWidth(0);
+        table_tools->setMovable(false);
+        table_tools->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        auto *precision = new QComboBox(table_tools);
+        precision->setObjectName("reportPrecision");
+        precision->setAccessibleName(QStringLiteral("表格显示精度"));
+        precision->addItem(QStringLiteral("常规精度"), 9);
+        precision->addItem(QStringLiteral("6 位有效数字"), 6);
+        precision->addItem(QStringLiteral("12 位有效数字"), 12);
+        precision->addItem(QStringLiteral("完整精度"), 17);
+        precision->setToolTip(QStringLiteral(
+            "只调整显示。常规：9 位有效数字，事件值 3 位小数。复制与导出始终保留完整精度。"));
+        table_tools->addWidget(precision);
+        table_tools->addSeparator();
+        table_layout->addWidget(table_tools);
+        table = new QTableView(table_page);
         table->setObjectName("reportTable");
         table->setMinimumSize(0, 0);
         model = new ReportModel(table);
-        table->setModel(model);
+        table_proxy = new QSortFilterProxyModel(table);
+        table_proxy->setSourceModel(model);
+        table_proxy->setSortRole(Qt::UserRole);
+        table_proxy->setDynamicSortFilter(false);
+        table->setModel(table_proxy);
+        table->setSortingEnabled(true);
+        table->sortByColumn(-1, Qt::AscendingOrder);
+        table->horizontalHeader()->setSortIndicatorClearable(true);
+        table->horizontalHeader()->setToolTip(
+            QStringLiteral("点击列标题排序，再次点击反向；第三次恢复原始顺序。"));
         table->setAlternatingRowColors(true);
         table->setShowGrid(false);
         table->setSelectionBehavior(QAbstractItemView::SelectRows);
         table->setSelectionMode(QAbstractItemView::ExtendedSelection);
         table->setEditTriggers(QAbstractItemView::NoEditTriggers);
-        table->verticalHeader()->setDefaultSectionSize(28);
+        table->verticalHeader()->setDefaultSectionSize(26);
         table->horizontalHeader()->setMinimumSectionSize(70);
         table->horizontalHeader()->setResizeContentsPrecision(50);
         auto *copy = new QAction(QStringLiteral("复制所选行"), table);
@@ -838,6 +917,36 @@ struct ReportDialog::Impl {
         table->addAction(copy);
         table->setContextMenuPolicy(Qt::ActionsContextMenu);
         QObject::connect(copy, &QAction::triggered, owner, [this] { copy_rows(); });
+        auto *copy_direct = table_tools->addAction(QStringLiteral("复制"));
+        copy_direct->setObjectName("reportTableCopy");
+        copy_direct->setToolTip(QStringLiteral("复制所选行，含列标题（Ctrl+C）"));
+        copy_direct->setEnabled(false);
+        QObject::connect(copy_direct, &QAction::triggered, owner, [this] { copy_rows(); });
+        choose_curve_action = table_tools->addAction(QStringLiteral("曲线…"));
+        choose_curve_action->setObjectName("reportChooseCurves");
+        choose_curve_action->setToolTip(QStringLiteral("选择多个字段并在曲线中比较"));
+        choose_curve_action->setEnabled(false);
+        QObject::connect(choose_curve_action, &QAction::triggered, owner, [this] {
+            if (choose_curves())
+                views->setCurrentIndex(1);
+        });
+        auto *fit_columns = table_tools->addAction(QStringLiteral("适合列宽"));
+        fit_columns->setObjectName("reportFitColumns");
+        fit_columns->setToolTip(QStringLiteral("按当前显示精度调整列宽；也可拖动表头边界调整"));
+        QObject::connect(fit_columns, &QAction::triggered, table,
+                         &QTableView::resizeColumnsToContents);
+        auto *original_order = table_tools->addAction(QStringLiteral("原始顺序"));
+        original_order->setObjectName("reportOriginalOrder");
+        original_order->setEnabled(false);
+        QObject::connect(original_order, &QAction::triggered, owner,
+                         [this] { table->sortByColumn(-1, Qt::AscendingOrder); });
+        QObject::connect(table->horizontalHeader(), &QHeaderView::sortIndicatorChanged, owner,
+                         [original_order](int column, Qt::SortOrder) {
+                             original_order->setEnabled(column >= 0);
+                         });
+        QObject::connect(precision, &QComboBox::currentIndexChanged, owner, [this, precision] {
+            model->set_digits(precision->currentData().toInt());
+        });
         QObject::connect(copy_button, &QAction::triggered, owner, [this] {
             if (views->currentIndex() > 0) {
                 QApplication::clipboard()->setImage(
@@ -848,27 +957,31 @@ struct ReportDialog::Impl {
         });
         QObject::connect(source_button, &QAction::triggered, owner, [this] { show_source(); });
         QObject::connect(refresh_button, &QToolButton::clicked, owner, [this] { start(); });
+        const auto update_selection = [this, copy_direct, copy] {
+            const bool selected = table->selectionModel()->hasSelection();
+            copy_direct->setEnabled(selected);
+            copy->setEnabled(selected);
+            copy_button->setEnabled(views->currentIndex() > 0 || selected);
+        };
         QObject::connect(table->selectionModel(), &QItemSelectionModel::selectionChanged, owner,
-                         [this] {
-                             copy_button->setEnabled(views->currentIndex() > 0 ||
-                                                     table->selectionModel()->hasSelection());
-                         });
-        result_stack->addWidget(table);
+                         update_selection);
+        QObject::connect(table_proxy, &QAbstractItemModel::modelReset, owner, update_selection);
+        copy->setEnabled(false);
+        table_layout->addWidget(table, 1);
+        result_stack->addWidget(table_page);
         plot_page = new QWidget(result_stack);
         auto *plot_layout = new QVBoxLayout(plot_page);
-        plot_layout->setContentsMargins(0, 0, 0, 0);
+        plot_layout->setContentsMargins(8, 6, 8, 6);
         plot_layout->setSpacing(8);
 
-        plot_field = new QComboBox(plot_page);
-        plot_field->setObjectName("reportPlotField");
-        plot_field->setAccessibleName(QStringLiteral("曲线字段"));
+        plot_field = new ReportSelectionButton(plot_page);
+        plot_field->setObjectName("reportPlotFields");
+        plot_field->setAccessibleName(QStringLiteral("选择曲线"));
         plot_object = new ObjectSelectionField(plot_page);
         plot_object->setObjectName("reportPlotObject");
         plot_object->setAccessibleName(QStringLiteral("曲线对象"));
         plot_field->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-        plot_field->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-        plot_field->setMinimumContentsLength(6);
-        plot_field->setToolTip(QStringLiteral("选择绘制的数值字段"));
+        plot_field->setToolTip(QStringLiteral("选择要同时显示的曲线；同单位叠加，不同单位分区"));
         plot_object->setToolTip(QStringLiteral("选择比较全部对象或只看单个对象"));
         plot_tools = new QGridLayout;
         plot_tools->setContentsMargins(0, 0, 0, 0);
@@ -882,7 +995,8 @@ struct ReportDialog::Impl {
         reset_plot->setIcon(workbench_icon(WorkbenchIcon::fit));
         reset_plot->setToolTip(QStringLiteral("还原完整范围（Home）"));
         reset_plot->setAccessibleName(QStringLiteral("还原曲线范围"));
-        plot_tools->addWidget(reset_plot, 0, 2);
+        reset_plot->setText(QStringLiteral("全范围"));
+        reset_plot->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         new WidthObserver(
             plot_page, [this, mode = WidthMode{}, previous = false](int width) mutable {
                 const bool small = mode.narrow(width, 500);
@@ -891,21 +1005,54 @@ struct ReportDialog::Impl {
                 previous = small;
                 plot_tools->removeWidget(plot_field);
                 plot_tools->removeWidget(plot_object);
-                plot_tools->removeWidget(reset_plot);
                 plot_tools->addWidget(plot_field, 0, 0, 1, small ? 2 : 1);
                 plot_tools->addWidget(plot_object, small ? 1 : 0, small ? 0 : 1, 1, small ? 2 : 1);
-                plot_tools->addWidget(reset_plot, 0, 2);
             });
         plot_layout->addLayout(plot_tools);
         plot = new ReportPlot(plot_page);
+        auto *navigation = new QToolBar(plot_page);
+        navigation->setObjectName("reportPlotTools");
+        navigation->setMinimumWidth(0);
+        navigation->setMovable(false);
+        navigation->setIconSize(QSize(16, 16));
+        auto *mode_group = new QActionGroup(navigation);
+        auto *box = navigation->addAction(QStringLiteral("框选"));
+        box->setObjectName("reportPlotBox");
+        box->setCheckable(true);
+        box->setChecked(true);
+        box->setToolTip(QStringLiteral("拖动框选时间范围；Esc 取消操作"));
+        mode_group->addAction(box);
+        auto *pan = navigation->addAction(QStringLiteral("平移"));
+        pan->setObjectName("reportPlotPan");
+        pan->setCheckable(true);
+        pan->setToolTip(QStringLiteral("拖动平移时间范围；也可按住鼠标中键拖动"));
+        mode_group->addAction(pan);
+        QObject::connect(pan, &QAction::toggled, plot, &ReportPlot::set_pan_mode);
+        navigation->addSeparator();
+        auto *zoom_in =
+            navigation->addAction(workbench_icon(WorkbenchIcon::zoom_in), QStringLiteral("放大"));
+        zoom_in->setObjectName("reportPlotZoomIn");
+        zoom_in->setToolTip(QStringLiteral("放大时间范围（+）；滚轮以指针为中心缩放"));
+        auto *zoom_out =
+            navigation->addAction(workbench_icon(WorkbenchIcon::zoom_out), QStringLiteral("缩小"));
+        zoom_out->setObjectName("reportPlotZoomOut");
+        zoom_out->setToolTip(QStringLiteral("缩小时间范围（−）"));
+        QObject::connect(zoom_in, &QAction::triggered, plot, [this] { plot->zoom(.8); });
+        QObject::connect(zoom_out, &QAction::triggered, plot, [this] { plot->zoom(1.25); });
+        navigation->addWidget(reset_plot);
+        plot_layout->addWidget(navigation);
         plot->seek = [this](core::Epoch epoch) {
             if (epoch.tai_nanoseconds() >= project.first.tai_nanoseconds() &&
                 epoch.tai_nanoseconds() <= project.last.tai_nanoseconds() && seek)
                 seek(epoch);
         };
-        plot_layout->addWidget(plot, 1);
-        plot_note =
-            note(QStringLiteral("滚轮 / 框选缩放 · 右键还原 · 双击采样点定位场景时刻"), plot_page);
+        auto *plot_scroll = new QScrollArea(plot_page);
+        plot_scroll->setObjectName("reportPlotScroll");
+        plot_scroll->setFrameShape(QFrame::NoFrame);
+        plot_scroll->setWidgetResizable(true);
+        plot_scroll->setWidget(plot);
+        plot_layout->addWidget(plot_scroll, 1);
+        plot_note = note(QStringLiteral("滚轮缩放 · 中键平移 · 双击采样点定位时刻"), plot_page);
         plot_layout->addWidget(plot_note);
         result_stack->addWidget(plot_page);
         coverage_page = new QWidget(result_stack);
@@ -941,11 +1088,7 @@ struct ReportDialog::Impl {
                 seek_result(coverage_starts[index]);
         });
         QObject::connect(reset_plot, &QToolButton::clicked, owner, [this] { plot->reset_view(); });
-        QObject::connect(plot_field, &QComboBox::currentIndexChanged, owner, [this] {
-            if (plot_field->currentIndex() >= 0)
-                plot->set_field(static_cast<std::size_t>(plot_field->currentData().toInt()),
-                                plot_field->currentText());
-        });
+        QObject::connect(plot_field, &QPushButton::clicked, owner, [this] { choose_curves(); });
         QObject::connect(plot_object, &ObjectSelectionField::selectionChanged, owner,
                          [this] { plot->set_object(plot_object->id()); });
         QObject::connect(views, &QTabBar::currentChanged, owner, [this] { select_view(); });
@@ -964,7 +1107,7 @@ struct ReportDialog::Impl {
         root->addWidget(progress);
         status = note(QStringLiteral("就绪"), owner);
         status->setObjectName("reportStatus");
-        status->setContentsMargins(24, 6, 24, 6);
+        status->setContentsMargins(10, 3, 10, 3);
         root->addWidget(status);
         QObject::connect(library, &QPushButton::clicked, owner, [this] { choose_report(); });
         QObject::connect(scope_button, &QPushButton::clicked, owner, [this] { choose_scope(); });
@@ -1026,7 +1169,8 @@ struct ReportDialog::Impl {
         });
         QObject::connect(export_csv, &QPushButton::clicked, owner, [this] { export_file(); });
         QObject::connect(
-            table, &QTableView::doubleClicked, owner, [this](const QModelIndex &index) {
+            table, &QTableView::doubleClicked, owner, [this](const QModelIndex &view_index) {
+                const auto index = table_proxy->mapToSource(view_index);
                 if (!model->result)
                     return;
                 const auto &r = *model->result;
@@ -1051,13 +1195,45 @@ struct ReportDialog::Impl {
             });
         table->setContextMenuPolicy(Qt::CustomContextMenu);
         QObject::connect(table, &QWidget::customContextMenuRequested, owner, [this](QPoint point) {
-            const auto index = table->indexAt(point);
+            const auto view_index = table->indexAt(point);
+            const auto index = table_proxy->mapToSource(view_index);
             if (!index.isValid() || !model->result)
                 return;
             const auto &r = *model->result;
             const auto &source = r.source_table ? *r.source_table : r.table;
             QMenu menu(owner);
+            if (!table->selectionModel()->isRowSelected(view_index.row(), {}))
+                table->selectRow(view_index.row());
             menu.addActions(table->actions());
+            menu.addAction(QStringLiteral("复制此单元格"), owner, [this, index] {
+                QApplication::clipboard()->setText(
+                    text(model->result->cell_text(index.row(), index.column())));
+            });
+            const auto curve_field = std::ranges::find(
+                curve_choices, static_cast<std::size_t>(index.column()), &ReportCurveField::column);
+            if (views->isTabEnabled(1) && curve_field != curve_choices.end()) {
+                const auto id = curve_field->id;
+                menu.addAction(QStringLiteral("加入曲线比较"), owner, [this, id] {
+                    auto selected = curve_ids;
+                    if (!selected.contains(id))
+                        selected << id;
+                    if (selected.size() > 6) {
+                        if (!choose_curves(selected))
+                            return;
+                    } else
+                        apply_curves(selected);
+                    views->setCurrentIndex(1);
+                });
+                menu.addAction(QStringLiteral("只显示此列曲线"), owner, [this, id] {
+                    apply_curves({id});
+                    views->setCurrentIndex(1);
+                });
+            }
+            if (views->isTabEnabled(1))
+                menu.addAction(QStringLiteral("选择曲线…"), owner, [this] {
+                    if (choose_curves())
+                        views->setCurrentIndex(1);
+                });
             if (!application::report_is_interval(r.definition.query.kind)) {
                 menu.exec(table->viewport()->mapToGlobal(point));
                 return;
@@ -1355,7 +1531,13 @@ struct ReportDialog::Impl {
         settings_panel->setMaximumWidth(compact ? QWIDGETSIZE_MAX : 380);
         settings_panel->setVisible(compact ? narrow_settings : wide_settings);
         result_panel->setVisible(!compact || !narrow_settings);
-        if (!compact && wide_settings && (was_compact || settings_hidden))
+        // A panel first shown inside a narrow dock may retain a zero splitter size.
+        // Allocate the single visible pane explicitly; keep the user's wide split intact.
+        if (compact)
+            split->setSizes(narrow_settings ? QList<int>{width, 0} : QList<int>{0, width});
+        else if (!wide_settings)
+            split->setSizes({0, width});
+        else if (wide_settings && (was_compact || settings_hidden))
             split->setSizes(wide_sizes);
         view_button->setText(
             compact ? (narrow_settings ? QStringLiteral("查看结果") : QStringLiteral("编辑设置"))
@@ -1715,6 +1897,8 @@ struct ReportDialog::Impl {
         result_status();
     }
     void publish(std::shared_ptr<runtime::ReportResult> result, bool new_calculation = true) {
+        if (new_calculation)
+            table->sortByColumn(-1, Qt::AscendingOrder);
         model->publish(result);
         if (new_calculation && owner->result_published && result_is_current())
             owner->result_published(result, *result_analysis);
@@ -1812,6 +1996,7 @@ struct ReportDialog::Impl {
             event_notice->setVisible(!notes.isEmpty());
         }
         views->setTabEnabled(2, result->coverage_statistics.has_value());
+        views->setTabVisible(2, views->isTabEnabled(2));
         coverage_map->set_result(result, new_calculation);
         if (result->coverage_statistics) {
             const auto &s = *result->coverage_statistics;
@@ -1847,7 +2032,7 @@ struct ReportDialog::Impl {
                        result->table.columns()[c].id == "access.max_elevation_time" ||
                        result->table.columns()[c].id == "access.min_range_time"))));
         result_status();
-        prepare_plot();
+        prepare_plot(!new_calculation);
         if (new_calculation && result->coverage_statistics)
             views->setCurrentIndex(result->definition.query.kind == ReportKind::coverage_grid ? 2
                                                                                               : 1);
@@ -2069,19 +2254,59 @@ struct ReportDialog::Impl {
         if (model->result)
             result_stack->setCurrentWidget(views->currentIndex() == 2 ? coverage_page
                                            : chart                    ? plot_page
-                                                                      : table);
+                                                                      : table_page);
         export_csv->setText(chart ? QStringLiteral("导出 PNG…") : QStringLiteral("导出 CSV…"));
         copy_button->setText(chart ? QStringLiteral("复制图片") : QStringLiteral("复制选中行"));
         copy_button->setToolTip(chart ? QStringLiteral("复制当前图片")
                                       : QStringLiteral("复制所选行（Ctrl+C）"));
         copy_button->setEnabled(chart || table->selectionModel()->hasSelection());
     }
-    void prepare_plot() {
+    std::vector<ReportCurveField> selected_curves() const {
+        std::vector<ReportCurveField> selected;
+        for (const auto &field : curve_choices)
+            if (curve_ids.contains(field.id))
+                selected.push_back(field);
+        return selected;
+    }
+    void update_curve_button() {
+        QStringList names;
+        for (const auto &field : selected_curves())
+            names << field.label;
+        plot_field->setText(names.size() == 1
+                                ? QStringLiteral("曲线 · %1").arg(names.front())
+                                : QStringLiteral("选择曲线 · %1 项").arg(names.size()));
+        plot_field->setAccessibleDescription(names.join(QStringLiteral("、")));
+        plot_field->setToolTip(QStringLiteral("选择要比较的曲线\n%1").arg(names.join("\n")));
+        plot_field->setEnabled(!curve_choices.empty());
+    }
+    void apply_curves(const QStringList &selected) {
+        if (!model->result)
+            return;
+        curve_ids = selected;
+        curve_preferences[model->result->definition.query.kind] = curve_ids;
+        plot->set_fields(selected_curves());
+        update_curve_button();
+    }
+    bool choose_curves(QStringList selected = {}) {
+        if (curve_choices.empty())
+            return false;
+        const auto snapshot = model->result;
+        ReportCurveSelectionDialog chooser(curve_choices, selected.isEmpty() ? curve_ids : selected,
+                                           owner);
+        if (chooser.exec() != QDialog::Accepted)
+            return false;
+        if (model->result != snapshot) {
+            status->setText(QStringLiteral("报告结果已更新，请重新选择曲线。"));
+            return false;
+        }
+        apply_curves(chooser.selection());
+        return true;
+    }
+    void prepare_plot(bool preserve_view) {
         const auto &r = *model->result;
-        const auto previous_field = plot_field->currentData(Qt::UserRole + 1).toString();
         const auto previous_object = plot_object->id();
-        const QSignalBlocker fields_guard(plot_field), objects_guard(plot_object);
-        plot_field->clear();
+        const QSignalBlocker objects_guard(plot_object);
+        curve_choices.clear();
         plot_object->set_objects({});
         plot_object->set_id({});
         const auto &columns = r.table.columns();
@@ -2103,10 +2328,11 @@ struct ReportDialog::Impl {
                     continue;
                 const auto &column = r.table.columns()[c];
                 const auto suffix = r.column_unit(c);
-                plot_field->addItem(localized(text(column.title)) +
-                                        (suffix.empty() ? QString{} : " (" + text(suffix) + ")"),
-                                    static_cast<int>(c));
-                plot_field->setItemData(plot_field->count() - 1, text(column.id), Qt::UserRole + 1);
+                curve_choices.push_back(
+                    {c, text(column.id),
+                     localized(text(column.title)) +
+                         (suffix.empty() ? QString{} : " (" + text(suffix) + ")"),
+                     text(suffix)});
             }
             // A compact legend remains legible for up to twelve objects. Larger scopes keep
             // their complete table/CSV; the chart explicitly asks the user to choose an object.
@@ -2137,23 +2363,32 @@ struct ReportDialog::Impl {
                 objects.size() > 12
                     ? QStringLiteral(
                           "对象超过 12 个，选择单个查看或在左侧缩小范围。滚轮缩放，双击定位时刻。")
-                    : QStringLiteral("滚轮 / 框选缩放 · 右键还原 · 双击采样点定位场景时刻"));
-            auto index = plot_field->findData(previous_field, Qt::UserRole + 1);
-            if (index < 0 && r.definition.query.kind == ReportKind::classical_elements)
-                index = plot_field->findData("elements.nu", Qt::UserRole + 1);
-            if (index < 0 && r.definition.query.kind == ReportKind::geodetic_position)
-                index = plot_field->findData("geodetic.height", Qt::UserRole + 1);
-            if (index < 0 && r.definition.query.kind == ReportKind::aer)
-                index = plot_field->findData("aer.elevation", Qt::UserRole + 1);
-            if (index < 0 && r.definition.query.kind == ReportKind::relative_motion)
-                index = plot_field->findData("relative.range", Qt::UserRole + 1);
-            if (index < 0 && r.definition.query.kind == ReportKind::coverage_time)
-                index = plot_field->findData("coverage.fraction", Qt::UserRole + 1);
-            plot_field->setCurrentIndex(std::max(0, index));
+                    : QStringLiteral("滚轮缩放 · 中键平移 · 双击采样点定位时刻"));
         }
-        plot->set_result(model->result, static_cast<std::size_t>(plot_field->currentData().toInt()),
-                         plot_field->currentText(), plot_object->id());
-        views->setTabEnabled(1, sampled && plot_field->count() > 0);
+        curve_ids = curve_preferences[r.definition.query.kind];
+        curve_ids.removeIf([this](const auto &id) {
+            return std::ranges::find(curve_choices, id, &ReportCurveField::id) ==
+                   curve_choices.end();
+        });
+        if (curve_ids.isEmpty() && !curve_choices.empty()) {
+            const auto preferred =
+                r.definition.query.kind == ReportKind::classical_elements  ? "elements.nu"
+                : r.definition.query.kind == ReportKind::geodetic_position ? "geodetic.height"
+                : r.definition.query.kind == ReportKind::aer               ? "aer.elevation"
+                : r.definition.query.kind == ReportKind::relative_motion   ? "relative.range"
+                : r.definition.query.kind == ReportKind::coverage_time     ? "coverage.fraction"
+                                                                           : "";
+            const auto field = std::ranges::find(curve_choices, QString::fromLatin1(preferred),
+                                                 &ReportCurveField::id);
+            curve_ids << (field == curve_choices.end() ? curve_choices.front().id : field->id);
+        }
+        curve_preferences[r.definition.query.kind] = curve_ids;
+        plot->set_result(model->result, selected_curves(), plot_object->id(), preserve_view);
+        update_curve_button();
+        views->setTabEnabled(1, sampled && !curve_choices.empty());
+        choose_curve_action->setVisible(views->isTabEnabled(1));
+        choose_curve_action->setEnabled(views->isTabEnabled(1));
+        views->setTabVisible(1, views->isTabEnabled(1));
         if (!views->isTabEnabled(views->currentIndex()))
             views->setCurrentIndex(0);
         select_view();
@@ -2233,7 +2468,7 @@ struct ReportDialog::Impl {
             QStringList cells;
             for (int c = 0; c < model->columnCount(); ++c)
                 if (!table->isColumnHidden(c))
-                    cells << text(model->result->cell_text(row.row(), c));
+                    cells << text(model->result->cell_text(table_proxy->mapToSource(row).row(), c));
             append(cells);
         }
         QApplication::clipboard()->setText(value);

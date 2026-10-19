@@ -12,14 +12,17 @@
 #include "project_scene.hpp"
 #include "quantity_editor.hpp"
 #include "report_dialog.hpp"
+#include "report_plot.hpp"
 #include "responsive_layout.hpp"
 #include "satellite_model.hpp"
 #include "scenario_dialog.hpp"
 #include "sensor_editor.hpp"
 #include "startup_splash.hpp"
+#include "view_navigation.hpp"
 #include "welcome_page.hpp"
 #include "workbench_profile.hpp"
 #include "workbench_style.hpp"
+#include "workbench_window.hpp"
 #include "workspace.hpp"
 #include <QUuid>
 #include <numbers>
@@ -278,7 +281,7 @@ class FlushToolBar final : public QToolBar {
     }
 };
 
-class Workbench final : public QMainWindow {
+class Workbench final : public WorkbenchWindow {
     struct Station {
         application::ProjectGroundStation config;
         QTreeWidgetItem *item = nullptr;
@@ -397,17 +400,15 @@ class Workbench final : public QMainWindow {
             if (!benchmarking_) {
                 model_group_ = vsg::Group::create();
                 scene_->addChild(model_group_);
-                // One title row: brand and menus on the left, the scene in the centre and icon
-                // commands on the right. Narrow windows drop the wordmark, then the scene chip;
-                // QMenuBar folds overflowing menus into its extension button.
-                // Every region is a rounded panel floating on the canvas, 8 px apart.
-                setContentsMargins(6, 6, 6, 0);
+                // Separate window navigation from task commands. Both bars use Qt overflow;
+                // width changes only hide decorative labels, never rebuild actions or editors.
+                setContentsMargins(1, 1, 1, 0);
                 auto *title_host = new QWidget;
                 auto *title_host_layout = new QVBoxLayout(title_host);
-                title_host_layout->setContentsMargins(0, 0, 0, 6);
+                title_host_layout->setContentsMargins(0, 0, 0, 0);
                 auto *title_bar = new QWidget;
                 title_bar->setObjectName("titleBar");
-                title_bar->setFixedHeight(40);
+                title_bar->setFixedHeight(36);
                 title_host_layout->addWidget(title_bar);
                 auto *title_layout = new QHBoxLayout(title_bar);
                 title_layout->setContentsMargins(10, 0, 6, 0);
@@ -423,12 +424,14 @@ class Workbench final : public QMainWindow {
                 menu_bar_->setObjectName("titleMenus");
                 menu_bar_->setNativeMenuBar(false);
                 title_layout->addWidget(menu_bar_, 0, Qt::AlignVCenter);
-                title_layout->addStretch(1);
+                auto *drag_space = new QWidget(title_bar);
+                drag_space->setMinimumWidth(48);
+                title_layout->addWidget(drag_space, 1);
                 auto *chip = new QFrame;
                 chip->setObjectName("workspaceChip");
                 chip->setFixedHeight(24);
                 auto *chip_layout = new QHBoxLayout(chip);
-                chip_layout->setContentsMargins(12, 0, 14, 0);
+                chip_layout->setContentsMargins(8, 0, 8, 0);
                 chip_layout->setSpacing(8);
                 workspace_dot_ = new QLabel;
                 workspace_dot_->setObjectName("workspaceDot");
@@ -444,13 +447,19 @@ class Workbench final : public QMainWindow {
                 commands_->setObjectName("commandBar");
                 commands_->setMovable(false);
                 commands_->setIconSize(QSize(16, 16));
-                commands_->setToolButtonStyle(Qt::ToolButtonIconOnly);
-                title_layout->addWidget(commands_);
+                commands_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+                title_host_layout->addWidget(commands_);
+                new WidthObserver(commands_, [this, mode = WidthMode{}](int width) mutable {
+                    commands_->setToolButtonStyle(mode.narrow(width, 660)
+                                                      ? Qt::ToolButtonIconOnly
+                                                      : Qt::ToolButtonTextBesideIcon);
+                });
+                install_title_bar(title_bar, title_layout);
                 setMenuWidget(title_host);
                 new WidthObserver(title_bar, [name, chip, wide = WidthMode{},
                                               roomy = WidthMode{}](int width) mutable {
-                    name->setVisible(!wide.narrow(width, 1180));
-                    chip->setVisible(!roomy.narrow(width, 960));
+                    name->setVisible(!wide.narrow(width, 760));
+                    chip->setVisible(!roomy.narrow(width, 1000));
                 });
                 scene_menu_ = menu_bar_->addMenu(QStringLiteral("场景"));
                 insert_menu_ = menu_bar_->addMenu(QStringLiteral("插入"));
@@ -509,6 +518,7 @@ class Workbench final : public QMainWindow {
                 connect(insert_action_, &QAction::triggered, this,
                         [this] { show_insert_objects(); });
                 insert_menu_->addAction(insert_action_);
+                commands_->insertAction(report_action_, insert_action_);
             }
             if (benchmarking_) {
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
@@ -972,7 +982,7 @@ class Workbench final : public QMainWindow {
                 auto *timeline_host = new QWidget;
                 timeline_host->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
                 auto *host_layout = new QVBoxLayout(timeline_host);
-                host_layout->setContentsMargins(0, 6, 0, 0);
+                host_layout->setContentsMargins(0, 3, 0, 0);
                 host_layout->addWidget(timeline);
                 toolbar->addWidget(timeline_host);
                 responsive_columns(timeline, control_rows, 1000);
@@ -1220,7 +1230,7 @@ class Workbench final : public QMainWindow {
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
             slot->gpu.reset();
 #endif
-            slot->trackball = {};
+            slot->navigation.reset();
             slot->labels.reset();
             slot->station_markers.reset();
             slot->station_selection.reset();
@@ -1409,7 +1419,7 @@ class Workbench final : public QMainWindow {
         vsg::ref_ptr<vsg::View> view;
         vsg::ref_ptr<vsg::CommandGraph> graph;
         vsg::ref_ptr<vsg::RenderGraph> render_graph;
-        vsg::ref_ptr<vsg::Trackball> trackball;
+        std::unique_ptr<ViewNavigation> navigation;
         vsg::ref_ptr<render_vsg::SwapchainCapture> capture;
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
         std::shared_ptr<BenchmarkGpu> gpu;
@@ -3623,9 +3633,9 @@ class Workbench final : public QMainWindow {
             look->eye = view_direction * distance;
             look->center = vsg::dvec3(0, 0, 0);
             look->up = vsg::normalize(vsg::cross(view_direction, side));
-            if (slot.trackball)
-                slot.trackball->setViewpoint(vsg::LookAt::create(look->eye, look->center, look->up),
-                                             0);
+            if (slot.navigation)
+                slot.navigation->set_viewpoint(
+                    vsg::LookAt::create(look->eye, look->center, look->up));
             perspective->nearDistance = 6378.137;
             perspective->farDistance = distance + bound * 20;
         }
@@ -3648,8 +3658,8 @@ class Workbench final : public QMainWindow {
                                                                              : vsg::dvec3(0, 0, 1))
                                               : look->up;
             const auto viewpoint = vsg::LookAt::create(centre + direction * distance, centre, up);
-            if (slot->trackball)
-                slot->trackball->setViewpoint(viewpoint, 0);
+            if (slot->navigation)
+                slot->navigation->set_viewpoint(viewpoint);
             else {
                 look->eye = viewpoint->eye;
                 look->center = centre;
@@ -3703,17 +3713,8 @@ class Workbench final : public QMainWindow {
     }
     void zoom_view(std::size_t index, double factor) {
         auto &slot = *slots_.at(index);
-        auto *look = dynamic_cast<vsg::LookAt *>(slot.camera->viewMatrix.get());
-        const auto offset = look->eye - look->center;
-        const auto distance =
-            std::clamp(vsg::length(offset) * factor,
-                       vsg::length(look->center) < 1 ? 6378137.0 * 1.02 : 1.0, 1e11);
-        slot.trackball->setViewpoint(
-            vsg::LookAt::create(look->center + vsg::normalize(offset) * distance, look->center,
-                                look->up),
-            0);
-        auto *projection = dynamic_cast<vsg::Perspective *>(slot.camera->projectionMatrix.get());
-        projection->farDistance = std::max(projection->farDistance, distance * 3);
+        if (slot.navigation)
+            slot.navigation->zoom(1 / factor);
     }
     void change_display_frame(int index) {
         if (!scenario_ || !display_to_itrf_)
@@ -3731,8 +3732,8 @@ class Workbench final : public QMainWindow {
             auto *look = dynamic_cast<vsg::LookAt *>(slot->camera->viewMatrix.get());
             const auto viewpoint =
                 vsg::LookAt::create(convert(look->eye), convert(look->center), convert(look->up));
-            if (slot->trackball)
-                slot->trackball->setViewpoint(viewpoint, 0);
+            if (slot->navigation)
+                slot->navigation->set_viewpoint(viewpoint);
             else
                 slot->camera->viewMatrix = viewpoint;
         }
@@ -3807,7 +3808,8 @@ class Workbench final : public QMainWindow {
             tool_layout->addWidget(control);
             return control;
         };
-        button(WorkbenchIcon::fit, slot ? QStringLiteral("适配轨道") : QStringLiteral("显示全球"),
+        button(WorkbenchIcon::fit,
+               slot ? QStringLiteral("适配轨道 · Home") : QStringLiteral("显示全球 · Home"),
                [this, slot] {
                    if (slot)
                        fit_views(slot);
@@ -3824,12 +3826,13 @@ class Workbench final : public QMainWindow {
         for (const auto &[icon, factor, text] :
              {std::tuple{WorkbenchIcon::zoom_in, 1.3, QStringLiteral("放大")},
               std::tuple{WorkbenchIcon::zoom_out, 1 / 1.3, QStringLiteral("缩小")}})
-            button(icon, text, [this, slot, factor] {
-                if (slot)
-                    zoom_view(*slot, 1 / factor);
-                else
-                    ground_map_->zoom(factor, ground_map_->rect().center());
-            });
+            button(icon, text + (factor > 1 ? QStringLiteral(" · +") : QStringLiteral(" · −")),
+                   [this, slot, factor] {
+                       if (slot)
+                           zoom_view(*slot, 1 / factor);
+                       else
+                           ground_map_->zoom_centered(factor);
+                   });
         bar->addStretch();
         auto *settings = new QMenu(header);
         if (!lighting_action_) {
@@ -3894,6 +3897,17 @@ class Workbench final : public QMainWindow {
         current->window = new EmbeddedWindow(viewer_, traits);
         current->container = QWidget::createWindowContainer(current->window);
         current->container->setMinimumSize(64, 64);
+        current->container->setFocusPolicy(Qt::StrongFocus);
+        if (!benchmarking_) {
+            current->container->setAccessibleName(QStringLiteral("三维轨道视图"));
+            const auto help =
+                QStringLiteral("左键拖动：旋转；中键 / Shift + 左键拖动：平移\n"
+                               "滚轮 / 触控板：缩放；右键上下拖动：连续缩放\n"
+                               "单击：选择对象；+ / −：缩放；方向键：平移\n"
+                               "Shift + 方向键：精细平移；Home：适配轨道；Esc：取消拖动");
+            current->container->setAccessibleDescription(help);
+            current->container->setToolTip(help);
+        }
         if (benchmarking_) {
             const auto ratio = current->window->devicePixelRatio();
             const int width = qRound(1280.0 / ratio), height = qRound(720.0 / ratio);
@@ -4061,9 +4075,17 @@ class Workbench final : public QMainWindow {
         if (slot.capture)
             slot.graph->addChild(slot.capture);
         if (!benchmarking_) {
-            slot.trackball = vsg::Trackball::create(slot.camera);
-            slot.trackball->addWindow(adapter);
-            viewer_->addEventHandler(slot.trackball);
+            slot.navigation = std::make_unique<ViewNavigation>(*slot.window, slot.camera);
+            slot.navigation->select = [&slot](QPointF point) {
+                if (slot.window->pressed)
+                    slot.window->pressed(point * slot.window->devicePixelRatio());
+            };
+            slot.navigation->fit = [this, &slot] {
+                const auto position =
+                    std::find_if(slots_.begin(), slots_.end(),
+                                 [&slot](const auto &value) { return value.get() == &slot; });
+                fit_views(static_cast<std::size_t>(std::distance(slots_.begin(), position)));
+            };
         }
         ++slot.creations;
         if (timer_.isActive())
@@ -4073,10 +4095,8 @@ class Workbench final : public QMainWindow {
         if (!slot.graph || stopped_)
             return;
         begin_change();
-        auto &handlers = viewer_->getEventHandlers();
-        handlers.remove(slot.trackball);
         globe_->release_view(*slot.view);
-        slot.trackball = {};
+        slot.navigation.reset();
         slot.graph = {};
         slot.render_graph = {};
         slot.pick_candidates.clear();
@@ -6814,8 +6834,8 @@ class Workbench final : public QMainWindow {
             focus_satellite(0);
             const auto back =
                 -vsg::normalize(vsg::dvec3(displayed[0], displayed[1], displayed[2])) * 14e6;
-            slots_[1]->trackball->setViewpoint(
-                vsg::LookAt::create(back, vsg::dvec3{}, vsg::dvec3(0, 0, 1)), 0);
+            slots_[1]->navigation->set_viewpoint(
+                vsg::LookAt::create(back, vsg::dvec3{}, vsg::dvec3(0, 0, 1)));
             set_selection(std::nullopt);
             smoke_final_frames_ = 0;
             record("ground-station-negative-height-keeps-exact-computation");
@@ -7076,6 +7096,8 @@ class Workbench final : public QMainWindow {
                 break;
             const auto *table = report_dialog_->findChild<QTableView *>("reportTable");
             require(table->model()->rowCount() > 0, "Report generation did not produce a table");
+            require(table->isVisible() && table->width() > 250 && table->height() > 200,
+                    "Generated report is not visible in its workspace pane");
             save_workbench_image("report-results.png");
             QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, true);
             QTimer::singleShot(0, this, [this, require] {
@@ -7223,12 +7245,13 @@ class Workbench final : public QMainWindow {
             break;
         }
         case 132: {
-            auto *plot = report_dialog_->findChild<QWidget *>("reportPlot");
+            auto *plot =
+                static_cast<ReportPlot *>(report_dialog_->findChild<QWidget *>("reportPlot"));
             require(plot && plot->isVisible() && plot->width() > 200 && plot->height() > 150,
                     "Report graph is not usable inside the workbench");
-            auto *fields = report_dialog_->findChild<QComboBox *>("reportPlotField");
-            require(fields->count() == 6 &&
-                        fields->currentData(Qt::UserRole + 1).toString() == "elements.nu",
+            auto *fields = report_dialog_->findChild<QPushButton *>("reportPlotFields");
+            require(fields && fields->isEnabled() && plot->fields().size() == 1 &&
+                        plot->fields().front().id == "elements.nu",
                     "Classical graph fields or default angle are incorrect");
             save_workbench_image("report-classical-curves.png");
             record("report-classical-elements-and-curves");
@@ -7553,7 +7576,9 @@ class Workbench final : public QMainWindow {
                 editor_->findChild<QTabBar *>("propertyPageTabs")->isVisible();
             require(
                 width() <= 880 && compact_navigation &&
-                    commands_->toolButtonStyle() == Qt::ToolButtonIconOnly &&
+                    commands_->toolButtonStyle() == Qt::ToolButtonTextBesideIcon &&
+                    commands_->widgetForAction(eop_action_)->isVisible() &&
+                    commands_->rect().contains(commands_->actionGeometry(eop_action_)) &&
                     findChild<QWidget *>("timelineControls")->height() > 50 &&
                     action_in_workspace("applyOrbit"),
                 qPrintable(
@@ -7602,7 +7627,84 @@ class Workbench final : public QMainWindow {
             smoke_final_frames_ = 0;
             ++orbit_smoke_stage_;
             break;
-        case 154:
+        case 154: {
+            if (++smoke_final_frames_ < 4)
+                return;
+            auto &slot = *slots_[0];
+            auto *look = dynamic_cast<vsg::LookAt *>(slot.camera->viewMatrix.get());
+            const auto eye = look->eye;
+            const auto selected = selected_marker_index();
+            const auto center = QPointF(slot.window->width() / 2.0, slot.window->height() / 2.0);
+            const auto end = center + QPointF(60, 30);
+            QMouseEvent press(QEvent::MouseButtonPress, center, center, Qt::LeftButton,
+                              Qt::LeftButton, Qt::NoModifier);
+            QMouseEvent move(QEvent::MouseMove, end, end, Qt::NoButton, Qt::LeftButton,
+                             Qt::NoModifier);
+            QMouseEvent release(QEvent::MouseButtonRelease, end, end, Qt::LeftButton, Qt::NoButton,
+                                Qt::NoModifier);
+            QCoreApplication::sendEvent(slot.window, &press);
+            QCoreApplication::sendEvent(slot.window, &move);
+            QCoreApplication::sendEvent(slot.window, &release);
+            require(vsg::length(look->eye - eye) > 1000 && selected_marker_index() == selected,
+                    "3D rotation did not respond or changed object selection");
+            smoke_camera_ = {look->eye, look->center, look->up};
+            smoke_wait_frame_ = frame_count_ + 4;
+            record("3d-drag-rotates-without-selecting");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 155: {
+            if (frame_count_ < smoke_wait_frame_)
+                return;
+            auto &slot = *slots_[0];
+            auto *look = dynamic_cast<vsg::LookAt *>(slot.camera->viewMatrix.get());
+            require(look->eye == smoke_camera_[0] && look->center == smoke_camera_[1] &&
+                        look->up == smoke_camera_[2],
+                    "3D camera drifted after mouse release");
+            const auto center = QPointF(slot.window->width() / 2.0, slot.window->height() / 2.0);
+            const auto end = center + QPointF(35, 20);
+            QMouseEvent press(QEvent::MouseButtonPress, center, center, Qt::MiddleButton,
+                              Qt::MiddleButton, Qt::NoModifier);
+            QMouseEvent move(QEvent::MouseMove, end, end, Qt::NoButton, Qt::MiddleButton,
+                             Qt::NoModifier);
+            QCoreApplication::sendEvent(slot.window, &press);
+            QCoreApplication::sendEvent(slot.window, &move);
+            require(look->center != smoke_camera_[1], "3D middle drag did not pan");
+            QKeyEvent cancel(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+            QCoreApplication::sendEvent(slot.window, &cancel);
+            require(look->eye == smoke_camera_[0] && look->center == smoke_camera_[1],
+                    "3D Escape did not restore the camera");
+            const auto before = vsg::length(look->eye - look->center);
+            QWheelEvent wheel(center, center, QPoint{0, 3}, QPoint{0, 120}, Qt::NoButton,
+                              Qt::NoModifier, Qt::ScrollUpdate, false);
+            QCoreApplication::sendEvent(slot.window, &wheel);
+            const auto distance = vsg::length(look->eye - look->center);
+            require(std::abs(distance / before - 1 / std::pow(1.2, 3.0 / 60)) < 1e-9,
+                    "3D touchpad scrolling lost its continuous input magnitude");
+            smoke_navigation_distance_ = distance / 1.3;
+            zoom_view(0, 1 / 1.3);
+            smoke_wait_frame_ = frame_count_ + 12;
+            record("3d-release-stops-pan-cancels-and-touchpad-is-continuous");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 156: {
+            if (frame_count_ < smoke_wait_frame_)
+                return;
+            const auto *look = dynamic_cast<vsg::LookAt *>(slots_[0]->camera->viewMatrix.get());
+            require(std::abs(vsg::length(look->eye - look->center) / smoke_navigation_distance_ -
+                             1) < 1e-8,
+                    "3D toolbar zoom did not settle at its requested distance");
+            require(orbit_ == smoke_cache_, "Camera navigation recalculated the orbit");
+            QKeyEvent fit(QEvent::KeyPress, Qt::Key_Home, Qt::NoModifier);
+            QCoreApplication::sendEvent(slots_[0]->window, &fit);
+            require(vsg::length(look->center) < 1, "3D Home did not fit the orbital scene");
+            record("3d-smooth-zoom-home-and-orbit-cache-preserved");
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 157:
             if (++smoke_final_frames_ >= 4)
                 ++orbit_smoke_stage_;
             break;
@@ -7918,7 +8020,8 @@ class Workbench final : public QMainWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 155;
+    static constexpr int orbit_smoke_complete = 158;
+    double smoke_navigation_distance_ = 0;
     int smoke_final_frames_ = 0;
     std::vector<std::uint8_t> smoke_project_bytes_;
     application::DataLock smoke_data_lock_;
