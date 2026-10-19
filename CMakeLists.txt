@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(OrbitForge VERSION 0.2.1 LANGUAGES CXX)
+project(OrbitForge VERSION 0.3.0 LANGUAGES CXX)
 
 include(cmake/OrbitForgeOptions.cmake)
 include(cmake/OrbitForgeWarnings.cmake)

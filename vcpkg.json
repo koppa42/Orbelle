@@ -1,6 +1,6 @@
 {
   "name": "orbitforge",
-  "version-semver": "0.2.1",
+  "version-semver": "0.3.0",
   "builtin-baseline": "9b965a116838c6cdcd36bca60d1b81b030c8ab8d",
   "dependencies": [],
   "features": {
