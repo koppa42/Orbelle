@@ -2,7 +2,7 @@
 
 航天任务分析与仿真平台，提供桌面轨道工作台、C++ SDK 和独立 Python 包，共用一套计算与场景接口。
 
-当前版本为 **0.2.1 开发预览**，已提供轨道工作台、数据管理和基础报告，支持地面站可见性、卫星子传感器分析、HPOP 数值传播及脉冲机动序列，后续将扩展摄动力模型与覆盖分析。
+当前版本为 **0.3.0 开发预览**，已提供轨道工作台、数据管理和报告，支持地面站可见性、卫星子传感器、HPOP 数值传播及脉冲机动序列，以及光照与地影、轨道事件、星间分析和区域覆盖与重访分析。本版同时更新了桌面交互，并优化报告显示、项目处理与计算性能。
 
 [构建与测试](docs/development/build.md) · [工作台使用与设计](docs/architecture/scenario_workbench.md) · [开发者规范](docs/development/requirements.md) · [文档导航](docs/README.md) · [验证方法](docs/validation/README.md)
 
@@ -27,7 +27,7 @@
 
 图形桌面首次启动自动准备 UTC / 闰秒表、完整 C04 与 finals2000A、EGM2008，以及启用 CSPICE 时的 DE440s。准备窗口支持进度、失败重试、导入官方文件和取消退出；已完成的文件保留，后续启动只补齐缺失项。新建 HPOP 默认使用 EGM2008、21×21，文件重力计算支持至 2190 阶，EGM2008 可使用完整 2190×2159；阶数与次数按实际文件范围独立选择。
 
-尚未实现 OMM / 在线卫星目录、通用事件分析、覆盖分析、HDF5 结果存储或通用分析任务系统。HPOP 支持地球静态引力、[永久潮／完整固体潮](docs/architecture/solid_tides.md)、[FES2014bv1 海潮与海洋极潮](docs/architecture/ocean_tides.md)、可选太阳系第三体引力、[球形大气阻力](docs/architecture/atmospheric_drag.md)、[球形太阳辐射压／球面地月阴影](docs/architecture/solar_radiation_pressure.md)及[IERS 2003 三项相对论](docs/architecture/relativity.md)，数据中心可下载 EGM2008 / EGM96 / FES2014bv1 / DE440s / CelesTrak 空间天气或导入相应文件；文件显式长期变化、天气插值和预报、VOP、时间正则化及[基础协方差](docs/architecture/hpop_covariance.md)也已接入。当前按[首版范围](docs/architecture/hpop_alignment.md#首版交付范围)收尾；反照、热辐射、插件、更多阴影模型和高级协方差等延期。数值模型有独立成熟算法对照，尚无 STK 实机同配置验收。J2/J4 使用长期项平均根数，SGP4 使用固定 TLE（见[预报器说明](docs/architecture/propagators.md)）。时间与参考系尚无日内 EOP 潮汐改正。万星图形场景已有验证入口，尚未完成正式性能验收。
+尚未实现 OMM / 在线卫星目录、通用事件分析、HDF5 结果存储或通用分析任务系统。HPOP 支持地球静态引力、[永久潮／完整固体潮](docs/architecture/solid_tides.md)、[FES2014bv1 海潮与海洋极潮](docs/architecture/ocean_tides.md)、可选太阳系第三体引力、[球形大气阻力](docs/architecture/atmospheric_drag.md)、[球形太阳辐射压／球面地月阴影](docs/architecture/solar_radiation_pressure.md)及[IERS 2003 三项相对论](docs/architecture/relativity.md)，数据中心可下载 EGM2008 / EGM96 / FES2014bv1 / DE440s / CelesTrak 空间天气或导入相应文件；文件显式长期变化、天气插值和预报、VOP、时间正则化及[基础协方差](docs/architecture/hpop_covariance.md)也已接入。当前按[首版范围](docs/architecture/hpop_alignment.md#首版交付范围)收尾；反照、热辐射、插件、更多阴影模型和高级协方差等延期。数值模型有独立成熟算法对照，尚无 STK 实机同配置验收。J2/J4 使用长期项平均根数，SGP4 使用固定 TLE（见[预报器说明](docs/architecture/propagators.md)）。时间与参考系尚无日内 EOP 潮汐改正。万星图形场景已有验证入口，尚未完成正式性能验收。
 
 ## 获取与构建
 
