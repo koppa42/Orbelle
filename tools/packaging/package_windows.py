@@ -69,6 +69,7 @@ def verify_normal_launch(executable, cwd, environment, reports):
     user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
     user32.PostMessageW.restype = wintypes.BOOL
     windows = []
+    setup_windows = []
     with (reports / 'normal-launch-stdout.log').open('wb') as stdout, (reports / 'normal-launch-stderr.log').open('wb') as stderr:
         process = subprocess.Popen([str(executable)], cwd=cwd, env=environment, stdout=stdout, stderr=stderr)
 
@@ -82,6 +83,8 @@ def verify_normal_launch(executable, cwd, environment, reports):
                 # Identify the completed workbench, not the splash, for a graceful close.
                 if title.value.startswith('OrbitForge  |  '):
                     windows.append((window, title.value))
+                elif title.value == 'OrbitForge · 准备基础数据':
+                    setup_windows.append((window, title.value))
             return True
 
         try:
@@ -97,10 +100,16 @@ def verify_normal_launch(executable, cwd, environment, reports):
                 raise RuntimeError('Normal desktop exited before its window was closed')
             # Re-enumerate to avoid sending WM_CLOSE to a stale or reparented native handle.
             windows.clear()
+            setup_windows.clear()
             user32.EnumWindows(inspect, 0)
             if len(windows) != 1:
                 raise RuntimeError('Cannot uniquely identify the normal desktop window')
-            if not user32.PostMessageW(windows[0][0], 0x0010, 0, 0):  # This process only.
+            if len(setup_windows) > 1:
+                raise RuntimeError('Cannot uniquely identify initial data preparation')
+            # A fresh data directory opens a modal preparation dialog. Closing it
+            # follows Cancel and exit; the disabled workbench cannot close it.
+            close_window = setup_windows[0] if setup_windows else windows[0]
+            if not user32.PostMessageW(close_window[0], 0x0010, 0, 0):  # This process only.
                 raise ctypes.WinError(ctypes.get_last_error())
             if process.wait(timeout=30) != 0:
                 raise RuntimeError('Normal desktop launch/close failed')
@@ -108,7 +117,9 @@ def verify_normal_launch(executable, cwd, environment, reports):
             if process.poll() is None:
                 process.terminate()
                 process.wait(timeout=10)
-    return {'command': [str(executable)], 'window_title': windows[0][1], 'exit_code': process.returncode}
+    return {'command': [str(executable)], 'window_title': windows[0][1],
+            'closed_window_title': close_window[1], 'initial_data_setup': bool(setup_windows),
+            'exit_code': process.returncode}
 
 
 def main():
