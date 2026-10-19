@@ -43,3 +43,22 @@ CSPICE 使用 `de440s_2016_leap` 的冻结 LSK/SPK，target=10/301，observer=39
 - 原始报告必须具有全部 6 项、准确轮次/操作数、合法且不重叠的正耗时区间，所有检查成功；缺项、错误 profile、输入变动、非零程序退出或损坏报告不能生成有效吞吐量结论。smoke 的有效性不等于 baseline 的有效性。
 
 数值失败必须保留失败诊断，不能改小工作量、放宽容限或丢弃失败轮次后宣称同一基线有效。
+
+## 算法热点诊断
+
+`orbitforge_algorithm_benchmark` 是单独的显式 Release 目标，不加入普通构建或 CTest 耗时门槛，也不改变上述六项基线协议：
+
+```powershell
+cmake --build --preset compute-benchmark --target orbitforge_algorithm_benchmark
+$env:PATH = "$PWD/out/dependencies/installed/x64-windows/bin;$env:PATH"
+out/build/compute-benchmark/benchmarks/compute/Release/orbitforge_algorithm_benchmark.exe data/samples out/validation/algorithm-before
+```
+
+输出目录必须不存在。每项预热一次、测量五次，记录全部墙钟毫秒、中位数和输出摘要。计时包含结果分配及调用，但不含随后对输出的完整读取、摘要和重复一致性检查。工作量固定为：
+
+- 内置 EGM96 20×20：10,000 个固定位置的加速度，以及相同位置的解析引力梯度。
+- 约束区间搜索：一天、30 秒发现步长、1 毫秒边界容差，约束为 `sin(0.013 × TAI秒) − 0.2`，保留辅助极值搜索。
+- 多对象报告：32 个默认二体卫星、0–600 TAI 秒逐秒采样，共 19,232 行 ITRF 状态；使用固定 `iers_c04_2000_01_01_2000_01_02` 数据，包含会话创建、传播、完整参考系转换和表格构建。
+- HPOP：从 `{7e6,0,0}` m、`{0,5000,5600}` m/s 传播一小时，内置 EGM96 20×20、真实 ERFA/IERS、原有默认 RKF78 自适应参数；每轮创建新的传播器，不复用上一轮积分缓存。
+
+比较同机、同编译器和依赖的连续 A/B，至少重复三组；另存 Git 版本、源码、程序与数据散列、主机信息和原始日志。摘要相同只说明该固定负载输出一致，独立精度仍由完整 Release 数值回归及原参考容限验证。此工具不衡量界面、Python 调用、峰值内存或全部轨道模型，不能将局部热点加速等同于整段传播同比加速。

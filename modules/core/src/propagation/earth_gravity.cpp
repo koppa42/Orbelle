@@ -44,7 +44,15 @@ template <bool Second> Jet<Second> operator*(const Jet<Second> &a, const Jet<Sec
     return r;
 }
 template <bool Second> Jet<Second> operator*(double a, const Jet<Second> &b) {
-    return Jet<Second>{a} * b;
+    // A scalar has no spatial derivatives. Avoid constructing a constant jet
+    // and evaluating the general product rule for every harmonic recurrence.
+    Jet<Second> result{a * b.value};
+    for (std::size_t i = 0; i < 3; ++i)
+        result.gradient[i] = a * b.gradient[i];
+    if constexpr (Second)
+        for (std::size_t i = 0; i < 6; ++i)
+            result.hessian[i] = a * b.hessian[i];
+    return result;
 }
 using Coefficient = GravityCoefficient;
 // Fully normalized coefficients. Generated from the pinned ICGEM EGM96 source;

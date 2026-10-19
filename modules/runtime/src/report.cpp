@@ -1,6 +1,7 @@
 #include "coverage_report.hpp"
 #include "intersatellite_report.hpp"
 #include "report_execution.hpp"
+#include "report_frame_cache.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -625,6 +626,9 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                                       : report_satellites_only(d.query.kind) ? core::FrameId::gcrf
                                                                              : d.query.frame;
             const auto per_object = total / selected.size();
+            std::optional<detail::ReportFrameCache> frame_cache;
+            if (context.frames && selected.size() > 1)
+                frame_cache.emplace(*context.frames);
             for (const auto &object : selected) {
                 execution.check_cancelled();
                 const auto session = execution.session(object, target_frame);
@@ -633,6 +637,7 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                     tick();
                     std::vector<core::Epoch> epochs;
                     const auto count = std::min<std::size_t>(512, per_object - offset);
+                    epochs.reserve(count);
                     for (std::size_t i = 0; i < count; ++i) {
                         epochs.push_back(next);
                         if (ticks_between(next, last) <=
@@ -652,7 +657,11 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                         if (state.frame != target_frame) {
                             check(context.eop && context.frames,
                                   "Reference-frame conversion requires confirmed EOP data");
-                            state = core::transform_state(state, target_frame, *context.frames,
+                            const auto &frames =
+                                frame_cache
+                                    ? static_cast<const core::IFrameProvider &>(*frame_cache)
+                                    : *context.frames;
+                            state = core::transform_state(state, target_frame, frames,
                                                           context.eop->at(state.epoch));
                         }
                         const auto &p = state.position_m, &v = state.velocity_mps;
