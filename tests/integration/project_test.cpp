@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -136,6 +137,71 @@ TEST(Project, RejectsTruncationCorruptionFutureVersionAndTrailingBytes) {
     auto bad = bytes;
     bad.push_back(0);
     EXPECT_THROW((void)application::decode_project(bad), application::ProjectError);
+}
+TEST(Project, ChecksumsMatchBitwiseReferenceForEverySection) {
+    const auto reference = [](std::span<const std::uint8_t> bytes) {
+        std::uint32_t crc = 0xffffffff;
+        for (auto byte : bytes) {
+            crc ^= byte;
+            for (int bit = 0; bit < 8; ++bit)
+                crc = (crc >> 1) ^ ((crc & 1) ? 0xedb88320U : 0U);
+        }
+        return ~crc;
+    };
+    // Different UTF-8 lengths exercise empty, short and larger sections and tails.
+    for (const std::size_t length : {1U, 2U, 3U, 7U, 255U, 4096U, 16384U}) {
+        auto p = example();
+        p.name = std::string(length, 'x');
+        const auto bytes = application::encode_project(p);
+        const auto number = [&](std::size_t offset, unsigned width) {
+            std::uint64_t value = 0;
+            for (unsigned i = 0; i < width; ++i)
+                value |= std::uint64_t(bytes.at(offset + i)) << (8 * i);
+            return value;
+        };
+        const auto payload = std::span(bytes).subspan(24);
+        EXPECT_EQ(number(20, 4), reference(payload));
+        std::size_t offset = 24;
+        while (offset < bytes.size()) {
+            const auto size = static_cast<std::size_t>(number(offset + 8, 8));
+            ASSERT_LE(size, bytes.size() - offset - 20);
+            EXPECT_EQ(number(offset + 16, 4),
+                      reference(std::span(bytes).subspan(offset + 20, size)));
+            offset += 20 + size;
+        }
+        EXPECT_EQ(offset, bytes.size());
+        EXPECT_EQ(application::encode_project(application::decode_project(bytes)), bytes);
+    }
+}
+TEST(Project, RelationshipIndexRequiresCorrectObjectKindsAndPreservesDraftValidation) {
+    auto p = example();
+    p.ground_stations.push_back({"station", "Station", {0, 0, 0}});
+    p.sensors.push_back({"sensor", "Sensor", p.satellites[0].orbit.object_id, .3,
+                         application::SensorPointing::targeted, "station"});
+    EXPECT_NO_THROW(application::validate_project(p));
+    for (const auto &id : {std::string("station"), std::string("sensor"), std::string("missing")}) {
+        auto bad = p;
+        bad.sensors[0].parent_satellite_id = id;
+        EXPECT_THROW(application::validate_project(bad), application::ProjectError);
+        EXPECT_NO_THROW(application::validate_project(bad, false));
+    }
+    for (const auto &id :
+         {p.satellites[0].orbit.object_id, std::string("sensor"), std::string("missing")}) {
+        auto bad = p;
+        bad.sensors[0].target_station_id = id;
+        EXPECT_THROW(application::validate_project(bad), application::ProjectError);
+        EXPECT_NO_THROW(application::validate_project(bad, false));
+    }
+    for (const auto &id : {p.satellites[0].orbit.object_id, std::string("station")}) {
+        auto bad = p;
+        bad.sensors[0].object_id = id;
+        EXPECT_THROW(application::validate_project(bad, false), application::ProjectError);
+    }
+    // Indexes are query-local: reordering and replacing objects cannot leave stale views.
+    std::reverse(p.satellites.begin(), p.satellites.end());
+    EXPECT_NO_THROW(application::validate_project(p));
+    p.ground_stations.clear();
+    EXPECT_THROW(application::validate_project(p), application::ProjectError);
 }
 TEST(Project, SettingsPreserveInitialConditionsAndSynchronizeAllIntervalsAndCurrentTime) {
     const auto original = example();

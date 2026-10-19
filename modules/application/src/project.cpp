@@ -11,6 +11,7 @@
 #include <picosha2.h>
 #include <random>
 #include <set>
+#include <string_view>
 #include <system_error>
 #ifdef _WIN32
 #define NOMINMAX
@@ -105,12 +106,19 @@ bool hash_valid(const std::string &value) {
            });
 }
 std::uint32_t crc32(std::span<const std::uint8_t> bytes) {
+    static constexpr auto table = [] {
+        std::array<std::uint32_t, 256> values{};
+        for (std::uint32_t i = 0; i < values.size(); ++i) {
+            auto crc = i;
+            for (int bit = 0; bit < 8; ++bit)
+                crc = (crc >> 1) ^ (0xedb88320U & (0U - (crc & 1)));
+            values[i] = crc;
+        }
+        return values;
+    }();
     std::uint32_t crc = 0xffffffff;
-    for (const auto byte : bytes) {
-        crc ^= byte;
-        for (int bit = 0; bit < 8; ++bit)
-            crc = (crc >> 1) ^ (0xedb88320U & (0U - (crc & 1)));
-    }
+    for (const auto byte : bytes)
+        crc = (crc >> 8) ^ table[(crc ^ byte) & 0xff];
     return ~crc;
 }
 struct Writer {
@@ -561,12 +569,19 @@ void validate_project(const Project &project, bool relationships) {
     check(project.satellites.size() + project.ground_stations.size() + project.sensors.size() <=
               max_objects,
           "Project exceeds 10000 objects");
-    std::set<std::string> ids;
+    // Views remain valid for this read-only validation. Keep object kinds in the
+    // uniqueness index so every sensor relationship needs only a logarithmic lookup.
+    enum class Kind { satellite, station, sensor };
+    std::map<std::string_view, Kind> ids;
+    const auto has_kind = [&](const std::string &id, Kind kind) {
+        const auto found = ids.find(id);
+        return found != ids.end() && found->second == kind;
+    };
     for (const auto &satellite : project.satellites) {
         const auto &input = satellite.orbit;
         text_check(input.object_id, true);
         text_check(satellite.display_name, !satellite.display_name.empty());
-        check(ids.insert(input.object_id).second, "Duplicate project object ID");
+        check(ids.emplace(input.object_id, Kind::satellite).second, "Duplicate project object ID");
         check(input.first == project.first && input.last == project.last,
               "Satellite interval must match the project");
         check(input.propagator == OrbitPropagator::two_body ||
@@ -644,7 +659,7 @@ void validate_project(const Project &project, bool relationships) {
     for (const auto &station : project.ground_stations) {
         text_check(station.object_id, true);
         text_check(station.display_name, !station.display_name.empty());
-        check(ids.insert(station.object_id).second, "Duplicate project object ID");
+        check(ids.emplace(station.object_id, Kind::station).second, "Duplicate project object ID");
         check(std::isfinite(station.minimum_elevation_rad) && station.minimum_elevation_rad >= 0 &&
                   station.minimum_elevation_rad <= std::numbers::pi / 2,
               "Station minimum elevation must be in [0, 90] degrees");
@@ -659,12 +674,8 @@ void validate_project(const Project &project, bool relationships) {
         text_check(sensor.display_name, !sensor.display_name.empty());
         text_check(sensor.parent_satellite_id, true);
         text_check(sensor.target_station_id);
-        check(ids.insert(sensor.object_id).second, "Duplicate project object ID");
-        check(!relationships || std::ranges::any_of(project.satellites,
-                                                    [&](const auto &satellite) {
-                                                        return satellite.orbit.object_id ==
-                                                               sensor.parent_satellite_id;
-                                                    }),
+        check(ids.emplace(sensor.object_id, Kind::sensor).second, "Duplicate project object ID");
+        check(!relationships || has_kind(sensor.parent_satellite_id, Kind::satellite),
               "Sensor parent satellite does not exist");
         check(std::isfinite(sensor.half_angle_rad) && sensor.half_angle_rad > 0 &&
                   sensor.half_angle_rad <= std::numbers::pi / 2,
@@ -673,10 +684,7 @@ void validate_project(const Project &project, bool relationships) {
                   sensor.pointing == SensorPointing::targeted,
               "Unsupported sensor pointing");
         check(!relationships || sensor.pointing != SensorPointing::targeted ||
-                  std::ranges::any_of(project.ground_stations,
-                                      [&](const auto &station) {
-                                          return station.object_id == sensor.target_station_id;
-                                      }),
+                  has_kind(sensor.target_station_id, Kind::station),
               "Sensor target ground station does not exist; reassign the sensor first");
     }
     check(project.reports.size() <= 128, "Project exceeds 128 report definitions");

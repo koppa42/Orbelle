@@ -17,6 +17,8 @@ Qt desktop -> Runtime + Visualization + Qt Widgets
 
 Results 提供拥有自身存储的只读 `StateSeries` 和带类型列、单位及来源信息的 `Table`。Session 是只读、同步采样接口；Scenario 通过新值发布修订，Project 保存可编辑、可序列化输入。桌面后台任务负责计算与取消，目前没有通用 Job 系统、撤销栈或 HDF5 存储后端。报告边界见[报告与曲线](reports.md)。
 
+`Scenario::with_objects(vector<Session>)`（Python `scenario.with_objects(sessions)`）按传入顺序执行与 `with_object` 相同的插入或替换校验；每个成功更新增加一次场景修订，新对象追加、替换保留位置，空批次不增加修订。批次可以包含同一 ID 的连续合法修订。实现只复制一次原对象列表，并使用拥有字符串的局部索引；任何更新失败时不发布部分结果，原场景及已有读者保持不变。Runtime 项目装配与桌面后台场景准备使用此入口。
+
 Visualization 将采样结果转换为独立显示快照，并校验历元、原点和参考系后的显式旋转。窗口、GPU 资源、帧调度及按需显示缓存属于桌面和 RenderVsg / GeoRocky 适配层；边界与生命周期见[图形集成约定](graphics.md)。显示插值不回写分析结果。
 
 ## 时间

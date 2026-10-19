@@ -18,6 +18,9 @@ class Scenario {
     // Insert a new ID at revision 1, or replace its immediately preceding revision.
     // This rejects duplicate insertions and stale asynchronous candidates.
     [[nodiscard]] Scenario with_object(Session session) const;
+    // Equivalent to ordered with_object calls, including revisions and replacement order,
+    // but copies the existing object list once. Failure leaves this scenario unchanged.
+    [[nodiscard]] Scenario with_objects(std::vector<Session> sessions) const;
     [[nodiscard]] Scenario without_object(const std::string &object_id) const;
     // Analysis bounds and display name do not change numerical initial conditions.
     // Callers must validate external data coverage before publishing the new scene.

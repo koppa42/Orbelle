@@ -110,6 +110,8 @@ application::Scenario make_project_scenario(const application::Project &project,
                                             *project.earth_orientation))
         throw application::ProjectError("HPOP EOP data differs from the project's confirmed data");
     result = result.with_data_lock(project.data_lock());
+    std::vector<application::Session> sessions;
+    sessions.reserve(project.satellites.size() + project.ground_stations.size());
     for (const auto &satellite : project.satellites) {
         const auto &input = satellite.orbit;
         if (input.uses_hpop() && input.hpop_resource_options().uses_ephemeris()) {
@@ -137,10 +139,10 @@ application::Scenario make_project_scenario(const application::Project &project,
             validate_ocean_tide_reference(project.force_data, input.hpop.ocean_tides.model,
                                           environment.ocean_tides->info());
         }
-        result = result.with_object(make_orbit_session(satellite.orbit, 1, time, environment));
+        sessions.push_back(make_orbit_session(satellite.orbit, 1, time, environment));
     }
     for (const auto &station : project.ground_stations)
-        result = result.with_object(make_ground_station_session(station));
-    return result;
+        sessions.push_back(make_ground_station_session(station));
+    return result.with_objects(std::move(sessions));
 }
 } // namespace orbitforge::runtime

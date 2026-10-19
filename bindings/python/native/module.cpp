@@ -76,6 +76,8 @@ PYBIND11_MODULE(_native, module) {
             [](const application::Scenario &scenario) { return scenario.objects().size(); })
         .def("with_object", &application::Scenario::with_object, py::arg("session"),
              py::call_guard<py::gil_scoped_release>())
+        .def("with_objects", &application::Scenario::with_objects, py::arg("sessions"),
+             py::call_guard<py::gil_scoped_release>())
         .def("without_object", &application::Scenario::without_object, py::arg("object_id"),
              py::call_guard<py::gil_scoped_release>())
         .def(

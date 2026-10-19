@@ -39,6 +39,41 @@ TEST(Scenario, IndependentObjectsAndRevisionsPreserveReaders) {
     EXPECT_EQ(states[1].provenance().object_id, "B");
     EXPECT_EQ(states[0].states().size(), 2U);
 }
+TEST(Scenario, BatchMatchesSequentialUpdatesIncludingRepeatedIdsAndPreservesReadersOnFailure) {
+    const auto original =
+        application::Scenario("Mission", core::Epoch{0}, core::Epoch{100})
+            .with_object(object("A"))
+            .with_data_lock(application::DataLock{
+                {{"utc-time", "test", std::string(64, 'a'), "test-v1", std::string(64, 'b')}}});
+    const std::vector updates{object("B"), object("A", 2), object("B", 2), object("C"),
+                              object("A", 3)};
+    auto sequential = original;
+    for (auto session : updates)
+        sequential = sequential.with_object(std::move(session));
+    const auto batch = original.with_objects(updates);
+    EXPECT_EQ(batch.revision(), sequential.revision());
+    EXPECT_EQ(batch.data_lock(), sequential.data_lock());
+    EXPECT_EQ(batch.name(), original.name());
+    EXPECT_EQ(batch.first(), original.first());
+    EXPECT_EQ(batch.last(), original.last());
+    ASSERT_EQ(batch.objects().size(), sequential.objects().size());
+    const auto actual = batch.sample(std::array{core::Epoch{0}, core::Epoch{100}});
+    const auto expected = sequential.sample(std::array{core::Epoch{0}, core::Epoch{100}});
+    for (std::size_t i = 0; i < actual.size(); ++i) {
+        EXPECT_EQ(actual[i].provenance().object_id, expected[i].provenance().object_id);
+        EXPECT_EQ(actual[i].provenance().input_revision, expected[i].provenance().input_revision);
+        for (std::size_t j = 0; j < actual[i].states().size(); ++j) {
+            EXPECT_EQ(actual[i].states()[j].position_m, expected[i].states()[j].position_m);
+            EXPECT_EQ(actual[i].states()[j].velocity_mps, expected[i].states()[j].velocity_mps);
+        }
+    }
+    EXPECT_THROW((void)original.with_objects({object("B"), object("B")}), std::invalid_argument);
+    EXPECT_THROW((void)original.with_objects({object("B"), object("A", 3)}), std::invalid_argument);
+    EXPECT_THROW((void)original.with_objects({object("B", 2)}), std::invalid_argument);
+    ASSERT_EQ(original.objects().size(), 1U);
+    EXPECT_EQ(original.objects()[0].provenance().input_revision, 1U);
+    EXPECT_EQ(original.with_objects({}).revision(), original.revision());
+}
 TEST(Scenario, RemovalPreservesSurvivingRevisionsAndExistingReaders) {
     const auto original = application::Scenario("Mission", core::Epoch{0}, core::Epoch{100})
                               .with_object(object("A"))
