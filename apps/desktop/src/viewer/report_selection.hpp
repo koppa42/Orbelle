@@ -1,4 +1,5 @@
 #pragma once
+#include "report_curve_field.hpp"
 #include "workbench_style.hpp"
 #include <QDialog>
 #include <QList>
@@ -12,6 +13,7 @@ class QPushButton;
 class QScrollArea;
 class QSplitter;
 class QTabBar;
+class QTreeWidget;
 
 namespace orbitforge::desktop {
 struct ReportChoice {
@@ -46,6 +48,22 @@ class ReportSelectionDialog final : public QDialog {
     QList<int> wide_sizes_, narrow_sizes_;
     QLabel *title_, *category_, *description_, *scope_, *warning_, *count_, *empty_;
     QLabel *symbol_, *output_, *note_, *output_heading_, *scope_heading_;
+    QPushButton *confirm_;
+};
+
+class ReportCurveSelectionDialog final : public QDialog {
+  public:
+    ReportCurveSelectionDialog(const std::vector<ReportCurveField> &fields,
+                               const QStringList &selected, QWidget *parent = nullptr);
+    [[nodiscard]] QStringList selection() const;
+    void accept() override;
+
+  private:
+    void update_selection();
+    void filter();
+    QTreeWidget *list_;
+    QLineEdit *search_;
+    QLabel *count_;
     QPushButton *confirm_;
 };
 } // namespace orbitforge::desktop

@@ -2,6 +2,7 @@
 #include "workbench_theme.hpp"
 #include <QDialogButtonBox>
 #include <QFrame>
+#include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -16,6 +17,7 @@
 #include <QTabBar>
 #include <QTextLayout>
 #include <QTimer>
+#include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QtMath>
 #include <algorithm>
@@ -76,13 +78,13 @@ class ReportChoiceDelegate final : public QStyledItemDelegate {
   public:
     using QStyledItemDelegate::QStyledItemDelegate;
     QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &) const override {
-        return {120, option.fontMetrics.height() * 2 + 24};
+        return {120, option.fontMetrics.height() * 2 + 16};
     }
     void paint(QPainter *painter, const QStyleOptionViewItem &option,
                const QModelIndex &index) const override {
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing);
-        const QRect row = option.rect.adjusted(2, 2, -2, -2);
+        const QRect row = option.rect.adjusted(0, 0, 0, -1);
         const bool selected = option.state & QStyle::State_Selected;
         const bool unavailable = index.data(unavailable_role).toBool();
         paint_list_row(painter, option, QRectF(row), theme::color(theme::accent));
@@ -97,7 +99,7 @@ class ReportChoiceDelegate final : public QStyledItemDelegate {
         const int x = row.left() + 45, available = std::max(0, row.width() - 64);
         const QFontMetrics name_metrics(name_font);
         painter->drawText(
-            QRect(x, row.top() + 9, available, name_metrics.height()), Qt::AlignVCenter,
+            QRect(x, row.top() + 5, available, name_metrics.height()), Qt::AlignVCenter,
             name_metrics.elidedText(index.data().toString(), Qt::ElideRight, available));
         QFont subtitle_font = option.font;
         subtitle_font.setPixelSize(std::max(11, option.font.pixelSize() - 1));
@@ -105,7 +107,7 @@ class ReportChoiceDelegate final : public QStyledItemDelegate {
         painter->setPen(theme::color(theme::text_muted));
         const QFontMetrics subtitle_metrics(subtitle_font);
         painter->drawText(
-            QRect(x, row.top() + 12 + name_metrics.height(), available, subtitle_metrics.height()),
+            QRect(x, row.top() + 7 + name_metrics.height(), available, subtitle_metrics.height()),
             Qt::AlignVCenter,
             subtitle_metrics.elidedText(index.data(subtitle_role).toString(), Qt::ElideRight,
                                         available));
@@ -113,6 +115,114 @@ class ReportChoiceDelegate final : public QStyledItemDelegate {
     }
 };
 } // namespace
+ReportCurveSelectionDialog::ReportCurveSelectionDialog(const std::vector<ReportCurveField> &fields,
+                                                       const QStringList &selected, QWidget *parent)
+    : QDialog(parent) {
+    setObjectName("reportCurveSelectionDialog");
+    setWindowTitle(QStringLiteral("选择曲线"));
+    setWindowIcon(workbench_icon(WorkbenchIcon::properties));
+    resize(560, 480);
+    setMinimumSize(360, 380);
+    auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(10);
+    auto *hint = new QLabel(
+        QStringLiteral("勾选要比较的字段。同单位叠加，不同单位分区，共用时间轴。"), this);
+    hint->setObjectName("hint");
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+    search_ = new QLineEdit(this);
+    search_->setObjectName("reportCurveSearch");
+    search_->setPlaceholderText(QStringLiteral("搜索字段或单位…"));
+    search_->setAccessibleName(QStringLiteral("搜索曲线字段"));
+    search_->setClearButtonEnabled(true);
+    layout->addWidget(search_);
+    list_ = new QTreeWidget(this);
+    list_->setObjectName("reportCurveList");
+    list_->setAccessibleName(QStringLiteral("曲线字段，多选"));
+    list_->setColumnCount(2);
+    list_->setHeaderLabels({QStringLiteral("曲线字段"), QStringLiteral("单位")});
+    list_->setRootIsDecorated(false);
+    list_->setAlternatingRowColors(true);
+    list_->setUniformRowHeights(true);
+    list_->header()->setStretchLastSection(false);
+    list_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    list_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    for (const auto &field : fields) {
+        auto label = field.label;
+        const auto suffix = " (" + field.unit + ")";
+        if (!field.unit.isEmpty() && label.endsWith(suffix))
+            label.chop(suffix.size());
+        auto *item = new QTreeWidgetItem(list_, {label, field.unit});
+        item->setData(0, Qt::UserRole, field.id);
+        item->setToolTip(0, field.label + "\n" + field.id);
+        item->setCheckState(0, selected.contains(field.id) ? Qt::Checked : Qt::Unchecked);
+    }
+    layout->addWidget(list_, 1);
+    auto *footer = new QHBoxLayout;
+    count_ = new QLabel(this);
+    count_->setObjectName("reportCurveCount");
+    count_->setWordWrap(true);
+    footer->addWidget(count_, 1);
+    auto *clear = new QPushButton(QStringLiteral("清空选择"), this);
+    clear->setObjectName("reportCurveClear");
+    footer->addWidget(clear);
+    layout->addLayout(footer);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    confirm_ = buttons->button(QDialogButtonBox::Ok);
+    confirm_->setText(QStringLiteral("应用"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, this, &ReportCurveSelectionDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(search_, &QLineEdit::textChanged, this, &ReportCurveSelectionDialog::filter);
+    connect(list_, &QTreeWidget::itemChanged, this, &ReportCurveSelectionDialog::update_selection);
+    connect(clear, &QPushButton::clicked, this, [this] {
+        const QSignalBlocker guard(list_);
+        for (int i = 0; i < list_->topLevelItemCount(); ++i)
+            list_->topLevelItem(i)->setCheckState(0, Qt::Unchecked);
+        update_selection();
+    });
+    update_selection();
+}
+QStringList ReportCurveSelectionDialog::selection() const {
+    QStringList selected;
+    for (int i = 0; i < list_->topLevelItemCount(); ++i)
+        if (const auto *item = list_->topLevelItem(i); item->checkState(0) == Qt::Checked)
+            selected << item->data(0, Qt::UserRole).toString();
+    return selected;
+}
+void ReportCurveSelectionDialog::update_selection() {
+    const auto count = selection().size();
+    QStringList units;
+    for (int i = 0; i < list_->topLevelItemCount(); ++i)
+        if (const auto *item = list_->topLevelItem(i);
+            item->checkState(0) == Qt::Checked && !units.contains(item->text(1)))
+            units << item->text(1);
+    count_->setText(
+        count > 6
+            ? QStringLiteral("已选 %1 项，请保留最多 6 项以便比较").arg(count)
+            : QStringLiteral("已选 %1 项 · %2 个绘图区（最多 6 项）").arg(count).arg(units.size()));
+    confirm_->setEnabled(count > 0 && count <= 6);
+}
+void ReportCurveSelectionDialog::filter() {
+    const auto query = search_->text().trimmed();
+    int visible = 0;
+    for (int i = 0; i < list_->topLevelItemCount(); ++i) {
+        auto *item = list_->topLevelItem(i);
+        const auto value =
+            item->text(0) + " " + item->text(1) + " " + item->data(0, Qt::UserRole).toString();
+        item->setHidden(!value.contains(query, Qt::CaseInsensitive));
+        visible += !item->isHidden();
+    }
+    update_selection();
+    if (!visible)
+        count_->setText(QStringLiteral("没有匹配字段；已选 %1 项保留").arg(selection().size()));
+}
+void ReportCurveSelectionDialog::accept() {
+    if (confirm_->isEnabled())
+        QDialog::accept();
+}
 ReportSelectionDialog::ReportSelectionDialog(std::vector<ReportChoice> choices, QString selected,
                                              QWidget *parent)
     : QDialog(parent) {
@@ -122,26 +232,17 @@ ReportSelectionDialog::ReportSelectionDialog(std::vector<ReportChoice> choices, 
     resize(840, 580);
     setMinimumSize(360, 440);
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(theme::space::page);
-    layout->setSpacing(16);
-    auto *heading_layout = new QVBoxLayout;
-    heading_layout->setSpacing(6);
-    auto *heading = new QLabel(QStringLiteral("选择报告"), this);
-    heading->setObjectName("reportSelectionHeading");
-    heading_layout->addWidget(heading);
-    auto *subtitle = new QLabel(QStringLiteral("查找报告，预览内容与适用范围"), this);
-    subtitle->setObjectName("reportSelectionSubtitle");
-    heading_layout->addWidget(subtitle);
-    layout->addLayout(heading_layout);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(10);
     split_ = new QSplitter(this);
     split_->setObjectName("reportSelectionSplit");
-    split_->setHandleWidth(20);
+    split_->setHandleWidth(8);
     split_->setChildrenCollapsible(false);
     auto *navigation = new QWidget(split_);
     navigation->setMinimumWidth(0);
     auto *navigation_layout = new QVBoxLayout(navigation);
     navigation_layout->setContentsMargins(0, 0, 0, 0);
-    navigation_layout->setSpacing(10);
+    navigation_layout->setSpacing(6);
     search_ = new QLineEdit(this);
     search_->setObjectName("reportSelectionSearch");
     search_->setPlaceholderText(QStringLiteral("搜索名称、内容或对象"));
@@ -188,8 +289,8 @@ ReportSelectionDialog::ReportSelectionDialog(std::vector<ReportChoice> choices, 
     details->setObjectName("reportSelectionDetails");
     scroll->setWidget(details);
     auto *preview_layout = new QVBoxLayout(details);
-    preview_layout->setContentsMargins(20, 20, 20, 20);
-    preview_layout->setSpacing(12);
+    preview_layout->setContentsMargins(12, 12, 12, 12);
+    preview_layout->setSpacing(8);
     const auto label = [&](const char *name) {
         auto *value = new QLabel(details);
         value->setObjectName(name);
@@ -203,7 +304,7 @@ ReportSelectionDialog::ReportSelectionDialog(std::vector<ReportChoice> choices, 
     auto *identity = new QHBoxLayout;
     symbol_ = new QLabel(details);
     symbol_->setObjectName("reportSelectionSymbol");
-    symbol_->setFixedSize(36, 36);
+    symbol_->setFixedSize(28, 28);
     symbol_->setAlignment(Qt::AlignCenter);
     identity->addWidget(symbol_);
     identity->setSpacing(12);
@@ -359,8 +460,7 @@ void ReportSelectionDialog::resizeEvent(QResizeEvent *event) {
     if (!split_)
         return;
     const auto orientation = event->size().width() < 640 ? Qt::Vertical : Qt::Horizontal;
-    const int margin = orientation == Qt::Vertical ? 16 : 24;
-    layout()->setContentsMargins(margin, 20, margin, 16);
+    layout()->setContentsMargins(12, 12, 12, 12);
     if (split_->orientation() != orientation) {
         (split_->orientation() == Qt::Horizontal ? wide_sizes_ : narrow_sizes_) = split_->sizes();
         split_->setOrientation(orientation);

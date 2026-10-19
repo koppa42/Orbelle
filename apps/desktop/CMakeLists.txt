@@ -30,6 +30,8 @@ if(ORBITFORGE_WITH_VSG)
     find_package(rocky 1.1.0 EXACT CONFIG REQUIRED)
     find_package(vsgXchange 1.1.13 EXACT CONFIG REQUIRED)
     target_sources(orbitforge_desktop PRIVATE src/viewer/graphics_workbench.cpp
+        src/viewer/workbench_window.cpp
+        src/viewer/view_navigation.cpp
         src/viewer/report_dialog.cpp src/viewer/coverage_map.cpp src/viewer/report_plot.cpp src/viewer/report_selection.cpp
         src/viewer/project_scene.cpp src/viewer/eop_catalog.cpp src/viewer/data_center_dialog.cpp
         src/viewer/orbit_scene.cpp src/viewer/orbit_editor.cpp src/viewer/hpop_settings.cpp src/viewer/hpop_covariance_editor.cpp src/viewer/mission_editor.cpp src/viewer/track_style_editor.cpp src/viewer/workbench_style.cpp
@@ -67,6 +69,7 @@ if(ORBITFORGE_WITH_VSG)
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbitforge_welcome_tests tests/welcome_page_test.cpp
+            tests/workbench_window_test.cpp src/viewer/workbench_window.cpp
             src/viewer/welcome_page.cpp src/viewer/workbench_style.cpp)
         qt_add_resources(orbitforge_welcome_tests "welcome_resources" PREFIX "/orbitforge"
             BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/artwork/orbital-welcome.png)
@@ -160,6 +163,17 @@ if(ORBITFORGE_WITH_VSG)
         orbitforge_warnings(orbitforge_ground_map_tests)
         orbitforge_copy_runtime_dlls(orbitforge_ground_map_tests)
         gtest_discover_tests(orbitforge_ground_map_tests DISCOVERY_MODE PRE_TEST
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbitforge_desktop_tests TIMEOUT 10
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+            ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
+        add_executable(orbitforge_view_navigation_tests tests/view_navigation_test.cpp
+            src/viewer/view_navigation.cpp)
+        target_link_libraries(orbitforge_view_navigation_tests PRIVATE
+            Qt6::Widgets vsg::vsg GTest::gtest_main)
+        target_compile_features(orbitforge_view_navigation_tests PRIVATE cxx_std_20)
+        orbitforge_warnings(orbitforge_view_navigation_tests)
+        orbitforge_copy_runtime_dlls(orbitforge_view_navigation_tests)
+        gtest_discover_tests(orbitforge_view_navigation_tests DISCOVERY_MODE PRE_TEST
             TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbitforge_desktop_tests TIMEOUT 10
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")

@@ -7,6 +7,7 @@
 #include <QPainterPath>
 #include <QTimer>
 #include <QTransform>
+#include <QVariantAnimation>
 #include <QWidget>
 #include <atomic>
 #include <functional>
@@ -61,6 +62,7 @@ class GroundMap final : public QWidget {
     [[nodiscard]] const std::array<double, 3> &sun_direction() const { return sun_direction_; }
     void reset_view();
     void zoom(double factor, QPointF anchor);
+    void zoom_centered(double factor);
     [[nodiscard]] core::Epoch epoch() const { return epoch_; }
     [[nodiscard]] std::size_t track_count() const { return tracks_.size(); }
     [[nodiscard]] QPointF marker_position(std::size_t index) const;
@@ -78,6 +80,7 @@ class GroundMap final : public QWidget {
     void mouseDoubleClickEvent(QMouseEvent *) override;
     void wheelEvent(QWheelEvent *) override;
     void keyPressEvent(QKeyEvent *) override;
+    bool event(QEvent *) override;
 
   private:
     struct Point {
@@ -90,6 +93,11 @@ class GroundMap final : public QWidget {
     QRectF map_rect() const;
     QTransform map_transform() const;
     void clamp_pan();
+    void apply_zoom(double value, QPointF anchor, std::optional<QPointF> location = std::nullopt);
+    void request_zoom(double factor, QPointF anchor);
+    void pan_by(QPointF delta);
+    void drag_to(QPointF position);
+    void finish_drag(bool restore = false);
     void rebuild_night();
     void paint_background(QPainter &p, const QRectF &bounds);
     void paint_grid(QPainter &p);
@@ -156,7 +164,12 @@ class GroundMap final : public QWidget {
     bool access_visible_ = false;
     core::Epoch epoch_{0};
     double zoom_ = 1;
-    QPointF pan_, press_, last_mouse_;
+    // Fractions of projected map width preserve the geographic center on resize.
+    QPointF pan_, press_pan_, press_, last_mouse_;
+    QVariantAnimation zoom_animation_;
+    QPointF zoom_anchor_, zoom_location_;
+    QSize navigation_size_;
+    Qt::MouseButton drag_button_ = Qt::NoButton;
     bool dragging_ = false, moved_ = false;
 };
 } // namespace orbitforge::desktop

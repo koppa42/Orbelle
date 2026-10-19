@@ -4,13 +4,13 @@
 #include <QString>
 #include <string_view>
 
-// Workbench colour tokens: indigo blue-grey surfaces, a periwinkle "star blue" interaction
-// accent taken from the startup artwork, and a restrained sakura highlight. Stylesheets
+// Workbench colour tokens: neutral midnight surfaces and a restrained sakura interaction
+// accent taken from the startup artwork. Semantic status colours remain distinct. Stylesheets
 // reference tokens as `@name` or `@name/NN` (NN = opacity in percent); painted widgets use
 // the same constants so chrome, charts and overlays stay consistent.
 //
 // Legibility: text, textSoft and textMuted keep at least 4.5:1 contrast on every surface;
-// textFaint is reserved for disabled content. White text on accentDeep is about 4.9:1.
+// textFaint is reserved for disabled content. Filled actions use dark ink on pale sakura.
 namespace orbitforge::desktop::theme {
 struct Token {
     std::string_view name;
@@ -18,30 +18,30 @@ struct Token {
 };
 
 // Surfaces, darkest to lightest: the canvas shows between floating panels.
-inline constexpr Token canvas{"canvas", "#0b0f1a"};
-inline constexpr Token chrome{"chrome", "#121829"};
-inline constexpr Token panel{"panel", "#141b2d"};
-inline constexpr Token surface{"surface", "#171f33"};
-inline constexpr Token raised{"raised", "#1e2740"};
-inline constexpr Token overlay{"overlay", "#26304c"};
-inline constexpr Token field{"field", "#0f1424"};
-inline constexpr Token field_muted{"fieldMuted", "#171e31"};
+inline constexpr Token canvas{"canvas", "#10111b"};
+inline constexpr Token chrome{"chrome", "#171925"};
+inline constexpr Token panel{"panel", "#1a1c2a"};
+inline constexpr Token surface{"surface", "#1d2030"};
+inline constexpr Token raised{"raised", "#272a3d"};
+inline constexpr Token overlay{"overlay", "#303449"};
+inline constexpr Token field{"field", "#141622"};
+inline constexpr Token field_muted{"fieldMuted", "#202333"};
 // Lines and borders.
-inline constexpr Token line{"line", "#232c45"};
-inline constexpr Token border{"border", "#2f3a58"};
-inline constexpr Token border_strong{"borderStrong", "#46537a"};
+inline constexpr Token line{"line", "#303246"};
+inline constexpr Token border{"border", "#42455d"};
+inline constexpr Token border_strong{"borderStrong", "#70738d"};
 // Text.
-inline constexpr Token text{"text", "#e9edf9"};
-inline constexpr Token text_soft{"textSoft", "#c4cbe2"};
-inline constexpr Token text_muted{"textMuted", "#909bbd"};
+inline constexpr Token text{"text", "#eeedf5"};
+inline constexpr Token text_soft{"textSoft", "#c9cada"};
+inline constexpr Token text_muted{"textMuted", "#a9abc2"};
 inline constexpr Token text_faint{"textFaint", "#636e90"};
-// Star-blue interaction accent.
-inline constexpr Token accent{"accent", "#93acff"};
-inline constexpr Token accent_bright{"accentBright", "#c6d3ff"};
-inline constexpr Token accent_deep{"accentDeep", "#5269cc"};
-inline constexpr Token accent_wash{"accentWash", "#28325c"};
-inline constexpr Token accent_hover{"accentHover", "#1f2742"};
-inline constexpr Token on_accent{"onAccent", "#ffffff"};
+// Sakura interaction accent; selected regions remain low contrast in area, high in text.
+inline constexpr Token accent{"accent", "#efb2ce"};
+inline constexpr Token accent_bright{"accentBright", "#ffdaea"};
+inline constexpr Token accent_deep{"accentDeep", "#efb2ce"};
+inline constexpr Token accent_wash{"accentWash", "#423044"};
+inline constexpr Token accent_hover{"accentHover", "#302638"};
+inline constexpr Token on_accent{"onAccent", "#30202d"};
 // Sakura highlight for brand moments, the object's own interval and impulses.
 inline constexpr Token sakura{"sakura", "#f4b8d4"};
 inline constexpr Token sakura_deep{"sakuraDeep", "#de8cb5"};

@@ -103,7 +103,7 @@ Workspace::Workspace(QWidget *parent) : QWidget(parent) {
     parking_->hide();
     root_ = new QSplitter(Qt::Horizontal);
     root_->setChildrenCollapsible(false);
-    root_->setHandleWidth(6);
+    root_->setHandleWidth(3);
     layout->addWidget(root_);
     root_->addWidget(make_pane());
     drop_hint_ = new QRubberBand(QRubberBand::Rectangle);
@@ -148,9 +148,9 @@ Workspace::Pane *Workspace::make_pane(QDialog *window) {
     layout->setSpacing(0);
     auto *heading = new QWidget;
     heading->setObjectName("workspaceHeading");
-    heading->setFixedHeight(34);
+    heading->setFixedHeight(30);
     auto *bar = new QHBoxLayout(heading);
-    bar->setContentsMargins(6, 0, 6, 0);
+    bar->setContentsMargins(2, 0, 4, 0);
     bar->setSpacing(2);
     pane->tabs = new PageTabs;
     pane->tabs->setObjectName("workspaceTabs");
@@ -330,7 +330,9 @@ void Workspace::open(QDialog *content, bool wrap_in_scroll_area) {
         page->content = content;
         page->title = content->windowTitle();
         page->icon = workbench_icon(WorkbenchIcon::properties);
-        content->setWindowFlags(Qt::Widget);
+        // Set the parent and child-window flags together. On Windows an already shown
+        // dialog can otherwise retain its top-level native geometry when added to a stack.
+        content->setParent(parking_, Qt::Widget);
         content->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
         if (wrap_in_scroll_area) {
             auto *scroll = new QScrollArea;
@@ -421,7 +423,7 @@ void Workspace::move(Page &page, Pane *target, Qt::Edge edge, int insertion) {
         } else {
             auto *branch = new QSplitter(orientation);
             branch->setChildrenCollapsible(false);
-            branch->setHandleWidth(6);
+            branch->setHandleWidth(3);
             splitter->replaceWidget(splitter->indexOf(target), branch);
             branch->addWidget(before ? next : target);
             branch->addWidget(before ? target : next);

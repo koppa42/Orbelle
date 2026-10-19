@@ -1,11 +1,17 @@
 #include "../src/viewer/ground_map.hpp"
 #include <QApplication>
+#include <QDir>
 #include <QElapsedTimer>
+#include <QFocusEvent>
+#include <QKeyEvent>
+#include <QLineF>
 #include <QMouseEvent>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QWheelEvent>
 #include <cmath>
 #include <gtest/gtest.h>
+#include <limits>
 
 namespace orbitforge::desktop {
 class GroundMapTest : public ::testing::Test {
@@ -90,6 +96,14 @@ class GroundMapTest : public ::testing::Test {
         // Also bound the mean so a widespread tint or stale layer cannot pass.
         EXPECT_LE(maximum, 3);
         EXPECT_LE(total / (a.width() * a.height()), 0.01);
+        const auto output = qEnvironmentVariable("ORBITFORGE_MAP_CAPTURE_DIR");
+        if (maximum > 3 && !output.isEmpty()) {
+            QDir().mkpath(output);
+            const auto name =
+                QString::fromUtf8(::testing::UnitTest::GetInstance()->current_test_info()->name());
+            (void)a.save(output + "/" + name + "-cached.png");
+            (void)b.save(output + "/" + name + "-fresh.png");
+        }
     }
     static void pan(GroundMap &map) {
         QMouseEvent press(QEvent::MouseButtonPress, QPointF(300, 180), QPointF(300, 180),
@@ -101,6 +115,42 @@ class GroundMapTest : public ::testing::Test {
         QCoreApplication::sendEvent(&map, &press);
         QCoreApplication::sendEvent(&map, &move);
         QCoreApplication::sendEvent(&map, &release);
+    }
+    static void mouse(GroundMap &map, QEvent::Type type, QPointF point,
+                      Qt::MouseButton button = Qt::LeftButton,
+                      Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+        QMouseEvent event(type, point, point, type == QEvent::MouseMove ? Qt::NoButton : button,
+                          type == QEvent::MouseButtonRelease ? Qt::NoButton : button, modifiers);
+        QCoreApplication::sendEvent(&map, &event);
+    }
+    static bool wheel(GroundMap &map, QPointF point, QPoint angle, QPoint pixel = {}) {
+        QWheelEvent event(point, point, pixel, angle, Qt::NoButton, Qt::NoModifier,
+                          pixel.isNull() ? Qt::NoScrollPhase : Qt::ScrollUpdate, false);
+        QCoreApplication::sendEvent(&map, &event);
+        return event.isAccepted();
+    }
+    static void key(GroundMap &map, int code, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+        QKeyEvent event(QEvent::KeyPress, code, modifiers);
+        QCoreApplication::sendEvent(&map, &event);
+    }
+    static void process_for(int milliseconds) {
+        QElapsedTimer timer;
+        timer.start();
+        do {
+            QCoreApplication::processEvents();
+            QThread::msleep(1);
+        } while (timer.elapsed() < milliseconds);
+    }
+    static bool wait_zoom(GroundMap &map, double expected) {
+        QElapsedTimer timer;
+        timer.start();
+        do {
+            QCoreApplication::processEvents();
+            if (std::abs(map.zoom_factor() - expected) < 1e-9)
+                return true;
+            QThread::msleep(1);
+        } while (timer.elapsed() < 1000);
+        return false;
     }
     QTemporaryDir directory_;
     QString imagery_;
@@ -215,6 +265,7 @@ TEST_F(GroundMapTest, CachedPanAndResizeMatchFreshRendering) {
     (void)pixels(cached);
     pan(cached);
     pan(fresh);
+    EXPECT_EQ(cached.marker_position(0), fresh.marker_position(0));
     expect_same_pixels(pixels(cached), pixels(fresh));
     cached.resize(880, 450);
     fresh.resize(880, 450);
@@ -293,5 +344,264 @@ TEST_F(GroundMapTest, PanBeyondCachedCoverageAndBackgroundChangesMatchFreshRende
         map->set_sun_visible(false);
     }
     expect_same_pixels(pixels(cached), pixels(fresh));
+}
+TEST_F(GroundMapTest, WheelZoomRespondsImmediatelyAndKeepsThePointUnderTheCursor) {
+    GroundMap map(imagery_);
+    configure(map);
+    (void)pixels(map);
+    map.zoom(2, QPointF(250, 150));
+    const auto anchor = map.marker_position(0);
+    ASSERT_TRUE(wheel(map, anchor, {0, 120}));
+    EXPECT_GT(map.zoom_factor(), 2);
+    EXPECT_LT(map.zoom_factor(), 2.4);
+    ASSERT_TRUE(wait_zoom(map, 2.4));
+    EXPECT_NEAR(QLineF(map.marker_position(0), anchor).length(), 0, 1e-9);
+    // A second gesture after a completed animation must not reuse its old end value.
+    wheel(map, anchor, {0, 60});
+    EXPECT_GT(map.zoom_factor(), 2.4);
+    ASSERT_TRUE(wait_zoom(map, 2.4 * std::sqrt(1.2)));
+    EXPECT_NEAR(QLineF(map.marker_position(0), anchor).length(), 0, 1e-9);
+}
+TEST_F(GroundMapTest, PixelScrollingIsContinuousAndDoesNotLeaveAQueuedAnimation) {
+    GroundMap map(imagery_);
+    configure(map);
+    (void)pixels(map);
+    map.zoom(2, QPointF(250, 150));
+    const auto anchor = map.marker_position(0);
+    wheel(map, anchor, {0, 120});
+    const auto before = map.zoom_factor();
+    ASSERT_TRUE(wheel(map, anchor, {0, 120}, {0, 3}));
+    EXPECT_NEAR(map.zoom_factor(), before * std::pow(1.2, 3.0 / 60), 1e-9);
+    const auto continuous = map.zoom_factor();
+    process_for(170);
+    EXPECT_DOUBLE_EQ(map.zoom_factor(), continuous);
+    wheel(map, anchor, {}, {0, -3});
+    EXPECT_NEAR(map.zoom_factor(), before, 1e-9);
+    EXPECT_NEAR(QLineF(map.marker_position(0), anchor).length(), 0, 1e-9);
+}
+TEST_F(GroundMapTest, WheelBurstsAccumulateAndReverseFromTheVisibleScale) {
+    GroundMap map(imagery_);
+    configure(map);
+    (void)pixels(map);
+    map.zoom(2, map.marker_position(0));
+    const auto anchor = map.marker_position(0);
+    for (int i = 0; i < 4; ++i)
+        wheel(map, anchor, {0, 120});
+    ASSERT_TRUE(wait_zoom(map, 2 * std::pow(1.2, 4)));
+    wheel(map, anchor, {0, 120});
+    wheel(map, anchor, {0, 120});
+    const auto before_reverse = map.zoom_factor();
+    wheel(map, anchor, {0, -120});
+    EXPECT_LT(map.zoom_factor(), before_reverse);
+    ASSERT_TRUE(wait_zoom(map, before_reverse / 1.2));
+}
+TEST_F(GroundMapTest, InvalidZoomAndWheelOutsideTheMapDoNotChangeTheViewport) {
+    GroundMap map(imagery_);
+    configure(map);
+    (void)pixels(map);
+    const auto anchor = map.marker_position(0);
+    EXPECT_FALSE(wheel(map, {10, 10}, {0, 120}));
+    EXPECT_FALSE(wheel(map, {320, 20}, {0, 120})); // Letterboxing above the globe.
+    EXPECT_FALSE(wheel(map, anchor, {120, 0}));
+    EXPECT_FALSE(wheel(map, anchor, {}));
+    for (double factor : {0.0, -1.0, std::numeric_limits<double>::infinity(),
+                          std::numeric_limits<double>::quiet_NaN()})
+        map.zoom(factor, anchor);
+    map.zoom(2, {std::numeric_limits<double>::quiet_NaN(), 0});
+    process_for(170);
+    EXPECT_EQ(map.zoom_factor(), 1);
+    EXPECT_EQ(map.marker_position(0), anchor);
+    map.zoom(100, anchor);
+    EXPECT_EQ(map.zoom_factor(), 12);
+    wheel(map, anchor, {0, 120});
+    EXPECT_EQ(map.zoom_factor(), 12);
+    map.zoom(0.0001, anchor);
+    wheel(map, anchor, {0, -120});
+    EXPECT_EQ(map.zoom_factor(), 1);
+}
+TEST_F(GroundMapTest, DragKeepsTheFullDisplacementAndReleasePositionWithoutSelecting) {
+    GroundMap map(imagery_);
+    configure(map);
+    (void)pixels(map);
+    map.zoom(3, map.marker_position(0));
+    const auto origin = map.marker_position(0);
+    int selected = 0;
+    map.select = [&](auto) { ++selected; };
+    mouse(map, QEvent::MouseButtonPress, origin);
+    mouse(map, QEvent::MouseMove, origin + QPointF(1, 0));
+    EXPECT_EQ(map.marker_position(0), origin);
+    mouse(map, QEvent::MouseMove, origin + QPointF(40, 20));
+    EXPECT_NEAR(QLineF(map.marker_position(0), origin + QPointF(40, 20)).length(), 0, 1e-9);
+    mouse(map, QEvent::MouseButtonRelease, origin + QPointF(50, 30));
+    EXPECT_NEAR(QLineF(map.marker_position(0), origin + QPointF(50, 30)).length(), 0, 1e-9);
+    EXPECT_EQ(selected, 0);
+}
+TEST_F(GroundMapTest, MiddleButtonPansAndLeftClickStillSelectsWithSmallJitter) {
+    GroundMap map(imagery_);
+    configure(map);
+    (void)pixels(map);
+    map.zoom(3, map.marker_position(0));
+    int calls = 0;
+    std::optional<std::size_t> selected;
+    map.select = [&](auto index) {
+        ++calls;
+        selected = index;
+    };
+    auto point = map.marker_position(0);
+    mouse(map, QEvent::MouseButtonPress, point, Qt::MiddleButton);
+    mouse(map, QEvent::MouseButtonRelease, point, Qt::MiddleButton);
+    EXPECT_EQ(calls, 0);
+    mouse(map, QEvent::MouseButtonPress, point, Qt::MiddleButton);
+    mouse(map, QEvent::MouseMove, point + QPointF(40, 0), Qt::MiddleButton);
+    mouse(map, QEvent::MouseButtonRelease, point + QPointF(40, 0), Qt::MiddleButton);
+    EXPECT_EQ(calls, 0);
+    EXPECT_NEAR(map.marker_position(0).x(), point.x() + 40, 1e-9);
+    point = map.marker_position(0);
+    mouse(map, QEvent::MouseButtonPress, point);
+    mouse(map, QEvent::MouseMove, point + QPointF(1, 1));
+    mouse(map, QEvent::MouseButtonRelease, point + QPointF(1, 1));
+    EXPECT_EQ(calls, 1);
+    ASSERT_TRUE(selected);
+    EXPECT_EQ(*selected, 0u);
+    EXPECT_EQ(map.marker_position(0), point);
+    mouse(map, QEvent::MouseButtonPress, {10, 10});
+    mouse(map, QEvent::MouseButtonRelease, {10, 10});
+    EXPECT_EQ(calls, 1);
+}
+TEST_F(GroundMapTest, EscapeRestoresDragAndFocusLossEndsItWithoutLateMovement) {
+    GroundMap map(imagery_);
+    configure(map);
+    (void)pixels(map);
+    map.zoom(3, map.marker_position(0));
+    const auto origin = map.marker_position(0);
+    mouse(map, QEvent::MouseButtonPress, origin);
+    mouse(map, QEvent::MouseMove, origin + QPointF(80, 30));
+    key(map, Qt::Key_Escape);
+    EXPECT_EQ(map.marker_position(0), origin);
+    mouse(map, QEvent::MouseButtonRelease, origin + QPointF(80, 30));
+    EXPECT_EQ(map.marker_position(0), origin);
+    mouse(map, QEvent::MouseButtonPress, origin, Qt::MiddleButton);
+    mouse(map, QEvent::MouseMove, origin + QPointF(40, 10), Qt::MiddleButton);
+    QFocusEvent focus_out(QEvent::FocusOut);
+    QCoreApplication::sendEvent(&map, &focus_out);
+    const auto stopped = map.marker_position(0);
+    mouse(map, QEvent::MouseMove, origin + QPointF(100, 60), Qt::MiddleButton);
+    EXPECT_EQ(map.marker_position(0), stopped);
+    EXPECT_NE(map.cursor().shape(), Qt::ClosedHandCursor);
+}
+TEST_F(GroundMapTest, MapEdgesClampWithoutADeadZoneWhenTheDragReverses) {
+    GroundMap map(imagery_);
+    configure(map);
+    (void)pixels(map);
+    map.zoom(2, map.marker_position(0));
+    const auto origin = map.marker_position(0);
+    mouse(map, QEvent::MouseButtonPress, origin);
+    mouse(map, QEvent::MouseMove, origin + QPointF(5000, 0));
+    const auto edge = map.marker_position(0);
+    EXPECT_LT(edge.x(), origin.x() + 1000);
+    mouse(map, QEvent::MouseMove, origin + QPointF(4990, 0));
+    EXPECT_NEAR(map.marker_position(0).x(), edge.x() - 10, 1e-9);
+    key(map, Qt::Key_Escape);
+    EXPECT_EQ(map.marker_position(0), origin);
+}
+TEST_F(GroundMapTest, ResizeAndCenteredZoomPreserveTheGeographicCenter) {
+    GroundMap map(imagery_);
+    configure(map);
+    (void)pixels(map);
+    map.zoom(3, map.marker_position(0));
+    pan(map);
+    // The origin marker is offset from the viewport center. Its normalized offset
+    // identifies the geographic location at the center, independently of window size.
+    const auto centered_offset = [&] {
+        const auto plot = QRectF(map.rect()).adjusted(38, 14, -16, -44);
+        const auto map_width = std::min(plot.width(), 2 * plot.height()) * map.zoom_factor();
+        return (map.marker_position(0) - plot.center()) / map_width;
+    };
+    const auto offset = centered_offset();
+    map.resize(880, 450);
+    (void)pixels(map);
+    EXPECT_NEAR(QLineF(centered_offset(), offset).length(), 0, 1e-9);
+    EXPECT_EQ(map.zoom_factor(), 3);
+    map.zoom_centered(1.3);
+    ASSERT_TRUE(wait_zoom(map, 3.9));
+    EXPECT_NEAR(QLineF(centered_offset(), offset).length(), 0, 1e-9);
+    map.resize(400, 500);
+    (void)pixels(map);
+    EXPECT_NEAR(QLineF(centered_offset(), offset).length(), 0, 1e-9);
+}
+TEST_F(GroundMapTest, DoubleClickZoomsAtThePointerAndHomeCancelsPendingZoom) {
+    GroundMap map(imagery_);
+    configure(map);
+    (void)pixels(map);
+    const auto anchor = map.marker_position(0);
+    mouse(map, QEvent::MouseButtonDblClick, anchor);
+    QEvent ungrab(QEvent::UngrabMouse);
+    QCoreApplication::sendEvent(&map, &ungrab);
+    ASSERT_TRUE(wait_zoom(map, 2));
+    EXPECT_EQ(map.marker_position(0), anchor);
+    mouse(map, QEvent::MouseButtonDblClick, anchor, Qt::LeftButton, Qt::ShiftModifier);
+    ASSERT_TRUE(wait_zoom(map, 1));
+    key(map, Qt::Key_Plus);
+    key(map, Qt::Key_Home);
+    process_for(170);
+    EXPECT_EQ(map.zoom_factor(), 1);
+    EXPECT_EQ(map.marker_position(0), anchor);
+}
+TEST_F(GroundMapTest, ArrowKeysMoveTheViewportAndShiftMakesSmallerSteps) {
+    GroundMap map(imagery_);
+    configure(map);
+    (void)pixels(map);
+    map.zoom(3, map.marker_position(0));
+    const auto origin = map.marker_position(0);
+    key(map, Qt::Key_Right);
+    const auto horizontal = origin.x() - map.marker_position(0).x();
+    EXPECT_GT(horizontal, 0);
+    key(map, Qt::Key_Left);
+    EXPECT_NEAR(QLineF(map.marker_position(0), origin).length(), 0, 1e-9);
+    key(map, Qt::Key_Right, Qt::ShiftModifier);
+    EXPECT_NEAR(origin.x() - map.marker_position(0).x(), horizontal / 5, 1e-9);
+    key(map, Qt::Key_Down);
+    EXPECT_LT(map.marker_position(0).y(), origin.y());
+    key(map, Qt::Key_Up);
+    EXPECT_NEAR(map.marker_position(0).y(), origin.y(), 1e-9);
+}
+TEST_F(GroundMapTest, StartingADragOrHidingStopsTheZoomWithoutALateJump) {
+    GroundMap map(imagery_);
+    configure(map);
+    map.show();
+    QCoreApplication::processEvents();
+    map.zoom(3, map.marker_position(0));
+    const auto anchor = map.marker_position(0);
+    wheel(map, anchor, {0, 120});
+    const auto before_drag = map.zoom_factor();
+    mouse(map, QEvent::MouseButtonPress, anchor);
+    mouse(map, QEvent::MouseMove, anchor + QPointF(40, 20));
+    mouse(map, QEvent::MouseButtonRelease, anchor + QPointF(40, 20));
+    process_for(170);
+    EXPECT_DOUBLE_EQ(map.zoom_factor(), before_drag);
+    map.zoom_centered(1.3);
+    const auto before_hide = map.zoom_factor();
+    map.hide();
+    process_for(170);
+    map.show();
+    QCoreApplication::processEvents();
+    EXPECT_DOUBLE_EQ(map.zoom_factor(), before_hide);
+}
+TEST_F(GroundMapTest, AnimatedZoomSettlesToTheSameDetailedTracksAsDirectZoom) {
+    GroundMap map(imagery_), fresh(imagery_);
+    for (auto *view : {&map, &fresh}) {
+        configure(*view);
+        view->replace_track(0, dense_track());
+        (void)pixels(*view);
+        view->zoom(2, QPointF(250, 150));
+    }
+    ASSERT_TRUE(settle(map));
+    wheel(map, {250, 150}, {0, 120});
+    (void)pixels(map);
+    ASSERT_TRUE(wait_zoom(map, 2.4));
+    fresh.zoom(1.2, {250, 150});
+    ASSERT_TRUE(settle(map));
+    ASSERT_TRUE(settle(fresh));
+    expect_same_pixels(pixels(map), pixels(fresh));
 }
 } // namespace orbitforge::desktop

@@ -17,6 +17,7 @@
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QFileDialog>
+#include <QHeaderView>
 #include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
@@ -28,6 +29,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSortFilterProxyModel>
 #include <QSplitter>
 #include <QTabBar>
 #include <QTableView>
@@ -92,6 +94,49 @@ bool report_available(ReportDialog &dialog, int row) {
     });
     dialog.findChild<QPushButton *>("reportLibrary")->click();
     return available;
+}
+QStringList available_curves(ReportDialog &dialog) {
+    QStringList ids;
+    QTimer::singleShot(0, [&] {
+        auto *chooser = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(chooser);
+        auto *list = chooser->findChild<QTreeWidget *>("reportCurveList");
+        ASSERT_TRUE(list);
+        for (int i = 0; i < list->topLevelItemCount(); ++i)
+            ids << list->topLevelItem(i)->data(0, Qt::UserRole).toString();
+        chooser->reject();
+    });
+    dialog.findChild<QPushButton *>("reportPlotFields")->click();
+    return ids;
+}
+void select_curves(ReportDialog &dialog, const QStringList &ids, bool accept = true,
+                   bool from_table = false) {
+    QTimer::singleShot(0, [ids, accept] {
+        auto *chooser = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(chooser);
+        auto *list = chooser->findChild<QTreeWidget *>("reportCurveList");
+        ASSERT_TRUE(list);
+        for (int i = 0; i < list->topLevelItemCount(); ++i) {
+            auto *item = list->topLevelItem(i);
+            item->setCheckState(0, ids.contains(item->data(0, Qt::UserRole).toString())
+                                       ? Qt::Checked
+                                       : Qt::Unchecked);
+        }
+        if (!accept) {
+            chooser->reject();
+            return;
+        }
+        auto *confirm = chooser->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok);
+        EXPECT_TRUE(confirm->isEnabled());
+        if (confirm->isEnabled())
+            confirm->click();
+        else
+            chooser->reject();
+    });
+    if (from_table)
+        dialog.findChild<QAction *>("reportChooseCurves")->trigger();
+    else
+        dialog.findChild<QPushButton *>("reportPlotFields")->click();
 }
 void wait_for_report(ReportDialog &dialog, int timeout = 5000) {
     const auto *generate = dialog.findChild<QPushButton *>("generateReport");
@@ -267,6 +312,45 @@ TEST(ReportDialog, PreparingTemplatesAndDockingDoesNotShowTemporaryWindows) {
     QCoreApplication::processEvents();
     EXPECT_FALSE(dialog.isVisible());
     EXPECT_TRUE(windows.shown.isEmpty()) << windows.shown.join(", ").toStdString();
+}
+TEST(ReportDialog, FirstResultFillsInitiallyNarrowWorkspace) {
+    (void)test_app();
+    std::shared_ptr<const core::ITimeProvider> time = runtime::make_builtin_time_provider();
+    application::Project project("窄分屏报告", core::Epoch{0}, core::Epoch{120'000'000'000});
+    Workspace workspace;
+    workspace.resize(460, 640);
+    workspace.show();
+    auto *dialog = new ReportDialog(
+        project, time,
+        [&](const application::ReportQuery &, ReportDialog::Ready ready) {
+            ready(ReportInput{project, runtime::DataSnapshot::from_providers(time)}, {});
+        },
+        [](auto) {}, [](auto) {}, &workspace);
+    workspace.open(dialog, false);
+    for (int i = 0; i < 8; ++i)
+        QCoreApplication::processEvents();
+    ASSERT_LT(dialog->width(), 800);
+    auto *settings = dialog->findChild<QWidget *>("reportSettingsPanel");
+    auto *result = dialog->findChild<QWidget *>("reportResultPanel");
+    auto *table = dialog->findChild<QTableView *>("reportTable");
+    ASSERT_TRUE(settings->isVisible());
+    dialog->findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(*dialog);
+    for (int repeat = 0; repeat < 3; ++repeat) {
+        for (int i = 0; i < 8; ++i)
+            QCoreApplication::processEvents();
+        ASSERT_GT(table->model()->rowCount(), 0);
+        EXPECT_TRUE(table->isVisible());
+        EXPECT_FALSE(settings->isVisible());
+        EXPECT_GT(result->width(), dialog->width() - 20);
+        EXPECT_GT(table->width(), dialog->width() - 60);
+        EXPECT_GT(table->height(), 250);
+        auto *toggle = dialog->findChild<QPushButton *>("reportToggleSettings");
+        toggle->click();
+        QCoreApplication::processEvents();
+        EXPECT_GT(settings->width(), dialog->width() - 20);
+        toggle->click();
+    }
 }
 TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
     (void)test_app();
@@ -448,10 +532,18 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
     workspace.add_view(new QWidget, "3D", {});
     workspace.show();
     workspace.open(&dialog, false);
+    EXPECT_FALSE(dialog.isWindow());
     for (int i = 0; i < 3; ++i)
         QCoreApplication::processEvents();
+    const auto directory = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    if (!directory.isEmpty())
+        EXPECT_TRUE(workspace.grab().save(directory + "/docked-settings.png"));
     EXPECT_TRUE(
-        workspace.rect().contains(generate->mapTo(&workspace, generate->rect().bottomRight())));
+        workspace.rect().contains(generate->mapTo(&workspace, generate->rect().bottomRight())))
+        << "workspace=" << workspace.width() << "x" << workspace.height()
+        << ", report=" << dialog.width() << "x" << dialog.height()
+        << ", generate=" << generate->mapTo(&workspace, generate->rect().bottomRight()).x() << ","
+        << generate->mapTo(&workspace, generate->rect().bottomRight()).y();
     EXPECT_TRUE(generate->visibleRegion().contains(generate->rect()));
 }
 TEST(ReportDialog, ObjectScopeSurvivesTemplateChangesSavedConfigurationsAndProjectChanges) {
@@ -587,7 +679,7 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
     auto *generate = dialog.findChild<QPushButton *>("generateReport");
     auto *table = dialog.findChild<QTableView *>("reportTable");
     auto *views = dialog.findChild<QTabBar *>("reportViews");
-    auto *fields = dialog.findChild<QComboBox *>("reportPlotField");
+    auto *fields = dialog.findChild<QPushButton *>("reportPlotFields");
     auto *objects = dialog.findChild<ObjectSelectionField *>("reportPlotObject");
     auto *plot = static_cast<ReportPlot *>(dialog.findChild<QWidget *>("reportPlot"));
     auto *export_button = dialog.findChild<QPushButton *>("exportReportCsv");
@@ -613,7 +705,7 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
     views->setCurrentIndex(1);
     QCoreApplication::processEvents();
     ASSERT_TRUE(plot->isVisible());
-    EXPECT_EQ(fields->count(), 5);
+    EXPECT_EQ(available_curves(dialog).size(), 5);
     EXPECT_EQ(plot->series_count(), 2U);
     EXPECT_TRUE(export_button->text().contains("PNG"));
     const auto initial = plot->visible_interval();
@@ -631,6 +723,10 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
     EXPECT_LE(sought->tai_nanoseconds(), project.last.tai_nanoseconds());
     dialog.findChild<QToolButton *>("reportPlotReset")->click();
     EXPECT_EQ(plot->visible_interval(), initial);
+    dialog.findChild<QAction *>("reportPlotZoomIn")->trigger();
+    const auto comparison_interval = plot->visible_interval();
+    EXPECT_LT(comparison_interval.second - comparison_interval.first,
+              initial.second - initial.first);
     QTimer::singleShot(0, [] {
         auto *chooser = qobject_cast<ObjectSelectionDialog *>(QApplication::activeModalWidget());
         ASSERT_TRUE(chooser);
@@ -642,11 +738,37 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
     });
     objects->click();
     EXPECT_EQ(plot->series_count(), 1U);
-    fields->setCurrentIndex(fields->findData("motion.radial_speed", Qt::UserRole + 1));
+    EXPECT_EQ(plot->visible_interval(), comparison_interval);
+    select_curves(dialog, {"motion.radial_speed"});
+    EXPECT_EQ(plot->visible_interval(), comparison_interval);
+    dialog.findChild<QAction *>("reportPlotPan")->trigger();
+    EXPECT_EQ(plot->cursor().shape(), Qt::OpenHandCursor);
+    const auto move = pos + QPointF(40, 0);
+    QMouseEvent press(QEvent::MouseButtonPress, pos, plot->mapToGlobal(pos.toPoint()),
+                      Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QMouseEvent drag(QEvent::MouseMove, move, plot->mapToGlobal(move.toPoint()), Qt::NoButton,
+                     Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(plot, &press);
+    QApplication::sendEvent(plot, &drag);
+    EXPECT_LT(plot->visible_interval().first, comparison_interval.first);
+    EXPECT_NEAR(plot->visible_interval().second - plot->visible_interval().first,
+                comparison_interval.second - comparison_interval.first, 1e-6);
+    QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+    QApplication::sendEvent(plot, &escape);
+    EXPECT_EQ(plot->visible_interval(), comparison_interval);
+    QMouseEvent release(QEvent::MouseButtonRelease, move, plot->mapToGlobal(move.toPoint()),
+                        Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(plot, &release);
+    EXPECT_EQ(plot->visible_interval(), comparison_interval);
+    dialog.findChild<QAction *>("reportPlotBox")->trigger();
+    EXPECT_EQ(plot->cursor().shape(), Qt::CrossCursor);
+    dialog.findChild<QAction *>("reportPlotZoomOut")->trigger();
+    EXPECT_NEAR(plot->visible_interval().first, initial.first, 1e-6);
+    EXPECT_NEAR(plot->visible_interval().second, initial.second, 1e-6);
     EXPECT_EQ(preparations, 1); // A view change must not restart provider sampling.
     EXPECT_EQ(table->model()->rowCount(), 802);
     objects->set_selection({{}, true});
-    fields->setCurrentIndex(0);
+    select_curves(dialog, {"motion.radius"});
     EXPECT_FALSE(dialog.findChild<QLineEdit *>("reportName"));
     EXPECT_FALSE(dialog.findChild<QPushButton *>("saveReport"));
     QTimer::singleShot(0, [] {
@@ -679,12 +801,51 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
         }
     };
     capture("curves");
+    const int preparations_before_selection = preparations;
+    select_curves(dialog, {"motion.speed", "motion.radial_speed", "motion.transverse_speed"});
+    EXPECT_EQ(plot->series_count(), 6U);
+    EXPECT_EQ(plot->panel_count(), 1U);
+    plot->zoom(.8);
+    const auto compared_interval = plot->visible_interval();
+    select_curves(dialog, {"motion.radius", "motion.speed", "motion.radial_speed"});
+    EXPECT_EQ(plot->series_count(), 6U);
+    EXPECT_EQ(plot->panel_count(), 2U);
+    EXPECT_EQ(plot->visible_interval(), compared_interval);
+    select_curves(dialog, {"motion.transverse_speed"}, false);
+    EXPECT_EQ(plot->fields().size(), 3U);
+    EXPECT_EQ(plot->visible_interval(), compared_interval);
+    EXPECT_EQ(preparations, preparations_before_selection);
+    views->setCurrentIndex(0);
+    select_curves(dialog, {"motion.radius", "motion.speed", "motion.radial_speed"}, true, true);
+    EXPECT_EQ(views->currentIndex(), 1);
+    auto *display_units = dialog.findChild<QComboBox *>("reportUnits");
+    QTimer::singleShot(0, [&] {
+        auto *chooser = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(chooser);
+        auto *list = chooser->findChild<QTreeWidget *>("reportCurveList");
+        for (int i = 0; i < list->topLevelItemCount(); ++i)
+            list->topLevelItem(i)->setCheckState(0, i == 0 ? Qt::Checked : Qt::Unchecked);
+        display_units->setCurrentIndex(1); // A new presentation arrives while this draft is open.
+        chooser->accept();
+    });
+    fields->click();
+    EXPECT_EQ(plot->fields().size(), 3U); // The stale dialog cannot overwrite the new presentation.
+    EXPECT_EQ(plot->fields().front().unit, "m");
+    EXPECT_EQ(plot->panel_count(), 2U);
+    EXPECT_EQ(plot->visible_interval(), compared_interval);
+    EXPECT_TRUE(
+        dialog.findChild<QLabel *>("reportStatus")->text().contains(QStringLiteral("请重新选择")));
+    display_units->setCurrentIndex(0);
+    EXPECT_EQ(plot->fields().front().unit, "km");
+    EXPECT_EQ(plot->visible_interval(), compared_interval);
+    EXPECT_EQ(preparations, preparations_before_selection);
+    capture("curves-multiple");
     auto *split = dialog.findChild<QSplitter *>("reportSplit");
     ASSERT_TRUE(split);
     split->setSizes({370, 746});
     split->splitterMoved(split->sizes().front(), 1);
     const auto wide_sizes = split->sizes();
-    const auto selected_field = fields->currentData();
+    const auto selected_field = plot->fields().front().id;
     const auto selected_object = objects->id();
     const auto interval_before_resize = plot->visible_interval();
     const int preparations_before_resize = preparations;
@@ -693,7 +854,7 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
         for (int i = 0; i < 8; ++i)
             QCoreApplication::processEvents();
         EXPECT_EQ(dialog.width(), width);
-        EXPECT_EQ(fields->currentData(), selected_field);
+        EXPECT_EQ(plot->fields().front().id, selected_field);
         EXPECT_EQ(objects->id(), selected_object);
         EXPECT_EQ(plot->visible_interval(), interval_before_resize);
         EXPECT_EQ(table->model()->rowCount(), 802);
@@ -742,7 +903,7 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
     dialog.resize(1120, 740);
     choose_report(dialog, static_cast<int>(application::ReportKind::classical_elements));
     run();
-    EXPECT_EQ(fields->currentData(Qt::UserRole + 1).toString(), "elements.nu");
+    EXPECT_EQ(plot->fields().front().id, "elements.nu");
     capture("elements-curves");
     // A summary remains a table; a stale curve must not masquerade as the new result.
     choose_report(dialog, 0);
@@ -909,6 +1070,57 @@ TEST(ReportDialog, ReportChoiceCancellationSameSelectionAndLiveTemplateUpdates) 
     EXPECT_EQ(dialog.findChild<QLabel *>("reportScopeLabel")->text(), QStringLiteral("西站"));
     EXPECT_EQ(step->value(), 60);
 }
+TEST(ReportSelection, CurveFieldsSearchKeepsCheckedItemsAndValidatesLimit) {
+    (void)test_app();
+    const std::vector<ReportCurveField> fields{
+        {0, "state.x", "X (km)", "km"},
+        {1, "state.y", "Y (km)", "km"},
+        {2, "state.z", "Z (km)", "km"},
+        {3, "state.vx", "Vx (km/s)", "km/s"},
+        {4, "state.vy", "Vy (km/s)", "km/s"},
+        {5, "state.vz", "Vz (km/s)", "km/s"},
+        {6, "motion.speed", QStringLiteral("速率 (km/s)"), "km/s"}};
+    ReportCurveSelectionDialog chooser(fields, {"state.x", "state.y"});
+    chooser.show();
+    auto *list = chooser.findChild<QTreeWidget *>("reportCurveList");
+    auto *search = chooser.findChild<QLineEdit *>("reportCurveSearch");
+    auto *confirm = chooser.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok);
+    search->setText("vx");
+    EXPECT_TRUE(list->topLevelItem(0)->isHidden());
+    EXPECT_FALSE(list->topLevelItem(3)->isHidden());
+    list->topLevelItem(3)->setCheckState(0, Qt::Checked);
+    EXPECT_EQ(chooser.selection(), (QStringList{"state.x", "state.y", "state.vx"}));
+    search->setText("no-such-field");
+    EXPECT_TRUE(chooser.findChild<QLabel *>("reportCurveCount")
+                    ->text()
+                    .contains(QStringLiteral("没有匹配")));
+    EXPECT_TRUE(confirm->isEnabled()); // Searching does not discard hidden checked fields.
+    search->clear();
+    const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    for (int width : {560, 360}) {
+        chooser.resize(width, 480);
+        QCoreApplication::processEvents();
+        EXPECT_EQ(list->horizontalScrollBar()->maximum(), 0);
+        if (!capture.isEmpty()) {
+            QDir().mkpath(capture);
+            EXPECT_TRUE(
+                chooser.grab().save(capture + QString("/curve-selector-%1.png").arg(width)));
+        }
+    }
+    for (int i = 0; i < list->topLevelItemCount(); ++i)
+        list->topLevelItem(i)->setCheckState(0, Qt::Checked);
+    EXPECT_FALSE(confirm->isEnabled());
+    chooser.accept();
+    EXPECT_EQ(chooser.result(), QDialog::Rejected);
+    chooser.findChild<QPushButton *>("reportCurveClear")->click();
+    EXPECT_TRUE(chooser.selection().isEmpty());
+    EXPECT_FALSE(confirm->isEnabled());
+    list->topLevelItem(0)->setCheckState(0, Qt::Checked);
+    EXPECT_TRUE(confirm->isEnabled());
+    chooser.accept();
+    EXPECT_EQ(chooser.result(), QDialog::Accepted);
+}
+
 TEST(ReportPlot, AngleWrapDoesNotDrawFalseCrossingAndPixelReductionRetainsPeaks) {
     (void)test_app();
     application::ReportDefinition d;
@@ -1076,11 +1288,9 @@ TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
     run();
     EXPECT_EQ(published, 2);
     EXPECT_TRUE(views->isTabEnabled(1));
-    EXPECT_GE(
-        dialog.findChild<QComboBox *>("reportPlotField")->findData("aer.azimuth", Qt::UserRole + 1),
-        0);
+    EXPECT_TRUE(available_curves(dialog).contains("aer.azimuth"));
     EXPECT_EQ(
-        dialog.findChild<QComboBox *>("reportPlotField")->currentData(Qt::UserRole + 1).toString(),
+        static_cast<ReportPlot *>(dialog.findChild<QWidget *>("reportPlot"))->fields().front().id,
         "aer.elevation");
     const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
     if (!capture.isEmpty()) {
@@ -1162,6 +1372,89 @@ TEST(ReportDialog, TemplateUnitsReuseResultsAndReorderedFieldsKeepPlotsAndSelect
     dialog.findChild<QComboBox *>("reportUnits")->setCurrentIndex(0);
     EXPECT_TRUE(table->model()->headerData(0, Qt::Horizontal).toString().contains("(m)"));
     EXPECT_EQ(preparations, 1);
+}
+
+TEST(ReportDialog, NumericSortingPrecisionCopyAndTimeSeekKeepSourceRowIdentity) {
+    (void)test_app();
+    const auto restore_clipboard = [](QMimeData *data) {
+        QApplication::clipboard()->setMimeData(data);
+    };
+    std::unique_ptr<QMimeData, decltype(restore_clipboard)> clipboard(new QMimeData,
+                                                                      restore_clipboard);
+    if (const auto *original = QApplication::clipboard()->mimeData())
+        for (const auto &format : original->formats())
+            clipboard->setData(format, original->data(format));
+    std::shared_ptr<const core::ITimeProvider> time = runtime::make_builtin_time_provider();
+    application::Project project("表格交互", core::Epoch{0}, core::Epoch{120'000'000'001});
+    project.ground_stations.push_back(
+        {"low", "地面站", {std::acos(2000.123456789 / 6378137.0), 0, 0}});
+    project.ground_stations.push_back({"high", "高点", {std::acos(10000.0 / 6378137.0), 0, 0}});
+    application::ReportDefinition definition;
+    definition.id = "table-view";
+    definition.name = "表格交互";
+    definition.query.frame = core::FrameId::itrf;
+    definition.query.object_ids = {"low", "high"};
+    definition.format.columns = {{"state.x", "", "X"},
+                                 {"time.epoch", "", ""},
+                                 {"object.name", "", ""},
+                                 {"object.id", "", ""}};
+    project.reports.push_back(definition);
+    int preparations = 0;
+    std::optional<core::Epoch> sought;
+    std::shared_ptr<const runtime::ReportResult> result;
+    ReportDialog dialog(
+        project, time,
+        [&](const application::ReportQuery &, ReportDialog::Ready ready) {
+            ++preparations;
+            ready(ReportInput{project, runtime::DataSnapshot::from_providers(time)}, {});
+        },
+        [](auto) {}, [&](core::Epoch epoch) { sought = epoch; });
+    dialog.result_published = [&](auto value, const runtime::Analysis &) {
+        result = std::move(value);
+    };
+    choose_report(dialog, static_cast<int>(application::report_kinds.size()));
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    ASSERT_TRUE(result) << dialog.findChild<QLabel *>("reportStatus")->text().toStdString();
+    auto *table = dialog.findChild<QTableView *>("reportTable");
+    auto *proxy = qobject_cast<QSortFilterProxyModel *>(table->model());
+    ASSERT_TRUE(proxy);
+    ASSERT_EQ(proxy->rowCount(), 8);
+    table->sortByColumn(0, Qt::AscendingOrder);
+    EXPECT_EQ(proxy->index(0, 3).data().toString(), "low"); // 2 precedes 10 numerically.
+    EXPECT_EQ(proxy->index(7, 3).data().toString(), "high");
+    table->sortByColumn(0, Qt::DescendingOrder);
+    EXPECT_EQ(proxy->index(0, 3).data().toString(), "high");
+    table->sortByColumn(1, Qt::DescendingOrder);
+    const auto first = proxy->index(0, 1);
+    EXPECT_EQ(first.data(Qt::UserRole).toLongLong(), project.last.tai_nanoseconds());
+    table->doubleClicked(first);
+    ASSERT_TRUE(sought);
+    EXPECT_EQ(sought->tai_nanoseconds(), project.last.tai_nanoseconds());
+    table->selectRow(0);
+    dialog.findChild<QAction *>("reportTableCopy")->trigger();
+    const auto source_row = proxy->mapToSource(first).row();
+    EXPECT_TRUE(QApplication::clipboard()->text().contains(
+        QString::fromStdString(result->cell_text(source_row, 1))));
+    dialog.findChild<QAction *>("reportOriginalOrder")->trigger();
+    for (int i = 0; i < proxy->rowCount(); ++i)
+        EXPECT_EQ(proxy->mapToSource(proxy->index(i, 0)).row(), i);
+    auto *precision = dialog.findChild<QComboBox *>("reportPrecision");
+    precision->setCurrentIndex(precision->findData(6));
+    EXPECT_EQ(proxy->index(0, 0).data(Qt::ToolTipRole).toString(),
+              QString::fromStdString(result->cell_text(0, 0)));
+    precision->setCurrentIndex(precision->findData(17));
+    EXPECT_DOUBLE_EQ(proxy->index(0, 0).data().toString().toDouble(), *result->numeric_value(0, 0));
+    EXPECT_EQ(preparations, 1);
+    EXPECT_FALSE(dialog.findChild<QAction *>("reportOriginalOrder")->isEnabled());
+    table->sortByColumn(0, Qt::DescendingOrder);
+    table->selectRow(0);
+    EXPECT_TRUE(dialog.findChild<QAction *>("reportTableCopy")->isEnabled());
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    EXPECT_EQ(preparations, 2);
+    EXPECT_EQ(table->horizontalHeader()->sortIndicatorSection(), -1);
+    EXPECT_FALSE(dialog.findChild<QAction *>("reportTableCopy")->isEnabled());
 }
 
 TEST(ReportDialog, LightingIntervalsAndCurveShareResultsAndPreserveNarrowLayout) {

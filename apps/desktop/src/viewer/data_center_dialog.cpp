@@ -501,7 +501,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     auto *download = new QPushButton;
     download->setObjectName("downloadEop");
     download->setProperty("primary", true);
-    download->setIcon(workbench_icon(WorkbenchIcon::download, Qt::white));
+    download->setIcon(workbench_icon(WorkbenchIcon::download, theme::color(theme::on_accent)));
     auto *raw = new QPushButton(QStringLiteral("导入本地文件…"));
     raw->setObjectName("importRawEop");
     raw->setIcon(workbench_icon(WorkbenchIcon::folder));
