@@ -11,6 +11,7 @@
 #include <map>
 #include <numbers>
 #include <set>
+#include <string_view>
 
 namespace orbitforge::desktop {
 namespace {
@@ -47,6 +48,7 @@ ReportPlot::ReportPlot(QWidget *parent) : QWidget(parent) {
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setCursor(Qt::CrossCursor);
+    setAttribute(Qt::WA_OpaquePaintEvent);
 }
 void ReportPlot::set_result(std::shared_ptr<const runtime::ReportResult> result, std::size_t column,
                             QString label, std::string object, bool preserve_view) {
@@ -73,6 +75,7 @@ void ReportPlot::set_object(std::string id) {
     rebuild(true);
 }
 void ReportPlot::rebuild(bool preserve_view) {
+    plot_image_ = {};
     series_.clear();
     panels_.clear();
     hover_ = dragging_ = false;
@@ -119,44 +122,77 @@ void ReportPlot::rebuild(bool preserve_view) {
         const auto half_turn = field.unit == "deg" ? 180.0 : std::numbers::pi;
         std::map<std::string, std::size_t> indices;
         std::set<std::string> missing;
+        std::string_view previous_id;
+        const auto no_series = std::numeric_limits<std::size_t>::max();
+        std::size_t current_series = no_series;
+        bool have_previous = false;
         for (std::size_t r = 0; r < result_->table.rows().size(); ++r) {
             const auto &row = result_->table.rows()[r];
             const auto *id = std::get_if<std::string>(&row[id_column - columns.begin()]);
             const auto *epoch = std::get_if<core::Epoch>(&row[time_column_]);
-            const auto value = result_->numeric_value(r, field.column);
             if (!id || !epoch)
                 continue;
+            if (have_previous && previous_id == *id && current_series == no_series)
+                continue;
+            const auto value = result_->numeric_value(r, field.column);
             if (!value) {
                 missing.insert(*id);
                 continue;
             }
-            const auto color = color_indices.try_emplace(*id, color_indices.size()).first->second;
-            if (!object_.empty() && object_ != *id)
-                continue;
-            const auto [entry, inserted] = indices.try_emplace(*id, series_.size());
-            if (inserted) {
-                auto label = str(std::get<std::string>(row[name_column - columns.begin()]));
-                if (fields_.size() > 1)
-                    label = field_name + " · " + label;
-                const bool duplicate = std::any_of(series_.begin(), series_.end(),
-                                                   [&](const auto &s) { return s.label == label; });
-                if (duplicate)
-                    label += " [" + str(*id) + "]";
-                const auto tone = color + (fields_.size() > 1 ? field.column : 0);
-                panel->series.push_back(series_.size());
-                series_.push_back({label,
-                                   QColor(colors[tone % std::size(colors)]),
-                                   styles[f % std::size(styles)],
-                                   field.column,
-                                   panel_index,
-                                   {},
-                                   {}});
+            // Reports normally group samples by object. Resolve its stable color
+            // and series once per run, while still accepting interleaved rows.
+            if (!have_previous || previous_id != *id) {
+                have_previous = true;
+                previous_id = *id;
+                const auto color =
+                    color_indices.try_emplace(*id, color_indices.size()).first->second;
+                if (!object_.empty() && object_ != *id) {
+                    current_series = no_series;
+                    continue;
+                }
+                const auto [entry, inserted] = indices.try_emplace(*id, series_.size());
+                current_series = entry->second;
+                if (inserted) {
+                    auto label = str(std::get<std::string>(row[name_column - columns.begin()]));
+                    if (fields_.size() > 1)
+                        label = field_name + " · " + label;
+                    const bool duplicate =
+                        std::any_of(series_.begin(), series_.end(),
+                                    [&](const auto &s) { return s.label == label; });
+                    if (duplicate)
+                        label += " [" + str(*id) + "]";
+                    const auto tone = color + (fields_.size() > 1 ? field.column : 0);
+                    panel->series.push_back(series_.size());
+                    series_.push_back({label,
+                                       QColor(colors[tone % std::size(colors)]),
+                                       styles[f % std::size(styles)],
+                                       field.column,
+                                       panel_index,
+                                       {},
+                                       {},
+                                       {}});
+                }
             }
-            auto &points = series_[entry->second].points;
+            auto &points = series_[current_series].points;
             const bool gap =
                 missing.erase(*id) != 0 ||
                 (cyclic && !points.empty() && std::abs(points.back().y - *value) > half_turn);
             points.push_back({epoch->seconds_since(result_->first), *value, r, gap});
+        }
+    }
+    // Exact block extrema avoid rescanning every visible sample for axis limits
+    // on each wheel/drag event. Partial edge blocks still inspect the raw values.
+    for (auto &series : series_) {
+        series.extents.reserve((series.points.size() + extent_block_size - 1) / extent_block_size);
+        for (std::size_t i = 0; i < series.points.size(); ++i) {
+            const auto value = series.points[i].y;
+            if (i % extent_block_size == 0)
+                series.extents.emplace_back(value, value);
+            else {
+                auto &[low, high] = series.extents.back();
+                low = std::min(low, value);
+                high = std::max(high, value);
+            }
         }
     }
     setMinimumHeight(std::max(220, static_cast<int>(panels_.size()) * 210 + 50));
@@ -214,6 +250,7 @@ double ReportPlot::time_at(double x) const {
     return left_ + std::clamp((x - plot_.left()) / plot_.width(), 0.0, 1.0) * (right_ - left_);
 }
 void ReportPlot::layout_plot() {
+    plot_image_ = {};
     const auto fm = fontMetrics();
     const auto per_row = std::max(1, (width() - 32) / 180);
     int axis_width = 48;
@@ -234,9 +271,18 @@ void ReportPlot::layout_plot() {
             auto extended = end;
             if (extended != series.points.end())
                 ++extended;
-            for (auto it = begin; it != extended; ++it) {
-                low = std::min(low, it->y);
-                high = std::max(high, it->y);
+            const auto stop = static_cast<std::size_t>(extended - series.points.begin());
+            for (auto i = static_cast<std::size_t>(begin - series.points.begin()); i < stop;) {
+                if (i % extent_block_size == 0 && stop - i >= extent_block_size) {
+                    const auto &extent = series.extents[i / extent_block_size];
+                    low = std::min(low, extent.first);
+                    high = std::max(high, extent.second);
+                    i += extent_block_size;
+                } else {
+                    low = std::min(low, series.points[i].y);
+                    high = std::max(high, series.points[i].y);
+                    ++i;
+                }
             }
         }
         if (!std::isfinite(low)) {
@@ -279,16 +325,16 @@ void ReportPlot::layout_plot() {
     // Keep first, extrema and last per horizontal pixel bucket, in chronological order.
     // This bounds painted vertices while retaining narrow peaks; raw rows remain untouched.
     for (auto &series : series_) {
-        series.path = {};
-        std::vector<const Point *> bucket;
+        series.path.clear();
+        series.path.reserve(static_cast<int>(
+            std::min(series.points.size(), static_cast<std::size_t>(plot_.width() * 4 + 8))));
+        const Point *first = nullptr, *minimum = nullptr, *maximum = nullptr, *last = nullptr;
         int previous_pixel = std::numeric_limits<int>::min();
         bool connected = false;
         const auto flush = [&] {
-            if (bucket.empty())
+            if (!first)
                 return;
-            const auto mm = std::minmax_element(bucket.begin(), bucket.end(),
-                                                [](auto a, auto b) { return a->y < b->y; });
-            std::array<const Point *, 4> keep{bucket.front(), *mm.first, *mm.second, bucket.back()};
+            std::array<const Point *, 4> keep{first, minimum, maximum, last};
             std::sort(keep.begin(), keep.end(), [](auto a, auto b) { return a->row < b->row; });
             const Point *previous = nullptr;
             for (auto p : keep) {
@@ -301,28 +347,39 @@ void ReportPlot::layout_plot() {
                     series.path.lineTo(pixel(*p, series));
                 previous = p;
             }
-            bucket.clear();
+            first = nullptr;
         };
         auto begin = std::lower_bound(series.points.begin(), series.points.end(), left_,
                                       [](const auto &p, double x) { return p.x < x; });
         if (begin != series.points.begin())
             --begin;
         for (auto it = begin; it != series.points.end(); ++it) {
-            const auto px = static_cast<int>(std::clamp(pixel(*it, series).x(), -1e6, 1e6));
+            const auto &area = panels_[series.panel].rect;
+            const auto x = area.left() + (it->x - left_) / (right_ - left_) * area.width();
+            const auto px = static_cast<int>(std::clamp(x, -1e6, 1e6));
             if (px != previous_pixel || it->gap) {
                 flush();
                 previous_pixel = px;
             }
             if (it->gap)
                 connected = false;
-            bucket.push_back(&*it);
+            if (!first)
+                first = minimum = maximum = &*it;
+            else {
+                if (it->y < minimum->y)
+                    minimum = &*it;
+                // Match minmax_element: first minimum, last maximum on ties.
+                if (it->y >= maximum->y)
+                    maximum = &*it;
+            }
+            last = &*it;
             if (it->x > right_)
                 break;
         }
         flush();
     }
 }
-void ReportPlot::draw(QPainter &p, bool interaction) const {
+void ReportPlot::draw(QPainter &p) const {
     p.fillRect(rect(), theme::color(theme::chrome));
     p.setRenderHint(QPainter::Antialiasing);
     p.setFont(font());
@@ -337,9 +394,6 @@ void ReportPlot::draw(QPainter &p, bool interaction) const {
     const double time_scale = right_ - left_ >= 7200 ? 3600 : right_ - left_ >= 120 ? 60 : 1;
     const auto x_step = nice_step((right_ - left_) / time_scale / (width() < 500 ? 3 : 5));
     const auto first_tick = std::ceil(left_ / time_scale / x_step) * x_step;
-    const Series *hover_series = nullptr;
-    const auto *hover_point =
-        interaction && hover_ && !dragging_ ? nearest(cursor_, &hover_series) : nullptr;
     for (std::size_t group = 0; group < panels_.size(); ++group) {
         const auto &panel = panels_[group];
         const auto &area = panel.rect;
@@ -411,20 +465,6 @@ void ReportPlot::draw(QPainter &p, bool interaction) const {
                     p.drawEllipse(pixel(point, series), 2.4, 2.4);
             }
         }
-        if (hover_point) {
-            const auto pos = pixel(*hover_point, *hover_series);
-            p.setPen(QPen(theme::color(theme::text_muted), 1, Qt::DashLine));
-            p.drawLine(QPointF(pos.x(), area.top()), QPointF(pos.x(), area.bottom()));
-            if (hover_series->panel == group) {
-                p.drawLine(QPointF(area.left(), pos.y()), QPointF(area.right(), pos.y()));
-                p.setBrush(theme::color(theme::text));
-                p.drawEllipse(pos, 4, 4);
-            }
-        }
-        if (interaction && dragging_ && !panning_)
-            p.fillRect(QRectF(QPointF(std::min(drag_start_.x(), cursor_.x()), area.top()),
-                              QPointF(std::max(drag_start_.x(), cursor_.x()), area.bottom())),
-                       theme::color(theme::accent, 50));
         p.restore();
     }
     auto origin = str(result_->cell_text(series_.front().points.front().row, time_column_));
@@ -444,6 +484,31 @@ void ReportPlot::draw(QPainter &p, bool interaction) const {
     p.drawText(QRectF(12, height() - 42, width() - 24, 34), Qt::AlignCenter | Qt::TextWordWrap,
                axis);
 }
+void ReportPlot::draw_interaction(QPainter &p) const {
+    const Series *series = nullptr;
+    const auto *point = hover_ && !dragging_ ? nearest(cursor_, &series) : nullptr;
+    p.setRenderHint(QPainter::Antialiasing);
+    for (std::size_t group = 0; group < panels_.size(); ++group) {
+        const auto &area = panels_[group].rect;
+        p.save();
+        p.setClipRect(area.adjusted(-2, -2, 2, 2));
+        if (point) {
+            const auto pos = pixel(*point, *series);
+            p.setPen(QPen(theme::color(theme::text_muted), 1, Qt::DashLine));
+            p.drawLine(QPointF(pos.x(), area.top()), QPointF(pos.x(), area.bottom()));
+            if (series->panel == group) {
+                p.drawLine(QPointF(area.left(), pos.y()), QPointF(area.right(), pos.y()));
+                p.setBrush(theme::color(theme::text));
+                p.drawEllipse(pos, 4, 4);
+            }
+        }
+        if (dragging_ && !panning_)
+            p.fillRect(QRectF(QPointF(std::min(drag_start_.x(), cursor_.x()), area.top()),
+                              QPointF(std::max(drag_start_.x(), cursor_.x()), area.bottom())),
+                       theme::color(theme::accent, 50));
+        p.restore();
+    }
+}
 QImage ReportPlot::image(qreal scale) const {
     scale = std::clamp(scale, 1.0, 4.0);
     QImage output(QSize(qRound(width() * scale), qRound(height() * scale)),
@@ -451,14 +516,41 @@ QImage ReportPlot::image(qreal scale) const {
     output.fill(Qt::transparent);
     QPainter painter(&output);
     painter.scale(scale, scale);
-    draw(painter, false);
+    draw(painter);
     return output;
 }
 void ReportPlot::paintEvent(QPaintEvent *) {
     QPainter p(this);
-    draw(p, true);
+    const auto ratio = devicePixelRatioF();
+    const QSize pixels(qRound(width() * ratio), qRound(height() * ratio));
+    // Hover and range selection only change the overlay. Bound the static raster
+    // to one viewport and 64 MiB; exports still render vectors at their own scale.
+    if (static_cast<qint64>(pixels.width()) * pixels.height() * 4 <= 64 * 1024 * 1024) {
+        if (plot_image_.size() != pixels || plot_image_.devicePixelRatio() != ratio) {
+            plot_image_ = QImage(pixels, QImage::Format_RGB32);
+            plot_image_.setDevicePixelRatio(ratio);
+            QPainter cache(&plot_image_);
+            draw(cache);
+        }
+        if (plot_image_.isNull())
+            draw(p);
+        else
+            p.drawImage(QPointF{}, plot_image_);
+    } else {
+        plot_image_ = {};
+        draw(p);
+    }
+    draw_interaction(p);
 }
 void ReportPlot::resizeEvent(QResizeEvent *) { layout_plot(); }
+void ReportPlot::changeEvent(QEvent *event) {
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::FontChange || event->type() == QEvent::StyleChange ||
+        event->type() == QEvent::PaletteChange) {
+        layout_plot();
+        update();
+    }
+}
 const ReportPlot::Point *ReportPlot::nearest(QPointF position, const Series **source) const {
     const Point *best = nullptr;
     double distance = std::numeric_limits<double>::infinity();

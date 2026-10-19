@@ -1163,6 +1163,129 @@ TEST(ReportPlot, AngleWrapDoesNotDrawFalseCrossingAndPixelReductionRetainsPeaks)
     EXPECT_GT(curve_pixels(plot.image(1)), 10); // A one-sample peak survives pixel reduction.
     EXPECT_EQ(data->table.rows().size(), 20000U);
 }
+TEST(ReportPlot, CachedPaintingMatchesExportAfterViewDataFontAndOverlayChanges) {
+    (void)test_app();
+    application::ReportDefinition definition;
+    definition.id = definition.name = "cache";
+    definition.format.time_scale = application::ReportTimeScale::tai;
+    std::vector<results::Column> columns{
+        {"object.id", "ID", ""}, {"object.name", "Object", ""}, {"time.epoch", "Time", "epoch"},
+        {"state.x", "X", "m"},   {"state.y", "Y", "m"},         {"state.vx", "Vx", "m/s"}};
+    std::vector<results::Row> rows;
+    for (const auto &object : {std::string("a"), std::string("b")})
+        for (std::int64_t i = 0; i < 2000; ++i)
+            rows.push_back({object, object, core::Epoch{i * 1'000'000'000},
+                            i == 1001 ? 10000.0 : 1000 * std::sin(i * .03), 800 * std::cos(i * .03),
+                            100 * std::sin(i * .02)});
+    rows[513][3] = std::monostate{};
+    rows[2513][3] = std::monostate{};
+    auto result = std::make_shared<runtime::ReportResult>(
+        runtime::ReportResult{definition, results::Table{columns, std::move(rows)}});
+    result->last = core::Epoch{1999'000'000'000};
+    const std::vector<ReportCurveField> fields{
+        {3, {}, "X", {}}, {4, {}, "Y", {}}, {5, {}, "Vx", {}}};
+    ReportPlot plot;
+    plot.resize(760, 560);
+    plot.set_result(result, fields);
+    plot.show();
+    QCoreApplication::processEvents();
+    const auto check = [&] {
+        QEvent leave(QEvent::Leave);
+        QCoreApplication::sendEvent(&plot, &leave);
+        const auto expected =
+            plot.image(plot.devicePixelRatioF()).convertToFormat(QImage::Format_RGB32);
+        // The screen cache must reproduce the independent export render, including
+        // first paint and reuse, without baking interaction overlays into the result.
+        for (int i = 0; i < 2; ++i) {
+            auto actual = plot.grab().toImage().convertToFormat(QImage::Format_RGB32);
+            actual.setDevicePixelRatio(expected.devicePixelRatio());
+            EXPECT_EQ(actual, expected);
+        }
+    };
+    check();
+    const auto exported = plot.image(1);
+    QMouseEvent hover(QEvent::MouseMove, QPointF(300, 180), QPointF(300, 180), Qt::NoButton,
+                      Qt::NoButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(&plot, &hover);
+    (void)plot.grab();
+    EXPECT_EQ(plot.image(1), exported);
+    check();
+    plot.zoom(.25);
+    check();
+    plot.set_fields({fields[2], fields[0]});
+    check();
+    plot.set_object("b");
+    check();
+    auto font = plot.font();
+    font.setPixelSize(17);
+    plot.setFont(font);
+    check();
+    plot.resize(430, 710);
+    QCoreApplication::processEvents();
+    check();
+    auto converted = std::make_shared<runtime::ReportResult>(*result);
+    converted->definition.format.units = application::ReportUnits::si;
+    plot.set_result(converted, fields, {}, true);
+    check();
+    plot.set_result(nullptr, fields);
+    check();
+    plot.set_result(result, fields);
+    check();
+    const auto grouped = plot.image(1);
+    std::vector<results::Row> interleaved;
+    for (std::size_t i = 0; i < 2000; ++i) {
+        interleaved.push_back(result->table.rows()[i]);
+        interleaved.push_back(result->table.rows()[i + 2000]);
+    }
+    auto reordered = std::make_shared<runtime::ReportResult>(*result);
+    reordered->table = results::Table{columns, std::move(interleaved)};
+    plot.set_result(reordered, fields);
+    EXPECT_EQ(plot.image(1), grouped);
+    plot.set_object("b");
+    const auto single = plot.image(1);
+    plot.set_result(result, fields, "b");
+    EXPECT_EQ(plot.image(1), single);
+}
+TEST(ReportPlot, IndexedExtremaMatchVisibleSamplesAcrossPartialBlocks) {
+    (void)test_app();
+    application::ReportDefinition definition;
+    definition.id = definition.name = "extrema";
+    definition.format.time_scale = application::ReportTimeScale::tai;
+    const std::vector<results::Column> columns{{"object.id", "ID", ""},
+                                               {"object.name", "Object", ""},
+                                               {"time.epoch", "Time", "epoch"},
+                                               {"state.x", "X", "m"}};
+    std::vector<results::Row> rows;
+    for (std::int64_t i = 0; i < 12000; ++i) {
+        const double spike = i == 127 || i == 128 || i == 7001 || i == 9001 ? 10000 : 0;
+        rows.push_back({std::string("a"), std::string("A"), core::Epoch{i * 1'000'000'000},
+                        100 * std::sin(i * .03) + spike});
+    }
+    const auto data = [&](std::vector<results::Row> samples) {
+        auto result = std::make_shared<runtime::ReportResult>(
+            runtime::ReportResult{definition, results::Table{columns, std::move(samples)}});
+        result->last = core::Epoch{11999'000'000'000};
+        return result;
+    };
+    ReportPlot full;
+    full.resize(650, 420);
+    full.set_result(data(rows), 3, "X (km)");
+    for (double factor : {.77, .5, .1}) {
+        full.reset_view();
+        full.zoom(factor);
+        const auto [left, right] = full.visible_interval();
+        const auto from = static_cast<std::size_t>(std::ceil(left)) - 1;
+        const auto to = static_cast<std::size_t>(std::floor(right)) + 2;
+        ReportPlot subset;
+        subset.resize(full.size());
+        subset.set_result(data({rows.begin() + from, rows.begin() + to}), 3, "X (km)");
+        subset.zoom(factor);
+        // The subset changes only the footer's first-sample timestamp. Axes and
+        // curves must match even when block alignment and excluded spikes differ.
+        const QRect chart(0, 0, full.width(), full.height() - 45);
+        EXPECT_EQ(full.image(1).copy(chart), subset.image(1).copy(chart)) << factor;
+    }
+}
 TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
     (void)test_app();
     if (!runtime::two_body_available())
