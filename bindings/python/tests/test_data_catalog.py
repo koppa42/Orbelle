@@ -4,6 +4,7 @@ from pathlib import Path
 import gc
 import hashlib
 import json
+import math
 import shutil
 import sqlite3
 import tempfile
@@ -51,32 +52,42 @@ class DataCatalogTests(unittest.TestCase):
     def test_acquisition_receipts_are_persistent_local_metadata(self):
         store = self.root / 'catalog'
         catalog = of.DataCatalog(store)
-        entry = catalog.install_eop(C04 / 'manifest.json')
-        lock = self.project(catalog.load_eop(entry.lock_sha256)).data_lock
-        self.assertEqual(entry.acquisition, of.DataAcquisition.unknown)
-        self.assertIsNone(entry.acquired_at_unix_seconds)
-        catalog.record_acquisition(entry.lock_sha256, of.DataAcquisition.bundled)
-        self.assertEqual(catalog.snapshots[0].acquisition, of.DataAcquisition.bundled)
-        self.assertIsNone(catalog.snapshots[0].acquired_at_unix_seconds)
-        before = int(time.time())
-        catalog.record_acquisition(entry.lock_sha256, of.DataAcquisition.downloaded)
-        receipt = catalog.snapshots[0]
-        self.assertGreaterEqual(receipt.acquired_at_unix_seconds, before)
-        self.assertLessEqual(receipt.acquired_at_unix_seconds, int(time.time()))
-        del catalog
+        try:
+            entry = catalog.install_eop(C04 / 'manifest.json')
+            lock = self.project(catalog.load_eop(entry.lock_sha256)).data_lock
+            self.assertEqual(entry.acquisition, of.DataAcquisition.unknown)
+            self.assertIsNone(entry.acquired_at_unix_seconds)
+            catalog.record_acquisition(entry.lock_sha256, of.DataAcquisition.bundled)
+            self.assertEqual(catalog.snapshots[0].acquisition, of.DataAcquisition.bundled)
+            self.assertIsNone(catalog.snapshots[0].acquired_at_unix_seconds)
+            # Windows Python <= 3.12 reads a coarser clock than native system_clock.
+            # Include its reported tick resolution before truncating to Unix seconds.
+            resolution = time.get_clock_info('time').resolution
+            before = time.time()
+            catalog.record_acquisition(entry.lock_sha256, of.DataAcquisition.downloaded)
+            receipt = catalog.snapshots[0]
+            after = time.time()
+            self.assertGreaterEqual(receipt.acquired_at_unix_seconds, math.floor(before - resolution))
+            self.assertLessEqual(receipt.acquired_at_unix_seconds, math.floor(after + resolution))
+        finally:
+            del catalog  # Release SQLite even when an assertion retains this traceback.
         reopened = of.DataCatalog(store)
-        # Startup re-registration of bundled bytes must not erase a real receipt.
-        reopened.record_acquisition(entry.lock_sha256, of.DataAcquisition.bundled)
-        again = reopened.install_eop(C04 / 'manifest.json')
-        self.assertEqual(again.acquisition, of.DataAcquisition.downloaded)
-        self.assertEqual(again.acquired_at_unix_seconds, receipt.acquired_at_unix_seconds)
-        self.assertEqual(again.lock_sha256, entry.lock_sha256)
-        self.assertEqual(self.project(reopened.resolve_eop(lock)).data_lock.sha256, lock.sha256)
-        reopened.record_acquisition(entry.lock_sha256, of.DataAcquisition.imported)
-        self.assertEqual(reopened.snapshots[0].acquisition, of.DataAcquisition.imported)
-        with self.assertRaises(RuntimeError):
-            reopened.record_acquisition('a' * 64, of.DataAcquisition.downloaded)
-        del reopened
+        try:
+            # Startup re-registration of bundled bytes must not erase a real receipt.
+            reopened.record_acquisition(entry.lock_sha256, of.DataAcquisition.bundled)
+            again = reopened.install_eop(C04 / 'manifest.json')
+            self.assertEqual(again.acquisition, of.DataAcquisition.downloaded)
+            self.assertEqual(again.acquired_at_unix_seconds, receipt.acquired_at_unix_seconds)
+            self.assertEqual(again.lock_sha256, entry.lock_sha256)
+            self.assertEqual(self.project(reopened.resolve_eop(lock)).data_lock.sha256, lock.sha256)
+            acquired_at = 1_700_000_123
+            reopened.record_acquisition(entry.lock_sha256, of.DataAcquisition.imported, acquired_at)
+            self.assertEqual(reopened.snapshots[0].acquisition, of.DataAcquisition.imported)
+            self.assertEqual(reopened.snapshots[0].acquired_at_unix_seconds, acquired_at)
+            with self.assertRaises(RuntimeError):
+                reopened.record_acquisition('a' * 64, of.DataAcquisition.downloaded)
+        finally:
+            del reopened
 
     def test_schema_one_migration_does_not_invent_acquisition_dates(self):
         store = self.root / 'catalog'
