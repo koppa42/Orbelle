@@ -251,43 +251,79 @@ void GroundMap::set_sun_direction(const std::array<double, 3> &direction) {
     if (!night_.isNull() && change < 0.00035)
         return;
     sun_direction_ = direction;
-    night_dirty_ = background_dirty_ = true;
-    update();
+    night_dirty_ = true;
+    if (lighting_ || show_sun_) {
+        background_dirty_ = true;
+        update();
+    }
 }
 void GroundMap::rebuild_night() {
-    const auto &direction = sun_direction_;
-    night_ = QImage(1440, 720, QImage::Format_ARGB32_Premultiplied);
+    const ProfileScope profile("map_night_ms");
+    night_ = ground_lighting_mask(sun_direction_);
+    night_dirty_ = false;
+}
+QImage ground_lighting_mask(const std::array<double, 3> &direction) {
+    const auto length = std::hypot(direction[0], direction[1], direction[2]);
+    if (!std::isfinite(length) || std::abs(length - 1) > 1e-6)
+        throw std::invalid_argument("Map sunlight requires a finite unit vector");
+    QImage image(1440, 720, QImage::Format_ARGB32_Premultiplied);
+    if (image.isNull())
+        throw std::bad_alloc();
     std::array<double, 1440> longitude_component;
-    for (int x = 0; x < night_.width(); ++x) {
-        const double lon = ((x + 0.5) / night_.width() * 360 - 180) * std::numbers::pi / 180;
+    for (int x = 0; x < image.width(); ++x) {
+        const double lon = ((x + 0.5) / image.width() * 360 - 180) * std::numbers::pi / 180;
         longitude_component[x] = std::cos(lon) * direction[0] + std::sin(lon) * direction[1];
     }
-    for (int y = 0; y < night_.height(); ++y) {
-        const double lat = (90 - (y + 0.5) / night_.height() * 180) * std::numbers::pi / 180;
-        const double cos_lat = std::cos(lat), axial = std::sin(lat) * direction[2];
-        auto *pixels = reinterpret_cast<QRgb *>(night_.scanLine(y));
-        for (int x = 0; x < night_.width(); ++x) {
-            const double cosine = cos_lat * longitude_component[x] + axial;
-            // Only twilight pixels need the smooth transition. The two constant
-            // regions are exactly the same as clamping the expression below.
-            if (cosine >= 0.003) {
-                pixels[x] = qRgb(255, 255, 255);
-                continue;
-            }
-            if (cosine <= -0.003) {
-                pixels[x] = qRgb(42, 64, 90);
-                continue;
-            }
-            // A narrow visual twilight transition around the geometric terminator.
-            const double t = std::clamp(0.5 - cosine / 0.006, 0.0, 1.0);
-            const double night = t * t * (3 - 2 * t);
-            // Multiply preserves local texture contrast and gives ice a blue night tone.
-            // White is the identity on the day side; the narrow edge is display antialiasing.
-            pixels[x] = qRgb(qRound(255 - 213 * night), qRound(255 - 191 * night),
-                             qRound(255 - 165 * night));
+    struct Run {
+        int first, last;
+        bool ascending;
+    };
+    std::vector<Run> runs;
+    int first = 0;
+    bool ascending = longitude_component[1] >= longitude_component[0];
+    for (int x = 2; x < image.width(); ++x) {
+        const bool next = longitude_component[x] >= longitude_component[x - 1];
+        if (next != ascending) {
+            runs.push_back({first, x, ascending});
+            first = x;
+            ascending = next;
         }
     }
-    night_dirty_ = false;
+    runs.push_back({first, image.width(), ascending});
+    for (int y = 0; y < image.height(); ++y) {
+        const double lat = (90 - (y + 0.5) / image.height() * 180) * std::numbers::pi / 180;
+        const double cos_lat = std::cos(lat), axial = std::sin(lat) * direction[2];
+        auto *pixels = reinterpret_cast<QRgb *>(image.scanLine(y));
+        for (const auto &run : runs) {
+            const auto begin = longitude_component.begin() + run.first;
+            const auto end = longitude_component.begin() + run.last;
+            // Longitude is monotone inside each run. Find the two twilight edges
+            // with the original cosine expression, then bulk-fill constant areas.
+            // No angular approximation or reduced-resolution mask is introduced.
+            const auto left = std::partition_point(begin, end, [&](double value) {
+                const double cosine = cos_lat * value + axial;
+                return run.ascending ? cosine <= -0.003 : cosine >= 0.003;
+            });
+            const auto right = std::partition_point(left, end, [&](double value) {
+                const double cosine = cos_lat * value + axial;
+                return run.ascending ? cosine < 0.003 : cosine > -0.003;
+            });
+            const auto from = left - longitude_component.begin();
+            const auto to = right - longitude_component.begin();
+            std::fill(pixels + run.first, pixels + from,
+                      run.ascending ? qRgb(42, 64, 90) : qRgb(255, 255, 255));
+            std::fill(pixels + to, pixels + run.last,
+                      run.ascending ? qRgb(255, 255, 255) : qRgb(42, 64, 90));
+            for (auto x = from; x < to; ++x) {
+                const double cosine = cos_lat * longitude_component[x] + axial;
+                const double t = std::clamp(0.5 - cosine / 0.006, 0.0, 1.0);
+                const double night = t * t * (3 - 2 * t);
+                pixels[x] = qRgb(qRound(255 - 213 * night), qRound(255 - 191 * night),
+                                 qRound(255 - 165 * night));
+            }
+        }
+    }
+    return image;
 }
 void GroundMap::set_lighting(bool enabled) {
     if (lighting_ == enabled)
@@ -378,6 +414,7 @@ void GroundMap::apply_zoom(double next, QPointF anchor, std::optional<QPointF> l
     pan_ = offset / next_width - fixed_location;
     zoom_ = next;
     clamp_pan();
+    imagery_raster_ = {};
     cancel_obsolete_raster();
     update();
 }
@@ -420,6 +457,7 @@ void GroundMap::resizeEvent(QResizeEvent *) {
     zoom_animation_.stop();
     finish_drag();
     clamp_pan();
+    imagery_raster_ = {};
     cancel_obsolete_raster();
 }
 void GroundMap::pan_by(QPointF delta) {
@@ -428,6 +466,7 @@ void GroundMap::pan_by(QPointF delta) {
     clamp_pan();
     if (pan_ == before)
         return;
+    imagery_raster_ = {};
     cancel_obsolete_raster();
     update();
 }
@@ -439,16 +478,40 @@ void GroundMap::invalidate_tracks(bool geometry_changed) {
     cancel_obsolete_raster();
     update();
 }
-void GroundMap::paint_background(QPainter &p, const QRectF &bounds) {
+void GroundMap::paint_background(QPainter &p, const QRectF &bounds, bool cache_imagery) {
     p.setRenderHint(QPainter::Antialiasing);
     p.setRenderHint(QPainter::SmoothPixmapTransform);
-    p.fillRect(bounds, theme::color(theme::chrome));
     const auto area = map_rect();
     const auto transform = map_transform();
     p.save();
     p.setClipRect(bounds);
-    p.drawImage(area, imagery_);
-    p.fillRect(area, QColor(4, 12, 24, 35));
+    const auto paint_imagery = [&](QPainter &target) {
+        target.setRenderHint(QPainter::SmoothPixmapTransform);
+        target.fillRect(bounds, theme::color(theme::chrome));
+        target.drawImage(area, imagery_);
+        target.fillRect(area, QColor(4, 12, 24, 35));
+    };
+    if (cache_imagery) {
+        // Sunlight changes while the viewport stays still. Keep its expensive
+        // imagery resampling separate, at the exact device-pixel sampling phase.
+        // A single viewport bounds memory; navigation draws directly until settled.
+        const auto ratio = devicePixelRatioF();
+        if (imagery_raster_.image.isNull() || imagery_raster_.transform != transform ||
+            imagery_raster_.bounds != bounds || imagery_raster_.ratio != ratio) {
+            const ProfileScope sample("map_imagery_ms");
+            imagery_raster_ = raster_request(96);
+            allocate_raster(imagery_raster_, QImage::Format_RGB32);
+            QPainter cache(&imagery_raster_.image);
+            cache.setRenderHint(QPainter::Antialiasing);
+            cache.translate(-bounds.topLeft());
+            cache.setClipRect(bounds);
+            paint_imagery(cache);
+        }
+        p.drawImage(bounds.topLeft(), imagery_raster_.image);
+    } else {
+        imagery_raster_ = {};
+        paint_imagery(p);
+    }
     if (lighting_) {
         if (night_dirty_)
             rebuild_night();
@@ -711,7 +774,7 @@ void GroundMap::paintEvent(QPaintEvent *event) {
         allocate_raster(background_, QImage::Format_RGB32);
         QPainter cache(&background_.image);
         cache.translate(-background_.bounds.topLeft());
-        paint_background(cache, background_.bounds);
+        paint_background(cache, background_.bounds, !navigating);
         background_dirty_ = false;
     }
     // One immutable worker request at a time; never queue intermediate viewports.

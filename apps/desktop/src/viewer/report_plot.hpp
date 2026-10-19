@@ -39,6 +39,7 @@ class ReportPlot final : public QWidget {
     void wheelEvent(QWheelEvent *) override;
     void keyPressEvent(QKeyEvent *) override;
     void leaveEvent(QEvent *) override;
+    void changeEvent(QEvent *) override;
 
   private:
     struct Point {
@@ -53,7 +54,9 @@ class ReportPlot final : public QWidget {
         std::size_t column, panel;
         std::vector<Point> points;
         QPainterPath path;
+        std::vector<std::pair<double, double>> extents;
     };
+    static constexpr std::size_t extent_block_size = 128;
     struct Panel {
         QString unit, title;
         std::vector<std::size_t> series;
@@ -67,6 +70,7 @@ class ReportPlot final : public QWidget {
     std::vector<Panel> panels_;
     std::string object_;
     std::vector<Series> series_;
+    QImage plot_image_;
     QRectF plot_;
     double full_left_ = 0, full_right_ = 1, left_ = 0, right_ = 1;
     QPointF cursor_, drag_start_;
@@ -76,7 +80,8 @@ class ReportPlot final : public QWidget {
     void rebuild(bool preserve_view = false);
     void layout_plot();
     void set_interval(double left, double right);
-    void draw(QPainter &painter, bool interaction) const;
+    void draw(QPainter &painter) const;
+    void draw_interaction(QPainter &painter) const;
     [[nodiscard]] QPointF pixel(const Point &point, const Series &series) const;
     [[nodiscard]] bool inside_plot(QPointF point) const;
     [[nodiscard]] double time_at(double x) const;

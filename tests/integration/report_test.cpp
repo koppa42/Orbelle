@@ -32,6 +32,23 @@ std::string read(const std::filesystem::path &path) {
     std::ifstream input(path, std::ios::binary);
     return {std::istreambuf_iterator<char>{input}, {}};
 }
+class CountedFrames final : public core::IFrameProvider {
+  public:
+    std::shared_ptr<const core::IFrameProvider> source = runtime::make_frame_provider();
+    mutable std::size_t builds = 0;
+    bool fail = false;
+    core::PositionRotation gcrf_to_itrf(core::Epoch epoch,
+                                        const core::EarthOrientationSample &eop) const override {
+        return source->gcrf_to_itrf(epoch, eop);
+    }
+    core::StateTransform gcrf_to_itrf_state(core::Epoch epoch,
+                                            const core::EarthOrientationState &eop) const override {
+        ++builds;
+        if (fail)
+            throw std::runtime_error("Frame source unavailable");
+        return source->gcrf_to_itrf_state(epoch, eop);
+    }
+};
 } // namespace
 TEST(Reports, SamplesIntegerNanosecondsAndIncludesExactStopOnce) {
     auto c = stations();
@@ -126,6 +143,61 @@ TEST(Reports, FrameConversionRetainsEarthRotationVelocityAndConfirmedData) {
     c.project.earth_orientation = c.eop->data_info();
     c.project.earth_orientation->time_data.sha256[0] = 'x';
     EXPECT_THROW((void)runtime::generate_report(c, d), std::exception);
+}
+TEST(Reports, ReusesExactFrameTransformsAcrossObjectsAndBoundsCachePerQuery) {
+    if (!runtime::time_frames_available())
+        GTEST_SKIP();
+    // Cross both the 512-row batch and bounded transform-cache boundaries,
+    // including a final subsecond epoch that must not alias the previous row.
+    auto c = stations(8192'500'000'000);
+    c.project.ground_stations.push_back({"other", "Other station", {.7, -.4, 100}});
+    c.time = runtime::make_builtin_time_provider();
+    c.eop = runtime::load_eop_snapshot(ORBITFORGE_REPORT_EOP);
+    c.project.earth_orientation = c.eop->data_info();
+    const auto frames = std::make_shared<CountedFrames>();
+    c.frames = frames;
+    auto d = definition();
+    d.query.frame = core::FrameId::gcrf;
+    const auto result = runtime::generate_report(c, d);
+    constexpr std::size_t samples = 8194;
+    ASSERT_EQ(result.table.rows().size(), samples * 2);
+    EXPECT_GT(frames->builds, samples); // A bounded cache, not every epoch retained.
+    EXPECT_LT(frames->builds, samples * 2);
+    for (std::size_t object = 0; object < 2; ++object) {
+        const core::GroundStation station(c.project.ground_stations[object].location);
+        for (const auto sample : {0U, 511U, 512U, 8191U, 8192U, 8193U}) {
+            const auto &row = result.table.rows()[object * samples + sample];
+            EXPECT_EQ(std::get<std::string>(row[0]), c.project.ground_stations[object].object_id);
+            const auto epoch = std::get<core::Epoch>(row[2]);
+            const auto fixed = station.state_at(epoch);
+            const auto expected = core::transform_state(fixed, core::FrameId::gcrf, *frames->source,
+                                                        c.eop->at(epoch));
+            for (std::size_t axis = 0; axis < 3; ++axis) {
+                EXPECT_DOUBLE_EQ(std::get<double>(row[axis + 4]), expected.position_m[axis]);
+                EXPECT_DOUBLE_EQ(std::get<double>(row[axis + 7]), expected.velocity_mps[axis]);
+            }
+        }
+    }
+    d.query.follow_scenario = false;
+    d.query.first = core::Epoch{0};
+    d.query.last = core::Epoch{513'000'000'000};
+    frames->builds = 0;
+    EXPECT_EQ(runtime::generate_report(c, d).table.rows().size(), 514U * 2);
+    EXPECT_EQ(frames->builds, 514U);
+    frames->builds = 0;
+    EXPECT_EQ(runtime::generate_report(c, d).table.rows().size(), 514U * 2);
+    EXPECT_EQ(frames->builds, 514U); // No reuse across report executions.
+    frames->fail = true;
+    EXPECT_THROW((void)runtime::generate_report(c, d), std::runtime_error);
+    frames->fail = false;
+    std::atomic_bool cancel = false;
+    EXPECT_THROW((void)runtime::generate_report(c, d, &cancel,
+                                                [&](std::size_t completed, std::size_t) {
+                                                    if (completed)
+                                                        cancel = true;
+                                                }),
+                 runtime::ReportCancelled);
+    EXPECT_EQ(runtime::generate_report(c, d).table.rows().size(), 514U * 2);
 }
 TEST(Reports, UtcLeapSecondTaiAndTtFormattingPreserveEpoch) {
     if (!runtime::time_frames_available())

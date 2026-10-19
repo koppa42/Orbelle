@@ -16,6 +16,15 @@ orbitforge_warnings(orbitforge_compute_benchmark)
 orbitforge_sanitizers(orbitforge_compute_benchmark)
 orbitforge_copy_runtime_dlls(orbitforge_compute_benchmark)
 
+add_executable(orbitforge_algorithm_benchmark EXCLUDE_FROM_ALL algorithms.cpp)
+target_link_libraries(orbitforge_algorithm_benchmark PRIVATE
+    OrbitForge::Runtime nlohmann_json::nlohmann_json)
+target_compile_definitions(orbitforge_algorithm_benchmark PRIVATE
+    ORBITFORGE_BENCHMARK_CONFIG="$<CONFIG>")
+orbitforge_warnings(orbitforge_algorithm_benchmark)
+orbitforge_sanitizers(orbitforge_algorithm_benchmark)
+orbitforge_copy_runtime_dlls(orbitforge_algorithm_benchmark)
+
 add_executable(orbitforge_workflow_benchmark EXCLUDE_FROM_ALL workflows.cpp)
 target_link_libraries(orbitforge_workflow_benchmark PRIVATE
     OrbitForge::Runtime nlohmann_json::nlohmann_json)

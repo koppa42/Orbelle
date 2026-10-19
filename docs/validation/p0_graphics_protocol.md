@@ -33,6 +33,21 @@ python tools/validation/run_workbench_profile.py --executable out/build/desktop-
 
 比较 `map_paint_ms` 的平均值及 P95，并分别查看平移、播放、缩放和并排播放。`map_background_ms`、`map_composite_ms`、轨迹工作线程耗时用于定位开销；悬停只重绘坐标栏，不应与整幅地图绘制混在一起比较。缩放后的 `map_quality_restored_after_zoom` 必须为真。窗口隐藏、缓存更新、字体和 DPI 变化另做正确性检查。这些是 GUI CPU 计时，不能当作 GPU 帧时间、输入到屏幕延迟或万星验收结果。
 
+## 报告曲线 CPU 对照
+
+大数据报告使用显式诊断目标，不加入常规构建或 CTest 的耗时门槛：
+
+```powershell
+cmake --build --preset desktop-graphics --target orbitforge_report_plot_profile
+$env:PATH = "$PWD/out/dependencies/installed/x64-windows/bin;$env:PATH"
+$env:QT_PLUGIN_PATH = "$PWD/out/dependencies/installed/x64-windows/Qt6/plugins"
+$env:QT_QPA_PLATFORM = "windows"
+$env:QT_SCALE_FACTOR = "1"
+out/build/desktop-graphics/apps/desktop/Release/orbitforge_report_plot_profile.exe out/validation/report-profile-before
+```
+
+固定负载为 12 个对象、各 20,000 个时刻、6 个字段（72 条曲线、2 个单位分区），包含单样本尖峰。工具测量结果重建、缩放布局与鼠标悬停加抓图的 GUI CPU 时间；缩放指标不含后续栅格绘制，抓图指标不等于真实输入到显示延迟。每项先预热，再保存样本数、平均值、中位数和 P95，同时输出全范围／局部范围 PNG。比较必须使用同一台机器、Release 配置、窗口大小与实际 DPI，并检查图片、峰值及断线没有回退；新输出目录不可覆盖。日志和程序散列另存到本次 `out/validation/`。单次采样不代表通用性能承诺，建议重复运行确认收益稳定。
+
 ## 性能验收保留项
 
 正式性能负载仍以 `benchmarks/scenarios/windows_10k_two_views.json` 为准：10,000 颗动态卫星，两个各 1280×720 的实际渲染视窗；每视窗固定最多 100 条轨迹、200 个标签。实际轨迹细分、标签规则、地理数据/LOD、采样时长和重复次数须在测量前写入场景清单。

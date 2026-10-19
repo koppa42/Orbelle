@@ -97,6 +97,23 @@ TEST(Propagators, NewModelsRoundTripAndReportsUseConvertedStates) {
                         1e-8);
         }
     }
+    // Multiple native frames share epochs in the report cache. Compare each
+    // cached object with its independently generated single-object report.
+    d.query.scope = application::ReportScope::all_compatible;
+    d.query.object_ids.clear();
+    for (auto frame : {core::FrameId::gcrf, core::FrameId::itrf}) {
+        d.query.frame = frame;
+        const auto combined = runtime::generate_report({restored, time, frames, eop}, d);
+        ASSERT_EQ(combined.table.rows().size(), 4U);
+        for (std::size_t i = 0; i < restored.satellites.size(); ++i) {
+            auto single = d;
+            single.query.scope = application::ReportScope::objects;
+            single.query.object_ids = {restored.satellites[i].orbit.object_id};
+            const auto expected = runtime::generate_report({restored, time, frames, eop}, single);
+            EXPECT_EQ(combined.table.rows()[i * 2], expected.table.rows()[0]);
+            EXPECT_EQ(combined.table.rows()[i * 2 + 1], expected.table.rows()[1]);
+        }
+    }
     EXPECT_THROW((void)runtime::generate_report({restored, time, frames, {}}, d),
                  std::invalid_argument);
     const auto hash = runtime::report_input_sha256(project);
