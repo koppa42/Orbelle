@@ -12,8 +12,42 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include <limits>
+#include <numbers>
 
 namespace orbitforge::desktop {
+TEST(GroundLightingMask, MatchesPerPixelReferenceAtPolesSeamsAndTwilight) {
+    for (int sample = 0; sample < 20; ++sample) {
+        const double longitude = sample * std::numbers::pi / 5;
+        const double latitude = (sample % 5 - 2) * std::numbers::pi / 4;
+        const std::array<double, 3> direction{std::cos(latitude) * std::cos(longitude),
+                                              std::cos(latitude) * std::sin(longitude),
+                                              std::sin(latitude)};
+        const auto actual = ground_lighting_mask(direction);
+        QImage reference(1440, 720, QImage::Format_ARGB32_Premultiplied);
+        std::array<double, 1440> horizontal;
+        for (int x = 0; x < reference.width(); ++x) {
+            const double lon = ((x + 0.5) / reference.width() * 360 - 180) * std::numbers::pi / 180;
+            horizontal[x] = std::cos(lon) * direction[0] + std::sin(lon) * direction[1];
+        }
+        // Deliberately retain the old exhaustive pixel evaluation as an oracle.
+        for (int y = 0; y < reference.height(); ++y) {
+            const double lat = (90 - (y + 0.5) / reference.height() * 180) * std::numbers::pi / 180;
+            const double cosine_latitude = std::cos(lat), axial = std::sin(lat) * direction[2];
+            auto *pixels = reinterpret_cast<QRgb *>(reference.scanLine(y));
+            for (int x = 0; x < reference.width(); ++x) {
+                const double cosine = cosine_latitude * horizontal[x] + axial;
+                const double t = std::clamp(0.5 - cosine / 0.006, 0.0, 1.0);
+                const double night = t * t * (3 - 2 * t);
+                pixels[x] = qRgb(qRound(255 - 213 * night), qRound(255 - 191 * night),
+                                 qRound(255 - 165 * night));
+            }
+        }
+        EXPECT_EQ(actual, reference) << "direction " << sample;
+    }
+    EXPECT_THROW(ground_lighting_mask({0, 0, 0}), std::invalid_argument);
+    EXPECT_THROW(ground_lighting_mask({std::numeric_limits<double>::infinity(), 0, 0}),
+                 std::invalid_argument);
+}
 class GroundMapTest : public ::testing::Test {
   protected:
     void SetUp() override {
@@ -291,6 +325,38 @@ TEST_F(GroundMapTest, HiddenLightingAndSameEpochMarkerChangesAreNotStale) {
     EXPECT_EQ(cached.epoch(), core::Epoch{10});
     EXPECT_NE(pixels(cached), original);
     EXPECT_EQ(pixels(cached), pixels(fresh));
+}
+TEST_F(GroundMapTest, PlaybackLightingAndDisabledSunLayersKeepImageryAndLatestDirection) {
+    GroundMap cached(imagery_);
+    configure(cached);
+    const auto original = pixels(cached);
+    for (const auto &direction :
+         {std::array<double, 3>{0, 0.8, 0.6}, std::array<double, 3>{0, 0, 1},
+          std::array<double, 3>{-0.8, 0, -0.6}}) {
+        GroundMap fresh(imagery_);
+        configure(fresh);
+        fresh.set_sun_direction(direction);
+        cached.set_sun_direction(direction);
+        EXPECT_NE(pixels(cached), original);
+        expect_same_pixels(pixels(cached), pixels(fresh));
+    }
+    cached.set_lighting(false);
+    cached.set_sun_visible(false);
+    const auto unlit = pixels(cached);
+    cached.set_sun_direction({0, -1, 0});
+    EXPECT_EQ(pixels(cached), unlit);
+    cached.set_lighting(true);
+    cached.set_sun_visible(true);
+    GroundMap fresh(imagery_);
+    configure(fresh);
+    fresh.set_sun_direction({0, -1, 0});
+    expect_same_pixels(pixels(cached), pixels(fresh));
+    for (auto *view : {&cached, &fresh}) {
+        view->zoom(1.37, QPointF(220, 170));
+        view->resize(731, 427);
+        view->set_sun_direction({0.8, 0, 0.6});
+    }
+    expect_same_pixels(pixels(cached), pixels(fresh));
 }
 TEST_F(GroundMapTest, ObsoleteWorkerCannotRestoreAReplacedOrbit) {
     GroundMap map(imagery_), fresh(imagery_);
