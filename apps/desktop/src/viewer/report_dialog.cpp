@@ -297,6 +297,14 @@ class ReportModel final : public QAbstractTableModel {
         }
         if (role != Qt::DisplayRole && role != Qt::ToolTipRole)
             return {};
+        // Format the converted number once. Going through full-precision text and
+        // parsing it back for every visible cell adds stream/locale work on scroll.
+        if (role == Qt::DisplayRole && std::holds_alternative<double>(cell)) {
+            const auto value = *result->numeric_value(index.row(), index.column());
+            return digits == 9 && report_uses_event_search(result->definition.query.kind)
+                       ? QString::number(value, 'f', 3)
+                       : QString::number(value, 'g', digits);
+        }
         auto value = text(result->cell_text(index.row(), index.column()));
         const auto &field_id = result->table.columns().at(index.column()).id;
         bool clipped = false;
@@ -317,10 +325,6 @@ class ReportModel final : public QAbstractTableModel {
         }
         if (role == Qt::ToolTipRole && clipped)
             return value + QStringLiteral("\n此边界由分析区间截断，不是实际状态切换的时刻。");
-        if (role == Qt::DisplayRole && std::holds_alternative<double>(cell))
-            return digits == 9 && report_uses_event_search(result->definition.query.kind)
-                       ? QString::number(value.toDouble(), 'f', 3)
-                       : QString::number(value.toDouble(), 'g', digits);
         if (role == Qt::DisplayRole && std::holds_alternative<core::Epoch>(cell)) {
             if (value.endsWith('Z'))
                 value.chop(1);

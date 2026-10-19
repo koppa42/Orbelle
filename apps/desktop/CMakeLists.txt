@@ -156,6 +156,14 @@ if(ORBITFORGE_WITH_VSG)
             TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbitforge_desktop_tests TIMEOUT 20
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
+        # Explicit diagnostic target; excluded from ordinary builds and CTest timing gates.
+        add_executable(orbitforge_report_plot_profile EXCLUDE_FROM_ALL
+            ../../tools/validation/report_plot_profile.cpp
+            src/viewer/report_plot.cpp src/viewer/workbench_style.cpp)
+        target_include_directories(orbitforge_report_plot_profile PRIVATE src/viewer)
+        target_link_libraries(orbitforge_report_plot_profile PRIVATE OrbitForge::Runtime Qt6::Widgets)
+        orbitforge_warnings(orbitforge_report_plot_profile)
+        orbitforge_copy_runtime_dlls(orbitforge_report_plot_profile)
         add_executable(orbitforge_ground_map_tests tests/ground_map_test.cpp
             src/viewer/ground_map.cpp src/viewer/workbench_profile.cpp)
         target_link_libraries(orbitforge_ground_map_tests PRIVATE

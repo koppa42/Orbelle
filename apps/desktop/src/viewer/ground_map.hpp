@@ -19,6 +19,8 @@
 namespace orbitforge::desktop {
 // Display projection only: ITRF Cartesian positions onto the WGS84 reference ellipsoid.
 QPointF ground_coordinates(const std::array<double, 3> &position_m);
+// Opaque multiplicative day/night display mask; input is an ITRF unit direction.
+QImage ground_lighting_mask(const std::array<double, 3> &sun_direction);
 QPainterPath ground_path(std::span<const QPointF> longitude_latitude);
 inline QPainterPath ground_path(std::initializer_list<QPointF> points) {
     return ground_path(std::span<const QPointF>(points.begin(), points.size()));
@@ -99,7 +101,7 @@ class GroundMap final : public QWidget {
     void drag_to(QPointF position);
     void finish_drag(bool restore = false);
     void rebuild_night();
-    void paint_background(QPainter &p, const QRectF &bounds);
+    void paint_background(QPainter &p, const QRectF &bounds, bool cache_imagery);
     void paint_grid(QPainter &p);
     void paint_axes(QPainter &p);
     void invalidate_tracks(bool geometry_changed = true);
@@ -151,7 +153,7 @@ class GroundMap final : public QWidget {
     std::uint64_t geometry_revision_ = 0;
     QImage imagery_;
     QImage night_;
-    Raster background_, trails_, preview_, pending_view_;
+    Raster background_, imagery_raster_, trails_, preview_, pending_view_;
     bool background_dirty_ = true, trails_dirty_ = true, night_dirty_ = true;
     std::array<double, 3> sun_direction_{1, 0, 0};
     std::optional<QPointF> cursor_position_;
