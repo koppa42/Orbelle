@@ -267,7 +267,8 @@ TEST(DataCenterDialog, GroupedSourcesKeepDownloadStateAndPriorityIndependent) {
             EXPECT_TRUE(badge->text().contains(QStringLiteral("完整包")));
             EXPECT_FALSE(progress->isVisible());
             EXPECT_FALSE(cancel->isVisible());
-            EXPECT_TRUE(checked->text().contains(QStringLiteral("检查成功")));
+            EXPECT_TRUE(checked->text().contains(QStringLiteral("已下载更新")) ||
+                        checked->text().contains(QStringLiteral("已是最新")));
             EXPECT_TRUE(download->isEnabled());
             downloaded_at = catalog.inventory()[0].acquired_at;
             EXPECT_TRUE(downloaded_at);
@@ -288,7 +289,7 @@ TEST(DataCenterDialog, GroupedSourcesKeepDownloadStateAndPriorityIndependent) {
             break;
         }
         case 3:
-            if (catalog.downloading() || !checked->text().contains(QStringLiteral("无新内容")))
+            if (catalog.downloading() || !checked->text().contains(QStringLiteral("已是最新")))
                 break;
             EXPECT_EQ(catalog.received_bytes(), 0);
             EXPECT_EQ(catalog.inventory()[0].acquired_at, downloaded_at);

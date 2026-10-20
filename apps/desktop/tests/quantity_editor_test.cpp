@@ -2322,7 +2322,7 @@ TEST_F(QuantityTest, HpopWeatherFileSwitchesFieldsRetainsDraftsAndReopens) {
         QKeyEvent previous(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
         QApplication::sendEvent(update, &previous);
         EXPECT_EQ(update->currentIndex(), 2);
-        EXPECT_TRUE(update->currentText().contains("Interp"));
+        EXPECT_EQ(update->currentText(), QStringLiteral("三小时插值（保持均值）"));
         auto *geomagnetic_source = dialog->findChild<QComboBox *>("hpopDragGeomagneticSource");
         geomagnetic_source->setCurrentIndex(1);
         selection->setCurrentIndex(selection->findData("cssi"));

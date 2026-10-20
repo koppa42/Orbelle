@@ -238,7 +238,7 @@ TEST(ReportDialog, StalePreparationGenerationAndCancellationPreservePublishedRes
     dialog.update_project(changed, data.time());
     release(project);
     EXPECT_TRUE(generate->isEnabled());
-    EXPECT_TRUE(status->text().contains(QStringLiteral("准备期间已变化")));
+    EXPECT_TRUE(status->text().contains(QStringLiteral("准备期间已改变")));
     EXPECT_EQ(publications, 1);
     dialog.update_project(project, data.time());
 
@@ -250,7 +250,7 @@ TEST(ReportDialog, StalePreparationGenerationAndCancellationPreservePublishedRes
     dialog.update_project(project, data.time());
     wait_for_report(dialog);
     EXPECT_EQ(publications, 1);
-    EXPECT_TRUE(status->text().contains(QStringLiteral("未发布过期报告")));
+    EXPECT_TRUE(status->text().contains(QStringLiteral("本次生成的结果不再适用")));
     EXPECT_EQ(table->model()->data(table->model()->index(0, 3)), original);
 
     generate->click();
@@ -275,7 +275,7 @@ TEST(ReportDialog, StalePreparationGenerationAndCancellationPreservePublishedRes
     dialog.update_project(project, data.time());
     wait_for_report(dialog);
     EXPECT_EQ(publications, 2);
-    EXPECT_TRUE(status->text().contains(QStringLiteral("未发布过期报告")));
+    EXPECT_TRUE(status->text().contains(QStringLiteral("本次生成的结果不再适用")));
     EXPECT_EQ(table->model()->rowCount(), 3);
 }
 TEST(ReportDialog, AnalysisDoesNotSilentlyAcceptChangedDataAndUsesConfirmedPreflight) {
