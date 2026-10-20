@@ -31,6 +31,114 @@ HpopOptions options(HpopIntegrator method) {
     return o;
 }
 } // namespace
+TEST(HpopCovarianceSampling, ContinuedCoastsMatchIndependentOrekitStateAndCovariance) {
+    std::ifstream input(ORBITFORGE_UNIVERSAL_KEPLER_STM_REFERENCE);
+    ASSERT_TRUE(input);
+    double maximum = 0;
+    std::size_t cases = 0;
+    for (std::string line; std::getline(input, line);) {
+        if (line.empty() || line[0] == '#')
+            continue;
+        std::istringstream row(line);
+        int id;
+        double mu, seconds;
+        Vector initial{}, expected{};
+        Matrix phi{}, expected_covariance{};
+        row >> id >> mu >> seconds;
+        for (auto &x : initial)
+            row >> x;
+        for (auto &x : expected)
+            row >> x;
+        for (auto &r : phi)
+            for (auto &x : r)
+                row >> x;
+        ASSERT_TRUE(row);
+        if (id != 0 && id != 7 && id != 9 && id != 14 && id != 17 && id != 22 && id != 57 &&
+            id != 62)
+            continue;
+        HpopCovarianceInput covariance;
+        for (std::size_t i = 0; i < 6; ++i)
+            covariance.state[i][i] = i < 3 ? 10000 : 1;
+        covariance.drag = HpopConsiderParameter{1e-4, {.1, 0, 0, 0, 0, 0}};
+        covariance.srp = HpopConsiderParameter{2e-4, {0, -.1, 0, 0, 0, 0}};
+        covariance.drag_srp_covariance = 5e-5;
+        for (std::size_t i = 0; i < 6; ++i)
+            for (std::size_t j = 0; j < 6; ++j)
+                for (std::size_t k = 0; k < 6; ++k)
+                    expected_covariance[i][j] += phi[i][k] * covariance.state[k][k] * phi[j][k];
+        for (auto method : methods)
+            for (bool regular : {false, true}) {
+                if (regular && (id == 57 || id == 62))
+                    continue;
+                for (bool vop : {false, true}) {
+                    if (vop && method != HpopIntegrator::rkf78 &&
+                        method != HpopIntegrator::bulirsch_stoer)
+                        continue;
+                    SCOPED_TRACE(::testing::Message()
+                                 << id << " method=" << static_cast<int>(method)
+                                 << " regular=" << regular << " vop=" << vop);
+                    auto o = options(method);
+                    // Resolve day-long arcs tightly; GJ deliberately retains a large
+                    // fixed step to exercise its second-order variational history.
+                    if (id == 0 || id == 7) {
+                        o.fixed_step_seconds = method == HpopIntegrator::gauss_jackson ? 60 : 2;
+                        o.relative_tolerance = 1e-14;
+                        o.position_tolerance_m = 1e-8;
+                        o.velocity_tolerance_mps = 1e-11;
+                        o.max_step_seconds = 20;
+                    }
+                    o.gravity_mu = mu;
+                    o.vop = vop;
+                    o.time_regularization = regular;
+                    o.steps_per_orbit = method == HpopIntegrator::rk4 ? 6000 : 600;
+                    if ((id == 0 || id == 7) && method == HpopIntegrator::gauss_jackson)
+                        o.steps_per_orbit = 120;
+                    o.regularization_exponent = 1.5;
+                    const auto ns = static_cast<std::int64_t>(seconds * 1e9);
+                    // Deliberately unordered, with a duplicate and exact initial epoch.
+                    const std::vector<Epoch> times{Epoch{ns},     Epoch{0},          Epoch{ns / 7},
+                                                   Epoch{ns / 3}, Epoch{ns * 2 / 3}, Epoch{ns}};
+                    std::vector<HpopCovarianceState> results(
+                        times.size(), HpopCovarianceState{{cartesian(initial)}, {}, {}});
+                    std::vector<bool> seen(times.size());
+                    ASSERT_NO_THROW(sample_hpop_covariance(
+                        cartesian(initial), times, covariance,
+                        [&](std::size_t index, const HpopCovarianceState &value) {
+                            EXPECT_FALSE(seen.at(index));
+                            seen[index] = true;
+                            EXPECT_EQ(value.variational.state.epoch, times[index]);
+                            results[index] = value;
+                        },
+                        o));
+                    EXPECT_TRUE(std::ranges::all_of(seen, [](bool v) { return v; }));
+                    EXPECT_EQ(results[0].covariance, results.back().covariance);
+                    EXPECT_EQ(results[1].covariance,
+                              propagate_hpop_covariance(cartesian(initial), Epoch{0}, covariance, o)
+                                  .covariance);
+                    const auto &actual = results.front();
+                    for (std::size_t i = 0; i < 6; ++i) {
+                        const double state = i < 3 ? actual.variational.state.position_m[i]
+                                                   : actual.variational.state.velocity_mps[i - 3];
+                        EXPECT_LE(std::abs(state - expected[i]), i < 3 ? 5e-4 : 5e-7);
+                        for (std::size_t j = 0; j < 6; ++j) {
+                            const double error = std::abs(actual.covariance.state[i][j] -
+                                                          expected_covariance[i][j]) /
+                                                 std::sqrt(expected_covariance[i][i]) /
+                                                 std::sqrt(expected_covariance[j][j]);
+                            maximum = std::max(maximum, error);
+                            EXPECT_LE(error, 3e-9);
+                        }
+                    }
+                    EXPECT_DOUBLE_EQ(actual.covariance.drag->variance, covariance.drag->variance);
+                    EXPECT_DOUBLE_EQ(actual.covariance.drag_srp_covariance,
+                                     covariance.drag_srp_covariance);
+                    ++cases;
+                }
+            }
+    }
+    EXPECT_EQ(cases, 98U);
+    RecordProperty("max_normalized_covariance_error", maximum);
+}
 TEST(HpopVariational, KeplerStmMatchesIndependentOrekitAcrossIntegratorsAndTimeCoordinates) {
     std::ifstream input(ORBITFORGE_UNIVERSAL_KEPLER_STM_REFERENCE);
     ASSERT_TRUE(input);
@@ -209,6 +317,98 @@ TEST(HpopVariational, GaussJacksonRotatedOrekitReferencesConvergeAcrossZeroCompo
     EXPECT_EQ(count, 120U);
     RecordProperty("cases", count);
     RecordProperty("max_scaled_stm_error", maximum);
+}
+TEST(HpopVariational, GaussJacksonDayLongLargeStepsMatchIndependentOrekit) {
+    std::ifstream input(ORBITFORGE_UNIVERSAL_KEPLER_STM_REFERENCE);
+    ASSERT_TRUE(input);
+    std::size_t cases = 0;
+    double maximum_state = 0, maximum_stm = 0, maximum_covariance = 0, coarse_stm = 0;
+    for (std::string line; std::getline(input, line);) {
+        if (line.empty() || line[0] == '#')
+            continue;
+        std::istringstream row(line);
+        int id;
+        double mu, seconds;
+        Vector initial{}, expected{};
+        Matrix phi{}, expected_covariance{};
+        row >> id >> mu >> seconds;
+        for (auto &x : initial)
+            row >> x;
+        for (auto &x : expected)
+            row >> x;
+        for (auto &r : phi)
+            for (auto &x : r)
+                row >> x;
+        ASSERT_TRUE(row);
+        if (id != 0 && id != 7)
+            continue; // Independently integrated +/- one day, circular 7000 km orbit.
+        HpopCovarianceInput covariance;
+        for (std::size_t i = 0; i < 6; ++i)
+            covariance.state[i][i] = i < 3 ? 10000 : 1;
+        for (std::size_t i = 0; i < 6; ++i)
+            for (std::size_t j = 0; j < 6; ++j)
+                for (std::size_t k = 0; k < 6; ++k)
+                    expected_covariance[i][j] += phi[i][k] * covariance.state[k][k] * phi[j][k];
+        for (auto correction : {HpopCorrection::full, HpopCorrection::pseudo})
+            for (int grid : {20, 40, 60, -120, -240}) {
+                SCOPED_TRACE(::testing::Message() << id << " grid=" << grid << " correction="
+                                                  << static_cast<int>(correction));
+                auto o = options(HpopIntegrator::gauss_jackson);
+                o.gravity_mu = mu;
+                o.correction = correction;
+                o.time_regularization = grid < 0;
+                o.fixed_step_seconds = grid > 0 ? grid : 20;
+                o.steps_per_orbit = grid < 0 ? -grid : 120;
+                HpopCovarianceState actual{{cartesian(initial)}, {}, {}};
+                ASSERT_NO_THROW(actual = propagate_hpop_covariance(
+                                    cartesian(initial),
+                                    Epoch{static_cast<std::int64_t>(seconds * 1e9)}, covariance,
+                                    o));
+                double case_stm = 0;
+                for (std::size_t i = 0; i < 6; ++i) {
+                    const double value = i < 3 ? actual.variational.state.position_m[i]
+                                               : actual.variational.state.velocity_mps[i - 3];
+                    const double error = std::abs(value - expected[i]);
+                    EXPECT_LE(error, i < 3 ? 5e-4 : 5e-7);
+                    maximum_state = std::max(maximum_state, error * (i < 3 ? 1 : 1000));
+                    for (std::size_t j = 0; j < 6; ++j) {
+                        const double stm_error =
+                            std::abs(actual.variational.state_transition[i][j] - phi[i][j]) *
+                            scale(j) / scale(i);
+                        const double covariance_error =
+                            std::abs(actual.covariance.state[i][j] - expected_covariance[i][j]) /
+                            std::sqrt(expected_covariance[i][i]) /
+                            std::sqrt(expected_covariance[j][j]);
+                        EXPECT_LE(stm_error, 5e-9);
+                        EXPECT_LE(covariance_error, 3e-9);
+                        maximum_stm = std::max(maximum_stm, stm_error);
+                        case_stm = std::max(case_stm, stm_error);
+                        maximum_covariance = std::max(maximum_covariance, covariance_error);
+                    }
+                }
+                if (grid == 60) {
+                    // An intentionally coarser step probes truncation convergence,
+                    // not a precision guarantee for arbitrary fixed step sizes.
+                    o.fixed_step_seconds = 120;
+                    const auto coarse = propagate_hpop_variational(
+                        cartesian(initial), Epoch{static_cast<std::int64_t>(seconds * 1e9)}, o);
+                    double error = 0;
+                    for (std::size_t i = 0; i < 6; ++i)
+                        for (std::size_t j = 0; j < 6; ++j)
+                            error = std::max(error,
+                                             std::abs(coarse.state_transition[i][j] - phi[i][j]) *
+                                                 scale(j) / scale(i));
+                    EXPECT_LT(case_stm, error * .1);
+                    coarse_stm = std::max(coarse_stm, error);
+                }
+                ++cases;
+            }
+    }
+    EXPECT_EQ(cases, 20U);
+    RecordProperty("max_state_error_m_or_mps_times_1000", maximum_state);
+    RecordProperty("max_scaled_stm_error", maximum_stm);
+    RecordProperty("max_normalized_covariance_error", maximum_covariance);
+    RecordProperty("max_coarse_120s_scaled_stm_error", coarse_stm);
 }
 TEST(HpopVariational, InitialIdentityValidationAndCancellationDoNotPublishPartialResults) {
     const auto initial = cartesian({7e6, 1e6, 2e5, -1000, 7200, 1200});
@@ -623,6 +823,15 @@ TEST(HpopCovariance, JointPropagationMatchesIndependentOrekitNumpyAndHighPrecisi
         };
         compare(algebra, false);
         compare(actual, true);
+        const auto end = reference.variational.state.epoch;
+        sample_hpop_covariance(
+            cartesian(reference.initial),
+            {Epoch{end.tai_nanoseconds() / 3}, Epoch{end.tai_nanoseconds() * 2 / 3}, end}, input,
+            [&](std::size_t index, const HpopCovarianceState &value) {
+                if (index == 2)
+                    compare(value, true);
+            },
+            options, full_environment(), vo);
         ++count;
     }
     EXPECT_EQ(count, 72U);

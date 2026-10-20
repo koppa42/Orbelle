@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <orbitforge/core/propagation/state_provider.hpp>
+#include <type_traits>
 
 namespace orbitforge::core::detail {
 #include "gauss_jackson_coefficients.inc"
@@ -20,6 +21,14 @@ template <std::size_t N, std::size_t K = 0> struct GaussJacksonSystem12 {
     Acceleration sum1{}, sum2{}, compensation1{}, compensation2{};
 
     void reset() { count = 0; }
+    void recenter_first_order(std::size_t index) {
+        if (count == history.size()) {
+            Acceleration shift{};
+            shift[index - N] = -state[index];
+            add(sum1, compensation1, shift);
+        }
+        state[index] = 0;
+    }
     static void add(Acceleration &value, Acceleration &compensation,
                     const Acceleration &increment) {
         for (std::size_t i = 0; i < N + K; ++i) {
@@ -135,6 +144,104 @@ template <std::size_t N, std::size_t K = 0> struct GaussJacksonSystem12 {
             "HPOP Gauss-Jackson corrector did not converge; reduce the fixed step");
     }
 };
+// The 6x8 variational block is 24 position/velocity pairs, not 48
+// unrelated first-order equations. Applying the single-integral Adams formula
+// to both halves introduces its much narrower parasitic stability limit.
+// Pack the pairs into the same double-integral recurrence as the orbit.
+// An optional Sundman clock remains first-order. Its variational velocities
+// must already be dr_variation/dq in the usual velocity scaling.
+template <std::size_t Clock> struct VariationalGaussJackson12 : GaussJacksonSystem12<27, Clock> {
+    static_assert(Clock <= 1);
+    using Base = GaussJacksonSystem12<27, Clock>;
+    using State = std::array<double, 54 + Clock>;
+    using Acceleration = std::array<double, 51 + Clock>;
+    static constexpr std::size_t offset = 6 + Clock;
+    static constexpr double velocity_to_position = 1e-3; // 1e3 / 1e6 SI scaling.
+    // Public state retains the caller's layout; Base::state uses paired layout.
+    State state{};
+
+    static typename Base::State pack(const State &value) {
+        typename Base::State result{};
+        for (std::size_t i = 0; i < 3; ++i) {
+            result[i] = value[i];
+            result[27 + i] = value[3 + i];
+        }
+        for (std::size_t i = 0; i < 24; ++i) {
+            result[3 + i] = value[offset + i];
+            result[30 + i] = value[offset + 24 + i] * velocity_to_position;
+        }
+        if constexpr (Clock)
+            result[54] = value[6];
+        return result;
+    }
+    static State unpack(const typename Base::State &value) {
+        State result{};
+        for (std::size_t i = 0; i < 3; ++i) {
+            result[i] = value[i];
+            result[3 + i] = value[27 + i];
+        }
+        for (std::size_t i = 0; i < 24; ++i) {
+            result[offset + i] = value[3 + i];
+            result[offset + 24 + i] = value[30 + i] / velocity_to_position;
+        }
+        if constexpr (Clock)
+            result[6] = value[54];
+        return result;
+    }
+    static typename Base::Acceleration pack_acceleration(const Acceleration &value) {
+        typename Base::Acceleration result{};
+        std::copy_n(value.begin(), 3, result.begin());
+        for (std::size_t i = 0; i < 24; ++i)
+            result[3 + i] = value[3 + Clock + 24 + i] * velocity_to_position;
+        if constexpr (Clock)
+            result[27] = value[3];
+        return result;
+    }
+    static Acceleration unpack_acceleration(const typename Base::Acceleration &value,
+                                            const State &reference) {
+        Acceleration result{};
+        std::copy_n(value.begin(), 3, result.begin());
+        for (std::size_t i = 0; i < 24; ++i) {
+            result[3 + Clock + i] = reference[offset + 24 + i] * velocity_to_position;
+            result[3 + Clock + 24 + i] = value[3 + i] / velocity_to_position;
+        }
+        if constexpr (Clock)
+            result[3] = value[27];
+        return result;
+    }
+    void seed(const State &next, const Acceleration &acceleration, double h,
+              const State &state_compensation = {}) {
+        const auto packed = pack(next);
+        auto residual = pack(state_compensation);
+        for (std::size_t i = 0; i < 24; ++i)
+            residual[30 + i] -=
+                std::fma(next[offset + 24 + i], velocity_to_position, -packed[30 + i]);
+        Base::seed(packed, pack_acceleration(acceleration), h, residual);
+        state = next;
+    }
+    void recenter_first_order(std::size_t index) {
+        static_assert(Clock == 1);
+        (void)index; // The sole first-order state is the clock at public index 6.
+        Base::recenter_first_order(54);
+        state[6] = 0;
+    }
+    template <class Force, class Correction, class Converged>
+    void advance(double h, bool full_correction, const Force &force, const Correction &correction,
+                 const Converged &converged) {
+        Base::advance(
+            h, full_correction,
+            [&](const auto &value) { return pack_acceleration(force(unpack(value))); },
+            [&](const auto &before, const auto &after, const auto &acceleration) {
+                const auto previous = unpack(before);
+                return pack_acceleration(correction(previous, unpack(after),
+                                                    unpack_acceleration(acceleration, previous)));
+            },
+            [&](const auto &before, const auto &after) {
+                return converged(unpack(before), unpack(after));
+            });
+        state = unpack(Base::state);
+    }
+};
 // Optional row-major, scaled 6x8 variational block: STM then D/K sensitivities.
 // A column is one vector solution of the coupled variational equations. Its
 // components can cross zero without the vector becoming small. Testing each
@@ -163,8 +270,12 @@ bool variational_corrector_converged(const State &before, const State &after, st
 // Ordinary Cartesian-time adapter retains the established convergence and
 // pseudo-correction semantics. Other formulations supply their own scales and
 // transformed two-body term, including their kinematic clock terms.
-template <std::size_t Extra = 0> struct CartesianGaussJackson12 : GaussJacksonSystem12<3, Extra> {
-    using Base = GaussJacksonSystem12<3, Extra>;
+template <std::size_t Extra = 0>
+struct CartesianGaussJackson12
+    : std::conditional_t<Extra == 0, GaussJacksonSystem12<3>, VariationalGaussJackson12<0>> {
+    static_assert(Extra == 0 || Extra == 48);
+    using Base =
+        std::conditional_t<Extra == 0, GaussJacksonSystem12<3>, VariationalGaussJackson12<0>>;
     using State = typename Base::State;
     using Acceleration = typename Base::Acceleration;
     static Acceleration central(const State &s, double gravitational_parameter) {

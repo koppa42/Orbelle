@@ -277,3 +277,23 @@ TEST(DragDifferential, InertialPositionBlockIncludesAtmosphereRotationCoupling) 
         }
     }
 }
+
+TEST(DragDifferential, CutoffHasZeroExteriorPartialsAndAnExplicitBoundaryError) {
+    DragOptions options;
+    options.enabled = true;
+    for (auto model : {AtmosphereModel::jacchia_roberts, AtmosphereModel::nrlmsise00}) {
+        options.atmosphere = model;
+        for (const Vector r :
+             {Vector{8878138, 0, 0}, Vector{42164137, 0, 0}, Vector{0, 0, 42164137}}) {
+            const auto actual = drag_differential(r, velocity, sun, utc, options);
+            EXPECT_EQ(actual.force.acceleration_mps2, Vector{});
+            EXPECT_EQ(actual.force.position_jacobian_per_s2, Matrix{});
+            EXPECT_EQ(actual.force.velocity_jacobian_per_s, Matrix{});
+            EXPECT_EQ(actual.density_gradient_kg_m4, Vector{});
+            EXPECT_EQ(actual.drag_parameter_jacobian_pa, Vector{});
+        }
+        EXPECT_THROW((void)drag_differential({8878137, 0, 0}, velocity, sun, utc, options),
+                     PropagationError);
+        EXPECT_NO_THROW((void)drag_differential({8878136, 0, 0}, velocity, sun, utc, options));
+    }
+}

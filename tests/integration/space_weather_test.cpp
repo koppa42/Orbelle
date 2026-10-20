@@ -771,6 +771,28 @@ TEST_F(WeatherFiles, VariationalStatesComposeContinuouslyAcrossTheLeapWeatherJum
                 const auto whole = core::propagate_hpop_variational(input.initial, end, o, env);
                 const auto a = core::propagate_hpop_variational(input.initial, boundary, o, env);
                 const auto b = core::propagate_hpop_variational(a.state, end, o, env);
+                core::HpopCovarianceInput covariance;
+                for (std::size_t i = 0; i < 6; ++i)
+                    covariance.state[i][i] = i < 3 ? 10000 : 1;
+                covariance.drag = core::HpopConsiderParameter{1e-4, {}};
+                const auto expected = core::transport_hpop_covariance(covariance, whole);
+                core::sample_hpop_covariance(
+                    input.initial,
+                    {end, core::Epoch{boundary.tai_nanoseconds() - 1}, boundary,
+                     core::Epoch{boundary.tai_nanoseconds() + 1}},
+                    covariance,
+                    [&](std::size_t index, const core::HpopCovarianceState &sample) {
+                        if (index != 0)
+                            return;
+                        for (std::size_t i = 0; i < 6; ++i)
+                            for (std::size_t j = 0; j < 6; ++j)
+                                EXPECT_LE(std::abs(sample.covariance.state[i][j] -
+                                                   expected.covariance.state[i][j]) /
+                                              std::sqrt(expected.covariance.state[i][i]) /
+                                              std::sqrt(expected.covariance.state[j][j]),
+                                          3e-9);
+                    },
+                    o, env);
                 for (std::size_t i = 0; i < 6; ++i) {
                     const double scale = i < 3 ? 1 : 1000;
                     const double x =

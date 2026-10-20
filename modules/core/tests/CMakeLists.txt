@@ -34,6 +34,7 @@ target_compile_definitions(orbitforge_core_tests PRIVATE
     ORBITFORGE_SRP_MULTI_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/srp_multi_geometry.txt"
     ORBITFORGE_SRP_GEOMETRY_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/srp_geometry.txt"
     ORBITFORGE_NRLMSISE_AP_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/nrlmsise00_ap.txt"
+    ORBITFORGE_NRLMSISE_HIGH_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/nrlmsise00_high.txt"
     ORBITFORGE_NRLMSISE_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/nrlmsise00.txt"
     ORBITFORGE_JR_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/jacchia_roberts_precise.txt"
     ORBITFORGE_MASS_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/mass.txt"

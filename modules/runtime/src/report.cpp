@@ -599,24 +599,41 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                 const auto environment = context.force_environment(input);
                 // Preflight full resource coverage through the same prepared-session route.
                 (void)execution.session(object, core::FrameId::gcrf);
+                std::vector<core::Epoch> epochs;
+                epochs.reserve(per_object);
                 auto epoch = first;
                 for (std::size_t sample = 0; sample < per_object; ++sample) {
-                    tick();
-                    const auto value = core::propagate_hpop_covariance(
-                        input.initial, epoch, input.covariance.active_input(), input.hpop,
-                        environment, input.covariance.variational_options(),
-                        execution.check_cancelled);
-                    Row row{object.id, object.name, epoch, std::string("GCRF")};
-                    for (std::size_t i = 0; i < 6; ++i)
-                        for (std::size_t j = 0; j <= i; ++j)
-                            row.emplace_back(std::in_place_type<double>,
-                                             value.covariance.state[i][j]);
-                    rows.push_back(std::move(row));
+                    execution.check_cancelled();
+                    epochs.push_back(epoch);
                     epoch = ticks_between(epoch, last) <=
                                     static_cast<std::uint64_t>(d.query.step_nanoseconds)
                                 ? last
                                 : core::Epoch{epoch.tai_nanoseconds() + d.query.step_nanoseconds};
                 }
+                const auto base = rows.size();
+                std::size_t completed = 0;
+                if (progress)
+                    progress(base, total);
+                // Backward propagation visits nearest epochs first. Fill by original
+                // index so table/CSV ordering stays chronological; keep only report
+                // values, not a second copy of every full covariance/STM result.
+                rows.resize(base + per_object);
+                core::sample_hpop_covariance(
+                    input.initial, epochs, input.covariance.active_input(),
+                    [&](std::size_t index, const core::HpopCovarianceState &value) {
+                        execution.check_cancelled();
+                        Row row{object.id, object.name, epochs[index], std::string("GCRF")};
+                        row.reserve(25);
+                        for (std::size_t i = 0; i < 6; ++i)
+                            for (std::size_t j = 0; j <= i; ++j)
+                                row.emplace_back(std::in_place_type<double>,
+                                                 value.covariance.state[i][j]);
+                        rows[base + index] = std::move(row);
+                        if (progress)
+                            progress(base + ++completed, total);
+                    },
+                    input.hpop, environment, input.covariance.variational_options(),
+                    execution.check_cancelled);
             }
         } else {
             // Derived templates have a fixed physical reference frame, independent of the
@@ -707,7 +724,7 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                         context.time ? context.time->data_info().sha256 : "",
                         report_is_access(d.query.kind) ? "geometric-access-wgs84-v1"
                         : d.query.kind == ReportKind::state_covariance
-                            ? "hpop-joint-covariance-direct-coast-v1"
+                            ? "hpop-joint-covariance-sequential-samples-v2"
                             : "builtin-reports-v2",
                         first,
                         last,

@@ -74,6 +74,9 @@ template <std::size_t Extra = 0> class SundmanSystemTransform {
         auto result = first_order(s, time);
         for (std::size_t i = 3; i < 6; ++i)
             result[i] *= g;
+        if constexpr (Extra == 48)
+            for (std::size_t i = 7 + 24; i < 7 + Extra; ++i)
+                result[i] *= g;
         return result;
     }
     static Cartesian cartesian_first(const FirstOrder &s) {
@@ -88,6 +91,9 @@ template <std::size_t Extra = 0> class SundmanSystemTransform {
         auto result = cartesian_first(s);
         for (std::size_t i = 3; i < 6; ++i)
             result[i] /= g;
+        if constexpr (Extra == 48)
+            for (std::size_t i = 6 + 24; i < 6 + Extra; ++i)
+                result[i] /= g;
         if (!finite(result))
             throw PropagationError("Sundman physical velocity is not finite");
         return result;
@@ -126,7 +132,7 @@ template <std::size_t Extra = 0> class SundmanSystemTransform {
         for (std::size_t i = 0; i < 3; ++i)
             physical[i] = (previous[i] - old_kinematic * before[i + 3]) / old_clock / old_clock -
                           old_central[i] + new_central[i];
-        // The caller refreshes first-order equations at the corrected state.
+        // The caller refreshes variational derivatives at the corrected state.
         return transform_acceleration(after, physical);
     }
 
@@ -156,6 +162,11 @@ template <std::size_t Extra = 0> class SundmanSystemTransform {
                             physical[2] * g * g + k * s[5], g};
         for (std::size_t i = 0; i < Extra; ++i)
             result[i + 4] = physical[i + 3] * g;
+        if constexpr (Extra == 48)
+            // Fixed-physical-time variational columns satisfy R_q = g V and
+            // R_qq = g^2 V_t + (g_q/g) R_q. No variation of the clock is added.
+            for (std::size_t i = 24; i < Extra; ++i)
+                result[i + 4] = physical[i + 3] * g * g + k * s[i + 7];
         return result;
     }
     template <class F>

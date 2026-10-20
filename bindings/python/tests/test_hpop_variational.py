@@ -22,6 +22,39 @@ def orbit():
     return value
 
 class HpopVariationalTests(unittest.TestCase):
+    def test_gauss_jackson_long_arc_covariance_and_samples(self):
+        rows = [list(map(float, line.split())) for line in
+                (ROOT / "tests/reference/propagators/universal_kepler_stm.txt").read_text().splitlines()
+                if line and not line.startswith("#")]
+        covariance = of.HpopCovarianceInput()
+        covariance.state = [[(10000.0 if i < 3 else 1.0) if i == j else 0.0
+                             for j in range(6)] for i in range(6)]
+        for reference in (row for row in rows if row[0] in (0, 7)):
+            phi = [reference[15+6*i:21+6*i] for i in range(6)]
+            expected = [[sum(phi[i][k] * covariance.state[k][k] * phi[j][k] for k in range(6))
+                         for j in range(6)] for i in range(6)]
+            for regular in (False, True):
+                value = orbit()
+                value.initial = of.CartesianState(
+                    of.Epoch(0), of.OriginId.EARTH, of.FrameId.GCRF, reference[3:6], reference[6:9])
+                config = value.hpop
+                config.integrator = of.HpopIntegrator.GAUSS_JACKSON
+                config.fixed_step_seconds = 60
+                config.time_regularization = regular
+                config.steps_per_orbit = 120
+                value.hpop = config
+                end = of.Epoch(round(reference[2]*1e9))
+                direct = of.propagate_hpop_covariance(value, end, covariance)
+                samples = of.sample_hpop_covariance(
+                    value, [end, of.Epoch(end.tai_nanoseconds//3), of.Epoch(0), end], covariance)
+                self.assertEqual(samples[0].covariance.state, samples[-1].covariance.state)
+                for result in (direct, samples[0]):
+                    for i in range(6):
+                        for j in range(6):
+                            error = abs(result.covariance.state[i][j]-expected[i][j])
+                            error /= math.sqrt(expected[i][i])*math.sqrt(expected[j][j])
+                            self.assertLess(error, 3e-9)
+
     def test_installed_api_against_independent_orekit_stm(self):
         rows = [list(map(float, line.split())) for line in
                 (ROOT / "tests/reference/propagators/universal_kepler_stm.txt").read_text().splitlines()

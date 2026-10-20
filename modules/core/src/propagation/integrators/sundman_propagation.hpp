@@ -15,7 +15,8 @@ template <std::size_t Extra = 0> class SundmanSystemPropagation {
     using Transform = SundmanSystemTransform<Extra>;
     using Cartesian = typename Transform::Cartesian;
     using Vector = typename Transform::FirstOrder;
-    using History = GaussJacksonSystem12<3, 1 + Extra>;
+    using History =
+        std::conditional_t<Extra == 0, GaussJacksonSystem12<3, 1>, VariationalGaussJackson12<1>>;
     struct State {
         CompensatedState<7 + Extra> solution;
         History history;
@@ -297,11 +298,7 @@ template <std::size_t Extra = 0> class SundmanSystemPropagation {
         // Translate its compensated sum, leaving all derivative history unchanged.
         // The global physical clock is accumulated separately with compensation.
         if (history.count) {
-            if (history.count == history.history.size()) {
-                typename History::Acceleration shift{0, 0, 0, -history.state[6]};
-                History::add(history.sum1, history.compensation1, shift);
-            }
-            history.state[6] = 0;
+            history.recenter_first_order(6);
         } else {
             history.state = transform_.second_order(state.cartesian(), 0);
             state.startup_compensation = {};
@@ -316,6 +313,11 @@ template <std::size_t Extra = 0> class SundmanSystemPropagation {
                     state.solution.compensation[i + 3] * g;
                 state.startup_compensation[i + 3] = -residual;
             }
+            if constexpr (Extra == 48)
+                for (std::size_t i = 7 + 24; i < 7 + Extra; ++i)
+                    state.startup_compensation[i] =
+                        state.solution.compensation[i] * g -
+                        std::fma(state.solution.value[i], g, -history.state[i]);
         }
         const auto acceleration = [&](const Vector &s) {
             return transform_.acceleration(
@@ -376,7 +378,7 @@ template <std::size_t Extra = 0> class SundmanSystemPropagation {
                     }
                     return result;
                 },
-                [](const Vector &a, const Vector &b) {
+                [&](const Vector &a, const Vector &b) {
                     constexpr double epsilon = 8 * std::numeric_limits<double>::epsilon();
                     for (std::size_t i = 0; i < 3; ++i) {
                         if (std::abs(a[i] - b[i]) >
@@ -385,8 +387,11 @@ template <std::size_t Extra = 0> class SundmanSystemPropagation {
                                 epsilon * std::max(1., std::hypot(b[3], b[4], b[5])))
                             return false;
                     }
-                    if (!variational_corrector_converged<Extra>(a, b, 7, epsilon))
-                        return false;
+                    if constexpr (Extra > 0)
+                        if (!variational_corrector_converged<Extra>(transform_.cartesian_second(a),
+                                                                    transform_.cartesian_second(b),
+                                                                    6, epsilon))
+                            return false;
                     return std::abs(a[6] - b[6]) <= epsilon * std::max(1., std::abs(b[6]));
                 });
             ++state.multisteps;
@@ -397,7 +402,7 @@ template <std::size_t Extra = 0> class SundmanSystemPropagation {
         const auto cartesian = transform_.cartesian_second(history.state);
         const double g = transform_.clock_rate(history.state);
         for (std::size_t i = 7; i < 7 + Extra; ++i) {
-            state.solution.value[i] = history.state[i];
+            state.solution.value[i] = cartesian[i - 1];
             state.solution.compensation[i] = 0;
         }
         for (std::size_t i = 0; i < 6; ++i) {

@@ -34,6 +34,8 @@ struct HpopVariationalState {
 // Spherical dual-cone shadow and external weather time gates retain continuous
 // variational states. Cylindrical shadow and zero-width atmosphere switching are
 // currently rejected: their state-dependent force jumps require saltation.
+// Drag is supported on either side of its 2500 km cutoff; a variational stage
+// crossing that cutoff is rejected for the same reason (nominal coasts may cross).
 // Existing local derivative pole/branch restrictions apply. This is not a
 // covariance matrix, process-noise model or a derivative of integrator error.
 [[nodiscard]] HpopVariationalState propagate_hpop_variational(

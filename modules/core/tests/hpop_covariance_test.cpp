@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cmath>
 #include <gtest/gtest.h>
 #include <limits>
@@ -188,4 +189,95 @@ TEST(HpopCovariance, PropagationCapturesCovarianceBeforeInvokingCallbacks) {
                                                   [&] { input.state = {}; });
     EXPECT_EQ(result.covariance, identity_covariance());
     EXPECT_EQ(input.state, HpopStateCovariance{});
+}
+
+TEST(HpopCovarianceSampling, BothDirectionsCancellationFailureAndInputCapture) {
+    const auto initial = identity_transition().state;
+    auto covariance = identity_covariance();
+    HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    std::vector<Epoch> times{Epoch{31'000'000'001},  Epoch{-80'000'000'001}, Epoch{0},
+                             Epoch{-20'000'000'000}, Epoch{10'000'000'000},  Epoch{31'000'000'001}};
+    const auto saved = times;
+    std::vector<HpopCovarianceState> results(times.size(), HpopCovarianceState{{initial}, {}, {}});
+    std::size_t callbacks = 0;
+    sample_hpop_covariance(
+        initial, times, covariance,
+        [&](std::size_t index, const HpopCovarianceState &value) {
+            ++callbacks;
+            results.at(index) = value;
+            times.clear();
+            covariance = {};
+        },
+        options);
+    EXPECT_EQ(callbacks, saved.size());
+    for (std::size_t index = 0; index < saved.size(); ++index) {
+        const auto exact =
+            propagate_hpop_covariance(initial, saved[index], identity_covariance(), options);
+        EXPECT_EQ(results[index].variational.state.epoch, saved[index]);
+        for (std::size_t i = 0; i < 6; ++i)
+            for (std::size_t j = 0; j < 6; ++j)
+                EXPECT_LE(
+                    std::abs(results[index].covariance.state[i][j] - exact.covariance.state[i][j]) /
+                        std::sqrt(exact.covariance.state[i][i] * exact.covariance.state[j][j]),
+                    3e-9);
+    }
+    EXPECT_EQ(results.front().covariance, results.back().covariance);
+    callbacks = 0;
+    const auto consume = [&](std::size_t, const HpopCovarianceState &) { ++callbacks; };
+    EXPECT_THROW(sample_hpop_covariance(initial,
+                                        {Epoch{1}, Epoch{std::numeric_limits<std::int64_t>::min()}},
+                                        identity_covariance(), consume, options),
+                 PropagationError);
+    EXPECT_EQ(callbacks, 0U); // Preflight both directions before streaming anything.
+    int checkpoints = 0;
+    EXPECT_THROW(sample_hpop_covariance(initial, saved, identity_covariance(), consume, options, {},
+                                        {},
+                                        [&] {
+                                            if (++checkpoints == 40)
+                                                throw std::runtime_error("cancelled");
+                                        }),
+                 std::runtime_error);
+    EXPECT_EQ(checkpoints, 40);
+    EXPECT_NO_THROW(
+        sample_hpop_covariance(initial, saved, identity_covariance(), consume, options));
+    EXPECT_THROW(sample_hpop_covariance(
+                     initial, saved, identity_covariance(),
+                     [](std::size_t, const HpopCovarianceState &) {
+                         throw std::runtime_error("consumer failed");
+                     },
+                     options),
+                 std::runtime_error);
+    EXPECT_THROW(sample_hpop_covariance(initial, std::vector<Epoch>(200001, Epoch{0}),
+                                        identity_covariance(), consume, options),
+                 std::invalid_argument);
+    EXPECT_THROW(sample_hpop_covariance(initial, saved, identity_covariance(), {}, options),
+                 std::invalid_argument);
+}
+
+TEST(HpopCovarianceSampling, SharedPrefixWorkReplacesRepeatedFullCoasts) {
+    HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    const auto initial = identity_transition().state;
+    const auto covariance = identity_covariance();
+    std::vector<Epoch> times;
+    for (std::int64_t second = 0; second <= 3600; second += 30)
+        times.emplace_back(second * 1'000'000'000);
+    std::size_t direct_work = 0, batch_work = 0, samples = 0;
+    const auto direct_start = std::chrono::steady_clock::now();
+    for (auto epoch : times)
+        (void)propagate_hpop_covariance(initial, epoch, covariance, options, {}, {},
+                                        [&] { ++direct_work; });
+    const auto batch_start = std::chrono::steady_clock::now();
+    sample_hpop_covariance(
+        initial, times, covariance, [&](std::size_t, const HpopCovarianceState &) { ++samples; },
+        options, {}, {}, [&] { ++batch_work; });
+    const auto finish = std::chrono::steady_clock::now();
+    EXPECT_EQ(samples, times.size());
+    EXPECT_LT(batch_work * 8, direct_work);
+    RecordProperty("direct_checkpoints", static_cast<int>(direct_work));
+    RecordProperty("batch_checkpoints", static_cast<int>(batch_work));
+    RecordProperty("direct_seconds",
+                   std::chrono::duration<double>(batch_start - direct_start).count());
+    RecordProperty("batch_seconds", std::chrono::duration<double>(finish - batch_start).count());
 }

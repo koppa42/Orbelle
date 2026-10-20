@@ -2106,7 +2106,7 @@ TEST(ReportDialog, CovarianceUsesSavedSettingsAndPublishesSharedResult) {
     std::shared_ptr<const runtime::ReportResult> published;
     dialog.result_published = [&](auto result, const runtime::Analysis &analysis) {
         published = result;
-        EXPECT_EQ(result->algorithm, "hpop-joint-covariance-direct-coast-v1");
+        EXPECT_EQ(result->algorithm, "hpop-joint-covariance-sequential-samples-v2");
         EXPECT_EQ(result->table.rows().size(), 2);
         EXPECT_EQ(analysis.snapshot().project->satellites.front().orbit.covariance,
                   satellite.orbit.covariance);

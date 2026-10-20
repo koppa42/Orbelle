@@ -8,17 +8,29 @@
 
 默认密度高度使用精确 WGS84 椭球高，半长轴 `a=6378137 m`、扁率 `f=1/298.257223563`。`use_approximate_altitude=True` 启用 [STK 文档中的椭球径向近似](https://help.agi.com/stk/Content/hpop/approximateAltitudeComputation.htm)：`h=R−a(1−f)/sqrt(1−f(2−f)cos²φ)`，其中 `R` 是地心距，`φ` 是地心纬度。赤道和两极采用其有限极限；没有把大地纬度代入该公式。
 
-开关只替换密度、模型有效高度检查和高低空拼接使用的高度；大地经纬度保持精确定义，位置报告仍为精确 WGS84 大地高。`DragEvaluation.geodetic` 返回精确经纬高，`density_altitude_m` 单独返回实际密度高度。当前仍计算精确纬度，因此不承诺此开关带来 STK 所述的性能收益。它不改变积分器的最低地心高度阈值。太阳赤纬与当地太阳时由同一 ITRF 太阳矢量求得，太阳时角是向东相对太阳子午线的夹角。地心奇点、非有限输入和域外高度明确报错。
+开关只替换密度、模型有效高度检查、高空截止和低空拼接使用的高度；大地经纬度保持精确定义，位置报告仍为精确 WGS84 大地高。`DragEvaluation.geodetic` 返回精确经纬高，`density_altitude_m` 单独返回实际密度高度。当前仍计算精确纬度，因此不承诺此开关带来 STK 所述的性能收益。它不改变积分器的最低地心高度阈值。太阳赤纬与当地太阳时由同一 ITRF 太阳矢量求得，太阳时角是向东相对太阳子午线的夹角。地心奇点、非有限输入和低于所选模型下界的高度明确报错。
 
 Cd 为带符号经验系数，范围 −100…100；面积质量比为 0…9999 m²/kg，与光压参数独立。这两项范围对应 [STK HPOP Drag 命令](https://help.agi.com/stk/12.10.0/Subsystems/connectCmds/Content/cmd_HPOPDrag.htm)。负 Cd 产生反向经验加速度；正常阻力使用正 Cd。零面积或零 Cd 不改变已启用模型的数据依赖。
 
 ## 密度与天气
 
-Jacchia–Roberts 适用 90…2500 km，保留 NASA GMAT 标量模型的拟合常数及分段公式，并处理正午、午夜、极点、太阳赤纬为零的有限极限。GMAT 外层 `Density` 不开放 90…100 km，本实现使用其原有标量公式开放这一高度段。NRLMSISE-00 适用 0…1000 km，移植 Orekit 13.1.2 的双精度计算和表格，使用 `gtd7d` 总质量密度，包含异常氧；默认变化项开启，使用日 Ap。源码来源和 Apache-2.0 许可见 [模型说明](../../modules/core/src/propagation/atmosphere/README.md)。所有临时状态属于单次调用，模型可并发使用。
+原始 `evaluate_atmosphere` 密度／温度接口开放 JR 90…2500 km、NRLMSISE-00 0…2500 km 的计算范围，超出范围报错；该接口不施加力模型的高空截止，也不以零温度伪装原始模型结果。JR 保留 NASA GMAT 标量模型的拟合常数及分段公式，并处理正午、午夜、极点、太阳赤纬为零的有限极限。GMAT 外层 `Density` 不开放 90…100 km，本实现使用其原有标量公式开放这一高度段。NRLMSISE-00 移植 Orekit 13.1.2 的双精度计算和表格，使用 `gtd7d` 总质量密度，包含异常氧；默认变化项开启，使用日 Ap。其经验适用范围仍为 0…1000 km，延伸计算不表示物理精度经过认证。源码来源和 Apache-2.0 许可见 [模型说明](../../modules/core/src/propagation/atmosphere/README.md)。所有临时状态属于单次调用，模型可并发使用。
+
+`evaluate_drag` 与 HPOP 将三个高度规则独立处理：
+
+- **高空截止**：密度高度严格大于 2500 km 时，两个模型均返回零密度和零阻力；等于 2500 km 仍计算模型。其余力和普通轨道传播继续，下降回截止以下后恢复阻力。不在上限钳制高度，也不保持上限密度。该值是固定算法策略，桌面只读显示，暂不新增可保存参数。
+- **低空拼接**：JR 低于 90 km 时须显式选用 NRLMSISE-00 低空模型；未选则给出可操作的模型覆盖错误，不默默外推 JR。NRL 主模型或低空模型计算至 0 km；负密度高度报错。具体拼接见下文。
+- **最低传播高度**：`HpopOptions.minimum_altitude_m` 单独检查地心距减去所选重力场参考半径；任意积分阶段达到或低于阈值即停止并报错。关闭阻力、超过高空截止或选择低空模型均不绕过此条件。该高度基准与 WGS84 密度高度不同。
+
+截止采用 AGI [Jacchia–Roberts](https://help.agi.com/STKComponents/html/T_AGI_Foundation_Celestial_ScalarDensityJacchiaRoberts.htm) 与 [NRLMSISE 2000](https://help.agi.com/STKComponents/html/T_AGI_Foundation_Celestial_ScalarDensityMsis2000.htm) 的 `UpperHeightLimit=2500000 m` 默认规则；[组件发布说明](https://help.agi.com/STKComponents/html/WhatsNew.htm)记载其与 STK Desktop 11.3 默认行为对齐。STK HPOP 另提供[低空模型与拼接范围](https://help.agi.com/stk/Content/hpop/hpopDrag.htm)及[最低传播高度](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)。AGI JR 在 90 km 以下可返回不保证准确性的结果；OrbitForge 仍要求显式低空模型。上述参考不等于当前 STK 同配置数值验收。
+
+高空截止不取消已启用模型的资源依赖：UTC、EOP、太阳星历及选用的文件天气仍须完整覆盖传播路径，输入也继续校验。力模型身份升级为 `spherical-corotating-itrf-wgs84-v3`，记录 `altitude-policy=cutoff-above-2500km;low=explicit-nrl-smoothstep-v1`，防止复用旧结果。保存字段及单位不变，项目结构保持 v46 / OBJS32。
 
 手动天气来源为常量输入：日 F10.7、平均 F10.7（sfu）、Kp。NRLMSISE 将手动日值作为前一日 F10.7，将平均值作为模型平均通量；没有隐含的历史查询。Kp 使用标准 1/3 刻度的 28 项 Ap 表，非表格刻度线性插值，Kp=3 对应 Ap=15。界面/API 当前限制通量 `(0,1000]` sfu、Kp `[0,9]`，这些限制与 STK 命令允许的全部范围不同，不能据此宣称所有参数范围已对齐。低层 `AtmosphereInput` 使用 UTC 公历日期 1600…2600；闰秒合法性在 HPOP 中由实际时间 Provider 认证，独立标量调用方负责保证其 UTC 真实有效。
 
-JR 可选择 NRLMSISE-00 作为低空模型。低于 90 km 使用低空模型；在 `90 km…90 km+拼接范围` 内，以 `w=t²(3−2t)` 对质量密度加权，在其上使用 JR。正范围拼接具有连续的一阶权重；零范围表示明确的硬切换。有效拼接范围至多 910 km，防止低空模型查询超出 1000 km。NRLMSISE 为主模型时低空设置不生效，但合法草稿仍保存。该拼接定义为 OrbitForge 的公开约定，仍需 STK 数值核对。
+JR 可选择 NRLMSISE-00 作为低空模型。低于 90 km 使用低空模型；在 `90 km…90 km+拼接范围` 内，以 `w=t²(3−2t)` 对质量密度加权，在其上使用 JR。正范围拼接具有连续的一阶权重；零范围表示在 90 km 硬切换到 JR。拼接范围允许 0…1000 km，范围大于 910 km 时会使用 NRLMSISE 的延伸计算段。NRLMSISE 为主模型时低空设置不生效，但合法草稿仍保存。该拼接定义为 OrbitForge 的公开约定，仍需 STK 数值核对。
+
+局部阻力偏导在高空截止以上全部为零，在截止附近 1e−5 m 内报错；变分／协方差传播可位于截止的任一侧，但积分阶段跨越该硬切换时明确失败，尚未实现事件的 saltation 修正。普通轨道传播允许跨越；固定步长方法仍需选用足够小的步长检查收敛。这一限制与已有零宽低空切换的变分限制一致，不能省略跳变项后声称协方差有效。
 
 JR 的高空温度比值使用直接指数求值，避免 `T∞−T` 相减后丢失有效数字或得到零密度；模型常数和分段保持原定义。新增 C++ [阻力偏导接口](drag_differential.md)，用于后续协方差和 D 参数敏感度传播；其密度梯度和模型边界限制有独立契约。
 

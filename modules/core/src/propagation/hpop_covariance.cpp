@@ -1,3 +1,4 @@
+#include "hpop_sampling.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -202,14 +203,14 @@ HpopCovarianceInput apply_joint(const HpopCovarianceInput &input, const Joint &j
 }
 } // namespace
 void validate_hpop_covariance(const HpopCovarianceInput &input) { (void)prepare(input); }
-HpopCovarianceState transport_hpop_covariance(HpopCovarianceInput input,
-                                              HpopVariationalState variational,
-                                              const std::function<void()> &checkpoint) {
+namespace {
+HpopCovarianceState transport_prepared(const HpopCovarianceInput &input, const Joint &joint,
+                                       const HpopVariationalState &variational,
+                                       const std::function<void()> &checkpoint) {
     check(checkpoint);
     if (input.coordinates.frame != HpopCovarianceFrame::gcrf)
         throw std::invalid_argument(
             "Convert initial covariance to GCRF before applying a GCRF STM");
-    const auto joint = prepare(input);
     const auto f = transition(variational, joint);
     HpopCovarianceState result{variational, apply_joint(input, joint, f), {}};
     result.covariance.coordinates = {};
@@ -242,6 +243,13 @@ HpopCovarianceState transport_hpop_covariance(HpopCovarianceInput input,
     check(checkpoint);
     return result;
 }
+} // namespace
+HpopCovarianceState transport_hpop_covariance(HpopCovarianceInput input,
+                                              HpopVariationalState variational,
+                                              const std::function<void()> &checkpoint) {
+    check(checkpoint);
+    return transport_prepared(input, prepare(input), variational, checkpoint);
+}
 HpopCovarianceInput convert_hpop_covariance(CartesianState reference, HpopCovarianceInput input,
                                             HpopCovarianceCoordinates target,
                                             std::optional<std::array<double, 3>> acceleration_mps2,
@@ -261,11 +269,10 @@ HpopCovarianceInput convert_hpop_covariance(CartesianState reference, HpopCovari
     check(checkpoint);
     return result;
 }
-HpopCovarianceState propagate_hpop_covariance(CartesianState initial, Epoch end,
-                                              HpopCovarianceInput covariance, HpopOptions options,
-                                              HpopEnvironment environment,
-                                              HpopVariationalOptions variational,
-                                              const std::function<void()> &checkpoint) {
+namespace {
+HpopCovarianceInput initial_gcrf(CartesianState initial, HpopCovarianceInput covariance,
+                                 const HpopOptions &options, const HpopEnvironment &environment,
+                                 const std::function<void()> &checkpoint) {
     check(checkpoint);
     validate_hpop_covariance(covariance);
     if (covariance.coordinates.frame != HpopCovarianceFrame::gcrf) {
@@ -277,9 +284,39 @@ HpopCovarianceState propagate_hpop_covariance(CartesianState initial, Epoch end,
         covariance = convert_hpop_covariance(initial, covariance, {}, acceleration, checkpoint,
                                              {environment.frames, environment.eop});
     }
+    return covariance;
+}
+} // namespace
+HpopCovarianceState propagate_hpop_covariance(CartesianState initial, Epoch end,
+                                              HpopCovarianceInput covariance, HpopOptions options,
+                                              HpopEnvironment environment,
+                                              HpopVariationalOptions variational,
+                                              const std::function<void()> &checkpoint) {
+    covariance = initial_gcrf(initial, std::move(covariance), options, environment, checkpoint);
     const auto state =
         propagate_hpop_variational(initial, end, std::move(options), std::move(environment),
                                    std::move(variational), checkpoint);
     return transport_hpop_covariance(covariance, state, checkpoint);
+}
+void sample_hpop_covariance(
+    CartesianState initial, std::vector<Epoch> times, HpopCovarianceInput covariance,
+    const std::function<void(std::size_t, const HpopCovarianceState &)> &sample,
+    HpopOptions options, HpopEnvironment environment, HpopVariationalOptions variational,
+    const std::function<void()> &checkpoint) {
+    check(checkpoint);
+    if (times.size() > 200000)
+        throw std::invalid_argument("Covariance sampling exceeds 200000 epochs");
+    if (!sample)
+        throw std::invalid_argument("Covariance sampling requires an output consumer");
+    covariance = initial_gcrf(initial, std::move(covariance), options, environment, checkpoint);
+    const auto joint = prepare(covariance);
+    detail::sample_hpop_variational(
+        initial, times, std::move(options), std::move(environment), std::move(variational),
+        [&](std::size_t index, const HpopVariationalState &state) {
+            const auto result = transport_prepared(covariance, joint, state, checkpoint);
+            sample(index, result);
+            check(checkpoint);
+        },
+        checkpoint);
 }
 } // namespace orbitforge::core

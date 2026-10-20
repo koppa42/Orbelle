@@ -194,7 +194,10 @@ class SrpSettings:
 class DragSettings:
     """Spherical drag relative to co-rotating ITRF atmosphere; SI except F10.7 in sfu.
 
-    JR supports 90..2500 km; NRLMSISE-00 gtd7d supports 0..1000 km.
+    Drag is zero above density height 2500 km; orbit propagation continues.
+    JR requires an explicit low model below 90 km. NRLMSISE-00 gtd7d computes
+    through 2500 km, beyond its empirical 0..1000 km applicability range.
+    HpopSettings.minimum_altitude_m independently stops at a geocentric height.
     Manual flux/Kp values are constants; Kp is converted to Ap for NRLMSISE.
     Optional NRLMSISE low atmosphere blends over [90 km, 90 km + blending_range].
     Density height is exact WGS84 geodetic unless use_approximate_altitude selects

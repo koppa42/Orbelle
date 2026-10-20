@@ -35,6 +35,7 @@ def main():
             raise ValueError(f"Unexpected cached source hash: {record['file']}")
     for model, producer in (("nrlmsise00", "nrlmsise_reference.c"),
                             ("nrlmsise00_ap", "nrlmsise_ap_reference.c"),
+                            ("nrlmsise00_high", "nrlmsise_ap_reference.c"),
                             ("jacchia_roberts", "jacchia_roberts_reference.cpp")):
         executable = output / (model + (".exe" if os.name == "nt" else ""))
         sources = [str(tools / producer)]
@@ -47,7 +48,10 @@ def main():
             command = ["gcc" if model.startswith("nrlmsise00") else "g++", "-O2", f"-I{upstream}",
                        f"-I{tools / 'gmat_jr_stubs'}", *sources, "-lm", "-o", str(executable)]
         subprocess.run(command, cwd=output, check=True)
-        raw = subprocess.check_output([str(executable)], cwd=output).replace(b"\r\n", b"\n")
+        arguments = [str(executable)]
+        if model == "nrlmsise00_high":
+            arguments.append("--high-altitude")
+        raw = subprocess.check_output(arguments, cwd=output).replace(b"\r\n", b"\n")
         (output / f"{model}.txt").write_bytes(raw)
         print(model, hashlib.sha256(raw).hexdigest())
 
