@@ -1,4 +1,5 @@
 #include "hpop_force.hpp"
+#include "atmosphere_models.hpp"
 #include "srp_geometry.hpp"
 #include <algorithm>
 #include <cmath>
@@ -118,7 +119,8 @@ auto evaluate_force(const CartesianState &state, const HpopOptions &options,
                     const HpopEnvironment &environment, std::optional<Epoch> weather_at,
                     std::optional<double> shadow_lighting,
                     const std::function<void()> &checkpoint = {},
-                    const HpopOptions *differential_gravity = nullptr) {
+                    const HpopOptions *differential_gravity = nullptr,
+                    std::optional<bool> initial_drag_above_cutoff = {}) {
     using Result = std::conditional_t<Differential, HpopForceDifferential, Vector>;
     if (checkpoint)
         checkpoint();
@@ -235,6 +237,12 @@ auto evaluate_force(const CartesianState &state, const HpopOptions &options,
             const auto force = drag_differential(
                 fixed.position_m, fixed.velocity_mps, transform.rotation.apply_position(sun),
                 environment.time->to_utc(epoch), options.drag, weather, lower);
+            if (initial_drag_above_cutoff &&
+                (force.nominal.density_altitude_m > detail::drag_cutoff_altitude_m) !=
+                    *initial_drag_above_cutoff)
+                throw PropagationError(
+                    "Variational propagation across the 2500 km drag cutoff requires saltation; "
+                    "nominal orbit propagation remains supported");
             part = force.nominal.acceleration_itrf_mps2;
             add_blocks(result.force, inertial_blocks(force.force, transform.rotation,
                                                      transform.rotation_rate_per_second));
@@ -313,14 +321,12 @@ Vector detail::hpop_acceleration_unchecked(const CartesianState &state, const Hp
                                            std::optional<double> shadow_lighting) {
     return evaluate_force<false>(state, options, environment, weather_at, shadow_lighting);
 }
-HpopForceDifferential detail::hpop_differential_unchecked(const CartesianState &state,
-                                                          const HpopOptions &options,
-                                                          const HpopEnvironment &environment,
-                                                          std::optional<Epoch> weather_at,
-                                                          const HpopOptions *differential_gravity,
-                                                          const std::function<void()> &checkpoint) {
+HpopForceDifferential detail::hpop_differential_unchecked(
+    const CartesianState &state, const HpopOptions &options, const HpopEnvironment &environment,
+    std::optional<Epoch> weather_at, const HpopOptions *differential_gravity,
+    const std::function<void()> &checkpoint, std::optional<bool> initial_drag_above_cutoff) {
     return evaluate_force<true>(state, options, environment, weather_at, {}, checkpoint,
-                                differential_gravity);
+                                differential_gravity, initial_drag_above_cutoff);
 }
 Vector evaluate_hpop_acceleration(const CartesianState &state, const HpopOptions &options,
                                   HpopEnvironment environment) {

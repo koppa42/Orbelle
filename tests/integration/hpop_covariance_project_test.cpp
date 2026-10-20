@@ -138,7 +138,7 @@ TEST(HpopCovarianceProject, ReportUsesSameNumericsAndSquaredUnitScaling) {
     const auto result = analysis.report(report());
     ASSERT_EQ(result.table.rows().size(), 3);
     ASSERT_EQ(result.table.columns().size(), 25);
-    EXPECT_EQ(result.algorithm, "hpop-joint-covariance-direct-coast-v1");
+    EXPECT_EQ(result.algorithm, "hpop-joint-covariance-sequential-samples-v2");
     EXPECT_EQ(result.column_unit(4), "km^2");
     EXPECT_EQ(result.column_unit(10), "km^2/s");
     for (std::size_t row = 0; row < 3; ++row) {
@@ -188,4 +188,55 @@ TEST(HpopCovarianceProject, CovarianceResourceRequirementsJoinNominalRequirement
         const auto analysis = runtime::prepare(d, data);
         EXPECT_NO_THROW((void)analysis.covariance(d.objects().get("satellite-1"), p.last));
     }
+}
+TEST(HpopCovarianceProject, DenseReportOrdersBothDirectionsAndCancelsWithoutPublishing) {
+    auto p = example();
+    p.first = core::Epoch{-3600'000'000'000};
+    p.last = core::Epoch{3600'000'000'001};
+    p.satellites.front().orbit.first = p.first;
+    p.satellites.front().orbit.last = p.last;
+    auto definition = report();
+    definition.query.step_nanoseconds = 10'000'000'000;
+    runtime::ReportContext context{p, {}, {}, {}};
+    const auto expected_rows = runtime::estimate_report_rows(p, definition);
+    EXPECT_EQ(expected_rows, 722U);
+    std::size_t completed = 0;
+    const auto result = runtime::generate_report(context, definition, nullptr,
+                                                 [&](std::size_t count, std::size_t total) {
+                                                     EXPECT_EQ(total, expected_rows);
+                                                     EXPECT_GE(count, completed);
+                                                     completed = count;
+                                                 });
+    EXPECT_EQ(completed, expected_rows);
+    ASSERT_EQ(result.table.rows().size(), expected_rows);
+    EXPECT_EQ(std::get<core::Epoch>(result.table.rows().front()[2]), p.first);
+    EXPECT_EQ(std::get<core::Epoch>(result.table.rows().back()[2]), p.last);
+    for (std::size_t i = 1; i < expected_rows; ++i)
+        EXPECT_LT(std::get<core::Epoch>(result.table.rows()[i - 1][2]).tai_nanoseconds(),
+                  std::get<core::Epoch>(result.table.rows()[i][2]).tai_nanoseconds());
+    const auto &input = p.satellites.front().orbit;
+    for (const std::size_t row : {0U, 180U, 360U, 540U, 721U}) {
+        const auto exact = core::propagate_hpop_covariance(
+            input.initial, std::get<core::Epoch>(result.table.rows()[row][2]),
+            input.covariance.active_input(), input.hpop, {},
+            input.covariance.variational_options());
+        std::size_t column = 4;
+        for (std::size_t i = 0; i < 6; ++i)
+            for (std::size_t j = 0; j <= i; ++j)
+                EXPECT_LE(std::abs(std::get<double>(result.table.rows()[row][column++]) -
+                                   exact.covariance.state[i][j]) /
+                              std::sqrt(exact.covariance.state[i][i]) /
+                              std::sqrt(exact.covariance.state[j][j]),
+                          3e-9);
+    }
+    std::atomic_bool cancel = false;
+    EXPECT_THROW((void)runtime::generate_report(context, definition, &cancel,
+                                                [&](std::size_t count, std::size_t) {
+                                                    if (count >= 10)
+                                                        cancel = true;
+                                                }),
+                 runtime::ReportCancelled);
+    cancel = false;
+    const auto retry = runtime::generate_report(context, definition, &cancel);
+    EXPECT_EQ(retry.table.rows(), result.table.rows());
 }

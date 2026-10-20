@@ -62,10 +62,16 @@ class DragTests(unittest.TestCase):
                 self.assertAlmostEqual(actual.density_kg_m3 / row[5], 1, delta=3e-11)
 
     def test_explicit_daily_and_history_ap_match_author_reference(self):
-        rows = (ROOT / "tests/reference/propagators/nrlmsise00_ap.txt").read_text().splitlines()
+        self._check_ap_reference("nrlmsise00_ap.txt", 1056)
+
+    def test_high_altitude_daily_and_history_ap_match_author_reference(self):
+        self._check_ap_reference("nrlmsise00_high.txt", 576)
+
+    def _check_ap_reference(self, name, count):
+        rows = (ROOT / "tests/reference/propagators" / name).read_text().splitlines()
         rows = [list(map(float, line.split())) for line in rows if line and not line.startswith("#")]
-        self.assertEqual(len(rows), 1056)
-        for row in rows[::17]:
+        self.assertEqual(len(rows), count)
+        for row in rows:
             inputs = of.AtmosphereInput()
             seconds = int(row[3])
             hour, minute, second = (23, 59, 60) if seconds == 86400 else (
@@ -83,6 +89,29 @@ class DragTests(unittest.TestCase):
             self.assertAlmostEqual(result.density_kg_m3 / row[18], 1, delta=2e-10)
             self.assertAlmostEqual(result.temperature_k, row[19], delta=1e-7)
             self.assertAlmostEqual(result.exospheric_temperature_k, row[20], delta=1e-7)
+
+    def test_cutoff_low_blend_and_minimum_altitude_are_separate(self):
+        utc = of.UtcDateTime(2000, 1, 1, 12, 0, 0)
+        options = of.DragOptions()
+        options.enabled = True
+        for model in (of.AtmosphereModel.JACCHIA_ROBERTS, of.AtmosphereModel.NRLMSISE00):
+            options.atmosphere = model
+            for height in (1000001, 2000000, 2500000, 2500001, 35786000):
+                value = of.evaluate_drag((6378137 + height, 0, 0), (0, 7200, 0),
+                                         (1e11, 0, 2e10), utc, options)
+                self.assertEqual(value.density_kg_m3 == 0, height > 2500000)
+                if height > 2500000:
+                    self.assertEqual(list(value.acceleration_itrf_mps2), [0, 0, 0])
+        settings = of.orbits.DragSettings(enabled=True, low_altitude_model="nrlmsise00",
+                                         blending_range_m=1000000)
+        self.assertEqual(settings._native().blending_range_m, 1000000)
+        options = settings._native()
+        low = of.evaluate_drag((6458137, 0, 0), (0, 7200, 0), (1e11, 0, 2e10), utc, options)
+        self.assertGreater(low.density_kg_m3, 0)
+        # The low model and blending range do not modify the independent stop draft.
+        hpop = of.orbits.HpopSettings(minimum_altitude_m=70000, drag=settings)
+        self.assertEqual(hpop.minimum_altitude_m, 70000)
+        self.assertEqual(hpop.drag, settings)
 
     def test_explicit_ap_validation_selection_and_owned_values(self):
         inputs = of.AtmosphereInput()

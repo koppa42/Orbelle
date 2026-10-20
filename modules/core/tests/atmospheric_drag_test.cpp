@@ -9,6 +9,8 @@
 #include <numbers>
 #include <orbitforge/core/propagation/atmospheric_drag.hpp>
 #include <orbitforge/core/propagation/hpop.hpp>
+#include <orbitforge/core/propagation/hpop_force.hpp>
+#include <orbitforge/core/propagation/hpop_variational.hpp>
 #include <orbitforge/core/propagation/state_provider.hpp>
 #include <sstream>
 #include <vector>
@@ -149,7 +151,7 @@ TEST(AtmosphericDrag, InvalidDatesEnumsNonfiniteInputsAndModelDomainsAreRejected
     EXPECT_THROW((void)evaluate_atmosphere(AtmosphereModel::nrlmsise00, input),
                  std::invalid_argument);
     input.f107 = 150;
-    input.geodetic.height_m = 1000001;
+    input.geodetic.height_m = 2500001;
     EXPECT_THROW((void)evaluate_atmosphere(AtmosphereModel::nrlmsise00, input), PropagationError);
     input.geodetic.height_m = 89999;
     EXPECT_THROW((void)evaluate_atmosphere(AtmosphereModel::jacchia_roberts, input),
@@ -343,7 +345,7 @@ TEST(AtmosphericDrag, ApproximateAltitudeEquatorPolesDomainsAndLowAltitudeSelect
         }
     }
     EXPECT_THROW((void)evaluate_drag({a - 1, 0, 0}, v, sun, utc, options), PropagationError);
-    EXPECT_THROW((void)evaluate_drag({a + 1000001, 0, 0}, v, sun, utc, options), PropagationError);
+    EXPECT_GT(evaluate_drag({a + 1000001, 0, 0}, v, sun, utc, options).density_kg_m3, 0);
     EXPECT_THROW((void)evaluate_drag({0, 0, 0}, v, sun, utc, options), PropagationError);
     EXPECT_THROW(
         (void)evaluate_drag({0, std::numeric_limits<double>::infinity(), 0}, v, sun, utc, options),
@@ -576,8 +578,9 @@ TEST(AtmosphericDrag, RequiresUtcEopSunAndDeclaredApparentCoverageAndCancellatio
     EXPECT_THROW((void)provider->state_at(Epoch{172801000000000}), std::out_of_range);
 }
 
-TEST(AtmosphericDrag, NativeDailyAndHistoricalApMatchIndependentAuthorGtd7d) {
-    std::ifstream source(ORBITFORGE_NRLMSISE_AP_REFERENCE);
+namespace {
+void check_nrl_ap_reference(const char *path, std::size_t expected_count) {
+    std::ifstream source(path);
     ASSERT_TRUE(source);
     std::string line;
     std::size_t count = 0;
@@ -620,8 +623,193 @@ TEST(AtmosphericDrag, NativeDailyAndHistoricalApMatchIndependentAuthorGtd7d) {
         EXPECT_NEAR(actual.exospheric_temperature_k, exospheric, 1e-7);
         ++count;
     }
-    EXPECT_EQ(count, 1056u);
+    EXPECT_EQ(count, expected_count);
     std::cout << "NRLMSISE native/history Ap max relative density error: " << max_relative << '\n';
+}
+} // namespace
+TEST(AtmosphericDrag, NativeDailyAndHistoricalApMatchIndependentAuthorGtd7d) {
+    check_nrl_ap_reference(ORBITFORGE_NRLMSISE_AP_REFERENCE, 1056);
+}
+TEST(AtmosphericDrag, HighAltitudeDensityMatchesIndependentAuthorGtd7dThrough2500Km) {
+    check_nrl_ap_reference(ORBITFORGE_NRLMSISE_HIGH_REFERENCE, 576);
+}
+
+TEST(AtmosphericDrag, CutoffUsesDensityHeightAndDoesNotClampOrExtrapolateDensity) {
+    const std::array v{0., 7200., 0.}, sun{1e11, 0., 2e10};
+    const UtcDateTime utc{2000, 1, 1, 12, 0, 0, 0};
+    constexpr double a = 6378137, b = a * (1 - 1 / 298.257223563);
+    DragOptions options;
+    options.enabled = true;
+    for (auto model : {AtmosphereModel::jacchia_roberts, AtmosphereModel::nrlmsise00})
+        for (bool approximate : {false, true}) {
+            options.atmosphere = model;
+            options.use_approximate_altitude = approximate;
+            for (double h : {1000001., 2000000., 2499999., 2500000., 2500001., 35786000.})
+                for (const auto r : {std::array{a + h, 0., 0.}, std::array{0., 0., b + h}}) {
+                    SCOPED_TRACE(h);
+                    const auto result = evaluate_drag(r, v, sun, utc, options);
+                    EXPECT_NEAR(result.density_altitude_m, h, 1e-8);
+                    if (h <= 2500000)
+                        EXPECT_GT(result.density_kg_m3, 0);
+                    else {
+                        EXPECT_EQ(result.density_kg_m3, 0);
+                        EXPECT_EQ(result.acceleration_itrf_mps2, (std::array<double, 3>{}));
+                    }
+                }
+            // At 45 degrees the radial approximation lies above exact geodetic
+            // height. Put exact height just below the cutoff to check selection.
+            const double latitude = std::numbers::pi / 4, h = 2499999;
+            const double n = a / std::sqrt(1 - (1 - b * b / (a * a)) * .5);
+            const std::array r{(n + h) * std::cos(latitude), 0.,
+                               (n * b * b / (a * a) + h) * std::sin(latitude)};
+            const auto value = evaluate_drag(r, v, sun, utc, options);
+            EXPECT_EQ(value.density_kg_m3 == 0, approximate);
+        }
+    // A cutoff is not permission to accept malformed inputs or missing weather.
+    const std::array high{a + 35786000, 0., 0.};
+    EXPECT_THROW((void)evaluate_drag(high, v, sun, {2001, 2, 29, 0, 0, 0, 0}, options),
+                 std::invalid_argument);
+    options.weather_model = "celestrak";
+    EXPECT_THROW((void)evaluate_drag(high, v, sun, utc, options), std::invalid_argument);
+    const SpaceWeatherSample bad{std::numeric_limits<double>::quiet_NaN(), 150, 3, 15, {}};
+    EXPECT_THROW((void)evaluate_drag(high, v, sun, utc, options, bad), std::invalid_argument);
+}
+
+TEST(AtmosphericDrag, LowBlendAndMinimumPropagationAltitudeAreIndependent) {
+    const std::array v{0., 7200., 0.}, sun{1e11, 0., 2e10};
+    const UtcDateTime utc{2000, 1, 1, 12, 0, 0, 0};
+    DragOptions drag;
+    drag.enabled = true;
+    EXPECT_THROW((void)evaluate_drag({6378137 + 80000., 0, 0}, v, sun, utc, drag),
+                 PropagationError);
+    drag.low_altitude_model = LowAltitudeDensityModel::nrlmsise00;
+    for (double range : {0., 30000., 1000000.}) {
+        drag.blending_range_m = range;
+        EXPECT_NO_THROW(validate_drag_options(drag));
+        for (double h : {0., 80000., 89999., 90000., 90000. + range, 90001. + range}) {
+            AtmosphereInput input;
+            input.utc = utc;
+            input.geodetic.height_m = h;
+            input.sun_declination_rad = std::atan2(sun[2], sun[0]);
+            const auto expected_model = h < 90000 || (range > 0 && h == 90000)
+                                            ? AtmosphereModel::nrlmsise00
+                                            : AtmosphereModel::jacchia_roberts;
+            const auto actual = evaluate_drag({6378137 + h, 0, 0}, v, sun, utc, drag);
+            EXPECT_DOUBLE_EQ(actual.density_kg_m3,
+                             evaluate_atmosphere(expected_model, input).density_kg_m3);
+        }
+    }
+    HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    options.drag = drag;
+    const CartesianState low{Epoch{0}, OriginId::earth, FrameId::gcrf, {6378137 + 80000., 0, 0}, v};
+    options.minimum_altitude_m = 70000;
+    EXPECT_NO_THROW((void)make_hpop(low, options, environment())->state_at(Epoch{100000000}));
+    auto descending = low;
+    descending.velocity_mps[0] = -300;
+    options.drag.cd = 0; // Isolate the stop condition while keeping density evaluation enabled.
+    try {
+        (void)make_hpop(descending, options, environment())->state_at(Epoch{60000000000});
+        FAIL() << "A descending coast must stop at its independent minimum altitude";
+    } catch (const PropagationError &error) {
+        EXPECT_NE(std::string(error.what()).find("minimum geocentric altitude"), std::string::npos);
+    }
+    options.minimum_altitude_m = 85000;
+    EXPECT_THROW((void)make_hpop(low, options, environment()), PropagationError);
+    // The stop also applies above the drag cutoff, including with drag disabled.
+    auto high = low;
+    high.position_m[0] = egm96_radius_m + 3000000;
+    options.minimum_altitude_m = 3000000;
+    for (bool enabled : {true, false}) {
+        options.drag.enabled = enabled;
+        EXPECT_THROW((void)make_hpop(high, options, environment()), PropagationError);
+    }
+}
+
+TEST(AtmosphericDrag, HighOrbitKeepsOtherForcesAndRequiredResources) {
+    const CartesianState initial{
+        Epoch{0}, OriginId::earth, FrameId::gcrf, {42164137, 0, 0}, {0, 3074.66, 300}};
+    HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    options.third_body(ThirdBody::sun).enabled = true;
+    options.srp.enabled = true;
+    options.srp.sun_position_method = SrpSunPositionMethod::geometric;
+    options.srp.shadow_model = SrpShadowModel::none;
+    const auto baseline = evaluate_hpop_acceleration(initial, options, environment());
+    const auto coast =
+        propagate_hpop_variational(initial, Epoch{60000000000}, options, environment());
+    for (auto model : {AtmosphereModel::jacchia_roberts, AtmosphereModel::nrlmsise00}) {
+        options.drag.enabled = true;
+        options.drag.atmosphere = model;
+        EXPECT_EQ(evaluate_hpop_acceleration(initial, options, environment()), baseline);
+        const auto actual =
+            propagate_hpop_variational(initial, Epoch{60000000000}, options, environment());
+        EXPECT_EQ(actual.state.position_m, coast.state.position_m);
+        EXPECT_EQ(actual.state.velocity_mps, coast.state.velocity_mps);
+        EXPECT_EQ(actual.state_transition, coast.state_transition);
+        EXPECT_EQ(actual.drag_sensitivity, (std::array<double, 6>{}));
+        auto missing = environment();
+        missing.frames.reset();
+        EXPECT_THROW((void)make_hpop(initial, options, missing), std::invalid_argument);
+        missing = environment();
+        missing.ephemeris.reset();
+        EXPECT_THROW((void)make_hpop(initial, options, missing), std::invalid_argument);
+    }
+}
+
+TEST(AtmosphericDrag, NominalOrbitsCrossCutoffInBothDirectionsAndAllIntegrators) {
+    for (auto model : {AtmosphereModel::jacchia_roberts, AtmosphereModel::nrlmsise00})
+        for (double radial : {-200., 200.})
+            for (double direction : {-1., 1.}) {
+                const double height = radial * direction > 0 ? 2499000 : 2501000;
+                const CartesianState initial{Epoch{0},
+                                             OriginId::earth,
+                                             FrameId::gcrf,
+                                             {6378137 + height, 0, 0},
+                                             {radial, std::sqrt(egm96_mu / (6378137 + height)), 0}};
+                const auto end = Epoch{static_cast<std::int64_t>(direction * 20e9)};
+                HpopOptions options;
+                options.gravity_degree = options.gravity_order = 0;
+                options.drag.enabled = true;
+                options.drag.atmosphere = model;
+                // Stress the small high-altitude force using allowed large A/m.
+                options.drag.cd = 10;
+                options.drag.area_mass_ratio_m2_per_kg = 1000;
+                options.drag.f107 = 250;
+                options.drag.f107_average = 220;
+                options.drag.kp = 8.5;
+                options.integrator = HpopIntegrator::rk4;
+                options.fixed_step_seconds = .01;
+                const auto reference = make_hpop(initial, options, environment())->state_at(end);
+                const double final_height = drag_geodetic_position(reference.position_m).height_m;
+                EXPECT_EQ(final_height > 2500000, radial * direction > 0);
+                for (auto method :
+                     {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
+                      HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
+                    SCOPED_TRACE(static_cast<int>(method));
+                    options.integrator = method;
+                    options.fixed_step_seconds = .25;
+                    options.max_step_seconds = 1;
+                    options.min_step_seconds = 1e-6;
+                    options.position_tolerance_m = 1e-6;
+                    options.velocity_tolerance_mps = 1e-9;
+                    options.relative_tolerance = 1e-13;
+                    const auto actual = make_hpop(initial, options, environment())->state_at(end);
+                    // A fixed RK/GJ step may straddle the hard cutoff. At this A/m,
+                    // 0.25 s of the jump contributes <2 mm over the 20 s coast.
+                    for (std::size_t i = 0; i < 3; ++i) {
+                        EXPECT_NEAR(actual.position_m[i], reference.position_m[i], .002);
+                        EXPECT_NEAR(actual.velocity_mps[i], reference.velocity_mps[i], .0001);
+                    }
+                    try {
+                        (void)propagate_hpop_variational(initial, end, options, environment());
+                        FAIL() << "A cutoff crossing must not publish an uncorrected STM";
+                    } catch (const PropagationError &error) {
+                        EXPECT_NE(std::string(error.what()).find("2500 km drag cutoff"),
+                                  std::string::npos);
+                    }
+                }
+            }
 }
 
 TEST(AtmosphericDrag, ExplicitApModesAreDistinctValidatedAndLocalToEachCall) {

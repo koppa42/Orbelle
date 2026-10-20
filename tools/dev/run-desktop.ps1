@@ -18,6 +18,7 @@ $orbitStart.UseShellExecute = $false
 $orbitStart.WorkingDirectory = Split-Path -Parent $orbitExecutable
 $orbitStart.Environment['PATH'] = (Join-Path $orbitDependencies 'bin') + [IO.Path]::PathSeparator + $env:PATH
 $orbitStart.Environment['QT_QPA_PLATFORM_PLUGIN_PATH'] = Join-Path $orbitDependencies 'Qt6/plugins/platforms'
+$orbitStart.Environment['QT_PLUGIN_PATH'] = Join-Path $orbitDependencies 'Qt6/plugins'
 $orbitStart.Environment['QT_QPA_PLATFORM'] = 'windows'
 $orbitStart.Environment['VK_LAYER_PATH'] = Join-Path $orbitDependencies 'bin'
 $orbitStart.Environment['PROJ_DATA'] = Join-Path $orbitDependencies 'share/proj'

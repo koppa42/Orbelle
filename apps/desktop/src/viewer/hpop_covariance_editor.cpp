@@ -26,10 +26,26 @@ double read_number(const QString &text, const QString &label) {
         throw std::invalid_argument((label + QStringLiteral("：请输入有限数值。")).toStdString());
     return value;
 }
-double read_cell(const QTableWidget *table, int row, int column) {
-    return read_number(
+double read_cell(const QTableWidget *table, int row, int column, bool nonnegative = false) {
+    const auto value = read_number(
         table->item(row, column)->text(),
         QStringLiteral("%1 [%2, %3]").arg(table->accessibleName()).arg(row + 1).arg(column + 1));
+    if (nonnegative && value < 0)
+        throw std::invalid_argument(QStringLiteral("%1 [%2, %3]：方差不能小于零。")
+                                        .arg(table->accessibleName())
+                                        .arg(row + 1)
+                                        .arg(column + 1)
+                                        .toStdString());
+    return value;
+}
+template <class Read> double read_draft(double previous, bool active, const Read &read) {
+    try {
+        return read();
+    } catch (const std::invalid_argument &) {
+        if (active)
+            throw;
+        return previous;
+    }
 }
 void setup_table(QTableWidget *table, const char *name, const QString &accessible) {
     table->setObjectName(name);
@@ -48,7 +64,7 @@ void setup_table(QTableWidget *table, const char *name, const QString &accessibl
 } // namespace
 HpopCovarianceEditor::HpopCovarianceEditor(const application::HpopCovarianceSettings &s,
                                            bool supported, QWidget *parent)
-    : QWidget(parent) {
+    : QWidget(parent), initial_(s) {
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
@@ -189,6 +205,14 @@ void HpopCovarianceEditor::refresh() {
     degree_->setEnabled(independent_->isChecked());
     order_->setEnabled(independent_->isChecked());
     parameters_->setEnabled(consider_->isChecked());
+    const QSignalBlocker block(parameters_);
+    for (int row = 0; row < 2; ++row) {
+        const bool used = parameters_->item(row, 0)->checkState() == Qt::Checked;
+        for (int column = 2; column < parameters_->columnCount(); ++column)
+            parameters_->item(row, column)
+                ->setFlags(used ? Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable
+                                : Qt::ItemIsSelectable);
+    }
     const bool both = consider_->isChecked() &&
                       parameters_->item(0, 0)->checkState() == Qt::Checked &&
                       parameters_->item(1, 0)->checkState() == Qt::Checked;
@@ -199,7 +223,7 @@ QString HpopCovarianceEditor::summary() const {
     return enabled_->isChecked() ? frame_->currentText() : QStringLiteral("未启用");
 }
 application::HpopCovarianceSettings HpopCovarianceEditor::value() const {
-    application::HpopCovarianceSettings s;
+    auto s = initial_;
     s.enabled = enabled_->isChecked();
     s.coordinates = {static_cast<core::HpopCovarianceFrame>(frame_->currentData().toInt()),
                      static_cast<core::HpopCovarianceVelocity>(velocity_->currentIndex())};
@@ -207,22 +231,39 @@ application::HpopCovarianceSettings HpopCovarianceEditor::value() const {
         for (int j = 0; j <= i; ++j)
             s.state[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)] =
                 s.state[static_cast<std::size_t>(j)][static_cast<std::size_t>(i)] =
-                    read_cell(state_, i, j);
+                    read_draft(s.state[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)],
+                               s.enabled, [&] { return read_cell(state_, i, j, i == j); });
     s.independent_gravity = independent_->isChecked();
-    s.gravity = {degree_->value(), order_->value()};
-    s.absolute_tolerance = read_number(tolerance_->text(), QStringLiteral("变分绝对容差"));
+    const core::HpopGravityTruncation gravity{degree_->value(), order_->value()};
+    if ((gravity.degree == 0 || gravity.degree >= 2) && gravity.order <= gravity.degree)
+        s.gravity = gravity;
+    else if (s.enabled && s.independent_gravity)
+        throw std::invalid_argument("协方差重力需要 0×0 或至少 2 阶，次数不得超过阶数。");
+    s.absolute_tolerance = read_draft(s.absolute_tolerance, s.enabled, [&] {
+        const double value = read_number(tolerance_->text(), QStringLiteral("变分绝对容差"));
+        if (value < 1e-16 || value > 1)
+            throw std::invalid_argument("变分绝对容差必须在 1e-16 到 1 之间。");
+        return value;
+    });
     s.consider_analysis = consider_->isChecked();
     s.drag_enabled = parameters_->item(0, 0)->checkState() == Qt::Checked;
     s.srp_enabled = parameters_->item(1, 0)->checkState() == Qt::Checked;
     for (int row = 0; row < 2; ++row) {
         auto &p = row == 0 ? s.drag : s.srp;
-        p.variance = read_cell(parameters_, row, 2);
+        const bool active =
+            s.enabled && s.consider_analysis && (row == 0 ? s.drag_enabled : s.srp_enabled);
+        p.variance =
+            read_draft(p.variance, active, [&] { return read_cell(parameters_, row, 2, true); });
         for (int j = 0; j < 6; ++j)
             p.state_cross_covariance[static_cast<std::size_t>(j)] =
-                read_cell(parameters_, row, j + 3);
+                read_draft(p.state_cross_covariance[static_cast<std::size_t>(j)], active,
+                           [&] { return read_cell(parameters_, row, j + 3); });
     }
     s.consider_cross_correlation = cross_enabled_->isChecked();
-    s.drag_srp_covariance = read_cell(cross_, 0, 2);
+    s.drag_srp_covariance = read_draft(s.drag_srp_covariance,
+                                       s.enabled && s.consider_analysis && s.drag_enabled &&
+                                           s.srp_enabled && s.consider_cross_correlation,
+                                       [&] { return read_cell(cross_, 0, 2); });
     return s;
 }
 } // namespace orbitforge::desktop

@@ -403,8 +403,9 @@ bool edit_hpop_settings(
     ocean->addRow(ocean_cancel);
     auto *ocean_manage = new QPushButton(QStringLiteral("在数据中心管理海潮"));
     ocean_manage->setObjectName("hpopManageOceanTides");
-    ocean_manage->setVisible(data != nullptr);
+    // Attach optional controls before making them visible; unparented buttons are windows.
     ocean->addRow(ocean_manage);
+    ocean_manage->setVisible(data != nullptr);
     help(ocean, QStringLiteral("阶数和次数独立于中心引力设置；2 阶 1 次及以上自动包含海洋极潮。"
                                "0、1 阶不产生地心海潮引力。计算需要覆盖传播时段的 EOP。"));
     caution(ocean, QStringLiteral("当前使用文件中的显式分潮；次要分潮推算与最小振幅筛选待实现。"));
@@ -435,8 +436,8 @@ bool edit_hpop_settings(
     manage->setText(QStringLiteral("在数据中心管理"));
     manage->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     manage->setIcon(workbench_icon(WorkbenchIcon::database));
-    manage->setVisible(static_cast<bool>(manage_ephemerides));
     resource_layout->addWidget(manage, 0, Qt::AlignLeft);
+    manage->setVisible(static_cast<bool>(manage_ephemerides));
     const auto refresh_ephemeris = [&] {
         const auto found =
             std::find_if(installed_ephemerides.begin(), installed_ephemerides.end(),
@@ -707,6 +708,10 @@ bool edit_hpop_settings(
     density_model->addItems({QStringLiteral("Jacchia–Roberts"), QStringLiteral("NRLMSISE-00")});
     density_model->setCurrentIndex(static_cast<int>(options.drag.atmosphere));
     drag_density->addRow(QStringLiteral("密度模型"), density_model);
+    auto *drag_cutoff = new QLabel(QStringLiteral("2500 km · 超过后阻力为零，继续传播"));
+    drag_cutoff->setObjectName("hpopDragHighAltitudeCutoff");
+    drag_cutoff->setWordWrap(true);
+    drag_density->addRow(QStringLiteral("高空截止"), drag_cutoff);
     auto *low_density = new QComboBox;
     low_density->setObjectName("hpopDragLowAltitudeModel");
     low_density->addItems({QStringLiteral("None · 关闭"), QStringLiteral("NRLMSISE-00")});
@@ -715,8 +720,10 @@ bool edit_hpop_settings(
     auto *drag_blend = quantity(drag_density, QStringLiteral("拼接范围"), "hpopDragBlendingRange",
                                 Unit::metre, options.drag.blending_range_m, 0, 1000000);
     drag_blend->set_unit(Unit::kilometre);
-    help(drag_density, QStringLiteral("Jacchia–Roberts：90–2500 km；NRLMSISE-00：0–1000 km。"
-                                      "低空模型在 90 km 以上的指定范围内平滑拼接。"));
+    help(drag_density,
+         QStringLiteral("JR 低于 90 km 时需启用低空模型；从 90 km 起，在指定范围内平滑拼接。"
+                        "NRLMSISE-00 的经验适用范围为 0–1000 km，计算延伸至高空截止。"
+                        "停止传播的最低高度在「积分器」页单独设置。"));
     auto *drag_weather =
         section(drag_page, QStringLiteral("太阳通量 / 地磁"), "hpopDragWeatherSection");
     auto *drag_weather_source = new QComboBox;
@@ -788,8 +795,8 @@ bool edit_hpop_settings(
     };
     auto *weather_manage = new QPushButton(QStringLiteral("管理空间天气…"));
     weather_manage->setObjectName("hpopDragManageWeather");
-    weather_manage->setVisible(data != nullptr);
     drag_weather->addRow(QString{}, weather_manage);
+    weather_manage->setVisible(data != nullptr);
     QObject::connect(weather_manage, &QPushButton::clicked, &dialog, [&] {
         if (data)
             show_data_center(&dialog, *data, DataProduct::space_weather);
@@ -833,8 +840,8 @@ bool edit_hpop_settings(
     refresh_drag_resource();
     auto *drag_manage = new QPushButton(QStringLiteral("管理太阳系星历…"));
     drag_manage->setObjectName("hpopDragManageEphemerides");
-    drag_manage->setVisible(static_cast<bool>(manage_ephemerides));
     drag_sun->addRow(QString{}, drag_manage);
+    drag_manage->setVisible(static_cast<bool>(manage_ephemerides));
     std::function<void()> refresh_srp_resource;
     QObject::connect(drag_manage, &QPushButton::clicked, &dialog, [&] {
         if (manage_ephemerides) {
@@ -963,8 +970,8 @@ bool edit_hpop_settings(
     };
     auto *srp_manage = new QPushButton(QStringLiteral("在数据中心管理星历"));
     srp_manage->setObjectName("hpopSrpManageEphemerides");
-    srp_manage->setVisible(static_cast<bool>(manage_ephemerides));
     srp_sun->addRow(QString{}, srp_manage);
+    srp_manage->setVisible(static_cast<bool>(manage_ephemerides));
     QObject::connect(srp_manage, &QPushButton::clicked, manage, &QToolButton::click);
     QObject::connect(manage, &QToolButton::clicked, &dialog, refresh_srp_resource);
     QObject::connect(manage, &QToolButton::clicked, &dialog, refresh_drag_resource);
@@ -1367,7 +1374,8 @@ bool edit_hpop_settings(
     auto *altitude =
         quantity(stop, QStringLiteral("最低地心高度"), "hpopMinimumAltitude", Unit::metre,
                  options.minimum_altitude_m, 0, std::numeric_limits<double>::max());
-    help(stop, QStringLiteral("高度相对所选重力场参考球面；积分中低于此高度会停止并报错。"));
+    help(stop, QStringLiteral("高度相对所选重力场参考球面；积分中达到或低于此高度会停止并报错。"
+                              "此条件独立于阻力页的高空截止和低空模型。"));
     auto *covariance_page = page(tabs, QStringLiteral("协方差"), "hpopCovariancePage");
     auto *covariance_editor = new HpopCovarianceEditor(
         covariance ? *covariance : application::HpopCovarianceSettings{}, covariance != nullptr);
@@ -1760,6 +1768,17 @@ bool edit_hpop_settings(
             validation_field = field;
             return field->value(unit);
         };
+        const auto read_draft = [&](QuantityEditor *field, Unit unit, auto &value, bool active) {
+            if (active)
+                value = read(field, unit);
+            else {
+                try {
+                    value = field->value(unit);
+                } catch (const std::exception &) {
+                    // An unfinished inactive input must not replace the saved valid draft.
+                }
+            }
+        };
         try {
             auto candidate = options;
             for (auto body : core::third_body_list) {
@@ -1776,7 +1795,8 @@ bool edit_hpop_settings(
                     throw std::runtime_error(std::string(core::third_body_name(body)) +
                                              "：请先导入此天体的 Cb 引力常数文件。");
                 if (setting.source == core::ThirdBodyGravitySource::user_specified)
-                    setting.user_mu = read(field.mu, Unit::metres_cubed_per_second_squared);
+                    read_draft(field.mu, Unit::metres_cubed_per_second_squared, setting.user_mu,
+                               setting.enabled);
                 else if (field.manual->si &&
                          (setting.user_mu || field.manual->text != field.default_manual))
                     setting.user_mu = field.manual->si;
@@ -1951,34 +1971,59 @@ bool edit_hpop_settings(
             candidate.step_control = static_cast<core::HpopStepControl>(step_control_draft);
             validation_page = 1;
             candidate.time_regularization = regularization->isChecked();
-            if (candidate.time_regularization) {
-                candidate.regularization_exponent = read(exponent, Unit::one);
-                candidate.steps_per_orbit = steps_per_orbit->value();
-            }
+            read_draft(exponent, Unit::one, candidate.regularization_exponent,
+                       candidate.time_regularization);
+            candidate.steps_per_orbit = steps_per_orbit->value();
             candidate.minimum_altitude_m = read(altitude, Unit::metre);
-            if (!candidate.uses_fixed_step()) {
-                candidate.min_step_seconds = read(minimum, Unit::second);
-                candidate.max_step_seconds = read(maximum, Unit::second);
-                if (candidate.min_step_seconds > candidate.max_step_seconds)
+            const bool adaptive = !candidate.uses_fixed_step();
+            const auto read_bounds = [&] {
+                const double low = read(minimum, Unit::second);
+                const double high = read(maximum, Unit::second);
+                if (low > high)
                     throw std::runtime_error("最大步长不能小于最小步长。");
-                candidate.relative_tolerance = read(relative, Unit::one);
-                candidate.position_tolerance_m = read(position, Unit::metre);
-                candidate.velocity_tolerance_mps = read(velocity, Unit::metres_per_second);
-            } else if (!candidate.time_regularization) {
-                candidate.fixed_step_seconds = read(fixed, Unit::second);
+                // Bounds form one draft: never save only one side of an invalid pair.
+                candidate.min_step_seconds = low;
+                candidate.max_step_seconds = high;
+            };
+            if (adaptive)
+                read_bounds();
+            else {
+                try {
+                    read_bounds();
+                } catch (const std::exception &) {
+                }
             }
-            const auto vop_mu = read(interpolation_mu, Unit::metres_cubed_per_second_squared);
+            read_draft(relative, Unit::one, candidate.relative_tolerance, adaptive);
+            read_draft(position, Unit::metre, candidate.position_tolerance_m, adaptive);
+            read_draft(velocity, Unit::metres_per_second, candidate.velocity_tolerance_mps,
+                       adaptive);
+            read_draft(fixed, Unit::second, candidate.fixed_step_seconds,
+                       !adaptive && !candidate.time_regularization);
+            read_draft(interpolation_mu, Unit::metres_cubed_per_second_squared,
+                       candidate.interpolation.vop_mu, interpolation->currentIndex() == 2);
             validation_field = interpolation_order;
             candidate.interpolation = {
                 static_cast<core::OrbitInterpolationMethod>(interpolation->currentIndex()),
-                interpolation_order->value(), vop_mu};
+                interpolation_order->value(), candidate.interpolation.vop_mu};
             candidate.report_ephemeris_on_fixed_step = fixed_ephemeris->isChecked();
             core::validate_hpop_options(candidate);
             validation_page = 2;
             validation_field = covariance_editor->findChild<QTableWidget *>("hpopCovarianceMatrix");
             const auto covariance_candidate = covariance_editor->value();
-            if (covariance)
+            if (covariance) {
                 application::validate_hpop_covariance_settings(covariance_candidate, candidate);
+                if (covariance_candidate.enabled && covariance_candidate.independent_gravity) {
+                    const auto [max_degree, max_order] = gravity_limits();
+                    validation_field =
+                        covariance_editor->findChild<QSpinBox *>("hpopCovarianceDegree");
+                    if (covariance_candidate.gravity.degree > max_degree)
+                        throw std::runtime_error("协方差阶数超出所选重力文件的可用范围。");
+                    validation_field =
+                        covariance_editor->findChild<QSpinBox *>("hpopCovarianceOrder");
+                    if (covariance_candidate.gravity.order > max_order)
+                        throw std::runtime_error("协方差次数超出所选重力文件的可用范围。");
+                }
+            }
             options = candidate;
             if (covariance)
                 *covariance = covariance_candidate;

@@ -53,7 +53,9 @@ struct AtmosphereEvaluation {
     double density_kg_m3, temperature_k, exospheric_temperature_k;
 };
 // Pure SI density model, no files or implicit time/ephemeris queries. JR: 90..2500 km;
-// NRLMSISE-00 gtd7d (including anomalous oxygen): 0..1000 km. Invalid inputs throw.
+// NRLMSISE-00 gtd7d (including anomalous oxygen): 0..2500 km computational domain;
+// its empirical applicability remains 0..1000 km. Invalid inputs throw.
+// This raw density/temperature API does not apply the drag-force cutoff.
 [[nodiscard]] AtmosphereEvaluation evaluate_atmosphere(AtmosphereModel model,
                                                        const AtmosphereInput &input);
 struct DragEvaluation {
@@ -67,6 +69,9 @@ struct DragEvaluation {
 // Sun is geocentric in the same ITRF axes; no atmospheric winds. File mode requires
 // a sample for the main model and, when blending, one for the low-altitude model,
 // each sampled with its own lag. This pure evaluator performs no file access.
+// Above density height 2500 km returns zero density/drag, without stopping HPOP.
+// JR below 90 km requires an explicit NRLMSISE low model. Neither policy changes
+// HpopOptions::minimum_altitude_m (geocentric height above the gravity reference).
 [[nodiscard]] DragEvaluation
 evaluate_drag(const std::array<double, 3> &position_itrf_m,
               const std::array<double, 3> &velocity_itrf_mps,
@@ -85,7 +90,8 @@ struct DragDifferential {
 // velocity is relative to co-rotating air, as for evaluate_drag. Density position
 // derivatives use fourth-order finite differences; velocity and D are analytic.
 // Historical-Ap latitude derivatives keep their hemisphere (north at zero).
-// One-sided density derivatives at outer altitude limits; rejects interior model
+// Zero derivatives above 2500 km; rejects the cutoff within 1e-5 m. One-sided
+// density derivatives at the lower altitude limit; rejects interior model
 // branch boundaries (within 1e-5 m), angular cuts (within 1e-12 rad), and
 // longitude poles (|cos(latitude)| < 1e-8).
 // Full inertial partials also need the position-to-velocity rotation-rate coupling.

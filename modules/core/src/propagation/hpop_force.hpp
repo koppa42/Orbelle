@@ -17,5 +17,6 @@ void validate_hpop_force_state(const std::array<double, 3> &position,
 [[nodiscard]] HpopForceDifferential hpop_differential_unchecked(
     const CartesianState &state, const HpopOptions &options, const HpopEnvironment &environment,
     std::optional<Epoch> weather_at = {}, const HpopOptions *differential_gravity = nullptr,
-    const std::function<void()> &checkpoint = {});
+    const std::function<void()> &checkpoint = {},
+    std::optional<bool> initial_drag_above_cutoff = {});
 } // namespace orbitforge::core::detail

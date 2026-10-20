@@ -584,6 +584,20 @@ int main(int argc, char **argv) try {
             uncertainty.contributions.consider_parameters[0][0] <= 0 ||
             uncertainty.covariance.state[0][3] != uncertainty.covariance.state[3][0])
             throw std::runtime_error("Installed joint HPOP covariance API failed");
+        std::size_t covariance_samples = 0;
+        orbitforge::core::sample_hpop_covariance(
+            derivative_state, {variational_end, derivative_state.epoch, variational_end},
+            celestial_covariance,
+            [&](std::size_t index, const orbitforge::core::HpopCovarianceState &sample) {
+                ++covariance_samples;
+                if (sample.covariance.coordinates.frame !=
+                        orbitforge::core::HpopCovarianceFrame::gcrf ||
+                    (index != 1 && sample.covariance != uncertainty.covariance))
+                    throw std::runtime_error("Installed covariance sampling API failed");
+            },
+            options, force_environment);
+        if (covariance_samples != 3)
+            throw std::runtime_error("Installed covariance sampling dropped an epoch");
 
         const auto full_light = orbitforge::core::evaluate_srp(
             {7e6, 0, 0}, {149597870700, 0, 0}, options.srp, std::array{0., 384400000., 0.});

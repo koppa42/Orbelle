@@ -12,6 +12,8 @@
 
 `nrlmsise00_ap.txt` 另含 1056 个同一原作者 C `gtd7d` 参考，覆盖 3 个日期、11 个高度、4 组几何和 8 组地磁输入：3 组原生日 Ap（含非 Kp 表节点的 15.25）、5 组历史 Ap（全零、恒定、最大值、上升和衰减磁暴）。历史模式显式设置原生 `SW[9]=-1`；测试完整密度及两个温度。历史均值包含非整数，不舍入到离散 Kp 表。参考 SHA-256 为 `da884507a21fc53dd8f5c0002bedb6270f289fbf88fbb254366b71eb219e9037`。
 
+`nrlmsise00_high.txt` 使用同一原作者、同一输入网格，将高度替换为 1000、1000.001、1200、2000、2499.999、2500 km，共 576 组日／历史 Ap 参考。生成器 `nrlmsise_ap_reference.c --high-altitude` 不连接 OrbitForge，旧参考字节保持不变；SHA-256 为 `4823dba8337635f0d96dfd1b58012e127d5c8380229e4c98cbd74b9150930efa`。继续使用相对 `2e-10`、温度 `1e-7 K` 的原容限；这验证计算实现，不认证 1000 km 以上的经验物理精度。
+
 生成器为 `tools/validation/nrlmsise_reference.c`、`nrlmsise_ap_reference.c` 和 `jacchia_roberts_reference.cpp`；上游文件 URL 与原始字节 SHA-256 固定于 `density_sources.json`。`atmosphere_reference.py` 下载后校验字节、独立编译并在指定目录写候选文件，不能自动覆盖参考：
 
 ```powershell
@@ -22,6 +24,10 @@ python tools/validation/atmosphere_reference.py out/validation/density-reference
 Core/Python 对照密度相对容限 `2e-10`，NRL 温度绝对容限 `1e-7 K`，用于不同浮点运算顺序。另测非法日期、非法枚举、非有限参数、越界高度、Kp→Ap、极点/赤纬零/正午午夜及并发；这些测试不代表经验大气模型的物理精度。原生 Ap 测试额外检查两种输入互斥、JR 拒绝 Ap、七项长度与各项范围、显式 Ap 不读取非活动 Kp、输入数组所有权，以及日/历史模式交替和并发计算不串状态。Python 独立安装和 C++ SDK 消费端同时验证公开字段。历史 Ap 尚未用于 HPOP 轨道参考。
 
 ## 轨道参考
+
+高空策略回归另覆盖两个模型、精确／径向密度高度、赤道／两极、2500 km 等值及两侧、GEO 零阻力、非法输入和缺资源。GEO 打开阻力后，与关闭阻力的同一重力／太阳第三体／光压轨迹、STM 严格相等，D 灵敏度为零；最低传播高度独立生效。低空覆盖 0／80／90 km、零宽／30 km／1000 km 拼接和端点选择。
+
+五种积分器分别从截止两侧正反向传播，使用允许的大面积质量比放大截止跳变，与 0.01 s RK4 作步长收敛对照（不是独立传播器参考）：20 s 轨迹位置差 <2 mm、速度差 <0.1 mm/s。固定 RK/GJ 的 0.25 s 步可能跨硬截止，容限按跳变在该时间内的贡献设定；自适应方法使用 1e−6 m / 1e−9 m/s / 1e−13 局部容限。所有跨截止变分查询须明确失败，防止发布缺少 saltation 的协方差。
 
 `drag.txt` 有 24 个独立 Orekit 13.1.2 / Hipparchus 4.0.2 `NRLMSISE00 + IsotropicDrag + DP853` 轨道和初始阻力加速度。固定 jars 及 SHA-256 复用 `tools/validation/orekit/dependencies.json`，生成器为 `OrbitForgeDragReference.java`。
 

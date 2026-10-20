@@ -1,5 +1,6 @@
 #pragma once
 #include <orbitforge/core/propagation/hpop_variational.hpp>
+#include <vector>
 
 namespace orbitforge::core {
 using HpopStateCovariance = std::array<std::array<double, 6>, 6>;
@@ -101,4 +102,20 @@ propagate_hpop_covariance(CartesianState initial, Epoch end, HpopCovarianceInput
                           HpopOptions options = {}, HpopEnvironment environment = {},
                           HpopVariationalOptions variational = {},
                           const std::function<void()> &checkpoint = {});
+// Sample up to 200000 epochs without restarting at the initial state for each
+// output. Times/inputs are captured by value before callbacks. Each side of the
+// initial epoch advances once, retaining the global STM and integration history.
+// Output epochs are exact integration stops, not interpolated covariances; their
+// spacing can affect the numerical path within the selected method's accuracy.
+// Same force/event/resource restrictions as propagate_hpop_covariance; 200000
+// integration attempts per direction and at most 366 days from initial. Unsorted
+// times and duplicates are supported. The callback receives the original index
+// in propagation order (not necessarily chronological), and a temporary result.
+// Full coverage is checked before the first sample. Cancellation or a later
+// numerical failure throws; consumers must discard any earlier streamed samples.
+void sample_hpop_covariance(
+    CartesianState initial, std::vector<Epoch> times, HpopCovarianceInput covariance,
+    const std::function<void(std::size_t, const HpopCovarianceState &)> &sample,
+    HpopOptions options = {}, HpopEnvironment environment = {},
+    HpopVariationalOptions variational = {}, const std::function<void()> &checkpoint = {});
 } // namespace orbitforge::core

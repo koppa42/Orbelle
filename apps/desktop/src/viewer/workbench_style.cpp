@@ -462,6 +462,70 @@ QPixmap brand_mark(int size, qreal device_pixel_ratio) {
                  icon.pixmap(QSize(glyph, glyph), device_pixel_ratio));
     return pixels;
 }
+void paint_sakura_blossom(QPainter &painter, const QPointF &center, qreal radius,
+                          const QColor &color) {
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.translate(center);
+    painter.scale(radius, radius);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(color);
+    QPainterPath petal;
+    petal.moveTo(0, 0.08);
+    petal.cubicTo(-0.48, -0.20, -0.50, -0.69, -0.20, -1.0);
+    petal.lineTo(0, -0.82);
+    petal.lineTo(0.20, -1.0);
+    petal.cubicTo(0.50, -0.69, 0.48, -0.20, 0, 0.08);
+    for (int i = 0; i < 5; ++i) {
+        painter.drawPath(petal);
+        painter.rotate(72);
+    }
+    painter.setBrush(theme::color(theme::accent_bright, color.alpha()));
+    painter.drawEllipse(QPointF(0, 0), 0.12, 0.12);
+    painter.restore();
+}
+namespace {
+class SakuraRibbon final : public QWidget {
+  public:
+    explicit SakuraRibbon(QWidget *parent) : QWidget(parent) {
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setFocusPolicy(Qt::NoFocus);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    }
+    QSize sizeHint() const override { return {160, 26}; }
+    QSize minimumSizeHint() const override { return {0, 0}; }
+
+  protected:
+    void paintEvent(QPaintEvent *) override {
+        if (width() < 72)
+            return;
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        const qreal right = width() - 14.0;
+        const qreal left = std::max(8.0, right - 172);
+        const qreal y = height() * 0.5;
+        QLinearGradient ink(left, y, right, y);
+        ink.setColorAt(0, theme::color(theme::sakura, 0));
+        ink.setColorAt(0.7, theme::color(theme::sakura, 95));
+        ink.setColorAt(1, theme::color(theme::sakura, 25));
+        painter.setPen(QPen(QBrush(ink), 0.8));
+        QPainterPath orbit;
+        orbit.moveTo(left, y + 5);
+        orbit.cubicTo(left + 40, y + 8, right - 45, y - 9, right, y - 2);
+        painter.drawPath(orbit);
+        paint_sakura_blossom(painter, QPointF(right - 22, y), 6.5,
+                             theme::color(theme::sakura, 180));
+        paint_sakura_blossom(painter, QPointF(right - 50, y - 5), 3.5,
+                             theme::color(theme::sakura, 90));
+        painter.setPen(QPen(theme::color(theme::accent_bright, 125), 0.8));
+        painter.drawLine(QPointF(right - 75, y + 1), QPointF(right - 75, y + 7));
+        painter.drawLine(QPointF(right - 78, y + 4), QPointF(right - 72, y + 4));
+    }
+};
+
+} // namespace
+QWidget *make_sakura_ribbon(QWidget *parent) { return new SakuraRibbon(parent); }
+
 void paint_list_row(QPainter *painter, const QStyleOptionViewItem &option, const QRectF &row,
                     const QColor &stripe) {
     const bool selected = option.state & QStyle::State_Selected;
@@ -496,7 +560,7 @@ void style_dock(QDockWidget *dock, WorkbenchIcon icon) {
     title->setObjectName("dockTitle");
     (void)icon;
     layout->addWidget(title);
-    layout->addStretch();
+    layout->addWidget(make_sakura_ribbon(bar), 1);
     const auto tool = [bar](WorkbenchIcon glyph, const QString &tip) {
         auto *button = new QToolButton(bar);
         button->setIcon(workbench_icon(glyph, theme::color(theme::text_muted)));
@@ -561,7 +625,7 @@ QWidget#propertyFields { background: @surface; }
 QMainWindow { background: @canvas; }
 QMainWindow::separator { background: @canvas; width: 3px; height: 3px; }
 QMainWindow::separator:hover { background: @accentWash; }
-QWidget#titleBar { background: @chrome; border: 0; }
+QWidget#titleBar { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 @accentHover, stop:0.38 @chrome, stop:1 @chrome); border: 0; border-top: 1px solid @sakura/55; }
 QLabel#brand { color: @text; font-family: "Segoe UI Variable Display", "Segoe UI Semibold", "Segoe UI"; font-size: 14px; font-weight: 600; padding: 0 10px 0 2px; }
 QLabel#brandMark { background: transparent; }
 QMenuBar#titleMenus { background: transparent; border: 0; padding: 0; color: @textSoft; }
@@ -579,7 +643,7 @@ QToolButton[captionButton="true"] { padding: 0; border: 1px solid transparent; b
 QToolButton[captionButton="true"]:hover { background: @overlay; }
 QToolButton[captionButton="true"]:focus { border-color: @accent; }
 QToolButton#windowClose:hover { background: @dangerWash; border-color: @danger; }
-QWidget#dockHeading { background: @chrome; border: 0; border-bottom: 1px solid @line; }
+QWidget#dockHeading { background: @chrome; border: 0; border-bottom: 1px solid @sakura/24; }
 QWidget#dockHeading QToolButton { padding: 0; border-radius: 4px; }
 QLabel#dockTitle { color: @textSoft; background: transparent; padding: 3px 4px; font-size: 12px; }
 QWidget#objectExplorer { background: @chrome; border: 0; }

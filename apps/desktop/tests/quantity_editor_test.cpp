@@ -1272,6 +1272,54 @@ TEST_F(QuantityTest, MissionCompactPagesPreserveUnitsAndDraftsAndHandleEmptySequ
                               core::Epoch{7'200'000'000'000}, &parent));
     EXPECT_EQ(plan, original);
 }
+TEST_F(QuantityTest, OpeningHpopWithDataManagementShowsOnlyTheSettingsWindow) {
+    QTemporaryDir temporary;
+    ASSERT_TRUE(temporary.isValid());
+    EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
+    core::HpopOptions options;
+    const auto original = options;
+    for (int services = 0; services < 4; ++services) {
+        SCOPED_TRACE(services);
+        bool opened_manager = false;
+        std::function<std::vector<runtime::CatalogEphemeris>()> manage;
+        if (services & 1)
+            manage = [&] {
+                opened_manager = true;
+                return std::vector<runtime::CatalogEphemeris>{};
+            };
+        WindowShowObserver windows;
+        QTimer::singleShot(0, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            ASSERT_TRUE(dialog);
+            EXPECT_EQ(dialog->objectName(), "hpopSettingsDialog");
+            EXPECT_EQ(windows.shown.join(", ").toStdString(), "QDialog:hpopSettingsDialog");
+            // The weather manager belongs to file mode; manual mode deliberately hides it.
+            dialog->findChild<QComboBox *>("hpopDragWeatherSource")->setCurrentIndex(1);
+            for (const auto *name : {"hpopManageEphemerides", "hpopDragManageEphemerides",
+                                     "hpopSrpManageEphemerides"}) {
+                SCOPED_TRACE(name);
+                auto *button = dialog->findChild<QWidget *>(name);
+                ASSERT_TRUE(button);
+                EXPECT_FALSE(button->isWindow());
+                EXPECT_EQ(button->isHidden(), !(services & 1));
+            }
+            for (const auto *name : {"hpopManageOceanTides", "hpopDragManageWeather"}) {
+                SCOPED_TRACE(name);
+                auto *button = dialog->findChild<QWidget *>(name);
+                ASSERT_TRUE(button);
+                EXPECT_FALSE(button->isWindow());
+                EXPECT_EQ(button->isHidden(), !(services & 2));
+            }
+            dialog->reject();
+        });
+        EXPECT_FALSE(edit_hpop_settings(options, nullptr, {}, {}, manage,
+                                        services & 2 ? &catalog : nullptr));
+        EXPECT_FALSE(opened_manager);
+        EXPECT_FALSE(catalog.downloading());
+        EXPECT_EQ(options, original);
+        EXPECT_EQ(windows.shown.join(", ").toStdString(), "QDialog:hpopSettingsDialog");
+    }
+}
 TEST_F(QuantityTest, HpopSettingsValidateCancelAndRoundTripWithoutApplyingTheOrbit) {
     OrbitInput input;
     input.propagator = OrbitPropagator::hpop;
@@ -1899,6 +1947,10 @@ TEST_F(QuantityTest, HpopDragUnitsModelsResizeSaveReopenAndCancel) {
         auto *low = dialog->findChild<QComboBox *>("hpopDragLowAltitudeModel");
         EXPECT_FALSE(area->isEnabled());
         use->setChecked(true);
+        auto *cutoff = dialog->findChild<QLabel *>("hpopDragHighAltitudeCutoff");
+        ASSERT_TRUE(cutoff);
+        EXPECT_TRUE(cutoff->isVisible());
+        EXPECT_TRUE(cutoff->text().contains("2500 km"));
         EXPECT_TRUE(dialog->findChild<QCheckBox *>("hpopDragApproximateAltitude")->isVisible());
         area->set_unit(Unit::square_centimetres_per_gram);
         area->findChild<QLineEdit *>("quantityValue")->setText("0.3");
@@ -3651,12 +3703,153 @@ TEST_F(QuantityTest, HpopCovarianceEditorPreservesDraftsAndMirrorsLowerTriangle)
     editor.resize(360, 900);
     screenshot("covariance-editor-narrow");
     EXPECT_EQ(editor.value(), value);
+    parameters->item(1, 0)->setCheckState(Qt::Unchecked);
+    EXPECT_FALSE(parameters->item(1, 2)->flags() & Qt::ItemIsEditable);
+    EXPECT_FALSE(editor.findChild<QTableWidget *>("hpopConsiderCrossTable")->isEnabled());
+    screenshot("covariance-editor-inactive-srp");
+    parameters->item(1, 0)->setCheckState(Qt::Checked);
+    EXPECT_EQ(editor.value(), value);
     enabled->setChecked(false);
     EXPECT_FALSE(matrix->isEnabled());
     value.enabled = false;
     EXPECT_EQ(editor.value(), value);
     matrix->item(1, 0)->setText("not a number");
+    EXPECT_EQ(editor.value(), value);
+    enabled->setChecked(true);
     EXPECT_THROW((void)editor.value(), std::invalid_argument);
+}
+TEST_F(QuantityTest, HpopInactiveIntegratorDraftsPersistAcrossAcceptAndReopen) {
+    core::HpopOptions options;
+    options.gravity_degree = options.gravity_order = 0;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        dialog->findChild<QuantityEditor *>("hpopMinStep")->set_value(.25, Unit::second);
+        dialog->findChild<QuantityEditor *>("hpopMaxStep")->set_value(120, Unit::second);
+        dialog->findChild<QuantityEditor *>("hpopRelativeTolerance")->set_value(1e-10, Unit::one);
+        dialog->findChild<QuantityEditor *>("hpopPositionTolerance")->set_value(.02, Unit::metre);
+        dialog->findChild<QuantityEditor *>("hpopVelocityTolerance")
+            ->set_value(.003, Unit::metres_per_second);
+        dialog->findChild<QCheckBox *>("hpopTimeRegularization")->setChecked(true);
+        dialog->findChild<QuantityEditor *>("hpopRegularizationExponent")
+            ->set_value(1.75, Unit::one);
+        dialog->findChild<QSpinBox *>("hpopStepsPerOrbit")->setValue(1024);
+        dialog->findChild<QCheckBox *>("hpopTimeRegularization")->setChecked(false);
+        dialog->findChild<QComboBox *>("hpopStepControl")->setCurrentIndex(1);
+        dialog->findChild<QuantityEditor *>("hpopFixedStep")->set_value(15, Unit::second);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        if (dialog->isVisible())
+            dialog->reject();
+    });
+    ASSERT_TRUE(edit_hpop_settings(options, nullptr));
+    EXPECT_DOUBLE_EQ(options.min_step_seconds, .25);
+    EXPECT_DOUBLE_EQ(options.max_step_seconds, 120);
+    EXPECT_DOUBLE_EQ(options.relative_tolerance, 1e-10);
+    EXPECT_DOUBLE_EQ(options.position_tolerance_m, .02);
+    EXPECT_DOUBLE_EQ(options.velocity_tolerance_mps, .003);
+    EXPECT_DOUBLE_EQ(options.regularization_exponent, 1.75);
+    EXPECT_EQ(options.steps_per_orbit, 1024);
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        EXPECT_DOUBLE_EQ(dialog->findChild<QuantityEditor *>("hpopMaxStep")->value(Unit::second),
+                         120);
+        dialog->findChild<QuantityEditor *>("hpopFixedStep")->set_value(25, Unit::second);
+        dialog->findChild<QComboBox *>("hpopStepControl")->setCurrentIndex(0);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        if (dialog->isVisible())
+            dialog->reject();
+    });
+    ASSERT_TRUE(edit_hpop_settings(options, nullptr));
+    EXPECT_DOUBLE_EQ(options.fixed_step_seconds, 25);
+}
+TEST_F(QuantityTest, HpopInvalidInactiveMuDraftsDoNotBlockAccept) {
+    for (const bool third_body : {false, true}) {
+        core::HpopOptions options;
+        options.gravity_degree = options.gravity_order = 0;
+        const auto before = options;
+        QTimer::singleShot(0, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            ASSERT_TRUE(dialog);
+            auto *field = dialog->findChild<QuantityEditor *>(third_body ? "hpopSunMu"
+                                                                         : "hpopInterpolationMu");
+            if (third_body) {
+                dialog->findChild<QCheckBox *>("hpopSunGravity")->setChecked(true);
+                dialog->findChild<QComboBox *>("hpopSunSource")->setCurrentIndex(2);
+            } else
+                dialog->findChild<QComboBox *>("hpopInterpolation")->setCurrentIndex(2);
+            field->findChild<QLineEdit *>("quantityValue")->setText("unfinished");
+            if (third_body)
+                dialog->findChild<QCheckBox *>("hpopSunGravity")->setChecked(false);
+            else
+                dialog->findChild<QComboBox *>("hpopInterpolation")->setCurrentIndex(0);
+            dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            if (dialog->isVisible())
+                dialog->reject();
+        });
+        ASSERT_TRUE(edit_hpop_settings(options, nullptr));
+        EXPECT_EQ(options.third_body(core::ThirdBody::sun).user_mu,
+                  before.third_body(core::ThirdBody::sun).user_mu);
+        EXPECT_EQ(options.interpolation.vop_mu, before.interpolation.vop_mu);
+    }
+}
+TEST_F(QuantityTest, HpopCovarianceInactiveInvalidDraftsRetainValidValues) {
+    application::HpopCovarianceSettings initial;
+    for (int i = 0; i < 6; ++i)
+        initial.state[i][i] = 1;
+    initial.enabled = true;
+    initial.drag.variance = .1;
+    HpopCovarianceEditor editor(initial, true);
+    auto *parameters = editor.findChild<QTableWidget *>("hpopConsiderTable");
+    auto *consider = editor.findChild<QCheckBox *>("hpopConsiderAnalysis");
+    consider->setChecked(true);
+    parameters->item(0, 0)->setCheckState(Qt::Checked);
+    parameters->item(0, 2)->setText("-1");
+    EXPECT_THROW((void)editor.value(), std::invalid_argument);
+    parameters->item(0, 0)->setCheckState(Qt::Unchecked);
+    EXPECT_FALSE(parameters->item(0, 2)->flags() & Qt::ItemIsEditable);
+    parameters->item(0, 3)->setText("0.02");
+    auto value = editor.value();
+    EXPECT_EQ(value.drag.variance, .1);
+    EXPECT_EQ(value.drag.state_cross_covariance[0], .02);
+    EXPECT_NO_THROW(application::validate_hpop_covariance_settings(value, {}));
+    auto *matrix = editor.findChild<QTableWidget *>("hpopCovarianceMatrix");
+    matrix->item(0, 0)->setText("-2");
+    matrix->item(1, 0)->setText("unfinished");
+    editor.findChild<QLineEdit *>("hpopCovarianceTolerance")->setText("0");
+    editor.findChild<QSpinBox *>("hpopCovarianceDegree")->setValue(1);
+    editor.findChild<QCheckBox *>("hpopComputeCovariance")->setChecked(false);
+    value = editor.value();
+    EXPECT_EQ(value.state, initial.state);
+    EXPECT_EQ(value.absolute_tolerance, initial.absolute_tolerance);
+    EXPECT_EQ(value.gravity, initial.gravity);
+    EXPECT_NO_THROW(application::validate_hpop_covariance_settings(value, {}));
+}
+TEST_F(QuantityTest, HpopCovarianceRejectsGravityBeyondSelectedFileBeforeAccept) {
+    core::HpopOptions force;
+    force.gravity_degree = force.gravity_order = 0;
+    application::HpopCovarianceSettings settings;
+    settings.enabled = settings.independent_gravity = true;
+    for (int i = 0; i < 6; ++i)
+        settings.state[i][i] = 1;
+    const auto before = settings;
+    QTimer::singleShot(0, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        auto *degree = dialog->findChild<QSpinBox *>("hpopCovarianceDegree");
+        degree->setValue(core::egm96_max_degree + 1);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        EXPECT_TRUE(dialog->isVisible());
+        EXPECT_EQ(settings, before);
+        EXPECT_EQ(dialog->findChild<QTabWidget *>("hpopSettingsTabs")->currentIndex(), 2);
+        EXPECT_TRUE(dialog->findChild<QLabel *>("errorText")->text().contains("重力文件"));
+        degree->setValue(4);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        if (dialog->isVisible())
+            dialog->reject();
+    });
+    ASSERT_TRUE(edit_hpop_settings(force, nullptr, {}, {}, {}, nullptr, &settings));
+    EXPECT_EQ(settings.gravity.degree, 4);
 }
 TEST_F(QuantityTest, HpopCovarianceDialogRejectsInvalidJointInputAndCancelsAtomically) {
     apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));

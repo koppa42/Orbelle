@@ -8,6 +8,8 @@ class QDockWidget;
 class QPainter;
 class QStyleOptionViewItem;
 class QRectF;
+class QPointF;
+class QWidget;
 namespace orbitforge::desktop {
 enum class WorkbenchIcon {
     new_scenario,
@@ -50,6 +52,10 @@ QIcon workbench_icon(WorkbenchIcon icon, const QColor &color = theme::color(them
 void style_dock(QDockWidget *dock, WorkbenchIcon icon);
 // Application mark: the orbit glyph on a rounded ice-to-sakura tile, in logical pixels.
 QPixmap brand_mark(int size, qreal device_pixel_ratio = 1.0);
+// Static brand ornaments. Ribbons do not take focus or pointer input.
+void paint_sakura_blossom(QPainter &painter, const QPointF &center, qreal radius,
+                          const QColor &color);
+QWidget *make_sakura_ribbon(QWidget *parent = nullptr);
 // Shared list-row chrome for painted item delegates: a soft wash on hover, and the selected
 // row marked by an accent wash with a leading stripe (in `stripe`); focus adds a faint outline.
 void paint_list_row(QPainter *painter, const QStyleOptionViewItem &option, const QRectF &row,

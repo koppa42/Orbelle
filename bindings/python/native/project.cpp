@@ -181,11 +181,15 @@ void bind_project(py::module_ &module) {
                               result.geodetic.height_m};
         });
     module.def("evaluate_atmosphere", &core::evaluate_atmosphere, py::arg("model"),
-               py::arg("input"));
+               py::arg("input"),
+               "Raw SI density and temperatures: JR 90..2500 km, NRLMSISE 0..2500 km "
+               "(empirical applicability 0..1000 km). No drag-force cutoff.");
     module.def("evaluate_drag", &core::evaluate_drag, py::arg("position_itrf_m"),
                py::arg("velocity_itrf_mps"), py::arg("sun_itrf_m"), py::arg("utc"),
                py::arg("options"), py::arg("weather") = std::nullopt,
-               py::arg("low_weather") = std::nullopt);
+               py::arg("low_weather") = std::nullopt,
+               "Co-rotating ITRF spherical drag. Zero above density height 2500 km; "
+               "JR below 90 km needs an explicit low model. Independent of HPOP's stop altitude.");
     module.def("ap_to_kp", &core::ap_to_kp, py::arg("ap"));
     module.def("kp_to_ap", &core::kp_to_ap, py::arg("kp"));
     py::class_<core::SrpEclipsingBody>(module, "SrpEclipsingBody")

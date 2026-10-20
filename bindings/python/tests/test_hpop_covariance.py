@@ -79,6 +79,41 @@ class HpopCovarianceTests(unittest.TestCase):
         actual = of.propagate_hpop_covariance(value, of.Epoch(600*10**9), initial, cancelled=mutate_input)
         self.assertEqual(actual.covariance.state, reference.covariance.state)
 
+    def test_sampled_coast_order_duplicates_snapshot_and_cancellation(self):
+        value, initial = orbit(), covariance()
+        times = [of.Epoch(t) for t in (600_000_000_001, -400_000_000_001, 0,
+                                       300_000_000_000, -200_000_000_000, 600_000_000_001)]
+        result = of.sample_hpop_covariance(value, times, initial)
+        self.assertEqual([v.variational.state.epoch.tai_nanoseconds for v in result],
+                         [t.tai_nanoseconds for t in times])
+        self.assertEqual(result[0].covariance.state, result[-1].covariance.state)
+        for epoch, actual in zip(times, result):
+            exact = of.propagate_hpop_covariance(value, epoch, initial)
+            for i in range(6):
+                for j in range(6):
+                    error = abs(actual.covariance.state[i][j] - exact.covariance.state[i][j])
+                    error /= math.sqrt(exact.covariance.state[i][i] * exact.covariance.state[j][j])
+                    self.assertLess(error, 3e-9)
+        def mutate_input():
+            times.clear()
+            initial.state = [[0.0] * 6 for _ in range(6)]
+            return False
+        snapshot = of.sample_hpop_covariance(value, times, initial, cancelled=mutate_input)
+        self.assertEqual([v.covariance.state for v in snapshot],
+                         [v.covariance.state for v in result])
+        calls = 0
+        def cancel():
+            nonlocal calls
+            calls += 1
+            return calls == 40
+        with self.assertRaises(of.AnalysisCancelled):
+            of.sample_hpop_covariance(value, [of.Epoch(600 * 10**9)], covariance(), cancelled=cancel)
+        self.assertEqual(calls, 40)
+        self.assertEqual(of.sample_hpop_covariance(value, [], covariance()), [])
+        with self.assertRaises(ValueError):
+            of.sample_hpop_covariance(value, [of.Epoch(0)] * 200001, covariance())
+        self.assertEqual(len(of.sample_hpop_covariance(value, [of.Epoch(0)], covariance())), 1)
+
     def test_joint_validation_cancellation_and_retry(self):
         value, initial = orbit(), covariance()
         of.validate_hpop_covariance(initial)

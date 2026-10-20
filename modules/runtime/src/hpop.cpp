@@ -136,7 +136,8 @@ std::string hpop_algorithm(const core::HpopOptions &options,
         const auto d = core::effective_drag_options(options.drag);
         std::ostringstream config;
         config.imbue(std::locale::classic());
-        config << std::hexfloat << ";drag=spherical-corotating-itrf-wgs84-v2"
+        config << std::hexfloat << ";drag=spherical-corotating-itrf-wgs84-v3"
+               << ";altitude-policy=cutoff-above-2500km;low=explicit-nrl-smoothstep-v1"
                << ";density-altitude="
                << (d.use_approximate_altitude ? "radial-wgs84-v1" : "geodetic-wgs84-v1")
                << ";atmosphere=" << static_cast<int>(d.atmosphere)

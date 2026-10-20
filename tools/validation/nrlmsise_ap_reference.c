@@ -2,12 +2,17 @@
  * Does not include or link OrbitForge. Sources are pinned in density_sources.json. */
 #include "nrlmsise-00.h"
 #include <stdio.h>
+#include <string.h>
 
-int main(void) {
+int main(int argc, char **argv) {
     const double pi = 3.141592653589793238462643383279502884;
     const int dates[][4] = {{1999, 7, 9, 190}, {2000, 2, 29, 60}, {2016, 12, 31, 366}};
     const double sec[] = {29000, 45000, 86400};
-    const double alt[] = {0, 32.5, 50, 72.5, 90, 100, 125, 200, 400, 500, 1000};
+    const double low_alt[] = {0, 32.5, 50, 72.5, 90, 100, 125, 200, 400, 500, 1000};
+    const double high_alt[] = {1000, 1000.001, 1200, 2000, 2499.999, 2500};
+    const int high = argc == 2 && strcmp(argv[1], "--high-altitude") == 0;
+    const double *alt = high ? high_alt : low_alt;
+    const int altitude_count = high ? 6 : 11;
     const double geometry[][3] = {{60, -70, 16}, {-90, 10, 0}, {0, 0, 12}, {90, -170, 23}};
     const double history[][7] = {{0, 0, 0, 0, 0, 0, 0},
                                  {15.25, 0, 0, 0, 0, 0, 0},
@@ -23,7 +28,7 @@ int main(void) {
          "f107 f107_average history_mode ap0 ap1 ap2 ap3 ap4 ap5 ap6 density_kg_m3 "
          "temperature_K exospheric_temperature_K");
     for (d = 0; d < 3; ++d)
-        for (z = 0; z < 11; ++z)
+        for (z = 0; z < altitude_count; ++z)
             for (g = 0; g < 4; ++g)
                 for (w = 0; w < 8; ++w) {
                     struct nrlmsise_input input = {0};

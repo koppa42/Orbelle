@@ -51,6 +51,10 @@ TEST(DragPersistence, DraftsRoundtripAndOnlyEffectiveFieldsChangeIdentity) {
               options);
     drag.enabled = true;
     EXPECT_NE(drag_identity(p), original);
+    drag.blending_range_m = 1000000;
+    EXPECT_EQ(application::decode_project(application::encode_project(p)).satellites[0].orbit.hpop,
+              options);
+    drag.blending_range_m = 45000;
     EXPECT_TRUE(p.satellites[0].orbit.uses_eop_force());
     drag.atmosphere = core::AtmosphereModel::nrlmsise00;
     original = drag_identity(p);
@@ -90,6 +94,10 @@ TEST_F(DragFiles, PointMassDragRetainsTimeEopSunAcrossSessionReportAndReopen) {
     const auto session =
         runtime::make_hpop_session(orbit.initial, options, data.force_environment(orbit));
     EXPECT_NE(session.provenance().algorithm.find("density-altitude=radial-wgs84-v1"),
+              std::string::npos);
+    EXPECT_NE(session.provenance().algorithm.find("spherical-corotating-itrf-wgs84-v3"),
+              std::string::npos);
+    EXPECT_NE(session.provenance().algorithm.find("altitude-policy=cutoff-above-2500km"),
               std::string::npos);
     EXPECT_EQ(session.sample(std::array{p.last}).states()[0].position_m, state.position_m);
     application::ReportDefinition definition;

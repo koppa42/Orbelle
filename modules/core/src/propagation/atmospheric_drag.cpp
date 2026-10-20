@@ -32,6 +32,8 @@ void weather(double daily, double average, double kp) {
     if (!std::isfinite(kp) || kp < 0 || kp > 9)
         throw std::invalid_argument("Kp must be finite and within 0..9");
 }
+std::chrono::sys_days validate_atmosphere_input(AtmosphereModel model,
+                                                const AtmosphereInput &input);
 double drag_density(const AtmosphereInput &input, const DragOptions &options,
                     const std::optional<SpaceWeatherSample> &weather,
                     const std::optional<SpaceWeatherSample> &low_weather) {
@@ -55,6 +57,12 @@ double drag_density(const AtmosphereInput &input, const DragOptions &options,
             }
         } else if (weather || low_weather) {
             throw std::invalid_argument("Manual drag cannot receive file weather samples");
+        }
+        if (values.geodetic.height_m > detail::drag_cutoff_altitude_m) {
+            // Still validate supplied UTC, geometry and weather. No kernel or height
+            // clamping is needed above the force cutoff.
+            (void)validate_atmosphere_input(model, values);
+            return 0.;
         }
         return evaluate_atmosphere(model, values).density_kg_m3;
     };
@@ -103,7 +111,7 @@ double density_derivative(const Sample &sample, double center, double step, doub
 std::array<double, 2> density_interval(double height, const DragOptions &options) {
     const bool jr = options.atmosphere == AtmosphereModel::jacchia_roberts;
     const bool lower = jr && options.low_altitude_model == LowAltitudeDensityModel::nrlmsise00;
-    double lo = jr && !lower ? 90000 : 0, hi = jr ? 2500000 : 1000000;
+    double lo = jr && !lower ? 90000 : 0, hi = detail::drag_cutoff_altitude_m;
     const auto split = [&](double boundary) {
         if (boundary <= lo || boundary >= hi)
             return;
@@ -161,10 +169,6 @@ void validate_drag_options(const DragOptions &o) {
     if (!std::isfinite(o.blending_range_m) || o.blending_range_m < 0 ||
         o.blending_range_m > 1000000)
         throw std::invalid_argument("Drag blending range must be within 0..1000 km");
-    if (o.enabled && o.atmosphere == AtmosphereModel::jacchia_roberts &&
-        o.low_altitude_model == LowAltitudeDensityModel::nrlmsise00 && o.blending_range_m > 910000)
-        throw std::invalid_argument(
-            "JR/NRLMSISE blending must stay within the 1000 km NRLMSISE domain");
 }
 DragOptions effective_drag_options(DragOptions o) {
     if (!o.enabled)
@@ -222,7 +226,9 @@ GeodeticPosition drag_geodetic_position(const std::array<double, 3> &r) {
     const double height = p * c + r[2] * s - n * (1 - e2 * s * s);
     return {longitude, latitude, height};
 }
-AtmosphereEvaluation evaluate_atmosphere(AtmosphereModel model, const AtmosphereInput &input) {
+namespace {
+std::chrono::sys_days validate_atmosphere_input(AtmosphereModel model,
+                                                const AtmosphereInput &input) {
     if (input.daily_ap && input.ap_history)
         throw std::invalid_argument("Choose either daily Ap or seven-value Ap history");
     if ((input.daily_ap || input.ap_history) && model != AtmosphereModel::nrlmsise00)
@@ -246,11 +252,16 @@ AtmosphereEvaluation evaluate_atmosphere(AtmosphereModel model, const Atmosphere
         throw std::invalid_argument("Invalid atmosphere geometry input");
     if (model != AtmosphereModel::jacchia_roberts && model != AtmosphereModel::nrlmsise00)
         throw std::invalid_argument("Unsupported atmospheric density model");
+    return utc_day(input.utc);
+}
+} // namespace
+AtmosphereEvaluation evaluate_atmosphere(AtmosphereModel model, const AtmosphereInput &input) {
+    const auto day = validate_atmosphere_input(model, input);
     const bool jr = model == AtmosphereModel::jacchia_roberts;
-    if (g.height_m < (jr ? 90000 : 0) || g.height_m > (jr ? 2500000 : 1000000))
+    if (input.geodetic.height_m < (jr ? 90000 : 0) ||
+        input.geodetic.height_m > detail::drag_cutoff_altitude_m)
         throw PropagationError(jr ? "Jacchia-Roberts requires altitude 90..2500 km"
-                                  : "NRLMSISE-00 requires altitude 0..1000 km");
-    const auto day = utc_day(input.utc);
+                                  : "NRLMSISE-00 density evaluation requires altitude 0..2500 km");
     const auto january = std::chrono::sys_days{std::chrono::year{input.utc.year} / 1 / 1};
     const auto doy = static_cast<int>((day - january).count()) + 1;
     const double seconds = input.utc.hour * 3600 + input.utc.minute * 60 + input.utc.second +
@@ -266,6 +277,16 @@ AtmosphereEvaluation evaluate_atmosphere(AtmosphereModel model, const Atmosphere
         throw PropagationError("Atmospheric density model produced invalid output");
     return value;
 }
+double detail::drag_density_altitude(const std::array<double, 3> &r, const GeodeticPosition &g,
+                                     bool approximate) {
+    if (!approximate)
+        return g.height_m;
+    // Oblate-spheroid radial height uses geocentric, not geodetic, latitude.
+    const double p = std::hypot(r[0], r[1]), radius = std::hypot(p, r[2]);
+    const double cos_lat = p / radius;
+    const double surface = p == 0 ? b : r[2] == 0 ? a : b / std::sqrt(1 - e2 * cos_lat * cos_lat);
+    return radius - surface;
+}
 DragEvaluation evaluate_drag(const std::array<double, 3> &r, const std::array<double, 3> &v,
                              const std::array<double, 3> &sun, const UtcDateTime &utc,
                              const DragOptions &options,
@@ -280,18 +301,13 @@ DragEvaluation evaluate_drag(const std::array<double, 3> &r, const std::array<do
     if (!std::isfinite(sun_distance) || sun_distance == 0)
         throw std::invalid_argument("Atmospheric density requires a finite nonzero Sun position");
     const auto g = drag_geodetic_position(r);
-    double density_altitude = g.height_m;
-    if (options.use_approximate_altitude) {
-        // STK's oblate-spheroid approximation: radius minus the ellipsoid's
-        // radial intersection, using geocentric (not geodetic) latitude.
-        // Latitude/longitude passed to the atmosphere retain their exact definition.
-        const double p = std::hypot(r[0], r[1]), radius = std::hypot(p, r[2]);
-        const double cos_lat = p / radius;
-        const double surface = p == 0      ? b
-                               : r[2] == 0 ? a
-                                           : b / std::sqrt(1 - e2 * cos_lat * cos_lat);
-        density_altitude = radius - surface;
-    }
+    const double density_altitude =
+        detail::drag_density_altitude(r, g, options.use_approximate_altitude);
+    if (density_altitude < 90000 && options.atmosphere == AtmosphereModel::jacchia_roberts &&
+        options.low_altitude_model == LowAltitudeDensityModel::none)
+        throw PropagationError(
+            "Jacchia-Roberts below 90 km requires the NRLMSISE-00 low-altitude model; "
+            "the integrator minimum altitude is a separate stop condition");
     const double angle = std::atan2(sun[0] * r[1] - sun[1] * r[0], sun[0] * r[0] + sun[1] * r[1]);
     AtmosphereInput input{utc,          g,
                           angle,        std::atan2(sun[2], std::hypot(sun[0], sun[1])),
@@ -313,6 +329,10 @@ DragDifferential drag_differential(const std::array<double, 3> &r, const std::ar
     DragDifferential result;
     result.nominal = evaluate_drag(r, v, sun, utc, options, weather, low_weather);
     if (!options.enabled)
+        return result;
+    if (std::abs(result.nominal.density_altitude_m - detail::drag_cutoff_altitude_m) < 1e-5)
+        throw PropagationError("Drag derivative is undefined at the 2500 km cutoff");
+    if (result.nominal.density_altitude_m > detail::drag_cutoff_altitude_m)
         return result;
     result.force.acceleration_mps2 = result.nominal.acceleration_itrf_mps2;
     const auto &g = result.nominal.geodetic;

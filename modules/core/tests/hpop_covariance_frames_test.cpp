@@ -302,6 +302,12 @@ TEST(HpopCovarianceFrames, LocalInitialCovarianceUsesNominalForceAndReturnsGcrf)
     options.gravity_order = 0;
     const auto baseline =
         propagate_hpop_covariance(state, Epoch{60'000'000'000}, input_matrix(), options);
+    const std::vector<Epoch> times{Epoch{-30'000'000'000}, state.epoch, Epoch{20'000'000'000},
+                                   Epoch{60'000'000'000}};
+    std::vector<HpopCovarianceState> samples(times.size(), HpopCovarianceState{{state}, {}, {}});
+    sample_hpop_covariance(
+        state, times, input_matrix(),
+        [&](std::size_t i, const HpopCovarianceState &value) { samples[i] = value; }, options);
     // Built-in field's actual point-mass mu, independent of any covariance field truncation.
     const double mu = 3.986004415e14;
     const std::array<double, 3> acceleration{-mu / (7e6 * 7e6), 0, 0};
@@ -314,6 +320,17 @@ TEST(HpopCovarianceFrames, LocalInitialCovarianceUsesNominalForceAndReturnsGcrf)
         EXPECT_LE(error(joint_matrix(actual.covariance), joint_matrix(baseline.covariance)), 2e-13);
         EXPECT_EQ(actual.variational.state.position_m, baseline.variational.state.position_m);
         EXPECT_EQ(actual.variational.state.velocity_mps, baseline.variational.state.velocity_mps);
+        sample_hpop_covariance(
+            state, times, local,
+            [&](std::size_t i, const HpopCovarianceState &value) {
+                EXPECT_EQ(value.covariance.coordinates, HpopCovarianceCoordinates{});
+                EXPECT_LE(
+                    error(joint_matrix(value.covariance), joint_matrix(samples[i].covariance)),
+                    2e-13);
+                EXPECT_EQ(value.variational.state.position_m,
+                          samples[i].variational.state.position_m);
+            },
+            options);
     }
 }
 

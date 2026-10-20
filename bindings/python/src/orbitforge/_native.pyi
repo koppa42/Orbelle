@@ -1019,11 +1019,13 @@ class DragEvaluation:
 
 def kp_to_ap(kp: float) -> float: ...
 def ap_to_kp(ap: float) -> float: ...
-def evaluate_atmosphere(model: AtmosphereModel, input: AtmosphereInput) -> AtmosphereEvaluation: ...
+def evaluate_atmosphere(model: AtmosphereModel, input: AtmosphereInput) -> AtmosphereEvaluation:
+    """Raw density/temperatures: JR 90..2500 km; NRLMSISE 0..2500 km (empirical 0..1000)."""
 def evaluate_drag(position_itrf_m: Sequence[float], velocity_itrf_mps: Sequence[float],
                   sun_itrf_m: Sequence[float], utc: UtcDateTime, options: DragOptions,
                   weather: SpaceWeatherSample | None = None,
-                  low_weather: SpaceWeatherSample | None = None) -> DragEvaluation: ...
+                  low_weather: SpaceWeatherSample | None = None) -> DragEvaluation:
+    """Zero drag above density height 2500 km; independent of the HPOP stop altitude."""
 
 class SrpSunPositionMethod:
     TRUE: SrpSunPositionMethod
@@ -1873,6 +1875,12 @@ def propagate_hpop_covariance(
     options: HpopVariationalOptions = ..., data: DataSnapshot = ...,
     cancelled: Callable[[], bool] | None = None,
 ) -> HpopCovarianceState: ...
+
+def sample_hpop_covariance(
+    input: OrbitInput, times: Sequence[Epoch], covariance: HpopCovarianceInput, *,
+    options: HpopVariationalOptions = ..., data: DataSnapshot = ...,
+    cancelled: Callable[[], bool] | None = None,
+) -> list[HpopCovarianceState]: ...
 
 def propagate_hpop_ephemeris(
     input: OrbitInput, end: Epoch, *, reporting_step_nanoseconds: int = 0,

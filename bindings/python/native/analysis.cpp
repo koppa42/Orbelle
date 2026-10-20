@@ -473,6 +473,40 @@ void bind_analysis(py::module_ &module) {
         py::arg("options") = core::HpopVariationalOptions{},
         py::arg("data") = runtime::DataSnapshot{}, py::arg("cancelled") = py::none());
     module.def(
+        "sample_hpop_covariance",
+        [](application::OrbitInput input, std::vector<core::Epoch> times,
+           core::HpopCovarianceInput covariance, core::HpopVariationalOptions options,
+           runtime::DataSnapshot data, py::object callback) {
+            if (input.propagator != application::OrbitPropagator::hpop)
+                throw std::invalid_argument("Covariance sampling requires one HPOP coast");
+            if (times.size() > 200000)
+                throw std::invalid_argument("Covariance sampling exceeds 200000 epochs");
+            const auto cancelled = cancellation(callback);
+            py::gil_scoped_release release;
+            const auto check = [&] {
+                if (cancelled && cancelled())
+                    throw runtime::AnalysisCancelled{};
+            };
+            check();
+            core::validate_hpop_covariance(covariance);
+            std::vector<core::HpopCovarianceState> results(
+                times.size(), core::HpopCovarianceState{{input.initial}, {}, {}});
+            core::sample_hpop_covariance(
+                input.initial, std::move(times), covariance,
+                [&](std::size_t index, const core::HpopCovarianceState &value) {
+                    results[index] = value;
+                },
+                input.hpop, data.force_environment(variational_resources(input, options)), options,
+                check);
+            return results;
+        },
+        py::arg("input"), py::arg("times"), py::arg("covariance"), py::kw_only(),
+        py::arg("options") = core::HpopVariationalOptions{},
+        py::arg("data") = runtime::DataSnapshot{}, py::arg("cancelled") = py::none(),
+        "Sample one HPOP coast in input order, continuing each time direction once. "
+        "Exact integration stops; no covariance interpolation. Maximum 200000 epochs. "
+        "Inputs are captured before cancellation callbacks; failure returns no partial list.");
+    module.def(
         "propagate_hpop_ephemeris",
         [](application::OrbitInput input, core::Epoch end, std::int64_t report_ns,
            runtime::DataSnapshot data, py::object callback) {
