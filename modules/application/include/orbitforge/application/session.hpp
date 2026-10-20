@@ -3,6 +3,7 @@
 #include <orbitforge/core/propagation/state_provider.hpp>
 #include <orbitforge/results/state_series.hpp>
 #include <span>
+#include <utility>
 
 namespace orbitforge::application {
 // Immutable provider session. Scenario replaces whole sessions on an input revision.
@@ -12,6 +13,12 @@ class Session {
     [[nodiscard]] results::StateSeries sample(std::span<const core::Epoch> epochs,
                                               const std::function<void()> &checkpoint = {}) const;
     [[nodiscard]] const results::Provenance &provenance() const noexcept { return provenance_; }
+    // Shares the immutable provider and numerical cache; only result provenance changes.
+    [[nodiscard]] Session with_input_revision(std::uint64_t revision) const {
+        auto provenance = provenance_;
+        provenance.input_revision = revision;
+        return {provider_, std::move(provenance)};
+    }
     [[nodiscard]] std::vector<core::Epoch>
     discontinuities(const std::function<void()> &checkpoint = {}) const {
         return provider_->discontinuities(checkpoint);

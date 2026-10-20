@@ -1,7 +1,7 @@
 #pragma once
 #include <algorithm>
 #include <map>
-#include <orbitforge/application/project.hpp>
+#include <orbitforge/runtime/project.hpp>
 #include <string_view>
 
 namespace orbitforge::desktop {
@@ -31,39 +31,8 @@ inline bool same_station_input(const application::ProjectGroundStation &a,
            a.minimum_elevation_rad == b.minimum_elevation_rad;
 }
 
-inline std::string orbit_calculation_key(const application::OrbitInput &input) {
-    // Analytical providers are independent of the requested display interval.
-    const bool bounded =
-        input.uses_hpop() || input.propagator == application::OrbitPropagator::mission;
-    application::Project numerical{"orbit-calculation", bounded ? input.first : core::Epoch{0},
-                                   bounded ? input.last : core::Epoch{1}};
-    application::ProjectSatellite satellite;
-    satellite.orbit = input;
-    numerical.satellites.push_back(std::move(satellite));
-    return application::analysis_input_sha256(numerical);
-}
-
-inline application::DataLock orbit_calculation_data(const application::OrbitInput &input,
-                                                    const application::DataLock &data) {
-    std::vector<application::DataReference> refs;
-    const auto hpop = input.hpop_resource_options();
-    for (const auto &ref : data.references()) {
-        bool used = ref.role == "earth-orientation" && input.requires_eop();
-        used |= ref.role == "utc-time" &&
-                (input.propagator == application::OrbitPropagator::sgp4 ||
-                 (input.uses_hpop() && (hpop.uses_utc_force() || hpop.uses_ephemeris())));
-        if (input.uses_hpop())
-            used |=
-                (!hpop.gravity_model.empty() && ref.role == "gravity/" + hpop.gravity_model) ||
-                (hpop.uses_ephemeris() && ref.role == "ephemeris/" + hpop.ephemeris_model) ||
-                (hpop.drag.enabled && !hpop.drag.weather_model.empty() &&
-                 ref.role == "space-weather/" + hpop.drag.weather_model) ||
-                (hpop.ocean_tides.active() && ref.role == "ocean-tides/" + hpop.ocean_tides.model);
-        if (used)
-            refs.push_back(ref);
-    }
-    return application::DataLock{std::move(refs)};
-}
+using runtime::orbit_calculation_data;
+using runtime::orbit_calculation_key;
 
 inline bool can_reuse_orbit_session(const application::OrbitInput &before,
                                     const application::DataLock &before_data,

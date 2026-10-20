@@ -20,7 +20,8 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
     const std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> &ephemerides,
     const std::map<std::string, std::shared_ptr<const core::SpaceWeather>> &weather,
     const std::map<std::string, std::shared_ptr<const core::OceanTideModel>> &ocean_tides,
-    const std::optional<application::Project> &previous_project) {
+    const std::optional<application::Project> &previous_project,
+    std::shared_ptr<runtime::OrbitSessionCache> sessions) {
     application::validate_project(project);
     const auto [data_first, data_last] = application::calculation_data_interval(project);
     std::shared_ptr<const core::IEarthOrientationProvider> eop;
@@ -66,6 +67,12 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
     result->ephemerides = ephemerides;
     result->weather = weather;
     result->ocean_tides = ocean_tides;
+    result->sessions =
+        sessions ? std::move(sessions) : std::make_shared<runtime::OrbitSessionCache>();
+    std::vector<std::string> active_ids;
+    for (const auto &satellite : project.satellites)
+        active_ids.push_back(satellite.orbit.object_id);
+    result->sessions->retain_objects(active_ids);
     std::map<std::string, const application::Session *> existing_sessions;
     for (const auto &session : result->scenario.objects())
         existing_sessions.emplace(session.provenance().object_id, &session);
@@ -117,23 +124,23 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
         auto session =
             retained && !recompute
                 ? *existing
-                : make_orbit_session(satellite.orbit,
-                                     retained ? existing->provenance().input_revision + 1 : 1,
-                                     time.get(),
-                                     {frames, eop,
-                                      gravity.contains(satellite.orbit.hpop.gravity_model)
-                                          ? gravity.at(satellite.orbit.hpop.gravity_model)
-                                          : nullptr,
-                                      ephemerides.contains(satellite.orbit.hpop.ephemeris_model)
-                                          ? ephemerides.at(satellite.orbit.hpop.ephemeris_model)
-                                          : nullptr,
-                                      time,
-                                      weather.contains(input.hpop.drag.weather_model)
-                                          ? weather.at(input.hpop.drag.weather_model)
-                                          : nullptr,
-                                      ocean_tides.contains(input.hpop.ocean_tides.model)
-                                          ? ocean_tides.at(input.hpop.ocean_tides.model)
-                                          : nullptr});
+                : result->sessions->acquire(
+                      satellite.orbit, retained ? existing->provenance().input_revision + 1 : 1,
+                      time.get(),
+                      {frames, eop,
+                       gravity.contains(satellite.orbit.hpop.gravity_model)
+                           ? gravity.at(satellite.orbit.hpop.gravity_model)
+                           : nullptr,
+                       ephemerides.contains(satellite.orbit.hpop.ephemeris_model)
+                           ? ephemerides.at(satellite.orbit.hpop.ephemeris_model)
+                           : nullptr,
+                       time,
+                       weather.contains(input.hpop.drag.weather_model)
+                           ? weather.at(input.hpop.drag.weather_model)
+                           : nullptr,
+                       ocean_tides.contains(input.hpop.ocean_tides.model)
+                           ? ocean_tides.at(input.hpop.ocean_tides.model)
+                           : nullptr});
         auto orbit = prepare_orbit_scene(
             satellite.orbit, session, *frames, *eop, cancelled,
             display_cache_interval(satellite.orbit, satellite.display, project.current));

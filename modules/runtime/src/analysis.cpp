@@ -248,7 +248,8 @@ struct Analysis::Impl {
     ProjectSnapshot snapshot;
     DataSnapshot data;
     std::map<std::string, Entry> entries;
-    Impl(ProjectSnapshot s, DataSnapshot d) : snapshot(std::move(s)), data(std::move(d)) {
+    Impl(ProjectSnapshot s, DataSnapshot d, const std::shared_ptr<OrbitSessionCache> &sessions)
+        : snapshot(std::move(s)), data(std::move(d)) {
         const auto &p = *snapshot.project;
         if (data.time()) {
             (void)data.time()->to_utc(p.first);
@@ -277,10 +278,14 @@ struct Analysis::Impl {
             numerical.satellites.back().display_name.clear();
             if (input.propagator != OrbitPropagator::sgp4)
                 numerical.satellites.back().orbit.tle = {}; // Inactive TLE draft is not an input.
+            auto environment = data.force_environment(input);
+            auto session = sessions ? sessions->acquire(input, snapshot.revision, data.time().get(),
+                                                        std::move(environment))
+                                    : make_orbit_session(input, snapshot.revision,
+                                                         data.time().get(), std::move(environment));
             entries.emplace(
                 input.object_id,
-                Entry{make_orbit_session(input, snapshot.revision, data.time().get(),
-                                         data.force_environment(input)),
+                Entry{std::move(session),
                       input.propagator == OrbitPropagator::sgp4 ? core::FrameId::teme
                                                                 : core::FrameId::gcrf,
                       satellite.name(), report_input_sha256(numerical),
@@ -355,8 +360,9 @@ struct Analysis::Impl {
                     ";frames=state-frame-routing-v1;geometric-access-wgs84-v1"};
     }
 };
-Analysis::Analysis(ProjectSnapshot snapshot, DataSnapshot data)
-    : impl_(std::make_shared<const Impl>(std::move(snapshot), std::move(data))) {}
+Analysis::Analysis(ProjectSnapshot snapshot, DataSnapshot data,
+                   const std::shared_ptr<OrbitSessionCache> &sessions)
+    : impl_(std::make_shared<const Impl>(std::move(snapshot), std::move(data), sessions)) {}
 const ProjectSnapshot &Analysis::snapshot() const { return impl_->snapshot; }
 const DataSnapshot &Analysis::data() const { return impl_->data; }
 core::CartesianState Analysis::state(const ObjectRef &ref, core::Epoch at,
@@ -515,8 +521,9 @@ ReportResult Analysis::report(const ReportDefinition &definition,
 DataChangedError::DataChangedError(AnalysisPlan plan)
     : std::runtime_error("Selected calculation data differ from the project's recorded data"),
       plan_(std::make_shared<const AnalysisPlan>(std::move(plan))) {}
-AnalysisPlan::AnalysisPlan(const ProjectDocument &project, DataSnapshot data)
-    : AnalysisPlan(project, Analysis{project.snapshot(), std::move(data)}) {}
+AnalysisPlan::AnalysisPlan(const ProjectDocument &project, DataSnapshot data,
+                           std::shared_ptr<OrbitSessionCache> sessions)
+    : AnalysisPlan(project, Analysis{project.snapshot(), std::move(data), sessions}) {}
 AnalysisPlan::AnalysisPlan(const ProjectDocument &project, const DataCatalog &catalog)
     : AnalysisPlan(project, [&] {
           const auto captured = project.snapshot();
@@ -578,6 +585,10 @@ Analysis AnalysisPlan::prepare(bool accept) const {
 }
 Analysis prepare(const ProjectDocument &project, DataSnapshot data) {
     return AnalysisPlan{project, std::move(data)}.prepare();
+}
+Analysis prepare(const ProjectDocument &project, DataSnapshot data,
+                 std::shared_ptr<OrbitSessionCache> sessions) {
+    return AnalysisPlan{project, std::move(data), std::move(sessions)}.prepare();
 }
 Analysis prepare(const ProjectDocument &project, const DataCatalog &catalog) {
     return AnalysisPlan{project, catalog}.prepare();

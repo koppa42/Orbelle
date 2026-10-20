@@ -1858,7 +1858,7 @@ class Workbench final : public WorkbenchWindow {
             resources = resources.with_space_weather(id, model);
         for (const auto &[id, model] : ocean_tides_)
             resources = resources.with_ocean_tides(id, model);
-        return {project_snapshot(project_path_), std::move(resources)};
+        return {project_snapshot(project_path_), std::move(resources), orbit_sessions_};
     }
     void show_reports() {
         if (!scenario_ || busy())
@@ -2376,11 +2376,13 @@ class Workbench final : public WorkbenchWindow {
         const auto previous_project =
             editing ? std::optional{project_snapshot(project_path_)} : std::nullopt;
         const auto calculation_time = time_for(next_data->data_info().time_data);
+        const auto sessions =
+            editing ? orbit_sessions_->fork() : std::make_shared<runtime::OrbitSessionCache>();
         project_candidate_ = std::async(
             std::launch::async,
             [this, project = std::move(project),
              source = std::filesystem::path(pending_project_path_.toStdWString()), installed_data,
-             retained, previous_project, edited_object, calculation_time, gravity_files,
+             retained, previous_project, edited_object, calculation_time, sessions, gravity_files,
              ephemeris_files, weather_files, ocean_files, retained_gravity = gravity_,
              retained_ephemerides = ephemerides_, retained_weather = weather_,
              retained_ocean_tides = ocean_tides_, cancel = project_cancellation_]() mutable {
@@ -2421,7 +2423,7 @@ class Workbench final : public WorkbenchWindow {
                 return prepare_project_scene(std::move(project), source, frames_, installed_data,
                                              *cancel, retained, edited_object, calculation_time,
                                              gravity, ephemerides, weather, ocean_tides,
-                                             previous_project);
+                                             previous_project, sessions);
             });
         update_actions();
         statusBar()->showMessage(editing ? QStringLiteral("正在更新场景并准备轨迹…")
@@ -2534,6 +2536,7 @@ class Workbench final : public WorkbenchWindow {
             if (station_editor_ && !project_edit_)
                 station_editor_->close();
             scenario_ = std::move(candidate->scenario);
+            orbit_sessions_ = std::move(candidate->sessions);
             eop_ = candidate->eop;
             gravity_ = candidate->gravity;
             ephemerides_ = candidate->ephemerides;
@@ -2885,6 +2888,8 @@ class Workbench final : public WorkbenchWindow {
         objects_->clear();
         object_item_ = nullptr;
         scenario_ = std::move(next);
+        orbit_sessions_ = std::make_shared<runtime::OrbitSessionCache>();
+        pending_orbit_sessions_.reset();
         eop_ = next_eop;
         gravity_.clear();
         ephemerides_.clear();
@@ -3665,8 +3670,10 @@ class Workbench final : public WorkbenchWindow {
         const auto cache = display_cache_interval(input, settings, snapshot_.epoch);
         const auto eop = eop_;
         const auto calculation_time = time_for(eop->data_info().time_data);
+        pending_orbit_sessions_ = orbit_sessions_->fork();
         candidate_ = std::async(std::launch::async, [this, input = std::move(input), previous,
                                                      reuse, cache, eop, calculation_time,
+                                                     sessions = pending_orbit_sessions_,
                                                      cancel = cancellation_] {
             if (*cancel)
                 throw OrbitCancelled{};
@@ -3676,7 +3683,7 @@ class Workbench final : public WorkbenchWindow {
                 throw std::overflow_error("Object input revision exhausted");
             auto session =
                 reuse ? previous->session
-                      : make_orbit_session(
+                      : sessions->acquire(
                             input, previous ? previous->session.provenance().input_revision + 1 : 1,
                             calculation_time.get(), {frames_, eop});
             return prepare_orbit_scene(input, std::move(session), *frames_, *eop, *cancel, cache);
@@ -3749,6 +3756,7 @@ class Workbench final : public WorkbenchWindow {
                 scenario_item_->setExpanded(true);
             }
             scenario_ = std::move(next_scenario);
+            orbit_sessions_ = std::move(pending_orbit_sessions_);
             filter_objects();
             mark_project_dirty();
             if (pending_orbit_target_)
@@ -3797,6 +3805,7 @@ class Workbench final : public WorkbenchWindow {
         if (insert_defaults_pending_ && last_orbit_outcome_ == "rejected")
             show_properties_dialog();
         insert_defaults_pending_ = false;
+        pending_orbit_sessions_.reset();
         update_actions();
     }
     void request_display_cache() {
@@ -8192,10 +8201,54 @@ class Workbench final : public WorkbenchWindow {
             ++orbit_smoke_stage_;
             break;
         }
-        case 162:
-            if (++smoke_final_frames_ >= 4)
-                ++orbit_smoke_stage_;
+        case 162: {
+            if (smoke_final_frames_++ == 0) {
+                const auto captured_report = report_input();
+                require(captured_report.sessions == orbit_sessions_,
+                        "Report did not capture the published scientific cache");
+                const auto &orbit = captured_report.project.satellites.front().orbit;
+                const application::ProjectDocument document{captured_report.project};
+                const auto analysis =
+                    runtime::prepare(document, captured_report.data, captured_report.sessions);
+                const std::array epochs{orbit.first, orbit.last};
+                int displayed_checks = 0, report_checks = 0;
+                const auto displayed =
+                    satellites_[0].orbit->session.sample(epochs, [&] { ++displayed_checks; });
+                const auto shared = captured_report.sessions->acquire(
+                    orbit, document.snapshot().revision, captured_report.data.time().get(),
+                    captured_report.data.force_environment(orbit));
+                (void)shared.sample(epochs, [&] { ++report_checks; });
+                const auto states = analysis.states(document.objects().get(orbit.object_id), epochs,
+                                                    core::FrameId::gcrf);
+                require(
+                    states.states().front().position_m == displayed.states().front().position_m &&
+                        states.states().back().position_m == displayed.states().back().position_m,
+                    "First report differs from the published scientific solution");
+                require(report_checks == displayed_checks,
+                        "First report repeated the prepared HPOP integration");
+                show_reports();
+                report_dialog_->select_object(orbit.object_id,
+                                              application::ReportKind::cartesian_state);
+                choose_report(QStringLiteral("builtin:%1")
+                                  .arg(static_cast<int>(application::ReportKind::cartesian_state)));
+                report_dialog_->findChild<QDoubleSpinBox *>("reportStep")->setValue(60);
+                smoke_apply_elapsed_.restart();
+                report_dialog_->findChild<QPushButton *>("generateReport")->click();
+                break;
+            }
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            require(report_dialog_->findChild<QTableView *>("reportTable")->model()->rowCount() ==
+                        61,
+                    "First HPOP report did not use its independent sampling interval");
+            interaction_report_.append(QJsonObject{{"kind", "hpop-first-report-timing"},
+                                                   {"elapsed_ms", smoke_apply_elapsed_.elapsed()},
+                                                   {"passed", true}});
+            record("hpop-first-report-shares-prepared-science");
+            workspace_->close_page(report_dialog_);
+            ++orbit_smoke_stage_;
             break;
+        }
         case 163: {
             application::Project project{"Apply navigation audit", scenario_->first(),
                                          scenario_->last()};
@@ -8766,6 +8819,9 @@ class Workbench final : public WorkbenchWindow {
     bool all_windows_closed_ = false;
     std::shared_ptr<const OrbitScene> orbit_;
     std::optional<application::Scenario> scenario_;
+    std::shared_ptr<runtime::OrbitSessionCache> orbit_sessions_ =
+        std::make_shared<runtime::OrbitSessionCache>();
+    std::shared_ptr<runtime::OrbitSessionCache> pending_orbit_sessions_;
     QString project_path_, pending_project_path_, last_project_outcome_;
     bool project_dirty_ = false;
     application::DataLock project_recorded_data_;

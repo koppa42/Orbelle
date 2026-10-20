@@ -2377,9 +2377,11 @@ struct ReportDialog::Impl {
                         if (cancel->load())
                             throw runtime::AnalysisCancelled{};
                         auto analysis =
-                            retained ? std::move(*retained)
-                                     : orbitforge::Project::from_data(std::move(snapshot.project))
-                                           .prepare(snapshot.data);
+                            retained
+                                ? std::move(*retained)
+                                : runtime::prepare(
+                                      application::ProjectDocument{std::move(snapshot.project)},
+                                      std::move(snapshot.data), std::move(snapshot.sessions));
                         auto result = analysis.report(
                             d, [cancel] { return cancel->load(); },
                             [count](std::size_t current, std::size_t) { count->store(current); });

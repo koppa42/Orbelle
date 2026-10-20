@@ -52,6 +52,8 @@ PYBIND11_MODULE(_native, module) {
         .def_property_readonly("states", &results::StateSeries::states);
     py::class_<application::Session>(module, "Session")
         .def_property_readonly("provenance", &application::Session::provenance)
+        .def("with_input_revision", &application::Session::with_input_revision, py::arg("revision"),
+             "Share the numerical provider while changing only the result revision.")
         .def(
             "sample",
             [](const application::Session &session, const std::vector<core::Epoch> &epochs) {
