@@ -16,6 +16,7 @@
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QFileDialog>
 #include <QHeaderView>
 #include <QInputDialog>
@@ -39,12 +40,14 @@
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QWheelEvent>
+#include <algorithm>
 #include <cmath>
 #include <gtest/gtest.h>
 #include <numbers>
 #include <orbitforge/runtime/ephemeris.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
 #include <orbitforge/runtime/two_body.hpp>
+#include <stdexcept>
 
 namespace orbitforge::desktop {
 namespace {
@@ -55,6 +58,20 @@ QApplication &test_app() {
     static QApplication app(argc, argv);
     apply_workbench_style(app);
     return app;
+}
+int table_column(QTableView *table, const char *id) {
+    for (int c = 0; c < table->model()->columnCount(); ++c)
+        if (table->model()->headerData(c, Qt::Horizontal, Qt::UserRole).toString() == id)
+            return c;
+    throw std::runtime_error(std::string("Missing displayed report column: ") + id);
+}
+const results::Cell &source_cell(const runtime::ReportResult &result, std::size_t row,
+                                 const char *id) {
+    const auto &source = result.source_table ? *result.source_table : result.table;
+    const auto found = std::ranges::find(source.columns(), id, &results::Column::id);
+    if (found == source.columns().end())
+        throw std::runtime_error(std::string("Missing source report column: ") + id);
+    return source.rows().at(row).at(found - source.columns().begin());
 }
 void save_template(ReportDialog &dialog, const QString &name) {
     QTimer::singleShot(0, [name] {
@@ -137,6 +154,37 @@ void select_curves(ReportDialog &dialog, const QStringList &ids, bool accept = t
         dialog.findChild<QAction *>("reportChooseCurves")->trigger();
     else
         dialog.findChild<QPushButton *>("reportPlotFields")->click();
+}
+void select_columns(ReportDialog &dialog, const QStringList &ids, bool accept = true) {
+    auto *action = dialog.findChild<QAction *>("reportChooseColumns");
+    ASSERT_TRUE(action && action->isEnabled());
+    QTimer::singleShot(0, [ids, accept] {
+        auto *chooser =
+            dynamic_cast<ReportColumnSelectionDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(chooser);
+        auto *list = chooser->findChild<QTreeWidget *>("reportColumnList");
+        for (int i = 0; i < list->topLevelItemCount(); ++i) {
+            auto *item = list->topLevelItem(i);
+            item->setCheckState(0, ids.contains(item->data(0, Qt::UserRole).toString())
+                                       ? Qt::Checked
+                                       : Qt::Unchecked);
+        }
+        // Exercise an arbitrary chosen order; the chooser's Up/Down controls are
+        // covered separately, including search and boundary behavior.
+        for (int target = 0; target < ids.size(); ++target)
+            for (int i = target; i < list->topLevelItemCount(); ++i)
+                if (list->topLevelItem(i)->data(0, Qt::UserRole).toString() == ids[target]) {
+                    auto *item = list->takeTopLevelItem(i);
+                    list->insertTopLevelItem(target, item);
+                    break;
+                }
+        EXPECT_EQ(chooser->selection(), ids);
+        if (accept && !ids.empty())
+            chooser->accept();
+        else
+            chooser->reject();
+    });
+    action->trigger();
 }
 void wait_for_report(ReportDialog &dialog, int timeout = 5000) {
     const auto *generate = dialog.findChild<QPushButton *>("generateReport");
@@ -508,8 +556,10 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
     EXPECT_TRUE(table->isVisible());
     EXPECT_TRUE(dialog.findChild<QWidget *>("reportSettingsPanel")->isVisible());
     EXPECT_GT(table->width(), dialog.findChild<QWidget *>("reportSettingsPanel")->width());
-    EXPECT_TRUE(table->model()->headerData(2, Qt::Horizontal).toString().contains("UTC"));
-    table->doubleClicked(table->model()->index(1, 2));
+    const auto epoch_column = table_column(table, "time.epoch");
+    EXPECT_TRUE(
+        table->model()->headerData(epoch_column, Qt::Horizontal).toString().contains("UTC"));
+    table->doubleClicked(table->model()->index(1, epoch_column));
     ASSERT_TRUE(sought);
     EXPECT_EQ(sought->tai_nanoseconds(), 60'000'000'000);
     capture("results");
@@ -660,13 +710,19 @@ TEST(ReportDialog, ObjectScopeSurvivesTemplateChangesSavedConfigurationsAndProje
     choose_report(dialog, 1);
     run();
     ASSERT_EQ(table->model()->rowCount(), 1);
-    EXPECT_EQ(table->model()->data(table->model()->index(0, 0)).toString(), "east");
+    EXPECT_EQ(table->model()
+                  ->data(table->model()->index(0, table_column(table, "object.name")))
+                  .toString(),
+              QStringLiteral("东站"));
     choose_report(dialog, 2);
     dialog.findChild<QComboBox *>("reportFrame")->setCurrentIndex(1);
     run();
     ASSERT_EQ(table->model()->rowCount(), 3);
     for (int row = 0; row < 3; ++row)
-        EXPECT_EQ(table->model()->data(table->model()->index(row, 0)).toString(), "east");
+        EXPECT_EQ(table->model()
+                      ->data(table->model()->index(row, table_column(table, "object.name")))
+                      .toString(),
+                  QStringLiteral("东站"));
     const auto capture_directory = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
     if (!capture_directory.isEmpty()) {
         QCoreApplication::processEvents();
@@ -681,13 +737,19 @@ TEST(ReportDialog, ObjectScopeSurvivesTemplateChangesSavedConfigurationsAndProje
     choose_report(dialog, 3);
     run();
     ASSERT_EQ(table->model()->rowCount(), 1);
-    EXPECT_EQ(table->model()->data(table->model()->index(0, 0)).toString(), "east");
+    EXPECT_EQ(table->model()
+                  ->data(table->model()->index(0, table_column(table, "object.name")))
+                  .toString(),
+              QStringLiteral("东站"));
     // A new context replaces the old object, even while reusing an existing report page.
     dialog.select_object("west", application::ReportKind::ground_stations);
     choose_report(dialog, 1);
     run();
     ASSERT_EQ(table->model()->rowCount(), 1);
-    EXPECT_EQ(table->model()->data(table->model()->index(0, 0)).toString(), "west");
+    EXPECT_EQ(table->model()
+                  ->data(table->model()->index(0, table_column(table, "object.name")))
+                  .toString(),
+              QStringLiteral("西站"));
     // Loading a saved configuration explicitly restores its own scope.
     choose_report(dialog, static_cast<int>(application::report_kinds.size()));
     run();
@@ -1199,6 +1261,263 @@ TEST(ReportSelection, CurveFieldsSearchKeepsCheckedItemsAndValidatesLimit) {
     EXPECT_EQ(chooser.result(), QDialog::Accepted);
 }
 
+TEST(ReportSelection, ColumnSearchOrderDefaultsAndEmptySelection) {
+    (void)test_app();
+    ReportColumnSelectionDialog chooser(
+        {{"object.name", QStringLiteral("对象名称"), ""},
+         {"time.epoch", QStringLiteral("时间"), "TAI"},
+         {"state.x", QStringLiteral("X 位置"), "m"},
+         {"state.y", QStringLiteral("一个较长的 Y 位置字段名称，用于检查窄窗口"), "km"}},
+        {"state.x", "object.name", "time.epoch"}, {"object.name", "time.epoch", "state.x"});
+    chooser.show();
+    auto *list = chooser.findChild<QTreeWidget *>("reportColumnList");
+    auto *search = chooser.findChild<QLineEdit *>("reportColumnSearch");
+    auto *confirm = chooser.findChild<QPushButton *>("reportColumnConfirm");
+    auto *down = chooser.findChild<QPushButton *>("reportColumnDown");
+    auto *up = chooser.findChild<QPushButton *>("reportColumnUp");
+    ASSERT_TRUE(list && search && confirm && down && up);
+    EXPECT_EQ(chooser.selection(), (QStringList{"state.x", "object.name", "time.epoch"}));
+    list->setCurrentItem(list->topLevelItem(0));
+    down->click();
+    EXPECT_EQ(chooser.selection(), (QStringList{"object.name", "state.x", "time.epoch"}));
+    up->click();
+    EXPECT_EQ(chooser.selection().front(), "state.x");
+    search->setText("state.y");
+    EXPECT_TRUE(list->topLevelItem(0)->isHidden());
+    EXPECT_FALSE(list->topLevelItem(3)->isHidden());
+    EXPECT_FALSE(down->isEnabled());
+    EXPECT_FALSE(up->isEnabled());
+    list->topLevelItem(3)->setCheckState(0, Qt::Checked);
+    search->setText("no-match");
+    EXPECT_EQ(chooser.selection().size(), 4);
+    EXPECT_TRUE(confirm->isEnabled());
+    search->clear();
+    const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    for (int width : {560, 340}) {
+        chooser.resize(width, 500);
+        QCoreApplication::processEvents();
+        EXPECT_EQ(chooser.width(), width);
+        EXPECT_EQ(list->horizontalScrollBar()->maximum(), 0);
+        for (auto *button : chooser.findChildren<QPushButton *>())
+            EXPECT_TRUE(
+                chooser.rect().contains(button->mapTo(&chooser, button->rect().bottomRight())));
+        if (!capture.isEmpty()) {
+            QDir().mkpath(capture);
+            EXPECT_TRUE(
+                chooser.grab().save(capture + QString("/column-selector-%1.png").arg(width)));
+        }
+    }
+    chooser.findChild<QPushButton *>("reportColumnClear")->click();
+    EXPECT_FALSE(confirm->isEnabled());
+    chooser.accept();
+    EXPECT_EQ(chooser.result(), QDialog::Rejected);
+    chooser.findChild<QPushButton *>("reportColumnDefaults")->click();
+    EXPECT_EQ(chooser.selection(), (QStringList{"object.name", "time.epoch", "state.x"}));
+    chooser.findChild<QPushButton *>("reportColumnAll")->click();
+    EXPECT_EQ(chooser.selection().size(), 4);
+    chooser.accept();
+    EXPECT_EQ(chooser.result(), QDialog::Accepted);
+}
+
+TEST(ReportDialog, ColumnsRetainSortingSelectionWidthsCurvesAndExportWithoutCalculation) {
+    (void)test_app();
+    const auto restore_clipboard = [](QMimeData *data) {
+        QApplication::clipboard()->setMimeData(data);
+    };
+    std::unique_ptr<QMimeData, decltype(restore_clipboard)> clipboard(new QMimeData,
+                                                                      restore_clipboard);
+    if (const auto *original = QApplication::clipboard()->mimeData())
+        for (const auto &format : original->formats())
+            clipboard->setData(format, original->data(format));
+    std::shared_ptr<const core::ITimeProvider> time = runtime::make_builtin_time_provider();
+    application::Project project("报告列", core::Epoch{0}, core::Epoch{120'000'000'001});
+    project.ground_stations.push_back({"low", "低点", {0, 0, 0}});
+    project.ground_stations.push_back({"high", "高点", {0, 0, 1000}});
+    application::ReportDefinition definition;
+    definition.id = "custom";
+    definition.name = "自定义位置";
+    definition.query.frame = core::FrameId::itrf;
+    definition.query.object_ids = {"low", "high"};
+    definition.format.time_scale = application::ReportTimeScale::tai;
+    definition.format.columns = {{"state.x", "m", "横向位置"},
+                                 {"time.epoch", "", ""},
+                                 {"object.name", "", ""},
+                                 {"object.id", "", ""}};
+    project.reports.push_back(definition);
+    int preparations = 0, publications = 0;
+    std::optional<core::Epoch> sought;
+    std::shared_ptr<const runtime::ReportResult> source_result;
+    ReportDialog dialog(
+        project, time,
+        [&](const application::ReportQuery &, ReportDialog::Ready ready) {
+            ++preparations;
+            ready(ReportInput{project, runtime::DataSnapshot::from_providers(time)}, {});
+        },
+        [&](auto reports) { project.reports = std::move(reports); },
+        [&](core::Epoch epoch) { sought = epoch; });
+    dialog.result_published = [&](auto result, const runtime::Analysis &) {
+        ++publications;
+        source_result = std::move(result);
+    };
+    dialog.show();
+    dialog.resize(1120, 740);
+    choose_report(dialog, static_cast<int>(application::report_kinds.size()));
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    ASSERT_TRUE(source_result);
+    auto *table = dialog.findChild<QTableView *>("reportTable");
+    auto *proxy = qobject_cast<QSortFilterProxyModel *>(table->model());
+    auto *views = dialog.findChild<QTabBar *>("reportViews");
+    auto *plot = static_cast<ReportPlot *>(dialog.findChild<QWidget *>("reportPlot"));
+    auto *columns = dialog.findChild<QAction *>("reportChooseColumns");
+    ASSERT_TRUE(proxy && columns->isEnabled());
+    EXPECT_EQ(available_curves(dialog).size(), 6); // Complete source, not just displayed X.
+    select_curves(dialog, {"state.x", "state.y"});
+    EXPECT_EQ(plot->series_count(), 4U);
+    EXPECT_EQ(plot->panel_count(), 2U); // Explicit X metres and engineering Y kilometres.
+    views->setCurrentIndex(1);
+    QCoreApplication::processEvents();
+    plot->zoom(.65);
+    const auto interval = plot->visible_interval();
+    const auto original_image = plot->image(1);
+    table->sortByColumn(table_column(table, "state.x"), Qt::DescendingOrder);
+    table->setColumnWidth(table_column(table, "state.x"), 237);
+    table->setCurrentIndex(proxy->index(1, table_column(table, "state.x")));
+    table->selectRow(1);
+    const auto selected_source_row =
+        proxy->mapToSource(table->selectionModel()->selectedRows().front()).row();
+    select_columns(dialog, {"state.y", "state.x"}, false);
+    EXPECT_EQ(proxy->columnCount(), 4);
+    select_columns(dialog, {"state.y", "state.x"});
+    ASSERT_EQ(proxy->columnCount(), 2);
+    EXPECT_EQ(table_column(table, "state.y"), 0);
+    EXPECT_EQ(table_column(table, "state.x"), 1);
+    EXPECT_EQ(table->horizontalHeader()->sortIndicatorSection(), 1);
+    EXPECT_EQ(table->horizontalHeader()->sortIndicatorOrder(), Qt::DescendingOrder);
+    EXPECT_EQ(table->columnWidth(1), 237);
+    ASSERT_EQ(table->selectionModel()->selectedRows().size(), 1);
+    EXPECT_EQ(proxy->mapToSource(table->selectionModel()->selectedRows().front()).row(),
+              selected_source_row);
+    EXPECT_EQ(proxy->mapToSource(table->currentIndex()).row(), selected_source_row);
+    EXPECT_EQ(table->currentIndex().column(), 1);
+    EXPECT_EQ(plot->visible_interval(), interval);
+    EXPECT_EQ(plot->image(1), original_image); // Columns alone do not rebuild or alter the plot.
+    EXPECT_EQ(plot->fields().front().unit, "m");
+    EXPECT_TRUE(plot->fields().front().label.contains(QStringLiteral("横向位置")));
+    EXPECT_TRUE(views->isTabEnabled(1));
+    table->doubleClicked(table->selectionModel()->selectedRows().front());
+    ASSERT_TRUE(sought);
+    EXPECT_EQ(*sought, std::get<core::Epoch>(
+                           source_cell(*source_result, selected_source_row, "time.epoch")));
+    select_columns(dialog, {"state.y"}); // Even hiding the plotted X keeps its unit and title.
+    auto *units = dialog.findChild<QComboBox *>("reportUnits");
+    units->setCurrentIndex(1);
+    EXPECT_EQ(plot->fields().front().unit, "m");
+    EXPECT_TRUE(plot->fields().front().label.contains(QStringLiteral("横向位置")));
+    EXPECT_EQ(plot->series_count(), 4U);
+    units->setCurrentIndex(0);
+    select_columns(dialog, {"state.y", "state.x"});
+    EXPECT_EQ(table->columnWidth(1), 237);
+    EXPECT_TRUE(
+        proxy->headerData(1, Qt::Horizontal).toString().contains(QStringLiteral("横向位置")));
+    EXPECT_DOUBLE_EQ(proxy->index(0, 1).data().toString().toDouble(), 6378137);
+    views->setCurrentIndex(0);
+    table->selectRow(0);
+    dialog.findChild<QAction *>("reportTableCopy")->trigger();
+    const auto copied = QApplication::clipboard()->text().split('\n');
+    ASSERT_GE(copied.size(), 2);
+    EXPECT_EQ(copied[0].count('\t'), 1);
+    EXPECT_EQ(copied[1].count('\t'), 1);
+    EXPECT_TRUE(copied[0].trimmed().endsWith(QStringLiteral("横向位置 (m)")));
+    save_template(dialog, QStringLiteral("两列位置"));
+    ASSERT_EQ(project.reports.size(), 2U);
+    EXPECT_EQ(project.reports.back().format.columns.size(), 2U);
+    EXPECT_EQ(project.reports.back().format.columns[0].field, "state.y");
+    EXPECT_EQ(project.reports.back().format.columns[1].unit, "m");
+    EXPECT_TRUE(columns->isEnabled()); // Saving a matching template keeps the result usable.
+    EXPECT_FALSE(dialog.findChild<QLabel *>("reportResultLabel")
+                     ->text()
+                     .contains(QStringLiteral("设置已更改")));
+    const auto round_trip = application::decode_project(application::encode_project(project));
+    EXPECT_EQ(round_trip.reports.back().format.columns, project.reports.back().format.columns);
+    QTemporaryDir output;
+    ASSERT_TRUE(output.isValid());
+    const auto file = output.filePath("chosen-columns.csv");
+    const bool native = QApplication::testAttribute(Qt::AA_DontUseNativeDialogs);
+    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, true);
+    QTimer::singleShot(0, [file] {
+        auto *chooser = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(chooser);
+        chooser->selectFile(file);
+        QMetaObject::invokeMethod(chooser, "accept", Qt::QueuedConnection);
+    });
+    dialog.findChild<QPushButton *>("exportReportCsv")->click();
+    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, native);
+    wait_for_report(dialog);
+    QFile csv(file);
+    ASSERT_TRUE(csv.open(QIODevice::ReadOnly));
+    const auto rows = QString::fromUtf8(csv.readAll()).trimmed().split('\n');
+    ASSERT_EQ(rows.size(), proxy->rowCount() + 1);
+    EXPECT_EQ(rows[0].count(','), 1);
+    EXPECT_TRUE(rows[0].contains(QStringLiteral("横向位置")));
+    for (int i = 1; i < rows.size(); ++i)
+        EXPECT_EQ(rows[i].count(','), 1);
+    // A presentation changed while the chooser is open must not be overwritten.
+    QTimer::singleShot(0, [&] {
+        auto *chooser =
+            dynamic_cast<ReportColumnSelectionDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(chooser);
+        chooser->findChild<QPushButton *>("reportColumnAll")->click();
+        units->setCurrentIndex(1);
+        chooser->accept();
+    });
+    columns->trigger();
+    EXPECT_EQ(proxy->columnCount(), 2);
+    EXPECT_TRUE(
+        dialog.findChild<QLabel *>("reportStatus")->text().contains(QStringLiteral("请重新选择")));
+    EXPECT_EQ(preparations, 1);
+    EXPECT_EQ(publications, 1);
+    EXPECT_EQ(source_result->table.columns().size(), 4U);
+    EXPECT_EQ(source_result->source_table->rows().size(), 8U);
+}
+
+TEST(ReportDialog, ColumnOnlyResultsExplainMissingUtcAndEnableCurvesWithTaiWithoutRegeneration) {
+    (void)test_app();
+    application::Project project("无 UTC 数据", core::Epoch{0}, core::Epoch{120'000'000'000});
+    project.ground_stations.push_back({"station", "地面站", {0, 0, 0}});
+    application::ReportDefinition definition;
+    definition.id = "column-only";
+    definition.name = "位置";
+    definition.query.frame = core::FrameId::itrf;
+    definition.query.object_ids = {"station"};
+    definition.format.columns = {{"state.x", "", ""}};
+    project.reports.push_back(definition);
+    int preparations = 0;
+    ReportDialog dialog(
+        project, nullptr,
+        [&](const application::ReportQuery &, ReportDialog::Ready ready) {
+            ++preparations;
+            ready(ReportInput{project, runtime::DataSnapshot::from_providers(nullptr)}, {});
+        },
+        [](auto) {}, [](auto) {});
+    choose_report(dialog, static_cast<int>(application::report_kinds.size()));
+    dialog.findChild<QPushButton *>("generateReport")->click();
+    wait_for_report(dialog);
+    auto *table = dialog.findChild<QTableView *>("reportTable");
+    auto *views = dialog.findChild<QTabBar *>("reportViews");
+    ASSERT_EQ(table->model()->columnCount(), 1)
+        << dialog.findChild<QLabel *>("reportStatus")->text().toStdString();
+    ASSERT_GT(table->model()->rowCount(), 0);
+    EXPECT_TRUE(views->isTabVisible(1));
+    EXPECT_FALSE(views->isTabEnabled(1));
+    EXPECT_TRUE(views->tabToolTip(1).contains("TAI"));
+    dialog.findChild<QComboBox *>("reportTimeScale")->setCurrentIndex(1);
+    EXPECT_TRUE(views->isTabEnabled(1));
+    EXPECT_TRUE(views->tabToolTip(1).isEmpty());
+    EXPECT_EQ(available_curves(dialog).size(), 6);
+    EXPECT_EQ(preparations, 1);
+}
+
 TEST(ReportPlot, AngleWrapDoesNotDrawFalseCrossingAndPixelReductionRetainsPeaks) {
     (void)test_app();
     application::ReportDefinition d;
@@ -1444,9 +1763,11 @@ TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
     EXPECT_EQ(dialog.findChild<QLabel *>("accessMetric0")->text(), "1");
     auto *table = dialog.findChild<QTableView *>("reportTable");
     ASSERT_TRUE(table);
-    const auto expected_epoch = std::get<core::Epoch>(pass_result->table.rows()[0][8]);
-    EXPECT_TRUE(QMetaObject::invokeMethod(table, "doubleClicked", Qt::DirectConnection,
-                                          Q_ARG(QModelIndex, table->model()->index(0, 7))));
+    const auto expected_epoch =
+        std::get<core::Epoch>(source_cell(*pass_result, 0, "access.max_elevation_time"));
+    EXPECT_TRUE(QMetaObject::invokeMethod(
+        table, "doubleClicked", Qt::DirectConnection,
+        Q_ARG(QModelIndex, table->model()->index(0, table_column(table, "access.max_elevation")))));
     ASSERT_TRUE(sought);
     EXPECT_EQ(*sought, expected_epoch);
     auto *search = dialog.findChild<QComboBox *>("accessSearchMode");
@@ -1714,11 +2035,12 @@ TEST(ReportDialog, LightingIntervalsAndCurveShareResultsAndPreserveNarrowLayout)
     EXPECT_GT(table->model()->rowCount(), 8);
     EXPECT_FALSE(views->isTabEnabled(1));
     EXPECT_TRUE(dialog.findChild<QLabel *>("accessMetric0")->text().contains("%"));
-    EXPECT_TRUE(table->isColumnHidden(6));
-    EXPECT_TRUE(table->isColumnHidden(7));
-    const auto end = std::get<core::Epoch>(published->table.rows()[1][3]);
-    QMetaObject::invokeMethod(table, "doubleClicked", Qt::DirectConnection,
-                              Q_ARG(QModelIndex, table->model()->index(1, 3)));
+    EXPECT_THROW(table_column(table, "lighting.start_clipped"), std::runtime_error);
+    EXPECT_THROW(table_column(table, "lighting.stop_clipped"), std::runtime_error);
+    const auto end = std::get<core::Epoch>(source_cell(*published, 1, "lighting.stop"));
+    QMetaObject::invokeMethod(
+        table, "doubleClicked", Qt::DirectConnection,
+        Q_ARG(QModelIndex, table->model()->index(1, table_column(table, "lighting.stop"))));
     EXPECT_EQ(sought, end);
     const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
     if (!capture.isEmpty())
@@ -1791,7 +2113,8 @@ TEST(ReportDialog, CovarianceUsesSavedSettingsAndPublishesSharedResult) {
         const auto covariance = core::propagate_hpop_covariance(
             satellite.orbit.initial, project.last, satellite.orbit.covariance.active_input(),
             satellite.orbit.hpop, data.force_environment(satellite.orbit));
-        EXPECT_EQ(std::get<double>(result->table.rows().back()[4]),
+        EXPECT_EQ(std::get<double>(
+                      source_cell(*result, result->table.rows().size() - 1, "covariance.x.x")),
                   covariance.covariance.state[0][0]);
     };
     dialog.select_object(satellite.orbit.object_id, application::ReportKind::state_covariance);
@@ -1802,15 +2125,16 @@ TEST(ReportDialog, CovarianceUsesSavedSettingsAndPublishesSharedResult) {
     ASSERT_TRUE(published);
     EXPECT_EQ(preparations, 1);
     auto *table = dialog.findChild<QTableView *>("reportTable");
-    ASSERT_EQ(table->model()->columnCount(), 25);
+    ASSERT_EQ(table->model()->columnCount(), 24);
     ASSERT_EQ(table->model()->rowCount(), 2);
-    EXPECT_DOUBLE_EQ(table->model()->data(table->model()->index(0, 4)).toString().toDouble(), .01);
-    EXPECT_TRUE(table->model()->headerData(4, Qt::Horizontal).toString().contains("km^2"));
+    const auto xx = table_column(table, "covariance.x.x");
+    EXPECT_DOUBLE_EQ(table->model()->data(table->model()->index(0, xx)).toString().toDouble(), .01);
+    EXPECT_TRUE(table->model()->headerData(xx, Qt::Horizontal).toString().contains("km^2"));
     dialog.findChild<QComboBox *>("reportUnits")->setCurrentIndex(1);
     EXPECT_EQ(preparations, 1);
-    EXPECT_DOUBLE_EQ(table->model()->data(table->model()->index(0, 4)).toString().toDouble(),
+    EXPECT_DOUBLE_EQ(table->model()->data(table->model()->index(0, xx)).toString().toDouble(),
                      10000);
-    EXPECT_TRUE(table->model()->headerData(4, Qt::Horizontal).toString().contains("m^2"));
+    EXPECT_TRUE(table->model()->headerData(xx, Qt::Horizontal).toString().contains("m^2"));
     auto *plot = static_cast<ReportPlot *>(dialog.findChild<QWidget *>("reportPlot"));
     EXPECT_FALSE(plot->image(1).isNull());
     project.satellites[0].orbit.covariance.enabled = false;
@@ -1857,9 +2181,10 @@ TEST(ReportDialog, OrbitalEventsSummaryTimeSeekAndResponsiveLayout) {
     EXPECT_EQ(dialog.findChild<QLabel *>("accessMetric0")->text().toULongLong(),
               published->orbital_event_statistics->counts[0]);
     EXPECT_TRUE(dialog.findChild<QLabel *>("orbitalEventNotice")->isHidden());
-    const auto epoch = std::get<core::Epoch>(published->table.rows()[2][2]);
-    QMetaObject::invokeMethod(table, "doubleClicked", Qt::DirectConnection,
-                              Q_ARG(QModelIndex, table->model()->index(2, 3)));
+    const auto epoch = std::get<core::Epoch>(source_cell(*published, 2, "time.epoch"));
+    QMetaObject::invokeMethod(
+        table, "doubleClicked", Qt::DirectConnection,
+        Q_ARG(QModelIndex, table->model()->index(2, table_column(table, "event.kind"))));
     EXPECT_EQ(sought, epoch);
     const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
     if (!capture.isEmpty())
@@ -1992,9 +2317,10 @@ TEST(ReportDialog, IntersatellitePairCurvesExtremaSeekAndResponsiveLayout) {
     EXPECT_EQ(preparations, 2);
     EXPECT_FALSE(views->isTabEnabled(1));
     ASSERT_GT(table->model()->rowCount(), 0);
-    const auto nearest = std::get<core::Epoch>(published->table.rows()[0][8]);
-    QMetaObject::invokeMethod(table, "doubleClicked", Qt::DirectConnection,
-                              Q_ARG(QModelIndex, table->model()->index(0, 7)));
+    const auto nearest = std::get<core::Epoch>(source_cell(*published, 0, "access.min_range_time"));
+    QMetaObject::invokeMethod(
+        table, "doubleClicked", Qt::DirectConnection,
+        Q_ARG(QModelIndex, table->model()->index(0, table_column(table, "access.min_range"))));
     EXPECT_EQ(sought, nearest);
     screenshots("intersatellite-access");
     const auto rows = published->table.rows();

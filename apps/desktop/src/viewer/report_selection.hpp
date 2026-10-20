@@ -66,4 +66,27 @@ class ReportCurveSelectionDialog final : public QDialog {
     QLabel *count_;
     QPushButton *confirm_;
 };
+
+struct ReportColumnChoice {
+    QString id, title, unit;
+};
+class ReportColumnSelectionDialog final : public QDialog {
+  public:
+    ReportColumnSelectionDialog(std::vector<ReportColumnChoice> fields, QStringList selected,
+                                QStringList defaults, QWidget *parent = nullptr);
+    [[nodiscard]] QStringList selection() const;
+    void accept() override;
+
+  private:
+    void populate(const QStringList &selected);
+    void filter();
+    void update_controls();
+    void move_current(int offset);
+    std::vector<ReportColumnChoice> fields_;
+    QStringList defaults_;
+    QTreeWidget *list_;
+    QLineEdit *search_;
+    QLabel *count_;
+    QPushButton *confirm_, *up_, *down_;
+};
 } // namespace orbitforge::desktop

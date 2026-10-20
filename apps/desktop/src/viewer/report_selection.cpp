@@ -223,6 +223,174 @@ void ReportCurveSelectionDialog::accept() {
     if (confirm_->isEnabled())
         QDialog::accept();
 }
+ReportColumnSelectionDialog::ReportColumnSelectionDialog(std::vector<ReportColumnChoice> fields,
+                                                         QStringList selected, QStringList defaults,
+                                                         QWidget *parent)
+    : QDialog(parent), fields_(std::move(fields)), defaults_(std::move(defaults)) {
+    setObjectName("reportColumnSelectionDialog");
+    setWindowTitle(QStringLiteral("显示列"));
+    setWindowIcon(workbench_icon(WorkbenchIcon::properties));
+    resize(560, 500);
+    setMinimumSize(340, 380);
+    auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(12, 12, 12, 12);
+    auto *hint = new QLabel(
+        QStringLiteral("选择表格、复制和 CSV 使用的列。上移或下移调整顺序；曲线保留完整结果。"),
+        this);
+    hint->setObjectName("hint");
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+    search_ = new QLineEdit(this);
+    search_->setObjectName("reportColumnSearch");
+    search_->setAccessibleName(QStringLiteral("搜索报告列"));
+    search_->setPlaceholderText(QStringLiteral("搜索名称、字段或单位…"));
+    search_->setClearButtonEnabled(true);
+    layout->addWidget(search_);
+    list_ = new QTreeWidget(this);
+    list_->setObjectName("reportColumnList");
+    list_->setAccessibleName(QStringLiteral("报告列，勾选并调整顺序"));
+    list_->setColumnCount(2);
+    list_->setHeaderLabels({QStringLiteral("列"), QStringLiteral("单位")});
+    list_->setRootIsDecorated(false);
+    list_->setAlternatingRowColors(true);
+    list_->setUniformRowHeights(true);
+    list_->header()->setStretchLastSection(false);
+    list_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    list_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    layout->addWidget(list_, 1);
+    auto *ordering = new QHBoxLayout;
+    up_ = new QPushButton(QStringLiteral("上移"), this);
+    down_ = new QPushButton(QStringLiteral("下移"), this);
+    up_->setObjectName("reportColumnUp");
+    down_->setObjectName("reportColumnDown");
+    up_->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Up));
+    down_->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Down));
+    for (auto *button : {up_, down_}) {
+        button->setAutoDefault(false);
+        button->setToolTip(QStringLiteral("清空搜索后调整列顺序（Alt+↑ / Alt+↓）"));
+        ordering->addWidget(button);
+    }
+    ordering->addStretch();
+    auto *all = new QPushButton(QStringLiteral("全选"), this);
+    all->setObjectName("reportColumnAll");
+    all->setAutoDefault(false);
+    auto *clear = new QPushButton(QStringLiteral("清空"), this);
+    clear->setObjectName("reportColumnClear");
+    clear->setAutoDefault(false);
+    auto *reset = new QPushButton(QStringLiteral("默认列"), this);
+    reset->setObjectName("reportColumnDefaults");
+    reset->setAutoDefault(false);
+    ordering->addWidget(all);
+    ordering->addWidget(clear);
+    ordering->addWidget(reset);
+    layout->addLayout(ordering);
+    count_ = new QLabel(this);
+    count_->setObjectName("reportColumnCount");
+    count_->setWordWrap(true);
+    layout->addWidget(count_);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    confirm_ = buttons->button(QDialogButtonBox::Ok);
+    confirm_->setObjectName("reportColumnConfirm");
+    confirm_->setText(QStringLiteral("应用"));
+    confirm_->setProperty("primary", true);
+    confirm_->setDefault(true);
+    confirm_->style()->unpolish(confirm_);
+    confirm_->style()->polish(confirm_);
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    buttons->button(QDialogButtonBox::Cancel)->setAutoDefault(false);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, this, &ReportColumnSelectionDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(search_, &QLineEdit::textChanged, this, &ReportColumnSelectionDialog::filter);
+    connect(list_, &QTreeWidget::itemChanged, this, &ReportColumnSelectionDialog::update_controls);
+    connect(list_, &QTreeWidget::currentItemChanged, this,
+            &ReportColumnSelectionDialog::update_controls);
+    connect(up_, &QPushButton::clicked, this, [this] { move_current(-1); });
+    connect(down_, &QPushButton::clicked, this, [this] { move_current(1); });
+    connect(all, &QPushButton::clicked, this, [this] {
+        const QSignalBlocker guard(list_);
+        for (int i = 0; i < list_->topLevelItemCount(); ++i)
+            list_->topLevelItem(i)->setCheckState(0, Qt::Checked);
+        update_controls();
+    });
+    connect(clear, &QPushButton::clicked, this, [this] {
+        const QSignalBlocker guard(list_);
+        for (int i = 0; i < list_->topLevelItemCount(); ++i)
+            list_->topLevelItem(i)->setCheckState(0, Qt::Unchecked);
+        update_controls();
+    });
+    connect(reset, &QPushButton::clicked, this, [this] {
+        search_->clear();
+        populate(defaults_);
+    });
+    populate(selected);
+    search_->setFocus();
+}
+void ReportColumnSelectionDialog::populate(const QStringList &selected) {
+    const QSignalBlocker guard(list_);
+    list_->clear();
+    auto ordered = selected;
+    for (const auto &field : fields_)
+        if (!ordered.contains(field.id))
+            ordered << field.id;
+    for (const auto &id : ordered) {
+        const auto found = std::ranges::find(fields_, id, &ReportColumnChoice::id);
+        if (found == fields_.end())
+            continue;
+        auto *item = new QTreeWidgetItem(list_, {found->title, found->unit});
+        item->setData(0, Qt::UserRole, id);
+        item->setToolTip(0, found->title + "\n" + id);
+        item->setCheckState(0, selected.contains(id) ? Qt::Checked : Qt::Unchecked);
+    }
+    list_->setCurrentItem(list_->topLevelItem(0));
+    filter();
+}
+QStringList ReportColumnSelectionDialog::selection() const {
+    QStringList selected;
+    for (int i = 0; i < list_->topLevelItemCount(); ++i)
+        if (const auto *item = list_->topLevelItem(i); item->checkState(0) == Qt::Checked)
+            selected << item->data(0, Qt::UserRole).toString();
+    return selected;
+}
+void ReportColumnSelectionDialog::filter() {
+    const auto query = search_->text().trimmed();
+    for (int i = 0; i < list_->topLevelItemCount(); ++i) {
+        auto *item = list_->topLevelItem(i);
+        const auto text =
+            item->text(0) + " " + item->text(1) + " " + item->data(0, Qt::UserRole).toString();
+        item->setHidden(!text.contains(query, Qt::CaseInsensitive));
+    }
+    update_controls();
+}
+void ReportColumnSelectionDialog::update_controls() {
+    const auto count = selection().size();
+    int visible = 0;
+    for (int i = 0; i < list_->topLevelItemCount(); ++i)
+        visible += !list_->topLevelItem(i)->isHidden();
+    count_->setText(QStringLiteral("已选 %1 列 · 匹配 %2 列%3")
+                        .arg(count)
+                        .arg(visible)
+                        .arg(count ? QString{} : QStringLiteral(" · 请至少选择一列")));
+    confirm_->setEnabled(count > 0);
+    const auto row = list_->indexOfTopLevelItem(list_->currentItem());
+    const bool reorder = search_->text().trimmed().isEmpty();
+    up_->setEnabled(reorder && row > 0);
+    down_->setEnabled(reorder && row >= 0 && row + 1 < list_->topLevelItemCount());
+}
+void ReportColumnSelectionDialog::move_current(int offset) {
+    const auto row = list_->indexOfTopLevelItem(list_->currentItem());
+    if (!search_->text().trimmed().isEmpty() || row < 0 || row + offset < 0 ||
+        row + offset >= list_->topLevelItemCount())
+        return;
+    auto *item = list_->takeTopLevelItem(row);
+    list_->insertTopLevelItem(row + offset, item);
+    list_->setCurrentItem(item);
+    update_controls();
+}
+void ReportColumnSelectionDialog::accept() {
+    if (confirm_->isEnabled())
+        QDialog::accept();
+}
 ReportSelectionDialog::ReportSelectionDialog(std::vector<ReportChoice> choices, QString selected,
                                              QWidget *parent)
     : QDialog(parent) {

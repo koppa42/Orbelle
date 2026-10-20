@@ -14,6 +14,7 @@
 #include "quantity_editor.hpp"
 #include "report_dialog.hpp"
 #include "report_plot.hpp"
+#include "report_selection.hpp"
 #include "responsive_layout.hpp"
 #include "satellite_model.hpp"
 #include "scenario_dialog.hpp"
@@ -5166,6 +5167,12 @@ class Workbench final : public WorkbenchWindow {
             if (!condition)
                 throw std::runtime_error(message);
         };
+        const auto report_column = [](const QAbstractItemModel *model, const char *id) {
+            for (int c = 0; c < model->columnCount(); ++c)
+                if (model->headerData(c, Qt::Horizontal, Qt::UserRole).toString() == id)
+                    return c;
+            throw std::runtime_error(std::string("Missing report field: ") + id);
+        };
         const auto choose_report = [this, require](const QString &key) {
             auto *button = report_dialog_->findChild<QPushButton *>("reportLibrary");
             require(button != nullptr, "Report selection button is missing");
@@ -7413,6 +7420,40 @@ class Workbench final : public WorkbenchWindow {
             const auto *table = report_dialog_->findChild<QTableView *>("reportTable");
             require(table->model()->rowCount() > 0, "Report generation did not produce a table");
             save_workbench_image("report-results.png");
+            const auto row_count = table->model()->rowCount();
+            QTimer::singleShot(0, this, [this, require] {
+                auto *chooser =
+                    dynamic_cast<ReportColumnSelectionDialog *>(QApplication::activeModalWidget());
+                require(chooser != nullptr, "Report column selection did not open");
+                chooser->resize(340, 500);
+                QCoreApplication::processEvents();
+                auto *list = chooser->findChild<QTreeWidget *>("reportColumnList");
+                require(chooser->width() == 340 && list->horizontalScrollBar()->maximum() == 0,
+                        "Report column selection exceeds a narrow window");
+                require(chooser->grab().save(smoke_dir_ + "/report-column-selection.png"),
+                        "Cannot save report column selection capture");
+                for (int i = 0; i < list->topLevelItemCount(); ++i) {
+                    auto *item = list->topLevelItem(i);
+                    const auto id = item->data(0, Qt::UserRole).toString();
+                    item->setCheckState(0, id == "state.x" || id == "state.y" ? Qt::Checked
+                                                                              : Qt::Unchecked);
+                }
+                chooser->accept();
+            });
+            report_dialog_->findChild<QAction *>("reportChooseColumns")->trigger();
+            require(table->model()->columnCount() == 2 && table->model()->rowCount() == row_count &&
+                        report_dialog_->findChild<QTabBar *>("reportViews")->isTabEnabled(1),
+                    "Hiding metadata columns lost rows or curves");
+            save_workbench_image("report-selected-columns.png");
+            QTimer::singleShot(0, this, [require] {
+                auto *chooser =
+                    dynamic_cast<ReportColumnSelectionDialog *>(QApplication::activeModalWidget());
+                require(chooser != nullptr, "Report column selection did not reopen");
+                chooser->findChild<QPushButton *>("reportColumnDefaults")->click();
+                chooser->accept();
+            });
+            report_dialog_->findChild<QAction *>("reportChooseColumns")->trigger();
+            record("report-columns-select-restore-and-preserve-curves");
             // Native desktop scaling can reduce the logical window height. Verify
             // usable data rows rather than an arbitrary total-height threshold.
             require(table->isVisible() && table->width() > 250 && table->rowHeight(0) > 0 &&
@@ -7548,10 +7589,11 @@ class Workbench final : public WorkbenchWindow {
             if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
                 break;
             auto *model = report_dialog_->findChild<QTableView *>("reportTable")->model();
-            require(model->rowCount() == 1 &&
-                        model->data(model->index(0, 0)).toString() ==
-                            QString::fromStdString(satellites_.at(1).orbit->input.object_id),
-                    "Object report included an unselected object");
+            require(
+                model->rowCount() == 1 &&
+                    model->data(model->index(0, report_column(model, "object.name"))).toString() ==
+                        satellites_.at(1).name(),
+                "Object report included an unselected object");
             save_workbench_image("object-report-results.png");
             record("object-report-context-scope-survives-template-change");
             choose_report(QStringLiteral("builtin:%1")
@@ -7747,7 +7789,8 @@ class Workbench final : public WorkbenchWindow {
             auto *table = report_dialog_->findChild<QTableView *>("reportTable");
             require(table->model()->rowCount() > 0 && access_session_.has_value(),
                     "Access report produced no overhead pass");
-            const auto index = table->model()->index(0, 2);
+            const auto index =
+                table->model()->index(0, report_column(table->model(), "time.epoch"));
             table->doubleClicked(index);
             record("access-windows-timeline-and-seek");
             save_workbench_image("access-windows.png");
