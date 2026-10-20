@@ -831,6 +831,35 @@ TEST_F(QuantityTest, J2MeanAnomalyAndReadOnlyModelDetailsPreserveDraft) {
     EXPECT_EQ(submitted->step_seconds, 30);
 }
 
+TEST_F(QuantityTest, StationAndSensorUnitChangesPreserveExactAppliedValues) {
+    const application::ProjectGroundStation station{
+        "station", "", {1.2345678901234567, -0.4567890123456789, 123.45}, 0.12345678901234567};
+    GroundStationEditor station_editor;
+    station_editor.set_station(station, false);
+    for (const auto *id : {"stationLongitude", "stationLatitude", "stationMinimumElevation"}) {
+        auto *field = station_editor.findChild<QuantityEditor *>(id);
+        field->set_unit(Unit::radian);
+        field->set_unit(Unit::degree);
+    }
+    const auto draft = station_editor.station();
+    EXPECT_EQ(draft.location, station.location);
+    EXPECT_EQ(draft.minimum_elevation_rad, station.minimum_elevation_rad);
+    EXPECT_EQ(draft.name(), station.name());
+
+    application::Project project{"Scenario", core::Epoch{0}, core::Epoch{120'000'000'000}};
+    application::ProjectSensor sensor;
+    sensor.parent_satellite_id = "satellite";
+    sensor.half_angle_rad = 0.567890123456789;
+    SensorEditor sensor_editor;
+    sensor_editor.set_sensor(sensor, project, false);
+    auto *angle = sensor_editor.findChild<QuantityEditor *>("sensorHalfAngle");
+    angle->set_unit(Unit::radian);
+    angle->set_unit(Unit::degree);
+    EXPECT_TRUE(same_sensor_input(sensor, sensor_editor.sensor()));
+    angle->set_value(sensor.half_angle_rad + 1e-10, Unit::radian);
+    EXPECT_FALSE(same_sensor_input(sensor, sensor_editor.sensor()));
+}
+
 TEST_F(QuantityTest, J4AndTleEditingKeepSeparateDraftsAndRejectInvalidInput) {
     apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
     OrbitEditor editor(OrbitInput{});

@@ -62,6 +62,20 @@ bool same_time(const std::shared_ptr<const core::ITimeProvider> &a,
     return a && b ? time_data_lock(a->data_info()) == time_data_lock(b->data_info())
                   : bool(a) == bool(b);
 }
+auto analysis_reuse_key(application::Project project) {
+    // Keep all inputs and result labels, including mission segment names. Only
+    // navigation, saved report templates and appearance are irrelevant to queries.
+    project.current = project.first;
+    project.reports.clear();
+    for (auto &satellite : project.satellites) {
+        satellite.display = {};
+        satellite.model_kind = 0;
+        satellite.model_path.clear();
+        satellite.model_diameter_m = 1'000'000;
+        satellite.orbit.input_frame = core::FrameId::gcrf;
+    }
+    return application::encode_project(project);
+}
 constexpr auto builtin_count = static_cast<int>(report_kinds.size());
 class ReportSelectionButton final : public QPushButton {
   public:
@@ -2175,14 +2189,22 @@ struct ReportDialog::Impl {
                     self.progress->setRange(0, static_cast<int>(self.expected));
                     self.progress->setValue(0);
                     self.status->setText(QStringLiteral("正在生成报告…"));
+                    auto retained = self.result_analysis;
+                    if (retained && (retained->data().data_lock() != context->data.data_lock() ||
+                                     retained->data().frames() != context->data.frames() ||
+                                     analysis_reuse_key(*retained->snapshot().project) !=
+                                         analysis_reuse_key(context->project)))
+                        retained.reset();
                     self.job = std::async(std::launch::async, [snapshot = std::move(*context), d,
+                                                               retained = std::move(retained),
                                                                cancel = self.cancellation,
                                                                count = self.completed]() mutable {
                         if (cancel->load())
                             throw runtime::AnalysisCancelled{};
-                        const auto captured_project =
-                            orbitforge::Project::from_data(std::move(snapshot.project));
-                        auto analysis = captured_project.prepare(snapshot.data);
+                        auto analysis =
+                            retained ? std::move(*retained)
+                                     : orbitforge::Project::from_data(std::move(snapshot.project))
+                                           .prepare(snapshot.data);
                         auto result = analysis.report(
                             d, [cancel] { return cancel->load(); },
                             [count](std::size_t current, std::size_t) { count->store(current); });

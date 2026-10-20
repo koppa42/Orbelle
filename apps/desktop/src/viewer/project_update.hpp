@@ -19,6 +19,13 @@ inline bool same_orbit_input(const application::OrbitInput &a, const application
            a.first == b.first && a.last == b.last && a.step_seconds == b.step_seconds;
 }
 
+inline bool same_sensor_input(const application::ProjectSensor &a,
+                              const application::ProjectSensor &b) {
+    return a.object_id == b.object_id && a.name() == b.name() &&
+           a.parent_satellite_id == b.parent_satellite_id && a.half_angle_rad == b.half_angle_rad &&
+           a.pointing == b.pointing && a.target_station_id == b.target_station_id;
+}
+
 inline std::string orbit_calculation_key(const application::OrbitInput &input) {
     // Analytical providers are independent of the requested display interval.
     const bool bounded =

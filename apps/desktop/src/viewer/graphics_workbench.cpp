@@ -1592,6 +1592,10 @@ class Workbench final : public WorkbenchWindow {
                 const auto id = sensor.object_id;
                 auto found = std::ranges::find(p.sensors, sensor.object_id,
                                                &application::ProjectSensor::object_id);
+                if (found != p.sensors.end() && same_sensor_input(*found, sensor)) {
+                    statusBar()->showMessage(QStringLiteral("没有需要应用的更改。"), 4000);
+                    return;
+                }
                 if (found == p.sensors.end())
                     p.sensors.push_back(std::move(sensor));
                 else
@@ -2175,8 +2179,6 @@ class Workbench final : public WorkbenchWindow {
             if (const auto *sensor = selected_sensor())
                 pending_project_sensor_selection_ = sensor->object_id;
         pending_project_path_ = editing ? project_path_ : QFileInfo(path).absoluteFilePath();
-        if (editing)
-            set_playing(false);
         if (!cancel_project_button_) {
             cancel_project_button_ = new QPushButton(QStringLiteral("取消打开"), statusBar());
             statusBar()->addPermanentWidget(cancel_project_button_);
@@ -2257,6 +2259,14 @@ class Workbench final : public WorkbenchWindow {
             auto candidate = project_candidate_.get();
             if (project_cancellation_->load())
                 throw OrbitCancelled{};
+            const auto current =
+                project_edit_
+                    ? core::Epoch{std::clamp(
+                          (!playing_ && precise_epoch_ ? *precise_epoch_ : snapshot_.epoch)
+                              .tai_nanoseconds(),
+                          candidate->project.first.tai_nanoseconds(),
+                          candidate->project.last.tai_nanoseconds())}
+                    : candidate->project.current;
             const bool root_expanded = !project_edit_ || scenario_item_->isExpanded();
             std::unordered_map<std::string, bool> expanded;
             if (project_edit_)
@@ -2401,9 +2411,10 @@ class Workbench final : public WorkbenchWindow {
                             objects_->scrollToItem(item);
                         }
                     }
-            set_playing(false);
-            seek_epoch(candidate->project.current);
-            snapshot_ = sample_frame(candidate->project.current);
+            if (!project_edit_)
+                set_playing(false);
+            seek_epoch(current);
+            snapshot_ = sample_frame(current);
             satellite_state_dirty_ = true;
             update_satellite();
             selection_->update({snapshot_.epoch, snapshot_.frame, snapshot_.origin, {}});
@@ -3351,8 +3362,6 @@ class Workbench final : public WorkbenchWindow {
     void start_orbit(OrbitInput input) {
         if (busy() || !scenario_)
             return;
-        if (display_cancellation_)
-            display_cancellation_->store(true);
         pending_orbit_target_ = editor_target_;
         input.first = scenario_->first();
         input.last = scenario_->last();
@@ -3369,6 +3378,8 @@ class Workbench final : public WorkbenchWindow {
             editor_->show_result(QStringLiteral("没有需要应用的更改。"));
             return;
         }
+        if (display_cancellation_)
+            display_cancellation_->store(true);
         auto data_first = input.first;
         auto data_last = input.last;
         try {
@@ -3422,20 +3433,29 @@ class Workbench final : public WorkbenchWindow {
         }
         cancellation_ = std::make_shared<std::atomic_bool>(false);
         last_orbit_outcome_.clear();
-        const auto revision =
-            editor_target_
-                ? satellites_.at(*editor_target_).orbit->session.provenance().input_revision + 1
-                : 1;
+        const auto previous = editor_target_ ? satellites_.at(*editor_target_).orbit : nullptr;
+        const bool reuse =
+            previous && can_reuse_orbit_session(previous->input, scenario_->data_lock(), input,
+                                                scenario_->data_lock());
         const auto settings =
             editor_target_ ? satellites_.at(*editor_target_).display : DisplaySettings{};
-        const auto cache = display_cache_interval(input, settings, scenario_->first());
+        const auto cache = display_cache_interval(input, settings, snapshot_.epoch);
         const auto eop = eop_;
         const auto calculation_time = time_for(eop->data_info().time_data);
-        candidate_ = std::async(std::launch::async, [this, input = std::move(input), revision,
-                                                     cache, eop, calculation_time,
+        candidate_ = std::async(std::launch::async, [this, input = std::move(input), previous,
+                                                     reuse, cache, eop, calculation_time,
                                                      cancel = cancellation_] {
+            if (*cancel)
+                throw OrbitCancelled{};
+            if (!reuse && previous &&
+                previous->session.provenance().input_revision ==
+                    std::numeric_limits<std::uint64_t>::max())
+                throw std::overflow_error("Object input revision exhausted");
             auto session =
-                make_orbit_session(input, revision, calculation_time.get(), {frames_, eop});
+                reuse ? previous->session
+                      : make_orbit_session(
+                            input, previous ? previous->session.provenance().input_revision + 1 : 1,
+                            calculation_time.get(), {frames_, eop});
             return prepare_orbit_scene(input, std::move(session), *frames_, *eop, *cancel, cache);
         });
         editor_->set_busy(true);
@@ -3450,7 +3470,15 @@ class Workbench final : public WorkbenchWindow {
             auto candidate = candidate_.get();
             if (cancellation_->load())
                 throw OrbitCancelled{};
-            auto next_scenario = scenario_->with_object(candidate->session);
+            const bool first_object = satellites_.empty() && stations_.empty();
+            const auto current = !playing_ && precise_epoch_ ? *precise_epoch_ : snapshot_.epoch;
+            const bool reused_session =
+                pending_orbit_target_ && candidate->session.provenance().input_revision ==
+                                             satellites_.at(*pending_orbit_target_)
+                                                 .orbit->session.provenance()
+                                                 .input_revision;
+            auto next_scenario =
+                reused_session ? *scenario_ : scenario_->with_object(candidate->session);
             auto ground_tracks = GroundMap::prepare_tracks({candidate});
             auto fixed_track = std::make_shared<render_vsg::TrackLayer>(candidate->track.nodes());
             auto inertial_track =
@@ -3514,21 +3542,19 @@ class Workbench final : public WorkbenchWindow {
                                                QStringLiteral(" · 对象属性"));
             orbit_ = satellites_.front().orbit;
             object_item_ = satellites_.front().item;
-            snapshot_ = sample_frame(scenario_->first());
+            snapshot_ = sample_frame(current);
+            satellite_state_dirty_ = true;
             update_satellite();
             set_selection(index);
             selection_->update({snapshot_.epoch, snapshot_.frame, snapshot_.origin, {}});
             for (auto &slot : slots_)
                 slot->pick_candidates.clear();
-            seconds_ = 0;
-            precise_epoch_.reset();
-            requested_time_ = true;
-            const QSignalBlocker block(slider_);
-            slider_->setValue(0);
-            clock_.restart();
+            seek_epoch(current);
             initial_position_ = snapshot_.markers.front().position_m;
-            fit_views();
-            fit_pending_ = true;
+            if (first_object) {
+                fit_views();
+                fit_pending_ = true;
+            }
             show_orbit_status();
             last_orbit_outcome_ = "applied";
         } catch (const OrbitCancelled &) {
@@ -6913,6 +6939,12 @@ class Workbench final : public WorkbenchWindow {
                                    application::encode_project(project_snapshot(project_path_)),
                     "Invalid station latitude changed the scene");
             station_editor_->findChild<QPushButton *>("resetGroundStation")->click();
+            const auto station_revision = scenario_->revision();
+            station_editor_->findChild<QuantityEditor *>("stationLatitude")->set_unit(Unit::radian);
+            station_editor_->findChild<QPushButton *>("applyGroundStation")->click();
+            require(!busy() && scenario_->revision() == station_revision,
+                    "Unchanged station Apply started work after a unit change");
+            record("unchanged-ground-station-apply-preserves-scene");
             station_editor_->findChild<QuantityEditor *>("stationHeight")
                 ->set_value(0.35, Unit::kilometre);
             station_editor_->findChild<QPushButton *>("applyGroundStation")->click();
@@ -7495,7 +7527,7 @@ class Workbench final : public WorkbenchWindow {
                           smoke_dir_ + "/access-sensors.orbitforge");
             ++orbit_smoke_stage_;
             break;
-        case 143:
+        case 143: {
             if (project_candidate_.valid())
                 break;
             require(sensors_.size() == 1 && satellites_[0].item->childCount() == 1 &&
@@ -7508,11 +7540,18 @@ class Workbench final : public WorkbenchWindow {
             findChild<QLineEdit *>("objectSearch")->setText(QStringLiteral("观测仪"));
             objects_->setCurrentItem(satellites_[0].item->child(0));
             open_properties();
+            const auto sensor_revision = scenario_->revision();
+            sensor_editor_->findChild<QuantityEditor *>("sensorHalfAngle")->set_unit(Unit::radian);
+            sensor_editor_->findChild<QPushButton *>("applySensor")->click();
+            require(!busy() && scenario_->revision() == sensor_revision && !project_dirty_,
+                    "Unchanged sensor Apply started work or dirtied the project");
+            record("unchanged-sensor-apply-preserves-scene");
             sensor_editor_->findChild<QuantityEditor *>("sensorHalfAngle")
                 ->set_value(25, Unit::degree);
             sensor_editor_->findChild<QPushButton *>("applySensor")->click();
             ++orbit_smoke_stage_;
             break;
+        }
         case 144:
             require(selected_sensor() && selected_sensor()->object_id == sensors_[0].object_id &&
                         std::abs(selected_sensor()->half_angle_rad - 25 * std::numbers::pi / 180) <
@@ -7848,6 +7887,141 @@ class Workbench final : public WorkbenchWindow {
             if (++smoke_final_frames_ >= 4)
                 ++orbit_smoke_stage_;
             break;
+        case 163: {
+            application::Project project{"Apply navigation audit", scenario_->first(),
+                                         scenario_->last()};
+            application::ProjectSatellite satellite;
+            satellite.orbit.object_id = "hpop-builtin";
+            satellite.orbit.propagator = OrbitPropagator::hpop;
+            satellite.orbit.initial.epoch = project.first;
+            satellite.orbit.first = project.first;
+            satellite.orbit.last = project.last;
+            project.satellites.push_back(satellite);
+            start_project(std::move(project), smoke_dir_ + "/apply-navigation.orbitforge");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 164: {
+            require(last_project_outcome_ == "opened" && gravity_.empty(),
+                    "Built-in HPOP audit scene did not open");
+            set_selection(0);
+            open_properties();
+            smoke_wait_frame_ = frame_count_ + 3;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 165: {
+            if (frame_count_ < smoke_wait_frame_)
+                return;
+            smoke_view_epoch_ =
+                core::Epoch{scenario_->first().tai_nanoseconds() + 1200'000'000'123LL};
+            seek_epoch(smoke_view_epoch_);
+            slots_[0]->navigation->set_viewpoint(vsg::LookAt::create(
+                vsg::dvec3{19e6, 7e6, 4e6}, vsg::dvec3{1e6, 2e6, 0}, vsg::dvec3{0, 0, 1}));
+            const auto *look = dynamic_cast<vsg::LookAt *>(slots_[0]->camera->viewMatrix.get());
+            smoke_camera_ = {look->eye, look->center, look->up};
+            smoke_cache_ = satellites_[0].orbit;
+            auto changed = satellites_[0].orbit->input;
+            changed.step_seconds = 30;
+            editor_->set_input(changed);
+            editor_->submit();
+            require(candidate_.valid(), "Display sampling edit did not use the single-orbit path");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 166: {
+            const auto *look = dynamic_cast<vsg::LookAt *>(slots_[0]->camera->viewMatrix.get());
+            require(last_orbit_outcome_ == "applied",
+                    qPrintable(editor_->findChild<QLabel *>("orbitResult")->text()));
+            require(satellites_[0].orbit->session.provenance().input_revision ==
+                            smoke_cache_->session.provenance().input_revision &&
+                        satellites_[0].orbit->input.step_seconds == 30,
+                    "Display sampling edit recomputed HPOP");
+            require(snapshot_.epoch == smoke_view_epoch_,
+                    "Display sampling edit reset the precise scene time");
+            require(look->eye == smoke_camera_[0] && look->center == smoke_camera_[1] &&
+                        look->up == smoke_camera_[2],
+                    "Display sampling edit reset the camera");
+            record("single-orbit-display-edit-reuses-session-and-keeps-navigation");
+            smoke_cache_ = satellites_[0].orbit;
+            open_properties();
+            auto changed = satellites_[0].orbit->input;
+            changed.initial.velocity_mps[1] += 1;
+            editor_->set_input(changed);
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 167: {
+            const auto *look = dynamic_cast<vsg::LookAt *>(slots_[0]->camera->viewMatrix.get());
+            require(last_orbit_outcome_ == "applied" &&
+                        satellites_[0].orbit->session.provenance().input_revision ==
+                            smoke_cache_->session.provenance().input_revision + 1 &&
+                        snapshot_.epoch == smoke_view_epoch_ && look->eye == smoke_camera_[0] &&
+                        look->center == smoke_camera_[1] && look->up == smoke_camera_[2],
+                    "Physical orbit edit failed to retain time/camera");
+            record("single-orbit-physical-edit-keeps-navigation");
+            smoke_cache_ = satellites_[0].orbit;
+            set_playing(true);
+            auto project = project_snapshot(project_path_);
+            project.ground_stations.push_back({"audit-station", "", {1.2, 0.6, 350}});
+            start_project(std::move(project), project_path_, true, 0);
+            require(playing_, "Project edit paused playback before publishing");
+            // A seek after submission must survive the background result publication.
+            set_playing(false);
+            smoke_view_epoch_ =
+                core::Epoch{scenario_->first().tai_nanoseconds() + 1800'000'000'321LL};
+            seek_epoch(smoke_view_epoch_);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 168: {
+            const auto *look = dynamic_cast<vsg::LookAt *>(slots_[0]->camera->viewMatrix.get());
+            require(last_project_outcome_ == "opened" && stations_.size() == 1 && !playing_ &&
+                        snapshot_.epoch == smoke_view_epoch_ && look->eye == smoke_camera_[0] &&
+                        look->center == smoke_camera_[1] && look->up == smoke_camera_[2] &&
+                        satellites_[0].orbit->session.provenance().input_revision ==
+                            smoke_cache_->session.provenance().input_revision,
+                    "Project edit discarded navigation made during preparation");
+            record("project-edit-keeps-latest-seek-and-camera");
+            set_playing(true);
+            auto project = project_snapshot(project_path_);
+            project.ground_stations[0].minimum_elevation_rad = 0.1;
+            start_project(std::move(project), project_path_, true, 0);
+            require(playing_, "Constraint edit paused playback");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 169: {
+            require(last_project_outcome_ == "opened" && playing_ &&
+                        stations_[0].config.minimum_elevation_rad == 0.1,
+                    "Successful project edit stopped playback");
+            record("project-edit-keeps-playback");
+            auto project = project_snapshot(project_path_);
+            project.ground_stations[0].minimum_elevation_rad = 0.2;
+            start_project(std::move(project), project_path_, true, 0);
+            project_cancellation_->store(true);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 170:
+            require(last_project_outcome_ == "cancelled" && playing_ &&
+                        stations_[0].config.minimum_elevation_rad == 0.1,
+                    "Cancelled project edit changed playback or applied its draft");
+            record("cancelled-project-edit-keeps-playback-and-applied-state");
+            set_playing(false);
+            save_project_to(smoke_dir_ + "/apply-navigation.orbitforge");
+            // Navigation assertions above deliberately leave the globe off-center.
+            // Restore a fitted view for the final whole-scene pixel checks.
+            fit_views();
+            fit_pending_ = true;
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        case 171:
+            if (++smoke_final_frames_ >= 4)
+                ++orbit_smoke_stage_;
+            break;
         }
     }
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
@@ -8160,7 +8334,7 @@ class Workbench final : public WorkbenchWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 163;
+    static constexpr int orbit_smoke_complete = 172;
     std::shared_ptr<const core::GravityModel> smoke_gravity_;
     QElapsedTimer smoke_apply_elapsed_;
     double smoke_navigation_distance_ = 0;

@@ -289,6 +289,84 @@ TEST(ReportDialog, LatePreflightAfterWindowDestructionIsIgnored) {
     }
     EXPECT_NO_THROW(pending(ReportInput{project, data}, {}));
 }
+
+TEST(ReportDialog, RepeatedQueriesReuseAnalysisAndChangedInputsOrDataReplaceIt) {
+    (void)test_app();
+    auto data = runtime::DataSnapshot::load(ORBITFORGE_ACCESS_EOP);
+    application::Project project{"HPOP reports", core::Epoch{0}, core::Epoch{120'000'000'000}};
+    project.earth_orientation = data.eop()->data_info();
+    application::ProjectSatellite satellite;
+    satellite.orbit.propagator = application::OrbitPropagator::hpop;
+    satellite.orbit.initial.epoch = project.first;
+    satellite.orbit.first = project.first;
+    satellite.orbit.last = project.last;
+    project.satellites.push_back(satellite);
+    int preflights = 0, publications = 0;
+    ReportDialog dialog(
+        project, data.time(),
+        [&](const application::ReportQuery &, auto ready) {
+            ++preflights;
+            ready(ReportInput{project, data}, {});
+        },
+        [](auto) {}, [](auto) {});
+    std::shared_ptr<const application::Project> captured;
+    std::shared_ptr<const runtime::ReportResult> result;
+    dialog.result_published = [&](auto report, const runtime::Analysis &analysis) {
+        ++publications;
+        captured = analysis.snapshot().project;
+        result = std::move(report);
+        EXPECT_EQ(analysis.data().data_lock(), data.data_lock());
+    };
+    dialog.select_object(satellite.orbit.object_id, application::ReportKind::cartesian_state);
+    auto *generate = dialog.findChild<QPushButton *>("generateReport");
+    generate->click();
+    wait_for_report(dialog);
+    ASSERT_EQ(publications, 1);
+    ASSERT_EQ(result->table.rows().size(), 3);
+    const auto first_analysis = captured;
+    const auto original_end = result->table.rows().back();
+
+    project.current = core::Epoch{1};
+    project.satellites[0].display.line_color = 0x123456;
+    project.reports = {result->definition};
+    project.reports[0].id = "saved-report";
+    dialog.update_project(project, data.time());
+    dialog.findChild<QDoubleSpinBox *>("reportStep")->setValue(30);
+    generate->click();
+    wait_for_report(dialog);
+    ASSERT_EQ(publications, 2) << dialog.findChild<QLabel *>("reportStatus")->text().toStdString();
+    EXPECT_EQ(captured, first_analysis);
+    EXPECT_EQ(result->table.rows().size(), 5);
+    EXPECT_EQ(result->table.rows().back(), original_end);
+
+    project.satellites[0].display_name = "Renamed satellite";
+    dialog.update_project(project, data.time());
+    generate->click();
+    wait_for_report(dialog);
+    ASSERT_EQ(publications, 3);
+    EXPECT_NE(captured, first_analysis);
+    EXPECT_EQ(captured->satellites[0].name(), "Renamed satellite");
+    const auto renamed = captured;
+
+    project.satellites[0].orbit.initial.velocity_mps[1] += 1;
+    dialog.update_project(project, data.time());
+    generate->click();
+    wait_for_report(dialog);
+    ASSERT_EQ(publications, 4);
+    EXPECT_NE(captured, renamed);
+    EXPECT_EQ(captured->satellites[0].orbit.initial.velocity_mps[1],
+              project.satellites[0].orbit.initial.velocity_mps[1]);
+    const auto changed = captured;
+
+    data = runtime::DataSnapshot::load(ORBITFORGE_ACCESS_EOP, {}, 2);
+    project.earth_orientation = data.eop()->data_info();
+    dialog.update_project(project, data.time());
+    generate->click();
+    wait_for_report(dialog);
+    ASSERT_EQ(publications, 5);
+    EXPECT_NE(captured, changed);
+    EXPECT_EQ(preflights, 5); // Reuse must not bypass current resource selection.
+}
 TEST(ReportDialog, PreparingTemplatesAndDockingDoesNotShowTemporaryWindows) {
     (void)test_app();
     WindowShowObserver windows;
