@@ -791,7 +791,8 @@ QLabel#missionCoverage { color: @textMuted; font-family: "Cascadia Mono", "Conso
 QLabel#missionCoverage[warning="true"] { color: @warning; }
 QDialog#missionEditorDialog QLabel#errorText { color: @danger; font-size: 12px; }
 )QSS"
-        R"QSS(QWidget#dataSidebar { background: @panel; border-right: 1px solid @line; }
+        R"QSS(QWidget#dataHeader { background: @chrome; border-bottom: 1px solid @line; }
+QWidget#dataSidebar { background: @panel; border-right: 1px solid @line; }
 QLabel#dataSidebarCaption { color: @textMuted; padding: 0 12px; font-size: 11px; font-weight: 600; letter-spacing: 1px; }
 QTreeWidget#dataInventory { background: transparent; border: 0; outline: 0; padding: 0; }
 QTreeWidget#dataInventory::item { border: 0; padding: 0; }
@@ -807,14 +808,14 @@ QTabWidget#dataPages QTabBar::tab:hover:!selected { color: @textSoft; background
 QLabel#dataStatus { border-radius: 8px; padding: 2px 9px; font-size: 11px; font-weight: 600; background: @overlay; color: @textSoft; }
 QLabel#dataStatus[tone="ready"] { background: @successWash; color: @success; }
 QLabel#dataStatus[tone="warning"] { background: @warningWash; color: @warning; }
-QFrame#dataFacts { background: @panel; border: 1px solid @line; border-radius: 8px; }
+QFrame#dataFacts { background: transparent; border: 0; }
 QLabel#dataValidFrom, QLabel#dataValidUntil { color: @text; font-family: "Cascadia Mono", "Consolas"; font-size: 12px; }
 QLabel#dataUpdateSchedule { color: @textMuted; font-size: 11px; }
 QProgressBar#dataDownloadProgress { background: @field; border: 0; border-radius: 2px; }
 QProgressBar#dataDownloadProgress::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 @accent, stop:1 @sakura); border-radius: 2px; }
 QLabel#dataSource { color: @accent; }
 QLabel#dataNote { color: @textMuted; padding: 4px 0; font-size: 11px; }
-QLabel#dataPriorityNote { color: @textMuted; padding: 14px; background: @panel; border: 1px solid @line; border-radius: 8px; }
+QLabel#dataPriorityNote { color: @textMuted; padding: 8px 0; border-top: 1px solid @line; }
 QLabel#dataInventoryDetails { color: @textMuted; font-family: "Cascadia Mono", "Consolas"; font-size: 11px; padding: 8px; background: @field; border: 1px solid @line; border-radius: 6px; }
 QLabel#dataCenterStatus { color: @accent; }
 QLabel#dataCenterStatus[warning="true"] { color: @warning; }
