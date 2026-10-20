@@ -25,6 +25,11 @@ inline bool same_sensor_input(const application::ProjectSensor &a,
            a.parent_satellite_id == b.parent_satellite_id && a.half_angle_rad == b.half_angle_rad &&
            a.pointing == b.pointing && a.target_station_id == b.target_station_id;
 }
+inline bool same_station_input(const application::ProjectGroundStation &a,
+                               const application::ProjectGroundStation &b) {
+    return a.object_id == b.object_id && a.name() == b.name() && a.location == b.location &&
+           a.minimum_elevation_rad == b.minimum_elevation_rad;
+}
 
 inline std::string orbit_calculation_key(const application::OrbitInput &input) {
     // Analytical providers are independent of the requested display interval.

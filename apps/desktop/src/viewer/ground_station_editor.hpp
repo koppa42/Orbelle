@@ -15,6 +15,10 @@ class GroundStationEditor final : public QDialog {
     void set_busy(bool busy);
     void show_result(const QString &text);
     [[nodiscard]] application::ProjectGroundStation station() const;
+    [[nodiscard]] bool has_unapplied_changes() const;
+    [[nodiscard]] const std::string &bound_object_id() const { return original_.object_id; }
+    void accept_station(const application::ProjectGroundStation &station);
+    void sync_name(const std::string &name);
     std::function<void(application::ProjectGroundStation)> apply;
 
   private:

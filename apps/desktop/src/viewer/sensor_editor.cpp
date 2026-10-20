@@ -1,5 +1,6 @@
 #include "sensor_editor.hpp"
 #include "object_selection.hpp"
+#include "project_update.hpp"
 #include "quantity_editor.hpp"
 #include "responsive_layout.hpp"
 #include "workbench_style.hpp"
@@ -268,13 +269,26 @@ SensorEditor::SensorEditor(QWidget *parent) : QDialog(parent) {
     footer_layout->addWidget(error_);
     auto *buttons = new QHBoxLayout;
     buttons->setSpacing(8);
-    close_ = new QPushButton(QStringLiteral("取消"), footer);
+    close_ = new QPushButton(QStringLiteral("关闭"), footer);
     close_->setObjectName("closeSensor");
     close_->setAutoDefault(false);
+    close_->setToolTip(QStringLiteral("关闭页面；未应用输入保留到本次场景结束"));
     apply_ = new QPushButton(QStringLiteral("插入传感器"), footer);
     apply_->setObjectName("applySensor");
     apply_->setProperty("primary", true);
     apply_->setDefault(true);
+    auto *reset = new QPushButton(QStringLiteral("重置"), footer);
+    reset->setObjectName("resetSensor");
+    connect(reset, &QPushButton::clicked, this, [this] {
+        name_->setText(QString::fromStdString(original_.name()));
+        angle_->set_value(original_.half_angle_rad, Unit::radian);
+        pointing_->button(static_cast<int>(original_.pointing))->setChecked(true);
+        target_->set_id(original_.target_station_id);
+        show_error({});
+        update_pointing();
+        update_preview();
+    });
+    buttons->addWidget(reset);
     buttons->addStretch();
     buttons->addWidget(close_);
     buttons->addWidget(apply_);
@@ -329,7 +343,7 @@ void SensorEditor::set_sensor(application::ProjectSensor sensor,
         throw std::invalid_argument("不支持的传感器指向方式。");
     title_->setText(creating ? QStringLiteral("插入传感器") : QStringLiteral("传感器属性"));
     apply_->setText(creating ? QStringLiteral("插入传感器") : QStringLiteral("应用"));
-    close_->setText(creating ? QStringLiteral("取消") : QStringLiteral("关闭"));
+    close_->setText(QStringLiteral("关闭"));
     setWindowTitle(creating
                        ? QStringLiteral("插入传感器")
                        : QString::fromStdString(original_.name()) + QStringLiteral(" · 传感器"));
@@ -380,5 +394,30 @@ application::ProjectSensor SensorEditor::sensor() const {
                                         ? "当前场景没有地面站，请先插入地面站，或选择对地心指向。"
                                         : "请选择目标地面站。");
     return s;
+}
+bool SensorEditor::has_unapplied_changes() const {
+    try {
+        return !same_sensor_input(sensor(), original_);
+    } catch (const std::exception &) {
+        return true;
+    }
+}
+void SensorEditor::accept_sensor(const application::ProjectSensor &sensor) {
+    original_ = sensor;
+    title_->setText(QStringLiteral("传感器属性"));
+    apply_->setText(QStringLiteral("应用"));
+    close_->setText(QStringLiteral("关闭"));
+}
+void SensorEditor::sync_name(const std::string &name) {
+    if (name_->text().trimmed().toStdString() == original_.name())
+        name_->setText(QString::fromStdString(name));
+    original_.display_name = name;
+}
+void SensorEditor::update_project(const application::Project &project) {
+    for (const auto &satellite : project.satellites)
+        if (satellite.orbit.object_id == original_.parent_satellite_id)
+            parent_->set_name(QString::fromStdString(satellite.name()));
+    target_->set_objects(project_object_choices(project, {ObjectKind::ground_station}));
+    update_pointing();
 }
 } // namespace orbitforge::desktop

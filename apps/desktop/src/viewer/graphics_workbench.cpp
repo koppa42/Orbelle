@@ -651,21 +651,19 @@ class Workbench final : public WorkbenchWindow {
                 editor_->display = [this](DisplaySettings settings) {
                     if (!editor_target_ || busy())
                         return;
-                    try {
-                        auto &satellite = satellites_.at(*editor_target_);
-                        (void)display_interval(*satellite.orbit, settings, snapshot_.epoch);
+                    auto &satellite = satellites_.at(*editor_target_);
+                    (void)display_interval(*satellite.orbit, settings, snapshot_.epoch);
+                    if (satellite.display != settings) {
                         satellite.display = settings;
                         satellite.item->setIcon(
                             0, workbench_icon(WorkbenchIcon::satellite,
                                               QColor::fromRgb(settings.line_color)));
                         mark_project_dirty();
                         update_satellite();
-                        statusBar()->showMessage(QStringLiteral("已应用显示设置，将按需更新轨迹"),
-                                                 5000);
-                    } catch (const std::exception &error) {
-                        QMessageBox::information(this, QStringLiteral("显示范围无效"),
-                                                 QString::fromUtf8(error.what()));
                     }
+                    editor_->accept_display(settings);
+                    statusBar()->showMessage(QStringLiteral("已应用显示设置，将按需更新轨迹"),
+                                             5000);
                 };
                 editor_->cancel = [this] {
                     if (project_candidate_.valid() && project_orbit_edit_ && project_cancellation_)
@@ -1127,8 +1125,13 @@ class Workbench final : public WorkbenchWindow {
             if (!smoke_dir_.isEmpty()) {
                 QDir().mkpath(smoke_dir_);
                 QTimer::singleShot(45000, this, [this] {
-                    if (!finished_)
-                        fail("Rendering smoke test timed out");
+                    if (!finished_) {
+                        const auto *modal = QApplication::activeModalWidget();
+                        fail(QStringLiteral("Rendering smoke test timed out at stage %1; modal: %2")
+                                 .arg(orbit_smoke_stage_)
+                                 .arg(modal ? modal->objectName() : QStringLiteral("none"))
+                                 .toStdString());
+                    }
                 });
             }
         } catch (...) {
@@ -1307,6 +1310,7 @@ class Workbench final : public WorkbenchWindow {
                                {"views", view_report_},
                                {"failure", failure_},
                                {"scope", "integration-smoke; not the 10k performance acceptance"}};
+            report.insert("orbit_smoke_stage", orbit_smoke_stage_);
             QJsonArray messages;
             {
                 std::lock_guard lock(log_.mutex);
@@ -1583,6 +1587,11 @@ class Workbench final : public WorkbenchWindow {
     void edit_sensor(bool creating) {
         if (busy() || !selected_)
             return;
+        if (creating && sensor_editor_bound_ && sensor_editor_creating_ &&
+            sensor_editor_->bound_parent_id() == satellites_[*selected_].orbit->input.object_id) {
+            workspace_->open(sensor_editor_, false);
+            return;
+        }
         if (!sensor_editor_) {
             sensor_editor_ = new SensorEditor(this);
             sensor_editor_->apply = [this](application::ProjectSensor sensor) {
@@ -1601,8 +1610,10 @@ class Workbench final : public WorkbenchWindow {
                 else
                     *found = std::move(sensor);
                 application::validate_project(p);
-                if (start_project(std::move(p), project_path_, true, selected_marker_index()))
+                if (start_project(std::move(p), project_path_, true, selected_marker_index())) {
                     pending_project_sensor_selection_ = id;
+                    pending_sensor_apply_ = id;
+                }
             };
         }
         application::ProjectSensor sensor;
@@ -1615,7 +1626,17 @@ class Workbench final : public WorkbenchWindow {
                 return;
             sensor = *selected_sensor();
         }
+        if (!creating && sensor_editor_bound_ &&
+            sensor_editor_->bound_object_id() == sensor.object_id) {
+            workspace_->open(sensor_editor_, false);
+            return;
+        }
+        if (sensor_editor_bound_ && sensor_editor_->has_unapplied_changes() &&
+            !confirm_discard_property(sensor_editor_))
+            return;
         sensor_editor_->set_sensor(std::move(sensor), project_snapshot(project_path_), creating);
+        sensor_editor_bound_ = true;
+        sensor_editor_creating_ = creating;
         workspace_->open(sensor_editor_, false);
     }
     void clear_access_display() {
@@ -1988,17 +2009,170 @@ class Workbench final : public WorkbenchWindow {
             return false;
         }
     }
-    bool confirm_replace_scenario() {
-        if (!scenario_ || !project_dirty_)
+    bool scenario_has_draft() const {
+        if (!scenario_editor_bound_ || !scenario_properties_ || !scenario_)
+            return false;
+        try {
+            return scenario_properties_->findChild<QLineEdit *>("scenarioSettingsName")
+                           ->text()
+                           .trimmed()
+                           .toStdString() != scenario_->name() ||
+                   dynamic_cast<EpochEditor *>(
+                       scenario_properties_->findChild<QWidget *>("scenarioSettingsStart"))
+                           ->epoch() != scenario_->first() ||
+                   dynamic_cast<EpochEditor *>(
+                       scenario_properties_->findChild<QWidget *>("scenarioSettingsEnd"))
+                           ->epoch() != scenario_->last();
+        } catch (const std::exception &) {
             return true;
-        const auto answer = QMessageBox::question(
-            this, QStringLiteral("保存当前项目？"),
-            QStringLiteral("当前项目有已应用但尚未保存的更改。是否先保存？\n属性页中尚未应用的输入"
-                           "不会写入项目。"),
-            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+        }
+    }
+    std::vector<QDialog *> unapplied_properties() const {
+        std::vector<QDialog *> drafts;
+        if (orbit_editor_bound_ && editor_->has_unapplied_changes())
+            drafts.push_back(properties_dialog_);
+        if (station_editor_bound_ && station_editor_->has_unapplied_changes())
+            drafts.push_back(station_editor_);
+        if (sensor_editor_bound_ && sensor_editor_->has_unapplied_changes())
+            drafts.push_back(sensor_editor_);
+        if (scenario_has_draft())
+            drafts.push_back(scenario_properties_);
+        return drafts;
+    }
+    bool confirm_discard_property(QDialog *page) {
+        QMessageBox question(QMessageBox::Question, QStringLiteral("保留未应用的输入？"),
+                             QStringLiteral("“%1”有尚未应用的输入。切换编辑对象会丢弃这些输入。")
+                                 .arg(page->windowTitle()),
+                             QMessageBox::Discard | QMessageBox::Cancel, this);
+        question.setObjectName("discardPropertyDraft");
+        question.button(QMessageBox::Discard)->setText(QStringLiteral("放弃输入并切换"));
+        question.button(QMessageBox::Cancel)->setText(QStringLiteral("继续编辑"));
+        question.setDefaultButton(QMessageBox::Cancel);
+        if (question.exec() == QMessageBox::Discard)
+            return true;
+        workspace_->open(page, page == scenario_properties_);
+        return false;
+    }
+    bool confirm_replace_scenario() {
+        if (!scenario_)
+            return true;
+        const auto drafts = unapplied_properties();
+        if (!project_dirty_ && drafts.empty())
+            return true;
+        QString message;
+        if (!drafts.empty()) {
+            QStringList names;
+            for (const auto *draft : drafts)
+                names << draft->windowTitle();
+            message = QStringLiteral("以下属性有尚未应用的输入：\n%1\n\n"
+                                     "保存项目只保存已应用的结果；离开当前场景会丢弃这些输入。")
+                          .arg(names.join("\n"));
+        } else
+            message = QStringLiteral("当前项目有已应用但尚未保存的更改。是否先保存？");
+        const auto buttons = QMessageBox::Discard | QMessageBox::Cancel |
+                             (project_dirty_ ? QMessageBox::Save : QMessageBox::NoButton);
+        QMessageBox question(QMessageBox::Question, QStringLiteral("离开当前场景？"), message,
+                             buttons, this);
+        question.setObjectName("leaveScenarioConfirmation");
+        question.setDefaultButton(drafts.empty() ? QMessageBox::Save : QMessageBox::Cancel);
+        if (!drafts.empty()) {
+            question.button(QMessageBox::Cancel)->setText(QStringLiteral("返回编辑"));
+            question.button(QMessageBox::Discard)->setText(QStringLiteral("放弃并离开"));
+            if (project_dirty_)
+                question.button(QMessageBox::Save)->setText(QStringLiteral("保存已应用结果并离开"));
+        }
+        const auto answer = question.exec();
+        if (answer == QMessageBox::Cancel && !drafts.empty())
+            workspace_->open(drafts.front(), drafts.front() == scenario_properties_);
         if (answer == QMessageBox::Save)
             return save_project_dialog(false);
         return answer == QMessageBox::Discard;
+    }
+    void refresh_property_bindings() {
+        if (orbit_editor_bound_) {
+            editor_->set_time_provider(active_time());
+            const auto found = std::ranges::find_if(satellites_, [this](const auto &satellite) {
+                return satellite.orbit->input.object_id == editor_->bound_object_id();
+            });
+            if (found != satellites_.end()) {
+                editor_target_ = static_cast<std::size_t>(found - satellites_.begin());
+                editor_->set_create_mode(false);
+                if (project_orbit_edit_)
+                    editor_->accept_input(found->orbit->input);
+                editor_->set_analysis_interval(scenario_->first(), scenario_->last());
+                properties_dialog_->setWindowTitle(found->name() + QStringLiteral(" · 对象属性"));
+            } else if (editor_target_) {
+                properties_dialog_->close();
+                orbit_editor_bound_ = false;
+                editor_target_.reset();
+            } else {
+                editor_->set_analysis_interval(scenario_->first(), scenario_->last());
+            }
+        }
+        if (station_editor_bound_) {
+            const auto found = std::ranges::find_if(stations_, [this](const auto &station) {
+                return station.config.object_id == station_editor_->bound_object_id();
+            });
+            if (found != stations_.end()) {
+                if (pending_station_apply_ == found->config.object_id)
+                    station_editor_->accept_station(found->config);
+                else if (!station_editor_->has_unapplied_changes())
+                    station_editor_->set_station(found->config, false);
+                station_editor_->sync_name(found->config.name());
+                station_editor_target_ = found->config.object_id;
+                station_editor_->setWindowTitle(found->name() + QStringLiteral(" · 地面站属性"));
+                station_editor_->show_result(pending_station_apply_ == found->config.object_id
+                                                 ? QStringLiteral("已应用。")
+                                                 : QString{});
+            } else if (station_editor_target_) {
+                station_editor_->close();
+                station_editor_bound_ = false;
+                station_editor_target_.reset();
+            }
+        }
+        if (sensor_editor_bound_) {
+            const auto found = std::ranges::find(sensors_, sensor_editor_->bound_object_id(),
+                                                 &application::ProjectSensor::object_id);
+            if (found != sensors_.end()) {
+                if (pending_sensor_apply_ == found->object_id)
+                    sensor_editor_->accept_sensor(*found);
+                else if (!sensor_editor_->has_unapplied_changes())
+                    sensor_editor_->set_sensor(*found, project_snapshot(project_path_), false);
+                sensor_editor_->sync_name(found->name());
+                sensor_editor_creating_ = false;
+                sensor_editor_->setWindowTitle(QString::fromStdString(found->name()) +
+                                               QStringLiteral(" · 传感器"));
+            } else if (!sensor_editor_creating_ ||
+                       std::ranges::none_of(satellites_, [this](const auto &satellite) {
+                           return satellite.orbit->input.object_id ==
+                                  sensor_editor_->bound_parent_id();
+                       })) {
+                sensor_editor_->close();
+                sensor_editor_bound_ = false;
+            }
+            if (sensor_editor_bound_)
+                sensor_editor_->update_project(project_snapshot(project_path_));
+        }
+        if (scenario_editor_bound_) {
+            for (const auto *id : {"scenarioSettingsStart", "scenarioSettingsEnd"})
+                dynamic_cast<EpochEditor *>(scenario_properties_->findChild<QWidget *>(id))
+                    ->set_time_provider(active_time());
+            scenario_properties_->setWindowTitle(QString::fromStdString(scenario_->name()) +
+                                                 QStringLiteral(" · 场景属性"));
+            scenario_properties_->findChild<QLabel *>("scenarioObjectCount")
+                ->setText(QString::number(satellites_.size() + stations_.size()));
+            scenario_properties_->findChild<QLineEdit *>("scenarioDataHash")
+                ->setText(QString::fromStdString(scenario_->data_lock().sha256()));
+            auto *caption = scenario_properties_->findChild<QLabel *>("scenarioEopData");
+            caption->setText(QString::fromStdString(eop_->data_info().id) +
+                             (eop_->data_info().interpolation.starts_with("finals2000a")
+                                  ? QStringLiteral(" · 可能含预测值")
+                                  : QString{}));
+            caption->setToolTip(QString::fromStdString(eop_->data_info().id));
+            scenario_properties_->findChild<QLabel *>("scenarioExtrapolation")
+                ->setText(extrapolation_description(eop_->data_info(), scenario_->first(),
+                                                    scenario_->last()));
+        }
     }
     void choose_project() {
         if (busy())
@@ -2174,6 +2348,8 @@ class Workbench final : public WorkbenchWindow {
                                              return satellite.orbit.object_id == *edited_object;
                                          });
         pending_project_selection_ = selection;
+        pending_station_apply_.reset();
+        pending_sensor_apply_.reset();
         pending_project_sensor_selection_.reset();
         if (editing && selection == selected_marker_index())
             if (const auto *sensor = selected_sensor())
@@ -2344,17 +2520,17 @@ class Workbench final : public WorkbenchWindow {
                 rebuild();
                 throw;
             }
-            if (properties_dialog_)
+            if (properties_dialog_ && !project_edit_)
                 properties_dialog_->close();
-            if (scenario_properties_)
+            if (scenario_properties_ && !project_edit_)
                 scenario_properties_->close();
             satellites_ = std::move(satellites);
             stations_ = std::move(stations);
             sensors_ = candidate->project.sensors;
             clear_access_display();
-            if (sensor_editor_)
+            if (sensor_editor_ && !project_edit_)
                 sensor_editor_->close();
-            if (station_editor_)
+            if (station_editor_ && !project_edit_)
                 station_editor_->close();
             scenario_ = std::move(candidate->scenario);
             eop_ = candidate->eop;
@@ -2369,7 +2545,11 @@ class Workbench final : public WorkbenchWindow {
             analysis_record_ = candidate->project.analysis_record;
             time_label_epoch_.reset();
             sun_epoch_.reset();
-            editor_target_.reset();
+            if (!project_edit_) {
+                editor_target_.reset();
+                orbit_editor_bound_ = station_editor_bound_ = sensor_editor_bound_ =
+                    scenario_editor_bound_ = false;
+            }
             pending_orbit_target_.reset();
             {
                 const QSignalBlocker block(objects_);
@@ -2430,6 +2610,8 @@ class Workbench final : public WorkbenchWindow {
             if (timeline_ && !project_edit_)
                 timeline_->reset_view();
             project_path_ = pending_project_path_;
+            if (project_edit_)
+                refresh_property_bindings();
             mark_project_dirty(project_edit_ ||
                                candidate->project.data_lock() != project_recorded_data_);
             last_project_outcome_ = "opened";
@@ -2694,6 +2876,8 @@ class Workbench final : public WorkbenchWindow {
         orbit_.reset();
         model_node_ = {};
         editor_target_.reset();
+        orbit_editor_bound_ = station_editor_bound_ = sensor_editor_bound_ =
+            scenario_editor_bound_ = false;
         model_kind_ = 0;
         model_diameter_km_ = 1000;
         const QSignalBlocker block(objects_);
@@ -2767,6 +2951,14 @@ class Workbench final : public WorkbenchWindow {
     void begin_insert_satellite(InsertObjectMethod method = InsertObjectMethod::define_properties) {
         if (!scenario_ || !editor_ || busy())
             return;
+        if (method == InsertObjectMethod::define_properties && orbit_editor_bound_ &&
+            !editor_target_) {
+            show_properties_dialog();
+            return;
+        }
+        if (orbit_editor_bound_ && editor_->has_unapplied_changes() &&
+            !confirm_discard_property(properties_dialog_))
+            return;
         if (satellites_.size() + stations_.size() >= 10000) {
             QMessageBox::information(this, QStringLiteral("对象数量"),
                                      QStringLiteral("当前场景最多支持 10,000 个对象。"));
@@ -2783,6 +2975,7 @@ class Workbench final : public WorkbenchWindow {
         editor_target_.reset();
         editor_->set_time_provider(eop_catalog_->time_provider());
         editor_->set_input(input);
+        orbit_editor_bound_ = true;
         editor_->set_create_mode(true);
         editor_->set_appearance(0, {}, 1000);
         editor_->set_display({});
@@ -2800,12 +2993,13 @@ class Workbench final : public WorkbenchWindow {
             show_properties_dialog();
         }
     }
-    void configure_station_editor(const application::ProjectGroundStation &station, bool creating) {
+    bool configure_station_editor(const application::ProjectGroundStation &station, bool creating) {
         if (!station_editor_) {
             station_editor_ = new GroundStationEditor(this);
             station_editor_->apply = [this](application::ProjectGroundStation value) {
                 if (busy() || !scenario_)
                     return;
+                const auto id = value.object_id;
                 auto project = project_snapshot(project_path_);
                 auto index = stations_.size();
                 std::optional<std::string> edited;
@@ -2829,19 +3023,32 @@ class Workbench final : public WorkbenchWindow {
                 }
                 application::validate_project(project);
                 if (start_project(std::move(project), project_path_, true,
-                                  satellites_.size() + index, edited))
+                                  satellites_.size() + index, edited)) {
+                    pending_station_apply_ = id;
                     station_editor_->show_result(QStringLiteral("正在应用…"));
-                else
+                } else
                     station_editor_->show_result(QStringLiteral("未应用，原场景保留。"));
             };
         }
+        if (!creating && station_editor_bound_ && station_editor_target_ == station.object_id)
+            return true;
+        if (station_editor_bound_ && station_editor_->has_unapplied_changes() &&
+            !confirm_discard_property(station_editor_))
+            return false;
         station_editor_target_ =
             creating ? std::nullopt : std::optional<std::string>{station.object_id};
         station_editor_->set_station(station, creating);
+        station_editor_bound_ = true;
+        return true;
     }
     void begin_insert_station(InsertObjectMethod method = InsertObjectMethod::define_properties) {
         if (!scenario_ || busy())
             return;
+        if (method == InsertObjectMethod::define_properties && station_editor_bound_ &&
+            !station_editor_target_) {
+            workspace_->open(station_editor_, false);
+            return;
+        }
         if (satellites_.size() + stations_.size() >= 10000) {
             QMessageBox::information(this, QStringLiteral("对象数量"),
                                      QStringLiteral("当前场景最多支持 10,000 个对象。"));
@@ -2853,7 +3060,8 @@ class Workbench final : public WorkbenchWindow {
             station.object_id = "GroundStation" + std::to_string(suffix++);
         } while (object_id_exists(station.object_id));
         station.display_name = "地面站 " + std::to_string(suffix - 1);
-        configure_station_editor(station, true);
+        if (!configure_station_editor(station, true))
+            return;
         if (method == InsertObjectMethod::defaults) {
             station_editor_->close();
             station_editor_->apply(station);
@@ -2934,8 +3142,8 @@ class Workbench final : public WorkbenchWindow {
             return;
         }
         if (selected_station_ && !busy()) {
-            configure_station_editor(stations_.at(*selected_station_).config, false);
-            workspace_->open(station_editor_, false);
+            if (configure_station_editor(stations_.at(*selected_station_).config, false))
+                workspace_->open(station_editor_, false);
             return;
         }
         if (!selected_ && scenario_ && objects_->currentItem() == scenario_item_) {
@@ -2944,10 +3152,19 @@ class Workbench final : public WorkbenchWindow {
         }
         if (!properties_dialog_ || !selected_ || busy())
             return;
+        if (orbit_editor_bound_ && editor_target_ &&
+            editor_->bound_object_id() == satellites_.at(*selected_).orbit->input.object_id) {
+            show_properties_dialog();
+            return;
+        }
+        if (orbit_editor_bound_ && editor_->has_unapplied_changes() &&
+            !confirm_discard_property(properties_dialog_))
+            return;
         editor_target_ = selected_;
         const auto &satellite = satellites_.at(*editor_target_);
         editor_->set_time_provider(eop_catalog_->time_provider());
         editor_->set_input(satellite.orbit->input);
+        orbit_editor_bound_ = true;
         editor_->set_create_mode(false);
         editor_->set_appearance(satellite.model_kind, satellite.model_path,
                                 satellite.model_diameter_km);
@@ -2985,7 +3202,7 @@ class Workbench final : public WorkbenchWindow {
         if (!scenario_properties_)
             scenario_properties_ = new QDialog(this);
         auto &dialog = *scenario_properties_;
-        if (workspace_->contains(&dialog)) {
+        if (scenario_editor_bound_) {
             if (auto *count = dialog.findChild<QLabel *>("scenarioObjectCount"))
                 count->setText(QString::number(satellites_.size() + stations_.size()));
             workspace_->open(&dialog);
@@ -3006,6 +3223,7 @@ class Workbench final : public WorkbenchWindow {
             delete previous;
         }
         dialog.setObjectName("scenarioProperties");
+        scenario_editor_bound_ = true;
         dialog.setWindowTitle(QString::fromStdString(scenario_->name()) +
                               QStringLiteral(" · 场景属性"));
         dialog.setMinimumWidth(620);
@@ -3073,6 +3291,7 @@ class Workbench final : public WorkbenchWindow {
         form = data_form;
         body_layout->addWidget(data_section);
         auto *eop_caption = new QLabel(QString::fromStdString(eop_->data_info().id));
+        eop_caption->setObjectName("scenarioEopData");
         if (eop_->data_info().interpolation.starts_with("finals2000a"))
             eop_caption->setText(eop_caption->text() + QStringLiteral(" · 可能含预测值"));
         eop_caption->setTextFormat(Qt::PlainText);
@@ -3327,6 +3546,8 @@ class Workbench final : public WorkbenchWindow {
                 model_diameter_km_ = satellite.model_diameter_km;
             }
             last_model_outcome_ = "applied";
+            editor_->accept_appearance(satellite.model_kind, satellite.model_path,
+                                       satellite.model_diameter_km);
             update_satellite();
             editor_->show_appearance_result(QStringLiteral("已应用"));
         } catch (const std::exception &error) {
@@ -3375,6 +3596,7 @@ class Workbench final : public WorkbenchWindow {
         if (editor_target_ &&
             same_orbit_input(input, satellites_.at(*editor_target_).orbit->input)) {
             last_orbit_outcome_ = "unchanged";
+            editor_->accept_input(input);
             editor_->show_result(QStringLiteral("没有需要应用的更改。"));
             return;
         }
@@ -3537,6 +3759,7 @@ class Workbench final : public WorkbenchWindow {
             satellites_[index].inertial_track = std::move(inertial_track);
             satellites_[index].tracks = track;
             editor_target_ = index;
+            editor_->accept_input(satellites_[index].orbit->input);
             editor_->set_create_mode(false);
             properties_dialog_->setWindowTitle(satellites_[index].name() +
                                                QStringLiteral(" · 对象属性"));
@@ -4903,6 +5126,12 @@ class Workbench final : public WorkbenchWindow {
             require(satellites_.empty() && scenario_->objects().empty(),
                     "Closing an insertion draft created an object");
             record("close-insert-without-applying");
+            smoke_insert_dialog(InsertObjectMethod::define_properties);
+            require(id->text() == "UncommittedDraft",
+                    "Reopening insertion discarded its unapplied draft");
+            editor_->findChild<QPushButton *>("resetOrbit")->click();
+            properties_dialog_->close();
+            record("reopen-and-explicitly-reset-insertion-draft");
             smoke_insert_dialog(InsertObjectMethod::defaults, "insert-objects-defaults.png");
             require(workspace_->current_document() != properties_dialog_,
                     "Default insertion unnecessarily opened the properties page");
@@ -5002,6 +5231,24 @@ class Workbench final : public WorkbenchWindow {
         };
         const auto scenario_epoch_control = [this](const char *name) {
             return dynamic_cast<EpochEditor *>(scenario_properties_->findChild<QWidget *>(name));
+        };
+        const auto answer_property = [this, require](const char *name,
+                                                     QMessageBox::StandardButton choice,
+                                                     bool save_available = false) {
+            QTimer::singleShot(0, [this, name, choice, save_available, require] {
+                auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+                require(box && box->objectName() == name, "Missing property draft confirmation");
+                require(bool(box->button(QMessageBox::Save)) == save_available,
+                        "Draft confirmation offered the wrong save action");
+                require(box->defaultButton() == box->button(QMessageBox::Cancel),
+                        "Discarding a draft must not be the default action");
+                require(
+                    box->grab().save(smoke_dir_ + QString("/draft-confirmation-%1-%2.png")
+                                                      .arg(name)
+                                                      .arg(save_available ? "save" : "discard")),
+                    "Cannot capture the property draft confirmation");
+                box->button(choice)->click();
+            });
         };
         auto input = orbit_ ? orbit_->input : OrbitInput{};
         switch (orbit_smoke_stage_) {
@@ -5781,6 +6028,9 @@ class Workbench final : public WorkbenchWindow {
             require(orbit_ == smoke_cache_ && satellites_.front().inertial_track->size() < 160,
                     "One-period display failed to restrict the retained full cache");
             record("display-visibility-and-range-reuse-existing-cache");
+            // These two checks called the workbench callback directly; synchronize the
+            // editor explicitly instead of relying on reopening it to discard stale fields.
+            editor_->set_display(satellites_.front().display);
             slots_[1]->dock->show();
             seek_epoch(scenario_->first());
             fit_views();
@@ -6060,7 +6310,8 @@ class Workbench final : public WorkbenchWindow {
             input = satellites_.front().orbit->input;
             input.object_id = "ProjectJ2";
             input.propagator = OrbitPropagator::j2_secular;
-            start_orbit(input);
+            editor_->set_input(input);
+            editor_->submit();
             ++orbit_smoke_stage_;
             break;
         case 72:
@@ -6071,7 +6322,7 @@ class Workbench final : public WorkbenchWindow {
             satellites_[1].display.past_minutes = 12.5;
             satellites_[1].display.future_minutes = 6.25;
             satellites_[1].display.labels_2d = false;
-            start_model(1, {}, 250);
+            editor_->configure_appearance(1, {}, 250);
             ++orbit_smoke_stage_;
             break;
         case 73: {
@@ -6251,7 +6502,8 @@ class Workbench final : public WorkbenchWindow {
             open_properties();
             auto copied = satellites_[2].orbit->input;
             copied.initial.position_m[0] *= 1.001;
-            start_orbit(std::move(copied));
+            editor_->set_input(copied);
+            editor_->submit();
             ++orbit_smoke_stage_;
             break;
         }
@@ -6466,14 +6718,15 @@ class Workbench final : public WorkbenchWindow {
             {
                 auto edited_input = satellites_[0].orbit->input;
                 edited_input.initial.position_m[0] *= 1.0001;
+                editor_->set_input(edited_input);
                 answer_data(false);
-                start_orbit(edited_input);
+                editor_->submit();
                 require(!busy() && orbit_ == smoke_cache_ && last_orbit_outcome_ == "cancelled" &&
                             scenario_->data_lock() == smoke_data_lock_,
                         "Declining recalculation changed the scene");
                 record("recalculation-data-change-decline-preserves-scene");
                 answer_data(true);
-                start_orbit(std::move(edited_input));
+                editor_->submit();
             }
             ++orbit_smoke_stage_;
             break;
@@ -7642,12 +7895,20 @@ class Workbench final : public WorkbenchWindow {
             smoke_cache_ = orbit_;
             workspace_->split_page(properties_dialog_, view_panel_, Qt::RightEdge);
             resize(880, 700);
+            smoke_final_frames_ = 0;
             smoke_wait_frame_ = frame_count_ + 4;
             ++orbit_smoke_stage_;
             break;
         case 151: {
             if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
                 return;
+            if (++smoke_final_frames_ == 1) {
+                // Responsive forms have now recomputed their compact minimums; retry the
+                // requested window size after that layout pass, still requiring 880 below.
+                resize(880, 700);
+                smoke_wait_frame_ = frame_count_ + 3;
+                return;
+            }
             save_workbench_image("responsive-workbench.png");
             // Compact navigation is page tabs at inspector widths, a selector when narrower.
             const bool compact_navigation =
@@ -7662,13 +7923,16 @@ class Workbench final : public WorkbenchWindow {
                     action_in_workspace("applyOrbit"),
                 qPrintable(
                     QString("Narrow workbench: width=%1, propertyWidth=%2, compactNavigation=%3, "
-                            "iconStyle=%4, controlsHeight=%5, applyVisible=%6")
+                            "iconStyle=%4, controlsHeight=%5, applyVisible=%6, minimumWidth=%7, "
+                            "minimumHint=%8")
                         .arg(width())
                         .arg(editor_->width())
                         .arg(compact_navigation)
                         .arg(commands_->toolButtonStyle())
                         .arg(findChild<QWidget *>("timelineControls")->height())
-                        .arg(action_in_workspace("applyOrbit"))));
+                        .arg(action_in_workspace("applyOrbit"))
+                        .arg(minimumWidth())
+                        .arg(minimumSizeHint().width())));
             require(orbit_ == smoke_cache_, "Resizing the workspace recalculated the orbit");
             record("responsive-workbench-and-native-view-resize");
             workspace_->detach_page(properties_dialog_);
@@ -7839,6 +8103,8 @@ class Workbench final : public WorkbenchWindow {
         case 160: {
             require(last_orbit_outcome_ == "applied" && gravity_.contains("apply-audit"),
                     "Explicit HPOP gravity selection prompted for data consent or failed");
+            require(workspace_->contains(properties_dialog_) && !editor_->has_unapplied_changes(),
+                    "HPOP Apply closed the property page or failed to accept its input");
             require(satellites_[1].orbit->session.provenance().input_revision == 1,
                     "Selecting one satellite's model recomputed the other satellite");
             record("hpop-explicit-model-applies-without-data-conflict");
@@ -8019,6 +8285,189 @@ class Workbench final : public WorkbenchWindow {
             ++orbit_smoke_stage_;
             break;
         case 171:
+            if (++smoke_final_frames_ >= 4)
+                ++orbit_smoke_stage_;
+            break;
+        case 172: {
+            set_selection(0);
+            open_properties();
+            editor_->set_state_mode(0);
+            auto *velocity = editor_->findChild<QuantityEditor *>("velocityY");
+            auto *text = velocity->findChild<QLineEdit *>("quantityValue");
+            text->setText("unfinished");
+            smoke_cache_ = satellites_[0].orbit;
+            properties_dialog_->close();
+            open_properties();
+            require(text->text() == "unfinished" && editor_->has_unapplied_changes(),
+                    "Reopening a property page discarded incomplete input");
+            editor_->submit();
+            require(!busy() && satellites_[0].orbit == smoke_cache_ &&
+                        editor_->has_unapplied_changes(),
+                    "Invalid Apply published or discarded the draft");
+            editor_->findChild<QPushButton *>("resetOrbit")->click();
+            require(!editor_->has_unapplied_changes(), "Reset did not restore the applied orbit");
+            editor_->set_state_mode(0);
+            velocity->set_value(velocity->value(Unit::metres_per_second) + 0.25,
+                                Unit::metres_per_second);
+            save_project_to(smoke_dir_ + "/property-drafts.orbitforge");
+            const auto saved = application::load_project(
+                std::filesystem::path((smoke_dir_ + "/property-drafts.orbitforge").toStdWString()));
+            require(same_orbit_input(saved.satellites[0].orbit, smoke_cache_->input) &&
+                        !project_dirty_ && editor_->has_unapplied_changes(),
+                    "Save incorrectly published a property draft");
+            properties_dialog_->close();
+            answer_property("leaveScenarioConfirmation", QMessageBox::Cancel);
+            require(!confirm_replace_scenario() && workspace_->contains(properties_dialog_) &&
+                        editor_->has_unapplied_changes(),
+                    "Clean project exit failed to protect its unapplied draft");
+            record("property-reopen-validation-reset-save-and-exit-preserve-draft");
+            set_selection(satellites_.size());
+            open_properties();
+            station_editor_->findChild<QuantityEditor *>("stationHeight")
+                ->set_value(400, Unit::metre);
+            station_editor_->close();
+            open_properties();
+            require(station_editor_->station().location.height_m == 400 &&
+                        station_editor_->has_unapplied_changes(),
+                    "Reopening a ground station discarded its draft");
+            station_editor_->findChild<QPushButton *>("applyGroundStation")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 173: {
+            require(
+                last_project_outcome_ == "opened" && stations_[0].config.location.height_m == 400 &&
+                    workspace_->contains(station_editor_) &&
+                    !station_editor_->has_unapplied_changes() && editor_->has_unapplied_changes() &&
+                    same_orbit_input(satellites_[0].orbit->input, smoke_cache_->input),
+                "Station Apply closed its page or discarded/applied another object's draft");
+            record("station-apply-retains-page-and-independent-satellite-draft");
+            auto project = project_snapshot(project_path_);
+            auto duplicate = project.satellites[0];
+            duplicate.orbit.object_id = "draft-audit-second";
+            project.satellites.push_back(std::move(duplicate));
+            start_project(std::move(project), project_path_, true, 0);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 174: {
+            require(satellites_.size() == 2 && editor_->has_unapplied_changes(),
+                    "Inserting another object discarded a property draft");
+            set_selection(1);
+            answer_property("discardPropertyDraft", QMessageBox::Cancel);
+            open_properties();
+            require(editor_->bound_object_id() == satellites_[0].orbit->input.object_id &&
+                        editor_->has_unapplied_changes(),
+                    "Cancelling a property switch changed the editor binding");
+            answer_property("discardPropertyDraft", QMessageBox::Discard);
+            open_properties();
+            require(editor_->bound_object_id() == satellites_[1].orbit->input.object_id &&
+                        !editor_->has_unapplied_changes(),
+                    "Explicitly discarding a draft did not switch the editor");
+            record("object-switch-cancel-preserves-draft-and-discard-rebinds");
+            smoke_cache_ = satellites_[1].orbit;
+            editor_->set_state_mode(0);
+            auto *velocity = editor_->findChild<QuantityEditor *>("velocityY");
+            velocity->set_value(velocity->value(Unit::metres_per_second) + 1,
+                                Unit::metres_per_second);
+            editor_->submit();
+            require(candidate_.valid(), "Draft cancellation did not start the expected orbit task");
+            editor_->cancel();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 175: {
+            require(last_orbit_outcome_ == "cancelled" && satellites_[1].orbit == smoke_cache_ &&
+                        editor_->has_unapplied_changes() &&
+                        workspace_->contains(properties_dialog_),
+                    "Cancelling Apply did not preserve the editable draft and applied state");
+            editor_->findChild<QPushButton *>("resetOrbit")->click();
+            record("cancelled-orbit-apply-retains-draft-and-page");
+            begin_insert_station();
+            station_editor_->findChild<QLineEdit *>("stationName")->setText("Pending station");
+            station_editor_->close();
+            begin_insert_station();
+            require(station_editor_->station().name() == "Pending station",
+                    "Reopening station creation discarded its draft");
+            set_selection(satellites_.size());
+            answer_property("discardPropertyDraft", QMessageBox::Discard);
+            open_properties();
+            require(!station_editor_->has_unapplied_changes(),
+                    "Switching from station creation did not load applied values");
+            set_selection(0);
+            edit_sensor(true);
+            sensor_editor_->findChild<QLineEdit *>("sensorName")->setText("Pending sensor");
+            sensor_editor_->close();
+            edit_sensor(true);
+            require(sensor_editor_->sensor().name() == "Pending sensor",
+                    "Reopening sensor creation discarded its draft");
+            sensor_editor_->findChild<QPushButton *>("applySensor")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 176: {
+            require(last_project_outcome_ == "opened" && sensors_.size() == 1 &&
+                        workspace_->contains(sensor_editor_) && !sensor_editor_creating_ &&
+                        !sensor_editor_->has_unapplied_changes(),
+                    "Sensor Apply closed its page or retained insertion mode");
+            sensor_editor_->findChild<QuantityEditor *>("sensorHalfAngle")
+                ->set_value(20, Unit::degree);
+            sensor_editor_->close();
+            edit_sensor(false);
+            require(sensor_editor_->has_unapplied_changes() &&
+                        std::abs(sensor_editor_->sensor().half_angle_rad -
+                                 20 * std::numbers::pi / 180) < 1e-12,
+                    "Reopening an existing sensor discarded its draft");
+            sensor_editor_->findChild<QPushButton *>("resetSensor")->click();
+            record("station-and-sensor-creation-reopen-and-successful-apply");
+            open_scenario_properties();
+            auto *name = scenario_properties_->findChild<QLineEdit *>("scenarioSettingsName");
+            name->setText("Pending scenario title");
+            scenario_properties_->close();
+            open_scenario_properties();
+            require(name->text() == "Pending scenario title" && scenario_has_draft(),
+                    "Reopening the scene properties discarded its draft");
+            // A different property update must preserve this draft and refresh read-only facts.
+            set_selection(satellites_.size());
+            open_properties();
+            station_editor_->findChild<QuantityEditor *>("stationHeight")
+                ->set_value(450, Unit::metre);
+            station_editor_->findChild<QPushButton *>("applyGroundStation")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 177: {
+            require(last_project_outcome_ == "opened" && scenario_has_draft() &&
+                        scenario_->name() != "Pending scenario title",
+                    "Unrelated property update discarded or applied a scene draft");
+            answer_property("leaveScenarioConfirmation", QMessageBox::Save, true);
+            require(confirm_replace_scenario() && !project_dirty_ && scenario_has_draft(),
+                    "Save-and-leave did not preserve the pending draft until actual replacement");
+            const auto saved =
+                application::load_project(std::filesystem::path(project_path_.toStdWString()));
+            require(saved.name == scenario_->name(),
+                    "Exit save accidentally applied a scene draft");
+            answer_property("leaveScenarioConfirmation", QMessageBox::Discard);
+            require(confirm_replace_scenario() && scenario_has_draft(),
+                    "Discard consent changed state before the replacement was prepared");
+            scenario_properties_->findChild<QPushButton *>("resetScenarioSettings")->click();
+            require(unapplied_properties().empty(), "Reset left phantom property drafts");
+            record("scene-draft-survives-other-updates-and-exit-saves-applied-state-only");
+            for (auto *page :
+                 {properties_dialog_, scenario_properties_, static_cast<QDialog *>(station_editor_),
+                  static_cast<QDialog *>(sensor_editor_)})
+                page->close();
+            // The last edit selected a ground station. Fit to a satellite for the
+            // final marker-pixel assertion instead of leaving it behind the globe.
+            set_selection(0);
+            seek_epoch(scenario_->first());
+            fit_views();
+            fit_pending_ = true;
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 178:
             if (++smoke_final_frames_ >= 4)
                 ++orbit_smoke_stage_;
             break;
@@ -8308,6 +8757,9 @@ class Workbench final : public WorkbenchWindow {
     std::string access_hash_;
     GroundStationEditor *station_editor_ = nullptr;
     std::optional<std::string> station_editor_target_;
+    std::optional<std::string> pending_station_apply_, pending_sensor_apply_;
+    bool orbit_editor_bound_ = false, station_editor_bound_ = false, sensor_editor_bound_ = false,
+         scenario_editor_bound_ = false, sensor_editor_creating_ = false;
     std::optional<std::size_t> selected_station_;
     QTreeWidgetItem *scenario_item_ = nullptr;
     std::optional<std::size_t> editor_target_, pending_orbit_target_;
@@ -8334,7 +8786,7 @@ class Workbench final : public WorkbenchWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 172;
+    static constexpr int orbit_smoke_complete = 179;
     std::shared_ptr<const core::GravityModel> smoke_gravity_;
     QElapsedTimer smoke_apply_elapsed_;
     double smoke_navigation_distance_ = 0;

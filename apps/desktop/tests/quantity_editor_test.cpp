@@ -860,6 +860,114 @@ TEST_F(QuantityTest, StationAndSensorUnitChangesPreserveExactAppliedValues) {
     EXPECT_FALSE(same_sensor_input(sensor, sensor_editor.sensor()));
 }
 
+TEST_F(QuantityTest, PropertyDraftsRemainDirtyUntilSuccessfullyPublished) {
+    OrbitInput input;
+    OrbitEditor orbit(input);
+    EXPECT_FALSE(orbit.has_unapplied_changes());
+    orbit.set_state_mode(0);
+    auto *position = orbit.findChild<QuantityEditor *>("positionX");
+    position->set_unit(Unit::metre);
+    EXPECT_FALSE(orbit.has_unapplied_changes());
+    position->set_value(input.initial.position_m[0] + 100, Unit::metre);
+    EXPECT_TRUE(orbit.has_unapplied_changes());
+    std::optional<OrbitInput> requested;
+    orbit.apply = [&](OrbitInput value) { requested = value; };
+    orbit.submit();
+    ASSERT_TRUE(requested);
+    EXPECT_TRUE(orbit.has_unapplied_changes());
+    orbit.accept_input(*requested);
+    EXPECT_FALSE(orbit.has_unapplied_changes());
+    position->findChild<QLineEdit *>("quantityValue")->setText("unfinished");
+    EXPECT_TRUE(orbit.has_unapplied_changes());
+    orbit.findChild<QPushButton *>("resetOrbit")->click();
+    EXPECT_FALSE(orbit.has_unapplied_changes());
+
+    int requests = 0;
+    orbit.appearance = [&](int, QString, double) {
+        ++requests;
+        throw std::runtime_error("Missing model");
+    };
+    orbit.configure_appearance(2, "missing.glb", 10);
+    EXPECT_TRUE(orbit.has_unapplied_changes());
+    orbit.findChild<QPushButton *>("applyAppearance")->click();
+    EXPECT_EQ(requests, 2);
+    orbit.accept_appearance(2, "missing.glb", 10);
+    EXPECT_FALSE(orbit.has_unapplied_changes());
+    orbit.findChild<QuantityEditor *>("modelDiameter")->set_value(20, Unit::kilometre);
+    orbit.findChild<QPushButton *>("resetAppearance")->click();
+    EXPECT_FALSE(orbit.has_unapplied_changes());
+
+    GroundStationEditor station;
+    station.set_station({"station", "", {1.2, 0.6, 100}}, true);
+    EXPECT_FALSE(station.has_unapplied_changes());
+    station.findChild<QuantityEditor *>("stationHeight")->set_value(200, Unit::metre);
+    EXPECT_TRUE(station.has_unapplied_changes());
+    station.sync_name("Renamed");
+    EXPECT_EQ(station.station().name(), "Renamed");
+    EXPECT_TRUE(station.has_unapplied_changes());
+    station.accept_station(station.station());
+    EXPECT_FALSE(station.has_unapplied_changes());
+    EXPECT_EQ(station.findChild<QPushButton *>("applyGroundStation")->text(),
+              QStringLiteral("应用"));
+
+    application::Project project{"Scenario", core::Epoch{0}, core::Epoch{120'000'000'000}};
+    application::ProjectSensor sensor;
+    sensor.parent_satellite_id = "satellite";
+    SensorEditor sensor_editor;
+    sensor_editor.set_sensor(sensor, project, true);
+    EXPECT_FALSE(sensor_editor.has_unapplied_changes());
+    sensor_editor.findChild<QuantityEditor *>("sensorHalfAngle")->set_value(20, Unit::degree);
+    EXPECT_TRUE(sensor_editor.has_unapplied_changes());
+    sensor_editor.sync_name("New sensor name");
+    EXPECT_EQ(sensor_editor.sensor().name(), "New sensor name");
+    sensor_editor.accept_sensor(sensor_editor.sensor());
+    EXPECT_FALSE(sensor_editor.has_unapplied_changes());
+    EXPECT_EQ(sensor_editor.findChild<QPushButton *>("applySensor")->text(),
+              QStringLiteral("应用"));
+    sensor_editor.findChild<QuantityEditor *>("sensorHalfAngle")
+        ->findChild<QLineEdit *>("quantityValue")
+        ->setText("unfinished");
+    EXPECT_TRUE(sensor_editor.has_unapplied_changes());
+    sensor_editor.findChild<QPushButton *>("resetSensor")->click();
+    EXPECT_FALSE(sensor_editor.has_unapplied_changes());
+}
+
+TEST_F(QuantityTest, RebindingTimeDataPreservesTypedAndIncompleteEpochDrafts) {
+    class NewTimeIdentity final : public core::ITimeProvider {
+      public:
+        std::shared_ptr<const core::ITimeProvider> source = runtime::make_builtin_time_provider();
+        core::TimeDataInfo info = source->data_info();
+        NewTimeIdentity() { info.sha256 = std::string(64, 'a'); }
+        core::Epoch from_utc(const core::UtcDateTime &value) const override {
+            return source->from_utc(value);
+        }
+        core::UtcDateTime to_utc(core::Epoch value) const override { return source->to_utc(value); }
+        int tai_minus_utc_seconds(core::Epoch value) const override {
+            return source->tai_minus_utc_seconds(value);
+        }
+        core::JulianDate julian_date(core::Epoch value, core::TimeScale scale) const override {
+            return source->julian_date(value, scale);
+        }
+        const core::TimeDataInfo &data_info() const noexcept override { return info; }
+    };
+    std::shared_ptr<const core::ITimeProvider> original = runtime::make_builtin_time_provider();
+    auto replacement = std::make_shared<NewTimeIdentity>();
+    EpochEditor editor(nullptr, original);
+    auto *text = editor.findChild<QLineEdit *>("epochValue");
+    text->setText("2026-10-09 12:34:56.123456789 TT");
+    const auto expected = editor.epoch();
+    editor.set_time_provider(replacement);
+    EXPECT_EQ(editor.epoch(), expected);
+    EXPECT_EQ(text->text(), "2026-10-09 12:34:56.123456789 TT");
+    text->setText("2026-10-");
+    editor.set_time_provider(original);
+    EXPECT_EQ(text->text(), "2026-10-");
+    EXPECT_THROW((void)editor.epoch(), std::invalid_argument);
+    editor.set_epoch(expected);
+    editor.set_time_provider(replacement);
+    EXPECT_EQ(editor.epoch(), expected);
+}
+
 TEST_F(QuantityTest, J4AndTleEditingKeepSeparateDraftsAndRejectInvalidInput) {
     apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
     OrbitEditor editor(OrbitInput{});

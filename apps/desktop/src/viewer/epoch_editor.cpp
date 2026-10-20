@@ -202,7 +202,10 @@ void EpochEditor::set_time_provider(std::shared_ptr<const core::ITimeProvider> t
         return;
     const auto value = stored_;
     time_ = std::move(time);
-    set_epoch(value);
+    // Typed text is an uncommitted draft, including incomplete input. Rebinding
+    // resources must not replace it with the last programmatically assigned epoch.
+    if (!dirty_)
+        set_epoch(value);
 }
 core::Epoch EpochEditor::epoch() const {
     const auto value = dirty_ ? parse_epoch(value_->text(), *time_).value : stored_;
