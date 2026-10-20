@@ -12,7 +12,6 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QPainter>
-#include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScreen>
@@ -56,46 +55,6 @@ QString product_name(DataProduct p) {
     }
     return {};
 }
-
-class DataCenterArtwork final : public QWidget {
-  public:
-    DataCenterArtwork() : artwork_(":/orbitforge/artwork/data-preparation.png") {
-        setObjectName("dataCenterArtwork");
-        setMinimumHeight(112);
-        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    }
-
-  protected:
-    void paintEvent(QPaintEvent *) override {
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::SmoothPixmapTransform);
-        painter.fillRect(rect(), QColor("#111a30"));
-        if (!artwork_.isNull()) {
-            // Keep the full head visible; narrow windows crop only the quiet left side.
-            const auto ratio = devicePixelRatioF();
-            const auto pixels = qRound(height() * ratio);
-            if (scaled_artwork_.height() != pixels || scaled_artwork_.devicePixelRatio() != ratio) {
-                scaled_artwork_ = artwork_.scaledToHeight(pixels, Qt::SmoothTransformation);
-                scaled_artwork_.setDevicePixelRatio(ratio);
-            }
-            const auto left = width() - scaled_artwork_.width() / ratio;
-            painter.drawPixmap(QPointF(left, 0), scaled_artwork_);
-            QLinearGradient blend(left, 0, left + height(), 0);
-            blend.setColorAt(0, QColor("#111a30"));
-            blend.setColorAt(1, QColor(17, 26, 48, 0));
-            painter.fillRect(QRectF(left, 0, height(), height()), blend);
-        }
-        QLinearGradient shade(0, 0, width(), 0);
-        shade.setColorAt(0, QColor(15, 23, 40, 245));
-        shade.setColorAt(0.5, QColor(15, 23, 40, width() < 620 ? 210 : 100));
-        shade.setColorAt(1, QColor(15, 23, 40, width() < 620 ? 90 : 0));
-        painter.fillRect(rect(), shade);
-    }
-
-  private:
-    QPixmap artwork_;
-    QPixmap scaled_artwork_;
-};
 
 QString installation_text(const DataInventoryItem &item) {
     switch (item.installation) {
@@ -270,36 +229,33 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     auto *layout = new QVBoxLayout(&dialog);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    auto *artwork = new DataCenterArtwork;
-    auto *heading = new QVBoxLayout(artwork);
-    heading->setContentsMargins(24, 16, 24, 14);
-    heading->setSpacing(6);
+    auto *header = new QWidget;
+    header->setObjectName("dataHeader");
+    auto *heading = new QHBoxLayout(header);
+    heading->setContentsMargins(18, 10, 18, 10);
+    heading->setSpacing(16);
     auto *heading_title = new QLabel(QStringLiteral("数据中心"));
     heading_title->setObjectName("panelTitle");
-    auto *heading_row = new QHBoxLayout;
-    heading_row->addWidget(heading_title);
+    heading->addWidget(heading_title);
     auto *back = new QPushButton(QStringLiteral("数据列表"), &dialog);
     back->setObjectName("dataBackToList");
     back->setIcon(workbench_icon(WorkbenchIcon::database));
     back->hide();
-    heading_row->addWidget(back);
-    heading_row->addStretch();
-    heading->addLayout(heading_row);
+    heading->addWidget(back);
     auto *description =
         new QLabel(QStringLiteral("管理计算数据，查看下载时间、覆盖范围与更新结果。"));
     description->setObjectName("dialogDescription");
-    description->setWordWrap(true);
-    description->setMaximumWidth(600);
     heading->addWidget(description);
-    layout->addWidget(artwork);
+    heading->addStretch();
+    layout->addWidget(header);
     auto *panels = new QHBoxLayout;
     panels->setSpacing(0);
     auto *sidebar = new QWidget;
     sidebar->setObjectName("dataSidebar");
     sidebar->setFixedWidth(std::clamp(dialog.width() / 4, 220, 258));
     auto *sidebar_layout = new QVBoxLayout(sidebar);
-    sidebar_layout->setContentsMargins(12, 16, 12, 16);
-    sidebar_layout->setSpacing(12);
+    sidebar_layout->setContentsMargins(8, 12, 8, 12);
+    sidebar_layout->setSpacing(8);
     auto *inventory_caption = new QLabel(QStringLiteral("数据列表"));
     inventory_caption->setObjectName("dataSidebarCaption");
     sidebar_layout->addWidget(inventory_caption);
@@ -314,11 +270,11 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     list->setHeaderHidden(true);
     list->setIndentation(16);
     auto *eop_node = new QTreeWidgetItem(list, {QStringLiteral("地球定向参数\n来源与计算优先级")});
-    eop_node->setSizeHint(0, QSize(0, 62));
+    eop_node->setSizeHint(0, QSize(0, 52));
     const auto add_source = [&](DataProduct product, QTreeWidgetItem *parent) {
         auto *item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(list);
         item->setData(0, Qt::UserRole, static_cast<int>(product));
-        item->setSizeHint(0, QSize(0, 62));
+        item->setSizeHint(0, QSize(0, 52));
         return item;
     };
     auto *finals_node = add_source(DataProduct::finals2000a, eop_node);
@@ -354,7 +310,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     panel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
     auto *detail_layout = new QVBoxLayout(panel);
     detail_layout->setContentsMargins(theme::space::page);
-    detail_layout->setSpacing(16);
+    detail_layout->setSpacing(10);
     panels->addWidget(panel, 1);
     layout->addLayout(panels, 1);
     auto *title = new QLabel;
@@ -419,12 +375,12 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     priority->setSelectionMode(QAbstractItemView::SingleSelection);
     priority->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     priority->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    priority->setFixedHeight(176);
+    priority->setFixedHeight(148);
     for (const auto product : {DataProduct::finals2000a, DataProduct::c04}) {
         auto *item = new QListWidgetItem(priority);
         item->setData(Qt::UserRole, static_cast<int>(product));
         item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
-        item->setSizeHint(QSize(0, 84));
+        item->setSizeHint(QSize(0, 70));
     }
     priority->setCurrentRow(0);
     priority_layout->addWidget(priority);
@@ -450,8 +406,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         auto *widget = new QWidget;
         auto *page_layout = new QVBoxLayout(widget);
-        page_layout->setContentsMargins(0, 16, 0, 0);
-        page_layout->setSpacing(24);
+        page_layout->setContentsMargins(0, 12, 0, 0);
+        page_layout->setSpacing(16);
         scroll->setWidget(widget);
         pages->addTab(scroll, label);
         return page_layout;
@@ -463,9 +419,9 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     auto *facts = new QFrame;
     facts->setObjectName("dataFacts");
     auto *form = new QFormLayout(facts);
-    form->setContentsMargins(theme::space::panel);
-    form->setHorizontalSpacing(20);
-    form->setVerticalSpacing(16);
+    form->setContentsMargins(0, 4, 0, 8);
+    form->setHorizontalSpacing(16);
+    form->setVerticalSpacing(10);
     form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     form->setRowWrapPolicy(QFormLayout::WrapLongRows);
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
@@ -487,7 +443,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     acquired->setToolTip(QStringLiteral("本地时间"));
     checked->setToolTip(QStringLiteral("本地时间"));
     overview_layout->addWidget(facts);
-    responsive_form(form, 380);
+    responsive_form(form, 300);
     auto *note = new QLabel;
     note->setObjectName("dataNote");
     note->setWordWrap(true);
@@ -599,6 +555,10 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     auto *cancel = new QPushButton(QStringLiteral("取消下载"));
     cancel->setObjectName("cancelEopDownload");
     actions->insertWidget(3, cancel);
+    for (auto *button : {download, raw, cancel}) {
+        button->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        actions->setAlignment(button, Qt::AlignLeft | Qt::AlignVCenter);
+    }
     auto *close = new QPushButton(QStringLiteral("关闭"));
     close->setMinimumWidth(88);
     footer->addWidget(close);
@@ -609,13 +569,13 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         sidebar->setVisible(!narrow || !showing_details);
         panel->setVisible(!narrow || showing_details);
         back->setVisible(narrow && showing_details);
-        description->setVisible(!narrow || !showing_details);
+        description->setVisible(!narrow);
     };
     new WidthObserver(&dialog, [&, mode = WidthMode{}](int width) mutable {
         narrow = mode.narrow(width, 760);
         sidebar->setMinimumWidth(narrow ? 0 : std::clamp(width / 4, 220, 258));
         sidebar->setMaximumWidth(narrow ? QWIDGETSIZE_MAX : sidebar->minimumWidth());
-        detail_layout->setContentsMargins(narrow ? 18 : 30, narrow ? 18 : 26, narrow ? 18 : 30, 24);
+        detail_layout->setContentsMargins(narrow ? 18 : 24, 16, narrow ? 18 : 24, 18);
         show_panels();
     });
     QObject::connect(back, &QPushButton::clicked, &dialog, [&] {

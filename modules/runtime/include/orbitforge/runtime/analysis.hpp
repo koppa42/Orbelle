@@ -100,6 +100,7 @@ class DataSnapshot {
 
 inline constexpr std::size_t max_analysis_samples = 200000;
 class AnalysisPlan;
+class OrbitSessionCache;
 class Analysis {
   public:
     [[nodiscard]] results::ManeuverSeries
@@ -155,7 +156,8 @@ class Analysis {
   private:
     struct Impl;
     std::shared_ptr<const Impl> impl_;
-    Analysis(application::ProjectSnapshot snapshot, DataSnapshot data);
+    Analysis(application::ProjectSnapshot snapshot, DataSnapshot data,
+             const std::shared_ptr<OrbitSessionCache> &sessions = {});
     friend class AnalysisPlan;
 };
 struct DataChange {
@@ -174,7 +176,10 @@ class DataChangedError : public std::runtime_error {
 // Accepting a data change never bypasses coverage/format/revision validation.
 class AnalysisPlan {
   public:
-    AnalysisPlan(const application::ProjectDocument &project, DataSnapshot data = {});
+    // Optional C++ session cache shares prepared science providers with an owning
+    // workbench. The same input/data/revision validation applies with or without it.
+    AnalysisPlan(const application::ProjectDocument &project, DataSnapshot data = {},
+                 std::shared_ptr<OrbitSessionCache> sessions = {});
     AnalysisPlan(const application::ProjectDocument &project, const DataCatalog &catalog);
     [[nodiscard]] const std::vector<DataChange> &data_changes() const { return changes_; }
     [[nodiscard]] const application::ProjectSnapshot &snapshot() const {
@@ -190,6 +195,8 @@ class AnalysisPlan {
     std::vector<DataChange> changes_;
 };
 [[nodiscard]] Analysis prepare(const application::ProjectDocument &project, DataSnapshot data = {});
+[[nodiscard]] Analysis prepare(const application::ProjectDocument &project, DataSnapshot data,
+                               std::shared_ptr<OrbitSessionCache> sessions);
 [[nodiscard]] Analysis prepare(const application::ProjectDocument &project,
                                const DataCatalog &catalog);
 // Save the current inputs with the supplied analysis's exact data provenance.

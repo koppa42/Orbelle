@@ -40,6 +40,24 @@ class StandaloneApiTests(unittest.TestCase):
         result = of.make_circular_demo_session().sample([])
         self.assertEqual(result.states, [])
 
+    def test_revision_copy_keeps_science_and_original_provenance(self):
+        original = of.make_circular_demo_session()
+        updated = original.with_input_revision(42)
+        self.assertEqual(original.provenance.input_revision, 1)
+        self.assertEqual(updated.provenance.input_revision, 42)
+        self.assertEqual(updated.provenance.algorithm, original.provenance.algorithm)
+        self.assertEqual(updated.provenance.object_id, original.provenance.object_id)
+        epochs = of.demo_epochs()
+        expected = original.sample(epochs).states
+        del original
+        actual = updated.sample(epochs)
+        self.assertEqual(actual.provenance.input_revision, 42)
+        for left, right in zip(expected, actual.states, strict=True):
+            self.assertEqual(left.position_m, right.position_m)
+            self.assertEqual(left.velocity_mps, right.velocity_mps)
+        with self.assertRaises((TypeError, OverflowError)):
+            updated.with_input_revision(-1)
+
 
 if __name__ == "__main__":
     unittest.main()

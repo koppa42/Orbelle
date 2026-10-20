@@ -10,9 +10,11 @@
 #include "orbit_editor.hpp"
 #include "orbit_scene.hpp"
 #include "project_scene.hpp"
+#include "project_update.hpp"
 #include "quantity_editor.hpp"
 #include "report_dialog.hpp"
 #include "report_plot.hpp"
+#include "report_selection.hpp"
 #include "responsive_layout.hpp"
 #include "satellite_model.hpp"
 #include "scenario_dialog.hpp"
@@ -93,6 +95,7 @@
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTableView>
+#include <QTableWidget>
 #include <QTimeZone>
 #include <QTimer>
 #include <QToolBar>
@@ -650,21 +653,19 @@ class Workbench final : public WorkbenchWindow {
                 editor_->display = [this](DisplaySettings settings) {
                     if (!editor_target_ || busy())
                         return;
-                    try {
-                        auto &satellite = satellites_.at(*editor_target_);
-                        (void)display_interval(*satellite.orbit, settings, snapshot_.epoch);
+                    auto &satellite = satellites_.at(*editor_target_);
+                    (void)display_interval(*satellite.orbit, settings, snapshot_.epoch);
+                    if (satellite.display != settings) {
                         satellite.display = settings;
                         satellite.item->setIcon(
                             0, workbench_icon(WorkbenchIcon::satellite,
                                               QColor::fromRgb(settings.line_color)));
                         mark_project_dirty();
                         update_satellite();
-                        statusBar()->showMessage(QStringLiteral("已应用显示设置，将按需更新轨迹"),
-                                                 5000);
-                    } catch (const std::exception &error) {
-                        QMessageBox::information(this, QStringLiteral("显示范围无效"),
-                                                 QString::fromUtf8(error.what()));
                     }
+                    editor_->accept_display(settings);
+                    statusBar()->showMessage(QStringLiteral("已应用显示设置，将按需更新轨迹"),
+                                             5000);
                 };
                 editor_->cancel = [this] {
                     if (project_candidate_.valid() && project_orbit_edit_ && project_cancellation_)
@@ -1125,9 +1126,16 @@ class Workbench final : public WorkbenchWindow {
             timer_.start(16);
             if (!smoke_dir_.isEmpty()) {
                 QDir().mkpath(smoke_dir_);
-                QTimer::singleShot(45000, this, [this] {
-                    if (!finished_)
-                        fail("Rendering smoke test timed out");
+                // The complete interaction audit includes modal editors, reports,
+                // persistence and two scientific propagation workflows.
+                QTimer::singleShot(90000, this, [this] {
+                    if (!finished_) {
+                        const auto *modal = QApplication::activeModalWidget();
+                        fail(QStringLiteral("Rendering smoke test timed out at stage %1; modal: %2")
+                                 .arg(orbit_smoke_stage_)
+                                 .arg(modal ? modal->objectName() : QStringLiteral("none"))
+                                 .toStdString());
+                    }
                 });
             }
         } catch (...) {
@@ -1306,6 +1314,7 @@ class Workbench final : public WorkbenchWindow {
                                {"views", view_report_},
                                {"failure", failure_},
                                {"scope", "integration-smoke; not the 10k performance acceptance"}};
+            report.insert("orbit_smoke_stage", orbit_smoke_stage_);
             QJsonArray messages;
             {
                 std::lock_guard lock(log_.mutex);
@@ -1582,6 +1591,11 @@ class Workbench final : public WorkbenchWindow {
     void edit_sensor(bool creating) {
         if (busy() || !selected_)
             return;
+        if (creating && sensor_editor_bound_ && sensor_editor_creating_ &&
+            sensor_editor_->bound_parent_id() == satellites_[*selected_].orbit->input.object_id) {
+            workspace_->open(sensor_editor_, false);
+            return;
+        }
         if (!sensor_editor_) {
             sensor_editor_ = new SensorEditor(this);
             sensor_editor_->apply = [this](application::ProjectSensor sensor) {
@@ -1591,13 +1605,19 @@ class Workbench final : public WorkbenchWindow {
                 const auto id = sensor.object_id;
                 auto found = std::ranges::find(p.sensors, sensor.object_id,
                                                &application::ProjectSensor::object_id);
+                if (found != p.sensors.end() && same_sensor_input(*found, sensor)) {
+                    statusBar()->showMessage(QStringLiteral("没有需要应用的更改。"), 4000);
+                    return;
+                }
                 if (found == p.sensors.end())
                     p.sensors.push_back(std::move(sensor));
                 else
                     *found = std::move(sensor);
                 application::validate_project(p);
-                if (start_project(std::move(p), project_path_, true, selected_marker_index()))
+                if (start_project(std::move(p), project_path_, true, selected_marker_index())) {
                     pending_project_sensor_selection_ = id;
+                    pending_sensor_apply_ = id;
+                }
             };
         }
         application::ProjectSensor sensor;
@@ -1610,7 +1630,17 @@ class Workbench final : public WorkbenchWindow {
                 return;
             sensor = *selected_sensor();
         }
+        if (!creating && sensor_editor_bound_ &&
+            sensor_editor_->bound_object_id() == sensor.object_id) {
+            workspace_->open(sensor_editor_, false);
+            return;
+        }
+        if (sensor_editor_bound_ && sensor_editor_->has_unapplied_changes() &&
+            !confirm_discard_property(sensor_editor_))
+            return;
         sensor_editor_->set_sensor(std::move(sensor), project_snapshot(project_path_), creating);
+        sensor_editor_bound_ = true;
+        sensor_editor_creating_ = creating;
         workspace_->open(sensor_editor_, false);
     }
     void clear_access_display() {
@@ -1693,9 +1723,7 @@ class Workbench final : public WorkbenchWindow {
         project.earth_orientation = eop_->data_info();
         project.time_data = standalone_time_data_;
         project.analysis_record = analysis_record_;
-        for (const auto &ref : scenario_->data_lock().references())
-            if (ref.role.starts_with("gravity/") || ref.role.starts_with("ephemeris/"))
-                project.force_data.push_back(ref);
+        project.force_data = force_data_references(scenario_->data_lock());
         if (project.data_lock() != scenario_->data_lock())
             throw application::ProjectError(
                 "Scenario data lock does not match its active providers");
@@ -1833,7 +1861,7 @@ class Workbench final : public WorkbenchWindow {
             resources = resources.with_space_weather(id, model);
         for (const auto &[id, model] : ocean_tides_)
             resources = resources.with_ocean_tides(id, model);
-        return {project_snapshot(project_path_), std::move(resources)};
+        return {project_snapshot(project_path_), std::move(resources), orbit_sessions_};
     }
     void show_reports() {
         if (!scenario_ || busy())
@@ -1985,17 +2013,170 @@ class Workbench final : public WorkbenchWindow {
             return false;
         }
     }
-    bool confirm_replace_scenario() {
-        if (!scenario_ || !project_dirty_)
+    bool scenario_has_draft() const {
+        if (!scenario_editor_bound_ || !scenario_properties_ || !scenario_)
+            return false;
+        try {
+            return scenario_properties_->findChild<QLineEdit *>("scenarioSettingsName")
+                           ->text()
+                           .trimmed()
+                           .toStdString() != scenario_->name() ||
+                   dynamic_cast<EpochEditor *>(
+                       scenario_properties_->findChild<QWidget *>("scenarioSettingsStart"))
+                           ->epoch() != scenario_->first() ||
+                   dynamic_cast<EpochEditor *>(
+                       scenario_properties_->findChild<QWidget *>("scenarioSettingsEnd"))
+                           ->epoch() != scenario_->last();
+        } catch (const std::exception &) {
             return true;
-        const auto answer = QMessageBox::question(
-            this, QStringLiteral("保存当前项目？"),
-            QStringLiteral("当前项目有已应用但尚未保存的更改。是否先保存？\n属性页中尚未应用的输入"
-                           "不会写入项目。"),
-            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+        }
+    }
+    std::vector<QDialog *> unapplied_properties() const {
+        std::vector<QDialog *> drafts;
+        if (orbit_editor_bound_ && editor_->has_unapplied_changes())
+            drafts.push_back(properties_dialog_);
+        if (station_editor_bound_ && station_editor_->has_unapplied_changes())
+            drafts.push_back(station_editor_);
+        if (sensor_editor_bound_ && sensor_editor_->has_unapplied_changes())
+            drafts.push_back(sensor_editor_);
+        if (scenario_has_draft())
+            drafts.push_back(scenario_properties_);
+        return drafts;
+    }
+    bool confirm_discard_property(QDialog *page) {
+        QMessageBox question(QMessageBox::Question, QStringLiteral("保留未应用的输入？"),
+                             QStringLiteral("“%1”有尚未应用的输入。切换编辑对象会丢弃这些输入。")
+                                 .arg(page->windowTitle()),
+                             QMessageBox::Discard | QMessageBox::Cancel, this);
+        question.setObjectName("discardPropertyDraft");
+        question.button(QMessageBox::Discard)->setText(QStringLiteral("放弃输入并切换"));
+        question.button(QMessageBox::Cancel)->setText(QStringLiteral("继续编辑"));
+        question.setDefaultButton(QMessageBox::Cancel);
+        if (question.exec() == QMessageBox::Discard)
+            return true;
+        workspace_->open(page, page == scenario_properties_);
+        return false;
+    }
+    bool confirm_replace_scenario() {
+        if (!scenario_)
+            return true;
+        const auto drafts = unapplied_properties();
+        if (!project_dirty_ && drafts.empty())
+            return true;
+        QString message;
+        if (!drafts.empty()) {
+            QStringList names;
+            for (const auto *draft : drafts)
+                names << draft->windowTitle();
+            message = QStringLiteral("以下属性有尚未应用的输入：\n%1\n\n"
+                                     "保存项目只保存已应用的结果；离开当前场景会丢弃这些输入。")
+                          .arg(names.join("\n"));
+        } else
+            message = QStringLiteral("当前项目有已应用但尚未保存的更改。是否先保存？");
+        const auto buttons = QMessageBox::Discard | QMessageBox::Cancel |
+                             (project_dirty_ ? QMessageBox::Save : QMessageBox::NoButton);
+        QMessageBox question(QMessageBox::Question, QStringLiteral("离开当前场景？"), message,
+                             buttons, this);
+        question.setObjectName("leaveScenarioConfirmation");
+        question.setDefaultButton(drafts.empty() ? QMessageBox::Save : QMessageBox::Cancel);
+        if (!drafts.empty()) {
+            question.button(QMessageBox::Cancel)->setText(QStringLiteral("返回编辑"));
+            question.button(QMessageBox::Discard)->setText(QStringLiteral("放弃并离开"));
+            if (project_dirty_)
+                question.button(QMessageBox::Save)->setText(QStringLiteral("保存已应用结果并离开"));
+        }
+        const auto answer = question.exec();
+        if (answer == QMessageBox::Cancel && !drafts.empty())
+            workspace_->open(drafts.front(), drafts.front() == scenario_properties_);
         if (answer == QMessageBox::Save)
             return save_project_dialog(false);
         return answer == QMessageBox::Discard;
+    }
+    void refresh_property_bindings() {
+        if (orbit_editor_bound_) {
+            editor_->set_time_provider(active_time());
+            const auto found = std::ranges::find_if(satellites_, [this](const auto &satellite) {
+                return satellite.orbit->input.object_id == editor_->bound_object_id();
+            });
+            if (found != satellites_.end()) {
+                editor_target_ = static_cast<std::size_t>(found - satellites_.begin());
+                editor_->set_create_mode(false);
+                if (project_orbit_edit_)
+                    editor_->accept_input(found->orbit->input);
+                editor_->set_analysis_interval(scenario_->first(), scenario_->last());
+                properties_dialog_->setWindowTitle(found->name() + QStringLiteral(" · 对象属性"));
+            } else if (editor_target_) {
+                properties_dialog_->close();
+                orbit_editor_bound_ = false;
+                editor_target_.reset();
+            } else {
+                editor_->set_analysis_interval(scenario_->first(), scenario_->last());
+            }
+        }
+        if (station_editor_bound_) {
+            const auto found = std::ranges::find_if(stations_, [this](const auto &station) {
+                return station.config.object_id == station_editor_->bound_object_id();
+            });
+            if (found != stations_.end()) {
+                if (pending_station_apply_ == found->config.object_id)
+                    station_editor_->accept_station(found->config);
+                else if (!station_editor_->has_unapplied_changes())
+                    station_editor_->set_station(found->config, false);
+                station_editor_->sync_name(found->config.name());
+                station_editor_target_ = found->config.object_id;
+                station_editor_->setWindowTitle(found->name() + QStringLiteral(" · 地面站属性"));
+                station_editor_->show_result(pending_station_apply_ == found->config.object_id
+                                                 ? QStringLiteral("已应用。")
+                                                 : QString{});
+            } else if (station_editor_target_) {
+                station_editor_->close();
+                station_editor_bound_ = false;
+                station_editor_target_.reset();
+            }
+        }
+        if (sensor_editor_bound_) {
+            const auto found = std::ranges::find(sensors_, sensor_editor_->bound_object_id(),
+                                                 &application::ProjectSensor::object_id);
+            if (found != sensors_.end()) {
+                if (pending_sensor_apply_ == found->object_id)
+                    sensor_editor_->accept_sensor(*found);
+                else if (!sensor_editor_->has_unapplied_changes())
+                    sensor_editor_->set_sensor(*found, project_snapshot(project_path_), false);
+                sensor_editor_->sync_name(found->name());
+                sensor_editor_creating_ = false;
+                sensor_editor_->setWindowTitle(QString::fromStdString(found->name()) +
+                                               QStringLiteral(" · 传感器"));
+            } else if (!sensor_editor_creating_ ||
+                       std::ranges::none_of(satellites_, [this](const auto &satellite) {
+                           return satellite.orbit->input.object_id ==
+                                  sensor_editor_->bound_parent_id();
+                       })) {
+                sensor_editor_->close();
+                sensor_editor_bound_ = false;
+            }
+            if (sensor_editor_bound_)
+                sensor_editor_->update_project(project_snapshot(project_path_));
+        }
+        if (scenario_editor_bound_) {
+            for (const auto *id : {"scenarioSettingsStart", "scenarioSettingsEnd"})
+                dynamic_cast<EpochEditor *>(scenario_properties_->findChild<QWidget *>(id))
+                    ->set_time_provider(active_time());
+            scenario_properties_->setWindowTitle(QString::fromStdString(scenario_->name()) +
+                                                 QStringLiteral(" · 场景属性"));
+            scenario_properties_->findChild<QLabel *>("scenarioObjectCount")
+                ->setText(QString::number(satellites_.size() + stations_.size()));
+            scenario_properties_->findChild<QLineEdit *>("scenarioDataHash")
+                ->setText(QString::fromStdString(scenario_->data_lock().sha256()));
+            auto *caption = scenario_properties_->findChild<QLabel *>("scenarioEopData");
+            caption->setText(QString::fromStdString(eop_->data_info().id) +
+                             (eop_->data_info().interpolation.starts_with("finals2000a")
+                                  ? QStringLiteral(" · 可能含预测值")
+                                  : QString{}));
+            caption->setToolTip(QString::fromStdString(eop_->data_info().id));
+            scenario_properties_->findChild<QLabel *>("scenarioExtrapolation")
+                ->setText(extrapolation_description(eop_->data_info(), scenario_->first(),
+                                                    scenario_->last()));
+        }
     }
     void choose_project() {
         if (busy())
@@ -2099,19 +2280,48 @@ class Workbench final : public WorkbenchWindow {
         const auto weather_files = selected_weather(project);
         const auto ocean_files = selected_ocean_tides(project);
         const auto selected_lock = selected_data_lock(project, next_data->data_info());
-        if (!project.data_lock().references().empty() && project.data_lock() != selected_lock) {
+        const auto changes = calculation_data_changes(project.data_lock(), selected_lock, editing);
+        if (!changes.empty()) {
+            QStringList descriptions, details;
+            for (const auto &change : changes) {
+                const auto &ref = change.after ? *change.after : *change.before;
+                const auto role = QString::fromStdString(ref.role);
+                const auto label =
+                    ref.role == "earth-orientation"          ? QStringLiteral("地球定向参数")
+                    : ref.role == "utc-time"                 ? QStringLiteral("UTC / 闰秒")
+                    : ref.role.starts_with("gravity/")       ? QStringLiteral("重力场")
+                    : ref.role.starts_with("ephemeris/")     ? QStringLiteral("太阳系星历")
+                    : ref.role.starts_with("space-weather/") ? QStringLiteral("空间天气")
+                    : ref.role.starts_with("ocean-tides/")   ? QStringLiteral("海潮")
+                                                             : role;
+                const auto old_id = change.before
+                                        ? QString::fromStdString(change.before->snapshot_id)
+                                        : QStringLiteral("未使用");
+                const auto new_id = change.after ? QString::fromStdString(change.after->snapshot_id)
+                                                 : QStringLiteral("不再使用");
+                descriptions << QStringLiteral("• %1：%2 → %3").arg(label, old_id, new_id);
+                details << role;
+                for (const auto &value : {change.before, change.after})
+                    details << (value
+                                    ? QStringLiteral("%1 · %2\n内容：%3\n解释配置：%4")
+                                          .arg(
+                                              QString::fromStdString(value->snapshot_id),
+                                              QString::fromStdString(value->interpretation_version),
+                                              QString::fromStdString(value->content_sha256),
+                                              QString::fromStdString(value->configuration_sha256))
+                                    : QStringLiteral("未使用"));
+            }
             QMessageBox message(
-                QMessageBox::Question, QStringLiteral("场景数据已变化"),
-                QStringLiteral("当前数据或使用策略与此场景上次计算不一致。\n是否使用当前数据更新场"
-                               "景并继续？\n%1\n\n取消将保留当前场景，不打开或重新计算。")
-                    .arg(extrapolation_description(next_data->data_info(), data_first, data_last)),
+                QMessageBox::Question, QStringLiteral("采用更新后的计算数据？"),
+                QStringLiteral("以下已引用的数据或解释设置发生了变化：\n%1\n\n"
+                               "%2\n采用后将更新依赖这些数据的计算与显示。取消将保留原场景和结果。")
+                    .arg(descriptions.join('\n'),
+                         extrapolation_description(next_data->data_info(), data_first, data_last)),
                 QMessageBox::Yes | QMessageBox::Cancel, this);
             message.setObjectName("dataChangeDialog");
             message.button(QMessageBox::Yes)->setText(QStringLiteral("使用当前数据"));
             message.setDefaultButton(QMessageBox::Cancel);
-            message.setDetailedText(QStringLiteral("上次数据：%1\n当前数据：%2")
-                                        .arg(QString::fromStdString(project.data_lock().sha256()),
-                                             QString::fromStdString(selected_lock.sha256())));
+            message.setDetailedText(details.join('\n'));
             if (message.exec() != QMessageBox::Yes) {
                 last_project_outcome_ = "cancelled";
                 return false;
@@ -2142,13 +2352,13 @@ class Workbench final : public WorkbenchWindow {
                                              return satellite.orbit.object_id == *edited_object;
                                          });
         pending_project_selection_ = selection;
+        pending_station_apply_.reset();
+        pending_sensor_apply_.reset();
         pending_project_sensor_selection_.reset();
         if (editing && selection == selected_marker_index())
             if (const auto *sensor = selected_sensor())
                 pending_project_sensor_selection_ = sensor->object_id;
         pending_project_path_ = editing ? project_path_ : QFileInfo(path).absoluteFilePath();
-        if (editing)
-            set_playing(false);
         if (!cancel_project_button_) {
             cancel_project_button_ = new QPushButton(QStringLiteral("取消打开"), statusBar());
             statusBar()->addPermanentWidget(cancel_project_button_);
@@ -2166,59 +2376,57 @@ class Workbench final : public WorkbenchWindow {
         // completes while the confirmation dialog is open.
         std::vector<EopCatalog::Provider> installed_data{next_data};
         const auto retained = editing ? scenario_ : std::nullopt;
+        const auto previous_project =
+            editing ? std::optional{project_snapshot(project_path_)} : std::nullopt;
         const auto calculation_time = time_for(next_data->data_info().time_data);
+        const auto sessions =
+            editing ? orbit_sessions_->fork() : std::make_shared<runtime::OrbitSessionCache>();
         project_candidate_ = std::async(
             std::launch::async,
             [this, project = std::move(project),
              source = std::filesystem::path(pending_project_path_.toStdWString()), installed_data,
-             retained, edited_object, calculation_time, gravity_files, ephemeris_files,
-             weather_files, ocean_files, cancel = project_cancellation_]() mutable {
-                std::map<std::string, std::shared_ptr<const core::GravityModel>> gravity;
-                std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> ephemerides;
-                std::map<std::string, std::shared_ptr<const core::SpaceWeather>> weather;
-                std::map<std::string, std::shared_ptr<const core::OceanTideModel>> ocean_tides;
-                for (const auto &file : ocean_files) {
-                    auto model =
-                        runtime::load_ocean_tides(file.file, file.info.source_url, [cancel] {
-                            if (*cancel)
-                                throw OrbitCancelled{};
-                        });
-                    if (model->info().sha256 != file.info.sha256)
-                        throw std::runtime_error("Ocean tide content changed after selection");
-                    ocean_tides.emplace(file.selection, std::move(model));
-                }
-                for (const auto &file : weather_files) {
-                    auto model =
-                        runtime::load_space_weather(file.file, file.info.source_url, [cancel] {
-                            if (*cancel)
-                                throw OrbitCancelled{};
-                        });
-                    if (model->info().sha256 != file.info.sha256)
-                        throw std::runtime_error("Space weather content changed after selection");
-                    weather.emplace(file.selection, std::move(model));
-                }
-                for (const auto &file : ephemeris_files) {
+             retained, previous_project, edited_object, calculation_time, sessions, gravity_files,
+             ephemeris_files, weather_files, ocean_files, retained_gravity = gravity_,
+             retained_ephemerides = ephemerides_, retained_weather = weather_,
+             retained_ocean_tides = ocean_tides_, cancel = project_cancellation_]() mutable {
+                const auto checkpoint = [cancel] {
                     if (*cancel)
                         throw OrbitCancelled{};
-                    auto model = runtime::make_third_body_ephemeris(runtime::load_spice_snapshot(
-                        file.manifest,
-                        file.manifest.parent_path().parent_path().parent_path() / "runtime"));
-                    if (model->data_info().content_sha256 != file.info.content_sha256)
-                        throw std::runtime_error("Ephemeris file content changed after selection");
-                    ephemerides.emplace(file.selection, std::move(model));
-                }
-                for (const auto &file : gravity_files) {
-                    auto model = runtime::load_gravity(file.file, file.info.source_url, [cancel] {
-                        if (*cancel)
-                            throw OrbitCancelled{};
-                    });
-                    if (model->info().sha256 != file.info.sha256)
-                        throw std::runtime_error("Gravity file content changed after selection");
-                    gravity.emplace(file.selection, std::move(model));
-                }
+                };
+                const auto info = [](const auto &model) -> const auto & { return model.info(); };
+                const auto gravity = prepare_resources(
+                    gravity_files, retained_gravity, runtime::gravity_reference, info,
+                    [&](const auto &file) {
+                        return runtime::load_gravity(file.file, file.info.source_url, checkpoint);
+                    },
+                    checkpoint);
+                const auto ocean_tides = prepare_resources(
+                    ocean_files, retained_ocean_tides, runtime::ocean_tide_reference, info,
+                    [&](const auto &file) {
+                        return runtime::load_ocean_tides(file.file, file.info.source_url,
+                                                         checkpoint);
+                    },
+                    checkpoint);
+                const auto weather = prepare_resources(
+                    weather_files, retained_weather, runtime::space_weather_reference, info,
+                    [&](const auto &file) {
+                        return runtime::load_space_weather(file.file, file.info.source_url,
+                                                           checkpoint);
+                    },
+                    checkpoint);
+                const auto ephemerides = prepare_resources(
+                    ephemeris_files, retained_ephemerides, runtime::ephemeris_reference,
+                    [](const auto &model) -> const auto & { return model.data_info(); },
+                    [&](const auto &file) {
+                        return runtime::make_third_body_ephemeris(runtime::load_spice_snapshot(
+                            file.manifest,
+                            file.manifest.parent_path().parent_path().parent_path() / "runtime"));
+                    },
+                    checkpoint);
                 return prepare_project_scene(std::move(project), source, frames_, installed_data,
                                              *cancel, retained, edited_object, calculation_time,
-                                             gravity, ephemerides, weather, ocean_tides);
+                                             gravity, ephemerides, weather, ocean_tides,
+                                             previous_project, sessions);
             });
         update_actions();
         statusBar()->showMessage(editing ? QStringLiteral("正在更新场景并准备轨迹…")
@@ -2233,6 +2441,14 @@ class Workbench final : public WorkbenchWindow {
             auto candidate = project_candidate_.get();
             if (project_cancellation_->load())
                 throw OrbitCancelled{};
+            const auto current =
+                project_edit_
+                    ? core::Epoch{std::clamp(
+                          (!playing_ && precise_epoch_ ? *precise_epoch_ : snapshot_.epoch)
+                              .tai_nanoseconds(),
+                          candidate->project.first.tai_nanoseconds(),
+                          candidate->project.last.tai_nanoseconds())}
+                    : candidate->project.current;
             const bool root_expanded = !project_edit_ || scenario_item_->isExpanded();
             std::unordered_map<std::string, bool> expanded;
             if (project_edit_)
@@ -2310,19 +2526,20 @@ class Workbench final : public WorkbenchWindow {
                 rebuild();
                 throw;
             }
-            if (properties_dialog_)
+            if (properties_dialog_ && !project_edit_)
                 properties_dialog_->close();
-            if (scenario_properties_)
+            if (scenario_properties_ && !project_edit_)
                 scenario_properties_->close();
             satellites_ = std::move(satellites);
             stations_ = std::move(stations);
             sensors_ = candidate->project.sensors;
             clear_access_display();
-            if (sensor_editor_)
+            if (sensor_editor_ && !project_edit_)
                 sensor_editor_->close();
-            if (station_editor_)
+            if (station_editor_ && !project_edit_)
                 station_editor_->close();
             scenario_ = std::move(candidate->scenario);
+            orbit_sessions_ = std::move(candidate->sessions);
             eop_ = candidate->eop;
             gravity_ = candidate->gravity;
             ephemerides_ = candidate->ephemerides;
@@ -2335,7 +2552,11 @@ class Workbench final : public WorkbenchWindow {
             analysis_record_ = candidate->project.analysis_record;
             time_label_epoch_.reset();
             sun_epoch_.reset();
-            editor_target_.reset();
+            if (!project_edit_) {
+                editor_target_.reset();
+                orbit_editor_bound_ = station_editor_bound_ = sensor_editor_bound_ =
+                    scenario_editor_bound_ = false;
+            }
             pending_orbit_target_.reset();
             {
                 const QSignalBlocker block(objects_);
@@ -2377,9 +2598,10 @@ class Workbench final : public WorkbenchWindow {
                             objects_->scrollToItem(item);
                         }
                     }
-            set_playing(false);
-            seek_epoch(candidate->project.current);
-            snapshot_ = sample_frame(candidate->project.current);
+            if (!project_edit_)
+                set_playing(false);
+            seek_epoch(current);
+            snapshot_ = sample_frame(current);
             satellite_state_dirty_ = true;
             update_satellite();
             selection_->update({snapshot_.epoch, snapshot_.frame, snapshot_.origin, {}});
@@ -2395,6 +2617,8 @@ class Workbench final : public WorkbenchWindow {
             if (timeline_ && !project_edit_)
                 timeline_->reset_view();
             project_path_ = pending_project_path_;
+            if (project_edit_)
+                refresh_property_bindings();
             mark_project_dirty(project_edit_ ||
                                candidate->project.data_lock() != project_recorded_data_);
             last_project_outcome_ = "opened";
@@ -2659,12 +2883,16 @@ class Workbench final : public WorkbenchWindow {
         orbit_.reset();
         model_node_ = {};
         editor_target_.reset();
+        orbit_editor_bound_ = station_editor_bound_ = sensor_editor_bound_ =
+            scenario_editor_bound_ = false;
         model_kind_ = 0;
         model_diameter_km_ = 1000;
         const QSignalBlocker block(objects_);
         objects_->clear();
         object_item_ = nullptr;
         scenario_ = std::move(next);
+        orbit_sessions_ = std::make_shared<runtime::OrbitSessionCache>();
+        pending_orbit_sessions_.reset();
         eop_ = next_eop;
         gravity_.clear();
         ephemerides_.clear();
@@ -2732,6 +2960,14 @@ class Workbench final : public WorkbenchWindow {
     void begin_insert_satellite(InsertObjectMethod method = InsertObjectMethod::define_properties) {
         if (!scenario_ || !editor_ || busy())
             return;
+        if (method == InsertObjectMethod::define_properties && orbit_editor_bound_ &&
+            !editor_target_) {
+            show_properties_dialog();
+            return;
+        }
+        if (orbit_editor_bound_ && editor_->has_unapplied_changes() &&
+            !confirm_discard_property(properties_dialog_))
+            return;
         if (satellites_.size() + stations_.size() >= 10000) {
             QMessageBox::information(this, QStringLiteral("对象数量"),
                                      QStringLiteral("当前场景最多支持 10,000 个对象。"));
@@ -2748,6 +2984,7 @@ class Workbench final : public WorkbenchWindow {
         editor_target_.reset();
         editor_->set_time_provider(eop_catalog_->time_provider());
         editor_->set_input(input);
+        orbit_editor_bound_ = true;
         editor_->set_create_mode(true);
         editor_->set_appearance(0, {}, 1000);
         editor_->set_display({});
@@ -2765,12 +3002,13 @@ class Workbench final : public WorkbenchWindow {
             show_properties_dialog();
         }
     }
-    void configure_station_editor(const application::ProjectGroundStation &station, bool creating) {
+    bool configure_station_editor(const application::ProjectGroundStation &station, bool creating) {
         if (!station_editor_) {
             station_editor_ = new GroundStationEditor(this);
             station_editor_->apply = [this](application::ProjectGroundStation value) {
                 if (busy() || !scenario_)
                     return;
+                const auto id = value.object_id;
                 auto project = project_snapshot(project_path_);
                 auto index = stations_.size();
                 std::optional<std::string> edited;
@@ -2794,19 +3032,32 @@ class Workbench final : public WorkbenchWindow {
                 }
                 application::validate_project(project);
                 if (start_project(std::move(project), project_path_, true,
-                                  satellites_.size() + index, edited))
+                                  satellites_.size() + index, edited)) {
+                    pending_station_apply_ = id;
                     station_editor_->show_result(QStringLiteral("正在应用…"));
-                else
+                } else
                     station_editor_->show_result(QStringLiteral("未应用，原场景保留。"));
             };
         }
+        if (!creating && station_editor_bound_ && station_editor_target_ == station.object_id)
+            return true;
+        if (station_editor_bound_ && station_editor_->has_unapplied_changes() &&
+            !confirm_discard_property(station_editor_))
+            return false;
         station_editor_target_ =
             creating ? std::nullopt : std::optional<std::string>{station.object_id};
         station_editor_->set_station(station, creating);
+        station_editor_bound_ = true;
+        return true;
     }
     void begin_insert_station(InsertObjectMethod method = InsertObjectMethod::define_properties) {
         if (!scenario_ || busy())
             return;
+        if (method == InsertObjectMethod::define_properties && station_editor_bound_ &&
+            !station_editor_target_) {
+            workspace_->open(station_editor_, false);
+            return;
+        }
         if (satellites_.size() + stations_.size() >= 10000) {
             QMessageBox::information(this, QStringLiteral("对象数量"),
                                      QStringLiteral("当前场景最多支持 10,000 个对象。"));
@@ -2818,7 +3069,8 @@ class Workbench final : public WorkbenchWindow {
             station.object_id = "GroundStation" + std::to_string(suffix++);
         } while (object_id_exists(station.object_id));
         station.display_name = "地面站 " + std::to_string(suffix - 1);
-        configure_station_editor(station, true);
+        if (!configure_station_editor(station, true))
+            return;
         if (method == InsertObjectMethod::defaults) {
             station_editor_->close();
             station_editor_->apply(station);
@@ -2899,8 +3151,8 @@ class Workbench final : public WorkbenchWindow {
             return;
         }
         if (selected_station_ && !busy()) {
-            configure_station_editor(stations_.at(*selected_station_).config, false);
-            workspace_->open(station_editor_, false);
+            if (configure_station_editor(stations_.at(*selected_station_).config, false))
+                workspace_->open(station_editor_, false);
             return;
         }
         if (!selected_ && scenario_ && objects_->currentItem() == scenario_item_) {
@@ -2909,10 +3161,19 @@ class Workbench final : public WorkbenchWindow {
         }
         if (!properties_dialog_ || !selected_ || busy())
             return;
+        if (orbit_editor_bound_ && editor_target_ &&
+            editor_->bound_object_id() == satellites_.at(*selected_).orbit->input.object_id) {
+            show_properties_dialog();
+            return;
+        }
+        if (orbit_editor_bound_ && editor_->has_unapplied_changes() &&
+            !confirm_discard_property(properties_dialog_))
+            return;
         editor_target_ = selected_;
         const auto &satellite = satellites_.at(*editor_target_);
         editor_->set_time_provider(eop_catalog_->time_provider());
         editor_->set_input(satellite.orbit->input);
+        orbit_editor_bound_ = true;
         editor_->set_create_mode(false);
         editor_->set_appearance(satellite.model_kind, satellite.model_path,
                                 satellite.model_diameter_km);
@@ -2950,7 +3211,7 @@ class Workbench final : public WorkbenchWindow {
         if (!scenario_properties_)
             scenario_properties_ = new QDialog(this);
         auto &dialog = *scenario_properties_;
-        if (workspace_->contains(&dialog)) {
+        if (scenario_editor_bound_) {
             if (auto *count = dialog.findChild<QLabel *>("scenarioObjectCount"))
                 count->setText(QString::number(satellites_.size() + stations_.size()));
             workspace_->open(&dialog);
@@ -2971,6 +3232,7 @@ class Workbench final : public WorkbenchWindow {
             delete previous;
         }
         dialog.setObjectName("scenarioProperties");
+        scenario_editor_bound_ = true;
         dialog.setWindowTitle(QString::fromStdString(scenario_->name()) +
                               QStringLiteral(" · 场景属性"));
         dialog.setMinimumWidth(620);
@@ -3038,6 +3300,7 @@ class Workbench final : public WorkbenchWindow {
         form = data_form;
         body_layout->addWidget(data_section);
         auto *eop_caption = new QLabel(QString::fromStdString(eop_->data_info().id));
+        eop_caption->setObjectName("scenarioEopData");
         if (eop_->data_info().interpolation.starts_with("finals2000a"))
             eop_caption->setText(eop_caption->text() + QStringLiteral(" · 可能含预测值"));
         eop_caption->setTextFormat(Qt::PlainText);
@@ -3292,6 +3555,8 @@ class Workbench final : public WorkbenchWindow {
                 model_diameter_km_ = satellite.model_diameter_km;
             }
             last_model_outcome_ = "applied";
+            editor_->accept_appearance(satellite.model_kind, satellite.model_path,
+                                       satellite.model_diameter_km);
             update_satellite();
             editor_->show_appearance_result(QStringLiteral("已应用"));
         } catch (const std::exception &error) {
@@ -3327,8 +3592,6 @@ class Workbench final : public WorkbenchWindow {
     void start_orbit(OrbitInput input) {
         if (busy() || !scenario_)
             return;
-        if (display_cancellation_)
-            display_cancellation_->store(true);
         pending_orbit_target_ = editor_target_;
         input.first = scenario_->first();
         input.last = scenario_->last();
@@ -3339,6 +3602,15 @@ class Workbench final : public WorkbenchWindow {
             editor_->show_result(QStringLiteral("对象 ID 已存在，请使用其他名称。"), true);
             return;
         }
+        if (editor_target_ &&
+            same_orbit_input(input, satellites_.at(*editor_target_).orbit->input)) {
+            last_orbit_outcome_ = "unchanged";
+            editor_->accept_input(input);
+            editor_->show_result(QStringLiteral("没有需要应用的更改。"));
+            return;
+        }
+        if (display_cancellation_)
+            display_cancellation_->store(true);
         auto data_first = input.first;
         auto data_last = input.last;
         try {
@@ -3392,20 +3664,31 @@ class Workbench final : public WorkbenchWindow {
         }
         cancellation_ = std::make_shared<std::atomic_bool>(false);
         last_orbit_outcome_.clear();
-        const auto revision =
-            editor_target_
-                ? satellites_.at(*editor_target_).orbit->session.provenance().input_revision + 1
-                : 1;
+        const auto previous = editor_target_ ? satellites_.at(*editor_target_).orbit : nullptr;
+        const bool reuse =
+            previous && can_reuse_orbit_session(previous->input, scenario_->data_lock(), input,
+                                                scenario_->data_lock());
         const auto settings =
             editor_target_ ? satellites_.at(*editor_target_).display : DisplaySettings{};
-        const auto cache = display_cache_interval(input, settings, scenario_->first());
+        const auto cache = display_cache_interval(input, settings, snapshot_.epoch);
         const auto eop = eop_;
         const auto calculation_time = time_for(eop->data_info().time_data);
-        candidate_ = std::async(std::launch::async, [this, input = std::move(input), revision,
-                                                     cache, eop, calculation_time,
+        pending_orbit_sessions_ = orbit_sessions_->fork();
+        candidate_ = std::async(std::launch::async, [this, input = std::move(input), previous,
+                                                     reuse, cache, eop, calculation_time,
+                                                     sessions = pending_orbit_sessions_,
                                                      cancel = cancellation_] {
+            if (*cancel)
+                throw OrbitCancelled{};
+            if (!reuse && previous &&
+                previous->session.provenance().input_revision ==
+                    std::numeric_limits<std::uint64_t>::max())
+                throw std::overflow_error("Object input revision exhausted");
             auto session =
-                make_orbit_session(input, revision, calculation_time.get(), {frames_, eop});
+                reuse ? previous->session
+                      : sessions->acquire(
+                            input, previous ? previous->session.provenance().input_revision + 1 : 1,
+                            calculation_time.get(), {frames_, eop});
             return prepare_orbit_scene(input, std::move(session), *frames_, *eop, *cancel, cache);
         });
         editor_->set_busy(true);
@@ -3420,7 +3703,15 @@ class Workbench final : public WorkbenchWindow {
             auto candidate = candidate_.get();
             if (cancellation_->load())
                 throw OrbitCancelled{};
-            auto next_scenario = scenario_->with_object(candidate->session);
+            const bool first_object = satellites_.empty() && stations_.empty();
+            const auto current = !playing_ && precise_epoch_ ? *precise_epoch_ : snapshot_.epoch;
+            const bool reused_session =
+                pending_orbit_target_ && candidate->session.provenance().input_revision ==
+                                             satellites_.at(*pending_orbit_target_)
+                                                 .orbit->session.provenance()
+                                                 .input_revision;
+            auto next_scenario =
+                reused_session ? *scenario_ : scenario_->with_object(candidate->session);
             auto ground_tracks = GroundMap::prepare_tracks({candidate});
             auto fixed_track = std::make_shared<render_vsg::TrackLayer>(candidate->track.nodes());
             auto inertial_track =
@@ -3468,6 +3759,7 @@ class Workbench final : public WorkbenchWindow {
                 scenario_item_->setExpanded(true);
             }
             scenario_ = std::move(next_scenario);
+            orbit_sessions_ = std::move(pending_orbit_sessions_);
             filter_objects();
             mark_project_dirty();
             if (pending_orbit_target_)
@@ -3479,26 +3771,25 @@ class Workbench final : public WorkbenchWindow {
             satellites_[index].inertial_track = std::move(inertial_track);
             satellites_[index].tracks = track;
             editor_target_ = index;
+            editor_->accept_input(satellites_[index].orbit->input);
             editor_->set_create_mode(false);
             properties_dialog_->setWindowTitle(satellites_[index].name() +
                                                QStringLiteral(" · 对象属性"));
             orbit_ = satellites_.front().orbit;
             object_item_ = satellites_.front().item;
-            snapshot_ = sample_frame(scenario_->first());
+            snapshot_ = sample_frame(current);
+            satellite_state_dirty_ = true;
             update_satellite();
             set_selection(index);
             selection_->update({snapshot_.epoch, snapshot_.frame, snapshot_.origin, {}});
             for (auto &slot : slots_)
                 slot->pick_candidates.clear();
-            seconds_ = 0;
-            precise_epoch_.reset();
-            requested_time_ = true;
-            const QSignalBlocker block(slider_);
-            slider_->setValue(0);
-            clock_.restart();
+            seek_epoch(current);
             initial_position_ = snapshot_.markers.front().position_m;
-            fit_views();
-            fit_pending_ = true;
+            if (first_object) {
+                fit_views();
+                fit_pending_ = true;
+            }
             show_orbit_status();
             last_orbit_outcome_ = "applied";
         } catch (const OrbitCancelled &) {
@@ -3517,6 +3808,7 @@ class Workbench final : public WorkbenchWindow {
         if (insert_defaults_pending_ && last_orbit_outcome_ == "rejected")
             show_properties_dialog();
         insert_defaults_pending_ = false;
+        pending_orbit_sessions_.reset();
         update_actions();
     }
     void request_display_cache() {
@@ -4847,6 +5139,12 @@ class Workbench final : public WorkbenchWindow {
             require(satellites_.empty() && scenario_->objects().empty(),
                     "Closing an insertion draft created an object");
             record("close-insert-without-applying");
+            smoke_insert_dialog(InsertObjectMethod::define_properties);
+            require(id->text() == "UncommittedDraft",
+                    "Reopening insertion discarded its unapplied draft");
+            editor_->findChild<QPushButton *>("resetOrbit")->click();
+            properties_dialog_->close();
+            record("reopen-and-explicitly-reset-insertion-draft");
             smoke_insert_dialog(InsertObjectMethod::defaults, "insert-objects-defaults.png");
             require(workspace_->current_document() != properties_dialog_,
                     "Default insertion unnecessarily opened the properties page");
@@ -4881,6 +5179,12 @@ class Workbench final : public WorkbenchWindow {
             if (!condition)
                 throw std::runtime_error(message);
         };
+        const auto report_column = [](const QAbstractItemModel *model, const char *id) {
+            for (int c = 0; c < model->columnCount(); ++c)
+                if (model->headerData(c, Qt::Horizontal, Qt::UserRole).toString() == id)
+                    return c;
+            throw std::runtime_error(std::string("Missing report field: ") + id);
+        };
         const auto choose_report = [this, require](const QString &key) {
             auto *button = report_dialog_->findChild<QPushButton *>("reportLibrary");
             require(button != nullptr, "Report selection button is missing");
@@ -4907,6 +5211,27 @@ class Workbench final : public WorkbenchWindow {
             button->click();
             timer_.start();
             require(selected, "Report selection window did not accept the requested choice");
+        };
+        const auto edit_covariance = [this, require](double variance, bool accept) {
+            bool visited = false;
+            QTimer::singleShot(0, this, [&] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                require(dialog && dialog->objectName() == "hpopSettingsDialog",
+                        "HPOP settings did not open");
+                visited = true;
+                dialog->findChild<QCheckBox *>("hpopComputeCovariance")->setChecked(true);
+                dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(2);
+                auto *matrix = dialog->findChild<QTableWidget *>("hpopCovarianceMatrix");
+                for (int i = 0; i < 6; ++i)
+                    matrix->item(i, i)->setText(i < 3 ? QString::number(variance) : "1");
+                dialog->findChild<QDialogButtonBox *>()
+                    ->button(accept ? QDialogButtonBox::Ok : QDialogButtonBox::Cancel)
+                    ->click();
+            });
+            timer_.stop();
+            editor_->open_propagator_details();
+            timer_.start();
+            require(visited, "Covariance editor was not visited");
         };
         const auto record = [&](const char *kind) {
             interaction_report_.append(QJsonObject{
@@ -4946,6 +5271,24 @@ class Workbench final : public WorkbenchWindow {
         };
         const auto scenario_epoch_control = [this](const char *name) {
             return dynamic_cast<EpochEditor *>(scenario_properties_->findChild<QWidget *>(name));
+        };
+        const auto answer_property = [this, require](const char *name,
+                                                     QMessageBox::StandardButton choice,
+                                                     bool save_available = false) {
+            QTimer::singleShot(0, [this, name, choice, save_available, require] {
+                auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+                require(box && box->objectName() == name, "Missing property draft confirmation");
+                require(bool(box->button(QMessageBox::Save)) == save_available,
+                        "Draft confirmation offered the wrong save action");
+                require(box->defaultButton() == box->button(QMessageBox::Cancel),
+                        "Discarding a draft must not be the default action");
+                require(
+                    box->grab().save(smoke_dir_ + QString("/draft-confirmation-%1-%2.png")
+                                                      .arg(name)
+                                                      .arg(save_available ? "save" : "discard")),
+                    "Cannot capture the property draft confirmation");
+                box->button(choice)->click();
+            });
         };
         auto input = orbit_ ? orbit_->input : OrbitInput{};
         switch (orbit_smoke_stage_) {
@@ -5035,6 +5378,7 @@ class Workbench final : public WorkbenchWindow {
                 slot->window->destroy();
             }
             require(viewer_->windows().empty(), "Views remained after destroying both windows");
+            input.initial.velocity_mps[0] += 1;
             editor_->set_input(input);
             editor_->submit();
             ++orbit_smoke_stage_;
@@ -5724,6 +6068,9 @@ class Workbench final : public WorkbenchWindow {
             require(orbit_ == smoke_cache_ && satellites_.front().inertial_track->size() < 160,
                     "One-period display failed to restrict the retained full cache");
             record("display-visibility-and-range-reuse-existing-cache");
+            // These two checks called the workbench callback directly; synchronize the
+            // editor explicitly instead of relying on reopening it to discard stale fields.
+            editor_->set_display(satellites_.front().display);
             slots_[1]->dock->show();
             seek_epoch(scenario_->first());
             fit_views();
@@ -6003,7 +6350,8 @@ class Workbench final : public WorkbenchWindow {
             input = satellites_.front().orbit->input;
             input.object_id = "ProjectJ2";
             input.propagator = OrbitPropagator::j2_secular;
-            start_orbit(input);
+            editor_->set_input(input);
+            editor_->submit();
             ++orbit_smoke_stage_;
             break;
         case 72:
@@ -6014,7 +6362,7 @@ class Workbench final : public WorkbenchWindow {
             satellites_[1].display.past_minutes = 12.5;
             satellites_[1].display.future_minutes = 6.25;
             satellites_[1].display.labels_2d = false;
-            start_model(1, {}, 250);
+            editor_->configure_appearance(1, {}, 250);
             ++orbit_smoke_stage_;
             break;
         case 73: {
@@ -6194,7 +6542,8 @@ class Workbench final : public WorkbenchWindow {
             open_properties();
             auto copied = satellites_[2].orbit->input;
             copied.initial.position_m[0] *= 1.001;
-            start_orbit(std::move(copied));
+            editor_->set_input(copied);
+            editor_->submit();
             ++orbit_smoke_stage_;
             break;
         }
@@ -6409,14 +6758,15 @@ class Workbench final : public WorkbenchWindow {
             {
                 auto edited_input = satellites_[0].orbit->input;
                 edited_input.initial.position_m[0] *= 1.0001;
+                editor_->set_input(edited_input);
                 answer_data(false);
-                start_orbit(edited_input);
+                editor_->submit();
                 require(!busy() && orbit_ == smoke_cache_ && last_orbit_outcome_ == "cancelled" &&
                             scenario_->data_lock() == smoke_data_lock_,
                         "Declining recalculation changed the scene");
                 record("recalculation-data-change-decline-preserves-scene");
                 answer_data(true);
-                start_orbit(std::move(edited_input));
+                editor_->submit();
             }
             ++orbit_smoke_stage_;
             break;
@@ -6882,6 +7232,12 @@ class Workbench final : public WorkbenchWindow {
                                    application::encode_project(project_snapshot(project_path_)),
                     "Invalid station latitude changed the scene");
             station_editor_->findChild<QPushButton *>("resetGroundStation")->click();
+            const auto station_revision = scenario_->revision();
+            station_editor_->findChild<QuantityEditor *>("stationLatitude")->set_unit(Unit::radian);
+            station_editor_->findChild<QPushButton *>("applyGroundStation")->click();
+            require(!busy() && scenario_->revision() == station_revision,
+                    "Unchanged station Apply started work after a unit change");
+            record("unchanged-ground-station-apply-preserves-scene");
             station_editor_->findChild<QuantityEditor *>("stationHeight")
                 ->set_value(0.35, Unit::kilometre);
             station_editor_->findChild<QPushButton *>("applyGroundStation")->click();
@@ -7096,9 +7452,52 @@ class Workbench final : public WorkbenchWindow {
                 break;
             const auto *table = report_dialog_->findChild<QTableView *>("reportTable");
             require(table->model()->rowCount() > 0, "Report generation did not produce a table");
-            require(table->isVisible() && table->width() > 250 && table->height() > 200,
-                    "Generated report is not visible in its workspace pane");
             save_workbench_image("report-results.png");
+            const auto row_count = table->model()->rowCount();
+            QTimer::singleShot(0, this, [this, require] {
+                auto *chooser =
+                    dynamic_cast<ReportColumnSelectionDialog *>(QApplication::activeModalWidget());
+                require(chooser != nullptr, "Report column selection did not open");
+                chooser->resize(340, 500);
+                QCoreApplication::processEvents();
+                auto *list = chooser->findChild<QTreeWidget *>("reportColumnList");
+                require(chooser->width() == 340 && list->horizontalScrollBar()->maximum() == 0,
+                        "Report column selection exceeds a narrow window");
+                require(chooser->grab().save(smoke_dir_ + "/report-column-selection.png"),
+                        "Cannot save report column selection capture");
+                for (int i = 0; i < list->topLevelItemCount(); ++i) {
+                    auto *item = list->topLevelItem(i);
+                    const auto id = item->data(0, Qt::UserRole).toString();
+                    item->setCheckState(0, id == "state.x" || id == "state.y" ? Qt::Checked
+                                                                              : Qt::Unchecked);
+                }
+                chooser->accept();
+            });
+            report_dialog_->findChild<QAction *>("reportChooseColumns")->trigger();
+            require(table->model()->columnCount() == 2 && table->model()->rowCount() == row_count &&
+                        report_dialog_->findChild<QTabBar *>("reportViews")->isTabEnabled(1),
+                    "Hiding metadata columns lost rows or curves");
+            save_workbench_image("report-selected-columns.png");
+            QTimer::singleShot(0, this, [require] {
+                auto *chooser =
+                    dynamic_cast<ReportColumnSelectionDialog *>(QApplication::activeModalWidget());
+                require(chooser != nullptr, "Report column selection did not reopen");
+                chooser->findChild<QPushButton *>("reportColumnDefaults")->click();
+                chooser->accept();
+            });
+            report_dialog_->findChild<QAction *>("reportChooseColumns")->trigger();
+            record("report-columns-select-restore-and-preserve-curves");
+            // Native desktop scaling can reduce the logical window height. Verify
+            // usable data rows rather than an arbitrary total-height threshold.
+            require(table->isVisible() && table->width() > 250 && table->rowHeight(0) > 0 &&
+                        table->viewport()->height() >= 5 * table->rowHeight(0),
+                    qPrintable(QString("Generated report is not visible in its workspace pane: "
+                                       "visible=%1, table=%2x%3, panel=%4x%5")
+                                   .arg(table->isVisible())
+                                   .arg(table->width())
+                                   .arg(table->height())
+                                   .arg(report_dialog_->width())
+                                   .arg(report_dialog_->height())));
             QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, true);
             QTimer::singleShot(0, this, [this, require] {
                 auto *chooser = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
@@ -7223,10 +7622,11 @@ class Workbench final : public WorkbenchWindow {
             if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
                 break;
             auto *model = report_dialog_->findChild<QTableView *>("reportTable")->model();
-            require(model->rowCount() == 1 &&
-                        model->data(model->index(0, 0)).toString() ==
-                            QString::fromStdString(satellites_.at(1).orbit->input.object_id),
-                    "Object report included an unselected object");
+            require(
+                model->rowCount() == 1 &&
+                    model->data(model->index(0, report_column(model, "object.name"))).toString() ==
+                        satellites_.at(1).name(),
+                "Object report included an unselected object");
             save_workbench_image("object-report-results.png");
             record("object-report-context-scope-survives-template-change");
             choose_report(QStringLiteral("builtin:%1")
@@ -7422,7 +7822,8 @@ class Workbench final : public WorkbenchWindow {
             auto *table = report_dialog_->findChild<QTableView *>("reportTable");
             require(table->model()->rowCount() > 0 && access_session_.has_value(),
                     "Access report produced no overhead pass");
-            const auto index = table->model()->index(0, 2);
+            const auto index =
+                table->model()->index(0, report_column(table->model(), "time.epoch"));
             table->doubleClicked(index);
             record("access-windows-timeline-and-seek");
             save_workbench_image("access-windows.png");
@@ -7455,7 +7856,7 @@ class Workbench final : public WorkbenchWindow {
                           smoke_dir_ + "/access-sensors.orbitforge");
             ++orbit_smoke_stage_;
             break;
-        case 143:
+        case 143: {
             if (project_candidate_.valid())
                 break;
             require(sensors_.size() == 1 && satellites_[0].item->childCount() == 1 &&
@@ -7468,11 +7869,18 @@ class Workbench final : public WorkbenchWindow {
             findChild<QLineEdit *>("objectSearch")->setText(QStringLiteral("观测仪"));
             objects_->setCurrentItem(satellites_[0].item->child(0));
             open_properties();
+            const auto sensor_revision = scenario_->revision();
+            sensor_editor_->findChild<QuantityEditor *>("sensorHalfAngle")->set_unit(Unit::radian);
+            sensor_editor_->findChild<QPushButton *>("applySensor")->click();
+            require(!busy() && scenario_->revision() == sensor_revision && !project_dirty_,
+                    "Unchanged sensor Apply started work or dirtied the project");
+            record("unchanged-sensor-apply-preserves-scene");
             sensor_editor_->findChild<QuantityEditor *>("sensorHalfAngle")
                 ->set_value(25, Unit::degree);
             sensor_editor_->findChild<QPushButton *>("applySensor")->click();
             ++orbit_smoke_stage_;
             break;
+        }
         case 144:
             require(selected_sensor() && selected_sensor()->object_id == sensors_[0].object_id &&
                         std::abs(selected_sensor()->half_angle_rad - 25 * std::numbers::pi / 180) <
@@ -7563,12 +7971,20 @@ class Workbench final : public WorkbenchWindow {
             smoke_cache_ = orbit_;
             workspace_->split_page(properties_dialog_, view_panel_, Qt::RightEdge);
             resize(880, 700);
+            smoke_final_frames_ = 0;
             smoke_wait_frame_ = frame_count_ + 4;
             ++orbit_smoke_stage_;
             break;
         case 151: {
             if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
                 return;
+            if (++smoke_final_frames_ == 1) {
+                // Responsive forms have now recomputed their compact minimums; retry the
+                // requested window size after that layout pass, still requiring 880 below.
+                resize(880, 700);
+                smoke_wait_frame_ = frame_count_ + 3;
+                return;
+            }
             save_workbench_image("responsive-workbench.png");
             // Compact navigation is page tabs at inspector widths, a selector when narrower.
             const bool compact_navigation =
@@ -7583,13 +7999,16 @@ class Workbench final : public WorkbenchWindow {
                     action_in_workspace("applyOrbit"),
                 qPrintable(
                     QString("Narrow workbench: width=%1, propertyWidth=%2, compactNavigation=%3, "
-                            "iconStyle=%4, controlsHeight=%5, applyVisible=%6")
+                            "iconStyle=%4, controlsHeight=%5, applyVisible=%6, minimumWidth=%7, "
+                            "minimumHint=%8")
                         .arg(width())
                         .arg(editor_->width())
                         .arg(compact_navigation)
                         .arg(commands_->toolButtonStyle())
                         .arg(findChild<QWidget *>("timelineControls")->height())
-                        .arg(action_in_workspace("applyOrbit"))));
+                        .arg(action_in_workspace("applyOrbit"))
+                        .arg(minimumWidth())
+                        .arg(minimumSizeHint().width())));
             require(orbit_ == smoke_cache_, "Resizing the workspace recalculated the orbit");
             record("responsive-workbench-and-native-view-resize");
             workspace_->detach_page(properties_dialog_);
@@ -7705,6 +8124,728 @@ class Workbench final : public WorkbenchWindow {
             break;
         }
         case 157:
+            if (++smoke_final_frames_ >= 4)
+                ++orbit_smoke_stage_;
+            break;
+        case 158: {
+            application::Project project{
+                "HPOP Apply audit", scenario_->first(),
+                core::Epoch{scenario_->first().tai_nanoseconds() + 3600'000'000'000LL}};
+            for (int i = 0; i < 2; ++i) {
+                application::ProjectSatellite satellite;
+                satellite.orbit.object_id = "hpop-" + std::to_string(i);
+                satellite.orbit.first = project.first;
+                satellite.orbit.last = project.last;
+                satellite.orbit.initial.epoch = project.first;
+                satellite.orbit.propagator = OrbitPropagator::hpop;
+                project.satellites.push_back(satellite);
+            }
+            start_project(std::move(project), smoke_dir_ + "/apply-audit.orbitforge");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 159: {
+            require(last_project_outcome_ == "opened", "HPOP audit scene did not open");
+            QFile fixture(smoke_dir_ + "/apply-gravity.gfc");
+            require(fixture.open(QIODevice::WriteOnly), "Cannot write gravity audit fixture");
+            fixture.write("product_type gravity_field\nmodelname ApplyAudit\n"
+                          "earth_gravity_constant 3.986004415e14\nradius 6378136.3\n"
+                          "max_degree 2\ntide_system tide_free\nend_of_head\n"
+                          "gfc 0 0 1 0\ngfc 2 0 -0.000484165371736 0\n");
+            fixture.close();
+            const auto supplied = qEnvironmentVariable("ORBITFORGE_APPLY_GRAVITY_FILE");
+            const auto source = supplied.isEmpty() ? fixture.fileName() : supplied;
+            const auto installed = eop_catalog_->data().install_gravity(
+                std::filesystem::path(source.toStdWString()), "apply-audit");
+            set_selection(0);
+            open_properties();
+            auto changed = satellites_[0].orbit->input;
+            changed.hpop.gravity_model = "apply-audit";
+            changed.hpop.gravity_mu = installed.info.mu;
+            changed.hpop.gravity_degree = std::min(21, installed.info.degree);
+            changed.hpop.gravity_order =
+                std::min(changed.hpop.gravity_degree, installed.info.order);
+            editor_->set_input(changed);
+            // A dependency explicitly added by Apply must not need a second consent.
+            QTimer::singleShot(0, [] {
+                if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+                    box->reject();
+            });
+            smoke_apply_elapsed_.start();
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 160: {
+            require(last_orbit_outcome_ == "applied" && gravity_.contains("apply-audit"),
+                    "Explicit HPOP gravity selection prompted for data consent or failed");
+            require(workspace_->contains(properties_dialog_) && !editor_->has_unapplied_changes(),
+                    "HPOP Apply closed the property page or failed to accept its input");
+            require(satellites_[1].orbit->session.provenance().input_revision == 1,
+                    "Selecting one satellite's model recomputed the other satellite");
+            record("hpop-explicit-model-applies-without-data-conflict");
+            interaction_report_.append(QJsonObject{{"kind", "hpop-cold-apply-timing"},
+                                                   {"elapsed_ms", smoke_apply_elapsed_.elapsed()},
+                                                   {"passed", true}});
+            smoke_gravity_ = gravity_.at("apply-audit");
+            set_selection(0);
+            open_properties();
+            editor_->set_state_mode(0);
+            auto *velocity = editor_->findChild<QuantityEditor *>("velocityY");
+            velocity->set_value(velocity->value(Unit::metres_per_second) + 1,
+                                Unit::metres_per_second);
+            smoke_apply_elapsed_.restart();
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 161: {
+            require(last_orbit_outcome_ == "applied" &&
+                        gravity_.at("apply-audit") == smoke_gravity_,
+                    "Editing HPOP reloaded an unchanged gravity resource");
+            require(satellites_[0].orbit->session.provenance().input_revision == 3 &&
+                        satellites_[1].orbit->session.provenance().input_revision == 1,
+                    "HPOP update did not preserve the unaffected numerical session");
+            record("hpop-apply-reuses-resource-and-unaffected-session");
+            interaction_report_.append(QJsonObject{{"kind", "hpop-warm-apply-timing"},
+                                                   {"elapsed_ms", smoke_apply_elapsed_.elapsed()},
+                                                   {"passed", true}});
+            set_selection(0);
+            open_properties();
+            const auto revision = scenario_->revision();
+            const auto current = satellites_[0].orbit;
+            editor_->submit();
+            require(last_orbit_outcome_ == "unchanged" && !busy() &&
+                        scenario_->revision() == revision && satellites_[0].orbit == current,
+                    "Unchanged Apply started work or revised the scenario");
+            record("unchanged-apply-does-not-compute-or-confirm-data");
+            properties_dialog_->close();
+            save_project_to(smoke_dir_ + "/apply-audit.orbitforge");
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 162: {
+            if (smoke_final_frames_++ == 0) {
+                const auto captured_report = report_input();
+                require(captured_report.sessions == orbit_sessions_,
+                        "Report did not capture the published scientific cache");
+                const auto &orbit = captured_report.project.satellites.front().orbit;
+                const application::ProjectDocument document{captured_report.project};
+                const auto analysis =
+                    runtime::prepare(document, captured_report.data, captured_report.sessions);
+                const std::array epochs{orbit.first, orbit.last};
+                int displayed_checks = 0, report_checks = 0;
+                const auto displayed =
+                    satellites_[0].orbit->session.sample(epochs, [&] { ++displayed_checks; });
+                const auto shared = captured_report.sessions->acquire(
+                    orbit, document.snapshot().revision, captured_report.data.time().get(),
+                    captured_report.data.force_environment(orbit));
+                (void)shared.sample(epochs, [&] { ++report_checks; });
+                const auto states = analysis.states(document.objects().get(orbit.object_id), epochs,
+                                                    core::FrameId::gcrf);
+                require(
+                    states.states().front().position_m == displayed.states().front().position_m &&
+                        states.states().back().position_m == displayed.states().back().position_m,
+                    "First report differs from the published scientific solution");
+                require(report_checks == displayed_checks,
+                        "First report repeated the prepared HPOP integration");
+                show_reports();
+                report_dialog_->select_object(orbit.object_id,
+                                              application::ReportKind::cartesian_state);
+                choose_report(QStringLiteral("builtin:%1")
+                                  .arg(static_cast<int>(application::ReportKind::cartesian_state)));
+                report_dialog_->findChild<QDoubleSpinBox *>("reportStep")->setValue(60);
+                smoke_apply_elapsed_.restart();
+                report_dialog_->findChild<QPushButton *>("generateReport")->click();
+                break;
+            }
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            require(report_dialog_->findChild<QTableView *>("reportTable")->model()->rowCount() ==
+                        61,
+                    "First HPOP report did not use its independent sampling interval");
+            interaction_report_.append(QJsonObject{{"kind", "hpop-first-report-timing"},
+                                                   {"elapsed_ms", smoke_apply_elapsed_.elapsed()},
+                                                   {"passed", true}});
+            record("hpop-first-report-shares-prepared-science");
+            workspace_->close_page(report_dialog_);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 163: {
+            application::Project project{"Apply navigation audit", scenario_->first(),
+                                         scenario_->last()};
+            application::ProjectSatellite satellite;
+            satellite.orbit.object_id = "hpop-builtin";
+            satellite.orbit.propagator = OrbitPropagator::hpop;
+            satellite.orbit.initial.epoch = project.first;
+            satellite.orbit.first = project.first;
+            satellite.orbit.last = project.last;
+            project.satellites.push_back(satellite);
+            start_project(std::move(project), smoke_dir_ + "/apply-navigation.orbitforge");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 164: {
+            require(last_project_outcome_ == "opened" && gravity_.empty(),
+                    "Built-in HPOP audit scene did not open");
+            set_selection(0);
+            open_properties();
+            smoke_wait_frame_ = frame_count_ + 3;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 165: {
+            if (frame_count_ < smoke_wait_frame_)
+                return;
+            smoke_view_epoch_ =
+                core::Epoch{scenario_->first().tai_nanoseconds() + 1200'000'000'123LL};
+            seek_epoch(smoke_view_epoch_);
+            slots_[0]->navigation->set_viewpoint(vsg::LookAt::create(
+                vsg::dvec3{19e6, 7e6, 4e6}, vsg::dvec3{1e6, 2e6, 0}, vsg::dvec3{0, 0, 1}));
+            const auto *look = dynamic_cast<vsg::LookAt *>(slots_[0]->camera->viewMatrix.get());
+            smoke_camera_ = {look->eye, look->center, look->up};
+            smoke_cache_ = satellites_[0].orbit;
+            auto changed = satellites_[0].orbit->input;
+            changed.step_seconds = 30;
+            editor_->set_input(changed);
+            editor_->submit();
+            require(candidate_.valid(), "Display sampling edit did not use the single-orbit path");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 166: {
+            const auto *look = dynamic_cast<vsg::LookAt *>(slots_[0]->camera->viewMatrix.get());
+            require(last_orbit_outcome_ == "applied",
+                    qPrintable(editor_->findChild<QLabel *>("orbitResult")->text()));
+            require(satellites_[0].orbit->session.provenance().input_revision ==
+                            smoke_cache_->session.provenance().input_revision &&
+                        satellites_[0].orbit->input.step_seconds == 30,
+                    "Display sampling edit recomputed HPOP");
+            require(snapshot_.epoch == smoke_view_epoch_,
+                    "Display sampling edit reset the precise scene time");
+            require(look->eye == smoke_camera_[0] && look->center == smoke_camera_[1] &&
+                        look->up == smoke_camera_[2],
+                    "Display sampling edit reset the camera");
+            record("single-orbit-display-edit-reuses-session-and-keeps-navigation");
+            smoke_cache_ = satellites_[0].orbit;
+            open_properties();
+            auto changed = satellites_[0].orbit->input;
+            changed.initial.velocity_mps[1] += 1;
+            editor_->set_input(changed);
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 167: {
+            const auto *look = dynamic_cast<vsg::LookAt *>(slots_[0]->camera->viewMatrix.get());
+            require(last_orbit_outcome_ == "applied" &&
+                        satellites_[0].orbit->session.provenance().input_revision ==
+                            smoke_cache_->session.provenance().input_revision + 1 &&
+                        snapshot_.epoch == smoke_view_epoch_ && look->eye == smoke_camera_[0] &&
+                        look->center == smoke_camera_[1] && look->up == smoke_camera_[2],
+                    "Physical orbit edit failed to retain time/camera");
+            record("single-orbit-physical-edit-keeps-navigation");
+            smoke_cache_ = satellites_[0].orbit;
+            set_playing(true);
+            auto project = project_snapshot(project_path_);
+            project.ground_stations.push_back({"audit-station", "", {1.2, 0.6, 350}});
+            start_project(std::move(project), project_path_, true, 0);
+            require(playing_, "Project edit paused playback before publishing");
+            // A seek after submission must survive the background result publication.
+            set_playing(false);
+            smoke_view_epoch_ =
+                core::Epoch{scenario_->first().tai_nanoseconds() + 1800'000'000'321LL};
+            seek_epoch(smoke_view_epoch_);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 168: {
+            const auto *look = dynamic_cast<vsg::LookAt *>(slots_[0]->camera->viewMatrix.get());
+            require(last_project_outcome_ == "opened" && stations_.size() == 1 && !playing_ &&
+                        snapshot_.epoch == smoke_view_epoch_ && look->eye == smoke_camera_[0] &&
+                        look->center == smoke_camera_[1] && look->up == smoke_camera_[2] &&
+                        satellites_[0].orbit->session.provenance().input_revision ==
+                            smoke_cache_->session.provenance().input_revision,
+                    "Project edit discarded navigation made during preparation");
+            record("project-edit-keeps-latest-seek-and-camera");
+            set_playing(true);
+            auto project = project_snapshot(project_path_);
+            project.ground_stations[0].minimum_elevation_rad = 0.1;
+            start_project(std::move(project), project_path_, true, 0);
+            require(playing_, "Constraint edit paused playback");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 169: {
+            require(last_project_outcome_ == "opened" && playing_ &&
+                        stations_[0].config.minimum_elevation_rad == 0.1,
+                    "Successful project edit stopped playback");
+            record("project-edit-keeps-playback");
+            auto project = project_snapshot(project_path_);
+            project.ground_stations[0].minimum_elevation_rad = 0.2;
+            start_project(std::move(project), project_path_, true, 0);
+            project_cancellation_->store(true);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 170:
+            require(last_project_outcome_ == "cancelled" && playing_ &&
+                        stations_[0].config.minimum_elevation_rad == 0.1,
+                    "Cancelled project edit changed playback or applied its draft");
+            record("cancelled-project-edit-keeps-playback-and-applied-state");
+            set_playing(false);
+            save_project_to(smoke_dir_ + "/apply-navigation.orbitforge");
+            // Navigation assertions above deliberately leave the globe off-center.
+            // Restore a fitted view for the final whole-scene pixel checks.
+            fit_views();
+            fit_pending_ = true;
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        case 171:
+            if (++smoke_final_frames_ >= 4)
+                ++orbit_smoke_stage_;
+            break;
+        case 172: {
+            set_selection(0);
+            open_properties();
+            editor_->set_state_mode(0);
+            auto *velocity = editor_->findChild<QuantityEditor *>("velocityY");
+            auto *text = velocity->findChild<QLineEdit *>("quantityValue");
+            text->setText("unfinished");
+            smoke_cache_ = satellites_[0].orbit;
+            properties_dialog_->close();
+            open_properties();
+            require(text->text() == "unfinished" && editor_->has_unapplied_changes(),
+                    "Reopening a property page discarded incomplete input");
+            editor_->submit();
+            require(!busy() && satellites_[0].orbit == smoke_cache_ &&
+                        editor_->has_unapplied_changes(),
+                    "Invalid Apply published or discarded the draft");
+            editor_->findChild<QPushButton *>("resetOrbit")->click();
+            require(!editor_->has_unapplied_changes(), "Reset did not restore the applied orbit");
+            editor_->set_state_mode(0);
+            velocity->set_value(velocity->value(Unit::metres_per_second) + 0.25,
+                                Unit::metres_per_second);
+            save_project_to(smoke_dir_ + "/property-drafts.orbitforge");
+            const auto saved = application::load_project(
+                std::filesystem::path((smoke_dir_ + "/property-drafts.orbitforge").toStdWString()));
+            require(same_orbit_input(saved.satellites[0].orbit, smoke_cache_->input) &&
+                        !project_dirty_ && editor_->has_unapplied_changes(),
+                    "Save incorrectly published a property draft");
+            properties_dialog_->close();
+            answer_property("leaveScenarioConfirmation", QMessageBox::Cancel);
+            require(!confirm_replace_scenario() && workspace_->contains(properties_dialog_) &&
+                        editor_->has_unapplied_changes(),
+                    "Clean project exit failed to protect its unapplied draft");
+            record("property-reopen-validation-reset-save-and-exit-preserve-draft");
+            set_selection(satellites_.size());
+            open_properties();
+            station_editor_->findChild<QuantityEditor *>("stationHeight")
+                ->set_value(400, Unit::metre);
+            station_editor_->close();
+            open_properties();
+            require(station_editor_->station().location.height_m == 400 &&
+                        station_editor_->has_unapplied_changes(),
+                    "Reopening a ground station discarded its draft");
+            station_editor_->findChild<QPushButton *>("applyGroundStation")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 173: {
+            require(
+                last_project_outcome_ == "opened" && stations_[0].config.location.height_m == 400 &&
+                    workspace_->contains(station_editor_) &&
+                    !station_editor_->has_unapplied_changes() && editor_->has_unapplied_changes() &&
+                    same_orbit_input(satellites_[0].orbit->input, smoke_cache_->input),
+                "Station Apply closed its page or discarded/applied another object's draft");
+            record("station-apply-retains-page-and-independent-satellite-draft");
+            auto project = project_snapshot(project_path_);
+            auto duplicate = project.satellites[0];
+            duplicate.orbit.object_id = "draft-audit-second";
+            project.satellites.push_back(std::move(duplicate));
+            start_project(std::move(project), project_path_, true, 0);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 174: {
+            require(satellites_.size() == 2 && editor_->has_unapplied_changes(),
+                    "Inserting another object discarded a property draft");
+            set_selection(1);
+            answer_property("discardPropertyDraft", QMessageBox::Cancel);
+            open_properties();
+            require(editor_->bound_object_id() == satellites_[0].orbit->input.object_id &&
+                        editor_->has_unapplied_changes(),
+                    "Cancelling a property switch changed the editor binding");
+            answer_property("discardPropertyDraft", QMessageBox::Discard);
+            open_properties();
+            require(editor_->bound_object_id() == satellites_[1].orbit->input.object_id &&
+                        !editor_->has_unapplied_changes(),
+                    "Explicitly discarding a draft did not switch the editor");
+            record("object-switch-cancel-preserves-draft-and-discard-rebinds");
+            smoke_cache_ = satellites_[1].orbit;
+            editor_->set_state_mode(0);
+            auto *velocity = editor_->findChild<QuantityEditor *>("velocityY");
+            velocity->set_value(velocity->value(Unit::metres_per_second) + 1,
+                                Unit::metres_per_second);
+            editor_->submit();
+            require(candidate_.valid(), "Draft cancellation did not start the expected orbit task");
+            editor_->cancel();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 175: {
+            require(last_orbit_outcome_ == "cancelled" && satellites_[1].orbit == smoke_cache_ &&
+                        editor_->has_unapplied_changes() &&
+                        workspace_->contains(properties_dialog_),
+                    "Cancelling Apply did not preserve the editable draft and applied state");
+            editor_->findChild<QPushButton *>("resetOrbit")->click();
+            record("cancelled-orbit-apply-retains-draft-and-page");
+            begin_insert_station();
+            station_editor_->findChild<QLineEdit *>("stationName")->setText("Pending station");
+            station_editor_->close();
+            begin_insert_station();
+            require(station_editor_->station().name() == "Pending station",
+                    "Reopening station creation discarded its draft");
+            set_selection(satellites_.size());
+            answer_property("discardPropertyDraft", QMessageBox::Discard);
+            open_properties();
+            require(!station_editor_->has_unapplied_changes(),
+                    "Switching from station creation did not load applied values");
+            set_selection(0);
+            edit_sensor(true);
+            sensor_editor_->findChild<QLineEdit *>("sensorName")->setText("Pending sensor");
+            sensor_editor_->close();
+            edit_sensor(true);
+            require(sensor_editor_->sensor().name() == "Pending sensor",
+                    "Reopening sensor creation discarded its draft");
+            sensor_editor_->findChild<QPushButton *>("applySensor")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 176: {
+            require(last_project_outcome_ == "opened" && sensors_.size() == 1 &&
+                        workspace_->contains(sensor_editor_) && !sensor_editor_creating_ &&
+                        !sensor_editor_->has_unapplied_changes(),
+                    "Sensor Apply closed its page or retained insertion mode");
+            sensor_editor_->findChild<QuantityEditor *>("sensorHalfAngle")
+                ->set_value(20, Unit::degree);
+            sensor_editor_->close();
+            edit_sensor(false);
+            require(sensor_editor_->has_unapplied_changes() &&
+                        std::abs(sensor_editor_->sensor().half_angle_rad -
+                                 20 * std::numbers::pi / 180) < 1e-12,
+                    "Reopening an existing sensor discarded its draft");
+            sensor_editor_->findChild<QPushButton *>("resetSensor")->click();
+            record("station-and-sensor-creation-reopen-and-successful-apply");
+            open_scenario_properties();
+            auto *name = scenario_properties_->findChild<QLineEdit *>("scenarioSettingsName");
+            name->setText("Pending scenario title");
+            scenario_properties_->close();
+            open_scenario_properties();
+            require(name->text() == "Pending scenario title" && scenario_has_draft(),
+                    "Reopening the scene properties discarded its draft");
+            // A different property update must preserve this draft and refresh read-only facts.
+            set_selection(satellites_.size());
+            open_properties();
+            station_editor_->findChild<QuantityEditor *>("stationHeight")
+                ->set_value(450, Unit::metre);
+            station_editor_->findChild<QPushButton *>("applyGroundStation")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 177: {
+            require(last_project_outcome_ == "opened" && scenario_has_draft() &&
+                        scenario_->name() != "Pending scenario title",
+                    "Unrelated property update discarded or applied a scene draft");
+            answer_property("leaveScenarioConfirmation", QMessageBox::Save, true);
+            require(confirm_replace_scenario() && !project_dirty_ && scenario_has_draft(),
+                    "Save-and-leave did not preserve the pending draft until actual replacement");
+            const auto saved =
+                application::load_project(std::filesystem::path(project_path_.toStdWString()));
+            require(saved.name == scenario_->name(),
+                    "Exit save accidentally applied a scene draft");
+            answer_property("leaveScenarioConfirmation", QMessageBox::Discard);
+            require(confirm_replace_scenario() && scenario_has_draft(),
+                    "Discard consent changed state before the replacement was prepared");
+            scenario_properties_->findChild<QPushButton *>("resetScenarioSettings")->click();
+            require(unapplied_properties().empty(), "Reset left phantom property drafts");
+            record("scene-draft-survives-other-updates-and-exit-saves-applied-state-only");
+            for (auto *page :
+                 {properties_dialog_, scenario_properties_, static_cast<QDialog *>(station_editor_),
+                  static_cast<QDialog *>(sensor_editor_)})
+                page->close();
+            // The last edit selected a ground station. Fit to a satellite for the
+            // final marker-pixel assertion instead of leaving it behind the globe.
+            set_selection(0);
+            seek_epoch(scenario_->first());
+            fit_views();
+            fit_pending_ = true;
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 178: {
+            application::Project workflow{
+                "Covariance and mission audit", scenario_->first(),
+                core::Epoch{scenario_->first().tai_nanoseconds() + 600'000'000'000LL}};
+            application::ProjectSatellite satellite;
+            satellite.orbit.object_id = "workflow-audit";
+            satellite.orbit.first = workflow.first;
+            satellite.orbit.last = workflow.last;
+            satellite.orbit.initial.epoch = workflow.first;
+            satellite.orbit.propagator = OrbitPropagator::hpop;
+            workflow.satellites.push_back(satellite);
+            start_project(std::move(workflow), smoke_dir_ + "/specialist-workflow.orbitforge");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 179:
+            require(last_project_outcome_ == "opened", "Specialist workflow did not open");
+            set_selection(0);
+            open_properties();
+            edit_covariance(10000, true);
+            require(editor_->has_unapplied_changes() && !orbit_->input.covariance.enabled,
+                    "Saving covariance settings applied them without Apply");
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        case 180:
+            require(last_orbit_outcome_ == "applied" && orbit_->input.covariance.enabled &&
+                        orbit_->input.covariance.state[0][0] == 10000 &&
+                        !editor_->has_unapplied_changes(),
+                    "Covariance Apply did not publish the accepted settings");
+            show_reports();
+            report_dialog_->select_object("workflow-audit",
+                                          application::ReportKind::state_covariance);
+            report_dialog_->findChild<QDoubleSpinBox *>("reportStep")->setValue(60);
+            report_dialog_->findChild<QPushButton *>("generateReport")->click();
+            ++orbit_smoke_stage_;
+            break;
+        case 181: {
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            const auto *model = report_dialog_->findChild<QTableView *>("reportTable")->model();
+            require(model->rowCount() == 11 &&
+                        model->index(0, report_column(model, "covariance.x.x"))
+                                .data(Qt::UserRole)
+                                .toDouble() == 10000,
+                    "Covariance report did not use the applied SI matrix");
+            save_workbench_image("covariance-applied-report.png");
+            open_properties();
+            edit_covariance(90000, false);
+            require(!editor_->has_unapplied_changes(),
+                    "Cancelling covariance settings modified the draft");
+            edit_covariance(40000, true);
+            smoke_cache_ = orbit_;
+            editor_->submit();
+            require(candidate_.valid(), "Covariance edit did not start a task");
+            editor_->cancel();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 182:
+            require(last_orbit_outcome_ == "cancelled" && orbit_ == smoke_cache_ &&
+                        editor_->has_unapplied_changes() &&
+                        report_dialog_->findChild<QPushButton *>("exportReportCsv")->isEnabled(),
+                    "Cancelled covariance Apply lost the draft or invalidated the old report");
+            record("covariance-settings-and-apply-cancel-preserve-published-state");
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        case 183: {
+            require(last_orbit_outcome_ == "applied" &&
+                        orbit_->input.covariance.state[0][0] == 40000,
+                    "Retrying covariance Apply did not publish the retained draft");
+            const auto *model = report_dialog_->findChild<QTableView *>("reportTable")->model();
+            require(model->index(0, report_column(model, "covariance.x.x"))
+                                .data(Qt::UserRole)
+                                .toDouble() == 10000 &&
+                        report_dialog_->findChild<QLabel *>("reportResultLabel")
+                            ->text()
+                            .contains(QStringLiteral("场景已变化")) &&
+                        !report_dialog_->findChild<QAction *>("reportChooseColumns")->isEnabled(),
+                    "Applied covariance failed to retain and mark the old report stale");
+            show_reports();
+            report_dialog_->findChild<QPushButton *>("generateReport")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 184: {
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            const auto *model = report_dialog_->findChild<QTableView *>("reportTable")->model();
+            require(model->rowCount() == 11 &&
+                        model->index(0, report_column(model, "covariance.x.x"))
+                                .data(Qt::UserRole)
+                                .toDouble() == 40000,
+                    "Regenerated covariance report reused stale settings");
+            record("covariance-apply-invalidates-report-and-regenerate-uses-new-matrix");
+            save_project_to(smoke_dir_ + "/covariance-workflow.orbitforge");
+            const auto restored =
+                application::load_project(std::filesystem::path(project_path_.toStdWString()));
+            require(restored.satellites[0].orbit.covariance == orbit_->input.covariance,
+                    "Covariance persistence changed applied settings");
+            start_project(restored, project_path_);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 185: {
+            require(last_project_outcome_ == "opened" && orbit_->input.covariance.enabled &&
+                        orbit_->input.covariance.state[0][0] == 40000,
+                    "Reopening the project lost covariance settings");
+            record("covariance-save-reopen-preserves-applied-configuration");
+            set_selection(0);
+            open_properties();
+            editor_->set_propagator(OrbitPropagator::mission);
+            bool configured = false;
+            QTimer::singleShot(0, this, [&] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                require(dialog && dialog->objectName() == "missionEditorDialog",
+                        "Mission editor did not open");
+                dialog->findChild<QComboBox *>("missionCoastModel")->setCurrentIndex(0);
+                dialog->findChild<QuantityEditor *>("missionCoastDuration")
+                    ->set_value(300, Unit::second);
+                dialog->findChild<QPushButton *>("missionAddImpulse")->click();
+                dialog->findChild<QLineEdit *>("missionSegmentName")->setText("Transfer burn");
+                dialog->findChild<QComboBox *>("missionManeuverFrame")->setCurrentIndex(0);
+                dialog->findChild<QuantityEditor *>("missionDeltaV1")
+                    ->set_value(10, Unit::metres_per_second);
+                dialog->findChild<QPushButton *>("missionAddCoast")->click();
+                dialog->findChild<QuantityEditor *>("missionCoastDuration")
+                    ->set_value(300, Unit::second);
+                configured = true;
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            });
+            timer_.stop();
+            editor_->open_propagator_details();
+            timer_.start();
+            require(configured && editor_->has_unapplied_changes() &&
+                        orbit_->input.propagator == OrbitPropagator::hpop,
+                    "Saving a mission plan applied it without Apply");
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 186: {
+            require(last_orbit_outcome_ == "applied" &&
+                        orbit_->input.propagator == OrbitPropagator::mission &&
+                        !orbit_->input.covariance.enabled,
+                    "Mission Apply retained unsupported active covariance");
+            const auto burns = orbit_->session.maneuvers(scenario_->first(), scenario_->last());
+            require(burns.size() == 1 && burns[0].name == "Transfer burn" &&
+                        burns[0].after.epoch.tai_nanoseconds() ==
+                            scenario_->first().tai_nanoseconds() + 300'000'000'000LL &&
+                        burns[0].delta_v_gcrf_mps == std::array<double, 3>{0, 10, 0},
+                    "Applied mission did not preserve the configured burn");
+            smoke_cache_ = orbit_;
+            show_reports();
+            report_dialog_->select_object("workflow-audit",
+                                          application::ReportKind::cartesian_state);
+            report_dialog_->findChild<QComboBox *>("reportFrame")->setCurrentIndex(0);
+            report_dialog_->findChild<QDoubleSpinBox *>("reportStep")->setValue(60);
+            report_dialog_->findChild<QPushButton *>("generateReport")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 187: {
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            const auto *model = report_dialog_->findChild<QTableView *>("reportTable")->model();
+            const auto burns = orbit_->session.maneuvers(scenario_->first(), scenario_->last());
+            require(model->rowCount() == 11, "Mission report has the wrong sampling interval");
+            for (int i = 0; i < 3; ++i) {
+                const auto position = std::array{"state.x", "state.y", "state.z"}[i];
+                const auto velocity = std::array{"state.vx", "state.vy", "state.vz"}[i];
+                require(
+                    model->index(5, report_column(model, position)).data(Qt::UserRole).toDouble() ==
+                            burns[0].after.position_m[i] &&
+                        model->index(5, report_column(model, velocity))
+                                .data(Qt::UserRole)
+                                .toDouble() == burns[0].after.velocity_mps[i],
+                    "Mission report at a burn did not use the exact post-burn state");
+            }
+            save_workbench_image("mission-applied-report.png");
+            record("mission-plan-apply-and-report-preserve-exact-burn-boundary");
+            open_properties();
+            QTimer::singleShot(0, this, [require] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                require(dialog && dialog->objectName() == "missionEditorDialog",
+                        "Mission editor did not reopen");
+                dialog->findChild<QListWidget *>("missionSegments")->setCurrentRow(1);
+                dialog->findChild<QLineEdit *>("missionSegmentName")->setText("Renamed burn");
+                dialog->findChild<QuantityEditor *>("missionDeltaV1")
+                    ->set_value(20, Unit::metres_per_second);
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            });
+            timer_.stop();
+            editor_->open_propagator_details();
+            timer_.start();
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 188: {
+            require(last_orbit_outcome_ == "applied" &&
+                        orbit_->session.maneuvers(scenario_->first(), scenario_->last())[0].name ==
+                            "Renamed burn" &&
+                        smoke_cache_->session.maneuvers(scenario_->first(), scenario_->last())[0]
+                                .name == "Transfer burn",
+                    "Editing a mission segment reused or mutated an old scientific session");
+            require(report_dialog_->findChild<QLabel *>("reportResultLabel")
+                        ->text()
+                        .contains(QStringLiteral("场景已变化")),
+                    "Mission Apply did not mark the old report stale");
+            save_project_to(smoke_dir_ + "/mission-workflow.orbitforge");
+            const auto restored =
+                application::load_project(std::filesystem::path(project_path_.toStdWString()));
+            require(restored.satellites[0].orbit.mission == orbit_->input.mission,
+                    "Mission persistence changed the sequence");
+            start_project(restored, project_path_);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 189:
+            require(last_project_outcome_ == "opened" &&
+                        orbit_->input.propagator == OrbitPropagator::mission &&
+                        orbit_->session.maneuvers(scenario_->first(), scenario_->last())[0].name ==
+                            "Renamed burn",
+                    "Reopening the project lost the applied mission");
+            record("mission-edit-preserves-old-session-and-save-reopen-keeps-new-plan");
+            set_selection(0);
+            show_reports();
+            report_dialog_->select_object("workflow-audit",
+                                          application::ReportKind::cartesian_state);
+            report_dialog_->findChild<QComboBox *>("reportFrame")->setCurrentIndex(0);
+            report_dialog_->findChild<QDoubleSpinBox *>("reportStep")->setValue(60);
+            report_dialog_->findChild<QPushButton *>("generateReport")->click();
+            ++orbit_smoke_stage_;
+            break;
+        case 190: {
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            const auto *model = report_dialog_->findChild<QTableView *>("reportTable")->model();
+            const auto burns = orbit_->session.maneuvers(scenario_->first(), scenario_->last());
+            const auto previous =
+                smoke_cache_->session.maneuvers(scenario_->first(), scenario_->last());
+            require(model->rowCount() == 11 && burns[0].delta_v_gcrf_mps[1] == 20 &&
+                        previous[0].delta_v_gcrf_mps[1] == 10 &&
+                        model->index(5, report_column(model, "state.vy"))
+                                .data(Qt::UserRole)
+                                .toDouble() == burns[0].after.velocity_mps[1],
+                    "Regenerating the reopened mission report reused the old burn");
+            record("mission-save-reopen-report-uses-updated-burn");
+            workspace_->close_page(report_dialog_);
+            seek_epoch(scenario_->first());
+            fit_views();
+            fit_pending_ = true;
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 191:
             if (++smoke_final_frames_ >= 4)
                 ++orbit_smoke_stage_;
             break;
@@ -7960,6 +9101,9 @@ class Workbench final : public WorkbenchWindow {
     bool all_windows_closed_ = false;
     std::shared_ptr<const OrbitScene> orbit_;
     std::optional<application::Scenario> scenario_;
+    std::shared_ptr<runtime::OrbitSessionCache> orbit_sessions_ =
+        std::make_shared<runtime::OrbitSessionCache>();
+    std::shared_ptr<runtime::OrbitSessionCache> pending_orbit_sessions_;
     QString project_path_, pending_project_path_, last_project_outcome_;
     bool project_dirty_ = false;
     application::DataLock project_recorded_data_;
@@ -7994,6 +9138,9 @@ class Workbench final : public WorkbenchWindow {
     std::string access_hash_;
     GroundStationEditor *station_editor_ = nullptr;
     std::optional<std::string> station_editor_target_;
+    std::optional<std::string> pending_station_apply_, pending_sensor_apply_;
+    bool orbit_editor_bound_ = false, station_editor_bound_ = false, sensor_editor_bound_ = false,
+         scenario_editor_bound_ = false, sensor_editor_creating_ = false;
     std::optional<std::size_t> selected_station_;
     QTreeWidgetItem *scenario_item_ = nullptr;
     std::optional<std::size_t> editor_target_, pending_orbit_target_;
@@ -8020,7 +9167,9 @@ class Workbench final : public WorkbenchWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 158;
+    static constexpr int orbit_smoke_complete = 192;
+    std::shared_ptr<const core::GravityModel> smoke_gravity_;
+    QElapsedTimer smoke_apply_elapsed_;
     double smoke_navigation_distance_ = 0;
     int smoke_final_frames_ = 0;
     std::vector<std::uint8_t> smoke_project_bytes_;

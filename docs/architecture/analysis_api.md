@@ -275,9 +275,13 @@ orbitforge::runtime::export_report_csv(report, "aer-report.csv");
 
 Runtime 位于 Application 之上，分析不让对象模型反向依赖 Provider。`ProjectSnapshot` 保留进程内项目范围；`snapshot.read(ref)` 从该修订读取对象，原对象删除后仍有效。C++ 的 `AnalysisPlan` 和 `DataChangedError::plan()` 与 Python 确认行为一致。
 
+已拥有科学会话的 C++ 宿主可通过 `runtime/project.hpp` 的 `OrbitSessionCache` 共享视图与分析的传播结果：`acquire(input, revision, time, environment)` 返回拥有资源的 Session；`runtime::prepare(document, data, cache)` 和 `AnalysisPlan(document, data, cache)` 使用相同缓存，仍执行资源、覆盖和数据变化校验。缓存不负责同意数据更换。编辑时调用 `fork()` 复制索引，成功后发布候选；`retain_objects(ids)` 清理已删除对象。匹配条件及取消规则见[报告](reports.md)。该缓存是 C++ 宿主适配入口，不在 Python 门面中暴露全局缓存。
+
+`application::Session::with_input_revision(revision)`（Python 同名）返回共享原科学 Provider 的新会话，只修改返回值的来源修订；原 Session 与结果不变。宿主仅在确认有效输入与资源一致后使用它附上当前文档修订。它不会修改状态、重新传播或检查外部文件。
+
 C++ 打开使用 `ProjectOpenPlan(path, data)` / `runtime::open_project(path, data)`；`OpenDataChangedError::plan()` 返回对应打开计划，确认后调用 `plan.open(true)`。纯输入保存使用 `document.save(path)`。所有文件校验、数据确认及保存规则由共享 C++ 实现，Python 仅包装入口和异常计划。
 
-分析构建和查询可在 Python 释放 GIL 后运行，回调期间重新持有 GIL。当前提供同步状态、可见区间、AER 和内置报告查询；Access、AER、报告支持取消回调，已提供字段选择与可复用显示模板；尚未提供通用任务系统、桌面自由选列编辑器或完整的 Analysis 桌面接入。后续按[整体设计](object_api_design.md)逐批迁移。
+分析构建和查询可在 Python 释放 GIL 后运行，回调期间重新持有 GIL。当前提供同步状态、可见区间、AER 和内置报告查询；Access、AER、报告支持取消回调，已提供字段选择、桌面选列窗口与可复用显示模板；尚未提供通用任务系统或完整的 Analysis 桌面接入。后续按[整体设计](object_api_design.md)逐批迁移。
 
 验证包括 C++ `Analysis.*`、Python `test_analysis.py`、现有传播/时间/哈希回归，以及安装后的 SDK 消费端。覆盖文件移除后的资源存活、同 ID 跨项目拒绝、旧结果存活、确认计划过期、有限外推、UTC 失效、整数极限附近采样、CSV 覆盖保护及可选数组适配。可运行示例见 [analysis.py](../../examples/python/analysis.py)。
 

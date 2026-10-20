@@ -11,6 +11,7 @@ namespace orbitforge::desktop {
 struct ReportInput {
     application::Project project;
     runtime::DataSnapshot data;
+    std::shared_ptr<runtime::OrbitSessionCache> sessions = {};
 };
 class ReportDialog final : public QDialog {
   public:

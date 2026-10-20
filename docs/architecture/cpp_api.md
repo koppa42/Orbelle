@@ -96,7 +96,7 @@ add_executable(mission main.cpp)
 target_link_libraries(mission PRIVATE OrbitForge::Runtime)
 ```
 
-组件层的 `application::ProjectDocument` 与 `runtime::prepare()` 继续作为适配层入口，门面没有第二套校验、计算或持久化实现。桌面报告已通过 `Project::from_data()` 捕获已发布场景，在后台准备 `Analysis` 并生成结果；地图可见性联动使用该分析捕获的资源。工作台的对象应用与图形场景准备仍需进一步接入同一文档、事务和计划，当前报告捕获的文档修订不代表整个工作台的编辑次数。
+组件层的 `application::ProjectDocument` 与 `runtime::prepare()` 继续作为适配层入口，门面没有第二套校验、计算或持久化实现。桌面报告通过 `ProjectDocument` 捕获已发布场景，在后台准备 `Analysis` 并生成结果；可用的科学 Session 从当前场景缓存复用，地图可见性联动使用该分析捕获的资源。工作台的对象应用与图形场景准备仍需进一步接入同一文档、事务和计划，当前报告捕获的文档修订不代表整个工作台的编辑次数。
 
 大气阻力通过 `HpopOptions.drag` 接入，低层 `evaluate_atmosphere` / `evaluate_drag` 使用 SI 输入；前者的 NRLMSISE 可显式传入 `AtmosphereInput.daily_ap` 或 `ap_history`（互斥），后者仍使用手动 Kp；实际 HPOP 同时保留 UTC/EOP/Sun。模型、跨接口和独立参考见[阻力契约](../architecture/atmospheric_drag.md)及[阻力验证](../validation/atmospheric_drag_protocol.md)。
 

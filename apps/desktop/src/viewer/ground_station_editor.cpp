@@ -1,5 +1,6 @@
 #include "ground_station_editor.hpp"
 #include "form_kit.hpp"
+#include "project_update.hpp"
 #include "quantity_editor.hpp"
 #include "responsive_layout.hpp"
 #include "workbench_style.hpp"
@@ -176,6 +177,22 @@ application::ProjectGroundStation GroundStationEditor::station() const {
     (void)core::ground_station_position(value.location);
     value.minimum_elevation_rad = minimum_elevation_->value(Unit::radian);
     return value;
+}
+bool GroundStationEditor::has_unapplied_changes() const {
+    try {
+        return !same_station_input(station(), original_);
+    } catch (const std::exception &) {
+        return true;
+    }
+}
+void GroundStationEditor::accept_station(const application::ProjectGroundStation &station) {
+    original_ = station;
+    apply_->setText(QStringLiteral("应用"));
+}
+void GroundStationEditor::sync_name(const std::string &name) {
+    if (name_->text().trimmed().toStdString() == original_.name())
+        name_->setText(QString::fromStdString(name));
+    original_.display_name = name;
 }
 void GroundStationEditor::preview() {
     try {

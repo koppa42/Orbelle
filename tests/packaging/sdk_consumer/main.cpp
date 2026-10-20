@@ -22,6 +22,28 @@
 #include <orbitforge/runtime/two_body.hpp>
 int main(int argc, char **argv) try {
     {
+        using namespace orbitforge;
+        application::Project project{"Shared sessions", core::Epoch{0},
+                                     core::Epoch{600'000'000'000}};
+        application::ProjectSatellite satellite;
+        satellite.orbit.first = project.first;
+        satellite.orbit.last = project.last;
+        satellite.orbit.propagator = application::OrbitPropagator::hpop;
+        satellite.orbit.hpop.gravity_degree = satellite.orbit.hpop.gravity_order = 0;
+        project.satellites.push_back(satellite);
+        const application::ProjectDocument document{project};
+        auto cache = std::make_shared<runtime::OrbitSessionCache>();
+        const auto session = cache->acquire(satellite.orbit, 17);
+        const auto state = session.sample(std::array{project.last}).states().front();
+        const auto analysis = runtime::prepare(document, {}, cache);
+        if (analysis.state(document.objects().get(satellite.orbit.object_id), project.last,
+                           core::FrameId::gcrf).position_m != state.position_m ||
+            session.with_input_revision(23).provenance().input_revision != 23 ||
+            session.provenance().input_revision != 17)
+            throw std::runtime_error("Installed shared session API failed");
+        cache->fork()->retain_objects({});
+    }
+    {
         using namespace orbitforge::core;
         const auto cells = coverage_grid(CoverageGrid{});
         const auto gaps = coverage_time_statistics(Epoch{0}, Epoch{1000000000}, {}, false);

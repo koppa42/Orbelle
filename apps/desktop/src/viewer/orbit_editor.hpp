@@ -35,6 +35,13 @@ class OrbitEditor final : public QWidget {
     std::function<core::CartesianState(core::CartesianState, core::FrameId)> transform_state;
     void set_display(const DisplaySettings &settings);
     void set_input(const OrbitInput &input);
+    // Acknowledge only successfully published values; failure keeps the draft dirty.
+    void accept_input(const OrbitInput &input);
+    void accept_display(const DisplaySettings &settings);
+    void accept_appearance(int kind, const QString &path, double diameter_km);
+    void set_analysis_interval(core::Epoch first, core::Epoch last);
+    [[nodiscard]] bool has_unapplied_changes() const;
+    [[nodiscard]] const std::string &bound_object_id() const { return bound_input_.object_id; }
     void set_create_mode(bool create);
     void set_state_mode(int mode);
     void set_reference_frame(core::FrameId frame);
@@ -50,6 +57,21 @@ class OrbitEditor final : public QWidget {
 
   private:
     void refresh_enabled();
+    [[nodiscard]] OrbitInput read_input() const;
+    [[nodiscard]] DisplaySettings read_display() const;
+    struct StateDisplay {
+        core::Epoch epoch{0};
+        core::OriginId body = core::OriginId::earth;
+        core::FrameId frame = core::FrameId::gcrf;
+        int mode = 0;
+        double mu = 0;
+        std::array<double, 6> values{};
+        bool operator==(const StateDisplay &) const = default;
+    };
+    [[nodiscard]] StateDisplay state_display() const;
+    void remember_state(const core::CartesianState &state) const;
+    mutable std::optional<StateDisplay> remembered_display_;
+    mutable core::CartesianState remembered_state_ = OrbitInput{}.initial;
     core::CartesianState read_state() const;
     core::CartesianState in_frame(core::CartesianState state, core::FrameId frame) const;
     void write_cartesian(const core::CartesianState &state);
@@ -59,6 +81,8 @@ class OrbitEditor final : public QWidget {
     void update_tle_preview();
     std::shared_ptr<const core::ITimeProvider> time_;
     core::CartesianState manual_state_ = OrbitInput{}.initial;
+    OrbitInput bound_input_;
+    DisplaySettings bound_display_;
     QPlainTextEdit *tle_text_ = nullptr;
     QLabel *tle_preview_ = nullptr, *epoch_label_ = nullptr;
     core::OriginId body_ = core::OriginId::earth;
@@ -89,7 +113,7 @@ class OrbitEditor final : public QWidget {
     std::array<QuantityEditor *, 6> elements_{};
     int state_mode_index_ = 0;
     QuantityEditor *step_ = nullptr;
-    QPushButton *apply_ = nullptr, *cancel_ = nullptr;
+    QPushButton *apply_ = nullptr, *cancel_ = nullptr, *reset_orbit_ = nullptr;
     QLabel *message_ = nullptr;
     QWidget *fields_ = nullptr;
     QWidget *model_fields_ = nullptr;
@@ -97,12 +121,12 @@ class OrbitEditor final : public QWidget {
     QLineEdit *model_path_ = nullptr;
     QuantityEditor *model_diameter_ = nullptr;
     QPushButton *apply_model_ = nullptr;
-    // Last values handed to the workbench; the 3D page's single Apply submits only changes.
+    // Successfully published values; a rejected request can be corrected and retried.
     bool applied_track_3d_ = true;
     int applied_model_kind_ = 0;
     QString applied_model_path_;
     double applied_model_diameter_km_ = 1000;
-    void apply_appearance_page();
+    void apply_appearance_page(bool force = false);
     QLabel *model_message_ = nullptr;
     QComboBox *track_extent_ = nullptr;
     TrackStyleEditor *track_style_ = nullptr;

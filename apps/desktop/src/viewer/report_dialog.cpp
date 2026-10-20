@@ -34,6 +34,7 @@
 #include <QResizeEvent>
 #include <QSaveFile>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QSignalBlocker>
 #include <QSortFilterProxyModel>
 #include <QSplitter>
@@ -62,7 +63,53 @@ bool same_time(const std::shared_ptr<const core::ITimeProvider> &a,
     return a && b ? time_data_lock(a->data_info()) == time_data_lock(b->data_info())
                   : bool(a) == bool(b);
 }
+auto analysis_reuse_key(application::Project project) {
+    // Keep all inputs and result labels, including mission segment names. Only
+    // navigation, saved report templates and appearance are irrelevant to queries.
+    project.current = project.first;
+    project.reports.clear();
+    for (auto &satellite : project.satellites) {
+        satellite.display = {};
+        satellite.model_kind = 0;
+        satellite.model_path.clear();
+        satellite.model_diameter_m = 1'000'000;
+        satellite.orbit.input_frame = core::FrameId::gcrf;
+    }
+    return application::encode_project(project);
+}
 constexpr auto builtin_count = static_cast<int>(report_kinds.size());
+std::vector<ReportColumnSpec> default_columns(ReportKind kind) {
+    std::vector<ReportColumnSpec> selected;
+    for (const auto &column : report_columns(kind)) {
+        const auto &id = column.id;
+        if (id == "object.id" || id == "lighting.start_clipped" || id == "lighting.stop_clipped" ||
+            ((kind == ReportKind::access_intervals || kind == ReportKind::intersatellite_access) &&
+             (id == "object.name" || id == "access.start_clipped" || id == "access.stop_clipped" ||
+              id == "access.max_elevation_time" || id == "access.min_range_time")))
+            continue;
+        selected.push_back({id, {}, {}});
+    }
+    return selected;
+}
+std::shared_ptr<runtime::ReportResult>
+complete_plot_result(const runtime::ReportResult &result,
+                     const std::map<std::string, ReportColumnSpec> &retained_specs) {
+    // Table storage is immutable and shared. Plotting keeps all source fields without
+    // duplicating rows, statistics or numerical sessions when the table hides columns.
+    auto complete = std::make_shared<runtime::ReportResult>(
+        runtime::ReportResult{.definition = result.definition,
+                              .table = result.source_table ? *result.source_table : result.table,
+                              .first = result.first,
+                              .last = result.last,
+                              .time = result.time,
+                              .source_table = result.source_table});
+    for (const auto &[field, spec] : retained_specs)
+        if (std::ranges::find(complete->definition.format.columns, field,
+                              &ReportColumnSpec::field) ==
+            complete->definition.format.columns.end())
+            complete->definition.format.columns.push_back(spec);
+    return complete;
+}
 class ReportSelectionButton final : public QPushButton {
   public:
     using QPushButton::QPushButton;
@@ -349,6 +396,8 @@ class ReportModel final : public QAbstractTableModel {
     QVariant headerData(int section, Qt::Orientation orientation, int role) const override {
         if (!result)
             return {};
+        if (orientation == Qt::Horizontal && role == Qt::UserRole)
+            return text(result->table.columns().at(section).id);
         if (role == Qt::TextAlignmentRole && orientation == Qt::Horizontal) {
             const bool numeric =
                 !result->table.rows().empty() &&
@@ -401,7 +450,7 @@ struct ReportDialog::Impl {
     QPushButton *generate, *export_csv, *cancel, *scope_button, *view_button;
     QToolButton *refresh_button, *config_menu, *result_more;
     QAction *source_button, *copy_button, *store, *update_template, *remove;
-    QAction *choose_curve_action;
+    QAction *choose_curve_action, *choose_columns_action;
     QProgressBar *progress;
     QTableView *table;
     QWidget *table_page;
@@ -421,6 +470,8 @@ struct ReportDialog::Impl {
     std::vector<ReportCurveField> curve_choices;
     QStringList curve_ids;
     std::map<ReportKind, QStringList> curve_preferences;
+    std::map<std::string, ReportColumnSpec> retained_column_specs;
+    std::map<std::string, int> column_widths;
     ObjectSelectionField *plot_object;
     QLabel *plot_note;
     ReportModel *model;
@@ -908,6 +959,10 @@ struct ReportDialog::Impl {
             QStringLiteral("点击列标题排序，再次点击反向；第三次恢复原始顺序。"));
         table->setAlternatingRowColors(true);
         table->setShowGrid(false);
+        table->setWordWrap(false);
+        table->setTextElideMode(Qt::ElideRight);
+        table->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+        table->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
         table->setSelectionBehavior(QAbstractItemView::SelectRows);
         table->setSelectionMode(QAbstractItemView::ExtendedSelection);
         table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -926,6 +981,13 @@ struct ReportDialog::Impl {
         copy_direct->setToolTip(QStringLiteral("复制所选行，含列标题（Ctrl+C）"));
         copy_direct->setEnabled(false);
         QObject::connect(copy_direct, &QAction::triggered, owner, [this] { copy_rows(); });
+        choose_columns_action = table_tools->addAction(QStringLiteral("显示列…"));
+        choose_columns_action->setObjectName("reportChooseColumns");
+        choose_columns_action->setToolTip(QStringLiteral("选择并重排表格和 CSV 的列，不重新计算"));
+        choose_columns_action->setEnabled(false);
+        table->addAction(choose_columns_action);
+        QObject::connect(choose_columns_action, &QAction::triggered, owner,
+                         [this] { choose_columns(); });
         choose_curve_action = table_tools->addAction(QStringLiteral("曲线…"));
         choose_curve_action->setObjectName("reportChooseCurves");
         choose_curve_action->setToolTip(QStringLiteral("选择多个字段并在曲线中比较"));
@@ -937,8 +999,7 @@ struct ReportDialog::Impl {
         auto *fit_columns = table_tools->addAction(QStringLiteral("适合列宽"));
         fit_columns->setObjectName("reportFitColumns");
         fit_columns->setToolTip(QStringLiteral("按当前显示精度调整列宽；也可拖动表头边界调整"));
-        QObject::connect(fit_columns, &QAction::triggered, table,
-                         &QTableView::resizeColumnsToContents);
+        QObject::connect(fit_columns, &QAction::triggered, owner, [this] { fit_table_columns(); });
         auto *original_order = table_tools->addAction(QStringLiteral("原始顺序"));
         original_order->setObjectName("reportOriginalOrder");
         original_order->setEnabled(false);
@@ -1191,7 +1252,7 @@ struct ReportDialog::Impl {
                         return;
                     }
                 }
-                for (const auto &cell : r.table.rows().at(index.row()))
+                for (const auto &cell : source.rows().at(index.row()))
                     if (const auto *epoch = std::get_if<core::Epoch>(&cell)) {
                         seek_result(*epoch);
                         break;
@@ -1214,7 +1275,7 @@ struct ReportDialog::Impl {
                     text(model->result->cell_text(index.row(), index.column())));
             });
             const auto curve_field = std::ranges::find(
-                curve_choices, static_cast<std::size_t>(index.column()), &ReportCurveField::column);
+                curve_choices, text(r.table.columns()[index.column()].id), &ReportCurveField::id);
             if (views->isTabEnabled(1) && curve_field != curve_choices.end()) {
                 const auto id = curve_field->id;
                 menu.addAction(QStringLiteral("加入曲线比较"), owner, [this, id] {
@@ -1860,6 +1921,8 @@ struct ReportDialog::Impl {
         d.query.frame = frame->currentIndex() == 0 ? core::FrameId::gcrf : core::FrameId::itrf;
         d.format.units = units->currentIndex() == 0 ? ReportUnits::engineering : ReportUnits::si;
         d.format.time_scale = static_cast<ReportTimeScale>(scale->currentIndex());
+        if (d.format.columns.empty())
+            d.format.columns = default_columns(d.query.kind);
         auto &g = d.query.coverage;
         const auto angle = [&](int i) {
             const auto *field = coverage_fields[i];
@@ -1900,9 +1963,111 @@ struct ReportDialog::Impl {
         }
         result_status();
     }
-    void publish(std::shared_ptr<runtime::ReportResult> result, bool new_calculation = true) {
+    void fit_table_columns() {
+        table->resizeColumnsToContents();
+        if (!model->result)
+            return;
+        const auto &columns = model->result->table.columns();
+        for (std::size_t c = 0; c < columns.size(); ++c) {
+            const auto &column = columns[c];
+            // Long object names must not consume the whole viewport; exact text
+            // remains in tooltips and copies. Date columns retain their measured width.
+            if (column.unit.empty())
+                table->setColumnWidth(static_cast<int>(c),
+                                      std::clamp(table->columnWidth(static_cast<int>(c)), 90, 180));
+        }
+    }
+    void choose_columns() {
+        if (!model->result || !choose_columns_action->isEnabled())
+            return;
+        try {
+            const auto snapshot = model->result;
+            const auto generation = input_generation;
+            const auto current = definition();
+            const auto source = complete_plot_result(*snapshot, retained_column_specs);
+            std::vector<ReportColumnChoice> choices;
+            for (std::size_t i = 0; i < source->table.columns().size(); ++i) {
+                const auto &column = source->table.columns()[i];
+                const auto &specs = source->definition.format.columns;
+                const auto spec = std::ranges::find(specs, column.id, &ReportColumnSpec::field);
+                choices.push_back({text(column.id),
+                                   spec != specs.end() && !spec->title.empty()
+                                       ? text(spec->title)
+                                       : localized(text(column.title)),
+                                   text(source->column_unit(i))});
+            }
+            QStringList selected, defaults;
+            for (const auto &column : current.format.columns)
+                selected << text(column.field);
+            for (const auto &column : default_columns(current.query.kind))
+                defaults << text(column.field);
+            ReportColumnSelectionDialog chooser(std::move(choices), selected, defaults, owner);
+            if (chooser.exec() != QDialog::Accepted)
+                return;
+            const auto live = definition();
+            if (model->result != snapshot || input_generation != generation ||
+                live.id != current.id || live.query != current.query ||
+                live.format != current.format || !result_is_current()) {
+                status->setText(QStringLiteral("报告或设置已更新，请重新选择显示列。"));
+                return;
+            }
+            if (chooser.selection() == selected)
+                return;
+            auto next = current;
+            next.format.columns.clear();
+            for (const auto &id : chooser.selection()) {
+                const auto found = retained_column_specs.find(id.toStdString());
+                next.format.columns.push_back(found == retained_column_specs.end()
+                                                  ? ReportColumnSpec{id.toStdString(), {}, {}}
+                                                  : found->second);
+            }
+            auto result =
+                std::make_shared<runtime::ReportResult>(snapshot->with_template(next.format));
+            result->definition = next;
+            // Validate the complete new presentation before updating the configuration.
+            draft.format = next.format;
+            publish(std::move(result), false, false);
+            status->setText(QStringLiteral("显示列已更新，可保存为模板；未重新计算。"));
+        } catch (const std::exception &error) {
+            status->setText(
+                QStringLiteral("无法应用显示列：%1").arg(QString::fromUtf8(error.what())));
+        }
+    }
+    void publish(std::shared_ptr<runtime::ReportResult> result, bool new_calculation = true,
+                 bool update_plot = true) {
+        std::string sort_field;
+        const auto sort_order = table->horizontalHeader()->sortIndicatorOrder();
+        std::vector<int> selected_rows;
+        const int scroll = table->verticalScrollBar()->value();
+        const int horizontal_scroll = table->horizontalScrollBar()->value();
+        int current_row = -1;
+        std::string current_field;
+        if (model->result &&
+            model->result->definition.query.kind == result->definition.query.kind) {
+            const auto &columns = model->result->table.columns();
+            for (std::size_t i = 0; i < columns.size(); ++i)
+                column_widths.insert_or_assign(columns[i].id,
+                                               table->columnWidth(static_cast<int>(i)));
+            if (!new_calculation) {
+                const auto current = table_proxy->mapToSource(table->currentIndex());
+                if (current.isValid()) {
+                    current_row = current.row();
+                    current_field = columns[current.column()].id;
+                }
+                const auto sorted = table->horizontalHeader()->sortIndicatorSection();
+                if (sorted >= 0 && static_cast<std::size_t>(sorted) < columns.size())
+                    sort_field = columns[sorted].id;
+                for (const auto &row : table->selectionModel()->selectedRows())
+                    selected_rows.push_back(table_proxy->mapToSource(row).row());
+            }
+        } else {
+            column_widths.clear();
+        }
         if (new_calculation)
-            table->sortByColumn(-1, Qt::AscendingOrder);
+            retained_column_specs.clear();
+        for (const auto &column : result->definition.format.columns)
+            retained_column_specs.insert_or_assign(column.field, column);
+        table->sortByColumn(-1, Qt::AscendingOrder);
         model->publish(result);
         if (new_calculation && owner->result_published && result_is_current())
             owner->result_published(result, *result_analysis);
@@ -2020,23 +2185,37 @@ struct ReportDialog::Impl {
                 "网格面积加权；平均覆盖率为覆盖面积随时间的平均值。最长空档按所选首尾策略统计。"));
             select_coverage_point(coverage_map->point_index());
         }
-        table->resizeColumnsToContents();
-        for (std::size_t c = 0; c < result->table.columns().size(); ++c)
-            table->setColumnHidden(
-                static_cast<int>(c),
-                result->definition.format.columns.empty() &&
-                    (result->table.columns()[c].id == "object.id" ||
-                     result->table.columns()[c].id == "lighting.start_clipped" ||
-                     result->table.columns()[c].id == "lighting.stop_clipped" ||
-                     ((result->definition.query.kind == ReportKind::access_intervals ||
-                       result->definition.query.kind == ReportKind::intersatellite_access) &&
-                      (result->table.columns()[c].id == "object.name" ||
-                       result->table.columns()[c].id == "access.start_clipped" ||
-                       result->table.columns()[c].id == "access.stop_clipped" ||
-                       result->table.columns()[c].id == "access.max_elevation_time" ||
-                       result->table.columns()[c].id == "access.min_range_time"))));
+        fit_table_columns();
+        for (std::size_t c = 0; c < result->table.columns().size(); ++c) {
+            const auto &id = result->table.columns()[c].id;
+            table->setColumnHidden(static_cast<int>(c), false);
+            if (column_widths.contains(id))
+                table->setColumnWidth(static_cast<int>(c), column_widths.at(id));
+            if (id == sort_field)
+                table->sortByColumn(static_cast<int>(c), sort_order);
+        }
+        for (const auto row : selected_rows) {
+            const auto index = table_proxy->mapFromSource(model->index(row, 0));
+            if (index.isValid())
+                table->selectionModel()->select(index, QItemSelectionModel::Select |
+                                                           QItemSelectionModel::Rows);
+        }
+        if (!new_calculation) {
+            if (current_row >= 0) {
+                const auto &columns = result->table.columns();
+                const auto field = std::ranges::find(columns, current_field, &results::Column::id);
+                const int column =
+                    field == columns.end() ? 0 : static_cast<int>(field - columns.begin());
+                table->selectionModel()->setCurrentIndex(
+                    table_proxy->mapFromSource(model->index(current_row, column)),
+                    QItemSelectionModel::NoUpdate);
+            }
+            table->verticalScrollBar()->setValue(scroll);
+            table->horizontalScrollBar()->setValue(horizontal_scroll);
+        }
         result_status();
-        prepare_plot(!new_calculation);
+        if (update_plot)
+            prepare_plot(!new_calculation);
         if (new_calculation && result->coverage_statistics)
             views->setCurrentIndex(result->definition.query.kind == ReportKind::coverage_grid ? 2
                                                                                               : 1);
@@ -2109,6 +2288,14 @@ struct ReportDialog::Impl {
             return;
         const auto &r = *model->result;
         const bool stale = !result_is_current();
+        bool editable = false;
+        try {
+            const auto current = definition();
+            editable = !stale && !job.valid() && !waiting && !export_job.valid() &&
+                       current.id == r.definition.id && current.query == r.definition.query;
+        } catch (const std::exception &) {
+        }
+        choose_columns_action->setEnabled(editable);
         result_title->setText(text(r.definition.name));
         result_title->setToolTip(text(r.definition.name));
         result_label->setText(QStringLiteral("%1 行%2")
@@ -2119,6 +2306,8 @@ struct ReportDialog::Impl {
                                            : QStringLiteral(" · 与当前场景一致")));
     }
     void set_busy(bool value) {
+        choose_columns_action->setEnabled(!value && model->result && result_is_current() &&
+                                          !changed);
         settings->setEnabled(!value);
         library->setEnabled(!value);
         generate->setEnabled(!value);
@@ -2175,14 +2364,24 @@ struct ReportDialog::Impl {
                     self.progress->setRange(0, static_cast<int>(self.expected));
                     self.progress->setValue(0);
                     self.status->setText(QStringLiteral("正在生成报告…"));
+                    auto retained = self.result_analysis;
+                    if (retained && (retained->data().data_lock() != context->data.data_lock() ||
+                                     retained->data().frames() != context->data.frames() ||
+                                     analysis_reuse_key(*retained->snapshot().project) !=
+                                         analysis_reuse_key(context->project)))
+                        retained.reset();
                     self.job = std::async(std::launch::async, [snapshot = std::move(*context), d,
+                                                               retained = std::move(retained),
                                                                cancel = self.cancellation,
                                                                count = self.completed]() mutable {
                         if (cancel->load())
                             throw runtime::AnalysisCancelled{};
-                        const auto captured_project =
-                            orbitforge::Project::from_data(std::move(snapshot.project));
-                        auto analysis = captured_project.prepare(snapshot.data);
+                        auto analysis =
+                            retained
+                                ? std::move(*retained)
+                                : runtime::prepare(
+                                      application::ProjectDocument{std::move(snapshot.project)},
+                                      std::move(snapshot.data), std::move(snapshot.sessions));
                         auto result = analysis.report(
                             d, [cancel] { return cancel->load(); },
                             [count](std::size_t current, std::size_t) { count->store(current); });
@@ -2227,8 +2426,16 @@ struct ReportDialog::Impl {
             save(reports);
             project.reports = std::move(reports);
             draft = d;
-            if (as_copy)
+            if (model->result && result_is_current() &&
+                model->result->definition.query == d.query &&
+                model->result->definition.format == d.format) {
+                // Naming a matching result does not invalidate its sampled data or chart.
+                auto presentation = std::make_shared<runtime::ReportResult>(*model->result);
+                presentation->definition = d;
+                publish(std::move(presentation), false, false);
+            } else if (as_copy) {
                 changed = true;
+            }
             fill_library();
             remove->setEnabled(true);
             update_template->setEnabled(true);
@@ -2307,7 +2514,8 @@ struct ReportDialog::Impl {
         return true;
     }
     void prepare_plot(bool preserve_view) {
-        const auto &r = *model->result;
+        const auto plot_result = complete_plot_result(*model->result, retained_column_specs);
+        const auto &r = *plot_result;
         const auto previous_object = plot_object->id();
         const QSignalBlocker objects_guard(plot_object);
         curve_choices.clear();
@@ -2316,13 +2524,29 @@ struct ReportDialog::Impl {
         const auto &columns = r.table.columns();
         const auto id_column = std::ranges::find(columns, "object.id", &results::Column::id);
         const auto name_column = std::ranges::find(columns, "object.name", &results::Column::id);
-        const bool sampled =
+        bool sampled =
             report_is_sampled(r.definition.query.kind) &&
             !report_is_interval(r.definition.query.kind) &&
             r.definition.query.kind != ReportKind::orbital_events && id_column != columns.end() &&
             name_column != columns.end() &&
             std::ranges::find(columns, "time.epoch", &results::Column::id) != columns.end() &&
             !r.table.rows().empty();
+        QString unavailable;
+        if (sampled) {
+            // A column-only table can be valid without UTC coverage. Keep it usable
+            // and require an explicit time-scale choice before drawing UTC labels.
+            const auto time_column = static_cast<std::size_t>(
+                std::ranges::find(columns, "time.epoch", &results::Column::id) - columns.begin());
+            try {
+                (void)r.cell_text(0, time_column);
+                (void)r.cell_text(r.table.rows().size() - 1, time_column);
+            } catch (const std::exception &error) {
+                sampled = false;
+                unavailable =
+                    QStringLiteral("曲线时间标签不可用：%1。请检查时间数据或选择 TAI / TT。")
+                        .arg(QString::fromUtf8(error.what()));
+            }
+        }
         if (sampled) {
             for (std::size_t c = 0; c < r.table.columns().size(); ++c) {
                 bool numeric = false;
@@ -2332,10 +2556,14 @@ struct ReportDialog::Impl {
                     continue;
                 const auto &column = r.table.columns()[c];
                 const auto suffix = r.column_unit(c);
+                const auto spec = std::ranges::find(r.definition.format.columns, column.id,
+                                                    &ReportColumnSpec::field);
+                const auto title = spec != r.definition.format.columns.end() && !spec->title.empty()
+                                       ? text(spec->title)
+                                       : localized(text(column.title));
                 curve_choices.push_back(
                     {c, text(column.id),
-                     localized(text(column.title)) +
-                         (suffix.empty() ? QString{} : " (" + text(suffix) + ")"),
+                     title + (suffix.empty() ? QString{} : " (" + text(suffix) + ")"),
                      text(suffix)});
             }
             // A compact legend remains legible for up to twelve objects. Larger scopes keep
@@ -2387,12 +2615,13 @@ struct ReportDialog::Impl {
             curve_ids << (field == curve_choices.end() ? curve_choices.front().id : field->id);
         }
         curve_preferences[r.definition.query.kind] = curve_ids;
-        plot->set_result(model->result, selected_curves(), plot_object->id(), preserve_view);
+        plot->set_result(plot_result, selected_curves(), plot_object->id(), preserve_view);
         update_curve_button();
         views->setTabEnabled(1, sampled && !curve_choices.empty());
+        views->setTabToolTip(1, unavailable);
         choose_curve_action->setVisible(views->isTabEnabled(1));
         choose_curve_action->setEnabled(views->isTabEnabled(1));
-        views->setTabVisible(1, views->isTabEnabled(1));
+        views->setTabVisible(1, views->isTabEnabled(1) || !unavailable.isEmpty());
         if (!views->isTabEnabled(views->currentIndex()))
             views->setCurrentIndex(0);
         select_view();

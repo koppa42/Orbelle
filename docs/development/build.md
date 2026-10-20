@@ -234,6 +234,8 @@ python tools/validation/run_graphics_smoke.py --executable out/build/desktop-gra
 
 每次运行选择新的输出目录。脚本需要真实 Windows 桌面和 Vulkan GPU，会启动图形窗口；不是 offscreen 测试。默认分别运行 100%、150%、200% 的 Qt 缩放，启用 Khronos 同步验证，记录窗口重建、实际呈现、共享设备/场景、独立相机以及交换链图像检查，最后测试缺少 shader 和不可用 Vulkan 驱动的明确失败路径。驱动发现覆盖仅作用于失败测试子进程；实际 DPR 还受显示器系统缩放影响。
 
+正常工作台检查还覆盖属性草稿、应用／取消、报告失效、协方差及任务机动的保存重开。完整交互流程的程序内时限为90秒，图形脚本和便携包验证的进程时限为120秒，为失败后的窗口释放和诊断写入留出时间。该时限用于发现挂起，不是交互性能或数值积分速度的验收门槛。
+
 构建后 shader、EOP 样例与离线地球影像等资源复制到可执行文件旁的 `resources/`。运行脚本只为子进程配置依赖 DLL、Qt platform plugin 和 validation layer；开发路径不等于独立安装包。工作台默认使用带离线影像的 Rocky 地球。渲染模块与 Qt 工作台的边界、后台编译屏障和退出次序见[集成约定](../architecture/graphics.md)。
 
 日常打开图形工作台可执行 `pwsh tools/dev/run-desktop.ps1`。启动器为子进程设置固定依赖和 PROJ/GDAL 数据路径，不改变调用者的环境；它会等待窗口关闭。使用 `-Executable`、`-DependencyPrefix` 可覆盖开发路径，附加程序参数通过 `-DesktopArguments` 传入。

@@ -3,6 +3,7 @@
 #include "form_kit.hpp"
 #include "hpop_settings.hpp"
 #include "mission_editor.hpp"
+#include "project_update.hpp"
 #include "quantity_editor.hpp"
 #include "responsive_layout.hpp"
 #include "track_style_editor.hpp"
@@ -437,6 +438,17 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     message_->hide();
     layout->addWidget(message_);
     auto *buttons = new QHBoxLayout;
+    auto *reset = new QPushButton(QStringLiteral("重置"));
+    reset_orbit_ = reset;
+    reset->setObjectName("resetOrbit");
+    reset->setToolTip(QStringLiteral("恢复已应用的轨道参数"));
+    connect(reset, &QPushButton::clicked, this, [this] {
+        if (!orbit_busy_ && !model_busy_) {
+            set_input(bound_input_);
+            show_result({});
+        }
+    });
+    buttons->addWidget(reset);
     buttons->addStretch();
     apply_ = new QPushButton(QStringLiteral("应用"));
     apply_->setToolTip(QStringLiteral("应用轨道参数，重新计算并更新场景"));
@@ -448,6 +460,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     buttons->addWidget(cancel_);
     auto *close = new QPushButton(QStringLiteral("关闭"));
     close->setAutoDefault(false);
+    close->setToolTip(QStringLiteral("关闭页面；未应用输入保留到本次场景结束"));
     connect(close, &QPushButton::clicked, this, [this] {
         if (close_requested)
             close_requested();
@@ -494,6 +507,12 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         stack->addWidget(error);
         // Same footer as the orbit and 3D pages: Close, then the page's single Apply.
         auto *buttons = new QHBoxLayout;
+        auto *reset = new QPushButton(QStringLiteral("重置"));
+        reset->setObjectName("resetDisplay");
+        reset->setToolTip(QStringLiteral("恢复已应用的轨迹与二维显示设置"));
+        display_buttons_.push_back(reset);
+        connect(reset, &QPushButton::clicked, this, [this] { set_display(bound_display_); });
+        buttons->addWidget(reset);
         buttons->addStretch();
         auto *close = new QPushButton(QStringLiteral("关闭"));
         close->setAutoDefault(false);
@@ -662,6 +681,15 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     model_message_->setTextFormat(Qt::PlainText);
     appearance_layout->addWidget(model_message_);
     auto *appearance_buttons = new QHBoxLayout;
+    auto *reset_model = new QPushButton(QStringLiteral("重置"));
+    reset_model->setObjectName("resetAppearance");
+    display_buttons_.push_back(reset_model);
+    connect(reset_model, &QPushButton::clicked, this, [this] {
+        set_appearance(applied_model_kind_, applied_model_path_, applied_model_diameter_km_);
+        track_3d_->setChecked(bound_display_.track_3d);
+        show_appearance_result({});
+    });
+    appearance_buttons->addWidget(reset_model);
     appearance_buttons->addStretch();
     auto *close_appearance = new QPushButton(QStringLiteral("关闭"));
     close_appearance->setAutoDefault(false);
@@ -698,8 +726,12 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     connect(apply_model_, &QPushButton::clicked, this, &OrbitEditor::apply_appearance_page);
     navigation->setCurrentItem(navigation->topLevelItem(0)->child(0));
     set_input(input);
+    set_display({});
+    set_appearance(0, {}, 1000);
 }
 void OrbitEditor::set_input(const OrbitInput &input) {
+    bound_input_ = input;
+    remembered_display_.reset();
     const QSignalBlocker state_block(state_mode_), frame_block(reference_frame_),
         propagator_block(propagator_);
     body_ = input.initial.origin;
@@ -734,10 +766,59 @@ void OrbitEditor::set_input(const OrbitInput &input) {
     state_pages_->setCurrentIndex(state_mode_index_);
     update_state_labels();
     update_tle_preview();
+    remember_state(input.initial);
+}
+void OrbitEditor::accept_input(const OrbitInput &input) {
+    bound_input_ = input;
+    if (propagator_kind_ != OrbitPropagator::sgp4)
+        remember_state(input.initial);
+}
+void OrbitEditor::set_analysis_interval(core::Epoch first, core::Epoch last) {
+    bound_input_.first = first;
+    bound_input_.last = last;
+    first_->set_epoch(first);
+    last_->set_epoch(last);
+}
+bool OrbitEditor::has_unapplied_changes() const {
+    try {
+        return !same_orbit_input(read_input(), bound_input_) ||
+               (!create_mode_ &&
+                (read_display() != bound_display_ ||
+                 model_kind_->currentIndex() != applied_model_kind_ ||
+                 model_path_->text() != applied_model_path_ ||
+                 model_diameter_->value(Unit::kilometre) != applied_model_diameter_km_));
+    } catch (const std::exception &) {
+        // An incomplete value is still a draft worth preserving.
+        return true;
+    }
+}
+OrbitEditor::StateDisplay OrbitEditor::state_display() const {
+    StateDisplay signature{epoch_->epoch(), body_, input_frame_, state_mode_index_,
+                           uses_hpop()
+                               ? hpop_.gravity_mu
+                               : core::central_body(body_).mu.metres_cubed_per_second_squared};
+    if (state_mode_index_ == 1) {
+        for (std::size_t k = 0; k < 6; ++k)
+            signature.values[k] = elements_[k]->value(element_units[k]);
+    } else {
+        for (std::size_t k = 0; k < 3; ++k) {
+            signature.values[k] = position_[k]->value(Unit::metre);
+            signature.values[k + 3] = velocity_[k]->value(Unit::metres_per_second);
+        }
+    }
+    return signature;
+}
+void OrbitEditor::remember_state(const core::CartesianState &state) const {
+    remembered_display_ = state_display();
+    remembered_state_ = state;
 }
 core::CartesianState OrbitEditor::read_state() const {
     if (propagator_kind_ == OrbitPropagator::sgp4)
         return manual_state_;
+    // Displaying elements, changing units or switching frames must not round-trip
+    // an unchanged physical state into a new orbit on Apply.
+    if (remembered_display_ && *remembered_display_ == state_display())
+        return remembered_state_;
     if (state_mode_index_ == 1) {
         if (propagator_kind_ == OrbitPropagator::j4_secular)
             return runtime::j4_mean_ellipse_state(
@@ -824,6 +905,7 @@ void OrbitEditor::set_state_mode(int mode) {
         const QSignalBlocker block(state_mode_);
         state_mode_->setCurrentIndex(mode);
         state_pages_->setCurrentIndex(mode);
+        remember_state(state);
         show_result(QStringLiteral("已转换状态表示，点击应用后更新对象。"));
     } catch (const std::exception &exception) {
         const QSignalBlocker block(state_mode_);
@@ -840,12 +922,13 @@ void OrbitEditor::set_reference_frame(core::FrameId frame) {
     try {
         if (frame != core::FrameId::gcrf && frame != core::FrameId::itrf)
             throw std::invalid_argument("Unsupported initial-state reference frame");
-        const auto state = in_frame(read_state(), frame);
-        write_cartesian(state);
+        const auto state = read_state();
+        write_cartesian(in_frame(state, frame));
         input_frame_ = frame;
         state_mode_index_ = 0;
         state_mode_->setCurrentIndex(0);
         state_pages_->setCurrentIndex(0);
+        remember_state(state);
         show_result({});
     } catch (const std::exception &error) {
         show_result(QString::fromUtf8(error.what()), true);
@@ -887,6 +970,15 @@ void OrbitEditor::set_propagator(OrbitPropagator propagator) {
         }
         if (state_mode_index_ == 1 && propagator != OrbitPropagator::sgp4)
             write_elements(state);
+        if (propagator != OrbitPropagator::sgp4) {
+            try {
+                remember_state(state);
+            } catch (const std::exception &) {
+                // Returning from TLE input may restore an unfinished manual draft.
+                // Keep it editable; normal submission still validates every field.
+                remembered_display_.reset();
+            }
+        }
         update_state_labels();
         show_result(propagator == OrbitPropagator::sgp4
                         ? QStringLiteral("使用独立的 TLE 输入；应用后更新轨道。")
@@ -1032,6 +1124,7 @@ void OrbitEditor::open_propagator_details() {
                     hpop_initialized_ || uses_hpop() || hpop_ != core::HpopOptions{};
                 if (state_mode_index_ == 1)
                     write_elements(state);
+                remember_state(state);
                 update_state_labels();
             }
         } catch (const std::exception &error) {
@@ -1040,12 +1133,21 @@ void OrbitEditor::open_propagator_details() {
         return;
     }
     if (propagator_kind_ == OrbitPropagator::hpop) {
-        if (edit_hpop_settings(
-                hpop_, this,
-                gravity_models ? gravity_models() : std::vector<runtime::CatalogGravity>{},
-                ephemerides ? ephemerides() : std::vector<runtime::CatalogEphemeris>{},
-                manage_ephemerides, data_catalog, &covariance_))
-            update_state_labels();
+        try {
+            const auto state = read_state();
+            if (edit_hpop_settings(
+                    hpop_, this,
+                    gravity_models ? gravity_models() : std::vector<runtime::CatalogGravity>{},
+                    ephemerides ? ephemerides() : std::vector<runtime::CatalogEphemeris>{},
+                    manage_ephemerides, data_catalog, &covariance_)) {
+                if (state_mode_index_ == 1)
+                    write_elements(state);
+                remember_state(state);
+                update_state_labels();
+            }
+        } catch (const std::exception &error) {
+            show_result(QString::fromUtf8(error.what()), true);
+        }
         return;
     }
     try {
@@ -1107,10 +1209,12 @@ void OrbitEditor::open_propagator_details() {
     }
 }
 void OrbitEditor::set_create_mode(bool create) {
+    const bool changed = create_mode_ != create;
     create_mode_ = create;
     object_->setReadOnly(!create);
     apply_->setText(create ? QStringLiteral("插入卫星") : QStringLiteral("应用"));
-    navigation_->setCurrentItem(navigation_->topLevelItem(0)->child(0));
+    if (changed)
+        navigation_->setCurrentItem(navigation_->topLevelItem(0)->child(0));
     compact_navigation_->setEnabled(!create);
     page_tabs_->setEnabled(!create);
     for (int i = 0; i < navigation_->topLevelItemCount(); ++i)
@@ -1127,31 +1231,36 @@ void OrbitEditor::submit() {
     if (!apply_->isEnabled())
         return;
     try {
-        OrbitInput input;
-        input.object_id = object_->text().trimmed().toStdString();
-        input.initial = read_state();
-        input.propagator = propagator_kind_;
-        input.hpop = hpop_;
-        input.covariance = covariance_;
-        if (propagator_kind_ != OrbitPropagator::hpop)
-            input.covariance.enabled = false;
-        input.mission = mission_;
-        if (propagator_kind_ == OrbitPropagator::sgp4) {
-            input.tle = read_tle();
-            const auto parsed = core::parse_tle(input.tle);
-            if (!time_)
-                throw std::invalid_argument("TLE 历元需要已确认的 UTC 数据。");
-            (void)time_->from_utc(parsed.epoch_utc);
-        }
-        input.input_frame = input_frame_;
-        input.first = first_->epoch();
-        input.last = last_->epoch();
-        input.step_seconds = static_cast<int>(step_->value(Unit::second));
         if (apply)
-            apply(std::move(input));
+            apply(read_input());
     } catch (const std::exception &error) {
         show_result(QString::fromUtf8(error.what()), true);
     }
+}
+OrbitInput OrbitEditor::read_input() const {
+    OrbitInput input = bound_input_;
+    input.object_id = object_->text().trimmed().toStdString();
+    input.initial = read_state();
+    input.propagator = propagator_kind_;
+    input.hpop = hpop_;
+    input.covariance = covariance_;
+    if (propagator_kind_ != OrbitPropagator::hpop)
+        input.covariance.enabled = false;
+    input.mission = mission_;
+    if (propagator_kind_ == OrbitPropagator::sgp4) {
+        input.tle = read_tle();
+        const auto parsed = core::parse_tle(input.tle);
+        if (!time_)
+            throw std::invalid_argument("TLE 历元需要已确认的 UTC 数据。");
+        (void)time_->from_utc(parsed.epoch_utc);
+    } else if (bound_input_.propagator == OrbitPropagator::sgp4) {
+        input.tle = {};
+    }
+    input.input_frame = input_frame_;
+    input.first = first_->epoch();
+    input.last = last_->epoch();
+    input.step_seconds = static_cast<int>(step_->value(Unit::second));
+    return input;
 }
 void OrbitEditor::set_busy(bool busy) {
     orbit_busy_ = busy;
@@ -1167,36 +1276,36 @@ void OrbitEditor::show_result(const QString &message, bool error) {
     message_->setVisible(!message.isEmpty());
 }
 void OrbitEditor::configure_appearance(int kind, const QString &path, double diameter_km) {
-    set_appearance(kind, path, diameter_km);
-    // Explicit configuration always reaches the workbench, even when unchanged.
-    applied_model_kind_ = -1;
-    apply_appearance_page();
+    model_kind_->setCurrentIndex(kind);
+    model_path_->setText(path);
+    model_diameter_->set_value(diameter_km, Unit::kilometre);
+    apply_appearance_page(true);
 }
 void OrbitEditor::set_appearance(int kind, const QString &path, double diameter_km) {
     model_kind_->setCurrentIndex(kind);
     model_path_->setText(path);
     model_diameter_->set_value(diameter_km, Unit::kilometre);
+    accept_appearance(kind, path, diameter_km);
+}
+void OrbitEditor::accept_appearance(int kind, const QString &path, double diameter_km) {
     applied_model_kind_ = kind;
     applied_model_path_ = path;
     applied_model_diameter_km_ = diameter_km;
 }
 // Applies the 3D page: the track switch through the display settings, and the model only
 // when it changed, so an unchanged appearance does not rebuild the model.
-void OrbitEditor::apply_appearance_page() {
+void OrbitEditor::apply_appearance_page(bool force) {
     if (track_3d_->isChecked() != applied_track_3d_)
         submit_display();
     try {
         const int kind = model_kind_->currentIndex();
         const auto path = model_path_->text();
         const double diameter = model_diameter_->value(Unit::kilometre);
-        if (kind == applied_model_kind_ && path == applied_model_path_ &&
+        if (!force && kind == applied_model_kind_ && path == applied_model_path_ &&
             diameter == applied_model_diameter_km_)
             return;
         if (appearance)
             appearance(kind, path, diameter);
-        applied_model_kind_ = kind;
-        applied_model_path_ = path;
-        applied_model_diameter_km_ = diameter;
     } catch (const std::exception &error) {
         show_appearance_result(QString::fromUtf8(error.what()), true);
     }
@@ -1211,6 +1320,7 @@ void OrbitEditor::refresh_enabled() {
     for (auto *button : display_buttons_)
         button->setEnabled(!create_mode_ && !orbit_busy_ && !model_busy_);
     const bool idle = !orbit_busy_ && !model_busy_;
+    reset_orbit_->setEnabled(idle);
     object_->setEnabled(idle);
     fields_->setEnabled(idle);
     apply_->setEnabled(idle);
@@ -1230,17 +1340,23 @@ void OrbitEditor::set_display(const DisplaySettings &settings) {
     track_2d_->setChecked(settings.track_2d);
     label_2d_->setChecked(settings.labels_2d);
     track_3d_->setChecked(settings.track_3d);
+    accept_display(settings);
+}
+void OrbitEditor::accept_display(const DisplaySettings &settings) {
+    bound_display_ = settings;
     applied_track_3d_ = settings.track_3d;
+}
+DisplaySettings OrbitEditor::read_display() const {
+    DisplaySettings settings{track_extent_->currentIndex(), past_->value(Unit::minute),
+                             future_->value(Unit::minute),  track_2d_->isChecked(),
+                             label_2d_->isChecked(),        track_3d_->isChecked()};
+    track_style_->write_settings(settings);
+    return settings;
 }
 void OrbitEditor::submit_display() {
     try {
         if (display) {
-            DisplaySettings settings{track_extent_->currentIndex(), past_->value(Unit::minute),
-                                     future_->value(Unit::minute),  track_2d_->isChecked(),
-                                     label_2d_->isChecked(),        track_3d_->isChecked()};
-            track_style_->write_settings(settings);
-            display(settings);
-            applied_track_3d_ = settings.track_3d;
+            display(read_display());
         }
         for (auto *error : display_messages_)
             error->hide();

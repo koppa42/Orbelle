@@ -17,6 +17,14 @@ class SensorEditor final : public QDialog {
     void set_sensor(application::ProjectSensor sensor, const application::Project &project,
                     bool creating);
     [[nodiscard]] application::ProjectSensor sensor() const;
+    [[nodiscard]] bool has_unapplied_changes() const;
+    [[nodiscard]] const std::string &bound_object_id() const { return original_.object_id; }
+    void accept_sensor(const application::ProjectSensor &sensor);
+    void update_project(const application::Project &project);
+    void sync_name(const std::string &name);
+    [[nodiscard]] const std::string &bound_parent_id() const {
+        return original_.parent_satellite_id;
+    }
     std::function<void(application::ProjectSensor)> apply;
 
   private:

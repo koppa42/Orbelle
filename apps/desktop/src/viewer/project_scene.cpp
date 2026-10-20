@@ -1,4 +1,5 @@
 #include "project_scene.hpp"
+#include "project_update.hpp"
 #include "satellite_model.hpp"
 #include <algorithm>
 #include <limits>
@@ -18,7 +19,9 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
     const std::map<std::string, std::shared_ptr<const core::GravityModel>> &gravity,
     const std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> &ephemerides,
     const std::map<std::string, std::shared_ptr<const core::SpaceWeather>> &weather,
-    const std::map<std::string, std::shared_ptr<const core::OceanTideModel>> &ocean_tides) {
+    const std::map<std::string, std::shared_ptr<const core::OceanTideModel>> &ocean_tides,
+    const std::optional<application::Project> &previous_project,
+    std::shared_ptr<runtime::OrbitSessionCache> sessions) {
     application::validate_project(project);
     const auto [data_first, data_last] = application::calculation_data_interval(project);
     std::shared_ptr<const core::IEarthOrientationProvider> eop;
@@ -64,10 +67,23 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
     result->ephemerides = ephemerides;
     result->weather = weather;
     result->ocean_tides = ocean_tides;
+    result->sessions =
+        sessions ? std::move(sessions) : std::make_shared<runtime::OrbitSessionCache>();
+    std::vector<std::string> active_ids;
+    for (const auto &satellite : project.satellites)
+        active_ids.push_back(satellite.orbit.object_id);
+    result->sessions->retain_objects(active_ids);
     std::map<std::string, const application::Session *> existing_sessions;
     for (const auto &session : result->scenario.objects())
         existing_sessions.emplace(session.provenance().object_id, &session);
     std::vector<application::Session> updates;
+    std::map<std::string, const application::OrbitInput *> previous_inputs;
+    if (previous_project)
+        for (const auto &satellite : previous_project->satellites)
+            previous_inputs.emplace(satellite.orbit.object_id, &satellite.orbit);
+    const auto previous_data =
+        previous_project ? previous_project->data_lock() : application::DataLock{};
+    const auto current_data = project.data_lock();
     updates.reserve(project.satellites.size() + project.ground_stations.size());
     result->orbits.reserve(project.satellites.size());
     result->models.reserve(project.satellites.size());
@@ -98,34 +114,33 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
         const auto found = existing_sessions.find(satellite.orbit.object_id);
         const auto *existing = found == existing_sessions.end() ? nullptr : found->second;
         const bool retained = existing != nullptr;
-        // SGP4 epoch interpretation belongs to this calculation's confirmed time data.
-        const bool recompute = (edited_object && *edited_object == satellite.orbit.object_id) ||
-                               satellite.orbit.propagator == OrbitPropagator::sgp4 ||
-                               satellite.orbit.propagator == OrbitPropagator::hpop ||
-                               satellite.orbit.propagator == OrbitPropagator::mission;
+        const auto previous = previous_inputs.find(input.object_id);
+        const bool recompute =
+            !retained || previous == previous_inputs.end() ||
+            !can_reuse_orbit_session(*previous->second, previous_data, input, current_data);
         if (retained && recompute &&
             existing->provenance().input_revision == std::numeric_limits<std::uint64_t>::max())
             throw std::overflow_error("Object input revision exhausted");
         auto session =
             retained && !recompute
                 ? *existing
-                : make_orbit_session(satellite.orbit,
-                                     retained ? existing->provenance().input_revision + 1 : 1,
-                                     time.get(),
-                                     {frames, eop,
-                                      gravity.contains(satellite.orbit.hpop.gravity_model)
-                                          ? gravity.at(satellite.orbit.hpop.gravity_model)
-                                          : nullptr,
-                                      ephemerides.contains(satellite.orbit.hpop.ephemeris_model)
-                                          ? ephemerides.at(satellite.orbit.hpop.ephemeris_model)
-                                          : nullptr,
-                                      time,
-                                      weather.contains(input.hpop.drag.weather_model)
-                                          ? weather.at(input.hpop.drag.weather_model)
-                                          : nullptr,
-                                      ocean_tides.contains(input.hpop.ocean_tides.model)
-                                          ? ocean_tides.at(input.hpop.ocean_tides.model)
-                                          : nullptr});
+                : result->sessions->acquire(
+                      satellite.orbit, retained ? existing->provenance().input_revision + 1 : 1,
+                      time.get(),
+                      {frames, eop,
+                       gravity.contains(satellite.orbit.hpop.gravity_model)
+                           ? gravity.at(satellite.orbit.hpop.gravity_model)
+                           : nullptr,
+                       ephemerides.contains(satellite.orbit.hpop.ephemeris_model)
+                           ? ephemerides.at(satellite.orbit.hpop.ephemeris_model)
+                           : nullptr,
+                       time,
+                       weather.contains(input.hpop.drag.weather_model)
+                           ? weather.at(input.hpop.drag.weather_model)
+                           : nullptr,
+                       ocean_tides.contains(input.hpop.ocean_tides.model)
+                           ? ocean_tides.at(input.hpop.ocean_tides.model)
+                           : nullptr});
         auto orbit = prepare_orbit_scene(
             satellite.orbit, session, *frames, *eop, cancelled,
             display_cache_interval(satellite.orbit, satellite.display, project.current));
