@@ -110,6 +110,19 @@ if(ORBITFORGE_WITH_VSG)
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
     endif()
     if(BUILD_TESTING AND ORBITFORGE_WITH_ERFA AND ORBITFORGE_WITH_SPICE)
+        add_executable(orbitforge_project_update_tests tests/project_update_test.cpp
+            src/viewer/project_scene.cpp src/viewer/orbit_scene.cpp src/viewer/ground_map.cpp
+            src/viewer/satellite_model.cpp src/viewer/workbench_profile.cpp)
+        target_link_libraries(orbitforge_project_update_tests PRIVATE
+            OrbitForge::Runtime OrbitForge::Visualization Qt6::Widgets
+            vsgXchange::vsgXchange rocky::rocky GTest::gtest_main)
+        target_compile_definitions(orbitforge_project_update_tests PRIVATE
+            ORBITFORGE_TEST_EOP="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json")
+        orbitforge_warnings(orbitforge_project_update_tests)
+        orbitforge_copy_runtime_dlls(orbitforge_project_update_tests)
+        gtest_discover_tests(orbitforge_project_update_tests DISCOVERY_MODE PRE_TEST
+            DISCOVERY_TIMEOUT 30 TEST_PREFIX "desktop." PROPERTIES
+            RESOURCE_LOCK orbitforge_desktop_tests TIMEOUT 60)
         add_executable(orbitforge_orbit_scene_tests tests/orbit_scene_test.cpp src/viewer/orbit_scene.cpp)
         target_link_libraries(orbitforge_orbit_scene_tests PRIVATE
             OrbitForge::Runtime OrbitForge::Visualization GTest::gtest_main)

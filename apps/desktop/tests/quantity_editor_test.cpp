@@ -7,6 +7,7 @@
 #include "../src/viewer/mission_editor.hpp"
 #include "../src/viewer/object_selection.hpp"
 #include "../src/viewer/orbit_editor.hpp"
+#include "../src/viewer/project_update.hpp"
 #include "../src/viewer/quantity_editor.hpp"
 #include "../src/viewer/sensor_editor.hpp"
 #include "../src/viewer/workbench_style.hpp"
@@ -550,6 +551,51 @@ TEST_F(QuantityTest, OrbitSubmissionReadsMixedUnitsAsSIAndKeepsUnitPreferences) 
     text(step)->setText("0.751");
     editor.submit();
     EXPECT_FALSE(submitted);
+}
+TEST_F(QuantityTest, UneditedOrbitPreservesExactStateAcrossRepresentationsAndUnits) {
+    OrbitInput input;
+    input.propagator = OrbitPropagator::hpop;
+    input.initial.position_m = {7000000.123456789, 123.456789123, -987.654321987};
+    OrbitEditor editor(input);
+    std::optional<OrbitInput> submitted;
+    editor.apply = [&](OrbitInput result) { submitted = std::move(result); };
+    const auto submit_unchanged = [&] {
+        submitted.reset();
+        editor.submit();
+        ASSERT_TRUE(submitted);
+        EXPECT_TRUE(same_orbit_input(*submitted, input));
+    };
+    submit_unchanged();
+    field(editor, "semiMajorAxis").set_unit(Unit::metre);
+    submit_unchanged();
+    editor.set_state_mode(0);
+    submit_unchanged();
+    editor.set_state_mode(1);
+    submit_unchanged();
+    auto &axis = field(editor, "semiMajorAxis");
+    axis.set_value(axis.value(Unit::metre) + .001, Unit::metre);
+    editor.submit();
+    ASSERT_TRUE(submitted);
+    EXPECT_FALSE(same_state(submitted->initial, input.initial));
+}
+TEST_F(QuantityTest, ReturningFromTleKeepsIncompleteManualDraftEditable) {
+    OrbitEditor editor(OrbitInput{});
+    editor.set_state_mode(0);
+    auto &position = field(editor, "positionX");
+    text(position)->setText("unfinished");
+    editor.set_propagator(OrbitPropagator::sgp4);
+    editor.set_propagator(OrbitPropagator::two_body);
+    EXPECT_EQ(editor.findChild<QComboBox *>("orbitPropagator")->currentIndex(),
+              static_cast<int>(OrbitPropagator::two_body));
+    EXPECT_EQ(text(position)->text(), "unfinished");
+    std::optional<OrbitInput> submitted;
+    editor.apply = [&](OrbitInput value) { submitted = std::move(value); };
+    editor.submit();
+    EXPECT_FALSE(submitted);
+    position.set_value(7100000, Unit::metre);
+    editor.submit();
+    ASSERT_TRUE(submitted);
+    EXPECT_EQ(submitted->initial.position_m[0], 7100000);
 }
 TEST_F(QuantityTest, KeplerianSubmissionUsesRadiansWithoutDoubleConversion) {
     OrbitInput input;

@@ -50,6 +50,19 @@ class OrbitEditor final : public QWidget {
 
   private:
     void refresh_enabled();
+    struct StateDisplay {
+        core::Epoch epoch{0};
+        core::OriginId body = core::OriginId::earth;
+        core::FrameId frame = core::FrameId::gcrf;
+        int mode = 0;
+        double mu = 0;
+        std::array<double, 6> values{};
+        bool operator==(const StateDisplay &) const = default;
+    };
+    [[nodiscard]] StateDisplay state_display() const;
+    void remember_state(const core::CartesianState &state) const;
+    mutable std::optional<StateDisplay> remembered_display_;
+    mutable core::CartesianState remembered_state_ = OrbitInput{}.initial;
     core::CartesianState read_state() const;
     core::CartesianState in_frame(core::CartesianState state, core::FrameId frame) const;
     void write_cartesian(const core::CartesianState &state);
@@ -59,6 +72,7 @@ class OrbitEditor final : public QWidget {
     void update_tle_preview();
     std::shared_ptr<const core::ITimeProvider> time_;
     core::CartesianState manual_state_ = OrbitInput{}.initial;
+    OrbitInput bound_input_;
     QPlainTextEdit *tle_text_ = nullptr;
     QLabel *tle_preview_ = nullptr, *epoch_label_ = nullptr;
     core::OriginId body_ = core::OriginId::earth;

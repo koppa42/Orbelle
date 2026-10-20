@@ -29,5 +29,6 @@ struct PreparedProject {
     const std::map<std::string, std::shared_ptr<const core::GravityModel>> &gravity = {},
     const std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> &ephemerides = {},
     const std::map<std::string, std::shared_ptr<const core::SpaceWeather>> &weather = {},
-    const std::map<std::string, std::shared_ptr<const core::OceanTideModel>> &ocean_tides = {});
+    const std::map<std::string, std::shared_ptr<const core::OceanTideModel>> &ocean_tides = {},
+    const std::optional<application::Project> &previous_project = std::nullopt);
 } // namespace orbitforge::desktop

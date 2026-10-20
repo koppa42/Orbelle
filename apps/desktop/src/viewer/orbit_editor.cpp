@@ -700,6 +700,8 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     set_input(input);
 }
 void OrbitEditor::set_input(const OrbitInput &input) {
+    bound_input_ = input;
+    remembered_display_.reset();
     const QSignalBlocker state_block(state_mode_), frame_block(reference_frame_),
         propagator_block(propagator_);
     body_ = input.initial.origin;
@@ -734,10 +736,35 @@ void OrbitEditor::set_input(const OrbitInput &input) {
     state_pages_->setCurrentIndex(state_mode_index_);
     update_state_labels();
     update_tle_preview();
+    remember_state(input.initial);
+}
+OrbitEditor::StateDisplay OrbitEditor::state_display() const {
+    StateDisplay signature{epoch_->epoch(), body_, input_frame_, state_mode_index_,
+                           uses_hpop()
+                               ? hpop_.gravity_mu
+                               : core::central_body(body_).mu.metres_cubed_per_second_squared};
+    if (state_mode_index_ == 1) {
+        for (std::size_t k = 0; k < 6; ++k)
+            signature.values[k] = elements_[k]->value(element_units[k]);
+    } else {
+        for (std::size_t k = 0; k < 3; ++k) {
+            signature.values[k] = position_[k]->value(Unit::metre);
+            signature.values[k + 3] = velocity_[k]->value(Unit::metres_per_second);
+        }
+    }
+    return signature;
+}
+void OrbitEditor::remember_state(const core::CartesianState &state) const {
+    remembered_display_ = state_display();
+    remembered_state_ = state;
 }
 core::CartesianState OrbitEditor::read_state() const {
     if (propagator_kind_ == OrbitPropagator::sgp4)
         return manual_state_;
+    // Displaying elements, changing units or switching frames must not round-trip
+    // an unchanged physical state into a new orbit on Apply.
+    if (remembered_display_ && *remembered_display_ == state_display())
+        return remembered_state_;
     if (state_mode_index_ == 1) {
         if (propagator_kind_ == OrbitPropagator::j4_secular)
             return runtime::j4_mean_ellipse_state(
@@ -824,6 +851,7 @@ void OrbitEditor::set_state_mode(int mode) {
         const QSignalBlocker block(state_mode_);
         state_mode_->setCurrentIndex(mode);
         state_pages_->setCurrentIndex(mode);
+        remember_state(state);
         show_result(QStringLiteral("已转换状态表示，点击应用后更新对象。"));
     } catch (const std::exception &exception) {
         const QSignalBlocker block(state_mode_);
@@ -840,12 +868,13 @@ void OrbitEditor::set_reference_frame(core::FrameId frame) {
     try {
         if (frame != core::FrameId::gcrf && frame != core::FrameId::itrf)
             throw std::invalid_argument("Unsupported initial-state reference frame");
-        const auto state = in_frame(read_state(), frame);
-        write_cartesian(state);
+        const auto state = read_state();
+        write_cartesian(in_frame(state, frame));
         input_frame_ = frame;
         state_mode_index_ = 0;
         state_mode_->setCurrentIndex(0);
         state_pages_->setCurrentIndex(0);
+        remember_state(state);
         show_result({});
     } catch (const std::exception &error) {
         show_result(QString::fromUtf8(error.what()), true);
@@ -887,6 +916,15 @@ void OrbitEditor::set_propagator(OrbitPropagator propagator) {
         }
         if (state_mode_index_ == 1 && propagator != OrbitPropagator::sgp4)
             write_elements(state);
+        if (propagator != OrbitPropagator::sgp4) {
+            try {
+                remember_state(state);
+            } catch (const std::exception &) {
+                // Returning from TLE input may restore an unfinished manual draft.
+                // Keep it editable; normal submission still validates every field.
+                remembered_display_.reset();
+            }
+        }
         update_state_labels();
         show_result(propagator == OrbitPropagator::sgp4
                         ? QStringLiteral("使用独立的 TLE 输入；应用后更新轨道。")
@@ -1032,6 +1070,7 @@ void OrbitEditor::open_propagator_details() {
                     hpop_initialized_ || uses_hpop() || hpop_ != core::HpopOptions{};
                 if (state_mode_index_ == 1)
                     write_elements(state);
+                remember_state(state);
                 update_state_labels();
             }
         } catch (const std::exception &error) {
@@ -1040,12 +1079,21 @@ void OrbitEditor::open_propagator_details() {
         return;
     }
     if (propagator_kind_ == OrbitPropagator::hpop) {
-        if (edit_hpop_settings(
-                hpop_, this,
-                gravity_models ? gravity_models() : std::vector<runtime::CatalogGravity>{},
-                ephemerides ? ephemerides() : std::vector<runtime::CatalogEphemeris>{},
-                manage_ephemerides, data_catalog, &covariance_))
-            update_state_labels();
+        try {
+            const auto state = read_state();
+            if (edit_hpop_settings(
+                    hpop_, this,
+                    gravity_models ? gravity_models() : std::vector<runtime::CatalogGravity>{},
+                    ephemerides ? ephemerides() : std::vector<runtime::CatalogEphemeris>{},
+                    manage_ephemerides, data_catalog, &covariance_)) {
+                if (state_mode_index_ == 1)
+                    write_elements(state);
+                remember_state(state);
+                update_state_labels();
+            }
+        } catch (const std::exception &error) {
+            show_result(QString::fromUtf8(error.what()), true);
+        }
         return;
     }
     try {
@@ -1127,7 +1175,7 @@ void OrbitEditor::submit() {
     if (!apply_->isEnabled())
         return;
     try {
-        OrbitInput input;
+        OrbitInput input = bound_input_;
         input.object_id = object_->text().trimmed().toStdString();
         input.initial = read_state();
         input.propagator = propagator_kind_;
@@ -1142,6 +1190,8 @@ void OrbitEditor::submit() {
             if (!time_)
                 throw std::invalid_argument("TLE 历元需要已确认的 UTC 数据。");
             (void)time_->from_utc(parsed.epoch_utc);
+        } else if (bound_input_.propagator == OrbitPropagator::sgp4) {
+            input.tle = {};
         }
         input.input_frame = input_frame_;
         input.first = first_->epoch();

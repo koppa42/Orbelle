@@ -10,6 +10,7 @@
 #include "orbit_editor.hpp"
 #include "orbit_scene.hpp"
 #include "project_scene.hpp"
+#include "project_update.hpp"
 #include "quantity_editor.hpp"
 #include "report_dialog.hpp"
 #include "report_plot.hpp"
@@ -1693,9 +1694,7 @@ class Workbench final : public WorkbenchWindow {
         project.earth_orientation = eop_->data_info();
         project.time_data = standalone_time_data_;
         project.analysis_record = analysis_record_;
-        for (const auto &ref : scenario_->data_lock().references())
-            if (ref.role.starts_with("gravity/") || ref.role.starts_with("ephemeris/"))
-                project.force_data.push_back(ref);
+        project.force_data = force_data_references(scenario_->data_lock());
         if (project.data_lock() != scenario_->data_lock())
             throw application::ProjectError(
                 "Scenario data lock does not match its active providers");
@@ -2099,19 +2098,48 @@ class Workbench final : public WorkbenchWindow {
         const auto weather_files = selected_weather(project);
         const auto ocean_files = selected_ocean_tides(project);
         const auto selected_lock = selected_data_lock(project, next_data->data_info());
-        if (!project.data_lock().references().empty() && project.data_lock() != selected_lock) {
+        const auto changes = calculation_data_changes(project.data_lock(), selected_lock, editing);
+        if (!changes.empty()) {
+            QStringList descriptions, details;
+            for (const auto &change : changes) {
+                const auto &ref = change.after ? *change.after : *change.before;
+                const auto role = QString::fromStdString(ref.role);
+                const auto label =
+                    ref.role == "earth-orientation"          ? QStringLiteral("地球定向参数")
+                    : ref.role == "utc-time"                 ? QStringLiteral("UTC / 闰秒")
+                    : ref.role.starts_with("gravity/")       ? QStringLiteral("重力场")
+                    : ref.role.starts_with("ephemeris/")     ? QStringLiteral("太阳系星历")
+                    : ref.role.starts_with("space-weather/") ? QStringLiteral("空间天气")
+                    : ref.role.starts_with("ocean-tides/")   ? QStringLiteral("海潮")
+                                                             : role;
+                const auto old_id = change.before
+                                        ? QString::fromStdString(change.before->snapshot_id)
+                                        : QStringLiteral("未使用");
+                const auto new_id = change.after ? QString::fromStdString(change.after->snapshot_id)
+                                                 : QStringLiteral("不再使用");
+                descriptions << QStringLiteral("• %1：%2 → %3").arg(label, old_id, new_id);
+                details << role;
+                for (const auto &value : {change.before, change.after})
+                    details << (value
+                                    ? QStringLiteral("%1 · %2\n内容：%3\n解释配置：%4")
+                                          .arg(
+                                              QString::fromStdString(value->snapshot_id),
+                                              QString::fromStdString(value->interpretation_version),
+                                              QString::fromStdString(value->content_sha256),
+                                              QString::fromStdString(value->configuration_sha256))
+                                    : QStringLiteral("未使用"));
+            }
             QMessageBox message(
-                QMessageBox::Question, QStringLiteral("场景数据已变化"),
-                QStringLiteral("当前数据或使用策略与此场景上次计算不一致。\n是否使用当前数据更新场"
-                               "景并继续？\n%1\n\n取消将保留当前场景，不打开或重新计算。")
-                    .arg(extrapolation_description(next_data->data_info(), data_first, data_last)),
+                QMessageBox::Question, QStringLiteral("采用更新后的计算数据？"),
+                QStringLiteral("以下已引用的数据或解释设置发生了变化：\n%1\n\n"
+                               "%2\n采用后将更新依赖这些数据的计算与显示。取消将保留原场景和结果。")
+                    .arg(descriptions.join('\n'),
+                         extrapolation_description(next_data->data_info(), data_first, data_last)),
                 QMessageBox::Yes | QMessageBox::Cancel, this);
             message.setObjectName("dataChangeDialog");
             message.button(QMessageBox::Yes)->setText(QStringLiteral("使用当前数据"));
             message.setDefaultButton(QMessageBox::Cancel);
-            message.setDetailedText(QStringLiteral("上次数据：%1\n当前数据：%2")
-                                        .arg(QString::fromStdString(project.data_lock().sha256()),
-                                             QString::fromStdString(selected_lock.sha256())));
+            message.setDetailedText(details.join('\n'));
             if (message.exec() != QMessageBox::Yes) {
                 last_project_outcome_ = "cancelled";
                 return false;
@@ -2166,59 +2194,55 @@ class Workbench final : public WorkbenchWindow {
         // completes while the confirmation dialog is open.
         std::vector<EopCatalog::Provider> installed_data{next_data};
         const auto retained = editing ? scenario_ : std::nullopt;
+        const auto previous_project =
+            editing ? std::optional{project_snapshot(project_path_)} : std::nullopt;
         const auto calculation_time = time_for(next_data->data_info().time_data);
         project_candidate_ = std::async(
             std::launch::async,
             [this, project = std::move(project),
              source = std::filesystem::path(pending_project_path_.toStdWString()), installed_data,
-             retained, edited_object, calculation_time, gravity_files, ephemeris_files,
-             weather_files, ocean_files, cancel = project_cancellation_]() mutable {
-                std::map<std::string, std::shared_ptr<const core::GravityModel>> gravity;
-                std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> ephemerides;
-                std::map<std::string, std::shared_ptr<const core::SpaceWeather>> weather;
-                std::map<std::string, std::shared_ptr<const core::OceanTideModel>> ocean_tides;
-                for (const auto &file : ocean_files) {
-                    auto model =
-                        runtime::load_ocean_tides(file.file, file.info.source_url, [cancel] {
-                            if (*cancel)
-                                throw OrbitCancelled{};
-                        });
-                    if (model->info().sha256 != file.info.sha256)
-                        throw std::runtime_error("Ocean tide content changed after selection");
-                    ocean_tides.emplace(file.selection, std::move(model));
-                }
-                for (const auto &file : weather_files) {
-                    auto model =
-                        runtime::load_space_weather(file.file, file.info.source_url, [cancel] {
-                            if (*cancel)
-                                throw OrbitCancelled{};
-                        });
-                    if (model->info().sha256 != file.info.sha256)
-                        throw std::runtime_error("Space weather content changed after selection");
-                    weather.emplace(file.selection, std::move(model));
-                }
-                for (const auto &file : ephemeris_files) {
+             retained, previous_project, edited_object, calculation_time, gravity_files,
+             ephemeris_files, weather_files, ocean_files, retained_gravity = gravity_,
+             retained_ephemerides = ephemerides_, retained_weather = weather_,
+             retained_ocean_tides = ocean_tides_, cancel = project_cancellation_]() mutable {
+                const auto checkpoint = [cancel] {
                     if (*cancel)
                         throw OrbitCancelled{};
-                    auto model = runtime::make_third_body_ephemeris(runtime::load_spice_snapshot(
-                        file.manifest,
-                        file.manifest.parent_path().parent_path().parent_path() / "runtime"));
-                    if (model->data_info().content_sha256 != file.info.content_sha256)
-                        throw std::runtime_error("Ephemeris file content changed after selection");
-                    ephemerides.emplace(file.selection, std::move(model));
-                }
-                for (const auto &file : gravity_files) {
-                    auto model = runtime::load_gravity(file.file, file.info.source_url, [cancel] {
-                        if (*cancel)
-                            throw OrbitCancelled{};
-                    });
-                    if (model->info().sha256 != file.info.sha256)
-                        throw std::runtime_error("Gravity file content changed after selection");
-                    gravity.emplace(file.selection, std::move(model));
-                }
+                };
+                const auto info = [](const auto &model) -> const auto & { return model.info(); };
+                const auto gravity = prepare_resources(
+                    gravity_files, retained_gravity, runtime::gravity_reference, info,
+                    [&](const auto &file) {
+                        return runtime::load_gravity(file.file, file.info.source_url, checkpoint);
+                    },
+                    checkpoint);
+                const auto ocean_tides = prepare_resources(
+                    ocean_files, retained_ocean_tides, runtime::ocean_tide_reference, info,
+                    [&](const auto &file) {
+                        return runtime::load_ocean_tides(file.file, file.info.source_url,
+                                                         checkpoint);
+                    },
+                    checkpoint);
+                const auto weather = prepare_resources(
+                    weather_files, retained_weather, runtime::space_weather_reference, info,
+                    [&](const auto &file) {
+                        return runtime::load_space_weather(file.file, file.info.source_url,
+                                                           checkpoint);
+                    },
+                    checkpoint);
+                const auto ephemerides = prepare_resources(
+                    ephemeris_files, retained_ephemerides, runtime::ephemeris_reference,
+                    [](const auto &model) -> const auto & { return model.data_info(); },
+                    [&](const auto &file) {
+                        return runtime::make_third_body_ephemeris(runtime::load_spice_snapshot(
+                            file.manifest,
+                            file.manifest.parent_path().parent_path().parent_path() / "runtime"));
+                    },
+                    checkpoint);
                 return prepare_project_scene(std::move(project), source, frames_, installed_data,
                                              *cancel, retained, edited_object, calculation_time,
-                                             gravity, ephemerides, weather, ocean_tides);
+                                             gravity, ephemerides, weather, ocean_tides,
+                                             previous_project);
             });
         update_actions();
         statusBar()->showMessage(editing ? QStringLiteral("正在更新场景并准备轨迹…")
@@ -3337,6 +3361,12 @@ class Workbench final : public WorkbenchWindow {
         else if (object_id_exists(input.object_id)) {
             last_orbit_outcome_ = "rejected";
             editor_->show_result(QStringLiteral("对象 ID 已存在，请使用其他名称。"), true);
+            return;
+        }
+        if (editor_target_ &&
+            same_orbit_input(input, satellites_.at(*editor_target_).orbit->input)) {
+            last_orbit_outcome_ = "unchanged";
+            editor_->show_result(QStringLiteral("没有需要应用的更改。"));
             return;
         }
         auto data_first = input.first;
@@ -5035,6 +5065,7 @@ class Workbench final : public WorkbenchWindow {
                 slot->window->destroy();
             }
             require(viewer_->windows().empty(), "Views remained after destroying both windows");
+            input.initial.velocity_mps[0] += 1;
             editor_->set_input(input);
             editor_->submit();
             ++orbit_smoke_stage_;
@@ -7096,9 +7127,18 @@ class Workbench final : public WorkbenchWindow {
                 break;
             const auto *table = report_dialog_->findChild<QTableView *>("reportTable");
             require(table->model()->rowCount() > 0, "Report generation did not produce a table");
-            require(table->isVisible() && table->width() > 250 && table->height() > 200,
-                    "Generated report is not visible in its workspace pane");
             save_workbench_image("report-results.png");
+            // Native desktop scaling can reduce the logical window height. Verify
+            // usable data rows rather than an arbitrary total-height threshold.
+            require(table->isVisible() && table->width() > 250 && table->rowHeight(0) > 0 &&
+                        table->viewport()->height() >= 5 * table->rowHeight(0),
+                    qPrintable(QString("Generated report is not visible in its workspace pane: "
+                                       "visible=%1, table=%2x%3, panel=%4x%5")
+                                   .arg(table->isVisible())
+                                   .arg(table->width())
+                                   .arg(table->height())
+                                   .arg(report_dialog_->width())
+                                   .arg(report_dialog_->height())));
             QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, true);
             QTimer::singleShot(0, this, [this, require] {
                 auto *chooser = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
@@ -7708,6 +7748,106 @@ class Workbench final : public WorkbenchWindow {
             if (++smoke_final_frames_ >= 4)
                 ++orbit_smoke_stage_;
             break;
+        case 158: {
+            application::Project project{
+                "HPOP Apply audit", scenario_->first(),
+                core::Epoch{scenario_->first().tai_nanoseconds() + 3600'000'000'000LL}};
+            for (int i = 0; i < 2; ++i) {
+                application::ProjectSatellite satellite;
+                satellite.orbit.object_id = "hpop-" + std::to_string(i);
+                satellite.orbit.first = project.first;
+                satellite.orbit.last = project.last;
+                satellite.orbit.initial.epoch = project.first;
+                satellite.orbit.propagator = OrbitPropagator::hpop;
+                project.satellites.push_back(satellite);
+            }
+            start_project(std::move(project), smoke_dir_ + "/apply-audit.orbitforge");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 159: {
+            require(last_project_outcome_ == "opened", "HPOP audit scene did not open");
+            QFile fixture(smoke_dir_ + "/apply-gravity.gfc");
+            require(fixture.open(QIODevice::WriteOnly), "Cannot write gravity audit fixture");
+            fixture.write("product_type gravity_field\nmodelname ApplyAudit\n"
+                          "earth_gravity_constant 3.986004415e14\nradius 6378136.3\n"
+                          "max_degree 2\ntide_system tide_free\nend_of_head\n"
+                          "gfc 0 0 1 0\ngfc 2 0 -0.000484165371736 0\n");
+            fixture.close();
+            const auto supplied = qEnvironmentVariable("ORBITFORGE_APPLY_GRAVITY_FILE");
+            const auto source = supplied.isEmpty() ? fixture.fileName() : supplied;
+            const auto installed = eop_catalog_->data().install_gravity(
+                std::filesystem::path(source.toStdWString()), "apply-audit");
+            set_selection(0);
+            open_properties();
+            auto changed = satellites_[0].orbit->input;
+            changed.hpop.gravity_model = "apply-audit";
+            changed.hpop.gravity_mu = installed.info.mu;
+            changed.hpop.gravity_degree = std::min(21, installed.info.degree);
+            changed.hpop.gravity_order =
+                std::min(changed.hpop.gravity_degree, installed.info.order);
+            editor_->set_input(changed);
+            // A dependency explicitly added by Apply must not need a second consent.
+            QTimer::singleShot(0, [] {
+                if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+                    box->reject();
+            });
+            smoke_apply_elapsed_.start();
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 160: {
+            require(last_orbit_outcome_ == "applied" && gravity_.contains("apply-audit"),
+                    "Explicit HPOP gravity selection prompted for data consent or failed");
+            require(satellites_[1].orbit->session.provenance().input_revision == 1,
+                    "Selecting one satellite's model recomputed the other satellite");
+            record("hpop-explicit-model-applies-without-data-conflict");
+            interaction_report_.append(QJsonObject{{"kind", "hpop-cold-apply-timing"},
+                                                   {"elapsed_ms", smoke_apply_elapsed_.elapsed()},
+                                                   {"passed", true}});
+            smoke_gravity_ = gravity_.at("apply-audit");
+            set_selection(0);
+            open_properties();
+            editor_->set_state_mode(0);
+            auto *velocity = editor_->findChild<QuantityEditor *>("velocityY");
+            velocity->set_value(velocity->value(Unit::metres_per_second) + 1,
+                                Unit::metres_per_second);
+            smoke_apply_elapsed_.restart();
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 161: {
+            require(last_orbit_outcome_ == "applied" &&
+                        gravity_.at("apply-audit") == smoke_gravity_,
+                    "Editing HPOP reloaded an unchanged gravity resource");
+            require(satellites_[0].orbit->session.provenance().input_revision == 3 &&
+                        satellites_[1].orbit->session.provenance().input_revision == 1,
+                    "HPOP update did not preserve the unaffected numerical session");
+            record("hpop-apply-reuses-resource-and-unaffected-session");
+            interaction_report_.append(QJsonObject{{"kind", "hpop-warm-apply-timing"},
+                                                   {"elapsed_ms", smoke_apply_elapsed_.elapsed()},
+                                                   {"passed", true}});
+            set_selection(0);
+            open_properties();
+            const auto revision = scenario_->revision();
+            const auto current = satellites_[0].orbit;
+            editor_->submit();
+            require(last_orbit_outcome_ == "unchanged" && !busy() &&
+                        scenario_->revision() == revision && satellites_[0].orbit == current,
+                    "Unchanged Apply started work or revised the scenario");
+            record("unchanged-apply-does-not-compute-or-confirm-data");
+            properties_dialog_->close();
+            save_project_to(smoke_dir_ + "/apply-audit.orbitforge");
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 162:
+            if (++smoke_final_frames_ >= 4)
+                ++orbit_smoke_stage_;
+            break;
         }
     }
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
@@ -8020,7 +8160,9 @@ class Workbench final : public WorkbenchWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 158;
+    static constexpr int orbit_smoke_complete = 163;
+    std::shared_ptr<const core::GravityModel> smoke_gravity_;
+    QElapsedTimer smoke_apply_elapsed_;
     double smoke_navigation_distance_ = 0;
     int smoke_final_frames_ = 0;
     std::vector<std::uint8_t> smoke_project_bytes_;
