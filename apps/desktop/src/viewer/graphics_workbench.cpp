@@ -95,6 +95,7 @@
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTableView>
+#include <QTableWidget>
 #include <QTimeZone>
 #include <QTimer>
 #include <QToolBar>
@@ -1125,7 +1126,9 @@ class Workbench final : public WorkbenchWindow {
             timer_.start(16);
             if (!smoke_dir_.isEmpty()) {
                 QDir().mkpath(smoke_dir_);
-                QTimer::singleShot(45000, this, [this] {
+                // The complete interaction audit includes modal editors, reports,
+                // persistence and two scientific propagation workflows.
+                QTimer::singleShot(90000, this, [this] {
                     if (!finished_) {
                         const auto *modal = QApplication::activeModalWidget();
                         fail(QStringLiteral("Rendering smoke test timed out at stage %1; modal: %2")
@@ -5209,6 +5212,27 @@ class Workbench final : public WorkbenchWindow {
             timer_.start();
             require(selected, "Report selection window did not accept the requested choice");
         };
+        const auto edit_covariance = [this, require](double variance, bool accept) {
+            bool visited = false;
+            QTimer::singleShot(0, this, [&] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                require(dialog && dialog->objectName() == "hpopSettingsDialog",
+                        "HPOP settings did not open");
+                visited = true;
+                dialog->findChild<QCheckBox *>("hpopComputeCovariance")->setChecked(true);
+                dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(2);
+                auto *matrix = dialog->findChild<QTableWidget *>("hpopCovarianceMatrix");
+                for (int i = 0; i < 6; ++i)
+                    matrix->item(i, i)->setText(i < 3 ? QString::number(variance) : "1");
+                dialog->findChild<QDialogButtonBox *>()
+                    ->button(accept ? QDialogButtonBox::Ok : QDialogButtonBox::Cancel)
+                    ->click();
+            });
+            timer_.stop();
+            editor_->open_propagator_details();
+            timer_.start();
+            require(visited, "Covariance editor was not visited");
+        };
         const auto record = [&](const char *kind) {
             interaction_report_.append(QJsonObject{
                 {"kind", kind},
@@ -8563,7 +8587,265 @@ class Workbench final : public WorkbenchWindow {
             ++orbit_smoke_stage_;
             break;
         }
-        case 178:
+        case 178: {
+            application::Project workflow{
+                "Covariance and mission audit", scenario_->first(),
+                core::Epoch{scenario_->first().tai_nanoseconds() + 600'000'000'000LL}};
+            application::ProjectSatellite satellite;
+            satellite.orbit.object_id = "workflow-audit";
+            satellite.orbit.first = workflow.first;
+            satellite.orbit.last = workflow.last;
+            satellite.orbit.initial.epoch = workflow.first;
+            satellite.orbit.propagator = OrbitPropagator::hpop;
+            workflow.satellites.push_back(satellite);
+            start_project(std::move(workflow), smoke_dir_ + "/specialist-workflow.orbitforge");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 179:
+            require(last_project_outcome_ == "opened", "Specialist workflow did not open");
+            set_selection(0);
+            open_properties();
+            edit_covariance(10000, true);
+            require(editor_->has_unapplied_changes() && !orbit_->input.covariance.enabled,
+                    "Saving covariance settings applied them without Apply");
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        case 180:
+            require(last_orbit_outcome_ == "applied" && orbit_->input.covariance.enabled &&
+                        orbit_->input.covariance.state[0][0] == 10000 &&
+                        !editor_->has_unapplied_changes(),
+                    "Covariance Apply did not publish the accepted settings");
+            show_reports();
+            report_dialog_->select_object("workflow-audit",
+                                          application::ReportKind::state_covariance);
+            report_dialog_->findChild<QDoubleSpinBox *>("reportStep")->setValue(60);
+            report_dialog_->findChild<QPushButton *>("generateReport")->click();
+            ++orbit_smoke_stage_;
+            break;
+        case 181: {
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            const auto *model = report_dialog_->findChild<QTableView *>("reportTable")->model();
+            require(model->rowCount() == 11 &&
+                        model->index(0, report_column(model, "covariance.x.x"))
+                                .data(Qt::UserRole)
+                                .toDouble() == 10000,
+                    "Covariance report did not use the applied SI matrix");
+            save_workbench_image("covariance-applied-report.png");
+            open_properties();
+            edit_covariance(90000, false);
+            require(!editor_->has_unapplied_changes(),
+                    "Cancelling covariance settings modified the draft");
+            edit_covariance(40000, true);
+            smoke_cache_ = orbit_;
+            editor_->submit();
+            require(candidate_.valid(), "Covariance edit did not start a task");
+            editor_->cancel();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 182:
+            require(last_orbit_outcome_ == "cancelled" && orbit_ == smoke_cache_ &&
+                        editor_->has_unapplied_changes() &&
+                        report_dialog_->findChild<QPushButton *>("exportReportCsv")->isEnabled(),
+                    "Cancelled covariance Apply lost the draft or invalidated the old report");
+            record("covariance-settings-and-apply-cancel-preserve-published-state");
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        case 183: {
+            require(last_orbit_outcome_ == "applied" &&
+                        orbit_->input.covariance.state[0][0] == 40000,
+                    "Retrying covariance Apply did not publish the retained draft");
+            const auto *model = report_dialog_->findChild<QTableView *>("reportTable")->model();
+            require(model->index(0, report_column(model, "covariance.x.x"))
+                                .data(Qt::UserRole)
+                                .toDouble() == 10000 &&
+                        report_dialog_->findChild<QLabel *>("reportResultLabel")
+                            ->text()
+                            .contains(QStringLiteral("场景已变化")) &&
+                        !report_dialog_->findChild<QAction *>("reportChooseColumns")->isEnabled(),
+                    "Applied covariance failed to retain and mark the old report stale");
+            show_reports();
+            report_dialog_->findChild<QPushButton *>("generateReport")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 184: {
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            const auto *model = report_dialog_->findChild<QTableView *>("reportTable")->model();
+            require(model->rowCount() == 11 &&
+                        model->index(0, report_column(model, "covariance.x.x"))
+                                .data(Qt::UserRole)
+                                .toDouble() == 40000,
+                    "Regenerated covariance report reused stale settings");
+            record("covariance-apply-invalidates-report-and-regenerate-uses-new-matrix");
+            save_project_to(smoke_dir_ + "/covariance-workflow.orbitforge");
+            const auto restored =
+                application::load_project(std::filesystem::path(project_path_.toStdWString()));
+            require(restored.satellites[0].orbit.covariance == orbit_->input.covariance,
+                    "Covariance persistence changed applied settings");
+            start_project(restored, project_path_);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 185: {
+            require(last_project_outcome_ == "opened" && orbit_->input.covariance.enabled &&
+                        orbit_->input.covariance.state[0][0] == 40000,
+                    "Reopening the project lost covariance settings");
+            record("covariance-save-reopen-preserves-applied-configuration");
+            set_selection(0);
+            open_properties();
+            editor_->set_propagator(OrbitPropagator::mission);
+            bool configured = false;
+            QTimer::singleShot(0, this, [&] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                require(dialog && dialog->objectName() == "missionEditorDialog",
+                        "Mission editor did not open");
+                dialog->findChild<QComboBox *>("missionCoastModel")->setCurrentIndex(0);
+                dialog->findChild<QuantityEditor *>("missionCoastDuration")
+                    ->set_value(300, Unit::second);
+                dialog->findChild<QPushButton *>("missionAddImpulse")->click();
+                dialog->findChild<QLineEdit *>("missionSegmentName")->setText("Transfer burn");
+                dialog->findChild<QComboBox *>("missionManeuverFrame")->setCurrentIndex(0);
+                dialog->findChild<QuantityEditor *>("missionDeltaV1")
+                    ->set_value(10, Unit::metres_per_second);
+                dialog->findChild<QPushButton *>("missionAddCoast")->click();
+                dialog->findChild<QuantityEditor *>("missionCoastDuration")
+                    ->set_value(300, Unit::second);
+                configured = true;
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            });
+            timer_.stop();
+            editor_->open_propagator_details();
+            timer_.start();
+            require(configured && editor_->has_unapplied_changes() &&
+                        orbit_->input.propagator == OrbitPropagator::hpop,
+                    "Saving a mission plan applied it without Apply");
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 186: {
+            require(last_orbit_outcome_ == "applied" &&
+                        orbit_->input.propagator == OrbitPropagator::mission &&
+                        !orbit_->input.covariance.enabled,
+                    "Mission Apply retained unsupported active covariance");
+            const auto burns = orbit_->session.maneuvers(scenario_->first(), scenario_->last());
+            require(burns.size() == 1 && burns[0].name == "Transfer burn" &&
+                        burns[0].after.epoch.tai_nanoseconds() ==
+                            scenario_->first().tai_nanoseconds() + 300'000'000'000LL &&
+                        burns[0].delta_v_gcrf_mps == std::array<double, 3>{0, 10, 0},
+                    "Applied mission did not preserve the configured burn");
+            smoke_cache_ = orbit_;
+            show_reports();
+            report_dialog_->select_object("workflow-audit",
+                                          application::ReportKind::cartesian_state);
+            report_dialog_->findChild<QComboBox *>("reportFrame")->setCurrentIndex(0);
+            report_dialog_->findChild<QDoubleSpinBox *>("reportStep")->setValue(60);
+            report_dialog_->findChild<QPushButton *>("generateReport")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 187: {
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            const auto *model = report_dialog_->findChild<QTableView *>("reportTable")->model();
+            const auto burns = orbit_->session.maneuvers(scenario_->first(), scenario_->last());
+            require(model->rowCount() == 11, "Mission report has the wrong sampling interval");
+            for (int i = 0; i < 3; ++i) {
+                const auto position = std::array{"state.x", "state.y", "state.z"}[i];
+                const auto velocity = std::array{"state.vx", "state.vy", "state.vz"}[i];
+                require(
+                    model->index(5, report_column(model, position)).data(Qt::UserRole).toDouble() ==
+                            burns[0].after.position_m[i] &&
+                        model->index(5, report_column(model, velocity))
+                                .data(Qt::UserRole)
+                                .toDouble() == burns[0].after.velocity_mps[i],
+                    "Mission report at a burn did not use the exact post-burn state");
+            }
+            save_workbench_image("mission-applied-report.png");
+            record("mission-plan-apply-and-report-preserve-exact-burn-boundary");
+            open_properties();
+            QTimer::singleShot(0, this, [require] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                require(dialog && dialog->objectName() == "missionEditorDialog",
+                        "Mission editor did not reopen");
+                dialog->findChild<QListWidget *>("missionSegments")->setCurrentRow(1);
+                dialog->findChild<QLineEdit *>("missionSegmentName")->setText("Renamed burn");
+                dialog->findChild<QuantityEditor *>("missionDeltaV1")
+                    ->set_value(20, Unit::metres_per_second);
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            });
+            timer_.stop();
+            editor_->open_propagator_details();
+            timer_.start();
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 188: {
+            require(last_orbit_outcome_ == "applied" &&
+                        orbit_->session.maneuvers(scenario_->first(), scenario_->last())[0].name ==
+                            "Renamed burn" &&
+                        smoke_cache_->session.maneuvers(scenario_->first(), scenario_->last())[0]
+                                .name == "Transfer burn",
+                    "Editing a mission segment reused or mutated an old scientific session");
+            require(report_dialog_->findChild<QLabel *>("reportResultLabel")
+                        ->text()
+                        .contains(QStringLiteral("场景已变化")),
+                    "Mission Apply did not mark the old report stale");
+            save_project_to(smoke_dir_ + "/mission-workflow.orbitforge");
+            const auto restored =
+                application::load_project(std::filesystem::path(project_path_.toStdWString()));
+            require(restored.satellites[0].orbit.mission == orbit_->input.mission,
+                    "Mission persistence changed the sequence");
+            start_project(restored, project_path_);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 189:
+            require(last_project_outcome_ == "opened" &&
+                        orbit_->input.propagator == OrbitPropagator::mission &&
+                        orbit_->session.maneuvers(scenario_->first(), scenario_->last())[0].name ==
+                            "Renamed burn",
+                    "Reopening the project lost the applied mission");
+            record("mission-edit-preserves-old-session-and-save-reopen-keeps-new-plan");
+            set_selection(0);
+            show_reports();
+            report_dialog_->select_object("workflow-audit",
+                                          application::ReportKind::cartesian_state);
+            report_dialog_->findChild<QComboBox *>("reportFrame")->setCurrentIndex(0);
+            report_dialog_->findChild<QDoubleSpinBox *>("reportStep")->setValue(60);
+            report_dialog_->findChild<QPushButton *>("generateReport")->click();
+            ++orbit_smoke_stage_;
+            break;
+        case 190: {
+            if (!report_dialog_->findChild<QPushButton *>("generateReport")->isEnabled())
+                break;
+            const auto *model = report_dialog_->findChild<QTableView *>("reportTable")->model();
+            const auto burns = orbit_->session.maneuvers(scenario_->first(), scenario_->last());
+            const auto previous =
+                smoke_cache_->session.maneuvers(scenario_->first(), scenario_->last());
+            require(model->rowCount() == 11 && burns[0].delta_v_gcrf_mps[1] == 20 &&
+                        previous[0].delta_v_gcrf_mps[1] == 10 &&
+                        model->index(5, report_column(model, "state.vy"))
+                                .data(Qt::UserRole)
+                                .toDouble() == burns[0].after.velocity_mps[1],
+                    "Regenerating the reopened mission report reused the old burn");
+            record("mission-save-reopen-report-uses-updated-burn");
+            workspace_->close_page(report_dialog_);
+            seek_epoch(scenario_->first());
+            fit_views();
+            fit_pending_ = true;
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 191:
             if (++smoke_final_frames_ >= 4)
                 ++orbit_smoke_stage_;
             break;
@@ -8885,7 +9167,7 @@ class Workbench final : public WorkbenchWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 179;
+    static constexpr int orbit_smoke_complete = 192;
     std::shared_ptr<const core::GravityModel> smoke_gravity_;
     QElapsedTimer smoke_apply_elapsed_;
     double smoke_navigation_distance_ = 0;

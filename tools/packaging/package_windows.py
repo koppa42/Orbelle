@@ -250,7 +250,7 @@ def main():
         cwd.mkdir()
         smoke = reports / 'portable-smoke'
         command = [str(packaged_executable), '--portable-smoke', str(smoke)]
-        run = subprocess.run(command, cwd=cwd, env=environment, capture_output=True, timeout=90)
+        run = subprocess.run(command, cwd=cwd, env=environment, capture_output=True, timeout=120)
         (reports / 'portable-stdout.log').write_bytes(run.stdout)
         (reports / 'portable-stderr.log').write_bytes(run.stderr)
         run.check_returncode()

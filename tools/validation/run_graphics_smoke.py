@@ -62,7 +62,7 @@ def main() -> int:
         record = {"requested_scale": scale, "command": command}
         try:
             process = subprocess.run(command, env=environment, cwd=executable.parent,
-                                     capture_output=True, timeout=60, check=False)
+                                     capture_output=True, timeout=120, check=False)
             (run_dir / "stdout.log").write_bytes(process.stdout)
             (run_dir / "stderr.log").write_bytes(process.stderr)
             record["exit_code"] = process.returncode
