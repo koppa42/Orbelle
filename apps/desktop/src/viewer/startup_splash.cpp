@@ -60,6 +60,8 @@ void StartupSplash::drawContents(QPainter *painter) {
     painter->setPen(theme::color(theme::text_soft));
     painter->drawText(QRectF(100, 94, 420, 26), Qt::AlignLeft | Qt::AlignVCenter,
                       QStringLiteral("轨道仿真工作台"));
+    paint_sakura_blossom(*painter, QPointF(906, 48), 11, theme::color(theme::sakura, 200));
+    paint_sakura_blossom(*painter, QPointF(878, 34), 5, theme::color(theme::sakura, 120));
 
     // Ice-to-sakura hairline above the status message.
     QLinearGradient rule(48, 0, 368, 0);

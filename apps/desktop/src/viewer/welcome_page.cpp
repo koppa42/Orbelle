@@ -46,6 +46,21 @@ class WelcomeBackdrop final : public QWidget {
         floor.setColorAt(0, theme::color(theme::canvas, 0));
         floor.setColorAt(1, theme::color(theme::canvas, 190));
         painter.fillRect(rect(), floor);
+        // Echo the character's sakura hair ornament around the outer edge of the artwork.
+        // Keep the launcher's text column clear, including when it wraps on narrow pages.
+        if (!narrow) {
+            paint_sakura_blossom(painter, QPointF(width() - 48, 49), 12,
+                                 theme::color(theme::sakura, 175));
+            paint_sakura_blossom(painter, QPointF(width() - 88, 30), 6,
+                                 theme::color(theme::sakura, 105));
+            paint_sakura_blossom(painter, QPointF(width() - 30, 105), 5,
+                                 theme::color(theme::sakura, 115));
+            QLinearGradient rule(width() * 0.55, 16, width() - 28, 16);
+            rule.setColorAt(0, theme::color(theme::sakura, 0));
+            rule.setColorAt(1, theme::color(theme::sakura, 100));
+            painter.setPen(QPen(QBrush(rule), 0.8));
+            painter.drawLine(QPointF(width() * 0.55, 16), QPointF(width() - 28, 16));
+        }
     }
 
   private:
@@ -150,7 +165,22 @@ QWidget *make_welcome_page(QAction *create, QAction *open, QAction *example) {
     layout->setSpacing(12);
     auto *brand = new QLabel(QStringLiteral("ORBITFORGE"));
     brand->setObjectName("eyebrow");
-    layout->addWidget(brand);
+    auto *brand_row = new QHBoxLayout;
+    brand_row->setSpacing(9);
+    auto *blossom = new QLabel;
+    blossom->setAttribute(Qt::WA_TransparentForMouseEvents);
+    QPixmap emblem(QSize(22, 22) * page->devicePixelRatioF());
+    emblem.setDevicePixelRatio(page->devicePixelRatioF());
+    emblem.fill(Qt::transparent);
+    {
+        QPainter painter(&emblem);
+        paint_sakura_blossom(painter, QPointF(11, 11), 8, theme::color(theme::sakura));
+    }
+    blossom->setPixmap(emblem);
+    brand_row->addWidget(blossom);
+    brand_row->addWidget(brand);
+    brand_row->addStretch();
+    layout->addLayout(brand_row);
     auto *heading =
         new QLabel(QStringLiteral("下一站，<br><span style='color:%1'>你的轨道。</span>")
                        .arg(theme::color(theme::sakura).name()));

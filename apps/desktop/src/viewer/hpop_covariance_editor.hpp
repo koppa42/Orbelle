@@ -17,6 +17,7 @@ class HpopCovarianceEditor final : public QWidget {
 
   private:
     void refresh();
+    application::HpopCovarianceSettings initial_;
     QCheckBox *enabled_, *independent_, *consider_, *cross_enabled_;
     QComboBox *frame_, *velocity_;
     QSpinBox *degree_, *order_;

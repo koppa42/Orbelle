@@ -427,7 +427,7 @@ class Workbench final : public WorkbenchWindow {
                 menu_bar_->setObjectName("titleMenus");
                 menu_bar_->setNativeMenuBar(false);
                 title_layout->addWidget(menu_bar_, 0, Qt::AlignVCenter);
-                auto *drag_space = new QWidget(title_bar);
+                auto *drag_space = make_sakura_ribbon(title_bar);
                 drag_space->setMinimumWidth(48);
                 title_layout->addWidget(drag_space, 1);
                 auto *chip = new QFrame;
