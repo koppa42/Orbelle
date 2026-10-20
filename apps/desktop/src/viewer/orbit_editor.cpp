@@ -1,4 +1,5 @@
 #include "orbit_editor.hpp"
+#include "../ui_text.hpp"
 #include "epoch_editor.hpp"
 #include "form_kit.hpp"
 #include "hpop_settings.hpp"
@@ -83,21 +84,23 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     compact_layout->setContentsMargins(24, 12, 24, 0);
     compact_navigation_ = new QComboBox(compact_bar);
     compact_navigation_->setObjectName("propertyPageSelector");
-    compact_navigation_->setAccessibleName(QStringLiteral("属性页面"));
-    compact_navigation_->addItems({QStringLiteral("轨道"), QStringLiteral("轨迹显示"),
-                                   QStringLiteral("二维视图"), QStringLiteral("三维视图与模型")});
+    compact_navigation_->setAccessibleName(
+        ui::text("orbit_editor.compact_navigation.set_accessible_name"));
+    compact_navigation_->addItems({ui::text("orbit_editor.label"), ui::text("orbit_editor.label_2"),
+                                   ui::text("workspace.view_2d"),
+                                   ui::text("orbit_editor.label_3")});
     compact_layout->addWidget(compact_navigation_, 1);
     page_tabs_ = new QTabBar(compact_bar);
     page_tabs_->setObjectName("propertyPageTabs");
-    page_tabs_->setAccessibleName(QStringLiteral("属性页面"));
+    page_tabs_->setAccessibleName(ui::text("orbit_editor.compact_navigation.set_accessible_name"));
     page_tabs_->setDrawBase(false);
     page_tabs_->setExpanding(false);
     page_tabs_->setUsesScrollButtons(true);
     for (const auto &[label, tip] :
-         {std::pair{QStringLiteral("轨道"), QStringLiteral("轨道参数")},
-          std::pair{QStringLiteral("轨迹"), QStringLiteral("轨迹显示")},
-          std::pair{QStringLiteral("二维"), QStringLiteral("二维视图")},
-          std::pair{QStringLiteral("三维"), QStringLiteral("三维视图与模型")}})
+         {std::pair{ui::text("orbit_editor.label"), ui::text("orbit_editor.label_4")},
+          std::pair{ui::text("orbit_editor.label_5"), ui::text("orbit_editor.label_2")},
+          std::pair{ui::text("orbit_editor.label_6"), ui::text("workspace.view_2d")},
+          std::pair{ui::text("orbit_editor.label_7"), ui::text("orbit_editor.label_3")}})
         page_tabs_->setTabToolTip(page_tabs_->addTab(label), tip);
     compact_layout->addWidget(page_tabs_);
     compact_layout->addStretch();
@@ -132,11 +135,11 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         item->setIcon(0, workbench_icon(icons.at(static_cast<std::size_t>(index))));
         item->setData(0, Qt::UserRole, index);
     };
-    auto *basic = category(QStringLiteral("基本"));
-    page(basic, QStringLiteral("轨道"), 0);
-    page(basic, QStringLiteral("轨迹显示"), 1);
-    page(category(QStringLiteral("二维视图")), QStringLiteral("显示"), 2);
-    page(category(QStringLiteral("三维视图")), QStringLiteral("显示与模型"), 3);
+    auto *basic = category(ui::text("orbit_editor.basic"));
+    page(basic, ui::text("orbit_editor.label"), 0);
+    page(basic, ui::text("orbit_editor.label_2"), 1);
+    page(category(ui::text("workspace.view_2d")), ui::text("orbit_editor.label_8"), 2);
+    page(category(ui::text("workspace.view_3d")), ui::text("orbit_editor.label_9"), 3);
     auto *tabs = new QStackedWidget;
     // Hidden pages must not force the whole document to their preferred height.
     // The orbit/model fields already provide their own scroll areas.
@@ -176,7 +179,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     layout->setContentsMargins(theme::space::page);
     layout->setSpacing(12);
     auto *header = new QHBoxLayout;
-    auto *title = new QLabel(QStringLiteral("轨道参数"));
+    auto *title = new QLabel(ui::text("orbit_editor.label_4"));
     title->setObjectName("panelTitle");
     header->addWidget(title);
     auto *identity_row = new QWidget;
@@ -184,13 +187,13 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     auto *identity = new QHBoxLayout(identity_row);
     identity->setContentsMargins(0, 0, 0, 0);
     identity->setSpacing(10);
-    auto *identity_label = new QLabel(QStringLiteral("对象 ID"));
+    auto *identity_label = new QLabel(ui::text("orbit_editor.identity_label"));
     identity_label->setObjectName("muted");
     identity_label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
     identity->addWidget(identity_label);
     object_ = new QLineEdit;
     object_->setObjectName("objectId");
-    object_->setAccessibleName(QStringLiteral("卫星对象 ID"));
+    object_->setAccessibleName(ui::text("orbit_editor.object.set_accessible_name"));
     object_->setMaximumWidth(250);
     object_->setMinimumWidth(60);
     identity->addWidget(object_, 1);
@@ -198,7 +201,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     // Width-limited rows are centred by default once the header stacks vertically.
     header->addWidget(identity_row, 0, Qt::AlignLeft);
     header->addStretch();
-    auto *body = new QLabel(QStringLiteral("中心天体  /  地球"));
+    auto *body = new QLabel(ui::text("orbit_editor.body"));
     body->setObjectName("hint");
     header->addWidget(body);
     layout->addLayout(header);
@@ -217,11 +220,11 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     auto *settings_layout = new QVBoxLayout(settings);
     settings_layout->setContentsMargins(0, 0, 0, 0);
     settings_layout->setSpacing(0);
-    auto *propagation_group = new FormGroup(QStringLiteral("传播设置"));
-    auto *span_group = new FormGroup(QStringLiteral("所属场景时段"));
+    auto *propagation_group = new FormGroup(ui::text("orbit_editor.propagation_group"));
+    auto *span_group = new FormGroup(ui::text("orbit_editor.span_group"));
     settings_layout->addWidget(propagation_group);
     settings_layout->addWidget(span_group);
-    auto *state_group = new FormGroup(QStringLiteral("初始状态"));
+    auto *state_group = new FormGroup(ui::text("orbit_editor.state_group"));
     columns->addWidget(settings, 1, Qt::AlignTop);
     columns->addWidget(state_group, 1, Qt::AlignTop);
     auto *form = propagation_group->form();
@@ -232,21 +235,20 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     propagator_row->setSpacing(6);
     propagator_ = new QComboBox;
     propagator_->setObjectName("orbitPropagator");
-    propagator_->setAccessibleName(QStringLiteral("轨道传播器"));
+    propagator_->setAccessibleName(ui::text("orbit_editor.propagator.set_accessible_name"));
     propagator_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     propagator_->setMinimumContentsLength(8);
-    propagator_->addItems({QStringLiteral("二体 · Two Body"), QStringLiteral("J2 · 长期摄动"),
-                           QStringLiteral("J4 · 高阶长期摄动"), QStringLiteral("SGP4 · TLE"),
-                           QStringLiteral("HPOP · 数值传播"),
-                           QStringLiteral("任务序列 · 机动规划")});
+    propagator_->addItems({ui::text("orbit_editor.label_10"), ui::text("orbit_editor.label_11"),
+                           ui::text("orbit_editor.label_12"), ui::text("propagator.sgp4_tle"),
+                           ui::text("orbit_editor.label_13"), ui::text("orbit_editor.label_14")});
     propagator_row->addWidget(propagator_, 1);
-    auto *model_button = new QPushButton(QStringLiteral("模型…"));
+    auto *model_button = new QPushButton(ui::text("orbit_editor.model_button"));
     model_button_ = model_button;
     model_button->setObjectName("propagatorDetails");
-    model_button->setToolTip(QStringLiteral("查看传播模型与中心天体常数"));
+    model_button->setToolTip(ui::text("orbit_editor.model_button.set_tool_tip"));
     model_button->setAutoDefault(false);
     propagator_row->addWidget(model_button, 0, Qt::AlignRight);
-    form->addRow(QStringLiteral("传播器"), propagator_row);
+    form->addRow(ui::text("orbit_editor.form.add_row"), propagator_row);
     hpop_summary_ = new QLabel;
     hpop_summary_->setObjectName("hint");
     hpop_summary_->setWordWrap(true);
@@ -255,16 +257,18 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     connect(propagator_, &QComboBox::currentIndexChanged, this,
             [this](int index) { set_propagator(static_cast<OrbitPropagator>(index)); });
     epoch_ = new EpochEditor;
-    epoch_label_ = new QLabel(QStringLiteral("初始历元"));
+    epoch_label_ = new QLabel(ui::text("orbit_editor.label_15"));
     form->addRow(epoch_label_, epoch_);
     reference_frame_ = new QComboBox;
     reference_frame_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     reference_frame_->setMinimumContentsLength(8);
     reference_frame_->setObjectName("initialReferenceFrame");
-    reference_frame_->setAccessibleName(QStringLiteral("初始状态参考系"));
-    reference_frame_->addItems({QStringLiteral("GCRF · 地心惯性"), QStringLiteral("ITRF · 地固")});
-    reference_frame_->setToolTip(QStringLiteral("ITRF 使用位置 / 速度；轨道根数在 GCRF 下定义。"));
-    form->insertRow(1, QStringLiteral("参考系"), reference_frame_);
+    reference_frame_->setAccessibleName(
+        ui::text("orbit_editor.reference_frame.set_accessible_name"));
+    reference_frame_->addItems(
+        {ui::text("orbit_editor.label_16"), ui::text("orbit_editor.label_17")});
+    reference_frame_->setToolTip(ui::text("orbit_editor.reference_frame.set_tool_tip"));
+    form->insertRow(1, ui::text("orbit_editor.label_18"), reference_frame_);
     connect(reference_frame_, &QComboBox::currentIndexChanged, this, [this](int index) {
         if (propagator_kind_ == OrbitPropagator::sgp4)
             return;
@@ -279,8 +283,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     state_mode_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     state_mode_->setMinimumContentsLength(8);
     state_mode_->setObjectName("stateRepresentation");
-    state_mode_->addItems(
-        {QStringLiteral("位置 / 速度 · Cartesian"), QStringLiteral("经典轨道根数")});
+    state_mode_->addItems({ui::text("orbit_editor.label_19"), ui::text("orbit_editor.label_20")});
     state_form->addRow(state_mode_);
     state_pages_ = new StatePages;
     auto *cartesian_page = new QWidget;
@@ -305,17 +308,18 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
             cartesian_form->addRow(axis, fields[i]);
         }
     };
-    vector_row(QStringLiteral("位置"), Unit::kilometre, "position", position_);
-    vector_row(QStringLiteral("速度"), Unit::kilometres_per_second, "velocity", velocity_);
+    vector_row(ui::text("common.position"), Unit::kilometre, "position", position_);
+    vector_row(ui::text("orbit_editor.label_21"), Unit::kilometres_per_second, "velocity",
+               velocity_);
     auto *keplerian_page = new QWidget;
     auto *keplerian_form = new QFormLayout(keplerian_page);
     keplerian_form->setContentsMargins(0, 0, 0, 0);
     keplerian_form->setHorizontalSpacing(theme::space::md);
     keplerian_form->setVerticalSpacing(theme::space::row);
     keplerian_form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    const QStringList labels{QStringLiteral("半长轴 a"),     QStringLiteral("偏心率 e"),
-                             QStringLiteral("倾角 i"),       QStringLiteral("升交点赤经 Ω"),
-                             QStringLiteral("近地点幅角 ω"), QStringLiteral("真近点角 ν")};
+    const QStringList labels{ui::text("orbit_editor.label_22"), ui::text("orbit_editor.label_23"),
+                             ui::text("orbit_editor.label_24"), ui::text("orbit_editor.label_25"),
+                             ui::text("orbit_editor.label_26"), ui::text("orbit_editor.label_27")};
     const QStringList names{"semiMajorAxis", "eccentricity",        "inclination",
                             "raan",          "argumentOfPeriapsis", "trueAnomaly"};
     for (std::size_t i = 0; i < 6; ++i) {
@@ -339,27 +343,27 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         if (i == 5)
             anomaly_label_ = qobject_cast<QLabel *>(keplerian_form->labelForField(field));
     }
-    state_mode_->setToolTip(QStringLiteral("GCRF 瞬时根数；抛物线轨道使用位置 / 速度。"));
+    state_mode_->setToolTip(ui::text("orbit_editor.state_mode.set_tool_tip"));
     state_pages_->addWidget(keplerian_page);
     auto *tle_page = new QWidget;
     auto *tle_layout = new QVBoxLayout(tle_page);
     tle_layout->setContentsMargins(0, 0, 0, 0);
     tle_layout->setSpacing(12);
-    auto *tle_hint = new QLabel(QStringLiteral("粘贴一组两行轨道根数，可带卫星名称。"));
+    auto *tle_hint = new QLabel(ui::text("orbit_editor.tle_hint"));
     tle_hint->setObjectName("hint");
     tle_hint->setWordWrap(true);
     tle_layout->addWidget(tle_hint);
     tle_text_ = new QPlainTextEdit;
     tle_text_->setObjectName("tleInput");
-    tle_text_->setAccessibleName(QStringLiteral("TLE 两行轨道根数"));
-    tle_text_->setPlaceholderText("1 NNNNN…\n2 NNNNN…");
+    tle_text_->setAccessibleName(ui::text("orbit_editor.tle_text.set_accessible_name"));
+    tle_text_->setPlaceholderText(ui::utf8("orbit.tle_placeholder"));
     tle_text_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     tle_text_->setLineWrapMode(QPlainTextEdit::NoWrap);
     tle_text_->setMinimumHeight(92);
     tle_text_->setMaximumHeight(112);
     tle_text_->setStyleSheet("font-family: Consolas; font-size: 12px;");
     tle_layout->addWidget(tle_text_);
-    auto *import_tle = new QPushButton(QStringLiteral("导入 TLE 文件…"));
+    auto *import_tle = new QPushButton(ui::text("orbit_editor.import_tle"));
     import_tle->setObjectName("importTle");
     import_tle->setAutoDefault(false);
     tle_layout->addWidget(import_tle, 0, Qt::AlignLeft);
@@ -372,14 +376,13 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     tle_layout->addStretch();
     connect(tle_text_, &QPlainTextEdit::textChanged, this, &OrbitEditor::update_tle_preview);
     connect(import_tle, &QPushButton::clicked, this, [this] {
-        const auto path =
-            QFileDialog::getOpenFileName(this, QStringLiteral("导入卫星 TLE"), {},
-                                         QStringLiteral("TLE 文件 (*.tle *.txt);;所有文件 (*)"));
+        const auto path = QFileDialog::getOpenFileName(this, ui::text("orbit_editor.path"), {},
+                                                       ui::text("orbit_editor.path_2"));
         if (path.isEmpty())
             return;
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly) || file.size() > 4096) {
-            show_result(QStringLiteral("无法读取文件；请导入仅包含一组 TLE 的文本文件。"), true);
+            show_result(ui::text("orbit_editor.label_28"), true);
             return;
         }
         const auto previous = tle_text_->toPlainText();
@@ -408,13 +411,13 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     step_->setObjectName("displayStep");
     step_->set_range(1, 60, Unit::second);
     step_->set_quantum(1, Unit::second);
-    step_->set_label(QStringLiteral("轨道步长"));
+    step_->set_label(ui::text("orbit_editor.step.set_label"));
     step_->setMaximumWidth(QWIDGETSIZE_MAX);
-    form->addRow(QStringLiteral("轨道步长"), step_);
-    span_group->add_help(QStringLiteral("分析时段由所属场景统一管理，可在场景设置中修改。"));
-    time_row(QStringLiteral("起点"), first_);
-    time_row(QStringLiteral("终点"), last_);
-    first_->setToolTip(QStringLiteral("分析时段由所属 Scenario 统一管理"));
+    form->addRow(ui::text("orbit_editor.step.set_label"), step_);
+    span_group->add_help(ui::text("orbit_editor.span_group.add_help"));
+    time_row(ui::text("orbit_editor.label_29"), first_);
+    time_row(ui::text("orbit_editor.label_30"), last_);
+    first_->setToolTip(ui::text("orbit_editor.first.set_tool_tip"));
     last_->setToolTip(first_->toolTip());
     auto *parameters = new QScrollArea;
     parameters->setObjectName("orbitParametersScroll");
@@ -438,10 +441,10 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     message_->hide();
     layout->addWidget(message_);
     auto *buttons = new QHBoxLayout;
-    auto *reset = new QPushButton(QStringLiteral("重置"));
+    auto *reset = new QPushButton(ui::text("orbit_editor.reset"));
     reset_orbit_ = reset;
     reset->setObjectName("resetOrbit");
-    reset->setToolTip(QStringLiteral("恢复已应用的轨道参数"));
+    reset->setToolTip(ui::text("orbit_editor.reset.set_tool_tip"));
     connect(reset, &QPushButton::clicked, this, [this] {
         if (!orbit_busy_ && !model_busy_) {
             set_input(bound_input_);
@@ -450,17 +453,17 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     });
     buttons->addWidget(reset);
     buttons->addStretch();
-    apply_ = new QPushButton(QStringLiteral("应用"));
-    apply_->setToolTip(QStringLiteral("应用轨道参数，重新计算并更新场景"));
-    apply_->setAccessibleName(QStringLiteral("应用轨道"));
+    apply_ = new QPushButton(ui::text("common.apply"));
+    apply_->setToolTip(ui::text("orbit_editor.apply.set_tool_tip"));
+    apply_->setAccessibleName(ui::text("orbit_editor.apply.set_accessible_name"));
     apply_->setObjectName("applyOrbit");
-    cancel_ = new QPushButton(QStringLiteral("取消计算"));
+    cancel_ = new QPushButton(ui::text("orbit_editor.label_31"));
     cancel_->setEnabled(false);
     cancel_->hide();
     buttons->addWidget(cancel_);
-    auto *close = new QPushButton(QStringLiteral("关闭"));
+    auto *close = new QPushButton(ui::text("common.close"));
     close->setAutoDefault(false);
-    close->setToolTip(QStringLiteral("关闭页面；未应用输入保留到本次场景结束"));
+    close->setToolTip(ui::text("orbit_editor.close.set_tool_tip"));
     connect(close, &QPushButton::clicked, this, [this] {
         if (close_requested)
             close_requested();
@@ -489,10 +492,10 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         return stack;
     };
     const auto apply_display = [&](QVBoxLayout *stack) {
-        auto *apply = new QPushButton(QStringLiteral("应用"));
+        auto *apply = new QPushButton(ui::text("common.apply"));
         apply->setObjectName("applyDisplay");
-        apply->setToolTip(QStringLiteral("应用轨迹显示设置"));
-        apply->setAccessibleName(QStringLiteral("应用显示设置"));
+        apply->setToolTip(ui::text("orbit_editor.apply.set_tool_tip_2"));
+        apply->setAccessibleName(ui::text("orbit_editor.apply.set_accessible_name_2"));
         apply->setProperty("primary", true);
         display_buttons_.push_back(apply);
         connect(apply, &QPushButton::clicked, this, [this] { submit_display(); });
@@ -507,14 +510,14 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         stack->addWidget(error);
         // Same footer as the orbit and 3D pages: Close, then the page's single Apply.
         auto *buttons = new QHBoxLayout;
-        auto *reset = new QPushButton(QStringLiteral("重置"));
+        auto *reset = new QPushButton(ui::text("orbit_editor.reset"));
         reset->setObjectName("resetDisplay");
-        reset->setToolTip(QStringLiteral("恢复已应用的轨迹与二维显示设置"));
+        reset->setToolTip(ui::text("orbit_editor.reset.set_tool_tip_2"));
         display_buttons_.push_back(reset);
         connect(reset, &QPushButton::clicked, this, [this] { set_display(bound_display_); });
         buttons->addWidget(reset);
         buttons->addStretch();
-        auto *close = new QPushButton(QStringLiteral("关闭"));
+        auto *close = new QPushButton(ui::text("common.close"));
         close->setAutoDefault(false);
         connect(close, &QPushButton::clicked, this, [this] {
             if (close_requested)
@@ -524,21 +527,20 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         buttons->addWidget(apply);
         stack->addLayout(buttons);
     };
-    auto *common = display_page(QStringLiteral("轨迹显示"),
-                                QStringLiteral("当前卫星的二维与三维视图共用这些样式与显示范围。"));
-    auto *style_group = new FormGroup(QStringLiteral("线条样式"));
-    auto *extent_group = new FormGroup(QStringLiteral("显示范围"));
+    auto *common = display_page(ui::text("orbit_editor.label_2"), ui::text("orbit_editor.common"));
+    auto *style_group = new FormGroup(ui::text("orbit_editor.style_group"));
+    auto *extent_group = new FormGroup(ui::text("orbit_editor.extent_group"));
     auto *common_form = extent_group->form();
     track_extent_ = new QComboBox;
     track_extent_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     track_extent_->setMinimumContentsLength(8);
     track_extent_->setObjectName("trackExtent");
     track_extent_->setMaximumWidth(276);
-    track_extent_->addItems({QStringLiteral("一圈轨迹"), QStringLiteral("整个场景时段"),
-                             QStringLiteral("自定义前后时长")});
-    common_form->addRow(QStringLiteral("范围"), track_extent_);
-    track_extent_->setAccessibleName(QStringLiteral("显示范围"));
-    extent_group->add_help(QStringLiteral("同时用于二维与三维；非闭合轨道的一圈按一小时显示。"));
+    track_extent_->addItems({ui::text("orbit_editor.label_32"), ui::text("orbit_editor.label_33"),
+                             ui::text("orbit_editor.label_34")});
+    common_form->addRow(ui::text("orbit_editor.common_form.add_row"), track_extent_);
+    track_extent_->setAccessibleName(ui::text("orbit_editor.extent_group"));
+    extent_group->add_help(ui::text("orbit_editor.extent_group.add_help"));
     const auto duration = [&] {
         auto *field = new QuantityEditor(Unit::minute);
         field->set_range(0, 10080, Unit::minute);
@@ -549,11 +551,11 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     past_ = duration();
     future_ = duration();
     past_->setObjectName("pastDuration");
-    past_->set_label(QStringLiteral("当前时刻之前"));
+    past_->set_label(ui::text("orbit_editor.past.set_label"));
     future_->setObjectName("futureDuration");
-    future_->set_label(QStringLiteral("当前时刻之后"));
-    common_form->addRow(QStringLiteral("当前时刻之前"), past_);
-    common_form->addRow(QStringLiteral("当前时刻之后"), future_);
+    future_->set_label(ui::text("orbit_editor.future.set_label"));
+    common_form->addRow(ui::text("orbit_editor.past.set_label"), past_);
+    common_form->addRow(ui::text("orbit_editor.future.set_label"), future_);
     connect(track_extent_, &QComboBox::currentIndexChanged, this, [this, common_form](int index) {
         common_form->setRowVisible(past_, index == 2);
         common_form->setRowVisible(future_, index == 2);
@@ -580,12 +582,11 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     align_form_labels(range_fields);
     common->addWidget(range_scroll, 1);
     apply_display(common);
-    auto *map = display_page(QStringLiteral("二维视图设置"),
-                             QStringLiteral("设置当前卫星在地图中的轨迹与标注。"));
-    auto *map_options = new FormGroup(QStringLiteral("地图标注"));
+    auto *map = display_page(ui::text("orbit_editor.map"), ui::text("orbit_editor.map_2"));
+    auto *map_options = new FormGroup(ui::text("orbit_editor.map_options"));
     map_options->setMaximumWidth(480);
-    track_2d_ = new QCheckBox(QStringLiteral("显示地面轨迹"));
-    label_2d_ = new QCheckBox(QStringLiteral("显示对象名称"));
+    track_2d_ = new QCheckBox(ui::text("orbit_editor.map_options_2"));
+    label_2d_ = new QCheckBox(ui::text("orbit_editor.label_35"));
     for (auto *toggle : {track_2d_, label_2d_}) {
         toggle->setChecked(true);
         make_switch(toggle);
@@ -598,10 +599,10 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     auto *appearance_layout = new QVBoxLayout(appearance_tab);
     appearance_layout->setContentsMargins(theme::space::page);
     appearance_layout->setSpacing(12);
-    auto *appearance_title = new QLabel(QStringLiteral("三维视图设置"));
+    auto *appearance_title = new QLabel(ui::text("orbit_editor.appearance_title"));
     appearance_title->setObjectName("panelTitle");
     appearance_layout->addWidget(appearance_title);
-    auto *appearance_description = new QLabel(QStringLiteral("设置空间轨迹、卫星外观与示意尺寸。"));
+    auto *appearance_description = new QLabel(ui::text("orbit_editor.appearance_description"));
     appearance_description->setObjectName("dialogDescription");
     appearance_description->setWordWrap(true);
     appearance_layout->addWidget(appearance_description);
@@ -617,8 +618,8 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         appearance_content->addWidget(frame);
         return frame->form();
     };
-    auto *track_group = group(QStringLiteral("空间轨迹"));
-    track_3d_ = new QCheckBox(QStringLiteral("显示空间轨迹"));
+    auto *track_group = group(ui::text("orbit_editor.track_group"));
+    track_3d_ = new QCheckBox(ui::text("orbit_editor.track_group_2"));
     track_3d_->setChecked(true);
     make_switch(track_3d_);
     track_group->addRow(track_3d_);
@@ -629,7 +630,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     display_error->hide();
     display_messages_.push_back(display_error);
     track_group->addRow(display_error);
-    auto *model_group = group(QStringLiteral("卫星外观"));
+    auto *model_group = group(ui::text("orbit_editor.model_group"));
     model_fields_ = new QWidget;
     auto *form_model = new QFormLayout(model_fields_);
     form_model->setContentsMargins(0, 0, 0, 0);
@@ -641,24 +642,24 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     model_kind_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     model_kind_->setMinimumContentsLength(8);
     model_kind_->setMaximumWidth(320);
-    model_kind_->addItems({QStringLiteral("点标记（默认）"), QStringLiteral("内置卫星模型"),
-                           QStringLiteral("本地三维模型")});
-    form_model->addRow(QStringLiteral("显示方式"), model_kind_);
+    model_kind_->addItems({ui::text("orbit_editor.label_36"), ui::text("orbit_editor.label_37"),
+                           ui::text("orbit_editor.label_38")});
+    form_model->addRow(ui::text("orbit_editor.form_model.add_row"), model_kind_);
     model_path_ = new QLineEdit;
     model_path_->setMaximumWidth(440);
     model_path_->setPlaceholderText(QStringLiteral(".glb / .gltf / .vsgb / .vsgt"));
-    auto *browse = new QPushButton(QStringLiteral("选择模型文件…"));
-    form_model->addRow(QStringLiteral("模型文件"), model_path_);
+    auto *browse = new QPushButton(ui::text("orbit_editor.browse"));
+    form_model->addRow(ui::text("orbit_editor.form_model.add_row_2"), model_path_);
     form_model->addRow(QString{}, browse);
     model_diameter_ = new QuantityEditor(Unit::kilometre);
     model_diameter_->setObjectName("modelDiameter");
-    model_diameter_->set_label(QStringLiteral("示意显示直径"));
+    model_diameter_->set_label(ui::text("orbit_editor.model_diameter.set_label"));
     model_diameter_->set_range(0.001, 10000, Unit::kilometre);
     model_diameter_->set_single_step(1, Unit::kilometre);
     model_diameter_->set_value(1000, Unit::kilometre);
-    form_model->addRow(QStringLiteral("示意显示直径"), model_diameter_);
+    form_model->addRow(ui::text("orbit_editor.model_diameter.set_label"), model_diameter_);
     model_group->addRow(model_fields_);
-    model_diameter_->setToolTip(QStringLiteral("模型示意尺寸；朝向固定于 ITRF。"));
+    model_diameter_->setToolTip(ui::text("orbit_editor.model_diameter.set_tool_tip"));
     appearance_content->addStretch();
     auto *appearance_scroll = new QScrollArea;
     appearance_scroll->setWidgetResizable(true);
@@ -668,10 +669,10 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     responsive_form(form_model, 400);
     align_form_labels(appearance_fields);
     appearance_layout->addWidget(appearance_scroll, 1);
-    apply_model_ = new QPushButton(QStringLiteral("应用"));
+    apply_model_ = new QPushButton(ui::text("common.apply"));
     apply_model_->setObjectName("applyAppearance");
-    apply_model_->setToolTip(QStringLiteral("应用空间轨迹显示与卫星外观"));
-    apply_model_->setAccessibleName(QStringLiteral("应用三维视图设置"));
+    apply_model_->setToolTip(ui::text("orbit_editor.apply_model.set_tool_tip"));
+    apply_model_->setAccessibleName(ui::text("orbit_editor.apply_model.set_accessible_name"));
     apply_model_->setProperty("primary", true);
     appearance_layout->addWidget(divider());
     model_message_ = new QLabel;
@@ -681,7 +682,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     model_message_->setTextFormat(Qt::PlainText);
     appearance_layout->addWidget(model_message_);
     auto *appearance_buttons = new QHBoxLayout;
-    auto *reset_model = new QPushButton(QStringLiteral("重置"));
+    auto *reset_model = new QPushButton(ui::text("orbit_editor.reset"));
     reset_model->setObjectName("resetAppearance");
     display_buttons_.push_back(reset_model);
     connect(reset_model, &QPushButton::clicked, this, [this] {
@@ -691,7 +692,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     });
     appearance_buttons->addWidget(reset_model);
     appearance_buttons->addStretch();
-    auto *close_appearance = new QPushButton(QStringLiteral("关闭"));
+    auto *close_appearance = new QPushButton(ui::text("common.close"));
     close_appearance->setAutoDefault(false);
     connect(close_appearance, &QPushButton::clicked, this, [this] {
         if (close_requested)
@@ -701,7 +702,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     appearance_buttons->addWidget(apply_model_);
     appearance_layout->addLayout(appearance_buttons);
     connect(browse, &QPushButton::clicked, this, [this] {
-        const auto path = QFileDialog::getOpenFileName(this, QStringLiteral("选择卫星模型"), {},
+        const auto path = QFileDialog::getOpenFileName(this, ui::text("orbit_editor.path_3"), {},
                                                        "3D models (*.glb *.gltf *.vsgb *.vsgt)");
         if (!path.isEmpty()) {
             model_path_->setText(path);
@@ -849,7 +850,7 @@ core::CartesianState OrbitEditor::in_frame(core::CartesianState state, core::Fra
     if (state.frame == frame)
         return state;
     if (!transform_state)
-        throw std::runtime_error("参考系转换需要场景的地球定向数据。");
+        throw std::runtime_error(ui::utf8("orbit_editor.validation"));
     return transform_state(std::move(state), frame);
 }
 void OrbitEditor::write_cartesian(const core::CartesianState &state) {
@@ -906,7 +907,7 @@ void OrbitEditor::set_state_mode(int mode) {
         state_mode_->setCurrentIndex(mode);
         state_pages_->setCurrentIndex(mode);
         remember_state(state);
-        show_result(QStringLiteral("已转换状态表示，点击应用后更新对象。"));
+        show_result(ui::text("orbit_editor.label_39"));
     } catch (const std::exception &exception) {
         const QSignalBlocker block(state_mode_);
         state_mode_->setCurrentIndex(state_mode_index_);
@@ -980,15 +981,11 @@ void OrbitEditor::set_propagator(OrbitPropagator propagator) {
             }
         }
         update_state_labels();
-        show_result(propagator == OrbitPropagator::sgp4
-                        ? QStringLiteral("使用独立的 TLE 输入；应用后更新轨道。")
-                    : propagator == OrbitPropagator::two_body
-                        ? QStringLiteral("以当前椭圆定义二体初始状态。")
-                    : propagator == OrbitPropagator::hpop
-                        ? QStringLiteral("以当前状态作为瞬时初值；可在配置中调整引力与积分设置。")
-                    : propagator == OrbitPropagator::mission
-                        ? QStringLiteral("以当前状态作为任务起点；点击规划添加滑行段与脉冲机动。")
-                        : QStringLiteral("以当前椭圆定义平均根数，不含周期项转换。"));
+        show_result(propagator == OrbitPropagator::sgp4       ? ui::text("orbit_editor.label_40")
+                    : propagator == OrbitPropagator::two_body ? ui::text("orbit_editor.label_41")
+                    : propagator == OrbitPropagator::hpop     ? ui::text("orbit_editor.label_42")
+                    : propagator == OrbitPropagator::mission  ? ui::text("orbit_editor.label_43")
+                                                              : ui::text("orbit_editor.label_44"));
     } catch (const std::exception &error) {
         propagator_kind_ = previous;
         show_result(QString::fromUtf8(error.what()), true);
@@ -997,34 +994,38 @@ void OrbitEditor::set_propagator(OrbitPropagator propagator) {
 }
 void OrbitEditor::update_state_labels() {
     const bool hpop = propagator_kind_ == OrbitPropagator::hpop;
-    model_button_->setText(hpop ? QStringLiteral("配置…") : QStringLiteral("模型…"));
-    model_button_->setToolTip(hpop ? QStringLiteral("设置 HPOP 力模型与数值积分")
-                                   : QStringLiteral("查看传播模型与中心天体常数"));
+    model_button_->setText(hpop ? ui::text("orbit_editor.model_button.set_text")
+                                : ui::text("orbit_editor.model_button"));
+    model_button_->setToolTip(hpop ? ui::text("orbit_editor.model_button.set_tool_tip_2")
+                                   : ui::text("orbit_editor.model_button.set_tool_tip"));
     hpop_summary_->setVisible(hpop);
     hpop_summary_->setText(
         (hpop_.gravity_degree == 0
-             ? QStringLiteral("点质量")
+             ? ui::text("orbit_editor.hpop_summary.set_text")
              : QStringLiteral("%1 %2 × %3")
-                   .arg(hpop_.gravity_model.empty() ? QStringLiteral("EGM96 内置")
+                   .arg(hpop_.gravity_model.empty() ? ui::text("orbit_editor.label_45")
                                                     : QString::fromStdString(hpop_.gravity_model))
                    .arg(hpop_.gravity_degree)
                    .arg(hpop_.gravity_order)) +
         (hpop_.uses_third_bodies()
-             ? QStringLiteral(" + %1 个第三体").arg(hpop_.enabled_third_bodies().size())
+             ? ui::text("orbit_editor.label_46").arg(hpop_.enabled_third_bodies().size())
              : QString{}) +
-        (hpop_.srp.enabled ? QStringLiteral(" + 太阳辐射压") : QString{}) +
-        (hpop_.drag.enabled ? QStringLiteral(" + 大气阻力") : QString{}) +
-        (hpop_.integrator == core::HpopIntegrator::rkf78   ? QStringLiteral(" · RKF 7(8)")
-         : hpop_.integrator == core::HpopIntegrator::rkv89 ? QStringLiteral(" · RKV 8(9) Efficient")
+        (hpop_.srp.enabled ? ui::text("orbit_editor.label_47") : QString{}) +
+        (hpop_.drag.enabled ? ui::text("orbit_editor.label_48") : QString{}) +
+        (hpop_.integrator == core::HpopIntegrator::rkf78
+             ? QStringLiteral(" · ") + ui::text("integrator.rkf78")
+         : hpop_.integrator == core::HpopIntegrator::rkv89
+             ? QStringLiteral(" · ") + ui::text("integrator.rkv89")
          : hpop_.integrator == core::HpopIntegrator::bulirsch_stoer
-             ? QStringLiteral(" · Bulirsch–Stoer")
+             ? QStringLiteral(" · ") + ui::text("integrator.bulirsch_stoer")
          : hpop_.integrator == core::HpopIntegrator::gauss_jackson
-             ? QStringLiteral(" · Gauss–Jackson 12")
-             : QStringLiteral(" · RK4")) +
-        (hpop_.uses_fixed_step() ? QStringLiteral(" 固定步长") : QStringLiteral(" 相对误差")));
+             ? QStringLiteral(" · ") + ui::text("integrator.gauss_jackson")
+             : QStringLiteral(" · ") + ui::text("integrator.rk4")) +
+        (hpop_.uses_fixed_step() ? ui::text("orbit_editor.label_49")
+                                 : ui::text("orbit_editor.label_50")));
     if (propagator_kind_ == OrbitPropagator::mission) {
-        model_button_->setText(QStringLiteral("规划…"));
-        model_button_->setToolTip(QStringLiteral("编辑滑行与脉冲机动序列"));
+        model_button_->setText(ui::text("orbit_editor.model_button.set_text_2"));
+        model_button_->setToolTip(ui::text("orbit_editor.model_button.set_tool_tip_3"));
         hpop_summary_->setVisible(true);
         double total_delta_v = 0;
         for (const auto &segment : mission_.segments)
@@ -1032,9 +1033,9 @@ void OrbitEditor::update_state_labels() {
                 total_delta_v += std::hypot(segment.delta_v_mps[0], segment.delta_v_mps[1],
                                             segment.delta_v_mps[2]);
         hpop_summary_->setText(
-            QStringLiteral("%1 段 · %2 滑行 · Δv %3 m/s")
+            ui::text("orbit_editor.hpop_summary.set_text_2")
                 .arg(mission_.segments.size())
-                .arg(uses_hpop() ? QStringLiteral("HPOP") : QStringLiteral("二体"))
+                .arg(uses_hpop() ? QStringLiteral("HPOP") : ui::text("orbit_editor.label_51"))
                 .arg(total_delta_v, 0, 'g', 8));
     }
     const bool sgp4 = propagator_kind_ == OrbitPropagator::sgp4;
@@ -1047,43 +1048,43 @@ void OrbitEditor::update_state_labels() {
     reference_frame_->setEnabled(!sgp4);
     const QSignalBlocker frame_block(reference_frame_);
     if (sgp4 && reference_frame_->count() == 2)
-        reference_frame_->addItem(QStringLiteral("TEME · TLE 原生"));
+        reference_frame_->addItem(ui::text("orbit_editor.reference_frame.add_item"));
     else if (!sgp4 && reference_frame_->count() == 3)
         reference_frame_->removeItem(2);
     reference_frame_->setCurrentIndex(sgp4 ? 2 : input_frame_ == core::FrameId::gcrf ? 0 : 1);
     state_pages_->setCurrentIndex(sgp4 ? 2 : state_mode_index_);
-    state_title_->setText(sgp4 ? QStringLiteral("两行轨道根数 · TLE")
-                          : j2 ? QStringLiteral("初始平均椭圆 · %1").arg(model)
-                               : QStringLiteral("初始状态"));
-    state_mode_->setItemText(0, j2 ? QStringLiteral("平均椭圆位置 / 速度")
-                                   : QStringLiteral("位置 / 速度 · Cartesian"));
-    state_mode_->setItemText(1, j2 ? QStringLiteral("%1 平均轨道根数").arg(model)
-                                   : QStringLiteral("经典轨道根数 · 瞬时"));
-    state_mode_->setToolTip(j2 ? QStringLiteral("长期项平均椭圆；位置/速度是辅助开普勒状态，"
-                                                "不代表瞬时根数或传播轨迹的实际速度。")
-                               : QStringLiteral("GCRF 瞬时根数；抛物线轨道使用位置 / 速度。"));
-    anomaly_label_->setText(j2 ? QStringLiteral("平近点角 M") : QStringLiteral("真近点角 ν"));
+    state_title_->setText(sgp4 ? ui::text("orbit_editor.state_title.set_text")
+                          : j2 ? ui::text("orbit_editor.state_title.set_text_2").arg(model)
+                               : ui::text("orbit_editor.state_group"));
+    state_mode_->setItemText(0, j2 ? ui::text("orbit_editor.state_mode.set_item_text")
+                                   : ui::text("orbit_editor.label_19"));
+    state_mode_->setItemText(1, j2 ? ui::text("orbit_editor.state_mode.set_item_text_2").arg(model)
+                                   : ui::text("orbit_editor.state_mode.set_item_text_3"));
+    state_mode_->setToolTip(j2 ? ui::text("orbit_editor.state_mode.set_tool_tip_2")
+                               : ui::text("orbit_editor.state_mode.set_tool_tip"));
+    anomaly_label_->setText(j2 ? ui::text("orbit_editor.anomaly_label.set_text")
+                               : ui::text("orbit_editor.label_27"));
     elements_[5]->set_label(anomaly_label_->text());
     elements_[5]->setObjectName(j2 ? "meanAnomaly" : "trueAnomaly");
 }
 core::Tle OrbitEditor::read_tle() const {
     const auto text = tle_text_->toPlainText();
     if (text.size() > 4096)
-        throw std::invalid_argument("请只输入一颗卫星的一组 TLE。");
+        throw std::invalid_argument(ui::utf8("orbit_editor.text"));
     auto lines = text.split('\n', Qt::SkipEmptyParts);
     for (auto &line : lines)
         line = line.trimmed();
     if (lines.size() == 3 && !lines[0].startsWith("1 ") && !lines[0].startsWith("2 "))
         lines.removeFirst();
     if (lines.size() != 2)
-        throw std::invalid_argument("请输入完整的两行 TLE，可在前面附一行卫星名称。");
+        throw std::invalid_argument(ui::utf8("orbit_editor.validation_2"));
     return {lines[0].toStdString(), lines[1].toStdString()};
 }
 void OrbitEditor::update_tle_preview() {
     if (!tle_preview_)
         return;
     if (tle_text_->toPlainText().trimmed().isEmpty()) {
-        tle_preview_->setText(QStringLiteral("导入后显示编号、历元与轨道周期。"));
+        tle_preview_->setText(ui::text("orbit_editor.tle_preview.set_text"));
         return;
     }
     try {
@@ -1092,7 +1093,7 @@ void OrbitEditor::update_tle_preview() {
         const auto date = QDate(utc.year, utc.month, utc.day).toString("yyyy-MM-dd");
         const auto clock = QTime(utc.hour, utc.minute, utc.second).toString("HH:mm:ss") + "." +
                            QString::number(utc.nanosecond).rightJustified(9, '0');
-        QString text = QStringLiteral("编号  %1\n历元  %2 %3 UTC\n周期  %4 min")
+        QString text = ui::text("orbit_editor.text_2")
                            .arg(QString::fromStdString(parsed.catalog_id), date, clock)
                            .arg(1440 / parsed.mean_motion_revolutions_per_day, 0, 'f', 3);
         if (time_) {
@@ -1101,14 +1102,12 @@ void OrbitEditor::update_tle_preview() {
                                         std::abs(last_->epoch().seconds_since(epoch))) /
                                86400;
             if (age > 14)
-                text +=
-                    QStringLiteral("\n\n场景距 TLE 历元最远 %1 天，建议更换接近场景时段的根数。")
-                        .arg(age, 0, 'f', 1);
+                text += ui::text("orbit_editor.label_52").arg(age, 0, 'f', 1);
         }
         tle_preview_->setText(text);
     } catch (const std::exception &error) {
         tle_preview_->setText(
-            QStringLiteral("TLE 未就绪：%1").arg(QString::fromUtf8(error.what())));
+            ui::text("orbit_editor.tle_preview.set_text_2").arg(QString::fromUtf8(error.what())));
     }
 }
 void OrbitEditor::open_propagator_details() {
@@ -1156,7 +1155,7 @@ void OrbitEditor::open_propagator_details() {
         const bool j4 = propagator_kind_ == OrbitPropagator::j4_secular;
         const bool sgp4 = propagator_kind_ == OrbitPropagator::sgp4;
         const bool j2 = propagator_kind_ == OrbitPropagator::j2_secular || j4;
-        dialog.setWindowTitle(propagator_->currentText() + QStringLiteral(" · 模型信息"));
+        dialog.setWindowTitle(propagator_->currentText() + ui::text("orbit_editor.label_53"));
         dialog.setMinimumWidth(400);
         auto *layout = new QVBoxLayout(&dialog);
         layout->setContentsMargins(theme::space::page);
@@ -1171,35 +1170,35 @@ void OrbitEditor::open_propagator_details() {
             form->addRow(label, text);
         };
         const auto &body = j4 ? core::j4_earth() : core::central_body(body_);
-        row(QStringLiteral("传播模型"), sgp4 ? QStringLiteral("SGP4 · 近地 / 深空自动选择")
-                                        : j4 ? QStringLiteral("J2、J2²、J4 长期项")
-                                        : j2 ? QStringLiteral("一阶 J2 长期项")
-                                             : QStringLiteral("二体"));
-        row(QStringLiteral("中心天体"), sgp4 ? QStringLiteral("地球 · WGS72")
-                                        : j4 ? QStringLiteral("地球 · EGM2008")
-                                             : QStringLiteral("地球 · IERS 2003"));
-        row(QStringLiteral("引力参数 μ"),
+        row(ui::text("orbit_editor.body_2"), sgp4 ? ui::text("orbit_editor.body_3")
+                                             : j4 ? ui::text("orbit_editor.label_54")
+                                             : j2 ? ui::text("orbit_editor.label_55")
+                                                  : ui::text("orbit_editor.label_51"));
+        row(ui::text("orbit_editor.label_56"), sgp4 ? ui::text("orbit_editor.label_57")
+                                               : j4 ? ui::text("orbit_editor.label_58")
+                                                    : ui::text("orbit_editor.label_59"));
+        row(ui::text("orbit_editor.label_60"),
             QString::number(sgp4 ? 398600.8 : body.mu.metres_cubed_per_second_squared / 1e9, 'g',
                             15) +
                 QStringLiteral(" km³/s²"));
-        row(QStringLiteral("传播参考系"),
+        row(ui::text("orbit_editor.label_61"),
             sgp4 ? QStringLiteral("TEME → GCRF / ITRF") : QStringLiteral("GCRF"));
         if (sgp4) {
-            row(QStringLiteral("根数输入"), QStringLiteral("一组固定 TLE，含 B* 阻力项"));
-            row(QStringLiteral("使用建议"), QStringLiteral("使用接近分析时段的根数"));
+            row(ui::text("orbit_editor.label_62"), ui::text("orbit_editor.label_63"));
+            row(ui::text("orbit_editor.label_64"), ui::text("orbit_editor.label_65"));
         }
         if (j2) {
-            row(QStringLiteral("参考半径"),
+            row(ui::text("orbit_editor.label_66"),
                 QString::number(body.equatorial_radius_m / 1000, 'g', 15) + " km");
-            row(QStringLiteral("J2 系数"), QString::number(body.j2, 'g', 15));
+            row(ui::text("orbit_editor.label_67"), QString::number(body.j2, 'g', 15));
             if (j4)
-                row(QStringLiteral("J4 系数"), QString::number(body.j4, 'g', 15));
-            row(QStringLiteral("长期项"), QStringLiteral("Ω、ω、M（全部计入）"));
+                row(ui::text("orbit_editor.label_68"), QString::number(body.j4, 'g', 15));
+            row(ui::text("orbit_editor.label_69"), ui::text("orbit_editor.label_70"));
         }
         layout->addLayout(form);
         layout->addWidget(divider());
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close);
-        buttons->button(QDialogButtonBox::Close)->setText(QStringLiteral("关闭"));
+        buttons->button(QDialogButtonBox::Close)->setText(ui::text("common.close"));
         buttons->button(QDialogButtonBox::Close)->setDefault(true);
         layout->addWidget(buttons);
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -1212,7 +1211,7 @@ void OrbitEditor::set_create_mode(bool create) {
     const bool changed = create_mode_ != create;
     create_mode_ = create;
     object_->setReadOnly(!create);
-    apply_->setText(create ? QStringLiteral("插入卫星") : QStringLiteral("应用"));
+    apply_->setText(create ? ui::text("orbit_editor.apply.set_text") : ui::text("common.apply"));
     if (changed)
         navigation_->setCurrentItem(navigation_->topLevelItem(0)->child(0));
     compact_navigation_->setEnabled(!create);
@@ -1223,7 +1222,7 @@ void OrbitEditor::set_create_mode(bool create) {
             if (item->data(0, Qt::UserRole).toInt() == 0)
                 continue;
             item->setDisabled(create);
-            item->setToolTip(0, create ? QStringLiteral("插入卫星后可配置") : QString{});
+            item->setToolTip(0, create ? ui::text("orbit_editor.item.set_tool_tip") : QString{});
         }
     refresh_enabled();
 }
@@ -1251,7 +1250,7 @@ OrbitInput OrbitEditor::read_input() const {
         input.tle = read_tle();
         const auto parsed = core::parse_tle(input.tle);
         if (!time_)
-            throw std::invalid_argument("TLE 历元需要已确认的 UTC 数据。");
+            throw std::invalid_argument(ui::utf8("orbit_editor.parsed"));
         (void)time_->from_utc(parsed.epoch_utc);
     } else if (bound_input_.propagator == OrbitPropagator::sgp4) {
         input.tle = {};
@@ -1268,7 +1267,7 @@ void OrbitEditor::set_busy(bool busy) {
     cancel_->setEnabled(busy);
     cancel_->setVisible(busy);
     if (busy)
-        show_result(QStringLiteral("正在计算…"));
+        show_result(ui::text("orbit_editor.label_71"));
 }
 void OrbitEditor::show_result(const QString &message, bool error) {
     restyle_message(message_, error);
@@ -1314,7 +1313,7 @@ void OrbitEditor::set_appearance_busy(bool busy) {
     model_busy_ = busy;
     refresh_enabled();
     if (busy)
-        show_appearance_result(QStringLiteral("正在准备三维模型…"));
+        show_appearance_result(ui::text("orbit_editor.label_72"));
 }
 void OrbitEditor::refresh_enabled() {
     for (auto *button : display_buttons_)

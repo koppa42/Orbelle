@@ -1,4 +1,5 @@
 #include "hpop_covariance_editor.hpp"
+#include "../ui_text.hpp"
 #include "form_kit.hpp"
 #include <QComboBox>
 #include <QHeaderView>
@@ -23,7 +24,8 @@ double read_number(const QString &text, const QString &label) {
     bool ok = false;
     const double value = QLocale::c().toDouble(text.trimmed(), &ok);
     if (!ok || !std::isfinite(value))
-        throw std::invalid_argument((label + QStringLiteral("：请输入有限数值。")).toStdString());
+        throw std::invalid_argument(
+            (label + ui::text("hpop_covariance_editor.validation")).toStdString());
     return value;
 }
 double read_cell(const QTableWidget *table, int row, int column, bool nonnegative = false) {
@@ -31,7 +33,7 @@ double read_cell(const QTableWidget *table, int row, int column, bool nonnegativ
         table->item(row, column)->text(),
         QStringLiteral("%1 [%2, %3]").arg(table->accessibleName()).arg(row + 1).arg(column + 1));
     if (nonnegative && value < 0)
-        throw std::invalid_argument(QStringLiteral("%1 [%2, %3]：方差不能小于零。")
+        throw std::invalid_argument(ui::text("hpop_covariance_editor.validation_2")
                                         .arg(table->accessibleName())
                                         .arg(row + 1)
                                         .arg(column + 1)
@@ -68,24 +70,23 @@ HpopCovarianceEditor::HpopCovarianceEditor(const application::HpopCovarianceSett
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
-    enabled_ = new QCheckBox(QStringLiteral("计算协方差"));
+    enabled_ = new QCheckBox(ui::text("hpop_covariance_editor.layout"));
     enabled_->setObjectName("hpopComputeCovariance");
     make_switch(enabled_);
     enabled_->setChecked(s.enabled);
     enabled_->setEnabled(supported);
     layout->addWidget(enabled_);
     if (!supported)
-        layout->addWidget(caution_label(QStringLiteral("任务序列的跨机动协方差尚未接入。")));
+        layout->addWidget(caution_label(ui::text("hpop_covariance_editor.layout.add_widget")));
     fields_ = new QWidget;
     auto *fields_layout = new QVBoxLayout(fields_);
     fields_layout->setContentsMargins(0, 0, 0, 0);
     fields_layout->setSpacing(12);
     layout->addWidget(fields_);
-    auto *initial = new FormGroup(QStringLiteral("初始位置速度协方差"), "hpopInitialCovariance");
+    auto *initial =
+        new FormGroup(ui::text("hpop_covariance_editor.initial"), "hpopInitialCovariance");
     fields_layout->addWidget(initial);
-    initial->add_help(
-        QStringLiteral("矩阵对应轨道初始历元。编辑下三角，上三角自动对称；位置用 m、速度用 m/s，"
-                       "三个矩阵块分别为 m²、m²/s、m²/s²。对角线是方差，不是标准差。"));
+    initial->add_help(ui::text("hpop_covariance_editor.initial.add_help"));
     auto *form = initial->form();
     frame_ = new QComboBox;
     frame_->setObjectName("hpopCovarianceFrame");
@@ -93,23 +94,23 @@ HpopCovarianceEditor::HpopCovarianceEditor(const application::HpopCovarianceSett
         frame_->addItem(name, static_cast<int>(frame));
     };
     add_frame("GCRF", core::HpopCovarianceFrame::gcrf);
-    add_frame("J2000 (IERS1996)", core::HpopCovarianceFrame::fk5_j2000);
-    add_frame("TrueOfDate (IERS1996)", core::HpopCovarianceFrame::true_of_date);
-    add_frame("LVLH (R, I, C)", core::HpopCovarianceFrame::lvlh);
-    add_frame("Frenet (N, T, C)", core::HpopCovarianceFrame::frenet);
+    add_frame(ui::utf8("covariance.frame.j2000"), core::HpopCovarianceFrame::fk5_j2000);
+    add_frame(ui::utf8("covariance.frame.true_of_date"), core::HpopCovarianceFrame::true_of_date);
+    add_frame(ui::utf8("covariance.frame.lvlh"), core::HpopCovarianceFrame::lvlh);
+    add_frame(ui::utf8("covariance.frame.frenet"), core::HpopCovarianceFrame::frenet);
     frame_->setCurrentIndex(frame_->findData(static_cast<int>(s.coordinates.frame)));
-    form->addRow(QStringLiteral("参考系"), frame_);
-    form->addRow(QStringLiteral("表示"), new QLabel("Cartesian"));
+    form->addRow(ui::text("hpop_covariance_editor.form.add_row"), frame_);
+    form->addRow(ui::text("hpop_covariance_editor.form.add_row_2"),
+                 new QLabel(ui::utf8("covariance.cartesian")));
     velocity_ = new QComboBox;
     velocity_->setObjectName("hpopCovarianceVelocity");
     velocity_->addItems(
-        {QStringLiteral("惯性速度分量投影"), QStringLiteral("相对转动坐标系的速度")});
+        {ui::text("hpop_covariance_editor.label"), ui::text("hpop_covariance_editor.label_2")});
     velocity_->setCurrentIndex(static_cast<int>(s.coordinates.velocity));
-    form->addRow(QStringLiteral("速度约定"), velocity_);
-    initial->add_help(QStringLiteral("切换参考系重新解释输入矩阵，不自动换算已有数值。"
-                                     "速度投影与转动速度具有不同的交叉项。"));
+    form->addRow(ui::text("hpop_covariance_editor.form.add_row_3"), velocity_);
+    initial->add_help(ui::text("hpop_covariance_editor.initial.add_help_2"));
     state_ = new QTableWidget(6, 6);
-    setup_table(state_, "hpopCovarianceMatrix", QStringLiteral("初始协方差"));
+    setup_table(state_, "hpopCovarianceMatrix", ui::text("hpop_covariance_editor.label_3"));
     state_->setHorizontalHeaderLabels({"x", "y", "z", "vx", "vy", "vz"});
     state_->setVerticalHeaderLabels({"x", "y", "z", "vx", "vy", "vz"});
     for (int i = 0; i < 6; ++i)
@@ -124,9 +125,10 @@ HpopCovarianceEditor::HpopCovarianceEditor(const application::HpopCovarianceSett
             state_->item(column, row)->setText(state_->item(row, column)->text());
         }
     });
-    auto *gravity = new FormGroup(QStringLiteral("协方差传播"), "hpopCovarianceGravitySection");
+    auto *gravity =
+        new FormGroup(ui::text("hpop_covariance_editor.gravity"), "hpopCovarianceGravitySection");
     fields_layout->addWidget(gravity);
-    independent_ = new QCheckBox(QStringLiteral("使用独立重力阶次"));
+    independent_ = new QCheckBox(ui::text("hpop_covariance_editor.label_4"));
     independent_->setObjectName("hpopCovarianceIndependentGravity");
     independent_->setChecked(s.independent_gravity);
     gravity->form()->addRow(independent_);
@@ -138,27 +140,26 @@ HpopCovarianceEditor::HpopCovarianceEditor(const application::HpopCovarianceSett
     order_->setObjectName("hpopCovarianceOrder");
     order_->setRange(0, core::gravity_max_degree);
     order_->setValue(s.gravity.order);
-    gravity->form()->addRow(QStringLiteral("最大阶数"), degree_);
-    gravity->form()->addRow(QStringLiteral("最大次数"), order_);
+    gravity->form()->addRow(ui::text("hpop_covariance_editor.label_5"), degree_);
+    gravity->form()->addRow(ui::text("hpop_covariance_editor.label_6"), order_);
     tolerance_ = new QLineEdit(QString::number(s.absolute_tolerance, 'g', 17));
     tolerance_->setObjectName("hpopCovarianceTolerance");
-    gravity->form()->addRow(QStringLiteral("变分绝对容差"), tolerance_);
-    gravity->add_help(QStringLiteral("独立阶次只影响协方差方程，名义轨道沿用力模型设置。"
-                                     "支持 0×0 或至少 2 阶，次数不得超过阶数和重力文件范围。"));
-    auto *parameters = new FormGroup(QStringLiteral("考虑参数"), "hpopConsiderSection");
+    gravity->form()->addRow(ui::text("hpop_covariance_editor.label_7"), tolerance_);
+    gravity->add_help(ui::text("hpop_covariance_editor.gravity.add_help"));
+    auto *parameters =
+        new FormGroup(ui::text("hpop_covariance_editor.parameters"), "hpopConsiderSection");
     fields_layout->addWidget(parameters);
-    consider_ = new QCheckBox(QStringLiteral("包含考虑参数分析"));
+    consider_ = new QCheckBox(ui::text("hpop_covariance_editor.label_8"));
     consider_->setObjectName("hpopConsiderAnalysis");
     consider_->setChecked(s.consider_analysis);
     parameters->form()->addRow(consider_);
-    parameters->add_help(QStringLiteral(
-        "D = Cd × 阻力面积/质量，K = Cr × 光压面积/质量。Value 是参数方差，单位 m⁴/kg²；"
-        "与位置、速度的交叉协方差分别为 m³/kg、m³/(kg·s)。整个联合矩阵必须正定。"));
+    parameters->add_help(ui::text("hpop_covariance_editor.parameters.add_help"));
     parameters_ = new QTableWidget(2, 9);
-    setup_table(parameters_, "hpopConsiderTable", QStringLiteral("考虑参数"));
+    setup_table(parameters_, "hpopConsiderTable", ui::text("hpop_covariance_editor.parameters"));
     parameters_->verticalHeader()->hide();
     parameters_->setHorizontalHeaderLabels(
-        {QStringLiteral("使用"), QStringLiteral("参数"), "Value", "x", "y", "z", "vx", "vy", "vz"});
+        {ui::text("hpop_covariance_editor.label_9"), ui::text("hpop_covariance_editor.label_10"),
+         ui::utf8("covariance.value"), "x", "y", "z", "vx", "vy", "vz"});
     const std::array<const core::HpopConsiderParameter *, 2> values{&s.drag, &s.srp};
     for (int row = 0; row < 2; ++row) {
         auto *use = new QTableWidgetItem;
@@ -166,7 +167,8 @@ HpopCovarianceEditor::HpopCovarianceEditor(const application::HpopCovarianceSett
         use->setCheckState((row == 0 ? s.drag_enabled : s.srp_enabled) ? Qt::Checked
                                                                        : Qt::Unchecked);
         parameters_->setItem(row, 0, use);
-        auto *name = new QTableWidgetItem(row == 0 ? "Drag (D)" : "SRP (K)");
+        auto *name = new QTableWidgetItem(row == 0 ? ui::utf8("covariance.drag")
+                                                   : ui::utf8("covariance.srp"));
         name->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
         parameters_->setItem(row, 1, name);
         const auto &value = *values[static_cast<std::size_t>(row)];
@@ -176,16 +178,18 @@ HpopCovarianceEditor::HpopCovarianceEditor(const application::HpopCovarianceSett
                                  number(value.state_cross_covariance[static_cast<std::size_t>(j)]));
     }
     parameters->form()->addRow(parameters_);
-    cross_enabled_ = new QCheckBox(QStringLiteral("包含考虑参数间交叉协方差"));
+    cross_enabled_ = new QCheckBox(ui::text("hpop_covariance_editor.label_11"));
     cross_enabled_->setObjectName("hpopConsiderCrossCorrelation");
     cross_enabled_->setChecked(s.consider_cross_correlation);
     parameters->form()->addRow(cross_enabled_);
     cross_ = new QTableWidget(1, 3);
-    setup_table(cross_, "hpopConsiderCrossTable", QStringLiteral("参数间交叉协方差"));
+    setup_table(cross_, "hpopConsiderCrossTable", ui::text("hpop_covariance_editor.label_12"));
     cross_->verticalHeader()->hide();
-    cross_->setHorizontalHeaderLabels({QStringLiteral("行"), QStringLiteral("列"), "Value"});
-    auto *d = new QTableWidgetItem("Drag (D)");
-    auto *k = new QTableWidgetItem("SRP (K)");
+    cross_->setHorizontalHeaderLabels({ui::text("hpop_covariance_editor.label_13"),
+                                       ui::text("hpop_covariance_editor.label_14"),
+                                       ui::utf8("covariance.value")});
+    auto *d = new QTableWidgetItem(ui::utf8("covariance.drag"));
+    auto *k = new QTableWidgetItem(ui::utf8("covariance.srp"));
     for (auto *item : {d, k})
         item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
     cross_->setItem(0, 0, d);
@@ -220,7 +224,7 @@ void HpopCovarianceEditor::refresh() {
     cross_->setEnabled(both && cross_enabled_->isChecked());
 }
 QString HpopCovarianceEditor::summary() const {
-    return enabled_->isChecked() ? frame_->currentText() : QStringLiteral("未启用");
+    return enabled_->isChecked() ? frame_->currentText() : ui::text("common.disabled");
 }
 application::HpopCovarianceSettings HpopCovarianceEditor::value() const {
     auto s = initial_;
@@ -238,11 +242,12 @@ application::HpopCovarianceSettings HpopCovarianceEditor::value() const {
     if ((gravity.degree == 0 || gravity.degree >= 2) && gravity.order <= gravity.degree)
         s.gravity = gravity;
     else if (s.enabled && s.independent_gravity)
-        throw std::invalid_argument("协方差重力需要 0×0 或至少 2 阶，次数不得超过阶数。");
+        throw std::invalid_argument(ui::utf8("hpop_covariance_editor.validation_3"));
     s.absolute_tolerance = read_draft(s.absolute_tolerance, s.enabled, [&] {
-        const double value = read_number(tolerance_->text(), QStringLiteral("变分绝对容差"));
+        const double value =
+            read_number(tolerance_->text(), ui::text("hpop_covariance_editor.label_7"));
         if (value < 1e-16 || value > 1)
-            throw std::invalid_argument("变分绝对容差必须在 1e-16 到 1 之间。");
+            throw std::invalid_argument(ui::utf8("hpop_covariance_editor.validation_4"));
         return value;
     });
     s.consider_analysis = consider_->isChecked();

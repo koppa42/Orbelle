@@ -24,6 +24,7 @@ class GroundStationEditor final : public QDialog {
   private:
     void preview();
     application::ProjectGroundStation original_;
+    bool creating_ = false;
     QLineEdit *name_;
     QuantityEditor *longitude_, *latitude_, *height_, *minimum_elevation_;
     QLabel *preview_, *result_;

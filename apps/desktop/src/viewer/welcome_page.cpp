@@ -1,4 +1,5 @@
 #include "welcome_page.hpp"
+#include "../ui_text.hpp"
 #include "workbench_style.hpp"
 #include "workbench_theme.hpp"
 #include <QAction>
@@ -163,7 +164,7 @@ QWidget *make_welcome_page(QAction *create, QAction *open, QAction *example) {
     auto *layout = new QVBoxLayout(column);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
-    auto *brand = new QLabel(QStringLiteral("ORBITFORGE"));
+    auto *brand = new QLabel(ui::text("brand.wordmark"));
     brand->setObjectName("eyebrow");
     auto *brand_row = new QHBoxLayout;
     brand_row->setSpacing(9);
@@ -182,29 +183,27 @@ QWidget *make_welcome_page(QAction *create, QAction *open, QAction *example) {
     brand_row->addStretch();
     layout->addLayout(brand_row);
     auto *heading =
-        new QLabel(QStringLiteral("下一站，<br><span style='color:%1'>你的轨道。</span>")
-                       .arg(theme::color(theme::sakura).name()));
+        new QLabel(ui::text("welcome_page.heading").arg(theme::color(theme::sakura).name()));
     heading->setObjectName("welcomeTitle");
     heading->setWordWrap(true);
     layout->addWidget(heading);
-    auto *description =
-        new QLabel(QStringLiteral("从一颗卫星开始，探索轨道、可见性与每一次交会。"));
+    auto *description = new QLabel(ui::text("welcome_page.description"));
     description->setObjectName("welcomeDescription");
     description->setWordWrap(true);
     layout->addWidget(description);
     layout->addSpacing(14);
 
     auto *new_button = new ActionCard(
-        "welcomeCreate", WorkbenchIcon::new_scenario, "primary", QStringLiteral("新建场景"),
-        QStringLiteral("设定分析时段与地球定向数据，从空白场景开始。"), QStringLiteral("Ctrl+N"));
+        "welcomeCreate", WorkbenchIcon::new_scenario, "primary", ui::text("common.new_scenario"),
+        ui::text("welcome_page.new_button"), QStringLiteral("Ctrl+N"));
     QObject::connect(new_button, &QPushButton::clicked, create, &QAction::trigger);
     auto *open_button = new ActionCard(
-        "welcomeOpen", WorkbenchIcon::folder, "accent", QStringLiteral("打开项目…"),
-        QStringLiteral("继续编辑已保存的 .orbitforge 项目。"), QStringLiteral("Ctrl+O"));
+        "welcomeOpen", WorkbenchIcon::folder, "accent", ui::text("welcome_page.open_button"),
+        ui::text("welcome_page.open_button_2"), QStringLiteral("Ctrl+O"));
     QObject::connect(open_button, &QPushButton::clicked, open, &QAction::trigger);
-    auto *example_button =
-        new ActionCard("welcomeExample", WorkbenchIcon::orbit, "sakura", QStringLiteral("二体示例"),
-                       QStringLiteral("载入预置卫星，立即查看三维轨道与地面轨迹。"), QString{});
+    auto *example_button = new ActionCard("welcomeExample", WorkbenchIcon::orbit, "sakura",
+                                          ui::text("welcome.two_body_example"),
+                                          ui::text("welcome_page.example_button"), QString{});
     QObject::connect(example_button, &QPushButton::clicked, example, &QAction::trigger);
     layout->addWidget(new_button);
     layout->addWidget(open_button);
@@ -212,7 +211,7 @@ QWidget *make_welcome_page(QAction *create, QAction *open, QAction *example) {
     outer->addWidget(column);
     outer->addStretch(4);
 
-    auto *caption = new QLabel(QStringLiteral("星夜相伴 · 探索有据"));
+    auto *caption = new QLabel(ui::text("welcome_page.caption"));
     caption->setObjectName("welcomeCaption");
     outer->addWidget(caption);
     return scroll;

@@ -1,4 +1,5 @@
 #include "workbench_style.hpp"
+#include "../ui_text.hpp"
 #include "workbench_theme.hpp"
 #include <QAbstractSpinBox>
 #include <QApplication>
@@ -427,6 +428,27 @@ QIcon workbench_icon(WorkbenchIcon icon, const QColor &color) {
             line(7, 7, 17, 17);
             line(7, 17, 17, 7);
             break;
+        case WorkbenchIcon::refresh:
+            p.drawArc(QRectF(4, 4, 16, 16), 0, 300 * 16);
+            line(20, 7, 20, 12);
+            line(15, 12, 20, 12);
+            break;
+        case WorkbenchIcon::more:
+            p.setPen(Qt::NoPen);
+            p.setBrush(color);
+            for (int x : {5, 12, 19})
+                p.drawEllipse(QPointF(x, 12), 1.5, 1.5);
+            break;
+        case WorkbenchIcon::arrow_left:
+        case WorkbenchIcon::arrow_right:
+            if (icon == WorkbenchIcon::arrow_left) {
+                p.translate(24, 0);
+                p.scale(-1, 1);
+            }
+            line(5, 12, 19, 12);
+            line(13, 6, 19, 12);
+            line(19, 12, 13, 18);
+            break;
         case WorkbenchIcon::detach:
             p.drawRoundedRect(QRectF(4, 8, 12, 12), 1, 1);
             line(10, 4, 20, 4);
@@ -570,8 +592,8 @@ void style_dock(QDockWidget *dock, WorkbenchIcon icon) {
         button->setIconSize(QSize(14, 14));
         return button;
     };
-    auto *detach = tool(WorkbenchIcon::detach, QStringLiteral("浮动 / 停靠面板"));
-    auto *close = tool(WorkbenchIcon::close, QStringLiteral("隐藏面板 · 可从视图菜单恢复"));
+    auto *detach = tool(WorkbenchIcon::detach, ui::text("workbench_style.detach"));
+    auto *close = tool(WorkbenchIcon::close, ui::text("workbench_style.close"));
     layout->addWidget(detach);
     layout->addWidget(close);
     QObject::connect(detach, &QToolButton::clicked, dock,
@@ -657,7 +679,9 @@ QWidget#workspaceHeading QToolButton, QTabBar QToolButton { padding: 0; border-r
 QToolButton#closePage { border: 0; border-radius: 4px; }
 QToolButton#closePage:hover { background: @overlay; }
 QToolButton#closePage:focus { background: @accentHover; }
-QTabBar#workspaceTabs::tab { color: @textMuted; background: transparent; border: 0; border-right: 1px solid @line; border-bottom: 2px solid transparent; padding: 3px 10px; margin: 0; }
+/* Balance the underline with a transparent top border: Qt centres tab buttons in the
+   whole tab, but centres labels in its content box. Keep both on the same centreline. */
+QTabBar#workspaceTabs::tab { color: @textMuted; background: transparent; border: 0; border-top: 2px solid transparent; border-right: 1px solid @line; border-bottom: 2px solid transparent; padding: 2px 10px; margin: 0; }
 QTabBar#workspaceTabs::tab:selected { color: @text; background: @surface; border-bottom-color: @accent; }
 QTabBar#workspaceTabs::tab:hover:!selected { color: @text; background: @accentHover; }
 QTabBar#propertyPageTabs::tab { color: @textMuted; background: transparent; border: 0; border-radius: 4px; padding: 4px 12px; margin-right: 2px; }
@@ -771,6 +795,7 @@ QPushButton:hover { background: @overlay; border-color: @borderStrong; color: @t
 QPushButton:pressed { background: @accentWash; }
 QPushButton:disabled { background: @panel; color: @textFaint; border-color: @line; }
 QToolButton { color: @textSoft; background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 3px 6px; }
+QToolButton[iconOnly="true"] { padding: 0; }
 QToolButton:hover { background: @accentHover; border-color: transparent; color: @text; }
 QToolButton:pressed { background: @accentWash; }
 QToolButton:checked { background: @accentWash; color: @accentBright; border-color: transparent; }
@@ -789,7 +814,7 @@ QCheckBox, QRadioButton { spacing: 7px; min-height: 22px; }
 QCheckBox:hover, QRadioButton:hover { color: @text; }
 )QSS"
         R"QSS(QTabWidget::pane { border: 0; }
-QTabBar::tab { color: @textMuted; background: transparent; min-height: 18px; padding: 5px 12px; border: 0; border-bottom: 2px solid transparent; }
+QTabBar::tab { color: @textMuted; background: transparent; min-height: 18px; padding: 4px 12px; border: 0; border-top: 2px solid transparent; border-bottom: 2px solid transparent; }
 QTabBar::tab:selected { color: @text; border-bottom-color: @sakura; }
 QTabBar::tab:hover:!selected { background: @accentHover; color: @textSoft; }
 QMenuBar { background: @canvas; color: @textSoft; padding: 2px 8px; border-bottom: 1px solid @line; }
@@ -842,7 +867,7 @@ QCalendarWidget QAbstractItemView { border: 0; outline: 0; color: @textSoft; bac
 QListWidget#missionSegments { background: transparent; border: 0; padding: 0; outline: 0; }
 QScrollArea#missionParameters { background: @panel; border: 1px solid @line; border-radius: 8px; }
 QScrollArea#missionParameters > QWidget, QWidget#missionParameterFields { background: transparent; }
-QTabBar#missionNavigation::tab { background: transparent; color: @textMuted; border: 0; border-bottom: 2px solid transparent; padding: 6px 12px; }
+QTabBar#missionNavigation::tab { background: transparent; color: @textMuted; border: 0; border-top: 2px solid transparent; border-bottom: 2px solid transparent; padding: 5px 12px; }
 QTabBar#missionNavigation::tab:selected { color: @text; border-bottom-color: @sakura; }
 QTabBar#missionNavigation::tab:hover:!selected { color: @textSoft; background: @accentHover; }
 QTabBar#missionNavigation::tab:disabled { color: @textFaint; }
@@ -866,7 +891,7 @@ QListWidget#eopSourcePriority::item { border: 0; padding: 0; }
 QLabel#dataName { font-size: 17px; color: @text; }
 QLabel#dataDescription { color: @textMuted; }
 QTabWidget#dataPages::pane { border: 0; background: transparent; }
-QTabWidget#dataPages QTabBar::tab { background: transparent; color: @textMuted; border: 0; border-bottom: 2px solid @line; padding: 8px 16px; margin-right: 0; }
+QTabWidget#dataPages QTabBar::tab { background: transparent; color: @textMuted; border: 0; border-top: 2px solid transparent; border-bottom: 2px solid @line; padding: 7px 16px; margin-right: 0; }
 QTabWidget#dataPages QTabBar::tab:selected { color: @text; border-bottom-color: @sakura; }
 QTabWidget#dataPages QTabBar::tab:hover:!selected { color: @textSoft; background: @accentHover; }
 QLabel#dataStatus { border-radius: 8px; padding: 2px 9px; font-size: 11px; font-weight: 600; background: @overlay; color: @textSoft; }
@@ -914,7 +939,7 @@ QLabel#reportTemplateDescription { color: @textMuted; font-size: 11px; }
 QDialog#reportSelectionDialog { background: @surface; }
 QLineEdit#reportSelectionSearch { background: @field; border: 1px solid @border; border-radius: 5px; padding: 6px 9px; min-width: 0; }
 QLineEdit#reportSelectionSearch:focus { border-color: @accent; }
-QTabBar#reportSelectionSource::tab { color: @textMuted; background: transparent; border: 0; border-bottom: 2px solid transparent; padding: 5px 10px; margin-right: 3px; font-size: 12px; }
+QTabBar#reportSelectionSource::tab { color: @textMuted; background: transparent; border: 0; border-top: 2px solid transparent; border-bottom: 2px solid transparent; padding: 4px 10px; margin-right: 3px; font-size: 12px; }
 QTabBar#reportSelectionSource::tab:selected { color: @text; border-bottom-color: @sakura; }
 QTabBar#reportSelectionSource::tab:hover:!selected { color: @textSoft; background: @accentHover; }
 QListWidget#reportSelectionList { background: transparent; border: 0; padding: 0; outline: 0; }
@@ -936,12 +961,11 @@ QToolButton#reportConfigMenu { color: @textSoft; background: transparent; border
 QToolButton#reportConfigMenu:hover { color: @accentBright; background: @accentHover; border-radius: 4px; }
 QPushButton#reportChangeScope { color: @accent; background: transparent; border: none; padding: 3px 6px; }
 QPushButton#reportChangeScope:hover { color: @accentBright; background: @accentHover; }
-QTabBar#reportViews::tab { color: @textMuted; background: transparent; border: none; border-bottom: 2px solid transparent; padding: 4px 10px; margin: 0; min-width: 28px; }
+QTabBar#reportViews::tab { color: @textMuted; background: transparent; border: none; border-top: 2px solid transparent; border-bottom: 2px solid transparent; padding: 3px 10px; margin: 0; min-width: 28px; }
 QTabBar#reportViews::tab:selected { color: @text; background: transparent; border-bottom-color: @accent; }
 QTabBar#reportViews::tab:hover:!selected { color: @text; background: @accentHover; }
 QTabBar#reportViews::tab:disabled { color: @textFaint; background: transparent; }
-QToolButton#refreshReport { font-size: 18px; padding: 0px; min-width: 28px; min-height: 28px; border: none; background: transparent; }
-QToolButton#reportResultMenu { font-size: 15px; padding: 2px 6px; border: none; background: transparent; }
+QToolButton#refreshReport, QToolButton#reportResultMenu { padding: 0; }
 QToolButton#reportResultMenu::menu-indicator { image: none; }
 QPushButton#exportReportCsv { background: transparent; border: 1px solid transparent; color: @textSoft; border-radius: 3px; padding: 3px 8px; }
 QPushButton#exportReportCsv:hover { background: @overlay; border-color: @accent; }
@@ -1004,7 +1028,7 @@ QLabel#hpopResourceBadge { color: @accentBright; background: @accentWash; border
 QFrame[hpopSection="true"] { background: transparent; border: 0; border-top: 1px solid @line; border-radius: 0; }
 QLabel#hpopSectionTitle { color: @text; font-size: 12px; font-weight: bold; }
 QLabel#hpopPendingBadge { color: @sakura; background: @sakuraWash; border-radius: 8px; padding: 1px 8px; font-size: 11px; }
-QTabWidget#hpopForceModelTabs QTabBar::tab { background: transparent; padding: 4px 10px; }
+QTabWidget#hpopForceModelTabs QTabBar::tab { background: transparent; padding: 3px 10px; }
 QTabWidget#hpopForceModelTabs QTabBar::tab:selected { background: @accentWash; border-bottom-color: @accent; color: @accentBright; }
 QDialog#hpopSettingsDialog QLineEdit[readOnly="true"] { color: @textMuted; }
 QFrame[formGroup="true"] { background: transparent; border: 0; border-top: 1px solid @line; }

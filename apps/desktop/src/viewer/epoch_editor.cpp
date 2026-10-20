@@ -1,4 +1,5 @@
 #include "epoch_editor.hpp"
+#include "../ui_text.hpp"
 #include "workbench_spin_box.hpp"
 #include "workbench_style.hpp"
 #include <QCalendarWidget>
@@ -56,7 +57,7 @@ core::UtcDateTime calendar_parts(core::Epoch epoch, CalendarScale scale,
 }
 void validate_date(QDate date) {
     if (!date.isValid() || date < QDate(1972, 1, 1) || date > QDate(2250, 1, 1))
-        throw std::out_of_range("日期应在 1972-01-01 至 2250-01-01 范围内。");
+        throw std::out_of_range(ui::utf8("epoch_editor.validation"));
 }
 core::Epoch calendar_epoch(core::UtcDateTime p, CalendarScale scale,
                            const core::ITimeProvider &time) {
@@ -64,11 +65,11 @@ core::Epoch calendar_epoch(core::UtcDateTime p, CalendarScale scale,
     validate_date(date);
     if (p.hour < 0 || p.hour > 23 || p.minute < 0 || p.minute > 59 || p.second < 0 ||
         p.second > 60 || p.nanosecond < 0 || p.nanosecond >= 1'000'000'000)
-        throw std::invalid_argument("请输入有效的时分秒；UTC 允许有效闰秒 60。");
+        throw std::invalid_argument(ui::utf8("epoch_editor.validation_2"));
     if (scale == CalendarScale::utc)
         return time.from_utc(p);
     if (p.second >= 60)
-        throw std::invalid_argument("TAI / TT 不含闰秒，秒应小于 60。");
+        throw std::invalid_argument(ui::utf8("epoch_editor.validation_3"));
     auto ms = origin.msecsTo(QDateTime(date, QTime(p.hour, p.minute, p.second), QTimeZone::UTC));
     if (scale == CalendarScale::tt)
         ms -= 32184;
@@ -88,7 +89,7 @@ ParsedEpoch parse_epoch(const QString &text, const core::ITimeProvider &time) {
         QRegularExpression::CaseInsensitiveOption);
     const auto match = format.match(text);
     if (!match.hasMatch())
-        throw std::invalid_argument("格式示例：2026-10-09 00:00:00 UTC，可附带最多 9 位小数秒。");
+        throw std::invalid_argument(ui::utf8("epoch_editor.match"));
     const auto name = match.captured(8).toUpper();
     const auto scale = name == "UTC"   ? CalendarScale::utc
                        : name == "TAI" ? CalendarScale::tai
@@ -155,14 +156,14 @@ EpochEditor::EpochEditor(QWidget *parent, std::shared_ptr<const core::ITimeProvi
     value_->installEventFilter(this);
     value_->setObjectName("epochValue");
     value_->setMinimumWidth(180);
-    value_->setAccessibleName(QStringLiteral("历元，日期、时间和 UTC / TAI / TT"));
-    value_->setPlaceholderText("yyyy-MM-dd HH:mm:ss UTC");
-    value_->setToolTip(QStringLiteral("可直接输入或粘贴完整历元，支持 UTC / TAI / TT 和小数秒。"));
+    value_->setAccessibleName(ui::text("epoch_editor.value.set_accessible_name"));
+    value_->setPlaceholderText(ui::utf8("epoch.input_placeholder"));
+    value_->setToolTip(ui::text("epoch_editor.value.set_tool_tip"));
     row->addWidget(value_, 1);
     picker_button_ = new QToolButton;
     picker_button_->setObjectName("openEpochPicker");
     picker_button_->setIcon(workbench_icon(WorkbenchIcon::calendar));
-    picker_button_->setToolTip(QStringLiteral("选择日期、时间和时间标准"));
+    picker_button_->setToolTip(ui::text("epoch_editor.picker_button.set_tool_tip"));
     picker_button_->setFixedSize(24, 24);
     row->addWidget(picker_button_);
     layout->addWidget(box);
@@ -211,13 +212,13 @@ core::Epoch EpochEditor::epoch() const {
     const auto value = dirty_ ? parse_epoch(value_->text(), *time_).value : stored_;
     if ((first_ && value.tai_nanoseconds() < first_->tai_nanoseconds()) ||
         (last_ && value.tai_nanoseconds() > last_->tai_nanoseconds()))
-        throw std::out_of_range("时间超出可用的分析或数据时段。");
+        throw std::out_of_range(ui::utf8("epoch_editor.validation_4"));
     return value;
 }
 void EpochEditor::set_epoch(core::Epoch epoch) {
     if ((first_ && epoch.tai_nanoseconds() < first_->tai_nanoseconds()) ||
         (last_ && epoch.tai_nanoseconds() > last_->tai_nanoseconds()))
-        throw std::out_of_range("时间超出可用的分析或数据时段。");
+        throw std::out_of_range(ui::utf8("epoch_editor.validation_4"));
     const auto p = calendar_parts(epoch, current_scale_, *time_);
     validate_date(QDate(p.year, p.month, p.day));
     updating_ = true;
@@ -282,7 +283,7 @@ void EpochEditor::open_picker() {
     layout->setContentsMargins(theme::space::card);
     layout->setSpacing(8);
     auto *header = new QHBoxLayout;
-    header->addWidget(new QLabel(QStringLiteral("日期与时间")), 1);
+    header->addWidget(new QLabel(ui::text("epoch_editor.header.add_widget")), 1);
     auto *scales = new QComboBox;
     scales->setObjectName("pickerScale");
     scales->addItems({"UTC", "TAI", "TT"});
@@ -326,9 +327,9 @@ void EpochEditor::open_picker() {
         column->addWidget(field);
         row->addLayout(column);
     };
-    add(QStringLiteral("时"), hours);
-    add(QStringLiteral("分"), minutes);
-    add(QStringLiteral("秒"), seconds);
+    add(ui::text("epoch_editor.label"), hours);
+    add(ui::text("epoch_editor.label_2"), minutes);
+    add(ui::text("epoch_editor.label_3"), seconds);
     layout->addLayout(row);
     const auto picker_scale = std::make_shared<CalendarScale>(initial.scale);
     const auto picker_value = std::make_shared<core::Epoch>(initial.value);
@@ -389,7 +390,7 @@ void EpochEditor::open_picker() {
             });
     auto *footer = new QHBoxLayout;
     footer->addStretch();
-    auto *apply = new QPushButton(QStringLiteral("确定"));
+    auto *apply = new QPushButton(ui::text("common.ok"));
     apply->setObjectName("applyOrbit");
     apply->setAutoDefault(false);
     footer->addWidget(apply);

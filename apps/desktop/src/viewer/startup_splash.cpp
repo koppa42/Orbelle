@@ -1,4 +1,5 @@
 #include "startup_splash.hpp"
+#include "../ui_text.hpp"
 #include "workbench_style.hpp"
 #include <QFont>
 #include <QLinearGradient>
@@ -27,7 +28,7 @@ QPixmap splash_picture(QScreen *screen) {
 } // namespace
 StartupSplash::StartupSplash(QScreen *screen) : QSplashScreen(screen, splash_picture(screen)) {
     setObjectName("startupSplash");
-    setWindowTitle(QStringLiteral("OrbitForge · 启动"));
+    setWindowTitle(ui::text("startup_splash.label"));
     setWindowIcon(workbench_icon(WorkbenchIcon::orbit, theme::color(theme::accent)));
     if (screen)
         move(screen->availableGeometry().center() - rect().center());
@@ -59,7 +60,7 @@ void StartupSplash::drawContents(QPainter *painter) {
     painter->setFont(font);
     painter->setPen(theme::color(theme::text_soft));
     painter->drawText(QRectF(100, 94, 420, 26), Qt::AlignLeft | Qt::AlignVCenter,
-                      QStringLiteral("轨道仿真工作台"));
+                      ui::text("startup_splash.label_2"));
     paint_sakura_blossom(*painter, QPointF(906, 48), 11, theme::color(theme::sakura, 200));
     paint_sakura_blossom(*painter, QPointF(878, 34), 5, theme::color(theme::sakura, 120));
 

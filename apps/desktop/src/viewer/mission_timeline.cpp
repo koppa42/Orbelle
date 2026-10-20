@@ -1,4 +1,5 @@
 #include "mission_timeline.hpp"
+#include "../ui_text.hpp"
 #include "workbench_style.hpp"
 #include <QDateTime>
 #include <QKeyEvent>
@@ -27,7 +28,7 @@ QString full_time(qint64 epoch, CalendarScale scale, const core::ITimeProvider &
 }
 QString duration_text(qint64 milliseconds) {
     if (milliseconds % day_ms == 0)
-        return QStringLiteral("%1 天").arg(milliseconds / day_ms);
+        return ui::text("mission_timeline.label").arg(milliseconds / day_ms);
     if (milliseconds % 3'600'000 == 0)
         return QStringLiteral("%1 h").arg(milliseconds / 3'600'000);
     if (milliseconds >= 3'600'000)
@@ -70,10 +71,8 @@ MissionTimeline::MissionTimeline(QWidget *parent)
     setRange(0, 10000);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
-    setAccessibleName(QStringLiteral("场景时间轴"));
-    setAccessibleDescription(QStringLiteral(
-        "上方总览拖动浏览范围，两端拖动缩放；下方单击或拖动跳转。滚轮缩放，Shift 拖动平移。"
-        "左右键微调时间，Home/End 到达场景端点，Page Up/Down 平移，F 显示全时段，C 定位游标。"));
+    setAccessibleName(ui::text("mission_timeline.label_2"));
+    setAccessibleDescription(ui::text("mission_timeline.label_3"));
     setMinimumHeight(sizeHint().height());
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     connect(this, &QSlider::valueChanged, this, [this](int value) {
@@ -236,15 +235,16 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
     auto caption = font();
     caption.setPixelSize(std::max(10, font().pixelSize() - 1));
     p.setPen(theme::color(theme::text_soft));
-    p.drawText(QRectF(16, 2, left - 32, 20), Qt::AlignVCenter, QStringLiteral("场景总览"));
+    p.drawText(QRectF(16, 2, left - 32, 20), Qt::AlignVCenter,
+               ui::text("mission_timeline.label_4"));
     p.drawText(QRectF(16, 48, left - 32, 18), Qt::AlignVCenter,
-               QStringLiteral("时间 · ") + scale_name(scale_));
+               ui::text("mission_timeline.label_5") + scale_name(scale_));
     p.setFont(caption);
     p.setPen(theme::color(theme::text_muted));
     p.drawText(QRectF(16, 21, left - 32, 16), Qt::AlignVCenter,
-               QStringLiteral("全长 ") + duration_text(last_ - first_));
+               ui::text("mission_timeline.label_6") + duration_text(last_ - first_));
     p.drawText(QRectF(16, 66, left - 32, 16), Qt::AlignVCenter,
-               QStringLiteral("可视 ") + duration_text(view_last_ - view_first_));
+               ui::text("mission_timeline.label_7") + duration_text(view_last_ - view_first_));
 
     QFont mono;
     mono.setFamilies({"Cascadia Mono", "Consolas"});
@@ -353,21 +353,21 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
         p.drawText(bar.adjusted(10, 0, -10, 0), Qt::AlignVCenter, label_text);
         p.setFont(font());
     };
-    track(91, scenario_, QStringLiteral("场景分析区间"), scenario_icon, theme::accent);
+    track(91, scenario_, ui::text("mission_timeline.label_8"), scenario_icon, theme::accent);
     if (show_object_interval_ && !object_.isEmpty())
-        track(117, object_, QStringLiteral("轨道传播"), satellite_icon, theme::sakura);
+        track(117, object_, ui::text("mission_timeline.label_9"), satellite_icon, theme::sakura);
     else if (show_object_interval_) {
         p.setFont(font());
         p.setPen(theme::color(theme::text_muted));
         p.drawText(QRectF(left + 9, 117, detail.width() - 18, 18), Qt::AlignVCenter,
-                   QStringLiteral("选择卫星查看传播区间"));
+                   ui::text("mission_timeline.label_10"));
     }
     p.setPen(QPen(cursor_color, 1.5));
     if (!access_label_.isEmpty()) {
         const double y = show_object_interval_ ? 143 : 117;
         p.setPen(theme::color(theme::success));
         p.drawText(QRectF(16, y, left - 32, 18), Qt::AlignVCenter,
-                   fontMetrics().elidedText(QStringLiteral("可见 · ") + access_label_,
+                   fontMetrics().elidedText(ui::text("mission_timeline.label_11") + access_label_,
                                             Qt::ElideRight, static_cast<int>(left - 32)));
         p.save();
         p.setClipRect(QRectF(left, y, detail.width(), 18));
@@ -380,7 +380,7 @@ void MissionTimeline::paintEvent(QPaintEvent *) {
         if (access_intervals_.empty()) {
             p.setPen(theme::color(theme::text_muted));
             p.drawText(QRectF(left + 9, y, detail.width() - 18, 18), Qt::AlignVCenter,
-                       QStringLiteral("无可见时段"));
+                       ui::text("mission_timeline.label_12"));
         }
         p.restore();
         p.setPen(QPen(cursor_color, 1.5));
@@ -483,14 +483,13 @@ void MissionTimeline::mouseMoveEvent(QMouseEvent *event) {
         const bool edge = b - a >= 18 && (std::abs(event->position().x() - a) <= 6 ||
                                           std::abs(event->position().x() - b) <= 6);
         setCursor(edge ? Qt::SizeHorCursor : Qt::OpenHandCursor);
-        QToolTip::showText(event->globalPosition().toPoint(),
-                           QStringLiteral("拖动浏览范围 · 两端拖动缩放 · 双击显示全时段"), this);
+        QToolTip::showText(event->globalPosition().toPoint(), ui::text("mission_timeline.label_13"),
+                           this);
     } else if (detail_rect().contains(event->position())) {
         setCursor(Qt::CrossCursor);
         QToolTip::showText(event->globalPosition().toPoint(),
                            full_time(time_at(event->position().x()), scale_, *time_) + " " +
-                               scale_name(scale_) +
-                               QStringLiteral("\n单击跳转 · 滚轮缩放 · Shift 拖动平移"),
+                               scale_name(scale_) + ui::text("mission_timeline.label_14"),
                            this);
     } else {
         unsetCursor();

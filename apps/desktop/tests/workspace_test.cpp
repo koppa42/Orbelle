@@ -1,3 +1,4 @@
+#include "../src/viewer/workbench_style.hpp"
 #include "../src/viewer/workspace.hpp"
 #include <QApplication>
 #include <QDialog>
@@ -5,6 +6,7 @@
 #include <QLineEdit>
 #include <QMouseEvent>
 #include <QSplitter>
+#include <QStyleOptionTab>
 #include <QTabBar>
 #include <QVBoxLayout>
 #include <gtest/gtest.h>
@@ -94,6 +96,49 @@ TEST_F(WorkspaceTest, SwitchingDetachingAndClosingPreserveDocumentDraft) {
     workspace.open(document);
     EXPECT_EQ(field->text(), "changed in window");
     EXPECT_EQ(workspace.findChild<QTabBar *>()->count(), 3);
+}
+TEST_F(WorkspaceTest, TabLabelsAndCloseControlsShareCentreline) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    Workspace workspace;
+    auto *map = new QWidget;
+    workspace.add_view(map, "2D", workbench_icon(WorkbenchIcon::map));
+    workspace.add_view(new QWidget, "3D", workbench_icon(WorkbenchIcon::earth));
+    workspace.show();
+    const auto check = [&] {
+        QCoreApplication::processEvents();
+        for (auto *tabs : workspace.findChildren<QTabBar *>()) {
+            for (int i = 0; i < tabs->count(); ++i) {
+                auto *close = tabs->tabButton(i, QTabBar::RightSide);
+                ASSERT_NE(close, nullptr);
+                QStyleOptionTab option;
+                option.initFrom(tabs);
+                option.rect = tabs->tabRect(i);
+                option.shape = tabs->shape();
+                option.tabIndex = i;
+                option.text = tabs->tabText(i);
+                option.icon = tabs->tabIcon(i);
+                option.iconSize = tabs->iconSize();
+                option.rightButtonSize = close->size();
+                option.state.setFlag(QStyle::State_Selected, i == tabs->currentIndex());
+                const auto label =
+                    tabs->style()->subElementRect(QStyle::SE_TabBarTabText, &option, tabs);
+                EXPECT_NEAR(QRectF(label).center().y(), QRectF(close->geometry()).center().y(),
+                            0.5);
+                EXPECT_TRUE(tabs->rect().contains(close->geometry()));
+            }
+        }
+    };
+    for (int width : {800, 320, 600}) {
+        workspace.resize(width, 260);
+        for (int selected : {0, 1}) {
+            workspace.select_view(selected);
+            check();
+        }
+    }
+    workspace.detach_page(map);
+    check();
+    workspace.dock_page(map);
+    check();
 }
 TEST_F(WorkspaceTest, NarrowSplitRespectsActiveDocumentWithoutWideningHiddenViews) {
     Workspace workspace;

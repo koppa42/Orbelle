@@ -1,4 +1,5 @@
 #include "workbench_window.hpp"
+#include "../ui_text.hpp"
 #include "workbench_style.hpp"
 #include "workbench_theme.hpp"
 #include <QAbstractButton>
@@ -17,19 +18,22 @@
 
 namespace orbitforge::desktop {
 namespace {
-QIcon caption_icon(bool restore) {
+enum class CaptionIcon { minimize, maximize, restore };
+QIcon caption_icon(CaptionIcon kind) {
     QIcon icon;
-    for (int size : {16, 24, 32, 48}) {
+    for (int size : {16, 20, 24, 32, 48, 64}) {
         QPixmap image(size, size);
         image.fill(Qt::transparent);
         QPainter painter(&image);
         painter.setRenderHint(QPainter::Antialiasing);
         painter.scale(size / 16.0, size / 16.0);
         painter.setPen(QPen(theme::color(theme::text_soft), 1.1));
-        if (restore) {
-            painter.drawPolyline(QPolygonF{QPointF(5, 4), QPointF(5, 2), QPointF(13, 2),
-                                           QPointF(13, 10), QPointF(11, 10)});
-            painter.drawRect(QRectF(3, 5, 7, 7));
+        if (kind == CaptionIcon::minimize) {
+            painter.drawLine(QPointF(3, 8), QPointF(13, 8));
+        } else if (kind == CaptionIcon::restore) {
+            painter.drawPolyline(QPolygonF{QPointF(5, 5), QPointF(5, 3), QPointF(13, 3),
+                                           QPointF(13, 11), QPointF(11, 11)});
+            painter.drawRect(QRectF(3, 6, 7, 7));
         } else {
             painter.drawRect(QRectF(3, 3, 10, 10));
         }
@@ -57,17 +61,12 @@ void WorkbenchWindow::install_title_bar(QWidget *bar, QHBoxLayout *layout) {
         layout->addWidget(control);
         return control;
     };
-    QPixmap line(16, 16);
-    line.fill(Qt::transparent);
-    {
-        QPainter painter(&line);
-        painter.setPen(theme::color(theme::text_soft));
-        painter.drawLine(3, 8, 12, 8);
-    }
-    auto *minimize = button("windowMinimize", QStringLiteral("最小化"), QIcon(line));
-    maximize_ = button("windowMaximize", QStringLiteral("最大化"), caption_icon(false));
-    auto *close = button("windowClose", QStringLiteral("关闭 · Alt+F4"),
-                         workbench_icon(WorkbenchIcon::close));
+    auto *minimize =
+        button("windowMinimize", ui::text("window.minimize"), caption_icon(CaptionIcon::minimize));
+    maximize_ =
+        button("windowMaximize", ui::text("window.maximize"), caption_icon(CaptionIcon::maximize));
+    auto *close =
+        button("windowClose", ui::text("window.close_hint"), workbench_icon(WorkbenchIcon::close));
     connect(minimize, &QToolButton::clicked, this, &WorkbenchWindow::minimize_window);
     connect(maximize_, &QToolButton::clicked, this,
             [this] { isMaximized() ? restore_window() : maximize_window(); });
@@ -106,8 +105,8 @@ void WorkbenchWindow::restore_window() {
 void WorkbenchWindow::update_window_buttons() {
     if (!maximize_)
         return;
-    const auto label = isMaximized() ? QStringLiteral("还原") : QStringLiteral("最大化");
-    maximize_->setIcon(caption_icon(isMaximized()));
+    const auto label = isMaximized() ? ui::text("window.restore") : ui::text("window.maximize");
+    maximize_->setIcon(caption_icon(isMaximized() ? CaptionIcon::restore : CaptionIcon::maximize));
     maximize_->setToolTip(label);
     maximize_->setAccessibleName(label);
 }

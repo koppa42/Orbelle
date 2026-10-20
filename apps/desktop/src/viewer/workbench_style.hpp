@@ -45,7 +45,11 @@ enum class WorkbenchIcon {
     add,
     remove,
     info,
-    chevron_right
+    chevron_right,
+    refresh,
+    more,
+    arrow_left,
+    arrow_right
 };
 void apply_workbench_style(QApplication &app);
 QIcon workbench_icon(WorkbenchIcon icon, const QColor &color = theme::color(theme::text_soft));

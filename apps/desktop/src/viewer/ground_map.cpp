@@ -1,4 +1,5 @@
 #include "ground_map.hpp"
+#include "../ui_text.hpp"
 #include "track_style_editor.hpp"
 #include "workbench_profile.hpp"
 #include "workbench_theme.hpp"
@@ -117,13 +118,8 @@ GroundMap::GroundMap(const QString &imagery, QWidget *parent) : QWidget(parent),
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
     setAttribute(Qt::WA_OpaquePaintEvent);
-    setAccessibleName(QStringLiteral("二维地面轨迹"));
-    const auto navigation_help =
-        QStringLiteral("滚轮 / 触控板：以指针为中心缩放\n"
-                       "左键 / 中键拖动：平移；单击：选择对象\n"
-                       "双击：放大；Shift + 双击：缩小\n"
-                       "+ / −：缩放；方向键：平移；Shift + 方向键：精细平移\n"
-                       "Home：显示全球；Esc：取消拖动");
+    setAccessibleName(ui::text("ground_map.label"));
+    const auto navigation_help = ui::text("ground_map.navigation_help");
     setAccessibleDescription(navigation_help);
     setToolTip(navigation_help);
 }
@@ -932,10 +928,10 @@ void GroundMap::paintEvent(QPaintEvent *event) {
     }
     p.setFont(font());
     p.setPen(theme::color(theme::text_muted));
-    QString caption = QStringLiteral("WGS84 · 等距圆柱   |   滚轮缩放 · 拖动平移 · Home 全球");
+    QString caption = ui::text("ground_map.caption");
     if (cursor_position_) {
         const auto ll = map_transform().inverted().map(*cursor_position_);
-        caption = QStringLiteral("经度 %1°%2    纬度 %3°%4")
+        caption = ui::text("ground_map.ll")
                       .arg(std::abs(ll.x()), 0, 'f', 3)
                       .arg(ll.x() < 0 ? "W" : "E")
                       .arg(std::abs(ll.y()), 0, 'f', 3)

@@ -932,6 +932,24 @@ TEST_F(QuantityTest, PropertyDraftsRemainDirtyUntilSuccessfullyPublished) {
     EXPECT_FALSE(sensor_editor.has_unapplied_changes());
 }
 
+TEST_F(QuantityTest, GroundStationResetUsesCreationStateInsteadOfButtonCopy) {
+    GroundStationEditor editor;
+    application::ProjectGroundStation station;
+    station.object_id = "draft-station";
+    editor.set_station(station, true);
+    auto *apply = editor.findChild<QPushButton *>("applyGroundStation");
+    auto *reset = editor.findChild<QPushButton *>("resetGroundStation");
+    ASSERT_NE(apply, nullptr);
+    ASSERT_NE(reset, nullptr);
+    apply->setText("Translated create action");
+    reset->click();
+    EXPECT_EQ(apply->text(), QStringLiteral("插入地面站"));
+    editor.accept_station(station);
+    apply->setText("Translated apply action");
+    reset->click();
+    EXPECT_EQ(apply->text(), QStringLiteral("应用"));
+}
+
 TEST_F(QuantityTest, RebindingTimeDataPreservesTypedAndIncompleteEpochDrafts) {
     class NewTimeIdentity final : public core::ITimeProvider {
       public:
