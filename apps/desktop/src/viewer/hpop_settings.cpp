@@ -1348,6 +1348,7 @@ bool edit_hpop_settings(
     update_interpolation();
     auto *fixed_ephemeris = new QCheckBox(ui::text("hpop_settings.fixed_ephemeris"));
     fixed_ephemeris->setObjectName("hpopFixedEphemeris");
+    fixed_ephemeris->setToolTip(ui::text("hpop_settings.fixed_ephemeris.help"));
     fixed_ephemeris->setChecked(options.report_ephemeris_on_fixed_step);
     interpolation_form->addRow(fixed_ephemeris);
     help(interpolation_form, ui::text("hpop_settings.label_48"));

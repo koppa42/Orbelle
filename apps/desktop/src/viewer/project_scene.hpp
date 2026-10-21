@@ -32,5 +32,6 @@ struct PreparedProject {
     const std::map<std::string, std::shared_ptr<const core::SpaceWeather>> &weather = {},
     const std::map<std::string, std::shared_ptr<const core::OceanTideModel>> &ocean_tides = {},
     const std::optional<application::Project> &previous_project = std::nullopt,
-    std::shared_ptr<runtime::OrbitSessionCache> sessions = {});
+    std::shared_ptr<runtime::OrbitSessionCache> sessions = {},
+    const std::function<void(std::size_t)> &orbit_progress = {});
 } // namespace orbitforge::desktop

@@ -346,3 +346,26 @@ CSPICE 固定 DE440s 样例检查水星／金星物理中心与原生 `geometric
 ## 总力与局部状态块装配
 
 传播器与瞬时名义／偏导入口共用总力装配，包含全部当前力项、完整 ITRF 状态耦合、SRP 视太阳链及 D/K 参数偏导。216 组 Orekit 八变量自动微分、潮汐组合与旧版名义短弧比较见[总力验证](hpop_force_protocol.md)。完整单滑行段变分积分与联合协方差已接入，分别按[变分协议](hpop_variational_protocol.md)和[矩阵协议](hpop_covariance_protocol.md)验收。
+
+## 应用性能测量
+
+`compute-benchmark` 预设提供 `orbitforge_hpop_benchmark`。在 Release 模式下，用同一台机器、相同依赖和完整重力文件比较改动前后：
+
+```powershell
+cmake --build --preset compute-benchmark --target orbitforge_hpop_benchmark
+out/build/compute-benchmark/benchmarks/compute/Release/orbitforge_hpop_benchmark.exe data/samples <EGM2008.gfc> out/validation/<new-run>
+```
+
+程序记录原始重力文件 SHA-256、读取与校验时间，以及 1 小时、24 小时两种时段的准备、首次传播、参考系变换和缓存采样时间。默认组为 EGM2008 21×21、永久潮、RKF78、自适应最大步长 60 秒；另一组加上阻力、日月引力与太阳辐射压。两组保留相同误差设置，使用固定 EOP / 星历样例和每分钟输出进行比较；三次传播的中位数用于观察耗时，输出全部采样值供核验。
+
+首次读取是进程内未加载模型时的完整解析，操作系统文件缓存可能已热，不能称作物理磁盘冷启动。参考系包装器计时也有开销。先单独运行基准，再运行回归或 GUI 测试，避免同时争用 CPU。精确复用优化要求所有轨道样本及文件哈希不变；数值算法变更仍须执行本文既有独立参考和收敛验证，不可以性能代替精度验收。
+
+桌面另外运行 `run_graphics_smoke.py`，核对无修改应用、资源复用、取消、失败后保留原状态和数据变化确认。基准不包含 GUI 发布和 GPU 呈现，也不包含 STK 实机对比。
+
+### 启动预加载与内存
+
+`orbitforge_data_center_ui_tests` 的 `Startup.*` 覆盖后台阶段进度、窗口响应、点击不隐藏启动页、按钮 / Esc / 关闭取消、失败重试、计算身份不符时拒绝复用，以及场景释放后复用和过期缓存释放。首次数据准备的既有测试继续覆盖缺失下载、重试与取消。
+
+可选完整文件检查设置 `ORBITFORGE_STARTUP_GRAVITY_FILE` 为官方 EGM2008 原文，`ORBITFORGE_STARTUP_EPHEMERIS_CATALOG` 为已有完整 DE440s 的测试目录。运行 `Startup.FullDefaultDataWarmupMemoryAndRepeatedReuse`，用 `ORBITFORGE_STARTUP_CAPTURE_DIR` 指定新的截图及 `memory.json` 目录。Windows 用进程 PrivateUsage 记录加载前、加载后、十次复用后的内存，以及独立线程按 10 ms 间隔记录的采样峰值；采样峰值不是严格的瞬时最大值，测量不包含真实工作台 GPU 场景，其他平台内存字段为 -1。时间包含启动页进度与截图开销。常规 CI 未提供完整数据时跳过此项。
+
+真实工作台 smoke 也可接收 `ORBITFORGE_STARTUP_GRAVITY_FILE`：仅向 smoke 自己的数据目录安装该本地夹具，经生产预加载入口加载后进入工作台，断言首次 HPOP 应用在多次场景切换后仍引用同一 Provider，并记录 `hpop-preloaded-first-apply-timing`。常规 smoke、固定图形基准和性能 profile 保持固定输入，不执行联网准备；这个显式夹具模式验证预加载，不能代替生产首次下载测试。

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <fstream>
@@ -7,6 +8,17 @@
 #include <orbitforge/runtime/gravity.hpp>
 #include <picosha2.h>
 #include <sstream>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+
+#include <bcrypt.h>
+#endif
 
 namespace orbitforge::runtime {
 namespace {
@@ -32,6 +44,8 @@ template <class T> T number(std::string_view s) {
     return value;
 }
 double real(std::string_view text) {
+    if (text.find_first_of("Dd") == text.npos)
+        return number<double>(text);
     std::string value(text);
     std::replace(value.begin(), value.end(), 'D', 'E');
     std::replace(value.begin(), value.end(), 'd', 'e');
@@ -91,8 +105,8 @@ double normalize(double v, int n, int m) {
             "Unnormalized gravity coefficient overflow or underflow");
     return result;
 }
-std::vector<std::string_view> fields(std::string_view line) {
-    std::vector<std::string_view> result;
+void fields(std::string_view line, std::vector<std::string_view> &result) {
+    result.clear();
     while (!line.empty()) {
         const auto start = line.find_first_not_of(" \t\r");
         if (start == line.npos || line[start] == '#')
@@ -104,8 +118,109 @@ std::vector<std::string_view> fields(std::string_view line) {
             break;
         line.remove_prefix(end);
     }
-    return result;
 }
+class GravityHash {
+  public:
+#ifdef _WIN32
+    GravityHash() {
+        require(BCryptOpenAlgorithmProvider(&algorithm_, BCRYPT_SHA256_ALGORITHM, nullptr, 0) >= 0,
+                "Cannot initialize gravity SHA-256");
+        if (BCryptCreateHash(algorithm_, &hash_, nullptr, 0, nullptr, 0, 0) < 0) {
+            BCryptCloseAlgorithmProvider(algorithm_, 0);
+            throw std::runtime_error("Cannot create gravity SHA-256");
+        }
+    }
+    ~GravityHash() {
+        BCryptDestroyHash(hash_);
+        BCryptCloseAlgorithmProvider(algorithm_, 0);
+    }
+    GravityHash(const GravityHash &) = delete;
+    GravityHash &operator=(const GravityHash &) = delete;
+    void process(std::span<const char> bytes) {
+        require(bytes.size() <= std::numeric_limits<ULONG>::max(), "SHA-256 block is too large");
+        require(BCryptHashData(hash_, reinterpret_cast<PUCHAR>(const_cast<char *>(bytes.data())),
+                               static_cast<ULONG>(bytes.size()), 0) >= 0,
+                "Cannot hash gravity data");
+    }
+    std::string finish() {
+        std::array<unsigned char, 32> bytes;
+        require(BCryptFinishHash(hash_, bytes.data(), static_cast<ULONG>(bytes.size()), 0) >= 0,
+                "Cannot finish gravity SHA-256");
+        constexpr char digits[] = "0123456789abcdef";
+        std::string result;
+        result.reserve(64);
+        for (auto byte : bytes) {
+            result += digits[byte >> 4];
+            result += digits[byte & 15];
+        }
+        return result;
+    }
+
+  private:
+    BCRYPT_ALG_HANDLE algorithm_ = nullptr;
+    BCRYPT_HASH_HANDLE hash_ = nullptr;
+#else
+    void process(std::span<const char> bytes) { hash_.process(bytes.begin(), bytes.end()); }
+    std::string finish() {
+        hash_.finish();
+        return picosha2::get_hash_hex_string(hash_);
+    }
+
+  private:
+    picosha2::hash256_one_by_one hash_;
+#endif
+};
+// Hash original bytes once per block and expose lines without per-character stream
+// extraction. Views remain valid until next(); only lines spanning blocks are copied.
+// The bounded buffers also enforce the existing file/line limits before allocation.
+class GravityLines {
+  public:
+    GravityLines(std::ifstream &input, GravityHash &hash) : input_(input), hash_(hash) {}
+    bool next(std::string_view &line) {
+        tail_.clear();
+        for (;;) {
+            if (at_ == size_) {
+                if (input_.eof()) {
+                    line = tail_;
+                    return !tail_.empty();
+                }
+                input_.read(buffer_.data(), static_cast<std::streamsize>(buffer_.size()));
+                require(!input_.bad() && (input_.eof() || !input_.fail()),
+                        "Cannot read gravity file");
+                size_ = static_cast<std::size_t>(input_.gcount());
+                at_ = 0;
+                bytes_ += size_;
+                require(bytes_ <= 512U * 1024 * 1024, "Gravity file exceeds 512 MiB");
+                hash_.process(std::span{buffer_}.first(size_));
+                if (!size_) {
+                    line = tail_;
+                    return !tail_.empty();
+                }
+            }
+            const std::string_view available(buffer_.data() + at_, size_ - at_);
+            const auto end = available.find('\n');
+            const auto part = available.substr(0, end);
+            require(tail_.size() + part.size() <= 4096, "Gravity file line exceeds 4096 bytes");
+            at_ += part.size() + (end != available.npos ? 1 : 0);
+            if (tail_.empty() && end != available.npos) {
+                line = part;
+                return true;
+            }
+            tail_.append(part);
+            if (end != available.npos) {
+                line = tail_;
+                return true;
+            }
+        }
+    }
+
+  private:
+    std::ifstream &input_;
+    GravityHash &hash_;
+    std::array<char, 64 * 1024> buffer_;
+    std::string tail_;
+    std::size_t at_ = 0, size_ = 0, bytes_ = 0;
+};
 } // namespace
 void validate_gravity_reference(std::span<const application::DataReference> recorded,
                                 const std::string &selection, const core::GravityInfo &info) {
@@ -129,7 +244,7 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
                                                        const std::function<void()> &checkpoint) {
     std::ifstream input(file, std::ios::binary);
     require(input.is_open(), "Cannot open gravity file");
-    picosha2::hash256_one_by_one hash;
+    GravityHash hash;
     core::GravityInfo info;
     info.source_url = source_url;
     std::map<std::string, std::string> header;
@@ -164,7 +279,7 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
         (void)real(row[offset + 3]);
         love_seen = true;
     };
-    std::size_t line_number = 0, bytes = 0, count = 0;
+    std::size_t line_number = 0, count = 0;
     int maximum_order = 0;
     const auto begin = [&] {
         const auto get = [&](const char *gfc, const char *stk) -> const std::string & {
@@ -208,22 +323,16 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
         coefficients.reserve(grv ? std::min<std::size_t>(seen.size(), 1024) : seen.size());
         started = true;
     };
-    for (std::string line; std::getline(input, line);) {
+    GravityLines lines(input, hash);
+    std::vector<std::string_view> raw;
+    raw.reserve(9);
+    for (std::string_view view; lines.next(view);) {
         if ((++line_number % 1024) == 0 && checkpoint)
             checkpoint();
-        require(line.size() <= 4096, "Gravity file line exceeds 4096 bytes");
-        bytes += line.size() + 1;
-        require(bytes <= 512U * 1024 * 1024, "Gravity file exceeds 512 MiB");
-        hash.process(line.begin(), line.end());
-        if (!input.eof()) {
-            const std::string lf = "\n";
-            hash.process(lf.begin(), lf.end());
-        }
         // Fortran D exponents occur in ICGEM data. Change only numeric text, after hashing.
-        std::string_view view(line);
         if (line_number == 1 && view.starts_with("\xef\xbb\xbf"))
             view.remove_prefix(3);
-        const auto raw = fields(view);
+        fields(view, raw);
         if (raw.empty())
             continue;
         const auto key = lower(raw.front());
@@ -381,8 +490,7 @@ std::shared_ptr<const core::GravityModel> load_gravity(const std::filesystem::pa
     }
     if (checkpoint)
         checkpoint();
-    hash.finish();
-    info.sha256 = picosha2::get_hash_hex_string(hash);
+    info.sha256 = hash.finish();
     return std::make_shared<const core::GravityModel>(std::move(info), coefficients);
 }
 application::DataReference gravity_reference(const std::string &selection,

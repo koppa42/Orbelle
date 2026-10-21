@@ -85,15 +85,21 @@ inline std::vector<DataChange> calculation_data_changes(const application::DataL
 // The candidate owns its maps; failure/cancellation cannot modify the active scene.
 template <class Files, class Providers, class Reference, class Info, class Load, class Checkpoint>
 Providers prepare_resources(const Files &files, const Providers &retained, Reference reference,
-                            Info info, Load load, Checkpoint checkpoint) {
+                            Info info, Load load, Checkpoint checkpoint,
+                            const Providers &warmed = {}) {
     Providers result;
     for (const auto &file : files) {
         checkpoint();
         const auto wanted = reference(file.selection, file.info);
-        const auto found = retained.find(file.selection);
-        if (found != retained.end() && found->second &&
-            reference(file.selection, info(*found->second)) == wanted) {
+        const auto reuse = [&](const Providers &providers) {
+            const auto found = providers.find(file.selection);
+            if (found == providers.end() || !found->second ||
+                reference(file.selection, info(*found->second)) != wanted)
+                return false;
             result.emplace(file.selection, found->second);
+            return true;
+        };
+        if (reuse(retained) || reuse(warmed)) {
             continue;
         }
         auto model = load(file);

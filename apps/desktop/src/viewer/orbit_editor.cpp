@@ -412,6 +412,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     step_->set_range(1, 60, Unit::second);
     step_->set_quantum(1, Unit::second);
     step_->set_label(ui::text("orbit_editor.step.set_label"));
+    step_->setToolTip(ui::text("orbit_editor.step.help"));
     step_->setMaximumWidth(QWIDGETSIZE_MAX);
     form->addRow(ui::text("orbit_editor.step.set_label"), step_);
     span_group->add_help(ui::text("orbit_editor.span_group.add_help"));

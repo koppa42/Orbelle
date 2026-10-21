@@ -216,11 +216,31 @@ struct SlowRotations {
     core::Matrix3 polar;
     core::Matrix3 celestial;
 };
+std::array<double, 3> model_cip(core::JulianDate tt) {
+    struct Entry {
+        core::JulianDate tt{};
+        std::array<double, 3> value{};
+    };
+    // The uncorrected IAU series depends only on these exact two TT doubles.
+    // RK stages repeat epochs; gravity, drag and their derivatives also share them.
+    // No time rounding, interpolation, EOP values or provider identities enter this cache.
+    // Thread-local bounded storage avoids locks and races between concurrent analyses.
+    thread_local std::array<Entry, 64> entries;
+    thread_local std::size_t count = 0, next = 0;
+    for (std::size_t i = 0; i < count; ++i)
+        if (entries[i].tt.day == tt.day && entries[i].tt.fraction == tt.fraction)
+            return entries[i].value;
+    std::array<double, 3> value;
+    eraXys06a(tt.day, tt.fraction, &value[0], &value[1], &value[2]);
+    entries[next] = {tt, value};
+    next = (next + 1) % entries.size();
+    count = std::min(count + 1, entries.size());
+    return value;
+}
 SlowRotations slow_rotations(core::JulianDate tt, const core::EarthOrientationState &eop,
                              double dt) {
     tt.fraction += dt / 86400.0;
-    double x = 0, y = 0, s = 0;
-    eraXys06a(tt.day, tt.fraction, &x, &y, &s);
+    auto [x, y, s] = model_cip(tt);
     x += eop.sample.celestial_pole_dx_rad + dt * eop.rates.celestial_pole_dx_rad_per_second;
     y += eop.sample.celestial_pole_dy_rad + dt * eop.rates.celestial_pole_dy_rad_per_second;
     if (x * x + y * y >= 1) {
@@ -387,8 +407,7 @@ class FrameProvider final : public core::IFrameProvider {
             for (std::size_t j = 0; j < 3; ++j)
                 derivative[i][j] = (8 * (p1[i][j] - m1[i][j]) - (p2[i][j] - m2[i][j])) / (12 * h);
         const auto tt = tt_jd(epoch);
-        double x = 0, y = 0, s = 0;
-        eraXys06a(tt.day, tt.fraction, &x, &y, &s);
+        auto [x, y, s] = model_cip(tt);
         x += eop.sample.celestial_pole_dx_rad;
         y += eop.sample.celestial_pole_dy_rad;
         const auto dx = eop.rates.celestial_pole_dx_rad_per_second,
