@@ -102,7 +102,10 @@ QPainterPath ground_path(std::span<const QPointF> points) {
     }
     return result;
 }
-GroundMap::GroundMap(const QString &imagery, QWidget *parent) : QWidget(parent), imagery_(imagery) {
+GroundMap::GroundMap(const QString &imagery, QWidget *parent)
+    : GroundMap(QImage(imagery), parent) {}
+GroundMap::GroundMap(QImage imagery, QWidget *parent)
+    : QWidget(parent), imagery_(std::move(imagery)), refinement_animation_(this) {
     if (imagery_.isNull())
         throw std::runtime_error("Cannot load offline imagery for the 2D map");
     raster_timer_.setInterval(16);
@@ -114,6 +117,17 @@ GroundMap::GroundMap(const QString &imagery, QWidget *parent) : QWidget(parent),
                 apply_zoom(value.toDouble(), zoom_anchor_, zoom_location_);
             });
     connect(&zoom_animation_, &QVariantAnimation::finished, this, [this] { update(); });
+    refinement_animation_.setDuration(160);
+    refinement_animation_.setObjectName("groundMapRefinement");
+    refinement_animation_.setStartValue(0.0);
+    refinement_animation_.setEndValue(1.0);
+    refinement_animation_.setEasingCurve(QEasingCurve::InOutCubic);
+    connect(&refinement_animation_, &QVariantAnimation::valueChanged, this, [this] { update(); });
+    connect(&refinement_animation_, &QVariantAnimation::finished, this, [this] {
+        previous_detail_ = {};
+        blended_detail_ = {};
+        update();
+    });
     setMinimumSize(160, 100);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
@@ -153,6 +167,15 @@ GroundMap::prepare_tracks(const std::vector<std::shared_ptr<const OrbitScene>> &
 void GroundMap::publish_tracks(PreparedTracks tracks) {
     tracks_.swap(tracks);
     invalidate_tracks();
+}
+void GroundMap::refine_tracks(PreparedTracks tracks) {
+    auto previous =
+        !tracks.empty() && tracks.size() == tracks_.size() && tracks_ready() ? trails_ : Raster{};
+    publish_tracks(std::move(tracks));
+    if (!previous.image.isNull()) {
+        previous_detail_ = std::move(previous);
+        refinement_pending_ = true;
+    }
 }
 void GroundMap::replace_track(std::size_t index, Track track) {
     tracks_.at(index) = std::move(track);
@@ -467,6 +490,7 @@ void GroundMap::pan_by(QPointF delta) {
     update();
 }
 void GroundMap::invalidate_tracks(bool geometry_changed) {
+    cancel_refinement();
     ++trails_revision_;
     if (geometry_changed)
         ++geometry_revision_;
@@ -707,6 +731,53 @@ void GroundMap::install_raster(Raster result) {
         return;
     trails_ = std::move(result);
     trails_dirty_ = false;
+    if (refinement_pending_) {
+        refinement_pending_ = false;
+        refinement_animation_.start();
+    }
+}
+void GroundMap::cancel_refinement() {
+    refinement_animation_.stop();
+    refinement_pending_ = false;
+    previous_detail_ = {};
+    blended_detail_ = {};
+}
+const GroundMap::Raster *GroundMap::refinement_display() {
+    if (refinement_pending_)
+        return &previous_detail_;
+    if (refinement_animation_.state() != QAbstractAnimation::Running)
+        return nullptr;
+    const double amount = refinement_animation_.currentValue().toDouble();
+    if (amount == 0)
+        return &previous_detail_;
+    if (previous_detail_.bounds != trails_.bounds ||
+        previous_detail_.image.size() != trails_.image.size()) {
+        cancel_refinement();
+        return nullptr;
+    }
+    if (blended_detail_.image.size() != trails_.image.size()) {
+        blended_detail_ = trails_;
+        allocate_raster(blended_detail_, QImage::Format_ARGB32_Premultiplied);
+    }
+    const ProfileScope profile("map_refinement_blend_ms");
+    // Interpolate premultiplied channels directly. Source-over dims coincident
+    // lines, and QPainter's Plus with global opacity can clamp before weighting.
+    const unsigned weight = static_cast<unsigned>(std::lround(amount * 256));
+    const auto mix = [weight](QRgb from, QRgb to) {
+        constexpr unsigned mask = 0x00ff00ff, round = 0x00800080;
+        const unsigned red_blue = ((from & mask) * (256 - weight) + (to & mask) * weight + round);
+        const unsigned alpha_green =
+            (((from >> 8) & mask) * (256 - weight) + ((to >> 8) & mask) * weight + round);
+        return ((red_blue >> 8) & mask) | (alpha_green & 0xff00ff00);
+    };
+    for (int y = 0; y < trails_.image.height(); ++y) {
+        const auto *from = reinterpret_cast<const QRgb *>(previous_detail_.image.constScanLine(y));
+        const auto *to = reinterpret_cast<const QRgb *>(trails_.image.constScanLine(y));
+        auto *out = reinterpret_cast<QRgb *>(blended_detail_.image.scanLine(y));
+        for (int x = 0; x < trails_.image.width(); ++x)
+            out[x] = mix(from[x], to[x]);
+    }
+    return &blended_detail_;
 }
 void GroundMap::poll_raster() {
     if (!pending_raster_.valid() ||
@@ -763,6 +834,10 @@ void GroundMap::paintEvent(QPaintEvent *event) {
     const bool footer_only = event->rect().top() >= height() - 24;
     const bool navigating =
         (dragging_ && moved_) || zoom_animation_.state() == QAbstractAnimation::Running;
+    if (tracks_transitioning() &&
+        (previous_detail_.transform != map_transform() ||
+         previous_detail_.ratio != devicePixelRatioF() || !covers_view(previous_detail_)))
+        cancel_refinement();
     if (!footer_only && (background_dirty_ || background_.image.isNull() ||
                          !covers_view(background_, !navigating))) {
         const ProfileScope rebuild("map_background_ms");
@@ -785,7 +860,8 @@ void GroundMap::paintEvent(QPaintEvent *event) {
         auto request = raster_request();
         if (vertices > 1024) {
             const bool needs_preview =
-                preview_.image.isNull() || preview_.revision != geometry_revision_;
+                !refinement_pending_ &&
+                (preview_.image.isNull() || preview_.revision != geometry_revision_);
             // Continuous input reprojects immutable coverage. Build full detail
             // once input stops, instead of cancelling a new worker every frame.
             if (!navigating || needs_preview) {
@@ -819,6 +895,8 @@ void GroundMap::paintEvent(QPaintEvent *event) {
             display = &trails_;
         else if (!preview_.image.isNull() && preview_.revision == geometry_revision_)
             display = &preview_;
+        if (const auto *detail = refinement_display())
+            display = detail;
         const BaseKey key{map_transform(),
                           size(),
                           devicePixelRatioF(),

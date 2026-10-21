@@ -105,7 +105,7 @@ class GroundMapTest : public ::testing::Test {
         do {
             QCoreApplication::processEvents();
             (void)pixels(map);
-            if (map.tracks_ready())
+            if (map.tracks_ready() && !map.tracks_transitioning())
                 return true;
             QThread::msleep(1);
         } while (deadline.elapsed() < 3000);
@@ -368,6 +368,87 @@ TEST_F(GroundMapTest, ObsoleteWorkerCannotRestoreAReplacedOrbit) {
     map.replace_track(0, track());
     ASSERT_TRUE(settle(map));
     EXPECT_EQ(pixels(map), pixels(fresh));
+}
+TEST_F(GroundMapTest, RefinementKeepsTheVisibleCurveUntilItsDetailedRasterIsReady) {
+    GroundMap map(imagery_), fresh(imagery_);
+    configure(map);
+    configure(fresh);
+    const auto before = pixels(map);
+    ASSERT_TRUE(map.tracks_ready());
+    const auto detailed = dense_track();
+    map.refine_tracks({detailed});
+    EXPECT_TRUE(map.tracks_transitioning());
+    // The first paint starts the asynchronous raster, without an empty frame or a
+    // lower-quality whole-world raster being shown in between.
+    EXPECT_EQ(pixels(map), before);
+    EXPECT_FALSE(map.tracks_ready());
+    fresh.publish_tracks({detailed});
+    ASSERT_TRUE(settle(map));
+    ASSERT_TRUE(settle(fresh));
+    EXPECT_FALSE(map.tracks_transitioning());
+    expect_same_pixels(pixels(map), pixels(fresh));
+}
+TEST_F(GroundMapTest, RefinementBlendsWithoutDimmingAndNewInputInterruptsIt) {
+    GroundMap map(imagery_), fresh(imagery_);
+    configure(map);
+    configure(fresh);
+    const auto before = pixels(map);
+    // Identical geometry must keep constant brightness even halfway through a fade.
+    map.refine_tracks({track()});
+    EXPECT_EQ(pixels(map), before);
+    ASSERT_TRUE(map.tracks_transitioning());
+    auto *animation = map.findChild<QVariantAnimation *>("groundMapRefinement");
+    ASSERT_NE(animation, nullptr);
+    animation->setCurrentTime(animation->duration() / 2);
+    {
+        SCOPED_TRACE("constant brightness at halfway");
+        expect_same_pixels(pixels(map), before);
+    }
+    auto changed = track();
+    changed.points[1].ry() += 2;
+    changed.path = ground_path(changed.points);
+    animation->setCurrentTime(animation->duration());
+    map.refine_tracks({changed});
+    EXPECT_EQ(pixels(map), before);
+    animation->setCurrentTime(animation->duration() / 2);
+    const auto midway = pixels(map);
+    EXPECT_NE(midway, before);
+    fresh.publish_tracks({changed});
+    EXPECT_NE(midway, pixels(fresh));
+    animation->setCurrentTime(animation->duration());
+    {
+        SCOPED_TRACE("exact detail after transition");
+        expect_same_pixels(pixels(map), pixels(fresh));
+    }
+
+    map.refine_tracks({track()});
+    (void)pixels(map);
+    ASSERT_TRUE(map.tracks_transitioning());
+    map.publish_tracks({});
+    fresh.publish_tracks({});
+    EXPECT_FALSE(map.tracks_transitioning());
+    expect_same_pixels(pixels(map), pixels(fresh));
+    ASSERT_TRUE(settle(map));
+    expect_same_pixels(pixels(map), pixels(fresh));
+
+    map.publish_tracks({track()});
+    (void)pixels(map);
+    map.refine_tracks({dense_track()});
+    (void)pixels(map);
+    map.publish_tracks({changed}); // Interrupt a pending worker as well as a fade.
+    fresh.publish_tracks({changed});
+    ASSERT_TRUE(settle(map));
+    expect_same_pixels(pixels(map), pixels(fresh));
+
+    map.refine_tracks({track()});
+    (void)pixels(map);
+    ASSERT_TRUE(map.tracks_transitioning());
+    map.zoom_centered(2);
+    fresh.publish_tracks({track()});
+    fresh.zoom_centered(2);
+    ASSERT_TRUE(settle(map));
+    EXPECT_FALSE(map.tracks_transitioning());
+    expect_same_pixels(pixels(map), pixels(fresh));
 }
 TEST_F(GroundMapTest, ZoomBurstAndResizeSettleAtTheLatestViewport) {
     GroundMap map(imagery_), fresh(imagery_);

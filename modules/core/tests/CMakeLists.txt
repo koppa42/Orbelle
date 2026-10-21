@@ -1,5 +1,6 @@
 add_executable(orbitforge_core_tests universal_kepler_test.cpp vop_interpolation_test.cpp circular_two_body_test.cpp tabulated_orbit_test.cpp ground_station_test.cpp hpop_test.cpp hpop_force_test.cpp hpop_variational_test.cpp hpop_covariance_test.cpp hpop_covariance_frames_test.cpp sundman_test.cpp mission_test.cpp srp_differential_test.cpp drag_differential_test.cpp force_differential_test.cpp gravity_differential_test.cpp gravity_test.cpp solid_tides_test.cpp ocean_tides_test.cpp relativity_test.cpp third_body_test.cpp solar_radiation_pressure_test.cpp atmospheric_drag_test.cpp)
 target_compile_definitions(orbitforge_core_tests PRIVATE
+    ORBITFORGE_ORBIT_DESIGN_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/orbit_design.txt"
     ORBITFORGE_HPOP_COVARIANCE_FRAMES_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/hpop_covariance_frames.txt"
     ORBITFORGE_HPOP_COVARIANCE_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/hpop_covariance.txt"
     ORBITFORGE_HPOP_VARIATIONAL_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/hpop_variational.txt"
@@ -40,6 +41,7 @@ target_compile_definitions(orbitforge_core_tests PRIVATE
     ORBITFORGE_MASS_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/mass.txt"
     ORBITFORGE_DRAG_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/drag.txt"
     ORBITFORGE_HPOP_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/hpop.txt")
+target_sources(orbitforge_core_tests PRIVATE orbit_design_test.cpp)
 target_link_libraries(orbitforge_core_tests PRIVATE OrbitForge::Core GTest::gtest_main)
 orbitforge_warnings(orbitforge_core_tests)
 orbitforge_copy_runtime_dlls(orbitforge_core_tests)

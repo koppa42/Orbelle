@@ -661,6 +661,11 @@ QLabel#workspaceDot[warning="true"] { background: @warning; }
 QToolBar#commandBar { background: @chrome; border: 0; border-bottom: 1px solid @line; padding: 1px 6px; spacing: 2px; }
 QToolBar#commandBar::separator { background: @line; width: 1px; margin: 9px 6px; }
 QToolBar#commandBar QToolButton { padding: 3px 7px; min-width: 18px; min-height: 18px; border-radius: 3px; }
+QToolBar#commandBar QToolButton#insertObjectButton { padding: 3px 30px 3px 8px; }
+QToolButton#insertObjectButton::menu-button { subcontrol-origin: padding; subcontrol-position: top right; width: 24px; border: 0; border-left: 1px solid @line; border-top-right-radius: 3px; border-bottom-right-radius: 3px; }
+QToolButton#insertObjectButton::menu-button:hover { background: @accentHover; }
+QToolButton#insertObjectButton::menu-button:pressed { background: @accentWash; }
+QToolButton#insertObjectButton::menu-arrow { image: url(:/orbitforge/icons/chevron-down.png); width: 10px; height: 6px; }
 QToolButton[captionButton="true"] { padding: 0; border: 1px solid transparent; border-radius: 4px; }
 QToolButton[captionButton="true"]:hover { background: @overlay; }
 QToolButton[captionButton="true"]:focus { border-color: @accent; }
@@ -751,11 +756,18 @@ QTreeWidget#propertyNavigation::item:selected { background: @accentWash; color: 
 QTreeWidget#propertyNavigation::item:disabled { color: @textFaint; }
 QTreeWidget#propertyNavigation::branch { background: transparent; }
 QTreeWidget#propertyNavigation::branch:selected { background: @panel; }
-QTreeWidget#insertObjectTypes { background: @field; border: 1px solid @line; border-radius: 6px; padding: 4px; }
-QTreeWidget#insertObjectTypes::item { height: 24px; padding: 1px 6px; }
+QDialog#insertObjectsDialog QLabel, QDialog#insertObjectsDialog QTreeWidget, QDialog#insertObjectsDialog QPushButton, QDialog#insertObjectsDialog QCheckBox { font-size: 13px; }
+QLabel#insertDestination { color: @textMuted; }
+QLabel#insertSectionHeading { color: @text; font-weight: 600; }
+QTreeWidget#insertObjectTypes { background: @field; border: 1px solid @line; border-radius: 5px; padding: 6px; }
+QTreeWidget#insertObjectTypes::item { height: 30px; padding: 3px 8px; }
 QTreeWidget#insertObjectTypes::branch { background: @field; }
-QDialog#insertObjectsDialog QRadioButton { color: @text; spacing: 8px; }
-QDialog#insertObjectsDialog QRadioButton:hover { color: @accentBright; }
+QTreeWidget#insertObjectMethods { background: @field; border: 1px solid @line; border-radius: 5px; padding: 6px; outline: 0; }
+QTreeWidget#insertObjectMethods::item { height: 32px; padding: 4px 10px; border-radius: 0; }
+QLabel#insertMethodDescription { color: @textMuted; padding: 6px 2px 10px 2px; }
+QPushButton#saveDefaultInsertMethod { background: transparent; border-color: transparent; padding: 4px 6px; }
+QPushButton#saveDefaultInsertMethod:hover { background: @accentHover; border-color: @line; }
+QPushButton#saveDefaultInsertMethod:focus { border-color: @accent; }
 QHeaderView::section { background: @panel; color: @textMuted; border: 0; border-right: 1px solid @line; border-bottom: 1px solid @line; padding: 4px 8px; font-size: 11px; }
 QLineEdit#objectSearch { background: @field; padding: 4px 8px; border-color: @line; border-radius: 5px; }
 QLineEdit#objectSearch:focus { border-color: @accent; }
@@ -836,6 +848,11 @@ QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover { backgro
 QScrollBar::handle:vertical:pressed, QScrollBar::handle:horizontal:pressed { background: @accentDeep; }
 QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+QSlider[orbitParameter="true"]::groove:horizontal { background: @border; height: 3px; border-radius: 1px; margin: 0 5px; }
+QSlider[orbitParameter="true"]::sub-page:horizontal { background: @accentDeep; border-radius: 1px; }
+QSlider[orbitParameter="true"]::handle:horizontal { background: @accent; border: 1px solid @accent; width: 10px; margin: -4px -5px; border-radius: 5px; }
+QSlider[orbitParameter="true"]::handle:horizontal:hover { background: @accentBright; border-color: @accentBright; }
+QSlider[orbitParameter="true"]::handle:horizontal:focus { border-color: @text; }
 QProgressBar { background: @field; border: 0; border-radius: 3px; color: transparent; max-height: 6px; }
 QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 @accent, stop:1 @sakura); border-radius: 3px; }
 QRubberBand { background: @accent/15; border: 1px solid @accent; }

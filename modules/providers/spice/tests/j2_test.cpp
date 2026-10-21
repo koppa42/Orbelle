@@ -4,12 +4,39 @@
 #include <limits>
 #include <numbers>
 #include <orbitforge/providers/spice/provider.hpp>
+#include <orbitforge/core/propagation/orbit_design.hpp>
 
 namespace {
 using namespace orbitforge;
 using namespace orbitforge::core;
 const auto &earth = central_body(OriginId::earth);
 constexpr double rad = std::numbers::pi / 180;
+TEST(OrbitDesignPropagation, CircularRepeatClosesInUniformlyRotatingEarthFrame) {
+    for (auto type : {EarthOrbitType::repeating_ground_trace, EarthOrbitType::repeating_sun_sync}) {
+        EarthOrbitDesignRequest request;
+        request.type = type;
+        request.repeat_revolutions = 233;
+        request.repeat_days = 16;
+        request.raan_rad = 0.3;
+        request.true_anomaly_rad = 0.4;
+        const auto design = design_earth_orbit(request);
+        const auto &e = design.elements;
+        // Circular: mean anomaly equals true anomaly. This exercises the actual
+        // propagation provider, independently of the designer's rate diagnostics.
+        const auto provider = providers::spice::make_j2(
+            {e.epoch, e.semi_major_axis_m, 0, e.inclination_rad, e.raan_rad, 0, e.true_anomaly_rad}, earth, {});
+        const auto first = provider->state_at(e.epoch);
+        for (int cycles : {-1, 1, 10}) {
+            const double seconds = cycles * design.repeat_cycle_seconds;
+            const auto end = provider->state_at(Epoch{static_cast<std::int64_t>(std::llround(seconds * 1e9))});
+            const double rotation = 7.292115e-5 * seconds;
+            const std::array fixed{std::cos(rotation) * end.position_m[0] + std::sin(rotation) * end.position_m[1],
+                                  -std::sin(rotation) * end.position_m[0] + std::cos(rotation) * end.position_m[1],
+                                  end.position_m[2]};
+            for (std::size_t k = 0; k < 3; ++k) EXPECT_NEAR(fixed[k], first.position_m[k], 0.001);
+        }
+    }
+}
 J2MeanElements leo() { return {Epoch{0}, 7e6, .01, 98.5 * rad, 25 * rad, 70 * rad, 10 * rad}; }
 void near(const CartesianState &a, const CartesianState &b, double r = .001, double v = 1e-6) {
     EXPECT_EQ(a.epoch, b.epoch);

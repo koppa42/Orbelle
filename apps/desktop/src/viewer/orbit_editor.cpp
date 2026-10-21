@@ -7,6 +7,7 @@
 #include "project_update.hpp"
 #include "quantity_editor.hpp"
 #include "responsive_layout.hpp"
+#include "satellite_creation.hpp"
 #include "track_style_editor.hpp"
 #include "workbench_style.hpp"
 #include <QCheckBox>
@@ -1068,19 +1069,7 @@ void OrbitEditor::update_state_labels() {
     elements_[5]->set_label(anomaly_label_->text());
     elements_[5]->setObjectName(j2 ? "meanAnomaly" : "trueAnomaly");
 }
-core::Tle OrbitEditor::read_tle() const {
-    const auto text = tle_text_->toPlainText();
-    if (text.size() > 4096)
-        throw std::invalid_argument(ui::utf8("orbit_editor.text"));
-    auto lines = text.split('\n', Qt::SkipEmptyParts);
-    for (auto &line : lines)
-        line = line.trimmed();
-    if (lines.size() == 3 && !lines[0].startsWith("1 ") && !lines[0].startsWith("2 "))
-        lines.removeFirst();
-    if (lines.size() != 2)
-        throw std::invalid_argument(ui::utf8("orbit_editor.validation_2"));
-    return {lines[0].toStdString(), lines[1].toStdString()};
-}
+core::Tle OrbitEditor::read_tle() const { return parse_single_tle(tle_text_->toPlainText()); }
 void OrbitEditor::update_tle_preview() {
     if (!tle_preview_)
         return;
