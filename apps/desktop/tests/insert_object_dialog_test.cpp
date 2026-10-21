@@ -637,6 +637,44 @@ TEST_F(InsertionTest, PreviewPrefetchDoesNotRequireDataBeyondTheRequestedView) {
     EXPECT_EQ(map->track_count(), 0u);
 }
 
+TEST_F(InsertionTest, PreviewDestructionDiscardsQueuedWorkerCompletion) {
+    class PausedEop final : public core::IEarthOrientationProvider {
+      public:
+        core::EarthOrientationState at(core::Epoch epoch) const override {
+            entered = true;
+            while (!resume.load())
+                QThread::msleep(1);
+            return source->at(epoch);
+        }
+        const core::EopDataInfo &data_info() const noexcept override { return source->data_info(); }
+        std::shared_ptr<const core::IEarthOrientationProvider> source =
+            runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+        mutable std::atomic_bool entered{false}, resume{false};
+    };
+    const auto eop = std::make_shared<PausedEop>();
+    core::EarthOrbitDesignRequest request;
+    request.epoch = runtime::make_builtin_time_provider()->from_utc({2026, 10, 1, 0, 0, 0});
+    QImage imagery(360, 180, QImage::Format_RGB32);
+    imagery.fill(Qt::darkBlue);
+    auto preview = std::make_unique<OrbitDesignPreview>();
+    preview->set_context(imagery, runtime::make_frame_provider(), eop);
+    preview->set_design(core::design_earth_orbit(request));
+    QElapsedTimer timer;
+    timer.start();
+    while (!eop->entered.load() && timer.elapsed() < 5000) {
+        QApplication::processEvents();
+        QThread::msleep(1);
+    }
+    const bool worker_started = eop->entered.load();
+    // Do not deliver any GUI event between releasing the worker and destroying
+    // its context. The destructor must join it, then discard its queued result.
+    eop->resume = true;
+    preview.reset();
+    EXPECT_TRUE(worker_started);
+    QApplication::sendPostedEvents(nullptr, QEvent::MetaCall);
+    QApplication::processEvents();
+}
+
 // Explicit interaction profile, excluded from CI timing gates. Run with
 // --gtest_also_run_disabled_tests --gtest_filter=*WizardPreviewInteractionProfile.
 TEST_F(InsertionTest, DISABLED_WizardPreviewInteractionProfile) {

@@ -1,6 +1,6 @@
 #pragma once
 #include "ground_map.hpp"
-#include <QFutureWatcher>
+#include <future>
 #include <orbitforge/core/propagation/orbit_design.hpp>
 
 class QComboBox;
@@ -54,7 +54,7 @@ class OrbitDesignPreview final : public QWidget {
     QLabel *status_;
     QComboBox *revolutions_;
     QTimer update_timer_, refine_timer_;
-    QFutureWatcher<Result> watcher_;
+    std::future<Result> result_;
     std::optional<core::EarthOrbitDesign> design_;
     std::shared_ptr<const core::IFrameProvider> frames_;
     std::shared_ptr<const core::IEarthOrientationProvider> eop_;

@@ -4,7 +4,7 @@
 #include "workbench_style.hpp"
 #include <QComboBox>
 #include <QLabel>
-#include <QPromise>
+#include <QMetaObject>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <algorithm>
@@ -75,7 +75,6 @@ OrbitDesignPreview::OrbitDesignPreview(QWidget *parent) : QWidget(parent) {
         dirty_ = true;
         start();
     });
-    connect(&watcher_, &QFutureWatcher<Result>::finished, this, [this] { finish(); });
     connect(revolutions_, &QComboBox::currentIndexChanged, this, [this] { request_update(); });
     connect(reset, &QToolButton::clicked, this, [this] {
         if (map_)
@@ -85,6 +84,8 @@ OrbitDesignPreview::OrbitDesignPreview(QWidget *parent) : QWidget(parent) {
 OrbitDesignPreview::~OrbitDesignPreview() {
     if (cancel_)
         cancel_->store(true);
+    // Keep the QObject context alive until its worker has posted completion.
+    // QObject destruction discards any queued callback that has not run yet.
     if (pending_.valid())
         pending_.wait();
 }
@@ -193,60 +194,62 @@ void OrbitDesignPreview::start() {
     auto cached = full ? rotation_cache_[2] : nullptr;
     if (cached && !cached->matches(design_->elements.epoch, grid_duration, samples))
         cached.reset();
-    QPromise<Result> promise;
-    promise.start();
-    watcher_.setFuture(promise.future());
-    pending_ = std::async(std::launch::async, [design = *design_, frames = frames_, eop = eop_,
-                                               cancelled = cancel_, duration, grid_duration,
-                                               samples, full, cached = std::move(cached),
-                                               promise = std::move(promise)]() mutable {
-        try {
-            const auto checkpoint = [&] {
-                if (cancelled->load(std::memory_order_relaxed))
-                    throw PreviewCancelled{};
-            };
-            Result result;
-            result.full = full;
-            const auto &elements = design.elements;
-            if (!cached) {
-                auto grid = std::make_shared<RotationGrid>();
-                grid->epoch = elements.epoch;
-                grid->duration = grid_duration;
-                grid->segments = samples;
-                grid->epochs.reserve(samples + 1);
-                grid->rotations.reserve(samples + 1);
-                for (int index = 0; index <= samples; ++index) {
-                    checkpoint();
-                    const double seconds =
-                        index == samples ? grid_duration : grid_duration * index / samples;
-                    // Future cache coverage may end before the bucket boundary.
-                    // Failure within the requested view still fails the preview.
-                    try {
-                        const auto epoch = offset_epoch(elements.epoch, seconds);
-                        const auto rotation = frames->gcrf_to_itrf(epoch, eop->at(epoch).sample);
-                        grid->epochs.push_back(epoch);
-                        grid->rotations.push_back(rotation.matrix);
-                    } catch (const std::exception &) {
-                        if (!full && seconds > duration)
-                            break;
-                        throw;
+    std::promise<Result> promise;
+    result_ = promise.get_future();
+    pending_ = std::async(
+        std::launch::async, [this, design = *design_, frames = frames_, eop = eop_,
+                             cancelled = cancel_, duration, grid_duration, samples, full,
+                             cached = std::move(cached), promise = std::move(promise)]() mutable {
+            try {
+                const auto checkpoint = [&] {
+                    if (cancelled->load(std::memory_order_relaxed))
+                        throw PreviewCancelled{};
+                };
+                Result result;
+                result.full = full;
+                const auto &elements = design.elements;
+                if (!cached) {
+                    auto grid = std::make_shared<RotationGrid>();
+                    grid->epoch = elements.epoch;
+                    grid->duration = grid_duration;
+                    grid->segments = samples;
+                    grid->epochs.reserve(samples + 1);
+                    grid->rotations.reserve(samples + 1);
+                    for (int index = 0; index <= samples; ++index) {
+                        checkpoint();
+                        const double seconds =
+                            index == samples ? grid_duration : grid_duration * index / samples;
+                        // Future cache coverage may end before the bucket boundary.
+                        // Failure within the requested view still fails the preview.
+                        try {
+                            const auto epoch = offset_epoch(elements.epoch, seconds);
+                            const auto rotation =
+                                frames->gcrf_to_itrf(epoch, eop->at(epoch).sample);
+                            grid->epochs.push_back(epoch);
+                            grid->rotations.push_back(rotation.matrix);
+                        } catch (const std::exception &) {
+                            if (!full && seconds > duration)
+                                break;
+                            throw;
+                        }
                     }
+                    cached = std::move(grid);
                 }
-                cached = std::move(grid);
+                result.grid = cached;
+                if (full)
+                    result = sample(design, cached, duration, true, checkpoint);
+                promise.set_value(std::move(result));
+            } catch (const PreviewCancelled &) {
+                Result result;
+                result.cancelled = true;
+                promise.set_value(std::move(result));
+            } catch (...) {
+                promise.set_exception(std::current_exception());
             }
-            result.grid = cached;
-            if (full)
-                result = sample(design, cached, duration, true, checkpoint);
-            promise.addResult(std::move(result));
-        } catch (const PreviewCancelled &) {
-            Result result;
-            result.cancelled = true;
-            promise.addResult(std::move(result));
-        } catch (...) {
-            promise.setException(std::current_exception());
-        }
-        promise.finish();
-    });
+            // A context-bound queued call works with the minimal Qt Core build and
+            // wakes the GUI immediately, without polling or touching widgets here.
+            QMetaObject::invokeMethod(this, [this] { finish(); }, Qt::QueuedConnection);
+        });
 }
 OrbitDesignPreview::Result OrbitDesignPreview::sample(const core::EarthOrbitDesign &design,
                                                       std::shared_ptr<const RotationGrid> grid,
@@ -318,7 +321,7 @@ void OrbitDesignPreview::publish(Result result) {
 void OrbitDesignPreview::finish() {
     pending_.get();
     try {
-        auto result = watcher_.future().takeResult();
+        auto result = result_.get();
         if (result.grid && running_context_ == context_revision_) {
             if (result.full)
                 rotation_cache_[2] = result.grid;

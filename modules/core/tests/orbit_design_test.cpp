@@ -108,7 +108,7 @@ TEST(OrbitDesign, RepeatConstraintClosesForProgradePolarRetrogradeAndSunSynchron
         q.type = type;
         for (const double inclination : {0., 53 * rad, pi / 2, 100 * rad, pi}) {
             q.inclination_rad = inclination;
-            for (const auto pair : {std::pair{15, 1}, std::pair{233, 16}, std::pair{29, 2}}) {
+            for (const auto &pair : {std::pair{15, 1}, std::pair{233, 16}, std::pair{29, 2}}) {
                 q.repeat_revolutions = pair.first;
                 q.repeat_days = pair.second;
                 const auto orbit = design_earth_orbit(q);
@@ -116,8 +116,9 @@ TEST(OrbitDesign, RepeatConstraintClosesForProgradePolarRetrogradeAndSunSynchron
                             2 * pi * pair.second, 1e-10);
                 EXPECT_NEAR(orbit.repeat_cycle_seconds / orbit.nodal_period_seconds, pair.first,
                             1e-10);
-                if (type == EarthOrbitType::repeating_sun_sync)
+                if (type == EarthOrbitType::repeating_sun_sync) {
                     EXPECT_NEAR(orbit.raan_rate_rad_s * 86400 / rad, 360 / 365.2422, 1e-12);
+                }
             }
         }
     }
