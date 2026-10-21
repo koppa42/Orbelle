@@ -10,9 +10,10 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
-import os
 from pathlib import Path
 import subprocess
+
+from desktop_test_support import desktop_environment, run_logged, timeout_message
 
 
 def main() -> int:
@@ -29,13 +30,7 @@ def main() -> int:
     prefix = args.dependency_prefix.resolve(strict=True)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    env = os.environ.copy()
-    env.update(PATH=str(prefix / "bin") + os.pathsep + env.get("PATH", ""),
-               QT_QPA_PLATFORM_PLUGIN_PATH=str(prefix / "Qt6/plugins/platforms"),
-               QT_PLUGIN_PATH=str(prefix / "Qt6/plugins"), QT_QPA_PLATFORM="windows",
-               QT_SCALE_FACTOR=str(args.scale), PROJ_DATA=str(prefix / "share/proj"),
-               GDAL_DATA=str(prefix / "share/gdal"), PROJ_NETWORK="OFF")
-    env.pop("VK_INSTANCE_LAYERS", None)
+    env = desktop_environment(prefix, scale=args.scale, validation=False)
     command = [str(executable), "--workbench-profile", str(output / "run"),
                "--profile-satellites", str(args.satellites)]
     (output / "run-info.json").write_text(json.dumps({
@@ -43,9 +38,11 @@ def main() -> int:
         "executable_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
         "requested_scale": args.scale, "validation_layers_requested": False,
     }, indent=2) + "\n", encoding="utf-8")
-    with (output / "stdout.log").open("wb") as stdout, (output / "stderr.log").open("wb") as stderr:
-        process = subprocess.run(command, cwd=executable.parent, env=env, stdout=stdout,
-                                 stderr=stderr, timeout=900, check=False)
+    try:
+        process = run_logged(command, cwd=executable.parent, env=env, directory=output, timeout=900)
+    except subprocess.TimeoutExpired as error:
+        print(timeout_message(error), flush=True)
+        return 1
     if process.returncode:
         print((output / "stderr.log").read_text(encoding="utf-8", errors="replace"))
         return process.returncode

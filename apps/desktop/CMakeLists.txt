@@ -148,6 +148,17 @@ if(ORBITFORGE_WITH_VSG)
         gtest_discover_tests(orbitforge_orbit_scene_tests DISCOVERY_MODE PRE_TEST
             DISCOVERY_TIMEOUT 30 TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbitforge_desktop_tests TIMEOUT 60)
         add_executable(orbitforge_quantity_tests tests/quantity_editor_test.cpp
+            tests/orbit_editor_test.cpp
+            tests/property_editor_test.cpp
+            tests/sensor_editor_test.cpp
+            tests/mission_editor_test.cpp
+            tests/hpop_settings_test.cpp
+            tests/hpop_gravity_test.cpp
+            tests/hpop_radiation_test.cpp
+            tests/hpop_drag_test.cpp
+            tests/hpop_data_acquisition_test.cpp
+            tests/hpop_integration_test.cpp
+            tests/hpop_covariance_test.cpp
             tests/insert_object_dialog_test.cpp src/viewer/insert_object_dialog.cpp
             src/viewer/satellite_creation.cpp
             src/viewer/orbit_design_preview.cpp src/viewer/ground_map.cpp src/viewer/workbench_profile.cpp
@@ -172,6 +183,11 @@ if(ORBITFORGE_WITH_VSG)
     endif()
     if(BUILD_TESTING AND ORBITFORGE_WITH_ERFA)
         add_executable(orbitforge_report_ui_tests tests/report_dialog_test.cpp
+            tests/report_plot_test.cpp
+            tests/report_selection_test.cpp
+            tests/report_table_test.cpp
+            tests/report_analysis_test.cpp
+            tests/support/report_test_support.cpp
             src/viewer/report_dialog.cpp src/viewer/coverage_map.cpp src/viewer/report_plot.cpp src/viewer/report_selection.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp src/viewer/workspace.cpp
             src/viewer/object_selection.cpp src/viewer/object_selection.hpp)
         set_target_properties(orbitforge_report_ui_tests PROPERTIES AUTOMOC ON)
@@ -278,6 +294,10 @@ if(BUILD_TESTING)
             --root "${PROJECT_SOURCE_DIR}")
     add_test(NAME desktop.TextCatalogueValidator
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/ci/test_desktop_text.py")
+    add_test(NAME desktop.ValidationTools
+        COMMAND "${Python3_EXECUTABLE}" -m unittest discover -v
+            -s "${PROJECT_SOURCE_DIR}/tools/validation/tests" -p "test_desktop_*.py")
+    set_tests_properties(desktop.ValidationTools PROPERTIES TIMEOUT 30)
 endif()
 # All desktop executables (including isolated UI fixtures) use the same embedded copy.
 get_property(orbitforge_desktop_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)

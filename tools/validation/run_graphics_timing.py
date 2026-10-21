@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+from contextlib import ExitStack
 import hashlib
 import json
 import os
@@ -18,18 +19,9 @@ import time
 import uuid
 
 from analyze_vulkan_timing import analyze_directory
+from desktop_test_support import desktop_environment, logged_process, stop_process, wait_until
 
 PRESENTMON_SHA256 = "b2a706bc6ad475749e3b7e3409263aa1e6906d45bdcf993f6dbc0f660188f1af"
-
-
-def wait_until(predicate, process, timeout):
-    deadline = time.monotonic() + timeout
-    while not predicate():
-        if process.poll() is not None:
-            raise RuntimeError(f"Process {process.pid} exited early with {process.returncode}")
-        if time.monotonic() >= deadline:
-            raise TimeoutError("Timed out waiting for capture readiness")
-        time.sleep(0.1)
 
 
 def qpc():
@@ -59,29 +51,17 @@ def start_device_sampler(log, record):
 
 def run(args, directory, index):
     directory.mkdir()
-    environment = os.environ.copy()
-    prefix = args.dependency_prefix
-    environment.update(PATH=str(prefix / "bin") + os.pathsep + environment.get("PATH", ""),
-                       QT_QPA_PLATFORM_PLUGIN_PATH=str(prefix / "Qt6/plugins/platforms"),
-                       QT_QPA_PLATFORM="windows", QT_SCALE_FACTOR="1", VK_LAYER_PATH=str(prefix / "bin"),
-                       GDAL_DATA=str(prefix / "share/gdal"), PROJ_DATA=str(prefix / "share/proj"), PROJ_NETWORK="OFF",
-                       DISABLE_VULKAN_OBS_CAPTURE="1")
-    for name in ("VK_INSTANCE_LAYERS", "VK_LOADER_LAYERS_ENABLE", "VK_LAYER_ENABLES", "VK_LAYER_DISABLES"):
-        environment.pop(name, None)
-    if args.validation:
-        environment.update(VK_LAYER_VALIDATE_SYNC="1", VK_LAYER_VALIDATE_CORE="1",
-                           VK_LAYER_OBJECT_LIFETIME="1", VK_LAYER_THREAD_SAFETY="1")
+    environment = desktop_environment(args.dependency_prefix, validation=args.validation)
+    environment["DISABLE_VULKAN_OBS_CAPTURE"] = "1"
     session = "OrbitForgeTiming-" + uuid.uuid4().hex
     app = capture = gpu = None
-    streams = []
+    resources = ExitStack()
     record = {"run": index, "session_name": session if args.presentmon else None,
               "profile": args.profile, "validation": args.validation,
               "output_only_probe": args.output_only_probe,
               "implicit_obs_capture_disabled_for_child": True}
     def log(name):
-        stream = (directory / name).open("wb")
-        streams.append(stream)
-        return stream
+        return resources.enter_context((directory / name).open("wb"))
     try:
         command = [str(args.executable), "--benchmark-scenario", str(args.scenario),
                    "--benchmark-run", str(directory / "app")]
@@ -90,8 +70,8 @@ def run(args, directory, index):
         if args.validation: command.append("--validation")
         record["launch_qpc"] = qpc()
         record["app_command"] = command
-        app = subprocess.Popen(command, cwd=args.executable.parent, env=environment,
-                               stdout=log("app.stdout.log"), stderr=log("app.stderr.log"))
+        app = resources.enter_context(logged_process(
+            command, cwd=args.executable.parent, env=environment, directory=directory, stem="app."))
         record["process_id"] = app.pid
         wait_until(lambda: (directory / "app/ready.json").exists(), app, 40)
         record["ready_observed_qpc"] = qpc()
@@ -144,17 +124,23 @@ def run(args, directory, index):
         record["failure"] = str(error)
         raise
     finally:
-        if capture and capture.poll() is None:
-            subprocess.run([str(args.presentmon), "--session_name", session, "--terminate_existing_session"],
-                           stdout=log("capture-stop.stdout.log"), stderr=log("capture-stop.stderr.log"),
-                           timeout=10, check=False, creationflags=subprocess.CREATE_NO_WINDOW)
-            try: capture.wait(timeout=10)
-            except subprocess.TimeoutExpired: capture.terminate(); capture.wait(timeout=10)
-        for process in (app, gpu):
-            if process and process.poll() is None:
-                process.terminate()
-                process.wait(timeout=10)
-        for stream in streams: stream.close()
+        try:
+            if capture and capture.poll() is None:
+                try:
+                    subprocess.run([str(args.presentmon), "--session_name", session,
+                                    "--terminate_existing_session"],
+                                   stdout=log("capture-stop.stdout.log"),
+                                   stderr=log("capture-stop.stderr.log"),
+                                   timeout=10, check=False, creationflags=subprocess.CREATE_NO_WINDOW)
+                    capture.wait(timeout=10)
+                finally:
+                    stop_process(capture)
+        finally:
+            try:
+                if gpu:
+                    stop_process(gpu)
+            finally:
+                resources.close()
         if gpu:
             lines = (directory / "gpu-device.csv").read_text(encoding="utf-8", errors="replace").splitlines()
             diagnostic = record["device_gpu_diagnostic"]

@@ -4,6 +4,7 @@
 #include "../src/viewer/satellite_creation.hpp"
 #include "../src/viewer/workbench_profile.hpp"
 #include "../src/viewer/workbench_style.hpp"
+#include "support/ui_test_support.hpp"
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -32,15 +33,7 @@
 namespace orbitforge::desktop {
 class InsertionTest : public ::testing::Test {
   protected:
-    void SetUp() override {
-        static int argc = 1;
-        static char name[] = "insertion_test";
-        static char *argv[] = {name, nullptr};
-        static std::unique_ptr<QApplication> app;
-        if (!QApplication::instance())
-            app = std::make_unique<QApplication>(argc, argv);
-        apply_workbench_style(*qApp);
-    }
+    void SetUp() override { apply_workbench_style(test_application("insertion_test")); }
     static void method(InsertObjectDialog &dialog, InsertObjectMethod value) {
         auto *tree = dialog.findChild<QTreeWidget *>("insertObjectMethods");
         for (int i = 0; i < tree->topLevelItemCount(); ++i)
