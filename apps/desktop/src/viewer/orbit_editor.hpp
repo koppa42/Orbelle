@@ -100,6 +100,7 @@ class OrbitEditor final : public QWidget {
     QLabel *hpop_summary_ = nullptr;
     QPushButton *model_button_ = nullptr;
     bool create_mode_ = false, orbit_busy_ = false, model_busy_ = false;
+    bool orbit_busy_message_ = false, model_busy_message_ = false;
     QTreeWidget *navigation_ = nullptr;
     QComboBox *compact_navigation_ = nullptr;
     QTabBar *page_tabs_ = nullptr;
