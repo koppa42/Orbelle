@@ -8,9 +8,21 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
-import os
 from pathlib import Path
 import subprocess
+
+from desktop_test_support import desktop_environment, run_logged, timeout_message
+
+
+def expected_failure(command, environment, directory, message, *, stem=""):
+    try:
+        process = run_logged(command, env=environment, cwd=Path(command[0]).parent,
+                             directory=directory, timeout=15, stem=stem)
+        stderr = (directory / f"{stem}stderr.log").read_bytes()
+        return {"exit_code": process.returncode,
+                "passed": process.returncode == 1 and message in stderr}
+    except subprocess.TimeoutExpired as error:
+        return {"passed": False, "failure": timeout_message(error)}
 
 
 def main() -> int:
@@ -29,23 +41,7 @@ def main() -> int:
     scenario = args.benchmark_scenario.resolve(strict=True) if args.benchmark_scenario else None
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    environment = os.environ.copy()
-    environment["PATH"] = str(prefix / "bin") + os.pathsep + environment.get("PATH", "")
-    environment["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(prefix / "Qt6/plugins/platforms")
-    environment["QT_PLUGIN_PATH"] = str(prefix / "Qt6/plugins")
-    environment["QT_QPA_PLATFORM"] = "windows"
-    environment["VK_LAYER_PATH"] = str(prefix / "bin")
-    environment["PROJ_DATA"] = str(prefix / "share/proj")
-    environment["GDAL_DATA"] = str(prefix / "share/gdal")
-    environment["PROJ_NETWORK"] = "OFF"
-    # Fixed VVL 1.4.350's supported setting (deprecated VK_LAYER_ENABLES is not used).
-    # https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/vulkan-sdk-1.4.350.0/docs/updating_from_VK_EXT_validation_features.md
-    for key in ("VK_LAYER_ENABLES", "VK_LAYER_DISABLES"):
-        environment.pop(key, None)
-    environment["VK_LAYER_VALIDATE_SYNC"] = "1"
-    environment["VK_LAYER_VALIDATE_CORE"] = "1"
-    environment["VK_LAYER_OBJECT_LIFETIME"] = "1"
-    environment["VK_LAYER_THREAD_SAFETY"] = "1"
+    environment = desktop_environment(prefix, validation=True)
     records = []
     success = True
     for scale in args.scales:
@@ -61,10 +57,8 @@ def main() -> int:
             command += ["--project-smoke-input", str(args.project_fixture.resolve(strict=True))]
         record = {"requested_scale": scale, "command": command}
         try:
-            process = subprocess.run(command, env=environment, cwd=executable.parent,
-                                     capture_output=True, timeout=120, check=False)
-            (run_dir / "stdout.log").write_bytes(process.stdout)
-            (run_dir / "stderr.log").write_bytes(process.stderr)
+            process = run_logged(command, env=environment, cwd=executable.parent,
+                                 directory=run_dir, timeout=120)
             record["exit_code"] = process.returncode
             report_path = run_dir / "report.json"
             report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else None
@@ -95,9 +89,7 @@ def main() -> int:
                     passed &= report.get("benchmark", {}).get("satellites") == 10000
             record["passed"] = bool(passed)
         except subprocess.TimeoutExpired as error:
-            (run_dir / "stdout.log").write_bytes(error.stdout or b"")
-            (run_dir / "stderr.log").write_bytes(error.stderr or b"")
-            record.update(passed=False, failure="External 60-second timeout")
+            record.update(passed=False, failure=timeout_message(error))
         records.append(record)
         success &= record["passed"]
         print(f"scale {scale:g}: {'PASS' if record['passed'] else 'FAIL'}", flush=True)
@@ -105,18 +97,9 @@ def main() -> int:
             break
     missing_resources = output / "missing-resources"
     missing_resources.mkdir()
-    rejected = {"passed": False}
-    try:
-        process = subprocess.run(
-            [str(executable), "--validation", "--rocky-resources", str(missing_resources)],
-            env=environment, cwd=executable.parent, capture_output=True, timeout=15, check=False)
-        (missing_resources / "stderr.log").write_bytes(process.stderr)
-        (missing_resources / "stdout.log").write_bytes(process.stdout)
-        rejected = {"exit_code": process.returncode,
-                    "passed": process.returncode == 1 and b"Rocky shader resource missing" in process.stderr}
-    except subprocess.TimeoutExpired as error:
-        (missing_resources / "stderr.log").write_bytes(error.stderr or b"")
-        rejected["failure"] = "External 15-second timeout"
+    rejected = expected_failure(
+        [str(executable), "--validation", "--rocky-resources", str(missing_resources)],
+        environment, missing_resources, b"Rocky shader resource missing")
     success &= rejected["passed"]
     print(f"missing resources: {'PASS' if rejected['passed'] else 'FAIL'}", flush=True)
     no_driver = output / "no-vulkan-driver"
@@ -125,19 +108,9 @@ def main() -> int:
     # Override discovery only in this child, with an existing empty manifest directory.
     # No machine drivers, registry entries or parent environment are changed.
     no_driver_environment["VK_DRIVER_FILES"] = str(no_driver)
-    driver_rejected = {"passed": False}
-    try:
-        process = subprocess.run(
-            [str(executable), "--validation"], env=no_driver_environment, cwd=executable.parent,
-            capture_output=True, timeout=15, check=False)
-        (no_driver / "stderr.log").write_bytes(process.stderr)
-        (no_driver / "stdout.log").write_bytes(process.stdout)
-        driver_rejected = {
-            "exit_code": process.returncode,
-            "passed": process.returncode == 1 and b"failed to create VkInstance" in process.stderr}
-    except subprocess.TimeoutExpired as error:
-        (no_driver / "stderr.log").write_bytes(error.stderr or b"")
-        driver_rejected["failure"] = "External 15-second timeout"
+    driver_rejected = expected_failure(
+        [str(executable), "--validation"], no_driver_environment, no_driver,
+        b"failed to create VkInstance")
     success &= driver_rejected["passed"]
     print(f"missing Vulkan driver: {'PASS' if driver_rejected['passed'] else 'FAIL'}", flush=True)
     scenario_rejected = None
@@ -146,12 +119,9 @@ def main() -> int:
         content = json.loads(scenario.read_text(encoding="utf-8"))
         content["workload"]["satellites"] = 1
         altered.write_text(json.dumps(content), encoding="utf-8")
-        process = subprocess.run(
-            [str(executable), "--benchmark-scenario", str(altered)], env=environment,
-            cwd=executable.parent, capture_output=True, timeout=15, check=False)
-        (output / "altered-scenario.stderr.log").write_bytes(process.stderr)
-        scenario_rejected = {"exit_code": process.returncode,
-                             "passed": process.returncode == 1 and b"Benchmark resource SHA256 mismatch" in process.stderr}
+        scenario_rejected = expected_failure(
+            [str(executable), "--benchmark-scenario", str(altered)], environment, output,
+            b"Benchmark resource SHA256 mismatch", stem="altered-scenario.")
         success &= scenario_rejected["passed"]
         print(f"altered workload: {'PASS' if scenario_rejected['passed'] else 'FAIL'}", flush=True)
     summary = {"timestamp_utc": datetime.now(timezone.utc).isoformat(),

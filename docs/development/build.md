@@ -237,6 +237,14 @@ python tools/validation/run_graphics_smoke.py --executable out/build/desktop-gra
 
 正常工作台检查还覆盖属性草稿、应用／取消、报告失效、协方差及任务机动的保存重开。完整交互流程的程序内时限为90秒，图形脚本和便携包验证的进程时限为120秒，为失败后的窗口释放和诊断写入留出时间。该时限用于发现挂起，不是交互性能或数值积分速度的验收门槛。
 
+桌面自动化按以下职责维护，避免为同一操作另起一套驱动：
+
+- `apps/desktop/tests/*_test.cpp` 按控件与功能组织 Qt offscreen 用例；共用 `support/` 中的 QApplication、等待条件、属性字段及报告操作工具。现有 GoogleTest 名称与 CTest 过滤方式保持不变，例如 `ctest --preset desktop-graphics -R '^desktop\.'`。`orbitforge_quantity_tests` 为兼容现有调用保留目标名，包含数量控件、轨道、传感器、任务和 HPOP 属性测试。
+- `apps/desktop/tests/graphics_smoke/` 包含真实工作台的具名场景段。各段保留异步阶段顺序，前段创建的项目、窗口及缓存会被后段验证，因此不能任意跳过或单独执行。`.inc` 在工作台类定义后包含，以访问内部集成状态，避免把测试入口暴露为产品 API。公共操作在 `helpers.inc`，调度器留在工作台中；`report.json` 的 `orbit_smoke_scenario` 定位当前场景，`orbit_smoke_scenarios` 记录已完成场景与耗时。
+- `tools/validation/desktop_test_support.py` 共用开发环境、完整日志、等待就绪、超时及子进程清理。smoke 明确启用验证层，计时脚本默认关闭；便携包检查继续使用独立的隔离环境。启动工具回归纳入 `desktop.ValidationTools`，也可运行 `python -m unittest discover -s tools/validation/tests -p "test_desktop_*.py" -v`。
+
+三档 DPI 均继续执行完整 smoke，包括业务检查和真实图形生命周期断言；拆分文件与复用辅助代码不减少测试场景。新增检查应放入对应场景或 Qt 测试文件，避免继续向单个大型测试文件追加无关流程。
+
 构建后 shader、EOP 样例与离线地球影像等资源复制到可执行文件旁的 `resources/`。运行脚本只为子进程配置依赖 DLL、Qt platform plugin 和 validation layer；开发路径不等于独立安装包。工作台默认使用带离线影像的 Rocky 地球。渲染模块与 Qt 工作台的边界、后台编译屏障和退出次序见[集成约定](../architecture/graphics.md)。
 
 日常打开图形工作台可执行 `pwsh tools/dev/run-desktop.ps1`。启动器为子进程设置固定依赖和 PROJ/GDAL 数据路径，不改变调用者的环境；它会等待窗口关闭。使用 `-Executable`、`-DependencyPrefix` 可覆盖开发路径，附加程序参数通过 `-DesktopArguments` 传入。
