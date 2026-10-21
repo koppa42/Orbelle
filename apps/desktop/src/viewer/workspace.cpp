@@ -1,4 +1,5 @@
 #include "workspace.hpp"
+#include "../ui_text.hpp"
 #include "workbench_style.hpp"
 #include <QApplication>
 #include <QDialog>
@@ -154,8 +155,8 @@ Workspace::Pane *Workspace::make_pane(QDialog *window) {
     bar->setSpacing(2);
     pane->tabs = new PageTabs;
     pane->tabs->setObjectName("workspaceTabs");
-    pane->tabs->setAccessibleName(QStringLiteral("主工作区页面"));
-    pane->tabs->setToolTip(QStringLiteral("拖动标签：边缘分屏，标签栏合并，窗口外独立显示"));
+    pane->tabs->setAccessibleName(ui::text("workspace.tabs.set_accessible_name"));
+    pane->tabs->setToolTip(ui::text("workspace.tabs.set_tool_tip"));
     pane->tabs->setExpanding(false);
     pane->tabs->setSelectionBehaviorOnRemove(QTabBar::SelectPreviousTab);
     pane->tabs->setDrawBase(false);
@@ -169,14 +170,14 @@ Workspace::Pane *Workspace::make_pane(QDialog *window) {
     detach->setIcon(workbench_icon(window ? WorkbenchIcon::views : WorkbenchIcon::detach));
     detach->setFixedSize(24, 24);
     detach->setIconSize(QSize(16, 16));
-    detach->setToolTip(window ? QStringLiteral("放回工作区")
-                              : QStringLiteral("在独立窗口打开当前页面"));
+    detach->setToolTip(window ? ui::text("workspace.detach.set_tool_tip")
+                              : ui::text("workspace.detach.set_tool_tip_2"));
     detach->setAccessibleName(detach->toolTip());
     bar->addWidget(detach);
     layout->addWidget(heading);
     pane->stack = new QStackedWidget;
     pane->stack->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
-    auto *empty = new QLabel(QStringLiteral("暂无打开的页面"));
+    auto *empty = new QLabel(ui::text("workspace.empty"));
     empty->setObjectName("muted");
     empty->setAlignment(Qt::AlignCenter);
     pane->stack->addWidget(empty);
@@ -262,7 +263,7 @@ void Workspace::append(Page &page, Pane *pane, int insertion) {
     close->setIcon(workbench_icon(WorkbenchIcon::close, theme::color(theme::text_muted)));
     close->setFixedSize(20, 20);
     close->setIconSize(QSize(14, 14));
-    close->setToolTip(QStringLiteral("关闭页面"));
+    close->setToolTip(ui::text("common.close_page"));
     close->setAccessibleName(close->toolTip());
     connect(close, &QToolButton::clicked, this,
             [this, content = page.content] { close_page(content); });
@@ -490,11 +491,11 @@ void Workspace::context_menu(Pane *pane, int tab, const QPoint &global) {
     if (!page)
         return;
     QMenu menu;
-    auto *right = menu.addAction(QStringLiteral("向右分屏"));
-    auto *below = menu.addAction(QStringLiteral("向下分屏"));
+    auto *right = menu.addAction(ui::text("workspace.right"));
+    auto *below = menu.addAction(ui::text("workspace.below"));
     right->setEnabled(!pane->window && pane->tabs->count() > 1);
     below->setEnabled(right->isEnabled());
-    auto *merge = menu.addAction(QStringLiteral("合并到其他标签组"));
+    auto *merge = menu.addAction(ui::text("workspace.merge"));
     auto *other = main_pane();
     for (auto *candidate : panes_)
         if (candidate != pane && !candidate->window) {
@@ -503,9 +504,9 @@ void Workspace::context_menu(Pane *pane, int tab, const QPoint &global) {
         }
     merge->setEnabled(other != pane);
     menu.addSeparator();
-    auto *detach = menu.addAction(pane->window ? QStringLiteral("放回工作区")
-                                               : QStringLiteral("在独立窗口打开"));
-    auto *close = menu.addAction(QStringLiteral("关闭页面"));
+    auto *detach = menu.addAction(pane->window ? ui::text("workspace.detach.set_tool_tip")
+                                               : ui::text("workspace.detach"));
+    auto *close = menu.addAction(ui::text("common.close_page"));
     auto *chosen = menu.exec(global);
     if (chosen == right || chosen == below)
         move(*page, pane, chosen == right ? Qt::RightEdge : Qt::BottomEdge);

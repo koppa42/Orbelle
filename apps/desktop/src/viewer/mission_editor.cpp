@@ -1,4 +1,5 @@
 #include "mission_editor.hpp"
+#include "../ui_text.hpp"
 #include "hpop_settings.hpp"
 #include "quantity_editor.hpp"
 #include "responsive_layout.hpp"
@@ -118,28 +119,28 @@ class MissionEditor final : public QDialog {
         : QDialog(parent), plan(std::move(draft)), hpop(options), initial_(initial),
           first_(scenario_first), last_(scenario_last) {
         setObjectName("missionEditorDialog");
-        setWindowTitle(QStringLiteral("机动规划 · 任务序列"));
+        setWindowTitle(ui::text("mission_editor.label"));
         auto *outer = new QVBoxLayout(this);
         outer->setContentsMargins(theme::space::page);
         outer->setSpacing(12);
         auto *heading = new QVBoxLayout;
         heading->setSpacing(4);
-        auto *title = new QLabel(QStringLiteral("机动规划"));
+        auto *title = new QLabel(ui::text("mission_editor.title"));
         title->setObjectName("panelTitle");
         heading->addWidget(title);
-        heading->addWidget(note(QStringLiteral("保存计划后，在卫星轨道页点击“应用”。")));
+        heading->addWidget(note(ui::text("mission_editor.heading.add_widget")));
         outer->addLayout(heading);
 
         auto *model_row = new QHBoxLayout;
         model_row->setSpacing(12);
-        model_row->addWidget(new QLabel(QStringLiteral("滑行模型")));
+        model_row->addWidget(new QLabel(ui::text("mission_editor.model_row.add_widget")));
         model_ = new QComboBox;
         model_->setObjectName("missionCoastModel");
-        model_->addItems({QStringLiteral("二体"), QStringLiteral("HPOP · 数值积分")});
+        model_->addItems({ui::text("mission_editor.label_2"), ui::text("mission_editor.label_3")});
         model_->setCurrentIndex(plan.coast_model == core::MissionCoastModel::hpop ? 1 : 0);
         model_row->addWidget(model_, 1);
-        auto *settings = button(QStringLiteral("模型设置…"), "missionHpopSettings");
-        settings->setToolTip(QStringLiteral("设置 HPOP 力模型与积分参数"));
+        auto *settings = button(ui::text("mission_editor.settings"), "missionHpopSettings");
+        settings->setToolTip(ui::text("mission_editor.settings.set_tool_tip"));
         settings->setEnabled(model_->currentIndex() == 1);
         model_row->addWidget(settings);
         outer->addLayout(model_row);
@@ -162,9 +163,9 @@ class MissionEditor final : public QDialog {
 
         navigation_ = new QTabBar(this);
         navigation_->setObjectName("missionNavigation");
-        navigation_->setAccessibleName(QStringLiteral("机动规划页面"));
-        navigation_->addTab(QStringLiteral("任务序列"));
-        navigation_->addTab(QStringLiteral("段参数"));
+        navigation_->setAccessibleName(ui::text("mission_editor.navigation.set_accessible_name"));
+        navigation_->addTab(ui::text("mission_editor.navigation.add_tab"));
+        navigation_->addTab(ui::text("mission_editor.navigation.add_tab_2"));
         navigation_->setExpanding(true);
         navigation_->setDrawBase(false);
         navigation_->hide();
@@ -178,16 +179,16 @@ class MissionEditor final : public QDialog {
         auto *left = new QVBoxLayout(sequence_);
         left->setContentsMargins(0, 0, 0, 0);
         left->setSpacing(10);
-        auto *initial_label = new QLabel(QStringLiteral("任务序列"));
+        auto *initial_label = new QLabel(ui::text("mission_editor.navigation.add_tab"));
         initial_label->setObjectName("sectionTitle");
         left->addWidget(initial_label);
-        left->addWidget(note(QStringLiteral("T+ 从卫星初始历元起算 · TAI 时长")));
+        left->addWidget(note(ui::text("mission_editor.left.add_widget")));
         list_ = new QListWidget;
         list_->setObjectName("missionSegments");
         list_->setSpacing(4);
         list_->setMinimumWidth(0);
         list_->setItemDelegate(new SegmentDelegate(list_));
-        list_->setAccessibleName(QStringLiteral("按执行顺序排列的任务段"));
+        list_->setAccessibleName(ui::text("mission_editor.list.set_accessible_name"));
         list_->setMouseTracking(true);
         list_->setResizeMode(QListView::Adjust);
         list_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
@@ -196,17 +197,19 @@ class MissionEditor final : public QDialog {
         // icon buttons whose tooltips and accessible names keep the full wording.
         auto *actions = new QHBoxLayout;
         actions->setSpacing(6);
-        auto *coast = button(QStringLiteral("＋ 滑行"), "missionAddCoast");
-        auto *impulse = button(QStringLiteral("＋ 脉冲"), "missionAddImpulse");
+        auto *coast = button(ui::text("mission_editor.coast"), "missionAddCoast");
+        auto *impulse = button(ui::text("mission_editor.impulse"), "missionAddImpulse");
         actions->addWidget(coast);
         actions->addWidget(impulse);
         actions->addStretch(1);
-        up_ = icon_button(WorkbenchIcon::chevron_up, QStringLiteral("上移"), "missionMoveUp");
-        down_ = icon_button(WorkbenchIcon::chevron_down, QStringLiteral("下移"), "missionMoveDown");
-        remove_ = icon_button(WorkbenchIcon::remove, QStringLiteral("删除"), "missionRemove");
-        up_->setToolTip(QStringLiteral("上移当前段（列表中 Alt+↑）"));
-        down_->setToolTip(QStringLiteral("下移当前段（列表中 Alt+↓）"));
-        remove_->setToolTip(QStringLiteral("删除当前段及其未完成输入（列表中 Delete）"));
+        up_ = icon_button(WorkbenchIcon::chevron_up, ui::text("mission_editor.label_4"),
+                          "missionMoveUp");
+        down_ = icon_button(WorkbenchIcon::chevron_down, ui::text("mission_editor.label_5"),
+                            "missionMoveDown");
+        remove_ = icon_button(WorkbenchIcon::remove, ui::text("common.delete"), "missionRemove");
+        up_->setToolTip(ui::text("mission_editor.up.set_tool_tip"));
+        down_->setToolTip(ui::text("mission_editor.down.set_tool_tip"));
+        remove_->setToolTip(ui::text("mission_editor.remove.set_tool_tip"));
         for (auto *b : {up_, down_, remove_})
             actions->addWidget(b);
         left->addLayout(actions);
@@ -227,8 +230,7 @@ class MissionEditor final : public QDialog {
         timing_ = note({});
         timing_->setObjectName("missionSegmentTiming");
         right->addWidget(timing_);
-        empty_ =
-            note(QStringLiteral("添加一段滑行，再按点火时刻插入脉冲。\n每段继承上一段的末状态。"));
+        empty_ = note(ui::text("mission_editor.label_6"));
         empty_->setObjectName("missionEmpty");
         right->addWidget(empty_);
         right->addSpacing(theme::space::sm);
@@ -243,8 +245,8 @@ class MissionEditor final : public QDialog {
         name_ = new QLineEdit;
         name_->setObjectName("missionSegmentName");
         name_->setMaxLength(16384);
-        name_->setPlaceholderText(QStringLiteral("可选名称"));
-        form->addRow(QStringLiteral("名称"), name_);
+        name_->setPlaceholderText(ui::text("mission_editor.name.set_placeholder_text"));
+        form->addRow(ui::text("common.name"), name_);
         fields_layout->addLayout(form);
         pages_ = new QStackedWidget;
         auto *coast_page = new QWidget;
@@ -254,11 +256,11 @@ class MissionEditor final : public QDialog {
         coast_form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
         duration_ = new QuantityEditor(Unit::minute);
         duration_->setObjectName("missionCoastDuration");
-        duration_->set_label(QStringLiteral("滑行时长"));
+        duration_->set_label(ui::text("mission_editor.duration.set_label"));
         duration_->set_range(1e-9, 366 * 86400.0, Unit::second);
         duration_->setMaximumWidth(QWIDGETSIZE_MAX);
-        coast_form->addRow(QStringLiteral("时长"), duration_);
-        coast_form->addRow(note(QStringLiteral("继承上一段的末状态，传播指定的时长。")));
+        coast_form->addRow(ui::text("mission_editor.coast_form.add_row"), duration_);
+        coast_form->addRow(note(ui::text("mission_editor.coast_form.add_row_2")));
         pages_->addWidget(coast_page);
         auto *impulse_page = new QWidget;
         auto *impulse_form = new QFormLayout(impulse_page);
@@ -268,8 +270,8 @@ class MissionEditor final : public QDialog {
         frame_ = new QComboBox;
         frame_->setObjectName("missionManeuverFrame");
         frame_->addItems({"GCRF", "VNC", "LVLH"});
-        frame_->setAccessibleName(QStringLiteral("脉冲方向参考系"));
-        impulse_form->addRow(QStringLiteral("方向参考系"), frame_);
+        frame_->setAccessibleName(ui::text("mission_editor.frame.set_accessible_name"));
+        impulse_form->addRow(ui::text("mission_editor.impulse_form.add_row"), frame_);
         for (std::size_t i = 0; i < 3; ++i) {
             dv_[i] = new QuantityEditor(Unit::metres_per_second);
             dv_[i]->setObjectName(QStringLiteral("missionDeltaV%1").arg(i));
@@ -289,7 +291,7 @@ class MissionEditor final : public QDialog {
         right->addStretch();
         scroll_->setWidget(details);
         columns->addWidget(scroll_, 3);
-        const int label_width = fontMetrics().horizontalAdvance(QStringLiteral("Δv · 共法向 C"));
+        const int label_width = fontMetrics().horizontalAdvance(ui::text("mission_editor.label_7"));
         for (auto *f : {form, coast_form, impulse_form}) {
             f->setRowWrapPolicy(QFormLayout::WrapLongRows);
             f->setHorizontalSpacing(theme::space::md);
@@ -327,13 +329,12 @@ class MissionEditor final : public QDialog {
         error_->hide();
         outer->addWidget(error_);
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-        buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("保存计划"));
+        buttons->button(QDialogButtonBox::Ok)->setText(ui::text("mission_editor.buttons"));
         buttons->button(QDialogButtonBox::Ok)->setProperty("primary", true);
         buttons->button(QDialogButtonBox::Ok)->setAutoDefault(false);
         buttons->button(QDialogButtonBox::Ok)->setDefault(false);
-        buttons->button(QDialogButtonBox::Ok)
-            ->setToolTip(QStringLiteral("保存到卫星属性草稿（Ctrl+Enter）"));
-        buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+        buttons->button(QDialogButtonBox::Ok)->setToolTip(ui::text("mission_editor.label_8"));
+        buttons->button(QDialogButtonBox::Cancel)->setText(ui::text("common.cancel"));
         buttons->button(QDialogButtonBox::Cancel)->setAutoDefault(false);
         auto *save = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Return), this);
         connect(save, &QShortcut::activated, buttons->button(QDialogButtonBox::Ok),
@@ -472,24 +473,23 @@ class MissionEditor final : public QDialog {
     }
     void update_axes() {
         const QStringList names =
-            frame_->currentIndex() == 1
-                ? QStringList{QStringLiteral("Δv · 速度 V"), QStringLiteral("Δv · 法向 N"),
-                              QStringLiteral("Δv · 共法向 C")}
+            frame_->currentIndex() == 1 ? QStringList{ui::text("mission_editor.label_9"),
+                                                      ui::text("mission_editor.label_10"),
+                                                      ui::text("mission_editor.label_7")}
             : frame_->currentIndex() == 2
-                ? QStringList{QStringLiteral("Δv · 径向 R"), QStringLiteral("Δv · 横向 T"),
-                              QStringLiteral("Δv · 法向 N")}
+                ? QStringList{ui::text("mission_editor.label_11"),
+                              ui::text("mission_editor.label_12"),
+                              ui::text("mission_editor.label_10")}
                 : QStringList{QStringLiteral("Δv · X"), QStringLiteral("Δv · Y"),
                               QStringLiteral("Δv · Z")};
         for (int i = 0; i < 3; ++i) {
             axes_[static_cast<std::size_t>(i)]->setText(names[i]);
             dv_[static_cast<std::size_t>(i)]->set_label(names[i]);
         }
-        axes_note_->setText(
-            frame_->currentIndex() == 1
-                ? QStringLiteral("V 沿速度，N 沿轨道法向，C = V × N。方向取点火前状态。")
-            : frame_->currentIndex() == 2
-                ? QStringLiteral("R 径向向外，N 沿轨道法向，T = N × R。方向取点火前状态。")
-                : QStringLiteral("沿 GCRF 惯性坐标轴施加 Δv；脉冲瞬间位置保持不变。"));
+        axes_note_->setText(frame_->currentIndex() == 1
+                                ? ui::text("mission_editor.axes_note.set_text")
+                            : frame_->currentIndex() == 2 ? ui::text("mission_editor.label_13")
+                                                          : ui::text("mission_editor.label_14"));
     }
     bool store_selected() {
         if (loading_ || selected_ < 0)
@@ -505,7 +505,7 @@ class MissionEditor final : public QDialog {
                 if (seconds != static_cast<double>(segment.duration_nanoseconds) * 1e-9)
                     segment.duration_nanoseconds = std::llround(seconds * 1e9);
                 if (segment.duration_nanoseconds <= 0)
-                    throw std::invalid_argument("滑行时长至少为 1 ns。");
+                    throw std::invalid_argument(ui::utf8("mission_editor.validation"));
             } else {
                 segment.frame = static_cast<core::ManeuverFrame>(frame_->currentIndex());
                 for (std::size_t i = 0; i < 3; ++i) {
@@ -514,7 +514,7 @@ class MissionEditor final : public QDialog {
                 }
                 if (!std::isfinite(std::hypot(segment.delta_v_mps[0], segment.delta_v_mps[1],
                                               segment.delta_v_mps[2])))
-                    throw std::invalid_argument("Δv 合量超出数值范围，请减小分量。");
+                    throw std::invalid_argument(ui::utf8("mission_editor.validation_2"));
             }
             plan.segments[static_cast<std::size_t>(selected_)] = std::move(segment);
             draft_valid_ = true;
@@ -539,15 +539,15 @@ class MissionEditor final : public QDialog {
         up_->setEnabled(selected_ > 0);
         down_->setEnabled(selected && selected_ + 1 < static_cast<int>(plan.segments.size()));
         remove_->setEnabled(selected);
-        heading_->setText(QStringLiteral("从一段滑行开始"));
+        heading_->setText(ui::text("mission_editor.heading.set_text"));
         name_->clear();
         if (selected) {
             const auto &segment = plan.segments.at(static_cast<std::size_t>(selected_));
             const bool coast = segment.kind == core::MissionSegmentKind::coast;
-            heading_->setText(
-                QStringLiteral("%1  /  %2")
-                    .arg(selected_ + 1, 2, 10, QChar('0'))
-                    .arg(coast ? QStringLiteral("滑行段") : QStringLiteral("脉冲机动")));
+            heading_->setText(QStringLiteral("%1  /  %2")
+                                  .arg(selected_ + 1, 2, 10, QChar('0'))
+                                  .arg(coast ? ui::text("mission_editor.label_15")
+                                             : ui::text("mission_editor.label_16")));
             name_->setText(QString::fromStdString(segment.name));
             pages_->setCurrentIndex(coast ? 0 : 1);
             if (coast)
@@ -569,7 +569,7 @@ class MissionEditor final : public QDialog {
     }
     QString plan_issue() const {
         if (plan.segments.empty())
-            return QStringLiteral("计划为空，请先添加一段滑行。");
+            return ui::text("mission_editor.label_17");
         std::int64_t duration = 0;
         double total = 0;
         for (const auto &s : plan.segments) {
@@ -579,17 +579,17 @@ class MissionEditor final : public QDialog {
                 total += std::hypot(s.delta_v_mps[0], s.delta_v_mps[1], s.delta_v_mps[2]);
         }
         if (duration == 0)
-            return QStringLiteral("计划至少需要一段正时长滑行。");
+            return ui::text("mission_editor.label_18");
         if (duration > 366 * day_ns)
-            return QStringLiteral("计划总时长不能超过 366 天，请缩短滑行段。");
+            return ui::text("mission_editor.label_19");
         if (!std::isfinite(total))
-            return QStringLiteral("累计 Δv 超出数值范围，请减小脉冲分量。");
+            return ui::text("mission_editor.label_20");
         try {
             const auto end = core::validate_mission(initial_, plan);
             if (initial_.tai_nanoseconds() > first_.tai_nanoseconds())
-                return QStringLiteral("初始历元晚于场景起点，请返回卫星属性调整历元。");
+                return ui::text("mission_editor.end");
             if (end.tai_nanoseconds() < last_.tai_nanoseconds())
-                return QStringLiteral("距场景结束还差 %1，请延长滑行段。")
+                return ui::text("mission_editor.label_21")
                     .arg(duration_text(last_.seconds_since(end)));
         } catch (const std::exception &e) {
             return QString::fromUtf8(e.what());
@@ -608,13 +608,13 @@ class MissionEditor final : public QDialog {
                 duration += s.duration_nanoseconds;
             else
                 total += dv;
-            const auto label = s.name.empty()
-                                   ? (coast ? QStringLiteral("滑行") : QStringLiteral("脉冲机动"))
-                                   : QString::fromStdString(s.name);
+            const auto label = s.name.empty() ? (coast ? ui::text("mission_editor.label_22")
+                                                       : ui::text("mission_editor.label_16"))
+                                              : QString::fromStdString(s.name);
             const auto timing =
                 coast ? start + QStringLiteral(" → ") + elapsed_text(duration) : start;
             const auto detail =
-                coast ? QStringLiteral("滑行 · %1")
+                coast ? ui::text("mission_editor.detail")
                             .arg(duration_text(static_cast<double>(s.duration_nanoseconds) * 1e-9))
                       : QStringLiteral("Δv %1 m/s · %2")
                             .arg(dv, 0, 'g', 8)
@@ -631,22 +631,23 @@ class MissionEditor final : public QDialog {
                 Qt::AccessibleTextRole,
                 QStringLiteral("%1 · %2 · %3 · %4").arg(i + 1).arg(label, timing, detail));
             if (static_cast<int>(i) == selected_) {
-                timing_->setText(
-                    (coast ? QStringLiteral("执行时段  ") : QStringLiteral("点火时刻  ")) + timing);
-                magnitude_->setText(QStringLiteral("本次 Δv  %1 m/s").arg(dv, 0, 'g', 9));
+                timing_->setText((coast ? ui::text("mission_editor.timing.set_text")
+                                        : ui::text("mission_editor.timing.set_text_2")) +
+                                 timing);
+                magnitude_->setText(
+                    ui::text("mission_editor.magnitude.set_text").arg(dv, 0, 'g', 9));
             }
         }
         summary_->setText(
-            QStringLiteral("%1 段   ·   总时长 %2   ·   总 Δv %3 m/s")
+            ui::text("mission_editor.summary.set_text")
                 .arg(plan.segments.size())
                 .arg(duration_text(static_cast<double>(duration) * 1e-9))
                 .arg(std::isfinite(total) ? QString::number(total, 'g', 9) : QStringLiteral("—")));
         const auto issue = plan_issue();
-        coverage_->setText(
-            !draft_valid_ ? QStringLiteral("输入尚未完成 · 预览保留上次有效参数")
-            : !issue.isEmpty()
-                ? issue
-                : QStringLiteral("已覆盖场景 · 计划结束于 %1").arg(elapsed_text(duration)));
+        coverage_->setText(!draft_valid_ ? ui::text("mission_editor.coverage.set_text")
+                           : !issue.isEmpty()
+                               ? issue
+                               : ui::text("mission_editor.label_23").arg(elapsed_text(duration)));
         const bool warning = !draft_valid_ || !issue.isEmpty();
         if (coverage_->property("warning").toBool() != warning) {
             coverage_->setProperty("warning", warning);
@@ -669,7 +670,7 @@ class MissionEditor final : public QDialog {
         if (!store_selected())
             return;
         if (plan.segments.size() >= 256) {
-            show_error(QStringLiteral("最多可添加 256 个段。"));
+            show_error(ui::text("mission_editor.label_24"));
             return;
         }
         const int next = selected_ + 1;

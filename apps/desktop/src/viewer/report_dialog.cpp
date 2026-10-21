@@ -1,4 +1,5 @@
 #include "report_dialog.hpp"
+#include "../ui_text.hpp"
 #include "coverage_map.hpp"
 #include "epoch_editor.hpp"
 #include "object_selection.hpp"
@@ -125,8 +126,9 @@ class ReportSelectionButton final : public QPushButton {
         option.text = fontMetrics().elidedText(text(), Qt::ElideRight, std::max(0, width() - 70));
         QStylePainter painter(this);
         painter.drawControl(QStyle::CE_PushButton, option);
-        painter.drawText(QRect(width() - 28, 0, 20, height()), Qt::AlignCenter,
-                         QStringLiteral("…"));
+        workbench_icon(WorkbenchIcon::more)
+            .paint(&painter, QRect(width() - 26, (height() - 16) / 2, 16, 16), Qt::AlignCenter,
+                   isEnabled() ? QIcon::Normal : QIcon::Disabled);
     }
 };
 class ReportTitle final : public QLabel {
@@ -164,117 +166,117 @@ bool pair_report(ReportKind kind) {
 QString kind_name(ReportKind kind) {
     switch (kind) {
     case ReportKind::scenario_summary:
-        return QStringLiteral("场景摘要");
+        return ui::text("report_dialog.label");
     case ReportKind::object_summary:
-        return QStringLiteral("对象摘要");
+        return ui::text("report_dialog.label_2");
     case ReportKind::cartesian_state:
-        return QStringLiteral("位置与速度");
+        return ui::text("report_dialog.label_3");
     case ReportKind::ground_stations:
-        return QStringLiteral("地面站坐标");
+        return ui::text("report_dialog.label_4");
     case ReportKind::classical_elements:
-        return QStringLiteral("经典轨道根数");
+        return ui::text("report_dialog.label_5");
     case ReportKind::geodetic_position:
-        return QStringLiteral("经纬高");
+        return ui::text("report_dialog.label_6");
     case ReportKind::orbital_motion:
-        return QStringLiteral("轨道距离与速率");
+        return ui::text("report_dialog.label_7");
     case ReportKind::access_intervals:
-        return QStringLiteral("可见时段 · Access");
+        return ui::text("report_dialog.label_8");
     case ReportKind::aer:
-        return QStringLiteral("AER · 方位 / 仰角 / 距离");
+        return ui::text("report_dialog.label_9");
     case ReportKind::lighting_intervals:
-        return QStringLiteral("光照与地影时段");
+        return ui::text("report_dialog.label_10");
     case ReportKind::lighting_state:
-        return QStringLiteral("太阳光照比例");
+        return ui::text("report_dialog.label_11");
     case ReportKind::orbital_events:
-        return QStringLiteral("轨道事件 · 近远地点 / 交点");
+        return ui::text("report_dialog.label_12");
     case ReportKind::relative_motion:
-        return QStringLiteral("星间相对运动 · RIC");
+        return ui::text("report_dialog.label_13");
     case ReportKind::intersatellite_access:
-        return QStringLiteral("星间可见时段");
+        return ui::text("report_dialog.label_14");
     case ReportKind::coverage_grid:
-        return QStringLiteral("覆盖网格与重访");
+        return ui::text("report_dialog.label_15");
     case ReportKind::coverage_time:
-        return QStringLiteral("覆盖率时间曲线");
+        return ui::text("report_dialog.label_16");
     case ReportKind::state_covariance:
-        return QStringLiteral("HPOP · 位置速度协方差");
+        return ui::text("report_dialog.label_17");
     }
     return {};
 }
 QString localized(QString value) {
     static const std::map<QString, QString> labels{
-        {"Latitude", QStringLiteral("大地纬度")},
-        {"Cell area", QStringLiteral("网格面积")},
-        {"Time covered", QStringLiteral("覆盖时长")},
-        {"Time covered fraction", QStringLiteral("覆盖时长占比")},
-        {"Coverage intervals", QStringLiteral("可见区间数")},
-        {"Maximum revisit time", QStringLiteral("最长无覆盖空档")},
-        {"Mean revisit time", QStringLiteral("平均无覆盖空档")},
-        {"Area covered", QStringLiteral("覆盖面积")},
-        {"Area covered fraction", QStringLiteral("覆盖面积占比")},
-        {"Cumulative area covered", QStringLiteral("累计覆盖面积")},
-        {"Cumulative area covered fraction", QStringLiteral("累计覆盖面积占比")},
-        {"Property", QStringLiteral("属性")},
-        {"Value", QStringLiteral("值")},
-        {"Object ID", QStringLiteral("对象 ID")},
-        {"Object", QStringLiteral("对象")},
-        {"Type", QStringLiteral("类型")},
-        {"Model", QStringLiteral("模型")},
-        {"Time", QStringLiteral("时间")},
-        {"Frame", QStringLiteral("坐标系")},
-        {"Longitude", QStringLiteral("经度")},
-        {"Geodetic latitude", QStringLiteral("大地纬度")},
-        {"Ellipsoid height", QStringLiteral("椭球高")},
-        {"Semi-major axis", QStringLiteral("半长轴")},
-        {"Eccentricity", QStringLiteral("偏心率")},
-        {"Inclination", QStringLiteral("轨道倾角")},
-        {"RAAN", QStringLiteral("升交点赤经")},
-        {"Argument of periapsis", QStringLiteral("近地点幅角")},
-        {"True anomaly", QStringLiteral("真近点角")},
-        {"Geocentric distance", QStringLiteral("地心距离")},
-        {"Speed", QStringLiteral("速率")},
-        {"Radial speed", QStringLiteral("径向速率")},
-        {"Transverse speed", QStringLiteral("横向速率")},
-        {"Flight path angle", QStringLiteral("航迹倾角")},
-        {"Scenario", QStringLiteral("场景")},
-        {"Start", QStringLiteral("开始")},
-        {"Stop", QStringLiteral("结束")},
-        {"Time scale", QStringLiteral("时间系统")},
-        {"Satellites", QStringLiteral("卫星数量")},
-        {"Ground stations", QStringLiteral("地面站数量")},
-        {"Central body", QStringLiteral("中心天体")},
-        {"Earth", QStringLiteral("地球")},
-        {"Satellite", QStringLiteral("卫星")},
-        {"Ground station", QStringLiteral("地面站")},
-        {"Duration", QStringLiteral("持续时间")},
-        {"Event", QStringLiteral("事件")},
-        {"Periapsis", QStringLiteral("近地点")},
-        {"Apoapsis", QStringLiteral("远地点")},
-        {"Ascending node", QStringLiteral("升交点")},
-        {"Descending node", QStringLiteral("降交点")},
-        {"Lighting", QStringLiteral("光照状态")},
-        {"Solar disk illumination", QStringLiteral("太阳光照比例")},
-        {"Sunlight", QStringLiteral("全光照")},
-        {"Penumbra", QStringLiteral("半影")},
-        {"Umbra", QStringLiteral("本影")},
-        {"Start clipped", QStringLiteral("开始于分析边界")},
-        {"Stop clipped", QStringLiteral("结束于分析边界")},
-        {"Azimuth", QStringLiteral("方位角")},
-        {"Elevation", QStringLiteral("仰角")},
-        {"Range", QStringLiteral("斜距")},
-        {"Maximum elevation", QStringLiteral("最大仰角")},
-        {"Maximum elevation time", QStringLiteral("最大仰角时刻")},
-        {"Minimum range", QStringLiteral("最近距离")},
-        {"Minimum range time", QStringLiteral("最近距离时刻")},
-        {"Inertial relative speed", QStringLiteral("惯性相对速率")},
-        {"RIC radial", QStringLiteral("RIC 径向")},
-        {"RIC in-track", QStringLiteral("RIC 沿轨")},
-        {"RIC cross-track", QStringLiteral("RIC 法向")},
-        {"Range rate", QStringLiteral("距离变化率")},
-        {"Visible", QStringLiteral("可见（1 / 0）")},
-        {"Off boresight", QStringLiteral("离轴角")},
-        {"Two body", QStringLiteral("二体")},
-        {"J2 secular", QStringLiteral("J2 长期项")},
-        {"WGS84 fixed", QStringLiteral("WGS84 固定站")}};
+        {"Latitude", ui::text("report_dialog.label_18")},
+        {"Cell area", ui::text("report_dialog.label_19")},
+        {"Time covered", ui::text("report_dialog.label_20")},
+        {"Time covered fraction", ui::text("report_dialog.label_21")},
+        {"Coverage intervals", ui::text("report_dialog.label_22")},
+        {"Maximum revisit time", ui::text("report_dialog.label_23")},
+        {"Mean revisit time", ui::text("report_dialog.label_24")},
+        {"Area covered", ui::text("report_dialog.label_25")},
+        {"Area covered fraction", ui::text("report_dialog.label_26")},
+        {"Cumulative area covered", ui::text("report_dialog.label_27")},
+        {"Cumulative area covered fraction", ui::text("report_dialog.label_28")},
+        {"Property", ui::text("common.properties")},
+        {"Value", ui::text("report_dialog.label_29")},
+        {"Object ID", ui::text("report_dialog.label_30")},
+        {"Object", ui::text("common.objects")},
+        {"Type", ui::text("report_dialog.label_31")},
+        {"Model", ui::text("report_dialog.label_32")},
+        {"Time", ui::text("common.time")},
+        {"Frame", ui::text("report_dialog.label_33")},
+        {"Longitude", ui::text("report_dialog.label_34")},
+        {"Geodetic latitude", ui::text("report_dialog.label_18")},
+        {"Ellipsoid height", ui::text("report_dialog.label_35")},
+        {"Semi-major axis", ui::text("report_dialog.label_36")},
+        {"Eccentricity", ui::text("report_dialog.label_37")},
+        {"Inclination", ui::text("report_dialog.label_38")},
+        {"RAAN", ui::text("report_dialog.label_39")},
+        {"Argument of periapsis", ui::text("report_dialog.label_40")},
+        {"True anomaly", ui::text("report_dialog.label_41")},
+        {"Geocentric distance", ui::text("report_dialog.label_42")},
+        {"Speed", ui::text("report_dialog.label_43")},
+        {"Radial speed", ui::text("report_dialog.label_44")},
+        {"Transverse speed", ui::text("report_dialog.label_45")},
+        {"Flight path angle", ui::text("report_dialog.label_46")},
+        {"Scenario", ui::text("common.scenario")},
+        {"Start", ui::text("common.start")},
+        {"Stop", ui::text("common.end")},
+        {"Time scale", ui::text("report_dialog.label_47")},
+        {"Satellites", ui::text("report_dialog.label_48")},
+        {"Ground stations", ui::text("report_dialog.label_49")},
+        {"Central body", ui::text("report_dialog.label_50")},
+        {"Earth", ui::text("body.earth")},
+        {"Satellite", ui::text("report_dialog.label_51")},
+        {"Ground station", ui::text("report_dialog.label_52")},
+        {"Duration", ui::text("report_dialog.label_53")},
+        {"Event", ui::text("report_dialog.label_54")},
+        {"Periapsis", ui::text("report_dialog.label_55")},
+        {"Apoapsis", ui::text("report_dialog.label_56")},
+        {"Ascending node", ui::text("report_dialog.label_57")},
+        {"Descending node", ui::text("report_dialog.label_58")},
+        {"Lighting", ui::text("report_dialog.label_59")},
+        {"Solar disk illumination", ui::text("report_dialog.label_11")},
+        {"Sunlight", ui::text("report_dialog.label_60")},
+        {"Penumbra", ui::text("report_dialog.label_61")},
+        {"Umbra", ui::text("report_dialog.label_62")},
+        {"Start clipped", ui::text("report_dialog.label_63")},
+        {"Stop clipped", ui::text("report_dialog.label_64")},
+        {"Azimuth", ui::text("report_dialog.label_65")},
+        {"Elevation", ui::text("report_dialog.label_66")},
+        {"Range", ui::text("report_dialog.label_67")},
+        {"Maximum elevation", ui::text("report_dialog.label_68")},
+        {"Maximum elevation time", ui::text("report_dialog.label_69")},
+        {"Minimum range", ui::text("report_dialog.label_70")},
+        {"Minimum range time", ui::text("report_dialog.label_71")},
+        {"Inertial relative speed", ui::text("report_dialog.label_72")},
+        {"RIC radial", ui::text("report_dialog.label_73")},
+        {"RIC in-track", ui::text("report_dialog.label_74")},
+        {"RIC cross-track", ui::text("report_dialog.label_75")},
+        {"Range rate", ui::text("report_dialog.label_76")},
+        {"Visible", ui::text("report_dialog.label_77")},
+        {"Off boresight", ui::text("report_dialog.label_78")},
+        {"Two body", ui::text("report_dialog.label_79")},
+        {"J2 secular", ui::text("report_dialog.label_80")},
+        {"WGS84 fixed", ui::text("report_dialog.label_81")}};
     const auto match = labels.find(value);
     return match == labels.end() ? value : match->second;
 }
@@ -371,7 +373,7 @@ class ReportModel final : public QAbstractTableModel {
                               source.rows()[index.row()][flag - source.columns().begin()]) != 0;
         }
         if (role == Qt::ToolTipRole && clipped)
-            return value + QStringLiteral("\n此边界由分析区间截断，不是实际状态切换的时刻。");
+            return value + ui::text("report_dialog.label_82");
         if (role == Qt::DisplayRole && std::holds_alternative<core::Epoch>(cell)) {
             if (value.endsWith('Z'))
                 value.chop(1);
@@ -501,7 +503,7 @@ struct ReportDialog::Impl {
         : owner(parent), project(std::move(input)), prepare(std::move(preflight)),
           save(std::move(persist)), seek(std::move(jump)), time(std::move(clock)) {
         owner->setObjectName("reportDialog");
-        owner->setWindowTitle(QStringLiteral("报告"));
+        owner->setWindowTitle(ui::text("common.report"));
         owner->setWindowIcon(workbench_icon(WorkbenchIcon::properties));
         owner->setMinimumSize(320, 320);
         owner->resize(1120, 740);
@@ -514,7 +516,7 @@ struct ReportDialog::Impl {
         auto *heading_layout = new QHBoxLayout(heading);
         heading_layout->setContentsMargins(8, 3, 8, 3);
         heading_layout->setSpacing(6);
-        view_button = new QPushButton(QStringLiteral("收起设置"), heading);
+        view_button = new QPushButton(ui::text("report_dialog.label_83"), heading);
         view_button->setObjectName("reportToggleSettings");
         heading_layout->addWidget(view_button);
         root->addWidget(heading);
@@ -547,14 +549,14 @@ struct ReportDialog::Impl {
             caption->setObjectName("reportSectionTitle");
             config->addWidget(caption);
         };
-        section(QStringLiteral("对象范围"));
+        section(ui::text("report_dialog.label_84"));
         auto *scope_row = new QHBoxLayout;
         scope_label = new QLabel(settings);
         scope_label->setObjectName("reportScopeLabel");
         scope_label->setWordWrap(true);
         scope_label->setTextFormat(Qt::PlainText);
         scope_row->addWidget(scope_label, 1);
-        scope_button = new QPushButton(QStringLiteral("选择对象…"), settings);
+        scope_button = new QPushButton(ui::text("report_dialog.label_85"), settings);
         scope_button->setObjectName("reportChangeScope");
         scope_row->addWidget(scope_button);
         config->addLayout(scope_row);
@@ -567,33 +569,35 @@ struct ReportDialog::Impl {
         pair_form->setVerticalSpacing(12);
         pair_form->setRowWrapPolicy(QFormLayout::WrapAllRows);
         access_station = new ObjectSelectionField(access_pair);
-        access_station->set_options({QStringLiteral("选择可见性分析的地面站"), false, {}});
-        access_station->setAccessibleName(QStringLiteral("可见性分析地面站"));
+        access_station->set_options({ui::text("report_dialog.label_86"), false, {}});
+        access_station->setAccessibleName(
+            ui::text("report_dialog.access_station.set_accessible_name"));
         access_station->setObjectName("accessStation");
         access_target = new ObjectSelectionField(access_pair);
-        access_target->set_options({QStringLiteral("选择可见性分析的卫星或传感器"), false, {}});
-        access_target->setAccessibleName(QStringLiteral("可见性分析目标"));
+        access_target->set_options({ui::text("report_dialog.label_87"), false, {}});
+        access_target->setAccessibleName(
+            ui::text("report_dialog.access_target.set_accessible_name"));
         access_target->setObjectName("accessTarget");
-        pair_form->addRow(QStringLiteral("地面站"), access_station);
-        pair_form->addRow(QStringLiteral("卫星 / 传感器"), access_target);
+        pair_form->addRow(ui::text("report_dialog.label_52"), access_station);
+        pair_form->addRow(ui::text("report_dialog.pair_form.add_row"), access_target);
         config->addWidget(access_pair);
         auto *template_heading = new QHBoxLayout;
-        auto *template_title = new QLabel(QStringLiteral("报告类型"), settings);
+        auto *template_title = new QLabel(ui::text("report_dialog.template_title"), settings);
         template_title->setObjectName("reportSectionTitle");
         template_heading->addWidget(template_title);
         template_heading->addStretch();
         config_menu = new QToolButton(settings);
         config_menu->setObjectName("reportConfigMenu");
-        config_menu->setText(QStringLiteral("模板"));
-        config_menu->setToolTip(QStringLiteral("将当前对象、类型和采样设置保存为项目模板"));
+        config_menu->setText(ui::text("report_dialog.config_menu.set_text"));
+        config_menu->setToolTip(ui::text("report_dialog.config_menu.set_tool_tip"));
         config_menu->setPopupMode(QToolButton::InstantPopup);
         auto *menu = new QMenu(config_menu);
-        store = menu->addAction(QStringLiteral("保存为模板…"));
+        store = menu->addAction(ui::text("report_dialog.menu.add_action"));
         store->setObjectName("saveReport");
-        update_template = menu->addAction(QStringLiteral("更新当前模板"));
+        update_template = menu->addAction(ui::text("report_dialog.menu.add_action_2"));
         update_template->setObjectName("updateReport");
         menu->addSeparator();
-        remove = menu->addAction(QStringLiteral("删除当前模板"));
+        remove = menu->addAction(ui::text("report_dialog.menu.add_action_3"));
         remove->setObjectName("deleteReport");
         config_menu->setMenu(menu);
         template_heading->addWidget(config_menu);
@@ -604,7 +608,7 @@ struct ReportDialog::Impl {
         library->setProperty("objectSelector", true);
         library->setAutoDefault(false);
         library->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        library->setAccessibleName(QStringLiteral("选择报告"));
+        library->setAccessibleName(ui::text("report_dialog.library.set_accessible_name"));
         config->addWidget(library);
         template_description = note({}, settings);
         template_description->setObjectName("reportTemplateDescription");
@@ -615,9 +619,9 @@ struct ReportDialog::Impl {
         coverage_form->setContentsMargins(0, 8, 0, 0);
         coverage_form->setRowWrapPolicy(QFormLayout::WrapAllRows);
         const std::array labels{
-            QStringLiteral("南界 / 北界（北纬为正）"), QString{},
-            QStringLiteral("西界 / 东界（东经为正）"), QString{},
-            QStringLiteral("网格间隔（赤道处）"),      QStringLiteral("最低仰角")};
+            ui::text("report_dialog.label_88"), QString{},
+            ui::text("report_dialog.label_89"), QString{},
+            ui::text("report_dialog.label_90"), ui::text("report_dialog.label_91")};
         const std::array names{"coverageSouth", "coverageNorth",      "coverageWest",
                                "coverageEast",  "coverageResolution", "coverageElevation"};
         for (int i = 0; i < 6; ++i) {
@@ -641,15 +645,13 @@ struct ReportDialog::Impl {
         }
         for (int i : {4, 5})
             coverage_form->addRow(labels[i], coverage_fields[i]);
-        coverage_fields[2]->setToolTip(
-            QStringLiteral("西界大于东界时，区域跨越日期变更线。全球使用 −180° 至 180°。"));
-        auto *global = new QPushButton(QStringLiteral("使用全球范围"), coverage_settings);
+        coverage_fields[2]->setToolTip(ui::text("report_dialog.label_92"));
+        auto *global = new QPushButton(ui::text("report_dialog.global"), coverage_settings);
         global->setObjectName("coverageGlobal");
         coverage_form->addRow(global);
-        coverage_ends = new QCheckBox(QStringLiteral("重访统计包含首尾空档"), coverage_settings);
+        coverage_ends = new QCheckBox(ui::text("report_dialog.label_93"), coverage_settings);
         coverage_ends->setObjectName("coverageEndGaps");
-        coverage_ends->setToolTip(QStringLiteral(
-            "首尾空档截断到分析区间；从未覆盖的网格点，其空档始终等于整个分析时长。"));
+        coverage_ends->setToolTip(ui::text("report_dialog.coverage_ends.set_tool_tip"));
         coverage_form->addRow(coverage_ends);
         config->addWidget(coverage_settings);
         for (auto *field : coverage_fields)
@@ -668,10 +670,10 @@ struct ReportDialog::Impl {
         auto *sampling_layout = new QVBoxLayout(sampling);
         sampling_layout->setContentsMargins(0, 8, 0, 0);
         sampling_layout->setSpacing(6);
-        auto *sampling_title = new QLabel(QStringLiteral("时间与采样"), sampling);
+        auto *sampling_title = new QLabel(ui::text("report_dialog.sampling_title"), sampling);
         sampling_title->setObjectName("reportSectionTitle");
         sampling_layout->addWidget(sampling_title);
-        follow = new QCheckBox(QStringLiteral("使用场景时段"), sampling);
+        follow = new QCheckBox(ui::text("report_dialog.label_94"), sampling);
         follow->setObjectName("reportFollowScenario");
         sampling_layout->addWidget(follow);
         interval_label = note({}, sampling);
@@ -685,9 +687,9 @@ struct ReportDialog::Impl {
         first->setObjectName("reportFirst");
         last = new EpochEditor(custom_times, time);
         last->setObjectName("reportLast");
-        time_layout->addWidget(note(QStringLiteral("开始"), custom_times));
+        time_layout->addWidget(note(ui::text("common.start"), custom_times));
         time_layout->addWidget(first);
-        time_layout->addWidget(note(QStringLiteral("结束"), custom_times));
+        time_layout->addWidget(note(ui::text("common.end"), custom_times));
         time_layout->addWidget(last);
         for (auto *editor : {first, last})
             editor->findChild<QLineEdit *>("epochValue")->setMinimumWidth(180);
@@ -701,10 +703,10 @@ struct ReportDialog::Impl {
         step->setDecimals(9);
         step->setRange(0.000000001, 86400);
         step->setValue(60);
-        step->setSuffix(QStringLiteral(" 秒"));
+        step->setSuffix(ui::text("report_dialog.step.set_suffix"));
         step->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-        step->setToolTip(QStringLiteral("报告独立采样，始终包含起止时刻。"));
-        step_label = new QLabel(QStringLiteral("采样间隔"));
+        step->setToolTip(ui::text("report_dialog.step.set_tool_tip"));
+        step_label = new QLabel(ui::text("report_dialog.label_95"));
         sampling_form->addRow(step_label, step);
         access_options = new QWidget(sampling);
         auto *access_form = new QFormLayout(access_options);
@@ -713,19 +715,18 @@ struct ReportDialog::Impl {
         access_form->setVerticalSpacing(10);
         access_mode = new QComboBox(access_options);
         access_mode->setObjectName("accessSearchMode");
-        access_mode->addItems({QStringLiteral("固定步长"), QStringLiteral("极值辅助搜索")});
-        access_mode->setToolTip(QStringLiteral("极值辅助搜索在检查区间内寻找峰谷，以发现短窗口和短"
-                                               "间隙。快速变化时仍需减小最大检查间隔。"));
+        access_mode->addItems(
+            {ui::text("report_dialog.label_96"), ui::text("report_dialog.label_97")});
+        access_mode->setToolTip(ui::text("report_dialog.access_mode.set_tool_tip"));
         access_tolerance = new StepSpinBox(access_options);
         access_tolerance->setObjectName("accessTimeTolerance");
         access_tolerance->setDecimals(6);
         access_tolerance->setRange(.000001, 1000);
         access_tolerance->setValue(.001);
-        access_tolerance->setSuffix(QStringLiteral(" 秒"));
-        access_tolerance->setToolTip(
-            QStringLiteral("已发现事件、边界与过境极值的时间搜索容差；不是轨道的物理精度。"));
-        access_form->addRow(QStringLiteral("搜索方式"), access_mode);
-        access_form->addRow(QStringLiteral("时间容差"), access_tolerance);
+        access_tolerance->setSuffix(ui::text("report_dialog.step.set_suffix"));
+        access_tolerance->setToolTip(ui::text("report_dialog.access_tolerance.set_tool_tip"));
+        access_form->addRow(ui::text("report_dialog.access_form.add_row"), access_mode);
+        access_form->addRow(ui::text("report_dialog.access_form.add_row_2"), access_tolerance);
         sampling_form->addRow(access_options);
         frame = new QComboBox(sampling);
         frame->setObjectName("reportFrame");
@@ -734,11 +735,11 @@ struct ReportDialog::Impl {
         auto *frame_form = new QFormLayout(frame_field);
         frame_form->setContentsMargins(0, 0, 0, 0);
         frame_form->setRowWrapPolicy(QFormLayout::WrapLongRows);
-        frame_form->addRow(QStringLiteral("坐标系"), frame);
+        frame_form->addRow(ui::text("report_dialog.label_33"), frame);
         sampling_layout->addLayout(sampling_form);
         sampling_layout->addWidget(frame_field);
         config->addWidget(sampling);
-        section(QStringLiteral("显示格式"));
+        section(ui::text("report_dialog.label_98"));
         format_title = qobject_cast<QLabel *>(config->itemAt(config->count() - 1)->widget());
         units_field = new QWidget(settings);
         auto *units_form = new QFormLayout(units_field);
@@ -750,7 +751,7 @@ struct ReportDialog::Impl {
         units->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
         units->setMinimumContentsLength(8);
         units->addItems({QStringLiteral("km / km·s⁻¹ / °"), QStringLiteral("m / m·s⁻¹ / rad")});
-        units_form->addRow(QStringLiteral("数值单位"), units);
+        units_form->addRow(ui::text("report_dialog.units_form.add_row"), units);
         config->addWidget(units_field);
         scale_field = new QWidget(settings);
         auto *scale_form = new QFormLayout(scale_field);
@@ -760,12 +761,12 @@ struct ReportDialog::Impl {
         scale = new QComboBox(scale_field);
         scale->setObjectName("reportTimeScale");
         scale->addItems({"UTC", "TAI", "TT"});
-        scale_form->addRow(QStringLiteral("时间系统"), scale);
+        scale_form->addRow(ui::text("report_dialog.label_47"), scale);
         for (auto *form : {sampling_form, access_form, frame_form, units_form, scale_form}) {
             form->setHorizontalSpacing(12);
             if (auto *label = form->itemAt(0, QFormLayout::LabelRole)->widget())
-                label->setFixedWidth(
-                    settings->fontMetrics().horizontalAdvance(QStringLiteral("最大检查间隔")));
+                label->setFixedWidth(settings->fontMetrics().horizontalAdvance(
+                    ui::text("report_dialog.label.set_fixed_width")));
         }
         config->addWidget(scale_field);
         config->addStretch();
@@ -777,14 +778,14 @@ struct ReportDialog::Impl {
         estimate = note({}, actions);
         estimate->setObjectName("reportEstimate");
         actions_layout->addWidget(estimate);
-        generate = new QPushButton(QStringLiteral("生成报告"), actions);
+        generate = new QPushButton(ui::text("report_dialog.label_99"), actions);
         generate->setObjectName("generateReport");
         generate->setProperty("primary", true);
         generate->setDefault(true);
         auto *generation_buttons = new QHBoxLayout;
         generation_buttons->addStretch();
         generate->setMinimumWidth(104);
-        cancel = new QPushButton(QStringLiteral("取消生成"), actions);
+        cancel = new QPushButton(ui::text("report_dialog.label_100"), actions);
         cancel->setObjectName("cancelReport");
         cancel->hide();
         generation_buttons->addWidget(cancel);
@@ -798,39 +799,44 @@ struct ReportDialog::Impl {
         result_layout->setContentsMargins(0, 0, 0, 0);
         result_layout->setSpacing(0);
         // One document toolbar; keep the table's title and commands out of its data area.
-        result_title = new ReportTitle(QStringLiteral("报告"), heading);
+        result_title = new ReportTitle(ui::text("common.report"), heading);
         result_title->setObjectName("reportResultTitle");
         result_title->setTextFormat(Qt::PlainText);
         result_title->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         heading_layout->addWidget(result_title, 1);
         refresh_button = new QToolButton(heading);
         refresh_button->setObjectName("refreshReport");
-        refresh_button->setText(QStringLiteral("↻"));
-        refresh_button->setAccessibleName(QStringLiteral("刷新报告"));
-        refresh_button->setToolTip(QStringLiteral("按当前设置重新生成（F5）"));
+        refresh_button->setIcon(workbench_icon(WorkbenchIcon::refresh));
+        refresh_button->setIconSize(QSize(16, 16));
+        refresh_button->setFixedSize(28, 28);
+        refresh_button->setAccessibleName(ui::text("report.refresh"));
+        refresh_button->setToolTip(ui::text("report_dialog.refresh_button.set_tool_tip"));
         refresh_button->setShortcut(QKeySequence(Qt::Key_F5));
         refresh_button->setEnabled(false);
         heading_layout->addWidget(refresh_button);
-        export_csv = new QPushButton(QStringLiteral("导出 CSV…"), heading);
+        export_csv = new QPushButton(ui::text("report_dialog.label_101"), heading);
         export_csv->setObjectName("exportReportCsv");
         export_csv->setEnabled(false);
         heading_layout->addWidget(export_csv);
         result_more = new QToolButton(heading);
         result_more->setObjectName("reportResultMenu");
-        result_more->setText(QStringLiteral("···"));
-        result_more->setToolTip(QStringLiteral("复制与数据来源"));
+        result_more->setIcon(workbench_icon(WorkbenchIcon::more));
+        result_more->setIconSize(QSize(16, 16));
+        result_more->setFixedSize(28, 28);
+        result_more->setToolTip(ui::text("report.more_hint"));
+        result_more->setAccessibleName(result_more->toolTip());
         result_more->setPopupMode(QToolButton::InstantPopup);
         result_more->setEnabled(false);
         auto *result_menu = new QMenu(result_more);
-        copy_button = result_menu->addAction(QStringLiteral("复制选中行"));
+        copy_button = result_menu->addAction(ui::text("report_dialog.result_menu.add_action"));
         copy_button->setObjectName("reportCopy");
         copy_button->setEnabled(false);
-        source_button = result_menu->addAction(QStringLiteral("查看数据来源…"));
+        source_button = result_menu->addAction(ui::text("report_dialog.result_menu.add_action_2"));
         source_button->setObjectName("reportShowSource");
         source_button->setEnabled(false);
         result_more->setMenu(result_menu);
         heading_layout->addWidget(result_more);
-        result_label = note(QStringLiteral("等待生成"), result_panel);
+        result_label = note(ui::text("report_dialog.label_102"), result_panel);
         result_label->setTextFormat(Qt::PlainText);
         result_label->setObjectName("reportResultLabel");
         auto *result_meta_bar = new QWidget(result_panel);
@@ -842,14 +848,14 @@ struct ReportDialog::Impl {
         views->setObjectName("reportViews");
         views->setExpanding(false);
         views->setDrawBase(false);
-        views->addTab(QStringLiteral("表格"));
-        views->addTab(QStringLiteral("曲线"));
-        views->addTab(QStringLiteral("热力图"));
+        views->addTab(ui::text("report.table"));
+        views->addTab(ui::text("report.curves"));
+        views->addTab(ui::text("report_dialog.views.add_tab"));
         views->setTabEnabled(2, false);
         views->setTabEnabled(1, false);
         views->setTabVisible(2, false);
         views->setTabVisible(1, false);
-        views->setTabToolTip(1, QStringLiteral("生成按时间采样的报告后，可查看曲线。"));
+        views->setTabToolTip(1, ui::text("report_dialog.views.set_tab_tool_tip"));
         result_meta->addWidget(views);
         result_meta->addWidget(result_label, 1);
         result_label->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -859,8 +865,9 @@ struct ReportDialog::Impl {
         auto *metrics = new QGridLayout(pass_summary);
         metrics->setContentsMargins(8, 4, 8, 4);
         metrics->setSpacing(0);
-        const std::array metric_names{QStringLiteral("可见过境"), QStringLiteral("总可见时长"),
-                                      QStringLiteral("最长过境"), QStringLiteral("平均时长")};
+        const std::array metric_names{
+            ui::text("report_dialog.label_103"), ui::text("report_dialog.label_104"),
+            ui::text("report_dialog.label_105"), ui::text("report_dialog.label_106")};
         std::array<QFrame *, 4> cards{};
         for (std::size_t i = 0; i < cards.size(); ++i) {
             cards[i] = new QFrame(pass_summary);
@@ -913,11 +920,11 @@ struct ReportDialog::Impl {
             workbench_icon(WorkbenchIcon::properties, theme::color(theme::accent)).pixmap(24, 24));
         empty_layout->addWidget(empty_icon, 0, Qt::AlignHCenter);
         empty_layout->addSpacing(8);
-        auto *empty_title = new QLabel(QStringLiteral("还没有报告结果"), empty);
+        auto *empty_title = new QLabel(ui::text("report_dialog.empty_title"), empty);
         empty_title->setObjectName("reportEmptyTitle");
         empty_title->setAlignment(Qt::AlignCenter);
         empty_layout->addWidget(empty_title);
-        auto *empty_note = note(QStringLiteral("选择对象和报告类型，点击“生成报告”。"), empty);
+        auto *empty_note = note(ui::text("report_dialog.empty_note"), empty);
         empty_note->setAlignment(Qt::AlignCenter);
         empty_layout->addWidget(empty_note);
         empty_layout->addStretch();
@@ -933,13 +940,12 @@ struct ReportDialog::Impl {
         table_tools->setToolButtonStyle(Qt::ToolButtonTextOnly);
         auto *precision = new QComboBox(table_tools);
         precision->setObjectName("reportPrecision");
-        precision->setAccessibleName(QStringLiteral("表格显示精度"));
-        precision->addItem(QStringLiteral("常规精度"), 9);
-        precision->addItem(QStringLiteral("6 位有效数字"), 6);
-        precision->addItem(QStringLiteral("12 位有效数字"), 12);
-        precision->addItem(QStringLiteral("完整精度"), 17);
-        precision->setToolTip(QStringLiteral(
-            "只调整显示。常规：9 位有效数字，事件值 3 位小数。复制与导出始终保留完整精度。"));
+        precision->setAccessibleName(ui::text("report_dialog.precision.set_accessible_name"));
+        precision->addItem(ui::text("report_dialog.precision.add_item"), 9);
+        precision->addItem(ui::text("report_dialog.precision.add_item_2"), 6);
+        precision->addItem(ui::text("report_dialog.precision.add_item_3"), 12);
+        precision->addItem(ui::text("report_dialog.precision.add_item_4"), 17);
+        precision->setToolTip(ui::text("report_dialog.precision.set_tool_tip"));
         table_tools->addWidget(precision);
         table_tools->addSeparator();
         table_layout->addWidget(table_tools);
@@ -955,8 +961,7 @@ struct ReportDialog::Impl {
         table->setSortingEnabled(true);
         table->sortByColumn(-1, Qt::AscendingOrder);
         table->horizontalHeader()->setSortIndicatorClearable(true);
-        table->horizontalHeader()->setToolTip(
-            QStringLiteral("点击列标题排序，再次点击反向；第三次恢复原始顺序。"));
+        table->horizontalHeader()->setToolTip(ui::text("report_dialog.label_107"));
         table->setAlternatingRowColors(true);
         table->setShowGrid(false);
         table->setWordWrap(false);
@@ -969,38 +974,43 @@ struct ReportDialog::Impl {
         table->verticalHeader()->setDefaultSectionSize(26);
         table->horizontalHeader()->setMinimumSectionSize(70);
         table->horizontalHeader()->setResizeContentsPrecision(50);
-        auto *copy = new QAction(QStringLiteral("复制所选行"), table);
+        auto *copy = new QAction(ui::text("report_dialog.copy"), table);
         copy->setObjectName("copyReportRows");
         copy->setShortcut(QKeySequence::Copy);
         copy->setShortcutContext(Qt::WidgetWithChildrenShortcut);
         table->addAction(copy);
         table->setContextMenuPolicy(Qt::ActionsContextMenu);
         QObject::connect(copy, &QAction::triggered, owner, [this] { copy_rows(); });
-        auto *copy_direct = table_tools->addAction(QStringLiteral("复制"));
+        auto *copy_direct = table_tools->addAction(ui::text("common.copy"));
         copy_direct->setObjectName("reportTableCopy");
-        copy_direct->setToolTip(QStringLiteral("复制所选行，含列标题（Ctrl+C）"));
+        copy_direct->setToolTip(ui::text("report_dialog.copy_direct.set_tool_tip"));
         copy_direct->setEnabled(false);
         QObject::connect(copy_direct, &QAction::triggered, owner, [this] { copy_rows(); });
-        choose_columns_action = table_tools->addAction(QStringLiteral("显示列…"));
+        choose_columns_action =
+            table_tools->addAction(ui::text("report_dialog.table_tools.add_action"));
         choose_columns_action->setObjectName("reportChooseColumns");
-        choose_columns_action->setToolTip(QStringLiteral("选择并重排表格和 CSV 的列，不重新计算"));
+        choose_columns_action->setToolTip(
+            ui::text("report_dialog.choose_columns_action.set_tool_tip"));
         choose_columns_action->setEnabled(false);
         table->addAction(choose_columns_action);
         QObject::connect(choose_columns_action, &QAction::triggered, owner,
                          [this] { choose_columns(); });
-        choose_curve_action = table_tools->addAction(QStringLiteral("曲线…"));
+        choose_curve_action =
+            table_tools->addAction(ui::text("report_dialog.table_tools.add_action_2"));
         choose_curve_action->setObjectName("reportChooseCurves");
-        choose_curve_action->setToolTip(QStringLiteral("选择多个字段并在曲线中比较"));
+        choose_curve_action->setToolTip(ui::text("report_dialog.choose_curve_action.set_tool_tip"));
         choose_curve_action->setEnabled(false);
         QObject::connect(choose_curve_action, &QAction::triggered, owner, [this] {
             if (choose_curves())
                 views->setCurrentIndex(1);
         });
-        auto *fit_columns = table_tools->addAction(QStringLiteral("适合列宽"));
+        auto *fit_columns =
+            table_tools->addAction(ui::text("report_dialog.table_tools.add_action_3"));
         fit_columns->setObjectName("reportFitColumns");
-        fit_columns->setToolTip(QStringLiteral("按当前显示精度调整列宽；也可拖动表头边界调整"));
+        fit_columns->setToolTip(ui::text("report_dialog.fit_columns.set_tool_tip"));
         QObject::connect(fit_columns, &QAction::triggered, owner, [this] { fit_table_columns(); });
-        auto *original_order = table_tools->addAction(QStringLiteral("原始顺序"));
+        auto *original_order =
+            table_tools->addAction(ui::text("report_dialog.table_tools.add_action_4"));
         original_order->setObjectName("reportOriginalOrder");
         original_order->setEnabled(false);
         QObject::connect(original_order, &QAction::triggered, owner,
@@ -1016,7 +1026,7 @@ struct ReportDialog::Impl {
             if (views->currentIndex() > 0) {
                 QApplication::clipboard()->setImage(
                     views->currentIndex() == 2 ? coverage_map->image() : plot->image());
-                status->setText(QStringLiteral("图片已复制。"));
+                status->setText(ui::text("report_dialog.status.set_text"));
             } else
                 copy_rows();
         });
@@ -1041,13 +1051,13 @@ struct ReportDialog::Impl {
 
         plot_field = new ReportSelectionButton(plot_page);
         plot_field->setObjectName("reportPlotFields");
-        plot_field->setAccessibleName(QStringLiteral("选择曲线"));
+        plot_field->setAccessibleName(ui::text("report_dialog.plot_field.set_accessible_name"));
         plot_object = new ObjectSelectionField(plot_page);
         plot_object->setObjectName("reportPlotObject");
-        plot_object->setAccessibleName(QStringLiteral("曲线对象"));
+        plot_object->setAccessibleName(ui::text("report_dialog.plot_object.set_accessible_name"));
         plot_field->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-        plot_field->setToolTip(QStringLiteral("选择要同时显示的曲线；同单位叠加，不同单位分区"));
-        plot_object->setToolTip(QStringLiteral("选择比较全部对象或只看单个对象"));
+        plot_field->setToolTip(ui::text("report_dialog.plot_field.set_tool_tip"));
+        plot_object->setToolTip(ui::text("report_dialog.plot_object.set_tool_tip"));
         plot_tools = new QGridLayout;
         plot_tools->setContentsMargins(0, 0, 0, 0);
         plot_tools->setHorizontalSpacing(10);
@@ -1058,9 +1068,9 @@ struct ReportDialog::Impl {
         reset_plot = new QToolButton(plot_page);
         reset_plot->setObjectName("reportPlotReset");
         reset_plot->setIcon(workbench_icon(WorkbenchIcon::fit));
-        reset_plot->setToolTip(QStringLiteral("还原完整范围（Home）"));
-        reset_plot->setAccessibleName(QStringLiteral("还原曲线范围"));
-        reset_plot->setText(QStringLiteral("全范围"));
+        reset_plot->setToolTip(ui::text("report_dialog.reset_plot.set_tool_tip"));
+        reset_plot->setAccessibleName(ui::text("report_dialog.reset_plot.set_accessible_name"));
+        reset_plot->setText(ui::text("report_dialog.reset_plot.set_text"));
         reset_plot->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         new WidthObserver(
             plot_page, [this, mode = WidthMode{}, previous = false](int width) mutable {
@@ -1081,27 +1091,27 @@ struct ReportDialog::Impl {
         navigation->setMovable(false);
         navigation->setIconSize(QSize(16, 16));
         auto *mode_group = new QActionGroup(navigation);
-        auto *box = navigation->addAction(QStringLiteral("框选"));
+        auto *box = navigation->addAction(ui::text("report_dialog.navigation.add_action"));
         box->setObjectName("reportPlotBox");
         box->setCheckable(true);
         box->setChecked(true);
-        box->setToolTip(QStringLiteral("拖动框选时间范围；Esc 取消操作"));
+        box->setToolTip(ui::text("report_dialog.box.set_tool_tip"));
         mode_group->addAction(box);
-        auto *pan = navigation->addAction(QStringLiteral("平移"));
+        auto *pan = navigation->addAction(ui::text("report_dialog.navigation.add_action_2"));
         pan->setObjectName("reportPlotPan");
         pan->setCheckable(true);
-        pan->setToolTip(QStringLiteral("拖动平移时间范围；也可按住鼠标中键拖动"));
+        pan->setToolTip(ui::text("report_dialog.pan.set_tool_tip"));
         mode_group->addAction(pan);
         QObject::connect(pan, &QAction::toggled, plot, &ReportPlot::set_pan_mode);
         navigation->addSeparator();
-        auto *zoom_in =
-            navigation->addAction(workbench_icon(WorkbenchIcon::zoom_in), QStringLiteral("放大"));
+        auto *zoom_in = navigation->addAction(workbench_icon(WorkbenchIcon::zoom_in),
+                                              ui::text("report_dialog.navigation.add_action_3"));
         zoom_in->setObjectName("reportPlotZoomIn");
-        zoom_in->setToolTip(QStringLiteral("放大时间范围（+）；滚轮以指针为中心缩放"));
-        auto *zoom_out =
-            navigation->addAction(workbench_icon(WorkbenchIcon::zoom_out), QStringLiteral("缩小"));
+        zoom_in->setToolTip(ui::text("report_dialog.zoom_in.set_tool_tip"));
+        auto *zoom_out = navigation->addAction(workbench_icon(WorkbenchIcon::zoom_out),
+                                               ui::text("report_dialog.navigation.add_action_4"));
         zoom_out->setObjectName("reportPlotZoomOut");
-        zoom_out->setToolTip(QStringLiteral("缩小时间范围（−）"));
+        zoom_out->setToolTip(ui::text("report_dialog.zoom_out.set_tool_tip"));
         QObject::connect(zoom_in, &QAction::triggered, plot, [this] { plot->zoom(.8); });
         QObject::connect(zoom_out, &QAction::triggered, plot, [this] { plot->zoom(1.25); });
         navigation->addWidget(reset_plot);
@@ -1117,7 +1127,7 @@ struct ReportDialog::Impl {
         plot_scroll->setWidgetResizable(true);
         plot_scroll->setWidget(plot);
         plot_layout->addWidget(plot_scroll, 1);
-        plot_note = note(QStringLiteral("滚轮缩放 · 中键平移 · 双击采样点定位时刻"), plot_page);
+        plot_note = note(ui::text("report_dialog.label_108"), plot_page);
         plot_layout->addWidget(plot_note);
         result_stack->addWidget(plot_page);
         coverage_page = new QWidget(result_stack);
@@ -1126,23 +1136,24 @@ struct ReportDialog::Impl {
         coverage_metric = new QComboBox(coverage_page);
         coverage_metric->setObjectName("coverageMetric");
         coverage_metric->addItems(
-            {QStringLiteral("覆盖时长占比"), QStringLiteral("最长无覆盖空档")});
+            {ui::text("report_dialog.label_21"), ui::text("report_dialog.label_23")});
         coverage_layout->addWidget(coverage_metric);
         coverage_map = new CoverageMap(coverage_page);
         coverage_layout->addWidget(coverage_map, 1);
-        coverage_point = note(QStringLiteral("选择网格点查看可见区间"), coverage_page);
+        coverage_point = note(ui::text("report_dialog.label_109"), coverage_page);
         coverage_point->setObjectName("coveragePointDetail");
         coverage_layout->addWidget(coverage_point);
         coverage_windows = new QComboBox(coverage_page);
         coverage_windows->setObjectName("coverageWindows");
         coverage_windows->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-        coverage_windows->setAccessibleName(QStringLiteral("网格点可见区间"));
+        coverage_windows->setAccessibleName(
+            ui::text("report_dialog.coverage_windows.set_accessible_name"));
         coverage_layout->addWidget(coverage_windows);
-        coverage_jump = new QPushButton(QStringLiteral("定位所选区间开始时刻"), coverage_page);
+        coverage_jump = new QPushButton(ui::text("report_dialog.label_110"), coverage_page);
         coverage_jump->setObjectName("coverageJump");
         coverage_layout->addWidget(coverage_jump);
-        coverage_layout->addWidget(note(
-            QStringLiteral("WGS84 网格中心采样 · 按网格面积加权 · 不含地形和折射"), coverage_page));
+        coverage_layout->addWidget(
+            note(ui::text("report_dialog.coverage_layout.add_widget"), coverage_page));
         result_stack->addWidget(coverage_page);
         coverage_map->selected = [this](std::size_t index) { select_coverage_point(index); };
         QObject::connect(coverage_metric, &QComboBox::currentIndexChanged, owner,
@@ -1170,7 +1181,7 @@ struct ReportDialog::Impl {
         progress->setTextVisible(false);
         progress->hide();
         root->addWidget(progress);
-        status = note(QStringLiteral("就绪"), owner);
+        status = note(ui::text("report_dialog.label_111"), owner);
         status->setObjectName("reportStatus");
         status->setContentsMargins(10, 3, 10, 3);
         root->addWidget(status);
@@ -1209,10 +1220,10 @@ struct ReportDialog::Impl {
         QObject::connect(access_mode, &QComboBox::currentIndexChanged, owner, [this] {
             if (report_uses_event_search(draft.query.kind))
                 step_label->setText(access_mode->currentIndex() == 0
-                                        ? QStringLiteral("搜索步长")
-                                        : QStringLiteral("最大检查间隔"));
+                                        ? ui::text("report_dialog.step_label.set_text")
+                                        : ui::text("report_dialog.label.set_fixed_width"));
             if (draft.query.kind == ReportKind::relative_motion)
-                step_label->setText(QStringLiteral("采样 / 检查间隔"));
+                step_label->setText(ui::text("report_dialog.step_label.set_text_2"));
             edit();
         });
         for (auto *editor : {first, last})
@@ -1229,7 +1240,7 @@ struct ReportDialog::Impl {
                 waiting = false;
                 ++request;
                 set_busy(false);
-                status->setText(QStringLiteral("已取消报告生成。"));
+                status->setText(ui::text("report_dialog.status.set_text_2"));
             }
         });
         QObject::connect(export_csv, &QPushButton::clicked, owner, [this] { export_file(); });
@@ -1270,7 +1281,7 @@ struct ReportDialog::Impl {
             if (!table->selectionModel()->isRowSelected(view_index.row(), {}))
                 table->selectRow(view_index.row());
             menu.addActions(table->actions());
-            menu.addAction(QStringLiteral("复制此单元格"), owner, [this, index] {
+            menu.addAction(ui::text("report_dialog.label_112"), owner, [this, index] {
                 QApplication::clipboard()->setText(
                     text(model->result->cell_text(index.row(), index.column())));
             });
@@ -1278,7 +1289,7 @@ struct ReportDialog::Impl {
                 curve_choices, text(r.table.columns()[index.column()].id), &ReportCurveField::id);
             if (views->isTabEnabled(1) && curve_field != curve_choices.end()) {
                 const auto id = curve_field->id;
-                menu.addAction(QStringLiteral("加入曲线比较"), owner, [this, id] {
+                menu.addAction(ui::text("report_dialog.id"), owner, [this, id] {
                     auto selected = curve_ids;
                     if (!selected.contains(id))
                         selected << id;
@@ -1289,13 +1300,13 @@ struct ReportDialog::Impl {
                         apply_curves(selected);
                     views->setCurrentIndex(1);
                 });
-                menu.addAction(QStringLiteral("只显示此列曲线"), owner, [this, id] {
+                menu.addAction(ui::text("report_dialog.label_113"), owner, [this, id] {
                     apply_curves({id});
                     views->setCurrentIndex(1);
                 });
             }
             if (views->isTabEnabled(1))
-                menu.addAction(QStringLiteral("选择曲线…"), owner, [this] {
+                menu.addAction(ui::text("report_dialog.label_114"), owner, [this] {
                     if (choose_curves())
                         views->setCurrentIndex(1);
                 });
@@ -1305,11 +1316,11 @@ struct ReportDialog::Impl {
             }
             menu.addSeparator();
             for (const auto &[id, label] : std::array{
-                     std::pair{"time.epoch", QStringLiteral("定位到时段开始")},
-                     std::pair{"access.max_elevation_time", QStringLiteral("定位到最大仰角")},
-                     std::pair{"access.min_range_time", QStringLiteral("定位到最近距离")},
-                     std::pair{"access.stop", QStringLiteral("定位到过境结束")},
-                     std::pair{"lighting.stop", QStringLiteral("定位到时段结束")}}) {
+                     std::pair{"time.epoch", ui::text("report_dialog.label_115")},
+                     std::pair{"access.max_elevation_time", ui::text("report_dialog.label_116")},
+                     std::pair{"access.min_range_time", ui::text("report_dialog.label_117")},
+                     std::pair{"access.stop", ui::text("report_dialog.label_118")},
+                     std::pair{"lighting.stop", ui::text("report_dialog.label_119")}}) {
                 const auto field = std::ranges::find(source.columns(), id, &results::Column::id);
                 if (field != source.columns().end()) {
                     const auto epoch = std::get<core::Epoch>(
@@ -1341,21 +1352,22 @@ struct ReportDialog::Impl {
             project.reports, [this](const auto &definition) { return definition.id == draft.id; });
         library->setText(saved ? text(draft.name) : kind_name(draft.query.kind));
         library->setIcon(workbench_icon(saved ? WorkbenchIcon::save : WorkbenchIcon::properties));
-        library->setToolTip(library->text() + QStringLiteral("\n选择报告…"));
+        library->setToolTip(library->text() + ui::text("report_dialog.library.set_tool_tip"));
         library->setAccessibleDescription(library->toolTip());
         remove->setEnabled(saved);
         update_template->setEnabled(saved);
-        store->setText(saved ? QStringLiteral("另存为模板…") : QStringLiteral("保存为模板…"));
+        store->setText(saved ? ui::text("report_dialog.store.set_text")
+                             : ui::text("report_dialog.menu.add_action"));
         refresh_scope();
     }
     QString report_scope(const std::vector<std::string> &ids, bool all) const {
         if (all)
-            return QStringLiteral("整个场景中的适用对象");
+            return ui::text("report_dialog.label_120");
         QStringList names;
         const auto objects = project_object_choices(project);
         for (const auto &id : ids) {
             const auto found = std::ranges::find(objects, id, &ObjectChoice::id);
-            names << (found == objects.end() ? text(id) + QStringLiteral("（已删除）")
+            names << (found == objects.end() ? text(id) + ui::text("report_dialog.found")
                                              : found->path);
         }
         return names.join(QStringLiteral("、"));
@@ -1364,73 +1376,63 @@ struct ReportDialog::Impl {
         const auto description = [](ReportKind kind) -> QString {
             switch (kind) {
             case ReportKind::scenario_summary:
-                return QStringLiteral("场景时段、对象数量与中心天体。");
+                return ui::text("report_dialog.label_121");
             case ReportKind::object_summary:
-                return QStringLiteral("对象名称、类型与计算模型。");
+                return ui::text("report_dialog.label_122");
             case ReportKind::cartesian_state:
-                return QStringLiteral("按指定间隔输出位置与速度，可选 GCRF 或 ITRF。");
+                return ui::text("report_dialog.label_123");
             case ReportKind::ground_stations:
-                return QStringLiteral("WGS84 经度、大地纬度、椭球高与 ITRF 坐标。");
+                return ui::text("report_dialog.label_124");
             case ReportKind::classical_elements:
-                return QStringLiteral("由 GCRF 状态换算瞬时六根数；J2 / J4 "
-                                      "结果不是平均根数。");
+                return ui::text("report_dialog.label_125");
             case ReportKind::geodetic_position:
-                return QStringLiteral("ITRF / WGS84 "
-                                      "经度、大地纬度和椭球高。高度不表示离地距离。");
+                return ui::text("report_dialog.label_126");
             case ReportKind::orbital_motion:
-                return QStringLiteral("GCRF 地心距离、总速率、径向与横向速率、航迹倾角。");
+                return ui::text("report_dialog.label_127");
             case ReportKind::access_intervals:
-                return QStringLiteral("地面站与卫星 / "
-                                      "传感器的可见时段，考虑地球遮挡、最低仰角与传感器视场。");
+                return ui::text("report_dialog.label_128");
             case ReportKind::aer:
-                return QStringLiteral("地面站观测目标的方位角、仰角、斜距与可见标记。");
+                return ui::text("report_dialog.label_129");
             case ReportKind::lighting_intervals:
-                return QStringLiteral(
-                    "全光照、半影与本影的连续时段、持续时间和占比。地球球面遮挡，使用几何太阳。");
+                return ui::text("report_dialog.label_130");
             case ReportKind::lighting_state:
-                return QStringLiteral("按时刻输出可见太阳圆盘的比例，支持光照曲线与 "
-                                      "CSV。地球球面遮挡，使用几何太阳。");
+                return ui::text("report_dialog.label_131");
             case ReportKind::orbital_events:
-                return QStringLiteral("近地点、远地点、升交点和降交点的精确时刻、地心距离与速率。交"
-                                      "点采用 GCRF 赤道面，近圆 / 近赤道情况明确提示。");
+                return ui::text("report_dialog.label_132");
             case ReportKind::relative_motion:
-                return QStringLiteral(
-                    "基准卫星 RIC 相对位置、星间距离、距离变化率和惯性相对速率，附地球遮挡状态。");
+                return ui::text("report_dialog.label_133");
             case ReportKind::intersatellite_access:
-                return QStringLiteral(
-                    "WGS84 椭球遮挡下的星间可见时段、持续时间和每段最近距离。双击定位时刻。");
+                return ui::text("report_dialog.label_134");
             case ReportKind::coverage_grid:
-                return QStringLiteral(
-                    "区域或全球网格的覆盖时长、覆盖比例与重访空档；多颗卫星 / 传感器联合覆盖。");
+                return ui::text("report_dialog.label_135");
             case ReportKind::coverage_time:
-                return QStringLiteral(
-                    "随时间变化的覆盖面积与累计覆盖比例；按 WGS84 网格面积加权。");
+                return ui::text("report_dialog.label_136");
             case ReportKind::state_covariance:
-                return QStringLiteral("传播已启用的 HPOP 协方差，输出 GCRF 位置速度矩阵的下三角。");
+                return ui::text("report_dialog.label_137");
             }
             return {};
         };
         const auto output = [](ReportKind kind) -> QString {
             switch (kind) {
             case ReportKind::coverage_grid:
-                return QStringLiteral("热力图 · 网格统计 · 可见区间");
+                return ui::text("report_dialog.output");
             case ReportKind::coverage_time:
-                return QStringLiteral("覆盖率曲线 · 面积统计 · 热力图");
+                return ui::text("report_dialog.label_138");
             case ReportKind::scenario_summary:
-                return QStringLiteral("属性表");
+                return ui::text("report_dialog.label_139");
             case ReportKind::object_summary:
-                return QStringLiteral("对象表");
+                return ui::text("report_dialog.label_140");
             case ReportKind::ground_stations:
-                return QStringLiteral("站点坐标表");
+                return ui::text("report_dialog.label_141");
             case ReportKind::access_intervals:
             case ReportKind::intersatellite_access:
-                return QStringLiteral("可见时间区间表");
+                return ui::text("report_dialog.label_142");
             case ReportKind::lighting_intervals:
-                return QStringLiteral("光照时间区间表 · 分类统计");
+                return ui::text("report_dialog.label_143");
             case ReportKind::orbital_events:
-                return QStringLiteral("事件时刻表 · 分类统计 · 时间定位");
+                return ui::text("report_dialog.label_144");
             default:
-                return QStringLiteral("时间序列 · 表格与曲线");
+                return ui::text("report_dialog.label_145");
             }
         };
         const auto icon = [](ReportKind kind) {
@@ -1455,39 +1457,35 @@ struct ReportDialog::Impl {
         };
         std::vector<ReportChoice> choices;
         for (auto kind : report_kinds)
-            choices.push_back(
-                {QStringLiteral("builtin:%1").arg(static_cast<int>(kind)),
-                 kind_name(kind),
-                 kind_name(kind),
-                 description(kind),
-                 report_is_intersatellite(kind) ? QStringLiteral("基准卫星 → 目标卫星 · 有序对象对")
-                 : report_is_access(kind)
-                     ? QStringLiteral("地面站 → 卫星 / 传感器；保留当前对象，随后选择配对对象")
-                     : report_scope(scope_ids, all_objects),
-                 false,
-                 compatible(kind) ? QString{} : QStringLiteral("不适用于当前对象范围"),
-                 output(kind),
-                 {},
-                 icon(kind)});
+            choices.push_back({QStringLiteral("builtin:%1").arg(static_cast<int>(kind)),
+                               kind_name(kind),
+                               kind_name(kind),
+                               description(kind),
+                               report_is_intersatellite(kind) ? ui::text("report_dialog.label_146")
+                               : report_is_access(kind)       ? ui::text("report_dialog.label_147")
+                                                        : report_scope(scope_ids, all_objects),
+                               false,
+                               compatible(kind) ? QString{} : ui::text("report_dialog.label_148"),
+                               output(kind),
+                               {},
+                               icon(kind)});
         for (const auto &definition : project.reports) {
             QString warning;
             const auto objects = project_object_choices(project);
             for (const auto &id : definition.query.object_ids)
                 if (std::ranges::find(objects, id, &ObjectChoice::id) == objects.end())
-                    warning =
-                        QStringLiteral("\n绑定的对象已删除；载入后需重新选择对象，才能生成报告。");
-            choices.push_back(
-                {"template:" + text(definition.id),
-                 text(definition.name),
-                 kind_name(definition.query.kind),
-                 description(definition.query.kind),
-                 report_scope(definition.query.object_ids,
-                              definition.query.scope == ReportScope::all_compatible),
-                 true,
-                 {},
-                 output(definition.query.kind),
-                 QStringLiteral("载入模板将恢复已保存的对象、时间和格式设置。") + warning,
-                 icon(definition.query.kind)});
+                    warning = ui::text("report_dialog.label_149");
+            choices.push_back({"template:" + text(definition.id),
+                               text(definition.name),
+                               kind_name(definition.query.kind),
+                               description(definition.query.kind),
+                               report_scope(definition.query.object_ids,
+                                            definition.query.scope == ReportScope::all_compatible),
+                               true,
+                               {},
+                               output(definition.query.kind),
+                               ui::text("report_dialog.label_150") + warning,
+                               icon(definition.query.kind)});
         }
         return choices;
     }
@@ -1558,7 +1556,7 @@ struct ReportDialog::Impl {
         QStringList labels;
         bool single_station = false;
         for (const auto &id : scope_ids) {
-            QString label = text(id) + QStringLiteral("（已删除）");
+            QString label = text(id) + ui::text("report_dialog.found");
             for (const auto &sensor : project.sensors)
                 if (sensor.object_id == id)
                     label = text(sensor.name());
@@ -1572,19 +1570,20 @@ struct ReportDialog::Impl {
                 }
             labels << label;
         }
-        scope_label->setText(all_objects ? QStringLiteral("整个场景")
+        scope_label->setText(all_objects ? ui::text("report_dialog.scope_label.set_text")
                              : labels.size() == 1
                                  ? labels.front()
-                                 : QStringLiteral("已选 %1 个对象").arg(labels.size()));
+                                 : ui::text("report_dialog.label_151").arg(labels.size()));
         scope_label->setToolTip(labels.join('\n'));
-        scope_detail->setText(
-            all_objects ? QStringLiteral("包含当前和以后添加的适用对象")
-            : labels.size() == 1
-                ? (single_station ? QStringLiteral("仅此地面站") : QStringLiteral("仅此对象"))
-                : QStringLiteral("仅使用指定对象，不自动添加新对象"));
-        owner->setWindowTitle(scope_ids.size() == 1
-                                  ? QStringLiteral("报告 · %1").arg(labels.front())
-                                  : QStringLiteral("报告"));
+        scope_detail->setText(all_objects ? ui::text("report_dialog.scope_detail.set_text")
+                              : labels.size() == 1
+                                  ? (single_station ? ui::text("report_dialog.detail.set_text")
+                                                    : ui::text("report_dialog.label_152"))
+                                  : ui::text("report_dialog.label_153"));
+        owner->setWindowTitle(
+            scope_ids.size() == 1
+                ? ui::text("report_dialog.owner.set_window_title").arg(labels.front())
+                : ui::text("common.report"));
         if (report_chooser)
             report_chooser->set_choices(report_choices());
     }
@@ -1604,9 +1603,11 @@ struct ReportDialog::Impl {
             split->setSizes({0, width});
         else if (wide_settings && (was_compact || settings_hidden))
             split->setSizes(wide_sizes);
-        view_button->setText(
-            compact ? (narrow_settings ? QStringLiteral("查看结果") : QStringLiteral("编辑设置"))
-                    : (wide_settings ? QStringLiteral("收起设置") : QStringLiteral("展开设置")));
+        view_button->setText(compact ? (narrow_settings
+                                            ? ui::text("report_dialog.view_button.set_text")
+                                            : ui::text("report_dialog.view_button.set_text_2"))
+                                     : (wide_settings ? ui::text("report_dialog.label_83")
+                                                      : ui::text("report_dialog.label_154")));
     }
     void update_interval() {
         for (auto *editor : {first, last})
@@ -1631,10 +1632,10 @@ struct ReportDialog::Impl {
         else if (report_satellites_only(draft.query.kind))
             choices = project_object_choices(project, {ObjectKind::satellite});
         ObjectSelectionDialog chooser(std::move(choices),
-                                      {QStringLiteral("选择报告适用对象"), true,
+                                      {ui::text("report_dialog.label_155"), true,
                                        report_is_coverage(draft.query.kind)
                                            ? QString{}
-                                           : QStringLiteral("全部适用对象（含以后新增）")},
+                                           : ui::text("report_dialog.label_156")},
                                       {scope_ids, all_objects}, owner);
         if (chooser.exec() != QDialog::Accepted)
             return;
@@ -1654,21 +1655,20 @@ struct ReportDialog::Impl {
             return;
         const auto &result = *model->result;
         QDialog dialog(owner);
-        dialog.setWindowTitle(QStringLiteral("报告来源"));
+        dialog.setWindowTitle(ui::text("report_dialog.result"));
         dialog.setObjectName("reportSourceDialog");
         dialog.resize(640, 400);
         auto *layout = new QVBoxLayout(&dialog);
         auto *source = new QPlainTextEdit(&dialog);
         source->setObjectName("reportSource");
         source->setReadOnly(true);
-        source->setPlainText(QStringLiteral("报告：%1\n算法：%2\n\n输入 SHA-256\n%3\n\n场景数据 "
-                                            "SHA-256\n%4\n\nUTC 数据 SHA-256\n%5")
+        source->setPlainText(ui::text("report_dialog.source.set_plain_text")
                                  .arg(text(result.definition.name), text(result.algorithm),
                                       text(result.input_sha256), text(result.data_sha256),
                                       text(result.time_sha256)));
         layout->addWidget(source, 1);
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
-        buttons->button(QDialogButtonBox::Close)->setText(QStringLiteral("关闭"));
+        buttons->button(QDialogButtonBox::Close)->setText(ui::text("common.close"));
         QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         layout->addWidget(buttons);
         dialog.exec();
@@ -1678,22 +1678,25 @@ struct ReportDialog::Impl {
         const bool intersatellite = report_is_intersatellite(draft.query.kind);
         auto *form = static_cast<QFormLayout *>(access_pair->layout());
         static_cast<QLabel *>(form->labelForField(access_station))
-            ->setText(intersatellite ? QStringLiteral("基准卫星") : QStringLiteral("地面站"));
+            ->setText(intersatellite ? ui::text("report_dialog.label_157")
+                                     : ui::text("report_dialog.label_52"));
         static_cast<QLabel *>(form->labelForField(access_target))
-            ->setText(intersatellite ? QStringLiteral("目标卫星")
-                                     : QStringLiteral("卫星 / 传感器"));
-        access_station->set_options({intersatellite ? QStringLiteral("选择 RIC 基准卫星")
-                                                    : QStringLiteral("选择可见性分析的地面站"),
+            ->setText(intersatellite ? ui::text("report_dialog.label_158")
+                                     : ui::text("report_dialog.pair_form.add_row"));
+        access_station->set_options({intersatellite ? ui::text("report_dialog.label_159")
+                                                    : ui::text("report_dialog.label_86"),
                                      false,
                                      {}});
-        access_target->set_options({intersatellite ? QStringLiteral("选择目标卫星")
-                                                   : QStringLiteral("选择可见性分析的卫星或传感器"),
+        access_target->set_options({intersatellite ? ui::text("report_dialog.label_160")
+                                                   : ui::text("report_dialog.label_87"),
                                     false,
                                     {}});
-        access_station->setAccessibleName(intersatellite ? QStringLiteral("基准卫星")
-                                                         : QStringLiteral("可见性分析地面站"));
-        access_target->setAccessibleName(intersatellite ? QStringLiteral("目标卫星")
-                                                        : QStringLiteral("可见性分析目标"));
+        access_station->setAccessibleName(
+            intersatellite ? ui::text("report_dialog.label_157")
+                           : ui::text("report_dialog.access_station.set_accessible_name"));
+        access_target->setAccessibleName(
+            intersatellite ? ui::text("report_dialog.label_158")
+                           : ui::text("report_dialog.access_target.set_accessible_name"));
         access_station->set_objects(project_object_choices(
             project, intersatellite ? std::initializer_list{ObjectKind::satellite}
                                     : std::initializer_list{ObjectKind::ground_station}));
@@ -1778,17 +1781,15 @@ struct ReportDialog::Impl {
                                    1e9);
         step_label->setText(report_uses_event_search(draft.query.kind)
                                 ? (access_mode->currentIndex() == 0
-                                       ? QStringLiteral("搜索步长")
-                                       : QStringLiteral("最大检查间隔"))
-                                : QStringLiteral("采样间隔"));
+                                       ? ui::text("report_dialog.step_label.set_text")
+                                       : ui::text("report_dialog.label.set_fixed_width"))
+                                : ui::text("report_dialog.label_95"));
         step->setToolTip(report_uses_event_search(draft.query.kind)
-                             ? QStringLiteral("事件搜索的最大检查间隔；快速变化时减半核对收敛。事件"
-                                              "时刻自动细化，不限于检查节点。")
-                             : QStringLiteral("报告独立采样，始终包含起止时刻。"));
+                             ? ui::text("report_dialog.step.set_tool_tip_2")
+                             : ui::text("report_dialog.step.set_tool_tip"));
         if (draft.query.kind == ReportKind::relative_motion) {
-            step_label->setText(QStringLiteral("采样 / 检查间隔"));
-            step->setToolTip(QStringLiteral("采样输出包含起止时刻；此间隔也用于可见性和连续距离极值"
-                                            "搜索。快速变化时减半检查收敛。"));
+            step_label->setText(ui::text("report_dialog.step_label.set_text_2"));
+            step->setToolTip(ui::text("report_dialog.step.set_tool_tip_3"));
         }
         step->setMinimum(access ? .001 : .000000001);
         access_pair->setVisible(access);
@@ -1808,10 +1809,10 @@ struct ReportDialog::Impl {
             frame->setCurrentIndex(0);
         frame_field->setVisible(draft.query.kind == ReportKind::cartesian_state);
         units->setItemText(0, draft.query.kind == ReportKind::lighting_state
-                                  ? QStringLiteral("百分比 (%)")
+                                  ? ui::text("report_dialog.units.set_item_text")
                                   : QStringLiteral("km / km·s⁻¹ / °"));
         units->setItemText(1, draft.query.kind == ReportKind::lighting_state
-                                  ? QStringLiteral("比例 (0–1)")
+                                  ? ui::text("report_dialog.units.set_item_text_2")
                                   : QStringLiteral("m / m·s⁻¹ / rad"));
         units->setCurrentIndex(draft.format.units == ReportUnits::engineering ? 0 : 1);
         scale->setCurrentIndex(static_cast<int>(draft.format.time_scale));
@@ -1826,70 +1827,60 @@ struct ReportDialog::Impl {
         format_title->setVisible(draft.query.kind != ReportKind::object_summary);
         template_description->setText(
             draft.query.kind == ReportKind::scenario_summary
-                ? QStringLiteral("场景时段、对象数量与中心天体")
-            : draft.query.kind == ReportKind::object_summary
-                ? QStringLiteral("对象名称、类型与计算模型")
-            : draft.query.kind == ReportKind::cartesian_state
-                ? QStringLiteral("按指定间隔输出位置与速度")
+                ? ui::text("report_dialog.template_description.set_text")
+            : draft.query.kind == ReportKind::object_summary  ? ui::text("report_dialog.label_161")
+            : draft.query.kind == ReportKind::cartesian_state ? ui::text("report_dialog.label_162")
             : draft.query.kind == ReportKind::classical_elements
-                ? QStringLiteral("GCRF 状态换算的瞬时根数；圆轨道 / 赤道轨道的奇异角采用约定值。J2 "
-                                 "结果不是平均根数。")
+                ? ui::text("report_dialog.label_163")
             : draft.query.kind == ReportKind::geodetic_position
-                ? QStringLiteral("ITRF / WGS84 经度、大地纬度和椭球高；高度不表示离地距离。")
-            : draft.query.kind == ReportKind::orbital_motion
-                ? QStringLiteral("GCRF 地心距离、总速率、径向 / 横向速率与航迹倾角；径向向外为正。")
-                : QStringLiteral("WGS84 经纬度、高度与 ITRF 坐标"));
+                ? ui::text("report_dialog.label_164")
+            : draft.query.kind == ReportKind::orbital_motion ? ui::text("report_dialog.label_165")
+                                                             : ui::text("report_dialog.label_166"));
         template_description->setToolTip(template_description->text());
         if (draft.query.kind == ReportKind::classical_elements)
-            template_description->setText(QStringLiteral("瞬时六根数 · GCRF"));
+            template_description->setText(
+                ui::text("report_dialog.template_description.set_text_2"));
         if (draft.query.kind == ReportKind::state_covariance)
-            template_description->setText(QStringLiteral("位置速度协方差下三角 · GCRF"));
+            template_description->setText(
+                ui::text("report_dialog.template_description.set_text_3"));
         if (draft.query.kind == ReportKind::orbital_motion)
-            template_description->setText(QStringLiteral("地心距离、速率与航迹倾角 · GCRF"));
+            template_description->setText(
+                ui::text("report_dialog.template_description.set_text_4"));
         if (draft.query.kind == ReportKind::geodetic_position)
-            template_description->setText(QStringLiteral("经度、大地纬度与椭球高 · WGS84"));
+            template_description->setText(
+                ui::text("report_dialog.template_description.set_text_5"));
         if (draft.query.kind == ReportKind::orbital_events) {
-            template_description->setText(QStringLiteral(
-                "近远地点 · GCRF 赤道交点\n连续求根定位事件；双击结果可跳转场景时间。"));
-            template_description->setToolTip(QStringLiteral(
-                "地心距离的极值与 GCRF 赤道面穿越。e ≤ 1e-8 时不定义近远地点；|sin(i)| ≤ 1e-8 "
-                "时不定义交点。不支持含机动的任务序列。快速变化时减小检查间隔并核对收敛。"));
+            template_description->setText(
+                ui::text("report_dialog.template_description.set_text_6"));
+            template_description->setToolTip(
+                ui::text("report_dialog.template_description.set_tool_tip"));
         }
         if (report_is_intersatellite(draft.query.kind)) {
             template_description->setText(
                 draft.query.kind == ReportKind::relative_motion
-                    ? QStringLiteral("距离与 RIC 相对位置 · 基准 → "
-                                     "目标\n距离变化率向外为正；可见性采用 WGS84 椭球。")
-                    : QStringLiteral("星间视线 · WGS84 "
-                                     "椭球\n可见时段、持续时间与每段最近距离；双击定位时刻。"));
-            template_description->setToolTip(QStringLiteral(
-                "连续距离极值包含不可见时段。RIC "
-                "径向向外、沿轨由法向与径向确定、法向为基准轨道角动量方向。惯性相对速率不是 RIC "
-                "坐标导数。不含地形、折射或光行时；暂不支持任务序列。"));
+                    ? ui::text("report_dialog.template_description.set_text_7")
+                    : ui::text("report_dialog.label_167"));
+            template_description->setToolTip(
+                ui::text("report_dialog.template_description.set_tool_tip_2"));
         }
         if (coverage) {
-            template_description->setText(QStringLiteral(
-                "联合覆盖 · WGS84 地表网格\n以网格中心可见性代表网格；减小间隔可核对空间收敛。"));
+            template_description->setText(
+                ui::text("report_dialog.template_description.set_text_8"));
             units->setItemText(0, QStringLiteral("km² / ° / %"));
-            units->setItemText(1, QStringLiteral("m² / rad / 比例"));
+            units->setItemText(1, ui::text("report_dialog.units.set_item_text_3"));
         }
         if (report_is_lighting(draft.query.kind))
-            template_description->setText(
-                QStringLiteral(
-                    "地球球面 · 几何太阳 · %1\n全光照 / 半影 / 本影；与卫星的光压力开关无关。")
-                    .arg(text(draft.query.lighting_ephemeris)));
+            template_description->setText(ui::text("report_dialog.template_description.set_text_9")
+                                              .arg(text(draft.query.lighting_ephemeris)));
         if (report_is_access(draft.query.kind))
             template_description->setText(
                 draft.query.kind == ReportKind::access_intervals
-                    ? QStringLiteral("地球遮挡 · 最低仰角 · "
-                                     "传感器视场\n输出过境区间、最大仰角与最近距离；快速变化时减小"
-                                     "检查间隔并核对收敛。")
-                    : QStringLiteral(
-                          "当地北向起算方位角，水平线起算仰角。包含不可见时刻，以 0 / 1 标记。"));
+                    ? ui::text("report_dialog.template_description.set_text_10")
+                    : ui::text("report_dialog.label_168"));
         remove->setEnabled(row >= builtin_count);
         update_template->setEnabled(row >= builtin_count);
-        store->setText(row >= builtin_count ? QStringLiteral("另存为模板…")
-                                            : QStringLiteral("保存为模板…"));
+        store->setText(row >= builtin_count ? ui::text("report_dialog.store.set_text")
+                                            : ui::text("report_dialog.menu.add_action"));
         fill_library();
         loading = false;
         edit();
@@ -1897,7 +1888,7 @@ struct ReportDialog::Impl {
     void seek_result(core::Epoch epoch) {
         if (epoch.tai_nanoseconds() < project.first.tai_nanoseconds() ||
             epoch.tai_nanoseconds() > project.last.tai_nanoseconds())
-            status->setText(QStringLiteral("该结果时间已超出当前场景，请刷新报告。"));
+            status->setText(ui::text("report_dialog.status.set_text_3"));
         else
             seek(epoch);
     }
@@ -1954,11 +1945,11 @@ struct ReportDialog::Impl {
                         model->result->with_template(d.format));
                     result->definition = d;
                     publish(result, false);
-                    status->setText(QStringLiteral("显示格式已更新。"));
+                    status->setText(ui::text("report_dialog.status.set_text_4"));
                 }
             } catch (const std::exception &error) {
-                status->setText(
-                    QStringLiteral("无法应用显示格式：%1").arg(QString::fromUtf8(error.what())));
+                status->setText(ui::text("report_dialog.status.set_text_5")
+                                    .arg(QString::fromUtf8(error.what())));
             }
         }
         result_status();
@@ -2008,7 +1999,7 @@ struct ReportDialog::Impl {
             if (model->result != snapshot || input_generation != generation ||
                 live.id != current.id || live.query != current.query ||
                 live.format != current.format || !result_is_current()) {
-                status->setText(QStringLiteral("报告或设置已更新，请重新选择显示列。"));
+                status->setText(ui::text("report_dialog.status.set_text_6"));
                 return;
             }
             if (chooser.selection() == selected)
@@ -2027,10 +2018,10 @@ struct ReportDialog::Impl {
             // Validate the complete new presentation before updating the configuration.
             draft.format = next.format;
             publish(std::move(result), false, false);
-            status->setText(QStringLiteral("显示列已更新，可保存为模板；未重新计算。"));
+            status->setText(ui::text("report_dialog.status.set_text_7"));
         } catch (const std::exception &error) {
             status->setText(
-                QStringLiteral("无法应用显示列：%1").arg(QString::fromUtf8(error.what())));
+                ui::text("report_dialog.status.set_text_8").arg(QString::fromUtf8(error.what())));
         }
     }
     void publish(std::shared_ptr<runtime::ReportResult> result, bool new_calculation = true,
@@ -2081,8 +2072,9 @@ struct ReportDialog::Impl {
         for (auto *value : pass_values)
             value->setToolTip({});
         if (result->access_statistics) {
-            const std::array captions{QStringLiteral("可见过境"), QStringLiteral("总可见时长"),
-                                      QStringLiteral("最长过境"), QStringLiteral("平均时长")};
+            const std::array captions{
+                ui::text("report_dialog.label_103"), ui::text("report_dialog.label_104"),
+                ui::text("report_dialog.label_105"), ui::text("report_dialog.label_106")};
             for (int i = 0; i < 4; ++i)
                 pass_captions[i]->setText(captions[i]);
             const auto &s = *result->access_statistics;
@@ -2095,15 +2087,15 @@ struct ReportDialog::Impl {
             pass_values[1]->setText(duration(s.total_duration_s));
             pass_values[2]->setText(s.count ? duration(s.longest_duration_s) : QStringLiteral("—"));
             pass_values[3]->setText(s.count ? duration(s.mean_duration_s) : QStringLiteral("—"));
-            pass_summary->setToolTip(
-                QStringLiteral("按当前分析区间统计，包含被区间边界截断的过境。最短过境：%"
-                               "1。双击最大仰角或最近距离可定位到对应时刻。")
-                    .arg(s.count ? duration(s.shortest_duration_s) : QStringLiteral("无")));
+            pass_summary->setToolTip(ui::text("report_dialog.pass_summary.set_tool_tip")
+                                         .arg(s.count ? duration(s.shortest_duration_s)
+                                                      : ui::text("report_dialog.label_169")));
         }
         if (result->intersatellite_statistics) {
             const auto &s = *result->intersatellite_statistics;
-            const std::array captions{QStringLiteral("最近距离"), QStringLiteral("最远距离"),
-                                      QStringLiteral("可见时段"), QStringLiteral("总可见时长")};
+            const std::array captions{
+                ui::text("report_dialog.label_70"), ui::text("report_dialog.s"),
+                ui::text("report_dialog.label_170"), ui::text("report_dialog.label_104")};
             for (int i = 0; i < 4; ++i)
                 pass_captions[i]->setText(captions[i]);
             const bool si = result->definition.format.units == ReportUnits::si;
@@ -2116,51 +2108,45 @@ struct ReportDialog::Impl {
             pass_values[2]->setText(QString::number(s.visibility.count));
             pass_values[3]->setText(
                 QStringLiteral("%1 min").arg(s.visibility.total_duration_s / 60, 0, 'f', 2));
-            pass_summary->setToolTip(QStringLiteral(
-                "距离极值覆盖整个分析区间，包含不可见时段；时段统计包含分析边界截断部分。"));
-            event_notice->setText(QStringLiteral(
-                "<a href=\"closest-approach\">定位全区间最近时刻</a> · 距离极值包含不可见时段"));
+            pass_summary->setToolTip(ui::text("report_dialog.pass_summary.set_tool_tip_2"));
+            event_notice->setText(ui::text("report_dialog.event_notice.set_text"));
             event_notice->show();
         }
         if (result->lighting_statistics) {
             const auto &s = *result->lighting_statistics;
-            const std::array captions{QStringLiteral("全光照占比"), QStringLiteral("半影占比"),
-                                      QStringLiteral("本影占比"), QStringLiteral("最长本影")};
+            const std::array captions{ui::text("report_dialog.s_2"), ui::text("report_dialog.s_3"),
+                                      ui::text("report_dialog.label_171"),
+                                      ui::text("report_dialog.label_172")};
             for (int i = 0; i < 4; ++i)
                 pass_captions[i]->setText(captions[i]);
             for (int i = 0; i < 3; ++i) {
                 pass_values[i]->setText(
                     QStringLiteral("%1 %").arg(100 * s.phases[i].fraction, 0, 'f', 2));
-                pass_values[i]->setToolTip(QStringLiteral("%1 段 · 累计 %2 秒")
+                pass_values[i]->setToolTip(ui::text("report_dialog.label_173")
                                                .arg(s.phases[i].count)
                                                .arg(s.phases[i].total_duration_s, 0, 'f', 6));
             }
             pass_values[3]->setText(
                 QStringLiteral("%1 min").arg(s.phases[2].longest_duration_s / 60, 0, 'f', 2));
-            pass_summary->setToolTip(QStringLiteral("按 %1 "
-                                                    "颗卫星分别累计，包含分析边界截断部分。占比以所"
-                                                    "选卫星的累计分析时长为分母。双击时刻定位。")
-                                         .arg(s.object_count));
+            pass_summary->setToolTip(
+                ui::text("report_dialog.pass_summary.set_tool_tip_3").arg(s.object_count));
         }
         if (result->orbital_event_statistics) {
             const auto &s = *result->orbital_event_statistics;
-            const std::array captions{QStringLiteral("近地点"), QStringLiteral("远地点"),
-                                      QStringLiteral("升交点"), QStringLiteral("降交点")};
+            const std::array captions{
+                ui::text("report_dialog.label_55"), ui::text("report_dialog.label_56"),
+                ui::text("report_dialog.label_57"), ui::text("report_dialog.label_58")};
             for (int i = 0; i < 4; ++i) {
                 pass_captions[i]->setText(captions[i]);
                 pass_values[i]->setText(QString::number(s.counts[i]));
             }
             pass_summary->setToolTip(
-                QStringLiteral(
-                    "%1 颗卫星的事件数量；交点参考面为 GCRF 赤道面。双击任意一行定位该事件时刻。")
-                    .arg(s.object_count));
+                ui::text("report_dialog.pass_summary.set_tool_tip_4").arg(s.object_count));
             QStringList notes;
             if (s.near_circular_objects)
-                notes << QStringLiteral("%1 颗卫星存在近圆状态，相应近远地点不定义")
-                             .arg(s.near_circular_objects);
+                notes << ui::text("report_dialog.label_174").arg(s.near_circular_objects);
             if (s.near_equatorial_objects)
-                notes << QStringLiteral("%1 颗卫星存在近赤道状态，相应交点不定义")
-                             .arg(s.near_equatorial_objects);
+                notes << ui::text("report_dialog.label_175").arg(s.near_equatorial_objects);
             event_notice->setText(notes.join(QStringLiteral("；")));
             event_notice->setVisible(!notes.isEmpty());
         }
@@ -2169,8 +2155,9 @@ struct ReportDialog::Impl {
         coverage_map->set_result(result, new_calculation);
         if (result->coverage_statistics) {
             const auto &s = *result->coverage_statistics;
-            const std::array captions{QStringLiteral("网格点"), QStringLiteral("曾覆盖面积占比"),
-                                      QStringLiteral("平均覆盖率"), QStringLiteral("最长空档")};
+            const std::array captions{ui::text("report_dialog.s_4"), ui::text("report_dialog.s_5"),
+                                      ui::text("report_dialog.label_176"),
+                                      ui::text("report_dialog.label_177")};
             for (int i = 0; i < 4; ++i)
                 pass_captions[i]->setText(captions[i]);
             pass_values[0]->setText(QString::number(s.points.size()));
@@ -2180,9 +2167,7 @@ struct ReportDialog::Impl {
                 QStringLiteral("%1 %").arg(100 * s.mean_coverage_fraction, 0, 'f', 2));
             pass_values[3]->setText(
                 QStringLiteral("%1 h").arg(s.maximum_gap_seconds / 3600, 0, 'f', 2));
-            pass_summary->setToolTip(QStringLiteral(
-                "按 WGS84 "
-                "网格面积加权；平均覆盖率为覆盖面积随时间的平均值。最长空档按所选首尾策略统计。"));
+            pass_summary->setToolTip(ui::text("report_dialog.pass_summary.set_tool_tip_5"));
             select_coverage_point(coverage_map->point_index());
         }
         fit_table_columns();
@@ -2228,7 +2213,7 @@ struct ReportDialog::Impl {
             return;
         const auto &p = s.points[index];
         coverage_point->setText(
-            QStringLiteral("网格 %1 · 经度 %2° / 纬度 %3° · 面积 %4 km²")
+            ui::text("report_dialog.coverage_point.set_text")
                 .arg(index + 1)
                 .arg(p.cell.location.longitude_rad * 180 / std::numbers::pi, 0, 'f', 3)
                 .arg(p.cell.location.latitude_rad * 180 / std::numbers::pi, 0, 'f', 3)
@@ -2244,13 +2229,12 @@ struct ReportDialog::Impl {
                                           .arg(stamp(w.first), stamp(w.last))
                                           .arg(w.last.seconds_since(w.first), 0, 'f', 3)
                                           .arg(w.start_clipped || w.stop_clipped
-                                                   ? QStringLiteral(" · 边界截断")
+                                                   ? ui::text("report_dialog.label_178")
                                                    : QString{}));
         }
         if (p.windows.empty())
-            coverage_windows->addItem(QStringLiteral("此网格点在分析时段内无覆盖"));
-        coverage_windows->setToolTip(
-            QStringLiteral("相对于分析开始时刻的秒数；多资产重叠区间已合并。"));
+            coverage_windows->addItem(ui::text("report_dialog.coverage_windows.add_item"));
+        coverage_windows->setToolTip(ui::text("report_dialog.coverage_windows.set_tool_tip"));
         coverage_jump->setEnabled(!p.windows.empty());
     }
     void update_estimate() {
@@ -2258,18 +2242,18 @@ struct ReportDialog::Impl {
             const auto d = definition();
             const auto rows = runtime::estimate_report_rows(project, d);
             if (report_is_coverage(d.query.kind)) {
-                estimate->setText(QStringLiteral("%1 个网格点 · %2 个资产 · %3 行输出")
+                estimate->setText(ui::text("report_dialog.estimate.set_text")
                                       .arg(core::coverage_grid(d.query.coverage).size())
                                       .arg(d.query.object_ids.size())
                                       .arg(rows));
                 return;
             }
             estimate->setText((report_uses_event_search(d.query.kind)
-                                   ? QStringLiteral("%1 个检查节点 · 自动细化%2")
-                                   : QStringLiteral("预计 %1 行%2"))
+                                   ? ui::text("report_dialog.estimate.set_text_2")
+                                   : ui::text("report_dialog.label_179"))
                                   .arg(static_cast<qulonglong>(rows))
                                   .arg(report_is_sampled(d.query.kind)
-                                           ? QStringLiteral(" · 含起止时刻")
+                                           ? ui::text("report_dialog.label_180")
                                            : QString{}));
         } catch (const std::exception &error) {
             estimate->setText(QString::fromUtf8(error.what()));
@@ -2298,12 +2282,11 @@ struct ReportDialog::Impl {
         choose_columns_action->setEnabled(editable);
         result_title->setText(text(r.definition.name));
         result_title->setToolTip(text(r.definition.name));
-        result_label->setText(QStringLiteral("%1 行%2")
+        result_label->setText(ui::text("report_dialog.result_label.set_text")
                                   .arg(static_cast<qulonglong>(r.table.rows().size()))
-                                  .arg(stale ? QStringLiteral(" · 场景已变化，请重新生成")
-                                       : changed
-                                           ? QStringLiteral(" · 设置已更改 · 当前显示上次结果")
-                                           : QStringLiteral(" · 与当前场景一致")));
+                                  .arg(stale     ? ui::text("report_dialog.label_181")
+                                       : changed ? ui::text("report_dialog.label_182")
+                                                 : ui::text("report_dialog.label_183")));
     }
     void set_busy(bool value) {
         choose_columns_action->setEnabled(!value && model->result && result_is_current() &&
@@ -2334,7 +2317,7 @@ struct ReportDialog::Impl {
             const auto ticket = ++request;
             set_busy(true);
             progress->setRange(0, 0);
-            status->setText(QStringLiteral("正在检查场景数据…"));
+            status->setText(ui::text("report_dialog.status.set_text_9"));
             const QPointer<ReportDialog> guard(owner);
             prepare(d.query, [guard, ticket, d](std::optional<ReportInput> context, QString error) {
                 if (!guard)
@@ -2353,8 +2336,7 @@ struct ReportDialog::Impl {
                             runtime::report_input_sha256(self.project) ||
                         !same_time(context->data.time(), self.time)) {
                         self.set_busy(false);
-                        self.status->setText(
-                            QStringLiteral("场景在准备期间已变化，请重新生成；上次结果保留。"));
+                        self.status->setText(ui::text("report_dialog.status.set_text_10"));
                         return;
                     }
                     self.expected = runtime::estimate_report_rows(context->project, d);
@@ -2363,7 +2345,7 @@ struct ReportDialog::Impl {
                     self.completed = std::make_shared<std::atomic_size_t>(0);
                     self.progress->setRange(0, static_cast<int>(self.expected));
                     self.progress->setValue(0);
-                    self.status->setText(QStringLiteral("正在生成报告…"));
+                    self.status->setText(ui::text("report_dialog.status.set_text_11"));
                     auto retained = self.result_analysis;
                     if (retained && (retained->data().data_lock() != context->data.data_lock() ||
                                      retained->data().frames() != context->data.frames() ||
@@ -2389,8 +2371,8 @@ struct ReportDialog::Impl {
                     });
                 } catch (const std::exception &failure) {
                     self.set_busy(false);
-                    self.status->setText(
-                        QStringLiteral("无法启动报告：%1").arg(QString::fromUtf8(failure.what())));
+                    self.status->setText(ui::text("report_dialog.status.set_text_12")
+                                             .arg(QString::fromUtf8(failure.what())));
                 }
             });
         } catch (const std::exception &error) {
@@ -2405,11 +2387,11 @@ struct ReportDialog::Impl {
             if (as_copy) {
                 QInputDialog naming(owner);
                 naming.setObjectName("reportTemplateDialog");
-                naming.setWindowTitle(QStringLiteral("保存报告模板"));
-                naming.setLabelText(QStringLiteral("模板名称"));
+                naming.setWindowTitle(ui::text("report_dialog.label_184"));
+                naming.setLabelText(ui::text("report_dialog.label_185"));
                 naming.setTextValue(text(d.name));
-                naming.setOkButtonText(QStringLiteral("保存模板"));
-                naming.setCancelButtonText(QStringLiteral("取消"));
+                naming.setOkButtonText(ui::text("report_dialog.label_186"));
+                naming.setCancelButtonText(ui::text("common.cancel"));
                 if (naming.exec() != QDialog::Accepted)
                     return;
                 d.name = naming.textValue().trimmed().toStdString();
@@ -2439,9 +2421,9 @@ struct ReportDialog::Impl {
             fill_library();
             remove->setEnabled(true);
             update_template->setEnabled(true);
-            store->setText(QStringLiteral("另存为模板…"));
+            store->setText(ui::text("report_dialog.store.set_text"));
             result_status();
-            status->setText(QStringLiteral("模板已加入项目；保存项目后写入磁盘。"));
+            status->setText(ui::text("report_dialog.status.set_text_13"));
         } catch (const std::exception &error) {
             status->setText(QString::fromUtf8(error.what()));
         }
@@ -2455,7 +2437,7 @@ struct ReportDialog::Impl {
             fill_library();
             choose(static_cast<int>(compatible(draft.query.kind) ? draft.query.kind
                                                                  : ReportKind::object_summary));
-            status->setText(QStringLiteral("已删除配置；保存项目后写入磁盘。"));
+            status->setText(ui::text("report_dialog.status.set_text_14"));
         } catch (const std::exception &error) {
             status->setText(QString::fromUtf8(error.what()));
         }
@@ -2466,10 +2448,12 @@ struct ReportDialog::Impl {
             result_stack->setCurrentWidget(views->currentIndex() == 2 ? coverage_page
                                            : chart                    ? plot_page
                                                                       : table_page);
-        export_csv->setText(chart ? QStringLiteral("导出 PNG…") : QStringLiteral("导出 CSV…"));
-        copy_button->setText(chart ? QStringLiteral("复制图片") : QStringLiteral("复制选中行"));
-        copy_button->setToolTip(chart ? QStringLiteral("复制当前图片")
-                                      : QStringLiteral("复制所选行（Ctrl+C）"));
+        export_csv->setText(chart ? ui::text("report_dialog.export_csv.set_text")
+                                  : ui::text("report_dialog.label_101"));
+        copy_button->setText(chart ? ui::text("report_dialog.copy_button.set_text")
+                                   : ui::text("report_dialog.result_menu.add_action"));
+        copy_button->setToolTip(chart ? ui::text("report_dialog.copy_button.set_tool_tip")
+                                      : ui::text("report_dialog.copy_button.set_tool_tip_2"));
         copy_button->setEnabled(chart || table->selectionModel()->hasSelection());
     }
     std::vector<ReportCurveField> selected_curves() const {
@@ -2484,10 +2468,11 @@ struct ReportDialog::Impl {
         for (const auto &field : selected_curves())
             names << field.label;
         plot_field->setText(names.size() == 1
-                                ? QStringLiteral("曲线 · %1").arg(names.front())
-                                : QStringLiteral("选择曲线 · %1 项").arg(names.size()));
+                                ? ui::text("report_dialog.plot_field.set_text").arg(names.front())
+                                : ui::text("report_dialog.ield.set_text").arg(names.size()));
         plot_field->setAccessibleDescription(names.join(QStringLiteral("、")));
-        plot_field->setToolTip(QStringLiteral("选择要比较的曲线\n%1").arg(names.join("\n")));
+        plot_field->setToolTip(
+            ui::text("report_dialog.plot_field.set_tool_tip_2").arg(names.join("\n")));
         plot_field->setEnabled(!curve_choices.empty());
     }
     void apply_curves(const QStringList &selected) {
@@ -2507,7 +2492,7 @@ struct ReportDialog::Impl {
         if (chooser.exec() != QDialog::Accepted)
             return false;
         if (model->result != snapshot) {
-            status->setText(QStringLiteral("报告结果已更新，请重新选择曲线。"));
+            status->setText(ui::text("report_dialog.status.set_text_15"));
             return false;
         }
         apply_curves(chooser.selection());
@@ -2543,8 +2528,7 @@ struct ReportDialog::Impl {
             } catch (const std::exception &error) {
                 sampled = false;
                 unavailable =
-                    QStringLiteral("曲线时间标签不可用：%1。请检查时间数据或选择 TAI / TT。")
-                        .arg(QString::fromUtf8(error.what()));
+                    ui::text("report_dialog.label_187").arg(QString::fromUtf8(error.what()));
             }
         }
         if (sampled) {
@@ -2580,9 +2564,9 @@ struct ReportDialog::Impl {
             for (const auto &[id, object_name] : objects)
                 choices.push_back(
                     {id, text(object_name), kinds.contains(id) ? kinds.at(id) : ObjectKind::other});
-            plot_object->set_options({QStringLiteral("选择曲线显示对象"), false,
+            plot_object->set_options({ui::text("report_dialog.label_188"), false,
                                       objects.size() <= 12
-                                          ? QStringLiteral("全部结果对象（%1）").arg(objects.size())
+                                          ? ui::text("report_dialog.label_189").arg(objects.size())
                                           : QString{}});
             plot_object->set_objects(std::move(choices));
             if (plot_object->contains(previous_object))
@@ -2591,11 +2575,8 @@ struct ReportDialog::Impl {
                 plot_object->set_selection({{}, true});
             else
                 plot_object->set_id(objects.begin()->first);
-            plot_note->setText(
-                objects.size() > 12
-                    ? QStringLiteral(
-                          "对象超过 12 个，选择单个查看或在左侧缩小范围。滚轮缩放，双击定位时刻。")
-                    : QStringLiteral("滚轮缩放 · 中键平移 · 双击采样点定位时刻"));
+            plot_note->setText(objects.size() > 12 ? ui::text("report_dialog.plot_note.set_text")
+                                                   : ui::text("report_dialog.label_108"));
         }
         curve_ids = curve_preferences[r.definition.query.kind];
         curve_ids.removeIf([this](const auto &id) {
@@ -2630,7 +2611,7 @@ struct ReportDialog::Impl {
         if (!model->result)
             return;
         if (views->currentIndex() > 0) {
-            QFileDialog chooser(owner, QStringLiteral("导出图片"));
+            QFileDialog chooser(owner, ui::text("report_dialog.label_190"));
             chooser.setAcceptMode(QFileDialog::AcceptSave);
             chooser.setFileMode(QFileDialog::AnyFile);
             chooser.setNameFilter("PNG (*.png)");
@@ -2643,11 +2624,12 @@ struct ReportDialog::Impl {
                             (views->currentIndex() == 2 ? coverage_map->image() : plot->image())
                                 .save(&output, "PNG") &&
                             output.commit();
-            status->setText(ok ? QStringLiteral("图片已导出（2 倍分辨率）。")
-                               : QStringLiteral("图片导出失败：%1").arg(output.errorString()));
+            status->setText(
+                ok ? ui::text("report_dialog.status.set_text_16")
+                   : ui::text("report_dialog.status.set_text_17").arg(output.errorString()));
             return;
         }
-        QFileDialog chooser(owner, QStringLiteral("导出报告"));
+        QFileDialog chooser(owner, ui::text("report_dialog.label_191"));
         chooser.setAcceptMode(QFileDialog::AcceptSave);
         chooser.setFileMode(QFileDialog::AnyFile);
         chooser.setNameFilter("CSV (*.csv)");
@@ -2659,7 +2641,7 @@ struct ReportDialog::Impl {
         cancellation = std::make_shared<std::atomic_bool>(false);
         set_busy(true);
         progress->setRange(0, 0);
-        status->setText(QStringLiteral("正在导出上方结果…"));
+        status->setText(ui::text("report_dialog.status.set_text_18"));
         try {
             export_job = std::async(
                 std::launch::async, [result = model->result, path, cancel = cancellation] {
@@ -2668,7 +2650,7 @@ struct ReportDialog::Impl {
         } catch (const std::exception &error) {
             set_busy(false);
             status->setText(
-                QStringLiteral("无法启动导出：%1").arg(QString::fromUtf8(error.what())));
+                ui::text("report_dialog.status.set_text_19").arg(QString::fromUtf8(error.what())));
         }
     }
     void copy_rows() {
@@ -2676,7 +2658,7 @@ struct ReportDialog::Impl {
             return;
         auto rows = table->selectionModel()->selectedRows();
         if (rows.isEmpty()) {
-            status->setText(QStringLiteral("请先选择要复制的行。"));
+            status->setText(ui::text("report_dialog.status.set_text_20"));
             return;
         }
         std::sort(rows.begin(), rows.end(),
@@ -2705,8 +2687,7 @@ struct ReportDialog::Impl {
             append(cells);
         }
         QApplication::clipboard()->setText(value);
-        status->setText(
-            QStringLiteral("已复制 %1 行（含列标题，保留完整精度）。").arg(rows.size()));
+        status->setText(ui::text("report_dialog.status.set_text_21").arg(rows.size()));
     }
     void poll() {
         if (job.valid()) {
@@ -2722,31 +2703,30 @@ struct ReportDialog::Impl {
                     publish(std::make_shared<runtime::ReportResult>(std::move(generated.report)));
                     narrow_settings = false;
                     adapt(owner->width());
-                    status->setText(QStringLiteral("报告已生成。"));
+                    status->setText(ui::text("report_dialog.status.set_text_22"));
                 }
             } catch (const runtime::AnalysisCancelled &) {
-                status->setText(QStringLiteral("已取消；上次结果保留。"));
+                status->setText(ui::text("report_dialog.status.set_text_23"));
             } catch (const runtime::ReportCancelled &) {
-                status->setText(QStringLiteral("已取消；上次结果保留。"));
+                status->setText(ui::text("report_dialog.status.set_text_23"));
             } catch (const std::exception &error) {
-                status->setText(QStringLiteral("生成失败；上次结果保留。%1")
+                status->setText(ui::text("report_dialog.status.set_text_24")
                                     .arg(QString::fromUtf8(error.what())));
             }
             if (job_generation != input_generation)
-                status->setText(
-                    QStringLiteral("场景已变化，未发布过期报告；上次结果保留。请重新生成。"));
+                status->setText(ui::text("report_dialog.status.set_text_25"));
             set_busy(false);
         }
         if (export_job.valid() &&
             export_job.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             try {
                 export_job.get();
-                status->setText(QStringLiteral("CSV 已导出。"));
+                status->setText(ui::text("report_dialog.status.set_text_26"));
             } catch (const runtime::ReportCancelled &) {
-                status->setText(QStringLiteral("已取消导出；原文件保留。"));
+                status->setText(ui::text("report_dialog.status.set_text_27"));
             } catch (const std::exception &error) {
-                status->setText(
-                    QStringLiteral("导出失败：%1").arg(QString::fromUtf8(error.what())));
+                status->setText(ui::text("report_dialog.status.set_text_28")
+                                    .arg(QString::fromUtf8(error.what())));
             }
             set_busy(false);
         }
@@ -2789,7 +2769,7 @@ ReportDialog::~ReportDialog() = default;
 void ReportDialog::select_object(const std::string &id, application::ReportKind kind) {
     auto &self = *impl_;
     if (!self.generate->isEnabled()) {
-        self.status->setText(QStringLiteral("报告任务正在运行；完成或取消后可切换对象。"));
+        self.status->setText(ui::text("report_dialog.status.set_text_29"));
         return;
     }
     self.scope_ids = {id};

@@ -1,4 +1,5 @@
 #include "coverage_map.hpp"
+#include "../ui_text.hpp"
 #include "workbench_style.hpp"
 #include <QImage>
 #include <QKeyEvent>
@@ -27,7 +28,7 @@ CoverageMap::CoverageMap(QWidget *parent) : QWidget(parent) {
     setMinimumSize(180, 180);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
-    setAccessibleName(QStringLiteral("覆盖热力图；左右方向键选择网格点"));
+    setAccessibleName(ui::text("coverage_map.label"));
 }
 void CoverageMap::set_result(std::shared_ptr<const runtime::ReportResult> result,
                              bool reset_selection) {
@@ -85,8 +86,7 @@ void CoverageMap::draw(QPainter &p) const {
     p.setRenderHint(QPainter::Antialiasing);
     p.setPen(theme::color(theme::text));
     p.drawText(QRectF(16, 9, width() - 32, 24), Qt::AlignLeft | Qt::AlignVCenter,
-               metric_ == 0 ? QStringLiteral("累计覆盖时长占比  ·  %")
-                            : QStringLiteral("最长无覆盖空档  ·  h"));
+               metric_ == 0 ? ui::text("coverage_map.label_2") : ui::text("coverage_map.label_3"));
     if (!result_ || !result_->coverage_statistics)
         return;
     const auto &points = result_->coverage_statistics->points;
@@ -154,7 +154,7 @@ void CoverageMap::mouseMoveEvent(QMouseEvent *event) {
         for (const auto &point : result_->coverage_statistics->points)
             if (cell_rect(point.cell).contains(event->position())) {
                 QToolTip::showText(event->globalPosition().toPoint(),
-                                   QStringLiteral("经度 %1° · 纬度 %2°\n%3 %4\n面积 %5 km²")
+                                   ui::text("coverage_map.label_4")
                                        .arg(point.cell.location.longitude_rad * degrees, 0, 'f', 3)
                                        .arg(point.cell.location.latitude_rad * degrees, 0, 'f', 3)
                                        .arg(value(point), 0, 'f', 3)

@@ -1,4 +1,5 @@
 #include "initial_data_setup.hpp"
+#include "../ui_text.hpp"
 #include "eop_catalog.hpp"
 #include "responsive_layout.hpp"
 #include "workbench_theme.hpp"
@@ -27,19 +28,19 @@ namespace {
 QString product_title(DataProduct product) {
     switch (product) {
     case DataProduct::utc:
-        return QStringLiteral("UTC / 闰秒表");
+        return ui::text("initial_data_setup.label");
     case DataProduct::c04:
-        return QStringLiteral("IERS C04 · 历史地球定向");
+        return ui::text("initial_data_setup.label_2");
     case DataProduct::finals2000a:
-        return QStringLiteral("IERS finals2000A · 近期与预测");
+        return ui::text("initial_data_setup.label_3");
     case DataProduct::egm2008:
-        return QStringLiteral("EGM2008 · 地球重力场（约 240 MiB）");
+        return ui::text("initial_data_setup.label_4");
     case DataProduct::de440s:
-        return QStringLiteral("DE440s · 太阳系星历（约 32 MiB）");
+        return ui::text("initial_data_setup.label_5");
     case DataProduct::egm96:
-        return QStringLiteral("EGM96 · 地球重力场");
+        return ui::text("initial_data_setup.label_6");
     case DataProduct::custom_gravity:
-        return QStringLiteral("外部重力场");
+        return ui::text("initial_data_setup.label_7");
     }
     return {};
 }
@@ -55,17 +56,14 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
         return true;
     QDialog dialog(parent);
     dialog.setObjectName("initialDataSetupDialog");
-    dialog.setWindowTitle(QStringLiteral("OrbitForge · 准备基础数据"));
+    dialog.setWindowTitle(ui::text("initial_data_setup.label_8"));
     auto *layout = new QVBoxLayout(&dialog);
     layout->setContentsMargins(theme::space::page);
     layout->setSpacing(16);
-    auto *heading = new QLabel(QStringLiteral("首次使用 · 准备基础数据"));
+    auto *heading = new QLabel(ui::text("initial_data_setup.heading"));
     heading->setObjectName("panelTitle");
     layout->addWidget(heading);
-    auto *description =
-        new QLabel(QStringLiteral("进入工作台前需要完整的时间、地球定向、重力与星历数据。"
-                                  "程序会自动下载缺失文件并校验安装；已完成的文件下次直接使用。"
-                                  "也可导入已下载的官方文件。"));
+    auto *description = new QLabel(ui::text("initial_data_setup.description"));
     description->setWordWrap(true);
     layout->addWidget(description);
     auto *scroll = new QScrollArea;
@@ -93,12 +91,12 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
     progress->setObjectName("initialDataProgress");
     layout->addWidget(progress);
     auto *actions = new QHBoxLayout;
-    auto *retry = new QPushButton(QStringLiteral("重试"));
+    auto *retry = new QPushButton(ui::text("initial_data_setup.retry"));
     retry->setObjectName("initialDataRetry");
     retry->setProperty("primary", true);
-    auto *manage = new QPushButton(QStringLiteral("导入已有文件…"));
+    auto *manage = new QPushButton(ui::text("initial_data_setup.manage"));
     manage->setObjectName("initialDataImport");
-    auto *cancel = new QPushButton(QStringLiteral("取消并退出"));
+    auto *cancel = new QPushButton(ui::text("initial_data_setup.cancel"));
     cancel->setObjectName("initialDataCancel");
     actions->addWidget(retry);
     actions->addWidget(manage);
@@ -113,10 +111,11 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
             const auto product = required[i];
             const bool running = catalog.downloading() && catalog.active_product() == product;
             const auto state = catalog.update_status(product).state;
-            states[i]->setText(catalog.has_full_download(product) ? QStringLiteral("已就绪")
-                               : running                          ? QStringLiteral("下载 / 校验中")
-                               : state == DataUpdateState::failed ? QStringLiteral("失败，待重试")
-                                                                  : QStringLiteral("待下载"));
+            states[i]->setText(
+                catalog.has_full_download(product) ? ui::text("initial_data_setup.state")
+                : running                          ? ui::text("initial_data_setup.label_9")
+                : state == DataUpdateState::failed ? ui::text("initial_data_setup.label_10")
+                                                   : ui::text("initial_data_setup.label_11"));
         }
         retry->setVisible(paused);
         manage->setEnabled(!catalog.downloading());
@@ -130,17 +129,16 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
                 progress->setRange(0, 0);
             }
             status->setText(
-                QStringLiteral("%1\n%2 · 已接收 %3 MiB%4")
+                ui::text("initial_data_setup.status.set_text")
                     .arg(product_title(catalog.active_product()), catalog.status())
                     .arg(received / (1024.0 * 1024), 0, 'f', 1)
                     .arg(total > 0
                              ? QStringLiteral(" / %1 MiB").arg(total / (1024.0 * 1024), 0, 'f', 1)
                              : QString{}));
         } else if (paused) {
-            status->setText(catalog.status() +
-                            QStringLiteral("\n可重试或导入已有文件。已安装的数据会保留。"));
+            status->setText(catalog.status() + ui::text("initial_data_setup.status.set_text_2"));
         } else {
-            status->setText(QStringLiteral("正在准备下一项…"));
+            status->setText(ui::text("initial_data_setup.status.set_text_3"));
         }
     };
     const auto advance = [&] {

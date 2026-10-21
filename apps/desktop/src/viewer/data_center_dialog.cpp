@@ -1,3 +1,4 @@
+#include "../ui_text.hpp"
 #include "eop_catalog.hpp"
 #include "form_kit.hpp"
 #include "responsive_layout.hpp"
@@ -33,25 +34,25 @@ namespace {
 QString product_name(DataProduct p) {
     switch (p) {
     case DataProduct::finals2000a:
-        return QStringLiteral("finals2000A");
+        return ui::text("model.finals2000a");
     case DataProduct::c04:
-        return QStringLiteral("C04");
+        return ui::text("model.c04");
     case DataProduct::utc:
-        return QStringLiteral("UTC / 闰秒");
+        return ui::text("data_center_dialog.label");
     case DataProduct::egm2008:
-        return QStringLiteral("EGM2008");
+        return ui::text("model.egm2008");
     case DataProduct::egm96:
-        return QStringLiteral("EGM96");
+        return ui::text("model.egm96");
     case DataProduct::custom_gravity:
-        return QStringLiteral("外部重力场");
+        return ui::text("data_center_dialog.label_2");
     case DataProduct::fes2014bv1:
-        return QStringLiteral("FES2014bv1 海潮");
+        return ui::text("data_center_dialog.label_3");
     case DataProduct::custom_ocean_tides:
-        return QStringLiteral("外部海潮模型");
+        return ui::text("data_center_dialog.label_4");
     case DataProduct::space_weather:
-        return QStringLiteral("空间天气 · CelesTrak");
+        return ui::text("data_center_dialog.label_5");
     case DataProduct::de440s:
-        return QStringLiteral("DE440s");
+        return ui::text("model.de440s");
     }
     return {};
 }
@@ -59,38 +60,39 @@ QString product_name(DataProduct p) {
 QString installation_text(const DataInventoryItem &item) {
     switch (item.installation) {
     case DataInstallation::missing:
-        return item.online_updates ? QStringLiteral("未下载") : QStringLiteral("未导入");
+        return item.online_updates ? ui::text("data_center_dialog.label_6")
+                                   : ui::text("data_center_dialog.label_7");
     case DataInstallation::bundled_sample:
-        return QStringLiteral("内置示例");
+        return ui::text("data_center_dialog.label_8");
     case DataInstallation::local_file:
-        return QStringLiteral("本地文件");
+        return ui::text("data_center_dialog.label_9");
     case DataInstallation::downloaded:
-        return QStringLiteral("完整包已下载");
+        return ui::text("data_center_dialog.label_10");
     case DataInstallation::builtin:
-        return QStringLiteral("程序内置");
+        return ui::text("data_center_dialog.label_11");
     }
     return {};
 }
 QString check_text(DataUpdateState state) {
     switch (state) {
     case DataUpdateState::never_checked:
-        return QStringLiteral("尚未检查");
+        return ui::text("data_center_dialog.label_12");
     case DataUpdateState::checking:
-        return QStringLiteral("正在检查");
+        return ui::text("data_center_dialog.label_13");
     case DataUpdateState::downloading:
-        return QStringLiteral("正在下载");
+        return ui::text("data_center_dialog.label_14");
     case DataUpdateState::updated:
-        return QStringLiteral("检查成功 · 已下载更新");
+        return ui::text("data_center_dialog.label_15");
     case DataUpdateState::unchanged:
-        return QStringLiteral("检查成功 · 无新内容");
+        return ui::text("data_center_dialog.label_16");
     case DataUpdateState::failed:
-        return QStringLiteral("检查失败");
+        return ui::text("data_center_dialog.label_17");
     case DataUpdateState::cancelled:
-        return QStringLiteral("已取消");
+        return ui::text("data_center_dialog.label_18");
     case DataUpdateState::interrupted:
-        return QStringLiteral("上次下载未完成");
+        return ui::text("data_center_dialog.label_19");
     case DataUpdateState::local_changed:
-        return QStringLiteral("本地文件已更换 · 待检查");
+        return ui::text("data_center_dialog.label_20");
     }
     return {};
 }
@@ -220,7 +222,7 @@ class PriorityDelegate final : public QStyledItemDelegate {
 void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataProduct> initial) {
     QDialog dialog(parent);
     dialog.setObjectName("eopDataDialog");
-    dialog.setWindowTitle(QStringLiteral("数据中心"));
+    dialog.setWindowTitle(ui::text("common.data_center"));
     dialog.setWindowIcon(workbench_icon(WorkbenchIcon::database));
     dialog.resize(
         QSize(1020, 720).boundedTo(dialog.screen()->availableGeometry().size() - QSize(48, 72)));
@@ -234,16 +236,15 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     auto *heading = new QHBoxLayout(header);
     heading->setContentsMargins(18, 10, 18, 10);
     heading->setSpacing(16);
-    auto *heading_title = new QLabel(QStringLiteral("数据中心"));
+    auto *heading_title = new QLabel(ui::text("common.data_center"));
     heading_title->setObjectName("panelTitle");
     heading->addWidget(heading_title);
-    auto *back = new QPushButton(QStringLiteral("数据列表"), &dialog);
+    auto *back = new QPushButton(ui::text("data_center_dialog.back"), &dialog);
     back->setObjectName("dataBackToList");
     back->setIcon(workbench_icon(WorkbenchIcon::database));
     back->hide();
     heading->addWidget(back);
-    auto *description =
-        new QLabel(QStringLiteral("管理计算数据，查看下载时间、覆盖范围与更新结果。"));
+    auto *description = new QLabel(ui::text("data_center_dialog.description"));
     description->setObjectName("dialogDescription");
     heading->addWidget(description);
     heading->addStretch();
@@ -256,12 +257,12 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     auto *sidebar_layout = new QVBoxLayout(sidebar);
     sidebar_layout->setContentsMargins(8, 12, 8, 12);
     sidebar_layout->setSpacing(8);
-    auto *inventory_caption = new QLabel(QStringLiteral("数据列表"));
+    auto *inventory_caption = new QLabel(ui::text("data_center_dialog.back"));
     inventory_caption->setObjectName("dataSidebarCaption");
     sidebar_layout->addWidget(inventory_caption);
     auto *list = new DataTreeWidget;
     list->setObjectName("dataInventory");
-    list->setAccessibleName(QStringLiteral("数据及安装状态"));
+    list->setAccessibleName(ui::text("data_center_dialog.list.set_accessible_name"));
     list->setItemDelegate(new DataItemDelegate(list));
     list->setMouseTracking(true);
     list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -269,7 +270,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     list->setSelectionMode(QAbstractItemView::SingleSelection);
     list->setHeaderHidden(true);
     list->setIndentation(16);
-    auto *eop_node = new QTreeWidgetItem(list, {QStringLiteral("地球定向参数\n来源与计算优先级")});
+    auto *eop_node = new QTreeWidgetItem(list, {ui::text("data_center_dialog.eop_node")});
     eop_node->setSizeHint(0, QSize(0, 52));
     const auto add_source = [&](DataProduct product, QTreeWidgetItem *parent) {
         auto *item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(list);
@@ -280,19 +281,18 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     auto *finals_node = add_source(DataProduct::finals2000a, eop_node);
     auto *c04_node = add_source(DataProduct::c04, eop_node);
     auto *utc_node = add_source(DataProduct::utc, nullptr);
-    auto *gravity_node =
-        new QTreeWidgetItem(list, {QStringLiteral("地球重力场\n模型文件与计算资源")});
+    auto *gravity_node = new QTreeWidgetItem(list, {ui::text("data_center_dialog.gravity_node")});
     gravity_node->setSizeHint(0, QSize(0, 54));
     auto *egm2008_node = add_source(DataProduct::egm2008, gravity_node);
     auto *egm96_node = add_source(DataProduct::egm96, gravity_node);
     auto *custom_node = add_source(DataProduct::custom_gravity, gravity_node);
     gravity_node->setExpanded(true);
     auto *ephemeris_node =
-        new QTreeWidgetItem(list, {QStringLiteral("太阳系星历\n第三体引力数据")});
+        new QTreeWidgetItem(list, {ui::text("data_center_dialog.ephemeris_node")});
     ephemeris_node->setSizeHint(0, QSize(0, 54));
     auto *de440s_node = add_source(DataProduct::de440s, ephemeris_node);
     auto *weather_node = add_source(DataProduct::space_weather, nullptr);
-    auto *ocean_node = new QTreeWidgetItem(list, {QStringLiteral("海潮模型\n归一化势系数")});
+    auto *ocean_node = new QTreeWidgetItem(list, {ui::text("data_center_dialog.ocean_node")});
     ocean_node->setSizeHint(0, QSize(0, 54));
     auto *fes_node = add_source(DataProduct::fes2014bv1, ocean_node);
     auto *custom_ocean_node = add_source(DataProduct::custom_ocean_tides, ocean_node);
@@ -301,7 +301,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     eop_node->setExpanded(true);
     list->setCurrentItem(eop_node);
     sidebar_layout->addWidget(list, 1);
-    auto *inventory_note = new QLabel(QStringLiteral("所有场景共用这些数据"));
+    auto *inventory_note = new QLabel(ui::text("data_center_dialog.inventory_note"));
     inventory_note->setObjectName("dataSidebarCaption");
     sidebar_layout->addWidget(inventory_note);
     panels->addWidget(sidebar);
@@ -327,11 +327,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     data_description->setObjectName("dataDescription");
     data_description->setWordWrap(true);
     detail_layout->addWidget(data_description);
-    auto *gravity_summary = new QLabel(QStringLiteral(
-        "EGM2008 / EGM96 "
-        "是静态重力场，无固定有效期，默认按需下载。\n\n完整文件保留全部系数；支持 EGM2008 "
-        "完整 2190 × 2159，按文件范围独立选择阶数和次数。外部文件支持静态 ICGEM .gfc 和 STK .grv，"
-        "不支持的时变项会明确报错。"));
+    auto *gravity_summary = new QLabel(ui::text("data_center_dialog.gravity_summary"));
     gravity_summary->setWordWrap(true);
     gravity_summary->setObjectName("hint");
     detail_layout->addWidget(gravity_summary);
@@ -346,26 +342,26 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     priority_layout->setContentsMargins(0, 12, 0, 0);
     priority_layout->setSpacing(12);
     auto *priority_heading = new QHBoxLayout;
-    auto *priority_caption = new QLabel(QStringLiteral("计算优先级"));
+    auto *priority_caption = new QLabel(ui::text("data_center_dialog.priority_caption"));
     priority_caption->setObjectName("sectionTitle");
     priority_heading->addWidget(priority_caption);
     priority_heading->addStretch();
     auto *move_up = new QToolButton;
     move_up->setObjectName("eopPriorityUp");
     move_up->setIcon(workbench_icon(WorkbenchIcon::chevron_up));
-    move_up->setToolTip(QStringLiteral("上移（Alt+↑）"));
+    move_up->setToolTip(ui::text("data_center_dialog.move_up.set_tool_tip"));
     move_up->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Up));
     auto *move_down = new QToolButton;
     move_down->setObjectName("eopPriorityDown");
     move_down->setIcon(workbench_icon(WorkbenchIcon::chevron_down));
-    move_down->setToolTip(QStringLiteral("下移（Alt+↓）"));
+    move_down->setToolTip(ui::text("data_center_dialog.move_down.set_tool_tip"));
     move_down->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Down));
     priority_heading->addWidget(move_up);
     priority_heading->addWidget(move_down);
     priority_layout->addLayout(priority_heading);
     auto *priority = new QListWidget;
     priority->setObjectName("eopSourcePriority");
-    priority->setAccessibleName(QStringLiteral("地球定向参数计算优先级"));
+    priority->setAccessibleName(ui::text("data_center_dialog.priority.set_accessible_name"));
     priority->setItemDelegate(new PriorityDelegate(priority));
     priority->setMouseTracking(true);
     priority->setCursor(Qt::OpenHandCursor);
@@ -384,8 +380,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     }
     priority->setCurrentRow(0);
     priority_layout->addWidget(priority);
-    auto *priority_note = new QLabel(QStringLiteral("先按顺序选择能完整覆盖场景时段的数据。\n两种来"
-                                                    "源均不足时，再按此顺序尝试允许的有限外推。"));
+    auto *priority_note = new QLabel(ui::text("data_center_dialog.priority_note"));
     priority_note->setObjectName("dataPriorityNote");
     priority_note->setWordWrap(true);
     priority_layout->addWidget(priority_note);
@@ -412,9 +407,9 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         pages->addTab(scroll, label);
         return page_layout;
     };
-    auto *overview_layout = page(QStringLiteral("概览"));
-    auto *settings_layout = page(QStringLiteral("更新与计算"));
-    auto *file_layout = page(QStringLiteral("文件信息"));
+    auto *overview_layout = page(ui::text("data_center_dialog.overview_layout"));
+    auto *settings_layout = page(ui::text("data_center_dialog.settings_layout"));
+    auto *file_layout = page(ui::text("data_center_dialog.file_layout"));
     detail_layout->addWidget(pages, 1);
     auto *facts = new QFrame;
     facts->setObjectName("dataFacts");
@@ -436,12 +431,12 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         form->addRow(field_caption, label);
         return label;
     };
-    auto *acquired = field(QStringLiteral("下载 / 导入时间"), "dataAcquiredAt");
-    auto *first = field(QStringLiteral("覆盖起点（UTC）"), "dataValidFrom");
-    auto *until = field(QStringLiteral("覆盖截止（UTC）"), "dataValidUntil");
-    auto *checked = field(QStringLiteral("最近检查"), "dataLastChecked");
-    acquired->setToolTip(QStringLiteral("本地时间"));
-    checked->setToolTip(QStringLiteral("本地时间"));
+    auto *acquired = field(ui::text("data_center_dialog.acquired"), "dataAcquiredAt");
+    auto *first = field(ui::text("data_center_dialog.first"), "dataValidFrom");
+    auto *until = field(ui::text("data_center_dialog.until"), "dataValidUntil");
+    auto *checked = field(ui::text("data_center_dialog.checked"), "dataLastChecked");
+    acquired->setToolTip(ui::text("data_center_dialog.acquired.set_tool_tip"));
+    checked->setToolTip(ui::text("data_center_dialog.acquired.set_tool_tip"));
     overview_layout->addWidget(facts);
     responsive_form(form, 300);
     auto *note = new QLabel;
@@ -458,37 +453,37 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     download->setObjectName("downloadEop");
     download->setProperty("primary", true);
     download->setIcon(workbench_icon(WorkbenchIcon::download, theme::color(theme::on_accent)));
-    auto *raw = new QPushButton(QStringLiteral("导入本地文件…"));
+    auto *raw = new QPushButton(ui::text("data_center_dialog.raw"));
     raw->setObjectName("importRawEop");
     raw->setIcon(workbench_icon(WorkbenchIcon::folder));
-    auto *manifest = new QPushButton(QStringLiteral("导入数据…"));
+    auto *manifest = new QPushButton(ui::text("data_center_dialog.manifest"));
     manifest->setObjectName("importEopSnapshot");
     actions->addWidget(download);
     actions->addWidget(raw);
     file_layout->addWidget(manifest, 0, Qt::AlignLeft);
     actions->addStretch();
     acquisition_layout->addLayout(actions);
-    auto *planetary_centres = new QPushButton(QStringLiteral("导入行星本体星历…"));
+    auto *planetary_centres = new QPushButton(ui::text("data_center_dialog.planetary_centres"));
     planetary_centres->setObjectName("importPlanetaryCentres");
     planetary_centres->setIcon(workbench_icon(WorkbenchIcon::folder));
     acquisition_layout->addWidget(planetary_centres, 0, Qt::AlignLeft);
     // Update and extrapolation settings: two inspector groups, each opened by a switch.
     settings_layout->setSpacing(0);
-    auto *automatic_row = new FormGroup(QStringLiteral("自动更新"));
+    auto *automatic_row = new FormGroup(ui::text("data_center_dialog.automatic_row"));
     automatic_row->setProperty("leading", true);
-    auto *automatic = new QCheckBox(QStringLiteral("自动下载与更新"));
+    auto *automatic = new QCheckBox(ui::text("data_center_dialog.automatic"));
     automatic->setObjectName("dataAutoUpdate");
     automatic->setChecked(catalog.automatic_updates());
     make_switch(automatic);
     auto *frequency = new QComboBox;
     frequency->setObjectName("dataUpdateFrequency");
-    frequency->setAccessibleName(QStringLiteral("自动检查频率"));
-    frequency->addItem(QStringLiteral("每 6 小时"), 6);
-    frequency->addItem(QStringLiteral("每 24 小时"), 24);
-    frequency->addItem(QStringLiteral("每 7 天"), 168);
+    frequency->setAccessibleName(ui::text("data_center_dialog.frequency.set_accessible_name"));
+    frequency->addItem(ui::text("data_center_dialog.frequency.add_item"), 6);
+    frequency->addItem(ui::text("data_center_dialog.frequency.add_item_2"), 24);
+    frequency->addItem(ui::text("data_center_dialog.frequency.add_item_3"), 168);
     frequency->setMaximumWidth(276);
     automatic_row->form()->addRow(automatic);
-    automatic_row->form()->addRow(QStringLiteral("检查频率"), frequency);
+    automatic_row->form()->addRow(ui::text("data_center_dialog.label_21"), frequency);
     settings_layout->addWidget(automatic_row);
     auto *schedule = new QLabel;
     schedule->setObjectName("dataUpdateSchedule");
@@ -502,26 +497,26 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     overview_layout->addWidget(acquisition);
     overview_layout->addWidget(note);
     overview_layout->addStretch();
-    auto *policy_title = new FormGroup(QStringLiteral("覆盖范围之外"));
+    auto *policy_title = new FormGroup(ui::text("data_center_dialog.policy_title"));
     settings_layout->addWidget(policy_title);
     auto *extrapolation = policy_title->body();
-    auto *allow = new QCheckBox(QStringLiteral("允许有限外推"));
+    auto *allow = new QCheckBox(ui::text("data_center_dialog.allow"));
     allow->setObjectName("allowEopExtrapolation");
     make_switch(allow);
     auto *days = new WorkbenchSpinBox<QSpinBox>;
     days->setObjectName("eopExtrapolationDays");
-    days->setAccessibleName(QStringLiteral("EOP 前后各允许外推的天数"));
+    days->setAccessibleName(ui::text("data_center_dialog.days.set_accessible_name"));
     days->setProperty("stepButtons", true);
     days->setMinimumWidth(90);
     days->setRange(1, core::max_eop_extrapolation_days);
     days->setValue(3);
-    days->setSuffix(QStringLiteral(" 天"));
+    days->setSuffix(ui::text("data_center_dialog.days.set_suffix"));
     days->setMaximumWidth(160);
     policy_title->form()->addRow(allow);
-    auto *limit_caption = new QLabel(QStringLiteral("前后各最多"));
+    auto *limit_caption = new QLabel(ui::text("data_center_dialog.limit_caption"));
     policy_title->form()->addRow(limit_caption, days);
-    auto *extrapolation_note = policy_title->add_caution(
-        QStringLiteral("端点线性估算，距离覆盖时段越远，误差越大。闰秒有效期不会随外推延长。"));
+    auto *extrapolation_note =
+        policy_title->add_caution(ui::text("data_center_dialog.policy_title.add_caution"));
     align_form_labels(policy_title->parentWidget());
     settings_layout->addStretch();
     auto *technical = new QLabel;
@@ -548,18 +543,18 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     footer_panel->setObjectName("dataFooter");
     auto *footer = new QHBoxLayout(footer_panel);
     footer->setContentsMargins(theme::space::footer);
-    auto *usage = new QLabel(QStringLiteral("打开或重算时检查数据，数据变化后需确认。"));
+    auto *usage = new QLabel(ui::text("data_center_dialog.usage"));
     usage->setWordWrap(true);
     usage->setObjectName("hint");
     footer->addWidget(usage, 1);
-    auto *cancel = new QPushButton(QStringLiteral("取消下载"));
+    auto *cancel = new QPushButton(ui::text("data_center_dialog.cancel"));
     cancel->setObjectName("cancelEopDownload");
     actions->insertWidget(3, cancel);
     for (auto *button : {download, raw, cancel}) {
         button->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
         actions->setAlignment(button, Qt::AlignLeft | Qt::AlignVCenter);
     }
-    auto *close = new QPushButton(QStringLiteral("关闭"));
+    auto *close = new QPushButton(ui::text("common.close"));
     close->setMinimumWidth(88);
     footer->addWidget(close);
     layout->addWidget(footer_panel);
@@ -622,40 +617,29 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         if (group) {
             if (list->currentItem() == ephemeris_node) {
                 priority_scroll->hide();
-                title->setText(QStringLiteral("太阳系星历"));
-                data_description->setText(
-                    QStringLiteral("统一管理 HPOP 使用的太阳、月球位置数据。"));
-                gravity_summary->setText(QStringLiteral(
-                    "JPL DE440s\n\n完整文件约 32 MiB，安装后支持 1850—2150 年的日月与行星引力计算。"
-                    "\n\n选择左侧 DE440s 下载或导入文件，然后在 HPOP 的“力模型 → "
-                    "引力”页启用相应第三体。"
-                    "\n\n星历覆盖不使用外推。每次计算固定数据内容，更新后重新计算需确认。"));
+                title->setText(ui::text("data_center_dialog.title.set_text"));
+                data_description->setText(ui::text("data_center_dialog.data_description.set_text"));
+                gravity_summary->setText(ui::text("data_center_dialog.gravity_summary.set_text"));
                 return;
             }
             if (list->currentItem() == ocean_node) {
                 priority_scroll->hide();
-                title->setText(QStringLiteral("海潮模型"));
-                data_description->setText(QStringLiteral("管理 HPOP 使用的海潮引力系数。"));
-                gravity_summary->setText(QStringLiteral(
-                    "FES2014bv1\n\n官方公开势系数文件约 10.7 MiB，包含 36 个显式分潮，最高 100 × "
-                    "100。"
-                    "\n\n在 HPOP 的“引力 → 海潮”中启用，并独立设置阶数和次数。"
-                    "适用时自动包含海洋极潮。\n\n外部模型使用相同的 FES 归一化势系数格式。"));
+                title->setText(ui::text("data_center_dialog.title.set_text_2"));
+                data_description->setText(
+                    ui::text("data_center_dialog.data_description.set_text_2"));
+                gravity_summary->setText(ui::text("data_center_dialog.gravity_summary.set_text_2"));
                 return;
             }
             if (list->currentItem() == gravity_node) {
-                gravity_summary->setText(QStringLiteral(
-                    "EGM2008 / EGM96\n\n下载完整球谐系数文件，或导入 GFC / GRV 重力场。"
-                    "\n\n在 HPOP 中选择模型与阶次；每次计算固定所选数据。静态模型无固定有效期。"));
+                gravity_summary->setText(ui::text("data_center_dialog.gravity_summary.set_text_3"));
                 priority_scroll->hide();
-                title->setText(QStringLiteral("地球重力场"));
-                data_description->setText(QStringLiteral(
-                    "下载完整模型，或导入自己的重力文件。在 HPOP 设置中选择使用的模型和阶次。"));
+                title->setText(ui::text("data_center_dialog.title.set_text_3"));
+                data_description->setText(
+                    ui::text("data_center_dialog.data_description.set_text_3"));
                 return;
             }
-            title->setText(QStringLiteral("地球定向参数"));
-            data_description->setText(
-                QStringLiteral("拖动数据来源调整计算顺序，排在上方的优先使用。"));
+            title->setText(ui::text("data_center_dialog.title.set_text_4"));
+            data_description->setText(ui::text("data_center_dialog.data_description.set_text_4"));
             acquisition->hide();
             policy_title->hide();
             extrapolation->hide();
@@ -673,20 +657,20 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         download->setVisible(item.online_updates);
         raw->setVisible(item.raw_import);
         manifest->setVisible(item.manifest_import || is_ephemeris);
-        manifest->setText(is_ephemeris ? QStringLiteral("导入星历数据包…")
-                                       : QStringLiteral("导入带清单的数据包…"));
+        manifest->setText(is_ephemeris ? ui::text("data_center_dialog.manifest.set_text")
+                                       : ui::text("data_center_dialog.manifest.set_text_2"));
         planetary_centres->setVisible(is_ephemeris);
         automatic_row->setVisible(item.online_updates);
         schedule->setVisible(item.online_updates);
         const QSignalBlocker auto_block(automatic), frequency_block(frequency), allow_block(allow),
             days_block(days);
         automatic->setChecked(catalog.automatic_updates(item.product));
-        schedule->setText(automatic->isChecked()
-                              ? QStringLiteral("在应用运行时检查；尚未安装完整文件时会自动下载。")
-                              : QStringLiteral("自动更新已关闭，可随时手动下载或检查。"));
+        schedule->setText(automatic->isChecked() ? ui::text("data_center_dialog.schedule.set_text")
+                                                 : ui::text("data_center_dialog.edule.set_text"));
         const auto hours = catalog.update_interval_hours(item.product);
         if (frequency->findData(hours) < 0)
-            frequency->addItem(QStringLiteral("每 %1 小时").arg(hours), hours);
+            frequency->addItem(ui::text("data_center_dialog.frequency.add_item_4").arg(hours),
+                               hours);
         frequency->setCurrentIndex(frequency->findData(hours));
         frequency->setEnabled(automatic->isChecked());
         if (item.provider_index) {
@@ -697,17 +681,15 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
             limit_caption->setEnabled(limit > 0);
         }
         title->setText(product_name(item.product));
-        data_description->setText(
-            item.product == DataProduct::space_weather
-                ? QStringLiteral(
-                      "F10.7 / Kp / Ap · 原始记录范围；计算另检查模型滞后、历史窗口和缺值")
-            : is_ocean     ? QStringLiteral("海潮势系数 · HPOP / 机动滑行共用")
-            : is_gravity   ? QStringLiteral("地球静态球谐重力场 · HPOP / 机动滑行共用")
-            : is_ephemeris ? QStringLiteral("JPL 行星星历 · 太阳系第三体引力")
-            : is_time      ? QStringLiteral("UTC、TAI 与 TT 之间的时间转换")
-            : item.product == DataProduct::finals2000a
-                ? QStringLiteral("快速观测与预测 · 适用于近期和未来时段")
-                : QStringLiteral("综合参考序列 · 历史时段的默认首选"));
+        data_description->setText(item.product == DataProduct::space_weather
+                                      ? ui::text("data_center_dialog.data_description.set_text_5")
+                                  : is_ocean     ? ui::text("data_center_dialog.label_22")
+                                  : is_gravity   ? ui::text("data_center_dialog.label_23")
+                                  : is_ephemeris ? ui::text("data_center_dialog.label_24")
+                                  : is_time      ? ui::text("data_center_dialog.label_25")
+                                  : item.product == DataProduct::finals2000a
+                                      ? ui::text("data_center_dialog.label_26")
+                                      : ui::text("data_center_dialog.label_27"));
         state->setText(installation_text(item));
         state->setProperty("tone", item.installation == DataInstallation::bundled_sample ||
                                            item.installation == DataInstallation::missing
@@ -717,46 +699,44 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         state->style()->polish(state);
         acquired->setText(item.acquired_at ? local_time(*item.acquired_at)
                           : item.acquisition == runtime::DataAcquisition::bundled
-                              ? QStringLiteral("内置，随程序附带")
+                              ? ui::text("data_center_dialog.label_28")
                           : item.installation == DataInstallation::missing
-                              ? QStringLiteral("尚未下载或导入")
-                              : QStringLiteral("未记录（已有本地文件）"));
+                              ? ui::text("data_center_dialog.label_29")
+                              : ui::text("data_center_dialog.label_30"));
         qobject_cast<QLabel *>(form->labelForField(first))
-            ->setText(is_gravity || is_ocean ? QStringLiteral("可用阶 × 次")
-                      : is_ephemeris         ? QStringLiteral("覆盖起点（TAI）")
-                                             : QStringLiteral("覆盖起点（UTC）"));
+            ->setText(is_gravity || is_ocean ? ui::text("data_center_dialog.label_31")
+                      : is_ephemeris         ? ui::text("data_center_dialog.label_32")
+                                             : ui::text("data_center_dialog.first"));
         first->setText(is_ocean     ? (item.ocean_tides ? QStringLiteral("%1 × %2")
                                                           .arg(item.ocean_tides->degree)
                                                           .arg(item.ocean_tides->order)
-                                                        : QStringLiteral("下载或导入后显示"))
+                                                        : ui::text("data_center_dialog.label_33"))
                        : is_gravity ? (item.gravity ? QStringLiteral("%1 × %2")
                                                           .arg(item.gravity->degree)
                                                           .arg(item.gravity->order)
-                                                    : QStringLiteral("下载或导入后显示"))
+                                                    : ui::text("data_center_dialog.label_33"))
                                     : coverage_time(item.first));
-        until->setText(is_gravity || is_ocean
-                           ? QStringLiteral("无固定有效期")
-                           : coverage_time(item.last) +
-                                 (item.exclusive_end ? QStringLiteral("\n不含当日") : QString{}));
+        until->setText(
+            is_gravity || is_ocean
+                ? ui::text("data_center_dialog.until.set_text")
+                : coverage_time(item.last) +
+                      (item.exclusive_end ? ui::text("data_center_dialog.label_34") : QString{}));
         qobject_cast<QLabel *>(form->labelForField(until))
-            ->setText(is_gravity || is_ocean ? QStringLiteral("有效期")
-                      : is_ephemeris         ? QStringLiteral("覆盖截止（TAI）")
-                      : is_time              ? QStringLiteral("有效截止（UTC）")
-                                             : QStringLiteral("覆盖截止（UTC）"));
+            ->setText(is_gravity || is_ocean ? ui::text("data_center_dialog.label_35")
+                      : is_ephemeris         ? ui::text("data_center_dialog.label_36")
+                      : is_time              ? ui::text("data_center_dialog.label_37")
+                                             : ui::text("data_center_dialog.until"));
         if (is_gravity)
             note->setText(
                 item.gravity
-                    ? QStringLiteral(
-                          "%1 · %2\nGM = %3 m³/s² · 参考半径 %4 "
-                          "m · 固体潮 k20 = %5\n计算开始时固定文件；更新不会改变正在运行的计算。")
+                    ? ui::text("data_center_dialog.note.set_text")
                               .arg(QString::fromStdString(item.gravity->model),
                                    QString::fromStdString(item.gravity->tide_system))
                               .arg(item.gravity->mu, 0, 'g', 15)
                               .arg(item.gravity->radius_m, 0, 'g', 15)
                               .arg(item.gravity->solid_tide_k20, 0, 'g', 15) +
                           (item.gravity->secular_variations
-                               ? QStringLiteral(
-                                     "\n长期变化：参考历元 JD %1 TT，%2 项变化率 / 儒略年")
+                               ? ui::text("data_center_dialog.label_38")
                                      .arg(2451545.0 +
                                               (item.gravity->secular_variations->reference_epoch
                                                    .seconds_since(core::Epoch{0}) +
@@ -764,50 +744,41 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
                                                   86400,
                                           0, 'f', 9)
                                      .arg(item.gravity->secular_variations->rates_per_year.size())
-                               : QStringLiteral("\n文件未定义长期变化。"))
-                : item.product == DataProduct::egm2008
-                    ? QStringLiteral(
-                          "官方完整文件约 240 MiB，下载后在后台校验。静态模型默认不自动下载。")
-                    : QStringLiteral("导入或下载完整重力场后，可在 HPOP 中选择模型与阶次。"));
+                               : ui::text("data_center_dialog.label_39"))
+                : item.product == DataProduct::egm2008 ? ui::text("data_center_dialog.label_40")
+                                                       : ui::text("data_center_dialog.label_41"));
         else if (is_ocean)
-            note->setText(
-                item.ocean_tides
-                    ? QStringLiteral(
-                          "%1 · %2 个显式分潮\n计算开始时固定文件；更新不会改变正在运行的计算。")
-                          .arg(QString::fromStdString(item.ocean_tides->model))
-                          .arg(item.ocean_tides->constituents)
-                    : QStringLiteral("下载官方 FES2014bv1，或导入外部 FES 势系数文件。"));
+            note->setText(item.ocean_tides
+                              ? ui::text("data_center_dialog.note.set_text_2")
+                                    .arg(QString::fromStdString(item.ocean_tides->model))
+                                    .arg(item.ocean_tides->constituents)
+                              : ui::text("data_center_dialog.label_42"));
         else if (is_ephemeris)
-            note->setText(QStringLiteral(
-                "完整 DE440s 约 32 MiB · NAIF 官方文件\n"
-                "HPOP 使用地心几何位置与 DE440 配套 GM；日月、行星和冥王星可独立启用。"
-                "覆盖为可计算时段，静态星历不按下载日期到期，也不作外推。"));
+            note->setText(ui::text("data_center_dialog.note.set_text_3"));
         else if (is_time)
             note->setText(QDateTime::currentDateTimeUtc() >= item.last
-                              ? QStringLiteral("闰秒数据已到期，请检查更新后再计算后续时段。")
-                              : QStringLiteral("有效期来自 IERS 公告；到期后可在此联网更新。"));
+                              ? ui::text("data_center_dialog.note.set_text_4")
+                              : ui::text("data_center_dialog.label_43"));
         else if (item.installation == DataInstallation::bundled_sample)
-            note->setText(
-                item.online_updates
-                    ? QStringLiteral("当前只有内置示例片段，完整包尚未下载。")
-                    : QStringLiteral("当前只有内置示例片段，可导入覆盖所需时段的 C04 数据。"));
+            note->setText(item.online_updates ? ui::text("data_center_dialog.note.set_text_5")
+                                              : ui::text("data_center_dialog.note.set_text_6"));
         else if (item.installation == DataInstallation::missing)
-            note->setText(item.online_updates
-                              ? QStringLiteral("下载完整文件后，可查看实际计算覆盖范围。")
-                              : QStringLiteral("导入本地 C04 数据后，可查看计算覆盖范围。"));
+            note->setText(item.online_updates ? ui::text("data_center_dialog.note.set_text_7")
+                                              : ui::text("data_center_dialog.note.set_text_8"));
         else
-            note->setText(QStringLiteral("以上为可计算时段，不含外推；历史数据可持续使用。"));
-        const auto location = is_time && item.file.empty() ? QStringLiteral("内嵌在程序中")
-                              : item.file.empty()          ? QStringLiteral("尚无本地文件")
+            note->setText(ui::text("data_center_dialog.note.set_text_9"));
+        const auto location = is_time && item.file.empty() ? ui::text("data_center_dialog.location")
+                              : item.file.empty() ? ui::text("data_center_dialog.location_2")
                                                   : QString::fromStdWString(item.file.wstring());
         technical->setText(
-            QStringLiteral("来源：%1\n文件：%2\n大小：%3\nSHA-256：%4%5")
-                .arg(item.source_url.isEmpty() ? QStringLiteral("本地导入") : item.source_url,
+            ui::text("data_center_dialog.technical.set_text")
+                .arg(item.source_url.isEmpty() ? ui::text("data_center_dialog.technical.set_text_2")
+                                               : item.source_url,
                      location, item.file_size ? bytes_text(*item.file_size) : QStringLiteral("—"),
                      item.sha256.isEmpty() ? QStringLiteral("—") : item.sha256,
                      item.identity_sha256.isEmpty()
                          ? QString{}
-                         : QStringLiteral("\n数据身份：") + item.identity_sha256));
+                         : ui::text("data_center_dialog.label_44") + item.identity_sha256));
     };
     const auto show_error = [&](const std::exception &error) {
         operation_error = QString::fromUtf8(error.what());
@@ -859,11 +830,11 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         catalog.start_download({}, *selected());
     });
     QObject::connect(manifest, &QPushButton::clicked, &dialog, [&] {
-        const auto file = QFileDialog::getOpenFileName(&dialog,
-                                                       selected() == DataProduct::de440s
-                                                           ? QStringLiteral("导入星历数据包")
-                                                           : QStringLiteral("导入 EOP 数据"),
-                                                       {}, QStringLiteral("数据清单 (*.json)"));
+        const auto file = QFileDialog::getOpenFileName(
+            &dialog,
+            selected() == DataProduct::de440s ? ui::text("data_center_dialog.label_45")
+                                              : ui::text("data_center_dialog.label_46"),
+            {}, ui::text("data_center_dialog.label_47"));
         if (file.isEmpty())
             return;
         operation_error.clear();
@@ -882,8 +853,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         }
     });
     QObject::connect(planetary_centres, &QPushButton::clicked, &dialog, [&] {
-        const auto file = QFileDialog::getOpenFileName(&dialog, QStringLiteral("导入行星本体星历"),
-                                                       {}, QStringLiteral("SPICE 星历 (*.bsp)"));
+        const auto file = QFileDialog::getOpenFileName(&dialog, ui::text("data_center_dialog.file"),
+                                                       {}, ui::text("data_center_dialog.file_2"));
         if (file.isEmpty())
             return;
         operation_error.clear();
@@ -896,13 +867,12 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     });
     QObject::connect(raw, &QPushButton::clicked, &dialog, [&] {
         const auto file = QFileDialog::getOpenFileName(
-            &dialog, QStringLiteral("导入 %1 文件").arg(title->text()), {},
-            ocean_product(*selected()) ? QStringLiteral("海潮势系数 (*.txt *.pot);;所有文件 (*)")
-            : *selected() == DataProduct::space_weather
-                ? QStringLiteral("空间天气 (*.csv *.txt *.fxm *.dat);;所有文件 (*)")
-            : *selected() == DataProduct::de440s ? QStringLiteral("DE440s 星历 (de440s.bsp *.bsp)")
-            : gravity_product(*selected()) ? QStringLiteral("重力场 (*.gfc *.grv);;所有文件 (*)")
-                                           : QStringLiteral("所有文件 (*)"));
+            &dialog, ui::text("data_center_dialog.file_3").arg(title->text()), {},
+            ocean_product(*selected())                  ? ui::text("data_center_dialog.label_48")
+            : *selected() == DataProduct::space_weather ? ui::text("data_center_dialog.label_49")
+            : *selected() == DataProduct::de440s        ? ui::text("data_center_dialog.label_50")
+            : gravity_product(*selected())              ? ui::text("data_center_dialog.label_51")
+                                                        : ui::text("data_center_dialog.label_52"));
         if (file.isEmpty())
             return;
         operation_error.clear();
@@ -970,13 +940,13 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
                                           : installation_text(entry);
             node->setText(
                 0, name + "\n" + installation + "\n" +
-                       (ocean_product(entry.product)     ? QStringLiteral("海潮系数 · 无固定有效期")
-                        : gravity_product(entry.product) ? QStringLiteral("静态模型 · 无固定有效期")
-                        : entry.last.isValid()
-                            ? (entry.product == DataProduct::utc ? QStringLiteral("有效至 ")
-                                                                 : QStringLiteral("覆盖至 ")) +
-                                  entry.last.date().toString(Qt::ISODate)
-                            : QStringLiteral("尚无覆盖数据")));
+                       (ocean_product(entry.product) ? ui::text("data_center_dialog.node.set_text")
+                        : gravity_product(entry.product) ? ui::text("data_center_dialog.label_53")
+                        : entry.last.isValid()           ? (entry.product == DataProduct::utc
+                                                                ? ui::text("data_center_dialog.label_54")
+                                                                : ui::text("data_center_dialog.label_55")) +
+                                                     entry.last.date().toString(Qt::ISODate)
+                                               : ui::text("data_center_dialog.label_56")));
             node->setData(0, Qt::UserRole + 1, entry.online_updates && failed);
             node->setToolTip(0, node->text(0));
         }
@@ -991,13 +961,13 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
             const auto &entry =
                 inventory_item(static_cast<DataProduct>(entry_item->data(Qt::UserRole).toInt()));
             const auto name = entry.product == DataProduct::finals2000a
-                                  ? QStringLiteral("finals2000A")
-                                  : QStringLiteral("C04");
+                                  ? ui::text("model.finals2000a")
+                                  : ui::text("model.c04");
             entry_item->setText(name + "\n" + installation_text(entry) +
                                 (entry.first.isValid() ? QStringLiteral(" · %1 — %2 UTC")
                                                              .arg(coverage_time(entry.first),
                                                                   coverage_time(entry.last))
-                                                       : QStringLiteral(" · 尚无覆盖数据")));
+                                                       : ui::text("data_center_dialog.label_57")));
         }
         move_up->setEnabled(priority->currentRow() > 0);
         move_down->setEnabled(priority->currentRow() >= 0 &&
@@ -1013,16 +983,16 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
             item.online_updates
                 ? (update.attempted_at ? local_time(*update.attempted_at) + "\n" : QString{}) +
                       check_text(update.state)
-            : item.product == DataProduct::utc ? QStringLiteral("随程序更新")
-                                               : QStringLiteral("本地导入，不联网检查"));
+            : item.product == DataProduct::utc ? ui::text("data_center_dialog.label_58")
+                                               : ui::text("data_center_dialog.label_59"));
         download->setText(downloading_this ? check_text(update.state)
                           : update.state == DataUpdateState::failed ||
                                   update.state == DataUpdateState::interrupted
-                              ? QStringLiteral("重试下载 / 更新")
+                              ? ui::text("data_center_dialog.label_60")
                           : item.installation == DataInstallation::missing ||
                                   item.installation == DataInstallation::bundled_sample
-                              ? QStringLiteral("下载完整数据")
-                              : QStringLiteral("检查并更新"));
+                              ? ui::text("data_center_dialog.label_61")
+                              : ui::text("data_center_dialog.label_62"));
         download->setEnabled(!busy);
         raw->setEnabled(!busy);
         planetary_centres->setEnabled(!busy);
@@ -1036,9 +1006,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         } else {
             progress->setRange(0, 0);
         }
-        schedule->setText(automatic->isChecked()
-                              ? QStringLiteral("在应用运行时检查；尚未安装完整文件时会自动下载。")
-                              : QStringLiteral("自动更新已关闭，可随时手动下载或检查。"));
+        schedule->setText(automatic->isChecked() ? ui::text("data_center_dialog.schedule.set_text")
+                                                 : ui::text("data_center_dialog.edule.set_text"));
         QString message = operation_error;
         if (message.isEmpty() &&
             (item.online_updates || gravity_product(item.product) || ocean_product(item.product))) {
@@ -1056,7 +1025,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
                        update.state == DataUpdateState::local_changed) {
                 message = update.message;
                 if (update.checked_at)
-                    message += QStringLiteral(" 上次成功检查：") + local_time(*update.checked_at);
+                    message +=
+                        ui::text("data_center_dialog.label_63") + local_time(*update.checked_at);
             }
         }
         status->setText(message);

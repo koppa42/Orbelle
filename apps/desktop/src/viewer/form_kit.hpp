@@ -1,4 +1,5 @@
 #pragma once
+#include "../ui_text.hpp"
 #include "workbench_style.hpp"
 #include <QCheckBox>
 #include <QFormLayout>
@@ -32,7 +33,7 @@ inline QToolButton *info_marker(QWidget *parent = nullptr) {
     marker->setFixedSize(20, 20);
     marker->setAutoRaise(true);
     marker->setFocusPolicy(Qt::TabFocus);
-    marker->setAccessibleName(QStringLiteral("说明"));
+    marker->setAccessibleName(ui::text("common.info"));
     QObject::connect(marker, &QToolButton::clicked, marker, [marker] {
         QToolTip::showText(marker->mapToGlobal(QPoint(0, marker->height())), marker->toolTip(),
                            marker);
@@ -145,7 +146,8 @@ class FormGroup final : public QFrame {
         chevron_->setIcon(
             workbench_icon(expanded_ ? WorkbenchIcon::chevron_down : WorkbenchIcon::chevron_right,
                            theme::color(theme::text_muted)));
-        chevron_->setToolTip(expanded_ ? QStringLiteral("收起") : QStringLiteral("展开"));
+        chevron_->setToolTip(expanded_ ? ui::text("form_kit.chevron.set_tool_tip")
+                                       : ui::text("form_kit.chevron.set_tool_tip_2"));
         chevron_->setAccessibleName(title_->text() + QStringLiteral(" · ") + chevron_->toolTip());
     }
     [[nodiscard]] bool expanded() const { return expanded_; }

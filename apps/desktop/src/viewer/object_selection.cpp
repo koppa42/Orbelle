@@ -1,4 +1,5 @@
 #include "object_selection.hpp"
+#include "../ui_text.hpp"
 #include "workbench_style.hpp"
 #include <QCheckBox>
 #include <QComboBox>
@@ -24,13 +25,13 @@ QString object_text(const std::string &s) { return QString::fromStdString(s); }
 QString kind_name(ObjectKind kind) {
     switch (kind) {
     case ObjectKind::satellite:
-        return QStringLiteral("卫星");
+        return ui::text("object_selection.label");
     case ObjectKind::ground_station:
-        return QStringLiteral("地面站");
+        return ui::text("object_selection.label_2");
     case ObjectKind::sensor:
-        return QStringLiteral("传感器");
+        return ui::text("object_selection.label_3");
     default:
-        return QStringLiteral("对象");
+        return ui::text("common.objects");
     }
 }
 QIcon object_icon(ObjectKind kind) {
@@ -90,14 +91,14 @@ ObjectSelectionDialog::ObjectSelectionDialog(std::vector<ObjectChoice> objects,
                                              ObjectSelection selection, QWidget *parent)
     : QDialog(parent), options_(std::move(options)), value_(std::move(selection)) {
     setObjectName("objectSelectionDialog");
-    setWindowTitle(QStringLiteral("对象选择窗口"));
+    setWindowTitle(ui::text("object_selection.label_4"));
     setWindowIcon(workbench_icon(WorkbenchIcon::search));
     resize(600, 540);
     setMinimumSize(360, 360);
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(theme::space::page);
     layout->setSpacing(12);
-    auto *title = new QLabel(QStringLiteral("选择对象"), this);
+    auto *title = new QLabel(ui::text("object_selection.title"), this);
     title->setObjectName("panelTitle");
     layout->addWidget(title);
     auto *purpose = new QLabel(options_.purpose, this);
@@ -108,14 +109,14 @@ ObjectSelectionDialog::ObjectSelectionDialog(std::vector<ObjectChoice> objects,
     auto *search_row = new QHBoxLayout;
     search_ = new QLineEdit(this);
     search_->setObjectName("objectSelectionSearch");
-    search_->setPlaceholderText(QStringLiteral("搜索名称、路径或 ID…"));
-    search_->setAccessibleName(QStringLiteral("搜索对象"));
+    search_->setPlaceholderText(ui::text("object_selection.search.set_placeholder_text"));
+    search_->setAccessibleName(ui::text("object_selection.search.set_accessible_name"));
     search_->setClearButtonEnabled(true);
     search_->addAction(workbench_icon(WorkbenchIcon::search), QLineEdit::LeadingPosition);
     search_row->addWidget(search_, 1);
     kind_ = new QComboBox(this);
     kind_->setObjectName("objectSelectionKind");
-    kind_->setAccessibleName(QStringLiteral("对象类型筛选"));
+    kind_->setAccessibleName(ui::text("object_selection.kind.set_accessible_name"));
     search_row->addWidget(kind_);
     layout->addLayout(search_row);
     all_ = new QCheckBox(options_.all_label, this);
@@ -127,7 +128,7 @@ ObjectSelectionDialog::ObjectSelectionDialog(std::vector<ObjectChoice> objects,
     tree_ = new QTreeWidget(this);
     tree_->setObjectName("objectSelectionTree");
     tree_->setColumnCount(2);
-    tree_->setHeaderLabels({QStringLiteral("对象"), QStringLiteral("类型")});
+    tree_->setHeaderLabels({ui::text("common.objects"), ui::text("object_selection.label_5")});
     tree_->setUniformRowHeights(true);
     tree_->setSelectionMode(QAbstractItemView::SingleSelection);
     tree_->setTextElideMode(Qt::ElideMiddle);
@@ -158,7 +159,7 @@ ObjectSelectionDialog::ObjectSelectionDialog(std::vector<ObjectChoice> objects,
     count_->setObjectName("objectSelectionCount");
     count_->setWordWrap(true);
     footer->addWidget(count_, 1);
-    clear_ = new QPushButton(QStringLiteral("清空"), this);
+    clear_ = new QPushButton(ui::text("object_selection.label_6"), this);
     clear_->setObjectName("objectSelectionClear");
     clear_->setAutoDefault(false);
     clear_->setVisible(options_.multiple);
@@ -166,12 +167,12 @@ ObjectSelectionDialog::ObjectSelectionDialog(std::vector<ObjectChoice> objects,
     layout->addLayout(footer);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     confirm_ = buttons->button(QDialogButtonBox::Ok);
-    confirm_->setText(QStringLiteral("确定"));
+    confirm_->setText(ui::text("common.ok"));
     confirm_->setProperty("primary", true);
     confirm_->style()->unpolish(confirm_);
     confirm_->style()->polish(confirm_);
     confirm_->setDefault(true);
-    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(ui::text("common.cancel"));
     buttons->button(QDialogButtonBox::Cancel)->setAutoDefault(false);
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, this, &ObjectSelectionDialog::confirm);
@@ -221,7 +222,7 @@ void ObjectSelectionDialog::set_objects(std::vector<ObjectChoice> objects) {
     objects_ = std::move(objects);
     const int previous_kind = kind_->count() ? kind_->currentData().toInt() : -1;
     kind_->clear();
-    kind_->addItem(QStringLiteral("全部类型"), -1);
+    kind_->addItem(ui::text("object_selection.kind.add_item"), -1);
     for (const auto kind :
          {ObjectKind::satellite, ObjectKind::ground_station, ObjectKind::sensor, ObjectKind::other})
         if (std::ranges::any_of(objects_,
@@ -235,7 +236,8 @@ void ObjectSelectionDialog::set_objects(std::vector<ObjectChoice> objects) {
         auto *item = new QTreeWidgetItem;
         item->setText(0, object.name);
         item->setIcon(0, object_icon(object.kind));
-        item->setText(1, missing ? QStringLiteral("不可用") : kind_name(object.kind));
+        item->setText(1, missing ? ui::text("object_selection.item.set_text")
+                                 : kind_name(object.kind));
         item->setData(0, id_role, object_text(object.id));
         item->setData(0, kind_role, static_cast<int>(object.kind));
         item->setData(0, path_role, object.path.isEmpty() ? object.name : object.path);
@@ -269,7 +271,7 @@ void ObjectSelectionDialog::set_objects(std::vector<ObjectChoice> objects) {
     }
     for (const auto &id : value_.ids)
         if (!items.contains(id)) {
-            append({id, object_text(id) + QStringLiteral("（已删除）")}, true);
+            append({id, object_text(id) + ui::text("object_selection.label_7")}, true);
             tree_->addTopLevelItem(items.at(id));
         }
     tree_->expandAll();
@@ -318,17 +320,17 @@ void ObjectSelectionDialog::update_status() {
     for (QTreeWidgetItemIterator it(tree_); *it; ++it)
         if (!(*it)->isHidden() && (*it)->data(0, available_role).toBool())
             ++visible;
-    empty_->setText(available.empty() ? QStringLiteral("暂无可选对象")
-                                      : QStringLiteral("没有匹配的对象\n请更换名称、路径或 ID"));
+    empty_->setText(available.empty() ? ui::text("object_selection.empty.set_text")
+                                      : ui::text("object_selection.empty.set_text_2"));
     empty_->setVisible(visible == 0);
     count_->setText(value_.all ? options_.all_label
-                               : QStringLiteral("已选 %1 个 · 显示 %2 / %3 个")
+                               : ui::text("object_selection.count.set_text")
                                      .arg(value_.ids.size())
                                      .arg(visible)
                                      .arg(available.size()));
     if (!value_.all && missing)
         count_->setText(count_->text() +
-                        QStringLiteral("\n%1 个对象不可用，请重新选择。").arg(missing));
+                        ui::text("object_selection.count.set_text_2").arg(missing));
     confirm_->setEnabled(value_.all || (!value_.ids.empty() && missing == 0));
     clear_->setEnabled(!value_.all && !value_.ids.empty());
     auto *current = tree_->currentItem();
@@ -338,7 +340,7 @@ void ObjectSelectionDialog::update_status() {
     details_->setText(
         current ? details_->fontMetrics().elidedText(path, Qt::ElideMiddle, width) + "\n" +
                       details_->fontMetrics().elidedText("ID: " + id, Qt::ElideMiddle, width)
-                : QStringLiteral("选择对象可查看完整路径和 ID"));
+                : ui::text("object_selection.label_8"));
     details_->setToolTip(path + "\nID: " + id);
 }
 void ObjectSelectionDialog::resizeEvent(QResizeEvent *event) {
@@ -398,22 +400,22 @@ void ObjectSelectionField::refresh() {
     if (selection_.all)
         label = options_.all_label;
     else if (selection_.ids.empty())
-        label = QStringLiteral("选择对象");
+        label = ui::text("object_selection.title");
     else if (selection_.ids.size() > 1)
-        label = QStringLiteral("已选 %1 个对象").arg(selection_.ids.size());
+        label = ui::text("object_selection.label_9").arg(selection_.ids.size());
     else {
         const auto found = std::ranges::find(objects_, id(), &ObjectChoice::id);
         if (found != objects_.end() && found->selectable) {
             label = found->path.isEmpty() ? found->name : found->path;
             glyph = object_icon(found->kind);
         } else
-            label = object_text(id()) + QStringLiteral("（已删除）");
+            label = object_text(id()) + ui::text("object_selection.label_7");
     }
     setText(label);
     setIcon(glyph);
     setToolTip(label + (selection_.ids.size() == 1 ? "\nID: " + object_text(id()) : QString{}) +
-               QStringLiteral("\n打开对象选择窗口"));
-    setAccessibleDescription(label + QStringLiteral("；打开对象选择窗口"));
+               ui::text("object_selection.label_10"));
+    setAccessibleDescription(label + ui::text("object_selection.label_11"));
 }
 void ObjectSelectionField::paintEvent(QPaintEvent *) {
     QStyleOptionButton option;
@@ -421,7 +423,9 @@ void ObjectSelectionField::paintEvent(QPaintEvent *) {
     option.text = fontMetrics().elidedText(text(), Qt::ElideMiddle, std::max(0, width() - 70));
     QStylePainter painter(this);
     painter.drawControl(QStyle::CE_PushButton, option);
-    painter.drawText(QRect(width() - 28, 0, 20, height()), Qt::AlignCenter, QStringLiteral("…"));
+    workbench_icon(WorkbenchIcon::more)
+        .paint(&painter, QRect(width() - 26, (height() - 16) / 2, 16, 16), Qt::AlignCenter,
+               isEnabled() ? QIcon::Normal : QIcon::Disabled);
 }
 void ObjectSelectionField::choose() {
     ObjectSelectionDialog dialog(objects_, options_, selection_, this);

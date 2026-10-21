@@ -1,4 +1,5 @@
 #include "graphics_workbench.hpp"
+#include "../ui_text.hpp"
 #include "eop_catalog.hpp"
 #include "epoch_editor.hpp"
 #include "form_kit.hpp"
@@ -420,7 +421,7 @@ class Workbench final : public WorkbenchWindow {
                 symbol->setObjectName("brandMark");
                 symbol->setPixmap(brand_mark(22, devicePixelRatioF()));
                 title_layout->addWidget(symbol);
-                auto *name = new QLabel("OrbitForge");
+                auto *name = new QLabel(ui::utf8("brand.name"));
                 name->setObjectName("brand");
                 title_layout->addWidget(name);
                 menu_bar_ = new QMenuBar;
@@ -440,13 +441,13 @@ class Workbench final : public WorkbenchWindow {
                 workspace_dot_->setObjectName("workspaceDot");
                 workspace_dot_->setFixedSize(6, 6);
                 chip_layout->addWidget(workspace_dot_);
-                workspace_label_ = new QLabel(QStringLiteral("未创建场景"));
+                workspace_label_ = new QLabel(ui::text("graphics_workbench.label"));
                 workspace_label_->setObjectName("workspaceName");
                 workspace_label_->setMaximumWidth(260);
                 chip_layout->addWidget(workspace_label_);
                 title_layout->addWidget(chip);
                 title_layout->addStretch(1);
-                commands_ = new QToolBar(QStringLiteral("场景与图形"));
+                commands_ = new QToolBar(ui::text("graphics_workbench.label_2"));
                 commands_->setObjectName("commandBar");
                 commands_->setMovable(false);
                 commands_->setIconSize(QSize(16, 16));
@@ -464,60 +465,68 @@ class Workbench final : public WorkbenchWindow {
                     name->setVisible(!wide.narrow(width, 760));
                     chip->setVisible(!roomy.narrow(width, 1000));
                 });
-                scene_menu_ = menu_bar_->addMenu(QStringLiteral("场景"));
-                insert_menu_ = menu_bar_->addMenu(QStringLiteral("插入"));
-                view_menu_ = menu_bar_->addMenu(QStringLiteral("视图"));
-                time_menu_ = menu_bar_->addMenu(QStringLiteral("时间"));
+                scene_menu_ = menu_bar_->addMenu(ui::text("common.scenario"));
+                insert_menu_ = menu_bar_->addMenu(ui::text("graphics_workbench.menu_bar.add_menu"));
+                view_menu_ = menu_bar_->addMenu(ui::text("graphics_workbench.menu_bar.add_menu_2"));
+                time_menu_ = menu_bar_->addMenu(ui::text("common.time"));
                 new_action_ = commands_->addAction(workbench_icon(WorkbenchIcon::new_scenario),
-                                                   QStringLiteral("新建场景"));
+                                                   ui::text("common.new_scenario"));
                 new_action_->setShortcut(QKeySequence("Ctrl+N"));
-                new_action_->setToolTip(QStringLiteral("新建场景 · Ctrl+N"));
+                new_action_->setToolTip(ui::text("graphics_workbench.new_action.set_tool_tip"));
                 connect(new_action_, &QAction::triggered, this, [this] { create_scenario(); });
                 scene_menu_->addAction(new_action_);
                 open_action_ = commands_->addAction(workbench_icon(WorkbenchIcon::folder),
-                                                    QStringLiteral("打开"));
+                                                    ui::text("common.open"));
                 open_action_->setShortcut(QKeySequence::Open);
                 open_action_->setObjectName("openProject");
-                open_action_->setToolTip(QStringLiteral("打开项目 · Ctrl+O"));
+                open_action_->setToolTip(ui::text("graphics_workbench.open_action.set_tool_tip"));
                 connect(open_action_, &QAction::triggered, this, [this] { choose_project(); });
                 scene_menu_->addAction(open_action_);
                 save_action_ = commands_->addAction(workbench_icon(WorkbenchIcon::save),
-                                                    QStringLiteral("保存"));
+                                                    ui::text("common.save"));
                 save_action_->setShortcut(QKeySequence::Save);
                 save_action_->setObjectName("saveProject");
-                save_action_->setToolTip(QStringLiteral("保存已应用的场景和对象属性 · Ctrl+S"));
+                save_action_->setToolTip(ui::text("graphics_workbench.save_action.set_tool_tip"));
                 connect(save_action_, &QAction::triggered, this,
                         [this] { (void)save_project_dialog(false); });
                 scene_menu_->addAction(save_action_);
-                save_as_action_ = scene_menu_->addAction(QStringLiteral("另存为…"));
+                save_as_action_ =
+                    scene_menu_->addAction(ui::text("graphics_workbench.scene_menu.add_action"));
                 save_as_action_->setShortcut(QKeySequence::SaveAs);
                 connect(save_as_action_, &QAction::triggered, this,
                         [this] { (void)save_project_dialog(true); });
-                example_action_ = scene_menu_->addAction(QStringLiteral("打开二体示例"));
+                example_action_ =
+                    scene_menu_->addAction(ui::text("graphics_workbench.scene_menu.add_action_2"));
                 connect(example_action_, &QAction::triggered, this, [this] { open_example(); });
-                auto *data_menu = menu_bar_->addMenu(QStringLiteral("数据"));
-                eop_action_ = data_menu->addAction(workbench_icon(WorkbenchIcon::database),
-                                                   QStringLiteral("数据中心…"));
+                auto *data_menu =
+                    menu_bar_->addMenu(ui::text("graphics_workbench.menu_bar.add_menu_3"));
+                eop_action_ =
+                    data_menu->addAction(workbench_icon(WorkbenchIcon::database),
+                                         ui::text("graphics_workbench.data_menu.add_action"));
                 eop_action_->setObjectName("manageEopData");
                 connect(eop_action_, &QAction::triggered, this, [this] { manage_eop_data(); });
-                auto *analysis_menu = menu_bar_->addMenu(QStringLiteral("分析"));
-                report_action_ = analysis_menu->addAction(workbench_icon(WorkbenchIcon::properties),
-                                                          QStringLiteral("报告…"));
+                auto *analysis_menu =
+                    menu_bar_->addMenu(ui::text("graphics_workbench.menu_bar.add_menu_4"));
+                report_action_ = analysis_menu->addAction(
+                    workbench_icon(WorkbenchIcon::properties),
+                    ui::text("graphics_workbench.analysis_menu.add_action"));
                 report_action_->setObjectName("openReports");
                 connect(report_action_, &QAction::triggered, this, [this] { show_reports(); });
                 scene_menu_->addSeparator();
                 // Analysis and data were only reachable from menus; keep them one click away.
                 commands_->addSeparator();
-                report_action_->setToolTip(QStringLiteral("报告与曲线"));
+                report_action_->setToolTip(
+                    ui::text("graphics_workbench.report_action.set_tool_tip"));
                 commands_->addAction(report_action_);
-                eop_action_->setToolTip(QStringLiteral("数据中心 · 地球定向、引力场与星历"));
+                eop_action_->setToolTip(ui::text("graphics_workbench.eop_action.set_tool_tip"));
                 commands_->addAction(eop_action_);
                 // Inserting lives with the objects it creates: the explorer's add button,
                 // the Insert menu and Ctrl+Shift+I.
                 insert_action_ = new QAction(workbench_icon(WorkbenchIcon::add),
-                                             QStringLiteral("插入对象…"), this);
+                                             ui::text("graphics_workbench.label_3"), this);
                 insert_action_->setShortcut(QKeySequence("Ctrl+Shift+I"));
-                insert_action_->setToolTip(QStringLiteral("插入卫星或地面站 · Ctrl+Shift+I"));
+                insert_action_->setToolTip(
+                    ui::text("graphics_workbench.insert_action.set_tool_tip"));
                 connect(insert_action_, &QAction::triggered, this,
                         [this] { show_insert_objects(); });
                 insert_menu_->addAction(insert_action_);
@@ -539,20 +548,20 @@ class Workbench final : public WorkbenchWindow {
             initial_position_ = snapshot_.markers.empty() ? std::array<double, 3>{7e6, 0, 0}
                                                           : snapshot_.markers.front().position_m;
             scene_->addChild(selection_->node());
-            setWindowTitle(benchmarking_ ? QStringLiteral("OrbitForge — 万星双视图基准场景")
-                                         : QStringLiteral("OrbitForge  |  新建场景"));
+            setWindowTitle(benchmarking_ ? ui::text("graphics_workbench.label_4")
+                                         : ui::text("graphics_workbench.label_5"));
             resize_to_screen(1600, 960);
             auto *objects = new QTreeWidget;
             objects_ = objects;
             objects->setObjectName("sceneObjects");
-            objects->setHeaderLabel(QStringLiteral("场景"));
+            objects->setHeaderLabel(ui::text("common.scenario"));
             if (!benchmarking_)
                 objects->setHeaderHidden(true);
             if (benchmarking_) {
                 auto *scenario =
-                    new QTreeWidgetItem(objects, {QStringLiteral("固定星座 · 10,000 颗")});
+                    new QTreeWidgetItem(objects, {ui::text("graphics_workbench.scenario")});
                 object_item_ =
-                    new QTreeWidgetItem(scenario, {QStringLiteral("100 条轨迹 · 每视图 200 标签")});
+                    new QTreeWidgetItem(scenario, {ui::text("graphics_workbench.label_6")});
             }
             objects->expandAll();
             if (!benchmarking_) {
@@ -564,7 +573,7 @@ class Workbench final : public WorkbenchWindow {
                             set_selection(object_index(item), false);
                         });
             }
-            auto *object_dock = new QDockWidget(QStringLiteral("对象浏览器"), this);
+            auto *object_dock = new QDockWidget(ui::text("graphics_workbench.object_dock"), this);
             object_dock_ = object_dock;
             if (benchmarking_) {
                 object_dock->setWidget(objects);
@@ -576,7 +585,8 @@ class Workbench final : public WorkbenchWindow {
                 layout->setSpacing(6);
                 auto *search = new QLineEdit;
                 search->setObjectName("objectSearch");
-                search->setPlaceholderText(QStringLiteral("搜索对象…"));
+                search->setPlaceholderText(
+                    ui::text("graphics_workbench.search.set_placeholder_text"));
                 search->addAction(workbench_icon(WorkbenchIcon::search),
                                   QLineEdit::LeadingPosition);
                 search->setClearButtonEnabled(true);
@@ -590,7 +600,7 @@ class Workbench final : public WorkbenchWindow {
                 add->setToolButtonStyle(Qt::ToolButtonIconOnly);
                 add->setFixedSize(26, 26);
                 add->setIconSize(QSize(16, 16));
-                add->setAccessibleName(QStringLiteral("插入对象"));
+                add->setAccessibleName(ui::text("graphics_workbench.add.set_accessible_name"));
                 search_row->addWidget(add);
                 layout->addLayout(search_row);
                 layout->addWidget(objects, 1);
@@ -626,11 +636,12 @@ class Workbench final : public WorkbenchWindow {
                         return frame == core::FrameId::itrf ? transform.apply(state)
                                                             : transform.inverse(state);
                     }
-                    throw std::out_of_range("初始历元超出已安装的地球定向数据范围。");
+                    throw std::out_of_range(ui::utf8("graphics_workbench.validation"));
                 };
                 properties_dialog_ = new QDialog(this, Qt::Window);
                 properties_dialog_->setAttribute(Qt::WA_QuitOnClose, false);
-                properties_dialog_->setWindowTitle(QStringLiteral("对象属性"));
+                properties_dialog_->setWindowTitle(
+                    ui::text("graphics_workbench.properties_dialog.set_window_title"));
                 properties_dialog_->resize(
                     980, std::min(660, screen()->availableGeometry().height() - 100));
                 properties_dialog_->setMinimumSize(320, 280);
@@ -641,7 +652,7 @@ class Workbench final : public WorkbenchWindow {
                 inspector_pages_ = new QStackedWidget;
                 inspector_pages_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
                 inspector_pages_->addWidget(editor_);
-                auto *empty = new QLabel(QStringLiteral("选择卫星"));
+                auto *empty = new QLabel(ui::text("graphics_workbench.empty"));
                 empty->setObjectName("muted");
                 empty->setAlignment(Qt::AlignCenter);
                 empty->setWordWrap(true);
@@ -664,8 +675,7 @@ class Workbench final : public WorkbenchWindow {
                         update_satellite();
                     }
                     editor_->accept_display(settings);
-                    statusBar()->showMessage(QStringLiteral("已应用显示设置，将按需更新轨迹"),
-                                             5000);
+                    statusBar()->showMessage(ui::text("graphics_workbench.label_7"), 5000);
                 };
                 editor_->cancel = [this] {
                     if (project_candidate_.valid() && project_orbit_edit_ && project_cancellation_)
@@ -677,7 +687,7 @@ class Workbench final : public WorkbenchWindow {
                     start_model(kind, path, diameter);
                 };
                 auto *properties = new QAction(workbench_icon(WorkbenchIcon::properties),
-                                               QStringLiteral("属性"), this);
+                                               ui::text("common.properties"), this);
                 addAction(properties);
                 properties_action_ = properties;
                 properties->setShortcut(QKeySequence("Ctrl+I"));
@@ -694,31 +704,35 @@ class Workbench final : public WorkbenchWindow {
                             open_properties();
                         });
                 scene_menu_->addAction(properties);
-                auto *object_menu = menu_bar_->insertMenu(view_menu_->menuAction(),
-                                                          new QMenu(QStringLiteral("对象"), this));
+                auto *object_menu = menu_bar_->insertMenu(
+                    view_menu_->menuAction(), new QMenu(ui::text("common.objects"), this));
                 auto *object_commands = object_menu->menu();
                 object_commands->addAction(properties);
-                rename_action_ = object_commands->addAction(QStringLiteral("重命名…"));
+                rename_action_ = object_commands->addAction(
+                    ui::text("graphics_workbench.object_commands.add_action"));
                 rename_action_->setObjectName("renameObject");
                 rename_action_->setShortcut(QKeySequence("F2"));
                 connect(rename_action_, &QAction::triggered, this, [this] { rename_selected(); });
-                duplicate_action_ = object_commands->addAction(QStringLiteral("复制对象"));
+                duplicate_action_ = object_commands->addAction(
+                    ui::text("graphics_workbench.object_commands.add_action_2"));
                 duplicate_action_->setObjectName("duplicateObject");
                 duplicate_action_->setShortcut(QKeySequence("Ctrl+D"));
                 connect(duplicate_action_, &QAction::triggered, this,
                         [this] { duplicate_selected(); });
-                delete_action_ = object_commands->addAction(QStringLiteral("删除…"));
+                delete_action_ = object_commands->addAction(
+                    ui::text("graphics_workbench.object_commands.add_action_3"));
                 delete_action_->setObjectName("deleteObject");
                 delete_action_->setShortcut(QKeySequence::Delete);
                 connect(delete_action_, &QAction::triggered, this, [this] { delete_selected(); });
                 scene_menu_->addSeparator();
-                auto *quit = scene_menu_->addAction(QStringLiteral("退出"));
+                auto *quit =
+                    scene_menu_->addAction(ui::text("graphics_workbench.scene_menu.add_action_3"));
                 connect(quit, &QAction::triggered, this, &QWidget::close);
                 view_menu_->addAction(object_dock->toggleViewAction());
                 show_orbit_status();
             }
-            auto *toolbar = benchmarking_ ? new QToolBar(QStringLiteral("时间"), this)
-                                          : new FlushToolBar(QStringLiteral("时间"), this);
+            auto *toolbar = benchmarking_ ? new QToolBar(ui::text("common.time"), this)
+                                          : new FlushToolBar(ui::text("common.time"), this);
             time_toolbar_ = toolbar;
             if (!benchmarking_)
                 toolbar->setObjectName("timelineBar");
@@ -730,9 +744,10 @@ class Workbench final : public WorkbenchWindow {
             if (run_)
                 toolbar->setEnabled(false);
 #endif
-            auto *play =
-                new QAction(play_icon(playing_),
-                            playing_ ? QStringLiteral("暂停") : QStringLiteral("播放"), this);
+            auto *play = new QAction(play_icon(playing_),
+                                     playing_ ? ui::text("graphics_workbench.play")
+                                              : ui::text("graphics_workbench.play_2"),
+                                     this);
             play_action_ = play;
             connect(play, &QAction::triggered, this, [this] { set_playing(!playing_); });
             if (benchmarking_) {
@@ -759,18 +774,18 @@ class Workbench final : public WorkbenchWindow {
                 auto *controls = transport;
                 controls->setContentsMargins(0, 0, 0, 0);
                 controls->setSpacing(4);
-                auto *heading = new QLabel(QStringLiteral("时间轴"));
+                auto *heading = new QLabel(ui::text("graphics_workbench.heading"));
                 heading->setObjectName("timelineTitle");
                 heading->setMinimumWidth(60);
                 controls->addWidget(heading);
                 auto *start = new QAction(workbench_icon(WorkbenchIcon::first),
-                                          QStringLiteral("分析起点"), this);
+                                          ui::text("graphics_workbench.start"), this);
                 auto *end = new QAction(workbench_icon(WorkbenchIcon::last),
-                                        QStringLiteral("分析终点"), this);
+                                        ui::text("graphics_workbench.end"), this);
                 auto *slower = new QAction(workbench_icon(WorkbenchIcon::slower),
-                                           QStringLiteral("减慢播放"), this);
+                                           ui::text("graphics_workbench.slower"), this);
                 auto *faster = new QAction(workbench_icon(WorkbenchIcon::faster),
-                                           QStringLiteral("加快播放"), this);
+                                           ui::text("graphics_workbench.faster"), this);
                 slower->setObjectName("slowerPlayback");
                 faster->setObjectName("fasterPlayback");
                 slower->setShortcut(QKeySequence("Ctrl+["));
@@ -806,9 +821,10 @@ class Workbench final : public WorkbenchWindow {
                 }
                 controls->addWidget(transport_group);
                 time_menu_->addSeparator();
-                auto *jump = time_menu_->addAction(QStringLiteral("跳转到指定时间…"));
+                auto *jump =
+                    time_menu_->addAction(ui::text("graphics_workbench.time_menu.add_action"));
                 jump->setShortcut(QKeySequence("Ctrl+T"));
-                jump->setToolTip(QStringLiteral("跳转到指定时间 · Ctrl+T"));
+                jump->setToolTip(ui::text("graphics_workbench.jump.set_tool_tip"));
                 connect(jump, &QAction::triggered, this, [this] { choose_time(); });
                 auto *speed = new QDoubleSpinBox;
                 speed->setObjectName("playbackRate");
@@ -819,8 +835,8 @@ class Workbench final : public WorkbenchWindow {
                 speed->setValue(playback_rate_);
                 speed->setSuffix(QStringLiteral(" ×"));
                 speed->setMinimumWidth(0);
-                speed->setToolTip(QStringLiteral("仿真时间相对实际时间的播放倍率"));
-                speed->setAccessibleName(QStringLiteral("播放倍率"));
+                speed->setToolTip(ui::text("graphics_workbench.speed.set_tool_tip"));
+                speed->setAccessibleName(ui::text("graphics_workbench.speed.set_accessible_name"));
                 auto *rate_field = new QFrame;
                 rate_field->setObjectName("playbackRateField");
                 rate_field->setFixedWidth(110);
@@ -828,7 +844,8 @@ class Workbench final : public WorkbenchWindow {
                 rate_layout->setContentsMargins(1, 1, 1, 1);
                 rate_layout->setSpacing(0);
                 rate_layout->addWidget(speed, 1);
-                auto *presets = new QMenu(QStringLiteral("播放倍率"), this);
+                auto *presets =
+                    new QMenu(ui::text("graphics_workbench.speed.set_accessible_name"), this);
                 presets->setObjectName("playbackRateMenu");
                 for (const double rate : playback_rates) {
                     auto *action = presets->addAction(QString::number(rate, 'g', 5) + " ×");
@@ -840,9 +857,9 @@ class Workbench final : public WorkbenchWindow {
                     playback_rate_ = rate;
                     slower->setEnabled(rate > playback_rates.front());
                     faster->setEnabled(rate < playback_rates.back());
-                    slower->setToolTip(QStringLiteral("减慢至 %1× · Ctrl+[")
+                    slower->setToolTip(ui::text("graphics_workbench.slower.set_tool_tip")
                                            .arg(adjacent_playback_rate(rate, false), 0, 'g', 5));
-                    faster->setToolTip(QStringLiteral("加快至 %1× · Ctrl+]")
+                    faster->setToolTip(ui::text("graphics_workbench.faster.set_tool_tip")
                                            .arg(adjacent_playback_rate(rate, true), 0, 'g', 5));
                     for (auto *action : presets->actions())
                         action->setChecked(action->data().toDouble() == rate);
@@ -871,7 +888,8 @@ class Workbench final : public WorkbenchWindow {
                 preset_button->setIconSize(QSize(14, 14));
                 preset_button->setFixedSize(24, 26);
                 preset_button->setPopupMode(QToolButton::InstantPopup);
-                preset_button->setToolTip(QStringLiteral("选择播放倍率"));
+                preset_button->setToolTip(
+                    ui::text("graphics_workbench.preset_button.set_tool_tip"));
                 preset_button->setAccessibleName(preset_button->toolTip());
                 preset_button->setMenu(presets);
                 rate_layout->addWidget(preset_button);
@@ -881,7 +899,8 @@ class Workbench final : public WorkbenchWindow {
                 timeline_ = new MissionTimeline;
                 slider_ = timeline_;
                 time_menu_->addSeparator();
-                auto *object_interval = time_menu_->addAction(QStringLiteral("显示所选对象区间"));
+                auto *object_interval =
+                    time_menu_->addAction(ui::text("graphics_workbench.time_menu.add_action_2"));
                 object_interval->setObjectName("showTimelineObject");
                 object_interval->setCheckable(true);
                 connect(object_interval, &QAction::toggled, this,
@@ -904,16 +923,16 @@ class Workbench final : public WorkbenchWindow {
                 divider->setFixedHeight(18);
                 controls->addWidget(divider);
                 for (const auto &[icon, text, name, command] :
-                     {std::tuple{WorkbenchIcon::zoom_out, QStringLiteral("缩小时间轴 · −"),
+                     {std::tuple{WorkbenchIcon::zoom_out, ui::text("graphics_workbench.label_8"),
                                  "timelineZoomOut",
                                  std::function<void()>{[this] { timeline_->zoom(0.5); }}},
-                      std::tuple{WorkbenchIcon::zoom_in, QStringLiteral("放大时间轴 · +"),
+                      std::tuple{WorkbenchIcon::zoom_in, ui::text("graphics_workbench.label_9"),
                                  "timelineZoomIn",
                                  std::function<void()>{[this] { timeline_->zoom(2); }}},
-                      std::tuple{WorkbenchIcon::focus, QStringLiteral("定位当前时间 · C"),
+                      std::tuple{WorkbenchIcon::focus, ui::text("graphics_workbench.label_10"),
                                  "timelineCenter",
                                  std::function<void()>{[this] { timeline_->center_current(); }}},
-                      std::tuple{WorkbenchIcon::time_fit, QStringLiteral("显示全时段 · F"),
+                      std::tuple{WorkbenchIcon::time_fit, ui::text("graphics_workbench.label_11"),
                                  "timelineFit",
                                  std::function<void()>{[this] { timeline_->reset_view(); }}}}) {
                     auto *button = new QToolButton;
@@ -940,14 +959,16 @@ class Workbench final : public WorkbenchWindow {
                 auto *time_scale = new QComboBox;
                 time_scale->setObjectName("timelineScale");
                 time_scale->addItems({"UTC", "TAI", "TT"});
-                time_scale->setAccessibleName(QStringLiteral("时间轴显示标准"));
+                time_scale->setAccessibleName(
+                    ui::text("graphics_workbench.time_scale.set_accessible_name"));
                 controls->addWidget(time_scale);
                 connect(time_scale, &QComboBox::currentIndexChanged, this, [this](int index) {
                     display_scale_ = static_cast<CalendarScale>(index);
                     if (timeline_)
                         timeline_->set_scale(display_scale_);
                 });
-                auto *expand = time_menu_->addAction(QStringLiteral("展开时间轴"));
+                auto *expand =
+                    time_menu_->addAction(ui::text("graphics_workbench.time_menu.add_action_3"));
                 expand->setObjectName("expandTimeline");
                 expand->setCheckable(true);
                 expand->setChecked(true);
@@ -957,7 +978,7 @@ class Workbench final : public WorkbenchWindow {
                 collapse->setFixedSize(28, 28);
                 collapse->setIconSize(QSize(16, 16));
                 collapse->setIcon(workbench_icon(WorkbenchIcon::chevron_down));
-                collapse->setToolTip(QStringLiteral("收起时间轴 · Ctrl+J"));
+                collapse->setToolTip(ui::text("graphics_workbench.collapse.set_tool_tip"));
                 collapse->setAccessibleName(collapse->toolTip());
                 connect(collapse, &QToolButton::clicked, expand, &QAction::toggle);
                 connect(expand, &QAction::toggled, this, [this, collapse, timeline](bool expanded) {
@@ -970,8 +991,9 @@ class Workbench final : public WorkbenchWindow {
                     this->layout()->activate();
                     collapse->setIcon(workbench_icon(expanded ? WorkbenchIcon::chevron_down
                                                               : WorkbenchIcon::chevron_up));
-                    collapse->setToolTip(expanded ? QStringLiteral("收起时间轴 · Ctrl+J")
-                                                  : QStringLiteral("展开时间轴 · Ctrl+J"));
+                    collapse->setToolTip(
+                        expanded ? ui::text("graphics_workbench.collapse.set_tool_tip")
+                                 : ui::text("graphics_workbench.collapse.set_tool_tip_2"));
                     collapse->setAccessibleName(collapse->toolTip());
                 });
                 controls->addWidget(collapse);
@@ -987,7 +1009,7 @@ class Workbench final : public WorkbenchWindow {
                 host_layout->addWidget(timeline);
                 toolbar->addWidget(timeline_host);
                 responsive_columns(timeline, control_rows, 1000);
-                auto *credit = new QLabel("NASA Blue Marble");
+                auto *credit = new QLabel(ui::utf8("brand.map_credit"));
                 credit->setObjectName("hint");
                 statusBar()->addPermanentWidget(credit);
                 show_orbit_status();
@@ -1012,26 +1034,26 @@ class Workbench final : public WorkbenchWindow {
                 map_layout->setSpacing(0);
                 map_layout->addWidget(make_view_controls(std::nullopt));
                 map_layout->addWidget(ground_map_, 1);
-                workspace_->add_view(map_panel_, QStringLiteral("二维视图"),
+                workspace_->add_view(map_panel_, ui::text("workspace.view_2d"),
                                      workbench_icon(WorkbenchIcon::map));
-                map_action_ = new QAction(QStringLiteral("二维视图"), this);
+                map_action_ = new QAction(ui::text("workspace.view_2d"), this);
                 map_action_->setIcon(workbench_icon(WorkbenchIcon::map));
                 map_action_->setShortcut(QKeySequence("Ctrl+3"));
                 view_menu_->addAction(map_action_);
                 connect(map_action_, &QAction::triggered, this,
                         [this] { workspace_->select_view(1); });
                 auto *three_d = view_menu_->addAction(workbench_icon(WorkbenchIcon::earth),
-                                                      QStringLiteral("三维视图"));
+                                                      ui::text("workspace.view_3d"));
                 three_d->setShortcut(QKeySequence("Ctrl+1"));
                 connect(three_d, &QAction::triggered, this, [this] { workspace_->select_view(0); });
                 fit_views();
                 auto *fit = new QAction(workbench_icon(WorkbenchIcon::fit),
-                                        QStringLiteral("适配轨道"), this);
+                                        ui::text("graphics_workbench.fit"), this);
                 fit_action_ = fit;
                 fit->setShortcut(QKeySequence("Ctrl+0"));
                 connect(fit, &QAction::triggered, this, [this] { fit_views(); });
                 auto *focus = new QAction(workbench_icon(WorkbenchIcon::focus),
-                                          QStringLiteral("定位对象"), this);
+                                          ui::text("graphics_workbench.focus"), this);
                 focus_action_ = focus;
                 focus->setShortcut(QKeySequence("Ctrl+L"));
                 connect(focus, &QAction::triggered, this, [this] {
@@ -1053,7 +1075,8 @@ class Workbench final : public WorkbenchWindow {
                                 if (properties_action_)
                                     menu.addAction(properties_action_);
                                 menu.addAction(focus);
-                                auto *report = menu.addAction(QStringLiteral("报告…"));
+                                auto *report = menu.addAction(
+                                    ui::text("graphics_workbench.analysis_menu.add_action"));
                                 report->setObjectName("openObjectReport");
                                 report->setEnabled(!busy());
                                 const auto report_id =
@@ -1072,7 +1095,8 @@ class Workbench final : public WorkbenchWindow {
                                                 report_dialog_->select_object(report_id,
                                                                               report_kind);
                                         });
-                                auto *access = menu.addAction(QStringLiteral("可见性分析…"));
+                                auto *access =
+                                    menu.addAction(ui::text("graphics_workbench.access"));
                                 access->setObjectName("openObjectAccess");
                                 access->setEnabled(!busy() && !stations_.empty() &&
                                                    !satellites_.empty());
@@ -1082,7 +1106,8 @@ class Workbench final : public WorkbenchWindow {
                                         report_id, application::ReportKind::access_intervals);
                                 });
                                 if (selected_ && !selected_sensor()) {
-                                    auto *sensor = menu.addAction(QStringLiteral("插入传感器…"));
+                                    auto *sensor =
+                                        menu.addAction(ui::text("graphics_workbench.sensor"));
                                     sensor->setObjectName("insertSensor");
                                     sensor->setEnabled(!busy());
                                     connect(sensor, &QAction::triggered, this,
@@ -1096,7 +1121,7 @@ class Workbench final : public WorkbenchWindow {
                                 if (item && item == scenario_item_) {
                                     auto *properties =
                                         menu.addAction(workbench_icon(WorkbenchIcon::properties),
-                                                       QStringLiteral("属性"));
+                                                       ui::text("common.properties"));
                                     properties->setEnabled(!busy());
                                     connect(properties, &QAction::triggered, this,
                                             [this] { open_scenario_properties(); });
@@ -1160,8 +1185,7 @@ class Workbench final : public WorkbenchWindow {
                 if (project_candidate_.valid() && project_cancellation_)
                     project_cancellation_->store(true);
                 event->ignore();
-                statusBar()->showMessage(QStringLiteral("请等待当前操作完成，或先取消轨道计算。"),
-                                         5000);
+                statusBar()->showMessage(ui::text("graphics_workbench.label_12"), 5000);
                 return;
             }
             if (!confirm_replace_scenario()) {
@@ -1600,13 +1624,13 @@ class Workbench final : public WorkbenchWindow {
             sensor_editor_ = new SensorEditor(this);
             sensor_editor_->apply = [this](application::ProjectSensor sensor) {
                 if (busy())
-                    throw std::runtime_error("场景正在更新，请稍后重试。");
+                    throw std::runtime_error(ui::utf8("graphics_workbench.validation_2"));
                 auto p = project_snapshot(project_path_);
                 const auto id = sensor.object_id;
                 auto found = std::ranges::find(p.sensors, sensor.object_id,
                                                &application::ProjectSensor::object_id);
                 if (found != p.sensors.end() && same_sensor_input(*found, sensor)) {
-                    statusBar()->showMessage(QStringLiteral("没有需要应用的更改。"), 4000);
+                    statusBar()->showMessage(ui::text("graphics_workbench.label_13"), 4000);
                     return;
                 }
                 if (found == p.sensors.end())
@@ -1678,7 +1702,7 @@ class Workbench final : public WorkbenchWindow {
         } catch (const std::exception &error) {
             clear_access_display();
             statusBar()->showMessage(
-                QStringLiteral("可见性联动已停止：%1").arg(QString::fromUtf8(error.what())), 6000);
+                ui::text("graphics_workbench.label_14").arg(QString::fromUtf8(error.what())), 6000);
         }
     }
     std::optional<std::size_t> selected_marker_index() const {
@@ -1708,10 +1732,10 @@ class Workbench final : public WorkbenchWindow {
         if (report_dialog_ && scenario_)
             report_dialog_->update_project(project_snapshot(project_path_), active_time());
         if (scenario_) {
-            const auto filename = project_path_.isEmpty() ? QStringLiteral("未保存")
+            const auto filename = project_path_.isEmpty() ? ui::text("graphics_workbench.filename")
                                                           : QFileInfo(project_path_).fileName();
             setWindowTitle(QString::fromStdString(scenario_->name()) + QStringLiteral(" · ") +
-                           filename + QStringLiteral("[*] · OrbitForge"));
+                           filename + ui::text("window.modified_title_suffix"));
         }
         setWindowModified(dirty);
     }
@@ -1762,7 +1786,7 @@ class Workbench final : public WorkbenchWindow {
                 return v.selection == input.hpop.gravity_model;
             });
             if (found == installed.end())
-                throw std::runtime_error("缺少重力场文件，请在数据中心下载或导入：" +
+                throw std::runtime_error(ui::utf8("graphics_workbench.validation_3") +
                                          input.hpop.gravity_model);
             result.push_back(*found);
         }
@@ -1790,7 +1814,7 @@ class Workbench final : public WorkbenchWindow {
             const auto found = std::find_if(installed.begin(), installed.end(),
                                             [&](const auto &v) { return v.selection == id; });
             if (found == installed.end())
-                throw std::runtime_error("缺少太阳系星历，请在数据中心下载或导入：" + id);
+                throw std::runtime_error(ui::utf8("graphics_workbench.validation_4") + id);
             result.push_back(*found);
         }
         return result;
@@ -1810,8 +1834,7 @@ class Workbench final : public WorkbenchWindow {
             const auto found = std::find_if(installed.begin(), installed.end(),
                                             [&](const auto &v) { return v.selection == id; });
             if (found == installed.end())
-                throw std::runtime_error("缺少空间天气数据，请在数据中心 → 空间天气下载或导入：" +
-                                         id);
+                throw std::runtime_error(ui::utf8("graphics_workbench.validation_5") + id);
             result.push_back(*found);
         }
         return result;
@@ -1831,7 +1854,7 @@ class Workbench final : public WorkbenchWindow {
             const auto found = std::find_if(installed.begin(), installed.end(),
                                             [&](const auto &v) { return v.selection == id; });
             if (found == installed.end())
-                throw std::runtime_error("缺少海潮模型，请在数据中心 → 海潮模型下载或导入：" + id);
+                throw std::runtime_error(ui::utf8("graphics_workbench.validation_6") + id);
             result.push_back(*found);
         }
         return result;
@@ -1872,7 +1895,7 @@ class Workbench final : public WorkbenchWindow {
                 [this](const application::ReportQuery &query, ReportDialog::Ready done) {
                     try {
                         if (busy()) {
-                            done({}, QStringLiteral("场景正在更新，请完成后再生成报告。"));
+                            done({}, ui::text("graphics_workbench.label_15"));
                             return;
                         }
                         auto requested = project_snapshot(project_path_);
@@ -1888,7 +1911,7 @@ class Workbench final : public WorkbenchWindow {
                                     });
                                 if (found == installed.end())
                                     throw std::runtime_error(
-                                        "光照分析需要太阳系星历，请在数据中心下载 DE440s。");
+                                        ui::utf8("graphics_workbench.validation_7"));
                                 requested.force_data.push_back(
                                     runtime::ephemeris_reference(found->selection, found->info));
                             }
@@ -1902,7 +1925,7 @@ class Workbench final : public WorkbenchWindow {
                                               selected_marker_index()))
                                 pending_report_input_ = std::move(done);
                             else
-                                done({}, QStringLiteral("未生成报告；场景数据未更新。"));
+                                done({}, ui::text("graphics_workbench.label_16"));
                         } else
                             done(report_input(), {});
                     } catch (const std::exception &error) {
@@ -1911,7 +1934,7 @@ class Workbench final : public WorkbenchWindow {
                 },
                 [this](std::vector<application::ReportDefinition> reports) {
                     if (busy())
-                        throw std::runtime_error("场景正在更新，请完成后再保存报告配置。");
+                        throw std::runtime_error(ui::utf8("graphics_workbench.validation_8"));
                     auto project = project_snapshot(project_path_);
                     project.reports = reports;
                     application::validate_project(project);
@@ -1988,19 +2011,19 @@ class Workbench final : public WorkbenchWindow {
                                   project_snapshot(absolute), true);
         project_path_ = absolute;
         mark_project_dirty(false);
-        statusBar()->showMessage(QStringLiteral("已保存：%1").arg(project_path_), 6000);
+        statusBar()->showMessage(ui::text("graphics_workbench.label_17").arg(project_path_), 6000);
     }
     bool save_project_dialog(bool save_as) {
         if (!scenario_ || busy())
             return false;
         QString path = project_path_;
         if (save_as || path.isEmpty()) {
-            QFileDialog dialog(this, QStringLiteral("保存项目"));
+            QFileDialog dialog(this, ui::text("graphics_workbench.path"));
             dialog.setAcceptMode(QFileDialog::AcceptSave);
             dialog.setFileMode(QFileDialog::AnyFile);
-            dialog.setNameFilter(QStringLiteral("OrbitForge 项目 (*.orbitforge)"));
+            dialog.setNameFilter(ui::text("graphics_workbench.label_18"));
             dialog.setDefaultSuffix(QStringLiteral("orbitforge"));
-            dialog.selectFile(path.isEmpty() ? QStringLiteral("项目.orbitforge") : path);
+            dialog.selectFile(path.isEmpty() ? ui::text("graphics_workbench.label_19") : path);
             if (dialog.exec() != QDialog::Accepted)
                 return false;
             path = dialog.selectedFiles().value(0);
@@ -2009,7 +2032,8 @@ class Workbench final : public WorkbenchWindow {
             save_project_to(path);
             return true;
         } catch (const std::exception &error) {
-            QMessageBox::warning(this, QStringLiteral("保存失败"), QString::fromUtf8(error.what()));
+            QMessageBox::warning(this, ui::text("graphics_workbench.label_20"),
+                                 QString::fromUtf8(error.what()));
             return false;
         }
     }
@@ -2044,13 +2068,12 @@ class Workbench final : public WorkbenchWindow {
         return drafts;
     }
     bool confirm_discard_property(QDialog *page) {
-        QMessageBox question(QMessageBox::Question, QStringLiteral("保留未应用的输入？"),
-                             QStringLiteral("“%1”有尚未应用的输入。切换编辑对象会丢弃这些输入。")
-                                 .arg(page->windowTitle()),
+        QMessageBox question(QMessageBox::Question, ui::text("graphics_workbench.label_21"),
+                             ui::text("graphics_workbench.label_22").arg(page->windowTitle()),
                              QMessageBox::Discard | QMessageBox::Cancel, this);
         question.setObjectName("discardPropertyDraft");
-        question.button(QMessageBox::Discard)->setText(QStringLiteral("放弃输入并切换"));
-        question.button(QMessageBox::Cancel)->setText(QStringLiteral("继续编辑"));
+        question.button(QMessageBox::Discard)->setText(ui::text("graphics_workbench.label_23"));
+        question.button(QMessageBox::Cancel)->setText(ui::text("graphics_workbench.label_24"));
         question.setDefaultButton(QMessageBox::Cancel);
         if (question.exec() == QMessageBox::Discard)
             return true;
@@ -2068,22 +2091,21 @@ class Workbench final : public WorkbenchWindow {
             QStringList names;
             for (const auto *draft : drafts)
                 names << draft->windowTitle();
-            message = QStringLiteral("以下属性有尚未应用的输入：\n%1\n\n"
-                                     "保存项目只保存已应用的结果；离开当前场景会丢弃这些输入。")
-                          .arg(names.join("\n"));
+            message = ui::text("graphics_workbench.label_25").arg(names.join("\n"));
         } else
-            message = QStringLiteral("当前项目有已应用但尚未保存的更改。是否先保存？");
+            message = ui::text("graphics_workbench.label_26");
         const auto buttons = QMessageBox::Discard | QMessageBox::Cancel |
                              (project_dirty_ ? QMessageBox::Save : QMessageBox::NoButton);
-        QMessageBox question(QMessageBox::Question, QStringLiteral("离开当前场景？"), message,
-                             buttons, this);
+        QMessageBox question(QMessageBox::Question, ui::text("graphics_workbench.label_27"),
+                             message, buttons, this);
         question.setObjectName("leaveScenarioConfirmation");
         question.setDefaultButton(drafts.empty() ? QMessageBox::Save : QMessageBox::Cancel);
         if (!drafts.empty()) {
-            question.button(QMessageBox::Cancel)->setText(QStringLiteral("返回编辑"));
-            question.button(QMessageBox::Discard)->setText(QStringLiteral("放弃并离开"));
+            question.button(QMessageBox::Cancel)->setText(ui::text("graphics_workbench.label_28"));
+            question.button(QMessageBox::Discard)->setText(ui::text("graphics_workbench.label_29"));
             if (project_dirty_)
-                question.button(QMessageBox::Save)->setText(QStringLiteral("保存已应用结果并离开"));
+                question.button(QMessageBox::Save)
+                    ->setText(ui::text("graphics_workbench.label_30"));
         }
         const auto answer = question.exec();
         if (answer == QMessageBox::Cancel && !drafts.empty())
@@ -2104,7 +2126,9 @@ class Workbench final : public WorkbenchWindow {
                 if (project_orbit_edit_)
                     editor_->accept_input(found->orbit->input);
                 editor_->set_analysis_interval(scenario_->first(), scenario_->last());
-                properties_dialog_->setWindowTitle(found->name() + QStringLiteral(" · 对象属性"));
+                properties_dialog_->setWindowTitle(
+                    found->name() +
+                    ui::text("graphics_workbench.properties_dialog.set_window_title_2"));
             } else if (editor_target_) {
                 properties_dialog_->close();
                 orbit_editor_bound_ = false;
@@ -2124,9 +2148,10 @@ class Workbench final : public WorkbenchWindow {
                     station_editor_->set_station(found->config, false);
                 station_editor_->sync_name(found->config.name());
                 station_editor_target_ = found->config.object_id;
-                station_editor_->setWindowTitle(found->name() + QStringLiteral(" · 地面站属性"));
+                station_editor_->setWindowTitle(
+                    found->name() + ui::text("graphics_workbench.station_editor.set_window_title"));
                 station_editor_->show_result(pending_station_apply_ == found->config.object_id
-                                                 ? QStringLiteral("已应用。")
+                                                 ? ui::text("graphics_workbench.label_31")
                                                  : QString{});
             } else if (station_editor_target_) {
                 station_editor_->close();
@@ -2144,8 +2169,9 @@ class Workbench final : public WorkbenchWindow {
                     sensor_editor_->set_sensor(*found, project_snapshot(project_path_), false);
                 sensor_editor_->sync_name(found->name());
                 sensor_editor_creating_ = false;
-                sensor_editor_->setWindowTitle(QString::fromStdString(found->name()) +
-                                               QStringLiteral(" · 传感器"));
+                sensor_editor_->setWindowTitle(
+                    QString::fromStdString(found->name()) +
+                    ui::text("graphics_workbench.sensor_editor.set_window_title"));
             } else if (!sensor_editor_creating_ ||
                        std::ranges::none_of(satellites_, [this](const auto &satellite) {
                            return satellite.orbit->input.object_id ==
@@ -2161,8 +2187,9 @@ class Workbench final : public WorkbenchWindow {
             for (const auto *id : {"scenarioSettingsStart", "scenarioSettingsEnd"})
                 dynamic_cast<EpochEditor *>(scenario_properties_->findChild<QWidget *>(id))
                     ->set_time_provider(active_time());
-            scenario_properties_->setWindowTitle(QString::fromStdString(scenario_->name()) +
-                                                 QStringLiteral(" · 场景属性"));
+            scenario_properties_->setWindowTitle(
+                QString::fromStdString(scenario_->name()) +
+                ui::text("graphics_workbench.scenario_properties.set_window_title"));
             scenario_properties_->findChild<QLabel *>("scenarioObjectCount")
                 ->setText(QString::number(satellites_.size() + stations_.size()));
             scenario_properties_->findChild<QLineEdit *>("scenarioDataHash")
@@ -2170,7 +2197,7 @@ class Workbench final : public WorkbenchWindow {
             auto *caption = scenario_properties_->findChild<QLabel *>("scenarioEopData");
             caption->setText(QString::fromStdString(eop_->data_info().id) +
                              (eop_->data_info().interpolation.starts_with("finals2000a")
-                                  ? QStringLiteral(" · 可能含预测值")
+                                  ? ui::text("graphics_workbench.label_32")
                                   : QString{}));
             caption->setToolTip(QString::fromStdString(eop_->data_info().id));
             scenario_properties_->findChild<QLabel *>("scenarioExtrapolation")
@@ -2182,8 +2209,8 @@ class Workbench final : public WorkbenchWindow {
         if (busy())
             return;
         const auto path =
-            QFileDialog::getOpenFileName(this, QStringLiteral("打开项目"), project_path_,
-                                         QStringLiteral("OrbitForge 项目 (*.orbitforge)"));
+            QFileDialog::getOpenFileName(this, ui::text("graphics_workbench.path_2"), project_path_,
+                                         ui::text("graphics_workbench.label_18"));
         if (path.isEmpty())
             return;
         try {
@@ -2193,7 +2220,7 @@ class Workbench final : public WorkbenchWindow {
             if (confirm_replace_scenario())
                 start_project(std::move(project), path);
         } catch (const std::exception &error) {
-            QMessageBox::warning(this, QStringLiteral("无法打开项目"),
+            QMessageBox::warning(this, ui::text("graphics_workbench.label_33"),
                                  QString::fromUtf8(error.what()));
         }
     }
@@ -2210,19 +2237,17 @@ class Workbench final : public WorkbenchWindow {
         QString coverage;
         for (const auto index : eop_catalog_->current_indices()) {
             const auto &info = eop_catalog_->providers().at(index)->data_info();
-            coverage += QStringLiteral("\n%1 — %2（允许外推：%3 天）")
+            coverage += ui::text("graphics_workbench.info")
                             .arg(label(info.first_epoch), label(info.last_epoch))
                             .arg(eop_catalog_->extrapolation_days(index));
         }
         QMessageBox message(
-            QMessageBox::Warning, QStringLiteral("数据覆盖不足"),
-            QStringLiteral("场景需要：%1 — "
-                           "%2\n当前数据覆盖：%3\n\n请在数据中心更新数据或调整外推设置后重试。UTC "
-                           "/ 闰秒有效期不可外推。")
-                .arg(label(first), label(last), coverage),
+            QMessageBox::Warning, ui::text("graphics_workbench.label_34"),
+            ui::text("graphics_workbench.label_35").arg(label(first), label(last), coverage),
             QMessageBox::Cancel, this);
         message.setObjectName("dataCoverageDialog");
-        auto *manage = message.addButton(QStringLiteral("打开数据中心"), QMessageBox::ActionRole);
+        auto *manage =
+            message.addButton(ui::text("graphics_workbench.manage"), QMessageBox::ActionRole);
         message.exec();
         if (message.clickedButton() == manage)
             show_data_center(this, *eop_catalog_);
@@ -2245,11 +2270,10 @@ class Workbench final : public WorkbenchWindow {
                                                                 info.last_epoch.tai_nanoseconds())},
                                            CalendarScale::utc) +
                              QStringLiteral(" — ") + calendar_text(last, CalendarScale::utc));
-        return ranges.empty()
-                   ? QStringLiteral("未使用外推")
-                   : QStringLiteral("已使用 EOP 外推（端点线性估算，上限 %1 天）\n%2 UTC")
-                         .arg(info.extrapolation_days)
-                         .arg(ranges.join(QStringLiteral("\n")));
+        return ranges.empty() ? ui::text("graphics_workbench.label_36")
+                              : ui::text("graphics_workbench.label_37")
+                                    .arg(info.extrapolation_days)
+                                    .arg(ranges.join(QStringLiteral("\n")));
     }
     bool start_project(application::Project project, const QString &path, bool editing = false,
                        std::optional<std::size_t> selection = std::nullopt,
@@ -2287,39 +2311,39 @@ class Workbench final : public WorkbenchWindow {
                 const auto &ref = change.after ? *change.after : *change.before;
                 const auto role = QString::fromStdString(ref.role);
                 const auto label =
-                    ref.role == "earth-orientation"          ? QStringLiteral("地球定向参数")
-                    : ref.role == "utc-time"                 ? QStringLiteral("UTC / 闰秒")
-                    : ref.role.starts_with("gravity/")       ? QStringLiteral("重力场")
-                    : ref.role.starts_with("ephemeris/")     ? QStringLiteral("太阳系星历")
-                    : ref.role.starts_with("space-weather/") ? QStringLiteral("空间天气")
-                    : ref.role.starts_with("ocean-tides/")   ? QStringLiteral("海潮")
-                                                             : role;
+                    ref.role == "earth-orientation"      ? ui::text("graphics_workbench.label_38")
+                    : ref.role == "utc-time"             ? ui::text("graphics_workbench.label_39")
+                    : ref.role.starts_with("gravity/")   ? ui::text("graphics_workbench.label_40")
+                    : ref.role.starts_with("ephemeris/") ? ui::text("graphics_workbench.label_41")
+                    : ref.role.starts_with("space-weather/")
+                        ? ui::text("graphics_workbench.label_42")
+                    : ref.role.starts_with("ocean-tides/") ? ui::text("graphics_workbench.label_43")
+                                                           : role;
                 const auto old_id = change.before
                                         ? QString::fromStdString(change.before->snapshot_id)
-                                        : QStringLiteral("未使用");
+                                        : ui::text("graphics_workbench.label_44");
                 const auto new_id = change.after ? QString::fromStdString(change.after->snapshot_id)
-                                                 : QStringLiteral("不再使用");
+                                                 : ui::text("graphics_workbench.new_id");
                 descriptions << QStringLiteral("• %1：%2 → %3").arg(label, old_id, new_id);
                 details << role;
                 for (const auto &value : {change.before, change.after})
                     details << (value
-                                    ? QStringLiteral("%1 · %2\n内容：%3\n解释配置：%4")
+                                    ? ui::text("graphics_workbench.label_45")
                                           .arg(
                                               QString::fromStdString(value->snapshot_id),
                                               QString::fromStdString(value->interpretation_version),
                                               QString::fromStdString(value->content_sha256),
                                               QString::fromStdString(value->configuration_sha256))
-                                    : QStringLiteral("未使用"));
+                                    : ui::text("graphics_workbench.label_44"));
             }
             QMessageBox message(
-                QMessageBox::Question, QStringLiteral("采用更新后的计算数据？"),
-                QStringLiteral("以下已引用的数据或解释设置发生了变化：\n%1\n\n"
-                               "%2\n采用后将更新依赖这些数据的计算与显示。取消将保留原场景和结果。")
+                QMessageBox::Question, ui::text("graphics_workbench.label_46"),
+                ui::text("graphics_workbench.label_47")
                     .arg(descriptions.join('\n'),
                          extrapolation_description(next_data->data_info(), data_first, data_last)),
                 QMessageBox::Yes | QMessageBox::Cancel, this);
             message.setObjectName("dataChangeDialog");
-            message.button(QMessageBox::Yes)->setText(QStringLiteral("使用当前数据"));
+            message.button(QMessageBox::Yes)->setText(ui::text("graphics_workbench.label_48"));
             message.setDefaultButton(QMessageBox::Cancel);
             message.setDetailedText(details.join('\n'));
             if (message.exec() != QMessageBox::Yes) {
@@ -2360,15 +2384,17 @@ class Workbench final : public WorkbenchWindow {
                 pending_project_sensor_selection_ = sensor->object_id;
         pending_project_path_ = editing ? project_path_ : QFileInfo(path).absoluteFilePath();
         if (!cancel_project_button_) {
-            cancel_project_button_ = new QPushButton(QStringLiteral("取消打开"), statusBar());
+            cancel_project_button_ =
+                new QPushButton(ui::text("graphics_workbench.label_49"), statusBar());
             statusBar()->addPermanentWidget(cancel_project_button_);
             connect(cancel_project_button_, &QPushButton::clicked, this, [this] {
                 if (project_cancellation_)
                     project_cancellation_->store(true);
             });
         }
-        cancel_project_button_->setText(editing ? QStringLiteral("取消更新")
-                                                : QStringLiteral("取消打开"));
+        cancel_project_button_->setText(
+            editing ? ui::text("graphics_workbench.cancel_project_button.set_text")
+                    : ui::text("graphics_workbench.label_49"));
         project_cancellation_ = std::make_shared<std::atomic_bool>(false);
         last_project_outcome_.clear();
         project_recorded_data_ = recorded_data;
@@ -2429,8 +2455,8 @@ class Workbench final : public WorkbenchWindow {
                                              previous_project, sessions);
             });
         update_actions();
-        statusBar()->showMessage(editing ? QStringLiteral("正在更新场景并准备轨迹…")
-                                         : QStringLiteral("正在打开项目并准备轨迹…"));
+        statusBar()->showMessage(editing ? ui::text("graphics_workbench.label_50")
+                                         : ui::text("graphics_workbench.label_51"));
         return true;
     }
     void poll_project() {
@@ -2484,8 +2510,9 @@ class Workbench final : public WorkbenchWindow {
                 satellite.tracks->addChild(true, satellite.fixed_track->node());
                 tracks->addChild(satellite.tracks);
                 satellite.item = new QTreeWidgetItem(root.get(), {satellite.name()});
-                satellite.item->setToolTip(0, QStringLiteral("ID：%1").arg(
-                                                  QString::fromStdString(config.orbit.object_id)));
+                satellite.item->setToolTip(
+                    0, ui::text("common.object_id_hint")
+                           .arg(QString::fromStdString(config.orbit.object_id)));
                 satellite.item->setIcon(0,
                                         workbench_icon(WorkbenchIcon::satellite,
                                                        QColor::fromRgb(config.display.line_color)));
@@ -2500,7 +2527,7 @@ class Workbench final : public WorkbenchWindow {
                 item->setData(0, Qt::UserRole + 17, QString::fromStdString(sensor.object_id));
                 item->setIcon(0, workbench_icon(WorkbenchIcon::focus, theme::color(theme::sakura)));
                 item->setToolTip(0,
-                                 QStringLiteral("圆锥传感器 · %1°\nID：%2")
+                                 ui::text("graphics_workbench.item.set_tool_tip")
                                      .arg(sensor.half_angle_rad * 180 / std::numbers::pi, 0, 'g', 5)
                                      .arg(QString::fromStdString(sensor.object_id)));
             }
@@ -2509,7 +2536,7 @@ class Workbench final : public WorkbenchWindow {
                 station.item = new QTreeWidgetItem(root.get(), {station.name()});
                 station.item->setIcon(
                     0, workbench_icon(WorkbenchIcon::ground_station, theme::color(theme::success)));
-                station.item->setToolTip(0, QStringLiteral("地面站 · WGS84\nID：%1")
+                station.item->setToolTip(0, ui::text("graphics_workbench.item.set_tool_tip_2")
                                                 .arg(QString::fromStdString(config.object_id)));
                 stations.push_back(std::move(station));
             }
@@ -2622,17 +2649,17 @@ class Workbench final : public WorkbenchWindow {
             mark_project_dirty(project_edit_ ||
                                candidate->project.data_lock() != project_recorded_data_);
             last_project_outcome_ = "opened";
-            statusBar()->showMessage(project_edit_
-                                         ? QStringLiteral("已更新场景")
-                                         : QStringLiteral("已打开：%1").arg(project_path_),
-                                     6000);
+            statusBar()->showMessage(
+                project_edit_ ? ui::text("graphics_workbench.label_52")
+                              : ui::text("graphics_workbench.label_53").arg(project_path_),
+                6000);
         } catch (const OrbitCancelled &) {
             last_project_outcome_ = "cancelled";
-            statusBar()->showMessage(QStringLiteral("已取消；继续显示原场景。"), 5000);
+            statusBar()->showMessage(ui::text("graphics_workbench.label_54"), 5000);
         } catch (const std::exception &error) {
             last_project_outcome_ = "rejected";
-            const auto title =
-                project_edit_ ? QStringLiteral("场景未更新") : QStringLiteral("项目未打开");
+            const auto title = project_edit_ ? ui::text("graphics_workbench.title")
+                                             : ui::text("graphics_workbench.title_2");
             statusBar()->showMessage(title + QStringLiteral("：") +
                                      QString::fromUtf8(error.what()));
             if (smoke_dir_.isEmpty())
@@ -2640,14 +2667,14 @@ class Workbench final : public WorkbenchWindow {
         } catch (const vsg::Exception &error) {
             last_project_outcome_ = "rejected";
             statusBar()->showMessage(
-                QStringLiteral("项目图形准备失败：%1").arg(QString::fromStdString(error.message)));
+                ui::text("graphics_workbench.label_55").arg(QString::fromStdString(error.message)));
         }
         if (project_orbit_edit_) {
             editor_->set_busy(false);
             last_orbit_outcome_ =
                 last_project_outcome_ == "opened" ? "applied" : last_project_outcome_;
             if (last_project_outcome_ != "opened")
-                editor_->show_result(QStringLiteral("未应用；原场景保留。"), true);
+                editor_->show_result(ui::text("graphics_workbench.label_56"), true);
             if (insert_defaults_pending_ && last_orbit_outcome_ == "rejected")
                 show_properties_dialog();
             insert_defaults_pending_ = false;
@@ -2655,21 +2682,20 @@ class Workbench final : public WorkbenchWindow {
         if (project_settings_edit_ && last_project_outcome_ != "opened" && scenario_properties_)
             if (auto *result =
                     scenario_properties_->findChild<QLabel *>("scenarioSettingsResult")) {
-                result->setText(
-                    last_project_outcome_ == "cancelled"
-                        ? QStringLiteral("已取消更新，原场景保留。可继续修改后重新应用。")
-                        : QStringLiteral("更新失败，原场景保留。请调整设置后重试。"));
+                result->setText(last_project_outcome_ == "cancelled"
+                                    ? ui::text("graphics_workbench.result.set_text")
+                                    : ui::text("graphics_workbench.label_57"));
                 result->show();
             }
         if (station_editor_ && last_project_outcome_ != "opened")
-            station_editor_->show_result(QStringLiteral("未应用，原场景保留。请调整后重试。"));
+            station_editor_->show_result(ui::text("graphics_workbench.label_58"));
         if (pending_report_input_) {
             auto done = std::move(pending_report_input_);
             pending_report_input_ = {};
             if (last_project_outcome_ == "opened")
                 done(report_input(), {});
             else
-                done({}, QStringLiteral("未生成报告；场景更新未完成，上次结果保留。"));
+                done({}, ui::text("graphics_workbench.label_59"));
         }
         update_actions();
     }
@@ -2680,7 +2706,7 @@ class Workbench final : public WorkbenchWindow {
                                          &application::ProjectSensor::object_id);
             s.display_name = name.trimmed().toStdString();
             if (s.display_name.empty())
-                throw std::invalid_argument("请输入传感器名称。");
+                throw std::invalid_argument(ui::utf8("graphics_workbench.validation_9"));
             start_project(std::move(p), project_path_, true, selected_marker_index());
             return;
         }
@@ -2703,7 +2729,9 @@ class Workbench final : public WorkbenchWindow {
         filter_objects();
         ground_map_->set_name(*selected_, satellite.name());
         if (editor_target_ == selected_)
-            properties_dialog_->setWindowTitle(satellite.name() + QStringLiteral(" · 对象属性"));
+            properties_dialog_->setWindowTitle(
+                satellite.name() +
+                ui::text("graphics_workbench.properties_dialog.set_window_title_2"));
         show_timeline_status();
         mark_project_dirty();
     }
@@ -2711,14 +2739,14 @@ class Workbench final : public WorkbenchWindow {
         if (busy() || !selected_marker_index())
             return;
         bool accepted = false;
-        const auto name =
-            QInputDialog::getText(this, QStringLiteral("重命名对象"), QStringLiteral("名称"),
-                                  QLineEdit::Normal, selected_name(), &accepted);
+        const auto name = QInputDialog::getText(this, ui::text("graphics_workbench.name"),
+                                                ui::text("common.name"), QLineEdit::Normal,
+                                                selected_name(), &accepted);
         if (accepted) {
             try {
                 rename_selected_to(name);
             } catch (const std::exception &error) {
-                QMessageBox::warning(this, QStringLiteral("名称无效"),
+                QMessageBox::warning(this, ui::text("graphics_workbench.label_60"),
                                      QString::fromUtf8(error.what()));
             }
         }
@@ -2730,7 +2758,7 @@ class Workbench final : public WorkbenchWindow {
             if (selected_sensor()) {
                 auto p = project_snapshot(project_path_);
                 auto s = *selected_sensor();
-                s.display_name = s.name() + " 副本";
+                s.display_name = s.name() + ui::utf8("graphics_workbench.s");
                 s.object_id = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
                 const auto id = s.object_id;
                 p.sensors.push_back(std::move(s));
@@ -2747,7 +2775,8 @@ class Workbench final : public WorkbenchWindow {
                     id = source.object_id + "-copy-" + std::to_string(suffix++);
                 } while (object_id_exists(id));
                 start_project(
-                    project.with_ground_station_copy(source.object_id, id, source.name() + " 副本"),
+                    project.with_ground_station_copy(
+                        source.object_id, id, source.name() + ui::utf8("graphics_workbench.s")),
                     project_path_, true, satellites_.size() + stations_.size());
                 return;
             }
@@ -2758,20 +2787,22 @@ class Workbench final : public WorkbenchWindow {
                 id = source.orbit.object_id + "-copy-" + std::to_string(suffix++);
             } while (object_id_exists(id));
             start_project(
-                project.with_satellite_copy(source.orbit.object_id, id, source.name() + " 副本"),
+                project.with_satellite_copy(source.orbit.object_id, id,
+                                            source.name() + ui::utf8("graphics_workbench.s")),
                 project_path_, true, satellites_.size());
         } catch (const std::exception &error) {
-            QMessageBox::warning(this, QStringLiteral("复制失败"), QString::fromUtf8(error.what()));
+            QMessageBox::warning(this, ui::text("graphics_workbench.label_61"),
+                                 QString::fromUtf8(error.what()));
         }
     }
     void delete_selected() {
         if (busy() || !selected_marker_index())
             return;
         const auto index = *selected_marker_index();
-        if (QMessageBox::question(
-                this, QStringLiteral("删除对象"),
-                QStringLiteral("删除“%1”？此操作尚不支持撤销。").arg(selected_name()),
-                QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes)
+        if (QMessageBox::question(this, ui::text("graphics_workbench.index"),
+                                  ui::text("graphics_workbench.index_2").arg(selected_name()),
+                                  QMessageBox::Yes | QMessageBox::Cancel,
+                                  QMessageBox::Cancel) != QMessageBox::Yes)
             return;
         try {
             const auto current = project_snapshot(project_path_);
@@ -2793,7 +2824,8 @@ class Workbench final : public WorkbenchWindow {
                                        : std::optional<std::size_t>{std::min(index, count - 1)};
             start_project(std::move(project), project_path_, true, selection);
         } catch (const std::exception &error) {
-            QMessageBox::warning(this, QStringLiteral("删除失败"), QString::fromUtf8(error.what()));
+            QMessageBox::warning(this, ui::text("graphics_workbench.label_62"),
+                                 QString::fromUtf8(error.what()));
         }
     }
     void manage_eop_data() {
@@ -2816,9 +2848,8 @@ class Workbench final : public WorkbenchWindow {
             if (next && confirm_replace_scenario())
                 activate_scenario(std::move(*next));
         } catch (const core::TimeDataRangeError &) {
-            QMessageBox::warning(
-                this, QStringLiteral("UTC 数据需要更新"),
-                QStringLiteral("当前日期超出闰秒数据有效期，请在数据中心更新 UTC / 闰秒后重试。"));
+            QMessageBox::warning(this, ui::text("graphics_workbench.label_63"),
+                                 ui::text("graphics_workbench.label_64"));
         }
     }
     std::shared_ptr<const core::IEarthOrientationProvider>
@@ -2904,11 +2935,11 @@ class Workbench final : public WorkbenchWindow {
         scenario_item_->setIcon(0,
                                 workbench_icon(WorkbenchIcon::earth, theme::color(theme::accent)));
         scenario_item_->setToolTip(
-            0, QStringLiteral("Scenario · 中心天体 Earth\n%1 — %2 TAI")
+            0, ui::text("graphics_workbench.scenario_item.set_tool_tip")
                    .arg(display_tai(scenario_->first()), display_tai(scenario_->last())));
         scenario_item_->setExpanded(true);
         set_workspace_name(QString::fromStdString(scenario_->name()));
-        setWindowTitle(QString::fromStdString(scenario_->name()) + QStringLiteral(" · OrbitForge"));
+        setWindowTitle(QString::fromStdString(scenario_->name()) + ui::text("window.title_suffix"));
         project_path_.clear();
         standalone_time_data_.reset();
         analysis_record_.reset();
@@ -2969,8 +3000,8 @@ class Workbench final : public WorkbenchWindow {
             !confirm_discard_property(properties_dialog_))
             return;
         if (satellites_.size() + stations_.size() >= 10000) {
-            QMessageBox::information(this, QStringLiteral("对象数量"),
-                                     QStringLiteral("当前场景最多支持 10,000 个对象。"));
+            QMessageBox::information(this, ui::text("graphics_workbench.label_65"),
+                                     ui::text("graphics_workbench.label_66"));
             return;
         }
         OrbitInput input;
@@ -2992,8 +3023,9 @@ class Workbench final : public WorkbenchWindow {
         editor_->setToolTip({});
         editor_->show_result({});
         inspector_pages_->setCurrentIndex(0);
-        properties_dialog_->setWindowTitle(QStringLiteral("插入卫星 · ") +
-                                           QString::fromStdString(scenario_->name()));
+        properties_dialog_->setWindowTitle(
+            ui::text("graphics_workbench.properties_dialog.set_window_title_3") +
+            QString::fromStdString(scenario_->name()));
         insert_defaults_pending_ = method == InsertObjectMethod::defaults;
         if (insert_defaults_pending_) {
             properties_dialog_->close();
@@ -3017,11 +3049,11 @@ class Workbench final : public WorkbenchWindow {
                         project.ground_stations.begin(), project.ground_stations.end(),
                         [&](const auto &s) { return s.object_id == *station_editor_target_; });
                     if (found == project.ground_stations.end())
-                        throw std::invalid_argument("地面站已不存在，请重新选择对象。");
+                        throw std::invalid_argument(ui::utf8("graphics_workbench.validation_10"));
                     index = static_cast<std::size_t>(found - project.ground_stations.begin());
                     if (found->location == value.location && found->name() == value.name() &&
                         found->minimum_elevation_rad == value.minimum_elevation_rad) {
-                        station_editor_->show_result(QStringLiteral("参数未改变。"));
+                        station_editor_->show_result(ui::text("graphics_workbench.label_67"));
                         return;
                     }
                     if (found->location != value.location)
@@ -3034,9 +3066,9 @@ class Workbench final : public WorkbenchWindow {
                 if (start_project(std::move(project), project_path_, true,
                                   satellites_.size() + index, edited)) {
                     pending_station_apply_ = id;
-                    station_editor_->show_result(QStringLiteral("正在应用…"));
+                    station_editor_->show_result(ui::text("graphics_workbench.label_68"));
                 } else
-                    station_editor_->show_result(QStringLiteral("未应用，原场景保留。"));
+                    station_editor_->show_result(ui::text("graphics_workbench.label_69"));
             };
         }
         if (!creating && station_editor_bound_ && station_editor_target_ == station.object_id)
@@ -3059,8 +3091,8 @@ class Workbench final : public WorkbenchWindow {
             return;
         }
         if (satellites_.size() + stations_.size() >= 10000) {
-            QMessageBox::information(this, QStringLiteral("对象数量"),
-                                     QStringLiteral("当前场景最多支持 10,000 个对象。"));
+            QMessageBox::information(this, ui::text("graphics_workbench.label_65"),
+                                     ui::text("graphics_workbench.label_66"));
             return;
         }
         application::ProjectGroundStation station;
@@ -3068,7 +3100,7 @@ class Workbench final : public WorkbenchWindow {
         do {
             station.object_id = "GroundStation" + std::to_string(suffix++);
         } while (object_id_exists(station.object_id));
-        station.display_name = "地面站 " + std::to_string(suffix - 1);
+        station.display_name = ui::utf8("graphics_workbench.label_70") + std::to_string(suffix - 1);
         if (!configure_station_editor(station, true))
             return;
         if (method == InsertObjectMethod::defaults) {
@@ -3082,7 +3114,8 @@ class Workbench final : public WorkbenchWindow {
         if (value)
             precise_epoch_.reset();
         if (play_action_) {
-            play_action_->setText(value ? QStringLiteral("暂停") : QStringLiteral("播放"));
+            play_action_->setText(value ? ui::text("graphics_workbench.play")
+                                        : ui::text("graphics_workbench.play_2"));
             play_action_->setIcon(play_icon(value));
         }
         clock_.restart();
@@ -3107,7 +3140,7 @@ class Workbench final : public WorkbenchWindow {
         set_playing(false);
         QDialog dialog(this);
         dialog.setObjectName("jumpTimeDialog");
-        dialog.setWindowTitle(QStringLiteral("跳转时间"));
+        dialog.setWindowTitle(ui::text("graphics_workbench.label_71"));
         auto *layout = new QVBoxLayout(&dialog);
         auto *time = new EpochEditor(nullptr, active_time());
         time->set_scale(display_scale_);
@@ -3117,8 +3150,8 @@ class Workbench final : public WorkbenchWindow {
         layout->addWidget(time);
         auto *buttons = new QHBoxLayout;
         buttons->addStretch();
-        auto *cancel = new QPushButton(QStringLiteral("取消"));
-        auto *apply = new QPushButton(QStringLiteral("跳转"));
+        auto *cancel = new QPushButton(ui::text("common.cancel"));
+        auto *apply = new QPushButton(ui::text("graphics_workbench.apply"));
         apply->setObjectName("applyOrbit");
         buttons->addWidget(cancel);
         buttons->addWidget(apply);
@@ -3129,7 +3162,7 @@ class Workbench final : public WorkbenchWindow {
                 (void)time->epoch();
                 dialog.accept();
             } catch (const std::exception &error) {
-                QMessageBox::information(&dialog, QStringLiteral("时间无效"),
+                QMessageBox::information(&dialog, ui::text("graphics_workbench.label_72"),
                                          QString::fromUtf8(error.what()));
             }
         });
@@ -3139,9 +3172,8 @@ class Workbench final : public WorkbenchWindow {
                 epoch.tai_nanoseconds() <= scenario_->last().tai_nanoseconds())
                 seek_epoch(epoch);
             else
-                QMessageBox::information(
-                    this, QStringLiteral("分析时段已更新"),
-                    QStringLiteral("新轨道的分析时段已改变，请重新选择跳转时间。"));
+                QMessageBox::information(this, ui::text("graphics_workbench.label_73"),
+                                         ui::text("graphics_workbench.label_74"));
         } else
             set_playing(resume);
     }
@@ -3180,7 +3212,8 @@ class Workbench final : public WorkbenchWindow {
         editor_->set_display(satellite.display);
         editor_->show_appearance_result({});
         inspector_pages_->setCurrentIndex(0);
-        properties_dialog_->setWindowTitle(satellite.name() + QStringLiteral(" · 对象属性"));
+        properties_dialog_->setWindowTitle(
+            satellite.name() + ui::text("graphics_workbench.properties_dialog.set_window_title_2"));
         show_orbit_status();
         show_properties_dialog();
     }
@@ -3200,7 +3233,8 @@ class Workbench final : public WorkbenchWindow {
         scenario_item_->setText(0, name);
         set_workspace_name(name);
         if (scenario_properties_)
-            scenario_properties_->setWindowTitle(name + QStringLiteral(" · 场景属性"));
+            scenario_properties_->setWindowTitle(
+                name + ui::text("graphics_workbench.scenario_properties.set_window_title"));
         show_timeline_status();
         mark_project_dirty();
         return true;
@@ -3234,16 +3268,15 @@ class Workbench final : public WorkbenchWindow {
         dialog.setObjectName("scenarioProperties");
         scenario_editor_bound_ = true;
         dialog.setWindowTitle(QString::fromStdString(scenario_->name()) +
-                              QStringLiteral(" · 场景属性"));
+                              ui::text("graphics_workbench.scenario_properties.set_window_title"));
         dialog.setMinimumWidth(620);
         auto *layout = new QVBoxLayout(&dialog);
         layout->setContentsMargins(theme::space::page);
         layout->setSpacing(16);
-        auto *title = new QLabel(QStringLiteral("场景设置"));
+        auto *title = new QLabel(ui::text("graphics_workbench.title_3"));
         title->setObjectName("panelTitle");
         layout->addWidget(title);
-        auto *description =
-            new QLabel(QStringLiteral("调整名称与分析时段，保留卫星的初始历元和轨道参数。"));
+        auto *description = new QLabel(ui::text("graphics_workbench.description"));
         description->setObjectName("dialogDescription");
         description->setWordWrap(true);
         layout->addWidget(description);
@@ -3262,11 +3295,11 @@ class Workbench final : public WorkbenchWindow {
             frame->setMaximumWidth(880);
             return std::pair{frame, frame->form()};
         };
-        auto [section, form] = group(QStringLiteral("基本设置"));
+        auto [section, form] = group(ui::text("graphics_workbench.label_75"));
         auto *name = new QLineEdit(QString::fromStdString(scenario_->name()));
         name->setObjectName("scenarioSettingsName");
         name->setMaximumWidth(380);
-        form->addRow(QStringLiteral("场景名称"), name);
+        form->addRow(ui::text("graphics_workbench.form.add_row"), name);
         auto *first = new EpochEditor(nullptr, eop_catalog_->time_provider());
         auto *last = new EpochEditor(nullptr, eop_catalog_->time_provider());
         first->setObjectName("scenarioSettingsStart");
@@ -3275,19 +3308,18 @@ class Workbench final : public WorkbenchWindow {
         last->set_epoch(scenario_->last());
         for (auto *field : {first, last})
             field->setMaximumWidth(380);
-        form->addRow(QStringLiteral("开始时间"), first);
-        form->addRow(QStringLiteral("结束时间"), last);
-        section->add_help(
-            QStringLiteral("修改时段后将重新准备全部轨迹。当前时刻超出新范围时，定位到最近的边界；"
-                           "数据不足或更新失败时保留原场景。"));
-        auto [facts, facts_form] = group(QStringLiteral("场景概况"));
-        facts_form->addRow(QStringLiteral("中心天体"), new QLabel(QStringLiteral("Earth / 地球")));
+        form->addRow(ui::text("graphics_workbench.form.add_row_2"), first);
+        form->addRow(ui::text("graphics_workbench.form.add_row_3"), last);
+        section->add_help(ui::text("graphics_workbench.section.add_help"));
+        auto [facts, facts_form] = group(ui::text("graphics_workbench.label_76"));
+        facts_form->addRow(ui::text("graphics_workbench.facts_form.add_row"),
+                           new QLabel(ui::text("graphics_workbench.facts_form.add_row_2")));
         auto *count = new QLabel(QString::number(satellites_.size() + stations_.size()));
         count->setObjectName("scenarioObjectCount");
-        facts_form->addRow(QStringLiteral("对象数量"), count);
+        facts_form->addRow(ui::text("graphics_workbench.label_65"), count);
         auto *duration = new QLabel;
         duration->setObjectName("scenarioSettingsDuration");
-        facts_form->addRow(QStringLiteral("时长"), duration);
+        facts_form->addRow(ui::text("graphics_workbench.facts_form.add_row_3"), duration);
         auto *fields = new QWidget;
         fields->setObjectName("scenarioSettingsFields");
         auto *fields_layout = new QVBoxLayout(fields);
@@ -3296,33 +3328,33 @@ class Workbench final : public WorkbenchWindow {
         fields_layout->addWidget(section);
         fields_layout->addWidget(facts);
         body_layout->addWidget(fields);
-        auto [data_section, data_form] = group(QStringLiteral("当前已应用的计算数据"));
+        auto [data_section, data_form] = group(ui::text("graphics_workbench.label_77"));
         form = data_form;
         body_layout->addWidget(data_section);
         auto *eop_caption = new QLabel(QString::fromStdString(eop_->data_info().id));
         eop_caption->setObjectName("scenarioEopData");
         if (eop_->data_info().interpolation.starts_with("finals2000a"))
-            eop_caption->setText(eop_caption->text() + QStringLiteral(" · 可能含预测值"));
+            eop_caption->setText(eop_caption->text() + ui::text("graphics_workbench.label_32"));
         eop_caption->setTextFormat(Qt::PlainText);
         eop_caption->setWordWrap(true);
         eop_caption->setToolTip(QString::fromStdString(eop_->data_info().id));
-        form->addRow(QStringLiteral("地球定向数据"), eop_caption);
+        form->addRow(ui::text("graphics_workbench.form.add_row_4"), eop_caption);
         auto *extrapolated = new QLabel(
             extrapolation_description(eop_->data_info(), scenario_->first(), scenario_->last()));
         extrapolated->setObjectName("scenarioExtrapolation");
         extrapolated->setWordWrap(true);
-        form->addRow(QStringLiteral("外推情况"), extrapolated);
+        form->addRow(ui::text("graphics_workbench.form.add_row_5"), extrapolated);
         // The 64-digit hash reads best on its own full-width row under its caption.
         auto *locked = new QLineEdit(QString::fromStdString(scenario_->data_lock().sha256()));
         locked->setObjectName("scenarioDataHash");
         locked->setReadOnly(true);
-        locked->setAccessibleName(QStringLiteral("本次计算数据 SHA-256"));
-        auto *locked_caption = new QLabel(QStringLiteral("本次计算数据 SHA-256"));
+        locked->setAccessibleName(ui::text("graphics_workbench.locked.set_accessible_name"));
+        auto *locked_caption =
+            new QLabel(ui::text("graphics_workbench.locked.set_accessible_name"));
         locked_caption->setBuddy(locked);
         form->addRow(locked_caption);
         form->addRow(locked);
-        data_section->add_help(
-            QStringLiteral("本次计算的数据来源记录；再次打开或计算时检查变化并请求确认。"));
+        data_section->add_help(ui::text("graphics_workbench.data_section.add_help"));
         align_form_labels(body);
         body_layout->addStretch();
         auto *result = new QLabel;
@@ -3331,17 +3363,17 @@ class Workbench final : public WorkbenchWindow {
         result->hide();
         layout->addWidget(result);
         auto *buttons = new QHBoxLayout;
-        auto *reset = new QPushButton(QStringLiteral("重置"));
+        auto *reset = new QPushButton(ui::text("graphics_workbench.reset"));
         reset->setObjectName("resetScenarioSettings");
         reset->setAutoDefault(false);
         buttons->addWidget(reset);
         buttons->addStretch();
-        auto *close = new QPushButton(QStringLiteral("关闭"));
+        auto *close = new QPushButton(ui::text("common.close"));
         close->setAutoDefault(false);
         buttons->addWidget(close);
-        auto *apply = new QPushButton(QStringLiteral("应用"));
+        auto *apply = new QPushButton(ui::text("common.apply"));
         apply->setObjectName("applyScenarioSettings");
-        apply->setToolTip(QStringLiteral("应用场景名称与分析时段"));
+        apply->setToolTip(ui::text("graphics_workbench.apply.set_tool_tip"));
         apply->setProperty("primary", true);
         apply->setDefault(true);
         buttons->addWidget(apply);
@@ -3350,10 +3382,10 @@ class Workbench final : public WorkbenchWindow {
             try {
                 const auto seconds = last->epoch().seconds_since(first->epoch());
                 duration->setText(seconds > 0 ? QString::number(seconds / 3600, 'g', 10) +
-                                                    QStringLiteral(" 小时")
-                                              : QStringLiteral("结束时间须晚于开始时间"));
+                                                    ui::text("graphics_workbench.duration.set_text")
+                                              : ui::text("graphics_workbench.label_78"));
             } catch (const std::exception &) {
-                duration->setText(QStringLiteral("请输入有效的起止时间"));
+                duration->setText(ui::text("graphics_workbench.duration.set_text_2"));
             }
         };
         for (auto *control : {first, last})
@@ -3370,21 +3402,21 @@ class Workbench final : public WorkbenchWindow {
         connect(apply, &QPushButton::clicked, &dialog, [this, name, first, last, result] {
             try {
                 if (name->text().trimmed().isEmpty())
-                    throw std::invalid_argument("请输入场景名称。");
+                    throw std::invalid_argument(ui::utf8("graphics_workbench.validation_11"));
                 const ScenarioSettings settings{name->text().trimmed().toStdString(),
                                                 first->epoch(), last->epoch()};
                 if (settings.last.tai_nanoseconds() <= settings.first.tai_nanoseconds())
-                    throw std::invalid_argument("结束时间必须晚于开始时间。");
+                    throw std::invalid_argument(ui::utf8("graphics_workbench.validation_12"));
                 const bool unchanged = settings.name == scenario_->name() &&
                                        settings.first == scenario_->first() &&
                                        settings.last == scenario_->last();
                 if (unchanged)
-                    result->setText(QStringLiteral("设置未变化。"));
+                    result->setText(ui::text("graphics_workbench.result.set_text_2"));
                 else if (apply_scenario_settings(settings))
-                    result->setText(busy() ? QStringLiteral("正在更新，可在状态栏取消。")
-                                           : QStringLiteral("场景名称已更新。"));
+                    result->setText(busy() ? ui::text("graphics_workbench.result.set_text_3")
+                                           : ui::text("graphics_workbench.result.set_text_4"));
                 else
-                    result->setText(QStringLiteral("未应用，原场景保留。"));
+                    result->setText(ui::text("graphics_workbench.label_69"));
             } catch (const std::exception &error) {
                 result->setText(QString::fromUtf8(error.what()));
             }
@@ -3500,8 +3532,7 @@ class Workbench final : public WorkbenchWindow {
             return;
         if (kind < 0 || kind > 2 || !std::isfinite(diameter_km) || diameter_km <= 0 ||
             (kind == 2 && path.isEmpty())) {
-            editor_->show_appearance_result(QStringLiteral("请选择模型文件和有效的显示尺寸。"),
-                                            true);
+            editor_->show_appearance_result(ui::text("graphics_workbench.label_79"), true);
             return;
         }
         pending_model_kind_ = kind;
@@ -3558,13 +3589,13 @@ class Workbench final : public WorkbenchWindow {
             editor_->accept_appearance(satellite.model_kind, satellite.model_path,
                                        satellite.model_diameter_km);
             update_satellite();
-            editor_->show_appearance_result(QStringLiteral("已应用"));
+            editor_->show_appearance_result(ui::text("graphics_workbench.label_80"));
         } catch (const std::exception &error) {
             editor_->show_appearance_result(
-                QStringLiteral("未应用；原外观保留。\n") + QString::fromUtf8(error.what()), true);
+                ui::text("graphics_workbench.label_81") + QString::fromUtf8(error.what()), true);
             last_model_outcome_ = "rejected";
         } catch (const vsg::Exception &error) {
-            editor_->show_appearance_result(QStringLiteral("模型编译失败；原外观保留。\n") +
+            editor_->show_appearance_result(ui::text("graphics_workbench.label_82") +
                                                 QString::fromStdString(error.message),
                                             true);
             last_model_outcome_ = "rejected";
@@ -3599,14 +3630,14 @@ class Workbench final : public WorkbenchWindow {
             input.object_id = satellites_.at(*editor_target_).orbit->input.object_id;
         else if (object_id_exists(input.object_id)) {
             last_orbit_outcome_ = "rejected";
-            editor_->show_result(QStringLiteral("对象 ID 已存在，请使用其他名称。"), true);
+            editor_->show_result(ui::text("graphics_workbench.label_83"), true);
             return;
         }
         if (editor_target_ &&
             same_orbit_input(input, satellites_.at(*editor_target_).orbit->input)) {
             last_orbit_outcome_ = "unchanged";
             editor_->accept_input(input);
-            editor_->show_result(QStringLiteral("没有需要应用的更改。"));
+            editor_->show_result(ui::text("graphics_workbench.label_13"));
             return;
         }
         if (display_cancellation_)
@@ -3648,14 +3679,14 @@ class Workbench final : public WorkbenchWindow {
                     editor_->set_busy(true);
                 } else {
                     last_orbit_outcome_ = last_project_outcome_;
-                    editor_->show_result(QStringLiteral("未重新计算；原场景保留。"));
+                    editor_->show_result(ui::text("graphics_workbench.label_84"));
                 }
                 return;
             }
         } catch (const std::out_of_range &) {
             last_orbit_outcome_ = "rejected";
             show_data_coverage(data_first, data_last);
-            editor_->show_result(QStringLiteral("数据覆盖不足；原场景保留。"), true);
+            editor_->show_result(ui::text("graphics_workbench.label_85"), true);
             return;
         } catch (const std::exception &error) {
             last_orbit_outcome_ = "rejected";
@@ -3754,7 +3785,7 @@ class Workbench final : public WorkbenchWindow {
                 satellite.item->setIcon(
                     0, workbench_icon(WorkbenchIcon::satellite,
                                       QColor::fromRgb(satellite.display.line_color)));
-                satellite.item->setToolTip(0, QStringLiteral("双击打开对象属性 · 默认显示为点"));
+                satellite.item->setToolTip(0, ui::text("graphics_workbench.item.set_tool_tip_3"));
                 satellites_.push_back(std::move(satellite));
                 scenario_item_->setExpanded(true);
             }
@@ -3773,8 +3804,9 @@ class Workbench final : public WorkbenchWindow {
             editor_target_ = index;
             editor_->accept_input(satellites_[index].orbit->input);
             editor_->set_create_mode(false);
-            properties_dialog_->setWindowTitle(satellites_[index].name() +
-                                               QStringLiteral(" · 对象属性"));
+            properties_dialog_->setWindowTitle(
+                satellites_[index].name() +
+                ui::text("graphics_workbench.properties_dialog.set_window_title_2"));
             orbit_ = satellites_.front().orbit;
             object_item_ = satellites_.front().item;
             snapshot_ = sample_frame(current);
@@ -3793,14 +3825,14 @@ class Workbench final : public WorkbenchWindow {
             show_orbit_status();
             last_orbit_outcome_ = "applied";
         } catch (const OrbitCancelled &) {
-            editor_->show_result(QStringLiteral("已取消；继续显示原场景。"));
+            editor_->show_result(ui::text("graphics_workbench.label_54"));
             last_orbit_outcome_ = "cancelled";
         } catch (const std::exception &error) {
             editor_->show_result(
-                QStringLiteral("未应用；原场景保留。\n") + QString::fromUtf8(error.what()), true);
+                ui::text("graphics_workbench.label_86") + QString::fromUtf8(error.what()), true);
             last_orbit_outcome_ = "rejected";
         } catch (const vsg::Exception &error) {
-            editor_->show_result(QStringLiteral("轨迹资源编译失败；原场景已恢复。\n") +
+            editor_->show_result(ui::text("graphics_workbench.label_87") +
                                      QString::fromStdString(error.message),
                                  true);
             last_orbit_outcome_ = "rejected";
@@ -3837,7 +3869,7 @@ class Workbench final : public WorkbenchWindow {
                     return prepare_orbit_scene(source->input, source->session, *frames_, *eop,
                                                *cancel, interval);
                 });
-            statusBar()->showMessage(QStringLiteral("正在准备当前时段的显示轨迹…"));
+            statusBar()->showMessage(ui::text("graphics_workbench.label_88"));
             break;
         }
     }
@@ -3883,17 +3915,17 @@ class Workbench final : public WorkbenchWindow {
             satellite_state_dirty_ = true;
             orbit_ = satellites_.front().orbit;
             ++display_cache_publications_;
-            statusBar()->showMessage(QStringLiteral("轨迹已更新"), 2000);
+            statusBar()->showMessage(ui::text("graphics_workbench.label_89"), 2000);
         } catch (const OrbitCancelled &) {
         } catch (const std::exception &error) {
             failed_display_source_ = display_source_;
             failed_display_settings_ = display_settings_;
-            statusBar()->showMessage(QStringLiteral("显示轨迹未更新：") +
+            statusBar()->showMessage(ui::text("graphics_workbench.label_90") +
                                      QString::fromUtf8(error.what()));
         } catch (const vsg::Exception &error) {
             failed_display_source_ = display_source_;
             failed_display_settings_ = display_settings_;
-            statusBar()->showMessage(QStringLiteral("显示轨迹未更新：") +
+            statusBar()->showMessage(ui::text("graphics_workbench.label_90") +
                                      QString::fromStdString(error.message));
         }
     }
@@ -4044,8 +4076,9 @@ class Workbench final : public WorkbenchWindow {
     }
     void set_workspace_name(const QString &name) {
         const bool extrapolated = eop_->data_info().extrapolation_days > 0;
-        workspace_label_->setText(name +
-                                  (extrapolated ? QStringLiteral(" · EOP 外推") : QString{}));
+        workspace_label_->setText(
+            name +
+            (extrapolated ? ui::text("graphics_workbench.workspace_label.set_text") : QString{}));
         workspace_label_->setToolTip(workspace_label_->text());
         workspace_dot_->setProperty("active", true);
         workspace_dot_->setProperty("warning", extrapolated);
@@ -4063,15 +4096,17 @@ class Workbench final : public WorkbenchWindow {
         auto *bar = new QHBoxLayout;
         bar->setContentsMargins(0, 0, 0, 0);
         bar->setSpacing(4);
-        auto *title = new QLabel(slot ? QStringLiteral("地球") : QStringLiteral("地面 · WGS84"));
+        auto *title =
+            new QLabel(slot ? ui::text("body.earth") : ui::text("graphics_workbench.title_4"));
         title->setObjectName("viewTitle");
         bar->addWidget(title);
         if (slot) {
             auto *choice = new QComboBox;
             choice->setObjectName("viewFrame");
-            choice->setAccessibleName(QStringLiteral("三维参考系"));
-            choice->addItems({QStringLiteral("GCRF · 惯性"), QStringLiteral("ITRF · 地固")});
-            choice->setToolTip(QStringLiteral("三维轨迹参考系；二维始终使用 ITRF"));
+            choice->setAccessibleName(ui::text("graphics_workbench.choice.set_accessible_name"));
+            choice->addItems(
+                {ui::text("graphics_workbench.label_91"), ui::text("graphics_workbench.label_92")});
+            choice->setToolTip(ui::text("graphics_workbench.choice.set_tool_tip"));
             choice->setCurrentIndex(display_frame_ == core::FrameId::gcrf ? 0 : 1);
             connect(choice, &QComboBox::currentIndexChanged, this,
                     [this](int index) { change_display_frame(index); });
@@ -4101,7 +4136,8 @@ class Workbench final : public WorkbenchWindow {
             return control;
         };
         button(WorkbenchIcon::fit,
-               slot ? QStringLiteral("适配轨道 · Home") : QStringLiteral("显示全球 · Home"),
+               slot ? ui::text("graphics_workbench.label_93")
+                    : ui::text("graphics_workbench.label_94"),
                [this, slot] {
                    if (slot)
                        fit_views(slot);
@@ -4109,15 +4145,16 @@ class Workbench final : public WorkbenchWindow {
                        ground_map_->reset_view();
                });
         view_focus_buttons_.push_back(
-            button(WorkbenchIcon::focus, QStringLiteral("定位所选对象"), [this, slot] {
+            button(WorkbenchIcon::focus, ui::text("graphics_workbench.label_95"), [this, slot] {
                 if (slot)
                     focus_satellite(slot);
                 else
                     ground_map_->focus_selection();
             }));
         for (const auto &[icon, factor, text] :
-             {std::tuple{WorkbenchIcon::zoom_in, 1.3, QStringLiteral("放大")},
-              std::tuple{WorkbenchIcon::zoom_out, 1 / 1.3, QStringLiteral("缩小")}})
+             {std::tuple{WorkbenchIcon::zoom_in, 1.3, ui::text("graphics_workbench.label_96")},
+              std::tuple{WorkbenchIcon::zoom_out, 1 / 1.3,
+                         ui::text("graphics_workbench.label_97")}})
             button(icon, text + (factor > 1 ? QStringLiteral(" · +") : QStringLiteral(" · −")),
                    [this, slot, factor] {
                        if (slot)
@@ -4128,7 +4165,7 @@ class Workbench final : public WorkbenchWindow {
         bar->addStretch();
         auto *settings = new QMenu(header);
         if (!lighting_action_) {
-            lighting_action_ = new QAction(QStringLiteral("昼夜光照 · 同步二维 / 三维"), this);
+            lighting_action_ = new QAction(ui::text("graphics_workbench.settings"), this);
             lighting_action_->setCheckable(true);
             lighting_action_->setChecked(true);
             connect(lighting_action_, &QAction::toggled, this, [this](bool enabled) {
@@ -4136,7 +4173,7 @@ class Workbench final : public WorkbenchWindow {
                     ground_map_->set_lighting(enabled);
                 satellite_state_dirty_ = true;
             });
-            tracks_action_ = new QAction(QStringLiteral("三维轨迹"), this);
+            tracks_action_ = new QAction(ui::text("graphics_workbench.label_98"), this);
             tracks_action_->setCheckable(true);
             tracks_action_->setChecked(true);
             connect(tracks_action_, &QAction::toggled, this,
@@ -4148,10 +4185,13 @@ class Workbench final : public WorkbenchWindow {
             settings->addAction(tracks_action_);
         } else {
             for (const auto &[text, method] :
-                 {std::pair{QStringLiteral("经纬网"), &GroundMap::set_grid_visible},
-                  std::pair{QStringLiteral("地面轨迹"), &GroundMap::set_tracks_visible},
-                  std::pair{QStringLiteral("对象名称"), &GroundMap::set_labels_visible},
-                  std::pair{QStringLiteral("太阳直射点"), &GroundMap::set_sun_visible}}) {
+                 {std::pair{ui::text("graphics_workbench.label_99"), &GroundMap::set_grid_visible},
+                  std::pair{ui::text("graphics_workbench.label_100"),
+                            &GroundMap::set_tracks_visible},
+                  std::pair{ui::text("graphics_workbench.label_101"),
+                            &GroundMap::set_labels_visible},
+                  std::pair{ui::text("graphics_workbench.label_102"),
+                            &GroundMap::set_sun_visible}}) {
                 auto *action = settings->addAction(text);
                 action->setCheckable(true);
                 action->setChecked(true);
@@ -4162,8 +4202,8 @@ class Workbench final : public WorkbenchWindow {
         display->setObjectName(slot ? "display3D" : "display2D");
         display->setIcon(workbench_icon(WorkbenchIcon::properties));
         display->setIconSize(QSize(18, 18));
-        display->setToolTip(QStringLiteral("显示设置"));
-        display->setAccessibleName(QStringLiteral("显示设置"));
+        display->setToolTip(ui::text("graphics_workbench.display.set_tool_tip"));
+        display->setAccessibleName(ui::text("graphics_workbench.display.set_tool_tip"));
         display->setFixedSize(30, 28);
         display->setMenu(settings);
         display->setPopupMode(QToolButton::InstantPopup);
@@ -4191,12 +4231,9 @@ class Workbench final : public WorkbenchWindow {
         current->container->setMinimumSize(64, 64);
         current->container->setFocusPolicy(Qt::StrongFocus);
         if (!benchmarking_) {
-            current->container->setAccessibleName(QStringLiteral("三维轨道视图"));
-            const auto help =
-                QStringLiteral("左键拖动：旋转；中键 / Shift + 左键拖动：平移\n"
-                               "滚轮 / 触控板：缩放；右键上下拖动：连续缩放\n"
-                               "单击：选择对象；+ / −：缩放；方向键：平移\n"
-                               "Shift + 方向键：精细平移；Home：适配轨道；Esc：取消拖动");
+            current->container->setAccessibleName(
+                ui::text("graphics_workbench.container.set_accessible_name"));
+            const auto help = ui::text("graphics_workbench.help");
             current->container->setAccessibleDescription(help);
             current->container->setToolTip(help);
         }
@@ -4209,19 +4246,19 @@ class Workbench final : public WorkbenchWindow {
             current->container->setFixedSize(width, height);
         }
         if (secondary) {
-            current->dock = new QDockWidget(QStringLiteral("辅助三维视图"), this);
+            current->dock = new QDockWidget(ui::text("graphics_workbench.label_103"), this);
             current->dock->setWidget(current->container);
             addDockWidget(Qt::RightDockWidgetArea, current->dock);
             if (benchmarking_) {
                 resizeDocks({current->dock}, {600}, Qt::Horizontal);
-                auto *action = menuBar()->addAction(QStringLiteral("显示视图 2"));
+                auto *action = menuBar()->addAction(ui::text("graphics_workbench.action"));
                 connect(action, &QAction::triggered, current->dock, &QWidget::show);
             } else {
                 style_dock(current->dock, WorkbenchIcon::views);
                 auto *action = current->dock->toggleViewAction();
                 aux_action_ = action;
                 action->setIcon(workbench_icon(WorkbenchIcon::views));
-                action->setText(QStringLiteral("辅助视图"));
+                action->setText(ui::text("graphics_workbench.action.set_text"));
                 action->setShortcut(QKeySequence("Ctrl+2"));
                 view_menu_->addAction(action);
                 auto *panel = new QWidget;
@@ -4246,7 +4283,7 @@ class Workbench final : public WorkbenchWindow {
                 layout->addWidget(current->container, 1);
                 view_panel_ = panel;
                 workspace_ = new Workspace;
-                workspace_->add_view(panel, QStringLiteral("三维视图"),
+                workspace_->add_view(panel, ui::text("workspace.view_3d"),
                                      workbench_icon(WorkbenchIcon::earth));
                 workspace_pages_ = new QStackedWidget;
                 workspace_pages_->addWidget(workspace_);
@@ -4892,13 +4929,13 @@ class Workbench final : public WorkbenchWindow {
         }
 #endif
         ++frame_count_;
-        statusBar()->showMessage(benchmarking_ ? QStringLiteral("ITRF · 固定双视图基准场景")
+        statusBar()->showMessage(benchmarking_ ? ui::text("graphics_workbench.label_104")
                                  : satellites_.empty() && stations_.empty()
-                                     ? QStringLiteral("空场景  ·  使用“插入对象”添加第一个对象")
-                                     : QStringLiteral("就绪  ·  %1")
+                                     ? ui::text("graphics_workbench.label_105")
+                                     : ui::text("graphics_workbench.label_106")
                                            .arg(selected_marker_index()
                                                     ? selected_name()
-                                                    : QStringLiteral("未选择对象")));
+                                                    : ui::text("graphics_workbench.label_107")));
         if (!smoke_dir_.isEmpty() && (benchmarking_ || smoke_bootstrap_ == 3)) {
             if (frame_count_ == 20) {
                 for (std::size_t i = 0; i < slots_.size(); ++i)
@@ -9346,7 +9383,7 @@ int run_graphics_workbench(QApplication &app) {
         if (benchmark_manifest.isEmpty()) {
             splash = std::make_unique<StartupSplash>(app.primaryScreen());
             splash->show();
-            splash->showMessage(QStringLiteral("正在加载地球与工作台…"));
+            splash->showMessage(ui::text("graphics_workbench.label_108"));
             app.processEvents(QEventLoop::ExcludeUserInputEvents);
             if (!smoke_dir.isEmpty()) {
                 QDir().mkpath(smoke_dir);

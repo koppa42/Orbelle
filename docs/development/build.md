@@ -12,6 +12,7 @@ cd OrbitForge
 - 基础构建：Git、CMake 3.28+ 和 C++20 编译器。Windows 需要 Visual Studio 的 C++ 桌面开发组件与 Windows SDK；Linux 可用 GCC / Clang 和 Ninja。
 - 天文计算与桌面：先准备可在命令行调用的 vcpkg，再按下方功能安装依赖。仓库固定 registry 基线和 overlay，公共预设不依赖开发机的绝对路径。
 - Python 包：Python 3.11+，构建后端版本由 `pyproject.toml` 固定。
+- 桌面启用 `BUILD_TESTING` 时也需要 Python 解释器，用于检查文案资源与引用；文案资源编译只依赖已有的 Qt Core，不需要额外安装 Qt Linguist。
 - Windows 图形运行：支持 Vulkan 的 GPU / 驱动；开发启动脚本使用 PowerShell 7（`pwsh`）。Linux 桌面尚未验证。
 
 完整场景工作台使用 `desktop-graphics`；`desktop` 仅用于基础 Qt 状态表。无界面基础示例可直接从下一节开始，不需要安装 vcpkg 依赖。

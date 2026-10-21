@@ -1,4 +1,10 @@
 find_package(Qt6 6.8 CONFIG REQUIRED COMPONENTS Widgets)
+add_library(orbitforge_desktop_text STATIC src/ui_text.cpp src/ui_text.hpp)
+target_compile_features(orbitforge_desktop_text PUBLIC cxx_std_20)
+target_link_libraries(orbitforge_desktop_text PUBLIC Qt6::Core)
+orbitforge_warnings(orbitforge_desktop_text)
+qt_add_resources(orbitforge_desktop_text "desktop_text" PREFIX "/orbitforge"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/text/zh_CN.json)
 add_executable(orbitforge_desktop WIN32 src/main.cpp)
 target_link_libraries(orbitforge_desktop PRIVATE
     OrbitForge::Runtime OrbitForge::Visualization Qt6::Widgets)
@@ -248,5 +254,27 @@ if(ORBITFORGE_WITH_VSG)
             VERBATIM)
     endif()
 endif()
+if(BUILD_TESTING)
+    add_executable(orbitforge_desktop_text_tests tests/ui_text_test.cpp)
+    target_link_libraries(orbitforge_desktop_text_tests PRIVATE GTest::gtest_main)
+    orbitforge_warnings(orbitforge_desktop_text_tests)
+    orbitforge_copy_runtime_dlls(orbitforge_desktop_text_tests)
+    gtest_discover_tests(orbitforge_desktop_text_tests DISCOVERY_MODE PRE_TEST
+        TEST_PREFIX "desktop." PROPERTIES TIMEOUT 10)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME desktop.TextCatalogueReferences
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/ci/check_desktop_text.py"
+            --root "${PROJECT_SOURCE_DIR}")
+    add_test(NAME desktop.TextCatalogueValidator
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/ci/test_desktop_text.py")
+endif()
+# All desktop executables (including isolated UI fixtures) use the same embedded copy.
+get_property(orbitforge_desktop_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(orbitforge_desktop_target IN LISTS orbitforge_desktop_targets)
+    get_target_property(orbitforge_desktop_target_type "${orbitforge_desktop_target}" TYPE)
+    if(orbitforge_desktop_target_type STREQUAL "EXECUTABLE")
+        target_link_libraries("${orbitforge_desktop_target}" PRIVATE orbitforge_desktop_text)
+    endif()
+endforeach()
 # The relocatable Windows preview is assembled by tools/packaging/package_windows.py.
 

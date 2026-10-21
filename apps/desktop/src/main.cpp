@@ -1,3 +1,4 @@
+#include "ui_text.hpp"
 #include <QApplication>
 #include <QDockWidget>
 #include <QHeaderView>
@@ -12,6 +13,8 @@
 #include "viewer/graphics_workbench.hpp"
 #endif
 
+namespace ui = orbitforge::desktop::ui;
+
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
     app.setApplicationName("OrbitForge");
@@ -23,20 +26,20 @@ int main(int argc, char **argv) {
     const auto snapshot = orbitforge::visualization::make_snapshot(series, 0);
 
     QMainWindow window;
-    window.setWindowTitle(QStringLiteral("OrbitForge — 圆轨道示例"));
+    window.setWindowTitle(ui::text("main.snapshot"));
     window.resize(1080, 640);
     auto *tree = new QTreeWidget;
-    tree->setHeaderLabel(QStringLiteral("场景"));
-    auto *scenario = new QTreeWidgetItem(tree, {QStringLiteral("圆轨道示例")});
+    tree->setHeaderLabel(ui::text("common.scenario"));
+    auto *scenario = new QTreeWidgetItem(tree, {ui::text("main.scenario")});
     new QTreeWidgetItem(scenario, {QStringLiteral("demo-satellite")});
     tree->expandAll();
-    auto *dock = new QDockWidget(QStringLiteral("对象"), &window);
+    auto *dock = new QDockWidget(ui::text("common.objects"), &window);
     dock->setWidget(tree);
     window.addDockWidget(Qt::LeftDockWidgetArea, dock);
 
     auto *table = new QTableWidget(static_cast<int>(series.states().size()), 7);
-    table->setHorizontalHeaderLabels({QStringLiteral("相对历元 (s)"), "X (m)", "Y (m)", "Z (m)",
-                                      "Vx (m/s)", "Vy (m/s)", "Vz (m/s)"});
+    table->setHorizontalHeaderLabels(
+        {ui::text("main.table"), "X (m)", "Y (m)", "Z (m)", "Vx (m/s)", "Vy (m/s)", "Vz (m/s)"});
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     for (std::size_t row = 0; row < series.states().size(); ++row) {
@@ -54,8 +57,7 @@ int main(int argc, char **argv) {
         }
     }
     window.setCentralWidget(table);
-    window.statusBar()->showMessage(
-        QStringLiteral("地心 GCRF | 历元：2000-01-01 12:00:00 TAI | 6 个采样点"));
+    window.statusBar()->showMessage(ui::text("main.label"));
     window.show();
     if (app.arguments().contains("--smoke-test")) {
         QTimer::singleShot(0, &app, [&]() {

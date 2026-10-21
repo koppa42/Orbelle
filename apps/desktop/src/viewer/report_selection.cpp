@@ -1,4 +1,5 @@
 #include "report_selection.hpp"
+#include "../ui_text.hpp"
 #include "workbench_theme.hpp"
 #include <QDialogButtonBox>
 #include <QFrame>
@@ -119,29 +120,29 @@ ReportCurveSelectionDialog::ReportCurveSelectionDialog(const std::vector<ReportC
                                                        const QStringList &selected, QWidget *parent)
     : QDialog(parent) {
     setObjectName("reportCurveSelectionDialog");
-    setWindowTitle(QStringLiteral("选择曲线"));
+    setWindowTitle(ui::text("report_selection.label"));
     setWindowIcon(workbench_icon(WorkbenchIcon::properties));
     resize(560, 480);
     setMinimumSize(360, 380);
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(12, 12, 12, 12);
     layout->setSpacing(10);
-    auto *hint = new QLabel(
-        QStringLiteral("勾选要比较的字段。同单位叠加，不同单位分区，共用时间轴。"), this);
+    auto *hint = new QLabel(ui::text("report_selection.hint"), this);
     hint->setObjectName("hint");
     hint->setWordWrap(true);
     layout->addWidget(hint);
     search_ = new QLineEdit(this);
     search_->setObjectName("reportCurveSearch");
-    search_->setPlaceholderText(QStringLiteral("搜索字段或单位…"));
-    search_->setAccessibleName(QStringLiteral("搜索曲线字段"));
+    search_->setPlaceholderText(ui::text("report_selection.search.set_placeholder_text"));
+    search_->setAccessibleName(ui::text("report_selection.search.set_accessible_name"));
     search_->setClearButtonEnabled(true);
     layout->addWidget(search_);
     list_ = new QTreeWidget(this);
     list_->setObjectName("reportCurveList");
-    list_->setAccessibleName(QStringLiteral("曲线字段，多选"));
+    list_->setAccessibleName(ui::text("report_selection.list.set_accessible_name"));
     list_->setColumnCount(2);
-    list_->setHeaderLabels({QStringLiteral("曲线字段"), QStringLiteral("单位")});
+    list_->setHeaderLabels(
+        {ui::text("report_selection.label_2"), ui::text("report_selection.label_3")});
     list_->setRootIsDecorated(false);
     list_->setAlternatingRowColors(true);
     list_->setUniformRowHeights(true);
@@ -164,14 +165,14 @@ ReportCurveSelectionDialog::ReportCurveSelectionDialog(const std::vector<ReportC
     count_->setObjectName("reportCurveCount");
     count_->setWordWrap(true);
     footer->addWidget(count_, 1);
-    auto *clear = new QPushButton(QStringLiteral("清空选择"), this);
+    auto *clear = new QPushButton(ui::text("report_selection.clear"), this);
     clear->setObjectName("reportCurveClear");
     footer->addWidget(clear);
     layout->addLayout(footer);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     confirm_ = buttons->button(QDialogButtonBox::Ok);
-    confirm_->setText(QStringLiteral("应用"));
-    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    confirm_->setText(ui::text("common.apply"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(ui::text("common.cancel"));
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, this, &ReportCurveSelectionDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -200,9 +201,8 @@ void ReportCurveSelectionDialog::update_selection() {
             item->checkState(0) == Qt::Checked && !units.contains(item->text(1)))
             units << item->text(1);
     count_->setText(
-        count > 6
-            ? QStringLiteral("已选 %1 项，请保留最多 6 项以便比较").arg(count)
-            : QStringLiteral("已选 %1 项 · %2 个绘图区（最多 6 项）").arg(count).arg(units.size()));
+        count > 6 ? ui::text("report_selection.count.set_text").arg(count)
+                  : ui::text("report_selection.count.set_text_2").arg(count).arg(units.size()));
     confirm_->setEnabled(count > 0 && count <= 6);
 }
 void ReportCurveSelectionDialog::filter() {
@@ -217,7 +217,7 @@ void ReportCurveSelectionDialog::filter() {
     }
     update_selection();
     if (!visible)
-        count_->setText(QStringLiteral("没有匹配字段；已选 %1 项保留").arg(selection().size()));
+        count_->setText(ui::text("report_selection.count.set_text_3").arg(selection().size()));
 }
 void ReportCurveSelectionDialog::accept() {
     if (confirm_->isEnabled())
@@ -228,29 +228,28 @@ ReportColumnSelectionDialog::ReportColumnSelectionDialog(std::vector<ReportColum
                                                          QWidget *parent)
     : QDialog(parent), fields_(std::move(fields)), defaults_(std::move(defaults)) {
     setObjectName("reportColumnSelectionDialog");
-    setWindowTitle(QStringLiteral("显示列"));
+    setWindowTitle(ui::text("report_selection.label_4"));
     setWindowIcon(workbench_icon(WorkbenchIcon::properties));
     resize(560, 500);
     setMinimumSize(340, 380);
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(12, 12, 12, 12);
-    auto *hint = new QLabel(
-        QStringLiteral("选择表格、复制和 CSV 使用的列。上移或下移调整顺序；曲线保留完整结果。"),
-        this);
+    auto *hint = new QLabel(ui::text("report_selection.hint_2"), this);
     hint->setObjectName("hint");
     hint->setWordWrap(true);
     layout->addWidget(hint);
     search_ = new QLineEdit(this);
     search_->setObjectName("reportColumnSearch");
-    search_->setAccessibleName(QStringLiteral("搜索报告列"));
-    search_->setPlaceholderText(QStringLiteral("搜索名称、字段或单位…"));
+    search_->setAccessibleName(ui::text("report_selection.search.set_accessible_name_2"));
+    search_->setPlaceholderText(ui::text("report_selection.search.set_placeholder_text_2"));
     search_->setClearButtonEnabled(true);
     layout->addWidget(search_);
     list_ = new QTreeWidget(this);
     list_->setObjectName("reportColumnList");
-    list_->setAccessibleName(QStringLiteral("报告列，勾选并调整顺序"));
+    list_->setAccessibleName(ui::text("report_selection.list.set_accessible_name_2"));
     list_->setColumnCount(2);
-    list_->setHeaderLabels({QStringLiteral("列"), QStringLiteral("单位")});
+    list_->setHeaderLabels(
+        {ui::text("report_selection.label_5"), ui::text("report_selection.label_3")});
     list_->setRootIsDecorated(false);
     list_->setAlternatingRowColors(true);
     list_->setUniformRowHeights(true);
@@ -259,25 +258,25 @@ ReportColumnSelectionDialog::ReportColumnSelectionDialog(std::vector<ReportColum
     list_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     layout->addWidget(list_, 1);
     auto *ordering = new QHBoxLayout;
-    up_ = new QPushButton(QStringLiteral("上移"), this);
-    down_ = new QPushButton(QStringLiteral("下移"), this);
+    up_ = new QPushButton(ui::text("report_selection.ordering"), this);
+    down_ = new QPushButton(ui::text("report_selection.ordering_2"), this);
     up_->setObjectName("reportColumnUp");
     down_->setObjectName("reportColumnDown");
     up_->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Up));
     down_->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Down));
     for (auto *button : {up_, down_}) {
         button->setAutoDefault(false);
-        button->setToolTip(QStringLiteral("清空搜索后调整列顺序（Alt+↑ / Alt+↓）"));
+        button->setToolTip(ui::text("report_selection.button.set_tool_tip"));
         ordering->addWidget(button);
     }
     ordering->addStretch();
-    auto *all = new QPushButton(QStringLiteral("全选"), this);
+    auto *all = new QPushButton(ui::text("report_selection.all"), this);
     all->setObjectName("reportColumnAll");
     all->setAutoDefault(false);
-    auto *clear = new QPushButton(QStringLiteral("清空"), this);
+    auto *clear = new QPushButton(ui::text("report_selection.clear_2"), this);
     clear->setObjectName("reportColumnClear");
     clear->setAutoDefault(false);
-    auto *reset = new QPushButton(QStringLiteral("默认列"), this);
+    auto *reset = new QPushButton(ui::text("report_selection.reset"), this);
     reset->setObjectName("reportColumnDefaults");
     reset->setAutoDefault(false);
     ordering->addWidget(all);
@@ -291,12 +290,12 @@ ReportColumnSelectionDialog::ReportColumnSelectionDialog(std::vector<ReportColum
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     confirm_ = buttons->button(QDialogButtonBox::Ok);
     confirm_->setObjectName("reportColumnConfirm");
-    confirm_->setText(QStringLiteral("应用"));
+    confirm_->setText(ui::text("common.apply"));
     confirm_->setProperty("primary", true);
     confirm_->setDefault(true);
     confirm_->style()->unpolish(confirm_);
     confirm_->style()->polish(confirm_);
-    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(ui::text("common.cancel"));
     buttons->button(QDialogButtonBox::Cancel)->setAutoDefault(false);
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, this, &ReportColumnSelectionDialog::accept);
@@ -367,10 +366,10 @@ void ReportColumnSelectionDialog::update_controls() {
     int visible = 0;
     for (int i = 0; i < list_->topLevelItemCount(); ++i)
         visible += !list_->topLevelItem(i)->isHidden();
-    count_->setText(QStringLiteral("已选 %1 列 · 匹配 %2 列%3")
+    count_->setText(ui::text("report_selection.count.set_text_4")
                         .arg(count)
                         .arg(visible)
-                        .arg(count ? QString{} : QStringLiteral(" · 请至少选择一列")));
+                        .arg(count ? QString{} : ui::text("report_selection.label_6")));
     confirm_->setEnabled(count > 0);
     const auto row = list_->indexOfTopLevelItem(list_->currentItem());
     const bool reorder = search_->text().trimmed().isEmpty();
@@ -395,7 +394,7 @@ ReportSelectionDialog::ReportSelectionDialog(std::vector<ReportChoice> choices, 
                                              QWidget *parent)
     : QDialog(parent) {
     setObjectName("reportSelectionDialog");
-    setWindowTitle(QStringLiteral("选择报告"));
+    setWindowTitle(ui::text("report_selection.label_7"));
     setWindowIcon(workbench_icon(WorkbenchIcon::properties));
     resize(840, 580);
     setMinimumSize(360, 440);
@@ -413,23 +412,23 @@ ReportSelectionDialog::ReportSelectionDialog(std::vector<ReportChoice> choices, 
     navigation_layout->setSpacing(6);
     search_ = new QLineEdit(this);
     search_->setObjectName("reportSelectionSearch");
-    search_->setPlaceholderText(QStringLiteral("搜索名称、内容或对象"));
-    search_->setAccessibleName(QStringLiteral("搜索报告"));
+    search_->setPlaceholderText(ui::text("report_selection.search.set_placeholder_text_3"));
+    search_->setAccessibleName(ui::text("report_selection.search.set_accessible_name_3"));
     search_->setClearButtonEnabled(true);
     search_->addAction(workbench_icon(WorkbenchIcon::search), QLineEdit::LeadingPosition);
     navigation_layout->addWidget(search_);
     source_ = new QTabBar(this);
     source_->setObjectName("reportSelectionSource");
-    source_->setAccessibleName(QStringLiteral("报告来源"));
-    source_->addTab(QStringLiteral("全部"));
-    source_->addTab(QStringLiteral("内置报告"));
-    source_->addTab(QStringLiteral("项目模板"));
+    source_->setAccessibleName(ui::text("report_selection.source.set_accessible_name"));
+    source_->addTab(ui::text("report_selection.source.add_tab"));
+    source_->addTab(ui::text("report_selection.source.add_tab_2"));
+    source_->addTab(ui::text("report_selection.source.add_tab_3"));
     source_->setExpanding(false);
     source_->setDrawBase(false);
     navigation_layout->addWidget(source_);
     list_ = new QListWidget(navigation);
     list_->setObjectName("reportSelectionList");
-    list_->setAccessibleName(QStringLiteral("报告列表"));
+    list_->setAccessibleName(ui::text("report_selection.list.set_accessible_name_3"));
     list_->setTextElideMode(Qt::ElideRight);
     list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     list_->setMinimumSize(0, 64);
@@ -439,7 +438,7 @@ ReportSelectionDialog::ReportSelectionDialog(std::vector<ReportChoice> choices, 
     navigation_layout->addWidget(list_, 1);
     auto *empty_layout = new QVBoxLayout(list_->viewport());
     empty_layout->addStretch();
-    empty_ = new QLabel(QStringLiteral("没有匹配的报告\n试试其他关键词或来源"), list_->viewport());
+    empty_ = new QLabel(ui::text("report_selection.empty_layout"), list_->viewport());
     empty_->setObjectName("reportSelectionEmpty");
     empty_->setAlignment(Qt::AlignCenter);
     empty_->setWordWrap(true);
@@ -499,11 +498,11 @@ ReportSelectionDialog::ReportSelectionDialog(std::vector<ReportChoice> choices, 
     preview_layout->addWidget(divider);
     preview_layout->addSpacing(4);
     output_heading_ = label("reportSelectionFieldHeading");
-    output_heading_->setText(QStringLiteral("输出形式"));
+    output_heading_->setText(ui::text("report_selection.output_heading.set_text"));
     output_ = label("reportSelectionOutput");
     preview_layout->addSpacing(4);
     scope_heading_ = label("reportSelectionFieldHeading");
-    scope_heading_->setText(QStringLiteral("对象范围"));
+    scope_heading_->setText(ui::text("report_selection.scope_heading.set_text"));
     scope_ = label("reportSelectionScope");
     note_ = label("reportSelectionNote");
     warning_ = label("reportSelectionWarning");
@@ -520,13 +519,13 @@ ReportSelectionDialog::ReportSelectionDialog(std::vector<ReportChoice> choices, 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     confirm_ = buttons->button(QDialogButtonBox::Ok);
     confirm_->setObjectName("reportSelectionConfirm");
-    confirm_->setText(QStringLiteral("使用此报告"));
+    confirm_->setText(ui::text("report_selection.confirm.set_text"));
     confirm_->setProperty("primary", true);
     confirm_->setDefault(true);
     // QDialogButtonBox polishes standard buttons before their role/name is assigned here.
     confirm_->style()->unpolish(confirm_);
     confirm_->style()->polish(confirm_);
-    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(ui::text("common.cancel"));
     buttons->button(QDialogButtonBox::Cancel)->setAutoDefault(false);
     footer->addWidget(buttons);
     layout->addLayout(footer);
@@ -590,7 +589,7 @@ void ReportSelectionDialog::filter() {
     // Filtering must never accept an invisible old selection on Enter.
     if (!list_->currentItem() || list_->currentItem()->isHidden())
         list_->setCurrentRow(-1);
-    count_->setText(QStringLiteral("%1 项报告").arg(visible));
+    count_->setText(ui::text("report_selection.count.set_text_5").arg(visible));
     empty_->setVisible(visible == 0);
     preview();
 }
@@ -598,16 +597,16 @@ void ReportSelectionDialog::preview() {
     const auto found = std::ranges::find(choices_, selection(), &ReportChoice::key);
     const bool valid =
         found != choices_.end() && list_->currentItem() && !list_->currentItem()->isHidden();
-    title_->setText(valid ? found->name : QStringLiteral("选择一项报告"));
+    title_->setText(valid ? found->name : ui::text("report_selection.title.set_text"));
     title_->setToolTip(title_->text());
-    category_->setText(
-        valid ? (found->saved ? QStringLiteral("项目模板") : QStringLiteral("内置报告"))
-              : QStringLiteral("报告预览"));
+    category_->setText(valid ? (found->saved ? ui::text("report_selection.source.add_tab_3")
+                                             : ui::text("report_selection.source.add_tab_2"))
+                             : ui::text("report_selection.category.set_text"));
     symbol_->setPixmap(workbench_icon(valid ? found->icon : WorkbenchIcon::search,
                                       theme::color(theme::accent_bright))
                            .pixmap(24, 24));
     description_->setText(valid ? found->description
-                                : QStringLiteral("从列表选择报告，查看它的内容与适用对象。"));
+                                : ui::text("report_selection.description.set_text"));
     output_->setText(valid ? (found->output.isEmpty() ? found->kind : found->output) : QString{});
     output_heading_->setVisible(valid);
     scope_heading_->setVisible(valid);

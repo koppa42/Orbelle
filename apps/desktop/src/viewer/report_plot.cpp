@@ -1,4 +1,5 @@
 #include "report_plot.hpp"
+#include "../ui_text.hpp"
 #include "workbench_theme.hpp"
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -43,7 +44,7 @@ constexpr const char *colors[]{"#a9a7ff", "#6cdaca", "#ffbd87", "#87bcff", "#efa
 } // namespace
 ReportPlot::ReportPlot(QWidget *parent) : QWidget(parent) {
     setObjectName("reportPlot");
-    setAccessibleName(QStringLiteral("报告时间曲线"));
+    setAccessibleName(ui::text("report_plot.label"));
     setMinimumSize(0, 220);
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
@@ -386,7 +387,7 @@ void ReportPlot::draw(QPainter &p) const {
     const auto fm = fontMetrics();
     if (series_.empty()) {
         p.setPen(theme::color(theme::text_muted));
-        p.drawText(rect(), Qt::AlignCenter, QStringLiteral("此结果没有可绘制的时间序列"));
+        p.drawText(rect(), Qt::AlignCenter, ui::text("report_plot.label_2"));
         return;
     }
     const auto per_row = std::max(1, (width() - 32) / 180);
@@ -415,7 +416,7 @@ void ReportPlot::draw(QPainter &p) const {
             p.drawText(
                 QRectF(x + 24, y, 148, fm.height()), Qt::AlignVCenter,
                 i + 1 == legend_count && legend_count < panel.series.size()
-                    ? QStringLiteral("另 %1 条曲线…").arg(panel.series.size() - legend_count + 1)
+                    ? ui::text("report_plot.label_3").arg(panel.series.size() - legend_count + 1)
                     : fm.elidedText(series.label, Qt::ElideRight, 148));
         }
         p.fillRect(area, theme::color(theme::field));
@@ -475,7 +476,7 @@ void ReportPlot::draw(QPainter &p) const {
     if (origin.endsWith('.'))
         origin.chop(1);
     origin.replace('T', ' ');
-    const auto axis = QStringLiteral("自 %1 %2 起 / %3")
+    const auto axis = ui::text("report_plot.axis")
                           .arg(origin, str(result_->column_unit(time_column_)),
                                time_scale == 3600 ? "h"
                                : time_scale == 60 ? "min"

@@ -1,4 +1,5 @@
 #include "eop_catalog.hpp"
+#include "../ui_text.hpp"
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QFile>
@@ -89,18 +90,18 @@ std::optional<qint64> timestamp(const QString &text) {
 }
 QString download_error(const QNetworkReply &reply, int http) {
     if (http >= 400)
-        return QStringLiteral("数据源返回 HTTP %1，暂时无法下载，请稍后重试。").arg(http);
+        return ui::text("eop_catalog.label").arg(http);
     switch (reply.error()) {
     case QNetworkReply::HostNotFoundError:
-        return QStringLiteral("无法找到数据源，请检查网络连接后重试。");
+        return ui::text("eop_catalog.label_2");
     case QNetworkReply::TimeoutError:
-        return QStringLiteral("连接数据源超时，请重试。");
+        return ui::text("eop_catalog.label_3");
     case QNetworkReply::SslHandshakeFailedError:
-        return QStringLiteral("无法与数据源建立安全连接，请检查系统时间和网络设置。");
+        return ui::text("eop_catalog.label_4");
     case QNetworkReply::NoError:
-        return QStringLiteral("数据源返回了无法使用的响应（HTTP %1），请重试。").arg(http);
+        return ui::text("eop_catalog.label_5").arg(http);
     default:
-        return QStringLiteral("下载连接中断，请检查网络后重试。");
+        return ui::text("eop_catalog.label_6");
     }
 }
 runtime::EopProduct eop_product(const core::EopDataInfo &info) {
@@ -177,7 +178,7 @@ EopCatalog::EopCatalog(std::filesystem::path store, std::vector<std::filesystem:
             if (update_.state == DataUpdateState::checking ||
                 update_.state == DataUpdateState::downloading) {
                 update_.state = DataUpdateState::interrupted;
-                update_.message = QStringLiteral("上次下载未完成，可重新检查并下载。");
+                update_.message = ui::text("eop_catalog.label_7");
             }
         }
         if (!update_.attempted_at)
@@ -203,7 +204,7 @@ EopCatalog::EopCatalog(std::filesystem::path store, std::vector<std::filesystem:
                                   installed.sha256);
                 data_.set_settings(resource_response_);
             }
-            record.message = status_ = QStringLiteral("数据已校验并安装，可在 HPOP 中选择。");
+            record.message = status_ = ui::text("eop_catalog.label_8");
             ++revision_;
         } catch (const std::exception &e) {
             record.state = resource_cancel_ && *resource_cancel_ ? DataUpdateState::cancelled
@@ -219,7 +220,7 @@ EopCatalog::EopCatalog(std::filesystem::path store, std::vector<std::filesystem:
         resource_response_.clear();
     });
     connect(&deadline_, &QTimer::timeout, this, [this] {
-        transfer_error_ = QStringLiteral("下载超时，请重试。");
+        transfer_error_ = ui::text("eop_catalog.label_9");
         if (reply_)
             reply_->abort();
     });
@@ -550,7 +551,7 @@ DataUpdateStatus EopCatalog::update_status(DataProduct product) const {
     if ((result.state == DataUpdateState::updated || result.state == DataUpdateState::unchanged) &&
         QString::fromStdString(current_hash(product)) != result.checked_sha256) {
         result.state = DataUpdateState::local_changed;
-        result.message = QStringLiteral("本地文件已更换，请重新检查更新。");
+        result.message = ui::text("eop_catalog.label_10");
     }
     return result;
 }
@@ -691,38 +692,36 @@ void EopCatalog::set_extrapolation_days(std::size_t index, int days) {
 }
 EopCatalog::Provider EopCatalog::for_interval(core::Epoch first, core::Epoch last) const {
     if (first.tai_nanoseconds() >= last.tai_nanoseconds())
-        throw std::invalid_argument("结束时间必须晚于开始时间。");
+        throw std::invalid_argument(ui::utf8("eop_catalog.validation"));
     std::vector<runtime::EopCandidate> candidates;
     for (const auto index : current_)
         candidates.push_back({providers_.at(index), extrapolation_days(index)});
     try {
         return runtime::select_eop_for_interval(candidates, first, last, time_);
     } catch (const core::EopCoverageError &error) {
-        throw core::EopCoverageError(
-            std::string("所选时段超出当前 EOP "
-                        "数据覆盖及允许的外推范围，请在数据中心更新数据或调整外推设置。\n") +
-            error.what());
+        throw core::EopCoverageError(std::string(ui::utf8("eop_catalog.validation_2")) +
+                                     error.what());
     }
 }
 void EopCatalog::import_raw(const std::filesystem::path &source, DataProduct product) {
     if (downloading())
-        throw std::runtime_error("请等待当前下载完成，或先取消下载。");
+        throw std::runtime_error(ui::utf8("eop_catalog.validation_3"));
     if (force_product(product)) {
         start_resource_install(source, product, {}, runtime::DataAcquisition::imported);
         return;
     }
     install_source(source, product, source_url(product), runtime::DataAcquisition::imported);
-    status_ = QStringLiteral("本地文件已导入。");
+    status_ = ui::text("eop_catalog.label_11");
 }
 void EopCatalog::import_ephemeris_snapshot(const std::filesystem::path &source) {
     if (downloading())
-        throw std::runtime_error("请等待当前操作完成，或先取消。");
+        throw std::runtime_error(ui::utf8("eop_catalog.validation_4"));
     start_resource_install(source, DataProduct::de440s, {}, runtime::DataAcquisition::imported,
                            EphemerisImport::snapshot);
 }
 void EopCatalog::import_planetary_centres(const std::filesystem::path &source) {
     if (downloading())
-        throw std::runtime_error("请等待当前操作完成，或先取消。");
+        throw std::runtime_error(ui::utf8("eop_catalog.validation_4"));
     start_resource_install(source, DataProduct::de440s, {}, runtime::DataAcquisition::imported,
                            EphemerisImport::planetary_centres);
 }
@@ -742,7 +741,7 @@ void EopCatalog::install_source(const std::filesystem::path &source, DataProduct
     const auto file = data_.install_time(source);
     std::shared_ptr<const core::ITimeProvider> next_time = runtime::load_time_snapshot(file);
     if (next_time->data_info().utc_valid_until_mjd < time_->data_info().utc_valid_until_mjd)
-        throw std::runtime_error("该闰秒文件的有效期早于当前数据，请使用较新的文件。");
+        throw std::runtime_error(ui::utf8("eop_catalog.validation_5"));
     std::map<std::string, std::string> settings{
         {"current-utc", next_time->data_info().sha256},
         {"utc-acquisition",
@@ -759,7 +758,7 @@ void EopCatalog::install_source(const std::filesystem::path &source, DataProduct
                     return entry.lock_sha256 == item.identity_sha256.toStdString();
                 });
             if (found == snapshots.end())
-                throw std::runtime_error("无法找到当前 EOP 文件，请重新导入后更新闰秒。");
+                throw std::runtime_error(ui::utf8("eop_catalog.validation_6"));
             auto entry =
                 has_full_download(item.product)
                     ? (item.product == DataProduct::finals2000a
@@ -807,11 +806,11 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
         if (url.isEmpty())
             url = QUrl(QString::fromStdString(source_url(product)));
         if (url.scheme() != "https" && !(url.scheme() == "http" && url.host() == "127.0.0.1"))
-            throw std::runtime_error("数据源必须使用 HTTPS。");
+            throw std::runtime_error(ui::utf8("eop_catalog.validation_7"));
         download_ = std::make_unique<QTemporaryFile>(
             QString::fromStdWString((store_ / "staging/download-XXXXXX").wstring()));
         if (!download_->open())
-            throw std::runtime_error("无法创建临时下载文件。");
+            throw std::runtime_error(ui::utf8("eop_catalog.validation_8"));
         QNetworkRequest request(url);
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                              QNetworkRequest::NoLessSafeRedirectPolicy);
@@ -840,7 +839,7 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
             }
         }
         update_.state = DataUpdateState::checking;
-        update_.message = status_ = QStringLiteral("正在连接数据源，检查完整文件…");
+        update_.message = status_ = ui::text("eop_catalog.label_12");
         save_update_status();
         reply_ = network_.get(request);
         reply_->setReadBufferSize(64 * 1024);
@@ -856,7 +855,7 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
                 if (valid && length > 0)
                     total_ = length;
                 if (valid && length > download_limit(active_product_)) {
-                    transfer_error_ = QStringLiteral("数据源文件超过 %1 MiB 限制。")
+                    transfer_error_ = ui::text("eop_catalog.label_13")
                                           .arg(download_limit(active_product_) / (1024 * 1024));
                     reply_->abort();
                 }
@@ -872,11 +871,11 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
             received_ += bytes.size();
             if (received_ > 0) {
                 update_.state = DataUpdateState::downloading;
-                update_.message = status_ = QStringLiteral("正在下载完整文件…");
+                update_.message = status_ = ui::text("eop_catalog.label_14");
             }
             if (received_ > download_limit(active_product_) ||
                 download_->write(bytes) != bytes.size()) {
-                transfer_error_ = QStringLiteral("下载超过 %1 MiB 限制，或临时文件写入失败。")
+                transfer_error_ = ui::text("eop_catalog.label_15")
                                       .arg(download_limit(active_product_) / (1024 * 1024));
                 reply_->abort();
             }
@@ -890,7 +889,7 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
                 reply_ = nullptr;
                 try {
                     if (cancelled_)
-                        throw std::runtime_error("下载已取消，已有数据和场景保持不变。");
+                        throw std::runtime_error(ui::utf8("eop_catalog.validation_9"));
                     if (!transfer_error_.isEmpty())
                         throw std::runtime_error(transfer_error_.toStdString());
                     const auto http =
@@ -902,10 +901,10 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
                         throw std::runtime_error("Cannot flush download");
                     if (http == 304) {
                         if (this->current_hash(product) != current_hash)
-                            throw std::runtime_error("检查期间本地文件已更换，请重新检查。");
+                            throw std::runtime_error(ui::utf8("eop_catalog.validation_10"));
                         update_.state = DataUpdateState::unchanged;
                         update_.checked_sha256 = QString::fromStdString(current_hash);
-                        status_ = QStringLiteral("数据已是最新，未重复下载。");
+                        status_ = ui::text("eop_catalog.label_16");
                     } else {
                         if (force_product(product)) {
                             resource_response_ = {
@@ -938,9 +937,8 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
                         update_.state = hash == current_hash ? DataUpdateState::unchanged
                                                              : DataUpdateState::updated;
                         update_.checked_sha256 = QString::fromStdString(hash);
-                        status_ = hash == current_hash
-                                      ? QStringLiteral("检查完成，文件内容没有变化。")
-                                      : QStringLiteral("完整文件已下载并通过校验。");
+                        status_ = hash == current_hash ? ui::text("eop_catalog.label_17")
+                                                       : ui::text("eop_catalog.label_18");
                     }
                     update_.checked_at = QDateTime::currentSecsSinceEpoch();
                 } catch (const std::exception &error) {
@@ -978,13 +976,13 @@ void EopCatalog::start_resource_install(const std::filesystem::path &file, DataP
     auto &record = update(product);
     record.attempted_at = QDateTime::currentSecsSinceEpoch();
     record.state = DataUpdateState::checking;
-    record.message = status_ = QStringLiteral("正在后台校验完整数据与覆盖范围，可取消…");
+    record.message = status_ = ui::text("eop_catalog.label_19");
     resource_job_ = std::async(std::launch::async, [root = store_, file, product, url, acquisition,
                                                     cancel = resource_cancel_, ephemeris_import] {
         runtime::DataCatalog catalog(root);
         const auto checkpoint = [cancel] {
             if (*cancel)
-                throw std::runtime_error("操作已取消，已有数据保持不变。");
+                throw std::runtime_error(ui::utf8("eop_catalog.checkpoint"));
         };
         if (ocean_product(product)) {
             const auto installed = catalog.install_ocean_tides(file, ocean_selection(product), url,

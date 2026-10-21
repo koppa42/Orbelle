@@ -932,6 +932,24 @@ TEST_F(QuantityTest, PropertyDraftsRemainDirtyUntilSuccessfullyPublished) {
     EXPECT_FALSE(sensor_editor.has_unapplied_changes());
 }
 
+TEST_F(QuantityTest, GroundStationResetUsesCreationStateInsteadOfButtonCopy) {
+    GroundStationEditor editor;
+    application::ProjectGroundStation station;
+    station.object_id = "draft-station";
+    editor.set_station(station, true);
+    auto *apply = editor.findChild<QPushButton *>("applyGroundStation");
+    auto *reset = editor.findChild<QPushButton *>("resetGroundStation");
+    ASSERT_NE(apply, nullptr);
+    ASSERT_NE(reset, nullptr);
+    apply->setText("Translated create action");
+    reset->click();
+    EXPECT_EQ(apply->text(), QStringLiteral("插入地面站"));
+    editor.accept_station(station);
+    apply->setText("Translated apply action");
+    reset->click();
+    EXPECT_EQ(apply->text(), QStringLiteral("应用"));
+}
+
 TEST_F(QuantityTest, RebindingTimeDataPreservesTypedAndIncompleteEpochDrafts) {
     class NewTimeIdentity final : public core::ITimeProvider {
       public:
@@ -2304,7 +2322,7 @@ TEST_F(QuantityTest, HpopWeatherFileSwitchesFieldsRetainsDraftsAndReopens) {
         QKeyEvent previous(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
         QApplication::sendEvent(update, &previous);
         EXPECT_EQ(update->currentIndex(), 2);
-        EXPECT_TRUE(update->currentText().contains("Interp"));
+        EXPECT_EQ(update->currentText(), QStringLiteral("三小时插值（保持均值）"));
         auto *geomagnetic_source = dialog->findChild<QComboBox *>("hpopDragGeomagneticSource");
         geomagnetic_source->setCurrentIndex(1);
         selection->setCurrentIndex(selection->findData("cssi"));
