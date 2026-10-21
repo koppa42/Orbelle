@@ -403,6 +403,8 @@
     "graphics_workbench.object_commands.add_action_3": "删除…",
     "graphics_workbench.object_dock": "对象浏览器",
     "graphics_workbench.open_action.set_tool_tip": "打开项目 · Ctrl+O",
+    "graphics_workbench.orbit_applied": "轨道已更新。",
+    "graphics_workbench.scenario_applied": "场景设置已更新。",
     "graphics_workbench.path": "保存项目",
     "graphics_workbench.path_2": "打开项目",
     "graphics_workbench.play": "暂停",

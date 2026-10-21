@@ -1267,10 +1267,17 @@ void OrbitEditor::set_busy(bool busy) {
     refresh_enabled();
     cancel_->setEnabled(busy);
     cancel_->setVisible(busy);
-    if (busy)
+    if (busy) {
         show_result(ui::text("orbit_editor.label_71"));
+        orbit_busy_message_ = true;
+    } else if (orbit_busy_message_) {
+        show_result({});
+    }
 }
 void OrbitEditor::show_result(const QString &message, bool error) {
+    // Only the pending hint belongs to set_busy; preserve a final result even
+    // when it arrives before the controller restores the controls.
+    orbit_busy_message_ = false;
     restyle_message(message_, error);
     message_->setText(message);
     message_->setVisible(!message.isEmpty());
@@ -1313,8 +1320,12 @@ void OrbitEditor::apply_appearance_page(bool force) {
 void OrbitEditor::set_appearance_busy(bool busy) {
     model_busy_ = busy;
     refresh_enabled();
-    if (busy)
+    if (busy) {
         show_appearance_result(ui::text("orbit_editor.label_72"));
+        model_busy_message_ = true;
+    } else if (model_busy_message_) {
+        show_appearance_result({});
+    }
 }
 void OrbitEditor::refresh_enabled() {
     for (auto *button : display_buttons_)
@@ -1328,6 +1339,7 @@ void OrbitEditor::refresh_enabled() {
     apply_model_->setEnabled(idle && !create_mode_);
 }
 void OrbitEditor::show_appearance_result(const QString &message, bool error) {
+    model_busy_message_ = false;
     restyle_message(model_message_, error);
     model_message_->setText(message);
     model_message_->setVisible(!message.isEmpty());

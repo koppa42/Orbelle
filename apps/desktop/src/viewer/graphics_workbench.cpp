@@ -2776,22 +2776,30 @@ class Workbench final : public WorkbenchWindow {
             editor_->set_busy(false);
             last_orbit_outcome_ =
                 last_project_outcome_ == "opened" ? "applied" : last_project_outcome_;
-            if (last_project_outcome_ != "opened")
+            if (last_project_outcome_ == "opened")
+                editor_->show_result(ui::text("graphics_workbench.orbit_applied"));
+            else if (last_project_outcome_ == "cancelled")
+                editor_->show_result(ui::text("graphics_workbench.label_54"));
+            else
                 editor_->show_result(ui::text("graphics_workbench.label_56"), true);
             if (insert_defaults_pending_ && last_orbit_outcome_ == "rejected")
                 show_properties_dialog();
             insert_defaults_pending_ = false;
         }
-        if (project_settings_edit_ && last_project_outcome_ != "opened" && scenario_properties_)
+        if (project_settings_edit_ && scenario_properties_)
             if (auto *result =
                     scenario_properties_->findChild<QLabel *>("scenarioSettingsResult")) {
-                result->setText(last_project_outcome_ == "cancelled"
+                result->setText(last_project_outcome_ == "opened"
+                                    ? ui::text("graphics_workbench.scenario_applied")
+                                : last_project_outcome_ == "cancelled"
                                     ? ui::text("graphics_workbench.result.set_text")
                                     : ui::text("graphics_workbench.label_57"));
                 result->show();
             }
-        if (station_editor_ && last_project_outcome_ != "opened")
-            station_editor_->show_result(ui::text("graphics_workbench.label_58"));
+        if (station_editor_ && pending_station_apply_ && last_project_outcome_ != "opened")
+            station_editor_->show_result(last_project_outcome_ == "cancelled"
+                                             ? ui::text("graphics_workbench.label_54")
+                                             : ui::text("graphics_workbench.label_58"));
         if (pending_report_input_) {
             auto done = std::move(pending_report_input_);
             pending_report_input_ = {};
@@ -3926,6 +3934,7 @@ class Workbench final : public WorkbenchWindow {
                 fit_pending_ = true;
             }
             show_orbit_status();
+            editor_->show_result(ui::text("graphics_workbench.orbit_applied"));
             last_orbit_outcome_ = "applied";
         } catch (const OrbitCancelled &) {
             editor_->show_result(ui::text("graphics_workbench.label_54"));
@@ -3973,6 +3982,10 @@ class Workbench final : public WorkbenchWindow {
                                                *cancel, interval);
                 });
             statusBar()->showMessage(ui::text("graphics_workbench.label_88"));
+            display_status_pending_ = true;
+            display_status_connection_ = connect(
+                statusBar(), &QStatusBar::messageChanged, this,
+                [this] { display_status_pending_ = false; }, Qt::SingleShotConnection);
             break;
         }
     }
@@ -3980,6 +3993,12 @@ class Workbench final : public WorkbenchWindow {
         if (!display_candidate_.valid() ||
             display_candidate_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
             return;
+        // A cancelled/superseded display job must release its own pending hint,
+        // without clearing a newer message from another operation.
+        disconnect(display_status_connection_);
+        if (display_status_pending_)
+            statusBar()->clearMessage();
+        display_status_pending_ = false;
         try {
             const ProfileScope profile("cache_publish_ms");
             auto candidate = display_candidate_.get();
@@ -5494,6 +5513,8 @@ class Workbench final : public WorkbenchWindow {
                     "Invalid edit replaced the live scene");
             record("reject-invalid-initial-state");
             const auto error_message = editor_->findChild<QLabel *>("orbitResult")->text();
+            require(!error_message.isEmpty() && !error_message.contains(QStringLiteral("正在")),
+                    "Rejected orbit retained a pending status");
             set_selection(std::nullopt);
             require(editor_->findChild<QLabel *>("orbitResult")->text() == error_message,
                     "Changing selection overwrote the property panel's failed update result");
@@ -5512,6 +5533,9 @@ class Workbench final : public WorkbenchWindow {
                         orbit_group_->children.front() == smoke_old_track_,
                     "Cancelled computation replaced the live scene");
             record("cancel-candidate");
+            require(editor_->findChild<QLabel *>("orbitResult")->text() ==
+                        QStringLiteral("已取消更新，原场景未改变。"),
+                    "Cancelled orbit retained a pending status");
             smoke_old_track_ = {};
             for (auto &slot : slots_) {
                 slot->window->hide();
@@ -6170,6 +6194,25 @@ class Workbench final : public WorkbenchWindow {
             smoke_publications_ = display_cache_publications_;
             smoke_render_tasks_ = viewer_->recordAndSubmitTasks;
             seek_epoch(jump);
+            // Drive display preparation for the pending seek without changing the
+            // current rendered frame and its epoch-matched Earth rotation.
+            const QScopedValueRollback snapshot_guard(snapshot_, sample_frame(jump));
+            request_display_cache();
+            require(display_candidate_.valid(), "Uncached seek did not start display preparation");
+            display_cancellation_->store(true);
+            display_candidate_.wait();
+            poll_display_cache();
+            require(statusBar()->currentMessage().isEmpty(),
+                    "Cancelled display preparation left a pending status");
+            request_display_cache();
+            require(display_candidate_.valid(), "Cancelled display preparation could not retry");
+            statusBar()->showMessage("Newer operation feedback");
+            display_cancellation_->store(true);
+            display_candidate_.wait();
+            poll_display_cache();
+            require(statusBar()->currentMessage() == "Newer operation feedback",
+                    "Cancelled display preparation erased a newer operation's status");
+            record("display-preparation-cancel-clears-only-its-own-status");
             ++orbit_smoke_stage_;
             break;
         }
@@ -7195,6 +7238,10 @@ class Workbench final : public WorkbenchWindow {
             break;
         }
         case 98: {
+            require(scenario_properties_->findChild<QLabel *>("scenarioSettingsResult")->text() ==
+                        QStringLiteral("场景设置已更新。"),
+                    "Successful scenario update retained the pending hint");
+            record("scenario-update-publishes-completion-status");
             require(last_project_outcome_ == "opened" && project_dirty_ &&
                         eop_->data_info().extrapolation_days == 1 &&
                         scenario_->data_lock() != smoke_settings_project_->data_lock(),
@@ -7219,6 +7266,10 @@ class Workbench final : public WorkbenchWindow {
             break;
         }
         case 99: {
+            require(scenario_properties_->findChild<QLabel *>("scenarioSettingsResult")
+                        ->text()
+                        .startsWith(QStringLiteral("已取消更新")),
+                    "Cancelled scenario update retained the pending hint");
             require(last_project_outcome_ == "cancelled" && !project_dirty_ &&
                         satellites_[0].orbit == smoke_cache_ &&
                         scenario_->first() == smoke_settings_project_->first &&
@@ -7236,6 +7287,10 @@ class Workbench final : public WorkbenchWindow {
             break;
         }
         case 100: {
+            require(scenario_properties_->findChild<QLabel *>("scenarioSettingsResult")
+                        ->text()
+                        .startsWith(QStringLiteral("更新失败")),
+                    "Failed scenario update retained the pending hint");
             require(last_project_outcome_ == "rejected" && !project_dirty_ &&
                         satellites_[0].orbit == smoke_cache_ &&
                         application::encode_project(project_snapshot(project_path_)) ==
@@ -8327,6 +8382,13 @@ class Workbench final : public WorkbenchWindow {
             break;
         }
         case 160: {
+            require(editor_->findChild<QLabel *>("orbitResult")->text() ==
+                            QStringLiteral("轨道已更新。") &&
+                        editor_->findChild<QPushButton *>("applyOrbit")->isEnabled(),
+                    "HPOP Apply completed but retained its pending status");
+            require(properties_dialog_->grab().save(smoke_dir_ + "/hpop-apply-complete.png"),
+                    "Cannot capture HPOP completion feedback");
+            record("hpop-apply-publishes-completion-status");
             require(last_orbit_outcome_ == "applied" && gravity_.contains(smoke_gravity_id_),
                     "Explicit HPOP gravity selection prompted for data consent or failed");
             require(workspace_->contains(properties_dialog_) && !editor_->has_unapplied_changes(),
@@ -8375,6 +8437,9 @@ class Workbench final : public WorkbenchWindow {
             require(last_orbit_outcome_ == "unchanged" && !busy() &&
                         scenario_->revision() == revision && satellites_[0].orbit == current,
                     "Unchanged Apply started work or revised the scenario");
+            require(editor_->findChild<QLabel *>("orbitResult")->text() ==
+                        QStringLiteral("没有需要应用的更改。"),
+                    "Unchanged Apply left a previous task status");
             record("unchanged-apply-does-not-compute-or-confirm-data");
             properties_dialog_->close();
             save_project_to(smoke_dir_ + "/apply-audit.orbitforge");
@@ -8473,6 +8538,9 @@ class Workbench final : public WorkbenchWindow {
             break;
         }
         case 166: {
+            require(editor_->findChild<QLabel *>("orbitResult")->text() ==
+                        QStringLiteral("轨道已更新。"),
+                    "Single-orbit Apply retained a pending status");
             const auto *look = dynamic_cast<vsg::LookAt *>(slots_[0]->camera->viewMatrix.get());
             require(last_orbit_outcome_ == "applied",
                     qPrintable(editor_->findChild<QLabel *>("orbitResult")->text()));
@@ -9006,6 +9074,74 @@ class Workbench final : public WorkbenchWindow {
             if (++smoke_final_frames_ >= 4)
                 ++orbit_smoke_stage_;
             break;
+        case 192: {
+            auto project = application::load_project(
+                std::filesystem::path((smoke_dir_ + "/apply-audit.orbitforge").toStdWString()));
+            project.ground_stations.push_back({"status-station", "Status station", {0, 0, 0}});
+            start_project(std::move(project), smoke_dir_ + "/status-audit.orbitforge");
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 193:
+            set_selection(satellites_.size());
+            open_properties();
+            station_editor_->findChild<QuantityEditor *>("stationHeight")
+                ->set_value(10, Unit::metre);
+            station_editor_->findChild<QPushButton *>("applyGroundStation")->click();
+            require(project_candidate_.valid(), "Station Apply did not start a project update");
+            project_cancellation_->store(true);
+            ++orbit_smoke_stage_;
+            break;
+        case 194: {
+            require(last_project_outcome_ == "cancelled" &&
+                        stations_[0].config.location.height_m == 0 &&
+                        station_editor_->findChild<QLabel *>("stationResult")->text() ==
+                            QStringLiteral("已取消更新，原场景未改变。"),
+                    "Cancelled station Apply was reported as a failure or stayed pending");
+            record("station-cancel-publishes-cancellation-status");
+            station_editor_->findChild<QPushButton *>("resetGroundStation")->click();
+            station_editor_->show_result("Station feedback");
+            set_selection(0);
+            open_properties();
+            smoke_cache_ = satellites_[0].orbit;
+            editor_->set_state_mode(0);
+            auto *velocity = editor_->findChild<QuantityEditor *>("velocityY");
+            velocity->set_value(velocity->value(Unit::metres_per_second) + 1,
+                                Unit::metres_per_second);
+            editor_->submit();
+            require(project_candidate_.valid(), "HPOP Apply did not start a project update");
+            editor_->cancel();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 195:
+            require(last_orbit_outcome_ == "cancelled" && satellites_[0].orbit == smoke_cache_ &&
+                        editor_->has_unapplied_changes() &&
+                        editor_->findChild<QLabel *>("orbitResult")->text() ==
+                            QStringLiteral("已取消更新，原场景未改变。") &&
+                        station_editor_->findChild<QLabel *>("stationResult")->text() ==
+                            "Station feedback",
+                    "HPOP cancellation lost its draft/status or overwrote another editor");
+            record("hpop-cancel-preserves-draft-and-unrelated-feedback");
+            editor_->submit();
+            ++orbit_smoke_stage_;
+            break;
+        case 196:
+            require(last_orbit_outcome_ == "applied" && !editor_->has_unapplied_changes() &&
+                        editor_->findChild<QLabel *>("orbitResult")->text() ==
+                            QStringLiteral("轨道已更新。"),
+                    "HPOP retry retained cancellation or pending feedback");
+            record("hpop-retry-replaces-cancellation-with-completion");
+            workspace_->select_view(0);
+            fit_views();
+            fit_pending_ = true;
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        case 197:
+            if (++smoke_final_frames_ >= 4)
+                ++orbit_smoke_stage_;
+            break;
         }
     }
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
@@ -9332,7 +9468,7 @@ class Workbench final : public WorkbenchWindow {
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 192;
+    static constexpr int orbit_smoke_complete = 198;
     std::shared_ptr<const core::GravityModel> smoke_gravity_;
     std::weak_ptr<const core::GravityModel> smoke_startup_gravity_;
     std::string smoke_gravity_id_ = "apply-audit";
@@ -9359,6 +9495,8 @@ class Workbench final : public WorkbenchWindow {
     DisplaySettings display_settings_, failed_display_settings_;
     std::shared_ptr<std::atomic_bool> display_cancellation_;
     std::size_t display_target_ = 0, display_cache_publications_ = 0;
+    QMetaObject::Connection display_status_connection_;
+    bool display_status_pending_ = false;
     std::shared_ptr<std::atomic_bool> cancellation_;
     OrbitEditor *editor_ = nullptr;
     QTreeWidgetItem *object_item_ = nullptr;

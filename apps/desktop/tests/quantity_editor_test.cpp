@@ -100,6 +100,48 @@ TEST_F(QuantityTest, PreparingOrbitPropertiesDoesNotShowTemporaryWindows) {
     EXPECT_FALSE(editor.isVisible());
     EXPECT_TRUE(windows.shown.isEmpty()) << windows.shown.join(", ").toStdString();
 }
+TEST_F(QuantityTest, BusyHintsEndWithoutErasingOrbitOrModelResults) {
+    OrbitEditor editor(OrbitInput{});
+    for (const bool appearance : {false, true}) {
+        SCOPED_TRACE(appearance ? "model" : "orbit");
+        auto *message = editor.findChild<QLabel *>(appearance ? "modelResult" : "orbitResult");
+        ASSERT_NE(message, nullptr);
+        const auto busy = [&](bool value) {
+            if (appearance)
+                editor.set_appearance_busy(value);
+            else
+                editor.set_busy(value);
+        };
+        const auto result = [&](const QString &text, bool error) {
+            if (appearance)
+                editor.show_appearance_result(text, error);
+            else
+                editor.show_result(text, error);
+        };
+        busy(true);
+        EXPECT_EQ(message->text(),
+                  appearance ? QStringLiteral("正在准备三维模型…") : QStringLiteral("正在计算…"));
+        EXPECT_FALSE(message->isHidden());
+        busy(false);
+        EXPECT_TRUE(message->text().isEmpty());
+        EXPECT_TRUE(message->isHidden());
+
+        // Completion may be published before or after the busy flag is reset.
+        // A final success, cancellation or error must survive subsequent idle updates.
+        for (const auto &text :
+             {QStringLiteral("已应用"), QStringLiteral("已取消"), QStringLiteral("模型文件无效")}) {
+            busy(true);
+            result(text, text == QStringLiteral("模型文件无效"));
+            busy(false);
+            busy(false);
+            EXPECT_EQ(message->text(), text);
+            EXPECT_FALSE(message->isHidden());
+        }
+        busy(true);
+        busy(false);
+        EXPECT_TRUE(message->text().isEmpty());
+    }
+}
 TEST_F(QuantityTest, PreparingGroundStationDoesNotShowTemporaryWindows) {
     WindowShowObserver windows;
     GroundStationEditor editor;
