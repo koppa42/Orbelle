@@ -193,7 +193,8 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     identity_label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
     identity->addWidget(identity_label);
     object_ = new QLineEdit;
-    object_->setObjectName("objectId");
+    object_->setObjectName("objectName");
+    object_->setMaxLength(16384);
     object_->setAccessibleName(ui::text("orbit_editor.object.set_accessible_name"));
     object_->setMaximumWidth(250);
     object_->setMinimumWidth(60);
@@ -733,6 +734,9 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     set_appearance(0, {}, 1000);
 }
 void OrbitEditor::set_input(const OrbitInput &input) {
+    const auto name = bound_name_.empty() || bound_input_.object_id != input.object_id
+                          ? input.object_id
+                          : bound_name_;
     bound_input_ = input;
     remembered_display_.reset();
     const QSignalBlocker state_block(state_mode_), frame_block(reference_frame_),
@@ -752,7 +756,7 @@ void OrbitEditor::set_input(const OrbitInput &input) {
         input.propagator == OrbitPropagator::sgp4 ? core::FrameId::gcrf : input.input_frame;
     propagator_->setCurrentIndex(static_cast<int>(propagator_kind_));
     reference_frame_->setCurrentIndex(input_frame_ == core::FrameId::gcrf ? 0 : 1);
-    object_->setText(QString::fromStdString(input.object_id));
+    set_name(name);
     epoch_->set_epoch(input.initial.epoch);
     first_->set_epoch(input.first);
     last_->set_epoch(input.last);
@@ -776,6 +780,21 @@ void OrbitEditor::accept_input(const OrbitInput &input) {
     if (propagator_kind_ != OrbitPropagator::sgp4)
         remember_state(input.initial);
 }
+std::string OrbitEditor::object_name() const {
+    const auto name = object_->text().trimmed().toStdString();
+    if (name.empty())
+        throw std::invalid_argument(ui::utf8("common.object_name_required"));
+    return name;
+}
+void OrbitEditor::set_name(const std::string &name) {
+    bound_name_ = name;
+    object_->setText(QString::fromStdString(name));
+}
+void OrbitEditor::sync_name(const std::string &name) {
+    if (object_->text().trimmed().toStdString() == bound_name_)
+        object_->setText(QString::fromStdString(name));
+    bound_name_ = name;
+}
 void OrbitEditor::set_analysis_interval(core::Epoch first, core::Epoch last) {
     bound_input_.first = first;
     bound_input_.last = last;
@@ -784,7 +803,7 @@ void OrbitEditor::set_analysis_interval(core::Epoch first, core::Epoch last) {
 }
 bool OrbitEditor::has_unapplied_changes() const {
     try {
-        return !same_orbit_input(read_input(), bound_input_) ||
+        return object_name() != bound_name_ || !same_orbit_input(read_input(), bound_input_) ||
                (!create_mode_ &&
                 (read_display() != bound_display_ ||
                  model_kind_->currentIndex() != applied_model_kind_ ||
@@ -1200,7 +1219,6 @@ void OrbitEditor::open_propagator_details() {
 void OrbitEditor::set_create_mode(bool create) {
     const bool changed = create_mode_ != create;
     create_mode_ = create;
-    object_->setReadOnly(!create);
     apply_->setText(create ? ui::text("orbit_editor.apply.set_text") : ui::text("common.apply"));
     if (changed)
         navigation_->setCurrentItem(navigation_->topLevelItem(0)->child(0));
@@ -1220,6 +1238,7 @@ void OrbitEditor::submit() {
     if (!apply_->isEnabled())
         return;
     try {
+        (void)object_name();
         if (apply)
             apply(read_input());
     } catch (const std::exception &error) {
@@ -1228,7 +1247,6 @@ void OrbitEditor::submit() {
 }
 OrbitInput OrbitEditor::read_input() const {
     OrbitInput input = bound_input_;
-    input.object_id = object_->text().trimmed().toStdString();
     input.initial = read_state();
     input.propagator = propagator_kind_;
     input.hpop = hpop_;

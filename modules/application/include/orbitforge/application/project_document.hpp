@@ -55,8 +55,10 @@ struct Pointing {
 struct Sensor {
     std::string name;
     ObjectRef parent;
-    double half_angle_rad = 0.7853981633974483;
+    core::SensorPattern pattern = {};
     Pointing pointing = {};
+    double roll_rad = 0;
+    SensorDisplay display = {};
 };
 struct SatelliteUpdate {
     std::optional<std::string> name = {};
@@ -70,8 +72,10 @@ struct GroundStationUpdate {
 };
 struct SensorUpdate {
     std::optional<std::string> name = {};
-    std::optional<double> half_angle_rad = {};
+    std::optional<core::SensorPattern> pattern = {};
     std::optional<Pointing> pointing = {};
+    std::optional<double> roll_rad = {};
+    std::optional<SensorDisplay> display = {};
 };
 } // namespace objects
 

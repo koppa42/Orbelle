@@ -8,6 +8,7 @@ class StateTrack {
   public:
     explicit StateTrack(results::StateSeries samples);
     [[nodiscard]] RenderSnapshot sample(core::Epoch epoch) const;
+    [[nodiscard]] core::CartesianState sample_state(core::Epoch epoch) const;
     [[nodiscard]] std::vector<RenderSnapshot> nodes() const;
     [[nodiscard]] const results::StateSeries &samples() const noexcept { return samples_; }
 

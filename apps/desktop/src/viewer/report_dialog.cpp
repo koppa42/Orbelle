@@ -3,6 +3,7 @@
 #include "coverage_map.hpp"
 #include "epoch_editor.hpp"
 #include "object_selection.hpp"
+#include "report_names.hpp"
 #include "report_plot.hpp"
 #include "report_selection.hpp"
 #include "responsive_layout.hpp"
@@ -2026,6 +2027,11 @@ struct ReportDialog::Impl {
     }
     void publish(std::shared_ptr<runtime::ReportResult> result, bool new_calculation = true,
                  bool update_plot = true) {
+        // A rename can arrive while the numerical query is running. Publish current
+        // labels without cancelling the worker or replacing its calculated values.
+        if (result_is_current())
+            if (auto renamed = renamed_report(*result, project))
+                result = std::move(renamed);
         std::string sort_field;
         const auto sort_order = table->horizontalHeader()->sortIndicatorOrder();
         std::vector<int> selected_rows;
@@ -2756,6 +2762,12 @@ struct ReportDialog::Impl {
             fill_access_pair(true);
         update_interval();
         update_estimate();
+        if (model->result && result_is_current())
+            if (auto renamed = renamed_report(*model->result, project)) {
+                const bool was_changed = changed;
+                publish(std::move(renamed), false);
+                changed = was_changed;
+            }
         result_status();
     }
 };

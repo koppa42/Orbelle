@@ -22,8 +22,9 @@ inline bool same_orbit_input(const application::OrbitInput &a, const application
 inline bool same_sensor_input(const application::ProjectSensor &a,
                               const application::ProjectSensor &b) {
     return a.object_id == b.object_id && a.name() == b.name() &&
-           a.parent_satellite_id == b.parent_satellite_id && a.half_angle_rad == b.half_angle_rad &&
-           a.pointing == b.pointing && a.target_station_id == b.target_station_id;
+           a.parent_satellite_id == b.parent_satellite_id && a.pattern == b.pattern &&
+           a.pointing == b.pointing && a.target_station_id == b.target_station_id &&
+           a.roll_rad == b.roll_rad && a.display == b.display;
 }
 inline bool same_station_input(const application::ProjectGroundStation &a,
                                const application::ProjectGroundStation &b) {

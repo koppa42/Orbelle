@@ -14,6 +14,7 @@
 #include <future>
 #include <map>
 #include <optional>
+#include <orbitforge/visualization/sensor_view.hpp>
 #include <span>
 
 namespace orbitforge::desktop {
@@ -22,6 +23,7 @@ QPointF ground_coordinates(const std::array<double, 3> &position_m);
 // Opaque multiplicative day/night display mask; input is an ITRF unit direction.
 QImage ground_lighting_mask(const std::array<double, 3> &sun_direction);
 QPainterPath ground_path(std::span<const QPointF> longitude_latitude);
+QPainterPath ground_footprint_path(std::span<const core::SensorTriangle> triangles);
 inline QPainterPath ground_path(std::initializer_list<QPointF> points) {
     return ground_path(std::span<const QPointF>(points.begin(), points.size()));
 }
@@ -53,8 +55,10 @@ class GroundMap final : public QWidget {
     void append_track(Track track);
     void replace_track(std::size_t index, Track track);
     void set_name(std::size_t index, const QString &name);
+    void set_station_name(std::size_t index, const std::string &id, const QString &name);
     void set_ground_stations(const std::vector<application::ProjectGroundStation> &stations);
     void set_snapshot(const visualization::RenderSnapshot &snapshot);
+    void set_sensor_footprints(std::span<const visualization::SensorMesh> meshes);
     void set_selection(std::optional<std::size_t> index);
     void set_access_link(std::optional<std::pair<std::size_t, std::size_t>> pair, bool visible);
     void set_display(std::size_t index, const DisplaySettings &settings, core::Epoch first,
@@ -79,6 +83,7 @@ class GroundMap final : public QWidget {
     [[nodiscard]] QPointF marker_coordinates(std::size_t index) const;
     [[nodiscard]] double zoom_factor() const { return zoom_; }
     [[nodiscard]] bool tracks_ready() const;
+    [[nodiscard]] bool footprints_ready() const;
     [[nodiscard]] bool tracks_transitioning() const {
         return refinement_pending_ || refinement_animation_.state() == QAbstractAnimation::Running;
     }
@@ -102,6 +107,13 @@ class GroundMap final : public QWidget {
         bool ground_station = false;
         bool operator==(const Point &) const = default;
     };
+    struct Footprint {
+        QPainterPath fill, edges;
+        QColor color;
+        double opacity;
+        bool filled;
+    };
+    std::shared_ptr<const std::vector<Footprint>> footprints_;
     QRectF plot_rect() const;
     QRectF map_rect() const;
     QTransform map_transform() const;
@@ -156,12 +168,21 @@ class GroundMap final : public QWidget {
     static Raster rasterize(Raster result, const std::vector<Stroke> &strokes,
                             const std::atomic_bool &cancelled);
     void poll_raster();
+    static Raster rasterize_footprints(Raster result, const std::vector<Footprint> &footprints,
+                                       const std::atomic_bool &cancelled);
+    void poll_footprints();
+    void prepare_footprints(bool navigating);
     void install_raster(Raster result);
     void cancel_refinement();
     const Raster *refinement_display();
     std::future<Raster> pending_raster_;
     std::shared_ptr<std::atomic_bool> cancel_raster_;
     QTimer raster_timer_;
+    std::future<Raster> pending_footprints_;
+    std::shared_ptr<std::atomic_bool> cancel_footprints_;
+    QTimer footprint_timer_;
+    std::uint64_t footprints_revision_ = 0;
+    Raster footprint_raster_, footprint_preview_, footprint_request_;
     std::uint64_t trails_revision_ = 0;
     std::uint64_t geometry_revision_ = 0;
     QImage imagery_;

@@ -185,7 +185,14 @@ std::string report_input_sha256(const application::Project &project) {
     auto p = project;
     p.reports.clear();
     p.current = p.first;
+    for (auto &s : p.ground_stations)
+        s.display_name.clear();
+    for (auto &s : p.sensors) {
+        s.display_name.clear();
+        s.display = {};
+    }
     for (auto &s : p.satellites) {
+        s.display_name.clear();
         s.display = {};
         s.model_kind = 0;
         s.model_path.clear();

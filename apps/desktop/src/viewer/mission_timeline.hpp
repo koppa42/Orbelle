@@ -17,6 +17,7 @@ class MissionTimeline final : public QSlider {
     void set_time_provider(std::shared_ptr<const core::ITimeProvider> time);
     void set_show_object_interval(bool show);
     void set_access_intervals(std::vector<std::pair<qint64, qint64>> intervals, QString label);
+    void set_access_label(QString label);
     void reset_view();
     void zoom(double factor);
     void center_current();

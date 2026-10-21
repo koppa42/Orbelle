@@ -33,3 +33,5 @@ gtest_discover_tests(orbitforge_integration_tests DISCOVERY_MODE PRE_TEST
     NO_PRETTY_VALUES TEST_PREFIX "integration.")
 
 target_include_directories(orbitforge_integration_tests PRIVATE "${PROJECT_SOURCE_DIR}/tests/support")
+
+target_sources(orbitforge_integration_tests PRIVATE sensor_view_test.cpp)

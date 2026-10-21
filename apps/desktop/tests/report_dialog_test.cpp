@@ -261,13 +261,15 @@ TEST(ReportDialog, StalePreparationGenerationAndCancellationPreservePublishedRes
     EXPECT_TRUE(status->text().contains(QStringLiteral("已取消")));
     EXPECT_EQ(table->model()->rowCount(), 3);
 
-    // Playback does not change computation inputs and must not discard a report.
+    // Playback and a rename during generation must retain the numerical job.
     generate->click();
     release(project);
     project.current = core::Epoch{1};
+    project.ground_stations[0].display_name = "Renamed while generating";
     dialog.update_project(project, data.time());
     wait_for_report(dialog);
     EXPECT_EQ(publications, 2);
+    EXPECT_EQ(table->model()->index(0, 0).data().toString(), "Renamed while generating");
 
     generate->click();
     release(project);
@@ -389,6 +391,15 @@ TEST(ReportDialog, RepeatedQueriesReuseAnalysisAndChangedInputsOrDataReplaceIt) 
 
     project.satellites[0].display_name = "Renamed satellite";
     dialog.update_project(project, data.time());
+    EXPECT_EQ(publications, 2);
+    EXPECT_EQ(preflights, 2);
+    EXPECT_FALSE(dialog.findChild<QLabel *>("reportResultLabel")
+                     ->text()
+                     .contains(QStringLiteral("场景已变化")));
+    auto *renamed_table = dialog.findChild<QTableView *>("reportTable");
+    ASSERT_NE(renamed_table, nullptr);
+    EXPECT_EQ(renamed_table->model()->index(0, 0).data().toString(), "Renamed satellite");
+    EXPECT_EQ(result->table.rows().back(), original_end); // Old snapshots remain immutable.
     generate->click();
     wait_for_report(dialog);
     ASSERT_EQ(publications, 3);

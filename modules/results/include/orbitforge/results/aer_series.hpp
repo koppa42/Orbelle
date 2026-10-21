@@ -10,6 +10,7 @@ struct AerSample {
     core::GroundObservation observation;
     std::optional<double> off_boresight_rad; // Only for a sensor target.
     bool visible;
+    std::optional<double> sensor_margin_rad = {}; // Signed pattern clearance for Access search.
 };
 // Owns every sample and its provenance, including for an empty explicit-time query.
 class AerSeries {

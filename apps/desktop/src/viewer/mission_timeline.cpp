@@ -92,6 +92,12 @@ void MissionTimeline::set_access_intervals(std::vector<std::pair<qint64, qint64>
     update();
 }
 double MissionTimeline::track_left() const { return width() < 900 ? 154.0 : 190.0; }
+void MissionTimeline::set_access_label(QString label) {
+    if (access_label_.isEmpty())
+        return;
+    access_label_ = std::move(label);
+    update();
+}
 QRectF MissionTimeline::overview_rect() const {
     return {track_left(), 23, std::max(1.0, width() - 18.0 - track_left()), 13};
 }

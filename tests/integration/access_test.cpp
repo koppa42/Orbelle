@@ -191,6 +191,54 @@ TEST(Access, SensorPersistenceCopyDeletionAndReferenceValidation) {
     EXPECT_THROW(application::validate_project(decoded), application::ProjectError);
 }
 
+TEST(Access, PatternGeometryControlsVisibilityAndDisplayDoesNotChangeInputIdentity) {
+    if (!runtime::time_frames_available() || !runtime::two_body_available())
+        GTEST_SKIP();
+    auto context = circular();
+    application::ProjectSensor sensor;
+    sensor.parent_satellite_id = "satellite-1";
+    sensor.pattern.type = core::SensorPatternType::complex_conic;
+    sensor.pattern.half_angle_rad = 45 * pi / 180;
+    sensor.pattern.inner_half_angle_rad = 5 * pi / 180;
+    context.project.sensors.push_back(sensor);
+    runtime::AccessSession annulus(context, "station", "sensor-1");
+    EXPECT_FALSE(annulus.at(seconds(0)).visible);
+    EXPECT_TRUE(annulus.at(seconds(20)).visible);
+    auto &s = context.project.sensors[0];
+    s.pointing = application::SensorPointing::targeted;
+    s.target_station_id = "station";
+    s.pattern.inner_half_angle_rad = 0;
+    s.pattern.minimum_clock_rad = 5 * pi / 3;
+    s.pattern.maximum_clock_rad = pi / 3;
+    const auto boundary = runtime::AccessSession(context, "station", "sensor-1").at(seconds(20));
+    EXPECT_TRUE(boundary.visible);
+    ASSERT_TRUE(boundary.sensor_margin_rad);
+    EXPECT_GE(*boundary.sensor_margin_rad, 0);
+    s.pointing = application::SensorPointing::nadir;
+    s.target_station_id.clear();
+    s.pattern.type = core::SensorPatternType::rectangular;
+    s.pattern.horizontal_half_angle_rad = 30 * pi / 180;
+    s.pattern.vertical_half_angle_rad = 1 * pi / 180;
+    EXPECT_TRUE(runtime::AccessSession(context, "station", "sensor-1").at(seconds(20)).visible);
+    s.roll_rad = pi / 2;
+    EXPECT_FALSE(runtime::AccessSession(context, "station", "sensor-1").at(seconds(20)).visible);
+    s.pattern.type = core::SensorPatternType::custom;
+    s.pattern.custom_points = {{.1, 0}, {.1, pi / 2}, {.1, pi}, {.1, 3 * pi / 2}};
+    EXPECT_TRUE(runtime::AccessSession(context, "station", "sensor-1").at(seconds(0)).visible);
+    const auto hash = application::analysis_input_sha256(context.project);
+    const auto report_hash = runtime::report_input_sha256(context.project);
+    s.display = {false, true, false, 0x123456, .37, 1234567};
+    EXPECT_EQ(application::analysis_input_sha256(context.project), hash);
+    EXPECT_EQ(runtime::report_input_sha256(context.project), report_hash);
+    const auto decoded = application::decode_project(application::encode_project(context.project));
+    EXPECT_EQ(decoded.sensors[0].pattern, s.pattern);
+    EXPECT_EQ(decoded.sensors[0].display, s.display);
+    EXPECT_EQ(decoded.sensors[0].roll_rad, s.roll_rad);
+    s.pattern.custom_points[0].cone_rad = .11;
+    EXPECT_NE(application::analysis_input_sha256(context.project), hash);
+    EXPECT_NE(runtime::report_input_sha256(context.project), report_hash);
+}
+
 TEST(Access, ExtremumDiscoveryFindsShortOffGridPassAndHiddenGap) {
     for (const auto centre : {.123456, 3.14159, 9.87654}) {
         const auto margin = [=](core::Epoch t) {

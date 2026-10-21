@@ -57,7 +57,7 @@ class ReportCancelled : public std::runtime_error {
   public:
     ReportCancelled() : std::runtime_error("Report generation cancelled") {}
 };
-// Excludes saved reports, playback time and purely graphical settings.
+// Excludes object display names, saved reports, playback time and object graphics.
 [[nodiscard]] std::string report_input_sha256(const application::Project &project);
 [[nodiscard]] std::size_t estimate_report_rows(const application::Project &project,
                                                const application::ReportDefinition &definition);

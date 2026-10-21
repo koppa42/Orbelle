@@ -1,4 +1,5 @@
 #include "../src/viewer/ground_map.hpp"
+#include "../src/viewer/workbench_profile.hpp"
 #include <QApplication>
 #include <QDir>
 #include <QElapsedTimer>
@@ -15,6 +16,25 @@
 #include <numbers>
 
 namespace orbitforge::desktop {
+TEST(GroundFootprint, SplitsDateLineAndClosesPolarCapWithoutFillingOtherHemisphere) {
+    const auto p = [](double lon, double lat) {
+        return core::ground_station_position(
+            {lon * std::numbers::pi / 180, lat * std::numbers::pi / 180, 0});
+    };
+    const std::vector<core::SensorTriangle> seam{{p(175, -5), p(-175, -5), p(180, 5)}};
+    const auto path = ground_footprint_path(seam);
+    EXPECT_TRUE(path.contains({179, 0}));
+    EXPECT_TRUE(path.contains({-179, 0}));
+    EXPECT_FALSE(path.contains({0, 0}));
+    EXPECT_FALSE(path.contains({170, 0}));
+    const std::vector<core::SensorTriangle> polar{{p(-120, 85), p(0, 85), p(120, 85)}};
+    const auto cap = ground_footprint_path(polar);
+    EXPECT_TRUE(cap.contains({179, 89}));
+    EXPECT_TRUE(cap.contains({-179, 89}));
+    EXPECT_TRUE(cap.contains({0, 89}));
+    EXPECT_FALSE(cap.contains({0, 70}));
+    EXPECT_FALSE(cap.contains({0, -89}));
+}
 TEST(GroundLightingMask, MatchesPerPixelReferenceAtPolesSeamsAndTwilight) {
     for (int sample = 0; sample < 20; ++sample) {
         const double longitude = sample * std::numbers::pi / 5;
@@ -105,7 +125,7 @@ class GroundMapTest : public ::testing::Test {
         do {
             QCoreApplication::processEvents();
             (void)pixels(map);
-            if (map.tracks_ready() && !map.tracks_transitioning())
+            if (map.tracks_ready() && !map.tracks_transitioning() && map.footprints_ready())
                 return true;
             QThread::msleep(1);
         } while (deadline.elapsed() < 3000);
@@ -189,6 +209,104 @@ class GroundMapTest : public ::testing::Test {
     QTemporaryDir directory_;
     QString imagery_;
 };
+TEST_F(GroundMapTest, ProfileZoomedSensorPanning) {
+    const auto output = qEnvironmentVariable("ORBITFORGE_SENSOR_PAN_PROFILE");
+    if (output.isEmpty())
+        GTEST_SKIP() << "Opt-in pan benchmark";
+    WorkbenchProfile profile(output);
+    for (int mode = 0; mode < 3; ++mode) {
+        GroundMap map(imagery_);
+        configure(map);
+        map.resize(1280, 800);
+        if (mode) {
+            core::SensorPattern pattern;
+            pattern.half_angle_rad = (mode == 1 ? 45 : 80) * std::numbers::pi / 180;
+            const visualization::SensorView view(pattern);
+            const core::SensorVector position{mode == 1 ? 7e6 : 42e6, 0, 0};
+            const auto axes = core::sensor_axes({0, 7500, 0}, {-1, 0, 0});
+            const auto mesh = view.project(position, axes, 20e6);
+            std::cout << "pan mode " << mode << ": " << mesh.ground.size() << " facets\n"
+                      << std::flush;
+            map.set_sensor_footprints(std::span(&mesh, 1));
+        }
+        map.show();
+        QCoreApplication::processEvents();
+        map.zoom(12, map.rect().center());
+        ASSERT_TRUE(settle(map));
+        profile.phase(QString("pan-%1").arg(mode), true);
+        mouse(map, QEvent::MouseButtonPress, {400, 300});
+        for (int step = 1; step <= 30; ++step) {
+            mouse(map, QEvent::MouseMove, {400.0 + step * 3, 300.0 + step});
+            (void)pixels(map);
+        }
+        mouse(map, QEvent::MouseButtonRelease, {670, 390});
+        profile.phase("settle", false);
+        profile.finish({{"completed_mode", mode}});
+        ASSERT_TRUE(settle(map));
+        profile.phase(QString("pan-beyond-cache-%1").arg(mode), true);
+        mouse(map, QEvent::MouseButtonPress, {400, 300});
+        for (int step = 1; step <= 30; ++step) {
+            mouse(map, QEvent::MouseMove, {400.0 + step * 12, 300.0 + step * 2});
+            (void)pixels(map);
+        }
+        mouse(map, QEvent::MouseButtonRelease, {760, 360});
+        profile.phase("settle", false);
+    }
+    profile.finish({{"logical_width", 1280}, {"logical_height", 800}, {"zoom", 12}, {"steps", 30}});
+}
+TEST_F(GroundMapTest, SensorRasterKeepsHolesAndRefreshesAfterPanResizeAndRemoval) {
+    GroundMap map(imagery_), reference(imagery_);
+    for (auto *view : {&map, &reference}) {
+        configure(*view);
+        view->set_labels_visible(false);
+        view->set_grid_visible(false);
+        view->set_lighting(false);
+        view->set_tracks_visible(false);
+        view->set_sun_visible(false);
+        view->zoom(12, view->rect().center());
+    }
+    ASSERT_TRUE(settle(reference));
+    const auto background = pixels(reference);
+    core::SensorPattern pattern;
+    pattern.type = core::SensorPatternType::complex_conic;
+    pattern.half_angle_rad = .8;
+    pattern.inner_half_angle_rad = .3;
+    const visualization::SensorView geometry(pattern);
+    auto mesh = geometry.project({7e6, 0, 0}, core::sensor_axes({0, 7500, 0}, {-1, 0, 0}), 20e6);
+    mesh.color = 0xff0066;
+    mesh.opacity = .7;
+    map.set_sensor_footprints(std::span(&mesh, 1));
+    ASSERT_TRUE(settle(map));
+    auto frame = pixels(map);
+    EXPECT_NE(frame, background);
+    // The central blind area stays transparent, including after a high-DPI cache.
+    const auto center = map.marker_position(0) * map.devicePixelRatioF();
+    for (int y = -6; y <= 6; ++y)
+        for (int x = -6; x <= 6; ++x)
+            EXPECT_EQ(frame.pixelColor(center.toPoint() + QPoint(x, y)),
+                      background.pixelColor(center.toPoint() + QPoint(x, y)));
+    for (auto *view : {&map, &reference}) {
+        mouse(*view, QEvent::MouseButtonPress, {300, 180});
+        mouse(*view, QEvent::MouseMove, {90.25, 220.5});
+        (void)pixels(*view);
+        mouse(*view, QEvent::MouseButtonRelease, {90.25, 220.5});
+        view->resize(780, 440);
+    }
+    reference.set_sensor_footprints(std::span(&mesh, 1));
+    ASSERT_TRUE(settle(map));
+    ASSERT_TRUE(settle(reference));
+    expect_same_pixels(pixels(map), pixels(reference));
+    // Replacing an in-flight request cannot publish the previous shape or color.
+    mesh.color = 0x00ddff;
+    map.set_sensor_footprints(std::span(&mesh, 1));
+    (void)pixels(map);
+    map.set_sensor_footprints({});
+    reference.set_sensor_footprints({});
+    process_for(80);
+    ASSERT_TRUE(settle(map));
+    ASSERT_TRUE(settle(reference));
+    expect_same_pixels(pixels(map), pixels(reference));
+}
 TEST_F(GroundMapTest, TrackStyleChangesRepaintCachedGeometryWithColorWidthAndGaps) {
     GroundMap map(imagery_);
     configure(map);

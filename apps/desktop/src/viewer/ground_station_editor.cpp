@@ -55,7 +55,8 @@ GroundStationEditor::GroundStationEditor(QWidget *parent) : QDialog(parent) {
     name_->setObjectName("stationName");
     name_->setMaxLength(16384);
     name_->setMaximumWidth(276);
-    identity->addRow(ui::text("common.name"), name_);
+    name_->setAccessibleName(ui::text("common.object_name"));
+    identity->addRow(ui::text("common.object_name"), name_);
     auto *form = group(ui::text("ground_station_editor.form"));
     longitude_ = new QuantityEditor(Unit::degree);
     latitude_ = new QuantityEditor(Unit::degree);

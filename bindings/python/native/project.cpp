@@ -48,12 +48,46 @@ void bind_project(py::module_ &module) {
     py::enum_<application::SensorPointing>(module, "SensorPointing")
         .value("NADIR", application::SensorPointing::nadir)
         .value("TARGETED", application::SensorPointing::targeted);
+    py::enum_<core::SensorPatternType>(module, "SensorPatternType")
+        .value("SIMPLE_CONIC", core::SensorPatternType::simple_conic)
+        .value("COMPLEX_CONIC", core::SensorPatternType::complex_conic)
+        .value("RECTANGULAR", core::SensorPatternType::rectangular)
+        .value("CUSTOM", core::SensorPatternType::custom);
+    py::class_<core::SensorPatternPoint>(module, "SensorPatternPoint")
+        .def(py::init<double, double>(), py::arg("cone_rad"), py::arg("clock_rad"))
+        .def_readwrite("cone_rad", &core::SensorPatternPoint::cone_rad)
+        .def_readwrite("clock_rad", &core::SensorPatternPoint::clock_rad);
+    py::class_<core::SensorPattern>(module, "SensorPattern")
+        .def(py::init<>())
+        .def_readwrite("type", &core::SensorPattern::type)
+        .def_readwrite("half_angle_rad", &core::SensorPattern::half_angle_rad)
+        .def_readwrite("inner_half_angle_rad", &core::SensorPattern::inner_half_angle_rad)
+        .def_readwrite("minimum_clock_rad", &core::SensorPattern::minimum_clock_rad)
+        .def_readwrite("maximum_clock_rad", &core::SensorPattern::maximum_clock_rad)
+        .def_readwrite("horizontal_half_angle_rad", &core::SensorPattern::horizontal_half_angle_rad)
+        .def_readwrite("vertical_half_angle_rad", &core::SensorPattern::vertical_half_angle_rad)
+        .def_readwrite("custom_points", &core::SensorPattern::custom_points);
+    module.def("parse_sensor_pattern", &core::parse_sensor_pattern, py::arg("text"));
+    py::class_<application::SensorDisplay>(module, "SensorDisplay")
+        .def(py::init<>())
+        .def_readwrite("show_2d", &application::SensorDisplay::show_2d)
+        .def_readwrite("show_3d", &application::SensorDisplay::show_3d)
+        .def_readwrite("fill", &application::SensorDisplay::fill)
+        .def_readwrite("color", &application::SensorDisplay::color)
+        .def_readwrite("opacity", &application::SensorDisplay::opacity)
+        .def_readwrite("space_range_m", &application::SensorDisplay::space_range_m);
     py::class_<application::ProjectSensor>(module, "ProjectSensor")
         .def(py::init<>())
         .def_readwrite("object_id", &application::ProjectSensor::object_id)
         .def_readwrite("display_name", &application::ProjectSensor::display_name)
         .def_readwrite("parent_satellite_id", &application::ProjectSensor::parent_satellite_id)
-        .def_readwrite("half_angle_rad", &application::ProjectSensor::half_angle_rad)
+        .def_readwrite("pattern", &application::ProjectSensor::pattern)
+        .def_readwrite("roll_rad", &application::ProjectSensor::roll_rad)
+        .def_readwrite("display", &application::ProjectSensor::display)
+        .def_property(
+            "half_angle_rad",
+            [](const application::ProjectSensor &s) { return s.pattern.half_angle_rad; },
+            [](application::ProjectSensor &s, double value) { s.pattern.half_angle_rad = value; })
         .def_readwrite("pointing", &application::ProjectSensor::pointing)
         .def_readwrite("target_station_id", &application::ProjectSensor::target_station_id)
         .def_property_readonly("name", &application::ProjectSensor::name);

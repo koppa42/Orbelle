@@ -10,6 +10,7 @@
 #include <orbitforge/core/propagation/ground_station.hpp>
 #include <orbitforge/core/propagation/hpop.hpp>
 #include <orbitforge/core/propagation/j4_mean_elements.hpp>
+#include <orbitforge/core/propagation/sensor.hpp>
 #include <orbitforge/core/propagation/tle.hpp>
 #include <span>
 #include <vector>
@@ -123,11 +124,19 @@ struct ProjectGroundStation {
     }
 };
 enum class SensorPointing { nadir, targeted };
+struct SensorDisplay {
+    bool show_2d = true, show_3d = true, fill = true;
+    std::uint32_t color = 0xf1a6ca;
+    double opacity = 0.16, space_range_m = 20'000'000;
+    bool operator==(const SensorDisplay &) const = default;
+};
 struct ProjectSensor {
     std::string object_id = "sensor-1", display_name, parent_satellite_id;
-    double half_angle_rad = 0.7853981633974483;      // Simple conic, (0, pi/2].
+    core::SensorPattern pattern = {};
     SensorPointing pointing = SensorPointing::nadir; // Geocentric nadir.
     std::string target_station_id; // Required for ideal instantaneous targeted pointing.
+    double roll_rad = 0;
+    SensorDisplay display = {};
     [[nodiscard]] const std::string &name() const {
         return display_name.empty() ? object_id : display_name;
     }

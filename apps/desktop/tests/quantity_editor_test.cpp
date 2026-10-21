@@ -9,6 +9,7 @@
 #include "../src/viewer/orbit_editor.hpp"
 #include "../src/viewer/project_update.hpp"
 #include "../src/viewer/quantity_editor.hpp"
+#include "../src/viewer/report_names.hpp"
 #include "../src/viewer/sensor_editor.hpp"
 #include "../src/viewer/workbench_style.hpp"
 #include "window_show_observer.hpp"
@@ -35,6 +36,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -236,6 +238,71 @@ TEST_F(QuantityTest, ResponsivePropertiesPreserveDraftsAndKeepFieldsInsideViewpo
             EXPECT_TRUE(station.grab().save(capture + QString("/station-%1.png").arg(width)));
     }
 }
+TEST_F(QuantityTest, SensorPatternFieldsPreserveGeometryAndRejectInvalidBoundaries) {
+    application::Project project("Scenario", core::Epoch{0}, core::Epoch{120'000'000'000});
+    application::ProjectSensor sensor;
+    sensor.display_name = "Sensor";
+    sensor.parent_satellite_id = "satellite";
+    SensorEditor editor;
+    editor.set_sensor(sensor, project, false);
+    auto *type = editor.findChild<QComboBox *>("sensorType");
+    ASSERT_TRUE(type);
+    ASSERT_EQ(type->count(), 4);
+    type->setCurrentIndex(1);
+    editor.findChild<QuantityEditor *>("sensorInnerAngle")->set_value(10, Unit::degree);
+    editor.findChild<QuantityEditor *>("sensorClockMin")->set_value(300, Unit::degree);
+    editor.findChild<QuantityEditor *>("sensorClockMax")->set_value(60, Unit::degree);
+    EXPECT_EQ(editor.sensor().pattern.type, core::SensorPatternType::complex_conic);
+    editor.findChild<QuantityEditor *>("sensorInnerAngle")->set_value(80, Unit::degree);
+    EXPECT_THROW((void)editor.sensor(), std::invalid_argument);
+    type->setCurrentIndex(2);
+    editor.findChild<QuantityEditor *>("sensorHorizontal")->set_value(20, Unit::degree);
+    editor.findChild<QuantityEditor *>("sensorVertical")->set_value(10, Unit::degree);
+    EXPECT_NEAR(editor.sensor().pattern.horizontal_half_angle_rad, std::numbers::pi / 9, 1e-14);
+    type->setCurrentIndex(3);
+    EXPECT_EQ(editor.sensor().pattern.custom_points.size(), 4U);
+    const auto saved = editor.sensor();
+    editor.set_sensor(saved, project, false);
+    EXPECT_EQ(editor.sensor().pattern, saved.pattern);
+    EXPECT_FALSE(editor.has_unapplied_changes());
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    editor.resize(340, 640);
+    editor.show();
+    QApplication::processEvents();
+    auto *scroll = editor.findChild<QScrollArea *>("sensorScroll");
+    EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+    const auto capture = qEnvironmentVariable("ORBITFORGE_SENSOR_UI_CAPTURE");
+    if (!capture.isEmpty())
+        EXPECT_TRUE(editor.grab().save(capture + "/sensor-custom.png"));
+    editor.findChild<QuantityEditor *>("sensorInnerAngle")->set_value(10, Unit::degree);
+    for (int i = 0; i < 4; ++i) {
+        SCOPED_TRACE(i);
+        type->setCurrentIndex(i);
+        for (const int width : {320, 560, 1500}) {
+            editor.resize(width, 680);
+            QApplication::processEvents();
+            QApplication::processEvents();
+            EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+            EXPECT_LE(scroll->widget()->width(), 640);
+            EXPECT_LE(scroll->widget()->width(), scroll->viewport()->width());
+            auto *preview = editor.findChild<QWidget *>("sensorAnglePreview");
+            ASSERT_TRUE(preview);
+            EXPECT_TRUE(preview->isVisible());
+            EXPECT_TRUE(scroll->widget()->rect().contains(
+                QRect(preview->mapTo(scroll->widget(), QPoint{}), preview->size())));
+            if (!capture.isEmpty())
+                EXPECT_TRUE(editor.grab().save(
+                    capture + QString("/sensor-type-%1-%2.png").arg(i).arg(width)));
+        }
+    }
+    auto precise = saved;
+    precise.pattern.custom_points[0].cone_rad = .345678901234567;
+    precise.display.opacity = .123456789;
+    editor.set_sensor(precise, project, false);
+    EXPECT_EQ(editor.sensor().pattern, precise.pattern);
+    EXPECT_EQ(editor.sensor().display, precise.display);
+    EXPECT_FALSE(editor.has_unapplied_changes());
+}
 TEST_F(QuantityTest, PreparingSensorDoesNotShowTemporaryWindows) {
     WindowShowObserver windows;
     application::Project project("Scenario", core::Epoch{0}, core::Epoch{120'000'000'000});
@@ -243,7 +310,7 @@ TEST_F(QuantityTest, PreparingSensorDoesNotShowTemporaryWindows) {
     application::ProjectSensor sensor;
     sensor.object_id = "sensor";
     sensor.parent_satellite_id = "satellite";
-    sensor.half_angle_rad = 0.2;
+    sensor.pattern.half_angle_rad = 0.2;
     SensorEditor editor;
     editor.set_sensor(sensor, project, true);
     sensor.pointing = application::SensorPointing::targeted;
@@ -304,7 +371,7 @@ TEST_F(QuantityTest, SensorPointingChoicesKeepTargetDraftAndSubmitStableIds) {
     EXPECT_EQ(applied->display_name, "对地观测仪");
     EXPECT_EQ(applied->pointing, application::SensorPointing::targeted);
     EXPECT_EQ(applied->target_station_id, "station-b");
-    EXPECT_NEAR(applied->half_angle_rad, std::numbers::pi / 6, 1e-14);
+    EXPECT_NEAR(applied->pattern.half_angle_rad, std::numbers::pi / 6, 1e-14);
     editor.set_sensor(*applied, project, false);
     EXPECT_EQ(angle->unit(), Unit::radian);
     EXPECT_EQ(target->id(), "station-b");
@@ -349,7 +416,7 @@ TEST_F(QuantityTest, SensorRejectsInvalidDraftAndNeverRebindsMissingTarget) {
     target->set_id("other-station");
     auto *angle = editor.findChild<QuantityEditor *>("sensorHalfAngle");
     ASSERT_TRUE(angle);
-    text(*angle)->setText("91");
+    text(*angle)->setText("181");
     submit->click();
     EXPECT_EQ(applications, 0);
     text(*angle)->setText("30");
@@ -358,7 +425,7 @@ TEST_F(QuantityTest, SensorRejectsInvalidDraftAndNeverRebindsMissingTarget) {
     name->setText(" ");
     submit->click();
     EXPECT_EQ(applications, 0);
-    EXPECT_EQ(error->text(), QStringLiteral("请输入传感器名称。"));
+    EXPECT_EQ(error->text(), QStringLiteral("请输入对象名称。"));
     name->setText("Sensor");
     submit->click();
     EXPECT_EQ(applications, 1);
@@ -376,7 +443,7 @@ TEST_F(QuantityTest, SensorLayoutFitsNarrowPanelsAndKeepsActionsVisible) {
     sensor.object_id = "sensor";
     sensor.display_name = "对地观测仪";
     sensor.parent_satellite_id = "satellite";
-    sensor.half_angle_rad = std::numbers::pi / 6;
+    sensor.pattern.half_angle_rad = std::numbers::pi / 6;
     SensorEditor editor;
     editor.set_sensor(sensor, project, true);
     auto *scroll = editor.findChild<QScrollArea *>("sensorScroll");
@@ -397,6 +464,12 @@ TEST_F(QuantityTest, SensorLayoutFitsNarrowPanelsAndKeepsActionsVisible) {
     editor.show();
     screenshot("sensor-insert");
     EXPECT_EQ(full_angle->text(), QStringLiteral("全视场 60°"));
+    auto *selector = editor.findChild<QComboBox *>("propertyPageSelector");
+    ASSERT_TRUE(selector);
+    selector->setCurrentIndex(1);
+    scroll = editor.findChild<QScrollArea *>("sensorPointingScroll");
+    ASSERT_TRUE(scroll);
+    QApplication::processEvents();
     targeted->setFocus();
     QKeyEvent press(QEvent::KeyPress, Qt::Key_Space, Qt::NoModifier);
     QKeyEvent release(QEvent::KeyRelease, Qt::Key_Space, Qt::NoModifier);
@@ -428,7 +501,7 @@ TEST_F(QuantityTest, SensorLayoutFitsNarrowPanelsAndKeepsActionsVisible) {
     editor.resize(360, 640);
     text(*angle)->setText("invalid");
     QApplication::processEvents();
-    EXPECT_EQ(full_angle->text(), QStringLiteral("半角范围 0.001–90°"));
+    EXPECT_EQ(full_angle->text(), QStringLiteral("半角范围 0.001–179.999°"));
     submit->click();
     screenshot("sensor-invalid");
     project.ground_stations.clear();
@@ -436,6 +509,94 @@ TEST_F(QuantityTest, SensorLayoutFitsNarrowPanelsAndKeepsActionsVisible) {
     submit->click();
     screenshot("sensor-no-stations");
     EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+}
+TEST_F(QuantityTest, SensorPagesPreserveDraftUnitsAndSelectionAcrossNavigationModes) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    application::Project project("Scenario", core::Epoch{0}, core::Epoch{120'000'000'000});
+    project.ground_stations.push_back({"station", "Ground Station", {1.2, .6, 350}});
+    application::ProjectSensor sensor;
+    sensor.object_id = "sensor";
+    sensor.parent_satellite_id = "satellite";
+    SensorEditor editor;
+    editor.set_sensor(sensor, project, false);
+    auto *selector = editor.findChild<QComboBox *>("propertyPageSelector");
+    auto *tabs = editor.findChild<QTabBar *>("propertyPageTabs");
+    auto *tree = editor.findChild<QTreeWidget *>("propertyNavigation");
+    auto *pages = editor.findChild<QStackedWidget *>("sensorPages");
+    auto *angle = editor.findChild<QuantityEditor *>("sensorHalfAngle");
+    auto *name = editor.findChild<QLineEdit *>("sensorName");
+    ASSERT_TRUE(selector && tabs && tree && pages && angle && name);
+    ASSERT_EQ(pages->count(), 4);
+    ASSERT_EQ(tree->topLevelItemCount(), 3);
+    std::vector<QTreeWidgetItem *> leaves;
+    for (int group = 0; group < tree->topLevelItemCount(); ++group) {
+        auto *category = tree->topLevelItem(group);
+        EXPECT_FALSE(category->data(0, Qt::UserRole).isValid());
+        for (int i = 0; i < category->childCount(); ++i)
+            leaves.push_back(category->child(i));
+    }
+    ASSERT_EQ(leaves.size(), 4U);
+    name->setText("Sensor draft");
+    angle->set_value(30, Unit::degree);
+    choose(*angle, Unit::radian);
+    editor.findChild<QPushButton *>("sensorTargeted")->click();
+    auto *show_2d = editor.findChild<QCheckBox *>("sensorShow2d");
+    auto *show_3d = editor.findChild<QCheckBox *>("sensorShow3d");
+    auto *fill = editor.findChild<QCheckBox *>("sensorFill");
+    auto *opacity = editor.findChild<QSpinBox *>("sensorOpacity");
+    ASSERT_TRUE(show_2d && show_3d && fill && opacity);
+    show_2d->setChecked(false);
+    show_3d->setChecked(true);
+    opacity->setValue(37);
+    fill->setChecked(false);
+    EXPECT_FALSE(opacity->isEnabled());
+    fill->setChecked(true);
+    EXPECT_TRUE(opacity->isEnabled());
+    editor.findChild<QuantityEditor *>("sensorSpaceRange")->set_value(1234, Unit::kilometre);
+    const auto display_draft = editor.sensor().display;
+    editor.show();
+    for (const int width : {1500, 800, 480, 320, 1500}) {
+        editor.resize(width, 600);
+        QApplication::processEvents();
+        EXPECT_EQ(tree->isVisible(), width >= 680);
+        EXPECT_EQ(tabs->isVisible(), width >= 400 && width < 680);
+        EXPECT_EQ(selector->isVisible(), width < 400);
+        for (int index = 0; index < pages->count(); ++index) {
+            if (tree->isVisible())
+                tree->setCurrentItem(leaves[index]);
+            else if (tabs->isVisible())
+                tabs->setCurrentIndex(index);
+            else
+                selector->setCurrentIndex(index);
+            QApplication::processEvents();
+            EXPECT_EQ(pages->currentIndex(), index);
+            EXPECT_EQ(selector->currentIndex(), index);
+            EXPECT_EQ(tabs->currentIndex(), index);
+            EXPECT_EQ(tree->currentItem(), leaves[index]);
+            auto *scroll = qobject_cast<QScrollArea *>(pages->currentWidget());
+            ASSERT_TRUE(scroll);
+            EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+            EXPECT_LE(scroll->widget()->width(), scroll->viewport()->width());
+            EXPECT_LE(scroll->widget()->width(), 640);
+            const auto output = qEnvironmentVariable("ORBITFORGE_SENSOR_UI_CAPTURE");
+            if (!output.isEmpty())
+                EXPECT_TRUE(editor.grab().save(
+                    output + QString("/sensor-page-%1-%2.png").arg(width).arg(index)));
+        }
+        EXPECT_EQ(pages->currentIndex(), 3);
+        EXPECT_EQ(name->text(), "Sensor draft");
+        EXPECT_EQ(angle->unit(), Unit::radian);
+        EXPECT_EQ(editor.sensor().target_station_id, "station");
+        EXPECT_NEAR(editor.sensor().pattern.half_angle_rad, std::numbers::pi / 6, 1e-14);
+        EXPECT_EQ(editor.sensor().display, display_draft);
+    }
+    editor.findChild<QPushButton *>("sensorEditAppearance")->click();
+    EXPECT_EQ(pages->currentIndex(), 2);
+    EXPECT_EQ(tree->currentItem(), leaves[2]);
+    EXPECT_EQ(editor.sensor().display, display_draft);
+    editor.findChild<QPushButton *>("resetSensor")->click();
+    EXPECT_FALSE(editor.has_unapplied_changes());
+    EXPECT_EQ(pages->currentIndex(), 2);
 }
 TEST_F(QuantityTest, PreparingEpochAndValidationDoesNotShowTemporaryWindows) {
     WindowShowObserver windows;
@@ -891,15 +1052,93 @@ TEST_F(QuantityTest, StationAndSensorUnitChangesPreserveExactAppliedValues) {
     application::Project project{"Scenario", core::Epoch{0}, core::Epoch{120'000'000'000}};
     application::ProjectSensor sensor;
     sensor.parent_satellite_id = "satellite";
-    sensor.half_angle_rad = 0.567890123456789;
+    sensor.pattern.half_angle_rad = 0.567890123456789;
     SensorEditor sensor_editor;
     sensor_editor.set_sensor(sensor, project, false);
     auto *angle = sensor_editor.findChild<QuantityEditor *>("sensorHalfAngle");
     angle->set_unit(Unit::radian);
     angle->set_unit(Unit::degree);
     EXPECT_TRUE(same_sensor_input(sensor, sensor_editor.sensor()));
-    angle->set_value(sensor.half_angle_rad + 1e-10, Unit::radian);
+    angle->set_value(sensor.pattern.half_angle_rad + 1e-10, Unit::radian);
     EXPECT_FALSE(same_sensor_input(sensor, sensor_editor.sensor()));
+}
+
+TEST_F(QuantityTest, ObjectNamesAreEditableWithoutChangingIdentityOrOtherDrafts) {
+    OrbitInput input;
+    input.object_id = "fixed-satellite-id";
+    OrbitEditor orbit(input);
+    orbit.set_name("Original");
+    orbit.set_create_mode(false);
+    auto *name = orbit.findChild<QLineEdit *>("objectName");
+    ASSERT_NE(name, nullptr);
+    EXPECT_FALSE(name->isReadOnly());
+    EXPECT_EQ(name->accessibleName(), QStringLiteral("对象名称"));
+    name->setText(QStringLiteral("  观测卫星 A  "));
+    EXPECT_TRUE(orbit.has_unapplied_changes());
+    std::optional<OrbitInput> submitted;
+    orbit.apply = [&](OrbitInput value) { submitted = value; };
+    orbit.submit();
+    ASSERT_TRUE(submitted);
+    EXPECT_TRUE(same_orbit_input(*submitted, input));
+    EXPECT_EQ(orbit.object_name(), "观测卫星 A");
+    orbit.sync_name("External rename");
+    EXPECT_EQ(orbit.object_name(), "观测卫星 A"); // Keep an independent name draft.
+    orbit.findChild<QPushButton *>("resetOrbit")->click();
+    EXPECT_EQ(orbit.object_name(), "External rename");
+    EXPECT_FALSE(orbit.has_unapplied_changes());
+    name->setText("   ");
+    submitted.reset();
+    orbit.submit();
+    EXPECT_FALSE(submitted);
+    EXPECT_TRUE(orbit.has_unapplied_changes());
+
+    GroundStationEditor station;
+    station.set_station({"fixed-station", "Station", {}}, false);
+    station.findChild<QLineEdit *>("stationName")->setText(QStringLiteral("测控站"));
+    EXPECT_EQ(station.station().object_id, "fixed-station");
+    EXPECT_EQ(station.station().name(), "测控站");
+    application::Project project{"Scene", core::Epoch{0}, core::Epoch{120'000'000'000}};
+    application::ProjectSensor sensor;
+    sensor.object_id = "fixed-sensor";
+    sensor.parent_satellite_id = input.object_id;
+    SensorEditor editor;
+    editor.set_sensor(sensor, project, false);
+    editor.findChild<QLineEdit *>("sensorName")->setText(QStringLiteral("相机 A"));
+    EXPECT_EQ(editor.sensor().object_id, sensor.object_id);
+    EXPECT_EQ(editor.sensor().parent_satellite_id, input.object_id);
+    EXPECT_EQ(editor.sensor().name(), "相机 A");
+}
+
+TEST_F(QuantityTest, ReportRenameRefreshesHiddenIdentityColumnsWithoutChangingSamples) {
+    application::Project project{"Scene", core::Epoch{0}, core::Epoch{60'000'000'000}};
+    application::ProjectSatellite satellite;
+    satellite.orbit.object_id = "sat";
+    satellite.display_name = "New satellite";
+    project.satellites.push_back(satellite);
+    project.ground_stations.push_back({"station", "New station", {}});
+    runtime::ReportResult report{
+        .definition = {},
+        .table = results::Table{
+            {{"object.id", "ID", ""}, {"object.name", "Name", ""}, {"state.x", "X", "m"}},
+            {{std::string("sat"), std::string("Old"), 123.25}}}};
+    report.input_sha256 = "unchanged";
+    report.definition.query.kind = application::ReportKind::cartesian_state;
+    report.definition.format.time_scale = application::ReportTimeScale::tai;
+    report.definition.format.columns = {{"object.name", {}, {}}, {"state.x", {}, {}}};
+    report = report.with_template(report.definition.format);
+    const auto renamed = renamed_report(report, project);
+    ASSERT_TRUE(renamed);
+    EXPECT_EQ(renamed->cell_text(0, 0), "New satellite");
+    EXPECT_EQ(renamed->numeric_value(0, 1), report.numeric_value(0, 1));
+    EXPECT_EQ(renamed->input_sha256, report.input_sha256);
+    EXPECT_EQ(report.cell_text(0, 0), "Old");
+    EXPECT_FALSE(renamed_report(*renamed, project));
+    report.definition.query.kind = application::ReportKind::aer;
+    report.definition.query.object_ids = {"station", "sat"};
+    report.definition.format.columns = {{"object.name", {}, {}}};
+    const auto pair = renamed_report(report, project);
+    ASSERT_TRUE(pair);
+    EXPECT_EQ(pair->cell_text(0, 0), "New station → New satellite");
 }
 
 TEST_F(QuantityTest, PropertyDraftsRemainDirtyUntilSuccessfullyPublished) {

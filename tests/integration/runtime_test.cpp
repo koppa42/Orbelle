@@ -107,6 +107,10 @@ TEST(Visualization, HermiteDisplayTrackReproducesCubicAndDoesNotExtrapolate) {
         EXPECT_NEAR(sample.markers.front().position_m[0], t * t * t, 1e-10);
         EXPECT_NEAR(sample.markers.front().position_m[1], t * t, 1e-10);
         EXPECT_NEAR(sample.markers.front().position_m[2], t, 1e-10);
+        const auto state = track.sample_state(epoch);
+        EXPECT_NEAR(state.velocity_mps[0], 3 * t * t, 1e-10);
+        EXPECT_NEAR(state.velocity_mps[1], 2 * t, 1e-10);
+        EXPECT_NEAR(state.velocity_mps[2], 1, 1e-10);
     }
     EXPECT_THROW((void)track.sample(core::Epoch{base - 1}), std::out_of_range);
     EXPECT_THROW((void)track.sample(core::Epoch{base + 7'000'000'001}), std::out_of_range);

@@ -161,7 +161,7 @@ TEST_F(ProjectPersistence, FingerprintCoversPhysicalInputsButNotAppearanceReport
     changed.satellites[0].orbit.step_seconds = 5;
     changed.satellites[0].orbit.input_frame = core::FrameId::itrf;
     EXPECT_EQ(analysis_input_sha256(changed), hash);
-    changed.sensors[0].half_angle_rad = 0.1;
+    changed.sensors[0].pattern.half_angle_rad = 0.1;
     EXPECT_NE(analysis_input_sha256(changed), hash);
     changed = original;
     changed.satellites[0].orbit.initial.velocity_mps[1] += 1;

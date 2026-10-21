@@ -100,8 +100,12 @@ std::vector<std::string> fields(const ProjectSensor &a, const ProjectSensor &b) 
         result.emplace_back("name");
     if (a.parent_satellite_id != b.parent_satellite_id)
         result.emplace_back("parent");
-    if (a.half_angle_rad != b.half_angle_rad)
+    if (a.pattern != b.pattern)
         result.emplace_back("field_of_view");
+    if (a.roll_rad != b.roll_rad)
+        result.emplace_back("roll");
+    if (a.display != b.display)
+        result.emplace_back("display");
     if (a.pointing != b.pointing || a.target_station_id != b.target_station_id)
         result.emplace_back("pointing");
     return result;
@@ -484,9 +488,11 @@ ObjectRef ObjectManager::create(const objects::Sensor &definition) {
         ProjectSensor value{ref.id(),
                             definition.name,
                             definition.parent.id(),
-                            definition.half_angle_rad,
+                            definition.pattern,
                             SensorPointing::nadir,
-                            {}};
+                            {},
+                            definition.roll_rad,
+                            definition.display};
         if (definition.pointing.target) {
             check_ref(*definition.pointing.target, next, ObjectKind::ground_station);
             value.pointing = SensorPointing::targeted;
@@ -530,8 +536,12 @@ void ObjectManager::update(const ObjectRef &ref, const objects::SensorUpdate &pa
         auto &value = lookup(next.sensors, ref.id());
         if (patch.name && *patch.name != value.name())
             value.display_name = *patch.name;
-        if (patch.half_angle_rad)
-            value.half_angle_rad = *patch.half_angle_rad;
+        if (patch.pattern)
+            value.pattern = *patch.pattern;
+        if (patch.roll_rad)
+            value.roll_rad = *patch.roll_rad;
+        if (patch.display)
+            value.display = *patch.display;
         if (patch.pointing) {
             const auto &target = patch.pointing->target;
             if (target)

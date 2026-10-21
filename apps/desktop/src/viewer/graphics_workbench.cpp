@@ -123,6 +123,7 @@
 #include <orbitforge/render_vsg/compile_manager.hpp>
 #include <orbitforge/render_vsg/labels.hpp>
 #include <orbitforge/render_vsg/marker_layer.hpp>
+#include <orbitforge/render_vsg/sensor_layer.hpp>
 #include <orbitforge/render_vsg/swapchain_capture.hpp>
 #include <orbitforge/runtime/demo.hpp>
 #include <orbitforge/runtime/time_frames.hpp>
@@ -703,7 +704,9 @@ class Workbench final : public WorkbenchWindow {
                 inspector_pages_->addWidget(empty);
                 dialog_layout->addWidget(inspector_pages_, 1);
                 resizeDocks({object_dock}, {224}, Qt::Horizontal);
-                editor_->apply = [this](OrbitInput input) { start_orbit(std::move(input)); };
+                editor_->apply = [this](OrbitInput input) {
+                    start_orbit(std::move(input), editor_->object_name());
+                };
                 editor_->close_requested = [this] { properties_dialog_->close(); };
                 editor_->display = [this](DisplaySettings settings) {
                     if (!editor_target_ || busy())
@@ -1752,6 +1755,16 @@ class Workbench final : public WorkbenchWindow {
                     statusBar()->showMessage(ui::text("graphics_workbench.label_13"), 4000);
                     return;
                 }
+                if (found != p.sensors.end()) {
+                    auto renamed = *found;
+                    renamed.display_name = sensor.display_name;
+                    if (same_sensor_input(renamed, sensor)) {
+                        rename_object(id, sensor.name());
+                        sensor_editor_->accept_sensor(sensor);
+                        statusBar()->showMessage(ui::text("graphics_workbench.label_31"), 4000);
+                        return;
+                    }
+                }
                 if (found == p.sensors.end())
                     p.sensors.push_back(std::move(sensor));
                 else
@@ -1789,6 +1802,16 @@ class Workbench final : public WorkbenchWindow {
             sensor_editor_->apply(sensor_editor_->sensor());
         } else
             workspace_->open(sensor_editor_, false);
+    }
+    QString object_pair_name(const std::vector<std::string> &ids) const {
+        if (ids.size() != 2)
+            return {};
+        const auto choices = project_object_choices(project_snapshot(project_path_));
+        const auto name = [&](const std::string &id) {
+            const auto found = std::ranges::find(choices, id, &ObjectChoice::id);
+            return found == choices.end() ? QString::fromStdString(id) : found->name;
+        };
+        return name(ids[0]) + QStringLiteral(" → ") + name(ids[1]);
     }
     void clear_access_display() {
         access_session_.reset();
@@ -2079,16 +2102,9 @@ class Workbench final : public WorkbenchWindow {
                         windows.emplace_back(w.first.tai_nanoseconds() / 1'000'000,
                                              w.last.tai_nanoseconds() / 1'000'000);
                     const auto &ids = result->definition.query.object_ids;
-                    const auto &satellites = analysis.snapshot().project->satellites;
-                    const auto name = [&](const std::string &id) {
-                        const auto found = std::ranges::find_if(
-                            satellites, [&](const auto &sat) { return sat.orbit.object_id == id; });
-                        return found == satellites.end() ? id : found->name();
-                    };
                     access_hash_ = runtime::report_input_sha256(*analysis.snapshot().project);
-                    timeline_->set_access_intervals(
-                        std::move(windows),
-                        QString::fromStdString(name(ids[0]) + " → " + name(ids[1])));
+                    access_ids_ = ids;
+                    timeline_->set_access_intervals(std::move(windows), object_pair_name(ids));
                     return;
                 }
                 if (!application::report_is_access(result->definition.query.kind))
@@ -2111,8 +2127,7 @@ class Workbench final : public WorkbenchWindow {
                         windows.emplace_back(
                             std::get<core::Epoch>(row[2]).tai_nanoseconds() / 1'000'000,
                             std::get<core::Epoch>(row[3]).tai_nanoseconds() / 1'000'000);
-                    timeline_->set_access_intervals(
-                        std::move(windows), QString::fromStdString(access_session_->name()));
+                    timeline_->set_access_intervals(std::move(windows), object_pair_name(ids));
                 }
                 update_access_display();
             };
@@ -2248,6 +2263,7 @@ class Workbench final : public WorkbenchWindow {
                 editor_->set_create_mode(false);
                 if (project_orbit_edit_)
                     editor_->accept_input(found->orbit->input);
+                editor_->sync_name(found->name().toStdString());
                 editor_->set_analysis_interval(scenario_->first(), scenario_->last());
                 properties_dialog_->setWindowTitle(
                     found->name() +
@@ -2696,10 +2712,13 @@ class Workbench final : public WorkbenchWindow {
                     new QTreeWidgetItem(parent->item, {QString::fromStdString(sensor.name())});
                 item->setData(0, Qt::UserRole + 17, QString::fromStdString(sensor.object_id));
                 item->setIcon(0, workbench_icon(WorkbenchIcon::focus, theme::color(theme::sakura)));
-                item->setToolTip(0,
-                                 ui::text("graphics_workbench.item.set_tool_tip")
-                                     .arg(sensor.half_angle_rad * 180 / std::numbers::pi, 0, 'g', 5)
-                                     .arg(QString::fromStdString(sensor.object_id)));
+                const std::array<const char *, 4> pattern_names{
+                    "sensor.geometry.simple", "sensor.geometry.complex",
+                    "sensor.geometry.rectangular", "sensor.geometry.custom"};
+                item->setToolTip(0, ui::text("sensor.geometry.tooltip")
+                                        .arg(ui::text(pattern_names.at(
+                                            static_cast<std::size_t>(sensor.pattern.type))))
+                                        .arg(QString::fromStdString(sensor.object_id)));
             }
             for (const auto &config : candidate->project.ground_stations) {
                 Station station{config};
@@ -2879,48 +2898,109 @@ class Workbench final : public WorkbenchWindow {
         finish_insertion(last_project_outcome_ == "opened", last_project_outcome_ == "cancelled");
         update_actions();
     }
-    void rename_selected_to(const QString &name) {
-        if (!busy() && selected_sensor()) {
-            auto p = project_snapshot(project_path_);
-            auto &s = *std::ranges::find(p.sensors, selected_sensor()->object_id,
-                                         &application::ProjectSensor::object_id);
-            s.display_name = name.trimmed().toStdString();
-            if (s.display_name.empty())
-                throw std::invalid_argument(ui::utf8("graphics_workbench.validation_9"));
-            start_project(std::move(p), project_path_, true, selected_marker_index());
+    void rename_object(const std::string &id, const std::string &name) {
+        if (name.empty())
+            throw std::invalid_argument(ui::utf8("common.object_name_required"));
+        // Validate the complete candidate before touching the live scene. Identity,
+        // sessions, graphics nodes and report queries remain bound to the same ID.
+        auto candidate = project_snapshot(project_path_);
+        bool changed = false, found = false;
+        const auto rename = [&](auto &object) {
+            found = true;
+            changed = object.name() != name;
+            object.display_name = name;
+        };
+        for (auto &satellite : candidate.satellites)
+            if (satellite.orbit.object_id == id)
+                rename(satellite);
+        for (auto &station : candidate.ground_stations)
+            if (station.object_id == id)
+                rename(station);
+        for (auto &sensor : candidate.sensors)
+            if (sensor.object_id == id)
+                rename(sensor);
+        if (!found)
+            throw std::invalid_argument("Object not found: " + id);
+        application::validate_project(candidate);
+        if (!changed)
             return;
+        for (std::size_t i = 0; i < satellites_.size(); ++i) {
+            auto &satellite = satellites_[i];
+            if (satellite.orbit->input.object_id != id)
+                continue;
+            satellite.display_name = name;
+            satellite.item->setText(0, satellite.name());
+            ground_map_->set_name(i, satellite.name());
         }
-        if (!busy() && selected_station_) {
-            const auto &station = stations_.at(*selected_station_).config;
-            start_project(
-                project_snapshot(project_path_)
-                    .renamed_ground_station(station.object_id, name.trimmed().toStdString()),
-                project_path_, true, selected_marker_index());
-            return;
+        for (std::size_t i = 0; i < stations_.size(); ++i) {
+            auto &station = stations_[i];
+            if (station.config.object_id != id)
+                continue;
+            station.config.display_name = name;
+            station.item->setText(0, station.name());
+            ground_map_->set_station_name(i, station.config.object_id, station.name());
         }
-        if (busy() || !selected_)
-            return;
-        auto &satellite = satellites_.at(*selected_);
-        const auto changed =
-            project_snapshot(project_path_)
-                .renamed_satellite(satellite.orbit->input.object_id, name.trimmed().toStdString());
-        satellite.display_name = changed.satellites.at(*selected_).display_name;
-        satellite.item->setText(0, satellite.name());
+        for (auto &sensor : sensors_)
+            if (sensor.object_id == id) {
+                sensor.display_name = name;
+                for (auto &satellite : satellites_)
+                    for (int i = 0; i < satellite.item->childCount(); ++i) {
+                        auto *item = satellite.item->child(i);
+                        if (item->data(0, Qt::UserRole + 17).toString().toStdString() == id)
+                            item->setText(0, QString::fromStdString(name));
+                    }
+            }
         filter_objects();
-        ground_map_->set_name(*selected_, satellite.name());
-        if (editor_target_ == selected_)
+        // External renames update only the name baseline, preserving other drafts,
+        // units, page selection and any independently edited name.
+        if (orbit_editor_bound_ && editor_target_) {
+            const auto &satellite = satellites_[*editor_target_];
+            editor_->sync_name(satellite.name().toStdString());
             properties_dialog_->setWindowTitle(
                 satellite.name() +
                 ui::text("graphics_workbench.properties_dialog.set_window_title_2"));
+        }
+        if (station_editor_bound_ && station_editor_target_)
+            for (const auto &station : stations_)
+                if (station.config.object_id == *station_editor_target_) {
+                    station_editor_->sync_name(station.config.name());
+                    station_editor_->setWindowTitle(
+                        station.name() +
+                        ui::text("graphics_workbench.station_editor.set_window_title"));
+                }
+        if (sensor_editor_bound_) {
+            for (const auto &sensor : sensors_)
+                if (sensor.object_id == sensor_editor_->bound_object_id()) {
+                    sensor_editor_->sync_name(sensor.name());
+                    sensor_editor_->setWindowTitle(
+                        QString::fromStdString(sensor.name()) +
+                        ui::text("graphics_workbench.sensor_editor.set_window_title"));
+                }
+            sensor_editor_->update_project(candidate);
+        }
+        if (access_ids_.size() == 2)
+            timeline_->set_access_label(object_pair_name(access_ids_));
         show_timeline_status();
         mark_project_dirty();
+    }
+    void rename_selected_to(const QString &name) {
+        if (busy())
+            return;
+        if (const auto *sensor = selected_sensor())
+            rename_object(sensor->object_id, name.trimmed().toStdString());
+        else if (selected_station_)
+            rename_object(stations_[*selected_station_].config.object_id,
+                          name.trimmed().toStdString());
+        else if (selected_)
+            rename_object(satellites_[*selected_].orbit->input.object_id,
+                          name.trimmed().toStdString());
     }
     void rename_selected() {
         if (busy() || !selected_marker_index())
             return;
         bool accepted = false;
         const auto name = QInputDialog::getText(this, ui::text("graphics_workbench.name"),
-                                                ui::text("common.name"), QLineEdit::Normal,
+                                                ui::text("common.object_name"), QLineEdit::Normal,
                                                 selected_name(), &accepted);
         if (accepted) {
             try {
@@ -3286,6 +3366,7 @@ class Workbench final : public WorkbenchWindow {
         editor_target_.reset();
         editor_->set_time_provider(eop_catalog_->time_provider());
         editor_->set_input(input);
+        editor_->set_name(input.object_id);
         if (method == InsertObjectMethod::orbit_wizard)
             editor_->set_state_mode(1);
         orbit_editor_bound_ = true;
@@ -3302,7 +3383,7 @@ class Workbench final : public WorkbenchWindow {
         insert_defaults_pending_ = method == InsertObjectMethod::defaults;
         if (insert_defaults_pending_) {
             properties_dialog_->close();
-            start_orbit(std::move(input));
+            start_orbit(std::move(input), editor_->object_name());
         } else {
             show_properties_dialog();
         }
@@ -3327,6 +3408,13 @@ class Workbench final : public WorkbenchWindow {
                     if (found->location == value.location && found->name() == value.name() &&
                         found->minimum_elevation_rad == value.minimum_elevation_rad) {
                         station_editor_->show_result(ui::text("graphics_workbench.label_67"));
+                        return;
+                    }
+                    if (found->location == value.location &&
+                        found->minimum_elevation_rad == value.minimum_elevation_rad) {
+                        rename_object(id, value.name());
+                        station_editor_->accept_station(value);
+                        station_editor_->show_result(ui::text("graphics_workbench.label_31"));
                         return;
                     }
                     if (found->location != value.location)
@@ -3478,6 +3566,7 @@ class Workbench final : public WorkbenchWindow {
         const auto &satellite = satellites_.at(*editor_target_);
         editor_->set_time_provider(eop_catalog_->time_provider());
         editor_->set_input(satellite.orbit->input);
+        editor_->set_name(satellite.name().toStdString());
         orbit_editor_bound_ = true;
         editor_->set_create_mode(false);
         editor_->set_appearance(satellite.model_kind, satellite.model_path,
@@ -3789,6 +3878,77 @@ class Workbench final : public WorkbenchWindow {
             }
         }
         markers_->update(points, point_colors, srgb);
+        std::vector<visualization::SensorMesh> sensor_meshes, sensor_footprints;
+        std::map<std::string, visualization::SensorView> next_sensor_views;
+        for (const auto &sensor : sensors_) {
+            if (!sensor.display.show_2d && !sensor.display.show_3d)
+                continue;
+            const auto sat =
+                std::find_if(satellites_.begin(), satellites_.end(), [&](const auto &s) {
+                    return s.orbit->input.object_id == sensor.parent_satellite_id;
+                });
+            if (sat == satellites_.end() ||
+                !cache_covers(*sat->orbit, snapshot_.epoch, snapshot_.epoch))
+                continue;
+            const auto state = sat->orbit->track.sample_state(snapshot_.epoch);
+            core::SensorVector direction;
+            for (std::size_t k = 0; k < 3; ++k)
+                direction[k] = -state.position_m[k];
+            if (sensor.pointing == application::SensorPointing::targeted) {
+                const auto station =
+                    std::find_if(stations_.begin(), stations_.end(), [&](const auto &s) {
+                        return s.config.object_id == sensor.target_station_id;
+                    });
+                if (station == stations_.end())
+                    continue;
+                const auto target = core::ground_station_position(station->config.location);
+                for (std::size_t k = 0; k < 3; ++k)
+                    direction[k] += target[k];
+            }
+            auto it = sensor_views_.find(sensor.object_id);
+            const auto config = sensor_view_patterns_.find(sensor.object_id);
+            if (it == sensor_views_.end() || config == sensor_view_patterns_.end() ||
+                config->second != sensor.pattern) {
+                sensor_views_.erase(sensor.object_id);
+                it = sensor_views_
+                         .emplace(sensor.object_id, visualization::SensorView(sensor.pattern))
+                         .first;
+            }
+            auto mesh = it->second.project(
+                state.position_m, core::sensor_axes(state.velocity_mps, direction, sensor.roll_rad),
+                sensor.display.space_range_m);
+            mesh.color = sensor.display.color;
+            mesh.opacity = sensor.display.opacity;
+            mesh.fill = sensor.display.fill;
+            if (sensor.display.show_2d)
+                sensor_footprints.push_back(mesh);
+            if (sensor.display.show_3d) {
+                mesh.ground.clear();
+                sensor_meshes.push_back(std::move(mesh));
+            }
+            next_sensor_views.emplace(sensor.object_id, std::move(it->second));
+        }
+        sensor_views_ = std::move(next_sensor_views);
+        sensor_view_patterns_.clear();
+        for (const auto &sensor : sensors_)
+            sensor_view_patterns_.emplace(sensor.object_id, sensor.pattern);
+        const auto required = render_vsg::SensorLayer::required(sensor_meshes);
+        if (required && (!sensor_layer_ || sensor_layer_->capacity() < required)) {
+            auto layer = std::make_unique<render_vsg::SensorLayer>(
+                std::max<std::size_t>(1024, required * 2));
+            layer->update(sensor_meshes, srgb);
+            publish_static_node(layer->node(), [&] {
+                if (sensor_layer_) {
+                    auto &children = earth_transform_->children;
+                    std::erase(children, sensor_layer_->node());
+                }
+                earth_transform_->addChild(layer->node());
+                sensor_layer_ = std::move(layer);
+            });
+        } else if (sensor_layer_)
+            sensor_layer_->update(sensor_meshes, srgb);
+        if (ground_map_)
+            ground_map_->set_sensor_footprints(sensor_footprints);
         for (std::size_t i = 0; i < stations_.size(); ++i) {
             const auto &station = stations_[i].config;
             fixed.markers.push_back(
@@ -3893,10 +4053,11 @@ class Workbench final : public WorkbenchWindow {
             return;
         editor_->show_result({});
     }
-    void start_orbit(OrbitInput input) {
+    void start_orbit(OrbitInput input, const std::string &name) {
         if (busy() || !scenario_)
             return;
         pending_orbit_target_ = editor_target_;
+        pending_orbit_name_ = name;
         input.first = scenario_->first();
         input.last = scenario_->last();
         if (editor_target_)
@@ -3908,9 +4069,13 @@ class Workbench final : public WorkbenchWindow {
         }
         if (editor_target_ &&
             same_orbit_input(input, satellites_.at(*editor_target_).orbit->input)) {
-            last_orbit_outcome_ = "unchanged";
+            const bool renamed = satellites_[*editor_target_].name().toStdString() != name;
+            rename_object(input.object_id, name);
+            last_orbit_outcome_ = renamed ? "applied" : "unchanged";
             editor_->accept_input(input);
-            editor_->show_result(ui::text("graphics_workbench.label_13"));
+            editor_->set_name(name);
+            editor_->show_result(
+                ui::text(renamed ? "graphics_workbench.label_31" : "graphics_workbench.label_13"));
             return;
         }
         if (display_cancellation_)
@@ -3919,13 +4084,18 @@ class Workbench final : public WorkbenchWindow {
         auto data_last = input.last;
         try {
             auto data_input = project_snapshot(project_path_);
-            if (editor_target_)
+            if (editor_target_) {
                 data_input.satellites.at(*editor_target_).orbit = input;
-            else {
+                data_input.satellites.at(*editor_target_).display_name = name;
+            } else {
                 application::ProjectSatellite added;
                 added.orbit = input;
+                added.display_name = name;
                 data_input.satellites.push_back(std::move(added));
             }
+            if (name.empty())
+                throw std::invalid_argument(ui::utf8("common.object_name_required"));
+            application::validate_project(data_input);
             std::tie(data_first, data_last) = application::calculation_data_interval(data_input);
             const auto current_data = data_for_interval(data_first, data_last);
             if (!application::matching_project_data(current_data->data_info(), eop_->data_info()) ||
@@ -3937,15 +4107,8 @@ class Workbench final : public WorkbenchWindow {
                   input.hpop.ocean_tides.active() ||
                   (input.hpop.drag.enabled && !input.hpop.drag.weather_model.empty())))) {
                 // Publish all tracks and their provider together, never mix EOP revisions.
-                auto project = project_snapshot(project_path_);
+                auto project = std::move(data_input);
                 const auto id = input.object_id;
-                if (editor_target_)
-                    project.satellites.at(*editor_target_).orbit = std::move(input);
-                else {
-                    application::ProjectSatellite added;
-                    added.orbit = std::move(input);
-                    project.satellites.push_back(std::move(added));
-                }
                 if (start_project(std::move(project), project_path_, true,
                                   editor_target_.value_or(satellites_.size()), id)) {
                     last_orbit_outcome_.clear();
@@ -4064,6 +4227,8 @@ class Workbench final : public WorkbenchWindow {
             }
             scenario_ = std::move(next_scenario);
             orbit_sessions_ = std::move(pending_orbit_sessions_);
+            satellites_[index].display_name = pending_orbit_name_;
+            satellites_[index].item->setText(0, satellites_[index].name());
             filter_objects();
             mark_project_dirty();
             if (pending_orbit_target_)
@@ -4076,6 +4241,7 @@ class Workbench final : public WorkbenchWindow {
             satellites_[index].tracks = track;
             editor_target_ = index;
             editor_->accept_input(satellites_[index].orbit->input);
+            editor_->set_name(satellites_[index].name().toStdString());
             editor_->set_create_mode(false);
             properties_dialog_->setWindowTitle(
                 satellites_[index].name() +
@@ -5431,8 +5597,8 @@ class Workbench final : public WorkbenchWindow {
             require(workspace_->current_document() == properties_dialog_ && satellites_.empty(),
                     "Define properties must open an uncommitted workspace draft");
             record("insert-object-define-properties-in-workspace");
-            auto *id = editor_->findChild<QLineEdit *>("objectId");
-            require(id, "Missing insertion draft object ID");
+            auto *id = editor_->findChild<QLineEdit *>("objectName");
+            require(id, "Missing insertion draft object name");
             id->setText("UncommittedDraft");
             smoke_insert_dialog(std::nullopt, {}, true);
             require(id->text() == "UncommittedDraft" &&
@@ -5783,8 +5949,8 @@ class Workbench final : public WorkbenchWindow {
             break;
         case 19:
             smoke_insert_dialog(InsertObjectMethod::define_properties);
-            require(editor_->findChild<QLineEdit *>("objectId")->text() == "Satellite2",
-                    "Insertion chooser did not generate a unique satellite ID");
+            require(editor_->findChild<QLineEdit *>("objectName")->text() == "Satellite2",
+                    "Insertion chooser did not generate a default satellite name");
             input.object_id = "Satellite1";
             editor_->set_input(input);
             editor_->submit();
@@ -6849,6 +7015,17 @@ class Workbench final : public WorkbenchWindow {
                         named.satellites[0].orbit.object_id == smoke_cache_->input.object_id,
                     "Rename did not persist separately from the stable ID");
             record("object-rename-keeps-session-and-stable-id");
+            open_properties();
+            editor_->findChild<QLineEdit *>("objectName")->setText(QStringLiteral("属性页卫星"));
+            editor_->submit();
+            require(!busy() && orbit_ == smoke_cache_ && !editor_->has_unapplied_changes() &&
+                        satellites_[0].name() == QStringLiteral("属性页卫星") &&
+                        runtime::report_input_sha256(project_snapshot(project_path_)) ==
+                            runtime::report_input_sha256(named),
+                    "Name-only satellite Apply recalculated or changed report inputs");
+            editor_->findChild<QLineEdit *>("objectName")->setText(QStringLiteral("观测卫星 A"));
+            editor_->submit();
+            record("satellite-name-apply-preserves-session-and-reports");
             smoke_view_epoch_ = snapshot_.epoch;
             duplicate_action_->trigger();
             ++orbit_smoke_stage_;
@@ -7854,10 +8031,10 @@ class Workbench final : public WorkbenchWindow {
                     "Report CSV was not exported");
             set_selection(0);
             rename_selected_to(QStringLiteral("报告测试卫星"));
-            require(report_dialog_->findChild<QLabel *>("reportResultLabel")
-                        ->text()
-                        .contains(QStringLiteral("场景已变化")),
-                    "Report did not mark changed inputs as stale");
+            require(!report_dialog_->findChild<QLabel *>("reportResultLabel")
+                         ->text()
+                         .contains(QStringLiteral("场景已变化")),
+                    "Renaming incorrectly invalidated the calculated report");
             save_project_to(smoke_dir_ + "/reports.orbitforge");
             const auto restored =
                 application::load_project(std::filesystem::path(project_path_.toStdWString()));
@@ -7865,7 +8042,7 @@ class Workbench final : public WorkbenchWindow {
                         restored.reports[0].query.step_nanoseconds == 600'000'000'000,
                     "Saved report configuration lost its sampling interval");
             start_project(restored, project_path_);
-            record("reports-workspace-generate-csv-stale-and-project-save");
+            record("reports-workspace-generate-csv-rename-and-project-save");
             ++orbit_smoke_stage_;
             break;
         }
@@ -8196,7 +8373,8 @@ class Workbench final : public WorkbenchWindow {
             if (project_candidate_.valid())
                 break;
             require(sensors_.size() == 1 && satellites_[0].item->childCount() == 1 &&
-                        std::abs(sensors_[0].half_angle_rad - 20 * std::numbers::pi / 180) < 1e-12,
+                        std::abs(sensors_[0].pattern.half_angle_rad - 20 * std::numbers::pi / 180) <
+                            1e-12,
                     "Reopening lost sensor configuration");
             require(satellites_[0].item->isExpanded() &&
                         !objects_->visualItemRect(satellites_[0].item->child(0)).isEmpty(),
@@ -8219,8 +8397,8 @@ class Workbench final : public WorkbenchWindow {
         }
         case 144:
             require(selected_sensor() && selected_sensor()->object_id == sensors_[0].object_id &&
-                        std::abs(selected_sensor()->half_angle_rad - 25 * std::numbers::pi / 180) <
-                            1e-12 &&
+                        std::abs(selected_sensor()->pattern.half_angle_rad -
+                                 25 * std::numbers::pi / 180) < 1e-12 &&
                         !satellites_[0].item->isHidden() && satellites_[0].item->isExpanded() &&
                         satellites_[1].item->isHidden() && stations_[0].item->isHidden(),
                     "Sensor edit lost the child selection or active search filter");
@@ -8234,6 +8412,25 @@ class Workbench final : public WorkbenchWindow {
                         objects_->currentItem()->text(0) == selected_name(),
                     "Sensor rename did not refresh the selected child");
             record("sensor-rename-refreshes-selected-child");
+            {
+                const auto orbit = satellites_[0].orbit;
+                const auto sensor = *selected_sensor();
+                const auto hash = runtime::report_input_sha256(project_snapshot(project_path_));
+                open_properties();
+                sensor_editor_->findChild<QLineEdit *>("sensorName")
+                    ->setText(QStringLiteral("属性页传感器"));
+                sensor_editor_->findChild<QPushButton *>("applySensor")->click();
+                require(!busy() && satellites_[0].orbit == orbit &&
+                            selected_sensor()->object_id == sensor.object_id &&
+                            selected_sensor()->parent_satellite_id == sensor.parent_satellite_id &&
+                            selected_sensor()->target_station_id == sensor.target_station_id &&
+                            selected_name() == QStringLiteral("属性页传感器") &&
+                            !sensor_editor_->has_unapplied_changes() &&
+                            runtime::report_input_sha256(project_snapshot(project_path_)) == hash,
+                        "Name-only sensor Apply rebuilt the scene or changed references");
+                rename_selected_to(QStringLiteral("对地观测仪重命名"));
+                record("sensor-name-apply-preserves-caches-and-references");
+            }
             duplicate_selected();
             ++orbit_smoke_stage_;
             break;
@@ -8256,6 +8453,23 @@ class Workbench final : public WorkbenchWindow {
             require(!satellites_[0].item->isExpanded() && selected_station_ == 0 &&
                         stations_[0].name() == QStringLiteral("测控站 · 更新"),
                     "Updating a station reset another object's collapsed state");
+            {
+                const auto orbit = satellites_[0].orbit;
+                const auto id = stations_[0].config.object_id;
+                const auto hash = runtime::report_input_sha256(project_snapshot(project_path_));
+                open_properties();
+                station_editor_->findChild<QLineEdit *>("stationName")
+                    ->setText(QStringLiteral("属性页地面站"));
+                station_editor_->findChild<QPushButton *>("applyGroundStation")->click();
+                require(!busy() && satellites_[0].orbit == orbit &&
+                            stations_[0].config.object_id == id &&
+                            stations_[0].name() == QStringLiteral("属性页地面站") &&
+                            !station_editor_->has_unapplied_changes() &&
+                            runtime::report_input_sha256(project_snapshot(project_path_)) == hash,
+                        "Name-only station Apply rebuilt the scene or changed identity");
+                rename_selected_to(QStringLiteral("测控站 · 更新"));
+                record("station-name-apply-preserves-caches-and-references");
+            }
             findChild<QLineEdit *>("objectSearch")->setText(QStringLiteral("副本"));
             require(satellites_[0].item->isExpanded() && !satellites_[0].item->isHidden() &&
                         satellites_[0].item->child(0)->isHidden() &&
@@ -8901,7 +9115,7 @@ class Workbench final : public WorkbenchWindow {
             sensor_editor_->close();
             edit_sensor(false);
             require(sensor_editor_->has_unapplied_changes() &&
-                        std::abs(sensor_editor_->sensor().half_angle_rad -
+                        std::abs(sensor_editor_->sensor().pattern.half_angle_rad -
                                  20 * std::numbers::pi / 180) < 1e-12,
                     "Reopening an existing sensor discarded its draft");
             sensor_editor_->findChild<QPushButton *>("resetSensor")->click();
@@ -9530,7 +9744,51 @@ class Workbench final : public WorkbenchWindow {
             ++orbit_smoke_stage_;
             break;
         }
-        case 204:
+        case 204: {
+            auto project = project_snapshot(project_path_);
+            project.sensors.clear();
+            application::ProjectSensor sensor;
+            sensor.object_id = "geometry-smoke";
+            sensor.display_name = "Geometry sensor";
+            sensor.parent_satellite_id = project.satellites.front().orbit.object_id;
+            sensor.pattern.custom_points = {{.4, 0},
+                                            {.25, std::numbers::pi / 2},
+                                            {.4, std::numbers::pi},
+                                            {.25, 3 * std::numbers::pi / 2}};
+            sensor.pattern.inner_half_angle_rad = .15;
+            sensor.pattern.minimum_clock_rad = 5 * std::numbers::pi / 3;
+            sensor.pattern.maximum_clock_rad = std::numbers::pi / 3;
+            project.sensors.push_back(sensor);
+            start_project(std::move(project), project_path_, true);
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 205: {
+            if (project_candidate_.valid() || ++smoke_final_frames_ < 4)
+                break;
+            require(sensor_layer_ && sensor_views_.contains("geometry-smoke"),
+                    "Sensor volume was not published");
+            const auto type = static_cast<int>(sensors_.front().pattern.type);
+            save_workbench_image(QString("sensor-geometry-%1.png").arg(type));
+            workspace_->select_view(1);
+            save_workbench_image(QString("sensor-footprint-%1.png").arg(type));
+            workspace_->select_view(0);
+            save_project_to(smoke_dir_ + QString("/sensor-geometry-%1.orbitforge").arg(type));
+            record(
+                QString("sensor-geometry-%1-rendered-and-saved").arg(type).toStdString().c_str());
+            if (type == 3) {
+                ++orbit_smoke_stage_;
+                smoke_final_frames_ = 0;
+                break;
+            }
+            auto project = project_snapshot(project_path_);
+            project.sensors.front().pattern.type = static_cast<core::SensorPatternType>(type + 1);
+            start_project(std::move(project), project_path_, true);
+            smoke_final_frames_ = 0;
+            break;
+        }
+        case 206:
             if (++smoke_final_frames_ >= 4)
                 ++orbit_smoke_stage_;
             break;
@@ -9837,6 +10095,7 @@ class Workbench final : public WorkbenchWindow {
     std::optional<std::size_t> selected_station_;
     QTreeWidgetItem *scenario_item_ = nullptr;
     std::optional<std::size_t> editor_target_, pending_orbit_target_;
+    std::string pending_orbit_name_;
     bool insert_defaults_pending_ = false;
     std::size_t pending_model_target_ = 0;
     QString pending_model_path_;
@@ -9864,7 +10123,7 @@ class Workbench final : public WorkbenchWindow {
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
     std::array<std::size_t, 3> smoke_insert_counts_{};
-    static constexpr int orbit_smoke_complete = 205;
+    static constexpr int orbit_smoke_complete = 207;
     std::shared_ptr<const core::GravityModel> smoke_gravity_;
     std::weak_ptr<const core::GravityModel> smoke_startup_gravity_;
     std::string smoke_gravity_id_ = "apply-audit";
@@ -9918,6 +10177,9 @@ class Workbench final : public WorkbenchWindow {
     vsg::ref_ptr<vsg::ResourceHints> hints_;
     vsg::ref_ptr<render_vsg::CompileManager> compiler_;
     std::unique_ptr<render_vsg::MarkerLayer> markers_;
+    std::unique_ptr<render_vsg::SensorLayer> sensor_layer_;
+    std::map<std::string, visualization::SensorView> sensor_views_;
+    std::map<std::string, core::SensorPattern> sensor_view_patterns_;
     std::unique_ptr<render_vsg::MarkerLayer> selection_;
     std::unique_ptr<render_vsg::IEarthDisplay> globe_;
     vsg::ref_ptr<vsg::Group> scene_;

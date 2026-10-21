@@ -25,6 +25,26 @@ def make_project():
 
 
 class ObjectEditingTest(unittest.TestCase):
+    def test_geometric_sensor_patterns_round_trip_and_atomic_rejection(self):
+        from orbitforge.sensors import ComplexConic, Rectangular, Custom
+        project, _, _, sensor = make_project()
+        shapes = [ComplexConic(u.deg(10),u.deg(40),u.deg(300),u.deg(60)),
+                  Rectangular(u.deg(30),u.deg(15)),
+                  Custom(tuple((u.deg(20),u.deg(clock)) for clock in (0,90,180,270)))]
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"patterns.orbitforge"
+            for shape in shapes:
+                sensor.field_of_view=shape
+                self.assertEqual(sensor.field_of_view,shape)
+                project.save(path,overwrite=True)
+                restored=of.Project.open(path)
+                self.assertEqual(restored.objects[sensor.id].field_of_view,shape)
+        before=project.revision
+        with self.assertRaises(ValueError):
+            sensor.field_of_view=ComplexConic(u.deg(50),u.deg(40))
+        self.assertEqual(project.revision,before)
+        self.assertEqual(sensor.field_of_view,shapes[-1])
+
     def test_creation_lookup_and_fixed_iteration(self):
         project, satellite, station, sensor = make_project()
         self.assertEqual(project.revision, 1)
@@ -50,7 +70,7 @@ class ObjectEditingTest(unittest.TestCase):
         changes = []
         project.subscribe(changes.append)
         with self.assertRaises(of.ProjectError):
-            sensor.update(name="Invalid", field_of_view=Cone(half_angle=u.deg(100)))
+            sensor.update(name="Invalid", field_of_view=Cone(half_angle=u.deg(180)))
         self.assertEqual(sensor.name, "Camera")
         self.assertEqual(project.revision, 1)
         self.assertEqual(changes, [])

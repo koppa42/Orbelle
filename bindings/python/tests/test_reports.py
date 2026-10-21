@@ -91,7 +91,7 @@ class ReportsTest(unittest.TestCase):
         project.reports = [definition]
         self.assertEqual(result.input_sha256, of.report_input_sha256(project))
         project = project.renamed_ground_station('station', 'New name')
-        self.assertNotEqual(result.input_sha256, of.report_input_sha256(project))
+        self.assertEqual(result.input_sha256, of.report_input_sha256(project))
         self.assertEqual(result.table.rows[0][1], '海岸,"一号"\n站')
 
     def test_all_four_templates_and_explicit_object_selection(self):
@@ -192,7 +192,7 @@ class ReportsTest(unittest.TestCase):
             path = Path(directory) / 'derived.orbitforge'
             project.save(path)
             raw = path.read_bytes()
-            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 46)
+            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 47)
             self.assertEqual(of.load_project(path).reports[0].query.kind, of.ReportKind.GEODETIC_POSITION)
 
 

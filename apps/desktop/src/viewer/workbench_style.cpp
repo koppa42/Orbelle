@@ -998,6 +998,7 @@ QLabel#reportCurveCount { color: @textMuted; font-size: 11px; }
         R"QSS(QWidget#sensorFields, QScrollArea#sensorScroll { background: @surface; }
 QLabel#sensorTitle { color: @text; font-size: 16px; }
 QLabel#sensorCaption { color: @textMuted; font-size: 12px; }
+QLabel#sensorSectionTitle { color: @textSoft; font-weight: 600; }
 QLabel#sensorBadge { background: @accentWash; border: 1px solid @border; border-radius: 10px; }
 QFrame#sensorParent { background: @panel; border: 1px solid @line; border-radius: 6px; }
 QLabel#sensorParentName { color: @textSoft; }
