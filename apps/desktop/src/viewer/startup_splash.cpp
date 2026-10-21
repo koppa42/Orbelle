@@ -1,11 +1,18 @@
 #include "startup_splash.hpp"
 #include "../ui_text.hpp"
 #include "workbench_style.hpp"
+#include <QCloseEvent>
+#include <QEventLoop>
 #include <QFont>
+#include <QKeyEvent>
 #include <QLinearGradient>
 #include <QPainter>
+#include <QProgressBar>
+#include <QPushButton>
 #include <QScreen>
+#include <QTimer>
 #include <algorithm>
+#include <future>
 #include <stdexcept>
 
 namespace orbitforge::desktop {
@@ -32,6 +39,110 @@ StartupSplash::StartupSplash(QScreen *screen) : QSplashScreen(screen, splash_pic
     setWindowIcon(workbench_icon(WorkbenchIcon::orbit, theme::color(theme::accent)));
     if (screen)
         move(screen->availableGeometry().center() - rect().center());
+    progress_ = new QProgressBar(this);
+    progress_->setObjectName("startupProgress");
+    progress_->setTextVisible(false);
+    progress_->setAccessibleName(ui::text("startup_splash.progress"));
+    progress_->hide();
+    cancel_ = new QPushButton(ui::text("startup_splash.cancel"), this);
+    cancel_->setObjectName("startupCancel");
+    cancel_->hide();
+    connect(cancel_, &QPushButton::clicked, this, &StartupSplash::cancel);
+}
+void StartupSplash::resizeEvent(QResizeEvent *event) {
+    QSplashScreen::resizeEvent(event);
+    const double scale = width() / 960.0;
+    if (progress_)
+        progress_->setGeometry(qRound(48 * scale), qRound(518 * scale), qRound(864 * scale),
+                               std::max(4, qRound(6 * scale)));
+    if (cancel_)
+        cancel_->setGeometry(qRound(814 * scale), qRound(480 * scale), qRound(98 * scale),
+                             qRound(30 * scale));
+}
+void StartupSplash::cancel() {
+    if (!preparing_)
+        return;
+    cancelled_ = true;
+    cancel_->setEnabled(false);
+    showMessage(ui::text("startup_splash.cancelling"));
+}
+void StartupSplash::closeEvent(QCloseEvent *event) {
+    if (preparing_) {
+        cancel();
+        event->ignore();
+    } else {
+        QSplashScreen::closeEvent(event);
+    }
+}
+void StartupSplash::keyPressEvent(QKeyEvent *event) {
+    if (event->key() == Qt::Key_Escape && preparing_) {
+        cancel();
+        event->accept();
+    } else {
+        QSplashScreen::keyPressEvent(event);
+    }
+}
+bool StartupSplash::prepare(const std::vector<Step> &steps) {
+    struct Cancelled {};
+    cancelled_ = false;
+    preparing_ = true;
+    progress_->setRange(0, std::max(1, static_cast<int>(steps.size())));
+    progress_->setValue(0);
+    progress_->show();
+    cancel_->setEnabled(true);
+    cancel_->show();
+    if (!isVisible())
+        show();
+    std::atomic_size_t completed{0};
+    auto worker = std::async(std::launch::async, [&] {
+        const std::function<void()> checkpoint = [&] {
+            if (cancelled_.load())
+                throw Cancelled{};
+        };
+        for (const auto &step : steps) {
+            checkpoint();
+            step.prepare(checkpoint);
+            checkpoint();
+            ++completed;
+        }
+    });
+    QEventLoop loop;
+    QTimer poll;
+    connect(&poll, &QTimer::timeout, &loop, [&] {
+        const auto count = completed.load();
+        progress_->setValue(static_cast<int>(count));
+        if (!cancelled_ && count < steps.size()) {
+            const auto status = ui::text("startup_splash.stage")
+                                    .arg(count + 1)
+                                    .arg(steps.size())
+                                    .arg(steps[count].message);
+            if (message() != status)
+                showMessage(status);
+        }
+        if (worker.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+            loop.quit();
+    });
+    if (!steps.empty())
+        showMessage(
+            ui::text("startup_splash.stage").arg(1).arg(steps.size()).arg(steps[0].message));
+    poll.start(30);
+    loop.exec();
+    // Quit events can end a nested loop before the worker. Cancel and join before
+    // destroying anything captured by reference, including on application exit.
+    if (worker.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        cancelled_ = true;
+    preparing_ = false;
+    cancel_->hide();
+    try {
+        worker.get();
+    } catch (const Cancelled &) {
+        return false;
+    }
+    if (cancelled_)
+        return false;
+    progress_->setValue(progress_->maximum());
+    showMessage(ui::text("startup_splash.ready"));
+    return true;
 }
 void StartupSplash::drawContents(QPainter *painter) {
     painter->save();
@@ -77,7 +188,7 @@ void StartupSplash::drawContents(QPainter *painter) {
     font.setLetterSpacing(QFont::AbsoluteSpacing, 0);
     painter->setFont(font);
     painter->setPen(theme::color(theme::text_soft));
-    painter->drawText(QRectF(62, 480, 800, 32), Qt::AlignLeft | Qt::AlignVCenter, message());
+    painter->drawText(QRectF(62, 480, 740, 32), Qt::AlignLeft | Qt::AlignVCenter, message());
     painter->setBrush(Qt::NoBrush);
     painter->setPen(QPen(theme::color(theme::accent, 50), 1));
     painter->drawRect(QRectF(0.5, 0.5, 959, 539));

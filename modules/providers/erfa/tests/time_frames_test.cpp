@@ -1,8 +1,10 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <erfa.h>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <gtest/gtest.h>
 #include <limits>
 #include <orbitforge/providers/erfa/provider.hpp>
@@ -195,6 +197,51 @@ TEST(ErfaFrames, MatchesUpstreamC2t06aReference) {
     EXPECT_EQ(rotation.from, core::FrameId::gcrf);
     EXPECT_EQ(rotation.to, core::FrameId::itrf);
     EXPECT_EQ(rotation.origin, core::OriginId::earth);
+}
+
+TEST(ErfaFrames, CachedSeriesMatchesDirectErfaAcrossEpochsCorrectionsAndThreads) {
+    const auto time = providers::erfa::make_builtin_time_provider();
+    const auto frames = providers::erfa::make_frame_provider();
+    const auto check = [&](int worker) {
+        double maximum_error = 0;
+        for (int i = 0; i < 192; ++i) {
+            // Repeated epochs, cache eviction, adjacent nanoseconds and different EOP.
+            const core::Epoch epoch{(i % 96 - 48) * 1'000'000'000'000'000LL + worker};
+            const core::EarthOrientationSample eop{
+                epoch, -32.1 + worker * .01, (worker + 1) * 1e-6, -2e-6, (i / 96 + worker) * 1e-8,
+                -2e-8, "comparison"};
+            const auto tt = time->julian_date(epoch, core::TimeScale::tt);
+            const auto tai = time->julian_date(epoch, core::TimeScale::tai);
+            double x, y, s, day, fraction, celestial[3][3], polar[3][3], expected[3][3];
+            eraXys06a(tt.day, tt.fraction, &x, &y, &s);
+            eraC2ixys(x + eop.celestial_pole_dx_rad, y + eop.celestial_pole_dy_rad, s, celestial);
+            eraPom00(eop.polar_motion_x_rad, eop.polar_motion_y_rad, eraSp00(tt.day, tt.fraction),
+                     polar);
+            eraTaiut1(tai.day, tai.fraction, eop.ut1_minus_tai_seconds, &day, &fraction);
+            eraC2tcio(celestial, eraEra00(day, fraction), polar, expected);
+            const auto actual = frames->gcrf_to_itrf(epoch, eop);
+            for (std::size_t r = 0; r < 3; ++r)
+                for (std::size_t c = 0; c < 3; ++c)
+                    maximum_error =
+                        std::max(maximum_error, std::abs(actual.matrix[r][c] - expected[r][c]));
+            const core::EarthOrientationState state{eop, {1e-8, 1e-12, -1e-12, 1e-13, -1e-13}};
+            const auto first = frames->gcrf_to_itrf_state(epoch, state);
+            auto changed = state;
+            changed.sample.celestial_pole_dx_rad += 1e-6;
+            changed.rates.polar_motion_y_rad_per_second *= 2;
+            (void)frames->gcrf_to_itrf_state(epoch, changed);
+            const auto repeated = frames->gcrf_to_itrf_state(epoch, state);
+            if (first.rotation.matrix != repeated.rotation.matrix ||
+                first.rotation_rate_per_second != repeated.rotation_rate_per_second)
+                return 1.0;
+        }
+        return maximum_error;
+    };
+    std::vector<std::future<double>> workers;
+    for (int i = 0; i < 4; ++i)
+        workers.push_back(std::async(std::launch::async, check, i));
+    for (auto &worker : workers)
+        EXPECT_LE(worker.get(), 5e-16);
 }
 
 TEST(ErfaFrames, RotationPreservesGeometryAndInverts) {

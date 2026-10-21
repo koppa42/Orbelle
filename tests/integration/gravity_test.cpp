@@ -68,6 +68,47 @@ TEST_F(GravityFiles, RejectsTruncationTimeDependenceDuplicatesAndUnsupportedTide
                       "tide_free\nend_of_head\ngfct 2 0 0 0\n")})
         EXPECT_THROW((void)runtime::load_gravity(write(bad)), std::runtime_error);
 }
+TEST_F(GravityFiles, BufferedParsingPreservesBytesAcrossBlocksAndEndOfFile) {
+    const auto original = grv();
+    const auto expected =
+        runtime::load_gravity(write(original))->acceleration({4e6, -3e6, 5e6}, 2, 2);
+    // Put a floating-point coefficient across the 64 KiB input boundary.
+    const auto padding = 65536 - original.find("2 0 -4") - 12;
+    std::string prefix;
+    for (std::size_t i = 0; i < padding / 2048; ++i)
+        prefix += '#' + std::string(2046, 'p') + '\n';
+    prefix += '#' + std::string(padding % 2048 - 2, 'p') + '\n';
+    auto lf = prefix + original;
+    auto no_newline = lf;
+    no_newline.pop_back();
+    std::string crlf = "\xef\xbb\xbf";
+    for (char c : lf)
+        crlf += c == '\n' ? "\r\n" : std::string(1, c);
+    // Independent Python hashlib SHA-256 of each exact fixture byte string.
+    for (const auto &[bytes, digest] : std::array{
+             std::pair{lf, "2d0457831470e7d8f707ac1b2316abad10b2657292f10a1be113cda06be91bd8"},
+             std::pair{no_newline,
+                       "f5c9e97750882a4e0784a6be8659530af9f885347daac19cbb1e1643dbb70d44"},
+             std::pair{crlf, "abf4ecf5b0a5166798e5506d935fd7aa241f29ae050abb80cd0312269beba1d6"}}) {
+        const auto model = runtime::load_gravity(write(bytes));
+        EXPECT_EQ(model->info().sha256, digest);
+        EXPECT_EQ(model->acceleration({4e6, -3e6, 5e6}, 2, 2), expected);
+    }
+    // Exact buffer-sized EOF, legal maximum line, and a malicious overlong line.
+    const auto exact = original + std::string(65536 - original.size(), '\n');
+    EXPECT_EQ(runtime::load_gravity(write(exact))->acceleration({4e6, -3e6, 5e6}, 2, 2), expected);
+    EXPECT_NO_THROW((void)runtime::load_gravity(write(original + '#' + std::string(4095, ' '))));
+    EXPECT_THROW((void)runtime::load_gravity(write(original + '#' + std::string(4096, ' '))),
+                 std::runtime_error);
+    int checkpoints = 0;
+    EXPECT_THROW((void)runtime::load_gravity(write(std::string(2048, '\n') + original), {},
+                                             [&] {
+                                                 ++checkpoints;
+                                                 throw std::runtime_error("cancelled");
+                                             }),
+                 std::runtime_error);
+    EXPECT_EQ(checkpoints, 1);
+}
 TEST_F(GravityFiles, CatalogFailureAndCancellationPreserveCurrentAndRunningResources) {
     if (!runtime::data_catalog_available())
         GTEST_SKIP();

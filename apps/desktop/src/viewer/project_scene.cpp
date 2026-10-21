@@ -21,7 +21,8 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
     const std::map<std::string, std::shared_ptr<const core::SpaceWeather>> &weather,
     const std::map<std::string, std::shared_ptr<const core::OceanTideModel>> &ocean_tides,
     const std::optional<application::Project> &previous_project,
-    std::shared_ptr<runtime::OrbitSessionCache> sessions) {
+    std::shared_ptr<runtime::OrbitSessionCache> sessions,
+    const std::function<void(std::size_t)> &orbit_progress) {
     application::validate_project(project);
     const auto [data_first, data_last] = application::calculation_data_interval(project);
     std::shared_ptr<const core::IEarthOrientationProvider> eop;
@@ -90,6 +91,8 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
     for (auto &satellite : result->project.satellites) {
         if (cancelled.load())
             throw OrbitCancelled{};
+        if (orbit_progress)
+            orbit_progress(result->orbits.size());
         const auto &input = satellite.orbit;
         if (input.uses_hpop() && !input.hpop.gravity_model.empty() &&
             gravity.contains(input.hpop.gravity_model))

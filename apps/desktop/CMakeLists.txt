@@ -49,6 +49,7 @@ if(ORBITFORGE_WITH_VSG)
         src/viewer/epoch_editor.cpp src/viewer/ground_map.cpp src/viewer/workspace.cpp
         src/viewer/workbench_profile.cpp src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
         src/viewer/startup_splash.cpp src/viewer/startup_splash.hpp
+        src/viewer/startup_resources.cpp src/viewer/startup_resources.hpp
         src/viewer/initial_data_setup.cpp src/viewer/initial_data_setup.hpp
         src/viewer/welcome_page.cpp src/viewer/welcome_page.hpp)
     set_target_properties(orbitforge_desktop PROPERTIES AUTOMOC ON)
@@ -98,16 +99,21 @@ if(ORBITFORGE_WITH_VSG)
         gtest_discover_tests(orbitforge_data_center_tests DISCOVERY_MODE PRE_TEST TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbitforge_desktop_tests TIMEOUT 30)
         add_executable(orbitforge_data_center_ui_tests tests/data_center_dialog_test.cpp
             src/viewer/eop_catalog.cpp src/viewer/data_center_dialog.cpp src/viewer/workbench_style.cpp
-            src/viewer/initial_data_setup.cpp)
+            src/viewer/initial_data_setup.cpp src/viewer/startup_splash.cpp
+            src/viewer/startup_resources.cpp tests/startup_test.cpp)
         qt_add_resources(orbitforge_data_center_ui_tests "data_center_icons" PREFIX "/orbitforge"
             BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
-            FILES resources/icons/chevron-down.png resources/artwork/data-preparation.png)
+            FILES resources/icons/chevron-down.png resources/artwork/data-preparation.png
+                  resources/startup/star-gazing.png)
         target_compile_definitions(orbitforge_data_center_ui_tests PRIVATE
             ORBITFORGE_TEST_PLANETS="${PROJECT_SOURCE_DIR}/data/samples/spice/de440s_planets_2016_leap/manifest.json"
             ORBITFORGE_TEST_FINALS="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json"
             ORBITFORGE_TEST_TIME="${PROJECT_SOURCE_DIR}/data/samples/time/iers_leap_seconds_2026_07.dat")
         target_link_libraries(orbitforge_data_center_ui_tests PRIVATE
             OrbitForge::Runtime Qt6::Widgets Qt6::Network GTest::gtest_main)
+        if(WIN32)
+            target_link_libraries(orbitforge_data_center_ui_tests PRIVATE psapi)
+        endif()
         orbitforge_warnings(orbitforge_data_center_ui_tests)
         orbitforge_copy_runtime_dlls(orbitforge_data_center_ui_tests)
         gtest_discover_tests(orbitforge_data_center_ui_tests DISCOVERY_MODE PRE_TEST

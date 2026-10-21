@@ -20,6 +20,7 @@
 #include "satellite_model.hpp"
 #include "scenario_dialog.hpp"
 #include "sensor_editor.hpp"
+#include "startup_resources.hpp"
 #include "startup_splash.hpp"
 #include "view_navigation.hpp"
 #include "welcome_page.hpp"
@@ -1148,7 +1149,7 @@ class Workbench final : public WorkbenchWindow {
             });
             clock_.start();
             timer_.setTimerType(Qt::PreciseTimer);
-            timer_.start(16);
+            timer_.setInterval(16);
             if (!smoke_dir_.isEmpty()) {
                 QDir().mkpath(smoke_dir_);
                 // The complete interaction audit includes modal editors, reports,
@@ -1169,11 +1170,67 @@ class Workbench final : public WorkbenchWindow {
         }
     }
     ~Workbench() override { shutdown(); }
-    bool initialize_data() {
-        if (benchmarking_ || !smoke_dir_.isEmpty() || profile_)
+    void start_rendering() {
+        clock_.restart();
+        timer_.start();
+    }
+    bool initialize_data(StartupSplash *splash) {
+        if (benchmarking_ || profile_)
             return true;
-        if (!prepare_initial_data(this, *eop_catalog_))
-            return false;
+        if (!smoke_dir_.isEmpty()) {
+            const auto fixture = qEnvironmentVariable("ORBITFORGE_STARTUP_GRAVITY_FILE");
+            if (!fixture.isEmpty()) {
+                // Explicit local smoke input: never download or touch the user's catalog.
+                eop_catalog_->data().install_gravity(std::filesystem::path(fixture.toStdWString()),
+                                                     "egm2008");
+                QElapsedTimer elapsed;
+                elapsed.start();
+                if (!splash->prepare(startup_resource_steps(
+                        startup_resources_, eop_catalog_->data().gravity_models(), {})))
+                    return false;
+                smoke_startup_gravity_ = startup_resources_.gravity.at("egm2008");
+                smoke_gravity_id_ = "egm2008";
+                interaction_report_.append(QJsonObject{{"kind", "startup-preloads-default-gravity"},
+                                                       {"elapsed_ms", elapsed.elapsed()},
+                                                       {"passed", true}});
+                if (!splash->grab().save(smoke_dir_ + "/startup-ready.png"))
+                    throw std::runtime_error("Cannot capture prepared startup");
+            }
+            return true;
+        }
+        for (;;) {
+            const auto required = initial_data_products();
+            if (!std::all_of(required.begin(), required.end(), [&](auto product) {
+                    return eop_catalog_->has_full_download(product);
+                }))
+                splash->hide();
+            if (!prepare_initial_data(this, *eop_catalog_))
+                return false;
+            try {
+                const auto steps = startup_resource_steps(startup_resources_,
+                                                          eop_catalog_->data().gravity_models(),
+                                                          eop_catalog_->data().ephemerides());
+                if (!splash->prepare(steps))
+                    return false;
+                break;
+            } catch (const std::exception &error) {
+                splash->hide();
+                QMessageBox message(QMessageBox::Warning, ui::text("startup_splash.failed_title"),
+                                    ui::text("startup_splash.failed"),
+                                    QMessageBox::Retry | QMessageBox::Cancel, this);
+                message.setObjectName("startupPreparationError");
+                message.setDetailedText(QString::fromUtf8(error.what()));
+                message.button(QMessageBox::Retry)->setText(ui::text("startup_splash.retry"));
+                message.button(QMessageBox::Cancel)->setText(ui::text("startup_splash.cancel"));
+                auto *manage =
+                    message.addButton(ui::text("startup_splash.manage"), QMessageBox::ActionRole);
+                message.exec();
+                if (message.clickedButton() == manage)
+                    show_data_center(this, *eop_catalog_);
+                else if (message.standardButton(message.clickedButton()) != QMessageBox::Retry)
+                    return false;
+            }
+        }
         if (editor_)
             editor_->set_time_provider(eop_catalog_->time_provider());
         eop_catalog_->set_update_schedule_enabled(true);
@@ -2301,6 +2358,8 @@ class Workbench final : public WorkbenchWindow {
         }
         const auto gravity_files = selected_gravity(project);
         const auto ephemeris_files = selected_ephemerides(project);
+        startup_resources_.reconcile(eop_catalog_->data().gravity_models(),
+                                     eop_catalog_->data().ephemerides());
         const auto weather_files = selected_weather(project);
         const auto ocean_files = selected_ocean_tides(project);
         const auto selected_lock = selected_data_lock(project, next_data->data_info());
@@ -2407,6 +2466,8 @@ class Workbench final : public WorkbenchWindow {
         const auto calculation_time = time_for(next_data->data_info().time_data);
         const auto sessions =
             editing ? orbit_sessions_->fork() : std::make_shared<runtime::OrbitSessionCache>();
+        project_progress_ = std::make_shared<ProjectProgress>();
+        project_progress_->count = project.satellites.size();
         project_candidate_ = std::async(
             std::launch::async,
             [this, project = std::move(project),
@@ -2414,7 +2475,8 @@ class Workbench final : public WorkbenchWindow {
              retained, previous_project, edited_object, calculation_time, sessions, gravity_files,
              ephemeris_files, weather_files, ocean_files, retained_gravity = gravity_,
              retained_ephemerides = ephemerides_, retained_weather = weather_,
-             retained_ocean_tides = ocean_tides_, cancel = project_cancellation_]() mutable {
+             retained_ocean_tides = ocean_tides_, cancel = project_cancellation_,
+             progress = project_progress_, warmed = startup_resources_]() mutable {
                 const auto checkpoint = [cancel] {
                     if (*cancel)
                         throw OrbitCancelled{};
@@ -2425,7 +2487,8 @@ class Workbench final : public WorkbenchWindow {
                     [&](const auto &file) {
                         return runtime::load_gravity(file.file, file.info.source_url, checkpoint);
                     },
-                    checkpoint);
+                    checkpoint, warmed.gravity);
+                progress->phase = ProjectProgress::Phase::ocean;
                 const auto ocean_tides = prepare_resources(
                     ocean_files, retained_ocean_tides, runtime::ocean_tide_reference, info,
                     [&](const auto &file) {
@@ -2433,6 +2496,7 @@ class Workbench final : public WorkbenchWindow {
                                                          checkpoint);
                     },
                     checkpoint);
+                progress->phase = ProjectProgress::Phase::weather;
                 const auto weather = prepare_resources(
                     weather_files, retained_weather, runtime::space_weather_reference, info,
                     [&](const auto &file) {
@@ -2440,6 +2504,7 @@ class Workbench final : public WorkbenchWindow {
                                                            checkpoint);
                     },
                     checkpoint);
+                progress->phase = ProjectProgress::Phase::ephemeris;
                 const auto ephemerides = prepare_resources(
                     ephemeris_files, retained_ephemerides, runtime::ephemeris_reference,
                     [](const auto &model) -> const auto & { return model.data_info(); },
@@ -2448,11 +2513,13 @@ class Workbench final : public WorkbenchWindow {
                             file.manifest,
                             file.manifest.parent_path().parent_path().parent_path() / "runtime"));
                     },
-                    checkpoint);
-                return prepare_project_scene(std::move(project), source, frames_, installed_data,
-                                             *cancel, retained, edited_object, calculation_time,
-                                             gravity, ephemerides, weather, ocean_tides,
-                                             previous_project, sessions);
+                    checkpoint, warmed.ephemerides);
+                progress->phase = ProjectProgress::Phase::orbits;
+                return prepare_project_scene(
+                    std::move(project), source, frames_, installed_data, *cancel, retained,
+                    edited_object, calculation_time, gravity, ephemerides, weather, ocean_tides,
+                    previous_project, sessions,
+                    [progress](std::size_t index) { progress->index = index; });
             });
         update_actions();
         statusBar()->showMessage(editing ? ui::text("graphics_workbench.label_50")
@@ -2460,13 +2527,48 @@ class Workbench final : public WorkbenchWindow {
         return true;
     }
     void poll_project() {
-        if (!project_candidate_.valid() ||
-            project_candidate_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        if (!project_candidate_.valid())
             return;
+        if (project_candidate_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+            QString status;
+            if (project_cancellation_->load()) {
+                status = ui::text("graphics_workbench.preparation.cancelling");
+            } else {
+                switch (project_progress_->phase.load()) {
+                case ProjectProgress::Phase::gravity:
+                    status = ui::text("graphics_workbench.preparation.gravity");
+                    break;
+                case ProjectProgress::Phase::ocean:
+                    status = ui::text("graphics_workbench.preparation.ocean");
+                    break;
+                case ProjectProgress::Phase::weather:
+                    status = ui::text("graphics_workbench.preparation.weather");
+                    break;
+                case ProjectProgress::Phase::ephemeris:
+                    status = ui::text("graphics_workbench.preparation.ephemeris");
+                    break;
+                case ProjectProgress::Phase::orbits:
+                    status = project_progress_->count
+                                 ? ui::text("graphics_workbench.preparation.orbits")
+                                       .arg(project_progress_->index.load() + 1)
+                                       .arg(project_progress_->count)
+                                 : ui::text("graphics_workbench.preparation.scene");
+                    break;
+                }
+            }
+            statusBar()->showMessage(status);
+            return;
+        }
         try {
             auto candidate = project_candidate_.get();
             if (project_cancellation_->load())
                 throw OrbitCancelled{};
+            // Catalog reads can fail: finish cache preparation before publishing
+            // any part of the new scene. Moving the prepared maps cannot reload data.
+            auto next_startup_resources = startup_resources_;
+            next_startup_resources.remember(candidate->gravity, candidate->ephemerides);
+            next_startup_resources.reconcile(eop_catalog_->data().gravity_models(),
+                                             eop_catalog_->data().ephemerides());
             const auto current =
                 project_edit_
                     ? core::Epoch{std::clamp(
@@ -2572,6 +2674,7 @@ class Workbench final : public WorkbenchWindow {
             ephemerides_ = candidate->ephemerides;
             weather_ = candidate->weather;
             ocean_tides_ = candidate->ocean_tides;
+            startup_resources_ = std::move(next_startup_resources);
             if (!project_edit_)
                 close_reports();
             reports_ = candidate->project.reports;
@@ -6686,7 +6789,7 @@ class Workbench final : public WorkbenchWindow {
                 inventory->setCurrentItem(finals);
                 require(dialog->findChild<QLabel *>("dataAcquiredAt")
                             ->text()
-                            .contains(QStringLiteral("内置")),
+                            .contains(QStringLiteral("随程序提供")),
                         "Missing acquisition information");
                 require(finals->text(0).contains(QStringLiteral("内置示例")) &&
                             dialog->findChild<QLabel *>("dataLastChecked")
@@ -8188,16 +8291,26 @@ class Workbench final : public WorkbenchWindow {
             fixture.write("product_type gravity_field\nmodelname ApplyAudit\n"
                           "earth_gravity_constant 3.986004415e14\nradius 6378136.3\n"
                           "max_degree 2\ntide_system tide_free\nend_of_head\n"
-                          "gfc 0 0 1 0\ngfc 2 0 -0.000484165371736 0\n");
+                          "gfc 0 0 1 0\ngfc 2 0 -0.000484165371736 0\n"
+                          "gfc 2 1 0 0\ngfc 2 2 0 0\n");
             fixture.close();
             const auto supplied = qEnvironmentVariable("ORBITFORGE_APPLY_GRAVITY_FILE");
             const auto source = supplied.isEmpty() ? fixture.fileName() : supplied;
-            const auto installed = eop_catalog_->data().install_gravity(
-                std::filesystem::path(source.toStdWString()), "apply-audit");
+            runtime::CatalogGravity installed;
+            if (smoke_gravity_id_ == "egm2008") {
+                const auto files = eop_catalog_->data().gravity_models();
+                const auto found =
+                    std::ranges::find(files, "egm2008", &runtime::CatalogGravity::selection);
+                require(found != files.end(), "Startup gravity fixture disappeared");
+                installed = *found;
+            } else {
+                installed = eop_catalog_->data().install_gravity(
+                    std::filesystem::path(source.toStdWString()), smoke_gravity_id_);
+            }
             set_selection(0);
             open_properties();
             auto changed = satellites_[0].orbit->input;
-            changed.hpop.gravity_model = "apply-audit";
+            changed.hpop.gravity_model = smoke_gravity_id_;
             changed.hpop.gravity_mu = installed.info.mu;
             changed.hpop.gravity_degree = std::min(21, installed.info.degree);
             changed.hpop.gravity_order =
@@ -8214,17 +8327,24 @@ class Workbench final : public WorkbenchWindow {
             break;
         }
         case 160: {
-            require(last_orbit_outcome_ == "applied" && gravity_.contains("apply-audit"),
+            require(last_orbit_outcome_ == "applied" && gravity_.contains(smoke_gravity_id_),
                     "Explicit HPOP gravity selection prompted for data consent or failed");
             require(workspace_->contains(properties_dialog_) && !editor_->has_unapplied_changes(),
                     "HPOP Apply closed the property page or failed to accept its input");
             require(satellites_[1].orbit->session.provenance().input_revision == 1,
                     "Selecting one satellite's model recomputed the other satellite");
             record("hpop-explicit-model-applies-without-data-conflict");
-            interaction_report_.append(QJsonObject{{"kind", "hpop-cold-apply-timing"},
-                                                   {"elapsed_ms", smoke_apply_elapsed_.elapsed()},
-                                                   {"passed", true}});
-            smoke_gravity_ = gravity_.at("apply-audit");
+            interaction_report_.append(QJsonObject{
+                {"kind", smoke_gravity_id_ == "egm2008" ? "hpop-preloaded-first-apply-timing"
+                                                        : "hpop-cold-apply-timing"},
+                {"elapsed_ms", smoke_apply_elapsed_.elapsed()},
+                {"passed", true}});
+            smoke_gravity_ = gravity_.at(smoke_gravity_id_);
+            if (smoke_gravity_id_ == "egm2008") {
+                require(smoke_gravity_ == smoke_startup_gravity_.lock(),
+                        "First HPOP application did not reuse startup gravity across scenes");
+                record("hpop-first-apply-shares-startup-resource-after-scene-changes");
+            }
             set_selection(0);
             open_properties();
             editor_->set_state_mode(0);
@@ -8238,7 +8358,7 @@ class Workbench final : public WorkbenchWindow {
         }
         case 161: {
             require(last_orbit_outcome_ == "applied" &&
-                        gravity_.at("apply-audit") == smoke_gravity_,
+                        gravity_.at(smoke_gravity_id_) == smoke_gravity_,
                     "Editing HPOP reloaded an unchanged gravity resource");
             require(satellites_[0].orbit->session.provenance().input_revision == 3 &&
                         satellites_[1].orbit->session.provenance().input_revision == 1,
@@ -9147,6 +9267,14 @@ class Workbench final : public WorkbenchWindow {
     std::optional<core::TimeDataInfo> standalone_time_data_;
     std::optional<application::AnalysisRecord> analysis_record_;
     std::optional<core::Epoch> precise_epoch_;
+    struct ProjectProgress {
+        enum class Phase { gravity, ocean, weather, ephemeris, orbits };
+        std::atomic<Phase> phase{Phase::gravity};
+        std::atomic<std::size_t> index{0};
+        std::size_t count = 0;
+    };
+    std::shared_ptr<ProjectProgress> project_progress_;
+    StartupResources startup_resources_;
     std::shared_ptr<std::atomic_bool> project_cancellation_;
     std::future<std::shared_ptr<PreparedProject>> project_candidate_;
     QAction *open_action_ = nullptr, *save_action_ = nullptr, *save_as_action_ = nullptr;
@@ -9206,6 +9334,8 @@ class Workbench final : public WorkbenchWindow {
     int smoke_bootstrap_ = 0;
     static constexpr int orbit_smoke_complete = 192;
     std::shared_ptr<const core::GravityModel> smoke_gravity_;
+    std::weak_ptr<const core::GravityModel> smoke_startup_gravity_;
+    std::string smoke_gravity_id_ = "apply-audit";
     QElapsedTimer smoke_apply_elapsed_;
     double smoke_navigation_distance_ = 0;
     int smoke_final_frames_ = 0;
@@ -9393,6 +9523,12 @@ int run_graphics_workbench(QApplication &app) {
         }
         Workbench window(app, log, smoke_dir, validation, benchmark_manifest, timing_dir,
                          timing_probe, output_only_probe);
+        if (!window.initialize_data(splash.get())) {
+            if (splash)
+                splash->hide();
+            window.shutdown();
+            return window.report(0);
+        }
         window.show();
         if (splash) {
             splash->finish(&window);
@@ -9401,7 +9537,8 @@ int run_graphics_workbench(QApplication &app) {
                     "Startup splash did not close after opening the workbench");
             splash.reset();
         }
-        const int code = window.initialize_data() ? app.exec() : 0;
+        window.start_rendering();
+        const int code = app.exec();
         window.shutdown();
         return window.report(code);
     } catch (const std::exception &error) {

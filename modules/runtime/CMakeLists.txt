@@ -3,6 +3,10 @@ orbitforge_module(orbitforge_runtime Runtime src/demo.cpp src/time_frames.cpp sr
     src/tabulated_orbit.cpp src/project_facade.cpp src/hpop.cpp src/mission.cpp src/gravity.cpp src/space_weather.cpp src/ocean_tides.cpp src/orbit_session_cache.cpp)
 target_link_libraries(orbitforge_runtime PUBLIC OrbitForge::Application)
 target_link_libraries(orbitforge_runtime PRIVATE OrbitForge::Sgp4)
+if(WIN32)
+    # System SHA-256 for streaming large gravity files; no bundled runtime DLL.
+    target_link_libraries(orbitforge_runtime PRIVATE bcrypt)
+endif()
 target_include_directories(orbitforge_runtime SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/modules/application/third_party")
 if(ORBITFORGE_WITH_DATA_CATALOG)
     find_package(unofficial-sqlite3 CONFIG REQUIRED)
