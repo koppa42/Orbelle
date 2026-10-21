@@ -237,9 +237,13 @@ void QuantityEditor::render() {
     unit_button_->setText(unit_symbol(unit_));
     for (auto *action : menu_->actions())
         action->setChecked(action->data().toInt() == static_cast<int>(unit_));
+    const bool was_invalid = property("invalid").toBool();
     setProperty("invalid", false);
     input_->setToolTip({});
-    refresh_style();
+    // Numeric changes do not change the stylesheet. Re-polishing on every slider
+    // tick sends layout/style events through the entire editor hierarchy.
+    if (was_invalid)
+        refresh_style();
 }
 void QuantityEditor::set_read_only(bool value) { input_->setReadOnly(value); }
 void QuantityEditor::validate_text() {

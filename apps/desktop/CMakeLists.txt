@@ -43,6 +43,8 @@ if(ORBITFORGE_WITH_VSG)
         src/viewer/orbit_scene.cpp src/viewer/orbit_editor.cpp src/viewer/hpop_settings.cpp src/viewer/hpop_covariance_editor.cpp src/viewer/mission_editor.cpp src/viewer/track_style_editor.cpp src/viewer/workbench_style.cpp
         src/viewer/satellite_model.cpp src/viewer/mission_timeline.cpp src/viewer/scenario_dialog.cpp
         src/viewer/insert_object_dialog.cpp src/viewer/insert_object_dialog.hpp
+        src/viewer/satellite_creation.cpp src/viewer/satellite_creation.hpp
+        src/viewer/orbit_design_preview.cpp src/viewer/orbit_design_preview.hpp
         src/viewer/ground_station_editor.cpp src/viewer/ground_station_editor.hpp
         src/viewer/sensor_editor.cpp src/viewer/sensor_editor.hpp
         src/viewer/object_selection.cpp src/viewer/object_selection.hpp
@@ -146,6 +148,9 @@ if(ORBITFORGE_WITH_VSG)
         gtest_discover_tests(orbitforge_orbit_scene_tests DISCOVERY_MODE PRE_TEST
             DISCOVERY_TIMEOUT 30 TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbitforge_desktop_tests TIMEOUT 60)
         add_executable(orbitforge_quantity_tests tests/quantity_editor_test.cpp
+            tests/insert_object_dialog_test.cpp src/viewer/insert_object_dialog.cpp
+            src/viewer/satellite_creation.cpp
+            src/viewer/orbit_design_preview.cpp src/viewer/ground_map.cpp src/viewer/workbench_profile.cpp
             src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
             src/viewer/ground_station_editor.cpp src/viewer/sensor_editor.cpp
             src/viewer/object_selection.cpp src/viewer/object_selection.hpp
@@ -157,7 +162,7 @@ if(ORBITFORGE_WITH_VSG)
         target_compile_definitions(orbitforge_quantity_tests PRIVATE
             ORBITFORGE_TEST_EOP="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json")
         target_link_libraries(orbitforge_quantity_tests PRIVATE
-            OrbitForge::Runtime OrbitForge::Visualization Qt6::Widgets Qt6::Network GTest::gtest_main)
+            OrbitForge::Runtime OrbitForge::Visualization Qt6::Widgets Qt6::Network rocky::rocky GTest::gtest_main)
         orbitforge_warnings(orbitforge_quantity_tests)
         orbitforge_copy_runtime_dlls(orbitforge_quantity_tests)
         gtest_discover_tests(orbitforge_quantity_tests DISCOVERY_MODE PRE_TEST

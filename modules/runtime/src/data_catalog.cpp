@@ -60,6 +60,7 @@ void DataCatalog::set_extrapolation_days(EopProduct product, int days) {
 
 #ifdef ORBITFORGE_HAS_DATA_CATALOG
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -138,7 +139,13 @@ struct Stage {
     explicit Stage(const std::filesystem::path &root) {
         std::filesystem::create_directories(root);
         for (unsigned i = 0; i < 10000; ++i) {
-            auto candidate = root / ("stage-" + std::to_string(i));
+            // Do not recycle low numbered names while other imports remove or publish them.
+            // On Windows, create_directory checks an existing path in a second system call;
+            // another owner can remove it between those calls. Each attempt gets 128 random
+            // bits, and atomic creation still decides ownership if a name ever collides.
+            std::array<unsigned char, 16> nonce{};
+            sqlite3_randomness(static_cast<int>(nonce.size()), nonce.data());
+            auto candidate = root / ("stage-" + picosha2::bytes_to_hex_string(nonce));
             if (std::filesystem::create_directory(candidate)) {
                 path = std::move(candidate);
                 return;
@@ -488,8 +495,10 @@ CatalogEphemeris DataCatalog::install_ephemeris_snapshot_checked(
             load_spice_snapshot(target / "manifest.json", impl_->root / "runtime");
         check(existing->data_info().manifest_sha256 == info.content_sha256,
               "Installed ephemeris is damaged");
-    } else
+    } else {
         publish(stage.path, target);
+        stage.path.clear();
+    }
     set_setting("ephemeris/de440s", record.dump());
     transaction.commit();
     return {"de440s", info, target / "manifest.json", acquisition, acquired};

@@ -65,3 +65,15 @@ out/build/desktop-graphics/apps/desktop/Release/orbitforge_report_plot_profile.e
 正式性能结论要求两视图呈现反馈、输入关联、GPU 时间戳及资源区间均完整有效。记录尾部排空和缺失原因；CPU 完成时间不能代替不可用的输出时间。计时工具接入或短探针成功不等于正式测量通过。
 
 CPU、GPU、内存、驱动和操作系统信息由每次运行单独记录，不写入固定工作负载。产品最低硬件配置及 Linux 桌面性能尚未验收，Linux 无界面交付检查不能代替图形验收。
+
+## 对象插入与轨道向导
+
+Qt 控件测试 `InsertionTest.*` 检查每类对象的默认方式持久化、写入失败、连续插入防重、关闭和 Esc、传感器父对象删除、窄窗口操作可达、单颗 TLE 校验及轨道向导单位、几何与无效参数。向导圆轨道速度使用独立的二体圆轨道公式核对。
+
+参数滑条需验证双向联动、m / km 和 rad / ° 切换、精确输入不被舍入、高轨输入自动扩展范围、隐藏草稿保留、键盘调节，以及未聚焦时滚轮不改变数值。长表单纵向滚动，主要操作始终可达，不得出现因摘要或滑条撑宽导致的横向滚动。
+
+预览性能可显式运行 `orbitforge_quantity_tests --gtest_also_run_disabled_tests --gtest_filter=*WizardPreviewInteractionProfile`。固定 2026-10-01 UTC、内置 EOP、相同 Qt 平台与窗口，分别在 1 / 3 圈下调整 RAAN 和高度；记录 12 次独立修改到地图轨迹准备完成的中位/最大耗时，再分别按 16 / 8 / 4 ms 间隔连续输入 1.6 s，统计实际交付的输入数、可绘制新轨迹次数、Qt Paint 事件中的轨迹变化次数、拖动期间最大绘制间隔及停止后的细化耗时。可设置 `ORBITFORGE_PREVIEW_PROFILE` 为新的输出目录，保存输入处理、交互投影和地图绘制的 CPU 分项统计。这是 Qt CPU / 轨迹缓存就绪测量，不是显示器呈现延迟，不作为 CI 时序门槛。普通回归以可阻塞的 Provider 检查高频编辑不会取消网格准备、完整作业阻塞时最新参数仍能更新、Provider 不在 GUI 线程执行、数据覆盖边界与旧结果丢弃，以及停止后 361 / 1081 个点和独立逐点计算的吻合。真实图形 smoke 同样覆盖三档输入间隔，并在 `orbit-preview-profile/profile.json` 中记录实际 DPI 和分项时间；该计数也不能解释为显示器刷新率。
+
+真实图形 smoke 还验证默认连续插入卫星、地面站与传感器、明确父对象绑定、快捷入口遵循偏好，以及向导和 TLE 文件导入取消与确认进入属性草稿的边界。保存 `insert-objects.png`、`insert-sensor.png`、`insert-sensor-narrow.png`、九类设计的 `orbit-wizard-0.png` 至 `orbit-wizard-8.png`、`orbit-wizard-narrow.png`，按至少两个 DPI 检查参数、地图和结果区。截图必须等待对应后台地图预览完成，不能以空地图代替通过。Qt 测试另检查快速参数修改、真实 EOP 定向的初始标记、无效输入清图、1 / 3 圈切换和取消；数值约束与传播闭合见[轨道设计](../architecture/orbit_design.md)。
+
+轨迹细化另由 `GroundMapTest.Refinement*` 检查首帧保留、异步图层完成前无空白帧、重合线段中途亮度不变、精细结果最终像素一致，以及新输入/清空中断过渡。可在 1.5 与 3 倍 DPI 重跑；真实图形 smoke 保存 `orbit-wizard-refinement-before.png`、`orbit-wizard-refinement-during.png` 与 `orbit-wizard-refinement-after.png`，记录是否捕获中间帧与图层混合 CPU 时间。完整数据就绪与图层绘制完成分开判断，滚出可见区的地图不能阻塞有效设计。

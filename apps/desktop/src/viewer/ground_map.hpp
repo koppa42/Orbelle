@@ -39,12 +39,17 @@ class GroundMap final : public QWidget {
     };
     using PreparedTracks = std::vector<Track>;
     explicit GroundMap(const QString &imagery, QWidget *parent = nullptr);
+    explicit GroundMap(QImage imagery, QWidget *parent = nullptr);
+    [[nodiscard]] const QImage &imagery() const { return imagery_; }
     ~GroundMap() override;
     std::function<void(std::optional<std::size_t>)> select;
     void set_orbits(const std::vector<std::shared_ptr<const OrbitScene>> &orbits);
     static PreparedTracks
     prepare_tracks(const std::vector<std::shared_ptr<const OrbitScene>> &orbits);
     void publish_tracks(PreparedTracks tracks);
+    // Same trajectory at higher display detail: retain its visible raster until the
+    // replacement is ready, then blend briefly. Ordinary publication cancels this.
+    void refine_tracks(PreparedTracks tracks);
     void append_track(Track track);
     void replace_track(std::size_t index, Track track);
     void set_name(std::size_t index, const QString &name);
@@ -67,10 +72,16 @@ class GroundMap final : public QWidget {
     void zoom_centered(double factor);
     [[nodiscard]] core::Epoch epoch() const { return epoch_; }
     [[nodiscard]] std::size_t track_count() const { return tracks_.size(); }
+    [[nodiscard]] std::span<const QPointF> track_coordinates(std::size_t index) const {
+        return tracks_.at(index).points;
+    }
     [[nodiscard]] QPointF marker_position(std::size_t index) const;
     [[nodiscard]] QPointF marker_coordinates(std::size_t index) const;
     [[nodiscard]] double zoom_factor() const { return zoom_; }
     [[nodiscard]] bool tracks_ready() const;
+    [[nodiscard]] bool tracks_transitioning() const {
+        return refinement_pending_ || refinement_animation_.state() == QAbstractAnimation::Running;
+    }
 
   protected:
     void paintEvent(QPaintEvent *) override;
@@ -146,6 +157,8 @@ class GroundMap final : public QWidget {
                             const std::atomic_bool &cancelled);
     void poll_raster();
     void install_raster(Raster result);
+    void cancel_refinement();
+    const Raster *refinement_display();
     std::future<Raster> pending_raster_;
     std::shared_ptr<std::atomic_bool> cancel_raster_;
     QTimer raster_timer_;
@@ -154,6 +167,9 @@ class GroundMap final : public QWidget {
     QImage imagery_;
     QImage night_;
     Raster background_, imagery_raster_, trails_, preview_, pending_view_;
+    Raster previous_detail_, blended_detail_;
+    QVariantAnimation refinement_animation_;
+    bool refinement_pending_ = false;
     bool background_dirty_ = true, trails_dirty_ = true, night_dirty_ = true;
     std::array<double, 3> sun_direction_{1, 0, 0};
     std::optional<QPointF> cursor_position_;

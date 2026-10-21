@@ -5,6 +5,53 @@ from pathlib import Path
 __version__: str
 MAX_ANALYSIS_SAMPLES: int
 
+class EarthOrbitType:
+    CIRCULAR: EarthOrbitType
+    CRITICALLY_INCLINED: EarthOrbitType
+    CRITICALLY_INCLINED_SUN_SYNC: EarthOrbitType
+    GEOSYNCHRONOUS: EarthOrbitType
+    MOLNIYA: EarthOrbitType
+    ORBIT_DESIGNER: EarthOrbitType
+    REPEATING_GROUND_TRACE: EarthOrbitType
+    REPEATING_SUN_SYNC: EarthOrbitType
+    SUN_SYNCHRONOUS: EarthOrbitType
+
+class EarthOrbitDesignRequest:
+    """Earth preliminary design; metres, radians, explicit TAI epoch. Inactive fields ignored."""
+    def __init__(self) -> None: ...
+    type: EarthOrbitType
+    epoch: Epoch
+    altitude_m: float
+    perigee_altitude_m: float
+    apogee_altitude_m: float
+    semi_major_axis_m: float
+    eccentricity: float
+    inclination_rad: float
+    raan_rad: float
+    argument_of_periapsis_rad: float
+    true_anomaly_rad: float
+    retrograde: bool
+    sun_sync_by_inclination: bool
+    repeat_revolutions: int
+    repeat_days: int
+
+class EarthOrbitDesign:
+    """Auxiliary mean ellipse if secular_j2, otherwise osculating two-body elements."""
+    @property
+    def elements(self) -> KeplerianElements: ...
+    @property
+    def secular_j2(self) -> bool: ...
+    @property
+    def nodal_period_seconds(self) -> float: ...
+    @property
+    def repeat_cycle_seconds(self) -> float: ...
+    @property
+    def raan_rate_rad_s(self) -> float: ...
+    @property
+    def periapsis_rate_rad_s(self) -> float: ...
+
+def design_earth_orbit(request: EarthOrbitDesignRequest) -> EarthOrbitDesign: ...
+
 class Epoch:
     def __init__(self, tai_nanoseconds_since_2000_noon: int) -> None: ...
     @property

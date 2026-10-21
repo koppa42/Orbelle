@@ -8,6 +8,7 @@
 #include "initial_data_setup.hpp"
 #include "insert_object_dialog.hpp"
 #include "mission_timeline.hpp"
+#include "orbit_design_preview.hpp"
 #include "orbit_editor.hpp"
 #include "orbit_scene.hpp"
 #include "project_scene.hpp"
@@ -17,6 +18,7 @@
 #include "report_plot.hpp"
 #include "report_selection.hpp"
 #include "responsive_layout.hpp"
+#include "satellite_creation.hpp"
 #include "satellite_model.hpp"
 #include "scenario_dialog.hpp"
 #include "sensor_editor.hpp"
@@ -79,9 +81,9 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPlainTextEdit>
 #include <QPlatformSurfaceEvent>
 #include <QPushButton>
-#include <QRadioButton>
 #include <QResizeEvent>
 #include <QScopedValueRollback>
 #include <QScreen>
@@ -98,6 +100,7 @@
 #include <QTabWidget>
 #include <QTableView>
 #include <QTableWidget>
+#include <QThread>
 #include <QTimeZone>
 #include <QTimer>
 #include <QToolBar>
@@ -531,7 +534,47 @@ class Workbench final : public WorkbenchWindow {
                 connect(insert_action_, &QAction::triggered, this,
                         [this] { show_insert_objects(); });
                 insert_menu_->addAction(insert_action_);
+                insert_menu_->addSeparator();
+                for (const auto type :
+                     {InsertObjectType::satellite, InsertObjectType::ground_station,
+                      InsertObjectType::sensor}) {
+                    const bool satellite = type == InsertObjectType::satellite;
+                    auto *action = insert_menu_->addAction(
+                        workbench_icon(satellite ? WorkbenchIcon::satellite
+                                       : type == InsertObjectType::sensor
+                                           ? WorkbenchIcon::focus
+                                           : WorkbenchIcon::ground_station),
+                        ui::text(satellite ? "insert_object_dialog.quick_satellite"
+                                 : type == InsertObjectType::sensor
+                                     ? "insert_object_dialog.quick_sensor"
+                                     : "insert_object_dialog.quick_station"));
+                    action->setObjectName(satellite ? "insertSatellitePreferred"
+                                          : type == InsertObjectType::sensor
+                                              ? "insertSensorPreferred"
+                                              : "insertStationPreferred");
+                    action->setToolTip(ui::text("insert_object_dialog.quick_hint"));
+                    quick_insert_actions_[static_cast<std::size_t>(type)] = action;
+                    connect(action, &QAction::triggered, this, [this, type] {
+                        if (scenario_ && !busy()) {
+                            const auto parent = selected_
+                                                    ? satellites_[*selected_].orbit->input.object_id
+                                                    : std::string{};
+                            if (type == InsertObjectType::sensor && parent.empty()) {
+                                show_insert_objects();
+                                insertion_dialog()->select_type(type);
+                            } else
+                                insert_object(
+                                    {type, insertion_dialog()->default_method(type), parent});
+                        }
+                    });
+                }
                 commands_->insertAction(report_action_, insert_action_);
+                if (auto *button =
+                        qobject_cast<QToolButton *>(commands_->widgetForAction(insert_action_))) {
+                    button->setObjectName("insertObjectButton");
+                    button->setMenu(insert_menu_);
+                    button->setPopupMode(QToolButton::MenuButtonPopup);
+                }
             }
             if (benchmarking_) {
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
@@ -1601,6 +1644,15 @@ class Workbench final : public WorkbenchWindow {
             example_action_->setEnabled(idle && runtime::two_body_available());
         if (insert_action_)
             insert_action_->setEnabled(active && idle && editor_);
+        for (auto *action : quick_insert_actions_)
+            if (action)
+                action->setEnabled(active && idle && editor_);
+        if (insert_dialog_) {
+            insert_dialog_->set_busy(!active || !idle);
+            if (active && idle && insert_dialog_->isVisible())
+                insert_dialog_->set_parents(project_object_choices(project_snapshot(project_path_),
+                                                                   {ObjectKind::satellite}));
+        }
         if (insert_menu_)
             insert_menu_->setEnabled(active);
         if (time_toolbar_) {
@@ -1669,11 +1721,21 @@ class Workbench final : public WorkbenchWindow {
         const auto found = std::ranges::find(sensors_, id, &application::ProjectSensor::object_id);
         return found == sensors_.end() ? nullptr : &*found;
     }
-    void edit_sensor(bool creating) {
-        if (busy() || !selected_)
+    void edit_sensor(bool creating, bool defaults = false, const std::string &parent_id = {}) {
+        auto parent_index = selected_;
+        if (!parent_id.empty()) {
+            const auto found = std::ranges::find_if(satellites_, [&](const auto &satellite) {
+                return satellite.orbit->input.object_id == parent_id;
+            });
+            if (found == satellites_.end())
+                return;
+            parent_index = static_cast<std::size_t>(found - satellites_.begin());
+        }
+        if (busy() || !parent_index)
             return;
-        if (creating && sensor_editor_bound_ && sensor_editor_creating_ &&
-            sensor_editor_->bound_parent_id() == satellites_[*selected_].orbit->input.object_id) {
+        if (creating && !defaults && sensor_editor_bound_ && sensor_editor_creating_ &&
+            sensor_editor_->bound_parent_id() ==
+                satellites_[*parent_index].orbit->input.object_id) {
             workspace_->open(sensor_editor_, false);
             return;
         }
@@ -1705,7 +1767,7 @@ class Workbench final : public WorkbenchWindow {
         if (creating) {
             sensor.object_id = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
             sensor.display_name = "Sensor " + std::to_string(sensors_.size() + 1);
-            sensor.parent_satellite_id = satellites_[*selected_].orbit->input.object_id;
+            sensor.parent_satellite_id = satellites_[*parent_index].orbit->input.object_id;
         } else {
             if (!selected_sensor())
                 return;
@@ -1722,7 +1784,11 @@ class Workbench final : public WorkbenchWindow {
         sensor_editor_->set_sensor(std::move(sensor), project_snapshot(project_path_), creating);
         sensor_editor_bound_ = true;
         sensor_editor_creating_ = creating;
-        workspace_->open(sensor_editor_, false);
+        if (defaults) {
+            sensor_editor_->close();
+            sensor_editor_->apply(sensor_editor_->sensor());
+        } else
+            workspace_->open(sensor_editor_, false);
     }
     void clear_access_display() {
         access_session_.reset();
@@ -2427,6 +2493,8 @@ class Workbench final : public WorkbenchWindow {
         }
         if (display_cancellation_)
             display_cancellation_->store(true);
+        if (!editing && insert_dialog_)
+            insert_dialog_->hide();
         project_edit_ = editing;
         project_settings_edit_ = settings.has_value();
         project_orbit_edit_ =
@@ -2808,6 +2876,7 @@ class Workbench final : public WorkbenchWindow {
             else
                 done({}, ui::text("graphics_workbench.label_59"));
         }
+        finish_insertion(last_project_outcome_ == "opened", last_project_outcome_ == "cancelled");
         update_actions();
     }
     void rename_selected_to(const QString &name) {
@@ -3008,6 +3077,8 @@ class Workbench final : public WorkbenchWindow {
         }
         if (properties_dialog_)
             properties_dialog_->close();
+        if (insert_dialog_)
+            insert_dialog_->hide();
         satellites_.clear();
         stations_.clear();
         sensors_.clear();
@@ -3084,22 +3155,111 @@ class Workbench final : public WorkbenchWindow {
         properties_dialog_->close();
     }
     void show_properties_dialog() { workspace_->open(properties_dialog_, false); }
+    InsertObjectDialog *insertion_dialog() {
+        if (!insert_dialog_) {
+            insert_dialog_ = new InsertObjectDialog(
+                QString::fromStdWString(
+                    (eop_catalog_->store() / "desktop-preferences.ini").wstring()),
+                this);
+            insert_dialog_->insert = [this](InsertObjectRequest request) {
+                insert_object(request);
+            };
+        }
+        return insert_dialog_;
+    }
     void show_insert_objects() {
         if (!scenario_ || !editor_ || busy())
             return;
-        const auto request = insert_object_dialog(this, QString::fromStdString(scenario_->name()));
-        if (!request)
+        auto *dialog = insertion_dialog();
+        dialog->set_scenario(QString::fromStdString(scenario_->name()));
+        dialog->set_parents(
+            project_object_choices(project_snapshot(project_path_), {ObjectKind::satellite}),
+            selected_ ? satellites_[*selected_].orbit->input.object_id : std::string{});
+        const auto selected = dialog->selection();
+        dialog->select_type(selected ? selected->type : InsertObjectType::satellite);
+        dialog->set_busy(false);
+        dialog->show();
+        dialog->raise();
+        dialog->activateWindow();
+    }
+    void insert_object(InsertObjectRequest request) {
+        if (!scenario_ || !editor_ || busy())
             return;
-        switch (request->type) {
-        case InsertObjectType::satellite:
-            begin_insert_satellite(request->method);
-            break;
-        case InsertObjectType::ground_station:
-            begin_insert_station(request->method);
-            break;
+        if (request.type == InsertObjectType::sensor &&
+            std::none_of(satellites_.begin(), satellites_.end(), [&](const auto &satellite) {
+                return satellite.orbit->input.object_id == request.parent_id;
+            })) {
+            show_insert_objects();
+            insertion_dialog()->select_type(InsertObjectType::sensor);
+            insertion_dialog()->show_result(ui::text("insert_object_dialog.parent_missing"));
+            return;
+        }
+        if (request.method != InsertObjectMethod::defaults)
+            insertion_dialog()->hide();
+        std::optional<OrbitInput> seed;
+        if (request.type == InsertObjectType::satellite) {
+            if (request.method == InsertObjectMethod::orbit_wizard) {
+                OrbitWizardDialog wizard(scenario_->first(), this);
+                wizard.set_preview_context(ground_map_->imagery(), frames_, eop_);
+                if (wizard.exec() != QDialog::Accepted)
+                    return;
+                seed = wizard.input();
+            } else if (request.method == InsertObjectMethod::tle_file) {
+                const auto path = QFileDialog::getOpenFileName(this, ui::text("orbit_editor.path"),
+                                                               {}, ui::text("orbit_editor.path_2"));
+                if (path.isEmpty())
+                    return;
+                try {
+                    seed = OrbitInput{};
+                    seed->propagator = OrbitPropagator::sgp4;
+                    seed->tle = read_single_tle_file(path);
+                    const auto elements = core::parse_tle(seed->tle);
+                    (void)eop_catalog_->time_provider()->from_utc(elements.epoch_utc);
+                } catch (const std::exception &error) {
+                    show_insert_objects();
+                    insertion_dialog()->show_result(QString::fromUtf8(error.what()));
+                    return;
+                }
+            }
+        }
+        try {
+            switch (request.type) {
+            case InsertObjectType::satellite:
+                begin_insert_satellite(request.method, seed);
+                break;
+            case InsertObjectType::ground_station:
+                begin_insert_station(request.method);
+                break;
+            case InsertObjectType::sensor:
+                if (request.parent_id.empty())
+                    return;
+                edit_sensor(true, request.method == InsertObjectMethod::defaults,
+                            request.parent_id);
+                break;
+            }
+        } catch (const std::exception &error) {
+            show_insert_objects();
+            insertion_dialog()->show_result(QString::fromUtf8(error.what()));
+            return;
+        }
+        if (request.method == InsertObjectMethod::defaults) {
+            insertion_pending_ = busy();
+            insertion_dialog()->show_result(ui::text(insertion_pending_
+                                                         ? "insert_object_dialog.pending"
+                                                         : "insert_object_dialog.not_inserted"));
+            update_actions();
         }
     }
-    void begin_insert_satellite(InsertObjectMethod method = InsertObjectMethod::define_properties) {
+    void finish_insertion(bool success, bool cancelled) {
+        if (!insertion_pending_)
+            return;
+        insertion_pending_ = false;
+        insertion_dialog()->show_result(ui::text(success     ? "insert_object_dialog.completed"
+                                                 : cancelled ? "insert_object_dialog.cancelled"
+                                                             : "insert_object_dialog.failed"));
+    }
+    void begin_insert_satellite(InsertObjectMethod method = InsertObjectMethod::define_properties,
+                                const std::optional<OrbitInput> &seed = {}) {
         if (!scenario_ || !editor_ || busy())
             return;
         if (method == InsertObjectMethod::define_properties && orbit_editor_bound_ &&
@@ -3115,7 +3275,7 @@ class Workbench final : public WorkbenchWindow {
                                      ui::text("graphics_workbench.label_66"));
             return;
         }
-        OrbitInput input;
+        OrbitInput input = seed.value_or(OrbitInput{});
         std::size_t suffix = satellites_.size() + 1;
         do {
             input.object_id = "Satellite" + std::to_string(suffix++);
@@ -3126,6 +3286,8 @@ class Workbench final : public WorkbenchWindow {
         editor_target_.reset();
         editor_->set_time_provider(eop_catalog_->time_provider());
         editor_->set_input(input);
+        if (method == InsertObjectMethod::orbit_wizard)
+            editor_->set_state_mode(1);
         orbit_editor_bound_ = true;
         editor_->set_create_mode(true);
         editor_->set_appearance(0, {}, 1000);
@@ -3953,6 +4115,7 @@ class Workbench final : public WorkbenchWindow {
             show_properties_dialog();
         insert_defaults_pending_ = false;
         pending_orbit_sessions_.reset();
+        finish_insertion(last_orbit_outcome_ == "applied", last_orbit_outcome_ == "cancelled");
         update_actions();
     }
     void request_display_cache() {
@@ -5102,49 +5265,31 @@ class Workbench final : public WorkbenchWindow {
     void smoke_insert_dialog(std::optional<InsertObjectMethod> method,
                              const QString &screenshot = {}, bool escape = false) {
         timer_.stop();
-        QString error;
-        bool handled = false;
-        QTimer click_timer;
-        click_timer.setSingleShot(true);
-        connect(&click_timer, &QTimer::timeout, this, [&] {
-            handled = true;
-            auto *dialog = findChild<QDialog *>("insertObjectsDialog");
-            if (!dialog) {
-                error = "Insert objects command did not open the chooser";
-                return;
-            }
-            auto *types = dialog->findChild<QTreeWidget *>("insertObjectTypes");
-            auto *properties = dialog->findChild<QRadioButton *>("insertDefineProperties");
-            auto *defaults = dialog->findChild<QRadioButton *>("insertDefaults");
-            auto *insert = dialog->findChild<QPushButton *>("insertObject");
-            if (!types || !types->currentItem() || !properties || !defaults || !insert ||
-                !properties->isChecked() ||
-                types->currentItem()->data(0, Qt::UserRole).toInt() !=
-                    static_cast<int>(InsertObjectType::satellite)) {
-                error = "Insert objects chooser has no valid initial selection";
-                dialog->reject();
-                return;
-            }
-            if (method == InsertObjectMethod::defaults)
-                defaults->click();
-            if (!screenshot.isEmpty() && !dialog->grab().save(smoke_dir_ + "/" + screenshot))
-                error = "Cannot save insert objects chooser";
-            if (method) {
-                insert->click();
-            } else if (escape) {
-                QKeyEvent key(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
-                QCoreApplication::sendEvent(dialog, &key);
-            } else {
-                dialog->findChild<QPushButton *>("closeInsertObjects")->click();
-            }
-        });
-        click_timer.start(0);
         insert_action_->trigger();
+        auto *dialog = insertion_dialog();
+        dialog->select_type(InsertObjectType::satellite);
+        auto *methods = dialog->findChild<QTreeWidget *>("insertObjectMethods");
+        auto *insert = dialog->findChild<QPushButton *>("insertObject");
+        if (!dialog->isVisible() || !methods || !insert)
+            throw std::runtime_error("Insert objects command did not open the chooser");
+        dialog->findChild<QCheckBox *>("keepInsertObjectsOpen")->setChecked(false);
+        for (int i = 0; i < methods->topLevelItemCount(); ++i)
+            if (methods->topLevelItem(i)->data(0, Qt::UserRole).toInt() ==
+                static_cast<int>(method.value_or(InsertObjectMethod::define_properties)))
+                methods->setCurrentItem(methods->topLevelItem(i));
+        for (int pass = 0; pass < 6; ++pass)
+            QApplication::processEvents();
+        if (!screenshot.isEmpty() && !dialog->grab().save(smoke_dir_ + "/" + screenshot))
+            throw std::runtime_error("Cannot save insert objects chooser");
+        if (method) {
+            insert->click();
+        } else if (escape) {
+            QKeyEvent key(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+            QCoreApplication::sendEvent(dialog, &key);
+        } else {
+            dialog->findChild<QPushButton *>("closeInsertObjects")->click();
+        }
         timer_.start();
-        if (!handled)
-            throw std::runtime_error("Insert objects command did not enter the chooser");
-        if (!error.isEmpty())
-            throw std::runtime_error(error.toStdString());
     }
     void scenario_smoke_step() {
         const auto require = [](bool condition, const char *message) {
@@ -7328,16 +7473,12 @@ class Workbench final : public WorkbenchWindow {
             break;
         case 103: {
             timer_.stop();
-            QTimer::singleShot(0, this, [this, require] {
-                auto *dialog = findChild<QDialog *>("insertObjectsDialog");
-                require(dialog, "Missing insertion chooser for ground station");
-                auto *types = dialog->findChild<QTreeWidget *>("insertObjectTypes");
-                types->setCurrentItem(types->topLevelItem(0)->child(1));
-                require(dialog->grab().save(smoke_dir_ + "/insert-ground-station.png"),
-                        "Cannot capture station chooser");
-                dialog->findChild<QPushButton *>("insertObject")->click();
-            });
             show_insert_objects();
+            insert_dialog_->select_type(InsertObjectType::ground_station);
+            QApplication::processEvents();
+            require(insert_dialog_->grab().save(smoke_dir_ + "/insert-ground-station.png"),
+                    "Cannot capture station chooser");
+            insert_dialog_->findChild<QPushButton *>("insertObject")->click();
             timer_.start();
             require(station_editor_ && workspace_->current_document() == station_editor_ &&
                         stations_.empty(),
@@ -9142,6 +9283,257 @@ class Workbench final : public WorkbenchWindow {
             if (++smoke_final_frames_ >= 4)
                 ++orbit_smoke_stage_;
             break;
+        case 198: {
+            smoke_insert_counts_ = {satellites_.size(), stations_.size(), sensors_.size()};
+            show_insert_objects();
+            insert_dialog_->select_type(InsertObjectType::satellite);
+            auto *methods = insert_dialog_->findChild<QTreeWidget *>("insertObjectMethods");
+            methods->setCurrentItem(methods->topLevelItem(1));
+            insert_dialog_->findChild<QCheckBox *>("keepInsertObjectsOpen")->setChecked(true);
+            insert_dialog_->findChild<QPushButton *>("saveDefaultInsertMethod")->click();
+            auto *button = insert_dialog_->findChild<QPushButton *>("insertObject");
+            button->click();
+            require(busy() && !button->isEnabled(), "Insertion was not blocked while busy");
+            button->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 199: {
+            require(satellites_.size() == smoke_insert_counts_[0] + 1 &&
+                        insert_dialog_->isVisible() &&
+                        insert_dialog_->findChild<QLabel *>("insertObjectResult")->text() ==
+                            "对象已插入。",
+                    "Continuous insertion duplicated a satellite or retained pending status");
+            record("continuous-insert-publishes-once-and-clears-pending-status");
+            insert_dialog_->select_type(InsertObjectType::ground_station);
+            auto *methods = insert_dialog_->findChild<QTreeWidget *>("insertObjectMethods");
+            methods->setCurrentItem(methods->topLevelItem(1));
+            insert_dialog_->findChild<QPushButton *>("insertObject")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 200: {
+            require(stations_.size() == smoke_insert_counts_[1] + 1,
+                    "Default ground station was not inserted");
+            insert_dialog_->select_type(InsertObjectType::sensor);
+            insert_dialog_->set_parents(
+                project_object_choices(project_snapshot(project_path_), {ObjectKind::satellite}),
+                satellites_.back().orbit->input.object_id);
+            auto *methods = insert_dialog_->findChild<QTreeWidget *>("insertObjectMethods");
+            methods->setCurrentItem(methods->topLevelItem(1));
+            timer_.stop();
+            QApplication::processEvents();
+            require(insert_dialog_->grab().save(smoke_dir_ + "/insert-sensor.png"),
+                    "Cannot capture sensor insertion");
+            insert_dialog_->resize(360, 300);
+            for (int pass = 0; pass < 6; ++pass)
+                QApplication::processEvents();
+            require(insert_dialog_->grab().save(smoke_dir_ + "/insert-sensor-narrow.png"),
+                    "Cannot capture narrow sensor insertion");
+            timer_.start();
+            insert_dialog_->findChild<QPushButton *>("insertObject")->click();
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 201:
+            require(sensors_.size() == smoke_insert_counts_[2] + 1 &&
+                        sensors_.back().parent_satellite_id ==
+                            satellites_.back().orbit->input.object_id,
+                    "Sensor insertion did not use its explicitly selected parent");
+            record("insert-station-and-sensor-with-explicit-parent");
+            insert_dialog_->close();
+            quick_insert_actions_[0]->trigger();
+            require(busy(), "Quick insertion did not use the stored satellite default");
+            ++orbit_smoke_stage_;
+            break;
+        case 202: {
+            require(satellites_.size() == smoke_insert_counts_[0] + 2,
+                    "Quick satellite insertion did not finish");
+            record("quick-insert-honors-per-type-preference");
+            QTimer::singleShot(0, this, [] {
+                if (auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget()))
+                    dialog->reject();
+            });
+            insert_object({InsertObjectType::satellite, InsertObjectMethod::orbit_wizard, {}});
+            require(!busy() && satellites_.size() == smoke_insert_counts_[0] + 2,
+                    "Cancelling the orbit wizard inserted an object");
+            bool accepted = false;
+            QTimer::singleShot(0, this, [&] {
+                auto *wizard = findChild<QDialog *>("orbitWizard");
+                if (!wizard)
+                    return;
+                auto *presets = wizard->findChild<QComboBox *>("orbitWizardPreset");
+                auto *preview = static_cast<OrbitDesignPreview *>(
+                    wizard->findChild<QWidget *>("orbitDesignPreview"));
+                auto *map =
+                    static_cast<GroundMap *>(wizard->findChild<QWidget *>("wizardGroundMap"));
+                for (int index = 0; index < presets->count(); ++index) {
+                    presets->setCurrentIndex(index);
+                    QElapsedTimer preview_wait;
+                    preview_wait.start();
+                    while ((!preview->ready() || !map->tracks_ready() ||
+                            map->tracks_transitioning()) &&
+                           preview_wait.elapsed() < 5000) {
+                        QApplication::processEvents();
+                        QThread::msleep(5);
+                    }
+                    require(preview->ready(), "Orbit design preview did not finish");
+                    require(map->tracks_ready() && !map->tracks_transitioning(),
+                            "Orbit design refinement did not finish painting");
+                    require(wizard->findChild<QLabel *>("orbitWizardError")->text().isEmpty(),
+                            "A standard orbit design has invalid default parameters");
+                    require(wizard->grab().save(smoke_dir_ + "/orbit-wizard-" +
+                                                QString::number(index) + ".png"),
+                            "Cannot capture orbit design layout");
+                }
+                // Exercise continuous changes, not just a settled screenshot: stale
+                // cancellation used to prevent every frame during a sustained drag.
+                presets->setCurrentIndex(0);
+                wizard->findChild<QComboBox *>("wizardPreviewRevolutions")->setCurrentIndex(1);
+                {
+                    WorkbenchProfile interaction_profile(smoke_dir_ + "/orbit-preview-profile");
+                    for (const char *parameter : {"wizardRaan", "wizardAltitude"}) {
+                        auto *field = wizard->findChild<QuantityEditor *>(parameter);
+                        for (int interval : {16, 8, 4}) {
+                            interaction_profile.phase(
+                                QStringLiteral("%1-%2ms").arg(parameter).arg(interval), true);
+                            QElapsedTimer drag, gap;
+                            drag.start();
+                            gap.start();
+                            int inputs = 0, drawn = 0;
+                            double maximum_gap = 0;
+                            QPointF last;
+                            while (drag.elapsed() < 1600) {
+                                if (drag.elapsed() >= inputs * interval) {
+                                    const ProfileScope edit("input_handler_ms");
+                                    field->set_value((field->unit() == Unit::degree ? 20 : 500) +
+                                                         inputs % 100,
+                                                     field->unit());
+                                    ++inputs;
+                                }
+                                QApplication::processEvents();
+                                if (map->track_count() && map->tracks_ready()) {
+                                    const auto point = map->track_coordinates(0).back();
+                                    if (point != last) {
+                                        ++drawn;
+                                        last = point;
+                                        const double milliseconds = gap.nsecsElapsed() * 1e-6;
+                                        maximum_gap = std::max(maximum_gap, milliseconds);
+                                        interaction_profile.record("drawable_gap_ms", milliseconds);
+                                        gap.start();
+                                    }
+                                }
+                                QThread::msleep(1);
+                            }
+                            require(drawn > 1, "Orbit preview stalled throughout continuous input");
+                            interaction_report_.append(
+                                QJsonObject{{"kind", "orbit-wizard-continuous-preview"},
+                                            {"passed", true},
+                                            {"parameter", parameter},
+                                            {"input_interval_ms", interval},
+                                            {"inputs", inputs},
+                                            {"drawable_updates", drawn},
+                                            {"maximum_drawable_gap_ms", maximum_gap}});
+                        }
+                    }
+                    interaction_profile.phase("refinement", true);
+                    require(wizard->grab().save(smoke_dir_ + "/orbit-wizard-refinement-before.png"),
+                            "Cannot capture the interactive orbit curve");
+                    bool captured_transition = false;
+                    QElapsedTimer refinement_wait;
+                    refinement_wait.start();
+                    while ((!preview->ready() || !map->tracks_ready() ||
+                            map->tracks_transitioning()) &&
+                           refinement_wait.elapsed() < 5000) {
+                        QApplication::processEvents();
+                        auto *animation =
+                            map->findChild<QVariantAnimation *>("groundMapRefinement");
+                        if (!captured_transition && animation &&
+                            animation->state() == QAbstractAnimation::Running &&
+                            animation->currentTime() >= 60) {
+                            captured_transition = wizard->grab().save(
+                                smoke_dir_ + "/orbit-wizard-refinement-during.png");
+                        }
+                        QThread::msleep(1);
+                    }
+                    require(preview->ready() && map->tracks_ready() && !map->tracks_transitioning(),
+                            "Orbit refinement failed to settle");
+                    require(wizard->grab().save(smoke_dir_ + "/orbit-wizard-refinement-after.png"),
+                            "Cannot capture the settled orbit curve");
+                    interaction_report_.append(
+                        QJsonObject{{"kind", "orbit-wizard-refinement"},
+                                    {"passed", true},
+                                    {"captured_intermediate_frame", captured_transition}});
+                    interaction_profile.finish(
+                        {{"device_pixel_ratio", wizard->devicePixelRatioF()}});
+                }
+                presets->setCurrentIndex(7);
+                wizard->resize(360, 300);
+                for (int iteration = 0; iteration < 5; ++iteration)
+                    QApplication::processEvents();
+                require(wizard->grab().save(smoke_dir_ + "/orbit-wizard-narrow.png"),
+                        "Cannot capture narrow orbit design layout");
+                wizard->resize(980, 590);
+                QApplication::processEvents();
+                accepted = wizard->grab().save(smoke_dir_ + "/orbit-wizard.png");
+                wizard->findChild<QPushButton *>("acceptOrbitWizard")->click();
+            });
+            insert_object({InsertObjectType::satellite, InsertObjectMethod::orbit_wizard, {}});
+            require(accepted && !busy() && !editor_target_ &&
+                        satellites_.size() == smoke_insert_counts_[0] + 2,
+                    "The orbit wizard failed to open a draft before publication");
+            record("orbit-wizard-cancel-and-accept-preserve-draft-boundary");
+            editor_->findChild<QPushButton *>("resetOrbit")->click();
+            properties_dialog_->close();
+            workspace_->select_view(0);
+            fit_views();
+            fit_pending_ = true;
+            smoke_final_frames_ = 0;
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 203: {
+            const bool native_disabled = QApplication::testAttribute(Qt::AA_DontUseNativeDialogs);
+            QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, true);
+            QTimer::singleShot(0, this, [] {
+                if (auto *dialog = qobject_cast<QFileDialog *>(QApplication::activeModalWidget()))
+                    dialog->reject();
+            });
+            insert_object({InsertObjectType::satellite, InsertObjectMethod::tle_file, {}});
+            require(!busy() && satellites_.size() == smoke_insert_counts_[0] + 2,
+                    "Cancelling TLE import changed the scene");
+            const QString tle =
+                "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753\n"
+                "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667";
+            const auto path = smoke_dir_ + "/single-satellite.tle";
+            QFile file(path);
+            require(file.open(QIODevice::WriteOnly), "Cannot create TLE import fixture");
+            file.write(tle.toUtf8());
+            file.close();
+            QTimer::singleShot(0, this, [path] {
+                if (auto *dialog = qobject_cast<QFileDialog *>(QApplication::activeModalWidget())) {
+                    dialog->selectFile(path);
+                    QMetaObject::invokeMethod(dialog, "accept", Qt::QueuedConnection);
+                }
+            });
+            insert_object({InsertObjectType::satellite, InsertObjectMethod::tle_file, {}});
+            QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, native_disabled);
+            require(!busy() && !editor_target_ &&
+                        editor_->findChild<QPlainTextEdit *>("tleInput")->toPlainText() == tle &&
+                        editor_->findChild<QComboBox *>("orbitPropagator")->currentIndex() ==
+                            static_cast<int>(OrbitPropagator::sgp4) &&
+                        satellites_.size() == smoke_insert_counts_[0] + 2,
+                    "TLE file import did not open an uncommitted SGP4 draft");
+            record("tle-file-import-and-cancel-preserve-draft-boundary");
+            properties_dialog_->close();
+            workspace_->select_view(0);
+            ++orbit_smoke_stage_;
+            break;
+        }
+        case 204:
+            if (++smoke_final_frames_ >= 4)
+                ++orbit_smoke_stage_;
+            break;
         }
     }
 #ifdef ORBITFORGE_DESKTOP_BENCHMARK
@@ -9463,12 +9855,16 @@ class Workbench final : public WorkbenchWindow {
     QLabel *workspace_label_ = nullptr, *workspace_dot_ = nullptr;
     QMenuBar *menu_bar_ = nullptr;
     QAction *new_action_ = nullptr, *example_action_ = nullptr, *insert_action_ = nullptr;
+    std::array<QAction *, 3> quick_insert_actions_{};
+    InsertObjectDialog *insert_dialog_ = nullptr;
+    bool insertion_pending_ = false;
     QAction *fit_action_ = nullptr, *aux_action_ = nullptr, *map_action_ = nullptr;
     GroundMap *ground_map_ = nullptr;
     QToolBar *time_toolbar_ = nullptr;
     QMenu *insert_menu_ = nullptr;
     int smoke_bootstrap_ = 0;
-    static constexpr int orbit_smoke_complete = 198;
+    std::array<std::size_t, 3> smoke_insert_counts_{};
+    static constexpr int orbit_smoke_complete = 205;
     std::shared_ptr<const core::GravityModel> smoke_gravity_;
     std::weak_ptr<const core::GravityModel> smoke_startup_gravity_;
     std::string smoke_gravity_id_ = "apply-audit";

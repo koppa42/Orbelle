@@ -8,6 +8,7 @@ import math
 import shutil
 import sqlite3
 import tempfile
+from threading import Barrier
 import time
 import unittest
 
@@ -136,15 +137,28 @@ class DataCatalogTests(unittest.TestCase):
 
     def test_parallel_imports_publish_once_and_keep_no_temporary_files(self):
         store = self.root / 'catalog'
-        of.DataCatalog(store)
-        def install(_):
-            catalog = of.DataCatalog(store)
-            return catalog.install_eop(C04 / 'manifest.json').lock_sha256
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            keys = list(pool.map(install, range(8)))
+        # Open independent connections before starting so SQLite setup does not stagger
+        # the imports. Repeated imports overlap temporary-directory creation and cleanup.
+        catalogs = [of.DataCatalog(store) for _ in range(4)]
+        ready = Barrier(len(catalogs), timeout=30)
+        def install(index):
+            catalog = catalogs[index]
+            try:
+                ready.wait()
+                return [catalog.install_eop(C04 / 'manifest.json').lock_sha256
+                        for _ in range(32)]
+            finally:
+                del catalog  # Do not retain an open SQLite handle in an error traceback.
+        try:
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                keys = [key for batch in pool.map(install, range(len(catalogs))) for key in batch]
+        finally:
+            catalogs.clear()
         self.assertEqual(len(set(keys)), 1)
         catalog = of.DataCatalog(store)
         self.assertEqual(len(catalog.snapshots), 1)
+        self.assertEqual(len(list((store / 'blobs/sha256').iterdir())), 1)
+        self.assertTrue(catalog.load_eop(keys[0]).data_info.id)
         self.assertEqual(list((store / 'staging').iterdir()), [])
         del catalog
 

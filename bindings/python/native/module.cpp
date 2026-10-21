@@ -11,6 +11,7 @@ using namespace orbitforge;
 void bind_time_frames(py::module_ &module);
 void bind_ephemeris(py::module_ &module);
 void bind_j2(py::module_ &module);
+void bind_orbit_design(py::module_ &module);
 void bind_project(py::module_ &module);
 void bind_project_document(py::module_ &module);
 void bind_data_lock(py::module_ &module);
@@ -151,6 +152,7 @@ PYBIND11_MODULE(_native, module) {
     bind_time_frames(module);
     bind_ephemeris(module);
     bind_j2(module);
+    bind_orbit_design(module);
     bind_reports(module);
     bind_project(module);
     bind_project_document(module);
