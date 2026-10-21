@@ -717,7 +717,10 @@ class PointingDefinition:
     def __init__(self, target: ObjectRef | None = None) -> None: ...
 
 class SensorDefinition:
+    @overload
     def __init__(self, name: str, parent: ObjectRef, half_angle_rad: float, pointing: PointingDefinition) -> None: ...
+    @overload
+    def __init__(self, name: str, parent: ObjectRef, pattern: SensorPattern, pointing: PointingDefinition, roll_rad: float = 0, display: SensorDisplay = ...) -> None: ...
 
 class SatelliteUpdate:
     def __init__(self) -> None: ...
@@ -735,6 +738,9 @@ class SensorUpdate:
     def __init__(self) -> None: ...
     name: str | None
     half_angle_rad: float | None
+    pattern: SensorPattern | None
+    roll_rad: float | None
+    display: SensorDisplay | None
     pointing: PointingDefinition | None
 
 class ProjectSnapshot:
@@ -1529,6 +1535,39 @@ class ReportKind:
     GEODETIC_POSITION: ReportKind
     ORBITAL_MOTION: ReportKind
 
+class SensorPatternType:
+    SIMPLE_CONIC: SensorPatternType
+    COMPLEX_CONIC: SensorPatternType
+    RECTANGULAR: SensorPatternType
+    CUSTOM: SensorPatternType
+
+class SensorPatternPoint:
+    def __init__(self, cone_rad: float, clock_rad: float) -> None: ...
+    cone_rad: float
+    clock_rad: float
+
+class SensorPattern:
+    def __init__(self) -> None: ...
+    type: SensorPatternType
+    half_angle_rad: float
+    inner_half_angle_rad: float
+    minimum_clock_rad: float
+    maximum_clock_rad: float
+    horizontal_half_angle_rad: float
+    vertical_half_angle_rad: float
+    custom_points: list[SensorPatternPoint]
+
+def parse_sensor_pattern(text: str) -> SensorPattern: ...
+
+class SensorDisplay:
+    def __init__(self) -> None: ...
+    show_2d: bool
+    show_3d: bool
+    fill: bool
+    color: int
+    opacity: float
+    space_range_m: float
+
 class SensorPointing:
     NADIR: SensorPointing
     TARGETED: SensorPointing
@@ -1538,6 +1577,9 @@ class ProjectSensor:
     display_name: str
     parent_satellite_id: str
     half_angle_rad: float
+    pattern: SensorPattern
+    roll_rad: float
+    display: SensorDisplay
     pointing: SensorPointing
     target_station_id: str
     def __init__(self) -> None: ...
@@ -1573,6 +1615,8 @@ class AccessSample:
     def observation(self) -> GroundObservation: ...
     @property
     def off_boresight_rad(self) -> float | None: ...
+    @property
+    def sensor_margin_rad(self) -> float | None: ...
     @property
     def visible(self) -> bool: ...
 

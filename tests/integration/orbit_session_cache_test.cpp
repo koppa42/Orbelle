@@ -81,6 +81,50 @@ TEST(OrbitSessionCache, FirstReportUsesPreparedScienceWithItsOwnRevisionAndSampl
     EXPECT_EQ(independent_checks - warm_checks, cold_checks - cached_checks);
 }
 
+TEST(OrbitSessionCache, RenamingAllObjectKindsPreservesHpopAndReferences) {
+    auto input = numerical_project();
+    input.ground_stations.push_back({"station", "Station", {}});
+    application::ProjectSensor sensor;
+    sensor.object_id = "sensor";
+    sensor.parent_satellite_id = input.satellites[0].orbit.object_id;
+    sensor.pointing = application::SensorPointing::targeted;
+    sensor.target_station_id = "station";
+    input.sensors.push_back(sensor);
+    application::ReportDefinition definition;
+    definition.id = "report";
+    definition.name = "Report";
+    definition.query.object_ids = {sensor.parent_satellite_id};
+    input.reports.push_back(definition);
+    application::ProjectDocument document{input};
+    const auto cache = std::make_shared<runtime::OrbitSessionCache>();
+    const auto &orbit = input.satellites[0].orbit;
+    int cold = 0, warm = 0, renamed_checks = 0;
+    const auto expected = sampled(cache->acquire(orbit, 1), input.last, cold);
+    (void)sampled(cache->acquire(orbit, 1), input.last, warm);
+    const auto hash = runtime::report_input_sha256(input);
+    for (const auto &ref : document.objects().find())
+        document.objects().rename(ref, "Renamed " + ref.id());
+    const auto &updated = *document.snapshot().project;
+    EXPECT_EQ(updated.satellites[0].orbit.object_id, orbit.object_id);
+    EXPECT_EQ(updated.ground_stations[0].object_id, "station");
+    EXPECT_EQ(updated.sensors[0].object_id, "sensor");
+    EXPECT_EQ(updated.sensors[0].parent_satellite_id, orbit.object_id);
+    EXPECT_EQ(updated.sensors[0].target_station_id, "station");
+    EXPECT_EQ(updated.reports[0].query.object_ids, definition.query.object_ids);
+    EXPECT_EQ(runtime::report_input_sha256(updated), hash);
+    const auto actual =
+        sampled(cache->acquire(updated.satellites[0].orbit, 1), input.last, renamed_checks);
+    EXPECT_EQ(actual.position_m, expected.position_m);
+    EXPECT_EQ(actual.velocity_mps, expected.velocity_mps);
+    EXPECT_EQ(renamed_checks, warm);
+    EXPECT_GT(cold, warm);
+    const auto restored = application::decode_project(application::encode_project(updated));
+    EXPECT_EQ(restored.satellites[0].name(), updated.satellites[0].name());
+    EXPECT_EQ(restored.ground_stations[0].name(), updated.ground_stations[0].name());
+    EXPECT_EQ(restored.sensors[0].name(), updated.sensors[0].name());
+    EXPECT_EQ(runtime::report_input_sha256(restored), hash);
+}
+
 TEST(OrbitSessionCache, ForkCancellationAndPruningPreservePublishedSolutions) {
     const auto input = numerical_project();
     const auto &orbit = input.satellites.front().orbit;

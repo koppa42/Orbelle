@@ -106,8 +106,7 @@ CoverageReportData coverage_report(const ReportContext &context,
                 auto value =
                     sample.observation.elevation_rad - d.query.coverage.minimum_elevation_rad;
                 if (asset.sensor)
-                    value =
-                        std::min(value, asset.sensor->half_angle_rad - *sample.off_boresight_rad);
+                    value = std::min(value, *sample.sensor_margin_rad);
                 if (!sample.observation.line_of_sight)
                     value = std::min(value, -1e-14);
                 return value;

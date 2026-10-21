@@ -26,7 +26,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 46;
+constexpr std::uint32_t project_version = 47;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -47,7 +47,7 @@ constexpr std::array section_schemas{
     SectionSchema{objects_tag, 32, "Missing satellites section"},
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 2, "Missing ground stations section"},
-    SectionSchema{sensors_tag, 1, "Missing sensors section"},
+    SectionSchema{sensors_tag, 2, "Missing sensors section"},
     SectionSchema{reports_tag, 7, "Missing reports section"},
     SectionSchema{data_tag, 2, nullptr},
     SectionSchema{time_tag, 1, nullptr},
@@ -180,6 +180,46 @@ struct Reader {
     }
     void done() const { check(bytes.empty(), "Unexpected trailing project data"); }
 };
+void write_sensor_pattern(Writer &out, const core::SensorPattern &p, bool draft = true) {
+    const auto type = p.type;
+    out.number(static_cast<unsigned>(type), 4);
+    if (draft || type == core::SensorPatternType::simple_conic ||
+        type == core::SensorPatternType::complex_conic)
+        out.real(p.half_angle_rad);
+    if (draft || type == core::SensorPatternType::complex_conic) {
+        out.real(p.inner_half_angle_rad);
+        out.real(p.minimum_clock_rad);
+        out.real(p.maximum_clock_rad);
+    }
+    if (draft || type == core::SensorPatternType::rectangular) {
+        out.real(p.horizontal_half_angle_rad);
+        out.real(p.vertical_half_angle_rad);
+    }
+    if (draft || type == core::SensorPatternType::custom) {
+        out.number(p.custom_points.size(), 4);
+        for (const auto &point : p.custom_points) {
+            out.real(point.cone_rad);
+            out.real(point.clock_rad);
+        }
+    }
+}
+core::SensorPattern read_sensor_pattern(Reader &in) {
+    core::SensorPattern p;
+    const auto type = in.number(4);
+    check(type <= 3, "Unsupported sensor pattern");
+    p.type = static_cast<core::SensorPatternType>(type);
+    p.half_angle_rad = in.real();
+    p.inner_half_angle_rad = in.real();
+    p.minimum_clock_rad = in.real();
+    p.maximum_clock_rad = in.real();
+    p.horizontal_half_angle_rad = in.real();
+    p.vertical_half_angle_rad = in.real();
+    const auto count = in.number(4);
+    check(count <= 256, "Too many custom sensor vertices");
+    for (std::uint64_t i = 0; i < count; ++i)
+        p.custom_points.push_back({in.real(), in.real()});
+    return p;
+}
 void write_srp(Writer &out, const core::SrpOptions &o, bool draft = true) {
     out.number(o.enabled, 1);
     if (!draft && !o.enabled)
@@ -540,7 +580,8 @@ std::string analysis_input_sha256(const Project &project) {
     for (const auto &[id, s] : sensors) {
         out.text(id);
         out.text(s->parent_satellite_id);
-        out.real(s->half_angle_rad);
+        write_sensor_pattern(out, s->pattern, false);
+        out.real(s->roll_rad);
         out.number(static_cast<unsigned>(s->pointing), 4);
         out.text(s->pointing == SensorPointing::targeted ? s->target_station_id : "");
     }
@@ -677,9 +718,27 @@ void validate_project(const Project &project, bool relationships) {
         check(ids.emplace(sensor.object_id, Kind::sensor).second, "Duplicate project object ID");
         check(!relationships || has_kind(sensor.parent_satellite_id, Kind::satellite),
               "Sensor parent satellite does not exist");
-        check(std::isfinite(sensor.half_angle_rad) && sensor.half_angle_rad > 0 &&
-                  sensor.half_angle_rad <= std::numbers::pi / 2,
-              "Sensor cone half angle must be in (0, 90] degrees");
+        try {
+            (void)core::SensorGeometry(sensor.pattern);
+        } catch (const std::invalid_argument &e) {
+            throw ProjectError(e.what());
+        }
+        const auto &pattern = sensor.pattern;
+        for (const double angle :
+             {pattern.half_angle_rad, pattern.inner_half_angle_rad, pattern.minimum_clock_rad,
+              pattern.maximum_clock_rad, pattern.horizontal_half_angle_rad,
+              pattern.vertical_half_angle_rad})
+            check(std::isfinite(angle), "Sensor draft angles must be finite");
+        check(pattern.custom_points.size() <= 256, "Too many custom sensor points");
+        for (const auto &point : pattern.custom_points)
+            check(std::isfinite(point.cone_rad) && std::isfinite(point.clock_rad),
+                  "Sensor draft vertices must be finite");
+        check(std::isfinite(sensor.roll_rad), "Sensor roll must be finite");
+        check(sensor.display.color <= 0xffffff && std::isfinite(sensor.display.opacity) &&
+                  sensor.display.opacity >= 0 && sensor.display.opacity <= 1 &&
+                  std::isfinite(sensor.display.space_range_m) && sensor.display.space_range_m > 0 &&
+                  sensor.display.space_range_m <= 1e10,
+              "Invalid sensor display settings");
         check(sensor.pointing == SensorPointing::nadir ||
                   sensor.pointing == SensorPointing::targeted,
               "Unsupported sensor pointing");
@@ -960,9 +1019,16 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         sensors.text(sensor.object_id);
         sensors.text(sensor.display_name);
         sensors.text(sensor.parent_satellite_id);
-        sensors.real(sensor.half_angle_rad);
+        write_sensor_pattern(sensors, sensor.pattern);
         sensors.number(static_cast<unsigned>(sensor.pointing), 4);
         sensors.text(sensor.target_station_id);
+        sensors.real(sensor.roll_rad);
+        sensors.number(sensor.display.show_2d, 1);
+        sensors.number(sensor.display.show_3d, 1);
+        sensors.number(sensor.display.fill, 1);
+        sensors.number(sensor.display.color, 4);
+        sensors.real(sensor.display.opacity);
+        sensors.real(sensor.display.space_range_m);
     }
     payload.section(sensors_tag, sensors);
     Writer reports;
@@ -1215,11 +1281,18 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             sensor.object_id = sensors.text();
             sensor.display_name = sensors.text();
             sensor.parent_satellite_id = sensors.text();
-            sensor.half_angle_rad = sensors.real();
+            sensor.pattern = read_sensor_pattern(sensors);
             const auto pointing = sensors.number(4);
             check(pointing <= 1, "Unsupported sensor pointing");
             sensor.pointing = static_cast<SensorPointing>(pointing);
             sensor.target_station_id = sensors.text();
+            sensor.roll_rad = sensors.real();
+            sensor.display.show_2d = sensors.boolean();
+            sensor.display.show_3d = sensors.boolean();
+            sensor.display.fill = sensors.boolean();
+            sensor.display.color = static_cast<std::uint32_t>(sensors.number(4));
+            sensor.display.opacity = sensors.real();
+            sensor.display.space_range_m = sensors.real();
             project.sensors.push_back(std::move(sensor));
         }
         sensors.done();

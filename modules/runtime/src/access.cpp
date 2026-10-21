@@ -21,6 +21,7 @@ detail::AccessGeometry::AccessGeometry(const application::Project &project,
         std::ranges::find(project.sensors, ids[1], &application::ProjectSensor::object_id);
     if (found_sensor != project.sensors.end()) {
         sensor = *found_sensor;
+        pattern.emplace(sensor->pattern);
         parent = sensor->parent_satellite_id;
         if (sensor->pointing == application::SensorPointing::targeted) {
             const auto target =
@@ -42,6 +43,7 @@ AccessSample detail::AccessGeometry::at(const core::CartesianState &state) const
     bool visible =
         observation.line_of_sight && observation.elevation_rad >= station.minimum_elevation_rad;
     std::optional<double> off_boresight;
+    std::optional<double> sensor_margin;
     if (sensor) {
         std::array<double, 3> axis{}, direction{}, target_position{};
         const auto station_position = core::ground_station_position(station.location);
@@ -52,9 +54,13 @@ AccessSample detail::AccessGeometry::at(const core::CartesianState &state) const
             direction[i] = station_position[i] - state.position_m[i];
         }
         off_boresight = core::vector_angle(axis, direction);
-        visible = visible && *off_boresight <= sensor->half_angle_rad;
+        const auto axes = core::sensor_axes(state.velocity_mps, axis, sensor->roll_rad);
+        sensor_margin = pattern->margin(axes.to_local(direction));
+        if (std::abs(*sensor_margin) <= 1e-14)
+            sensor_margin = 0;
+        visible = visible && *sensor_margin >= 0;
     }
-    return {state.epoch, observation, off_boresight, visible};
+    return {state.epoch, observation, off_boresight, visible, sensor_margin};
 }
 std::string detail::AccessGeometry::target_name() const {
     return sensor ? sensor->name() : satellite.name();
@@ -96,28 +102,27 @@ calculate_access_passes(const application::Project &project, const std::vector<s
         return cache.emplace(key, at(t)).first->second;
     };
     const auto step = query.search_step.count(), tolerance = query.boundary_tolerance.count();
-    const auto intervals =
-        query.search_mode == core::AccessSearchMode::fixed_grid
-            ? core::find_access_intervals(
-                  query.first, query.last, step, [&](auto t) { return sample(t).visible; },
-                  tolerance)
-            : core::find_constraint_intervals(
-                  query.first, query.last, step,
-                  [&](auto t) {
-                      const auto &s = sample(t);
-                      auto margin =
-                          s.observation.elevation_rad - geometry.station.minimum_elevation_rad;
-                      if (geometry.sensor)
-                          margin = std::min(margin,
-                                            geometry.sensor->half_angle_rad - *s.off_boresight_rad);
-                      // For above-surface stations with nonnegative minimum elevation, the
-                      // angular constraints imply ellipsoid clearance. Preserve the separate
-                      // segment test for below-ellipsoid stations and numerical tangency.
-                      if (!s.observation.line_of_sight)
-                          margin = std::min(margin, -1e-14);
-                      return margin;
-                  },
-                  tolerance);
+    const auto intervals = query.search_mode == core::AccessSearchMode::fixed_grid
+                               ? core::find_access_intervals(
+                                     query.first, query.last, step,
+                                     [&](auto t) { return sample(t).visible; }, tolerance)
+                               : core::find_constraint_intervals(
+                                     query.first, query.last, step,
+                                     [&](auto t) {
+                                         const auto &s = sample(t);
+                                         auto margin = s.observation.elevation_rad -
+                                                       geometry.station.minimum_elevation_rad;
+                                         if (geometry.sensor)
+                                             margin = std::min(margin, s.sensor_margin_rad.value());
+                                         // For above-surface stations with nonnegative minimum
+                                         // elevation, the angular constraints imply ellipsoid
+                                         // clearance. Preserve the separate segment test for
+                                         // below-ellipsoid stations and numerical tangency.
+                                         if (!s.observation.line_of_sight)
+                                             margin = std::min(margin, -1e-14);
+                                         return margin;
+                                     },
+                                     tolerance);
     std::vector<results::AccessWindow> result;
     for (const auto &w : intervals) {
         const auto elevation = core::find_access_extremum(

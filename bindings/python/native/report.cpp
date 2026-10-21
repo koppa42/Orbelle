@@ -44,6 +44,7 @@ void bind_reports(py::module_ &module) {
         .def_readonly("epoch", &runtime::AccessSample::epoch)
         .def_readonly("observation", &runtime::AccessSample::observation)
         .def_readonly("off_boresight_rad", &runtime::AccessSample::off_boresight_rad)
+        .def_readonly("sensor_margin_rad", &runtime::AccessSample::sensor_margin_rad)
         .def_readonly("visible", &runtime::AccessSample::visible);
     py::class_<runtime::AccessSession>(module, "AccessSession")
         .def(py::init([](const application::Project &project, std::string station,

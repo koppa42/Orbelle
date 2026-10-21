@@ -50,6 +50,10 @@ project.save("observation.orbitforge")
 
 ## 查找与生命周期
 
+桌面的卫星、地面站和传感器统一使用“对象名称”，创建时填写，创建后通过属性页、对象树右键“重命名”或 F2 修改。名称支持中文，去除首尾空白后不能为空；现有数据模型允许同名对象，绑定始终使用固定 ID。ID 创建后不随名称改变，属性页不提供 ID 编辑。
+
+单独应用名称直接更新对象树、二维标签、属性页和对象选择项，不进入场景重建或轨道传播流程，不改变 HPOP 会话、父子关系、跟踪目标及报告查询。外部重命名保留属性页中其他未应用参数和独立的名称草稿；关闭或重置遵循原有草稿规则。项目保存时同时保存名称和内部 ID。
+
 | 操作 | 结果 |
 | --- | --- |
 | `project.objects[id]` | 按 ID 查找；缺失抛 `KeyError`，不会回退到名称 |
@@ -111,6 +115,6 @@ Python `of.Project` 和 `of.load_project()` 现在返回事务门面。旧的可
 
 普通脚本不再修改 `project.satellites` 等列表。通过句柄操作对象；保存报告配置使用 `project.set_reports(definitions)`，读取旧配置可从显式 `to_data()` 副本取得。`project.earth_orientation = ...` 继续接受已明确选定的数据元信息，`None` 清空；`plan_prepare(data=...)` 提供数据确认计划，可传入固定的 `DataSnapshot` 或由 `DataCatalog` 按项目时段选源。
 
-`Project.open(path, data=...)` 校验所选数据，变化时通过 `DataChangedError.plan` 取得固定的打开计划；原始输入读取使用 `load_project_data()`。`save(path, analysis=...)` 可记录匹配的分析来源，普通保存保留现状。状态查询优先使用 `project.prepare()` 返回的 `Analysis`；`to_scenario(time=...)`、`generate_report(project, ...)` 和 `AccessSession(project, ...)` 继续捕获已提交输入，执行已有计算与数据匹配规则。文件包含仅 UTC 的来源和分析准备记录，以及报告查询/模板配置；仅读写当前 v46，旧格式明确拒绝，详见[分析 API](analysis_api.md)。
+`Project.open(path, data=...)` 校验所选数据，变化时通过 `DataChangedError.plan` 取得固定的打开计划；原始输入读取使用 `load_project_data()`。`save(path, analysis=...)` 可记录匹配的分析来源，普通保存保留现状。状态查询优先使用 `project.prepare()` 返回的 `Analysis`；`to_scenario(time=...)`、`generate_report(project, ...)` 和 `AccessSession(project, ...)` 继续捕获已提交输入，执行已有计算与数据匹配规则。文件包含仅 UTC 的来源和分析准备记录，以及报告查询/模板配置；仅读写当前 v47，旧格式明确拒绝，详见[分析 API](analysis_api.md)。
 
 完整示例见 [可见性分析](../../examples/python/access.py)和[保存项目](../../examples/python/save_project.py)。验证入口为 C++ `ProjectDocument.*` 集成测试、Python `test_objects.py`、原生文件与计算回归测试，以及安装后的 SDK 消费端。

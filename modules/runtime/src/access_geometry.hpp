@@ -7,6 +7,7 @@ struct AccessGeometry {
     application::ProjectGroundStation station;
     application::ProjectSatellite satellite;
     std::optional<application::ProjectSensor> sensor;
+    std::optional<core::SensorGeometry> pattern;
     std::optional<application::ProjectGroundStation> pointing_target;
 
     AccessGeometry(const application::Project &project, const std::vector<std::string> &ids);

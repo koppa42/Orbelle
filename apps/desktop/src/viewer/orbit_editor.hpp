@@ -37,6 +37,9 @@ class OrbitEditor final : public QWidget {
     void set_input(const OrbitInput &input);
     // Acknowledge only successfully published values; failure keeps the draft dirty.
     void accept_input(const OrbitInput &input);
+    [[nodiscard]] std::string object_name() const;
+    void set_name(const std::string &name);
+    void sync_name(const std::string &name);
     void accept_display(const DisplaySettings &settings);
     void accept_appearance(int kind, const QString &path, double diameter_km);
     void set_analysis_interval(core::Epoch first, core::Epoch last);
@@ -82,6 +85,7 @@ class OrbitEditor final : public QWidget {
     std::shared_ptr<const core::ITimeProvider> time_;
     core::CartesianState manual_state_ = OrbitInput{}.initial;
     OrbitInput bound_input_;
+    std::string bound_name_;
     DisplaySettings bound_display_;
     QPlainTextEdit *tle_text_ = nullptr;
     QLabel *tle_preview_ = nullptr, *epoch_label_ = nullptr;

@@ -19,6 +19,11 @@ StateTrack::StateTrack(results::StateSeries samples) : samples_(std::move(sample
     }
 }
 RenderSnapshot StateTrack::sample(core::Epoch epoch) const {
+    const auto state = sample_state(epoch);
+    return {
+        epoch, state.frame, state.origin, {{samples_.provenance().object_id, state.position_m}}};
+}
+core::CartesianState StateTrack::sample_state(core::Epoch epoch) const {
     const auto &states = samples_.states();
     if (epoch.tai_nanoseconds() < states.front().epoch.tai_nanoseconds() ||
         epoch.tai_nanoseconds() > states.back().epoch.tai_nanoseconds())
@@ -28,18 +33,23 @@ RenderSnapshot StateTrack::sample(core::Epoch epoch) const {
             return s.epoch.tai_nanoseconds() < t.tai_nanoseconds();
         });
     if (right->epoch == epoch)
-        return make_snapshot(samples_, static_cast<std::size_t>(right - states.begin()));
+        return *right;
     const auto &a = *(right - 1), &b = *right;
     const double h = b.epoch.seconds_since(a.epoch), t = epoch.seconds_since(a.epoch) / h;
     const double t2 = t * t, t3 = t2 * t;
-    std::array<double, 3> r{};
+    auto result = a;
+    result.epoch = epoch;
+    auto &r = result.position_m;
     for (std::size_t k = 0; k < 3; ++k) {
         r[k] = (2 * t3 - 3 * t2 + 1) * a.position_m[k] + (t3 - 2 * t2 + t) * h * a.velocity_mps[k] +
                (-2 * t3 + 3 * t2) * b.position_m[k] + (t3 - t2) * h * b.velocity_mps[k];
         if (!std::isfinite(r[k]))
             throw std::runtime_error("Display interpolation overflow");
+        result.velocity_mps[k] =
+            (6 * t2 - 6 * t) / h * a.position_m[k] + (3 * t2 - 4 * t + 1) * a.velocity_mps[k] +
+            (-6 * t2 + 6 * t) / h * b.position_m[k] + (3 * t2 - 2 * t) * b.velocity_mps[k];
     }
-    return {epoch, a.frame, a.origin, {{samples_.provenance().object_id, r}}};
+    return result;
 }
 std::vector<RenderSnapshot> StateTrack::nodes() const {
     std::vector<RenderSnapshot> snapshots;

@@ -6,7 +6,7 @@ from . import _native as n
 from . import units as u
 from ._values import OrbitStyle, UNSET, Unset, Wgs84Location, require
 from .orbits import Orbit
-from .sensors import Cone, Pointing
+from .sensors import FieldOfView, Pointing, _to_native, _from_native
 if TYPE_CHECKING:
     from ._project import Project
 
@@ -29,7 +29,7 @@ class GroundStation:
 class Sensor:
     name: str
     parent: SatelliteHandle
-    field_of_view: Cone
+    field_of_view: FieldOfView
     pointing: Pointing = Pointing()
 
 
@@ -57,7 +57,7 @@ class SensorState:
     id: str
     name: str
     parent_id: str
-    field_of_view: Cone
+    field_of_view: FieldOfView
     pointing: Pointing
 
 
@@ -169,11 +169,11 @@ class SensorHandle(ObjectHandle):
         return cast(SatelliteHandle, self._project.objects[self._project.objects.read(self).parent_id])
 
     @property
-    def field_of_view(self) -> Cone:
+    def field_of_view(self) -> FieldOfView:
         return self._project.objects.read(self).field_of_view
 
     @field_of_view.setter
-    def field_of_view(self, value: Cone) -> None:
+    def field_of_view(self, value: FieldOfView) -> None:
         self.update(field_of_view=value)
 
     @property
@@ -184,14 +184,13 @@ class SensorHandle(ObjectHandle):
     def pointing(self, value: Pointing) -> None:
         self.update(pointing=value)
 
-    def update(self, *, name: str | Unset = UNSET, field_of_view: Cone | Unset = UNSET,
+    def update(self, *, name: str | Unset = UNSET, field_of_view: FieldOfView | Unset = UNSET,
                pointing: Pointing | Unset = UNSET) -> None:
         patch = n.SensorUpdate()
         if name is not UNSET:
             patch.name = require(name, str, "name")
         if field_of_view is not UNSET:
-            cone = require(field_of_view, Cone, "field_of_view")
-            patch.half_angle_rad = require(cone.half_angle, u.Angle, "half_angle").radians
+            patch.pattern = _to_native(field_of_view)
         if pointing is not UNSET:
             patch.pointing = require(pointing, Pointing, "pointing")._native()
         self._project._manager().update(self._ref, patch)
@@ -281,11 +280,11 @@ class ObjectCollection:
             require(minimum_elevation, u.Angle, "minimum_elevation").radians)
         return GroundStationHandle(self._project, self._project._manager().create(definition))
 
-    def sensor(self, name: str, *, parent: SatelliteHandle, field_of_view: Cone,
+    def sensor(self, name: str, *, parent: SatelliteHandle, field_of_view: FieldOfView,
                pointing: Pointing = Pointing()) -> SensorHandle:
         definition = n.SensorDefinition(require(name, str, "name"),
             require(parent, SatelliteHandle, "parent")._ref,
-            require(require(field_of_view, Cone, "field_of_view").half_angle, u.Angle, "half_angle").radians,
+            _to_native(field_of_view),
             require(pointing, Pointing, "pointing")._native())
         return SensorHandle(self._project, self._project._manager().create(definition))
 
@@ -307,7 +306,7 @@ class ObjectCollection:
                                      u.m(state.location.height_m))
             return GroundStationState(obj.id, state.name, location, u.rad(state.minimum_elevation_rad))
         pointing = Pointing(state.target_station_id, self._project) if state.pointing == n.SensorPointing.TARGETED else Pointing()
-        return SensorState(obj.id, state.name, state.parent_satellite_id, Cone(u.rad(state.half_angle_rad)), pointing)
+        return SensorState(obj.id, state.name, state.parent_satellite_id, _from_native(state.pattern), pointing)
 
     def rename(self, obj: ObjectHandle, name: str) -> None:
         self._project._manager().rename(require(obj, ObjectHandle, "object")._ref, require(name, str, "name"))
@@ -320,10 +319,10 @@ class ObjectCollection:
                location: Wgs84Location | Unset = UNSET, minimum_elevation: u.Angle | Unset = UNSET) -> None: ...
     @overload
     def update(self, obj: SensorHandle, *, name: str | Unset = UNSET,
-               field_of_view: Cone | Unset = UNSET, pointing: Pointing | Unset = UNSET) -> None: ...
+               field_of_view: FieldOfView | Unset = UNSET, pointing: Pointing | Unset = UNSET) -> None: ...
     def update(self, obj: ObjectHandle, *, name: str | Unset = UNSET, orbit: Orbit | Unset = UNSET,
                display: OrbitStyle | Unset = UNSET, location: Wgs84Location | Unset = UNSET,
-               minimum_elevation: u.Angle | Unset = UNSET, field_of_view: Cone | Unset = UNSET,
+               minimum_elevation: u.Angle | Unset = UNSET, field_of_view: FieldOfView | Unset = UNSET,
                pointing: Pointing | Unset = UNSET) -> None:
         self._project._manager().read(require(obj, ObjectHandle, "object")._ref)
         values = {"name": name, "orbit": orbit, "display": display, "location": location,

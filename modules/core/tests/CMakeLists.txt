@@ -41,7 +41,7 @@ target_compile_definitions(orbitforge_core_tests PRIVATE
     ORBITFORGE_MASS_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/mass.txt"
     ORBITFORGE_DRAG_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/drag.txt"
     ORBITFORGE_HPOP_REFERENCE="${PROJECT_SOURCE_DIR}/tests/reference/propagators/hpop.txt")
-target_sources(orbitforge_core_tests PRIVATE orbit_design_test.cpp)
+target_sources(orbitforge_core_tests PRIVATE orbit_design_test.cpp sensor_test.cpp)
 target_link_libraries(orbitforge_core_tests PRIVATE OrbitForge::Core GTest::gtest_main)
 orbitforge_warnings(orbitforge_core_tests)
 orbitforge_copy_runtime_dlls(orbitforge_core_tests)

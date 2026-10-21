@@ -1,4 +1,5 @@
 orbitforge_module(orbitforge_core Core
+    src/propagation/sensor.cpp
     src/propagation/orbit_design.cpp
     src/propagation/circular_two_body.cpp src/propagation/ground_station.cpp src/frames/position_rotation.cpp
     src/frames/state_transform.cpp src/propagation/tle.cpp src/propagation/access.cpp src/propagation/lighting.cpp src/propagation/orbital_events.cpp src/propagation/relative_motion.cpp src/propagation/coverage.cpp
