@@ -1,9 +1,9 @@
 #include <cmath>
 #include <numbers>
-#include <orbitforge/core/propagation/ground_station.hpp>
+#include <orbelle/core/propagation/ground_station.hpp>
 #include <stdexcept>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 std::array<double, 3> ground_station_position(GroundStationLocation location) {
     const auto [longitude, latitude, height] = location;
     if (!std::isfinite(longitude) || !std::isfinite(latitude) || !std::isfinite(height) ||
@@ -23,4 +23,4 @@ GroundStation::GroundStation(GroundStationLocation location)
 CartesianState GroundStation::state_at(Epoch epoch) const {
     return {epoch, OriginId::earth, FrameId::itrf, position_, {0, 0, 0}};
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

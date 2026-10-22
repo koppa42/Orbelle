@@ -1,5 +1,5 @@
 // Compiles with the pinned, unmodified NASA GMAT scalar model and API-only stubs.
-// No OrbitForge headers/libraries or physical calculations in the stubs.
+// No Orbelle headers/libraries or physical calculations in the stubs.
 #include "AtmosphereModel.hpp"
 #include <cmath>
 #include <cstdio>
@@ -20,7 +20,7 @@ int main() {
     const double geometry[][3] = {{60, .2, 1.2}, {-80, -.3, -1.8}, {0, .4, .8}, {80, -.2, 2.6}};
     const double weather[][3] = {{70, 80, 0}, {150, 150, 3}, {250, 220, 8.5}};
     puts("# NASA GMAT c9b78bd scalar JR; original numerical methods, kg/m3; independent of "
-         "OrbitForge");
+         "Orbelle");
     puts("# year month day UTC_seconds altitude_m latitude_rad longitude_rad solar_hour_angle_rad "
          "sun_declination_rad f107 f107_average kp density_kg_m3");
     for (int d = 0; d < 3; d++)

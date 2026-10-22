@@ -2,9 +2,9 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <numbers>
-#include <orbitforge/core/propagation/circular_two_body.hpp>
+#include <orbelle/core/propagation/circular_two_body.hpp>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 
 TEST(Epoch, KeepsAdjacentNanosecondsAtLargeEpoch) {
     EXPECT_DOUBLE_EQ(

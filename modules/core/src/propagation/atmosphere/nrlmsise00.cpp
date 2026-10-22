@@ -14,15 +14,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-// C++ adaptation by OrbitForge: local scratch state, SI API, daily or historical Ap.
+// C++ adaptation by Orbelle: local scratch state, SI API, daily or historical Ap.
 #include "../atmosphere_models.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <numbers>
-#include <orbitforge/core/propagation/state_provider.hpp>
+#include <orbelle/core/propagation/state_provider.hpp>
 #include <span>
-namespace orbitforge::core::detail {
+namespace orbelle::core::detail {
 namespace {
 constexpr int HELIUM = 0;
 constexpr int ATOMIC_OXYGEN = 1;
@@ -1627,4 +1627,4 @@ AtmosphereEvaluation nrlmsise00(const AtmosphereInput &input, int doy, double se
     return {output.densities[TOTAL_MASS], output.temperatures[ALTITUDE],
             output.temperatures[EXOSPHERIC]};
 }
-} // namespace orbitforge::core::detail
+} // namespace orbelle::core::detail

@@ -1,13 +1,13 @@
 # C++ 项目 API
 
-日常 SDK 使用 `<orbitforge/orbitforge.hpp>`，链接 `OrbitForge::Runtime`。`orbitforge::Project` 把对象编辑、分析准备、数据确认和项目保存连接起来，内部直接使用与 Python 相同的 Application 文档和 Runtime 计划。公共头文件不依赖 Qt、Python、VSG 或 Rocky；专用 Provider 接口仍使用各自模块头文件。
+日常 SDK 使用 `<orbelle/orbelle.hpp>`，链接 `Orbelle::Runtime`。`orbelle::Project` 把对象编辑、分析准备、数据确认和项目保存连接起来，内部直接使用与 Python 相同的 Application 文档和 Runtime 计划。公共头文件不依赖 Qt、Python、VSG 或 Rocky；专用 Provider 接口仍使用各自模块头文件。
 
 ## 创建、编辑与查询
 
 ```cpp
-#include <orbitforge/orbitforge.hpp>
+#include <orbelle/orbelle.hpp>
 
-namespace of = orbitforge;
+namespace of = orbelle;
 using namespace std::chrono_literals;
 
 int main() {
@@ -31,15 +31,15 @@ int main() {
         {.columns = {{"time.epoch", "", "TAI"}, {"state.x", "km", "Position X"}},
          .time_scale = of::ReportTimeScale::tai});
 
-    project.save("observation.orbitforge", analysis);
-    auto reopened = of::Project::open("observation.orbitforge");
+    project.save("observation.orbelle", analysis);
+    auto reopened = of::Project::open("observation.orbelle");
     auto restored_satellite = reopened.objects().get(satellite.id());
 }
 ```
 
-该示例不需要外部数据文件；默认卫星的通用二体传播需要启用 CSPICE（`ORBITFORGE_WITH_SPICE=ON`，如 `astronomy` 预设）。创建自定义轨道时传入 `of::OrbitInput`，其 `initial` 为 SI 制 Cartesian 状态。地面站经纬度、最低仰角、传感器半锥角均为弧度，椭球高为米。`Epoch` 为从 2000-01-01 12:00:00 TAI 起算的 int64 纳秒，采样步长使用 `std::chrono` 整数时长。C++ 强类型轨道配置、单位构造器仍待后续实施，不应把 Python 的 `of.orbits` / `of.units` 示例直接当成 C++ 接口。
+该示例不需要外部数据文件；默认卫星的通用二体传播需要启用 CSPICE（`ORBELLE_WITH_SPICE=ON`，如 `astronomy` 预设）。创建自定义轨道时传入 `of::OrbitInput`，其 `initial` 为 SI 制 Cartesian 状态。地面站经纬度、最低仰角、传感器半锥角均为弧度，椭球高为米。`Epoch` 为从 2000-01-01 12:00:00 TAI 起算的 int64 纳秒，采样步长使用 `std::chrono` 整数时长。C++ 强类型轨道配置、单位构造器仍待后续实施，不应把 Python 的 `of.orbits` / `of.units` 示例直接当成 C++ 接口。
 
-可运行示例为 [`examples/cpp/project_analysis.cpp`](../../examples/cpp/project_analysis.cpp)，启用 CSPICE 时生成 `orbitforge_project_example`。独立安装验证 [`sdk_consumer/project_api.cpp`](../../tests/packaging/sdk_consumer/project_api.cpp) 仅包含聚合头文件，通过地面站 ITRF 状态完成编辑、查询、报告、保存与重开；这条基础流程不依赖天文库。
+可运行示例为 [`examples/cpp/project_analysis.cpp`](../../examples/cpp/project_analysis.cpp)，启用 CSPICE 时生成 `orbelle_project_example`。独立安装验证 [`sdk_consumer/project_api.cpp`](../../tests/packaging/sdk_consumer/project_api.cpp) 仅包含聚合头文件，通过地面站 ITRF 状态完成编辑、查询、报告、保存与重开；这条基础流程不依赖天文库。
 
 HPOP 的球形太阳辐射压使用 `OrbitInput.hpop.srp`（`core::SrpOptions`）；无阴影、圆柱和双锥枚举为 `core::SrpShadowModel`。Cr、面积质量比、半径、光压与参考距离均为 SI，详见[光压契约](solar_radiation_pressure.md)。即使所有第三体引力关闭，启用光压仍须通过 `DataSnapshot` 提供太阳星历；月球遮挡启用时还须月球。分析、报告和保存时捕获同一不可变数据身份，低层几何检查可直接调用 `core::evaluate_srp`。
 
@@ -91,9 +91,9 @@ auto aer = analysis.aer(station, sensor, 10s);
 ## 安装后链接
 
 ```cmake
-find_package(OrbitForge CONFIG REQUIRED COMPONENTS Runtime)
+find_package(Orbelle CONFIG REQUIRED COMPONENTS Runtime)
 add_executable(mission main.cpp)
-target_link_libraries(mission PRIVATE OrbitForge::Runtime)
+target_link_libraries(mission PRIVATE Orbelle::Runtime)
 ```
 
 组件层的 `application::ProjectDocument` 与 `runtime::prepare()` 继续作为适配层入口，门面没有第二套校验、计算或持久化实现。桌面报告通过 `ProjectDocument` 捕获已发布场景，在后台准备 `Analysis` 并生成结果；可用的科学 Session 从当前场景缓存复用，地图可见性联动使用该分析捕获的资源。工作台的对象应用与图形场景准备仍需进一步接入同一文档、事务和计划，当前报告捕获的文档修订不代表整个工作台的编辑次数。
@@ -103,4 +103,4 @@ target_link_libraries(mission PRIVATE OrbitForge::Runtime)
 
 ### 海潮资源
 
-聚合头 `orbitforge/orbitforge.hpp` 导出 `core::OceanTideOptions`、`OceanTideModel` 与 `runtime::load_ocean_tides`。HPOP 设置 `ocean_tides = {true, "fes2014bv1", 4, 4}`；资源通过 `DataSnapshot::with_ocean_tide_file(id, path)`、`with_ocean_tides(id, shared_ptr<const OceanTideModel>)` 或目录安装注入。资源只读并由分析共享持有，核心传播不读文件、不联网。关闭或阶数小于 2 时无需海潮数据；活动阶次超出资源范围明确失败。GM/半径缩放、时间和 EOP 约定见[海潮契约](ocean_tides.md)。
+聚合头 `orbelle/orbelle.hpp` 导出 `core::OceanTideOptions`、`OceanTideModel` 与 `runtime::load_ocean_tides`。HPOP 设置 `ocean_tides = {true, "fes2014bv1", 4, 4}`；资源通过 `DataSnapshot::with_ocean_tide_file(id, path)`、`with_ocean_tides(id, shared_ptr<const OceanTideModel>)` 或目录安装注入。资源只读并由分析共享持有，核心传播不读文件、不联网。关闭或阶数小于 2 时无需海潮数据；活动阶次超出资源范围明确失败。GM/半径缩放、时间和 EOP 约定见[海潮契约](ocean_tides.md)。

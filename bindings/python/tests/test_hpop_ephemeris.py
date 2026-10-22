@@ -1,7 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import math
 import unittest
-import orbitforge as of
+import orbelle as of
 
 
 def orbit(method=of.HpopIntegrator.RKF78):

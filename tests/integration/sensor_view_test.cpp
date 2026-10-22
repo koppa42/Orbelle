@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
-#ifdef ORBITFORGE_HAS_VISUALIZATION
+#ifdef ORBELLE_HAS_VISUALIZATION
 #include <cmath>
 #include <numbers>
-#include <orbitforge/visualization/sensor_view.hpp>
-using namespace orbitforge;
+#include <orbelle/visualization/sensor_view.hpp>
+using namespace orbelle;
 namespace {
 constexpr double d = std::numbers::pi / 180;
 void on_earth(const visualization::SensorMesh &mesh) {

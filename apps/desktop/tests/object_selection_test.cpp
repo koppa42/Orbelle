@@ -16,7 +16,7 @@
 #include <QVBoxLayout>
 #include <gtest/gtest.h>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 class ObjectSelectionTest : public ::testing::Test {
   protected:
@@ -61,7 +61,7 @@ class ObjectSelectionTest : public ::testing::Test {
         QApplication::sendEvent(&widget, &release);
     }
     static void capture(QWidget &widget, const QString &name) {
-        const auto directory = qEnvironmentVariable("ORBITFORGE_OBJECT_UI_CAPTURE");
+        const auto directory = qEnvironmentVariable("ORBELLE_OBJECT_UI_CAPTURE");
         if (directory.isEmpty())
             return;
         ASSERT_TRUE(QDir{}.mkpath(directory));
@@ -254,4 +254,4 @@ TEST_F(ObjectSelectionTest, NarrowLayoutsElideLongNamesWithoutExpandingWindow) {
     capture(host, "compact-field");
 }
 } // namespace
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

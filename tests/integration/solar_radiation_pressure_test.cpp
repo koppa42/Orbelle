@@ -1,10 +1,10 @@
 #include <chrono>
 #include <gtest/gtest.h>
-#include <orbitforge/orbitforge.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/hpop.hpp>
+#include <orbelle/orbelle.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/hpop.hpp>
 
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 application::Project input(core::Epoch first = core::Epoch{0}) {
     application::Project p{"SRP", first, core::Epoch{first.tai_nanoseconds() + 600000000000}};
@@ -24,7 +24,7 @@ class SrpFiles : public ::testing::Test {
   protected:
     std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        ("orbitforge-srp-" +
+        ("orbelle-srp-" +
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     void SetUp() override { std::filesystem::create_directories(root); }
     void TearDown() override { std::filesystem::remove_all(root); }
@@ -77,7 +77,7 @@ TEST(SrpPersistence, StoresInactiveDraftsButHashesOnlyEffectiveInputs) {
 TEST_F(SrpFiles, SrpOnlyUsesImmutableSpiceAcrossSessionReportAndReopen) {
     if (!runtime::ephemeris_available())
         GTEST_SKIP();
-    auto raw = runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root);
+    auto raw = runtime::load_spice_snapshot(ORBELLE_INTEGRATION_SPICE, root);
     auto p = input(core::Epoch{raw->data_info().first_epoch.tai_nanoseconds() + 600000000000});
     const auto ephemeris = runtime::make_third_body_ephemeris(std::move(raw));
     const auto data = runtime::DataSnapshot::builtin_time().with_ephemeris("de440s", ephemeris);
@@ -107,8 +107,8 @@ TEST_F(SrpFiles, SrpOnlyUsesImmutableSpiceAcrossSessionReportAndReopen) {
     ASSERT_EQ(report.table.rows().size(), 3U);
     for (std::size_t axis = 0; axis < 3; ++axis)
         EXPECT_EQ(std::get<double>(report.table.rows().back()[4 + axis]), state.position_m[axis]);
-    project.save(root / "srp.orbitforge", analysis);
-    const auto reopened = Project::open(root / "srp.orbitforge", data);
+    project.save(root / "srp.orbelle", analysis);
+    const auto reopened = Project::open(root / "srp.orbelle", data);
     EXPECT_EQ(reopened.to_data().satellites[0].orbit.hpop.srp, orbit.hpop.srp);
     ASSERT_EQ(reopened.to_data().force_data.size(), 1U);
     EXPECT_EQ(reopened.to_data().force_data[0].role, "ephemeris/de440s");

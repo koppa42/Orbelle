@@ -3,10 +3,10 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
-#include <orbitforge/runtime/j2.hpp>
-#include <orbitforge/runtime/project.hpp>
+#include <orbelle/runtime/j2.hpp>
+#include <orbelle/runtime/project.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 application::Session make_orbit_session(const OrbitInput &input, std::uint64_t revision,
                                         const core::ITimeProvider *time,
                                         core::HpopEnvironment environment) {
@@ -165,4 +165,4 @@ bool cache_covers(const OrbitScene &orbit, core::Epoch first, core::Epoch last) 
     return nodes.front().epoch.tai_nanoseconds() <= first.tai_nanoseconds() &&
            nodes.back().epoch.tai_nanoseconds() >= last.tai_nanoseconds();
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

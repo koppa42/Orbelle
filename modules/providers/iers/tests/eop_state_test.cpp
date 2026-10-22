@@ -8,17 +8,17 @@
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <numbers>
-#include <orbitforge/core/propagation/circular_two_body.hpp>
-#include <orbitforge/providers/erfa/provider.hpp>
-#include <orbitforge/providers/iers/eop_snapshot.hpp>
+#include <orbelle/core/propagation/circular_two_body.hpp>
+#include <orbelle/providers/erfa/provider.hpp>
+#include <orbelle/providers/iers/eop_snapshot.hpp>
 #include <picosha2.h>
 #include <sstream>
 
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 constexpr double arcsec = std::numbers::pi / (180 * 3600);
 auto load(const core::ITimeProvider &time) {
-    return providers::iers::load_eop_snapshot(ORBITFORGE_EOP_SAMPLE, time);
+    return providers::iers::load_eop_snapshot(ORBELLE_EOP_SAMPLE, time);
 }
 core::Epoch shift(core::Epoch epoch, double seconds) {
     return core::Epoch(epoch.tai_nanoseconds() +
@@ -29,7 +29,7 @@ std::string read(const std::filesystem::path &path) {
     return {std::istreambuf_iterator<char>(stream), {}};
 }
 std::filesystem::path fixture(const std::string &data, nlohmann::json manifest) {
-    const auto dir = std::filesystem::path(ORBITFORGE_EOP_TEST_DIR) /
+    const auto dir = std::filesystem::path(ORBELLE_EOP_TEST_DIR) /
                      ::testing::UnitTest::GetInstance()->current_test_info()->name();
     std::filesystem::create_directories(dir);
     manifest["sha256"] = picosha2::hash256_hex_string(data);
@@ -66,9 +66,9 @@ TEST(IersEop, PublishedNodesUseSiUnitsAndLeapOffsets) {
 }
 TEST(IersImport, ConcurrentImportsAreIdempotentAndIndependentOfTheSource) {
     const auto time = providers::erfa::make_builtin_time_provider();
-    const auto original_manifest = nlohmann::json::parse(read(ORBITFORGE_EOP_SAMPLE));
+    const auto original_manifest = nlohmann::json::parse(read(ORBELLE_EOP_SAMPLE));
     const auto original_data =
-        read(std::filesystem::path(ORBITFORGE_EOP_SAMPLE).parent_path() / "eop.c04");
+        read(std::filesystem::path(ORBELLE_EOP_SAMPLE).parent_path() / "eop.c04");
     const auto source = fixture(original_data, original_manifest);
     const auto store = source.parent_path() / "store";
     auto first = std::async(std::launch::async, [&] {
@@ -99,9 +99,9 @@ TEST(IersImport, ConcurrentImportsAreIdempotentAndIndependentOfTheSource) {
 }
 TEST(IersImport, FinalsSnapshotAndInvalidManifestNeverPublishPartialData) {
     const auto time = providers::erfa::make_builtin_time_provider();
-    auto manifest = nlohmann::json::parse(read(ORBITFORGE_FINALS_SAMPLE));
+    auto manifest = nlohmann::json::parse(read(ORBELLE_FINALS_SAMPLE));
     const auto bytes =
-        read(std::filesystem::path(ORBITFORGE_FINALS_SAMPLE).parent_path() / "finals2000A.data");
+        read(std::filesystem::path(ORBELLE_FINALS_SAMPLE).parent_path() / "finals2000A.data");
     const auto source = fixture(bytes, manifest);
     const auto store = source.parent_path() / "store";
     const auto saved = providers::iers::import_eop_snapshot(source, store, *time);
@@ -118,7 +118,7 @@ TEST(IersImport, FinalsSnapshotAndInvalidManifestNeverPublishPartialData) {
 
 TEST(IersFinals, PublishedPredictedValuesUnitsProvenanceAndNoExtrapolation) {
     const auto time = providers::erfa::make_builtin_time_provider();
-    const auto table = providers::iers::load_eop_snapshot(ORBITFORGE_FINALS_SAMPLE, *time);
+    const auto table = providers::iers::load_eop_snapshot(ORBELLE_FINALS_SAMPLE, *time);
     const auto epoch = time->from_utc({2026, 10, 9, 0, 0, 0, 0});
     const auto sample = table->at(epoch).sample;
     EXPECT_NEAR(sample.ut1_minus_tai_seconds, -37.0302856, 1e-12);
@@ -142,9 +142,9 @@ TEST(IersFinals, PublishedPredictedValuesUnitsProvenanceAndNoExtrapolation) {
 
 TEST(IersFinals, RejectsMissingCpoFlagsAndNonfiniteRecords) {
     const auto time = providers::erfa::make_builtin_time_provider();
-    const auto manifest = nlohmann::json::parse(read(ORBITFORGE_FINALS_SAMPLE));
+    const auto manifest = nlohmann::json::parse(read(ORBELLE_FINALS_SAMPLE));
     const auto original =
-        read(std::filesystem::path(ORBITFORGE_FINALS_SAMPLE).parent_path() / "finals2000A.data");
+        read(std::filesystem::path(ORBELLE_FINALS_SAMPLE).parent_path() / "finals2000A.data");
     auto invalid = original;
     invalid[95] = ' ';
     EXPECT_THROW((void)providers::iers::load_eop_snapshot(fixture(invalid, manifest), *time),
@@ -161,7 +161,7 @@ TEST(IersFinals, RejectsMissingCpoFlagsAndNonfiniteRecords) {
 
 TEST(IersFinals, PredictionProvenanceIncludesInterpolantDerivativeDependencies) {
     const auto time = providers::erfa::make_builtin_time_provider();
-    const auto table = providers::iers::load_eop_snapshot(ORBITFORGE_FINALS_SAMPLE, *time);
+    const auto table = providers::iers::load_eop_snapshot(ORBELLE_FINALS_SAMPLE, *time);
     for (const auto &[date, mask] :
          {std::pair{core::UtcDateTime{2026, 9, 21, 0, 0, 0, 0}, "prediction-mask=0"},
           std::pair{core::UtcDateTime{2026, 9, 21, 12, 0, 0, 0}, "prediction-mask=4"},
@@ -185,7 +185,7 @@ TEST(IersEop, CoverageIsClosedAndNeverExtrapolated) {
 
 TEST(IersEop, HermiteReproducesIndependentCubicAcrossLeapDay) {
     const auto time = providers::erfa::make_builtin_time_provider();
-    auto manifest = nlohmann::json::parse(read(ORBITFORGE_EOP_SAMPLE));
+    auto manifest = nlohmann::json::parse(read(ORBELLE_EOP_SAMPLE));
     manifest["first_mjd"] = 57752;
     manifest["last_mjd"] = 57754;
     std::ostringstream data;
@@ -213,8 +213,8 @@ TEST(IersEop, HermiteReproducesIndependentCubicAcrossLeapDay) {
 
 TEST(IersEop, RejectsCorruptionMissingDaysAndWrongSchema) {
     const auto time = providers::erfa::make_builtin_time_provider();
-    auto manifest = nlohmann::json::parse(read(ORBITFORGE_EOP_SAMPLE));
-    const auto data = read(std::filesystem::path(ORBITFORGE_EOP_SAMPLE).parent_path() / "eop.c04");
+    auto manifest = nlohmann::json::parse(read(ORBELLE_EOP_SAMPLE));
+    const auto data = read(std::filesystem::path(ORBELLE_EOP_SAMPLE).parent_path() / "eop.c04");
     const auto path = fixture(data, manifest);
     std::ofstream(path.parent_path() / "eop.c04", std::ios::app) << "# altered bytes\n";
     EXPECT_THROW((void)providers::iers::load_eop_snapshot(path, *time), core::EopDataError);
@@ -236,8 +236,8 @@ TEST(IersEop, RejectsCorruptionMissingDaysAndWrongSchema) {
 TEST(IersEop, ProvenanceDistinguishesWindowsWithDifferentBoundaryRates) {
     const auto time = providers::erfa::make_builtin_time_provider();
     const auto full = load(*time);
-    auto manifest = nlohmann::json::parse(read(ORBITFORGE_EOP_SAMPLE));
-    const auto data = read(std::filesystem::path(ORBITFORGE_EOP_SAMPLE).parent_path() / "eop.c04");
+    auto manifest = nlohmann::json::parse(read(ORBELLE_EOP_SAMPLE));
+    const auto data = read(std::filesystem::path(ORBELLE_EOP_SAMPLE).parent_path() / "eop.c04");
     manifest["first_mjd"] = 57751;
     const auto clipped = providers::iers::load_eop_snapshot(fixture(data, manifest), *time);
     const auto epoch = clipped->data_info().first_epoch;

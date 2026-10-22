@@ -6,7 +6,7 @@ import math
 import os
 from pathlib import Path
 import subprocess
-import orbitforge as of
+import orbelle as of
 
 
 def sha(path):
@@ -28,7 +28,7 @@ def main():
         jars.append(str(path.resolve()))
     args.output.mkdir(parents=True, exist_ok=False)
     classpath = os.pathsep.join(jars)
-    java = reference / 'OrbitForgeTwoBodyReference.java'
+    java = reference / 'OrbelleTwoBodyReference.java'
     subprocess.run(['javac', '-cp', classpath, '-d', str(args.output), str(java)], check=True)
     mu = 3.986004418e14
     cases = [
@@ -62,7 +62,7 @@ def main():
             actual_rows.append([name, dt, *state.position_m, *state.velocity_mps])
     inputs = '\n'.join(rows) + '\n'
     result = subprocess.run(['java', '-cp', str(args.output.resolve()) + os.pathsep + classpath,
-                             'OrbitForgeTwoBodyReference'], input=inputs, text=True,
+                             'OrbelleTwoBodyReference'], input=inputs, text=True,
                             capture_output=True, check=True)
     expected = [line.split(',') for line in result.stdout.splitlines()]
     if len(expected) != 63 or len(actual_rows) != 63 or any(len(row) != 8 for row in expected):

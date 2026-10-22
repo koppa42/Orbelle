@@ -5,7 +5,7 @@
 #include <gtest/gtest.h>
 #include <stdexcept>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 TEST(DesktopText, EmbeddedCatalogueDoesNotDependOnWorkingDirectory) {
     const auto previous = QDir::currentPath();
     QTemporaryDir directory;
@@ -38,4 +38,4 @@ TEST(DesktopText, PlaceholdersUnicodeAndLineBreaksArePreserved) {
     EXPECT_EQ(ui::text("common.object_id_hint").arg("station-1"),
               QString::fromUtf8("ID：station-1"));
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

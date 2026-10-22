@@ -5,7 +5,7 @@
 #include <fstream>
 #include <limits>
 #include <map>
-#include <orbitforge/runtime/gravity.hpp>
+#include <orbelle/runtime/gravity.hpp>
 #include <picosha2.h>
 #include <sstream>
 #ifdef _WIN32
@@ -20,7 +20,7 @@
 #include <bcrypt.h>
 #endif
 
-namespace orbitforge::runtime {
+namespace orbelle::runtime {
 namespace {
 void require(bool ok, const char *message) {
     if (!ok)
@@ -511,4 +511,4 @@ application::DataReference gravity_reference(const std::string &selection,
     return {"gravity/" + selection, info.model, info.sha256, version,
             picosha2::hash256_hex_string(config.str())};
 }
-} // namespace orbitforge::runtime
+} // namespace orbelle::runtime

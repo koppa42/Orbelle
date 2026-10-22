@@ -24,17 +24,17 @@
 
 清单字节顺序：
 
-1. 字符串 `orbitforge-data-lock-v1`。
+1. 字符串 `orbelle-data-lock-v1`。
 2. 引用数量 `u32`。
 3. 每个引用的五个字符串，顺序与上表相同。
 
 对这些字节计算总 SHA-256；总哈希不包含自身。`canonical_bytes()` 暴露同一编码，供其他实现独立验证。空清单明确表示尚未绑定数据，其 SHA-256 为 `81700a60bcada79003d1ea38a39cbea749f3997c1cdea22737be0bee6b7aeab1`。
 
-`utc-time` 使用解释版本 `orbitforge-utc-tai-v1`。其配置依次编码该版本字符串、UTC 有效 MJD 起点 `u32`、终点 `u32`，再取 SHA-256；文件内容哈希对应时间数据原文。
+`utc-time` 使用解释版本 `orbelle-utc-tai-v1`。其配置依次编码该版本字符串、UTC 有效 MJD 起点 `u32`、终点 `u32`，再取 SHA-256；文件内容哈希对应时间数据原文。
 
-禁止外推时，`earth-orientation` 使用解释版本 `orbitforge-eop-reader-v1`。其配置依次编码该版本字符串、参考系字符串、插值版本字符串、覆盖起止 TAI 纳秒各 `i64`（补码小端）、**仅含上述时间引用的 DataLock 总哈希字符串**，再取 SHA-256。因此时间内容、版本 ID 或有效期改变，即使 EOP 文件不变，也会改变 EOP 配置及整个数据锁。EOP 内容哈希对应实际读取的快照文件；如果该文件是源文件的截取子集，不能拿完整下载源文件的哈希替代。
+禁止外推时，`earth-orientation` 使用解释版本 `orbelle-eop-reader-v1`。其配置依次编码该版本字符串、参考系字符串、插值版本字符串、覆盖起止 TAI 纳秒各 `i64`（补码小端）、**仅含上述时间引用的 DataLock 总哈希字符串**，再取 SHA-256。因此时间内容、版本 ID 或有效期改变，即使 EOP 文件不变，也会改变 EOP 配置及整个数据锁。EOP 内容哈希对应实际读取的快照文件；如果该文件是源文件的截取子集，不能拿完整下载源文件的哈希替代。
 
-实际计算需要外推时，解释版本改为 `orbitforge-eop-reader-v2`。配置编码为版本、参考系、原插值版本、原始覆盖起止 TAI 纳秒、字符串 `endpoint-linear-tai-v1`、最大外推天数 `u32`（1–30）、仅含时间引用的 DataLock 总哈希字符串；再取 SHA-256。文件内容哈希不变。策略与原始数据分离，不能通过修改 first/last 冒充新增样本。实际外推时段可由项目分析区间与原始覆盖计算。
+实际计算需要外推时，解释版本改为 `orbelle-eop-reader-v2`。配置编码为版本、参考系、原插值版本、原始覆盖起止 TAI 纳秒、字符串 `endpoint-linear-tai-v1`、最大外推天数 `u32`（1–30）、仅含时间引用的 DataLock 总哈希字符串；再取 SHA-256。文件内容哈希不变。策略与原始数据分离，不能通过修改 first/last 冒充新增样本。实际外推时段可由项目分析区间与原始覆盖计算。
 
 解释或规范编码发生不兼容变化时必须使用新版本，同步更新项目格式并拒绝旧文件，不能修改版本的既有含义。SHA-256 核验内容及身份一致性，不认证数据发布者。
 
@@ -67,9 +67,9 @@ C++ 提供 `DataReference`、`DataLock`、`eop_data_lock`、`Project::data_lock(
 
 ```python
 import hashlib
-import orbitforge as of
+import orbelle as of
 
-project = of.load_project('mission.orbitforge')
+project = of.load_project('mission.orbelle')
 lock = project.data_lock
 assert hashlib.sha256(lock.canonical_bytes()).hexdigest() == lock.sha256
 assert project.to_scenario().data_lock.sha256 == lock.sha256

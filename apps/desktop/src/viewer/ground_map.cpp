@@ -17,7 +17,7 @@
 #include <rocky/Ellipsoid.h>
 #include <stdexcept>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 bool draw_track(QPainter &painter, const QPainterPath &path,
                 const std::atomic_bool *cancelled = nullptr) {
@@ -1433,4 +1433,4 @@ bool GroundMap::event(QEvent *event) {
         finish_drag();
     return QWidget::event(event);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -2,7 +2,7 @@
 
 ## 补充工作流基准
 
-可选目标 `orbitforge_workflow_benchmark` 衡量项目读写、科学插值、覆盖及场景装配。它与下述固定吞吐量协议分别报告，不替代独立数值参考。使用 `cmake --build --preset compute-benchmark --target orbitforge_workflow_benchmark` 构建 Release，然后运行 `orbitforge_workflow_benchmark data/samples out/validation/<新目录>`；添加 `--scenario-only` 单独测量场景装配。不同配置使用同一数据目录、编译器及优化选项。
+可选目标 `orbelle_workflow_benchmark` 衡量项目读写、科学插值、覆盖及场景装配。它与下述固定吞吐量协议分别报告，不替代独立数值参考。使用 `cmake --build --preset compute-benchmark --target orbelle_workflow_benchmark` 构建 Release，然后运行 `orbelle_workflow_benchmark data/samples out/validation/<新目录>`；添加 `--scenario-only` 单独测量场景装配。不同配置使用同一数据目录、编译器及优化选项。
 
 每项先预热一次，再测量三次；记录全部毫秒耗时、操作数及完整输出摘要。计时包括公开接口调用、结果分配及上轮结果替换；结果校验和摘要在计时之外。性能比较使用至少三组顺序交替的 A/B 进程，报告每组中位数及其中位数，保留二进制、源码、构建配置、输入及主机指纹。不可将工作流耗时直接解释为磁盘延迟、界面输入延迟或整体帧率。
 
@@ -65,12 +65,12 @@ CSPICE 使用 `de440s_2016_leap` 的冻结 LSK/SPK，target=10/301，observer=39
 
 ## 算法热点诊断
 
-`orbitforge_algorithm_benchmark` 是单独的显式 Release 目标，不加入普通构建或 CTest 耗时门槛，也不改变上述六项基线协议：
+`orbelle_algorithm_benchmark` 是单独的显式 Release 目标，不加入普通构建或 CTest 耗时门槛，也不改变上述六项基线协议：
 
 ```powershell
-cmake --build --preset compute-benchmark --target orbitforge_algorithm_benchmark
+cmake --build --preset compute-benchmark --target orbelle_algorithm_benchmark
 $env:PATH = "$PWD/out/dependencies/installed/x64-windows/bin;$env:PATH"
-out/build/compute-benchmark/benchmarks/compute/Release/orbitforge_algorithm_benchmark.exe data/samples out/validation/algorithm-before
+out/build/compute-benchmark/benchmarks/compute/Release/orbelle_algorithm_benchmark.exe data/samples out/validation/algorithm-before
 ```
 
 输出目录必须不存在。每项预热一次、测量五次，记录全部墙钟毫秒、中位数和输出摘要。计时包含结果分配及调用，但不含随后对输出的完整读取、摘要和重复一致性检查。工作量固定为：

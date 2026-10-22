@@ -38,7 +38,7 @@
 
 复制卫星同时复制子传感器并生成新 ID；删除卫星同时删除子传感器。传感器可单独重命名、复制和删除。被 Targeted 传感器引用的站点不能直接删除，须先修改指向或删除传感器。无效父对象、目标、非有限半角和重复 ID 均在发布／保存前拒绝。
 
-当前项目 v47 使用 GSTN v2 保存最低仰角、必需的 SNSR v2 保存传感器，并支持报告类型 7（Access）和 8（AER）。开发阶段仅读写当前格式，不从旧文件补默认值；详见[文件布局](project_files.md)。Access 配置可保存为报告模板，计算结果仍按报告契约导出，不写入项目。
+当前项目 v48 使用 GSTN v2 保存最低仰角、必需的 SNSR v2 保存传感器，并支持报告类型 7（Access）和 8（AER）。开发阶段仅读写当前格式，不从旧文件补默认值；详见[文件布局](project_files.md)。Access 配置可保存为报告模板，计算结果仍按报告契约导出，不写入项目。
 
 ## 几何视场与显示
 
@@ -56,11 +56,11 @@ Visualization 缓存角域网格。每帧只采样已有 ITRF 显示轨迹，并
 
 表单靠左上方排列，内容区最多 640 个逻辑像素，避免宽工作区把输入框和示意图拉散。宽面板使用分组侧栏，中等宽度使用页签，窄面板使用页面选择器，成对参数与示意图按实际可用宽度重排。每页独立滚动，应用、关闭和重置保持可见。调整宽度与切换页面不重建控件，保留草稿、单位、目标选择和当前页。
 
-二维拖动基准使用 `GroundMapTest.ProfileZoomedSensorPanning`；设置 `ORBITFORGE_SENSOR_PAN_PROFILE` 为尚不存在的输出目录后运行 `orbitforge_ground_map_tests --gtest_filter=GroundMapTest.ProfileZoomedSensorPanning`。固定 1280×800 逻辑像素、12 倍缩放、30 次位移，分别检查无传感器、45° 近地圆锥和 80° 高轨圆锥；另测长拖动越过缓存边缘。`QT_SCALE_FACTOR=1/2` 可复测不同 DPI。`profile.json` 的绘制耗时只衡量 Qt 地图路径，不等同整机帧率；过期任务、盲区、移除、平移与缩放后的图像一致性由普通回归用例检查。
+二维拖动基准使用 `GroundMapTest.ProfileZoomedSensorPanning`；设置 `ORBELLE_SENSOR_PAN_PROFILE` 为尚不存在的输出目录后运行 `orbelle_ground_map_tests --gtest_filter=GroundMapTest.ProfileZoomedSensorPanning`。固定 1280×800 逻辑像素、12 倍缩放、30 次位移，分别检查无传感器、45° 近地圆锥和 80° 高轨圆锥；另测长拖动越过缓存边缘。`QT_SCALE_FACTOR=1/2` 可复测不同 DPI。`profile.json` 的绘制耗时只衡量 Qt 地图路径，不等同整机帧率；过期任务、盲区、移除、平移与缩放后的图像一致性由普通回归用例检查。
 
 Python 对应 `sensors.Cone`、`ComplexConic`、`Rectangular`、`Custom`，均可用于 `project.objects.sensor(field_of_view=...)` 或句柄更新。EOIR、SAR、半功率天线模型不在本轮范围内。
 
-参数定义参考 STK [Sensor Definition](https://help.agi.com/stk/Content/stk/sn-01.htm)，空间延伸参考 [3D Projection](https://help.agi.com/stk/Content/vo/sensors-02.htm)，文件子集参考 [Custom Pattern](https://help.agi.com/stk/Content/stk/sncustom.htm)。这里复用几何概念，界面沿用 OrbitForge 的属性页及资源文案。
+参数定义参考 STK [Sensor Definition](https://help.agi.com/stk/Content/stk/sn-01.htm)，空间延伸参考 [3D Projection](https://help.agi.com/stk/Content/vo/sensors-02.htm)，文件子集参考 [Custom Pattern](https://help.agi.com/stk/Content/stk/sncustom.htm)。这里复用几何概念，界面沿用 Orbelle 的属性页及资源文案。
 
 ## SDK 与 Python
 

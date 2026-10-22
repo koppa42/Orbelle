@@ -40,7 +40,7 @@ m=0 的 S 规范为零，其势函数项恒为零。TAI 纳秒历元精确转换
 Python 易用入口：
 
 ```python
-import orbitforge as of
+import orbelle as of
 
 data = of.DataSnapshot.load(eop_manifest="eop/manifest.json").with_ocean_tides(
     "fes2014bv1", "fes2014b.v1.with-s1.potential.txt")
@@ -54,7 +54,7 @@ settings = of.orbits.OceanTideSettings(enabled=True, model="fes2014bv1", degree=
 
 ## 数值验证与未覆盖范围
 
-独立参考调用未经修改的 Orekit 13.1.2 `FESCnmSnmReader`、`OceanTidesField`、`HolmesFeatherstoneAttractionModel` 和 Hipparchus 4.0.2 DP853，不调用 OrbitForge 计算代码。固定小文件覆盖全部 36 个显式分潮的 4×4 截取；可选完整文件覆盖 100×100。另将 Orekit 的固体潮和海潮作为两个力分别积分，检查 OrbitForge 系数合并及独立截断。
+独立参考调用未经修改的 Orekit 13.1.2 `FESCnmSnmReader`、`OceanTidesField`、`HolmesFeatherstoneAttractionModel` 和 Hipparchus 4.0.2 DP853，不调用 Orbelle 计算代码。固定小文件覆盖全部 36 个显式分潮的 4×4 截取；可选完整文件覆盖 100×100。另将 Orekit 的固体潮和海潮作为两个力分别积分，检查 Orbelle 系数合并及独立截断。
 
 系数每分量容限 2e-20，加速度 2e-14 m/s²；轨迹位置 1 mm、速度 1e-6 m/s。前两项覆盖双精度相位/求和舍入，后两项覆盖独立积分器在相同严格容差下的全局误差；不代表真实预报误差。完整输入、边界、生成命令和接口测试见[验证协议](../validation/hpop_protocol.md#海潮与组合潮汐)。
 

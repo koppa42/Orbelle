@@ -1,9 +1,9 @@
 #include <cmath>
 #include <gtest/gtest.h>
-#include <orbitforge/application/scenario.hpp>
-#include <orbitforge/orbitforge.hpp>
-#include <orbitforge/runtime/hpop.hpp>
-using namespace orbitforge;
+#include <orbelle/application/scenario.hpp>
+#include <orbelle/orbelle.hpp>
+#include <orbelle/runtime/hpop.hpp>
+using namespace orbelle;
 TEST(TabulatedOrbit, HpopSamplesUseSharedSessionAndScenarioWithoutChangingSource) {
     core::HpopOptions hpop;
     hpop.gravity_degree = hpop.gravity_order = 0;

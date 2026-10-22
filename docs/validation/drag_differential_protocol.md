@@ -1,6 +1,6 @@
 # 阻力偏导与 JR 高空稳定性验证
 
-契约见[阻力偏导](../architecture/drag_differential.md)。固定参考独立生成，普通测试不联网、不依赖 Java 或 mpmath，不从 OrbitForge 输出反推期望值。当前没有 STK 同配置实测数据。
+契约见[阻力偏导](../architecture/drag_differential.md)。固定参考独立生成，普通测试不联网、不依赖 Java 或 mpmath，不从 Orbelle 输出反推期望值。当前没有 STK 同配置实测数据。
 
 ## 独立依据
 
@@ -26,9 +26,9 @@ Orekit 使用固定共转轴、WGS84 和质量 1000 kg；球体面积设为 1000
 
 ## 重现
 
-Orekit JAR 固定于 `tools/validation/orekit/dependencies.json`，生成器为 `OrbitForgeDragDifferentialReference.java`。编译后运行该类，唯一参数是候选输出文件；重复生成须字节一致。其他原始来源固定于 `tools/validation/density_sources.json`。
+Orekit JAR 固定于 `tools/validation/orekit/dependencies.json`，生成器为 `OrbelleDragDifferentialReference.java`。编译后运行该类，唯一参数是候选输出文件；重复生成须字节一致。其他原始来源固定于 `tools/validation/density_sources.json`。
 
-`drag_density_reference.cpp` 与未修改 GMAT 源码、API-only `gmat_jr_stubs` 及原作者 NRL C 文件编译为独立适配程序；不链接 OrbitForge。随后运行：
+`drag_density_reference.cpp` 与未修改 GMAT 源码、API-only `gmat_jr_stubs` 及原作者 NRL C 文件编译为独立适配程序；不链接 Orbelle。随后运行：
 
 ```text
 python tools/validation/drag_density_differential_reference.py <adapter> <candidate-low.txt>

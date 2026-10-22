@@ -2,9 +2,9 @@
 #include <QString>
 #include <cstddef>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 struct ReportCurveField {
     std::size_t column;
     QString id, label, unit;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -3,8 +3,8 @@
 #include "orbit_scene.hpp"
 #include <QWidget>
 #include <functional>
-#include <orbitforge/core/time/time_provider.hpp>
-#include <orbitforge/runtime/data_catalog.hpp>
+#include <orbelle/core/time/time_provider.hpp>
+#include <orbelle/runtime/data_catalog.hpp>
 
 class QLabel;
 class QLineEdit;
@@ -15,7 +15,7 @@ class QCheckBox;
 class QTreeWidget;
 class QStackedWidget;
 class QPlainTextEdit;
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 class EpochEditor;
 class QuantityEditor;
 class TrackStyleEditor;
@@ -141,4 +141,4 @@ class OrbitEditor final : public QWidget {
     std::vector<QLabel *> display_messages_;
     void submit_display();
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

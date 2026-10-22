@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QWidget>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // Final visibility alone misses controls that briefly show before layout insertion.
 class WindowShowObserver final : public QObject {
   public:
@@ -23,4 +23,4 @@ class WindowShowObserver final : public QObject {
         return false;
     }
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

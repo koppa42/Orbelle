@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <vsgXchange/freetype.h>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 QByteArray checked_file(const QString &path, const QByteArray &expected) {
     QFile file(path);
@@ -50,4 +50,4 @@ BenchmarkScene::BenchmarkScene(const QString &manifest, const core::IFrameProvid
               {"font_sha256", font_hash},
               {"scope", "fixed-workload integration preflight; performance unmeasured"}};
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

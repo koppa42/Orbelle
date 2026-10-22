@@ -9,8 +9,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 ROOT = Path(__file__).resolve().parents[3]
 EOP = ROOT / "data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
@@ -231,7 +231,7 @@ class AnalysisTests(unittest.TestCase):
     def test_numpy_and_pandas_are_optional(self):
         project, station = make_project()
         result = project.prepare().states(station, times=[], frame=of.FrameId.ITRF)
-        with patch("orbitforge._analysis.import_module", side_effect=ImportError):
+        with patch("orbelle._analysis.import_module", side_effect=ImportError):
             with self.assertRaisesRegex(ImportError, "pip install numpy"):
                 result.position.to_numpy()
             with self.assertRaisesRegex(ImportError, "pip install pandas"):

@@ -2,9 +2,9 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include <limits>
-#include <orbitforge/core/propagation/hpop_covariance.hpp>
+#include <orbelle/core/propagation/hpop_covariance.hpp>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 HpopCovarianceInput identity_covariance() {
     HpopCovarianceInput input;

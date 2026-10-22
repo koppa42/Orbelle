@@ -50,7 +50,7 @@ void Workbench::smoke_scenario_properties() {
             "Scenario rename rebuilt a cache or lost playback/title state");
         set_playing(false);
         smoke_record("scenario-rename-preserves-playback-caches-and-object-revisions");
-        save_project_to(smoke_dir_ + "/scenario-edit-base.orbitforge");
+        save_project_to(smoke_dir_ + "/scenario-edit-base.orbelle");
         smoke_settings_project_ = project_snapshot(project_path_);
         const auto span =
             scenario_->last().tai_nanoseconds() - scenario_->first().tai_nanoseconds();
@@ -75,7 +75,7 @@ void Workbench::smoke_scenario_properties() {
         smoke_require(selected_ == satellites_.size() - 1,
                       "Changed scenario bounds lost the selected satellite");
         smoke_require(QFileInfo(project_path_) ==
-                          QFileInfo(smoke_dir_ + "/scenario-edit-base.orbitforge"),
+                          QFileInfo(smoke_dir_ + "/scenario-edit-base.orbelle"),
                       "Changed scenario bounds lost the project file identity");
         const auto &before = *smoke_settings_project_;
         for (std::size_t i = 0; i < satellites_.size(); ++i) {
@@ -108,7 +108,7 @@ void Workbench::smoke_scenario_properties() {
         smoke_require(scenario_properties_->grab().save(smoke_dir_ + "/scenario-settings.png"),
                       "Cannot capture scenario settings");
         scenario_properties_->close();
-        save_project_to(smoke_dir_ + "/scenario-edited.orbitforge");
+        save_project_to(smoke_dir_ + "/scenario-edited.orbelle");
         smoke_settings_project_ = project_snapshot(project_path_);
         start_project(*smoke_settings_project_, project_path_);
         ++orbit_smoke_stage_;
@@ -163,7 +163,7 @@ void Workbench::smoke_scenario_properties() {
                                   std::string::npos,
                           "Scenario editing mixed calculation policies");
         smoke_record("scenario-edit-data-consent-publishes-one-consistent-calculation");
-        save_project_to(smoke_dir_ + "/scenario-edited.orbitforge");
+        save_project_to(smoke_dir_ + "/scenario-edited.orbelle");
         smoke_settings_project_ = project_snapshot(project_path_);
         smoke_cache_ = satellites_[0].orbit;
         open_scenario_properties();
@@ -224,7 +224,7 @@ void Workbench::smoke_scenario_properties() {
                           scenario_->last() == smoke_view_epoch_,
                       "Scenario shrinking failed to clamp current time to the exact final epoch");
         smoke_record("scenario-edit-clamps-end-with-nanosecond-precision");
-        save_project_to(smoke_dir_ + "/scenario-edited.orbitforge");
+        save_project_to(smoke_dir_ + "/scenario-edited.orbelle");
         // A longer interval can put the final marker behind Earth from the
         // retained camera. Frame its current position for the pixel checks.
         fit_views();

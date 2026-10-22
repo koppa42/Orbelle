@@ -4,7 +4,7 @@
 
 界面与查询结构参考 STK [Access Options](https://help.agi.com/stk/Content/stk/tools-01a.htm)、[Computational Settings](https://help.agi.com/stk/content/stk/CompSettings.htm) 和 [Access report styles](https://help.agi.com/stkdevkit/Subsystems/dataProviders/Content/htmlStyles/Access/AccessStyles.htm)。极值辅助搜索是本项目实现，不声称复刻 STK 自适应算法或完成 STK 实机数值验收。
 
-独立参考使用固定的 **Orekit 13.1.2 / Hipparchus 4.0.2**：KeplerianPropagator、OneAxisEllipsoid、TopocentricFrame、FunctionalDetector 的事件搜索和 BrentOptimizer 的连续极值。所有 JAR SHA-256 来自 `tools/validation/orekit/dependencies.json`，生成器不导入 OrbitForge。
+独立参考使用固定的 **Orekit 13.1.2 / Hipparchus 4.0.2**：KeplerianPropagator、OneAxisEllipsoid、TopocentricFrame、FunctionalDetector 的事件搜索和 BrentOptimizer 的连续极值。所有 JAR SHA-256 来自 `tools/validation/orekit/dependencies.json`，生成器不导入 Orbelle。
 
 为隔离事件／几何算法，参考和被测端均采用静止地球轴（GCRF 与 ITRF 轴重合、角速度为零），WGS84 椭球、GM=3.986004418e14 m³/s²、TAI 相对秒、固定站点、几何传播，关闭光行时、折射、地形。真实地球旋转与时间／EOP 由已有独立参考协议和 Access 距离变化率回归覆盖。被测端以 CSPICE 二体传播、项目的 ENU 几何、极值辅助发现与黄金分割极值计算；不使用 Orekit 代码或参考值参与计算。
 

@@ -38,10 +38,10 @@ C++ 使用 `HpopOptions::solid_tides`（`SolidTideOptions`），Python 使用 `o
 
 ## 验证
 
-`tools/validation/orekit/OrbitForgeSolidTideReference.java` 调用未修改的 Orekit 13.1.2 `SolidTidesField`、IERS_2003 Love 数、Holmes–Featherstone 与 Hipparchus 4.0.2 DP853。固定结果为 `tests/reference/propagators/solid_tides.txt`：120 组加速度（两种底场潮汐系统、三组日月几何、五组静态截断、潮汐截断开关、普通/近极点卫星）；四组移动日月 ±6000 s / ±1 天传播，关闭直接第三体引力。加速度逐分量容限 2e−14 m/s²（浮点球谐舍入），传播 3 mm / 3 μm/s（两种积分器误差控制差异）。另验证永久潮解析 J2、极点、低阶文件的扩展、覆盖不足、错误恢复及不可变底场。
+`tools/validation/orekit/OrbelleSolidTideReference.java` 调用未修改的 Orekit 13.1.2 `SolidTidesField`、IERS_2003 Love 数、Holmes–Featherstone 与 Hipparchus 4.0.2 DP853。固定结果为 `tests/reference/propagators/solid_tides.txt`：120 组加速度（两种底场潮汐系统、三组日月几何、五组静态截断、潮汐截断开关、普通/近极点卫星）；四组移动日月 ±6000 s / ±1 天传播，关闭直接第三体引力。加速度逐分量容限 2e−14 m/s²（浮点球谐舍入），传播 3 mm / 3 μm/s（两种积分器误差控制差异）。另验证永久潮解析 J2、极点、低阶文件的扩展、覆盖不足、错误恢复及不可变底场。
 
-自定义 k20 的独立数据为 `solid_tides_love.txt`，由 `OrbitForgeLoveNumberReference.java` 向原版 Orekit `LoveNumbers` / `SolidTidesField` 传参生成：k20=0、0.3、0.30190、0.4；48 组系数、96 组加速度、16 条 ±1 天轨迹，覆盖 tide-free / zero-tide、独立截断、近极点和附加时间项开关。永久项由 Orekit 的 IERS 值按同一 k20 换算；其余 Love 数和频率/极潮直接来自库。沿用系数 2e−20、加速度 2e−14 m/s²、位置 3 mm、速度 3 μm/s 容限。格式、事务、数据确认、分析不可变、Python 和 SDK 另行验证。
+自定义 k20 的独立数据为 `solid_tides_love.txt`，由 `OrbelleLoveNumberReference.java` 向原版 Orekit `LoveNumbers` / `SolidTidesField` 传参生成：k20=0、0.3、0.30190、0.4；48 组系数、96 组加速度、16 条 ±1 天轨迹，覆盖 tide-free / zero-tide、独立截断、近极点和附加时间项开关。永久项由 Orekit 的 IERS 值按同一 k20 换算；其余 Love 数和频率/极潮直接来自库。沿用系数 2e−20、加速度 2e−14 m/s²、位置 3 mm、速度 3 μm/s 容限。格式、事务、数据确认、分析不可变、Python 和 SDK 另行验证。
 
 这些是独立 IERS/Orekit 对照，尚无同配置 STK 轨迹导出实测；不能把关闭的附加时间项、不同极潮符号或不同 Love 数约定的结果视为相同模型。
 
-附加时间项的独立参考为 `solid_tides_time_dependent.txt`，由 `OrbitForgeTimeDependentTideReference.java` 调用未修改的 Orekit `IERS_2003` 频率/极潮函数、`SolidTidesField`、Holmes–Featherstone 和 DP853 生成。使用明确的合成 UTC=TAI−32 s、恒定 EOP 和单位旋转，以隔离力模型；39 组系数覆盖 1972–2026、纳秒余数、历史平均极点及 2000 边界，24 组加速度覆盖 0/0、2/0、2/1、2/2、4/3、21/21、截断开关及近极点，4 条 ±6000 s/±1 天轨迹。系数绝对容限 2e−20，依据大历元基本角的浮点舍入；加速度及轨迹沿用上述容限，没有放宽。Python 另使用真实 DE440s/EOP/闰秒表核验启用开关后的身份、报告、保存与重开。
+附加时间项的独立参考为 `solid_tides_time_dependent.txt`，由 `OrbelleTimeDependentTideReference.java` 调用未修改的 Orekit `IERS_2003` 频率/极潮函数、`SolidTidesField`、Holmes–Featherstone 和 DP853 生成。使用明确的合成 UTC=TAI−32 s、恒定 EOP 和单位旋转，以隔离力模型；39 组系数覆盖 1972–2026、纳秒余数、历史平均极点及 2000 边界，24 组加速度覆盖 0/0、2/0、2/1、2/2、4/3、21/21、截断开关及近极点，4 条 ±6000 s/±1 天轨迹。系数绝对容限 2e−20，依据大历元基本角的浮点舍入；加速度及轨迹沿用上述容限，没有放宽。Python 另使用真实 DE440s/EOP/闰秒表核验启用开关后的身份、报告、保存与重开。

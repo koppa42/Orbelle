@@ -1,6 +1,6 @@
-#include <orbitforge/project.hpp>
+#include <orbelle/project.hpp>
 
-namespace orbitforge {
+namespace orbelle {
 Project::Project(std::string name, Epoch first, Epoch last)
     : document_(application::Project{std::move(name), first, last}) {}
 Project::Project(application::ProjectDocument document) : document_(std::move(document)) {}
@@ -67,4 +67,4 @@ Project ProjectOpenPlan::open(bool accept_data_changes) const {
 OpenDataChangedError::OpenDataChangedError(ProjectOpenPlan plan)
     : std::runtime_error("Selected calculation data differ from the project's recorded data"),
       plan_(std::make_shared<const ProjectOpenPlan>(std::move(plan))) {}
-} // namespace orbitforge
+} // namespace orbelle

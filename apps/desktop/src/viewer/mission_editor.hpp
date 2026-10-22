@@ -1,9 +1,9 @@
 #pragma once
 #include <functional>
-#include <orbitforge/core/propagation/hpop.hpp>
-#include <orbitforge/runtime/data_catalog.hpp>
+#include <orbelle/core/propagation/hpop.hpp>
+#include <orbelle/runtime/data_catalog.hpp>
 class QWidget;
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 class EopCatalog;
 // Edits private drafts; commits both settings only on acceptance.
 bool edit_mission(
@@ -13,4 +13,4 @@ bool edit_mission(
     const std::vector<runtime::CatalogEphemeris> &ephemerides = {},
     const std::function<std::vector<runtime::CatalogEphemeris>()> &manage_ephemerides = {},
     EopCatalog *catalog = nullptr, bool initialize_hpop = false);
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

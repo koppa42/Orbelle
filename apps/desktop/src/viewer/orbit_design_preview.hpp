@@ -1,11 +1,11 @@
 #pragma once
 #include "ground_map.hpp"
 #include <future>
-#include <orbitforge/core/propagation/orbit_design.hpp>
+#include <orbelle/core/propagation/orbit_design.hpp>
 
 class QComboBox;
 class QLabel;
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // Providers prepare exact, reusable time grids off-thread. Bounded interactive
 // projection uses the latest design on Qt's thread; detailed sampling is asynchronous.
 class OrbitDesignPreview final : public QWidget {
@@ -66,4 +66,4 @@ class OrbitDesignPreview final : public QWidget {
     std::uint64_t context_revision_ = 0, running_context_ = 0;
     bool dirty_ = false, full_requested_ = false, published_full_ = false, running_full_ = false;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -13,9 +13,9 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <algorithm>
-#include <orbitforge/runtime/ephemeris.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 std::vector<DataProduct> initial_data_products() {
     // UTC must be ready before interpreting either EOP product.
     std::vector products{DataProduct::utc, DataProduct::c04, DataProduct::finals2000a,
@@ -185,4 +185,4 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
         catalog.cancel_download();
     return accepted && complete();
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -62,7 +62,7 @@ Python 计算和加载释放 GIL，再由此锁串行管理 CSPICE。这允许�
 
 `EphemerisDataError` 表示加载、格式、散列或内核常数问题；`EphemerisCoverageError` 表示清单窗口或实际 SPK 覆盖不足；二者在 Python 中继承 `ValueError`。其他 SPICE 查询问题为 `EphemerisQueryError`，Python 继承 `RuntimeError`。非有限 TDB 输入为 `ValueError`。错误消息保留 SPICE 短/长说明，库不会直接终止应用。
 
-`ORBITFORGE_WITH_SPICE` 默认关闭；`astronomy` 预设和标准 wheel 显式开启。CSPICE N0067 通过固定 vcpkg overlay 静态链接，SDK 消费端另外提供对应开发包，wheel 包含私有实例与许可证。仓库和两类交付均附带一周历史样例，当前不能直接查询今天的星历。
+`ORBELLE_WITH_SPICE` 默认关闭；`astronomy` 预设和标准 wheel 显式开启。CSPICE N0067 通过固定 vcpkg overlay 静态链接，SDK 消费端另外提供对应开发包，wheel 包含私有实例与许可证。仓库和两类交付均附带一周历史样例，当前不能直接查询今天的星历。
 
 ## 依据
 

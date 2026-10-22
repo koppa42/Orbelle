@@ -1,7 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import unittest
-import orbitforge as of
+import orbelle as of
 
 BASE = 8_000_000_000_000_000_000
 REFERENCE = Path(__file__).resolve().parents[3] / "tests/reference/propagators/orbit_interpolation.txt"

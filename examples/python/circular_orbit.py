@@ -1,7 +1,7 @@
-"""Run with the installed orbitforge wheel, independently of the desktop."""
+"""Run with the installed orbelle wheel, independently of the desktop."""
 import csv
 import sys
-import orbitforge as of
+import orbelle as of
 
 result = of.make_circular_demo_session().sample(of.demo_epochs())
 writer = csv.writer(sys.stdout, lineterminator="\n")

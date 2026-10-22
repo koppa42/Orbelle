@@ -32,12 +32,12 @@
 #include "workspace.hpp"
 #include <QUuid>
 #include <numbers>
-#include <orbitforge/runtime/access.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/gravity.hpp>
-#include <orbitforge/runtime/ocean_tides.hpp>
-#include <orbitforge/runtime/space_weather.hpp>
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#include <orbelle/runtime/access.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/gravity.hpp>
+#include <orbelle/runtime/ocean_tides.hpp>
+#include <orbelle/runtime/space_weather.hpp>
+#ifdef ORBELLE_DESKTOP_BENCHMARK
 #include "benchmark_gpu.hpp"
 #include "benchmark_presentation.hpp"
 #include "benchmark_run.hpp"
@@ -119,21 +119,21 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
-#include <orbitforge/geo_rocky/globe.hpp>
-#include <orbitforge/render_vsg/compile_manager.hpp>
-#include <orbitforge/render_vsg/labels.hpp>
-#include <orbitforge/render_vsg/marker_layer.hpp>
-#include <orbitforge/render_vsg/sensor_layer.hpp>
-#include <orbitforge/render_vsg/swapchain_capture.hpp>
-#include <orbitforge/runtime/demo.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/geo_rocky/globe.hpp>
+#include <orbelle/render_vsg/compile_manager.hpp>
+#include <orbelle/render_vsg/labels.hpp>
+#include <orbelle/render_vsg/marker_layer.hpp>
+#include <orbelle/render_vsg/sensor_layer.hpp>
+#include <orbelle/render_vsg/swapchain_capture.hpp>
+#include <orbelle/runtime/demo.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 #include <tuple>
 #include <unordered_map>
 #include <vsg/all.h>
 #include <vsgQt/Window.h>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 constexpr std::array playback_rates{0.1,  0.5,  1.0,   2.0,   5.0,   10.0,
                                     20.0, 50.0, 100.0, 200.0, 500.0, 1000.0};
@@ -348,7 +348,7 @@ class Workbench final : public WorkbenchWindow {
                     std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) /
                     "resources/eop-current/manifest.json");
             if (!benchmarking_) {
-                const auto configured_home = qEnvironmentVariable("ORBITFORGE_DATA_HOME");
+                const auto configured_home = qEnvironmentVariable("ORBELLE_DATA_HOME");
                 const auto normal_home =
                     configured_home.isEmpty()
                         ? QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) +
@@ -373,7 +373,7 @@ class Workbench final : public WorkbenchWindow {
                 eop_history_ = eop_catalog_->providers().at(1);
                 eop_ = eop_history_;
             }
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
             if (benchmarking_)
                 benchmark_ = std::make_unique<BenchmarkScene>(benchmark_manifest, *frames_, *eop_);
             if (!timing_dir.isEmpty()) {
@@ -578,7 +578,7 @@ class Workbench final : public WorkbenchWindow {
                 }
             }
             if (benchmarking_) {
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
                 for (std::size_t i = 0; i < 100; ++i)
                     scene_->addChild(render_vsg::make_track(benchmark_->cache->track(i * 100)));
 #endif
@@ -787,7 +787,7 @@ class Workbench final : public WorkbenchWindow {
             toolbar->setMovable(false);
             toolbar->setIconSize(QSize(18, 18));
             toolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
             if (run_)
                 toolbar->setEnabled(false);
 #endif
@@ -1226,7 +1226,7 @@ class Workbench final : public WorkbenchWindow {
         if (benchmarking_ || profile_)
             return true;
         if (!smoke_dir_.isEmpty()) {
-            const auto fixture = qEnvironmentVariable("ORBITFORGE_STARTUP_GRAVITY_FILE");
+            const auto fixture = qEnvironmentVariable("ORBELLE_STARTUP_GRAVITY_FILE");
             if (!fixture.isEmpty()) {
                 // Explicit local smoke input: never download or touch the user's catalog.
                 eop_catalog_->data().install_gravity(std::filesystem::path(fixture.toStdWString()),
@@ -1325,7 +1325,7 @@ class Workbench final : public WorkbenchWindow {
             model_candidate_.wait();
         if (profile_orbits_.valid())
             profile_orbits_.wait();
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
         if (run_)
             run_->stop_inputs();
         if (timing_presentation_)
@@ -1340,7 +1340,7 @@ class Workbench final : public WorkbenchWindow {
         if (viewer_) {
             viewer_->deviceWaitIdle();
             smoke_render_tasks_.clear();
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
             for (const auto &slot : slots_)
                 if (slot->gpu)
                     try {
@@ -1364,7 +1364,7 @@ class Workbench final : public WorkbenchWindow {
             slot->graph = {};
             slot->render_graph = {};
             slot->capture = {};
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
             slot->gpu.reset();
 #endif
             slot->navigation.reset();
@@ -1395,7 +1395,7 @@ class Workbench final : public WorkbenchWindow {
         }
         markers_.reset();
         selection_.reset();
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
         // Font sharing caches also retain GPU objects. Release them before the
         // validation report, while preserving the CPU-only benchmark metadata.
         if (benchmark_)
@@ -1406,7 +1406,7 @@ class Workbench final : public WorkbenchWindow {
         shared_device_ref_ = {};
     }
     int report(int code) {
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
         if (run_) {
             run_->finish(
                 QJsonObject{{"benchmark", benchmark_->report},
@@ -1431,8 +1431,8 @@ class Workbench final : public WorkbenchWindow {
             QJsonObject report{{"render_iterations", static_cast<qint64>(frame_count_)},
                                {"qt_version", QString::fromUtf8(qVersion())},
                                {"vsg_version", QString::fromUtf8(vsgGetVersionString())},
-                               {"rocky_version", ORBITFORGE_ROCKY_VERSION},
-                               {"vsgqt_version", ORBITFORGE_VSGQT_VERSION},
+                               {"rocky_version", ORBELLE_ROCKY_VERSION},
+                               {"vsgqt_version", ORBELLE_VSGQT_VERSION},
                                {"shared_device", shared_device_},
                                {"shared_scene", shared_scene_},
                                {"independent_cameras", independent_cameras_},
@@ -1506,7 +1506,7 @@ class Workbench final : public WorkbenchWindow {
                 report.insert("appearance", QJsonObject{{"kind", model_kind_},
                                                         {"diameter_km", model_diameter_km_}});
             }
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
             if (benchmark_) {
                 report.insert("benchmark", benchmark_->report);
                 report.insert("interactions", interaction_report_);
@@ -1526,7 +1526,7 @@ class Workbench final : public WorkbenchWindow {
 
   private:
     bool event(QEvent *event) override {
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
         if (run_ && event->type() == BenchmarkInputEvent::event_type()) {
             try {
                 benchmark_input(*static_cast<BenchmarkInputEvent *>(event));
@@ -1561,7 +1561,7 @@ class Workbench final : public WorkbenchWindow {
         vsg::ref_ptr<vsg::RenderGraph> render_graph;
         std::unique_ptr<ViewNavigation> navigation;
         vsg::ref_ptr<render_vsg::SwapchainCapture> capture;
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
         std::shared_ptr<BenchmarkGpu> gpu;
 #endif
         std::unique_ptr<render_vsg::LabelLayer> labels;
@@ -1571,7 +1571,7 @@ class Workbench final : public WorkbenchWindow {
         std::uint64_t creations = 0, destructions = 0, presentations = 0;
     };
     visualization::RenderSnapshot sample_frame(core::Epoch epoch) const {
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
         if (benchmark_)
             return benchmark_->cache->sample(epoch);
 #endif
@@ -2164,7 +2164,7 @@ class Workbench final : public WorkbenchWindow {
             dialog.setAcceptMode(QFileDialog::AcceptSave);
             dialog.setFileMode(QFileDialog::AnyFile);
             dialog.setNameFilter(ui::text("graphics_workbench.label_18"));
-            dialog.setDefaultSuffix(QStringLiteral("orbitforge"));
+            dialog.setDefaultSuffix(QStringLiteral("orbelle"));
             dialog.selectFile(path.isEmpty() ? ui::text("graphics_workbench.label_19") : path);
             if (dialog.exec() != QDialog::Accepted)
                 return false;
@@ -4674,7 +4674,7 @@ class Workbench final : public WorkbenchWindow {
         traits->height = 640;
         traits->deviceTypePreferences = {VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU};
         globe_->prepare_window(*traits, validation_);
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
         if (run_)
             prepare_present_timing(*traits);
 #endif
@@ -4766,7 +4766,7 @@ class Workbench final : public WorkbenchWindow {
             run_exclusive(operation);
         };
         current->window->pressed = [this, current](QPointF point) {
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
             if (run_ && !injecting_input_)
                 return;
 #endif
@@ -4783,7 +4783,7 @@ class Workbench final : public WorkbenchWindow {
             log_.install(adapter->getOrCreateInstance());
         // Validation belongs to the instance. Vulkan no longer permits device layers.
         adapter->traits()->requestedLayers.clear();
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
         if (run_) {
             const auto capabilities = present_timing_capabilities(*adapter);
             timing_capabilities_.append(capabilities);
@@ -4799,7 +4799,7 @@ class Workbench final : public WorkbenchWindow {
         auto device = adapter->getOrCreateDevice();
         if (shared_device_ref_ && shared_device_ref_ != device)
             throw std::runtime_error("A recreated view changed the shared Vulkan device");
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
         if (run_ && !shared_device_ref_)
             run_->configure_video_memory(*device->getPhysicalDevice());
 #endif
@@ -4823,7 +4823,7 @@ class Workbench final : public WorkbenchWindow {
                 slot.view->addChild(slot.station_markers->node());
                 slot.view->addChild(slot.station_selection->node());
             }
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
             if (benchmark_) {
                 slot.labels = std::make_unique<render_vsg::LabelLayer>(200, benchmark_->font);
                 slot.view->addChild(slot.labels->node());
@@ -4837,7 +4837,7 @@ class Workbench final : public WorkbenchWindow {
                                          ? VkClearColorValue{{0.018f, 0.025f, 0.045f, 1.0f}}
                                          : VkClearColorValue{{0.0003f, 0.0006f, 0.0012f, 1.0f}});
         slot.graph = vsg::CommandGraph::create(adapter);
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
         if (run_) {
             if (slot.gpu)
                 throw std::runtime_error("A GPU-timed view was recreated; this run is invalid");
@@ -4852,7 +4852,7 @@ class Workbench final : public WorkbenchWindow {
         }
 #endif
         slot.graph->addChild(render_graph);
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
         if (slot.gpu)
             slot.graph->addChild(slot.gpu->command(false));
 #endif
@@ -5120,7 +5120,7 @@ class Workbench final : public WorkbenchWindow {
             orbit_smoke_step();
         if (benchmarking_ && viewer_->windows().empty())
             return;
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
         const auto frame_begin = run_ ? BenchmarkRun::qpc() : 0;
         const auto phase = run_ ? run_->phase() : BenchmarkRun::Phase::waiting;
         if (run_) {
@@ -5225,7 +5225,7 @@ class Workbench final : public WorkbenchWindow {
             if (!slot->graph)
                 continue;
             const auto extent = slot->window->windowAdapter->extent2D();
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
             if (run_ && (extent.width != 1280 || extent.height != 720 ||
                          !slot->window->isExposed() || !slot->container->isVisible()))
                 throw std::runtime_error("Timing requires two exposed 1280x720 views");
@@ -5265,7 +5265,7 @@ class Workbench final : public WorkbenchWindow {
              (!benchmarking_ &&
               (smoke_bootstrap_ == 1 || orbit_capture_ ||
                (orbit_smoke_stage_ == orbit_smoke_complete && frame_count_ >= 189))));
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
         const auto update_qpc = run_ ? BenchmarkRun::qpc() : 0;
 #endif
         if (capture)
@@ -5277,7 +5277,7 @@ class Workbench final : public WorkbenchWindow {
             for (const auto &graph : task->commandGraphs)
                 graph->reset();
         for (const auto &task : viewer_->recordAndSubmitTasks) {
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
             if (run_)
                 for (const auto &slot : slots_)
                     if (std::find(task->commandGraphs.begin(), task->commandGraphs.end(),
@@ -5288,7 +5288,7 @@ class Workbench final : public WorkbenchWindow {
                 task->submit(vsg::ref_ptr<vsg::FrameStamp>(viewer_->getFrameStamp()));
             if (result != VK_SUCCESS)
                 throw std::runtime_error("Vulkan submission failed: " + std::to_string(result));
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
             if (run_)
                 for (const auto &slot : slots_)
                     if (std::find(task->commandGraphs.begin(), task->commandGraphs.end(),
@@ -5307,12 +5307,12 @@ class Workbench final : public WorkbenchWindow {
                                 .copy();
                     }
         }
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
         const auto submit_qpc = run_ ? BenchmarkRun::qpc() : 0;
 #endif
         for (const auto &presentation : viewer_->presentations) {
             VkResult result = VK_SUCCESS;
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
             if (run_) {
                 if (viewer_->presentations.size() != 1 || presentation->windows.size() != 2)
                     throw std::runtime_error(
@@ -5351,7 +5351,7 @@ class Workbench final : public WorkbenchWindow {
                         window->resize();
                 });
         }
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
         if (run_) {
             run_->frame({frame_count_, frame_begin, update_qpc, submit_qpc, BenchmarkRun::qpc(),
                          run_->active_input_id(), epoch.tai_nanoseconds(),
@@ -5725,7 +5725,7 @@ class Workbench final : public WorkbenchWindow {
         }
         throw std::logic_error("Unknown workbench smoke stage");
     }
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
     void benchmark_input(const BenchmarkInputEvent &input) {
         QJsonObject result;
         if (input.seek) {
@@ -6141,7 +6141,7 @@ class Workbench final : public WorkbenchWindow {
     visualization::RenderSnapshot snapshot_{
         core::Epoch{0}, core::FrameId::itrf, core::OriginId::earth, {}};
     std::optional<std::size_t> selected_, expected_selection_;
-#ifdef ORBITFORGE_DESKTOP_BENCHMARK
+#ifdef ORBELLE_DESKTOP_BENCHMARK
     std::unique_ptr<BenchmarkScene> benchmark_;
     std::unique_ptr<BenchmarkRun> run_;
     std::unique_ptr<BenchmarkPresentation> timing_presentation_;
@@ -6299,4 +6299,4 @@ int run_graphics_workbench(QApplication &app) {
         return 1;
     }
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

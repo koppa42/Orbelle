@@ -1,9 +1,9 @@
 #include <algorithm>
-#include <orbitforge/application/report.hpp>
+#include <orbelle/application/report.hpp>
 #include <set>
 #include <stdexcept>
 
-namespace orbitforge::application {
+namespace orbelle::application {
 std::vector<results::Column> report_columns(ReportKind kind) {
     if (kind == ReportKind::scenario_summary)
         return {{"summary.field", "Property", ""}, {"summary.value", "Value", ""}};
@@ -221,4 +221,4 @@ void validate_report_definition(const ReportDefinition &d) {
     validate_report_query(d.query);
     validate_report_template(d.format, d.query.kind);
 }
-} // namespace orbitforge::application
+} // namespace orbelle::application

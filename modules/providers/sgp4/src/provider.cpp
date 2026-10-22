@@ -1,9 +1,9 @@
 #include "SGP4.h"
 #include <cmath>
 #include <numbers>
-#include <orbitforge/providers/sgp4/provider.hpp>
+#include <orbelle/providers/sgp4/provider.hpp>
 
-namespace orbitforge::providers::sgp4 {
+namespace orbelle::providers::sgp4 {
 namespace {
 [[noreturn]] void propagation_error(int code) {
     const char *reason = "initialization failed";
@@ -70,4 +70,4 @@ std::shared_ptr<const core::IStateProvider> make_sgp4(const core::Tle &tle,
                                                       const core::ITimeProvider &time) {
     return std::make_shared<Sgp4>(tle, time);
 }
-} // namespace orbitforge::providers::sgp4
+} // namespace orbelle::providers::sgp4

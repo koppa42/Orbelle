@@ -27,7 +27,7 @@
 #include <QTreeWidget>
 #include <gtest/gtest.h>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 QApplication &test_app() {
     static int argc = 1;
@@ -89,7 +89,7 @@ TEST(DataCenterDialog, LoadingWarningsStayInsideTheDialog) {
     ASSERT_TRUE(QDir().mkpath(temporary.path() + "/legacy/" + QString(64, 'a')));
     const auto root = std::filesystem::path(temporary.path().toStdWString());
     // An incomplete legacy snapshot should produce a visible, inline warning.
-    EopCatalog catalog(root / "data", {ORBITFORGE_TEST_FINALS}, root / "legacy", false);
+    EopCatalog catalog(root / "data", {ORBELLE_TEST_FINALS}, root / "legacy", false);
     ASSERT_FALSE(catalog.warnings().isEmpty());
     WindowShowObserver windows;
     bool inspected = false;
@@ -117,12 +117,12 @@ TEST(DataCenterDialog, GroupedSourcesKeepDownloadStateAndPriorityIndependent) {
     ASSERT_TRUE(temporary.isValid());
     const auto root = std::filesystem::path(temporary.path().toStdWString());
     QFile file(QString::fromStdWString(
-        (std::filesystem::path(ORBITFORGE_TEST_FINALS).parent_path() / "finals2000A.data")
+        (std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() / "finals2000A.data")
             .wstring()));
     ASSERT_TRUE(file.open(QIODevice::ReadOnly));
     DownloadServer server(file.readAll());
-    EopCatalog catalog(root / "data", {ORBITFORGE_TEST_FINALS}, {}, false);
-    const auto output = qEnvironmentVariable("ORBITFORGE_DATA_UI_CAPTURE");
+    EopCatalog catalog(root / "data", {ORBELLE_TEST_FINALS}, {}, false);
+    const auto output = qEnvironmentVariable("ORBELLE_DATA_UI_CAPTURE");
     if (!output.isEmpty())
         ASSERT_TRUE(QDir().mkpath(output));
     const auto capture = [&](QDialog *dialog, const QString &state) {
@@ -351,11 +351,11 @@ TEST(DataCenterDialog, ResponsiveNavigationPreservesSelectionSettingsAndDownload
     ASSERT_TRUE(temporary.isValid());
     const auto root = std::filesystem::path(temporary.path().toStdWString());
     QFile file(QString::fromStdWString(
-        (std::filesystem::path(ORBITFORGE_TEST_FINALS).parent_path() / "finals2000A.data")
+        (std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() / "finals2000A.data")
             .wstring()));
     ASSERT_TRUE(file.open(QIODevice::ReadOnly));
     DownloadServer server(file.readAll());
-    EopCatalog catalog(root / "data", {ORBITFORGE_TEST_FINALS}, {}, false);
+    EopCatalog catalog(root / "data", {ORBELLE_TEST_FINALS}, {}, false);
     QTimer timeout;
     QObject::connect(&timeout, &QTimer::timeout, [] {
         ADD_FAILURE() << "Responsive data center test timed out";
@@ -375,7 +375,7 @@ TEST(DataCenterDialog, ResponsiveNavigationPreservesSelectionSettingsAndDownload
             for (auto *scroll : dialog->findChildren<QScrollArea *>())
                 if (scroll->isVisible())
                     EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0) << name.toStdString();
-            const auto output = qEnvironmentVariable("ORBITFORGE_RESPONSIVE_UI_CAPTURE");
+            const auto output = qEnvironmentVariable("ORBELLE_RESPONSIVE_UI_CAPTURE");
             if (!output.isEmpty()) {
                 ASSERT_TRUE(QDir().mkpath(output));
                 EXPECT_TRUE(dialog->grab().save(output + "/data-" + name + ".png"));
@@ -479,7 +479,7 @@ TEST(DataCenterDialog, GravityHasItsOwnGroupAndStaticValidityWithoutImplicitDown
         for (const auto *label : dialog->findChildren<QLabel *>())
             static_validity |= label->text() == QStringLiteral("无固定有效期");
         EXPECT_TRUE(static_validity);
-        const auto output = qEnvironmentVariable("ORBITFORGE_DATA_UI_CAPTURE");
+        const auto output = qEnvironmentVariable("ORBELLE_DATA_UI_CAPTURE");
         if (!output.isEmpty()) {
             QDir{}.mkpath(output);
             EXPECT_TRUE(dialog->grab().save(output + "/gravity-download.png"));
@@ -527,7 +527,7 @@ TEST(DataCenterDialog, EphemerisGroupAndDetailsRemainReadableAtCompactWidth) {
         EXPECT_EQ(dialog->findChild<QPushButton *>("importEopSnapshot")->text(),
                   QStringLiteral("导入星历数据包…"));
         tabs->setCurrentIndex(0);
-        const auto output = qEnvironmentVariable("ORBITFORGE_DATA_UI_CAPTURE");
+        const auto output = qEnvironmentVariable("ORBELLE_DATA_UI_CAPTURE");
         if (!output.isEmpty()) {
             QDir{}.mkpath(output);
             EXPECT_TRUE(dialog->grab().save(output + "/ephemeris-wide.png"));
@@ -596,7 +596,7 @@ void finish_initial_cancel(EopCatalog &catalog) {
     EXPECT_FALSE(catalog.downloading());
 }
 void capture_initial_setup(QDialog *dialog, const QString &name) {
-    const auto output = qEnvironmentVariable("ORBITFORGE_DATA_UI_CAPTURE");
+    const auto output = qEnvironmentVariable("ORBELLE_DATA_UI_CAPTURE");
     if (!output.isEmpty()) {
         EXPECT_TRUE(QDir{}.mkpath(output));
         QEventLoop settled;
@@ -615,9 +615,9 @@ TEST(DataCenterDialog, InitialSetupDownloadsInDependencyOrderSkipsInstalledAndRe
     EXPECT_EQ(expected[3], DataProduct::egm2008);
     QTemporaryDir temporary;
     EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
-    DownloadServer clock(initial_fixture(ORBITFORGE_TEST_TIME));
+    DownloadServer clock(initial_fixture(ORBELLE_TEST_TIME));
     DownloadServer finals(initial_fixture(
-        std::filesystem::path(ORBITFORGE_TEST_FINALS).parent_path() / "finals2000A.data"));
+        std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() / "finals2000A.data"));
     DownloadServer gravity(initial_gravity());
     clock.hold = finals.hold = gravity.hold = false;
     const std::vector required{DataProduct::utc, DataProduct::finals2000a,
@@ -661,9 +661,9 @@ TEST(DataCenterDialog, InitialSetupFailureStopsTheQueueAndRetryKeepsCompletedDow
     (void)test_app();
     QTemporaryDir temporary;
     EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
-    DownloadServer clock(initial_fixture(ORBITFORGE_TEST_TIME));
+    DownloadServer clock(initial_fixture(ORBELLE_TEST_TIME));
     DownloadServer finals(initial_fixture(
-        std::filesystem::path(ORBITFORGE_TEST_FINALS).parent_path() / "finals2000A.data"));
+        std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() / "finals2000A.data"));
     clock.hold = finals.hold = false;
     finals.fail = true;
     std::vector<DataProduct> requests;
@@ -710,9 +710,9 @@ TEST(DataCenterDialog,
     (void)test_app();
     QTemporaryDir temporary;
     EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
-    DownloadServer clock(initial_fixture(ORBITFORGE_TEST_TIME));
+    DownloadServer clock(initial_fixture(ORBELLE_TEST_TIME));
     DownloadServer finals(initial_fixture(
-        std::filesystem::path(ORBITFORGE_TEST_FINALS).parent_path() / "finals2000A.data"));
+        std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() / "finals2000A.data"));
     clock.hold = false;
     std::vector<DataProduct> requests;
     const auto download = [&](DataProduct product) {
@@ -763,7 +763,7 @@ TEST(DataCenterDialog, InitialSetupDefaultResourcesRemainReadableAtNarrowWidths)
     (void)test_app();
     QTemporaryDir temporary;
     EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
-    DownloadServer source(initial_fixture(ORBITFORGE_TEST_TIME));
+    DownloadServer source(initial_fixture(ORBELLE_TEST_TIME));
     QTimer::singleShot(120, [&] {
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
         ASSERT_TRUE(dialog);
@@ -787,12 +787,12 @@ TEST(DataCenterDialog, InitialSetupDefaultResourcesRemainReadableAtNarrowWidths)
     finish_initial_cancel(catalog);
 }
 TEST(DataCenterDialog, LiveInitialDataSetup) {
-    if (qEnvironmentVariableIsEmpty("ORBITFORGE_LIVE_INITIAL_DATA_HOME"))
+    if (qEnvironmentVariableIsEmpty("ORBELLE_LIVE_INITIAL_DATA_HOME"))
         GTEST_SKIP();
     (void)test_app();
     EopCatalog catalog(
         std::filesystem::path(
-            qEnvironmentVariable("ORBITFORGE_LIVE_INITIAL_DATA_HOME").toStdWString()),
+            qEnvironmentVariable("ORBELLE_LIVE_INITIAL_DATA_HOME").toStdWString()),
         {}, {}, false);
     const auto required = initial_data_products();
     QElapsedTimer elapsed;
@@ -848,7 +848,7 @@ TEST(DataCenterDialog, OceanGroupShowsIndependentExtentAndLocalImportAtCompactWi
             if (scroll->isVisible()) {
                 EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
             }
-        const auto output = qEnvironmentVariable("ORBITFORGE_DATA_UI_CAPTURE");
+        const auto output = qEnvironmentVariable("ORBELLE_DATA_UI_CAPTURE");
         if (!output.isEmpty()) {
             EXPECT_TRUE(QDir{}.mkpath(output));
             EXPECT_TRUE(dialog->grab().save(output + "/ocean-compact.png"));
@@ -857,4 +857,4 @@ TEST(DataCenterDialog, OceanGroupShowsIndependentExtentAndLocalImportAtCompactWi
     });
     show_data_center(nullptr, catalog, DataProduct::fes2014bv1);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

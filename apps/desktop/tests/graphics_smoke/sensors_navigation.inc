@@ -130,10 +130,10 @@ void Workbench::smoke_sensors_navigation() {
         report_dialog_->findChild<QTabBar *>("reportViews")->setCurrentIndex(1);
         smoke_record("aer-sensor-curve");
         save_workbench_image("access-aer.png");
-        save_project_to(smoke_dir_ + "/access-sensors.orbitforge");
+        save_project_to(smoke_dir_ + "/access-sensors.orbelle");
         start_project(application::load_project(std::filesystem::path(
-                          (smoke_dir_ + "/access-sensors.orbitforge").toStdWString())),
-                      smoke_dir_ + "/access-sensors.orbitforge");
+                          (smoke_dir_ + "/access-sensors.orbelle").toStdWString())),
+                      smoke_dir_ + "/access-sensors.orbelle");
         ++orbit_smoke_stage_;
         break;
     case 143: {

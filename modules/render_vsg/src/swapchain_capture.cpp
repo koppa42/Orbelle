@@ -1,11 +1,11 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
-#include <orbitforge/render_vsg/swapchain_capture.hpp>
+#include <orbelle/render_vsg/swapchain_capture.hpp>
 #include <stdexcept>
 #include <string>
 
-namespace orbitforge::render_vsg {
+namespace orbelle::render_vsg {
 namespace {
 void check(VkResult result, const char *operation) {
     if (result != VK_SUCCESS)
@@ -111,4 +111,4 @@ CapturedImage SwapchainCapture::read_after_submit(vsg::Fence &fence) {
     requested_ = false;
     return result;
 }
-} // namespace orbitforge::render_vsg
+} // namespace orbelle::render_vsg

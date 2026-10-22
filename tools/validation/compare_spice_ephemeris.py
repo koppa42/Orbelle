@@ -1,4 +1,4 @@
-"""Compare installed OrbitForge states with independent jplephem reads of the full DE440s source."""
+"""Compare installed Orbelle states with independent jplephem reads of the full DE440s source."""
 import argparse
 import gc
 import hashlib
@@ -9,7 +9,7 @@ from random import Random
 
 import numpy as np
 from jplephem.spk import SPK
-import orbitforge as of
+import orbelle as of
 
 POSITION_TOLERANCE_M = 1e-3
 VELOCITY_TOLERANCE_MPS = 1e-7

@@ -3,10 +3,10 @@
 #include <chrono>
 #include <cmath>
 #include <numbers>
-#include <orbitforge/core/propagation/tle.hpp>
+#include <orbelle/core/propagation/tle.hpp>
 #include <string_view>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 void check(bool ok, const char *message) {
     if (!ok)
@@ -133,4 +133,4 @@ TleElements parse_tle(const Tle &tle) {
     }
     return result;
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

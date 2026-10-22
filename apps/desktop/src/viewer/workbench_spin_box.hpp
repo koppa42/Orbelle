@@ -5,7 +5,7 @@
 #include <QStyle>
 #include <QStyleOptionSpinBox>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // Keep native stepping and keyboard behavior; paint crisp arrows over the QSS button surfaces.
 template <class Base> class WorkbenchSpinBox final : public Base {
   public:
@@ -32,4 +32,4 @@ template <class Base> class WorkbenchSpinBox final : public Base {
         }
     }
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

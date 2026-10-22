@@ -4,7 +4,7 @@
 
 ## 独立参考
 
-`tools/validation/orekit/OrbitForgeSundmanReference.java` 直接调用固定 **Hipparchus 4.0.2** 的 `IterativeLegendreGaussIntegrator`、`DfpField(32)` 和 `DormandPrince853FieldIntegrator`，不调用 OrbitForge。依赖下载地址与 SHA-256 在 `tools/validation/orekit/dependencies.json`；运行前逐个核验 JAR。
+`tools/validation/orekit/OrbelleSundmanReference.java` 直接调用固定 **Hipparchus 4.0.2** 的 `IterativeLegendreGaussIntegrator`、`DfpField(32)` 和 `DormandPrince853FieldIntegrator`，不调用 Orbelle。依赖下载地址与 SHA-256 在 `tools/validation/orekit/dependencies.json`；运行前逐个核验 JAR。
 
 `tests/reference/propagators/sundman.txt` 的 ASCII/LF SHA-256 为 `8817fd254063bc4a8c635358b580f31e616b15832e6ac378ad34de8e0993478a`。普通测试只读取固定文件，不联网或重新生成。文件包含：
 
@@ -111,8 +111,8 @@ Java 21 示例；`$jars` 指向已按 `dependencies.json` 核验的目录。新�
 $jars = 'out/validation/orekit/jars'
 $classpath = (Get-ChildItem -LiteralPath $jars -Filter '*.jar').FullName -join [IO.Path]::PathSeparator
 New-Item -ItemType Directory -Force -Path out/validation/sundman/classes
-javac -cp $classpath -d out/validation/sundman/classes tools/validation/orekit/OrbitForgeSundmanReference.java
-java -Xmx768m -cp ("out/validation/sundman/classes" + [IO.Path]::PathSeparator + $classpath) OrbitForgeSundmanReference out/validation/sundman/sundman.txt
+javac -cp $classpath -d out/validation/sundman/classes tools/validation/orekit/OrbelleSundmanReference.java
+java -Xmx768m -cp ("out/validation/sundman/classes" + [IO.Path]::PathSeparator + $classpath) OrbelleSundmanReference out/validation/sundman/sundman.txt
 Get-FileHash -Algorithm SHA256 -LiteralPath out/validation/sundman/sundman.txt
 cmake --build --preset desktop-graphics
 ctest --preset desktop-graphics -R 'core\.(Sundman|HpopRegularization|GaussJacksonKernel|All/SundmanMethods|All/SundmanBoundaries)'

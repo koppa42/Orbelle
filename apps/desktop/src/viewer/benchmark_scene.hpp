@@ -4,7 +4,7 @@
 #include <QString>
 #include <vsg/text/Font.h>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // Optional developer fixture. It does not add a propagator or a desktop-control API.
 class BenchmarkScene {
   public:
@@ -14,4 +14,4 @@ class BenchmarkScene {
     vsg::ref_ptr<vsg::Font> font;
     QJsonObject report;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

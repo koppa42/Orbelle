@@ -1,7 +1,7 @@
 #pragma once
 #include "universal_kepler.hpp"
 
-namespace orbitforge::core::detail {
+namespace orbelle::core::detail {
 using KeplerMatrix = std::array<std::array<double, 6>, 6>;
 struct KeplerLinearization {
     KeplerState state, increment;
@@ -143,4 +143,4 @@ universal_kepler_linearized(const KeplerState &initial, double seconds, double m
         checkpoint();
     return out;
 }
-} // namespace orbitforge::core::detail
+} // namespace orbelle::core::detail

@@ -7,17 +7,17 @@
 #include <future>
 #include <gtest/gtest.h>
 #include <limits>
-#include <orbitforge/providers/erfa/provider.hpp>
+#include <orbelle/providers/erfa/provider.hpp>
 #include <stdexcept>
 #include <string>
 
-using namespace orbitforge;
+using namespace orbelle;
 
 TEST(ErfaTime, DownloadedLeapTablesValidateDatesAndOwnTheirPositiveAndNegativeTransitions) {
     struct TemporaryFile {
         std::filesystem::path path =
             std::filesystem::temp_directory_path() /
-            ("orbitforge-leaps-" +
+            ("orbelle-leaps-" +
              std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".dat");
         ~TemporaryFile() {
             std::error_code error;
@@ -180,7 +180,7 @@ TEST(ErfaFrames, MatchesUpstreamC2t06aReference) {
     const core::Epoch epoch((2192LL * 86400 - 43200) * 1'000'000'000 - 32'184'000'000);
     const auto rotation = frames->gcrf_to_itrf(
         epoch, {epoch, 32.184, 2.55060238e-7, 1.860359247e-6, 0, 0, "ERFA-2.0.1-t_c2t06a"});
-    std::ifstream input(std::string(ORBITFORGE_REFERENCE_DIR) + "/erfa_2_0_1_c2t06a.csv");
+    std::ifstream input(std::string(ORBELLE_REFERENCE_DIR) + "/erfa_2_0_1_c2t06a.csv");
     ASSERT_TRUE(input.is_open());
     for (std::size_t row = 0; row < 3; ++row) {
         for (std::size_t col = 0; col < 3; ++col) {

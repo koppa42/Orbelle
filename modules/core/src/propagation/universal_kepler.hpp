@@ -5,9 +5,9 @@
 #include <functional>
 #include <limits>
 #include <numbers>
-#include <orbitforge/core/propagation/state_provider.hpp>
+#include <orbelle/core/propagation/state_provider.hpp>
 
-namespace orbitforge::core::detail {
+namespace orbelle::core::detail {
 // Universal-variable two-body flow in inertial Cartesian axes. SI units and
 // continuous seconds; no epochs, orbital-element singularities or frame conversion.
 // The radius-scaled Stumpff equation covers elliptic, parabolic and hyperbolic
@@ -149,4 +149,4 @@ inline KeplerState universal_kepler(const KeplerState &initial, double seconds, 
                                     const std::function<void()> &checkpoint = {}) {
     return universal_kepler_data(initial, seconds, mu, checkpoint).state;
 }
-} // namespace orbitforge::core::detail
+} // namespace orbelle::core::detail

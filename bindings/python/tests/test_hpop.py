@@ -4,8 +4,8 @@ import math
 import tempfile
 import unittest
 
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 EOP = Path(__file__).resolve().parents[3] / "data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
 
@@ -34,7 +34,7 @@ class HpopTests(unittest.TestCase):
                 self.assertEqual(current.states(satellite, step=u.s(600)).input_sha256, captured.input_sha256)
                 self.assertEqual(current.state(satellite, at=project.last).position_m, state.position_m)
                 with tempfile.TemporaryDirectory() as directory:
-                    path = Path(directory) / "fixed.orbitforge"
+                    path = Path(directory) / "fixed.orbelle"
                     project.save(path, analysis=current)
                     loaded = of.Project.open(path)
                     restored = loaded.objects[satellite.id]
@@ -73,7 +73,7 @@ class HpopTests(unittest.TestCase):
                     self.assertLess(math.dist(actual.position_m, (radius*math.cos(angle),
                                                                   radius*math.sin(angle), 0)), .005)
                     with tempfile.TemporaryDirectory() as directory:
-                        path = Path(directory) / "full-day.orbitforge"
+                        path = Path(directory) / "full-day.orbelle"
                         project.save(path, analysis=analysis)
                         reopened = of.Project.open(path)
                         restored = reopened.objects[satellite.id]
@@ -101,7 +101,7 @@ class HpopTests(unittest.TestCase):
         analysis = project.prepare()
         before = analysis.state(satellite, at=project.last)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "numerical.orbitforge"
+            path = Path(directory) / "numerical.orbelle"
             project.save(path, analysis=analysis)
             loaded = of.Project.open(path)
             restored = loaded.objects[satellite.id]
@@ -130,7 +130,7 @@ class HpopTests(unittest.TestCase):
             satellite.orbit = replace(satellite.orbit, hpop=replace(settings, fixed_step_seconds=7))
             self.assertEqual(project.prepare().states(satellite, step=u.s(600)).input_sha256, result.input_sha256)
             with tempfile.TemporaryDirectory() as directory:
-                path = Path(directory) / "adaptive.orbitforge"
+                path = Path(directory) / "adaptive.orbelle"
                 project.save(path)
                 restored = of.Project.open(path)
                 sat = restored.objects[satellite.id]
@@ -154,7 +154,7 @@ class HpopTests(unittest.TestCase):
             self.assertEqual(inactive.input_sha256, original.input_sha256)
             self.assertEqual(inactive.position.values, original.position.values)
             with tempfile.TemporaryDirectory() as folder:
-                path = Path(folder)/"gauss-jackson.orbitforge"
+                path = Path(folder)/"gauss-jackson.orbelle"
                 project.save(path)
                 reopened = of.Project.open(path)
                 restored = reopened.objects[satellite.id]
@@ -197,7 +197,7 @@ class HpopTests(unittest.TestCase):
         self.assertEqual(after.input_sha256, before.input_sha256)
         self.assertEqual(after.position.values, before.position.values)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "mass.orbitforge"
+            path = Path(directory) / "mass.orbelle"
             project.save(path, analysis=analysis)
             reopened = of.Project.open(path)
             self.assertEqual(reopened.objects[satellite.id].orbit.hpop, satellite.orbit.hpop)

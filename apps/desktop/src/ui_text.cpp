@@ -11,7 +11,7 @@
 // to the initializer also retains the resource object when linking this static library.
 static void initialize_text_resource() { Q_INIT_RESOURCE(desktop_text); }
 
-namespace orbitforge::desktop::ui {
+namespace orbelle::desktop::ui {
 namespace {
 struct Message {
     QString text;
@@ -29,7 +29,7 @@ const Catalogue &catalogue() {
     // Function-local initialization is thread safe; subsequent lookups only read data.
     static const auto messages = [] {
         initialize_text_resource();
-        QFile file(QStringLiteral(":/orbitforge/text/zh_CN.json"));
+        QFile file(QStringLiteral(":/orbelle/text/zh_CN.json"));
         if (!file.open(QIODevice::ReadOnly))
             throw std::runtime_error("Cannot open the embedded desktop text catalogue");
         QJsonParseError error;
@@ -63,4 +63,4 @@ const Message &message(std::string_view key) {
 } // namespace
 QString text(std::string_view key) { return message(key).text; }
 const char *utf8(std::string_view key) { return message(key).utf8.constData(); }
-} // namespace orbitforge::desktop::ui
+} // namespace orbelle::desktop::ui

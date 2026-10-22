@@ -11,9 +11,9 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <algorithm>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 std::optional<application::Scenario>
 new_scenario_dialog(QWidget *parent, core::Epoch coverage_first, core::Epoch coverage_last,
                     const std::function<void(core::Epoch, core::Epoch)> &validate,
@@ -103,4 +103,4 @@ new_scenario_dialog(QWidget *parent, core::Epoch coverage_first, core::Epoch cov
         result.reset();
     return result;
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

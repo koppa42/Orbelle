@@ -1,6 +1,6 @@
 """Independent exact-axis Legendre identities, evaluated at 70 decimal digits.
 
-No OrbitForge import. Decimal.from_float preserves the production binary64
+No Orbelle import. Decimal.from_float preserves the production binary64
 inputs. For U_n=mu/r*C_n0*sqrt(2n+1)*(R/r)^n*P_n(z/r), use P_n(1)=1
 and P_n'(1)=n(n+1)/2. The linear transverse value's neglected O(x^3)
 term at x=1e-7 m is far below the test's 1e-20 m/s^2 bound.

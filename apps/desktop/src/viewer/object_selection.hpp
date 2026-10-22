@@ -3,7 +3,7 @@
 #include <QPointer>
 #include <QPushButton>
 #include <initializer_list>
-#include <orbitforge/application/project.hpp>
+#include <orbelle/application/project.hpp>
 
 class QCheckBox;
 class QComboBox;
@@ -12,7 +12,7 @@ class QLineEdit;
 class QTreeWidget;
 class QTreeWidgetItem;
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 enum class ObjectKind { satellite, ground_station, sensor, other };
 struct ObjectChoice {
     std::string id;
@@ -95,4 +95,4 @@ class ObjectSelectionField final : public QPushButton {
     std::vector<ObjectChoice> objects_;
     QPointer<ObjectSelectionDialog> chooser_;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

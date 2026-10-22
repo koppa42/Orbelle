@@ -5,7 +5,7 @@
 class QApplication;
 class QTableView;
 
-namespace orbitforge::desktop::report_test {
+namespace orbelle::desktop::report_test {
 QApplication &test_app();
 int table_column(QTableView *table, const char *id);
 const results::Cell &source_cell(const runtime::ReportResult &result, std::size_t row,
@@ -18,4 +18,4 @@ void select_curves(ReportDialog &dialog, const QStringList &ids, bool accept = t
                    bool from_table = false);
 void select_columns(ReportDialog &dialog, const QStringList &ids, bool accept = true);
 void wait_for_report(ReportDialog &dialog, int timeout = 5000);
-} // namespace orbitforge::desktop::report_test
+} // namespace orbelle::desktop::report_test

@@ -4,7 +4,7 @@ import struct
 import tempfile
 import unittest
 # Native value/format tests; public editing is in test_objects.py.
-from orbitforge import _native as of
+from orbelle import _native as of
 from project_format import rewrite_section
 
 
@@ -21,7 +21,7 @@ class GroundStationTests(unittest.TestCase):
     def test_station_only_roundtrip_preserves_fixed_itrf_states_and_independent_values(self):
         project = self.make_project()
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / '地面站.orbitforge'
+            path = Path(directory) / '地面站.orbelle'
             project.save(path)
             restored = of.load_project(path)
             self.assertEqual(restored.ground_stations[0].name, '海岸站')
@@ -65,7 +65,7 @@ class GroundStationTests(unittest.TestCase):
 
     def test_station_section_is_required_and_validated_even_with_correct_crcs(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'invalid.orbitforge'
+            path = Path(directory) / 'invalid.orbelle'
             self.make_project().save(path)
             raw = path.read_bytes()
             for mutate in (lambda body: None,

@@ -2,10 +2,10 @@
 #include <fstream>
 #include <future>
 #include <gtest/gtest.h>
-#include <orbitforge/providers/sgp4/provider.hpp>
+#include <orbelle/providers/sgp4/provider.hpp>
 #include <sstream>
 
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 // Verification files specify minutes relative to each TLE epoch. This clock assigns
 // that epoch to zero, isolating the propagation model from UTC conversion tests.
@@ -37,7 +37,7 @@ TEST(Sgp4, Matches157PublishedNearEarthDeepSpaceAndResonanceStates) {
     for (const auto *id :
          {"00005", "04632", "06251", "08195", "14128", "24208", "25954", "28057"}) {
         SCOPED_TRACE(id);
-        std::ifstream file(std::filesystem::path{ORBITFORGE_SGP4_REFERENCE} /
+        std::ifstream file(std::filesystem::path{ORBELLE_SGP4_REFERENCE} /
                            (std::string(id) + ".txt"));
         ASSERT_TRUE(file);
         core::Tle tle;
@@ -66,7 +66,7 @@ TEST(Sgp4, Matches157PublishedNearEarthDeepSpaceAndResonanceStates) {
     EXPECT_EQ(states, 157U);
 }
 TEST(Sgp4, DeepSpaceQueriesAreOrderIndependentAndThreadSafe) {
-    std::ifstream file(std::filesystem::path{ORBITFORGE_SGP4_REFERENCE} / "08195.txt");
+    std::ifstream file(std::filesystem::path{ORBELLE_SGP4_REFERENCE} / "08195.txt");
     core::Tle tle;
     std::getline(file, tle.line1);
     std::getline(file, tle.line2);

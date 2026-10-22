@@ -2,7 +2,7 @@
 #include "../universal_kepler_jacobian.hpp"
 #include "one_step.hpp"
 
-namespace orbitforge::core::detail {
+namespace orbelle::core::detail {
 // Re-anchor universal-variable osculating Cartesian parameters at each trial start.
 // y = Phi(dt,c); dc/dt = D(Phi)^-1 [0,a_pert]. Hamiltonian two-body motion is
 // symplectic: only the position Jacobian blocks are needed, dc = [-B^T a, A^T a].
@@ -86,4 +86,4 @@ TrialStep<N> vop_step(double time, const std::array<double, N> &initial, double 
     }
     return trial;
 }
-} // namespace orbitforge::core::detail
+} // namespace orbelle::core::detail

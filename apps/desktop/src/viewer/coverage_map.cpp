@@ -10,7 +10,7 @@
 #include <cmath>
 #include <numbers>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 QColor ramp(double x) {
     const QColor a("#24364e"), b("#43b5be"), c("#e6d68a");
@@ -179,4 +179,4 @@ void CoverageMap::keyPressEvent(QKeyEvent *event) {
     }
     QWidget::keyPressEvent(event);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

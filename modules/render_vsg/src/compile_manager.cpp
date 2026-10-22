@@ -1,8 +1,8 @@
-#include <orbitforge/render_vsg/compile_manager.hpp>
+#include <orbelle/render_vsg/compile_manager.hpp>
 #include <stdexcept>
 #include <vsg/app/Viewer.h>
 
-namespace orbitforge::render_vsg {
+namespace orbelle::render_vsg {
 CompileManager::CompileManager(vsg::Viewer &viewer, vsg::ref_ptr<vsg::ResourceHints> hints)
     : Inherit(viewer, hints), hints_(std::move(hints)) {}
 
@@ -60,4 +60,4 @@ void CompileManager::end_change(vsg::Viewer &viewer) {
     paused_ = false;
     return_traversals_if_ready();
 }
-} // namespace orbitforge::render_vsg
+} // namespace orbelle::render_vsg

@@ -3,10 +3,10 @@
 #include <array>
 #include <cmath>
 #include <limits>
-#include <orbitforge/core/propagation/state_provider.hpp>
+#include <orbelle/core/propagation/state_provider.hpp>
 #include <type_traits>
 
-namespace orbitforge::core::detail {
+namespace orbelle::core::detail {
 #include "gauss_jackson_coefficients.inc"
 // N second-order coordinates plus K first-order states. The latter use the
 // method's single-integral sums/coefficients, with no artificial second derivative.
@@ -319,4 +319,4 @@ struct CartesianGaussJackson12
     }
 };
 using GaussJackson12 = CartesianGaussJackson12<>;
-} // namespace orbitforge::core::detail
+} // namespace orbelle::core::detail

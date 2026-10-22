@@ -1,7 +1,7 @@
 """Public design API and its use with the same J2 propagator as the desktop."""
 import math
 import unittest
-import orbitforge as of
+import orbelle as of
 
 
 class OrbitDesignTest(unittest.TestCase):

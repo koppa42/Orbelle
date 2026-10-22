@@ -26,14 +26,14 @@ Runtime 构建固定 ITRF Session，模型标识为 `ground-station-wgs84-fixed-
 Python 示例：
 
 ```python
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 project = of.Project("观测任务", of.Epoch(0), of.Epoch(7_200_000_000_000))
 station = project.objects.ground_station("示例地面站", location=of.Wgs84Location(
     longitude=u.deg(114.2), latitude=u.deg(22.3), ellipsoid_height=u.m(350)))
 states = project.to_scenario().sample([project.first, project.last])[0]  # ITRF
-project.save("station.orbitforge")
+project.save("station.orbelle")
 ```
 
 Python 普通脚本通过 `project.objects` 和站点句柄修改，例如 `station.minimum_elevation = u.deg(5)`；多对象原子修改使用 `with project.edit():`。文件层可变值保留为 `ProjectData`，详见[对象编辑 API](object_editing.md)。

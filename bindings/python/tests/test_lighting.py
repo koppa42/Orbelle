@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 SAMPLE = Path(__file__).resolve().parents[3] / "data/samples/spice/de440s_2016_leap"
 
@@ -68,8 +68,8 @@ class LightingTests(unittest.TestCase):
             with self.assertRaises(of.AnalysisCancelled):
                 analysis.report(of.ReportKind.LIGHTING_INTERVALS,objects=sat,step=u.s(60),cancelled=lambda: True)
             # Save the resource identity even when the propagator itself needs no Sun.
-            project.save(root/"lighting.orbitforge",analysis=analysis)
-            reopened=of.Project.open(root/"lighting.orbitforge",data=data)
+            project.save(root/"lighting.orbelle",analysis=analysis)
+            reopened=of.Project.open(root/"lighting.orbelle",data=data)
             repeat=reopened.prepare(data=data).report(of.ReportKind.LIGHTING_INTERVALS,
                 objects=reopened.objects[sat.id],step=u.s(60),boundary_tolerance=u.s(.000001),
                 time_scale=of.ReportTimeScale.TAI)

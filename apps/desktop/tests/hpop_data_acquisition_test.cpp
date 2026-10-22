@@ -38,16 +38,16 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/j2.hpp>
-#include <orbitforge/runtime/j4.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/j2.hpp>
+#include <orbelle/runtime/j4.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
 #include "support/hpop_test_support.hpp"
 #include "support/property_editor_fixture.hpp"
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 TEST_F(QuantityTest, HpopMissingGravityStartsOwnedDownloadAndCancelCloseCanRetryWithoutCommitting) {
     QTemporaryDir temporary;
     ASSERT_TRUE(temporary.isValid());
@@ -240,7 +240,7 @@ TEST_F(QuantityTest, HpopOceanIndependentTruncationKeyboardResizeReopenAndCancel
         EXPECT_TRUE(
             dialog->findChild<QLabel *>("errorText")->text().contains(QStringLiteral("可用范围")));
         degree->setValue(4);
-        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
         std::cout << "HPOP ocean tide device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
         for (int width : {720, 430}) {
             dialog->resize(width, width == 720 ? 700 : 620);
@@ -343,4 +343,4 @@ TEST_F(QuantityTest, HpopQueuedOceanCancellationPreservesUnrelatedDownloadAndDis
     catalog.cancel_download();
     settle_hpop_catalog(catalog);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

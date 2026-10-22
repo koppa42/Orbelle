@@ -1,10 +1,10 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
-#include <orbitforge/core/propagation/central_body.hpp>
-#include <orbitforge/core/propagation/orbit_design.hpp>
+#include <orbelle/core/propagation/central_body.hpp>
+#include <orbelle/core/propagation/orbit_design.hpp>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 constexpr double pi = std::numbers::pi, tau = 2 * pi;
 constexpr double maximum_axis = 106'378'136.6; // Explicit preliminary-design domain.
@@ -189,4 +189,4 @@ EarthOrbitDesign design_earth_orbit(const EarthOrbitDesignRequest &q) {
             r.node,
             r.apsis};
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

@@ -9,7 +9,7 @@
 #include <numbers>
 #include <vsg/app/ProjectionMatrix.h>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 constexpr double earth_radius = 6378137.0;
 constexpr double maximum_distance = 1e11;
@@ -246,4 +246,4 @@ bool ViewNavigation::eventFilter(QObject *object, QEvent *event) {
     }
     return false;
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

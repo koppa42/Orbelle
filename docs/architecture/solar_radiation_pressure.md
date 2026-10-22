@@ -28,7 +28,7 @@ Cr 范围为 `[-100, 100]`，面积质量比为 `[0, 9999] m²/kg`，允许带�
 | `apparent_to_true_cb` / `"apparent_to_true_cb"`（默认） | 以地心为观测者求接收型 LT+S 视太阳，再相对卫星构造向量 |
 | `apparent` / `"apparent"` | 以当前积分阶段的卫星位置和速度为观测者，求接收型 LT+S 太阳向量 |
 
-OrbitForge 默认采用地心视太阳；几何太阳的独立 Orekit 参考显式选择 `true`。公开帮助定义功能含义，并不完整披露 HPOP 内部星历、光行差或遮挡体历元约定；这三种实现不等于已通过 STK 同配置数值验收。
+Orbelle 默认采用地心视太阳；几何太阳的独立 Orekit 参考显式选择 `true`。公开帮助定义功能含义，并不完整披露 HPOP 内部星历、光行差或遮挡体历元约定；这三种实现不等于已通过 STK 同配置数值验收。
 
 卫星方法采用 [NAIF `spkapo` 的单次 LT+S 约定](https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/cspice/spkapo_c.html)：先由几何距离估计光行时，查询太阳发光时刻，再按观测者质心速度计算光行差。实现将各步显式展开，查询前校验发光时刻；不允许内部查询越过快照边界。速度包含地球的 SSB 速度及卫星相对地球的速度，后者从 TAI 导数换到 TDB 导数。换算使用当前 LSK 的 `K、EB、M0、M1`，按 [NAIF TIME 的公式](https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/req/time.html)求 `dTAI/dTDB = 1 − K cos(E) M1 (1 + EB cos(M))`。这是 ICRF 对齐轴下的牛顿叠加，不是完整 BCRS/GCRS 相对论转换。
 
@@ -77,7 +77,7 @@ C++ 使用 `HpopOptions::srp`／`SrpOptions`，通过显式 `HpopEnvironment` �
 
 ## 阴影边界修正
 
-`SrpOptions::boundary_mitigation` / Python `SrpSettings.boundary_mitigation` 对应 STK 的 Use Boundary Mitigation，默认 false。STK 公开帮助说明它用于修正跨阴影边界的积分误差，没有公开内部算法。OrbitForge 的实现采用可复核的事件定位、单侧力段和高精度边界校正；不声称与 STK 内部代码相同，也尚无 STK 同配置实测数据。
+`SrpOptions::boundary_mitigation` / Python `SrpSettings.boundary_mitigation` 对应 STK 的 Use Boundary Mitigation，默认 false。STK 公开帮助说明它用于修正跨阴影边界的积分误差，没有公开内部算法。Orbelle 的实现采用可复核的事件定位、单侧力段和高精度边界校正；不声称与 STK 内部代码相同，也尚无 STK 同配置实测数据。
 
 - 使用实际选定的太阳位置方法与几何遮挡体中心。每个球面的外接触、本影内接触和环食内接触采用有符号角距；圆柱采用点太阳接触。接触的前后方与深度门限、天体排序和有效性检查与瞬时光压力一致。
 - 在已接受试步内按至多 60 s 的检查间隔检测变号，并对包围的局部极值搜索短暂掠影。求根使用积分前缀；唯一的一阶位置外推是距段首四个时间分辨单位的选侧探针。时间分辨率为 `max(1 ns, 16 ε max(|t0|,|t1|))`，相邻不可分辨事件按同一边界处理。有限检查间隔不能保证捕获任意快速振荡的自定义星历或所有相切退化情况，不作为通用食事件搜索 API。
@@ -86,9 +86,9 @@ C++ 使用 `HpopOptions::srp`／`SrpOptions`，通过显式 `HpopEnvironment` �
 - 科学星历以接触时刻分弧，不能跨边界构造插值模板。浮点事件状态先按动力学输运到其整数纳秒历元，避免 Hermite 放大节点时间标注误差。接受节点模式遇到短半影弧时，在该弧内增加真实积分停止点并重新定位事件，在边界两侧的插值窗口以高精度 BS 前缀核对中点，误差超过配置分量尺度的十分之一时再细化；至多八次并共享每次查询的工作上限。无法满足所选阶数或精度时明确报错。固定报告网格继续保留原配置，短弧节点不足时报错，不静默降低插值阶数。
 - 界面位于 Force Models / SRP / 阴影；禁用条件保留草稿。关闭 SRP、None 阴影、无分配遮挡体、Cr 或 A/m 为零时，开关不参与有效计算身份。生效时来源包含 `srp-boundary=contacts-one-sided-bs-v1`、检查间隔和时间分辨率。项目使用 v46 / OBJS32。
 
-固定参考 `tests/reference/propagators/srp_boundaries.txt` 由 `tools/validation/orekit/OrbitForgeSrpBoundaryReference.java` 生成，依赖同目录 `OrbitForgeSrpReference.java` 的合成移动太阳：Orekit 13.1.2、Hipparchus 4.0.2 DP853、TAI/GCRF、球形地球，Cr=1.7、A/m=20 m²/kg，显式放大光压以检验边界误差。LEO/GEO 各含正反向和圆柱/双锥，共 8 条轨迹及所有接触状态。圆柱参考使用 Orekit `EclipseDetector` 的零半径发光源，保留 STK 指定的卫星至太阳方向；不能直接替换为使用地心太阳方向的 `CylindricalShadowEclipseDetector`。
+固定参考 `tests/reference/propagators/srp_boundaries.txt` 由 `tools/validation/orekit/OrbelleSrpBoundaryReference.java` 生成，依赖同目录 `OrbelleSrpReference.java` 的合成移动太阳：Orekit 13.1.2、Hipparchus 4.0.2 DP853、TAI/GCRF、球形地球，Cr=1.7、A/m=20 m²/kg，显式放大光压以检验边界误差。LEO/GEO 各含正反向和圆柱/双锥，共 8 条轨迹及所有接触状态。圆柱参考使用 Orekit `EclipseDetector` 的零半径发光源，保留 STK 指定的卫星至太阳方向；不能直接替换为使用地心太阳方向的 `CylindricalShadowEclipseDetector`。
 
-参考自身将最大步长从 2 s 减至 1 s，最大状态分量变化 1.930e−5 m / 8.284e−9 m/s，事件变化 1.776e−9 s。OrbitForge 对五种积分器、普通/正则化时间、两档步长比较 160 条传播；高阶方法的固定验收限为 1 mm、1 µm/s、0.3 µs，RK4 为 0.2 m、0.2 mm/s、30 µs。RK4 减半后误差须至少缩小八倍（1e−4 m 参考/浮点底限）；其他方法要求减半不出现超过固定底限的恶化。当前最大差异：高阶方法 2.556e−5 m / 1.435e−8 m/s / 2.322e−9 s；RK4 粗步长 0.041574 m / 2.331e−5 m/s / 3.513e−6 s。另有 24 条 RKF/RKV/BS 显式固定步长、普通/正则化时间的独立轨迹对照。既有太阳/多体并集、天气跳变和时间正则化参考继续独立保留。
+参考自身将最大步长从 2 s 减至 1 s，最大状态分量变化 1.930e−5 m / 8.284e−9 m/s，事件变化 1.776e−9 s。Orbelle 对五种积分器、普通/正则化时间、两档步长比较 160 条传播；高阶方法的固定验收限为 1 mm、1 µm/s、0.3 µs，RK4 为 0.2 m、0.2 mm/s、30 µs。RK4 减半后误差须至少缩小八倍（1e−4 m 参考/浮点底限）；其他方法要求减半不出现超过固定底限的恶化。当前最大差异：高阶方法 2.556e−5 m / 1.435e−8 m/s / 2.322e−9 s；RK4 粗步长 0.041574 m / 2.331e−5 m/s / 3.513e−6 s。另有 24 条 RKF/RKV/BS 显式固定步长、普通/正则化时间的独立轨迹对照。既有太阳/多体并集、天气跳变和时间正则化参考继续独立保留。
 
 ## 变分计算基础
 

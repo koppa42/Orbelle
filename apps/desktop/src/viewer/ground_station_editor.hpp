@@ -1,12 +1,12 @@
 #pragma once
 #include <QDialog>
 #include <functional>
-#include <orbitforge/application/project.hpp>
+#include <orbelle/application/project.hpp>
 
 class QLineEdit;
 class QLabel;
 class QPushButton;
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 class QuantityEditor;
 class GroundStationEditor final : public QDialog {
   public:
@@ -31,4 +31,4 @@ class GroundStationEditor final : public QDialog {
     QWidget *fields_;
     QPushButton *apply_, *reset_;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

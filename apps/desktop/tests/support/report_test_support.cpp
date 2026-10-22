@@ -46,12 +46,12 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 #include <stdexcept>
 
-namespace orbitforge::desktop::report_test {
+namespace orbelle::desktop::report_test {
 QApplication &test_app() {
     auto &app = test_application("report_ui_test");
     apply_workbench_style(app);
@@ -188,4 +188,4 @@ void wait_for_report(ReportDialog &dialog, int timeout) {
     const auto *generate = dialog.findChild<QPushButton *>("generateReport");
     ASSERT_TRUE(wait_for_ui([&] { return generate->isEnabled(); }, timeout));
 }
-} // namespace orbitforge::desktop::report_test
+} // namespace orbelle::desktop::report_test

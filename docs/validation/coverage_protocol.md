@@ -4,7 +4,7 @@
 
 ## 独立固定参考
 
-`tools/validation/orekit/OrbitForgeCoverageReference.java` 使用 Orekit 13.1.2 / Hipparchus 4.0.2：KeplerianPropagator、WGS84 OneAxisEllipsoid、TopocentricFrame 与 FunctionalDetector 搜索可见区间。事件检测检查间隔 1 s、边界阈值 1e-10 s。球锥夹角通过 Hipparchus Vector3D 计算；联合覆盖通过带活动计数的事件扫描得到，区别于生产代码的排序区间合并。
+`tools/validation/orekit/OrbelleCoverageReference.java` 使用 Orekit 13.1.2 / Hipparchus 4.0.2：KeplerianPropagator、WGS84 OneAxisEllipsoid、TopocentricFrame 与 FunctionalDetector 搜索可见区间。事件检测检查间隔 1 s、边界阈值 1e-10 s。球锥夹角通过 Hipparchus Vector3D 计算；联合覆盖通过带活动计数的事件扫描得到，区别于生产代码的排序区间合并。
 
 面积采用 Hipparchus 8 点迭代 Gauss-Legendre 数值积分计算椭球面积元，生产实现使用解析原函数。生成器验证 `dependencies.json` 固定 jar 的 SHA-256；提交的参考与源码散列保存在 `coverage_orekit.metadata.json`。
 
@@ -24,4 +24,4 @@ C++ 自动比较全部网格中心、面积、逐点可见区间、覆盖时长�
 
 Python 在独立安装环境运行完整接口回归；新增覆盖测试检查冻结快照、进度、明确资产选择、共享报告、CSV、单位转换、资源要求、取消与项目重开。`examples/python/coverage.py` 加入现有 CI 示例列表。
 
-Qt 覆盖测试检查全球/区域设置、热力图与曲线、方向键选点、区间定位、格式切换不重新准备、模板保存、对象删除、非法输入保留旧结果及 1140/420 逻辑像素布局。使用 `ORBITFORGE_REPORT_UI_CAPTURE` 可保存实际 Windows 截图；测试于 100%/150%/200% DPI 检查。完整 Release 回归和现有整机 graphics smoke 保留；Sanitizers 仍仅手动触发。
+Qt 覆盖测试检查全球/区域设置、热力图与曲线、方向键选点、区间定位、格式切换不重新准备、模板保存、对象删除、非法输入保留旧结果及 1140/420 逻辑像素布局。使用 `ORBELLE_REPORT_UI_CAPTURE` 可保存实际 Windows 截图；测试于 100%/150%/200% DPI 检查。完整 Release 回归和现有整机 graphics smoke 保留；Sanitizers 仍仅手动触发。

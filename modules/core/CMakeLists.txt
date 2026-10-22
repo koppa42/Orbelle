@@ -1,4 +1,4 @@
-orbitforge_module(orbitforge_core Core
+orbelle_module(orbelle_core Core
     src/propagation/sensor.cpp
     src/propagation/orbit_design.cpp
     src/propagation/circular_two_body.cpp src/propagation/ground_station.cpp src/frames/position_rotation.cpp
@@ -10,18 +10,18 @@ if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 foreach(notice IN ITEMS NOTICE.txt Apache-2.0.txt Orekit-NOTICE.txt)
-    if(ORBITFORGE_INSTALL_SDK)
+    if(ORBELLE_INSTALL_SDK)
         install(FILES "src/propagation/atmosphere/${notice}"
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/OrbitForge/notices"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/Orbelle/notices"
             RENAME "Atmosphere-${notice}" COMPONENT SDK)
     endif()
-    install(FILES "src/propagation/atmosphere/${notice}" DESTINATION "orbitforge/notices"
+    install(FILES "src/propagation/atmosphere/${notice}" DESTINATION "orbelle/notices"
         RENAME "Atmosphere-${notice}" COMPONENT Python)
 endforeach()
 
-if(ORBITFORGE_INSTALL_SDK)
+if(ORBELLE_INSTALL_SDK)
     install(FILES src/propagation/integrators/rklib-LICENSE.txt
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/OrbitForge/notices" COMPONENT SDK)
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/Orbelle/notices" COMPONENT SDK)
 endif()
 install(FILES src/propagation/integrators/rklib-LICENSE.txt
-    DESTINATION "orbitforge/notices" COMPONENT Python)
+    DESTINATION "orbelle/notices" COMPONENT Python)

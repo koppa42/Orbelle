@@ -3,14 +3,14 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <limits>
-#include <orbitforge/core/propagation/relative_motion.hpp>
-#include <orbitforge/runtime/analysis.hpp>
-#include <orbitforge/runtime/gravity.hpp>
-#include <orbitforge/runtime/project.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/core/propagation/relative_motion.hpp>
+#include <orbelle/runtime/analysis.hpp>
+#include <orbelle/runtime/gravity.hpp>
+#include <orbelle/runtime/project.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 #include <sstream>
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 core::Epoch seconds(double v) {
     return core::Epoch{static_cast<std::int64_t>(std::llround(v * 1e9))};
@@ -57,7 +57,7 @@ runtime::ReportContext context(double first = 0, double last = 600) {
             seconds(0), core::OriginId::earth, core::FrameId::gcrf, {7e6, 0, 0}, {0, 7500, 100}};
         p.satellites.push_back(s);
     }
-    auto eop = runtime::load_eop_snapshot(ORBITFORGE_REPORT_EOP);
+    auto eop = runtime::load_eop_snapshot(ORBELLE_REPORT_EOP);
     p.earth_orientation = eop->data_info();
     return {p, runtime::make_builtin_time_provider(), std::make_shared<IdentityFrames>(),
             std::move(eop)};
@@ -72,7 +72,7 @@ struct Reference {
     std::array<double, 4> extrema{};
 };
 std::vector<Reference> references() {
-    std::ifstream file(ORBITFORGE_INTERSATELLITE_REFERENCE);
+    std::ifstream file(ORBELLE_INTERSATELLITE_REFERENCE);
     if (!file)
         throw std::runtime_error("Missing intersatellite reference");
     std::vector<Reference> cases;

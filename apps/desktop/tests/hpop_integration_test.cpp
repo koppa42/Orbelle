@@ -34,15 +34,15 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/j2.hpp>
-#include <orbitforge/runtime/j4.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/j2.hpp>
+#include <orbelle/runtime/j4.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
 #include "support/property_editor_fixture.hpp"
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 TEST_F(QuantityTest, HpopAdaptiveIntegratorsValidatePersistAndPreserveCancelledDrafts) {
     apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
     for (const auto integrator : {core::HpopIntegrator::rkf78, core::HpopIntegrator::rkv89,
@@ -130,7 +130,7 @@ TEST_F(QuantityTest, HpopAdaptiveIntegratorsValidatePersistAndPreserveCancelledD
             dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(1);
             auto *method = dialog->findChild<QComboBox *>("hpopIntegrator");
             auto *maximum = dialog->findChild<QuantityEditor *>("hpopMaxStep");
-            const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+            const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
             std::cout << "HPOP " << method_index
                       << " device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
             for (const int width : {720, 430}) {
@@ -203,7 +203,7 @@ TEST_F(QuantityTest, HpopFixedStepControlAppliesAndRestoresDrafts) {
             dialog->findChild<QTabWidget *>("hpopSettingsTabs")->setCurrentIndex(1);
             auto *control = dialog->findChild<QComboBox *>("hpopStepControl");
             EXPECT_EQ(control->currentIndex(), 1);
-            const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+            const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
             for (int width : {430, 720}) {
                 dialog->resize(width, 620);
                 QEventLoop settled;
@@ -297,7 +297,7 @@ TEST_F(QuantityTest, HpopGaussJacksonCorrectionControlsValidatePersistAndCancel)
                 }
             }
             EXPECT_TRUE(fixed_summary);
-            const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+            const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
             std::cout << "HPOP Gauss-Jackson " << scheme << " DPR " << dialog->devicePixelRatioF()
                       << '\n';
             for (int width : {720, 430}) {
@@ -372,7 +372,7 @@ TEST_F(QuantityTest, HpopInterpolationValidatesPreservesDraftsAndReopensAtNarrow
         EXPECT_EQ(method->currentIndex(), 0);
         EXPECT_EQ(order->value(), 6);
         EXPECT_TRUE(fixed->isChecked());
-        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
         std::cout << "HPOP interpolation DPR " << dialog->devicePixelRatioF() << '\n';
         for (int selected : {0, 1}) {
             method->setCurrentIndex(selected);
@@ -470,7 +470,7 @@ TEST_F(QuantityTest, HpopRegularizationControlsPreserveDraftsCancelAndNarrowLayo
             QKeyEvent key(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
             QApplication::sendEvent(count, &key);
             EXPECT_EQ(count->value(), 1025);
-            const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+            const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
             std::cout << "HPOP regularization DPR " << dialog->devicePixelRatioF() << '\n';
             for (int width : {430, 720}) {
                 dialog->resize(width, 620);
@@ -547,7 +547,7 @@ TEST_F(QuantityTest, HpopVopInterpolationMuDraftsUnitsValidationAndNarrowLayouts
                     EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
                     EXPECT_TRUE(dialog->rect().contains(
                         dialog->findChild<QDialogButtonBox *>()->geometry()));
-                    const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+                    const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
                     if (!capture.isEmpty()) {
                         EXPECT_TRUE(QDir{}.mkpath(capture));
                         EXPECT_TRUE(
@@ -620,7 +620,7 @@ TEST_F(QuantityTest, HpopVopIntegrationSupportsOnlyRkfBsPreservesDraftAndCancels
                     EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
                     EXPECT_TRUE(dialog->rect().contains(
                         dialog->findChild<QDialogButtonBox *>()->geometry()));
-                    const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+                    const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
                     if (!capture.isEmpty() && pass == 1) {
                         EXPECT_TRUE(QDir{}.mkpath(capture));
                         EXPECT_TRUE(dialog->grab().save(
@@ -723,4 +723,4 @@ TEST_F(QuantityTest, HpopInvalidInactiveMuDraftsDoNotBlockAccept) {
         EXPECT_EQ(options.interpolation.vop_mu, before.interpolation.vop_mu);
     }
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

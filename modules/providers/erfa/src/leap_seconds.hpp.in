@@ -1,14 +1,14 @@
 #pragma once
 #include <array>
-#include <orbitforge/core/time/time_provider.hpp>
+#include <orbelle/core/time/time_provider.hpp>
 
-namespace orbitforge::providers::erfa::detail {
+namespace orbelle::providers::erfa::detail {
 struct LeapSecond { int mjd; int tai_minus_utc; };
 inline constexpr auto leap_seconds = std::to_array<LeapSecond>({
-@ORBITFORGE_LEAP_ROWS@
+@ORBELLE_LEAP_ROWS@
 });
 inline constexpr int utc_valid_from_mjd = @utc_valid_from_mjd@;
 inline constexpr int utc_valid_until_mjd = @utc_valid_until_mjd@;
 inline const core::TimeDataInfo time_data_info{
     "@snapshot_id@", "@sha256@", "@source_url@", utc_valid_from_mjd, utc_valid_until_mjd};
-} // namespace orbitforge::providers::erfa::detail
+} // namespace orbelle::providers::erfa::detail

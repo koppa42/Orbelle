@@ -2,9 +2,9 @@
 #include <fstream>
 #include <full_gravity.hpp>
 #include <gtest/gtest.h>
-#include <orbitforge/core/propagation/gravity.hpp>
+#include <orbelle/core/propagation/gravity.hpp>
 #include <sstream>
-using namespace orbitforge::core;
+using namespace orbelle::core;
 TEST(Gravity, HighDegreeNormalizedFieldMatchesIndependentOrekitIncludingNearPoles) {
     std::vector<GravityCoefficient> coefficients;
     for (int n = 2; n <= 360; ++n)
@@ -17,7 +17,7 @@ TEST(Gravity, HighDegreeNormalizedFieldMatchesIndependentOrekitIncludingNearPole
         }
     GravityModel model({"synthetic", {}, {}, "tide_free", 3.986004415e14, 6378136.3, 360, 360},
                        coefficients);
-    std::ifstream file(ORBITFORGE_GRAVITY_REFERENCE);
+    std::ifstream file(ORBELLE_GRAVITY_REFERENCE);
     ASSERT_TRUE(file.is_open());
     int rows = 0;
     for (std::string line; std::getline(file, line);) {
@@ -83,7 +83,7 @@ TEST(Gravity, FullDegreeAndRectangularFieldsMatchIndependentOrekit) {
             GravityInfo{
                 "full-reference", {}, {}, "tide_free", 3.986004415e14, 6378136.3, 2190, order},
             coefficients);
-        full_gravity_test::verify(model, profile, ORBITFORGE_GRAVITY_FULL_REFERENCE,
+        full_gravity_test::verify(model, profile, ORBELLE_GRAVITY_FULL_REFERENCE,
                                   profile == 2 ? 24 : 48, profile == 1 ? 2 : 0);
         if (profile < 2) {
             const auto polar = model->acceleration({0, 0, 6356752.3}, 2190, order);

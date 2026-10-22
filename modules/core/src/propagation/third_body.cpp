@@ -1,8 +1,8 @@
 #include <cmath>
-#include <orbitforge/core/propagation/third_body.hpp>
+#include <orbelle/core/propagation/third_body.hpp>
 #include <stdexcept>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 std::string_view third_body_name(ThirdBody body) {
     constexpr std::array<std::string_view, third_body_count> names{
         "Sun",  "Moon",    "Jupiter", "Venus",   "Saturn",
@@ -100,4 +100,4 @@ ForceDifferential third_body_differential(const std::array<double, 3> &r,
         }
     return result;
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

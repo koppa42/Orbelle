@@ -12,14 +12,14 @@
 #include <QTemporaryDir>
 #include <cmath>
 #include <gtest/gtest.h>
-#include <orbitforge/application/project.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
+#include <orbelle/application/project.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 QByteArray payload() {
     QFile file(QString::fromStdString(
-        (std::filesystem::path(ORBITFORGE_TEST_FINALS).parent_path() / "finals2000A.data")
+        (std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() / "finals2000A.data")
             .string()));
     if (!file.open(QIODevice::ReadOnly))
         throw std::runtime_error("Missing finals fixture");
@@ -74,8 +74,8 @@ class DataCenterTest : public ::testing::Test {
     static void complete(EopCatalog &catalog) {
         QElapsedTimer timer;
         timer.start();
-        const int limit = qEnvironmentVariableIsEmpty("ORBITFORGE_LIVE_IERS_URL") &&
-                                  qEnvironmentVariableIsEmpty("ORBITFORGE_LIVE_IERS")
+        const int limit = qEnvironmentVariableIsEmpty("ORBELLE_LIVE_IERS_URL") &&
+                                  qEnvironmentVariableIsEmpty("ORBELLE_LIVE_IERS")
                               ? 15000
                               : 120000;
         while (catalog.downloading() && timer.elapsed() < limit)
@@ -85,7 +85,7 @@ class DataCenterTest : public ::testing::Test {
     QTemporaryDir temp;
 };
 TEST_F(DataCenterTest, DownloadSelectsCurrentDataWithoutChangingActiveProviders) {
-    EopCatalog catalog(root() / "data", {ORBITFORGE_TEST_FINALS, ORBITFORGE_TEST_C04}, {}, false);
+    EopCatalog catalog(root() / "data", {ORBELLE_TEST_FINALS, ORBELLE_TEST_C04}, {}, false);
     auto original = catalog.providers().front();
     const auto lock = application::eop_data_lock(original->data_info());
     for (const auto &entry : catalog.data().snapshots()) {
@@ -94,7 +94,7 @@ TEST_F(DataCenterTest, DownloadSelectsCurrentDataWithoutChangingActiveProviders)
     }
     const auto before = QDateTime::currentSecsSinceEpoch();
     Server server(payload());
-    const auto live = qEnvironmentVariable("ORBITFORGE_LIVE_IERS_URL");
+    const auto live = qEnvironmentVariable("ORBELLE_LIVE_IERS_URL");
     const auto endpoint = live.isEmpty() ? server.url() : QUrl(live);
     catalog.start_download(endpoint);
     complete(catalog);
@@ -131,7 +131,7 @@ TEST_F(DataCenterTest, DownloadSelectsCurrentDataWithoutChangingActiveProviders)
     EXPECT_TRUE(std::filesystem::is_empty(root() / "data/staging"));
 }
 TEST_F(DataCenterTest, CancelHttpFailureTruncationAndInvalidDataNeverInstall) {
-    EopCatalog catalog(root() / "data", {ORBITFORGE_TEST_C04}, {}, false);
+    EopCatalog catalog(root() / "data", {ORBELLE_TEST_C04}, {}, false);
     Server valid(payload());
     catalog.start_download(valid.url());
     catalog.cancel_download();
@@ -153,7 +153,7 @@ TEST_F(DataCenterTest, CancelHttpFailureTruncationAndInvalidDataNeverInstall) {
     }
 }
 TEST_F(DataCenterTest, OversizedResponseIsRejectedAndCanRetry) {
-    EopCatalog catalog(root() / "data", {ORBITFORGE_TEST_C04}, {}, false);
+    EopCatalog catalog(root() / "data", {ORBELLE_TEST_C04}, {}, false);
     Server large(QByteArray(16 * 1024 * 1024 + 1, 'x'));
     catalog.start_download(large.url());
     complete(catalog);
@@ -165,16 +165,16 @@ TEST_F(DataCenterTest, OversizedResponseIsRejectedAndCanRetry) {
     EXPECT_EQ(catalog.providers().size(), 2);
 }
 TEST_F(DataCenterTest, LegacyMigrationAndPreferencesSurviveRestart) {
-    const auto old = runtime::import_eop_snapshot(ORBITFORGE_TEST_C04, root() / "eop");
+    const auto old = runtime::import_eop_snapshot(ORBELLE_TEST_C04, root() / "eop");
     auto provider = runtime::load_eop_snapshot(old);
     const auto lock = application::eop_data_lock(provider->data_info());
     {
-        EopCatalog catalog(root() / "data", {ORBITFORGE_TEST_FINALS}, root() / "eop", false);
+        EopCatalog catalog(root() / "data", {ORBELLE_TEST_FINALS}, root() / "eop", false);
         ASSERT_EQ(catalog.providers().size(), 2);
         EXPECT_EQ(application::eop_data_lock(catalog.providers()[1]->data_info()), lock);
         catalog.set_automatic_updates(false);
     }
-    EopCatalog reopened(root() / "data", {ORBITFORGE_TEST_FINALS}, root() / "eop", false);
+    EopCatalog reopened(root() / "data", {ORBELLE_TEST_FINALS}, root() / "eop", false);
     EXPECT_EQ(reopened.current_indices().size(), 2);
     EXPECT_FALSE(reopened.automatic_updates());
     EXPECT_EQ(reopened.providers().size(), 2);
@@ -187,7 +187,7 @@ TEST_F(DataCenterTest, ReimportingExistingContentSelectsItAndPersistsAcrossResta
     const auto store = root() / "data";
     std::string selected_key;
     {
-        EopCatalog catalog(store, {ORBITFORGE_TEST_C04}, {}, false);
+        EopCatalog catalog(store, {ORBELLE_TEST_C04}, {}, false);
         const auto source = root() / "finals.all";
         QFile file(QString::fromStdWString(source.wstring()));
         ASSERT_TRUE(file.open(QIODevice::WriteOnly));
@@ -208,7 +208,7 @@ TEST_F(DataCenterTest, ReimportingExistingContentSelectsItAndPersistsAcrossResta
         EXPECT_EQ(catalog.current_indices().size(), 2);
         EXPECT_EQ(catalog.providers().size(), 3);
     }
-    EopCatalog reopened(store, {ORBITFORGE_TEST_C04}, {}, false);
+    EopCatalog reopened(store, {ORBELLE_TEST_C04}, {}, false);
     EXPECT_EQ(application::eop_data_lock(
                   reopened.providers()[*reopened.inventory()[0].provider_index]->data_info())
                   .sha256(),
@@ -216,7 +216,7 @@ TEST_F(DataCenterTest, ReimportingExistingContentSelectsItAndPersistsAcrossResta
     EXPECT_EQ(reopened.current_indices().size(), 2);
 }
 TEST_F(DataCenterTest, AutomaticUpdatesAcquireFirstFullFileAndRespectIntervalAndOptOut) {
-    EopCatalog catalog(root() / "data", {ORBITFORGE_TEST_FINALS}, {}, false);
+    EopCatalog catalog(root() / "data", {ORBELLE_TEST_FINALS}, {}, false);
     Server server(payload());
     const auto now = QDateTime::currentSecsSinceEpoch();
     EXPECT_TRUE(catalog.automatic_updates());
@@ -256,7 +256,7 @@ TEST_F(DataCenterTest, ConditionalUpdatesSkipUnchangedBytesAndPreserveOldVersion
     std::string first_key;
     std::optional<std::int64_t> downloaded_at;
     {
-        EopCatalog catalog(store, {ORBITFORGE_TEST_C04}, {}, false);
+        EopCatalog catalog(store, {ORBELLE_TEST_C04}, {}, false);
         catalog.start_download(server.url());
         complete(catalog);
         ASSERT_TRUE(catalog.last_installed());
@@ -265,7 +265,7 @@ TEST_F(DataCenterTest, ConditionalUpdatesSkipUnchangedBytesAndPreserveOldVersion
         ASSERT_TRUE(downloaded_at);
         EXPECT_FALSE(server.requests.back().contains("If-None-Match"));
     }
-    EopCatalog catalog(store, {ORBITFORGE_TEST_C04}, {}, false);
+    EopCatalog catalog(store, {ORBELLE_TEST_C04}, {}, false);
     const auto revision = catalog.revision();
     catalog.start_download(server.url());
     complete(catalog);
@@ -320,7 +320,7 @@ TEST_F(DataCenterTest, InventorySeparatesInstallationCoverageAndUpdateCapabiliti
     EXPECT_FALSE(missing[2].extrapolation);
     EXPECT_FALSE(missing[2].acquired_at);
 
-    EopCatalog samples(root() / "samples", {ORBITFORGE_TEST_FINALS, ORBITFORGE_TEST_C04}, {},
+    EopCatalog samples(root() / "samples", {ORBELLE_TEST_FINALS, ORBELLE_TEST_C04}, {},
                        false);
     const auto installed = samples.inventory();
     EXPECT_EQ(installed[0].installation, DataInstallation::bundled_sample);
@@ -330,7 +330,7 @@ TEST_F(DataCenterTest, InventorySeparatesInstallationCoverageAndUpdateCapabiliti
     EXPECT_TRUE(std::filesystem::exists(installed[0].file));
     EXPECT_EQ(installed[1].last.date(), QDate(2000, 1, 2));
     EXPECT_EQ(samples.update_status().state, DataUpdateState::never_checked);
-    samples.import_snapshot(ORBITFORGE_TEST_C04);
+    samples.import_snapshot(ORBELLE_TEST_C04);
     const auto imported = samples.inventory();
     EXPECT_EQ(imported[1].installation, DataInstallation::local_file);
     EXPECT_TRUE(imported[1].acquired_at);
@@ -339,7 +339,7 @@ TEST_F(DataCenterTest, InventorySeparatesInstallationCoverageAndUpdateCapabiliti
 TEST_F(DataCenterTest, LocalReplacementMustNotReuseAnOlderFilesOnlineVerification) {
     Server server(payload());
     server.etag = "\"server-file\"";
-    EopCatalog catalog(root() / "data", {ORBITFORGE_TEST_FINALS}, {}, false);
+    EopCatalog catalog(root() / "data", {ORBELLE_TEST_FINALS}, {}, false);
     catalog.start_download(server.url());
     complete(catalog);
     const auto verified = catalog.update_status().checked_sha256;
@@ -357,7 +357,7 @@ TEST_F(DataCenterTest, LocalReplacementMustNotReuseAnOlderFilesOnlineVerificatio
     EXPECT_EQ(catalog.update_status().state, DataUpdateState::updated);
     EXPECT_EQ(catalog.update_status().checked_sha256, verified);
     EXPECT_EQ(catalog.inventory()[0].sha256, verified);
-    catalog.import_snapshot(ORBITFORGE_TEST_FINALS);
+    catalog.import_snapshot(ORBELLE_TEST_FINALS);
     EXPECT_FALSE(catalog.has_full_download());
 }
 TEST_F(DataCenterTest, UpdateResultsAndPreferencesSurviveFailureCancellationAndRestart) {
@@ -420,9 +420,9 @@ TEST_F(DataCenterTest, InterruptedAndLegacyChecksNeverClaimThatCurrentDataIsLate
     EXPECT_EQ(interrupted.update_status().checked_at, 1234567800);
 }
 TEST_F(DataCenterTest, LiveOfficialProductsAreValidated) {
-    if (qEnvironmentVariableIsEmpty("ORBITFORGE_LIVE_IERS"))
+    if (qEnvironmentVariableIsEmpty("ORBELLE_LIVE_IERS"))
         GTEST_SKIP() << "Opt-in official network check";
-    EopCatalog catalog(root() / "data", {ORBITFORGE_TEST_FINALS, ORBITFORGE_TEST_C04}, {}, false);
+    EopCatalog catalog(root() / "data", {ORBELLE_TEST_FINALS, ORBELLE_TEST_C04}, {}, false);
     for (const auto product : {DataProduct::utc, DataProduct::c04, DataProduct::finals2000a}) {
         catalog.start_download({}, product);
         complete(catalog);
@@ -442,7 +442,7 @@ TEST_F(DataCenterTest, LiveOfficialProductsAreValidated) {
 }
 TEST_F(DataCenterTest, C04AndUtcDownloadsAreIndependentAndRebindCalculationTimeAtomically) {
     QFile c04(QString::fromStdWString(
-        (std::filesystem::path(ORBITFORGE_TEST_C04).parent_path() / "eop.c04").wstring()));
+        (std::filesystem::path(ORBELLE_TEST_C04).parent_path() / "eop.c04").wstring()));
     ASSERT_TRUE(c04.open(QIODevice::ReadOnly));
     auto c04_bytes = c04.readAll();
     const auto day = QDate(1858, 11, 17).daysTo(QDate(2027, 1, 1));
@@ -450,7 +450,7 @@ TEST_F(DataCenterTest, C04AndUtcDownloadsAreIndependentAndRebindCalculationTimeA
                       "2027   1   1   0  " + QByteArray::number(day) + ".00");
     c04_bytes.replace("2000   1   2   0  51545.00",
                       "2027   1   2   0  " + QByteArray::number(day + 1) + ".00");
-    QFile leap(QString::fromStdString(ORBITFORGE_TEST_TIME));
+    QFile leap(QString::fromStdString(ORBELLE_TEST_TIME));
     ASSERT_TRUE(leap.open(QIODevice::ReadOnly));
     auto time_bytes = leap.readAll();
     time_bytes.replace("28 June 2027", "28 June 2028");
@@ -459,7 +459,7 @@ TEST_F(DataCenterTest, C04AndUtcDownloadsAreIndependentAndRebindCalculationTimeA
     application::DataLock new_lock;
     std::string new_time_hash;
     {
-        EopCatalog catalog(store, {ORBITFORGE_TEST_FINALS, ORBITFORGE_TEST_C04}, {}, false);
+        EopCatalog catalog(store, {ORBELLE_TEST_FINALS, ORBELLE_TEST_C04}, {}, false);
         const auto old_time = catalog.time_provider();
         Server c04_server(c04_bytes);
         c04_server.etag = "\"c04\"";
@@ -516,7 +516,7 @@ TEST_F(DataCenterTest, C04AndUtcDownloadsAreIndependentAndRebindCalculationTimeA
         EXPECT_EQ(catalog.time_provider(), time);
         EXPECT_EQ(catalog.for_interval(next_first, next_last), updated);
     }
-    EopCatalog reopened(store, {ORBITFORGE_TEST_FINALS, ORBITFORGE_TEST_C04}, {}, false);
+    EopCatalog reopened(store, {ORBELLE_TEST_FINALS, ORBELLE_TEST_C04}, {}, false);
     EXPECT_TRUE(reopened.warnings().empty()) << reopened.warnings().join('\n').toStdString();
     EXPECT_EQ(reopened.time_provider()->data_info().sha256, new_time_hash);
     EXPECT_EQ(reopened.data().resolve_eop(new_lock)->data_info().time_data.sha256, new_time_hash);
@@ -528,11 +528,11 @@ TEST_F(DataCenterTest, C04AndUtcDownloadsAreIndependentAndRebindCalculationTimeA
 }
 TEST_F(DataCenterTest, SourcePriorityPersistsAndRealCoveragePrecedesExtrapolation) {
     // Synthetic overlapping dates exercise source selection, not scientific accuracy.
-    QFile original(QString::fromStdString(ORBITFORGE_TEST_C04));
+    QFile original(QString::fromStdString(ORBELLE_TEST_C04));
     ASSERT_TRUE(original.open(QIODevice::ReadOnly));
     auto manifest = QJsonDocument::fromJson(original.readAll()).object();
     QFile data(QString::fromStdWString(
-        (std::filesystem::path(ORBITFORGE_TEST_C04).parent_path() / "eop.c04").wstring()));
+        (std::filesystem::path(ORBELLE_TEST_C04).parent_path() / "eop.c04").wstring()));
     ASSERT_TRUE(data.open(QIODevice::ReadOnly));
     auto bytes = data.readAll();
     bytes.replace("2000   1   1   0  51544.00", "2026   9   1   0  61284.00");
@@ -552,7 +552,7 @@ TEST_F(DataCenterTest, SourcePriorityPersistsAndRealCoveragePrecedesExtrapolatio
     metadata.write(QJsonDocument(manifest).toJson());
     metadata.close();
     const auto store = root() / "data";
-    const std::vector<std::filesystem::path> bundled{ORBITFORGE_TEST_FINALS,
+    const std::vector<std::filesystem::path> bundled{ORBELLE_TEST_FINALS,
                                                      root() / "overlap.json"};
     {
         EopCatalog catalog(store, bundled, {}, false);
@@ -587,7 +587,7 @@ TEST_F(DataCenterTest, SourcePriorityPersistsAndRealCoveragePrecedesExtrapolatio
         catalog.set_extrapolation_days(1, 0);
         EXPECT_EQ(catalog.for_interval(before, first)->data_info().sha256,
                   finals->data_info().sha256);
-        catalog.import_snapshot(ORBITFORGE_TEST_FINALS);
+        catalog.import_snapshot(ORBELLE_TEST_FINALS);
         EXPECT_EQ(catalog.preferred_product(), DataProduct::c04);
         EXPECT_EQ(catalog.for_interval(first, last), c04);
         EXPECT_THROW(catalog.set_preferred_product(DataProduct::utc), std::invalid_argument);
@@ -598,7 +598,7 @@ TEST_F(DataCenterTest, SourcePriorityPersistsAndRealCoveragePrecedesExtrapolatio
     EXPECT_EQ(reopened.preferred_index(), 1);
     const auto &info = reopened.providers()[1]->data_info();
     EXPECT_EQ(reopened.for_interval(info.first_epoch, info.last_epoch), reopened.providers()[1]);
-    EopCatalog missing(root() / "missing", {ORBITFORGE_TEST_FINALS}, {}, false);
+    EopCatalog missing(root() / "missing", {ORBELLE_TEST_FINALS}, {}, false);
     missing.set_preferred_product(DataProduct::c04);
     const auto available = missing.providers()[0];
     EXPECT_EQ(
@@ -610,7 +610,7 @@ TEST_F(DataCenterTest, ExtrapolationPoliciesAreIndependentPersistentAndNeverChan
     EopCatalog::Provider active;
     core::Epoch begin{0}, end{0};
     {
-        EopCatalog catalog(store, {ORBITFORGE_TEST_FINALS, ORBITFORGE_TEST_C04}, {}, false);
+        EopCatalog catalog(store, {ORBELLE_TEST_FINALS, ORBELLE_TEST_C04}, {}, false);
         EXPECT_EQ(catalog.extrapolation_days(0), 0);
         EXPECT_EQ(catalog.extrapolation_days(1), 0);
         const auto &info = catalog.providers()[0]->data_info();
@@ -632,7 +632,7 @@ TEST_F(DataCenterTest, ExtrapolationPoliciesAreIndependentPersistentAndNeverChan
         EXPECT_THROW(catalog.set_extrapolation_days(0, 31), std::invalid_argument);
         EXPECT_THROW(catalog.set_extrapolation_days(1, -1), std::invalid_argument);
     }
-    EopCatalog reopened(store, {ORBITFORGE_TEST_FINALS, ORBITFORGE_TEST_C04}, {}, false);
+    EopCatalog reopened(store, {ORBELLE_TEST_FINALS, ORBELLE_TEST_C04}, {}, false);
     EXPECT_EQ(reopened.extrapolation_days(0), 3);
     EXPECT_EQ(reopened.extrapolation_days(1), 0);
     EXPECT_EQ(active->data_info().extrapolation_days, 2);
@@ -642,7 +642,7 @@ TEST_F(DataCenterTest, ExtrapolationPoliciesAreIndependentPersistentAndNeverChan
 }
 TEST_F(DataCenterTest, LimitedExtrapolationIsContinuousDifferentiableAndBoundedAtBothEnds) {
     constexpr std::int64_t day = 86'400'000'000'000;
-    for (const auto *manifest : {ORBITFORGE_TEST_FINALS, ORBITFORGE_TEST_C04}) {
+    for (const auto *manifest : {ORBELLE_TEST_FINALS, ORBELLE_TEST_C04}) {
         const auto strict = runtime::load_eop_snapshot(manifest);
         const auto extended = runtime::load_eop_snapshot(manifest, 2);
         const auto &info = strict->data_info();
@@ -743,10 +743,10 @@ TEST_F(DataCenterTest, GravityImportRunsInBackgroundAndRejectsInvalidReplacement
     EXPECT_FALSE(catalog.has_full_download(DataProduct::egm2008));
 }
 TEST_F(DataCenterTest, LiveOfficialGravityDownload) {
-    if (qEnvironmentVariableIsEmpty("ORBITFORGE_LIVE_GRAVITY"))
+    if (qEnvironmentVariableIsEmpty("ORBELLE_LIVE_GRAVITY"))
         GTEST_SKIP();
     EopCatalog catalog(root() / "data", {}, {}, false);
-    const auto product = qEnvironmentVariable("ORBITFORGE_LIVE_GRAVITY") == "egm2008"
+    const auto product = qEnvironmentVariable("ORBELLE_LIVE_GRAVITY") == "egm2008"
                              ? DataProduct::egm2008
                              : DataProduct::egm96;
     catalog.start_download({}, product);
@@ -790,8 +790,8 @@ TEST_F(DataCenterTest, EphemerisDownloadRejectsWrongContentAndCanBeCancelled) {
     EXPECT_EQ(reopened.update_interval_hours(DataProduct::de440s), 168);
 }
 TEST_F(DataCenterTest, LiveOfficialEphemerisDownloadAndRecheckRetainCurrentData) {
-    const auto local_file = qEnvironmentVariable("ORBITFORGE_FULL_DE440S");
-    if (qEnvironmentVariableIsEmpty("ORBITFORGE_LIVE_DE440S") && local_file.isEmpty())
+    const auto local_file = qEnvironmentVariable("ORBELLE_FULL_DE440S");
+    if (qEnvironmentVariableIsEmpty("ORBELLE_LIVE_DE440S") && local_file.isEmpty())
         GTEST_SKIP();
     std::unique_ptr<Server> local_source;
     if (!local_file.isEmpty()) {
@@ -818,7 +818,7 @@ TEST_F(DataCenterTest, LiveOfficialEphemerisDownloadAndRecheckRetainCurrentData)
     EXPECT_GT(*item.file_size, 30000000U);
     auto provider = catalog.data().load_ephemeris("de440s");
     const auto position = provider->position(core::ThirdBody::sun, core::Epoch{0});
-    const auto sample = std::filesystem::path(ORBITFORGE_TEST_PLANETS).parent_path().parent_path() /
+    const auto sample = std::filesystem::path(ORBELLE_TEST_PLANETS).parent_path().parent_path() /
                         "mar099s_2016_leap/mar099s_subset.bsp";
     catalog.import_planetary_centres(sample);
     complete(catalog);
@@ -930,10 +930,10 @@ TEST_F(DataCenterTest, OceanImportRunsInBackgroundAndFailedOrCancelledDownloadsP
               frozen->info().sha256);
 }
 TEST_F(DataCenterTest, FullOceanTransferRecheckAndInvalidReplacementPreserveFrozenModel) {
-    const auto path = qEnvironmentVariable("ORBITFORGE_FULL_OCEAN_FILE");
+    const auto path = qEnvironmentVariable("ORBELLE_FULL_OCEAN_FILE");
     if (path.isEmpty())
         GTEST_SKIP()
-            << "Set ORBITFORGE_FULL_OCEAN_FILE to test the complete pinned download payload";
+            << "Set ORBELLE_FULL_OCEAN_FILE to test the complete pinned download payload";
     QFile file(path);
     ASSERT_TRUE(file.open(QIODevice::ReadOnly));
     Server server(file.readAll());
@@ -964,7 +964,7 @@ TEST_F(DataCenterTest,
     if (!runtime::ephemeris_available())
         GTEST_SKIP();
     EopCatalog catalog(root() / "planet-data", {}, {}, false);
-    catalog.import_ephemeris_snapshot(ORBITFORGE_TEST_PLANETS);
+    catalog.import_ephemeris_snapshot(ORBELLE_TEST_PLANETS);
     complete(catalog);
     ASSERT_EQ(catalog.update_status(DataProduct::de440s).state, DataUpdateState::updated)
         << catalog.status().toStdString();
@@ -972,11 +972,11 @@ TEST_F(DataCenterTest,
     EXPECT_FALSE(catalog.has_full_download(DataProduct::de440s));
     const auto inventory = catalog.inventory().at(static_cast<std::size_t>(DataProduct::de440s));
     EXPECT_TRUE(std::filesystem::is_regular_file(inventory.file));
-    EXPECT_EQ(inventory.file.filename(), "orbitforge_de440s_planets_2016_leap.bsp");
+    EXPECT_EQ(inventory.file.filename(), "orbelle_de440s_planets_2016_leap.bsp");
     EXPECT_EQ(inventory.sha256,
               QStringLiteral("e4c52121a5de093ea75f9826d5db48aeba25bb0f8bbe542e6fa07c6a0dd824fd"));
     EXPECT_EQ(inventory.identity_sha256, QString::fromStdString(base.info.content_sha256));
-    const auto sample = std::filesystem::path(ORBITFORGE_TEST_PLANETS).parent_path().parent_path() /
+    const auto sample = std::filesystem::path(ORBELLE_TEST_PLANETS).parent_path().parent_path() /
                         "mar099s_2016_leap/mar099s_subset.bsp";
     catalog.import_planetary_centres(sample);
     complete(catalog);
@@ -998,4 +998,4 @@ TEST_F(DataCenterTest,
     EXPECT_EQ(reopened.data().ephemerides().at(0).info.content_sha256,
               imported.info.content_sha256);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

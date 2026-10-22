@@ -9,7 +9,7 @@
 #include <gtest/gtest.h>
 #include <stdexcept>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // Preserve the public GoogleTest names so existing CTest filters and reports remain valid.
 class QuantityTest : public ::testing::Test {
   protected:
@@ -33,4 +33,4 @@ class QuantityTest : public ::testing::Test {
         return *result;
     }
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

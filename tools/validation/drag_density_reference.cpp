@@ -1,5 +1,5 @@
 // Streaming adapter to pinned, unmodified GMAT JR and the author's NRLMSISE-00.
-// Only API stubs: no OrbitForge headers, libraries, coordinate or derivative code.
+// Only API stubs: no Orbelle headers, libraries, coordinate or derivative code.
 #include "AtmosphereModel.hpp"
 #include <cmath>
 #include <iomanip>

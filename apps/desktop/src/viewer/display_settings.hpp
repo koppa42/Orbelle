@@ -4,7 +4,7 @@
 #include <cmath>
 #include <numbers>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 using DisplaySettings = application::OrbitDisplay;
 inline std::pair<core::Epoch, core::Epoch>
 display_interval(const OrbitInput &input, const DisplaySettings &settings, core::Epoch current) {
@@ -54,4 +54,4 @@ inline std::pair<core::Epoch, core::Epoch> display_cache_interval(const OrbitInp
     return {core::Epoch{std::max(input.first.tai_nanoseconds(), first.tai_nanoseconds() - padding)},
             core::Epoch{std::min(input.last.tai_nanoseconds(), last.tai_nanoseconds() + padding)}};
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -1,4 +1,4 @@
-"""Generate OrbitForge's self-contained, project-authored glTF display fixture."""
+"""Generate Orbelle's self-contained, project-authored glTF display fixture."""
 import base64
 import json
 from pathlib import Path
@@ -24,8 +24,8 @@ def main():
     ind = struct.pack('<36H', *indices)
     blob = pos + norm + ind
     document = {
-        'asset': {'version': '2.0', 'generator': 'OrbitForge make_satellite_model.py',
-                  'copyright': 'OrbitForge project-authored schematic model'},
+        'asset': {'version': '2.0', 'generator': 'Orbelle make_satellite_model.py',
+                  'copyright': 'Orbelle project-authored schematic model'},
         'extensionsUsed': ['KHR_materials_unlit'],
         'scene': 0, 'scenes': [{'nodes': [0, 1, 2, 3]}],
         'nodes': [{'mesh': 0, 'scale': [1.2, .9, 1.1]},

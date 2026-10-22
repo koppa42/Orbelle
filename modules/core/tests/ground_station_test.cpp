@@ -2,9 +2,9 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <numbers>
-#include <orbitforge/core/propagation/ground_station.hpp>
+#include <orbelle/core/propagation/ground_station.hpp>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 TEST(GroundStation, MatchesIndependentErfaWgs84Reference) {
     // Published eraGd2gc WGS84 reference values (3.1 rad, -0.5 rad, 2500 m):
     // https://github.com/liberfa/erfa/blob/master/src/t_erfa_c.c (t_gd2gc).

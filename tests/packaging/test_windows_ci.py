@@ -49,7 +49,7 @@ class WindowsGeneratorTests(unittest.TestCase):
                     "-C", "Release", "--output-on-failure", "--no-tests=error",
                     "--output-junit", str(root / "reports/desktop-tests.xml")])
                 self.assertIn("--cpp-example", python)
-                self.assertEqual(Path(python[-1]), root / "work/desktop/examples/cpp/Release/orbitforge_example.exe")
+                self.assertEqual(Path(python[-1]), root / "work/desktop/examples/cpp/Release/orbelle_example.exe")
 
     def test_test_failure_stops_before_python_and_cannot_report_success(self):
         with tempfile.TemporaryDirectory() as directory:

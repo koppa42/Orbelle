@@ -34,10 +34,10 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <cmath>
-#include <orbitforge/runtime/j2.hpp>
-#include <orbitforge/runtime/j4.hpp>
+#include <orbelle/runtime/j2.hpp>
+#include <orbelle/runtime/j4.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 // Result lines use the themed muted/danger tones from the application stylesheet.
 void restyle_message(QLabel *label, bool error) {
@@ -1386,4 +1386,4 @@ void OrbitEditor::submit_display() {
         }
     }
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

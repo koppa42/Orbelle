@@ -5,8 +5,8 @@ import unittest
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 SAMPLE = Path(__file__).resolve().parents[3] / "data/samples/spice/de440s_2016_leap"
 
@@ -47,7 +47,7 @@ class SrpTests(unittest.TestCase):
         sat = project.objects.satellite("Sat", orbit=orbit)
         before = project.prepare().states(sat, step=u.s(60))
         with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / "srp.orbitforge"
+            path = Path(folder) / "srp.orbelle"
             project.save(path)
             self.assertEqual(int.from_bytes(path.read_bytes()[8:12], "little"), 47)
             restored = of.Project.open(path)
@@ -118,7 +118,7 @@ class SrpTests(unittest.TestCase):
             reversed_states=project.prepare(data=data).states(sat,step=u.s(30))
             self.assertEqual(states.input_sha256,reversed_states.input_sha256)
             self.assertEqual(states.position.values,reversed_states.position.values)
-            path=root/"bodies.orbitforge"
+            path=root/"bodies.orbelle"
             project.save(path)
             restored=of.Project.open(path, data=data)
             self.assertEqual(restored.objects[sat.id].orbit.hpop.srp.additional_eclipsing_bodies,bodies[::-1])
@@ -158,7 +158,7 @@ class SrpTests(unittest.TestCase):
             report = analysis.report(of.ReportKind.CARTESIAN_STATE, objects=sat, step=u.s(60),
                                      units=of.ReportUnits.SI, time_scale=of.ReportTimeScale.TAI)
             self.assertEqual(len(report.table.rows), 11)
-            path = root / "srp.orbitforge"
+            path = root / "srp.orbelle"
             project.save(path, analysis=analysis)
             restored = of.Project.open(path, data=data)
             self.assertEqual(restored.objects[sat.id].orbit.hpop.srp, orbit.hpop.srp)
@@ -174,7 +174,7 @@ class SrpTests(unittest.TestCase):
                     states = result.states(sat, step=u.s(60))
                     identities.add(states.input_sha256)
                     endpoints.add(tuple(states.position.values[-1]))
-                    method_path = root / f"{method}.orbitforge"
+                    method_path = root / f"{method}.orbelle"
                     project.save(method_path, analysis=result)
                     opened = of.Project.open(method_path, data=data)
                     self.assertEqual(opened.objects[sat.id].orbit.hpop.srp, selected.hpop.srp)

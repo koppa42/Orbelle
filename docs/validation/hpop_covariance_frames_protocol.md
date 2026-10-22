@@ -4,11 +4,11 @@
 
 ## 独立参考与复现
 
-[Orekit 13.1.2](https://github.com/CS-SI/Orekit/tree/13.1.2) 与 Hipparchus 4.0.2 使用原始 `LOFType.LVLH[_INERTIAL]` / `NTW[_INERTIAL]`。STK LVLH 对应 Orekit LVLH，Frenet 对应 NTW；不能选择 `LVLH_CCSDS`。`LOF.transformFromInertial` 通过二阶自动微分求转动率，`Transform.getJacobian(USE_PV)` 输出完整 6×6 Jacobian；没有调用 OrbitForge，也没有使用生产解析轴导数公式。
+[Orekit 13.1.2](https://github.com/CS-SI/Orekit/tree/13.1.2) 与 Hipparchus 4.0.2 使用原始 `LOFType.LVLH[_INERTIAL]` / `NTW[_INERTIAL]`。STK LVLH 对应 Orekit LVLH，Frenet 对应 NTW；不能选择 `LVLH_CCSDS`。`LOF.transformFromInertial` 通过二阶自动微分求转动率，`Transform.getJacobian(USE_PV)` 输出完整 6×6 Jacobian；没有调用 Orbelle，也没有使用生产解析轴导数公式。
 
 ```sh
-javac -cp "<pinned Orekit and Hipparchus jars>" -d <classes> tools/validation/orekit/OrbitForgeCovarianceFramesReference.java
-java -cp "<classes and pinned jars>" OrbitForgeCovarianceFramesReference <orekit-transforms.txt>
+javac -cp "<pinned Orekit and Hipparchus jars>" -d <classes> tools/validation/orekit/OrbelleCovarianceFramesReference.java
+java -cp "<classes and pinned jars>" OrbelleCovarianceFramesReference <orekit-transforms.txt>
 python tools/validation/hpop_covariance_frames_reference.py --transforms <orekit-transforms.txt> --output <hpop_covariance_frames.txt>
 ```
 

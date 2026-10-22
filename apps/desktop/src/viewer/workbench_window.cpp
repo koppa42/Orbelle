@@ -16,7 +16,7 @@
 #include <windowsx.h>
 #endif
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 enum class CaptionIcon { minimize, maximize, restore };
 QIcon caption_icon(CaptionIcon kind) {
@@ -235,4 +235,4 @@ bool WorkbenchWindow::nativeEvent(const QByteArray &type, void *message, qintptr
 #endif
     return QMainWindow::nativeEvent(type, message, result);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

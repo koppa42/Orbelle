@@ -20,10 +20,10 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/two_body.hpp>
 #include <stdexcept>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 core::Tle parse_single_tle(const QString &text) {
     if (text.size() > 4096)
         throw std::invalid_argument(ui::utf8("orbit_editor.text"));
@@ -530,4 +530,4 @@ void OrbitWizardDialog::render_results(const core::EarthOrbitDesign &design) {
                     .arg(design.repeat_cycle_seconds / 86400, 0, 'f', 6);
     preview_->setText(text + QStringLiteral("</table>"));
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

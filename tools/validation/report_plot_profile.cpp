@@ -17,13 +17,13 @@
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
     if (argc != 2 || QFile::exists(QString::fromLocal8Bit(argv[1]))) {
-        std::cerr << "Usage: orbitforge_report_plot_profile <new-output-directory>\n";
+        std::cerr << "Usage: orbelle_report_plot_profile <new-output-directory>\n";
         return 1;
     }
     const QString output = QString::fromLocal8Bit(argv[1]);
     if (!QDir().mkpath(output))
         return 1;
-    using namespace orbitforge;
+    using namespace orbelle;
     desktop::apply_workbench_style(app);
     constexpr int objects = 12, samples = 20000;
     application::ReportDefinition definition;

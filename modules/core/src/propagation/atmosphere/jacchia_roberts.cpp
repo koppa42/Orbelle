@@ -30,13 +30,13 @@
  */
 //------------------------------------------------------------------------------
 
-// OrbitForge adaptation: explicit inputs/local scratch; finite angular limits; bounded roots.
+// Orbelle adaptation: explicit inputs/local scratch; finite angular limits; bounded roots.
 
 #include "../atmosphere_models.hpp"
 #include <cmath>
 #include <numbers>
-#include <orbitforge/core/propagation/state_provider.hpp>
-namespace orbitforge::core::detail {
+#include <orbelle/core/propagation/state_provider.hpp>
+namespace orbelle::core::detail {
 namespace {
 using Real = double;
 using Integer = int;
@@ -487,4 +487,4 @@ AtmosphereEvaluation jacchia_roberts(const AtmosphereInput &input, double utc_gm
     density *= 1000 * model.rho_cor(height, utc_gmat_mjd, lat, &geo);
     return {density, temperature, model.t_infinity};
 }
-} // namespace orbitforge::core::detail
+} // namespace orbelle::core::detail

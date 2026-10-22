@@ -4,7 +4,7 @@
 #include <numbers>
 #include <stdexcept>
 
-namespace orbitforge::benchmarks {
+namespace orbelle::benchmarks {
 namespace {
 constexpr double mu = 3.986004418e14;
 constexpr double equatorial_radius_m = 6378137.0;
@@ -95,4 +95,4 @@ std::vector<visualization::RenderSnapshot> DisplayCache::track(std::size_t objec
 std::size_t DisplayCache::position_bytes() const noexcept {
     return positions_.size() * sizeof(positions_.front());
 }
-} // namespace orbitforge::benchmarks
+} // namespace orbelle::benchmarks

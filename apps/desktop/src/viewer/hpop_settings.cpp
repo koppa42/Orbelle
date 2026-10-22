@@ -37,9 +37,9 @@
 #include <cmath>
 #include <limits>
 #include <map>
-#include <orbitforge/runtime/ephemeris.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 constexpr int summary_role = Qt::UserRole + 1;
 constexpr int heading_role = Qt::UserRole + 2;
@@ -2042,4 +2042,4 @@ bool edit_hpop_settings(
         data->cancel_download();
     return accepted;
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

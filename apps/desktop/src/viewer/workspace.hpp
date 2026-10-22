@@ -10,7 +10,7 @@ class QLabel;
 class QRubberBand;
 class QSplitter;
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // Views and documents keep their widgets and drafts when closed or moved.
 class Workspace final : public QWidget {
   public:
@@ -69,4 +69,4 @@ class Workspace final : public QWidget {
     std::vector<std::unique_ptr<Page>> pages_;
     std::vector<Page *> views_;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

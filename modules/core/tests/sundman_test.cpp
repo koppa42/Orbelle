@@ -9,8 +9,8 @@
 #include <vector>
 
 namespace {
-using namespace orbitforge::core;
-using namespace orbitforge::core::detail;
+using namespace orbelle::core;
+using namespace orbelle::core::detail;
 using Cartesian = SundmanTransform::Cartesian;
 using First = SundmanTransform::FirstOrder;
 using Second = SundmanTransform::SecondOrder;
@@ -47,7 +47,7 @@ struct Reference {
     Cartesian initial{}, final{};
 };
 std::vector<Reference> references() {
-    std::ifstream file{ORBITFORGE_SUNDMAN_REFERENCE};
+    std::ifstream file{ORBELLE_SUNDMAN_REFERENCE};
     if (!file.good())
         throw std::runtime_error("Missing independent Sundman reference");
     std::vector<Reference> result;
@@ -326,7 +326,7 @@ TEST(Sundman, ExponentsOneAndTwoFollowEccentricAndTrueAnomaly) {
     }
 }
 TEST(Sundman, StepsPerOrbitNormalizationMatchesIndependentLegendreGauss) {
-    std::ifstream file{ORBITFORGE_SUNDMAN_REFERENCE};
+    std::ifstream file{ORBELLE_SUNDMAN_REFERENCE};
     ASSERT_TRUE(file.good());
     std::string line;
     std::size_t count = 0;

@@ -32,15 +32,15 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/j2.hpp>
-#include <orbitforge/runtime/j4.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/j2.hpp>
+#include <orbelle/runtime/j4.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
 #include "support/property_editor_fixture.hpp"
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 TEST_F(QuantityTest, HpopUsesInstalledGravityLimitsAndPersistsSelectedModel) {
     apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
     core::HpopOptions options;
@@ -71,7 +71,7 @@ TEST_F(QuantityTest, HpopUsesInstalledGravityLimitsAndPersistsSelectedModel) {
         QKeyEvent up(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
         QApplication::sendEvent(degree, &up);
         EXPECT_EQ(degree->value(), 2190);
-        const auto output = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        const auto output = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
         if (!output.isEmpty()) {
             QDir{}.mkpath(output);
             for (const int width : {720, 430}) {
@@ -149,7 +149,7 @@ TEST_F(QuantityTest, HpopSolidTidesModesTruncationResizeReopenAndCancel) {
         EXPECT_TRUE(time->isEnabled());
         time->setChecked(true);
         truncate->setChecked(false);
-        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
         std::cout << "HPOP solid tide device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
         for (int width : {720, 430}) {
             dialog->resize(width, width == 720 ? 700 : 620);
@@ -324,7 +324,7 @@ TEST_F(QuantityTest, HpopSecularFileCapabilityKeyboardDraftAndValidation) {
             EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
             EXPECT_TRUE(
                 dialog->rect().contains(dialog->findChild<QDialogButtonBox *>()->geometry()));
-            const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+            const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
             if (!capture.isEmpty()) {
                 EXPECT_TRUE(QDir{}.mkpath(capture));
                 EXPECT_TRUE(
@@ -372,4 +372,4 @@ TEST_F(QuantityTest, HpopSecularFileCapabilityKeyboardDraftAndValidation) {
     EXPECT_EQ(options.gravity_degree, 0);
     EXPECT_TRUE(options.include_secular_variations);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

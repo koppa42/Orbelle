@@ -3,20 +3,20 @@
 #include <full_gravity.hpp>
 #include <gtest/gtest.h>
 #include <memory>
-#include <orbitforge/runtime/analysis.hpp>
-#include <orbitforge/runtime/data_catalog.hpp>
-#include <orbitforge/runtime/gravity.hpp>
-#include <orbitforge/runtime/hpop.hpp>
-#include <orbitforge/runtime/project.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/runtime/analysis.hpp>
+#include <orbelle/runtime/data_catalog.hpp>
+#include <orbelle/runtime/gravity.hpp>
+#include <orbelle/runtime/hpop.hpp>
+#include <orbelle/runtime/project.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 #include <sstream>
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 class GravityFiles : public ::testing::Test {
   protected:
     std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        ("orbitforge-gravity-" +
+        ("orbelle-gravity-" +
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     void SetUp() override { std::filesystem::create_directories(root); }
     void TearDown() override { std::filesystem::remove_all(root); }
@@ -130,7 +130,7 @@ TEST_F(GravityFiles, CatalogFailureAndCancellationPreserveCurrentAndRunningResou
 TEST_F(GravityFiles, HpopSnapshotProjectRoundtripAndChangedDataConfirmation) {
     if (!runtime::time_frames_available())
         GTEST_SKIP();
-    auto data = runtime::DataSnapshot::load(ORBITFORGE_REPORT_EOP)
+    auto data = runtime::DataSnapshot::load(ORBELLE_REPORT_EOP)
                     .with_gravity_file("custom", write(grv()));
     application::Project p{"Gravity", core::Epoch{0}, core::Epoch{600'000'000'000}};
     application::ProjectSatellite s;
@@ -144,8 +144,8 @@ TEST_F(GravityFiles, HpopSnapshotProjectRoundtripAndChangedDataConfirmation) {
     const auto analysis = runtime::prepare(project, data);
     const auto ref = project.objects().get("satellite-1");
     const auto original = analysis.state(ref, p.last, core::FrameId::gcrf);
-    runtime::save_project(project, root / "scenario.orbitforge", analysis);
-    const auto stored = application::load_project(root / "scenario.orbitforge");
+    runtime::save_project(project, root / "scenario.orbelle", analysis);
+    const auto stored = application::load_project(root / "scenario.orbelle");
     EXPECT_EQ(stored.force_data.size(), 1U);
     EXPECT_EQ(stored.data_lock(), data.data_lock());
     runtime::ReportContext context{stored, data.time(), data.frames(), data.eop(),
@@ -159,14 +159,14 @@ TEST_F(GravityFiles, HpopSnapshotProjectRoundtripAndChangedDataConfirmation) {
     EXPECT_THROW((void)runtime::make_project_scenario(stored, data.time().get(),
                                                       next.force_environment(s.orbit)),
                  std::runtime_error);
-    runtime::ProjectOpenPlan plan(root / "scenario.orbitforge", next);
+    runtime::ProjectOpenPlan plan(root / "scenario.orbelle", next);
     ASSERT_EQ(plan.data_changes().size(), 1U);
     EXPECT_EQ(plan.data_changes()[0].role, "gravity/custom");
     EXPECT_THROW((void)plan.open(), runtime::OpenDataChangedError);
     EXPECT_NO_THROW((void)plan.open(true));
     EXPECT_EQ(analysis.state(ref, p.last, core::FrameId::gcrf).position_m, original.position_m);
     EXPECT_THROW(
-        (void)runtime::prepare(project, runtime::DataSnapshot::load(ORBITFORGE_REPORT_EOP)),
+        (void)runtime::prepare(project, runtime::DataSnapshot::load(ORBELLE_REPORT_EOP)),
         runtime::AnalysisCapabilityError);
 }
 
@@ -200,17 +200,17 @@ TEST_F(GravityFiles, FullOfficialEgm2008MatchesIndependentOrekit) {
 #ifdef _WIN32
     char *value = nullptr;
     std::size_t length = 0;
-    const auto error = _dupenv_s(&value, &length, "ORBITFORGE_FULL_GRAVITY_FILE");
+    const auto error = _dupenv_s(&value, &length, "ORBELLE_FULL_GRAVITY_FILE");
     const std::unique_ptr<char, decltype(&std::free)> owned(value, &std::free);
     ASSERT_EQ(error, 0);
     if (owned)
         source = owned.get();
 #else
-    if (const char *value = std::getenv("ORBITFORGE_FULL_GRAVITY_FILE"))
+    if (const char *value = std::getenv("ORBELLE_FULL_GRAVITY_FILE"))
         source = value;
 #endif
     if (source.empty())
-        GTEST_SKIP() << "Set ORBITFORGE_FULL_GRAVITY_FILE to the pinned complete EGM2008.gfc";
+        GTEST_SKIP() << "Set ORBELLE_FULL_GRAVITY_FILE to the pinned complete EGM2008.gfc";
     int checkpoints = 0;
     const auto model = runtime::load_gravity(source, {}, [&] { ++checkpoints; });
     ASSERT_EQ(model->info().sha256,
@@ -224,7 +224,7 @@ TEST_F(GravityFiles, FullOfficialEgm2008MatchesIndependentOrekit) {
         EXPECT_EQ(model->acceleration(position, 2190, 2159),
                   model->acceleration(position, 2190, 2190));
     EXPECT_GT(checkpoints, 2000);
-    full_gravity_test::verify(model, 3, ORBITFORGE_EGM2008_FULL_REFERENCE, 80, 2);
+    full_gravity_test::verify(model, 3, ORBELLE_EGM2008_FULL_REFERENCE, 80, 2);
 }
 
 TEST_F(GravityFiles, ReadsEarthIersAndLegacyLoveNumbersWithExplicitTideSystem) {
@@ -321,7 +321,7 @@ TEST_F(GravityFiles, LoveNumberOnlyResourceChangeRequiresConfirmationAndPreserve
     if (!runtime::time_frames_available())
         GTEST_SKIP();
     auto data =
-        runtime::DataSnapshot::load(ORBITFORGE_REPORT_EOP)
+        runtime::DataSnapshot::load(ORBELLE_REPORT_EOP)
             .with_gravity_file("custom",
                                write(tide_grv("Begin EarthIERSTideModel\n"
                                               "LoveNumbers 2 0 .3 0\nEnd EarthIERSTideModel\n")));
@@ -338,9 +338,9 @@ TEST_F(GravityFiles, LoveNumberOnlyResourceChangeRequiresConfirmationAndPreserve
     const auto before = runtime::prepare(project, data);
     const auto object = project.objects().get("satellite-1");
     const auto state = before.state(object, p.last, core::FrameId::gcrf);
-    runtime::save_project(project, root / "love.orbitforge", before);
+    runtime::save_project(project, root / "love.orbelle", before);
     auto changed = data.with_gravity_file("custom", write(grv()));
-    runtime::ProjectOpenPlan plan(root / "love.orbitforge", changed);
+    runtime::ProjectOpenPlan plan(root / "love.orbelle", changed);
     ASSERT_EQ(plan.data_changes().size(), 1U);
     EXPECT_EQ(plan.data_changes().front().role, "gravity/custom");
     EXPECT_THROW((void)plan.open(), runtime::OpenDataChangedError);

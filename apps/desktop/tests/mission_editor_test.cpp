@@ -33,15 +33,15 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/j2.hpp>
-#include <orbitforge/runtime/j4.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/j2.hpp>
+#include <orbelle/runtime/j4.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
 #include "support/property_editor_fixture.hpp"
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 TEST_F(QuantityTest, MissionEditorValidatesSequencePreservesDraftAndCancelsWithoutApplying) {
     apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
     OrbitEditor editor(OrbitInput{});
@@ -50,7 +50,7 @@ TEST_F(QuantityTest, MissionEditorValidatesSequencePreservesDraftAndCancelsWitho
     editor.set_propagator(OrbitPropagator::mission);
     std::optional<OrbitInput> submitted;
     editor.apply = [&](OrbitInput input) { submitted = std::move(input); };
-    const auto capture = qEnvironmentVariable("ORBITFORGE_MISSION_UI_CAPTURE");
+    const auto capture = qEnvironmentVariable("ORBELLE_MISSION_UI_CAPTURE");
     QTimer::singleShot(0, &editor, [&] {
         auto *dialog = editor.findChild<QDialog *>("missionEditorDialog");
         ASSERT_NE(dialog, nullptr);
@@ -186,7 +186,7 @@ TEST_F(QuantityTest, MissionCompactPagesPreserveUnitsAndDraftsAndHandleEmptySequ
     const auto original = plan;
     core::HpopOptions hpop;
     QWidget parent;
-    const auto capture = qEnvironmentVariable("ORBITFORGE_MISSION_UI_CAPTURE");
+    const auto capture = qEnvironmentVariable("ORBELLE_MISSION_UI_CAPTURE");
     QTimer::singleShot(0, &parent, [&] {
         auto *dialog = parent.findChild<QDialog *>("missionEditorDialog");
         ASSERT_NE(dialog, nullptr);
@@ -283,4 +283,4 @@ TEST_F(QuantityTest, MissionCompactPagesPreserveUnitsAndDraftsAndHandleEmptySequ
                               core::Epoch{7'200'000'000'000}, &parent));
     EXPECT_EQ(plan, original);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

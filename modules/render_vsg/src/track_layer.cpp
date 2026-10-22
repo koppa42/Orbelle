@@ -2,11 +2,11 @@
 #include <cmath>
 #include <limits>
 #include <mutex>
-#include <orbitforge/render_vsg/marker_layer.hpp>
+#include <orbelle/render_vsg/marker_layer.hpp>
 #include <stdexcept>
 #include <vsg/all.h>
 
-namespace orbitforge::render_vsg {
+namespace orbelle::render_vsg {
 namespace {
 // Screen-space triangles avoid optional Vulkan wideLines and line-stipple features.
 // Each instance is one segment, with adjacent positions for bounded miter joins.
@@ -223,4 +223,4 @@ void TrackLayer::set_interval(core::Epoch first, core::Epoch last) {
 vsg::ref_ptr<vsg::Node> make_track(std::span<const visualization::RenderSnapshot> samples) {
     return TrackLayer(samples).node();
 }
-} // namespace orbitforge::render_vsg
+} // namespace orbelle::render_vsg

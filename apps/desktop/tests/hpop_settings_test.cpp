@@ -35,15 +35,15 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/j2.hpp>
-#include <orbitforge/runtime/j4.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/j2.hpp>
+#include <orbelle/runtime/j4.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
 #include "support/property_editor_fixture.hpp"
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 TEST_F(QuantityTest, OpeningHpopWithDataManagementShowsOnlyTheSettingsWindow) {
     QTemporaryDir temporary;
     ASSERT_TRUE(temporary.isValid());
@@ -102,7 +102,7 @@ TEST_F(QuantityTest, HpopSettingsValidateCancelAndRoundTripWithoutApplyingTheOrb
     editor.show();
     std::optional<OrbitInput> submitted;
     editor.apply = [&](OrbitInput value) { submitted = std::move(value); };
-    const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+    const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
     QTimer::singleShot(0, &editor, [&] {
         auto *dialog = editor.findChild<QDialog *>("hpopSettingsDialog");
         ASSERT_NE(dialog, nullptr);
@@ -207,7 +207,7 @@ TEST_F(QuantityTest, HpopThirdBodiesPreserveDraftsAndValidateManualConstants) {
         EXPECT_TRUE(managed);
         EXPECT_EQ(mu->text(), QStringLiteral("1.3271244e11"));
         EXPECT_TRUE(dialog->findChild<QLabel *>("hpopEphemerisStatus")->text().contains("2000"));
-        const auto output = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        const auto output = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
         if (!output.isEmpty()) {
             source->setCurrentIndex(1); // Preview the normal, automatic-GM configuration.
             QDir{}.mkpath(output);
@@ -352,7 +352,7 @@ TEST_F(QuantityTest, HpopNestedPagesPreserveDraftsAndKeepUnavailableModelsInacti
         sun->set_unit(Unit::metres_cubed_per_second_squared);
         auto *draft = sun->findChild<QLineEdit *>("quantityValue");
         draft->setText("1.23456789e20");
-        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
         const auto screenshot = [&](const QString &name) {
             QApplication::processEvents();
             if (!capture.isEmpty()) {
@@ -471,7 +471,7 @@ TEST_F(QuantityTest, HpopNewDesktopDefaultsUseEgm2008AndKeepExplicitModelChoices
         EXPECT_EQ(dialog->findChild<QComboBox *>("hpopGravityModel")->currentText(), "EGM2008");
         EXPECT_EQ(dialog->findChild<QSpinBox *>("hpopGravityDegree")->value(), 21);
         EXPECT_EQ(dialog->findChild<QSpinBox *>("hpopGravityOrder")->value(), 21);
-        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
         if (!capture.isEmpty()) {
             QEventLoop settled;
             QTimer::singleShot(60, &settled, &QEventLoop::quit);
@@ -496,4 +496,4 @@ TEST_F(QuantityTest, HpopNewDesktopDefaultsUseEgm2008AndKeepExplicitModelChoices
     ASSERT_TRUE(saved);
     EXPECT_EQ(saved->hpop, explicit_builtin.hpop);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

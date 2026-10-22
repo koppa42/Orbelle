@@ -1,6 +1,6 @@
 # HPOP 相对论加速度
 
-STK 13.1 的 [Additional 帮助](https://help.agi.com/stk/Content/hpop/hpopAdditional.htm) 将 Include Relativistic Accelerations 定义为 IERS Technical Note 32（2003）的广义相对论修正。OrbitForge 的 `HpopOptions.include_relativistic_accelerations` 默认关闭；开启时同时加入 Schwarzschild、Lense–Thirring 和 de Sitter 三项，C++、桌面、Python、任务序列及报告共用 Core 实现。这里采用公开方程，不声称复现 STK 内部实现或完成同配置 STK 轨迹验收。
+STK 13.1 的 [Additional 帮助](https://help.agi.com/stk/Content/hpop/hpopAdditional.htm) 将 Include Relativistic Accelerations 定义为 IERS Technical Note 32（2003）的广义相对论修正。Orbelle 的 `HpopOptions.include_relativistic_accelerations` 默认关闭；开启时同时加入 Schwarzschild、Lense–Thirring 和 de Sitter 三项，C++、桌面、Python、任务序列及报告共用 Core 实现。这里采用公开方程，不声称复现 STK 内部实现或完成同配置 STK 轨迹验收。
 
 ## 方程与输入约定
 
@@ -28,12 +28,12 @@ Python 使用 `of.orbits.Hpop(..., include_relativistic_accelerations=True)`，�
 
 ## 独立数值验收
 
-`tools/validation/orekit/OrbitForgeRelativityReference.java` 调用未经修改的 Orekit 13.1.2 `Relativity`、`LenseThirringRelativity`、`DeSitterRelativity` 和 Hipparchus DP853，既不导入 OrbitForge，也不调用生产公式。Orekit 对应的 IERS 2010 相对论三项与上述 IERS 2003 式 (1) 相同。JAR 固定版本、来源和 SHA-256 见同目录 `dependencies.json`。编译：`javac -cp <jars> -d <output> tools/validation/orekit/OrbitForgeRelativityReference.java`；运行：`java -cp <jars+output> OrbitForgeRelativityReference`。classpath 分隔符按平台选择，标准输出仅将换行统一为 LF。
+`tools/validation/orekit/OrbelleRelativityReference.java` 调用未经修改的 Orekit 13.1.2 `Relativity`、`LenseThirringRelativity`、`DeSitterRelativity` 和 Hipparchus DP853，既不导入 Orbelle，也不调用生产公式。Orekit 对应的 IERS 2010 相对论三项与上述 IERS 2003 式 (1) 相同。JAR 固定版本、来源和 SHA-256 见同目录 `dependencies.json`。编译：`javac -cp <jars> -d <output> tools/validation/orekit/OrbelleRelativityReference.java`；运行：`java -cp <jars+output> OrbelleRelativityReference`。classpath 分隔符按平台选择，标准输出仅将换行统一为 LF。
 
 固定输入 `tests/reference/propagators/relativity.txt` 的 SHA-256 为 `b3d6c74b77b0dedb0ee25881ac0b7e291f41b44667bdcf0aed1d7905d05e2339`：
 
 - 45 组分项加速度：三组太阳历元、三个极轴倾角、低轨/近极点/倾斜/GEO/零速度状态；Schwarzschild 与总量分量容限 2e−22 m/s²，另两项 2e−24 m/s²。这些界限覆盖双精度舍入，不通过相加抵消掩盖单项错误。
-- 8 条传播轨迹：三项全开或全关、±6000 秒与 ±86400 秒，地球点质量、固定倾斜极轴、运动几何太阳、直接第三体引力关闭；统一 TAI 秒。初态 r=(7000000,0,0) m，v=(0,6200,5300) m/s。独立 DP853 的位置/速度绝对容差为 1e−6 m / 1e−9 m/s，相对 1e−14，最大步长 30 秒；OrbitForge RKF78 为 1e−5 m / 1e−8 m/s、相对 1e−13、最大 30 秒。验收位置分量 0.1 mm、速度分量 1e−7 m/s，允许两种独立积分器的截断和舍入差异。
+- 8 条传播轨迹：三项全开或全关、±6000 秒与 ±86400 秒，地球点质量、固定倾斜极轴、运动几何太阳、直接第三体引力关闭；统一 TAI 秒。初态 r=(7000000,0,0) m，v=(0,6200,5300) m/s。独立 DP853 的位置/速度绝对容差为 1e−6 m / 1e−9 m/s，相对 1e−14，最大步长 30 秒；Orbelle RKF78 为 1e−5 m / 1e−8 m/s、相对 1e−13、最大 30 秒。验收位置分量 0.1 mm、速度分量 1e−7 m/s，允许两种独立积分器的截断和舍入差异。
 - `Spice.MovingSunLightTimeAndAberration` 使用放大变化率的人工 LSK 检验导数方向和数值；`EphemerisFiles.GeometricVelocityUsesTaiDerivativeAndRelativityRecordsItsInputs` 检验真实 DE440s 的速度转换、位置导数与实际传播来源。这些路由测试与合成力模型真值分开。
 - Python 安装后验证 45 组数据、真实 DE440s/EOP 传播、报告一致性、开关身份、存档精确重建及旧分析不可变；固定项目样例独立组装，并对重算 CRC 的非法布尔值拒绝。SDK 消费端调用独立分项接口；Qt 检查键盘、宽窄/DPI、重开/取消、缺数据错误定位。
 

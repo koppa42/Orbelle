@@ -5,7 +5,7 @@
 commit `8126f773923c2902719d45aab8bdb5cce86cf39d` (Vallado 2023-05-09 release).
 The repository's MIT `LICENSE` is included. Keep the upstream header comments.
 
-Only `sgp4init` and `sgp4` are called. OrbitForge provides its own bounded TLE parser;
+Only `sgp4init` and `sgp4` are called. Orbelle provides its own bounded TLE parser;
 the upstream interactive/file I/O helpers are not used. Compiler warnings are disabled
 for this source only. Updates must review the upstream license, rerun the pinned
 verification cases, and revise algorithm provenance if behavior changes.

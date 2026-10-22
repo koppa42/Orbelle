@@ -15,7 +15,7 @@ class QSplitter;
 class QTabBar;
 class QTreeWidget;
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 struct ReportChoice {
     QString key, name, kind, description, scope;
     bool saved = false;
@@ -89,4 +89,4 @@ class ReportColumnSelectionDialog final : public QDialog {
     QLabel *count_;
     QPushButton *confirm_, *up_, *down_;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

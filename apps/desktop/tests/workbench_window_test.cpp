@@ -16,7 +16,7 @@
 #endif
 #include <gtest/gtest.h>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 #ifdef Q_OS_WIN
 QApplication &application() {
@@ -184,4 +184,4 @@ TEST(WorkbenchWindow, CloseButtonHonorsVetoAndDoesNotCommitDraft) {
     EXPECT_FALSE(window.isVisible());
 }
 #endif
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

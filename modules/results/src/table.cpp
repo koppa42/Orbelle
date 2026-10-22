@@ -1,9 +1,9 @@
 #include <cmath>
-#include <orbitforge/results/table.hpp>
+#include <orbelle/results/table.hpp>
 #include <set>
 #include <stdexcept>
 
-namespace orbitforge::results {
+namespace orbelle::results {
 Table::Table(std::vector<Column> columns, std::vector<Row> rows) {
     std::set<std::string> ids;
     for (const auto &column : columns)
@@ -18,4 +18,4 @@ Table::Table(std::vector<Column> columns, std::vector<Row> rows) {
     }
     storage_ = std::make_shared<const Storage>(Storage{std::move(columns), std::move(rows)});
 }
-} // namespace orbitforge::results
+} // namespace orbelle::results

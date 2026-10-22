@@ -4,8 +4,8 @@ import tempfile
 from pathlib import Path
 import unittest
 
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 from test_analysis import make_project
 
 
@@ -102,7 +102,7 @@ class ReportTemplateTests(unittest.TestCase):
         project.set_reports([result.definition])
         project.objects.remove(station)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "report.orbitforge"
+            path = Path(directory) / "report.orbelle"
             project.save(path)
             restored = of.load_project(path)
             definition = restored.to_data().reports[0]

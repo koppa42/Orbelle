@@ -3,8 +3,8 @@ import struct
 import tempfile
 import unittest
 
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 from project_format import rewrite_section
 
 EOP = Path(of.__file__).parent / "data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
@@ -14,7 +14,7 @@ class ProjectPersistenceTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.path = Path(self.temp.name) / "任务.orbitforge"
+        self.path = Path(self.temp.name) / "任务.orbelle"
         self.project = of.Project("Mission", of.Epoch(0), of.Epoch(100))
         self.satellite = self.project.objects.satellite("Satellite", orbit=of.orbits.TwoBody(initial=of.OrbitInput().initial))
         self.station = self.project.objects.ground_station("Station", location=of.Wgs84Location(u.deg(0), u.deg(0)))

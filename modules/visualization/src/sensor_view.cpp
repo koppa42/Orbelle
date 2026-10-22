@@ -2,10 +2,10 @@
 #include <cmath>
 #include <numbers>
 #include <optional>
-#include <orbitforge/visualization/sensor_view.hpp>
+#include <orbelle/visualization/sensor_view.hpp>
 #include <stdexcept>
 
-namespace orbitforge::visualization {
+namespace orbelle::visualization {
 namespace {
 using V = core::SensorVector;
 using P = std::array<double, 2>;
@@ -152,4 +152,4 @@ SensorMesh SensorView::project(const V &position, const core::SensorAxes &axes,
     }
     return result;
 }
-} // namespace orbitforge::visualization
+} // namespace orbelle::visualization

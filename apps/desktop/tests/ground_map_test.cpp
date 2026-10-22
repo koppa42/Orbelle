@@ -15,7 +15,7 @@
 #include <limits>
 #include <numbers>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 TEST(GroundFootprint, SplitsDateLineAndClosesPolarCapWithoutFillingOtherHemisphere) {
     const auto p = [](double lon, double lat) {
         return core::ground_station_position(
@@ -150,7 +150,7 @@ class GroundMapTest : public ::testing::Test {
         // Also bound the mean so a widespread tint or stale layer cannot pass.
         EXPECT_LE(maximum, 3);
         EXPECT_LE(total / (a.width() * a.height()), 0.01);
-        const auto output = qEnvironmentVariable("ORBITFORGE_MAP_CAPTURE_DIR");
+        const auto output = qEnvironmentVariable("ORBELLE_MAP_CAPTURE_DIR");
         if (maximum > 3 && !output.isEmpty()) {
             QDir().mkpath(output);
             const auto name =
@@ -210,7 +210,7 @@ class GroundMapTest : public ::testing::Test {
     QString imagery_;
 };
 TEST_F(GroundMapTest, ProfileZoomedSensorPanning) {
-    const auto output = qEnvironmentVariable("ORBITFORGE_SENSOR_PAN_PROFILE");
+    const auto output = qEnvironmentVariable("ORBELLE_SENSOR_PAN_PROFILE");
     if (output.isEmpty())
         GTEST_SKIP() << "Opt-in pan benchmark";
     WorkbenchProfile profile(output);
@@ -869,4 +869,4 @@ TEST_F(GroundMapTest, AnimatedZoomSettlesToTheSameDetailedTracksAsDirectZoom) {
     ASSERT_TRUE(settle(fresh));
     expect_same_pixels(pixels(map), pixels(fresh));
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

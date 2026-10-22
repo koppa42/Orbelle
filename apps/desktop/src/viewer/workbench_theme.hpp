@@ -11,7 +11,7 @@
 //
 // Legibility: text, textSoft and textMuted keep at least 4.5:1 contrast on every surface;
 // textFaint is reserved for disabled content. Filled actions use dark ink on pale sakura.
-namespace orbitforge::desktop::theme {
+namespace orbelle::desktop::theme {
 struct Token {
     std::string_view name;
     std::string_view value;
@@ -85,4 +85,4 @@ inline const QMargins card{12, 10, 12, 10};   // cards, callouts and popups
 // Replaces `@token` and `@token/NN` references; throws std::invalid_argument for unknown
 // names or opacities above 100 so a typo fails loudly instead of silently dropping a rule.
 QString resolve(QString stylesheet);
-} // namespace orbitforge::desktop::theme
+} // namespace orbelle::desktop::theme

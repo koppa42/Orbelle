@@ -6,7 +6,7 @@
 
 ## 固定数值参考
 
-`tests/reference/propagators/hpop.txt` 为独立 Orekit 13.1.2 / Hipparchus 4.0.2 输出。参考生成器是 `tools/validation/orekit/OrbitForgeHpopReference.java`，依赖文件名及 SHA-256 固定在同目录 `dependencies.json`。输入为官方 ICGEM EGM96 全量文件，生成器校验其完整 SHA-256；生产表仅提取其中 20 阶，见 `tools/data/import_egm96.py`。
+`tests/reference/propagators/hpop.txt` 为独立 Orekit 13.1.2 / Hipparchus 4.0.2 输出。参考生成器是 `tools/validation/orekit/OrbelleHpopReference.java`，依赖文件名及 SHA-256 固定在同目录 `dependencies.json`。输入为官方 ICGEM EGM96 全量文件，生成器校验其完整 SHA-256；生产表仅提取其中 20 阶，见 `tools/data/import_egm96.py`。
 
 参考以 Holmes–Featherstone 重力和 DP853 数值传播，μ = 3.986004415e14 m³/s²、R = 6378136.3 m，tide-free、无其他摄动。DP853 最大步长 30 s，相对容差 1e-14，位置/速度绝对容差 1e-6 m / 1e-9 m/s。重力系刻意固定与 GCRF 同轴，避免把两个系统的 EOP/地球旋转差异混入重力、积分回归。
 
@@ -16,8 +16,8 @@
 
 ```powershell
 $classpath = (Get-ChildItem out/validation/orekit/jars/*.jar | ForEach-Object FullName) -join ';'
-javac -cp $classpath -d out/validation/hpop tools/validation/orekit/OrbitForgeHpopReference.java
-java -cp "out/validation/hpop;$classpath" OrbitForgeHpopReference out/research/hpop/EGM96.gfc
+javac -cp $classpath -d out/validation/hpop tools/validation/orekit/OrbelleHpopReference.java
+java -cp "out/validation/hpop;$classpath" OrbelleHpopReference out/research/hpop/EGM96.gfc
 ```
 
 极点本身由点质量加 J2 闭式梯度测试，避免依赖参考实现的轴上球坐标奇点。另测圆轨道解析极限、RK4 减半步长的四阶收敛、靠近 Epoch 范围端点的时间、1 ns 查询、乱序/重复/并发、取消后重用、错误容差、缺资源、最低高度和工作量上限。
@@ -49,13 +49,13 @@ java -cp "out/validation/hpop;$classpath" OrbitForgeHpopReference out/research/h
 | RKV 8(9) | 7.36508e−4 | 7.32579e−7 | 2.74750e−5 |
 | Bulirsch–Stoer | 4.35495e−4 | 1.41373e−7 | 4.95309e−4 |
 
-`tests/reference/propagators/long_steps.txt` 的 SHA-256 为 `e6e64a921514b8c5ff254dea87a9d8cf1189aa1d5e915bd6e2cc6a7f623d0e11`。生成器 `tools/validation/orekit/OrbitForgeLongStepReference.java` 调用 [Hipparchus 4.0.2 DP853](https://www.hipparchus.org/hipparchus-ode/apidocs/org/hipparchus/ode/nonstiff/DormandPrince853Integrator.html)，不调用生产代码；JAR 散列仍用 `dependencies.json`。半长轴 42164000、2e8、1e9、1e10 m，偏心率 0/.7、倾角 .4 rad，二体及 J2；输出 +1 天、±(3 天 + .123456789 s)，1e10 m 数值问题另有 +16 天。时间和坐标用 `L=a`、`T=sqrt(a³/μ)` 无量纲化，参考绝对/相对容差为 1e−16/1e−15；最大步长在前两种尺度为 600/300 s，后两种为 21600/10800 s。
+`tests/reference/propagators/long_steps.txt` 的 SHA-256 为 `e6e64a921514b8c5ff254dea87a9d8cf1189aa1d5e915bd6e2cc6a7f623d0e11`。生成器 `tools/validation/orekit/OrbelleLongStepReference.java` 调用 [Hipparchus 4.0.2 DP853](https://www.hipparchus.org/hipparchus-ode/apidocs/org/hipparchus/ode/nonstiff/DormandPrince853Integrator.html)，不调用生产代码；JAR 散列仍用 `dependencies.json`。半长轴 42164000、2e8、1e9、1e10 m，偏心率 0/.7、倾角 .4 rad，二体及 J2；输出 +1 天、±(3 天 + .123456789 s)，1e10 m 数值问题另有 +16 天。时间和坐标用 `L=a`、`T=sqrt(a³/μ)` 无量纲化，参考绝对/相对容差为 1e−16/1e−15；最大步长在前两种尺度为 600/300 s，后两种为 21600/10800 s。
 
 参考减半步长的三维差为 2.519e−5 m / 7.762e−9 m/s，通过预设 1e−4 m / 1e−8 m/s 线；26 组二体参考另与 Kepler 解析解比较，最大 5.755e−6 m / 1.185e−9 m/s。再次生成逐字节一致。初始 GBS 和过小固定上限下的长弧参考未通过收敛线，保留诊断于本地验证目录；最终改用无量纲 DP853，未放宽参考或生产验收阈值。
 
 ```powershell
-javac -cp $classpath -d out/validation/long-steps tools/validation/orekit/OrbitForgeBsReference.java tools/validation/orekit/OrbitForgeLongStepReference.java
-java -cp "out/validation/long-steps;$classpath" OrbitForgeLongStepReference out/validation/long-steps/long_steps.txt
+javac -cp $classpath -d out/validation/long-steps tools/validation/orekit/OrbelleBsReference.java tools/validation/orekit/OrbelleLongStepReference.java
+java -cp "out/validation/long-steps;$classpath" OrbelleLongStepReference out/validation/long-steps/long_steps.txt
 ```
 
 `FullDayFixedStepsMatchIndependentLongPeriodReference` 以 86400/43200 s 比较全部五种固定方法，使用半长轴 1e10 m 的四组二体参考；最差位置差 0.178 mm、速度差 2.294e−12 m/s，满足 5 mm / 5e−8 m/s 线。该远距离孤立地球场是步长范围的数学压力测试，不代表地球势力范围以外的实际轨道模型。16 天输出保证 Gauss–Jackson 完成启动后也实际执行完整步。
@@ -76,7 +76,7 @@ Qt 沿用自适应积分器交互验收，增加 RKF 7(8) 的键盘顺序、摘�
 
 系数来自 rklib 的 `rkv98e`，固定提交 `a1bf2d26ba2c37d049b448d28d4e9800a0ee4b58`；源文件 `src/rklib_variable_steps.f90` 的 SHA-256 为 `815a58549a72675c871f88abe127ad4444bcecfa20d9ef0a7b11ea58f8deb33e`。保留其 BSD-3-Clause 许可并随 Python、SDK、Windows 包交付。按照 STK 的八阶推进描述，生产使用原表的 `d` 权重，而原 rklib 常规九阶推进使用 `c` 权重；误差为 `h Σ(c−d)k`。STK 的内部控制器和同配置轨迹尚无直接对照结果。
 
-`tools/validation/rkv89_reference.py` 使用 NumPy 2.3.3 / SciPy 1.16.3 DOP853，不导入 OrbitForge 或其系数表。`tests/reference/propagators/rkv89.txt` 的 SHA-256 为 `da35cab3683d41c18b02f46585c42812836bc66637b8797c6554c1cb8ae4f985`，60 行记录完整初值和终态：圆轨道、偏心率 0.7 / 0.98 椭圆、LEO / MEO 闭式 J2、J2 加解析运动月球的差分引力。时间覆盖 ±1 天、±6 小时、±2 小时、非整数秒、0.25 秒及 1 ns；所有位置为固定惯性轴的 SI 分量。EOP 取恒等旋转，太阳/月球摄动之外的力关闭，避免混入外部数据差异。月球轨迹使用 384400000 m 半径、27.321661 日周期、0.3 rad 倾角、0.4 rad 初相位，GM 为 4.902800066e12 m³/s²；这里用于检验非自治方程阶段时刻，不是真实月球星历。
+`tools/validation/rkv89_reference.py` 使用 NumPy 2.3.3 / SciPy 1.16.3 DOP853，不导入 Orbelle 或其系数表。`tests/reference/propagators/rkv89.txt` 的 SHA-256 为 `da35cab3683d41c18b02f46585c42812836bc66637b8797c6554c1cb8ae4f985`，60 行记录完整初值和终态：圆轨道、偏心率 0.7 / 0.98 椭圆、LEO / MEO 闭式 J2、J2 加解析运动月球的差分引力。时间覆盖 ±1 天、±6 小时、±2 小时、非整数秒、0.25 秒及 1 ns；所有位置为固定惯性轴的 SI 分量。EOP 取恒等旋转，太阳/月球摄动之外的力关闭，避免混入外部数据差异。月球轨迹使用 384400000 m 半径、27.321661 日周期、0.3 rad 倾角、0.4 rad 初相位，GM 为 4.902800066e12 m³/s²；这里用于检验非自治方程阶段时刻，不是真实月球星历。
 
 参考 DOP853 相对容差 3e−14，位置/速度绝对容差 1e−9 m / 1e−12 m/s；最大步长 10 s，另以 20 s 复算。两次参考最大位置差 1.40e−5 m、速度差 1.51e−8 m/s，分别须小于 5e−5 m / 5e−8 m/s。生产 RKV89 设置最大 300 s、相对 1e−14、位置/速度绝对容差 1e−8 m / 1e−11 m/s，正反向三维位置误差限 5 mm、速度限 5e−6 m/s。局部动力学首步估计增量后，Windows/MSVC 实测最大 0.657 mm / 7.085e−7 m/s。数值容差是每步约束；例如将同一天圆轨道的绝对容差放宽到 1e−5 m / 1e−8 m/s、相对 1e−13，可产生约 7.5 cm 的累计误差，不能据容差值宣称全局毫米精度。
 
@@ -91,15 +91,15 @@ ctest --preset desktop-graphics -R "core.Hpop."
 
 ## Bulirsch–Stoer
 
-`tools/validation/orekit/OrbitForgeBsReference.java` 直接调用固定 Hipparchus 4.0.2 `GraggBulirschStoerIntegrator`，JAR 散列沿用 `dependencies.json`。生产实现只依赖标准库，不调用该参考库。参考输入复用上述 SciPy 基准文件中的 kind、时间、初始六维状态；生成器忽略其中的终态，独立实现点质量/J2/运动月球闭式右端项。参考 GBS 保持默认阶数与控制器，关闭插值误差控制并直接积分至每个输出时刻，使用 1e−14 相对容差和 1e−9 m / 1e−12 m/s 绝对容差。最大步长 60/30 s 复算的最大位置/速度差为 3.516e−5 m / 3.679e−8 m/s，均小于 5e−5 m / 5e−8 m/s；与独立 SciPy DOP853 10 s 结果交叉比较为 3.497e−5 m / 3.674e−8 m/s。更小的 20/10 s GBS 步长在一天积分中进入舍入误差主导区，差值约 7.92e−5 m；不能假定不断减小步长会持续提高精度。
+`tools/validation/orekit/OrbelleBsReference.java` 直接调用固定 Hipparchus 4.0.2 `GraggBulirschStoerIntegrator`，JAR 散列沿用 `dependencies.json`。生产实现只依赖标准库，不调用该参考库。参考输入复用上述 SciPy 基准文件中的 kind、时间、初始六维状态；生成器忽略其中的终态，独立实现点质量/J2/运动月球闭式右端项。参考 GBS 保持默认阶数与控制器，关闭插值误差控制并直接积分至每个输出时刻，使用 1e−14 相对容差和 1e−9 m / 1e−12 m/s 绝对容差。最大步长 60/30 s 复算的最大位置/速度差为 3.516e−5 m / 3.679e−8 m/s，均小于 5e−5 m / 5e−8 m/s；与独立 SciPy DOP853 10 s 结果交叉比较为 3.497e−5 m / 3.674e−8 m/s。更小的 20/10 s GBS 步长在一天积分中进入舍入误差主导区，差值约 7.92e−5 m；不能假定不断减小步长会持续提高精度。
 
 固定输出 `tests/reference/propagators/bulirsch_stoer.txt` 包含 60 组正反向、非整数秒和 1 ns 参考，SHA-256 `62e89df62c29838d5fd03e37ce73ffac28632be40467cafeb4bbccb93ce6885b`。生产使用最大步长 300 s、相对 1e−14、位置/速度绝对容差 1e−8 m / 1e−11 m/s；三维误差限 5 mm / 5e−6 m/s。局部动力学首步估计增量后，Windows/MSVC 实测最大位置差 0.144 mm、速度差 1.550e−7 m/s。既有 60 组 Orekit Holmes–Featherstone / DP853 重力参考同时加入 Bulirsch–Stoer，包含双曲线与 20×20 引力场。
 
 偏心率 0.7、近地点 7000 km、6000 s Kepler 解析解在最小/最大步长均为 300 s 时检验自适应阶数和精度：收紧容差后误差须至少下降 100 倍且小于 1 mm，记录中点子步工作量，不能固定在低阶后仅靠标签声称自适应。另测 300/60 s 最大步长收敛；快速双曲离去在固定 300 s 下精度不足必须报错，允许缩步后应成功。取消覆盖一次外推尝试内部；取消后重用、乱序、并发和大 Epoch 查询保持确定性。天气磁暴边界用 60/7 s Bulirsch–Stoer 与 RK4 0.5 s 比较，正反向位置差限 0.1 mm。
 
 ```powershell
-javac -cp $classpath -d out/validation/bs tools/validation/orekit/OrbitForgeBsReference.java
-java -cp "out/validation/bs;$classpath" OrbitForgeBsReference tests/reference/propagators/rkv89.txt out/validation/bs/bulirsch_stoer.txt
+javac -cp $classpath -d out/validation/bs tools/validation/orekit/OrbelleBsReference.java
+java -cp "out/validation/bs;$classpath" OrbelleBsReference tests/reference/propagators/rkv89.txt out/validation/bs/bulirsch_stoer.txt
 ctest --preset desktop-graphics -R "core.Hpop."
 ```
 
@@ -107,16 +107,16 @@ ctest --preset desktop-graphics -R "core.Hpop."
 
 ## 文件与高阶重力
 
-`tests/reference/propagators/gravity.txt` 是独立 Orekit 13.1.2 Holmes–Featherstone 输出，生成器为 `tools/validation/orekit/OrbitForgeGravityReference.java`，复用上述固定 jars。使用明确构造的归一化系数，覆盖 21、70、180、360 阶、全阶与带谐，以及一般位置、低轨、GEO、南北近极点，共 40 个加速度参考；每分量绝对容限 5e-12 m/s²。这个容限用于双精度不同递推顺序的数值回归，不代表模型物理精度，也不代替 EGM2008 轨道对照。
+`tests/reference/propagators/gravity.txt` 是独立 Orekit 13.1.2 Holmes–Featherstone 输出，生成器为 `tools/validation/orekit/OrbelleGravityReference.java`，复用上述固定 jars。使用明确构造的归一化系数，覆盖 21、70、180、360 阶、全阶与带谐，以及一般位置、低轨、GEO、南北近极点，共 40 个加速度参考；每分量绝对容限 5e-12 m/s²。这个容限用于双精度不同递推顺序的数值回归，不代表模型物理精度，也不代替 EGM2008 轨道对照。
 
 ```powershell
-javac -cp $classpath -d out/validation/hpop tools/validation/orekit/OrbitForgeGravityReference.java
-java -cp "out/validation/hpop;$classpath" OrbitForgeGravityReference
+javac -cp $classpath -d out/validation/hpop tools/validation/orekit/OrbelleGravityReference.java
+java -cp "out/validation/hpop;$classpath" OrbelleGravityReference
 ```
 
 `GravityFiles.*` 验证 `.grv` 归一化／非归一化、ICGEM 默认归一化、D 指数、原始换行哈希、截断／重复／NaN／不支持块、取消保留、不可变资源及项目更新确认。低层报告和场景也拒绝与项目记录不匹配的重力 Provider。`test_gravity.py` 验证目录安装、21 阶与完整 2190×2159 Python 配置、准备、保存和重新打开，并拒绝超出文件实际次数的配置。
 
-官方文件另做完整下载与原文校验；不把数百 MiB 文件提交仓库或作为普通 CI 的联网依赖。可选 `DataCenterTest.LiveOfficialGravityDownload` 通过 `ORBITFORGE_LIVE_GRAVITY=egm2008` 或 `egm96` 执行真实 Qt 下载、全量安装及再次检查；未设置时跳过。桌面离线测试覆盖后台导入和失败保留、重力分组、静态有效期、2190 阶／2159 次独立限幅、键盘输入、窄窗草稿保留、取消重开与缺资源错误。截图入口沿用 `ORBITFORGE_DATA_UI_CAPTURE` 和 `ORBITFORGE_HPOP_UI_CAPTURE`。
+官方文件另做完整下载与原文校验；不把数百 MiB 文件提交仓库或作为普通 CI 的联网依赖。可选 `DataCenterTest.LiveOfficialGravityDownload` 通过 `ORBELLE_LIVE_GRAVITY=egm2008` 或 `egm96` 执行真实 Qt 下载、全量安装及再次检查；未设置时跳过。桌面离线测试覆盖后台导入和失败保留、重力分组、静态有效期、2190 阶／2159 次独立限幅、键盘输入、窄窗草稿保留、取消重开与缺资源错误。截图入口沿用 `ORBELLE_DATA_UI_CAPTURE` 和 `ORBELLE_HPOP_UI_CAPTURE`。
 
 ### Gauss–Jackson 12
 
@@ -159,22 +159,22 @@ GJ 起步状态带入求和时保留乘法、减法及起步器状态补偿；�
 
 ## 完整 EGM2008 与 2190 阶验证
 
-`OrbitForgeFullGravityReference.java` 直接调用未经修改的 Orekit 13.1.2 `HolmesFeatherstoneAttractionModel`、`ICGEMFormatReader` 和 Hipparchus 4.0.2 DP853。生成器不导入 OrbitForge，也不转录生产递推。依赖散列使用同目录 `dependencies.json`；参考字节保持 UTF-8/LF。
+`OrbelleFullGravityReference.java` 直接调用未经修改的 Orekit 13.1.2 `HolmesFeatherstoneAttractionModel`、`ICGEMFormatReader` 和 Hipparchus 4.0.2 DP853。生成器不导入 Orbelle，也不转录生产递推。依赖散列使用同目录 `dependencies.json`；参考字节保持 UTF-8/LF。
 
 - `gravity_full.txt`：120 个加速度与 2 条 ±120 s 轨迹。包含稠密 2190×2190、2190×2159，以及刻意放大最高阶带谐、近带谐和扇谐的压力场；截断覆盖 720、1440、2190 阶，0 次和完整次数。
 - `gravity_egm2008_full.txt`：从完整官方 EGM2008 原文读取 80 个加速度与 2 条 ±120 s 轨迹；截断覆盖 20、360、720、1440、2190 阶，0 次和完整次数。输入 252140870 bytes，SHA-256 为 `ab5b524da073e63b5bdceb7ca47a0de07a26dd44a1c5798f39fc98dc80af70fd`；生成器及集成测试都核对散列。有效模型范围 2190×2159 与 [NGA 模型说明](https://earth-info.nga.mil/?action=wgs84&dir=wgs84)一致。该 ICGEM 导出把 2160–2190 次显式补零，因此文件记录范围是 2190×2190；加载器完整校验并保留该范围，另断言全文件求值与 2190×2159 求值相同，不把填零当成额外模型精度。
-- 八个加速度位置覆盖赤道近地表、一般位置、GEO、南北近极点，以及生产递推切换点两侧；单位为地固 SI，地球固定与 GCRF 同轴。完整文件测试不增加联网依赖：设置 `ORBITFORGE_FULL_GRAVITY_FILE` 指向已校验的本地文件后运行 `GravityFiles.FullOfficialEgm2008MatchesIndependentOrekit`，未提供时明确跳过。稠密与放大系数测试始终离线运行。
+- 八个加速度位置覆盖赤道近地表、一般位置、GEO、南北近极点，以及生产递推切换点两侧；单位为地固 SI，地球固定与 GCRF 同轴。完整文件测试不增加联网依赖：设置 `ORBELLE_FULL_GRAVITY_FILE` 指向已校验的本地文件后运行 `GravityFiles.FullOfficialEgm2008MatchesIndependentOrekit`，未提供时明确跳过。稠密与放大系数测试始终离线运行。
 - 全部加速度每分量容限 5e-12 m/s²；全阶轨迹每分量位置 1e-4 m、速度 1e-7 m/s。初始 TAI 历元 Epoch(0)，位置 `(6408136.3,0,0)` m、速度 `(0,6200,4700)` m/s，只包含选定静态重力。DP853 最大步长 10 s、相对 1e-14、位置/速度绝对容差 1e-7 m / 1e-10 m/s；生产 RKF78 最大步长 5 s、相对 1e-14、位置/速度绝对容差 1e-8 m / 1e-11 m/s。收紧积分设置用于隔离全阶力模型误差，不改变生产默认设置，也不把局部容差解释为全局精度。
 - 极点本身另用 `P_n(1)=1`、`P'_n(1)=n(n+1)/2` 的闭式值核对，70 位 Decimal 生成器为 `tools/validation/gravity_pole.py`。它区分最高阶真实横向梯度与数值奇点，包含正负零输入一致性检查。
 
 复现命令（`$classpath` 为已核验 JAR 的平台分隔列表）：
 
 ```powershell
-javac -cp $classpath -d out/validation/full-gravity tools/validation/orekit/OrbitForgeFullGravityReference.java
-java -Xmx1536m -cp "out/validation/full-gravity;$classpath" org.orekit.forces.gravity.potential.OrbitForgeFullGravityReference
-java -Xmx1536m -cp "out/validation/full-gravity;$classpath" org.orekit.forces.gravity.potential.OrbitForgeFullGravityReference out/research/hpop/EGM2008.gfc
+javac -cp $classpath -d out/validation/full-gravity tools/validation/orekit/OrbelleFullGravityReference.java
+java -Xmx1536m -cp "out/validation/full-gravity;$classpath" org.orekit.forces.gravity.potential.OrbelleFullGravityReference
+java -Xmx1536m -cp "out/validation/full-gravity;$classpath" org.orekit.forces.gravity.potential.OrbelleFullGravityReference out/research/hpop/EGM2008.gfc
 python tools/validation/gravity_pole.py
-$env:ORBITFORGE_FULL_GRAVITY_FILE = (Resolve-Path out/research/hpop/EGM2008.gfc)
+$env:ORBELLE_FULL_GRAVITY_FILE = (Resolve-Path out/research/hpop/EGM2008.gfc)
 ctest --test-dir out/build/desktop-graphics -C Release --output-on-failure -R 'Gravity[.]|GravityFiles[.]'
 ```
 
@@ -182,18 +182,18 @@ ctest --test-dir out/build/desktop-graphics -C Release --output-on-failure -R 'G
 
 ## 日月引力与星历
 
-`tests/reference/propagators/third_body.txt` 是独立 Orekit 13.1.2 `ThirdBodyAttraction` / Hipparchus 4.0.2 DP853 的 32 组输出。生成器 `tools/validation/orekit/OrbitForgeThirdBodyReference.java` 使用显式定义的移动太阳/月球、点质量地球，隔离差分引力和积分的实现；不依赖 OrbitForge 力值或 STK 输出。
+`tests/reference/propagators/third_body.txt` 是独立 Orekit 13.1.2 `ThirdBodyAttraction` / Hipparchus 4.0.2 DP853 的 32 组输出。生成器 `tools/validation/orekit/OrbelleThirdBodyReference.java` 使用显式定义的移动太阳/月球、点质量地球，隔离差分引力和积分的实现；不依赖 Orbelle 力值或 STK 输出。
 
 覆盖太阳单独、月球单独、组合、两者 GM 覆盖四种情况，LEO / GEO 初值及 ±6000 s / ±86400 s。参考每分量容限：初始第三体加速度 3e-18 m/s²，传播位置 2 mm、速度 2 µm/s。生产 RKF 7(8) 使用相对容差 1e−13、位置/速度绝对容差 1e−5 m / 1e−8 m/s，最大步长分别为 30/15 s；两组都检查原有独立参考容限，另要求每分量位置的步长收敛差小于 0.1 mm。Windows/MSVC 实测最大位置误差 1.968e−5 m、速度误差 1.191e−8 m/s，30/15 s 最大位置差 2.362e−5 m。此前七阶推进在 60 s 下的一天弧位置误差约 2.27 mm，超出 2 mm 标准，因此用步长收敛降低积分误差，保持参考值及验收阈值。具体数值固定在 `third_body_test.cpp`；不把该回归精度宣称为真实预报精度。另测毫米位移的潮汐极限、地心零差分、奇点、非法 GM、禁用无查询、取消后重用及覆盖先于力评估失败。
 
 ```powershell
-javac -cp $classpath -d out/validation/hpop tools/validation/orekit/OrbitForgeThirdBodyReference.java
-java -cp "out/validation/hpop;$classpath" OrbitForgeThirdBodyReference
+javac -cp $classpath -d out/validation/hpop tools/validation/orekit/OrbelleThirdBodyReference.java
+java -cp "out/validation/hpop;$classpath" OrbelleThirdBodyReference
 ```
 
 真实 SPICE 路由另用仓库内 DE440s 衍生片段检查位置、数据身份、保存/重开与原分析不受文件更新影响。构造两个不相连的 SPK 时间段，验证端点各自可查询也不能通过整段覆盖检查。统一覆盖约束含初始状态至全部输出的传播路径；不接受星历外推。
 
-可选 `DataCenterTest.LiveOfficialEphemerisDownloadAndRecheckRetainCurrentData` 由 `ORBITFORGE_LIVE_DE440S=1` 启用：完整官方文件下载、哈希和目标链校验、再次条件请求、错误替换保留已安装文件。不将 32 MiB 原文加入仓库，也不让普通 CI 依赖联网。运行 Qt 网络验证需加载对应 TLS 插件。
+可选 `DataCenterTest.LiveOfficialEphemerisDownloadAndRecheckRetainCurrentData` 由 `ORBELLE_LIVE_DE440S=1` 启用：完整官方文件下载、哈希和目标链校验、再次条件请求、错误替换保留已安装文件。不将 32 MiB 原文加入仓库，也不让普通 CI 依赖联网。运行 Qt 网络验证需加载对应 TLS 插件。
 
 桌面用 `QuantityTest.HpopThirdBodiesPreserveDraftsAndValidateManualConstants` 检查 GM 配套/手动切换、只读常数的单位转换、数据中心返回后保留草稿、非法值及取消；`DataCenterDialog.EphemerisGroupAndDetailsRemainReadableAtCompactWidth` 检查分组、窄窗和下载入口。沿用上述截图环境变量，并在真实主题、可显示中文的字体及不同 DPI 下检查。
 
@@ -204,22 +204,22 @@ java -cp "out/validation/hpop;$classpath" OrbitForgeThirdBodyReference
 参考 DP853 最大步长 1 s、位置／速度绝对容差 1e-8 m／1e-11 m/s、相对容差 1e-14，食事件阈值 1e-8 s。生产 RKF78 对照采用最大步长 2.5 s 和相同误差容差；每分量位置容限 0.5 mm、速度 0.2 µm/s、初始光压加速度容限 1e-20 m/s²。参考从 10 s 收紧到 1 s 的独立收敛检查排除参考积分误差；不使用放宽容限代替收敛检查。
 
 ```powershell
-javac -cp $classpath -d out/validation/hpop tools/validation/orekit/OrbitForgeSrpReference.java
-java -cp "out/validation/hpop;$classpath" OrbitForgeSrpReference
+javac -cp $classpath -d out/validation/hpop tools/validation/orekit/OrbelleSrpReference.java
+java -cp "out/validation/hpop;$classpath" OrbelleSrpReference
 python tools/validation/generate_srp_geometry_reference.py
 ```
 
 `srp_geometry.txt` 有 182 个独立均匀视圆盘面积参考，含太阳／地球／月球三圆交与并集、重合、包含、内外切、环食及大小相差悬殊的随机配置。独立 Python 生成器沿垂直截面积分，与生产 Green 定理圆弧积分采用不同方法；照明比例绝对容限 2e-9。Core 另检查距离平方、带符号 Cr、零面积、圆柱、大气高度、奇点、缺月球、无阴影不查询月球，以及光压单独启用时的完整星历覆盖。
 
-`SrpPersistence.*`／`SrpFiles.*` 和 `test_srp.py` 检查共享会话／分析／报告、真实 DE440s 路由、当前格式保存与重开、有效参数身份及原分析不可变。桌面 `QuantityTest.HpopSrp*` 检查单位转换、有效遮挡体组合、窄窗、草稿、错误路由及取消；截图使用 `ORBITFORGE_HPOP_UI_CAPTURE`，Windows 原生平台分别设置 `QT_SCALE_FACTOR=1`／`1.5`，日志记录实际窗口 DPR。
+`SrpPersistence.*`／`SrpFiles.*` 和 `test_srp.py` 检查共享会话／分析／报告、真实 DE440s 路由、当前格式保存与重开、有效参数身份及原分析不可变。桌面 `QuantityTest.HpopSrp*` 检查单位转换、有效遮挡体组合、窄窗、草稿、错误路由及取消；截图使用 `ORBELLE_HPOP_UI_CAPTURE`，Windows 原生平台分别设置 `QT_SCALE_FACTOR=1`／`1.5`，日志记录实际窗口 DPR。
 
 ## 集成与交付
 
 - `HpopProject.*`：真实 ERFA/IERS 帧转换、原生 GCRF 的 EOP 身份、报告/AER 复用、初始历元覆盖与取消。
 - `test_hpop.py`：Python 易用入口、不可变配置、Keplerian 的模型 μ、输出网格无关性、编辑前验证、准备结果独立和当前格式保存/打开。
-- `project-current.orbitforge`：独立二进制固定输入中的 HPOP 参数精确往返；非当前版本拒绝。
+- `project-current.orbelle`：独立二进制固定输入中的 HPOP 参数精确往返；非当前版本拒绝。
 - 安装后的 SDK 消费端：通过公共头文件创建 HPOP、查询并保存/重开，不依赖源码路径。
-- `QuantityTest.HpopSettingsValidateCancelAndRoundTripWithoutApplyingTheOrbit`：配置草稿、阶次约束、错误校验、取消和重开；可用 `ORBITFORGE_HPOP_UI_CAPTURE` 输出宽/窄窗口截图，配合 DPI 设置检查。
+- `QuantityTest.HpopSettingsValidateCancelAndRoundTripWithoutApplyingTheOrbit`：配置草稿、阶次约束、错误校验、取消和重开；可用 `ORBELLE_HPOP_UI_CAPTURE` 输出宽/窄窗口截图，配合 DPI 设置检查。
 
 运行日志与截图写入新 `out/validation/<运行名称>/`。修改力模型、系数、误差控制或分段策略时重新执行数值与交付检查；不因默认容差很小而提高产品精度宣称。
 
@@ -247,11 +247,11 @@ Core 的 `EveryBodyAndSourceActuallyChangesTheIntegratedForce` 将十个天体�
 
 计算边界、IERS 常数与容限见[固体潮契约](../architecture/solid_tides.md)。新增 `SolidTides.*` 核验 120 个独立加速度和四条正反向轨迹；`test_solid_tides.py` 检查真实 DE440s/EOP、零直接第三体、三种潮汐模式、报告、来源身份、非活动草稿和保存/重开；当前格式样例包含 Full + 截断 + 附加时间项的 0/0 草稿。SDK 消费端直接调用加性系数接口。`QuantityTest.HpopSolidTides*` 覆盖三选项、截断联动、键盘、宽窄/DPI、重开/取消及缺少星历时返回引力页。
 
-独立数据生成使用 `tools/validation/orekit/dependencies.json` 中八个已验 SHA-256 的 JAR。将它们加入 Java classpath，运行 `javac -cp <classpath> -d <output> tools/validation/orekit/OrbitForgeSolidTideReference.java`，然后运行 `java -cp <classpath+output> org.orekit.forces.gravity.OrbitForgeSolidTideReference`。classpath 分隔符按平台使用 `;` 或 `:`。生成器置于 Orekit 包名仅为调用其包级 `SolidTidesField`，没有修改或复制该库算法；Love 数来自该固定版本的 IERS_2003 资源，频率/极潮函数明确关闭。
+独立数据生成使用 `tools/validation/orekit/dependencies.json` 中八个已验 SHA-256 的 JAR。将它们加入 Java classpath，运行 `javac -cp <classpath> -d <output> tools/validation/orekit/OrbelleSolidTideReference.java`，然后运行 `java -cp <classpath+output> org.orekit.forces.gravity.OrbelleSolidTideReference`。classpath 分隔符按平台使用 `;` 或 `:`。生成器置于 Orekit 包名仅为调用其包级 `SolidTidesField`，没有修改或复制该库算法；Love 数来自该固定版本的 IERS_2003 资源，频率/极潮函数明确关闭。
 
 固定文本参考按 `.gitattributes` 保存为 UTF-8 / LF；Windows Java 输出先只规范换行再记录散列，数值文本保持原样。
 
-自定义 Love 数的独立参考为 `solid_tides_love.txt`：48 组系数、96 组加速度及 16 条 ±1 天轨迹，覆盖四个 k20、两种底场潮汐系统、截断、近极点、频率/极潮开关，沿用现有容限。生成器 `OrbitForgeLoveNumberReference.java` 与上述两个生成器一起编译，运行 `org.orekit.forces.gravity.OrbitForgeLoveNumberReference`。`GravityFiles.*` / Python 检查 `.grv` 两种 Love 数语法、冲突与损坏、导入失败/取消、收据重开、数据确认及分析不可变；Qt 检查选文件时显示值变化和取消，SDK 直接调用自定义 k20 的永久潮 API。
+自定义 Love 数的独立参考为 `solid_tides_love.txt`：48 组系数、96 组加速度及 16 条 ±1 天轨迹，覆盖四个 k20、两种底场潮汐系统、截断、近极点、频率/极潮开关，沿用现有容限。生成器 `OrbelleLoveNumberReference.java` 与上述两个生成器一起编译，运行 `org.orekit.forces.gravity.OrbelleLoveNumberReference`。`GravityFiles.*` / Python 检查 `.grv` 两种 Love 数语法、冲突与损坏、导入失败/取消、收据重开、数据确认及分析不可变；Qt 检查选文件时显示值变化和取消，SDK 直接调用自定义 k20 的永久潮 API。
 
 附加时间项另有 39 组独立系数、24 组加速度及四条轨迹对照（`solid_tides_time_dependent.txt`），包括 IERS 2003 与 2010 极潮符号差异、历史平均极点边界、UT1/TT 时间约定和非活动开关身份。Python 核验 Full 开关切换、数据覆盖、报告与存档；Qt 核验附加时间项仅 Full 可操作、切换模式保留草稿、宽窄/DPI、确认与取消。全部来源和容限见固体潮契约。
 
@@ -261,32 +261,32 @@ IERS 2003 三项修正的公式、时间/坐标约定、独立 Orekit 生成器�
 
 ## STK 球形模型的卫星质量
 
-`tools/validation/orekit/OrbitForgeMassReference.java` 使用固定 Orekit 13.1.2 / Hipparchus 4.0.2；与 `OrbitForgeDragReference.java` 一起编译。JAR 校验值见同目录 `dependencies.json`。运行 `OrbitForgeMassReference` 生成 `tests/reference/propagators/mass.txt`，禁止从生产代码生成真值。
+`tools/validation/orekit/OrbelleMassReference.java` 使用固定 Orekit 13.1.2 / Hipparchus 4.0.2；与 `OrbelleDragReference.java` 一起编译。JAR 校验值见同目录 `dependencies.json`。运行 `OrbelleMassReference` 生成 `tests/reference/propagators/mass.txt`，禁止从生产代码生成真值。
 
 参考向 Orekit 的 `IsotropicDrag` / `IsotropicRadiationSingleCoefficient` 传入实际面积，向 `SpacecraftState` 传入质量。1、250、1000、2700 kg 配置保持相同 A/m，另含双倍 A/m、零阻力面积和零光压面积。两组 LEO 初态各正反向传播 6000 s，共 28 组；NRLMSISE-00、共转 WGS84、几何太阳、球面地球双锥阴影、Cr=1.7，DP853 最大步长 1 s。TAI 作为合成 UTC，旋转地球和太阳与既有阻力协议一致，隔离外部 EOP/星历差异。
 
 `AtmosphericDrag.SharedMassAndIndependentAreasMatchOrekitCombinedForcesAndPropagation` 使用 RKF78（最大步长 2.5 s），核对分项加速度及组合传播；容限沿用阻力协议：每分量 1e-17 m/s²、0.5 mm、5e-7 m/s。另将质量改为 9876 kg，固定各自 A/m，确认轨迹逐位相同。质量有限性、正值、乘积上溢/下溢和零面积由 `Hpop.SatelliteMass*` 覆盖。
 
-项目 v41 / OBJS32 固定样例独立插入 1250 kg；C++/Python 精确字节往返，损坏质量即使重算 CRC 也拒绝。Python 真实 EOP/SPICE 组合力场景验证质量变更保存、计算身份、旧分析不变以及 A/m 改变后的轨迹变化；安装后 SDK 调用派生面积接口。Qt `HpopSatelliteMass*` 检查单位与键盘、430/720 逻辑宽度、不同 DPI、取消、重开和错误定位，截图路径由 `ORBITFORGE_HPOP_UI_CAPTURE` 指定。
+项目 v41 / OBJS32 固定样例独立插入 1250 kg；C++/Python 精确字节往返，损坏质量即使重算 CRC 也拒绝。Python 真实 EOP/SPICE 组合力场景验证质量变更保存、计算身份、旧分析不变以及 A/m 改变后的轨迹变化；安装后 SDK 调用派生面积接口。Qt `HpopSatelliteMass*` 检查单位与键盘、430/720 逻辑宽度、不同 DPI、取消、重开和错误定位，截图路径由 `ORBELLE_HPOP_UI_CAPTURE` 指定。
 
 
 ## 海潮与组合潮汐
 
-算法和数据约定见[海潮契约](../architecture/ocean_tides.md)。`tools/validation/orekit/OrbitForgeOceanTideReference.java` 使用固定 Orekit 13.1.2 / Hipparchus 4.0.2；所有 JAR 的 SHA-256 在同目录 `dependencies.json`。生成器校验输入 POT 原文 SHA-256，并调用库自己的 FES 势系数解析器、IERS_2010 海潮/海洋极潮、Holmes–Featherstone 和 DP853，不调用生产算法。
+算法和数据约定见[海潮契约](../architecture/ocean_tides.md)。`tools/validation/orekit/OrbelleOceanTideReference.java` 使用固定 Orekit 13.1.2 / Hipparchus 4.0.2；所有 JAR 的 SHA-256 在同目录 `dependencies.json`。生成器校验输入 POT 原文 SHA-256，并调用库自己的 FES 势系数解析器、IERS_2010 海潮/海洋极潮、Holmes–Featherstone 和 DP853，不调用生产算法。
 
 ```text
-javac -cp <jars> -d <classes> tools/validation/orekit/OrbitForgeOceanTideReference.java
-java -cp <classes-and-jars> org.orekit.forces.gravity.OrbitForgeOceanTideReference <4x4-potential-path> 4
-java -cp <classes-and-jars> org.orekit.forces.gravity.OrbitForgeOceanTideReference <full-potential-path> 100
+javac -cp <jars> -d <classes> tools/validation/orekit/OrbelleOceanTideReference.java
+java -cp <classes-and-jars> org.orekit.forces.gravity.OrbelleOceanTideReference <4x4-potential-path> 4
+java -cp <classes-and-jars> org.orekit.forces.gravity.OrbelleOceanTideReference <full-potential-path> 100
 ```
 
-classpath 分隔符随平台使用 `;` 或 `:`；固定输出只规范为 UTF-8 / LF，不改数值文本。输入截取步骤与完整散列见[参考数据说明](../../tests/reference/propagators/README.md)。基础 CI 不下载海潮文件，使用全部 36 个显式分潮的 4×4 固定截取。完整文件验收显式设置 `ORBITFORGE_FULL_OCEAN_FILE`，未设置时该项跳过，不能将跳过视为全模型验证。
+classpath 分隔符随平台使用 `;` 或 `:`；固定输出只规范为 UTF-8 / LF，不改数值文本。输入截取步骤与完整散列见[参考数据说明](../../tests/reference/propagators/README.md)。基础 CI 不下载海潮文件，使用全部 36 个显式分潮的 4×4 固定截取。完整文件验收显式设置 `ORBELLE_FULL_OCEAN_FILE`，未设置时该项跳过，不能将跳过视为全模型验证。
 
 参考使用固定 GCRF 同轴地球、TAI Epoch(0)、UTC=TAI−32 s、UT1−TAI=−31.7 s、xp=0.12″、yp=0.25″；GM=3.986004415e14 m³/s²、R=6378136.3 m。阶次包括 2/0、2/1、4/4、30/12、100/100，并分别开关海洋极潮。六个系数历元覆盖负纳秒时刻、Epoch(0)、小数秒、原版 IERS 2010 平均极点分界及其后一纳秒、较晚历元。加速度位置包括普通 LEO、近极点、GNSS 和 GEO。m=0 的 S 规范为零。
 
 - 小文件：84 组系数、144 组总加速度、4 条轨迹。
 - 完整 100×100 文件：216 组系数、240 组总加速度、12 条轨迹。
-- 组合力：`OrbitForgeCombinedTideReference.java` 与 OceanTide/SolidTide 两个生成器共同编译。调用 `org.orekit.forces.gravity.OrbitForgeCombinedTideReference <4x4-potential-path>`，得到 8 条轨迹；完整固体潮不截断，海潮独立取 2/0 或 4/4。Orekit 将二者作为两个力分别计算，检验生产代码的重叠系数相加及海潮范围之外的固体潮项保留。
+- 组合力：`OrbelleCombinedTideReference.java` 与 OceanTide/SolidTide 两个生成器共同编译。调用 `org.orekit.forces.gravity.OrbelleCombinedTideReference <4x4-potential-path>`，得到 8 条轨迹；完整固体潮不截断，海潮独立取 2/0 或 4/4。Orekit 将二者作为两个力分别计算，检验生产代码的重叠系数相加及海潮范围之外的固体潮项保留。
 
 轨迹初值 r=(7000000,0,0) m，v=(0,6200,5300) m/s；底场 0/0，分别传播 ±6000 s 与 ±86400 s。DP853 和 RKF78 使用位置绝对容差 1e-6 m、速度 1e-9 m/s、相对 1e-14、最大步长 30 s。系数每分量容限 2e-20，加速度 2e-14 m/s²，覆盖双精度相位/累加和势函数求值舍入；轨迹容限 1 mm / 1e-6 m/s，覆盖两种积分器的全局误差。该容限不表示实际卫星预报精度。
 
@@ -294,21 +294,21 @@ classpath 分隔符随平台使用 `;` 或 `:`；固定输出只规范为 UTF-8 
 
 Python `test_ocean_tides.py` 验证不可变易用配置、显式 DataSnapshot 与目录装配相同、原始文件变化确认、真实 EOP 传播/报告、保存重开和关闭/0/1 阶草稿身份。项目 v41 / OBJS32 使用独立 `struct.pack` 样例精确往返；非当前版本拒绝。安装后的 SDK 直接构造常相位海潮并核对解析系数。
 
-桌面 `Hpop*Ocean*` 与 `DataCenterDialog.OceanGroup*` 检查独立阶次、文件上限、键盘、430/720 逻辑宽度、草稿重开/取消、自有下载取消/重试、排队取消不影响其他下载，以及不显示“已安装”。使用 Windows 原生 Qt、`QT_SCALE_FACTOR=1` / `1.5`，由 `ORBITFORGE_HPOP_UI_CAPTURE` 与 `ORBITFORGE_DATA_UI_CAPTURE` 保存布局截图并记录实际 DPR；同时执行相关 offscreen 回归。`DataCenterTest.*Ocean*` 另外验证后台导入、失败/取消保留；设置 `ORBITFORGE_FULL_OCEAN_FILE` 时将完整固定原文作为 loopback HTTP 响应，核验实际传输、304 条件重查及损坏替换不影响旧资源。
+桌面 `Hpop*Ocean*` 与 `DataCenterDialog.OceanGroup*` 检查独立阶次、文件上限、键盘、430/720 逻辑宽度、草稿重开/取消、自有下载取消/重试、排队取消不影响其他下载，以及不显示“已安装”。使用 Windows 原生 Qt、`QT_SCALE_FACTOR=1` / `1.5`，由 `ORBELLE_HPOP_UI_CAPTURE` 与 `ORBELLE_DATA_UI_CAPTURE` 保存布局截图并记录实际 DPR；同时执行相关 offscreen 回归。`DataCenterTest.*Ocean*` 另外验证后台导入、失败/取消保留；设置 `ORBELLE_FULL_OCEAN_FILE` 时将完整固定原文作为 loopback HTTP 响应，核验实际传输、304 条件重查及损坏替换不影响旧资源。
 
 尚未完成完整旋转地球下的 STK 同配置轨迹、次要分潮推算和 Min. Amplitude。上述海潮测试不覆盖 EOP 日内潮汐改正或地面站海潮负荷位移。
 
 
 ## 文件显式引力系数长期变化
 
-模型、导入规则和 STK 对齐边界见[长期变化契约](../architecture/gravity_secular.md)。固定 Orekit 13.1.2 / Hipparchus 4.0.2，先逐个核对 `tools/validation/orekit/dependencies.json` 中的 JAR SHA-256。生成器只使用 Orekit 的 `SecularTrendSphericalHarmonics`、`WrappingNormalizedProvider`、Holmes–Featherstone、NewtonianAttraction 和 DP853；不调用 OrbitForge。包名用于访问未修改的包级类。
+模型、导入规则和 STK 对齐边界见[长期变化契约](../architecture/gravity_secular.md)。固定 Orekit 13.1.2 / Hipparchus 4.0.2，先逐个核对 `tools/validation/orekit/dependencies.json` 中的 JAR SHA-256。生成器只使用 Orekit 的 `SecularTrendSphericalHarmonics`、`WrappingNormalizedProvider`、Holmes–Featherstone、NewtonianAttraction 和 DP853；不调用 Orbelle。包名用于访问未修改的包级类。
 
 ```text
-javac -cp <jars> -d <classes> tools/validation/orekit/OrbitForgeSecularGravityReference.java
-java -cp <classes-and-jars> org.orekit.forces.gravity.potential.OrbitForgeSecularGravityReference tests/reference/propagators
+javac -cp <jars> -d <classes> tools/validation/orekit/OrbelleSecularGravityReference.java
+java -cp <classes-and-jars> org.orekit.forces.gravity.potential.OrbelleSecularGravityReference tests/reference/propagators
 ```
 
-标准输出保存为 `gravity_secular.txt`，只将换行规范为 UTF-8 / LF，不修改数值文本。组合参考需一起编译 `OrbitForgeSecularGravityReference.java`、`OrbitForgeSolidTideReference.java`、`OrbitForgeOceanTideReference.java` 和 `OrbitForgeSecularTideReference.java`；运行 `org.orekit.forces.gravity.OrbitForgeSecularTideReference tests/reference/propagators`，输出保存为 `gravity_secular_tides.txt`。classpath 分隔符在 Windows 为 `;`，其他平台为 `:`。三个输入 .grv 和输出散列见[参考说明](../../tests/reference/propagators/README.md)；生成器先校验原文字节，重复生成须逐字节一致。
+标准输出保存为 `gravity_secular.txt`，只将换行规范为 UTF-8 / LF，不修改数值文本。组合参考需一起编译 `OrbelleSecularGravityReference.java`、`OrbelleSolidTideReference.java`、`OrbelleOceanTideReference.java` 和 `OrbelleSecularTideReference.java`；运行 `org.orekit.forces.gravity.OrbelleSecularTideReference tests/reference/propagators`，输出保存为 `gravity_secular_tides.txt`。classpath 分隔符在 Windows 为 `;`，其他平台为 `:`。三个输入 .grv 和输出散列见[参考说明](../../tests/reference/propagators/README.md)；生成器先校验原文字节，重复生成须逐字节一致。
 
 三个合成 8×4 场分别使用 TT JD 2451545.0 / 2446431.0 / 2451545.123456789012345；第二个为未归一化输入。它们只用于验证公开线性模型，不代表 STK 默认 EGM 文件。Java 用 BigDecimal 解析 TT JD 并舍入到纳秒，率换算与归一化调用 Orekit；生产解析器独立实现。固定 GM=3.986004415e14 m³/s²、R=6378136.3 m、tide-free 底场和 GCRF 同轴地固系；初始 r=(7000000,0,0) m，v=(0,6200,5300) m/s。
 
@@ -318,7 +318,7 @@ java -cp <classes-and-jars> org.orekit.forces.gravity.potential.OrbitForgeSecula
 
 `SecularGravity.*` / `SecularFiles.*` 覆盖上述数值、最高 2190 阶率截断、百年时差、纳秒历元、非有限及溢出拒绝、重复/损坏块、导入取消、资源冻结、重准备确认及报告身份。Python `test_gravity.py` 检查只读元数据、真实 EOP 场景、保存重开、变化确认、0/0 非活动草稿和严格布尔输入；SDK 消费端调用公开率和加速度 API。项目 v41 / OBJS32 的独立固定样例与损坏测试属于本项验收。
 
-Qt `QuantityTest.HpopSecularFileCapabilityKeyboardDraftAndValidation` 检查有/无元数据、键盘操作、错误路由、取消/重开和 0/0 草稿；用 Windows 原生 Qt、`QT_SCALE_FACTOR=1` / `1.5` 检查 430/720 逻辑宽度，并通过 `ORBITFORGE_HPOP_UI_CAPTURE` 保存实际 DPR 截图。运行日志放入新的 `out/validation/`。静态 EGM96/EGM2008 的 STK 默认演化仍待核对，尚无 STK 同配置轨迹真值。
+Qt `QuantityTest.HpopSecularFileCapabilityKeyboardDraftAndValidation` 检查有/无元数据、键盘操作、错误路由、取消/重开和 0/0 草稿；用 Windows 原生 Qt、`QT_SCALE_FACTOR=1` / `1.5` 检查 430/720 逻辑宽度，并通过 `ORBELLE_HPOP_UI_CAPTURE` 保存实际 DPR 截图。运行日志放入新的 `out/validation/`。静态 EGM96/EGM2008 的 STK 默认演化仍待核对，尚无 STK 同配置轨迹真值。
 
 ### 多体遮挡与本体中心
 
@@ -335,7 +335,7 @@ CSPICE 固定 DE440s 样例检查水星／金星物理中心与原生 `geometric
 
 ## SRP 阴影边界修正
 
-事件与轨迹参考使用 `OrbitForgeSrpBoundaryReference.java`，与同目录 `OrbitForgeSrpReference.java` 一起用 Orekit 13.1.2 / Hipparchus 4.0.2 编译。运行主类 `OrbitForgeSrpBoundaryReference`，标准输出对应 `tests/reference/propagators/srp_boundaries.txt`；生成器内部先验证 2/1 s 最大步长收敛，不通过则失败退出。常数、圆柱方向区别、误差限和适用范围见[光压契约](../architecture/solar_radiation_pressure.md#阴影边界修正)。
+事件与轨迹参考使用 `OrbelleSrpBoundaryReference.java`，与同目录 `OrbelleSrpReference.java` 一起用 Orekit 13.1.2 / Hipparchus 4.0.2 编译。运行主类 `OrbelleSrpBoundaryReference`，标准输出对应 `tests/reference/propagators/srp_boundaries.txt`；生成器内部先验证 2/1 s 最大步长收敛，不通过则失败退出。常数、圆柱方向区别、误差限和适用范围见[光压契约](../architecture/solar_radiation_pressure.md#阴影边界修正)。
 
 `SrpBoundary.*` 覆盖 160 条两档步长的事件/轨迹对照、24 条高阶方法显式固定步长对照、掠影、正反向、短弧科学插值、整数历元状态一致性、取消后重试和非活动草稿。保留 `SolarRadiationPressure.*` 原有参考以及 `Sundman*` 的独立时间正则化参考；不能以新增测试取代这些回归。Python 检查生效身份、不可变旧分析和关闭阴影的草稿；当前二进制样例独立打包新的布尔字段，并以修复 CRC 的非法布尔值验证拒绝路径。Qt offscreen 加两档原生 DPI 检查开关、灰显草稿、重开/取消及窄宽布局。
 
@@ -349,11 +349,11 @@ CSPICE 固定 DE440s 样例检查水星／金星物理中心与原生 `geometric
 
 ## 应用性能测量
 
-`compute-benchmark` 预设提供 `orbitforge_hpop_benchmark`。在 Release 模式下，用同一台机器、相同依赖和完整重力文件比较改动前后：
+`compute-benchmark` 预设提供 `orbelle_hpop_benchmark`。在 Release 模式下，用同一台机器、相同依赖和完整重力文件比较改动前后：
 
 ```powershell
-cmake --build --preset compute-benchmark --target orbitforge_hpop_benchmark
-out/build/compute-benchmark/benchmarks/compute/Release/orbitforge_hpop_benchmark.exe data/samples <EGM2008.gfc> out/validation/<new-run>
+cmake --build --preset compute-benchmark --target orbelle_hpop_benchmark
+out/build/compute-benchmark/benchmarks/compute/Release/orbelle_hpop_benchmark.exe data/samples <EGM2008.gfc> out/validation/<new-run>
 ```
 
 程序记录原始重力文件 SHA-256、读取与校验时间，以及 1 小时、24 小时两种时段的准备、首次传播、参考系变换和缓存采样时间。默认组为 EGM2008 21×21、永久潮、RKF78、自适应最大步长 60 秒；另一组加上阻力、日月引力与太阳辐射压。两组保留相同误差设置，使用固定 EOP / 星历样例和每分钟输出进行比较；三次传播的中位数用于观察耗时，输出全部采样值供核验。
@@ -364,8 +364,8 @@ out/build/compute-benchmark/benchmarks/compute/Release/orbitforge_hpop_benchmark
 
 ### 启动预加载与内存
 
-`orbitforge_data_center_ui_tests` 的 `Startup.*` 覆盖后台阶段进度、窗口响应、点击不隐藏启动页、按钮 / Esc / 关闭取消、失败重试、计算身份不符时拒绝复用，以及场景释放后复用和过期缓存释放。首次数据准备的既有测试继续覆盖缺失下载、重试与取消。
+`orbelle_data_center_ui_tests` 的 `Startup.*` 覆盖后台阶段进度、窗口响应、点击不隐藏启动页、按钮 / Esc / 关闭取消、失败重试、计算身份不符时拒绝复用，以及场景释放后复用和过期缓存释放。首次数据准备的既有测试继续覆盖缺失下载、重试与取消。
 
-可选完整文件检查设置 `ORBITFORGE_STARTUP_GRAVITY_FILE` 为官方 EGM2008 原文，`ORBITFORGE_STARTUP_EPHEMERIS_CATALOG` 为已有完整 DE440s 的测试目录。运行 `Startup.FullDefaultDataWarmupMemoryAndRepeatedReuse`，用 `ORBITFORGE_STARTUP_CAPTURE_DIR` 指定新的截图及 `memory.json` 目录。Windows 用进程 PrivateUsage 记录加载前、加载后、十次复用后的内存，以及独立线程按 10 ms 间隔记录的采样峰值；采样峰值不是严格的瞬时最大值，测量不包含真实工作台 GPU 场景，其他平台内存字段为 -1。时间包含启动页进度与截图开销。常规 CI 未提供完整数据时跳过此项。
+可选完整文件检查设置 `ORBELLE_STARTUP_GRAVITY_FILE` 为官方 EGM2008 原文，`ORBELLE_STARTUP_EPHEMERIS_CATALOG` 为已有完整 DE440s 的测试目录。运行 `Startup.FullDefaultDataWarmupMemoryAndRepeatedReuse`，用 `ORBELLE_STARTUP_CAPTURE_DIR` 指定新的截图及 `memory.json` 目录。Windows 用进程 PrivateUsage 记录加载前、加载后、十次复用后的内存，以及独立线程按 10 ms 间隔记录的采样峰值；采样峰值不是严格的瞬时最大值，测量不包含真实工作台 GPU 场景，其他平台内存字段为 -1。时间包含启动页进度与截图开销。常规 CI 未提供完整数据时跳过此项。
 
-真实工作台 smoke 也可接收 `ORBITFORGE_STARTUP_GRAVITY_FILE`：仅向 smoke 自己的数据目录安装该本地夹具，经生产预加载入口加载后进入工作台，断言首次 HPOP 应用在多次场景切换后仍引用同一 Provider，并记录 `hpop-preloaded-first-apply-timing`。常规 smoke、固定图形基准和性能 profile 保持固定输入，不执行联网准备；这个显式夹具模式验证预加载，不能代替生产首次下载测试。
+真实工作台 smoke 也可接收 `ORBELLE_STARTUP_GRAVITY_FILE`：仅向 smoke 自己的数据目录安装该本地夹具，经生产预加载入口加载后进入工作台，断言首次 HPOP 应用在多次场景切换后仍引用同一 Provider，并记录 `hpop-preloaded-first-apply-timing`。常规 smoke、固定图形基准和性能 profile 保持固定输入，不执行联网准备；这个显式夹具模式验证预加载，不能代替生产首次下载测试。

@@ -5,7 +5,7 @@ import math
 import struct
 import tempfile
 import unittest
-import orbitforge as of
+import orbelle as of
 from project_format import read_sections, with_sections
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -40,7 +40,7 @@ class HpopCovarianceProjectTests(unittest.TestCase):
     def test_saved_project_query_and_report_against_independent_orekit(self):
         p, satellite, ref, end = reference_project()
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "covariance.orbitforge"
+            path = Path(directory) / "covariance.orbelle"
             p.save(path)
             restored = of.Project.open(path)
             satellite = restored.objects[satellite.id]
@@ -88,9 +88,9 @@ class HpopCovarianceProjectTests(unittest.TestCase):
             analysis.covariance(satellite, at=end, cancelled=lambda: "yes")
 
     def test_current_fixture_drafts_and_integrity(self):
-        raw = (ROOT / "tests/integration/fixtures/project-current.orbitforge").read_bytes()
+        raw = (ROOT / "tests/integration/fixtures/project-current.orbelle").read_bytes()
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "draft.orbitforge"
+            path = Path(directory) / "draft.orbelle"
             path.write_bytes(raw)
             p = of.Project.open(path)
             s = p.objects["satellite-b"].orbit.covariance

@@ -1,8 +1,8 @@
 #include <cmath>
-#include <orbitforge/core/frames/frame_provider.hpp>
+#include <orbelle/core/frames/frame_provider.hpp>
 #include <stdexcept>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 std::array<double, 3> apply(const PositionRotation &rotation, const std::array<double, 3> &position,
                             bool transpose) {
@@ -29,4 +29,4 @@ std::array<double, 3>
 PositionRotation::inverse_position(const std::array<double, 3> &position_m) const {
     return apply(*this, position_m, true);
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

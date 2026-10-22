@@ -5,8 +5,8 @@ import math
 import tempfile
 import unittest
 from pathlib import Path
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 EOP = Path(__file__).resolve().parents[3] / "data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
 GRV = """stk.v.6.0
@@ -43,12 +43,12 @@ class GravityTests(unittest.TestCase):
                 project.prepare(data=of.DataSnapshot.load(eop_manifest=EOP))
             analysis = project.prepare(data=data)
             before = analysis.states(sat, step=u.s(60)).position.values
-            project.save(root / "project.orbitforge", analysis=analysis)
-            restored = of.Project.open(root / "project.orbitforge", data=data)
+            project.save(root / "project.orbelle", analysis=analysis)
+            restored = of.Project.open(root / "project.orbelle", data=data)
             self.assertEqual(restored.objects[sat.id].orbit.hpop.gravity_model, "custom")
             file.write_text(GRV.replace("1e-8 2e-8", "2e-8 4e-8"))
             changed = data.with_gravity("custom", file)
-            plan = of.Project.plan_open(root / "project.orbitforge", data=changed)
+            plan = of.Project.plan_open(root / "project.orbelle", data=changed)
             self.assertEqual(plan.data_changes[0].role, "gravity/custom")
             self.assertEqual(analysis.states(sat, step=u.s(60)).position.values, before)
             with self.assertRaises(of.DataChangedError):
@@ -80,7 +80,7 @@ class GravityTests(unittest.TestCase):
                     solid_tides=of.orbits.SolidTideSettings("permanent")))
                 analysis = project.prepare(data=data)
                 before = analysis.states(sat, step=u.s(60))
-                path = root / "love.orbitforge"
+                path = root / "love.orbelle"
                 project.save(path, analysis=analysis)
                 restored = of.Project.open(path, data=data)
                 self.assertEqual(restored.prepare(data=data).states(restored.objects[sat.id], step=u.s(60))
@@ -136,7 +136,7 @@ class GravityTests(unittest.TestCase):
             analysis = project.prepare(data=data)
             before = analysis.state(satellite, at=project.last)
             self.assertTrue(all(math.isfinite(x) for x in before.position_m + before.velocity_mps))
-            path = root / "full.orbitforge"
+            path = root / "full.orbelle"
             project.save(path, analysis=analysis)
             restored = of.Project.open(path, data=data)
             restored_satellite = restored.objects[satellite.id]
@@ -179,7 +179,7 @@ class SecularGravityTests(unittest.TestCase):
                 analysis = project.prepare(data=data)
                 before = analysis.states(sat, step=u.s(60))
                 self.assertIn("secular=file-linear-julian-year-v1", before.provenance.algorithm)
-                path = root / "project.orbitforge"
+                path = root / "project.orbelle"
                 project.save(path, analysis=analysis)
                 restored = of.Project.open(path, data=data)
                 self.assertTrue(restored.objects[sat.id].orbit.hpop.include_secular_variations)
@@ -269,6 +269,6 @@ class SecularGravityTests(unittest.TestCase):
         self.assertEqual(before.input_sha256, after.input_sha256)
         self.assertEqual(before.position.values, after.position.values)
         with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / "draft.orbitforge"
+            path = Path(folder) / "draft.orbelle"
             project.save(path)
             self.assertTrue(of.Project.open(path).objects[sat.id].orbit.hpop.include_secular_variations)

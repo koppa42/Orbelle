@@ -1,10 +1,10 @@
 #pragma once
 #include <algorithm>
 #include <map>
-#include <orbitforge/runtime/project.hpp>
+#include <orbelle/runtime/project.hpp>
 #include <string_view>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 inline bool same_state(const core::CartesianState &a, const core::CartesianState &b) {
     return a.epoch == b.epoch && a.origin == b.origin && a.frame == b.frame &&
            a.position_m == b.position_m && a.velocity_mps == b.velocity_mps;
@@ -111,4 +111,4 @@ Providers prepare_resources(const Files &files, const Providers &retained, Refer
     }
     return result;
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

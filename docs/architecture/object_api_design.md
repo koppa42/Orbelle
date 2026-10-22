@@ -1,4 +1,4 @@
-# OrbitForge 对象 API 与数据驱动设计
+# Orbelle 对象 API 与数据驱动设计
 
 **状态：分阶段实施中。** 公共对象管理、事务、变更通知与 Python 易用接口见[对象编辑 API](object_editing.md)；分析快照、准备确认计划及目录按时段选源见[分析 API](analysis_api.md)。本文仍定义完整目标；C++ 顶层门面已实现，见 [C++ 项目 API](cpp_api.md)；桌面报告已接入固定分析，工作台对象应用和图形准备尚未整体迁入统一文档。强类型轨道配置和描述表等未完成部分不能直接用于当前 0.3.0 包。
 
@@ -109,7 +109,7 @@ ID 查询不会退回名称查询；名称允许重复，`find()` 返回全部�
 Python 多属性修改直接使用关键字参数，常用写法如下。`sensor.update()` 的这两个字段一起校验、一起提交，任意字段无效时全部保留原值。
 
 ```python
-from orbitforge.sensors import Cone, Pointing
+from orbelle.sensors import Cone, Pointing
 
 sensor.update(
     field_of_view=Cone(half_angle=u.deg(15)),
@@ -204,9 +204,9 @@ with project.edit():
 以下为目标工作流。示例目录应已安装覆盖该时段的数据；`snapshot()`、`prepare()` 和查询不会隐式下载。
 
 ```python
-import orbitforge as of
-from orbitforge import units as u
-from orbitforge.sensors import Cone, Pointing
+import orbelle as of
+from orbelle import units as u
+from orbelle.sensors import Cone, Pointing
 
 data = of.DataCatalog.open("local/data").snapshot()
 t0 = data.time.parse_utc("2026-10-01T00:00:00Z")
@@ -270,7 +270,7 @@ for window in windows:
     print(window.start, window.end, window.duration)
 
 trajectory.to_csv("trajectory.csv")
-project.save("observation.orbitforge", analysis=analysis)
+project.save("observation.orbelle", analysis=analysis)
 ```
 
 ## C++ 使用示例
@@ -278,8 +278,8 @@ project.save("observation.orbitforge", analysis=analysis)
 C++ 已提供不依赖 Qt 的聚合头文件和 `of::Project`。以下为当前可用接口，创建方式与 Python 项目构造器一致，候选事务仍须显式提交。
 
 ```cpp
-#include <orbitforge/orbitforge.hpp>
-namespace of = orbitforge;
+#include <orbelle/orbelle.hpp>
+namespace of = orbelle;
 using namespace std::chrono_literals;
 
 int main() {
@@ -291,8 +291,8 @@ int main() {
 
     auto analysis = project.prepare();
     auto trajectory = analysis.states(satellite, 30s, of::FrameId::gcrf);
-    project.save("observation.orbitforge", analysis);
-    auto reopened = of::Project::open("observation.orbitforge");
+    project.save("observation.orbelle", analysis);
+    auto reopened = of::Project::open("observation.orbelle");
 }
 ```
 
@@ -456,7 +456,7 @@ C++20 与 Python 使用一致的错误分类：参数与物理输入错误、对
 
 ## 文件与 API 迁移
 
-当前 `.orbitforge` 仅读写 v46，包含仅 UTC 的来源及分析准备记录；v1–v26 及未知版本明确拒绝。开发阶段不承诺旧文件兼容，不维护迁移分支，不让旧存储结构约束新 API；结构或语义改变时递增格式版本并整体更新当前实现。API 版本与文件格式分别演进。对象事务、固定分析、目录选源、检查后打开/保存、`analysis.access()` / `aer()` 和内置报告查询已实现，当前入口见[分析 API](analysis_api.md)；查询/报告模板分离与显式对象范围已落地；统一 C++ 顶层门面已落地；C++ 强类型配置、桌面计划接入继续按阶段推进。
+当前 `.orbelle` 仅读写 v46，包含仅 UTC 的来源及分析准备记录；v1–v26 及未知版本明确拒绝。开发阶段不承诺旧文件兼容，不维护迁移分支，不让旧存储结构约束新 API；结构或语义改变时递增格式版本并整体更新当前实现。API 版本与文件格式分别演进。对象事务、固定分析、目录选源、检查后打开/保存、`analysis.access()` / `aer()` 和内置报告查询已实现，当前入口见[分析 API](analysis_api.md)；查询/报告模板分离与显式对象范围已落地；统一 C++ 顶层门面已落地；C++ 强类型配置、桌面计划接入继续按阶段推进。
 
 - 保留稳定 ID、所属和目标引用、名称、显示设置、时间精度、轨道输入及数据来源信息。
 - 保留瞬时根数、平均根数和 TLE 的物理含义；SGP4 的非活动手工草稿不得误作计算输入。

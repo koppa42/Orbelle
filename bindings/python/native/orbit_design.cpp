@@ -1,7 +1,7 @@
-#include <orbitforge/core/propagation/orbit_design.hpp>
+#include <orbelle/core/propagation/orbit_design.hpp>
 #include <pybind11/pybind11.h>
 namespace py = pybind11;
-using namespace orbitforge;
+using namespace orbelle;
 void bind_orbit_design(py::module_ &module) {
     py::enum_<core::EarthOrbitType>(module, "EarthOrbitType")
         .value("CIRCULAR", core::EarthOrbitType::circular)

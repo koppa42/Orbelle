@@ -3,12 +3,12 @@ import math
 from pathlib import Path
 import tempfile
 
-import orbitforge as of
+import orbelle as of
 
 
 sample = Path(of.__file__).parent / "data/spice/de440s_2016_leap/manifest.json"
 epoch = of.make_builtin_time_provider().from_utc(of.UtcDateTime(2017, 1, 1))
-with tempfile.TemporaryDirectory(prefix="orbitforge-example-") as workspace:
+with tempfile.TemporaryDirectory(prefix="orbelle-example-") as workspace:
     ephemeris = of.load_spice_snapshot(sample, workspace)
     for name, target in (("Sun", 10), ("Moon", 301)):
         state = ephemeris.geometric_state(target, 399, epoch)

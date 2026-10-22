@@ -1,6 +1,6 @@
 # 报告与曲线
 
-参考 STK 的模板、数据提供器与对象绑定方式，报告计算使用 OrbitForge 的 Runtime。桌面和 Python 共用同一个生成、格式化和 CSV 导出实现。
+参考 STK 的模板、数据提供器与对象绑定方式，报告计算使用 Orbelle 的 Runtime。桌面和 Python 共用同一个生成、格式化和 CSV 导出实现。
 
 ## 使用
 
@@ -42,7 +42,7 @@
 
 所有时间序列报告可跟随场景范围或使用场景以内的自定义区间。步长是整数纳秒，包含起点和终点；不整除时额外保留精确终点，最后一段较短。允许单时刻查询。每个对象的行连续排列，顺序采用项目的卫星、地面站顺序。
 
-报告类型旁的“模板”菜单提供保存、更新和删除；选择“保存为模板…”时才输入名称。保存把定义加入当前项目并标记未保存；再保存项目后写入磁盘。项目 v47 保留配置，不保存数据表；开发阶段只读写当前格式，不兼容旧项目版本。取消生成或生成失败保留上次结果；改变查询仍保留上次结果并提示重新生成；仅修改显示单位或时间系统，且查询与场景输入未变时，直接复用已有结果。格式应用失败保留原结果。结果页显示所对应的报告名称，场景输入改变后提示重新生成。双击含历元的行可定位场景时间。
+报告类型旁的“模板”菜单提供保存、更新和删除；选择“保存为模板…”时才输入名称。保存把定义加入当前项目并标记未保存；再保存项目后写入磁盘。项目 v48 保留配置，不保存数据表；开发阶段只读写当前格式，不兼容旧项目版本。取消生成或生成失败保留上次结果；改变查询仍保留上次结果并提示重新生成；仅修改显示单位或时间系统，且查询与场景输入未变时，直接复用已有结果。格式应用失败保留原结果。结果页显示所对应的报告名称，场景输入改变后提示重新生成。双击含历元的行可定位场景时间。
 
 星间报告使用有序双卫星绑定，要求 UTC/EOP；连续距离极值包含不可见时段，详见[星间分析](intersatellite.md)。
 
@@ -99,8 +99,8 @@ CSV 使用 UTF-8 BOM、逗号分隔、双引号转义和 CRLF 行结束符，支
 ## Python
 
 ```python
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 # analysis 已由 project.prepare() 捕获，satellite 为项目对象句柄。
 template = of.reports.Template([
@@ -115,7 +115,7 @@ result.export_csv("state.csv")
 si = of.reports.Template(units=of.ReportUnits.SI).apply(result)
 print(si.numeric_value(0, 4))
 project.set_reports([result.definition])
-project.save("mission.orbitforge")
+project.save("mission.orbelle")
 ```
 
 省略模板仍可使用 `units=`、`time_scale=` 便利参数；提供模板时两者须写入模板，避免重复配置。Python 默认工程单位与 TAI，`columns=None` 使用完整字段，显式空列表报错。`of.reports.fields(kind)` 返回字段 ID、默认标题和原始维度。`Template` / `Column` 为不可变配置值，`Template.apply()` 目前接受 `ReportResult`，其他类型结果继续使用各自的导出/数组方法。保存配置通过 `project.set_reports()` 整体校验并提交，读取可用 `project.to_data().reports` 副本。完整可运行示例见 [report_templates.py](../../examples/python/report_templates.py)。
@@ -123,7 +123,7 @@ project.save("mission.orbitforge")
 ## C++
 
 ```cpp
-namespace app = orbitforge::application;
+namespace app = orbelle::application;
 app::ReportQuery query;
 query.kind = app::ReportKind::aer;
 query.object_ids = {station.id(), sensor.id()};
@@ -149,7 +149,7 @@ C++ 的原生模板默认 UTC；无 UTC 数据时显式选 TAI/TT。独立 `gene
 
 按 STK 2026 R1 / 13.1 官方帮助对照工作流；这是基于官方文档的工作流对照，尚未进行双方数值结果的交叉验证。STK 支持从分析菜单或对象进入、选择样式与时间后生成，并提供样式复制等管理操作。[官方工作流](https://help.agi.com/stk/Content/stk/report.htm)
 
-| 对照项 | OrbitForge 当前状态 | 后续取舍 |
+| 对照项 | Orbelle 当前状态 | 后续取舍 |
 | --- | --- | --- |
 | 分析菜单、对象右键入口 | 两处入口，右键自动绑定对象 | 后续支持多对象上下文入口 |
 | 内置与用户配置 | 13 个内置报告；独立选择窗口；项目内保存、复制、删除绑定配置 | 增加独立模板库与导入/导出；当前保存配置不等于任意样式编辑 |
@@ -161,7 +161,7 @@ C++ 的原生模板默认 UTC；无 UTC 数据时显式选 TAI/TT。独立 `gene
 | 文档/自动化 | CSV；Python/C++ 与桌面共用计算 | HTML/PDF、带元数据导出、批量任务 |
 | 大规模结果 | 预估行数、20 万行上限、后台取消 | 实测需求后增加分块存储及流式导出 |
 
-STK 的报告内容允许选择数据提供器、重排字段、划分具有不同时间依赖的节，并分别设置单位和统计。对应到 OrbitForge，下一阶段应把“查询字段/区间”和“显示样式”分离；时间序列与 Access 区间需要不同结果结构，避免把区间强行展开成采样行。[内容与统计](https://help.agi.com/stk/Content/stk/report-06.htm)
+STK 的报告内容允许选择数据提供器、重排字段、划分具有不同时间依赖的节，并分别设置单位和统计。对应到 Orbelle，下一阶段应把“查询字段/区间”和“显示样式”分离；时间序列与 Access 区间需要不同结果结构，避免把区间强行展开成采样行。[内容与统计](https://help.agi.com/stk/Content/stk/report-06.htm)
 
 STK 在结果窗口提供刷新、复制、查找、单位及导出设置。当前已提供对象入口、配置副本与表格复制，后续优先完善结果内的格式调整。仍使用简单默认 CSV，需要排版的报告另走文档导出。[结果操作](https://help.agi.com/stk/Content/stk/report_export.htm)
 
@@ -169,7 +169,7 @@ STK 在结果窗口提供刷新、复制、查找、单位及导出设置。当�
 
 STK 的报告管理器把对象类型/对象列表、Styles、Time Properties 和 Generate 分区组织，先选对象再选适用样式；报告生成后在结果窗口提供操作工具栏。它不是左侧设置、右侧实时结果的布局。[管理器与对象范围](https://help.agi.com/stk/Content/stk/report.htm)、[官方界面教程](https://help.agi.com/stk/content/training/L1_AccessReports.htm)
 
-OrbitForge 采用左侧设置、右侧结果的布局，借用其对象优先、适用类型筛选、结果工具栏三个特点。报告选择放在独立的可搜索窗口中，区分内置报告和项目模板，主面板只显示当前选择。时间默认使用场景时段，只有选择自定义时段才展开两个时间输入框。配置管理与来源详情保留明确入口，不占用主结果区域。
+Orbelle 采用左侧设置、右侧结果的布局，借用其对象优先、适用类型筛选、结果工具栏三个特点。报告选择放在独立的可搜索窗口中，区分内置报告和项目模板，主面板只显示当前选择。时间默认使用场景时段，只有选择自定义时段才展开两个时间输入框。配置管理与来源详情保留明确入口，不占用主结果区域。
 
 ## 调研参考
 

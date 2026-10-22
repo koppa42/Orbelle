@@ -3,10 +3,10 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <limits>
-#include <orbitforge/runtime/project.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/runtime/project.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 
-using namespace orbitforge;
+using namespace orbelle;
 TEST(ProjectGroundStation, RoundTripMixedObjectsAndImmutableEditsPreserveIdentityAndLocation) {
     application::Project project("Mixed", core::Epoch{0}, core::Epoch{7200000000000});
     application::ProjectSatellite satellite;
@@ -281,9 +281,9 @@ TEST(Project, RejectsAmbiguousInputsAndInvalidReferencesBeforeWriting) {
     EXPECT_THROW(application::validate_project(project), application::ProjectError);
 }
 TEST(Project, FileReplacementIsExplicitAndFailedSavePreservesExistingProject) {
-    const auto dir = std::filesystem::path(ORBITFORGE_INTEGRATION_WORKSPACE) / "project-file-test";
+    const auto dir = std::filesystem::path(ORBELLE_INTEGRATION_WORKSPACE) / "project-file-test";
     std::filesystem::create_directories(dir);
-    const auto path = dir / std::filesystem::path(u8"任务.orbitforge");
+    const auto path = dir / std::filesystem::path(u8"任务.orbelle");
     const auto original = example();
     application::save_project(path, original, true);
     auto edited = original;
@@ -304,7 +304,7 @@ TEST(Project, FileReplacementIsExplicitAndFailedSavePreservesExistingProject) {
     std::filesystem::remove(dir);
 }
 TEST(Project, ReconstructedTwoBodyAndJ2StatesAreIdenticalInEitherTimeDirection) {
-#if ORBITFORGE_EXPECT_SPICE
+#if ORBELLE_EXPECT_SPICE
     const auto original = example();
     const auto restored = application::decode_project(application::encode_project(original));
     const auto before = runtime::make_project_scenario(original);
@@ -358,7 +358,7 @@ TEST(Project, ObjectEditsPreserveIdentityAndDoNotMutatePreviousSnapshots) {
                  application::ProjectError);
 }
 TEST(Project, CurrentSchemaFixturePreservesInputsRelationshipsAndExactEncoding) {
-    const auto project = application::load_project(ORBITFORGE_PROJECT_CURRENT);
+    const auto project = application::load_project(ORBELLE_PROJECT_CURRENT);
     ASSERT_EQ(project.satellites.size(), 2U);
     EXPECT_EQ(project.name, "Schema fixture");
     EXPECT_TRUE(project.satellites[1].orbit.hpop.srp.boundary_mitigation);
@@ -458,7 +458,7 @@ TEST(Project, CurrentSchemaFixturePreservesInputsRelationshipsAndExactEncoding) 
     EXPECT_EQ(project.reports[0].format.columns[2].unit, "km");
     EXPECT_EQ(project.reports[0].format.columns[2].title, "Slant range");
     EXPECT_EQ(project.analysis_status(), application::AnalysisStatus::unrecorded);
-    std::ifstream input(ORBITFORGE_PROJECT_CURRENT, std::ios::binary);
+    std::ifstream input(ORBELLE_PROJECT_CURRENT, std::ios::binary);
     const std::vector<std::uint8_t> fixture(std::istreambuf_iterator<char>{input}, {});
     EXPECT_EQ(application::encode_project(project), fixture);
 }
@@ -510,8 +510,8 @@ TEST(Project, DataLocksHaveStableCanonicalOrderAndRejectDuplicateRoles) {
 }
 TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
     const auto bytes = application::encode_project(example());
-    for (std::uint32_t version = 0; version <= 48; ++version) {
-        if (version == 47)
+    for (std::uint32_t version = 0; version <= 49; ++version) {
+        if (version == 48)
             continue;
         SCOPED_TRACE(version);
         auto unsupported = bytes;
@@ -523,7 +523,7 @@ TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
         } catch (const application::ProjectError &error) {
             EXPECT_NE(std::string(error.what()).find("version " + std::to_string(version) + ";"),
                       std::string::npos);
-            EXPECT_NE(std::string(error.what()).find("reads only version 47"), std::string::npos);
+            EXPECT_NE(std::string(error.what()).find("reads only version 48"), std::string::npos);
         }
     }
 }

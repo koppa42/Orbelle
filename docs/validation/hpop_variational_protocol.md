@@ -32,7 +32,7 @@
 
 ## 独立输入与复现
 
-使用固定 JAR：Orekit 13.1.2、Hipparchus 4.0.2，散列见 `tools/validation/orekit/dependencies.json`。编译同目录的 `OrbitForgeRelativityReference.java`、`OrbitForgeHpopForceReference.java`、`OrbitForgeHpopVariationalReference.java`，运行最后一个类，唯一必需参数为输出路径。两次独立运行必须产生相同 ASCII/LF 字节，才更新 `tests/reference/propagators/hpop_variational.txt`。附加 `--zero-shadow` 仅供零参数审计，不生成完整测试输入。
+使用固定 JAR：Orekit 13.1.2、Hipparchus 4.0.2，散列见 `tools/validation/orekit/dependencies.json`。编译同目录的 `OrbelleRelativityReference.java`、`OrbelleHpopForceReference.java`、`OrbelleHpopVariationalReference.java`，运行最后一个类，唯一必需参数为输出路径。两次独立运行必须产生相同 ASCII/LF 字节，才更新 `tests/reference/propagators/hpop_variational.txt`。附加 `--zero-shadow` 仅供零参数审计，不生成完整测试输入。
 
 固定文件的 ASCII / LF SHA-256：
 
@@ -46,7 +46,7 @@
 - 6 组 ±6000 s 地球双锥食影，含正／零／负 Cr。名义 2×2 重力和均匀太阳圆盘；地球半径 6378137 m、太阳半径 695700000 m，无月球遮挡。
 - 全部力的部分案例仅将协方差重力改为 2×0：参考保留 2×2 名义加速度值，使用 Orekit 2×0 的自动导数，检验明确选定的近似变分方程。
 
-初始高度 750 km、WGS84 纬度 0.6 rad、经度 1.2 rad；速度沿地固东向、大小为所处地心半径的圆轨道速度。地固轴绕 z 以 7.292115e−5 rad/s 旋转，初相位 0.3 rad。初始为 TAI 2000-01-01 12:00:00，合成 UTC 与 TAI 相同。GM、归一化 2×2 系数、月球位置和圆周太阳参数沿用[总力参考](hpop_force_protocol.md)，太阳随时间移动。NRL 使用手动通量 150 sfu、Ap=15，关闭参考库的密度有限差分。模型与系数都不来自 OrbitForge 的计算函数。
+初始高度 750 km、WGS84 纬度 0.6 rad、经度 1.2 rad；速度沿地固东向、大小为所处地心半径的圆轨道速度。地固轴绕 z 以 7.292115e−5 rad/s 旋转，初相位 0.3 rad。初始为 TAI 2000-01-01 12:00:00，合成 UTC 与 TAI 相同。GM、归一化 2×2 系数、月球位置和圆周太阳参数沿用[总力参考](hpop_force_protocol.md)，太阳随时间移动。NRL 使用手动通量 150 sfu、Ap=15，关闭参考库的密度有限差分。模型与系数都不来自 Orbelle 的计算函数。
 
 ## 食影参考的数值条件
 
@@ -56,7 +56,7 @@
 
 K=0 时，原始自动微分仍给出 `∂(K f)/∂K=f`；完整敏感度随食影变化，不因为名义光压为零而被忽略。
 
-参考必须先通过自身收敛：末端位置 2e−6 m、速度 2e−9 m/s；缩放 STM 逐项差小于 2e−11，食影为 5e−11。参数列使用整个六维列的最大范数，速度加权 1000 s，以参考范数与 1e−7 的较大值为分母；两档结果差小于 2e−8。避免用可过零的单分量做相对误差分母。全部参考均使用原始 Orekit 力模型与 Hipparchus 自动微分／积分器，不调用 OrbitForge 算法。
+参考必须先通过自身收敛：末端位置 2e−6 m、速度 2e−9 m/s；缩放 STM 逐项差小于 2e−11，食影为 5e−11。参数列使用整个六维列的最大范数，速度加权 1000 s，以参考范数与 1e−7 的较大值为分母；两档结果差小于 2e−8。避免用可过零的单分量做相对误差分母。全部参考均使用原始 Orekit 力模型与 Hipparchus 自动微分／积分器，不调用 Orbelle 算法。
 
 ## 生产实现验收
 

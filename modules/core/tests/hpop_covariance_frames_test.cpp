@@ -3,11 +3,11 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <limits>
-#include <orbitforge/core/propagation/hpop_covariance.hpp>
-#include <orbitforge/core/propagation/hpop_force.hpp>
+#include <orbelle/core/propagation/hpop_covariance.hpp>
+#include <orbelle/core/propagation/hpop_force.hpp>
 #include <sstream>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 using Joint = std::array<std::array<double, 8>, 8>;
 HpopCovarianceCoordinates coordinate(int index) {
@@ -93,7 +93,7 @@ class FixedEop final : public IEarthOrientationProvider {
 };
 } // namespace
 TEST(HpopCovarianceFrames, MatchesOrekitAndIndependentJointMatrixReferences) {
-    std::ifstream input(ORBITFORGE_HPOP_COVARIANCE_FRAMES_REFERENCE);
+    std::ifstream input(ORBELLE_HPOP_COVARIANCE_FRAMES_REFERENCE);
     ASSERT_TRUE(input);
     std::string line;
     int count = 0;

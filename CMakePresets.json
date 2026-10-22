@@ -11,13 +11,13 @@
       "inherits": "astronomy",
       "displayName": "Headless computation throughput",
       "cacheVariables": {
-        "ORBITFORGE_BUILD_COMPUTE_BENCHMARKS": "ON",
-        "ORBITFORGE_BUILD_DESKTOP": "OFF",
-        "ORBITFORGE_BUILD_VISUALIZATION": "OFF",
-        "ORBITFORGE_BUILD_EXAMPLES": "OFF",
-        "ORBITFORGE_BUILD_DATA_TOOLS": "OFF",
-        "ORBITFORGE_WITH_VSG": "OFF",
-        "ORBITFORGE_WITH_ROCKY": "OFF"
+        "ORBELLE_BUILD_COMPUTE_BENCHMARKS": "ON",
+        "ORBELLE_BUILD_DESKTOP": "OFF",
+        "ORBELLE_BUILD_VISUALIZATION": "OFF",
+        "ORBELLE_BUILD_EXAMPLES": "OFF",
+        "ORBELLE_BUILD_DATA_TOOLS": "OFF",
+        "ORBELLE_WITH_VSG": "OFF",
+        "ORBELLE_WITH_ROCKY": "OFF"
       }
     },
     {
@@ -27,10 +27,10 @@
       "generator": "Ninja",
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
       "cacheVariables": {
-        "ORBITFORGE_WITH_DATA_CATALOG": "ON",
-        "ORBITFORGE_BUILD_DESKTOP": "OFF",
-        "ORBITFORGE_WITH_VSG": "OFF",
-        "ORBITFORGE_WITH_ROCKY": "OFF"
+        "ORBELLE_WITH_DATA_CATALOG": "ON",
+        "ORBELLE_BUILD_DESKTOP": "OFF",
+        "ORBELLE_WITH_VSG": "OFF",
+        "ORBELLE_WITH_ROCKY": "OFF"
       }
     },
     {
@@ -39,24 +39,24 @@
       "displayName": "Linux headless address and undefined behavior checks",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "ORBITFORGE_ENABLE_SANITIZERS": "ON"
+        "ORBELLE_ENABLE_SANITIZERS": "ON"
       }
     },
     {
       "name": "graphics-benchmark",
       "inherits": "desktop-graphics",
       "displayName": "Fixed 10k satellite graphics workload",
-      "cacheVariables": { "ORBITFORGE_BUILD_BENCHMARKS": "ON" }
+      "cacheVariables": { "ORBELLE_BUILD_BENCHMARKS": "ON" }
     },
     {
       "name": "desktop-graphics",
       "inherits": "astronomy",
       "displayName": "Qt / VSG / Rocky graphics integration",
       "cacheVariables": {
-        "ORBITFORGE_WITH_DATA_CATALOG": "ON",
-        "ORBITFORGE_BUILD_DESKTOP": "ON",
-        "ORBITFORGE_WITH_VSG": "ON",
-        "ORBITFORGE_WITH_ROCKY": "ON"
+        "ORBELLE_WITH_DATA_CATALOG": "ON",
+        "ORBELLE_BUILD_DESKTOP": "ON",
+        "ORBELLE_WITH_VSG": "ON",
+        "ORBELLE_WITH_ROCKY": "ON"
       }
     },
     {
@@ -82,7 +82,7 @@
       "inherits": "headless-tests",
       "displayName": "ERFA time and frame reference tests",
       "cacheVariables": {
-        "ORBITFORGE_WITH_ERFA": "ON"
+        "ORBELLE_WITH_ERFA": "ON"
       }
     },
     {
@@ -90,8 +90,8 @@
       "inherits": "time-frames",
       "displayName": "ERFA and CSPICE foundation",
       "cacheVariables": {
-        "ORBITFORGE_WITH_SPICE": "ON",
-        "ORBITFORGE_BUILD_DATA_TOOLS": "ON"
+        "ORBELLE_WITH_SPICE": "ON",
+        "ORBELLE_BUILD_DATA_TOOLS": "ON"
       }
     },
     {
@@ -99,9 +99,9 @@
       "inherits": "headless",
       "displayName": "Core with no application or UI dependencies",
       "cacheVariables": {
-        "ORBITFORGE_BUILD_APPLICATION": "OFF",
-        "ORBITFORGE_BUILD_VISUALIZATION": "OFF",
-        "ORBITFORGE_BUILD_EXAMPLES": "OFF"
+        "ORBELLE_BUILD_APPLICATION": "OFF",
+        "ORBELLE_BUILD_VISUALIZATION": "OFF",
+        "ORBELLE_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -109,7 +109,7 @@
       "inherits": "headless",
       "displayName": "Qt Widgets skeleton",
       "cacheVariables": {
-        "ORBITFORGE_BUILD_DESKTOP": "ON"
+        "ORBELLE_BUILD_DESKTOP": "ON"
       }
     }
   ],

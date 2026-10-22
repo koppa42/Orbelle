@@ -1,11 +1,11 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <orbitforge/results/access_windows.hpp>
+#include <orbelle/results/access_windows.hpp>
 #include <stdexcept>
 #include <utility>
 
-namespace orbitforge::results {
+namespace orbelle::results {
 AccessWindow::AccessWindow(core::Epoch start, core::Epoch end, bool start_clipped, bool end_clipped,
                            std::optional<core::PassExtrema> extrema)
     : extrema_(std::move(extrema)), start_(start), end_(end), start_clipped_(start_clipped),
@@ -55,4 +55,4 @@ AccessStatistics AccessWindows::statistics() const {
         result.mean_duration_s = result.total_duration_s / static_cast<double>(result.count);
     return result;
 }
-} // namespace orbitforge::results
+} // namespace orbelle::results

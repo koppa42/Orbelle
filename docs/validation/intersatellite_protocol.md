@@ -2,7 +2,7 @@
 
 ## 独立参考
 
-`tools/validation/orekit/OrbitForgeIntersatelliteReference.java` 不调用 OrbitForge：使用固定 Orekit 13.1.2 / Hipparchus 4.0.2，双 KeplerianPropagator、LOFType.QSW、InterSatDirectViewDetector（零掠过高度），以及 BrentOptimizer 连续极值。依赖与 SHA-256 由既有 `dependencies.json` 固定；参考数据和 Java 源散列保存于 `tests/reference/propagators/intersatellite_orekit.metadata.json`。
+`tools/validation/orekit/OrbelleIntersatelliteReference.java` 不调用 Orbelle：使用固定 Orekit 13.1.2 / Hipparchus 4.0.2，双 KeplerianPropagator、LOFType.QSW、InterSatDirectViewDetector（零掠过高度），以及 BrentOptimizer 连续极值。依赖与 SHA-256 由既有 `dependencies.json` 固定；参考数据和 Java 源散列保存于 `tests/reference/propagators/intersatellite_orekit.metadata.json`。
 
 参考采用地心惯性轴与静止 WGS84 椭球，隔离参考系模型差异；实际 ITRF 转换另走已验证的 IERS/ERFA 链，并由真实 EOP 的冻结 Analysis/低层报告一致性、Python 及桌面测试验证接线。不能把静止椭球参考称为真实地球姿态的端到端独立对照。
 

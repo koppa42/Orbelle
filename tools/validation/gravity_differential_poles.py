@@ -1,7 +1,7 @@
 """Independent exact-axis potential derivatives, 80-digit Decimal arithmetic.
 
 Uses Legendre identities P_n^(m)(+/-1) and harmonicity, without a Cartesian
-recurrence or OrbitForge import. Only orders 0, 1 and 2 contribute to the
+recurrence or Orbelle import. Only orders 0, 1 and 2 contribute to the
 potential Hessian on the axis; all higher orders vanish exactly. Inputs are
 converted from binary64 without decimal rounding. Run with an output path.
 """

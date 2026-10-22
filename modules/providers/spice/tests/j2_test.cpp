@@ -3,12 +3,12 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <numbers>
-#include <orbitforge/providers/spice/provider.hpp>
-#include <orbitforge/core/propagation/orbit_design.hpp>
+#include <orbelle/providers/spice/provider.hpp>
+#include <orbelle/core/propagation/orbit_design.hpp>
 
 namespace {
-using namespace orbitforge;
-using namespace orbitforge::core;
+using namespace orbelle;
+using namespace orbelle::core;
 const auto &earth = central_body(OriginId::earth);
 constexpr double rad = std::numbers::pi / 180;
 TEST(OrbitDesignPropagation, CircularRepeatClosesInUniformlyRotatingEarthFrame) {

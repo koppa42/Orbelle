@@ -5,7 +5,7 @@
 #include <cmath>
 #include <type_traits>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 using Vector = std::array<double, 3>;
 using Matrix = std::array<Vector, 3>;
@@ -346,4 +346,4 @@ HpopForceDifferential hpop_force_differential(const CartesianState &state,
     detail::validate_hpop_force_state(state.position_m, state.velocity_mps, options, environment);
     return evaluate_force<true>(state, options, environment, {}, {}, checkpoint);
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

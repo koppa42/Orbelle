@@ -1,4 +1,4 @@
-"""Reproduce the fixed Orekit/Hipparchus lighting reference without using OrbitForge."""
+"""Reproduce the fixed Orekit/Hipparchus lighting reference without using Orbelle."""
 import argparse
 import hashlib
 import json
@@ -24,10 +24,10 @@ for dep in deps:
     jars.append(str(path.resolve()))
 args.output.mkdir(parents=True, exist_ok=False)
 cp = os.pathsep.join(jars)
-java = source / "OrbitForgeLightingReference.java"
+java = source / "OrbelleLightingReference.java"
 subprocess.run(["javac", "-cp", cp, "-d", str(args.output), str(java)], check=True)
 run = subprocess.run(["java", "-cp", str(args.output.resolve()) + os.pathsep + cp,
-                      "OrbitForgeLightingReference"], text=True, capture_output=True)
+                      "OrbelleLightingReference"], text=True, capture_output=True)
 (args.output / "stderr.txt").write_text(run.stderr, encoding="utf-8")
 run.check_returncode()
 output = args.output / "lighting_orekit.txt"

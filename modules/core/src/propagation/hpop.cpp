@@ -13,12 +13,12 @@
 #include <limits>
 #include <mutex>
 #include <numeric>
-#include <orbitforge/core/propagation/hpop.hpp>
-#include <orbitforge/core/propagation/hpop_variational.hpp>
+#include <orbelle/core/propagation/hpop.hpp>
+#include <orbelle/core/propagation/hpop_variational.hpp>
 #include <tuple>
 #include <vector>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 std::function<double(Epoch)> sun_distance(const IThirdBodyEphemeris *ephemeris) {
     if (!ephemeris)
@@ -1527,4 +1527,4 @@ make_hpop_interpolated(CartesianState initial, Epoch first, Epoch last, HpopOpti
     return std::make_shared<InterpolatedHpop>(initial, first, last, std::move(options),
                                               std::move(environment), reporting_step_nanoseconds);
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

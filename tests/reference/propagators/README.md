@@ -19,7 +19,7 @@ This is a formula/transcription regression, not a direct STK comparison.
 
 `third_body.txt` contains 32 independent Orekit 13.1.2 / Hipparchus 4.0.2
 ThirdBodyAttraction + DP853 reference cases. The generator is
-`tools/validation/orekit/OrbitForgeThirdBodyReference.java`; dependency hashes are
+`tools/validation/orekit/OrbelleThirdBodyReference.java`; dependency hashes are
 in its sibling `dependencies.json`. Explicit moving synthetic geocentric bodies
 isolate differential gravity from SPICE. Cases cover Sun, Moon, both, and GM
 overrides; LEO/GEO initial states; and positive/negative 6000 s and 86400 s.
@@ -29,7 +29,7 @@ Real DE440s routing/coverage has separate integration tests; these values do not
 claim a same-configuration STK comparison.
 
 `srp.txt` contains 24 independent Orekit 13.1.2 SolarRadiationPressure + DP853
-cases from `tools/validation/orekit/OrbitForgeSrpReference.java`: point-mass Earth,
+cases from `tools/validation/orekit/OrbelleSrpReference.java`: point-mass Earth,
 spherical Earth eclipse, explicit moving geometric Sun, LEO/GEO, both time
 directions, Cr/A/m variations and a 23 km atmospheric radius increment. DP853
 uses a 1 s maximum step, 1e-8 m / 1e-11 m/s absolute and 1e-14 relative tolerances;
@@ -45,20 +45,20 @@ independently of the production boundary-arc integration. Coordinates and
 radii are in units of the apparent solar radius; output is the lighting ratio.
 Cases include identical, contained, tangent, disjoint, annular and simultaneous
 Earth/Moon disks, with occultor radii up to 300 solar radii. Neither generator
-imports OrbitForge or calls the production force implementation.
+imports Orbelle or calls the production force implementation.
 
-`solid_tides.txt` calls unmodified Orekit 13.1.2 SolidTidesField (IERS_2003 Love numbers, frequency/pole terms off), Holmes–Featherstone and DP853. Its 120 acceleration and 4 moving-body trajectory rows are produced by `tools/validation/orekit/OrbitForgeSolidTideReference.java`. See `docs/architecture/solid_tides.md` for complete conventions and tolerances.
-Fixed solid tide reference SHA-256: `8b50c6af9cc1beb3ecf762f71e2e39b65c5e0301b335e205fdce6552153eb1d1`. The generator uses only Orekit/Hipparchus; it does not import or call OrbitForge.
+`solid_tides.txt` calls unmodified Orekit 13.1.2 SolidTidesField (IERS_2003 Love numbers, frequency/pole terms off), Holmes–Featherstone and DP853. Its 120 acceleration and 4 moving-body trajectory rows are produced by `tools/validation/orekit/OrbelleSolidTideReference.java`. See `docs/architecture/solid_tides.md` for complete conventions and tolerances.
+Fixed solid tide reference SHA-256: `8b50c6af9cc1beb3ecf762f71e2e39b65c5e0301b335e205fdce6552153eb1d1`. The generator uses only Orekit/Hipparchus; it does not import or call Orbelle.
 
-`solid_tides_time_dependent.txt` adds unmodified Orekit 13.1.2 IERS_2003 frequency corrections (71 constituents) and the printed 2003 solid pole tide, including annual.pole interpolation. `OrbitForgeTimeDependentTideReference.java` calls Orekit's own implementations, then Holmes–Featherstone/DP853, without importing OrbitForge. Compile it with `OrbitForgeSolidTideReference.java` using the pinned JARs in `tools/validation/orekit/dependencies.json`; run `org.orekit.forces.gravity.OrbitForgeTimeDependentTideReference` and save UTF-8 LF output. The file records its synthetic UTC/EOP/frame convention and column meanings. There are 39 coefficient, 24 acceleration and 4 trajectory rows. Canonical LF SHA-256: `ad701acd8b1a4f2d0993acaa9c356e180a3c2dd6cfb8844927da5ef3c592e63f`.
+`solid_tides_time_dependent.txt` adds unmodified Orekit 13.1.2 IERS_2003 frequency corrections (71 constituents) and the printed 2003 solid pole tide, including annual.pole interpolation. `OrbelleTimeDependentTideReference.java` calls Orekit's own implementations, then Holmes–Featherstone/DP853, without importing Orbelle. Compile it with `OrbelleSolidTideReference.java` using the pinned JARs in `tools/validation/orekit/dependencies.json`; run `org.orekit.forces.gravity.OrbelleTimeDependentTideReference` and save UTF-8 LF output. The file records its synthetic UTC/EOP/frame convention and column meanings. There are 39 coefficient, 24 acceleration and 4 trajectory rows. Canonical LF SHA-256: `ad701acd8b1a4f2d0993acaa9c356e180a3c2dd6cfb8844927da5ef3c592e63f`.
 
-`relativity.txt` contains 45 independent three-term acceleration rows and 8 on/off forward/backward trajectories. `tools/validation/orekit/OrbitForgeRelativityReference.java` calls unmodified Orekit 13.1.2 Relativity, LenseThirringRelativity, DeSitterRelativity and DP853 with an explicit moving geometric Sun and tilted Earth axis. No OrbitForge code is called. Dependency hashes are in `dependencies.json`; units, TAI conventions and tolerances are in `docs/architecture/relativity.md`. Canonical UTF-8/LF SHA-256: `b3d6c74b77b0dedb0ee25881ac0b7e291f41b44667bdcf0aed1d7905d05e2339`.
+`relativity.txt` contains 45 independent three-term acceleration rows and 8 on/off forward/backward trajectories. `tools/validation/orekit/OrbelleRelativityReference.java` calls unmodified Orekit 13.1.2 Relativity, LenseThirringRelativity, DeSitterRelativity and DP853 with an explicit moving geometric Sun and tilted Earth axis. No Orbelle code is called. Dependency hashes are in `dependencies.json`; units, TAI conventions and tolerances are in `docs/architecture/relativity.md`. Canonical UTF-8/LF SHA-256: `b3d6c74b77b0dedb0ee25881ac0b7e291f41b44667bdcf0aed1d7905d05e2339`.
 
 `gravity_full.txt` and `gravity_egm2008_full.txt` call unmodified Orekit 13.1.2
 Holmes–Featherstone and Hipparchus 4.0.2 DP853 through
-`tools/validation/orekit/OrbitForgeFullGravityReference.java`. The generator is in
+`tools/validation/orekit/OrbelleFullGravityReference.java`. The generator is in
 package `org.orekit.forces.gravity.potential` to access the reader's normalized
-wrapper. It never calls OrbitForge. Dependency hashes are in `dependencies.json`.
+wrapper. It never calls Orbelle. Dependency hashes are in `dependencies.json`.
 Without arguments it emits 120 acceleration / 2 trajectory rows for three
 synthetic fields: dense 2190×2190, rectangular 2190×2159, and an amplified boundary
 field. Dense C20=-4.84165371736e-4; other Cnm=1e-8/(n+1)^2*sin((n+1)(m+2)),
@@ -75,20 +75,20 @@ The 252140870-byte input is obtained from the ICGEM EGM2008 product URL pinned i
 Both fields use GM=3.986004415e14 m³/s², radius=6378136.3 m, tide-free coefficients,
 a fixed GCRF-aligned Earth, and Epoch(0) TAI. Full inputs, truncations, bounds and
 commands are in `docs/validation/hpop_protocol.md`. The optional full-file test
-uses `ORBITFORGE_FULL_GRAVITY_FILE`; synthetic cases run offline in normal CI.
+uses `ORBELLE_FULL_GRAVITY_FILE`; synthetic cases run offline in normal CI.
 Canonical LF SHA-256: `gravity_full.txt`
 `a916af840a15eb820ed0a3784d436d0b7f46e7f454eb758c9c24963ea7317185`;
 `gravity_egm2008_full.txt`
 `3853ad823b55dc6d5d86443e8390109dfc9f3b1fab1f8ff49cc4ffca6b555dba`.
 
 `mass.txt` compares STK spherical mass semantics with Orekit's area-and-mass API.
-Compile `OrbitForgeMassReference.java` with `OrbitForgeDragReference.java`, using
-the pinned `dependencies.json` JARs, then run `OrbitForgeMassReference` and save
+Compile `OrbelleMassReference.java` with `OrbelleDragReference.java`, using
+the pinned `dependencies.json` JARs, then run `OrbelleMassReference` and save
 UTF-8/LF output. Its 28 rows cover masses 1/250/1000/2700 kg at equal A/m,
 changed A/m, zero drag/SRP areas, two LEO states and ±6000 s combined propagation.
 It calls Orekit 13.1.2 `DragForce` / `IsotropicDrag`, `SolarRadiationPressure` /
 `IsotropicRadiationSingleCoefficient`, and Hipparchus 4.0.2 DP853 without calling
-OrbitForge. The synthetic UTC/rotation/Sun are shared with the existing drag
+Orbelle. The synthetic UTC/rotation/Sun are shared with the existing drag
 reference; full conventions and bounds are in `docs/validation/hpop_protocol.md`.
 Canonical LF SHA-256: `ff1e9b22217a87263181b4fab347a29cbdf21d6ab221395bd72145b3d4b04e3d`.
 
@@ -98,10 +98,10 @@ unmodified Orekit 13.1.2 `LoveNumbers` / `SolidTidesField`. It has 48 coefficien
 tide systems, independent degree/order truncation, near-polar positions and
 frequency/pole terms on/off. The permanent deformation uses the same custom k20;
 all other Love numbers and frequency/pole functions stay at IERS_2003 values.
-Compile `OrbitForgeLoveNumberReference.java` with the two tide generators above,
+Compile `OrbelleLoveNumberReference.java` with the two tide generators above,
 using the pinned dependency JARs; run
-`org.orekit.forces.gravity.OrbitForgeLoveNumberReference` and save UTF-8 LF output.
-No OrbitForge implementation is called. Canonical LF SHA-256:
+`org.orekit.forces.gravity.OrbelleLoveNumberReference` and save UTF-8 LF output.
+No Orbelle implementation is called. Canonical LF SHA-256:
 `6f290d7b461a3d9881e3d0cd0cddae912871f305c901b8c10e6320044577475e`.
 
 
@@ -119,24 +119,24 @@ It contains normalized potential, not water heights; do not reapply loading
 Love numbers or infer minor waves when reproducing these references.
 
 `ocean_tides_small.txt` and `ocean_tides_full.txt` are generated by
-`tools/validation/orekit/OrbitForgeOceanTideReference.java`, using the pinned
+`tools/validation/orekit/OrbelleOceanTideReference.java`, using the pinned
 Orekit 13.1.2 / Hipparchus 4.0.2 JARs in `dependencies.json`. The generator
 checks the respective input SHA-256. It calls unmodified `FESCnmSnmReader`,
 `OceanTidesField`, IERS_2010 ocean pole tide, Holmes–Featherstone and DP853;
-it never imports OrbitForge. Compile with the JAR classpath, then run
-`org.orekit.forces.gravity.OrbitForgeOceanTideReference <potential-path> <4-or-100>`.
+it never imports Orbelle. Compile with the JAR classpath, then run
+`org.orekit.forces.gravity.OrbelleOceanTideReference <potential-path> <4-or-100>`.
 Save UTF-8/LF output without numeric changes. `S_n0` is canonical zero because
 its potential basis is identically zero. Small has 84 coefficient / 144
 acceleration / 4 trajectory rows; full has 216 / 240 / 12. Units and synthetic
 TT/UT1/EOP/body-frame conventions are in the headers and HPOP protocol.
 
-`ocean_tides_combined.txt` uses `OrbitForgeCombinedTideReference.java`, compiled
+`ocean_tides_combined.txt` uses `OrbelleCombinedTideReference.java`, compiled
 with the ocean and solid-tide generators above. Run
-`org.orekit.forces.gravity.OrbitForgeCombinedTideReference <4x4-potential-path>`.
+`org.orekit.forces.gravity.OrbelleCombinedTideReference <4x4-potential-path>`.
 Orekit adds untruncated IERS_2003 solid tides and IERS_2010 ocean tides as separate
 forces; eight trajectories cover independent ocean 2/0 and 4/4 truncations,
 point-mass base and forward/backward propagation. This independently checks
-OrbitForge's coefficient merge. No direct third-body attraction is included.
+Orbelle's coefficient merge. No direct third-body attraction is included.
 
 Canonical LF SHA-256:
 
@@ -145,20 +145,20 @@ Canonical LF SHA-256:
 - `ocean_tides_combined.txt`: `b0d008aa1becbd975b28c82e180074a4869ce677fc83da4569a1c524f0e78db3`
 
 The complete 100×100 model is not redistributed here; set
-`ORBITFORGE_FULL_OCEAN_FILE` to the pinned input for the optional full-model
+`ORBELLE_FULL_OCEAN_FILE` to the pinned input for the optional full-model
 test. Normal CI runs the 4×4 excerpt and combined-force cases offline. These
 references do not establish numerical equivalence with STK's expanded waves.
 
 
 `gravity_secular.txt` is generated by
-`tools/validation/orekit/OrbitForgeSecularGravityReference.java`, using the
+`tools/validation/orekit/OrbelleSecularGravityReference.java`, using the
 SHA-256-pinned Orekit 13.1.2 / Hipparchus 4.0.2 JARs. Compile with the JAR
 classpath, then run
-`org.orekit.forces.gravity.potential.OrbitForgeSecularGravityReference tests/reference/propagators`.
+`org.orekit.forces.gravity.potential.OrbelleSecularGravityReference tests/reference/propagators`.
 The package permits access to Orekit's unmodified `SecularTrendSphericalHarmonics`;
 the generator also uses its normalization factors, Holmes–Featherstone and DP853.
 It reads three pinned synthetic .grv files independently, uses BigDecimal
-for TT-to-TAI nanoseconds, and never calls OrbitForge.
+for TT-to-TAI nanoseconds, and never calls Orbelle.
 
 The three sparse 8×4 fields have reference TT JD 2451545.0, 2446431.0 and
 2451545.123456789012345; the second is unnormalized. They are test inputs,
@@ -168,9 +168,9 @@ normalizations, multiple reference epochs, ±100-year offsets, truncations
 2/0, 2/1 and 8/4, polar/high-orbit positions, both switch states and
 forward/backward one-day propagation.
 
-`gravity_secular_tides.txt` uses `OrbitForgeSecularTideReference.java`, compiled
+`gravity_secular_tides.txt` uses `OrbelleSecularTideReference.java`, compiled
 with the secular, solid and ocean reference generators. Run
-`org.orekit.forces.gravity.OrbitForgeSecularTideReference tests/reference/propagators`.
+`org.orekit.forces.gravity.OrbelleSecularTideReference tests/reference/propagators`.
 Orekit adds the evolving base field, untruncated IERS_2003 solid tides and
 IERS_2010 4×4 ocean tides as three independent forces. Eight trajectories
 exercise overlapping coefficients, independent truncation and ±1-day arcs.
@@ -194,14 +194,14 @@ SHA-256 (raw .grv bytes; canonical LF reference output):
 
 - `weather_cssi.dat` / `weather_monthly.csv` / `weather_monthly.txt`：独立合成的 CSSI 月中和 CelesTrak 月初输入、1056 组 SciPy / NumPy 天气与历史取样、32 组原始 GMAT JR 密度；含中心 81 日均值、闰日/闰秒及来源强制规则。生成器 `tools/validation/monthly_weather_reference.py`；格式、散列、命令与容限见[阻力验证协议](../../../docs/validation/atmospheric_drag_protocol.md)。这些文件不是 STK 导出结果。
 
-- `orbit_interpolation.txt`：Hipparchus 4.0.2 的 Lagrange / Hermite 全阶数参考，118 组、826 查询，含不等间隔节点和端点 1 ns；LF SHA-256 `8d8122d657c6ba438690e617c9e3ee22bd46a60207b22c42a818c87b6d6162fa`。生成器 `tools/validation/orekit/OrbitForgeInterpolationReference.java`，依赖散列、复现及验收界限见[插值协议](../../../docs/validation/orbit_interpolation_protocol.md)。
+- `orbit_interpolation.txt`：Hipparchus 4.0.2 的 Lagrange / Hermite 全阶数参考，118 组、826 查询，含不等间隔节点和端点 1 ns；LF SHA-256 `8d8122d657c6ba438690e617c9e3ee22bd46a60207b22c42a818c87b6d6162fa`。生成器 `tools/validation/orekit/OrbelleInterpolationReference.java`，依赖散列、复现及验收界限见[插值协议](../../../docs/validation/orbit_interpolation_protocol.md)。
 
 `sundman.txt` contains 36 normalized-period and 54 seven-dimensional trajectory
 references from unmodified Hipparchus 4.0.2 Legendre-Gauss quadrature and
 `DormandPrince853FieldIntegrator<Dfp>` with `DfpField(32)`. The generator is
-`tools/validation/orekit/OrbitForgeSundmanReference.java`; JAR hashes are pinned
+`tools/validation/orekit/OrbelleSundmanReference.java`; JAR hashes are pinned
 in `dependencies.json`. It compares two q step ceilings and a separate
-physical-time integration before writing ASCII/LF output. No OrbitForge code
+physical-time integration before writing ASCII/LF output. No Orbelle code
 is used. Inputs, budgets, convergence and reproduction commands are in the
 [time regularization protocol](../../../docs/validation/time_regularization_protocol.md).
 This validates internal kernels; public time regularization is not yet enabled.

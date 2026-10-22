@@ -35,15 +35,15 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/j2.hpp>
-#include <orbitforge/runtime/j4.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/j2.hpp>
+#include <orbelle/runtime/j4.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
 #include "support/property_editor_fixture.hpp"
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 TEST_F(QuantityTest, HpopSrpUnitsShadowAssignmentsResizeAndCancelPreserveExactDrafts) {
     apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
     core::HpopOptions options;
@@ -107,7 +107,7 @@ TEST_F(QuantityTest, HpopSrpUnitsShadowAssignmentsResizeAndCancelPreserveExactDr
         EXPECT_FALSE(dialog->findChild<QLabel *>("hpopSrpEphemerisStatus")
                          ->text()
                          .contains(QStringLiteral("已安装")));
-        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
         std::cout << "HPOP SRP device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
         for (int width : {720, 430}) {
             dialog->resize(width, width == 720 ? 700 : 620);
@@ -232,7 +232,7 @@ TEST_F(QuantityTest, HpopRelativityKeyboardResizeReopenAndCancel) {
         QApplication::sendEvent(relativity, &press);
         QApplication::sendEvent(relativity, &release);
         EXPECT_TRUE(relativity->isChecked());
-        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
         std::cout << "HPOP relativity device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
         for (int width : {720, 430}) {
             dialog->resize(width, width == 720 ? 700 : 620);
@@ -337,7 +337,7 @@ TEST_F(QuantityTest, HpopSatelliteMassUnitsKeyboardResizeReopenAndCancel) {
         EXPECT_EQ(text(*mass)->text(), QStringLiteral("1.25"));
         EXPECT_EQ(drag_area->text(), QStringLiteral("25 m²"));
         EXPECT_EQ(srp_area->text(), QStringLiteral("37.5 m²"));
-        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
         std::cout << "HPOP mass device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
         for (int width : {720, 430}) {
             dialog->resize(width, width == 720 ? 700 : 620);
@@ -444,7 +444,7 @@ TEST_F(QuantityTest, HpopSrpBodyAssignmentSearchRadiusDraftsNestedCancelAndNarro
                 ASSERT_TRUE(radius);
                 radius->set_unit(Unit::kilometre);
                 radius->findChild<QLineEdit *>("quantityValue")->setText("6000.125");
-                const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+                const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
                 std::cout << "HPOP SRP bodies DPR: " << selection->devicePixelRatioF() << '\n';
                 for (int width : {430, 720}) {
                     selection->resize(width, 520);
@@ -504,4 +504,4 @@ TEST_F(QuantityTest, HpopSrpBodyAssignmentSearchRadiusDraftsNestedCancelAndNarro
     EXPECT_EQ(options.srp.additional_eclipsing_bodies[0],
               (core::SrpEclipsingBody{core::ThirdBody::venus, 6000125}));
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

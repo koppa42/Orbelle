@@ -5,8 +5,8 @@ import math
 import tempfile
 import unittest
 
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 
 class HpopRegularizationTests(unittest.TestCase):
@@ -44,7 +44,7 @@ class HpopRegularizationTests(unittest.TestCase):
                     self.assertEqual(current.input_sha256, before.input_sha256)
                     self.assertEqual(current.position.values, before.position.values)
                     with tempfile.TemporaryDirectory() as directory:
-                        path = Path(directory)/"regularized.orbitforge"
+                        path = Path(directory)/"regularized.orbelle"
                         project.save(path)
                         restored = of.Project.open(path)
                         spacecraft = restored.objects[satellite.id]

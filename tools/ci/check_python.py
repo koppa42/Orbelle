@@ -78,7 +78,7 @@ def main():
     run("builder-dependencies", builder, "-m", "pip", "install", *config["build-system"]["requires"])
     clean = dict(environment)
     clean.pop("CMAKE_PREFIX_PATH", None)
-    clean["ORBITFORGE_DATA_HOME"] = str(work / "user-data")
+    clean["ORBELLE_DATA_HOME"] = str(work / "user-data")
     consumer = work / "consumer" / suffix
     run("consumer-venv", sys.executable, "-m", "venv", work / "consumer", env=clean)
     if args.release:
@@ -86,7 +86,7 @@ def main():
             "--no-index", "--wheel-dir", output, f"--config-settings=build-dir={work / 'build'}",
             *(["--config-settings=cmake.define.CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>"]
               if os.name == "nt" else []))
-        wheels = list(output.glob("orbitforge-*.whl"))
+        wheels = list(output.glob("orbelle-*.whl"))
         tag = "cp" + python_version.replace(".", "")
         if len(wheels) != 1 or f"-{tag}-{tag}-" not in wheels[0].name:
             raise ValueError("Expected exactly one wheel for this interpreter")
@@ -108,10 +108,10 @@ def main():
             env=clean, text=True).strip())
         run("python-stage", "cmake", "--install", build, "--config", "Release",
             "--component", "Python", "--prefix", site_packages)
-        shutil.copytree(source / "bindings/python/src/orbitforge", site_packages / "orbitforge",
+        shutil.copytree(source / "bindings/python/src/orbelle", site_packages / "orbelle",
                         dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     run("python-version", consumer, "-I", "-c",
-        "import orbitforge, sys; print(orbitforge.__file__); assert orbitforge.__version__ == sys.argv[1]",
+        "import orbelle, sys; print(orbelle.__file__); assert orbelle.__version__ == sys.argv[1]",
         version, env=clean)
     run("python-tests", consumer, "-I", "-m", "unittest", "discover", "-s", inputs / "bindings/python/tests", "-v", env=clean)
     for name in PYTHON_EXAMPLES:

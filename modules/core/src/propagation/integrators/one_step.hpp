@@ -4,9 +4,9 @@
 #include <cmath>
 #include <functional>
 #include <limits>
-#include <orbitforge/core/propagation/state_provider.hpp>
+#include <orbelle/core/propagation/state_provider.hpp>
 
-namespace orbitforge::core::detail {
+namespace orbelle::core::detail {
 // The state dimension and component scales belong to the equation formulation.
 // Stages, coefficients and extrapolation are shared by Cartesian and augmented ODEs.
 template <std::size_t N> struct ErrorControl {
@@ -270,4 +270,4 @@ TrialStep<N> bulirsch_stoer(double t, const std::array<double, N> &s, double h,
     }
     return accepted ? best : rejected;
 }
-} // namespace orbitforge::core::detail
+} // namespace orbelle::core::detail

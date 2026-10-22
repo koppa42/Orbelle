@@ -1,7 +1,7 @@
-#include <orbitforge/application/session.hpp>
+#include <orbelle/application/session.hpp>
 #include <stdexcept>
 #include <utility>
-namespace orbitforge::application {
+namespace orbelle::application {
 Session::Session(std::shared_ptr<const core::IStateProvider> provider,
                  results::Provenance provenance)
     : provider_(std::move(provider)), provenance_(std::move(provenance)) {
@@ -21,4 +21,4 @@ results::StateSeries Session::sample(std::span<const core::Epoch> epochs,
     }
     return {provenance_, std::move(states)};
 }
-} // namespace orbitforge::application
+} // namespace orbelle::application

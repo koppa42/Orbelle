@@ -3,8 +3,8 @@
 #include <future>
 #include <gtest/gtest.h>
 #include <limits>
-#include <orbitforge/core/propagation/hpop.hpp>
-using namespace orbitforge::core;
+#include <orbelle/core/propagation/hpop.hpp>
+using namespace orbelle::core;
 namespace {
 OceanTideInfo info(int n = 4, int m = 2) { return {"test", {}, {}, n, m}; }
 OceanTideConstituent constant(int n = 4, int m = 2) {

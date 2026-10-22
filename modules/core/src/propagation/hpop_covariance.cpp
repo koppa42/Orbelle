@@ -3,11 +3,11 @@
 #include <cmath>
 #include <limits>
 #include <numeric>
-#include <orbitforge/core/propagation/hpop_covariance.hpp>
-#include <orbitforge/core/propagation/hpop_force.hpp>
+#include <orbelle/core/propagation/hpop_covariance.hpp>
+#include <orbelle/core/propagation/hpop_force.hpp>
 #include <utility>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 using Row = std::array<double, 8>;
 using Matrix = std::array<Row, 8>;
@@ -319,4 +319,4 @@ void sample_hpop_covariance(
         },
         checkpoint);
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

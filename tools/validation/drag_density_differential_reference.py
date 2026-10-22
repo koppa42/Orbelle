@@ -1,7 +1,7 @@
 """Cartesian 8-point density gradients from unmodified GMAT JR / author NRLMSISE.
 
 Pass the streaming adapter executable and output path. The two derivative steps
-must agree before a row is written. No OrbitForge imports, headers or binaries.
+must agree before a row is written. No Orbelle imports, headers or binaries.
 """
 import argparse
 import math

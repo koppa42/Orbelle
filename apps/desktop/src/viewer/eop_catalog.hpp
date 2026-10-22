@@ -10,12 +10,12 @@
 #include <atomic>
 #include <future>
 #include <optional>
-#include <orbitforge/runtime/data_catalog.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/runtime/data_catalog.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 #include <vector>
 class QWidget;
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 class EopCatalog : public QObject {
   public:
     using Provider = std::shared_ptr<const core::IEarthOrientationProvider>;
@@ -109,4 +109,4 @@ class EopCatalog : public QObject {
 };
 void show_data_center(QWidget *parent, EopCatalog &catalog,
                       std::optional<DataProduct> initial = {});
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

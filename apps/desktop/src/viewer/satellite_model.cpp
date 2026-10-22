@@ -4,7 +4,7 @@
 #include <vsg/all.h>
 #include <vsgXchange/all.h>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 vsg::ref_ptr<vsg::MatrixTransform> make_satellite_model(const std::filesystem::path &path) {
     vsg::ref_ptr<vsg::Node> model;
     if (path.empty()) {
@@ -60,4 +60,4 @@ vsg::ref_ptr<vsg::MatrixTransform> make_satellite_model(const std::filesystem::p
     normalized->addChild(model);
     return normalized;
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

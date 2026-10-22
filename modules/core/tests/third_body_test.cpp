@@ -3,10 +3,10 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <numbers>
-#include <orbitforge/core/propagation/hpop.hpp>
+#include <orbelle/core/propagation/hpop.hpp>
 #include <sstream>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 class MovingBodies final : public IThirdBodyEphemeris {
     ThirdBodyDataInfo info_{"synthetic",
@@ -54,7 +54,7 @@ TEST(ThirdBody, StableTidalLimitSymmetryAndInvalidInputs) {
     EXPECT_THROW((void)third_body_acceleration({NAN, 0, 0}, {2, 0, 0}, mu), std::invalid_argument);
 }
 TEST(ThirdBody, MovingSunAndMoonMatchIndependentOrekitIntegration) {
-    std::ifstream source(ORBITFORGE_THIRD_BODY_REFERENCE);
+    std::ifstream source(ORBELLE_THIRD_BODY_REFERENCE);
     ASSERT_TRUE(source);
     std::string line;
     std::size_t cases = 0;
@@ -81,8 +81,8 @@ TEST(ThirdBody, MovingSunAndMoonMatchIndependentOrekitIntegration) {
             ASSERT_TRUE(row >> v);
         HpopOptions options;
         options.gravity_degree = options.gravity_order = 0;
-        options.third_body(orbitforge::core::ThirdBody::sun).enabled = mode != 1;
-        options.third_body(orbitforge::core::ThirdBody::moon).enabled = mode != 0;
+        options.third_body(orbelle::core::ThirdBody::sun).enabled = mode != 1;
+        options.third_body(orbelle::core::ThirdBody::moon).enabled = mode != 0;
         // Isolate the force comparison from the seventh-order long-arc truncation error.
         options.max_step_seconds = 30;
         options.relative_tolerance = 1e-13;
@@ -99,8 +99,8 @@ TEST(ThirdBody, MovingSunAndMoonMatchIndependentOrekitIntegration) {
         std::array<double, 3> actual_force{};
         for (auto body : {ThirdBody::sun, ThirdBody::moon}) {
             if (body == ThirdBody::sun
-                    ? !options.third_body(orbitforge::core::ThirdBody::sun).enabled
-                    : !options.third_body(orbitforge::core::ThirdBody::moon).enabled)
+                    ? !options.third_body(orbelle::core::ThirdBody::sun).enabled
+                    : !options.third_body(orbelle::core::ThirdBody::moon).enabled)
                 continue;
             const auto mu =
                 body == ThirdBody::sun
@@ -139,9 +139,9 @@ TEST(ThirdBody, MovingSunAndMoonMatchIndependentOrekitIntegration) {
         }
         EXPECT_EQ(provider->state_at(expected.epoch).position_m, result.position_m);
         EXPECT_EQ(bodies->sun_calls > 1,
-                  options.third_body(orbitforge::core::ThirdBody::sun).enabled);
+                  options.third_body(orbelle::core::ThirdBody::sun).enabled);
         EXPECT_EQ(bodies->moon_calls > 1,
-                  options.third_body(orbitforge::core::ThirdBody::moon).enabled);
+                  options.third_body(orbelle::core::ThirdBody::moon).enabled);
         ++cases;
     }
     EXPECT_EQ(cases, 32U);
@@ -152,7 +152,7 @@ TEST(ThirdBody, MovingSunAndMoonMatchIndependentOrekitIntegration) {
 TEST(ThirdBody, ResourceCoverageAndCancellationAreEnforcedBeforePublishingResults) {
     HpopOptions options;
     options.gravity_degree = options.gravity_order = 0;
-    options.third_body(orbitforge::core::ThirdBody::sun).enabled = true;
+    options.third_body(orbelle::core::ThirdBody::sun).enabled = true;
     const CartesianState initial{
         Epoch{0}, OriginId::earth, FrameId::gcrf, {7e6, 0, 0}, {0, 6200, 5300}};
     EXPECT_THROW((void)make_hpop(initial, options), std::invalid_argument);

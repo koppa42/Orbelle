@@ -7,8 +7,8 @@ import tempfile
 import threading
 import unittest
 
-import orbitforge as of
-from orbitforge import _native, units as u
+import orbelle as of
+from orbelle import _native, units as u
 
 SAMPLES = Path(_native.__file__).parent / "data/eop"
 C04 = SAMPLES / "iers_c04_2000_01_01_2000_01_02"

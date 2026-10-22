@@ -1,4 +1,4 @@
-"""Compare the installed OrbitForge frame API against independent Orekit celestial series."""
+"""Compare the installed Orbelle frame API against independent Orekit celestial series."""
 import argparse
 import hashlib
 import json
@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 
-import orbitforge as of
+import orbelle as of
 
 MATRIX_TOLERANCE = 2e-11  # ~4 microarcseconds; <1 mm at GEO for a single-axis error.
 VELOCITY_TOLERANCE = 2e-5  # m/s for r <= 42164 km, v <= 8 km/s.
@@ -45,7 +45,7 @@ def main():
     args.work_dir.mkdir(parents=True, exist_ok=True)
     classpath = os.pathsep.join(jars)
     subprocess.run(["javac", "-cp", classpath, "-d", str(args.work_dir),
-                    str(reference / "OrbitForgeFrameReference.java")], check=True)
+                    str(reference / "OrbelleFrameReference.java")], check=True)
     eop = of.load_eop_snapshot(args.manifest)
     first, last = eop.data_info.first_epoch.tai_nanoseconds, eop.data_info.last_epoch.tai_nanoseconds
     cases = [eop.at(of.Epoch(first + (last-first)*i//32)) for i in range(33)]
@@ -65,7 +65,7 @@ def main():
             inputs += [v + dt*r for v, r in zip(values, rates)]
             rows.append(",".join(map(str, inputs)))
     run = subprocess.run(["java", "-cp", str(args.work_dir.resolve()) + os.pathsep + classpath,
-                          "OrbitForgeFrameReference"], input="\n".join(rows)+"\n",
+                          "OrbelleFrameReference"], input="\n".join(rows)+"\n",
                          text=True, capture_output=True, check=True)
     reference_rows = [[float(x) for x in line.split(",")] for line in run.stdout.splitlines()]
     if len(reference_rows) != len(rows) or any(len(row) != 9 for row in reference_rows):

@@ -1,5 +1,5 @@
 """Create a scenario, then insert and sample a satellite (no GUI required)."""
-import orbitforge as of
+import orbelle as of
 from math import radians
 
 

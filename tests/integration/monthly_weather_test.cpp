@@ -2,17 +2,17 @@
 #include <cmath>
 #include <fstream>
 #include <gtest/gtest.h>
-#include <orbitforge/orbitforge.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/space_weather.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/orbelle.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/space_weather.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 #include <sstream>
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 using Model = core::AtmosphereModel;
 using Update = core::GeomagneticUpdate;
 using Source = core::GeomagneticSource;
-const std::filesystem::path reference = ORBITFORGE_WEATHER_MONTHLY_DIR;
+const std::filesystem::path reference = ORBELLE_WEATHER_MONTHLY_DIR;
 std::string read(const std::filesystem::path &path) {
     std::ifstream input(path, std::ios::binary);
     if (!input)
@@ -250,10 +250,10 @@ TEST_F(MonthlyWeather, HpopConvergesAcrossLeapAndForecastNodesAndReopensFrozenDa
     if (!runtime::time_frames_available() || !runtime::ephemeris_available())
         GTEST_SKIP();
     const auto base =
-        runtime::DataSnapshot::load(ORBITFORGE_DRAG_EOP)
+        runtime::DataSnapshot::load(ORBELLE_DRAG_EOP)
             .with_ephemeris("de440s",
                             runtime::make_third_body_ephemeris(
-                                runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root)));
+                                runtime::load_spice_snapshot(ORBELLE_INTEGRATION_SPICE, root)));
     const auto epoch = base.time()->from_utc({2017, 1, 1, 0, 0, 0, 0});
     const core::Epoch first{epoch.tai_nanoseconds() - 21600000000000LL},
         last{epoch.tai_nanoseconds() + 21600000000000LL};
@@ -310,7 +310,7 @@ TEST_F(MonthlyWeather, HpopConvergesAcrossLeapAndForecastNodesAndReopensFrozenDa
                     EXPECT_NEAR(state.velocity_mps[i], other.velocity_mps[i], 1e-6);
                 }
             }
-            const auto saved = root / (name + ".orbitforge");
+            const auto saved = root / (name + ".orbelle");
             project.save(saved, analysis);
             const auto reopened = Project::open(saved, data);
             EXPECT_EQ(reopened.prepare(data)

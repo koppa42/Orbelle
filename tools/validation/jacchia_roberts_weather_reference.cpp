@@ -1,5 +1,5 @@
 // Streaming validation adapter for pinned, unmodified NASA GMAT c9b78bd1.
-// API-only stubs; no OrbitForge headers, interpolation or density implementation.
+// API-only stubs; no Orbelle headers, interpolation or density implementation.
 #include "AtmosphereModel.hpp"
 #include <cmath>
 #include <iomanip>

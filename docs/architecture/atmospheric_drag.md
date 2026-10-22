@@ -22,13 +22,13 @@ Cd 为带符号经验系数，范围 −100…100；面积质量比为 0…9999 
 - **低空拼接**：JR 低于 90 km 时须显式选用 NRLMSISE-00 低空模型；未选则给出可操作的模型覆盖错误，不默默外推 JR。NRL 主模型或低空模型计算至 0 km；负密度高度报错。具体拼接见下文。
 - **最低传播高度**：`HpopOptions.minimum_altitude_m` 单独检查地心距减去所选重力场参考半径；任意积分阶段达到或低于阈值即停止并报错。关闭阻力、超过高空截止或选择低空模型均不绕过此条件。该高度基准与 WGS84 密度高度不同。
 
-截止采用 AGI [Jacchia–Roberts](https://help.agi.com/STKComponents/html/T_AGI_Foundation_Celestial_ScalarDensityJacchiaRoberts.htm) 与 [NRLMSISE 2000](https://help.agi.com/STKComponents/html/T_AGI_Foundation_Celestial_ScalarDensityMsis2000.htm) 的 `UpperHeightLimit=2500000 m` 默认规则；[组件发布说明](https://help.agi.com/STKComponents/html/WhatsNew.htm)记载其与 STK Desktop 11.3 默认行为对齐。STK HPOP 另提供[低空模型与拼接范围](https://help.agi.com/stk/Content/hpop/hpopDrag.htm)及[最低传播高度](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)。AGI JR 在 90 km 以下可返回不保证准确性的结果；OrbitForge 仍要求显式低空模型。上述参考不等于当前 STK 同配置数值验收。
+截止采用 AGI [Jacchia–Roberts](https://help.agi.com/STKComponents/html/T_AGI_Foundation_Celestial_ScalarDensityJacchiaRoberts.htm) 与 [NRLMSISE 2000](https://help.agi.com/STKComponents/html/T_AGI_Foundation_Celestial_ScalarDensityMsis2000.htm) 的 `UpperHeightLimit=2500000 m` 默认规则；[组件发布说明](https://help.agi.com/STKComponents/html/WhatsNew.htm)记载其与 STK Desktop 11.3 默认行为对齐。STK HPOP 另提供[低空模型与拼接范围](https://help.agi.com/stk/Content/hpop/hpopDrag.htm)及[最低传播高度](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)。AGI JR 在 90 km 以下可返回不保证准确性的结果；Orbelle 仍要求显式低空模型。上述参考不等于当前 STK 同配置数值验收。
 
 高空截止不取消已启用模型的资源依赖：UTC、EOP、太阳星历及选用的文件天气仍须完整覆盖传播路径，输入也继续校验。力模型身份升级为 `spherical-corotating-itrf-wgs84-v3`，记录 `altitude-policy=cutoff-above-2500km;low=explicit-nrl-smoothstep-v1`，防止复用旧结果。保存字段及单位不变，项目结构保持 v46 / OBJS32。
 
 手动天气来源为常量输入：日 F10.7、平均 F10.7（sfu）、Kp。NRLMSISE 将手动日值作为前一日 F10.7，将平均值作为模型平均通量；没有隐含的历史查询。Kp 使用标准 1/3 刻度的 28 项 Ap 表，非表格刻度线性插值，Kp=3 对应 Ap=15。界面/API 当前限制通量 `(0,1000]` sfu、Kp `[0,9]`，这些限制与 STK 命令允许的全部范围不同，不能据此宣称所有参数范围已对齐。低层 `AtmosphereInput` 使用 UTC 公历日期 1600…2600；闰秒合法性在 HPOP 中由实际时间 Provider 认证，独立标量调用方负责保证其 UTC 真实有效。
 
-JR 可选择 NRLMSISE-00 作为低空模型。低于 90 km 使用低空模型；在 `90 km…90 km+拼接范围` 内，以 `w=t²(3−2t)` 对质量密度加权，在其上使用 JR。正范围拼接具有连续的一阶权重；零范围表示在 90 km 硬切换到 JR。拼接范围允许 0…1000 km，范围大于 910 km 时会使用 NRLMSISE 的延伸计算段。NRLMSISE 为主模型时低空设置不生效，但合法草稿仍保存。该拼接定义为 OrbitForge 的公开约定，仍需 STK 数值核对。
+JR 可选择 NRLMSISE-00 作为低空模型。低于 90 km 使用低空模型；在 `90 km…90 km+拼接范围` 内，以 `w=t²(3−2t)` 对质量密度加权，在其上使用 JR。正范围拼接具有连续的一阶权重；零范围表示在 90 km 硬切换到 JR。拼接范围允许 0…1000 km，范围大于 910 km 时会使用 NRLMSISE 的延伸计算段。NRLMSISE 为主模型时低空设置不生效，但合法草稿仍保存。该拼接定义为 Orbelle 的公开约定，仍需 STK 数值核对。
 
 局部阻力偏导在高空截止以上全部为零，在截止附近 1e−5 m 内报错；变分／协方差传播可位于截止的任一侧，但积分阶段跨越该硬切换时明确失败，尚未实现事件的 saltation 修正。普通轨道传播允许跨越；固定步长方法仍需选用足够小的步长检查收敛。这一限制与已有零宽低空切换的变分限制一致，不能省略跳变项后声称协方差有效。
 
@@ -65,7 +65,7 @@ density = of.evaluate_atmosphere(of.AtmosphereModel.NRLMSISE00, inputs)
 
 ## 三小时自然三次样条
 
-`three_hourly_cubic_spline` 对应 STK 的 3-Hourly Cubic Spline 选择。STK 公开说明采用自然三次样条，但没有公开节点落点、断档端点和越界策略。以下是 OrbitForge 的明确计算约定，已对照独立 SciPy 与 GMAT；这些细节仍需同配置 STK 数值验收，不将其称为完全复现。
+`three_hourly_cubic_spline` 对应 STK 的 3-Hourly Cubic Spline 选择。STK 公开说明采用自然三次样条，但没有公开节点落点、断档端点和越界策略。以下是 Orbelle 的明确计算约定，已对照独立 SciPy 与 GMAT；这些细节仍需同配置 STK 数值验收，不将其称为完全复现。
 
 将每个三小时值放在该 UTC 窗口中心（01:30、04:30、…、22:30）。在连续、非月预报且该来源无缺值的序列上，一次性求自然三次样条，首末节点的二阶导数为零；两节点退化成线性，孤立节点仅允许精确命中。Ap 与 Kp 各有自己的有效序列，缺失日期/字段和月预报均断开序列，不跨缺口连接，也不外推。远处节点可能影响同一完整序列的曲线，因此更新文件仍须重新准备和确认；运行中的数据不可变。
 
@@ -79,7 +79,7 @@ C++ / Python 的枚举新增 `three_hourly_cubic_spline` / `THREE_HOURLY_CUBIC_S
 
 ## 三小时保持均值插值
 
-`three_hourly_interpolated` / `THREE_HOURLY_INTERPOLATED` 对应 [STK 的 3-Hourly Interp](https://help.agi.com/stk/Content/hpop/hpopDrag.htm)：每个三小时窗口内的平均值等于原始 Ap/Kp 记录。它与自然三次样条是不同选项。STK 未公开完整边界与限幅算法；下面是 OrbitForge 可复现的实现约定，同配置 STK 数值对照仍待验收。
+`three_hourly_interpolated` / `THREE_HOURLY_INTERPOLATED` 对应 [STK 的 3-Hourly Interp](https://help.agi.com/stk/Content/hpop/hpopDrag.htm)：每个三小时窗口内的平均值等于原始 Ap/Kp 记录。它与自然三次样条是不同选项。STK 未公开完整边界与限幅算法；下面是 Orbelle 可复现的实现约定，同配置 STK 数值对照仍待验收。
 
 对每个连续有效序列，在 UTC 三小时窗口边界拟合累积积分的自然三次样条，再对其求导，得到每个窗口的二次多项式。该[积分函数构造方法](https://kluge.in-chemnitz.de/opensource/spline/)自然保留窗口均值；实现直接求解相邻均值差的三对角方程，避免大累积量相减。每个来源独立分段，缺日期、缺字段和月预报均切断序列；单窗口退化为常值，首末窗口内可查询，窗口外不外推。
 
@@ -122,7 +122,7 @@ JR 的四种更新选择在月预报段均使用连续月曲线，经模型地�
 项目格式为 v46 / OBJS v32，只读写当前版本。禁用模型时保存合法参数草稿，计算身份忽略这些草稿；启用时计入实际密度模型、天气、Cd、面积质量比、高度算法、太阳方法及 UTC/EOP/星历来源。NRLMSISE 主模型的低空草稿和未启用的拼接范围不改变结果身份。
 
 ```python
-import orbitforge as of
+import orbelle as of
 
 drag = of.orbits.DragSettings(
     enabled=True, atmosphere="jacchia_roberts", cd=2.2,

@@ -11,7 +11,7 @@
 #include <memory>
 #include <stdexcept>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 QApplication &styled_application() {
     static int argc = 1;
@@ -52,7 +52,7 @@ TEST(WelcomePage, ActionsRemainReachableAtNarrowAndWideSizes) {
             QCoreApplication::sendEvent(button, &press);
             QCoreApplication::sendEvent(button, &release);
         }
-        const auto captures = qEnvironmentVariable("ORBITFORGE_WELCOME_CAPTURE");
+        const auto captures = qEnvironmentVariable("ORBELLE_WELCOME_CAPTURE");
         if (!captures.isEmpty()) {
             ASSERT_TRUE(QDir().mkpath(captures));
             scroll->verticalScrollBar()->setValue(0);
@@ -81,4 +81,4 @@ TEST(WorkbenchTheme, StylesheetReferencesOnlyKnownTokens) {
     EXPECT_FALSE(app.styleSheet().isEmpty());
     EXPECT_FALSE(app.styleSheet().contains('@'));
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

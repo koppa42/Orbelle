@@ -14,10 +14,10 @@
 #include <future>
 #include <map>
 #include <optional>
-#include <orbitforge/visualization/sensor_view.hpp>
+#include <orbelle/visualization/sensor_view.hpp>
 #include <span>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // Display projection only: ITRF Cartesian positions onto the WGS84 reference ellipsoid.
 QPointF ground_coordinates(const std::array<double, 3> &position_m);
 // Opaque multiplicative day/night display mask; input is an ITRF unit direction.
@@ -211,4 +211,4 @@ class GroundMap final : public QWidget {
     Qt::MouseButton drag_button_ = Qt::NoButton;
     bool dragging_ = false, moved_ = false;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

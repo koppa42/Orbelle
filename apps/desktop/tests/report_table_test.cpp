@@ -28,14 +28,14 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 #include <stdexcept>
 
 #include "support/report_test_support.hpp"
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 using namespace report_test;
 TEST(ReportDialog, ColumnsRetainSortingSelectionWidthsCurvesAndExportWithoutCalculation) {
@@ -384,4 +384,4 @@ TEST(ReportDialog, NumericSortingPrecisionCopyAndTimeSeekKeepSourceRowIdentity) 
     EXPECT_FALSE(dialog.findChild<QAction *>("reportTableCopy")->isEnabled());
 }
 } // namespace
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

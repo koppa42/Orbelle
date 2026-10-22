@@ -3,11 +3,11 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <limits>
-#include <orbitforge/core/propagation/relativity.hpp>
-#include <orbitforge/core/propagation/third_body.hpp>
+#include <orbelle/core/propagation/relativity.hpp>
+#include <orbelle/core/propagation/third_body.hpp>
 #include <sstream>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 using Vector = std::array<double, 3>;
 using Matrix = std::array<Vector, 3>;
@@ -40,7 +40,7 @@ void read(std::istream &in, ForceDifferential &value) {
 } // namespace
 
 TEST(ForceDifferential, ThirdBodyMatchesIndependentOrekitGradient) {
-    std::ifstream file(ORBITFORGE_FORCE_DIFFERENTIAL_REFERENCE);
+    std::ifstream file(ORBELLE_FORCE_DIFFERENTIAL_REFERENCE);
     ASSERT_TRUE(file.is_open());
     int rows = 0;
     double max_scaled = 0, max_absolute = 0;
@@ -89,7 +89,7 @@ TEST(ForceDifferential, ThirdBodyMatchesIndependentOrekitGradient) {
 }
 
 TEST(ForceDifferential, EveryRelativisticTermMatchesIndependentOrekitGradient) {
-    std::ifstream file(ORBITFORGE_FORCE_DIFFERENTIAL_REFERENCE);
+    std::ifstream file(ORBELLE_FORCE_DIFFERENTIAL_REFERENCE);
     ASSERT_TRUE(file.is_open());
     int rows = 0;
     std::array<double, 4> max_position{}, max_velocity{};

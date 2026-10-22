@@ -2,17 +2,17 @@
 #include <cmath>
 #include <fstream>
 #include <gtest/gtest.h>
-#include <orbitforge/orbitforge.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/orbelle.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 #include <sstream>
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 using Model = core::AtmosphereModel;
 using Update = core::GeomagneticUpdate;
 using Source = core::GeomagneticSource;
 constexpr auto interp = Update::three_hourly_interpolated;
 std::ifstream reference() {
-    std::ifstream input(ORBITFORGE_WEATHER_MEAN_REFERENCE);
+    std::ifstream input(ORBELLE_WEATHER_MEAN_REFERENCE);
     if (!input)
         throw std::runtime_error("Missing independent mean-preserving weather reference");
     return input;

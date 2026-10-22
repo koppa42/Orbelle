@@ -19,7 +19,7 @@ def validate_assets(directory, version):
     }
     for python in python_versions()[1]:
         tag = "cp" + python.replace(".", "")
-        expected.update(f"orbitforge-{version}-{tag}-{tag}-{platform}.whl"
+        expected.update(f"orbelle-{version}-{tag}-{tag}-{platform}.whl"
                         for platform in ("win_amd64", "linux_x86_64"))
     actual = {p.name for p in directory.iterdir()}
     if actual != expected:
@@ -30,7 +30,7 @@ def validate_assets(directory, version):
             raise ValueError(f"Empty or invalid asset: {name}")
         if name.endswith(".whl"):
             with zipfile.ZipFile(path) as wheel:
-                metadata = wheel.read(f"orbitforge-{version}.dist-info/METADATA").decode("utf-8")
+                metadata = wheel.read(f"orbelle-{version}.dist-info/METADATA").decode("utf-8")
                 if f"\nVersion: {version}\n" not in metadata:
                     raise ValueError(f"Wheel metadata version differs: {name}")
                 if wheel.testzip() is not None:

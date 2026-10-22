@@ -10,9 +10,9 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <orbitforge/runtime/j2.hpp>
+#include <orbelle/runtime/j2.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 bool same_geometry(const core::EarthOrbitDesign &a, const core::EarthOrbitDesign &b) {
     const auto &x = a.elements;
@@ -348,4 +348,4 @@ void OrbitDesignPreview::finish() {
     if (dirty_)
         start();
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

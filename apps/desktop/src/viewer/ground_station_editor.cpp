@@ -12,7 +12,7 @@
 #include <QScrollArea>
 #include <QVBoxLayout>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 GroundStationEditor::GroundStationEditor(QWidget *parent) : QDialog(parent) {
     setObjectName("groundStationProperties");
     setWindowIcon(workbench_icon(WorkbenchIcon::ground_station));
@@ -220,4 +220,4 @@ void GroundStationEditor::show_result(const QString &text) {
     result_->setText(text);
     result_->setVisible(!text.isEmpty());
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -1,11 +1,11 @@
 #include <cmath>
 #include <limits>
 #include <mutex>
-#include <orbitforge/render_vsg/marker_layer.hpp>
+#include <orbelle/render_vsg/marker_layer.hpp>
 #include <stdexcept>
 #include <vsg/all.h>
 
-namespace orbitforge::render_vsg {
+namespace orbelle::render_vsg {
 namespace {
 constexpr const char *vertex_source = R"glsl(#version 450
 layout(push_constant) uniform Matrices { mat4 projection; mat4 modelview; } pc;
@@ -201,4 +201,4 @@ void MarkerLayer::update(const visualization::RenderSnapshot &snapshot,
     impl_->positions->dirty();
     impl_->draw->vertexCount = static_cast<std::uint32_t>(converted.size());
 }
-} // namespace orbitforge::render_vsg
+} // namespace orbelle::render_vsg

@@ -11,7 +11,7 @@
 #include <cmath>
 #include <stdexcept>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 QTableWidgetItem *number(double value, bool editable = true) {
     auto *item = new QTableWidgetItem(QString::number(value, 'g', 17));
@@ -271,4 +271,4 @@ application::HpopCovarianceSettings HpopCovarianceEditor::value() const {
                                        [&] { return read_cell(cross_, 0, 2); });
     return s;
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

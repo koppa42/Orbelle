@@ -15,8 +15,8 @@
 #include <QTemporaryDir>
 #include <QTimer>
 #include <gtest/gtest.h>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/gravity.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/gravity.hpp>
 #include <thread>
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -27,7 +27,7 @@
 #include <psapi.h>
 #endif
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 QApplication &startup_app() {
     if (auto *app = qobject_cast<QApplication *>(QCoreApplication::instance()))
@@ -40,7 +40,7 @@ QApplication &startup_app() {
     return app;
 }
 void capture(StartupSplash &splash, const QString &name) {
-    const auto directory = qEnvironmentVariable("ORBITFORGE_STARTUP_CAPTURE_DIR");
+    const auto directory = qEnvironmentVariable("ORBELLE_STARTUP_CAPTURE_DIR");
     if (!directory.isEmpty()) {
         QDir().mkpath(directory);
         EXPECT_TRUE(splash.grab().save(directory + "/" + name + ".png"));
@@ -71,7 +71,7 @@ qint64 private_bytes() {
 
 TEST(Startup, BundledArtworkIncludesAllSevenScenes) {
     auto &app = startup_app();
-    const QDir directory(QStringLiteral(":/orbitforge/startup"));
+    const QDir directory(QStringLiteral(":/orbelle/startup"));
     const QStringList expected{"cozy-afternoon.png", "rain-window.png",    "sakura-garden.png",
                                "sakura-path.png",    "seaside-sunset.png", "star-gazing.png",
                                "winter-lights.png"};
@@ -82,7 +82,7 @@ TEST(Startup, BundledArtworkIncludesAllSevenScenes) {
         ASSERT_FALSE(artwork.isNull());
         if (name != "star-gazing.png")
             EXPECT_EQ(artwork.size(), QSize(2048, 1152));
-        if (!qEnvironmentVariableIsEmpty("ORBITFORGE_STARTUP_CAPTURE_DIR")) {
+        if (!qEnvironmentVariableIsEmpty("ORBELLE_STARTUP_CAPTURE_DIR")) {
             StartupSplash splash(app.primaryScreen());
             const auto pixels = splash.pixmap().size();
             auto picture =
@@ -253,7 +253,7 @@ TEST(Startup, DefaultCacheSurvivesSceneReleaseButDropsReplacedAndUnselectedModel
 }
 
 TEST(Startup, FullDefaultDataWarmupMemoryAndRepeatedReuse) {
-    const auto input = qEnvironmentVariable("ORBITFORGE_STARTUP_GRAVITY_FILE");
+    const auto input = qEnvironmentVariable("ORBELLE_STARTUP_GRAVITY_FILE");
     if (input.isEmpty())
         GTEST_SKIP() << "Optional full EGM2008 memory/profile fixture";
     auto &app = startup_app();
@@ -272,7 +272,7 @@ TEST(Startup, FullDefaultDataWarmupMemoryAndRepeatedReuse) {
                            2190};
     runtime::CatalogGravity file{"egm2008", info, std::filesystem::path(input.toStdWString())};
     std::vector<runtime::CatalogEphemeris> ephemerides;
-    const auto catalog = qEnvironmentVariable("ORBITFORGE_STARTUP_EPHEMERIS_CATALOG");
+    const auto catalog = qEnvironmentVariable("ORBELLE_STARTUP_EPHEMERIS_CATALOG");
     if (!catalog.isEmpty())
         ephemerides =
             runtime::DataCatalog(std::filesystem::path(catalog.toStdWString())).ephemerides();
@@ -339,7 +339,7 @@ TEST(Startup, FullDefaultDataWarmupMemoryAndRepeatedReuse) {
                              {"repeat_loads", loads},
                              {"gravity_providers", static_cast<int>(cache.gravity.size())},
                              {"ephemeris_providers", static_cast<int>(cache.ephemerides.size())}};
-    const auto output = qEnvironmentVariable("ORBITFORGE_STARTUP_CAPTURE_DIR");
+    const auto output = qEnvironmentVariable("ORBELLE_STARTUP_CAPTURE_DIR");
     if (!output.isEmpty()) {
         QFile result(output + "/memory.json");
         ASSERT_TRUE(result.open(QIODevice::WriteOnly));
@@ -348,4 +348,4 @@ TEST(Startup, FullDefaultDataWarmupMemoryAndRepeatedReuse) {
     std::cout << QJsonDocument(report).toJson().constData();
     capture(splash, "full-default-ready");
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

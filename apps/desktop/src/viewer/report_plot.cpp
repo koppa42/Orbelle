@@ -14,7 +14,7 @@
 #include <set>
 #include <string_view>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 QString str(const std::string &text) { return QString::fromStdString(text); }
 double nice_step(double value) {
@@ -673,4 +673,4 @@ void ReportPlot::leaveEvent(QEvent *) {
     QToolTip::hideText();
     update();
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

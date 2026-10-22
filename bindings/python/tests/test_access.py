@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 # Native value/format tests; public editing is in test_objects.py.
-from orbitforge import _native as of
+from orbelle import _native as of
 
 EOP = Path(of.__file__).parent / 'data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json'
 
@@ -83,7 +83,7 @@ class AccessTests(unittest.TestCase):
         stations[0].minimum_elevation_rad = 0.2
         p.ground_stations = stations
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'sensors.orbitforge'
+            path = Path(directory) / 'sensors.orbelle'
             p.save(path)
             restored = of.load_project(path)
             self.assertEqual(restored.sensors[0].target_station_id, 'station')

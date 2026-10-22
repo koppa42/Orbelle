@@ -2,10 +2,10 @@
 #include <cctype>
 #include <limits>
 #include <map>
-#include <orbitforge/application/scenario.hpp>
+#include <orbelle/application/scenario.hpp>
 #include <stdexcept>
 
-namespace orbitforge::application {
+namespace orbelle::application {
 Scenario::Scenario(std::string name, core::Epoch first, core::Epoch last)
     : name_(std::move(name)), first_(first), last_(last) {
     if (name_.empty() ||
@@ -119,4 +119,4 @@ std::vector<results::StateSeries> Scenario::sample(std::span<const core::Epoch> 
         result.push_back(object.sample(epochs));
     return result;
 }
-} // namespace orbitforge::application
+} // namespace orbelle::application

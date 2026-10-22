@@ -1,4 +1,4 @@
-"""Independent 80-digit spherical disk area; mpmath 1.3.0, no OrbitForge imports."""
+"""Independent 80-digit spherical disk area; mpmath 1.3.0, no Orbelle imports."""
 import mpmath as m
 
 m.mp.dps = 80

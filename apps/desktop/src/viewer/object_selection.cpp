@@ -17,7 +17,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 constexpr int id_role = Qt::UserRole, kind_role = Qt::UserRole + 1;
 constexpr int path_role = Qt::UserRole + 2, available_role = Qt::UserRole + 3;
@@ -434,4 +434,4 @@ void ObjectSelectionField::choose() {
         set_selection(dialog.selection());
     chooser_ = nullptr;
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

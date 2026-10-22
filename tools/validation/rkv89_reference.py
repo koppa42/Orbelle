@@ -1,4 +1,4 @@
-"""Independent orbit reference: SciPy 1.16.3 DOP853, no OrbitForge imports.
+"""Independent orbit reference: SciPy 1.16.3 DOP853, no Orbelle imports.
 
 python tools/validation/rkv89_reference.py OUTPUT_DIRECTORY
 Point mass / closed-form J2 / moving lunar point mass, fixed Cartesian axes.

@@ -4,8 +4,8 @@ import math
 from pathlib import Path
 import tempfile
 import unittest
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 EOP = Path(__file__).resolve().parents[3] / "data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
 
@@ -51,7 +51,7 @@ class CoverageTests(unittest.TestCase):
                 rows = list(csv.reader(stream))
             self.assertEqual(len(rows), result.table.row_count+1)
             self.assertAlmostEqual(float(rows[1][0]), stats.points[0].cell.area_m2/1e6)
-            saved = Path(folder)/"coverage.orbitforge"
+            saved = Path(folder)/"coverage.orbelle"
             p.save(saved, analysis=analysis)
             reopened = of.Project.open(saved, data=data)
             again = reopened.prepare(data=data).report(of.ReportKind.COVERAGE_GRID,

@@ -5,8 +5,8 @@ import json
 import shutil
 import tempfile
 import unittest
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 SAMPLES = Path(__file__).resolve().parents[3] / "data/samples/spice"
 BASE = SAMPLES / "de440s_planets_2016_leap/manifest.json"
@@ -25,9 +25,9 @@ class PlanetaryCentresTests(unittest.TestCase):
         try:
             catalog = of.DataCatalog(self.root / "catalog")
             base = catalog.install_ephemeris_snapshot(BASE)
-            entry = catalog.install_planetary_centres(MARS, "urn:orbitforge:validation:mar099s-subset")
+            entry = catalog.install_planetary_centres(MARS, "urn:orbelle:validation:mar099s-subset")
             self.assertNotEqual(base.info.content_sha256, entry.info.content_sha256)
-            self.assertEqual(catalog.install_planetary_centres(MARS, "urn:orbitforge:validation:mar099s-subset").info.content_sha256,
+            self.assertEqual(catalog.install_planetary_centres(MARS, "urn:orbelle:validation:mar099s-subset").info.content_sha256,
                              entry.info.content_sha256)
             raw = of.load_spice_snapshot(entry.manifest, self.root / "queries")
             count = 0
@@ -57,11 +57,11 @@ class PlanetaryCentresTests(unittest.TestCase):
                 project.prepare(data=old)
             analysis = project.prepare(data=data)
             expected = analysis.states(sat,step=u.s(30)).position.values
-            path = self.root / "mars.orbitforge"
+            path = self.root / "mars.orbelle"
             project.save(path,analysis=analysis)
             restored = of.Project.open(path,data=data)
             self.assertEqual(restored.prepare(data=data).states(restored.objects[sat.id],step=u.s(30)).position.values,expected)
-            revised = catalog.install_planetary_centres(MARS,"urn:orbitforge:validation:revised-provenance")
+            revised = catalog.install_planetary_centres(MARS,"urn:orbelle:validation:revised-provenance")
             changed = of.DataSnapshot.builtin_time().with_ephemeris("de440s",revised.manifest,self.root / "changed-runtime")
             plan = of.Project.plan_open(path,data=changed)
             self.assertEqual(plan.data_changes[0].role,"ephemeris/de440s")

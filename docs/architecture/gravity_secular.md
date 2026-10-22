@@ -48,8 +48,8 @@ HPOP 与 Python `orbits.HpopSettings` / `orbits.Hpop(...)` 使用布尔 `include
 
 ## 独立验证
 
-`OrbitForgeSecularGravityReference.java` 直接调用未修改的 Orekit 13.1.2 `SecularTrendSphericalHarmonics`、Holmes–Featherstone、NewtonianAttraction 与 Hipparchus 4.0.2 DP853；不用 OrbitForge 解析器、力模型或积分器生成真值。三份固定的合成 .grv 包含不同 TT 参考历元及归一化方式，具有完整字节散列，且不是 STK 默认数据。
+`OrbelleSecularGravityReference.java` 直接调用未修改的 Orekit 13.1.2 `SecularTrendSphericalHarmonics`、Holmes–Featherstone、NewtonianAttraction 与 Hipparchus 4.0.2 DP853；不用 Orbelle 解析器、力模型或积分器生成真值。三份固定的合成 .grv 包含不同 TT 参考历元及归一化方式，具有完整字节散列，且不是 STK 默认数据。
 
 参考包含 48 组系数、288 组加速度与 48 条正反向一天轨迹：跨参考历元两侧、百年时差、2/0、2/1、8/4、一般位置、近极区与高轨、开关两态。每分量容限依次为 2e−23、2e−13 m/s²、1 mm、1e−6 m/s，覆盖双精度归一化/求和与两个独立积分器的差异，不代表物理预报精度。
 
-`OrbitForgeSecularTideReference.java` 将长期变化的底场、完整固体潮及 4×4 海潮分别作为 Orekit 独立力积分；8 条正反向一天轨迹检验相同系数的合并与独立截断，位置/速度沿用 1 mm / 1e−6 m/s 容限。设置、生成和复现步骤见[HPOP 验证协议](../validation/hpop_protocol.md)。
+`OrbelleSecularTideReference.java` 将长期变化的底场、完整固体潮及 4×4 海潮分别作为 Orekit 独立力积分；8 条正反向一天轨迹检验相同系数的合并与独立截断，位置/速度沿用 1 mm / 1e−6 m/s 容限。设置、生成和复现步骤见[HPOP 验证协议](../validation/hpop_protocol.md)。

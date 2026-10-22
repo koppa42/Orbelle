@@ -30,7 +30,7 @@ void Workbench::smoke_sensor_geometry() {
         workspace_->select_view(1);
         save_workbench_image(QString("sensor-footprint-%1.png").arg(type));
         workspace_->select_view(0);
-        save_project_to(smoke_dir_ + QString("/sensor-geometry-%1.orbitforge").arg(type));
+        save_project_to(smoke_dir_ + QString("/sensor-geometry-%1.orbelle").arg(type));
         smoke_record(
             QString("sensor-geometry-%1-rendered-and-saved").arg(type).toStdString().c_str());
         if (type == 3) {

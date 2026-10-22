@@ -4,13 +4,13 @@
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
-#include <orbitforge/core/propagation/hpop.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/gravity.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/core/propagation/hpop.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/gravity.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 
 namespace {
-using namespace orbitforge;
+using namespace orbelle;
 using Clock = std::chrono::steady_clock;
 using Json = nlohmann::json;
 double milliseconds(Clock::time_point from) {
@@ -40,8 +40,8 @@ class TimedFrames final : public core::IFrameProvider {
 };
 } // namespace
 int main(int argc, char **argv) {
-    if (argc != 4 || std::string(ORBITFORGE_BENCHMARK_CONFIG) != "Release") {
-        std::cerr << "Usage (Release): orbitforge_hpop_benchmark <data/samples> <EGM2008.gfc> "
+    if (argc != 4 || std::string(ORBELLE_BENCHMARK_CONFIG) != "Release") {
+        std::cerr << "Usage (Release): orbelle_hpop_benchmark <data/samples> <EGM2008.gfc> "
                      "<new-output>\n";
         return 1;
     }

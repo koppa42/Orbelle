@@ -3,10 +3,10 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <numbers>
-#include <orbitforge/core/propagation/hpop.hpp>
-#include <orbitforge/core/propagation/mission.hpp>
+#include <orbelle/core/propagation/hpop.hpp>
+#include <orbelle/core/propagation/mission.hpp>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 using namespace std::chrono_literals;
 namespace {
 class LinearCoast final : public IStateProvider {

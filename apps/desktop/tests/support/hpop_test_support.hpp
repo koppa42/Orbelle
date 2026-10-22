@@ -5,7 +5,7 @@
 #include <QEventLoop>
 #include <QTimer>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 inline void settle_hpop_catalog(EopCatalog &catalog) {
     EXPECT_TRUE(wait_for_ui([&] { return !catalog.downloading(); }))
         << catalog.status().toStdString();
@@ -13,4 +13,4 @@ inline void settle_hpop_catalog(EopCatalog &catalog) {
     QTimer::singleShot(150, &settled, &QEventLoop::quit);
     settled.exec();
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

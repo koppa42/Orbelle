@@ -55,9 +55,9 @@
 #include <future>
 #include <map>
 #include <numbers>
-#include <orbitforge/project.hpp>
+#include <orbelle/project.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 using namespace application;
 bool same_time(const std::shared_ptr<const core::ITimeProvider> &a,
@@ -2801,4 +2801,4 @@ void ReportDialog::update_project(application::Project project,
                                   std::shared_ptr<const core::ITimeProvider> time) {
     impl_->update(std::move(project), std::move(time));
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -3,10 +3,10 @@
 #include <cmath>
 #include <limits>
 #include <map>
-#include <orbitforge/core/propagation/lighting.hpp>
+#include <orbelle/core/propagation/lighting.hpp>
 #include <stdexcept>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 std::string_view lighting_phase_name(LightingPhase phase) {
     switch (phase) {
     case LightingPhase::sunlight:
@@ -93,4 +93,4 @@ find_lighting_intervals(Epoch first, Epoch last, std::int64_t step,
         result.back().stop_clipped = true;
     return result;
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

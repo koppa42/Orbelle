@@ -22,9 +22,9 @@ void Workbench::smoke_property_drafts() {
         editor_->set_state_mode(0);
         velocity->set_value(velocity->value(Unit::metres_per_second) + 0.25,
                             Unit::metres_per_second);
-        save_project_to(smoke_dir_ + "/property-drafts.orbitforge");
+        save_project_to(smoke_dir_ + "/property-drafts.orbelle");
         const auto saved = application::load_project(
-            std::filesystem::path((smoke_dir_ + "/property-drafts.orbitforge").toStdWString()));
+            std::filesystem::path((smoke_dir_ + "/property-drafts.orbelle").toStdWString()));
         smoke_require(same_orbit_input(saved.satellites[0].orbit, smoke_cache_->input) &&
                           !project_dirty_ && editor_->has_unapplied_changes(),
                       "Save incorrectly published a property draft");

@@ -2,7 +2,7 @@
 
 ## 独立参考与模型对齐
 
-事件参考使用 Orekit 13.1.2 `EclipseDetector`、`KeplerianPropagator` 和 `SolarRadiationPressure.getLightingRatio()`，Hipparchus 4.0.2；JAR 的 SHA-256 固定在 `tools/validation/orekit/dependencies.json`。生成器不导入 OrbitForge。
+事件参考使用 Orekit 13.1.2 `EclipseDetector`、`KeplerianPropagator` 和 `SolarRadiationPressure.getLightingRatio()`，Hipparchus 4.0.2；JAR 的 SHA-256 固定在 `tools/validation/orekit/dependencies.json`。生成器不导入 Orbelle。
 
 采用地球球面 6378137 m、太阳半径 695700000 m、GM 3.986004418e14 m³/s²，固定几何太阳，GCRF / SI，TAI 零点为 2000-01-01 12:00:00。输入太阳方向、轨道初态和时间均写入固定参考文件。固定太阳用于隔离事件与几何算法，真实 DE440s 的加载、覆盖、数据锁、保存/重开另由 Python/C++ 集成验证。
 
@@ -10,7 +10,7 @@
 
 ## 精度和边界判据
 
-OrbitForge 分别使用 60 s 和 30 s 最大检查间隔、1 μs 根容差。须得到相同数量与类型的完整连续分段，边界绝对误差 ≤1.1 μs，最长时长误差 ≤2.2 μs，各状态累计时长误差 ≤2.2 μs ×（段数+1）；占比误差按累计时长预算除以查询跨度。所有时段之和须等于查询时长（1 ns 数值检查），clipped 标志须与参考一致。
+Orbelle 分别使用 60 s 和 30 s 最大检查间隔、1 μs 根容差。须得到相同数量与类型的完整连续分段，边界绝对误差 ≤1.1 μs，最长时长误差 ≤2.2 μs，各状态累计时长误差 ≤2.2 μs ×（段数+1）；占比误差按累计时长预算除以查询跨度。所有时段之和须等于查询时长（1 ns 数值检查），clipped 标志须与参考一致。
 
 Orekit 双精度圆盘面积公式在极浅接触处发生相减消减。为避免把这一差异当作产品精度标准，另以 **mpmath 1.3.0、80 位精度**计算独立球面视角及圆盘交集面积，并对同一参考状态生成固定比例。实现采用短弧圆缺面积的级数展开改善消减，仍与 SRP 共用几何。每个实际传播样本相对高精度参考须 ≤5e-11；Orekit 比例仍逐项核对，审计后的包络为普通案例 3e-9、短本影 3e-8、极浅擦边 2.5e-7。这三个包络约束参考算法差异，不放宽高精度验收。环食另检查同心解析面积与分类。
 

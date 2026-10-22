@@ -1,6 +1,6 @@
 """Independent multi-occultor reference: SciPy 1.16.3 QUADPACK and DOP853.
 
-No OrbitForge library or boundary-arc formula is used. Every solar-disk slice
+No Orbelle library or boundary-arc formula is used. Every solar-disk slice
 is clipped against a sorted union of vertical occultor intervals.
 """
 import argparse
@@ -136,7 +136,7 @@ def main():
     if scipy.__version__!='1.16.3':
         raise RuntimeError('Pinned reference requires SciPy 1.16.3')
     warnings.simplefilter('error',IntegrationWarning)
-    rows=['# SciPy 1.16.3 QUADPACK independent vertical-slice union; no OrbitForge imports']
+    rows=['# SciPy 1.16.3 QUADPACK independent vertical-slice union; no Orbelle imports']
     if args.trajectories:
         rows+=['# DOP853 point Earth, fixed geometric Sun, three synthetic moving spherical planets',
                '# initial x y z vx vy vz; signed dt; final x y z vx vy vz']

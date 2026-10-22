@@ -1,4 +1,4 @@
-"""Reproduce the fixed Orekit/Hipparchus pass reference without using OrbitForge."""
+"""Reproduce the fixed Orekit/Hipparchus pass reference without using Orbelle."""
 import argparse
 import hashlib
 import json
@@ -20,10 +20,10 @@ for dep in deps:
     jars.append(str(path.resolve()))
 args.output.mkdir(parents=True, exist_ok=False)
 cp = os.pathsep.join(jars)
-java = source / "OrbitForgeAccessReference.java"
+java = source / "OrbelleAccessReference.java"
 subprocess.run(["javac", "-cp", cp, "-d", str(args.output), str(java)], check=True)
 run = subprocess.run(["java", "-cp", str(args.output.resolve()) + os.pathsep + cp,
-                      "OrbitForgeAccessReference"], text=True, capture_output=True, check=True)
+                      "OrbelleAccessReference"], text=True, capture_output=True, check=True)
 output = args.output / "access_orekit.txt"
 output.write_text(run.stdout, encoding="utf-8", newline="\n")
 metadata = {"reference": "Orekit 13.1.2 / Hipparchus 4.0.2", "dependencies": deps,

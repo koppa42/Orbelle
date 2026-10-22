@@ -20,7 +20,7 @@
 #include <algorithm>
 #include <functional>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 // Mouse capture keeps dragging reliable over the native Vulkan child window.
 class PageTabs final : public QTabBar {
@@ -628,4 +628,4 @@ bool Workspace::eventFilter(QObject *object, QEvent *event) {
     }
     return QWidget::eventFilter(object, event);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

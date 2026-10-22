@@ -8,8 +8,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 EOP = Path(__file__).resolve().parents[3] / "data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
 
@@ -213,7 +213,7 @@ class AnalysisAccessTests(unittest.TestCase):
     def test_pandas_is_optional(self):
         project, station, _, sensor, data = scene()
         result = project.prepare(data=data).access(station, sensor, search_step=u.s(10))
-        with patch("orbitforge._analysis.import_module", side_effect=ImportError):
+        with patch("orbelle._analysis.import_module", side_effect=ImportError):
             with self.assertRaisesRegex(ImportError, "pip install pandas"):
                 result.to_pandas()
 

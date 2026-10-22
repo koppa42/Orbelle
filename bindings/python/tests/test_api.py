@@ -1,6 +1,6 @@
 import math
 import unittest
-import orbitforge as of
+import orbelle as of
 
 
 class StandaloneApiTests(unittest.TestCase):

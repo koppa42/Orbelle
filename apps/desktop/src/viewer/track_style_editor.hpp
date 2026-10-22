@@ -7,7 +7,7 @@ class QComboBox;
 class QDoubleSpinBox;
 class QPushButton;
 class QToolButton;
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 inline QPen track_pen(const QColor &color, double width, application::LineStyle style) {
     QPen pen(color, width, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin);
     switch (style) {
@@ -41,4 +41,4 @@ class TrackStyleEditor final : public QWidget {
     QWidget *preview_ = nullptr;
     std::vector<QToolButton *> swatches_;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

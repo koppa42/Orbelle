@@ -21,14 +21,14 @@
 | 数据中心 | C04、finals2000A、UTC / 闰秒完整文件下载与自动更新；来源优先级、覆盖检查、有限 EOP 外推 |
 | 报告与曲线 | 十七种报告（含 Access / AER / 光照与地影 / 轨道事件 / 星间分析 / 覆盖与重访 / HPOP 协方差）；对象范围、时间采样、多对象曲线、缩放与时刻定位、CSV / PNG 导出、项目内模板 |
 | 报告模板 API | Python/C++ 共用查询与模板模型；字段选择、顺序、逐列单位与标题，复用已有结果更换显示格式 |
-| 项目文件 | `.orbitforge` 版本化容器、完整性校验、原子保存；开发阶段仅读写当前 v47 / OBJS32，不兼容旧格式，API 支持数据确认和分析来源记录 |
+| 项目文件 | `.orbelle` 版本化容器、完整性校验、原子保存；开发阶段仅读写当前 v48 / OBJS32，不兼容旧格式，API 支持数据确认和分析来源记录 |
 | 开发接口 | 模块化 C++20 库与 CMake SDK；pybind11 Python 包；桌面与脚本共用 Runtime |
 
 新场景使用当前计算数据；打开或重新计算时，数据发生变化须经用户确认。计算过程保持数据一致，项目记录实际使用的数据哈希供溯源。外部模型和 EOP 文件仍为独立依赖，详见[项目格式](docs/architecture/project_files.md)和[数据中心](docs/architecture/data_center.md)。
 
 图形桌面首次启动自动准备 UTC / 闰秒表、完整 C04 与 finals2000A、EGM2008，以及启用 CSPICE 时的 DE440s。准备窗口支持进度、失败重试、导入官方文件和取消退出；已完成的文件保留，后续启动只补齐缺失项。新建 HPOP 默认使用 EGM2008、21×21，文件重力计算支持至 2190 阶，EGM2008 可使用完整 2190×2159；阶数与次数按实际文件范围独立选择。
 
-插画角色名为 **璃音**，与软件名 **星弦 Orbelle** 分开使用。启动封面从内置的七张插画中等概率随机选择一张，包括原有观星图和六张新场景；同一次启动的数据加载过程中保持不变。
+启动封面从内置的七张插画中等概率随机选择一张，包括原有观星图和六张新场景；同一次启动的数据加载过程中保持不变。
 
 Windows 可执行文件内嵌多尺寸应用图标，便携包中的 `Orbelle.exe` 可直接在资源管理器和快捷方式中显示粉色轨道标志。
 
@@ -36,11 +36,11 @@ Windows 可执行文件内嵌多尺寸应用图标，便携包中的 `Orbelle.ex
 
 ## 获取与构建
 
-代码仓库及技术接口沿用 `OrbitForge` / `orbitforge` 标识，包括 CMake 包、Python 导入、`.orbitforge` 项目扩展名与本地数据目录；桌面显示和发行包使用新名称。现有场景、数据与偏好可继续使用。
+产品和开发接口统一使用 `Orbelle` / `orbelle`：CMake 包为 `Orbelle`，Python 导入为 `orbelle`，项目扩展名为 `.orbelle`。本次更名同步更新环境变量、配置和默认数据目录；已有数据可通过数据中心重新导入。项目仅支持当前 v48 格式，旧版项目需使用对应版本程序打开。
 
 ```powershell
-git clone https://github.com/koppa42/OrbitForge.git
-cd OrbitForge
+git clone https://github.com/koppa42/OrbitForge.git Orbelle
+cd Orbelle
 ```
 
 需要 **CMake 3.28+** 和 **C++20 编译器**。Windows 使用 Visual Studio C++ 工具链；Linux 无界面构建已在 Ubuntu 24.04 / GCC 13.3 验证。Python 包要求 Python 3.11+，图形桌面需要 Vulkan 驱动。
@@ -55,7 +55,7 @@ cmake --build --preset headless
 cmake --install out/build/headless --config Release
 ```
 
-Windows/MSVC 示例程序为 `out/build/headless/examples/cpp/Release/orbitforge_example.exe`；单配置生成器的路径不含 `Release/`。只构建 Core 可使用 `core-only` 预设。
+Windows/MSVC 示例程序为 `out/build/headless/examples/cpp/Release/orbelle_example.exe`；单配置生成器的路径不含 `Release/`。只构建 Core 可使用 `core-only` 预设。
 
 ### 桌面工作台与完整计算接口
 
@@ -74,7 +74,7 @@ Windows/MSVC 示例程序为 `out/build/headless/examples/cpp/Release/orbitforge
 
 Python 对象统一通过 `project.objects` 创建，支持带类型的对象句柄、属性赋值、关键字 `update()` 和 `with project.edit():` 原子编辑。用法及旧接口迁移见[对象编辑 API](docs/architecture/object_editing.md)；完整后续路线见[统一 API 与数据驱动设计](docs/architecture/object_api_design.md)。
 
-C++ 包含 `<orbitforge/orbitforge.hpp>`，通过 `of::Project` 的 `objects()`、`prepare()`、`save()` 与 `Project::open()` 完成相同流程；创建对象使用 `of::objects::Satellite` 等配置值，事务显式提交。参见 [C++ 项目 API](docs/architecture/cpp_api.md)。
+C++ 包含 `<orbelle/orbelle.hpp>`，通过 `of::Project` 的 `objects()`、`prepare()`、`save()` 与 `Project::open()` 完成相同流程；创建对象使用 `of::objects::Satellite` 等配置值，事务显式提交。参见 [C++ 项目 API](docs/architecture/cpp_api.md)。
 
 `project.prepare()` 捕获固定分析输入，提供状态、可见区间、AER 和十七类内置报告查询：`analysis.states(sat, step=u.s(30))`、`analysis.access(station, sensor, search_step=u.s(1))`、`analysis.aer(station, sensor, step=u.s(10))`、`analysis.report(of.ReportKind.CARTESIAN_STATE, objects=[sat], step=u.s(30))`。可见区间与 AER 需准备 UTC/EOP 数据；数据变化通过固定计划确认。结果可直接导出 CSV，NumPy/pandas 为可选适配。参见[分析 API](docs/architecture/analysis_api.md)、[状态示例](examples/python/analysis.py)及[可见区间、AER 与报告示例](examples/python/access.py)。
 

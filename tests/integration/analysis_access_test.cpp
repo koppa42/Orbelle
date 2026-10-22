@@ -1,14 +1,14 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include <limits>
-#include <orbitforge/runtime/access.hpp>
-#include <orbitforge/runtime/analysis.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/access.hpp>
+#include <orbelle/runtime/analysis.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
-using namespace orbitforge;
+using namespace orbelle;
 using namespace std::chrono_literals;
-namespace app = orbitforge::application;
+namespace app = orbelle::application;
 namespace {
 app::OrbitInput circular() {
     app::OrbitInput orbit;
@@ -16,7 +16,7 @@ app::OrbitInput circular() {
     return orbit;
 }
 struct Scene {
-    runtime::DataSnapshot data = runtime::DataSnapshot::load(ORBITFORGE_REPORT_EOP);
+    runtime::DataSnapshot data = runtime::DataSnapshot::load(ORBELLE_REPORT_EOP);
     app::ProjectDocument document{
         app::Project{"Access", core::Epoch{0}, core::Epoch{7'200'000'000'000}}};
     app::ObjectRef satellite =

@@ -24,9 +24,9 @@
 #include <QVBoxLayout>
 #include <algorithm>
 #include <limits>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 const QDateTime origin(QDate(2000, 1, 1), QTime(12, 0), QTimeZone::UTC);
 QString scale_name(CalendarScale scale) {
@@ -415,4 +415,4 @@ void EpochEditor::open_picker() {
     connect(enter, &QShortcut::activated, popup, accept);
     show_popup(popup, value_->parentWidget());
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

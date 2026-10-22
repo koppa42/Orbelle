@@ -1,18 +1,18 @@
 #include <cmath>
 #include <fstream>
 #include <gtest/gtest.h>
-#include <orbitforge/orbitforge.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/hpop.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/orbelle.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/hpop.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 class EphemerisFiles : public ::testing::Test {
   protected:
     std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        ("orbitforge-ephemeris-" +
+        ("orbelle-ephemeris-" +
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     void SetUp() override { std::filesystem::create_directories(root); }
     void TearDown() override { std::filesystem::remove_all(root); }
@@ -21,7 +21,7 @@ class EphemerisFiles : public ::testing::Test {
 TEST_F(EphemerisFiles, SunMoonUseRealSpicePositionsAndRecordedIdentityAcrossReportsAndReopen) {
     if (!runtime::ephemeris_available())
         GTEST_SKIP();
-    auto raw = runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root);
+    auto raw = runtime::load_spice_snapshot(ORBELLE_INTEGRATION_SPICE, root);
     const auto epoch = raw->data_info().first_epoch;
     const auto ephemeris = runtime::make_third_body_ephemeris(std::move(raw));
     EXPECT_NO_THROW(ephemeris->validate_interval(epoch, ephemeris->data_info().last, true, true));
@@ -34,16 +34,16 @@ TEST_F(EphemerisFiles, SunMoonUseRealSpicePositionsAndRecordedIdentityAcrossRepo
     satellite.orbit.first = input.first;
     satellite.orbit.last = input.last;
     satellite.orbit.hpop.gravity_degree = satellite.orbit.hpop.gravity_order = 0;
-    satellite.orbit.hpop.third_body(orbitforge::core::ThirdBody::sun).enabled =
-        satellite.orbit.hpop.third_body(orbitforge::core::ThirdBody::moon).enabled = true;
+    satellite.orbit.hpop.third_body(orbelle::core::ThirdBody::sun).enabled =
+        satellite.orbit.hpop.third_body(orbelle::core::ThirdBody::moon).enabled = true;
     input.satellites.push_back(satellite);
     auto project = Project::from_data(input);
     EXPECT_THROW((void)project.prepare(), runtime::AnalysisCapabilityError);
     const auto analysis = project.prepare(data);
     const auto sat = project.objects().get("satellite-1");
     const auto state = analysis.state(sat, input.last, FrameId::gcrf);
-    project.save(root / "test.orbitforge", analysis);
-    const auto restored = Project::open(root / "test.orbitforge", data);
+    project.save(root / "test.orbelle", analysis);
+    const auto restored = Project::open(root / "test.orbelle", data);
     EXPECT_EQ(restored.to_data().satellites[0].orbit.hpop, satellite.orbit.hpop);
     EXPECT_EQ(restored.to_data().force_data.size(), 1U);
     EXPECT_EQ(restored.to_data().force_data[0].role, "ephemeris/de440s");
@@ -63,14 +63,14 @@ TEST_F(EphemerisFiles, SunMoonUseRealSpicePositionsAndRecordedIdentityAcrossRepo
     EXPECT_EQ(
         application::decode_project(application::encode_project(input)).satellites[0].orbit.hpop,
         input.satellites[0].orbit.hpop);
-    input.satellites[0].orbit.hpop.third_body(orbitforge::core::ThirdBody::sun).enabled = false;
+    input.satellites[0].orbit.hpop.third_body(orbelle::core::ThirdBody::sun).enabled = false;
     original = application::analysis_input_sha256(input);
     auto report_original = runtime::report_input_sha256(input);
     input.satellites[0].orbit.hpop.third_body(core::ThirdBody::sun).user_mu =
         runtime::de440_sun_mu * 1.02;
     EXPECT_EQ(application::analysis_input_sha256(input), original);
     EXPECT_EQ(runtime::report_input_sha256(input), report_original);
-    input.satellites[0].orbit.hpop.third_body(orbitforge::core::ThirdBody::moon).enabled = false;
+    input.satellites[0].orbit.hpop.third_body(orbelle::core::ThirdBody::moon).enabled = false;
     original = application::analysis_input_sha256(input);
     report_original = runtime::report_input_sha256(input);
     input.satellites[0].orbit.hpop.third_body(core::ThirdBody::moon).user_mu = 1;
@@ -144,11 +144,11 @@ TEST_F(EphemerisFiles, CbConstantsSelectSystemGmAndSurviveReopenWithoutTheSource
 TEST_F(EphemerisFiles, EveryPlanetUsesTheDeclaredCentreAndFullIntegrationCoverage) {
     if (!runtime::ephemeris_available())
         GTEST_SKIP();
-    auto raw = runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_PLANETS, root);
+    auto raw = runtime::load_spice_snapshot(ORBELLE_INTEGRATION_PLANETS, root);
     const auto first = raw->data_info().first_epoch, last = raw->data_info().last_epoch;
     const auto ephemeris = runtime::make_third_body_ephemeris(std::move(raw));
     EXPECT_NO_THROW(ephemeris->validate_interval(first, last, core::third_body_list));
-    auto original = runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root);
+    auto original = runtime::load_spice_snapshot(ORBELLE_INTEGRATION_SPICE, root);
     const auto moon_only = runtime::make_third_body_ephemeris(std::move(original));
     EXPECT_THROW(moon_only->validate_interval(first, last, core::third_body_list),
                  core::EphemerisCoverageError);
@@ -173,8 +173,8 @@ TEST_F(EphemerisFiles, EveryPlanetUsesTheDeclaredCentreAndFullIntegrationCoverag
     const auto object = project.objects().get("satellite-1");
     const auto state = analysis.state(object, input.last, FrameId::gcrf);
     EXPECT_TRUE(std::isfinite(state.position_m[0]));
-    project.save(root / "planets.orbitforge", analysis);
-    const auto reopened = Project::open(root / "planets.orbitforge", data);
+    project.save(root / "planets.orbelle", analysis);
+    const auto reopened = Project::open(root / "planets.orbelle", data);
     EXPECT_EQ(reopened.to_data().satellites[0].orbit.hpop, sat.orbit.hpop);
     EXPECT_EQ(reopened.prepare(data)
                   .state(reopened.objects().get("satellite-1"), input.last, FrameId::gcrf)
@@ -186,7 +186,7 @@ TEST_F(EphemerisFiles, GeometricVelocityUsesTaiDerivativeAndRelativityRecordsIts
     if (!runtime::ephemeris_available() || !runtime::time_frames_available())
         GTEST_SKIP();
     const std::shared_ptr<const core::IEphemerisProvider> raw =
-        runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root);
+        runtime::load_spice_snapshot(ORBELLE_INTEGRATION_SPICE, root);
     const auto epoch =
         core::Epoch{raw->data_info().first_epoch.tai_nanoseconds() + 3600000000000LL};
     const auto ephemeris = runtime::make_third_body_ephemeris(raw);
@@ -207,7 +207,7 @@ TEST_F(EphemerisFiles, GeometricVelocityUsesTaiDerivativeAndRelativityRecordsIts
     options.gravity_degree = options.gravity_order = 0;
     options.include_relativistic_accelerations = true;
     core::HpopEnvironment env{runtime::make_frame_provider(),
-                              runtime::load_eop_snapshot(ORBITFORGE_DRAG_EOP),
+                              runtime::load_eop_snapshot(ORBELLE_DRAG_EOP),
                               {},
                               ephemeris};
     const core::CartesianState initial{
@@ -229,7 +229,7 @@ TEST_F(EphemerisFiles, SrpPhysicalCentresMatchCspiceAndNeverFallBackToSystemBary
     if (!runtime::ephemeris_available())
         GTEST_SKIP();
     const std::shared_ptr<const core::IEphemerisProvider> raw =
-        runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_PLANETS, root);
+        runtime::load_spice_snapshot(ORBELLE_INTEGRATION_PLANETS, root);
     const auto ephemeris = runtime::make_third_body_ephemeris(raw);
     const auto epoch =
         core::Epoch{raw->data_info().first_epoch.tai_nanoseconds() + 3600000000000LL};

@@ -1,7 +1,7 @@
 """FXM reference: SciPy 1.16.3 linear interpolation and original NASA GMAT JR.
 
 Run: python tools/validation/fxm_weather_reference.py OUTPUT_DIR GMAT_DRIVER
-No OrbitForge imports. Synthetic daily solar distances span 0.97..1.035 AU;
+No Orbelle imports. Synthetic daily solar distances span 0.97..1.035 AU;
 these deliberately vary faster than the real Sun to expose scaling/lag mistakes.
 GMAT driver/source provenance: jacchia_roberts_weather_reference.cpp and
  density_sources.json. Values cover the 2016 leap second and FXM forecasts.

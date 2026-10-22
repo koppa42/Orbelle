@@ -4,12 +4,12 @@
 #include <cmath>
 #include <limits>
 #include <numbers>
-#include <orbitforge/core/propagation/solar_radiation_pressure.hpp>
-#include <orbitforge/core/propagation/state_provider.hpp>
+#include <orbelle/core/propagation/solar_radiation_pressure.hpp>
+#include <orbelle/core/propagation/state_provider.hpp>
 #include <span>
 #include <utility>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 using Vector = std::array<double, 3>;
 constexpr double pi = std::numbers::pi, turn = 2 * pi;
@@ -641,4 +641,4 @@ detail::ShadowContacts detail::srp_shadow_contacts(const Vector &satellite, cons
     }
     return result;
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

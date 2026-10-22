@@ -2,11 +2,11 @@
 #include <QWidget>
 #include <memory>
 #include <optional>
-#include <orbitforge/core/time/time_provider.hpp>
+#include <orbelle/core/time/time_provider.hpp>
 class QLineEdit;
 class QLabel;
 class QToolButton;
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 enum class CalendarScale { utc, tai, tt };
 QString calendar_text(core::Epoch epoch, CalendarScale scale, bool date = true,
                       const core::ITimeProvider *time = nullptr);
@@ -36,4 +36,4 @@ class EpochEditor final : public QWidget {
     std::optional<core::Epoch> first_, last_;
     bool updating_ = false, dirty_ = false;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

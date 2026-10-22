@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <vsg/vk/Queue.h>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 class TimestampCommand : public vsg::Inherit<vsg::Command, TimestampCommand> {
   public:
@@ -138,4 +138,4 @@ QJsonObject BenchmarkGpu::metadata() const {
         {"readback",
          "after existing VSG task fence reuse, then final device-idle drain; no new waits"}};
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

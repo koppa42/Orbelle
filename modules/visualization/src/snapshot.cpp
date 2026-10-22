@@ -1,7 +1,7 @@
 #include <cmath>
-#include <orbitforge/visualization/snapshot.hpp>
+#include <orbelle/visualization/snapshot.hpp>
 #include <stdexcept>
-namespace orbitforge::visualization {
+namespace orbelle::visualization {
 RenderSnapshot make_snapshot(const results::StateSeries &series, std::size_t index) {
     const auto &state = series.states().at(index);
     return {state.epoch,
@@ -32,4 +32,4 @@ RenderSnapshot rotate_snapshot(const RenderSnapshot &snapshot,
     }
     return result;
 }
-} // namespace orbitforge::visualization
+} // namespace orbelle::visualization

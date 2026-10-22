@@ -31,15 +31,15 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/j2.hpp>
-#include <orbitforge/runtime/j4.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/j2.hpp>
+#include <orbelle/runtime/j4.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
 #include "support/property_editor_fixture.hpp"
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 TEST_F(QuantityTest, HpopCovarianceEditorPreservesDraftsAndMirrorsLowerTriangle) {
     apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
     application::HpopCovarianceSettings s;
@@ -66,7 +66,7 @@ TEST_F(QuantityTest, HpopCovarianceEditorPreservesDraftsAndMirrorsLowerTriangle)
     editor.findChild<QTableWidget *>("hpopConsiderCrossTable")->item(0, 2)->setText("5e-5");
     auto value = editor.value();
     EXPECT_NO_THROW(application::validate_hpop_covariance_settings(value, {}));
-    const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+    const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
     const auto screenshot = [&](const QString &name) {
         QApplication::processEvents();
         if (!capture.isEmpty()) {
@@ -173,7 +173,7 @@ TEST_F(QuantityTest, HpopCovarianceDialogRejectsInvalidJointInputAndCancelsAtomi
             matrix->item(i, i)->setText(i < 3 ? "10000" : "1");
         dialog->findChild<QLabel *>("errorText")->hide();
         auto *scroll = dialog->findChild<QScrollArea *>("hpopCovariancePage");
-        const auto directory = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        const auto directory = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
         for (const int width : {780, 380}) {
             dialog->resize(width, 680);
             // Navigation and nested forms post separate layout requests after a resize.
@@ -210,4 +210,4 @@ TEST_F(QuantityTest, HpopCovarianceDialogRejectsInvalidJointInputAndCancelsAtomi
     EXPECT_FALSE(edit_hpop_settings(force, nullptr, {}, {}, {}, nullptr, &settings));
     EXPECT_EQ(settings, saved);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -4,11 +4,11 @@
 #include <locale>
 #include <numbers>
 #include <numeric>
-#include <orbitforge/core/propagation/sensor.hpp>
+#include <orbelle/core/propagation/sensor.hpp>
 #include <sstream>
 #include <stdexcept>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 constexpr double pi = std::numbers::pi, tau = 2 * pi;
 using V = SensorVector;
@@ -381,4 +381,4 @@ SensorPattern parse_sensor_pattern(std::string_view text) {
     (void)SensorGeometry(result);
     return result;
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

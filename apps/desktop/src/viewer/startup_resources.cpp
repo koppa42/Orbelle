@@ -1,10 +1,10 @@
 #include "startup_resources.hpp"
 #include "../ui_text.hpp"
 #include "project_update.hpp"
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/gravity.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/gravity.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 template <class Models> void remember_default(Models &cache, const Models &used, const char *id) {
     if (const auto it = used.find(id); it != used.end() && it->second)
@@ -68,4 +68,4 @@ startup_resource_steps(StartupResources &cache, const std::vector<runtime::Catal
                  }});
     return steps;
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

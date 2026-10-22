@@ -5,7 +5,7 @@
 #include <vsg/app/Presentation.h>
 #include <vsg/app/Window.h>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // Query the actual Qt window surface; an advertised device extension alone
 // does not promise display-stage timestamps for this presentation path.
 QJsonObject present_timing_capabilities(vsg::Window &window);
@@ -39,4 +39,4 @@ class BenchmarkPresentation {
     std::array<std::uint64_t, 2> calibrate(std::size_t view, BenchmarkRun &run);
     void check_swapchains() const;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

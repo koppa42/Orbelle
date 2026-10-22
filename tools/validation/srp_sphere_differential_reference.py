@@ -1,7 +1,7 @@
 """mpmath 1.3.0, 60/80-digit independent two-circle overlap and Cartesian partials.
 
 Reads only physical inputs from the Orekit fixture, never its expected outputs.
-Uses the lens-area formula and mpmath.diff, not boundary arcs or OrbitForge.
+Uses the lens-area formula and mpmath.diff, not boundary arcs or Orbelle.
 """
 import argparse
 import hashlib

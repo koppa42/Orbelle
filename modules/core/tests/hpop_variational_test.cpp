@@ -5,10 +5,10 @@
 #include <limits>
 #include <map>
 #include <numbers>
-#include <orbitforge/core/propagation/hpop_covariance.hpp>
+#include <orbelle/core/propagation/hpop_covariance.hpp>
 #include <sstream>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 using Vector = std::array<double, 6>;
 using Matrix = std::array<Vector, 6>;
@@ -32,7 +32,7 @@ HpopOptions options(HpopIntegrator method) {
 }
 } // namespace
 TEST(HpopCovarianceSampling, ContinuedCoastsMatchIndependentOrekitStateAndCovariance) {
-    std::ifstream input(ORBITFORGE_UNIVERSAL_KEPLER_STM_REFERENCE);
+    std::ifstream input(ORBELLE_UNIVERSAL_KEPLER_STM_REFERENCE);
     ASSERT_TRUE(input);
     double maximum = 0;
     std::size_t cases = 0;
@@ -140,7 +140,7 @@ TEST(HpopCovarianceSampling, ContinuedCoastsMatchIndependentOrekitStateAndCovari
     RecordProperty("max_normalized_covariance_error", maximum);
 }
 TEST(HpopVariational, KeplerStmMatchesIndependentOrekitAcrossIntegratorsAndTimeCoordinates) {
-    std::ifstream input(ORBITFORGE_UNIVERSAL_KEPLER_STM_REFERENCE);
+    std::ifstream input(ORBELLE_UNIVERSAL_KEPLER_STM_REFERENCE);
     ASSERT_TRUE(input);
     std::size_t count = 0;
     double maximum = 0, position_error = 0;
@@ -211,7 +211,7 @@ TEST(HpopVariational, KeplerStmMatchesIndependentOrekitAcrossIntegratorsAndTimeC
     RecordProperty("max_position_error_m", position_error);
 }
 TEST(HpopVariational, GaussJacksonRotatedOrekitReferencesConvergeAcrossZeroComponents) {
-    std::ifstream input(ORBITFORGE_UNIVERSAL_KEPLER_STM_REFERENCE);
+    std::ifstream input(ORBELLE_UNIVERSAL_KEPLER_STM_REFERENCE);
     ASSERT_TRUE(input);
     std::size_t count = 0;
     double maximum = 0;
@@ -319,7 +319,7 @@ TEST(HpopVariational, GaussJacksonRotatedOrekitReferencesConvergeAcrossZeroCompo
     RecordProperty("max_scaled_stm_error", maximum);
 }
 TEST(HpopVariational, GaussJacksonDayLongLargeStepsMatchIndependentOrekit) {
-    std::ifstream input(ORBITFORGE_UNIVERSAL_KEPLER_STM_REFERENCE);
+    std::ifstream input(ORBELLE_UNIVERSAL_KEPLER_STM_REFERENCE);
     ASSERT_TRUE(input);
     std::size_t cases = 0;
     double maximum_state = 0, maximum_stm = 0, maximum_covariance = 0, coarse_stm = 0;
@@ -574,7 +574,7 @@ HpopOptions full_options(int mask, double coefficient) {
 }
 } // namespace
 TEST(HpopVariational, CombinedCoastsMatchIndependentOrekitFieldDerivatives) {
-    std::ifstream file(ORBITFORGE_HPOP_VARIATIONAL_REFERENCE);
+    std::ifstream file(ORBELLE_HPOP_VARIATIONAL_REFERENCE);
     ASSERT_TRUE(file);
     double maximum = 0, max_d = 0, max_k = 0, max_position = 0;
     std::size_t count = 0, rows = 0;
@@ -694,7 +694,7 @@ TEST(HpopCovariance, JointPropagationMatchesIndependentOrekitNumpyAndHighPrecisi
         HpopVariationalState variational{cartesian({})};
     };
     std::map<int, Reference> references;
-    std::ifstream dynamics(ORBITFORGE_HPOP_VARIATIONAL_REFERENCE);
+    std::ifstream dynamics(ORBELLE_HPOP_VARIATIONAL_REFERENCE);
     ASSERT_TRUE(dynamics);
     for (std::string line; std::getline(dynamics, line);) {
         if (line.empty() || line[0] == '#')
@@ -720,7 +720,7 @@ TEST(HpopCovariance, JointPropagationMatchesIndependentOrekitNumpyAndHighPrecisi
         ASSERT_TRUE(row);
         references.emplace(id, r);
     }
-    std::ifstream file(ORBITFORGE_HPOP_COVARIANCE_REFERENCE);
+    std::ifstream file(ORBELLE_HPOP_COVARIANCE_REFERENCE);
     ASSERT_TRUE(file);
     std::size_t count = 0;
     double max_algebra = 0, max_total = 0, max_parameter = 0, max_cross = 0;

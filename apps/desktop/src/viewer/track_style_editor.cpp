@@ -13,7 +13,7 @@
 #include <QStyleOptionSpinBox>
 #include <QToolButton>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 class LineWidthSpinBox final : public QDoubleSpinBox {
     void paintEvent(QPaintEvent *event) override {
@@ -203,4 +203,4 @@ void TrackStyleEditor::refresh_preview() {
     write_settings(preview->settings);
     preview->update();
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

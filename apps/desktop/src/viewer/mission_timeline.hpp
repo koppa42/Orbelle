@@ -4,7 +4,7 @@
 #include <functional>
 #include <vector>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // The inherited slider remains a normalized compatibility API. Mouse/keyboard seeks use
 // TAI milliseconds directly, so zooming does not lose precision to its 10,000 steps.
 class MissionTimeline final : public QSlider {
@@ -62,4 +62,4 @@ class MissionTimeline final : public QSlider {
     CalendarScale scale_ = CalendarScale::utc;
     std::shared_ptr<const core::ITimeProvider> time_;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

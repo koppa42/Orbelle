@@ -9,7 +9,7 @@ class QLabel;
 class QPushButton;
 class QTreeWidget;
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 enum class InsertObjectType { satellite, ground_station, sensor };
 enum class InsertObjectMethod { define_properties, defaults, orbit_wizard, tle_file };
 struct InsertObjectRequest {
@@ -45,4 +45,4 @@ class InsertObjectDialog final : public QDialog {
     QLabel *parent_label_;
     bool busy_ = false;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

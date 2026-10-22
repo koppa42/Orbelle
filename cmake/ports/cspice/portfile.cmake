@@ -1,4 +1,4 @@
-# OrbitForge embeds a private CSPICE instance in its runtime / Python extension.
+# Orbelle embeds a private CSPICE instance in its runtime / Python extension.
 vcpkg_check_linkage(ONLY_STATIC_LIBRARY)
 if (VCPKG_TARGET_IS_WINDOWS)
     if (VCPKG_TARGET_ARCHITECTURE STREQUAL "x86")

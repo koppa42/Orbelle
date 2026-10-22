@@ -1,8 +1,10 @@
-# OrbitForge 项目文件 v47
+# Orbelle 项目文件 v48
 
-`.orbitforge` 是由 Application 模块读写的单文件、分段二进制容器。桌面、Python wheel 和 C++ SDK 使用相同实现。此版本保存可重建场景的输入，不保存 Provider 指针、GPU 资源或显示轨迹缓存。采用独立格式是为了精确保存纳秒整数和浮点输入，并允许以后为结果引用、其他对象和资源增加有版本的段。
+`.orbelle` 是由 Application 模块读写的单文件、分段二进制容器。桌面、Python wheel 和 C++ SDK 使用相同实现。此版本保存可重建场景的输入，不保存 Provider 指针、GPU 资源或显示轨迹缓存。采用独立格式是为了精确保存纳秒整数和浮点输入，并允许以后为结果引用、其他对象和资源增加有版本的段。
 
 项目校验在单次只读调用内建立带对象类型的 ID 索引，传感器父对象及指向关系使用对数复杂度查找；索引不跨调用保留。CRC32 使用编译期字节表，保留相同多项式、初值和最终取反，同时校验整体载荷及每个分段。编码字节和版本不变，读取不省略完整性或关系检查。
+
+本次更名将项目扩展名、数据锁和分析身份中的产品标识统一为 Orbelle，因此文件版本递增至 v48；分段布局保持不变，旧版项目仍按版本明确拒绝。
 
 ## 当前工作流
 
@@ -18,7 +20,7 @@
 
 EOP 来源记录包含快照 ID、SHA256、参考系、插值版本、覆盖区间，以及其依赖的时间数据 ID、SHA256 和 UTC 有效期。这些字段描述上次计算，不强制桌面安装同一旧文件。桌面打开或重算先比较当前数据及实际使用的外推策略，不一致时请求确认；同意后重建并标记未保存，取消则不打开或重算。保存时更新来源记录。覆盖不足时提供数据中心入口，保留原场景。通过“数据 → 数据中心”查看数据、获取时间和有效期，导入或下载当前文件，详见[数据中心](data_center.md)。
 
-开发预览阶段只读写当前 **v47**，不维护旧格式兼容、迁移器或缺字段补默认值的读取分支。v1–v46 及未知版本在解析内容前明确拒绝，错误包含实际版本和本程序支持的版本；源文件和当前场景不被修改。需要打开旧项目时使用与该格式匹配的程序，或在当前版本重新创建项目。后续结构或语义变化时递增版本，并同步替换读写实现、测试与文档；不为兼容旧文件限制新 API。
+开发预览阶段只读写当前 **v48**，不维护旧格式兼容、迁移器或缺字段补默认值的读取分支。v1–v47 及未知版本在解析内容前明确拒绝，错误包含实际版本和本程序支持的版本；源文件和当前场景不被修改。需要打开旧项目时使用与该格式匹配的程序，或在当前版本重新创建项目。后续结构或语义变化时递增版本，并同步替换读写实现、测试与文档；不为兼容旧文件限制新 API。
 
 外部三维模型按项目所在目录保存相对路径，跨盘时保留绝对路径；另存为会重新计算路径。模型及其纹理、外部缓冲文件仍需随项目另行保留，当前容器不嵌入资源，也不提供外部模型内容版本校验。模型缺失时拒绝打开，不静默改成点标记。内置示意模型无此文件依赖。
 
@@ -28,10 +30,10 @@ EOP 来源记录包含快照 ID、SHA256、参考系、插值版本、覆盖区�
 
 文件头共 24 字节：
 
-| 字段 | 类型 | v47 值或含义 |
+| 字段 | 类型 | v48 值或含义 |
 | --- | --- | --- |
 | magic | 8 bytes | `ORBFPRJ` 后跟 LF，即 `4f 52 42 46 50 52 4a 0a` |
-| format_version | u32 | 47（唯一接受的版本） |
+| format_version | u32 | 48（唯一接受的版本） |
 | payload_length | u64 | 后续全部段的总字节数 |
 | payload_crc32 | u32 | 后续全部段的 CRC-32/ISO-HDLC |
 
@@ -76,26 +78,26 @@ EOP 来源记录包含快照 ID、SHA256、参考系、插值版本、覆盖区�
 
 先在内存中完成校验与编码，再在目标目录下创建独占临时目录，写入并刷新临时文件，最后原子发布到目标路径。Windows 使用 MoveFileExW，POSIX 使用 rename（覆盖）或 link（不覆盖）。失败会清理本次临时文件；发布前的失败保留已有目标。此处承诺原子替换，不声称对所有网络文件系统或断电场景具备事务持久性保证。
 
-ANLY 的输入哈希采用独立 `orbitforge-analysis-input-v1` 编码：固定分析时段，按稳定 ID 排序记录卫星的活动传播器输入、站点坐标与最低仰角，以及传感器的视场、所属与指向关系。排除名称、外观、播放时间、报告配置及非活动轨道草稿。HPOP 插值方法与阶数参与身份；轨道步长在启用固定星历输出时也是科学输入，否则只影响显示并被排除。ANLY 与当前输入或数据锁不符表示旧准备记录已过期，不是文件损坏；无 ANLY 不推断为已计算。准备记录不包含查询结果，不证明已经执行所有查询。输入项目可以不含准备记录；不因读写而伪造记录。
+ANLY 的输入哈希采用独立 `orbelle-analysis-input-v1` 编码：固定分析时段，按稳定 ID 排序记录卫星的活动传播器输入、站点坐标与最低仰角，以及传感器的视场、所属与指向关系。排除名称、外观、播放时间、报告配置及非活动轨道草稿。HPOP 插值方法与阶数参与身份；轨道步长在启用固定星历输出时也是科学输入，否则只影响显示并被排除。ANLY 与当前输入或数据锁不符表示旧准备记录已过期，不是文件损坏；无 ANLY 不推断为已计算。准备记录不包含查询结果，不证明已经执行所有查询。输入项目可以不含准备记录；不因读写而伪造记录。
 
 C++ 文件层保留 `application::Project`、`save_project/load_project`、`runtime::make_project_scenario`。Python `Project`、`load_project` 使用事务门面，对象通过 `project.objects` 管理；显式低层交换使用 `ProjectData`、`load_project_data`，迁移见[对象编辑 API](object_editing.md)。Python `Project.open(path, data=...)` 检查当前数据，变化通过固定的计划确认；`save(path, analysis=...)` 校验项目归属与物理输入，保存精确来源和准备记录，成功后才更新内存。仅读取输入用 `load_project_data()`。详见[分析 API](analysis_api.md)。Python 保存默认拒绝覆盖，传入 `overwrite=True` 才替换已有文件。
 
 ```python
 from pathlib import Path
-import orbitforge as of
+import orbelle as of
 
 project = of.Project("Mission", of.Epoch(0), of.Epoch(7_200_000_000_000))
 satellite = project.objects.satellite("Satellite1", orbit=of.orbits.TwoBody(
     initial=of.OrbitInput().initial))
-project.save(Path("mission.orbitforge"))
+project.save(Path("mission.orbelle"))
 
-restored = of.load_project("mission.orbitforge")
+restored = of.load_project("mission.orbelle")
 states = restored.to_scenario().sample([restored.first, restored.last])
 
 # 一次提交项目设置；同步对象分析范围，保留初始条件。
 restored.update(name="Mission · revised", first=of.Epoch(1_000_000_000),
                 last=of.Epoch(3_600_000_000_000))
-restored.save("mission-revised.orbitforge")
+restored.save("mission-revised.orbelle")
 ```
 
 上述历史时段与桌面附带的 2000 年示例 EOP 匹配。完整双传播器示例见 `examples/python/save_project.py`。HPOP 的非中心重力在无界面计算中也要求显式 EOP；不隐式加载数据或外部模型。
@@ -120,22 +122,22 @@ OBJS v32 在 HPOP 重力 degree/order 之后保存“包含长期变化”u8，�
 
 OBJS v32 在三个固体潮字段之后、相对论开关之前保存 `OceanTideOptions`。ID 是 1–64 位小写 ASCII 字母、数字或连字符，不是路径；阶数 0–2190，次数 0–阶数。全部草稿均校验并精确保存；关闭或阶数小于 2 时无海潮力，模型与截断草稿不计入活动输入身份，也不要求文件。活动配置须在准备时符合所选文件实际范围，超出时失败，不静默降低阶次。
 
-活动海潮以 `ocean-tides/<选择 ID>` 加入 LOCK。原始字节 SHA-256、POT 格式解释版本、GM 和半径缩放进入来源，不嵌入文件或本机路径；内容/解释变化沿用确认流程。HPOP 及 Mission 的 HPOP 滑行使用相同字段和依赖。固定 v47 样例独立编码禁用的 `fixture-ocean`、30×12 草稿，C++/Python 必须逐字节复现。详见[海潮契约](ocean_tides.md)。
+活动海潮以 `ocean-tides/<选择 ID>` 加入 LOCK。原始字节 SHA-256、POT 格式解释版本、GM 和半径缩放进入来源，不嵌入文件或本机路径；内容/解释变化沿用确认流程。HPOP 及 Mission 的 HPOP 滑行使用相同字段和依赖。固定 v48 样例独立编码禁用的 `fixture-ocean`、30×12 草稿，C++/Python 必须逐字节复现。详见[海潮契约](ocean_tides.md)。
 
 
 ## 引力系数长期变化
 
 对象保存 `include_secular_variations` 布尔草稿；0/0 时该标志不参与分析和报告输入身份。启用非中心重力时，所选文件必须带显式参考历元与变化率，缺失则准备失败。变化率及参考历元属于冻结的重力资源，随原文字节与解释身份写入 `gravity/<ID>` 引用，不复制到对象字段。没有按模型名猜测的默认历元，也没有旧项目格式兼容路径；详见[长期变化契约](gravity_secular.md)。
 
-固定样例使用 Gauss–Jackson 12（枚举 4）和 Pseudo Correction（枚举 1），保留 0/0 下为 true 的长期变化草稿和未启用阻力的自然三次样条枚举。v47 / OBJS32 样例为 3044 bytes，SHA-256 `f863833ac401908ca56cece0bf9dd0b70f4e4a05db15348dc472623b1b518e11`；插值字段独立编码为 Hermite 5 阶、非活动 VOP μ `4.1e14 m³/s²` 和固定星历输出开启。
+固定样例使用 Gauss–Jackson 12（枚举 4）和 Pseudo Correction（枚举 1），保留 0/0 下为 true 的长期变化草稿和未启用阻力的自然三次样条枚举。v48 / OBJS32 样例为 3041 bytes，SHA-256 `4484d2143792e53cea41947cbada9f71bf0357c13e6a4281e2b7343c8e5bff9d`；插值字段独立编码为 Hermite 5 阶、非活动 VOP μ `4.1e14 m³/s²` 和固定星历输出开启。
 
 ### 额外遮挡天体
 
-v47 / OBJS32 在现有 SRP 月球半径之后、阻力字段之前保存额外遮挡天体数 u32（0–8），每项为 ThirdBody 枚举 u32（2–9）和球面半径 f64（m）。Earth/Moon 仍由原有独立字段保存，额外列表不允许 Sun/Moon、未知枚举、重复天体、非正或非有限半径。输入次序作为草稿精确保存，计算身份及阴影求和按枚举次序规范化。禁用光压或无阴影时该列表不进入有效计算身份，且不查询本体星历；合法草稿仍保存。
+v48 / OBJS32 在现有 SRP 月球半径之后、阻力字段之前保存额外遮挡天体数 u32（0–8），每项为 ThirdBody 枚举 u32（2–9）和球面半径 f64（m）。Earth/Moon 仍由原有独立字段保存，额外列表不允许 Sun/Moon、未知枚举、重复天体、非正或非有限半径。输入次序作为草稿精确保存，计算身份及阴影求和按枚举次序规范化。禁用光压或无阴影时该列表不进入有效计算身份，且不查询本体星历；合法草稿仍保存。
 
 独立二进制样例包含 Mercury `2440000.125 m`、Venus `6051800 m` 两项禁用草稿，以 `struct.pack("<IIdId", 2, 6, 2440000.125, 3, 6051800)` 插入。当前版本为 47，旧版和未知版均拒绝，不提供迁移读写。
 
-OBJS v32 在 SRP 的 Earth/Moon 阴影布尔值之后、Cr 之前保存 `boundary_mitigation` u8（0/1）。禁用 SRP、无阴影、未分配遮挡体或零光压力时仍保存草稿，但有效计算身份忽略此开关。当前项目只接受 v47，不解码其他版本的布局。
+OBJS v32 在 SRP 的 Earth/Moon 阴影布尔值之后、Cr 之前保存 `boundary_mitigation` u8（0/1）。禁用 SRP、无阴影、未分配遮挡体或零光压力时仍保存草稿，但有效计算身份忽略此开关。当前项目只接受 v48，不解码其他版本的布局。
 
 ## VOP 插值引力常数
 
@@ -144,7 +146,7 @@ OBJS v32 在插值方法、阶数之后保存独立 `vop_mu` f64，再写固定�
 
 ## 协方差设置
 
-v47 / OBJS32 在每条 HPOP（含 Mission HPOP）记录的阻力字段后保存协方差：
+v48 / OBJS32 在每条 HPOP（含 Mission HPOP）记录的阻力字段后保存协方差：
 启用 u8；参考系 u32（0 GCRF、1 LVLH、2 Frenet、3 FK5 J2000、4 TrueOfDate）；
 速度约定 u32（0 projected、1 rotating）；按行排列的 36 个 f64；
 独立引力开关 u8、Degree/Order 各 u32、变分绝对容差 f64；
@@ -154,17 +156,17 @@ v47 / OBJS32 在每条 HPOP（含 Mission HPOP）记录的阻力字段后保存�
 全部字段按 SI 保存，禁用草稿亦保留；输入校验和生效条件见[协方差契约](hpop_covariance.md)。
 Mission 记录只保存禁用草稿，当前拒绝启用跨机动传播。报告类型新增枚举 9，表示 GCRF 位置速度协方差。
 
-## Access 查询设置（v47 / RPTS7）
+## Access 查询设置（v48 / RPTS7）
 
 每条报告在 `step_nanoseconds:u64` 之后、frame 之前追加 `event_search_mode:u32`（0 固定网格、1 极值辅助）与 `event_tolerance_nanoseconds:u64`（默认 1000000）。所有类型保存这两个草稿字段，Access 和光照区间报告使用；容差必须为正且不超过一天，区间查询还要求不超过 step。未知模式、越界值均拒绝。
 
-项目版本为 47，RPTS 段版本为 7；旧版明确拒绝，无迁移代码。当前独立样例报告以 `struct.pack("<IQ",1,2000000)` 编码非默认 2 ms 草稿；3044 bytes，SHA-256 `f863833ac401908ca56cece0bf9dd0b70f4e4a05db15348dc472623b1b518e11`。对象段 OBJS32 的布局未变。
+项目版本为 48，RPTS 段版本为 7；旧版明确拒绝，无迁移代码。当前独立样例报告以 `struct.pack("<IQ",1,2000000)` 编码非默认 2 ms 草稿；3041 bytes，SHA-256 `4484d2143792e53cea41947cbada9f71bf0357c13e6a4281e2b7343c8e5bff9d`。对象段 OBJS32 的布局未变。
 
 
 ## 光照报告与事件搜索设置
 
-v47 / RPTS7 在搜索容差后保存 `lighting_ephemeris` 字符串，所有报告都保留合法草稿。Access 和光照时段共用 `event_search_mode` / `event_tolerance_nanoseconds`；这是当前 API 的命名，不保留旧字段别名。固定样例使用独立编码的 `fixture-sun`，用于校验非活动草稿的字节往返。OBJS32 未变。光照查询使用的太阳星历作为 `ephemeris/<ID>` 写入数据锁，二体卫星同样需要保存此分析资源身份。详见[光照分析](lighting.md)。
+v48 / RPTS7 在搜索容差后保存 `lighting_ephemeris` 字符串，所有报告都保留合法草稿。Access 和光照时段共用 `event_search_mode` / `event_tolerance_nanoseconds`；这是当前 API 的命名，不保留旧字段别名。固定样例使用独立编码的 `fixture-sun`，用于校验非活动草稿的字节往返。OBJS32 未变。光照查询使用的太阳星历作为 `ephemeris/<ID>` 写入数据锁，二体卫星同样需要保存此分析资源身份。详见[光照分析](lighting.md)。
 
-## 轨道事件（v47 / RPTS7）
+## 轨道事件（v48 / RPTS7）
 
 报告 kind 枚举增加 12（轨道事件），现有字段布局保持一致；搜索方式和容差同样适用于此离散事件报告。固定样例第二个模板绑定 satellite-a，使用自定义区间、30 s 检查间隔和 1 μs 容差，独立编码并更新两层 CRC。v43 及其他非当前版本明确拒绝。

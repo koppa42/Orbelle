@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $orbitRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 if (-not $Executable) {
-    $Executable = Join-Path $orbitRoot 'out/build/desktop-graphics/apps/desktop/Release/orbitforge_desktop.exe'
+    $Executable = Join-Path $orbitRoot 'out/build/desktop-graphics/apps/desktop/Release/orbelle_desktop.exe'
 }
 if (-not $DependencyPrefix) {
     $DependencyPrefix = Join-Path $orbitRoot 'out/dependencies/installed/x64-windows'
@@ -32,7 +32,7 @@ $orbitProcess = [System.Diagnostics.Process]::Start($orbitStart)
 try {
     $orbitProcess.WaitForExit()
     if ($orbitProcess.ExitCode -ne 0) {
-        throw "OrbitForge exited with code $($orbitProcess.ExitCode)"
+        throw "Orbelle exited with code $($orbitProcess.ExitCode)"
     }
 } finally {
     $orbitProcess.Dispose()

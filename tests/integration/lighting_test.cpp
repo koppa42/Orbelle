@@ -3,13 +3,13 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <limits>
-#include <orbitforge/core/propagation/lighting.hpp>
-#include <orbitforge/runtime/analysis.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/project.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/core/propagation/lighting.hpp>
+#include <orbelle/runtime/analysis.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/project.hpp>
+#include <orbelle/runtime/two_body.hpp>
 #include <sstream>
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 core::Epoch seconds(double s) {
     return core::Epoch{static_cast<std::int64_t>(std::llround(s * 1e9))};
@@ -75,7 +75,7 @@ TEST(Lighting, IntervalsFractionsAndStatisticsMatchIndependentOrekit) {
         std::vector<std::array<double, 5>> intervals;
         std::vector<std::array<double, 7>> samples;
     };
-    std::ifstream file(ORBITFORGE_LIGHTING_REFERENCE);
+    std::ifstream file(ORBELLE_LIGHTING_REFERENCE);
     ASSERT_TRUE(file);
     std::vector<Case> cases;
     std::string line;

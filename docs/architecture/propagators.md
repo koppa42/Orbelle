@@ -50,7 +50,7 @@ EGM96 取自 [ICGEM 原始系数](https://icgem.gfz.de/getmodel/gfc/971b0a3b49a4
 
 [HPOP 帮助](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)明确 RKV 的嵌入误差控制；[Connect 页](https://help.agi.com/stk/SubSystems/connectCmds/Content/cmd_HPOPIntegrator.htm)的 RelativeError 行仍只列 RKF78/BS。本实现依据前者为 RKV 保留自适应并新增固定模式；STK 实机有效组合、误差范数、步长范围和默认值仍待核对。当前工程参数范围为 1e−6–86400 s，已覆盖参考配置的一天上限；这不是对 STK 全部合法范围或出厂默认值的断言，默认值保持显式配置。
 
-RKV 8(9) Efficient 使用 Verner 的 16 阶段高效 9(8) 嵌入对，按 [STK 的八阶推进定义](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)推进八阶成员，以九阶与八阶之差估计局部误差。系数固定于 [rklib `rkv98e`](https://github.com/jacobwilliams/rklib/blob/a1bf2d26ba2c37d049b448d28d4e9800a0ee4b58/src/rklib_variable_steps.f90)（BSD-3-Clause）；其原实现推进九阶成员，OrbitForge 显式选择八阶权重。每步使用 16 次阶段力评估，所有阶段在该步闭区间内，另验证接受端点。控制器使用上述分量混合绝对/相对误差的最大范数，接受阈值 1，安全因子 0.9、缩放范围 0.1–4、指数 −1/9，随后约束到最小/最大步长。天气边界及末段可短于最小步长；若误差仍超限则报错。它与 RKF78 共用分段缓存和取消边界；固定步长模式已提供；项目使用独立的科学插值层，积分器内部连续输出和 FSAL 优化留待后续扩展。Python 使用 `integrator="rkv89"`，C++ 为 `HpopIntegrator::rkv89`，结果来源包含 `rkv89-efficient-8th-rklib-a1bf2d26-v1`。控制器并不宣称与 STK 内部实现相同；局部容差不能保证整段轨道误差，见[数值对照](../validation/hpop_protocol.md#rkv-89-efficient)。
+RKV 8(9) Efficient 使用 Verner 的 16 阶段高效 9(8) 嵌入对，按 [STK 的八阶推进定义](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)推进八阶成员，以九阶与八阶之差估计局部误差。系数固定于 [rklib `rkv98e`](https://github.com/jacobwilliams/rklib/blob/a1bf2d26ba2c37d049b448d28d4e9800a0ee4b58/src/rklib_variable_steps.f90)（BSD-3-Clause）；其原实现推进九阶成员，Orbelle 显式选择八阶权重。每步使用 16 次阶段力评估，所有阶段在该步闭区间内，另验证接受端点。控制器使用上述分量混合绝对/相对误差的最大范数，接受阈值 1，安全因子 0.9、缩放范围 0.1–4、指数 −1/9，随后约束到最小/最大步长。天气边界及末段可短于最小步长；若误差仍超限则报错。它与 RKF78 共用分段缓存和取消边界；固定步长模式已提供；项目使用独立的科学插值层，积分器内部连续输出和 FSAL 优化留待后续扩展。Python 使用 `integrator="rkv89"`，C++ 为 `HpopIntegrator::rkv89`，结果来源包含 `rkv89-efficient-8th-rklib-a1bf2d26-v1`。控制器并不宣称与 STK 内部实现相同；局部容差不能保证整段轨道误差，见[数值对照](../validation/hpop_protocol.md#rkv-89-efficient)。
 
 Bulirsch–Stoer 的相对误差模式按 [STK 定义](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)使用 Richardson 外推和自动步长。实现采用平滑改良中点、偶数子步序列 2/4/…/18，以及关于 `1/n²` 的多项式外推，候选阶数为 4–18。最后一列外推修正使用相同分量绝对/相对尺度估计误差；第 k 行（从 0 计）的步长控制指数为 `−1/(2k+1)`。每次尝试从低阶开始，到首个满足误差要求的候选后再计算一列，以累计力评估次数 / 下一步可达到时长比较成本，在合格候选中选择；下一步受配置上限、当前计算段剩余时长和已知天气边界限制；计算段宽度至少为配置上限。最高阶仍不满足要求则缩步，在最小步长或更短边界段仍不满足要求时明确报错。所有中点阶段限制在该步时间范围内，并在子步检查取消；天气边界采用同一单侧求值规则。Python 为 `integrator="bulirsch_stoer"`，C++ 为 `HpopIntegrator::bulirsch_stoer`，来源为 `bulirsch-stoer-midpoint-richardson-4to18-cost-v1`。此选择策略和误差控制不宣称复现 STK 的内部细节；VOP 积分方程与科学插值均已接入，见 [VOP 积分](vop_integration.md)及下文。独立对照见[验证协议](../validation/hpop_protocol.md#bulirschstoer)。
 
@@ -103,7 +103,7 @@ C++ 设置 `OrbitInput.propagator = OrbitPropagator::hpop`、`OrbitInput.hpop`�
 
 `make_sgp4_session(tle, time, object_id)` 必须显式注入 `ITimeProvider`，仅在初始化时把 TLE 的 UTC 历元解释为 TAI；后续使用连续 TAI 分钟差。该时间选择与 [DME/STK Components 的说明](https://help.agi.com/STKComponentsJava/Javadoc/agi-foundation-propagators-Sgp4Propagator.html)一致；跨闰秒时，与直接相减 UTC 儒略日的调用方式可能相差一秒。时间数据哈希进入 Session provenance。
 
-原始例程会修改深空积分状态，每次查询复制已初始化记录，避免随机顺序或并发查询污染计算。初始化、衰减、非法轨道与非有限结果明确报错。TLE 原文随当前 `.orbitforge` 格式持久化；计算不自动换用另一组根数，也不在 Provider 内联网。
+原始例程会修改深空积分状态，每次查询复制已初始化记录，避免随机顺序或并发查询污染计算。初始化、衰减、非法轨道与非有限结果明确报错。TLE 原文随当前 `.orbelle` 格式持久化；计算不自动换用另一组根数，也不在 Provider 内联网。
 
 桌面选择 SGP4 后显示独立的粘贴/文件导入界面，可带一行卫星名称；拒绝含多组 TLE 的文件，导入失败保留当前草稿。显示编号、UTC 历元和名义周期。场景距离历元超过 14 天时提醒检查根数时效，这是交互提示，不是精度保证或模型硬有效期。切换预报器不把普通椭圆伪装成 TLE；原手动输入作为非活动草稿保留。重开 TLE 属性时，手动草稿以保存的 GCRF 状态恢复，不要求旧草稿历元仍有 EOP 覆盖。
 

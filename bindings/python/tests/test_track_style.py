@@ -4,7 +4,7 @@ import struct
 import tempfile
 import unittest
 # Native value/format tests; public editing is in test_objects.py.
-from orbitforge import _native as of
+from orbelle import _native as of
 from project_format import rewrite_section
 
 
@@ -31,7 +31,7 @@ class TrackStyleTests(unittest.TestCase):
         satellites[1].display.line_style = of.LineStyle.DOTTED
         revised.satellites = satellites
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'styles.orbitforge'
+            path = Path(directory) / 'styles.orbelle'
             revised.save(path)
             restored = of.load_project(path)
             self.assertEqual(restored.satellites[0].display.line_color, 0xE9A2BA)
@@ -52,7 +52,7 @@ class TrackStyleTests(unittest.TestCase):
 
     def test_style_integrity_even_after_repairing_crcs(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'styles.orbitforge'
+            path = Path(directory) / 'styles.orbelle'
             self.project().save(path)
             raw = path.read_bytes()
             for mutate in (
@@ -73,7 +73,7 @@ class TrackStyleTests(unittest.TestCase):
     def test_invalid_style_is_rejected_before_replacing_existing_project(self):
         with tempfile.TemporaryDirectory() as directory:
             project = self.project()
-            path = Path(directory) / 'styles.orbitforge'
+            path = Path(directory) / 'styles.orbelle'
             project.save(path)
             raw = path.read_bytes()
             for value in [0, 8.1, math.inf, math.nan]:

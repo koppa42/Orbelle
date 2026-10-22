@@ -24,7 +24,7 @@
 #include <Psapi.h>
 #endif
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 const char *phase_name(BenchmarkRun::Phase phase) {
     switch (phase) {
@@ -389,4 +389,4 @@ void BenchmarkRun::finish(const QJsonObject &metadata) {
                   "excludes hardware/OS input delivery and physical pixel visibility");
     write_json("timing.json", report);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

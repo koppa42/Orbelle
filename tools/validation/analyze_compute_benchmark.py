@@ -26,7 +26,7 @@ EXPECTED_DATA = {
     "eop_interpolation": "c04-hermite-tai-v1", "eop_reference_frame": "ITRF2020",
     "time_id": "iers-bulletin-c-72-2026-07",
     "time_sha256": "6cb6f5d4b819f2e568e25db4b0b26d89dedf031fdffb18bc94d40f4e94e268d7",
-    "spice_id": "orbitforge-de440s-2016-leap-v1",
+    "spice_id": "orbelle-de440s-2016-leap-v1",
     "spice_manifest_sha256": "2b1a07664f8a2d52ef3d22b4f58023561d47a64f21f7ee544dfa421f7be90ce4",
     "spice_toolkit_version": "CSPICE_N0067",
     "spice_model": "DE440s-derived-Earth-Moon-Sun; SPICE J2000 with DE440 ICRF axes",
@@ -36,7 +36,7 @@ EXPECTED_DATA = {
     "kernels": [
         {"file": "naif0012.tls",
          "sha256": "678e32bdb5a744117a467cd9601cd6b373f0e9bc9bbde1371d5eee39600a039b"},
-        {"file": "orbitforge_de440s_2016_leap.bsp",
+        {"file": "orbelle_de440s_2016_leap.bsp",
          "sha256": "3bdfc2c0d92beeec54b653776f58ca6ef07ddf356bc3924e74028a14cfa7f9f6"}],
 }
 

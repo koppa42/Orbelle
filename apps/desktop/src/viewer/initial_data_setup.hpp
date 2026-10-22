@@ -4,7 +4,7 @@
 #include <vector>
 class QWidget;
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 class EopCatalog;
 [[nodiscard]] std::vector<DataProduct> initial_data_products();
 // Blocks entry to the workbench until required resources are installed. The modal
@@ -13,4 +13,4 @@ class EopCatalog;
 bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
                           const std::vector<DataProduct> &required = initial_data_products(),
                           const std::function<void(DataProduct)> &download = {});
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -4,7 +4,7 @@
 #include <map>
 #include <unordered_map>
 
-namespace orbitforge::runtime::detail {
+namespace orbelle::runtime::detail {
 namespace {
 void check(bool ok, const char *message) {
     if (!ok)
@@ -183,4 +183,4 @@ CoverageReportData coverage_report(const ReportContext &context,
     }
     return result;
 }
-} // namespace orbitforge::runtime::detail
+} // namespace orbelle::runtime::detail

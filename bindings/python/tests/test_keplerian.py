@@ -1,6 +1,6 @@
 import math
 import unittest
-import orbitforge as of
+import orbelle as of
 
 
 @unittest.skipUnless(of.two_body_available(), 'CSPICE disabled')

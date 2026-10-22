@@ -1,15 +1,15 @@
 #include "../src/viewer/display_settings.hpp"
 #include <chrono>
 #include <gtest/gtest.h>
-#include <orbitforge/runtime/j2.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/j2.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 TEST(OrbitPreparation, MissionBurnsKeepSeparateTangentsOnAndOffTheDisplayGrid) {
     const auto time = runtime::make_builtin_time_provider();
     const auto frames = runtime::make_frame_provider();
-    const auto eop = runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+    const auto eop = runtime::load_eop_snapshot(ORBELLE_TEST_EOP);
     for (auto offset : {300'000'000'000LL, 301'234'567'890LL}) {
         OrbitInput input;
         input.first = time->from_utc({2026, 10, 9, 0, 0, 0, 0});
@@ -40,7 +40,7 @@ TEST(OrbitPreparation, J4Sgp4AndHpopBuildGcrfAndItrfCachesFromTheirNativeModels)
     const auto time = runtime::make_builtin_time_provider();
     const std::shared_ptr<const core::IFrameProvider> frames = runtime::make_frame_provider();
     const std::shared_ptr<const core::IEarthOrientationProvider> eop =
-        runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+        runtime::load_eop_snapshot(ORBELLE_TEST_EOP);
     for (auto model : {OrbitPropagator::j4_secular, OrbitPropagator::sgp4, OrbitPropagator::hpop}) {
         OrbitInput input;
         input.first = time->from_utc({2026, 10, 9, 0, 0, 0, 0});
@@ -67,7 +67,7 @@ TEST(OrbitPreparation, J4Sgp4AndHpopBuildGcrfAndItrfCachesFromTheirNativeModels)
 TEST(OrbitPreparation, J2MinuteCacheUsesAllSecularTermsAndTrajectoryDerivative) {
     const auto time = runtime::make_builtin_time_provider();
     const auto frames = runtime::make_frame_provider();
-    const auto eop = runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+    const auto eop = runtime::load_eop_snapshot(ORBELLE_TEST_EOP);
     OrbitInput input;
     input.first = time->from_utc({2026, 10, 9, 0, 0, 0, 0});
     input.last = time->from_utc({2026, 10, 10, 0, 0, 0, 0});
@@ -89,7 +89,7 @@ TEST(OrbitPreparation, J2MinuteCacheUsesAllSecularTermsAndTrajectoryDerivative) 
 TEST(OrbitPreparation, FullDayRetainsValidatedEarthFixedCache) {
     const auto time = runtime::make_builtin_time_provider();
     const auto frames = runtime::make_frame_provider();
-    const auto eop = runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+    const auto eop = runtime::load_eop_snapshot(ORBELLE_TEST_EOP);
     OrbitInput input;
     input.step_seconds = 10; // Fixed input for the before/after full-day timing comparison.
     input.first = time->from_utc({2026, 10, 9, 0, 0, 0, 0});
@@ -115,7 +115,7 @@ TEST(OrbitPreparation, FullDayRetainsValidatedEarthFixedCache) {
 TEST(OrbitPreparation, DefaultMinuteStepPreparesOnlyTheRequestedPeriod) {
     const auto time = runtime::make_builtin_time_provider();
     const auto frames = runtime::make_frame_provider();
-    const auto eop = runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+    const auto eop = runtime::load_eop_snapshot(ORBELLE_TEST_EOP);
     OrbitInput input;
     ASSERT_EQ(input.step_seconds, 60);
     input.first = time->from_utc({2026, 10, 9, 0, 0, 0, 0});
@@ -178,4 +178,4 @@ TEST(DisplayInterval, FullCustomAndOpenOrbitWindowsStayWithinTheScenario) {
                      input, {.extent = 2, .past_minutes = 0, .future_minutes = 0}, input.first),
                  std::invalid_argument);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

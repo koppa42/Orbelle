@@ -2,13 +2,13 @@
 #include <atomic>
 #include <memory>
 #include <optional>
-#include <orbitforge/application/project.hpp>
-#include <orbitforge/application/session.hpp>
-#include <orbitforge/core/frames/frame_provider.hpp>
-#include <orbitforge/core/propagation/central_body.hpp>
-#include <orbitforge/visualization/state_track.hpp>
+#include <orbelle/application/project.hpp>
+#include <orbelle/application/session.hpp>
+#include <orbelle/core/frames/frame_provider.hpp>
+#include <orbelle/core/propagation/central_body.hpp>
+#include <orbelle/visualization/state_track.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 using application::OrbitInput;
 using application::OrbitPropagator;
 [[nodiscard]] application::Session make_orbit_session(const OrbitInput &input,
@@ -36,4 +36,4 @@ class OrbitCancelled : public std::runtime_error {
     const core::IEarthOrientationProvider &eop, const std::atomic_bool &cancelled,
     std::optional<std::pair<core::Epoch, core::Epoch>> cache_interval = std::nullopt);
 [[nodiscard]] bool cache_covers(const OrbitScene &orbit, core::Epoch first, core::Epoch last);
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

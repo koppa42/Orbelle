@@ -4,9 +4,9 @@
 #include <QPainterPath>
 #include <QWidget>
 #include <functional>
-#include <orbitforge/runtime/report.hpp>
+#include <orbelle/runtime/report.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // A view of one immutable report. Interaction never propagates or resamples an orbit.
 class ReportPlot final : public QWidget {
   public:
@@ -87,4 +87,4 @@ class ReportPlot final : public QWidget {
     [[nodiscard]] double time_at(double x) const;
     [[nodiscard]] const Point *nearest(QPointF position, const Series **series = nullptr) const;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -2,9 +2,9 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <numbers>
-#include <orbitforge/providers/spice/provider.hpp>
+#include <orbelle/providers/spice/provider.hpp>
 
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 core::J4MeanElements initial() {
     constexpr double rad = std::numbers::pi / 180;
@@ -13,7 +13,7 @@ core::J4MeanElements initial() {
 } // namespace
 TEST(J4Secular, MatchesHighPrecisionReferenceOverThirtyDaysInBothDirections) {
     const auto provider = providers::spice::make_j4(initial());
-    std::ifstream file(ORBITFORGE_J4_REFERENCE);
+    std::ifstream file(ORBELLE_J4_REFERENCE);
     ASSERT_TRUE(file);
     std::int64_t seconds = 0;
     int rows = 0;

@@ -1,11 +1,11 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
-#include <orbitforge/core/propagation/ocean_tides.hpp>
+#include <orbelle/core/propagation/ocean_tides.hpp>
 #include <stdexcept>
 #include <tuple>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 constexpr double arcsec = std::numbers::pi / (180 * 3600);
 constexpr double year_seconds = 365.25 * 86400;
@@ -183,4 +183,4 @@ std::vector<GravityCoefficient> OceanTideModel::corrections(const GravityInfo &f
     }
     return result;
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

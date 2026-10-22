@@ -1,8 +1,8 @@
 #include "interpolation_identity.hpp"
-#include <orbitforge/runtime/tabulated_orbit.hpp>
+#include <orbelle/runtime/tabulated_orbit.hpp>
 #include <utility>
 
-namespace orbitforge::runtime {
+namespace orbelle::runtime {
 application::Session make_tabulated_orbit_session(std::vector<core::OrbitEphemerisArc> arcs,
                                                   core::OrbitInterpolationOptions options,
                                                   std::string object_id,
@@ -19,4 +19,4 @@ application::Session make_tabulated_orbit_session(std::vector<core::OrbitEphemer
                                   detail::interpolation_mu_identity(options);
     return {std::move(provider), {std::move(object_id), input_revision, algorithm}};
 }
-} // namespace orbitforge::runtime
+} // namespace orbelle::runtime

@@ -3,13 +3,13 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <numbers>
-#include <orbitforge/runtime/project.hpp>
-#include <orbitforge/runtime/report.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/project.hpp>
+#include <orbelle/runtime/report.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 #include <random>
 
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 runtime::ReportContext stations(std::int64_t last = 2'000'000'001) {
     application::Project p("Reports", core::Epoch{0}, core::Epoch{last});
@@ -118,7 +118,7 @@ TEST(Reports, FrameConversionRetainsEarthRotationVelocityAndConfirmedData) {
     auto c = stations();
     c.time = runtime::make_builtin_time_provider();
     c.frames = runtime::make_frame_provider();
-    c.eop = runtime::load_eop_snapshot(ORBITFORGE_REPORT_EOP);
+    c.eop = runtime::load_eop_snapshot(ORBELLE_REPORT_EOP);
     c.project.earth_orientation = c.eop->data_info();
     auto d = definition();
     d.query.frame = core::FrameId::gcrf;
@@ -152,7 +152,7 @@ TEST(Reports, ReusesExactFrameTransformsAcrossObjectsAndBoundsCachePerQuery) {
     auto c = stations(8192'500'000'000);
     c.project.ground_stations.push_back({"other", "Other station", {.7, -.4, 100}});
     c.time = runtime::make_builtin_time_provider();
-    c.eop = runtime::load_eop_snapshot(ORBITFORGE_REPORT_EOP);
+    c.eop = runtime::load_eop_snapshot(ORBELLE_REPORT_EOP);
     c.project.earth_orientation = c.eop->data_info();
     const auto frames = std::make_shared<CountedFrames>();
     c.frames = frames;
@@ -255,7 +255,7 @@ TEST(Reports, CancellationIsObservedBetweenBatchesWithoutPublishingPartialResult
 }
 TEST(Reports, CsvQuotesUnicodeAndPreservesExistingFilesOnFailureAndCancellation) {
     const auto path = std::filesystem::temp_directory_path() /
-                      ("orbitforge-report-test-" + std::to_string(std::random_device{}()) + ".csv");
+                      ("orbelle-report-test-" + std::to_string(std::random_device{}()) + ".csv");
     const auto result = runtime::generate_report(stations(), definition());
     runtime::export_report_csv(result, path);
     const auto original = read(path);
@@ -409,7 +409,7 @@ TEST(Reports, SatelliteGeodeticRequiresConfirmedEopAndNewTemplatesRoundTrip) {
     auto c = stations(120'000'000'000);
     c.time = runtime::make_builtin_time_provider();
     c.frames = runtime::make_frame_provider();
-    c.eop = runtime::load_eop_snapshot(ORBITFORGE_REPORT_EOP);
+    c.eop = runtime::load_eop_snapshot(ORBELLE_REPORT_EOP);
     c.project.earth_orientation = c.eop->data_info();
     const core::CartesianState fixed{c.project.first,
                                      core::OriginId::earth,

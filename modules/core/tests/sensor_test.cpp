@@ -1,8 +1,8 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include <numbers>
-#include <orbitforge/core/propagation/sensor.hpp>
-using namespace orbitforge::core;
+#include <orbelle/core/propagation/sensor.hpp>
+using namespace orbelle::core;
 namespace {
 constexpr double d = std::numbers::pi / 180;
 SensorVector ray(double cone, double clock = 0) {

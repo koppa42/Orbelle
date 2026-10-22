@@ -1,7 +1,7 @@
 """Independent monthly weather reference using NumPy 2.3.3, SciPy 1.16.3 and original GMAT.
 
 python tools/validation/monthly_weather_reference.py OUTPUT_DIR GMAT_DRIVER
-No OrbitForge imports. CSSI nominal nodes are on day 15; CelesTrak monthly nodes
+No Orbelle imports. CSSI nominal nodes are on day 15; CelesTrak monthly nodes
 are on day 1. Flux nodes use 20 UTC, geomagnetic nodes midnight. CSSI averages
 use a NumPy 81-day centered convolution before daily-node interpolation.
 """

@@ -6,8 +6,8 @@ import unittest
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 ROOT = Path(__file__).resolve().parents[3]
 EOP = Path(of.__file__).parent / "data/eop/iers_c04_2016_12_28_2017_01_04/manifest.json"
@@ -191,7 +191,7 @@ class DragTests(unittest.TestCase):
                 self.assertEqual(before.input_sha256, after.input_sha256)
                 self.assertEqual(before.position.values, after.position.values)
                 self.assertEqual(before.velocity.values, after.velocity.values)
-                path = root / "mass.orbitforge"
+                path = root / "mass.orbelle"
                 project.save(path, analysis=analysis)
                 reopened = of.Project.open(path, data=data)
                 self.assertEqual(reopened.objects[sat.id].orbit.hpop, sat.orbit.hpop)
@@ -216,7 +216,7 @@ class DragTests(unittest.TestCase):
         sat = project.objects.satellite("Sat", orbit=orbit)
         before = project.prepare().states(sat, step=u.s(60))
         with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / "drag.orbitforge"
+            path = Path(folder) / "drag.orbelle"
             project.save(path)
             reopened = of.Project.open(path)
             self.assertEqual(reopened.objects[sat.id].orbit.hpop.drag, drag)
@@ -253,7 +253,7 @@ class DragTests(unittest.TestCase):
             report = analysis.report(of.ReportKind.CARTESIAN_STATE, objects=sat, step=u.s(60),
                                      units=of.ReportUnits.SI, time_scale=of.ReportTimeScale.TAI)
             self.assertEqual(tuple(report.table.rows[-1][4:7]), before.position.values[-1])
-            path = root / "drag.orbitforge"
+            path = root / "drag.orbelle"
             project.save(path, analysis=analysis)
             restored = of.Project.open(path, data=data)
             self.assertEqual(restored.objects[sat.id].orbit.hpop.drag, orbit.hpop.drag)

@@ -4,10 +4,10 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <limits>
-#include <orbitforge/core/propagation/hpop_force.hpp>
+#include <orbelle/core/propagation/hpop_force.hpp>
 #include <sstream>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 using Vector = std::array<double, 3>;
 using Matrix = std::array<Vector, 3>;
@@ -27,7 +27,7 @@ void read(std::istream &in, Matrix &m) {
         read(in, row);
 }
 std::vector<Case> cases() {
-    std::ifstream file(ORBITFORGE_HPOP_FORCE_REFERENCE);
+    std::ifstream file(ORBELLE_HPOP_FORCE_REFERENCE);
     if (!file)
         throw std::runtime_error("Missing combined HPOP reference");
     std::vector<Case> result;

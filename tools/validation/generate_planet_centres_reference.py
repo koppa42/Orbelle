@@ -2,7 +2,7 @@
 
 Pinned: JPLEPHEM 2.24, NumPy 2.2.6, SpiceyPy 7.0.0 / CSPICE N0067.
 SPKSUB copies original coefficients; JPLEPHEM evaluates the original full kernel,
-not the derived subset or an OrbitForge library. Time conversion uses NAIF unitim.
+not the derived subset or an Orbelle library. Time conversion uses NAIF unitim.
 """
 import argparse
 import hashlib
@@ -40,9 +40,9 @@ def main():
     spice.furnsh(str(base_dir / "naif0012.tls"))
     start, end = [spice.str2et(value) for value in ("2016 DEC 27 00:00:00 TDB", "2017 JAN 05 00:00:00 TDB")]
     source = spice.dafopr(str(args.source.resolve()))
-    dest = spice.spkopn(str(target.resolve()), "OrbitForge MAR099s validation subset", 2048)
+    dest = spice.spkopn(str(target.resolve()), "Orbelle MAR099s validation subset", 2048)
     spice.dafac(dest, [
-        "Producer of this derived kernel: OrbitForge project.",
+        "Producer of this derived kernel: Orbelle project.",
         "CSPICE N0067 SPKSUB; original coefficients were not refitted.",
         "Source: NAIF mar099s.bsp; SHA256 " + MARS_SHA,
         "Retained original targets 401,402,499,399,10,4,3 and J2000 axes.",
@@ -54,7 +54,7 @@ def main():
         descriptor = spice.dafgs(5)
         bounds, ids = spice.dafus(descriptor, 2, 6)
         assert ids[2] == 1 and ids[3] == 2 and bounds[0] <= start and bounds[1] >= end
-        spice.spksub(source, descriptor, "OrbitForge MAR099s subset " + str(ids[0]), start, end, dest)
+        spice.spksub(source, descriptor, "Orbelle MAR099s subset " + str(ids[0]), start, end, dest)
         targets.append(int(ids[0]))
         spice.dafcs(source)
     assert set(targets) == {401,402,499,399,10,4,3}

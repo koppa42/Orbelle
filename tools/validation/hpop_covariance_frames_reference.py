@@ -2,7 +2,7 @@
 
 NumPy performs direct F P F.T; mpmath 80/100 decimal digits independently
 confirm its result; SciPy LAPACK checks the active matrices. P includes optional
-D/K state cross terms and mutual covariance. No OrbitForge code is imported.
+D/K state cross terms and mutual covariance. No Orbelle code is imported.
 """
 import argparse
 import hashlib

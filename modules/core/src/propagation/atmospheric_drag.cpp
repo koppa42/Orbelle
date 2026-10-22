@@ -3,9 +3,9 @@
 #include <chrono>
 #include <cmath>
 #include <numbers>
-#include <orbitforge/core/propagation/state_provider.hpp>
+#include <orbelle/core/propagation/state_provider.hpp>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 constexpr double pi = std::numbers::pi, a = 6378137, f = 1 / 298.257223563;
 constexpr double e2 = f * (2 - f), b = a * (1 - f);
@@ -425,4 +425,4 @@ DragDifferential drag_differential(const std::array<double, 3> &r, const std::ar
     finite_vector(result.drag_parameter_jacobian_pa);
     return result;
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

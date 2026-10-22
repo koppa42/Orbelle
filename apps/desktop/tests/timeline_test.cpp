@@ -10,9 +10,9 @@
 #include <algorithm>
 #include <cmath>
 #include <gtest/gtest.h>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 constexpr qint64 second = 1000, hour = 3'600'000, day = 86'400'000;
 qint64 utc(core::UtcDateTime value) {
@@ -225,4 +225,4 @@ TEST_F(Timeline, VeryShortScenarioAndZoomStayWithinEndpoints) {
     EXPECT_EQ(widget.current_time(), first + 2);
 }
 } // namespace
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

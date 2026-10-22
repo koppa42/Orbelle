@@ -148,7 +148,7 @@ def main():
     toolset = next(parent.name for parent in linker.parents if parent.parent.name == 'MSVC')
     crt_root = find_crt(vc_root, toolset)
     source = build / 'apps/desktop/Release'
-    executable = source / 'orbitforge_desktop.exe'
+    executable = source / 'orbelle_desktop.exe'
     if not executable.is_file():
         raise RuntimeError('Build the Release desktop before packaging')
     output = args.output.resolve()
@@ -246,7 +246,7 @@ def main():
                        if not key.upper().startswith(('QT_', 'QML', 'VSG', 'ROCKY', 'GDAL', 'PROJ', 'VK_'))}
         system_root = Path(os.environ['SystemRoot'])
         environment['PATH'] = os.pathsep.join(map(str, (system_root / 'System32', system_root)))
-        environment['ORBITFORGE_DATA_HOME'] = str(reports / 'user-data')
+        environment['ORBELLE_DATA_HOME'] = str(reports / 'user-data')
         # Run from an unrelated empty directory to verify relative resource discovery.
         cwd = reports / 'empty-cwd'
         cwd.mkdir()

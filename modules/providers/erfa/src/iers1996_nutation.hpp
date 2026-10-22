@@ -1,7 +1,7 @@
 #pragma once
 #include <array>
 
-namespace orbitforge::providers::erfa::detail {
+namespace orbelle::providers::erfa::detail {
 // IERS Technical Note 21 (1996), Table 5.1. l,l',F,D,Omega;
 // longitude sine and obliquity cosine coefficients in 0.0001 arcsec.
 // Numeric table transcribed from Orekit 13.1.2's published IERS data.
@@ -118,4 +118,4 @@ inline constexpr std::array<NutationTerm, 106> nutation1996{{
     {{-1, -1, 0, 2, 1}, 1, 0.0, 0, 0.0},
     {{0, 1, 0, 1, 0}, 1, 0.0, 0, 0.0},
 }};
-} // namespace orbitforge::providers::erfa::detail
+} // namespace orbelle::providers::erfa::detail

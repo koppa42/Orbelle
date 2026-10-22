@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include <orbitforge/orbitforge.hpp>
+#include <orbelle/orbelle.hpp>
 
-namespace of = orbitforge;
+namespace of = orbelle;
 using namespace std::chrono_literals;
 
 namespace {
@@ -9,7 +9,7 @@ class ProjectFacade : public ::testing::Test {
   protected:
     std::filesystem::path folder;
     void SetUp() override {
-        folder = std::filesystem::path(ORBITFORGE_INTEGRATION_WORKSPACE).parent_path() /
+        folder = std::filesystem::path(ORBELLE_INTEGRATION_WORKSPACE).parent_path() /
                  ("project-facade-" +
                   std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         std::filesystem::create_directory(folder);
@@ -17,7 +17,7 @@ class ProjectFacade : public ::testing::Test {
     void TearDown() override {
         if (folder.is_absolute() &&
             folder.parent_path() ==
-                std::filesystem::path(ORBITFORGE_INTEGRATION_WORKSPACE).parent_path() &&
+                std::filesystem::path(ORBELLE_INTEGRATION_WORKSPACE).parent_path() &&
             folder.filename().string().starts_with("project-facade-")) {
             std::error_code ignored;
             std::filesystem::remove_all(folder, ignored);
@@ -26,7 +26,7 @@ class ProjectFacade : public ::testing::Test {
 };
 
 TEST_F(ProjectFacade, TransactionAnalysisAndReportsShareOneDocument) {
-    if (!ORBITFORGE_EXPECT_SPICE) {
+    if (!ORBELLE_EXPECT_SPICE) {
         GTEST_SKIP();
     }
     of::Project project{"Observation", of::Epoch{0}, of::Epoch{120'000'000'000}};
@@ -65,10 +65,10 @@ TEST_F(ProjectFacade, TransactionAnalysisAndReportsShareOneDocument) {
     EXPECT_EQ(
         std::get<of::application::ProjectSatellite>(analysis.snapshot().read(satellite)).name(),
         "Observer");
-    project.save(folder / "observation.orbitforge", analysis);
+    project.save(folder / "observation.orbelle", analysis);
     EXPECT_FALSE(project.dirty());
     EXPECT_EQ(project.analysis_status(), of::AnalysisStatus::current);
-    auto reopened = of::Project::open(folder / "observation.orbitforge");
+    auto reopened = of::Project::open(folder / "observation.orbelle");
     EXPECT_EQ(reopened.name(), "Observation");
     EXPECT_EQ(reopened.snapshot().project->reports[0].format, format);
     EXPECT_EQ(reopened.objects().get(sensor.id()).kind(), of::ObjectKind::sensor);
@@ -110,10 +110,10 @@ TEST_F(ProjectFacade, FailedEditsAndUncommittedDraftsDoNotChangePublishedInputs)
         edit.settings("Draft");
         (void)edit.objects().create(of::objects::Satellite{"Uncommitted", {}, {}});
         EXPECT_EQ(project.prepare().snapshot().project->name, "Committed");
-        project.save(folder / "committed.orbitforge");
+        project.save(folder / "committed.orbelle");
     }
     EXPECT_TRUE(project.objects().find().empty());
-    EXPECT_EQ(of::Project::open(folder / "committed.orbitforge").name(), "Committed");
+    EXPECT_EQ(of::Project::open(folder / "committed.orbelle").name(), "Committed");
     const auto plan = project.plan_prepare();
     project.update({.name = "New revision"});
     EXPECT_THROW((void)plan.prepare(true), of::RevisionConflictError);
@@ -123,7 +123,7 @@ TEST_F(ProjectFacade, StaleAnalysisAndFailedSavesLeaveDestinationAndDocumentUnto
     of::Project project{"Saved", of::Epoch{0}, of::Epoch{100}};
     const auto station = project.objects().create(of::objects::GroundStation{"Station", {}, 0});
     const auto analysis = project.prepare();
-    const auto path = folder / "saved.orbitforge";
+    const auto path = folder / "saved.orbelle";
     project.save(path, analysis);
     auto foreign = of::Project::from_data(project.to_data());
     EXPECT_THROW(foreign.save(path, analysis, true), of::ProjectError);
@@ -145,7 +145,7 @@ TEST_F(ProjectFacade, StaleAnalysisAndFailedSavesLeaveDestinationAndDocumentUnto
 }
 
 TEST_F(ProjectFacade, PreparationConsentRetainsDataAndOutlivesFacade) {
-    if (!ORBITFORGE_EXPECT_ERFA) {
+    if (!ORBELLE_EXPECT_ERFA) {
         GTEST_SKIP();
     }
     const auto plan = [] {
@@ -167,12 +167,12 @@ TEST_F(ProjectFacade, PreparationConsentRetainsDataAndOutlivesFacade) {
 }
 
 TEST_F(ProjectFacade, OpeningConsentReturnsFacadeWithoutReopeningOrRememberingAcceptance) {
-    if (!ORBITFORGE_EXPECT_ERFA) {
+    if (!ORBELLE_EXPECT_ERFA) {
         GTEST_SKIP();
     }
     const auto data = of::DataSnapshot::builtin_time();
     of::Project project{"Recorded", of::Epoch{0}, of::Epoch{100}};
-    const auto path = folder / "recorded.orbitforge";
+    const auto path = folder / "recorded.orbelle";
     project.save(path, project.prepare(data));
     EXPECT_THROW((void)of::Project::open(path), of::AnalysisCapabilityError);
     EXPECT_FALSE(of::Project::plan_open(path, data).open().dirty());
@@ -201,7 +201,7 @@ TEST_F(ProjectFacade, CatalogOverloadsPinProvidersAndValidateBeforeOpening) {
         GTEST_SKIP();
     }
     of::DataCatalog catalog{folder / "data"};
-    const auto entry = catalog.install_eop(ORBITFORGE_REPORT_EOP);
+    const auto entry = catalog.install_eop(ORBELLE_REPORT_EOP);
     catalog.activate_eop(entry.lock_sha256);
     of::Project project{"Catalog", of::Epoch{0}, of::Epoch{100}};
     const auto station = project.objects().create(of::objects::GroundStation{"Station", {}, 0});
@@ -209,7 +209,7 @@ TEST_F(ProjectFacade, CatalogOverloadsPinProvidersAndValidateBeforeOpening) {
     const auto analysis = project.prepare(catalog);
     EXPECT_EQ(planned.data().data_lock(), analysis.data().data_lock());
     EXPECT_EQ(analysis.state(station, of::Epoch{0}, of::FrameId::gcrf).frame, of::FrameId::gcrf);
-    const auto path = folder / "catalog.orbitforge";
+    const auto path = folder / "catalog.orbelle";
     project.save(path, analysis);
     const auto plan = of::Project::plan_open(path, catalog);
     EXPECT_FALSE(of::Project::open(path, catalog).dirty());

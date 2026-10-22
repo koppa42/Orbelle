@@ -1,9 +1,9 @@
 #pragma once
 #include "ground_map.hpp"
-#include <orbitforge/runtime/project.hpp>
+#include <orbelle/runtime/project.hpp>
 #include <vsg/nodes/MatrixTransform.h>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 struct PreparedProject {
     application::Project project;
     application::Scenario scenario;
@@ -34,4 +34,4 @@ struct PreparedProject {
     const std::optional<application::Project> &previous_project = std::nullopt,
     std::shared_ptr<runtime::OrbitSessionCache> sessions = {},
     const std::function<void(std::size_t)> &orbit_progress = {});
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

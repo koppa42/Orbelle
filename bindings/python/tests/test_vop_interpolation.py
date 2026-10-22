@@ -3,7 +3,7 @@ from pathlib import Path
 import math
 import tempfile
 import unittest
-import orbitforge as of
+import orbelle as of
 
 REFERENCE = Path(__file__).resolve().parents[3] / "tests/reference/propagators/vop_interpolation.txt"
 BASE = 8_000_000_000_000_000_123
@@ -64,7 +64,7 @@ class VopInterpolationTests(unittest.TestCase):
         self.assertNotEqual(changed.position.values, before.position.values)
         self.assertEqual(analysis.states(satellite, times=[epoch]).position.values, before.position.values)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory)/"vop.orbitforge"
+            path = Path(directory)/"vop.orbelle"
             project.save(path)
             reopened = of.Project.open(path)
             restored = reopened.objects[satellite.id]

@@ -27,10 +27,10 @@
 #include <iostream>
 #include <memory>
 #include <numbers>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 class InsertionTest : public ::testing::Test {
   protected:
     void SetUp() override { apply_workbench_style(test_application("insertion_test")); }
@@ -385,7 +385,7 @@ TEST_F(InsertionTest, WizardSunDriverRepeatRatioAndNarrowLayout) {
 TEST_F(InsertionTest, WizardMapUsesRealFramesAndClearsInvalidOrSupersededPreviews) {
     std::shared_ptr<const core::IFrameProvider> frames = runtime::make_frame_provider();
     std::shared_ptr<const core::IEarthOrientationProvider> eop =
-        runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+        runtime::load_eop_snapshot(ORBELLE_TEST_EOP);
     const auto time = runtime::make_builtin_time_provider();
     OrbitWizardDialog wizard(time->from_utc({2026, 10, 1, 0, 0, 0}));
     QImage imagery(360, 180, QImage::Format_RGB32);
@@ -470,7 +470,7 @@ TEST_F(InsertionTest, PreviewCachesExactRotationsAndRefinesLatestDesignOnly) {
     };
     const auto frames = std::make_shared<CountingFrames>();
     const std::shared_ptr<const core::IEarthOrientationProvider> eop =
-        runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+        runtime::load_eop_snapshot(ORBELLE_TEST_EOP);
     const auto time = runtime::make_builtin_time_provider();
     core::EarthOrbitDesignRequest request;
     request.epoch = time->from_utc({2026, 10, 1, 0, 0, 0});
@@ -593,7 +593,7 @@ TEST_F(InsertionTest, PreviewPrefetchDoesNotRequireDataBeyondTheRequestedView) {
         }
         const core::EopDataInfo &data_info() const noexcept override { return source->data_info(); }
         std::shared_ptr<const core::IEarthOrientationProvider> source =
-            runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+            runtime::load_eop_snapshot(ORBELLE_TEST_EOP);
         core::Epoch end{0};
     };
     const auto eop = std::make_shared<LimitedEop>();
@@ -641,7 +641,7 @@ TEST_F(InsertionTest, PreviewDestructionDiscardsQueuedWorkerCompletion) {
         }
         const core::EopDataInfo &data_info() const noexcept override { return source->data_info(); }
         std::shared_ptr<const core::IEarthOrientationProvider> source =
-            runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+            runtime::load_eop_snapshot(ORBELLE_TEST_EOP);
         mutable std::atomic_bool entered{false}, resume{false};
     };
     const auto eop = std::make_shared<PausedEop>();
@@ -671,7 +671,7 @@ TEST_F(InsertionTest, PreviewDestructionDiscardsQueuedWorkerCompletion) {
 // Explicit interaction profile, excluded from CI timing gates. Run with
 // --gtest_also_run_disabled_tests --gtest_filter=*WizardPreviewInteractionProfile.
 TEST_F(InsertionTest, DISABLED_WizardPreviewInteractionProfile) {
-    const auto output = qEnvironmentVariable("ORBITFORGE_PREVIEW_PROFILE");
+    const auto output = qEnvironmentVariable("ORBELLE_PREVIEW_PROFILE");
     std::unique_ptr<WorkbenchProfile> profile;
     if (!output.isEmpty())
         profile = std::make_unique<WorkbenchProfile>(output);
@@ -680,7 +680,7 @@ TEST_F(InsertionTest, DISABLED_WizardPreviewInteractionProfile) {
     QImage imagery(360, 180, QImage::Format_RGB32);
     imagery.fill(Qt::darkBlue);
     wizard.set_preview_context(imagery, runtime::make_frame_provider(),
-                               runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP));
+                               runtime::load_eop_snapshot(ORBELLE_TEST_EOP));
     wizard.show();
     auto *preview =
         static_cast<OrbitDesignPreview *>(wizard.findChild<QWidget *>("orbitDesignPreview"));
@@ -792,4 +792,4 @@ TEST_F(InsertionTest, DISABLED_WizardPreviewInteractionProfile) {
     if (profile)
         profile->finish({{"kind", "orbit-wizard-input-and-paint"}});
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

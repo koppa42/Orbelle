@@ -5,7 +5,7 @@
 #include <cstring>
 #include <stdexcept>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 constexpr std::uint32_t feedback_capacity = 512;
 constexpr VkPresentStageFlagsEXT default_stages_requested =
@@ -436,4 +436,4 @@ QJsonObject BenchmarkPresentation::metadata() const {
             {"stage_time_unit", "nanoseconds"},
             {"views", views}};
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

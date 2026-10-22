@@ -24,14 +24,14 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 #include <stdexcept>
 
 #include "support/report_test_support.hpp"
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 using namespace report_test;
 TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
@@ -40,7 +40,7 @@ TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
         GTEST_SKIP();
     std::shared_ptr<const core::ITimeProvider> time = runtime::make_builtin_time_provider();
     std::shared_ptr<const core::IEarthOrientationProvider> eop =
-        runtime::load_eop_snapshot(ORBITFORGE_ACCESS_EOP);
+        runtime::load_eop_snapshot(ORBELLE_ACCESS_EOP);
     std::shared_ptr<const core::IFrameProvider> frames = runtime::make_frame_provider();
     application::Project project{"Access UI", core::Epoch{0}, core::Epoch{120'000'000'000}};
     project.earth_orientation = eop->data_info();
@@ -128,7 +128,7 @@ TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
         for (int i = 0; i < 8; ++i)
             QCoreApplication::processEvents();
     };
-    const auto access_capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    const auto access_capture = qEnvironmentVariable("ORBELLE_REPORT_UI_CAPTURE");
     if (!access_capture.isEmpty())
         QDir().mkpath(access_capture);
     dialog.resize(1140, 780);
@@ -165,7 +165,7 @@ TEST(ReportDialog, AccessPairSensorScopeCurveAndDeletedBinding) {
     EXPECT_EQ(
         static_cast<ReportPlot *>(dialog.findChild<QWidget *>("reportPlot"))->fields().front().id,
         "aer.elevation");
-    const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    const auto capture = qEnvironmentVariable("ORBELLE_REPORT_UI_CAPTURE");
     if (!capture.isEmpty()) {
         QDir().mkpath(capture);
         dialog.resize(1140, 780);
@@ -247,7 +247,7 @@ TEST(ReportDialog, LightingIntervalsAndCurveShareResultsAndPreserveNarrowLayout)
         table, "doubleClicked", Qt::DirectConnection,
         Q_ARG(QModelIndex, table->model()->index(1, table_column(table, "lighting.stop"))));
     EXPECT_EQ(sought, end);
-    const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    const auto capture = qEnvironmentVariable("ORBELLE_REPORT_UI_CAPTURE");
     if (!capture.isEmpty())
         QDir().mkpath(capture);
     const auto settle = [] {
@@ -389,7 +389,7 @@ TEST(ReportDialog, OrbitalEventsSummaryTimeSeekAndResponsiveLayout) {
         table, "doubleClicked", Qt::DirectConnection,
         Q_ARG(QModelIndex, table->model()->index(2, table_column(table, "event.kind"))));
     EXPECT_EQ(sought, epoch);
-    const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    const auto capture = qEnvironmentVariable("ORBELLE_REPORT_UI_CAPTURE");
     if (!capture.isEmpty())
         QDir().mkpath(capture);
     for (const auto width : {1140, 420}) {
@@ -426,7 +426,7 @@ TEST(ReportDialog, IntersatellitePairCurvesExtremaSeekAndResponsiveLayout) {
         GTEST_SKIP();
     std::shared_ptr<const core::ITimeProvider> time = runtime::make_builtin_time_provider();
     std::shared_ptr<const core::IEarthOrientationProvider> eop =
-        runtime::load_eop_snapshot(ORBITFORGE_ACCESS_EOP);
+        runtime::load_eop_snapshot(ORBELLE_ACCESS_EOP);
     std::shared_ptr<const core::IFrameProvider> frames = runtime::make_frame_provider();
     const auto data = runtime::DataSnapshot::from_providers(time, frames, eop);
     application::Project project{"Intersatellite", core::Epoch{0}, core::Epoch{600'000'000'000}};
@@ -477,7 +477,7 @@ TEST(ReportDialog, IntersatellitePairCurvesExtremaSeekAndResponsiveLayout) {
     QMetaObject::invokeMethod(notice, "linkActivated", Qt::DirectConnection,
                               Q_ARG(QString, QString("closest-approach")));
     EXPECT_EQ(sought, published->intersatellite_statistics->minimum_range.epoch);
-    const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    const auto capture = qEnvironmentVariable("ORBELLE_REPORT_UI_CAPTURE");
     if (!capture.isEmpty())
         QDir().mkpath(capture);
     const auto screenshots = [&](const QString &name) {
@@ -544,7 +544,7 @@ TEST(ReportDialog, CoverageHeatmapPointWindowsTemplatesAndResponsiveLayout) {
         GTEST_SKIP();
     std::shared_ptr<const core::ITimeProvider> time = runtime::make_builtin_time_provider();
     std::shared_ptr<const core::IEarthOrientationProvider> eop =
-        runtime::load_eop_snapshot(ORBITFORGE_ACCESS_EOP);
+        runtime::load_eop_snapshot(ORBELLE_ACCESS_EOP);
     const auto data =
         runtime::DataSnapshot::from_providers(time, runtime::make_frame_provider(), eop);
     application::Project project{"Coverage · 区域与重访", core::Epoch{0},
@@ -600,7 +600,7 @@ TEST(ReportDialog, CoverageHeatmapPointWindowsTemplatesAndResponsiveLayout) {
     EXPECT_TRUE(dialog.findChild<QLabel *>("coveragePointDetail")
                     ->text()
                     .contains(QString::number((index + 1) % points.size() + 1)));
-    const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    const auto capture = qEnvironmentVariable("ORBELLE_REPORT_UI_CAPTURE");
     if (!capture.isEmpty())
         QDir().mkpath(capture);
     for (int width : {1140, 420}) {
@@ -659,4 +659,4 @@ TEST(ReportDialog, CoverageHeatmapPointWindowsTemplatesAndResponsiveLayout) {
     EXPECT_EQ(preparations, 2);
 }
 } // namespace
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

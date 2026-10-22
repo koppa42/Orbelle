@@ -1,11 +1,11 @@
 #include "workload.hpp"
 #include <cmath>
 #include <gtest/gtest.h>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 #include <set>
 
 namespace {
-using namespace orbitforge;
+using namespace orbelle;
 double length(const std::array<double, 3> &p) { return std::hypot(p[0], p[1], p[2]); }
 TEST(Constellation, TenThousandUniqueObjectsKeepSpecifiedOrbitalRadii) {
     const benchmarks::Constellation constellation;
@@ -27,7 +27,7 @@ TEST(Constellation, TenThousandUniqueObjectsKeepSpecifiedOrbitalRadii) {
 }
 TEST(DisplayCache, GroundFixedSamplesHaveBoundedInterpolationAndStrictCoverage) {
     const auto frames = runtime::make_frame_provider();
-    const auto eop = runtime::load_eop_snapshot(ORBITFORGE_BENCHMARK_EOP);
+    const auto eop = runtime::load_eop_snapshot(ORBELLE_BENCHMARK_EOP);
     const benchmarks::DisplayCache cache(*frames, *eop);
     EXPECT_EQ(cache.position_bytes(), 601u * 10000u * 3u * sizeof(double));
     const core::Epoch halfway{321'500'000'000};

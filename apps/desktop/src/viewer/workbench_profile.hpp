@@ -6,7 +6,7 @@
 #include <vector>
 
 class QImage;
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // Opt-in GUI-thread measurements; normal application runs collect no samples.
 class WorkbenchProfile {
   public:
@@ -41,4 +41,4 @@ class ProfileScope {
     const char *name_;
     QElapsedTimer timer_;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop
