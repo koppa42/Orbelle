@@ -6,6 +6,13 @@ orbitforge_warnings(orbitforge_desktop_text)
 qt_add_resources(orbitforge_desktop_text "desktop_text" PREFIX "/orbitforge"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/text/zh_CN.json)
 add_executable(orbitforge_desktop WIN32 src/main.cpp)
+if(WIN32)
+    enable_language(RC)
+    configure_file(resources/orbitforge.rc.in orbitforge.rc @ONLY)
+    target_sources(orbitforge_desktop PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/orbitforge.rc")
+    set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/orbitforge.rc" APPEND PROPERTY
+        OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/orbitforge.ico")
+endif()
 target_link_libraries(orbitforge_desktop PRIVATE
     OrbitForge::Runtime OrbitForge::Visualization Qt6::Widgets)
 orbitforge_warnings(orbitforge_desktop)
