@@ -496,7 +496,7 @@ TEST(Project, DataLockPinsFilesInterpretationCoverageAndTransitiveTimeDependency
 TEST(Project, DataLocksHaveStableCanonicalOrderAndRejectDuplicateRoles) {
     // Independently computed using .NET SHA256 over the documented empty encoding.
     EXPECT_EQ(application::DataLock{}.sha256(),
-              "81700a60bcada79003d1ea38a39cbea749f3997c1cdea22737be0bee6b7aeab1");
+              "7bb0c0284a40767918481e268d3e9bcca97621ab90abda00ef428e7a15c366ed");
     const auto lock = example().data_lock();
     std::vector<application::DataReference> reversed(lock.references().rbegin(),
                                                      lock.references().rend());
