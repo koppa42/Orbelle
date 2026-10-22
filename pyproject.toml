@@ -5,7 +5,7 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "orbitforge"
 version = "0.3.0"
-description = "OrbitForge orbital analysis, scenario management, and reporting"
+description = "Orbelle orbital analysis, scenario management, and reporting"
 readme = "README.md"
 requires-python = ">=3.11"
 classifiers = ["Programming Language :: Python :: 3", "Programming Language :: C++"]

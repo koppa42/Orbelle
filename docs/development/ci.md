@@ -75,9 +75,9 @@ Windows、Linux 和 Python 的 `commands.json` 记录每条命令的 UTC 开始�
 
 | 文件 | 用途 |
 | --- | --- |
-| `OrbitForge-X.Y.Z-win-x64.zip` | Windows x64 便携桌面，解压后运行 `OrbitForge.exe` |
-| `OrbitForge-X.Y.Z-sdk-win-x64.zip` | Windows x64 / VS 2022 Release C++ 无界面 SDK |
-| `OrbitForge-X.Y.Z-sdk-linux-x64.tar.gz` | Ubuntu 24.04 x86_64 Release C++ 无界面 SDK |
+| `Orbelle-X.Y.Z-win-x64.zip` | Windows x64 便携桌面，解压后运行 `Orbelle.exe` |
+| `Orbelle-X.Y.Z-sdk-win-x64.zip` | Windows x64 / VS 2022 Release C++ 无界面 SDK |
+| `Orbelle-X.Y.Z-sdk-linux-x64.tar.gz` | Ubuntu 24.04 x86_64 Release C++ 无界面 SDK |
 | `orbitforge-X.Y.Z-cpNNN-cpNNN-win_amd64.whl` | Windows x64；CPython 3.11～3.15，每个版本一个 wheel |
 | `orbitforge-X.Y.Z-cpNNN-cpNNN-linux_x86_64.whl` | Ubuntu 24.04 x86_64；CPython 3.11～3.15，每个版本一个 wheel |
 | `SHA256SUMS` | 上述十三个文件的 SHA-256 |
@@ -98,7 +98,7 @@ git commit -m "chore: prepare v0.1.1"
 git switch main
 git pull --ff-only
 python tools/ci/version.py --tag v0.1.1
-git tag -a v0.1.1 -m "OrbitForge v0.1.1"
+git tag -a v0.1.1 -m "Orbelle v0.1.1"
 git push origin v0.1.1
 ```
 

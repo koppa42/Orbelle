@@ -211,8 +211,10 @@ QWidget *make_welcome_page(QAction *create, QAction *open, QAction *example) {
     outer->addWidget(column);
     outer->addStretch(4);
 
-    auto *caption = new QLabel(ui::text("welcome_page.caption"));
+    auto *caption = new QLabel(ui::text("welcome_page.caption") + QStringLiteral("\n") +
+                               ui::text("brand.artwork_credit"));
     caption->setObjectName("welcomeCaption");
+    caption->setWordWrap(true);
     outer->addWidget(caption);
     return scroll;
 }

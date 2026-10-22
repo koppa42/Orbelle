@@ -87,9 +87,9 @@ def main():
     # Ordinary hosted runners do not provide the Vulkan GPU needed by --verify.
     run("desktop-package", sys.executable, source / "tools/packaging/package_windows.py",
         "--build-dir", desktop, "--dependency-prefix", prefix,
-        "--output", work / f"OrbitForge-{args.version}-win-x64",
+        "--output", work / f"Orbelle-{args.version}-win-x64",
         "--reports", reports / "desktop-package", "--version", args.version, "--zip")
-    shutil.copy2(work / f"OrbitForge-{args.version}-win-x64.zip", output)
+    shutil.copy2(work / f"Orbelle-{args.version}-win-x64.zip", output)
 
     # Copy tracked sources only: scikit-build must not walk vcpkg/build caches.
     wheel_source = work / "wheel-source"
@@ -116,9 +116,9 @@ def main():
     # Validate the archive after relocation; no development DLL paths in this phase.
     relocated = work / "consumer"
     relocated.mkdir()
-    with zipfile.ZipFile(output / f"OrbitForge-{args.version}-sdk-win-x64.zip") as archive:
+    with zipfile.ZipFile(output / f"Orbelle-{args.version}-sdk-win-x64.zip") as archive:
         archive.extractall(relocated)
-    installed = relocated / f"OrbitForge-{args.version}-sdk-win-x64"
+    installed = relocated / f"Orbelle-{args.version}-sdk-win-x64"
     clean = dict(environment)
     clean["PATH"] = os.environ["PATH"]
     clean.pop("CMAKE_PREFIX_PATH", None)

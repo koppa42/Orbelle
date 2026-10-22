@@ -220,10 +220,10 @@ Python 内存场景示例见 `examples/python/two_body_scenario.py`，项目文�
 ## Windows 便携包
 
 ```powershell
-python tools/packaging/package_windows.py --build-dir out/build/desktop-graphics --dependency-prefix out/dependencies/installed/x64-windows --output out/releases/OrbitForge-0.3.0-win-x64 --reports out/validation/package-new-run --verify --zip
+python tools/packaging/package_windows.py --build-dir out/build/desktop-graphics --dependency-prefix out/dependencies/installed/x64-windows --output out/releases/Orbelle-0.3.0-win-x64 --reports out/validation/package-new-run --verify --zip
 ```
 
-输出与报告均须使用新目录，且不能互相包含；公开包的清单仅记录文件与散列，完整 DLL 来源路径保存在本地报告中。整个 ZIP 解压后双击 `OrbitForge.exe`，保留同目录 DLL、`plugins` 和 `resources`。桌面启动不需要 Python 或 Qt SDK，需要支持 Vulkan 的显卡驱动。
+输出与报告均须使用新目录，且不能互相包含；公开包的清单仅记录文件与散列，完整 DLL 来源路径保存在本地报告中。整个 ZIP 解压后双击 `Orbelle.exe`，保留同目录 DLL、`plugins` 和 `resources`。桌面启动不需要 Python 或 Qt SDK，需要支持 Vulkan 的显卡驱动。
 
 验证包括依赖递归解析、文件 SHA-256、ZIP 完整性、删除开发环境搜索路径后的异地目录启动、无参数打开/关闭，以及便携版本完整场景交互检查。这是同一 Windows 主机上的部署验证，不等同于全新虚拟机或所有显卡的兼容性认证。
 

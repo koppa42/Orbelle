@@ -48,7 +48,7 @@ class WindowsManifestTests(unittest.TestCase):
             output, reports = root / 'package', root / 'reports'
             output.mkdir()
             reports.mkdir()
-            executable = output / 'OrbitForge.exe'
+            executable = output / 'Orbelle.exe'
             executable.write_bytes(b'fixture executable')
             library = output / 'runtime.dll'
             library.write_bytes(b'fixture runtime')
@@ -64,8 +64,8 @@ class WindowsManifestTests(unittest.TestCase):
             manifest = json.loads(manifest_text)
             self.assertNotIn('private-build-host', manifest_text)
             self.assertNotIn('source', manifest['dll_sources'][0])
-            self.assertEqual(manifest['executable_sha256'], windows.digest(relocated / 'OrbitForge.exe'))
-            self.assertEqual({entry['path'] for entry in manifest['files']}, {'OrbitForge.exe', 'runtime.dll'})
+            self.assertEqual(manifest['executable_sha256'], windows.digest(relocated / 'Orbelle.exe'))
+            self.assertEqual({entry['path'] for entry in manifest['files']}, {'Orbelle.exe', 'runtime.dll'})
             for entry in manifest['files']:
                 path = relocated / entry['path']
                 self.assertFalse(Path(entry['path']).is_absolute())

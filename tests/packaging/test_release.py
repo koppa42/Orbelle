@@ -21,9 +21,9 @@ class ReleaseTests(unittest.TestCase):
         self.assets = Path(self.temporary.name)
         self.version = version.check(ROOT)
         self.tag = "v" + self.version
-        for name in (f"OrbitForge-{self.version}-win-x64.zip",
-                     f"OrbitForge-{self.version}-sdk-win-x64.zip",
-                     f"OrbitForge-{self.version}-sdk-linux-x64.tar.gz"):
+        for name in (f"Orbelle-{self.version}-win-x64.zip",
+                     f"Orbelle-{self.version}-sdk-win-x64.zip",
+                     f"Orbelle-{self.version}-sdk-linux-x64.tar.gz"):
             (self.assets / name).write_bytes(b"test archive")
         for python in version.python_versions()[1]:
             tag = "cp" + python.replace(".", "")

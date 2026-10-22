@@ -80,20 +80,22 @@ def verify_normal_launch(executable, cwd, environment, reports):
             if pid.value == process.pid and user32.IsWindowVisible(window):
                 title = ctypes.create_unicode_buffer(512)
                 user32.GetWindowTextW(window, title, len(title))
+                # Qt appends applicationDisplayName to native Windows captions.
+                caption = title.value.removesuffix(' - 星弦 Orbelle')
                 # Identify the completed workbench, not the splash, for a graceful close.
-                if title.value.startswith('OrbitForge  |  '):
+                if caption.startswith('星弦 Orbelle  |  '):
                     windows.append((window, title.value))
-                elif title.value == 'OrbitForge · 准备基础数据':
+                elif caption == '星弦 Orbelle · 准备基础数据':
                     setup_windows.append((window, title.value))
             return True
 
         try:
             deadline = time.monotonic() + 30
-            while not windows and time.monotonic() < deadline and process.poll() is None:
+            while not (windows or setup_windows) and time.monotonic() < deadline and process.poll() is None:
                 user32.EnumWindows(inspect, 0)
                 time.sleep(0.1)
-            if not windows:
-                raise RuntimeError('Packaged EXE did not open its normal desktop window')
+            if not (windows or setup_windows):
+                raise RuntimeError('Packaged EXE did not open its desktop or initial setup window')
             # Allow the normal frame loop to run, then request a graceful close.
             time.sleep(2)
             if process.poll() is not None:
@@ -102,12 +104,12 @@ def verify_normal_launch(executable, cwd, environment, reports):
             windows.clear()
             setup_windows.clear()
             user32.EnumWindows(inspect, 0)
-            if len(windows) != 1:
+            if len(windows) > 1 or not (windows or setup_windows):
                 raise RuntimeError('Cannot uniquely identify the normal desktop window')
             if len(setup_windows) > 1:
                 raise RuntimeError('Cannot uniquely identify initial data preparation')
-            # A fresh data directory opens a modal preparation dialog. Closing it
-            # follows Cancel and exit; the disabled workbench cannot close it.
+            # A fresh data directory shows setup before the workbench becomes visible.
+            # Closing setup follows Cancel and exit, including while the parent is hidden.
             close_window = setup_windows[0] if setup_windows else windows[0]
             if not user32.PostMessageW(close_window[0], 0x0010, 0, 0):  # This process only.
                 raise ctypes.WinError(ctypes.get_last_error())
@@ -117,7 +119,7 @@ def verify_normal_launch(executable, cwd, environment, reports):
             if process.poll() is None:
                 process.terminate()
                 process.wait(timeout=10)
-    return {'command': [str(executable)], 'window_title': windows[0][1],
+    return {'command': [str(executable)], 'window_title': windows[0][1] if windows else None,
             'closed_window_title': close_window[1], 'initial_data_setup': bool(setup_windows),
             'exit_code': process.returncode}
 
@@ -157,7 +159,7 @@ def main():
         raise RuntimeError(f'Archive already exists: {archive}')
     output.mkdir(parents=True, exist_ok=False)
     reports.mkdir(parents=True, exist_ok=False)
-    packaged_executable = output / 'OrbitForge.exe'
+    packaged_executable = output / 'Orbelle.exe'
     shutil.copy2(executable, packaged_executable)
     shutil.copytree(source / 'resources', output / 'resources')
     for name in ('proj', 'gdal'):
@@ -211,7 +213,7 @@ def main():
         target.parent.mkdir(parents=True)
         shutil.copy2(notice, target)
     (output / 'README.txt').write_text(
-        f'OrbitForge {version} Windows x64\n\n解压整个文件夹，然后双击 OrbitForge.exe。\n'
+        f'星弦 Orbelle {version} Windows x64\n\n解压整个文件夹，然后双击 Orbelle.exe。\n'
         '请保留同目录 DLL、plugins 和 resources 文件夹。\n'
         '先新建场景（Ctrl+N），默认UTC今天零点至次日零点，再插入对象（Ctrl+Shift+I）。\n'
         '数据 → 数据中心：统一管理 C04、finals2000A 和 UTC/闰秒，支持完整文件下载、导入与自动更新。\n'
@@ -231,7 +233,7 @@ def main():
         'Ctrl+Space 播放/暂停；Ctrl+0 适配轨道；Ctrl+L 定位卫星；Ctrl+T 跳转时间。\n\n'
         'Ctrl+J 收起/展开时间轴，保留播放控制、当前时间和浏览范围。\n'
         'Ctrl+3 打开二维地图，与三维共享时间和选择；滚轮缩放、拖动平移、双击复位。\n\n'
-        'Run OrbitForge.exe from this folder.\n'
+        'Run Orbelle.exe from this folder.\n'
         'DLLs, Qt plugins, offline Earth imagery and example model are included.\n'
         'Keep the folder intact. A Vulkan-capable GPU and its vendor driver are required.\n'
         'No Python, Qt SDK or development PATH is required to launch the desktop.\n'

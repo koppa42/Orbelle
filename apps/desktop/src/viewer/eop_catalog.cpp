@@ -816,7 +816,7 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
                              QNetworkRequest::NoLessSafeRedirectPolicy);
         request.setMaximumRedirectsAllowed(3);
         request.setTransferTimeout(30000);
-        request.setRawHeader("User-Agent", "OrbitForge/0.1 data-center");
+        request.setRawHeader("User-Agent", "Orbelle data-center");
         request.setRawHeader("Accept-Encoding", "identity");
         request.setAttribute(QNetworkRequest::CacheLoadControlAttribute,
                              QNetworkRequest::AlwaysNetwork);

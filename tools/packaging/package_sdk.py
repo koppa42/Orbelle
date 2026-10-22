@@ -35,7 +35,7 @@ def package(sdk, dependencies, output, version, platform):
     if not re.search(r'set\(PACKAGE_VERSION "' + re.escape(version) + r'"\)', config):
         raise ValueError("Installed SDK version differs from release version")
     output.mkdir(parents=True, exist_ok=True)
-    name = f"OrbitForge-{version}-sdk-{platform}"
+    name = f"Orbelle-{version}-sdk-{platform}"
     staging = output.parent / (name + "-staging")
     root = staging / name
     archive = output / (name + (".zip" if platform == "win-x64" else ".tar.gz"))
@@ -44,7 +44,7 @@ def package(sdk, dependencies, output, version, platform):
     shutil.copytree(sdk, root)
     copy_dependencies(dependencies, root / "dependencies")
     (root / "README.txt").write_text(
-        f"OrbitForge {version} C++ SDK ({platform}, Release)\n\n"
+        f"Orbelle {version} C++ SDK ({platform}, Release)\n\n"
         "Requires CMake 3.28+ and a compatible C++20 compiler.\n"
         "Windows: Visual Studio 2022 x64 (v143); Linux: Ubuntu 24.04 x86_64.\n"
         "This is a headless SDK with Core, Results, Application, Runtime, ERFA/IERS, CSPICE and SQLite.\n"

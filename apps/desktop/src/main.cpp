@@ -17,7 +17,9 @@ namespace ui = orbitforge::desktop::ui;
 
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
+    // Keep the storage identity so existing data and preferences remain available.
     app.setApplicationName("OrbitForge");
+    app.setApplicationDisplayName(ui::text("brand.name"));
 #ifdef ORBITFORGE_DESKTOP_GRAPHICS
     return orbitforge::desktop::run_graphics_workbench(app);
 #endif

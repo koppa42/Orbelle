@@ -254,10 +254,10 @@ python tools/validation/run_graphics_smoke.py --executable out/build/desktop-gra
 完成 `desktop-graphics` 的 Release 构建后，使用全新的输出目录打包：
 
 ```powershell
-python tools/packaging/package_windows.py --build-dir out/build/desktop-graphics --dependency-prefix out/dependencies/installed/x64-windows --output out/releases/OrbitForge-0.3.0-win-x64 --reports out/validation/package-win-x64 --verify --zip
+python tools/packaging/package_windows.py --build-dir out/build/desktop-graphics --dependency-prefix out/dependencies/installed/x64-windows --output out/releases/Orbelle-0.3.0-win-x64 --reports out/validation/package-win-x64 --verify --zip
 ```
 
-脚本收集应用程序、运行库、Qt 插件、离线资源及第三方许可，并生成同名 ZIP。`--verify` 在真实 Windows 桌面与 Vulkan GPU 上检查打包结果；运行时使用隔离的数据目录。解压后的入口是 `OrbitForge.exe`。输出与报告必须使用互不包含的新目录。公开 `manifest.json` 只包含包内相对路径、文件名和校验值；本机 DLL 来源路径留在 `--reports` 的 `dll-sources.json`。完整参数可用 `python tools/packaging/package_windows.py --help` 查看。
+脚本收集应用程序、运行库、Qt 插件、离线资源及第三方许可，并生成同名 ZIP。`--verify` 在真实 Windows 桌面与 Vulkan GPU 上检查打包结果；运行时使用隔离的数据目录。解压后的入口是 `Orbelle.exe`。输出与报告必须使用互不包含的新目录。公开 `manifest.json` 只包含包内相对路径、文件名和校验值；本机 DLL 来源路径留在 `--reports` 的 `dll-sources.json`。完整参数可用 `python tools/packaging/package_windows.py --help` 查看。
 
 交付脚本回归测试：`python -m unittest discover -s tests/packaging -p "test_*.py" -v`。
 

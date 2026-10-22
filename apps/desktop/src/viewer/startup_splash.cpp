@@ -171,7 +171,8 @@ void StartupSplash::drawContents(QPainter *painter) {
     font.setWeight(QFont::DemiBold);
     painter->setFont(font);
     painter->setPen(theme::color(theme::text));
-    painter->drawText(QRectF(98, 37, 520, 58), Qt::AlignLeft | Qt::AlignVCenter, "OrbitForge");
+    painter->drawText(QRectF(98, 37, 520, 58), Qt::AlignLeft | Qt::AlignVCenter,
+                      ui::text("brand.name"));
     font.setPixelSize(15);
     font.setWeight(QFont::Normal);
     font.setLetterSpacing(QFont::AbsoluteSpacing, 1.5);
@@ -181,6 +182,12 @@ void StartupSplash::drawContents(QPainter *painter) {
                       ui::text("startup_splash.label_2"));
     paint_sakura_blossom(*painter, QPointF(906, 48), 11, theme::color(theme::sakura, 200));
     paint_sakura_blossom(*painter, QPointF(878, 34), 5, theme::color(theme::sakura, 120));
+
+    font.setPixelSize(12);
+    font.setLetterSpacing(QFont::AbsoluteSpacing, 0);
+    painter->setFont(font);
+    painter->drawText(QRectF(100, 126, 420, 24), Qt::AlignLeft | Qt::AlignVCenter,
+                      ui::text("brand.artwork_credit"));
 
     // Ice-to-sakura hairline above the status message.
     QLinearGradient rule(48, 0, 368, 0);
