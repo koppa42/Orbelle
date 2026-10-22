@@ -2,8 +2,10 @@
 #include "../src/viewer/startup_resources.hpp"
 #include "../src/viewer/workbench_style.hpp"
 #include <QApplication>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QKeyEvent>
@@ -67,9 +69,39 @@ qint64 private_bytes() {
 }
 } // namespace
 
+TEST(Startup, BundledArtworkIncludesAllSevenScenes) {
+    auto &app = startup_app();
+    const QDir directory(QStringLiteral(":/orbitforge/startup"));
+    const QStringList expected{"cozy-afternoon.png", "rain-window.png",    "sakura-garden.png",
+                               "sakura-path.png",    "seaside-sunset.png", "star-gazing.png",
+                               "winter-lights.png"};
+    EXPECT_EQ(directory.entryList({"*.png"}, QDir::Files, QDir::Name), expected);
+    for (const auto &name : expected) {
+        SCOPED_TRACE(name.toStdString());
+        const QPixmap artwork(directory.filePath(name));
+        ASSERT_FALSE(artwork.isNull());
+        if (name != "star-gazing.png")
+            EXPECT_EQ(artwork.size(), QSize(2048, 1152));
+        if (!qEnvironmentVariableIsEmpty("ORBITFORGE_STARTUP_CAPTURE_DIR")) {
+            StartupSplash splash(app.primaryScreen());
+            const auto pixels = splash.pixmap().size();
+            auto picture =
+                artwork.scaled(pixels, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+            picture = picture.copy((picture.width() - pixels.width()) / 2,
+                                   (picture.height() - pixels.height()) / 2, pixels.width(),
+                                   pixels.height());
+            picture.setDevicePixelRatio(splash.pixmap().devicePixelRatio());
+            splash.setPixmap(picture);
+            splash.showMessage("1 / 2　正在加载并校验 EGM2008 重力场…");
+            capture(splash, QFileInfo(name).baseName());
+        }
+    }
+}
+
 TEST(Startup, WorkerProgressKeepsWindowResponsiveAndClickDoesNotDismissIt) {
     auto &app = startup_app();
     StartupSplash splash(app.primaryScreen());
+    const auto artwork_key = splash.pixmap().cacheKey();
     splash.show();
     const auto gui_thread = std::this_thread::get_id();
     std::atomic_bool first_done{false}, release{false}, background{false};
@@ -114,6 +146,7 @@ TEST(Startup, WorkerProgressKeepsWindowResponsiveAndClickDoesNotDismissIt) {
     EXPECT_GE(ticks, 12);
     EXPECT_EQ(splash.findChild<QProgressBar *>("startupProgress")->value(), 2);
     EXPECT_EQ(splash.message(), "数据已就绪，正在打开工作台…");
+    EXPECT_EQ(splash.pixmap().cacheKey(), artwork_key);
     capture(splash, "ready");
 }
 

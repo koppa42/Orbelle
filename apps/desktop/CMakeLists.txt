@@ -25,12 +25,20 @@ if(ORBITFORGE_WITH_VSG)
             "Enable qtbase[freetype] in vcpkg and allow Qt plugin target imports.")
     endif()
     target_link_libraries(orbitforge_desktop PRIVATE Qt6::Network)
+    set(orbitforge_startup_artwork
+        resources/startup/star-gazing.png
+        resources/startup/sakura-path.png
+        resources/startup/rain-window.png
+        resources/startup/seaside-sunset.png
+        resources/startup/winter-lights.png
+        resources/startup/sakura-garden.png
+        resources/startup/cozy-afternoon.png)
     # Original chevrons are pre-rendered at high resolution; no optional QtSvg plugin needed.
     qt_add_resources(orbitforge_desktop "workbench_icons" PREFIX "/orbitforge"
         BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
         FILES resources/icons/chevron-down.png
               resources/icons/chevron-left.png resources/icons/chevron-right.png
-              resources/startup/star-gazing.png
+              ${orbitforge_startup_artwork}
               resources/artwork/orbital-welcome.png resources/artwork/data-preparation.png)
     find_package(vsgQt 0.4.0 EXACT CONFIG REQUIRED)
     find_package(rocky 1.1.0 EXACT CONFIG REQUIRED)
@@ -106,7 +114,7 @@ if(ORBITFORGE_WITH_VSG)
         qt_add_resources(orbitforge_data_center_ui_tests "data_center_icons" PREFIX "/orbitforge"
             BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
             FILES resources/icons/chevron-down.png resources/artwork/data-preparation.png
-                  resources/startup/star-gazing.png)
+                  ${orbitforge_startup_artwork})
         target_compile_definitions(orbitforge_data_center_ui_tests PRIVATE
             ORBITFORGE_TEST_PLANETS="${PROJECT_SOURCE_DIR}/data/samples/spice/de440s_planets_2016_leap/manifest.json"
             ORBITFORGE_TEST_FINALS="${PROJECT_SOURCE_DIR}/data/samples/eop/iers_finals2000a_2026_09_01_2026_11_01/manifest.json"

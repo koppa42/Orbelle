@@ -2,6 +2,7 @@
 #include "../ui_text.hpp"
 #include "workbench_style.hpp"
 #include <QCloseEvent>
+#include <QDir>
 #include <QEventLoop>
 #include <QFont>
 #include <QKeyEvent>
@@ -9,6 +10,7 @@
 #include <QPainter>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QRandomGenerator>
 #include <QScreen>
 #include <QTimer>
 #include <algorithm>
@@ -18,7 +20,12 @@
 namespace orbitforge::desktop {
 namespace {
 QPixmap splash_picture(QScreen *screen) {
-    const QPixmap artwork(QStringLiteral(":/orbitforge/startup/star-gazing.png"));
+    const QDir directory(QStringLiteral(":/orbitforge/startup"));
+    const auto pictures = directory.entryList({QStringLiteral("*.png")}, QDir::Files, QDir::Name);
+    if (pictures.isEmpty())
+        throw std::runtime_error("Startup artwork is missing from the application resources");
+    const auto index = QRandomGenerator::global()->bounded(static_cast<int>(pictures.size()));
+    const QPixmap artwork(directory.filePath(pictures[index]));
     if (artwork.isNull())
         throw std::runtime_error("Startup artwork is missing from the application resources");
     const auto available = screen ? screen->availableGeometry().size() : QSize(1280, 800);
