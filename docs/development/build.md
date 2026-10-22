@@ -5,7 +5,7 @@
 ## 首次准备
 
 ```powershell
-git clone https://github.com/koppa42/OrbitForge.git Orbelle
+git clone https://github.com/koppa42/Orbelle.git Orbelle
 cd Orbelle
 ```
 

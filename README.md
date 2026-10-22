@@ -39,7 +39,7 @@ Windows 可执行文件内嵌多尺寸应用图标，便携包中的 `Orbelle.ex
 产品和开发接口统一使用 `Orbelle` / `orbelle`：CMake 包为 `Orbelle`，Python 导入为 `orbelle`，项目扩展名为 `.orbelle`。本次更名同步更新环境变量、配置和默认数据目录；已有数据可通过数据中心重新导入。项目仅支持当前 v48 格式，旧版项目需使用对应版本程序打开。
 
 ```powershell
-git clone https://github.com/koppa42/OrbitForge.git Orbelle
+git clone https://github.com/koppa42/Orbelle.git Orbelle
 cd Orbelle
 ```
 
