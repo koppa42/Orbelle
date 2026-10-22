@@ -3,6 +3,7 @@
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QElapsedTimer>
+#include <QEvent>
 #include <QFile>
 #include <QHostAddress>
 #include <QJsonDocument>
@@ -11,6 +12,7 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <cmath>
+#include <functional>
 #include <gtest/gtest.h>
 #include <orbelle/application/project.hpp>
 #include <orbelle/runtime/ephemeris.hpp>
@@ -84,6 +86,58 @@ class DataCenterTest : public ::testing::Test {
     }
     QTemporaryDir temp;
 };
+class ReplyEventObserver final : public QObject {
+  public:
+    explicit ReplyEventObserver(std::function<void(QNetworkReply *)> inspect)
+        : inspect_(std::move(inspect)) {
+        qApp->installEventFilter(this);
+    }
+    ~ReplyEventObserver() override { qApp->removeEventFilter(this); }
+
+  protected:
+    bool eventFilter(QObject *object, QEvent *event) override {
+        if (event->type() == QEvent::MetaCall)
+            if (auto *reply = qobject_cast<QNetworkReply *>(object))
+                inspect_(reply);
+        return false;
+    }
+
+  private:
+    std::function<void(QNetworkReply *)> inspect_;
+};
+TEST_F(DataCenterTest, LateReplyEventsAfterCancelDoNotTouchIdleOrRetriedDownload) {
+    for (bool retry : {false, true}) {
+        SCOPED_TRACE(retry);
+        EopCatalog catalog(root() / (retry ? "retry" : "idle"), {ORBELLE_TEST_C04}, {}, false);
+        Server cancelled(payload()), replacement(payload());
+        bool observed = false;
+        // Cancel after the HTTP worker has queued a response event but before the GUI
+        // thread delivers it. The real pending event must still be safe to process.
+        ReplyEventObserver observer([&](QNetworkReply *reply) {
+            if (observed || reply->url() != cancelled.url() || cancelled.requests.isEmpty())
+                return;
+            observed = true;
+            catalog.cancel_download();
+            EXPECT_FALSE(catalog.downloading());
+            EXPECT_EQ(catalog.update_status().state, DataUpdateState::cancelled);
+            if (retry)
+                catalog.start_download(replacement.url());
+        });
+        catalog.start_download(cancelled.url());
+        complete(catalog);
+        ASSERT_TRUE(observed);
+        if (retry) {
+            EXPECT_TRUE(catalog.has_full_download());
+            EXPECT_EQ(replacement.requests.size(), 1);
+            EXPECT_EQ(catalog.update_status().state, DataUpdateState::updated);
+        } else {
+            EXPECT_FALSE(catalog.has_full_download());
+            EXPECT_EQ(catalog.update_status().state, DataUpdateState::cancelled);
+            EXPECT_FALSE(catalog.update_status().checked_at);
+        }
+        EXPECT_TRUE(std::filesystem::is_empty(catalog.store() / "staging"));
+    }
+}
 TEST_F(DataCenterTest, DownloadSelectsCurrentDataWithoutChangingActiveProviders) {
     EopCatalog catalog(root() / "data", {ORBELLE_TEST_FINALS, ORBELLE_TEST_C04}, {}, false);
     auto original = catalog.providers().front();
