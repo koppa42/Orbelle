@@ -98,7 +98,7 @@ class ProjectTests(unittest.TestCase):
             path = Path(directory) / 'bound.orbelle'
             project.save(path)
             original = path.read_bytes()
-            self.assertEqual(struct.unpack_from('<I', original, 8)[0], 47)
+            self.assertEqual(struct.unpack_from('<I', original, 8)[0], 48)
             def rewrite(tag_to_change, mutate):
                 path.write_bytes(rewrite_section(original, tag_to_change, mutate))
 
