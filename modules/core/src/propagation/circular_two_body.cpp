@@ -1,9 +1,9 @@
 #include <cmath>
 #include <numbers>
-#include <orbitforge/core/propagation/circular_two_body.hpp>
+#include <orbelle/core/propagation/circular_two_body.hpp>
 #include <stdexcept>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 CircularTwoBody::CircularTwoBody(Length radius, GravitationalParameter mu, Epoch reference_epoch)
     : radius_m_(radius.metres), speed_mps_(0.0), angular_rate_radps_(0.0),
       reference_epoch_(reference_epoch) {
@@ -31,4 +31,4 @@ CartesianState CircularTwoBody::state_at(Epoch epoch) const {
             {radius_m_ * c, radius_m_ * s, 0.0},
             {-speed_mps_ * s, speed_mps_ * c, 0.0}};
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

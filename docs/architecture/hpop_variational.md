@@ -42,9 +42,9 @@ Pseudo Correction 仍刷新变分右端，不能冻结修正前的 AΦ。校正�
 ## 使用
 
 ```python
-options = orbitforge.HpopVariationalOptions()
-options.gravity = orbitforge.HpopGravityTruncation(4, 4)
-result = orbitforge.propagate_hpop_variational(orbit_input, end, options=options, data=data)
+options = orbelle.HpopVariationalOptions()
+options.gravity = orbelle.HpopGravityTruncation(4, 4)
+result = orbelle.propagate_hpop_variational(orbit_input, end, options=options, data=data)
 phi = result.state_transition
 sensitivity_d = result.drag_sensitivity
 sensitivity_k = result.srp_sensitivity

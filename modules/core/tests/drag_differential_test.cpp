@@ -4,11 +4,11 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <numbers>
-#include <orbitforge/core/propagation/atmospheric_drag.hpp>
-#include <orbitforge/core/propagation/state_provider.hpp>
+#include <orbelle/core/propagation/atmospheric_drag.hpp>
+#include <orbelle/core/propagation/state_provider.hpp>
 #include <sstream>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 using Vector = std::array<double, 3>;
 using Matrix = std::array<Vector, 3>;
@@ -27,7 +27,7 @@ void read(std::istream &in, Matrix &m) {
 } // namespace
 
 TEST(DragDifferential, NrlStateAndConsiderParameterMatchOrekitAutomaticDifferentiation) {
-    std::ifstream file(ORBITFORGE_DRAG_DIFFERENTIAL_REFERENCE);
+    std::ifstream file(ORBELLE_DRAG_DIFFERENTIAL_REFERENCE);
     ASSERT_TRUE(file.is_open());
     unsigned rows = 0;
     double maximum = 0;
@@ -90,7 +90,7 @@ TEST(DragDifferential, NrlStateAndConsiderParameterMatchOrekitAutomaticDifferent
 }
 
 TEST(DragDifferential, JacchiaRobertsAndBlendMatchIndependentGmatAndAuthorNrl) {
-    std::ifstream file(ORBITFORGE_DRAG_DENSITY_REFERENCE);
+    std::ifstream file(ORBELLE_DRAG_DENSITY_REFERENCE);
     ASSERT_TRUE(file.is_open());
     unsigned rows = 0;
     double maximum = 0;
@@ -134,7 +134,7 @@ TEST(DragDifferential, JacchiaRobertsAndBlendMatchIndependentGmatAndAuthorNrl) {
 }
 
 TEST(DragDifferential, HighAltitudeRobertsMatches80DigitOriginalEquations) {
-    std::ifstream file(ORBITFORGE_DRAG_DENSITY_HIGH_REFERENCE);
+    std::ifstream file(ORBELLE_DRAG_DENSITY_HIGH_REFERENCE);
     ASSERT_TRUE(file.is_open());
     unsigned rows = 0;
     double maximum_density = 0, maximum_gradient = 0;

@@ -13,7 +13,7 @@ import time
 import unittest
 
 # Native value/format tests; public editing is in test_objects.py.
-from orbitforge import _native as of
+from orbelle import _native as of
 
 SAMPLES = Path(of.__file__).parent / 'data/eop'
 C04 = SAMPLES / 'iers_c04_2000_01_01_2000_01_02'

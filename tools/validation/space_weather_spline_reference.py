@@ -1,4 +1,4 @@
-"""Independent SciPy 1.16.3 natural cubic reference; no OrbitForge imports.
+"""Independent SciPy 1.16.3 natural cubic reference; no Orbelle imports.
 
 Run: python tools/validation/space_weather_spline_reference.py OUTPUT [GMAT_DRIVER]
 The two series are independent (Kp is not derived from Ap). Civil UTC slots

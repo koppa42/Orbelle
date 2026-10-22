@@ -2,10 +2,10 @@
 #include <cmath>
 #include <limits>
 #include <mutex>
-#include <orbitforge/core/propagation/mission.hpp>
+#include <orbelle/core/propagation/mission.hpp>
 #include <utility>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 using Vector = std::array<double, 3>;
 double norm(const Vector &v) { return std::hypot(v[0], v[1], v[2]); }
@@ -246,4 +246,4 @@ std::shared_ptr<const IStateProvider> make_mission(CartesianState initial, Missi
                                                    CoastFactory coast, std::optional<Epoch> stop) {
     return std::make_shared<MissionProvider>(initial, std::move(plan), std::move(coast), stop);
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

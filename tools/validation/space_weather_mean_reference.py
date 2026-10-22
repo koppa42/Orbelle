@@ -1,4 +1,4 @@
-"""Independent SciPy 1.16.3 primitive-spline / GMAT reference, no OrbitForge imports.
+"""Independent SciPy 1.16.3 primitive-spline / GMAT reference, no Orbelle imports.
 
 python tools/validation/space_weather_mean_reference.py OUTPUT GMAT_DRIVER
 The derivative of a natural cubic through cumulative bin integrals is quadratic.

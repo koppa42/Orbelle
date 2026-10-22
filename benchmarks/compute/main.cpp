@@ -9,10 +9,10 @@
 #include <iomanip>
 #include <iostream>
 #include <nlohmann/json.hpp>
-#include <orbitforge/application/session.hpp>
-#include <orbitforge/core/propagation/circular_two_body.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/application/session.hpp>
+#include <orbelle/core/propagation/circular_two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -27,7 +27,7 @@
 #endif
 
 namespace {
-using namespace orbitforge;
+using namespace orbelle;
 using Json = nlohmann::json;
 using Clock = std::chrono::steady_clock;
 constexpr double mu = 3.986004418e14;
@@ -463,15 +463,15 @@ int main(int argc, char **argv) {
         require(!std::filesystem::exists(output), "Output already exists");
         const auto profile = args.at("--profile").get<std::string>();
         require(profile == "baseline" || profile == "smoke", "Unknown profile");
-        const bool eligible = std::string{ORBITFORGE_BENCHMARK_CONFIG} == "Release" &&
-                              ORBITFORGE_BENCHMARK_SANITIZERS == 0;
+        const bool eligible = std::string{ORBELLE_BENCHMARK_CONFIG} == "Release" &&
+                              ORBELLE_BENCHMARK_SANITIZERS == 0;
         require(profile != "baseline" || eligible, "Baseline requires Release without sanitizers");
         const Profile p =
             profile == "baseline" ? Profile{10'000, 601, 10'000, 200, 5} : Profile{8, 7, 16, 8, 2};
         report["profile"] = profile;
-        report["build"] = {{"configuration", ORBITFORGE_BENCHMARK_CONFIG},
-                           {"compiler", ORBITFORGE_BENCHMARK_COMPILER},
-                           {"sanitizers", ORBITFORGE_BENCHMARK_SANITIZERS != 0}};
+        report["build"] = {{"configuration", ORBELLE_BENCHMARK_CONFIG},
+                           {"compiler", ORBELLE_BENCHMARK_COMPILER},
+                           {"sanitizers", ORBELLE_BENCHMARK_SANITIZERS != 0}};
         report["workload"] = {{"objects", p.objects},
                               {"epochs", p.epochs},
                               {"spice_epochs_per_body", p.spice_epochs},

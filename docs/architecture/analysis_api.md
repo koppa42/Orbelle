@@ -5,8 +5,8 @@
 ## Python 状态查询
 
 ```python
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 project = of.Project("Observation", of.Epoch(0), of.Epoch(300_000_000_000))
 sat = project.objects.satellite("Observer", orbit=of.orbits.TwoBody(
@@ -114,11 +114,11 @@ except of.DataChangedError as error:
 
 ```python
 analysis = project.prepare(data=data)
-project.save("mission.orbitforge", analysis=analysis)
+project.save("mission.orbelle", analysis=analysis)
 
 # 相同数据直接打开；数据变化时由应用取得确认。
 try:
-    restored = of.Project.open("mission.orbitforge", data=data)
+    restored = of.Project.open("mission.orbelle", data=data)
 except of.DataChangedError as error:
     plan = error.plan
     # 展示 plan.data_changes；仅在用户明确同意的分支执行：
@@ -127,11 +127,11 @@ except of.DataChangedError as error:
 
 `save(..., analysis=analysis)` 保存当前已提交输入、样式和报告定义，同时记录该分析固定的 UTC / EOP 来源与策略、整个项目的物理输入哈希和数据锁哈希。它不保存结果缓存，也不声称已经执行过所有查询。分析必须属于这个项目，且物理输入仍一致；允许改名、调整样式、播放时间和报告配置；仅用于显示的轨道步长也可改变。启用 HPOP 固定星历输出后，轨道步长属于物理计算输入。修改轨道、分析区间、站点坐标或最低仰角、传感器视场或引用关系后，保存旧分析抛出 `RevisionConflictError`。同稳定 ID 的另一个项目也不能借用该分析。
 
-`project.analysis_record` 返回只读的准备记录；`project.analysis_status` 为 `UNRECORDED`、`CURRENT` 或 `STALE`，由记录与当前输入、数据身份比较得出。输入哈希使用独立的 `orbitforge-analysis-input-v1` 编码，不等同于单对象轨迹的输入哈希。裸 `save(path)` 只保存现状，不创造准备记录，也不把过期记录改成当前；单纯 `prepare()` 仍不改写项目。更改传播模型的解释规则时须同步升级这份哈希编码的版本。
+`project.analysis_record` 返回只读的准备记录；`project.analysis_status` 为 `UNRECORDED`、`CURRENT` 或 `STALE`，由记录与当前输入、数据身份比较得出。输入哈希使用独立的 `orbelle-analysis-input-v1` 编码，不等同于单对象轨迹的输入哈希。裸 `save(path)` 只保存现状，不创造准备记录，也不把过期记录改成当前；单纯 `prepare()` 仍不改写项目。更改传播模型的解释规则时须同步升级这份哈希编码的版本。
 
 文件和文档共同遵守原子发布：候选校验、项目身份与修订检查通过后写入文件，成功后才更新内存来源、修订和已保存标记并通知观察者。覆盖默认关闭。写入失败或修订冲突不修改两者；观察者在保存成功后再次编辑，项目仍正确显示未保存。
 
-开发预览阶段只读写当前 `.orbitforge` v47；所有打开入口（包括 `load_project_data()`）在解析内容前拒绝非当前版本，并给出实际与支持的版本。没有旧格式迁移或缺字段补默认值的读取路径；输入项目仍可以不包含可选的分析准备记录。详见[项目文件](project_files.md)。
+开发预览阶段只读写当前 `.orbelle` v48；所有打开入口（包括 `load_project_data()`）在解析内容前拒绝非当前版本，并给出实际与支持的版本。没有旧格式迁移或缺字段补默认值的读取路径；输入项目仍可以不包含可选的分析准备记录。详见[项目文件](project_files.md)。
 
 `Project.plan_open(path, data=...)` 固定解析后的文件和已验证资源；`name`、`data`、`data_changes` 可供确认界面读取。直接 `Project.open()` 和 `of.load_project()` 使用同一流程。已有来源依赖必须提供相应当前数据；不传数据只适合没有 UTC / EOP 依赖的原生坐标计算项目，SGP4 仍须显式提供 UTC。需要仅检查或导入原始输入而不准备计算时，使用 `load_project_data()`，再按需 `Project.from_data()`。
 
@@ -234,43 +234,43 @@ Python 直接接收对象句柄，不需要构造 `ReportDefinition` 或填写 I
 
 `cancelled=callable` 必须返回 bool，取消抛出 `AnalysisCancelled`；`progress(done, total)` 提供同步进度，两者均可省略。即使在完成进度回调中取消，也不返回结果；回调异常传回调用方。生成时固定报告配置，回调修改原配置或当前项目不影响本次计算。报告查询不重建传播器、不重新读取数据文件，也不写入项目的已保存报告配置。
 
-报告查询与显示已拆为 `ReportQuery` / `ReportTemplate`。Python 可传 `template=of.reports.Template([...])`，或生成后用 `template.apply(result)` 重排列、切换单位和时间系统，不重新计算。C++ 支持 `Analysis::report(query, format)` 和 `ReportResult::with_template(format)`。原始 SI 表始终保留，可恢复被隐藏的列；逐列单位优先于默认单位。详见[报告](reports.md)。项目当前为 v47（RPTS v7），保存显式选择模式及显示模板；不增加旧格式兼容路径。
+报告查询与显示已拆为 `ReportQuery` / `ReportTemplate`。Python 可传 `template=of.reports.Template([...])`，或生成后用 `template.apply(result)` 重排列、切换单位和时间系统，不重新计算。C++ 支持 `Analysis::report(query, format)` 和 `ReportResult::with_template(format)`。原始 SI 表始终保留，可恢复被隐藏的列；逐列单位优先于默认单位。详见[报告](reports.md)。项目当前为 v48（RPTS v7），保存显式选择模式及显示模板；不增加旧格式兼容路径。
 
 ## C++ 入口与验证
 
 ```cpp
-#include <orbitforge/runtime/analysis.hpp>
-#include <orbitforge/runtime/data_catalog.hpp>
+#include <orbelle/runtime/analysis.hpp>
+#include <orbelle/runtime/data_catalog.hpp>
 using namespace std::chrono_literals;
 
 // document 为 application::ProjectDocument，satellite 是其 ObjectRef。
-auto analysis = orbitforge::runtime::prepare(document);
-auto trajectory = analysis.states(satellite, 30s, orbitforge::core::FrameId::gcrf);
-orbitforge::runtime::export_trajectory_csv(trajectory, "trajectory.csv");
-orbitforge::runtime::save_project(document, "mission.orbitforge", analysis);
-auto restored = orbitforge::runtime::open_project("mission.orbitforge");
+auto analysis = orbelle::runtime::prepare(document);
+auto trajectory = analysis.states(satellite, 30s, orbelle::core::FrameId::gcrf);
+orbelle::runtime::export_trajectory_csv(trajectory, "trajectory.csv");
+orbelle::runtime::save_project(document, "mission.orbelle", analysis);
+auto restored = orbelle::runtime::open_project("mission.orbelle");
 
-orbitforge::runtime::DataCatalog catalog{"local/shared-data"};
-auto earth_fixed = orbitforge::runtime::prepare(document, catalog);
+orbelle::runtime::DataCatalog catalog{"local/shared-data"};
+auto earth_fixed = orbelle::runtime::prepare(document, catalog);
 auto state = earth_fixed.state(satellite, document.snapshot().project->first,
-                               orbitforge::core::FrameId::itrf);
+                               orbelle::core::FrameId::itrf);
 auto windows = earth_fixed.access(station, sensor, {.search_step = 1s});
 for (const auto &window : windows.windows()) {
     auto exact_duration = window.duration();  // std::chrono::nanoseconds
 }
-orbitforge::runtime::export_access_csv(windows, "access.csv");
+orbelle::runtime::export_access_csv(windows, "access.csv");
 
 auto aer = earth_fixed.aer(station, sensor, 10s);
-orbitforge::runtime::export_aer_csv(aer, "aer.csv");
-orbitforge::application::ReportQuery query;
-query.kind = orbitforge::application::ReportKind::aer;
+orbelle::runtime::export_aer_csv(aer, "aer.csv");
+orbelle::application::ReportQuery query;
+query.kind = orbelle::application::ReportKind::aer;
 query.object_ids = {station.id(), sensor.id()};
 query.step_nanoseconds = 10'000'000'000;
-orbitforge::application::ReportTemplate format;
-format.time_scale = orbitforge::application::ReportTimeScale::tai;
+orbelle::application::ReportTemplate format;
+format.time_scale = orbelle::application::ReportTimeScale::tai;
 format.columns = {{"time.epoch", "TAI", ""}, {"aer.range", "km", "Range"}};
 auto report = earth_fixed.report(query, format);
-orbitforge::runtime::export_report_csv(report, "aer-report.csv");
+orbelle::runtime::export_report_csv(report, "aer-report.csv");
 ```
 
 Runtime 位于 Application 之上，分析不让对象模型反向依赖 Provider。`ProjectSnapshot` 保留进程内项目范围；`snapshot.read(ref)` 从该修订读取对象，原对象删除后仍有效。C++ 的 `AnalysisPlan` 和 `DataChangedError::plan()` 与 Python 确认行为一致。
@@ -291,7 +291,7 @@ Access 由 `AnalysisAccess.*`、`AccessResults.*`、Python `test_analysis_access
 
 AER 与统一报告还由 `test_analysis_aer_reports.py` 和 `AnalysisAccess.*` 验证：九类报告与原入口数值一致、ITRF 观测及距离数值差分、精确采样、不可见样本、对象删除与源文件移除、完成回调取消、明确对象选择、可选数组转换和已安装 SDK。`access.py` 同时演示 AER 和报告入口。
 
-报告模板由 `Reports.*`、`ReportDialog.TemplateUnitsReuseResultsAndReorderedFieldsKeepPlotsAndSelection`、Python `test_report_templates.py` 和安装后的 SDK 验证；覆盖逐列单位、重排与恢复字段、显式全选、UTC 按需校验、失效输入不自动重算，以及 v47 独立二进制样本精确往返。
+报告模板由 `Reports.*`、`ReportDialog.TemplateUnitsReuseResultsAndReorderedFieldsKeepPlotsAndSelection`、Python `test_report_templates.py` 和安装后的 SDK 验证；覆盖逐列单位、重排与恢复字段、显式全选、UTC 按需校验、失效输入不自动重算，以及 v48 独立二进制样本精确往返。
 
 ### 机动记录
 

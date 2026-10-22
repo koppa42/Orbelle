@@ -2,10 +2,10 @@
 #include <cmath>
 #include <complex>
 #include <numbers>
-#include <orbitforge/core/propagation/solid_tides.hpp>
+#include <orbelle/core/propagation/solid_tides.hpp>
 #include <stdexcept>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 constexpr std::array k2_real{0.30190, 0.29830, 0.30102};
 constexpr std::array k2_imag{0.0, -0.00144, -0.00130};
@@ -188,4 +188,4 @@ solid_tide_corrections(const GravityInfo &field, const SolidTideOptions &options
         }
     return result;
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

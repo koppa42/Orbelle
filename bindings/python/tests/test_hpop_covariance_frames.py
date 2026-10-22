@@ -3,7 +3,7 @@ from pathlib import Path
 import math
 import unittest
 
-import orbitforge as of
+import orbelle as of
 
 ROOT = Path(__file__).resolve().parents[3]
 

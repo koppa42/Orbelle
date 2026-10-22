@@ -34,7 +34,7 @@ def main() -> int:
     parser.add_argument("--benchmark-scenario", type=Path,
                         help="Use the fixed 10k workload; still a validation preflight, not timing")
     parser.add_argument("--project-fixture", type=Path,
-                        help="Open a Python-created two-body/J2 .orbitforge file in the desktop checks")
+                        help="Open a Python-created two-body/J2 .orbelle file in the desktop checks")
     args = parser.parse_args()
     executable = args.executable.resolve(strict=True)
     prefix = args.dependency_prefix.resolve(strict=True)

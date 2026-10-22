@@ -14,7 +14,7 @@ void Workbench::smoke_hpop_apply() {
             satellite.orbit.propagator = OrbitPropagator::hpop;
             project.satellites.push_back(satellite);
         }
-        start_project(std::move(project), smoke_dir_ + "/apply-audit.orbitforge");
+        start_project(std::move(project), smoke_dir_ + "/apply-audit.orbelle");
         ++orbit_smoke_stage_;
         break;
     }
@@ -28,7 +28,7 @@ void Workbench::smoke_hpop_apply() {
                       "gfc 0 0 1 0\ngfc 2 0 -0.000484165371736 0\n"
                       "gfc 2 1 0 0\ngfc 2 2 0 0\n");
         fixture.close();
-        const auto supplied = qEnvironmentVariable("ORBITFORGE_APPLY_GRAVITY_FILE");
+        const auto supplied = qEnvironmentVariable("ORBELLE_APPLY_GRAVITY_FILE");
         const auto source = supplied.isEmpty() ? fixture.fileName() : supplied;
         runtime::CatalogGravity installed;
         if (smoke_gravity_id_ == "egm2008") {
@@ -119,7 +119,7 @@ void Workbench::smoke_hpop_apply() {
                       "Unchanged Apply left a previous task status");
         smoke_record("unchanged-apply-does-not-compute-or-confirm-data");
         properties_dialog_->close();
-        save_project_to(smoke_dir_ + "/apply-audit.orbitforge");
+        save_project_to(smoke_dir_ + "/apply-audit.orbelle");
         smoke_final_frames_ = 0;
         ++orbit_smoke_stage_;
         break;
@@ -183,7 +183,7 @@ void Workbench::smoke_hpop_apply() {
         satellite.orbit.first = project.first;
         satellite.orbit.last = project.last;
         project.satellites.push_back(satellite);
-        start_project(std::move(project), smoke_dir_ + "/apply-navigation.orbitforge");
+        start_project(std::move(project), smoke_dir_ + "/apply-navigation.orbelle");
         ++orbit_smoke_stage_;
         break;
     }
@@ -298,7 +298,7 @@ void Workbench::smoke_hpop_apply() {
                       "Cancelled project edit changed playback or applied its draft");
         smoke_record("cancelled-project-edit-keeps-playback-and-applied-state");
         set_playing(false);
-        save_project_to(smoke_dir_ + "/apply-navigation.orbitforge");
+        save_project_to(smoke_dir_ + "/apply-navigation.orbelle");
         // Navigation assertions above deliberately leave the globe off-center.
         // Restore a fitted view for the final whole-scene pixel checks.
         fit_views();

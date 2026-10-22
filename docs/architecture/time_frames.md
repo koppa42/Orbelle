@@ -72,7 +72,7 @@ GCRF/ITRF 表示地心 GCRS/ITRS 的轴向关系，没有实现特定 ITRF 实�
 
 ## 装配与可选构建
 
-`ORBITFORGE_WITH_ERFA` 默认关闭；`time-frames` CMake 预设和标准 wheel 构建显式开启。Runtime 装配 Erfa 和 Iers，两者均只依赖 Core 接口；Iers 通过注入的时间 Provider 换算节点。Erfa 私有链接 `erfa::erfa`，Iers 私有使用 nlohmann-json 3.12.0 和 PicoSHA2 1.0.1。Core/Application 不依赖具体 Provider。
+`ORBELLE_WITH_ERFA` 默认关闭；`time-frames` CMake 预设和标准 wheel 构建显式开启。Runtime 装配 Erfa 和 Iers，两者均只依赖 Core 接口；Iers 通过注入的时间 Provider 换算节点。Erfa 私有链接 `erfa::erfa`，Iers 私有使用 nlohmann-json 3.12.0 和 PicoSHA2 1.0.1。Core/Application 不依赖具体 Provider。
 
 Runtime 始终公开能力查询 `time_frames_available()`；禁用 Provider 的构建调用相应工厂会抛出明确的错误。Python 绑定通过 Runtime 装配，公开头文件不泄漏 ERFA 类型。当前 Provider 只读、无可变缓存；调用的 ERFA 函数也不访问可变闰秒表。
 

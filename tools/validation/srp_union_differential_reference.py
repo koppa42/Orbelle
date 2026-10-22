@@ -1,6 +1,6 @@
 """Independent SciPy 1.16.3 QUADPACK disk union + eighth-order Cartesian differences.
 
-No OrbitForge import or boundary-arc/analytic-derivative formula. Compares two
+No Orbelle import or boundary-arc/analytic-derivative formula. Compares two
 stencil widths and two quadrature tolerances before accepting any reference.
 """
 import argparse

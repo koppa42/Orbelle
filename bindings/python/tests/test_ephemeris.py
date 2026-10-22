@@ -8,7 +8,7 @@ import shutil
 import tempfile
 import unittest
 
-import orbitforge as of
+import orbelle as of
 
 ROOT = Path(__file__).resolve().parents[3]
 SAMPLE = Path(of.__file__).parent / "data/spice/de440s_2016_leap"
@@ -105,7 +105,7 @@ class EphemerisApiTests(unittest.TestCase):
         (relocated / "naif0012.tls").write_bytes(payload)
         manifest["snapshot_id"] = "synthetic-time-coefficients-for-concurrency-test"
         manifest["kernels"][0]["sha256"] = hashlib.sha256(payload).hexdigest()
-        manifest["kernels"][0]["producer"] = "OrbitForge test fixture"
+        manifest["kernels"][0]["producer"] = "Orbelle test fixture"
         path.write_text(json.dumps(manifest))
         second = of.load_spice_snapshot(path, self.workspace)
         def query(provider):

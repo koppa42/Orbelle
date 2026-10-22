@@ -2,8 +2,8 @@
 import tempfile
 from pathlib import Path
 
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 project = of.Project("Reports", of.Epoch(0), of.Epoch(120_000_000_000))
 station = project.objects.ground_station("Equator", location=of.Wgs84Location(u.deg(0), u.deg(0)))
@@ -27,4 +27,4 @@ assert summary.table.row_count == 1
 project.set_reports([report.definition])
 with tempfile.TemporaryDirectory() as directory:
     report.export_csv(Path(directory) / "state.csv")
-    project.save(Path(directory) / "mission.orbitforge")
+    project.save(Path(directory) / "mission.orbelle")

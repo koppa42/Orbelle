@@ -1,4 +1,4 @@
-/* Independent official-author C evaluator; never links OrbitForge. See the density protocol. */
+/* Independent official-author C evaluator; never links Orbelle. See the density protocol. */
 #include "nrlmsise-00.h"
 #include <math.h>
 #include <stdio.h>
@@ -18,7 +18,7 @@ int main(void) {
     const double geometry[][3] = {{60, -70, 16}, {-90, 10, 0}, {0, 0, 12}, {90, -170, 23}};
     const double weather[][3] = {{70, 80, 0}, {150, 150, 3}, {250, 220, 8.5}};
     int d, z, g, w, i;
-    puts("# Author NRLMSISE-00 C bc9a2fe; gtd7d, SI, daily Ap; independent of OrbitForge");
+    puts("# Author NRLMSISE-00 C bc9a2fe; gtd7d, SI, daily Ap; independent of Orbelle");
     puts("# year month day UTC_seconds altitude_m latitude_rad longitude_rad solar_hour_angle_rad "
          "sun_declination_rad f107 f107_average kp density_kg_m3 temperature_K "
          "exospheric_temperature_K");

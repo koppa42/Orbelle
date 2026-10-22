@@ -3,10 +3,10 @@
 #include <cmath>
 #include <fstream>
 #include <map>
-#include <orbitforge/runtime/ocean_tides.hpp>
+#include <orbelle/runtime/ocean_tides.hpp>
 #include <picosha2.h>
 #include <sstream>
-namespace orbitforge::runtime {
+namespace orbelle::runtime {
 namespace {
 void require(bool valid, const std::string &message) {
     if (!valid)
@@ -182,4 +182,4 @@ std::string ocean_tide_download_url() {
     return "https://api.sedoo.fr/formater-catalogue-prod/grace/direct/"
            "fes2014b.v1.Cnm-Snm_Om1%2BOm2C20_with_S1_wave.POT_format.txt";
 }
-} // namespace orbitforge::runtime
+} // namespace orbelle::runtime

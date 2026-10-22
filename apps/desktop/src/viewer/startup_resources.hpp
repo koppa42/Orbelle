@@ -1,9 +1,9 @@
 #pragma once
 #include "startup_splash.hpp"
 #include <map>
-#include <orbitforge/runtime/data_catalog.hpp>
+#include <orbelle/runtime/data_catalog.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // Application-owned, immutable defaults, shared with scenes instead of copied.
 // Keep at most one EGM2008 and one DE440s provider, never a history or all installed
 // models. Active scenes/reports own their resources independently of this cache.
@@ -22,4 +22,4 @@ struct StartupResources {
 std::vector<StartupSplash::Step>
 startup_resource_steps(StartupResources &cache, const std::vector<runtime::CatalogGravity> &gravity,
                        const std::vector<runtime::CatalogEphemeris> &ephemerides);
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

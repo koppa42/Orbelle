@@ -7,13 +7,13 @@
 #include <fstream>
 #include <locale>
 #include <numbers>
-#include <orbitforge/providers/erfa/provider.hpp>
+#include <orbelle/providers/erfa/provider.hpp>
 #include <picosha2.h>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
 
-namespace orbitforge::providers::erfa {
+namespace orbelle::providers::erfa {
 core::GeodeticPosition itrf_to_wgs84(core::CartesianState state) {
     auto &p = state.position_m;
     if (state.origin != core::OriginId::earth || state.frame != core::FrameId::itrf ||
@@ -638,4 +638,4 @@ std::array<double, 3> display_sun_direction_gcrf(core::Epoch epoch) {
     return {-heliocentric[0][0] / length, -heliocentric[0][1] / length,
             -heliocentric[0][2] / length};
 }
-} // namespace orbitforge::providers::erfa
+} // namespace orbelle::providers::erfa

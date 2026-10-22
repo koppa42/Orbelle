@@ -1,7 +1,7 @@
 """Independent SRP disk-union reference using vertical slices and numerical quadrature.
 
 This integrates covered intervals inside the unit solar disk. It does not use the
-C++ boundary-arc integration or OrbitForge's bindings. Only Python's standard library
+C++ boundary-arc integration or Orbelle's bindings. Only Python's standard library
 is required. Coordinates/radii are in units of the apparent solar angular radius.
 """
 import argparse

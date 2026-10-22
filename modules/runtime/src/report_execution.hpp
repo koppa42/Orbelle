@@ -1,7 +1,7 @@
 #pragma once
-#include <orbitforge/runtime/access.hpp>
+#include <orbelle/runtime/access.hpp>
 
-namespace orbitforge::runtime::detail {
+namespace orbelle::runtime::detail {
 struct ReportObject {
     std::string id, name, kind;
     const application::ProjectGroundStation *station = nullptr;
@@ -22,4 +22,4 @@ struct ReportExecution {
 generate_report(const ReportContext &context, const application::ReportDefinition &definition,
                 const ReportExecution &execution,
                 const std::function<void(std::size_t, std::size_t)> &progress);
-} // namespace orbitforge::runtime::detail
+} // namespace orbelle::runtime::detail

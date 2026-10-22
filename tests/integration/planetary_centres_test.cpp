@@ -3,20 +3,20 @@
 #include <cmath>
 #include <fstream>
 #include <gtest/gtest.h>
-#include <orbitforge/orbitforge.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
+#include <orbelle/orbelle.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
 #include <sstream>
 
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 class PlanetaryCentres : public ::testing::Test {
   protected:
     std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        ("orbitforge-centres-" +
+        ("orbelle-centres-" +
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::path samples =
-        std::filesystem::path(ORBITFORGE_INTEGRATION_PLANETS).parent_path().parent_path();
+        std::filesystem::path(ORBELLE_INTEGRATION_PLANETS).parent_path().parent_path();
     void SetUp() override { std::filesystem::create_directories(root); }
     void TearDown() override { std::filesystem::remove_all(root); }
 };
@@ -25,11 +25,11 @@ TEST_F(PlanetaryCentres, OriginalMarsMatchesIndependentJplephemAndLeavesBaseBodi
     if (!runtime::ephemeris_available() || !runtime::data_catalog_available())
         GTEST_SKIP();
     runtime::DataCatalog catalog(root / "catalog");
-    const auto base = catalog.install_ephemeris_snapshot(ORBITFORGE_INTEGRATION_PLANETS);
+    const auto base = catalog.install_ephemeris_snapshot(ORBELLE_INTEGRATION_PLANETS);
     const auto before = catalog.load_ephemeris("de440s");
     const auto entry =
         catalog.install_planetary_centres(samples / "mar099s_2016_leap/mar099s_subset.bsp",
-                                          "urn:orbitforge:validation:mar099s-subset");
+                                          "urn:orbelle:validation:mar099s-subset");
     EXPECT_NE(entry.info.content_sha256, base.info.content_sha256);
     const auto after = catalog.load_ephemeris("de440s");
     const auto raw = runtime::load_spice_snapshot(entry.manifest, root / "queries");
@@ -96,7 +96,7 @@ TEST_F(PlanetaryCentres, OriginalMarsMatchesIndependentJplephemAndLeavesBaseBodi
                         ->state_at(core::Epoch{at.tai_nanoseconds() + 30000000000LL}));
     const auto repeated =
         catalog.install_planetary_centres(samples / "mar099s_2016_leap/mar099s_subset.bsp",
-                                          "urn:orbitforge:validation:mar099s-subset");
+                                          "urn:orbelle:validation:mar099s-subset");
     EXPECT_EQ(repeated.info.content_sha256, entry.info.content_sha256);
     runtime::DataCatalog reopened(root / "catalog");
     EXPECT_EQ(reopened.load_ephemeris("de440s")->eclipsing_body_position(core::ThirdBody::mars, at),
@@ -108,7 +108,7 @@ TEST_F(PlanetaryCentres, FailedCancelledAndConcurrentImportsRetainThePublishedSn
     runtime::DataCatalog catalog(root / "catalog");
     const auto source = samples / "mar099s_2016_leap/mar099s_subset.bsp";
     EXPECT_THROW((void)catalog.install_planetary_centres(source), std::runtime_error);
-    const auto base = catalog.install_ephemeris_snapshot(ORBITFORGE_INTEGRATION_PLANETS);
+    const auto base = catalog.install_ephemeris_snapshot(ORBELLE_INTEGRATION_PLANETS);
     EXPECT_THROW(
         (void)catalog.install_planetary_centres(source, {}, runtime::DataAcquisition::imported,
                                                 [] { throw std::runtime_error("cancel"); }),
@@ -124,7 +124,7 @@ TEST_F(PlanetaryCentres, FailedCancelledAndConcurrentImportsRetainThePublishedSn
                              changed = true;
                              runtime::DataCatalog other(root / "catalog");
                              (void)other.install_ephemeris_snapshot(
-                                 ORBITFORGE_INTEGRATION_PLANETS,
+                                 ORBELLE_INTEGRATION_PLANETS,
                                  runtime::DataAcquisition::downloaded);
                          }
                      }),

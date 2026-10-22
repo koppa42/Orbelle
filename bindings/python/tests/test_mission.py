@@ -4,9 +4,9 @@ import math
 import tempfile
 import unittest
 
-import orbitforge as of
-from orbitforge import units as u
-from orbitforge.missions import Coast, Impulse
+import orbelle as of
+from orbelle import units as u
+from orbelle.missions import Coast, Impulse
 
 
 class MissionTests(unittest.TestCase):
@@ -46,7 +46,7 @@ class MissionTests(unittest.TestCase):
         analysis = project.prepare()
         state = analysis.state(satellite, at=project.last)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "mission.orbitforge"
+            path = Path(directory) / "mission.orbelle"
             project.save(path, analysis=analysis)
             loaded = of.Project.open(path)
             restored = loaded.objects[satellite.id]

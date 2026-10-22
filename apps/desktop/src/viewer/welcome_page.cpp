@@ -12,7 +12,7 @@
 #include <QVBoxLayout>
 #include <algorithm>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 constexpr int narrow_width = 720;
 
@@ -20,7 +20,7 @@ constexpr int narrow_width = 720;
 // on the left keeps the copy and actions legible; narrow pages veil the whole picture.
 class WelcomeBackdrop final : public QWidget {
   public:
-    WelcomeBackdrop() : artwork_(":/orbitforge/artwork/orbital-welcome.png") {}
+    WelcomeBackdrop() : artwork_(":/orbelle/artwork/orbital-welcome.png") {}
 
   protected:
     void paintEvent(QPaintEvent *) override {
@@ -213,7 +213,8 @@ QWidget *make_welcome_page(QAction *create, QAction *open, QAction *example) {
 
     auto *caption = new QLabel(ui::text("welcome_page.caption"));
     caption->setObjectName("welcomeCaption");
+    caption->setWordWrap(true);
     outer->addWidget(caption);
     return scroll;
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -35,15 +35,15 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/j2.hpp>
-#include <orbitforge/runtime/j4.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/j2.hpp>
+#include <orbelle/runtime/j4.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
 #include "support/property_editor_fixture.hpp"
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 TEST_F(QuantityTest, HpopDragUnitsModelsResizeSaveReopenAndCancel) {
     apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
     core::HpopOptions options;
@@ -88,7 +88,7 @@ TEST_F(QuantityTest, HpopDragUnitsModelsResizeSaveReopenAndCancel) {
         EXPECT_FALSE(dialog->findChild<QLabel *>("hpopDragEphemerisStatus")
                          ->text()
                          .contains(QStringLiteral("已安装")));
-        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
         std::cout << "HPOP drag device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
         for (int width : {720, 430}) {
             dialog->resize(width, width == 720 ? 700 : 620);
@@ -245,7 +245,7 @@ TEST_F(QuantityTest, HpopWeatherFileSwitchesFieldsRetainsDraftsAndReopens) {
         source->setCurrentIndex(0);
         EXPECT_EQ(f107->value(Unit::one), 183);
         source->setCurrentIndex(1);
-        const auto capture = qEnvironmentVariable("ORBITFORGE_HPOP_UI_CAPTURE");
+        const auto capture = qEnvironmentVariable("ORBELLE_HPOP_UI_CAPTURE");
         std::cout << "HPOP weather device pixel ratio: " << dialog->devicePixelRatioF() << '\n';
         for (const int width : {720, 430}) {
             dialog->resize(width, 620);
@@ -294,4 +294,4 @@ TEST_F(QuantityTest, HpopWeatherFileSwitchesFieldsRetainsDraftsAndReopens) {
         options, nullptr, {}, {entry}, [entry] { return std::vector{entry}; }, &catalog));
     EXPECT_EQ(options, saved);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

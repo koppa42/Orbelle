@@ -27,11 +27,11 @@
 
 `Spice.ApparentSunDerivativeFailuresPreserveUsableProvider` 验证 NaN、超光速和发光历元越界拒绝，失败后结果逐位恢复。`SrpStateDifferential.*` 验证固定太阳方法的精确装配、默认 Provider 拒绝、无效参考系和非有限速度、禁用零结果及不查询星历。
 
-按 [构建说明](../development/build.md) 配置 `ORBITFORGE_WITH_SPICE=ON`、测试和必要的时间参考系依赖，执行构建目录内的测试程序：
+按 [构建说明](../development/build.md) 配置 `ORBELLE_WITH_SPICE=ON`、测试和必要的时间参考系依赖，执行构建目录内的测试程序：
 
 ```text
-orbitforge_spice_tests --gtest_filter=Spice.*Apparent*:Spice.SrpStateChain*
-orbitforge_core_tests --gtest_filter=SrpDifferential.*:SrpStateDifferential.*:SolarRadiationPressure.*:SrpBoundary.*
+orbelle_spice_tests --gtest_filter=Spice.*Apparent*:Spice.SrpStateChain*
+orbelle_core_tests --gtest_filter=SrpDifferential.*:SrpStateDifferential.*:SolarRadiationPressure.*:SrpBoundary.*
 ```
 
 测试 XML 记录导数误差和位置链可辨识量。相关回归保留 HPOP 的三种太阳方法逐阶段输入、第三体独立几何查询、SRP 项目与运行时集成。Python 在隔离安装环境检查返回类型、单位、只读副本、失败恢复及两个不可变快照的并发切换；SDK 消费端实际调用 Provider 和 Runtime 的完整 SRP 状态接口。执行日志、构建配置和安装结果存入新的 `out/validation/` 目录。当前没有 STK 同版本同配置的实测数据。

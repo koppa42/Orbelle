@@ -1,18 +1,18 @@
 #include <gtest/gtest.h>
 #include <limits>
-#include <orbitforge/runtime/demo.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
-#ifdef ORBITFORGE_HAS_VISUALIZATION
-#include <orbitforge/visualization/snapshot.hpp>
-#include <orbitforge/visualization/state_track.hpp>
+#include <orbelle/runtime/demo.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
+#ifdef ORBELLE_HAS_VISUALIZATION
+#include <orbelle/visualization/snapshot.hpp>
+#include <orbelle/visualization/state_track.hpp>
 #endif
 
-using namespace orbitforge;
+using namespace orbelle;
 
 TEST(Runtime, TwoBodyFactorySharesApplicationOwnershipAndBuildCapability) {
-    EXPECT_EQ(runtime::two_body_available(), static_cast<bool>(ORBITFORGE_EXPECT_SPICE));
+    EXPECT_EQ(runtime::two_body_available(), static_cast<bool>(ORBELLE_EXPECT_SPICE));
     const core::CartesianState initial{
         core::Epoch{0}, core::OriginId::earth, core::FrameId::gcrf, {3, 0, 0}, {0, 2, 0}};
     if (!runtime::two_body_available()) {
@@ -32,10 +32,10 @@ TEST(Runtime, TwoBodyFactorySharesApplicationOwnershipAndBuildCapability) {
 }
 
 TEST(Runtime, EphemerisFactoryMatchesBuildCapability) {
-    ASSERT_EQ(runtime::ephemeris_available(), static_cast<bool>(ORBITFORGE_EXPECT_SPICE));
+    ASSERT_EQ(runtime::ephemeris_available(), static_cast<bool>(ORBELLE_EXPECT_SPICE));
     if (runtime::ephemeris_available()) {
-        const auto provider = runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE,
-                                                           ORBITFORGE_INTEGRATION_WORKSPACE);
+        const auto provider = runtime::load_spice_snapshot(ORBELLE_INTEGRATION_SPICE,
+                                                           ORBELLE_INTEGRATION_WORKSPACE);
         const auto state = provider->geometric_state(301, 399, provider->data_info().first_epoch);
         EXPECT_EQ(state.frame, core::FrameId::spice_j2000);
         EXPECT_EQ(state.velocity_time_scale, core::TimeScale::tdb);
@@ -46,7 +46,7 @@ TEST(Runtime, EphemerisFactoryMatchesBuildCapability) {
 }
 
 TEST(Runtime, TimeAndFramesMatchBuildCapability) {
-    ASSERT_EQ(runtime::time_frames_available(), static_cast<bool>(ORBITFORGE_EXPECT_ERFA));
+    ASSERT_EQ(runtime::time_frames_available(), static_cast<bool>(ORBELLE_EXPECT_ERFA));
     if (runtime::time_frames_available()) {
         const auto time = runtime::make_builtin_time_provider();
         const auto epoch = time->from_utc({2000, 1, 1, 11, 59, 28, 0});
@@ -82,7 +82,7 @@ TEST(Application, UsesInjectedProviderInsteadOfDemoImplementation) {
     EXPECT_EQ(result.provenance().input_revision, 7U);
     EXPECT_EQ(result.states().front().position_m[0], 1.0);
 }
-#ifdef ORBITFORGE_HAS_VISUALIZATION
+#ifdef ORBELLE_HAS_VISUALIZATION
 TEST(Visualization, HermiteDisplayTrackReproducesCubicAndDoesNotExtrapolate) {
     // Non-uniform intervals at a large absolute epoch, with exact cubic derivatives.
     constexpr std::int64_t base = 8'000'000'000'000'000'000;

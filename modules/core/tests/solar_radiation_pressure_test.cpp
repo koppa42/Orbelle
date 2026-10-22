@@ -6,11 +6,11 @@
 #include <iostream>
 #include <limits>
 #include <numbers>
-#include <orbitforge/core/ephemeris/ephemeris_provider.hpp>
-#include <orbitforge/core/propagation/hpop.hpp>
+#include <orbelle/core/ephemeris/ephemeris_provider.hpp>
+#include <orbelle/core/propagation/hpop.hpp>
 #include <sstream>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 constexpr double au = 149597870700.0;
 std::array<double, 3> plus(std::array<double, 3> a, const std::array<double, 3> &b) {
@@ -211,7 +211,7 @@ TEST(SolarRadiationPressure, CancellationDuringSrpIntegrationRetainsReusableChec
 }
 
 TEST(SolarRadiationPressure, MovingSunAndEarthEclipsesMatchIndependentOrekitTrajectories) {
-    std::ifstream source(ORBITFORGE_SRP_REFERENCE);
+    std::ifstream source(ORBELLE_SRP_REFERENCE);
     ASSERT_TRUE(source);
     std::string line;
     std::size_t count = 0;
@@ -278,7 +278,7 @@ TEST(SolarRadiationPressure, MovingSunAndEarthEclipsesMatchIndependentOrekitTraj
               << max_velocity << " m/s\n";
 }
 TEST(SolarRadiationPressure, ClippedEarthMoonDiskUnionMatchesIndependentNumericalQuadrature) {
-    std::ifstream source(ORBITFORGE_SRP_GEOMETRY_REFERENCE);
+    std::ifstream source(ORBELLE_SRP_GEOMETRY_REFERENCE);
     ASSERT_TRUE(source);
     std::string line;
     std::size_t count = 0;
@@ -393,7 +393,7 @@ TEST(SolarRadiationPressure, ApparentModesRequireCapableProvidersAndValidateEnum
 }
 
 TEST(SolarRadiationPressure, UpToTenOccultorsMatchIndependentScipyQuadpackAndAreOrderIndependent) {
-    std::ifstream input(ORBITFORGE_SRP_MULTI_REFERENCE);
+    std::ifstream input(ORBELLE_SRP_MULTI_REFERENCE);
     ASSERT_TRUE(input);
     std::string line;
     unsigned cases = 0;
@@ -536,7 +536,7 @@ class TransitingPlanets final : public IThirdBodyEphemeris {
 };
 } // namespace
 TEST(SolarRadiationPressure, MovingPlanetUnionsMatchIndependentScipyDop853AndQuadpackPropagation) {
-    std::ifstream input(ORBITFORGE_SRP_MULTI_TRAJECTORIES);
+    std::ifstream input(ORBELLE_SRP_MULTI_TRAJECTORIES);
     ASSERT_TRUE(input);
     const auto planets = std::make_shared<TransitingPlanets>();
     HpopOptions options;
@@ -677,7 +677,7 @@ TEST(SrpBoundary, EventsAndTrajectoriesMatchOrekitAndConvergeForEveryIntegrator)
             std::array<double, 6> state;
         };
         std::map<std::tuple<int, int, int>, std::vector<Expected>> cases;
-        std::ifstream source(ORBITFORGE_SRP_BOUNDARY_REFERENCE);
+        std::ifstream source(ORBELLE_SRP_BOUNDARY_REFERENCE);
         ASSERT_TRUE(source);
         std::string line;
         while (std::getline(source, line)) {
@@ -872,7 +872,7 @@ TEST(SrpBoundary, FixedHigherOrderStepsAlsoMatchIndependentOrekit) {
     for (bool vop : {false, true}) {
         SCOPED_TRACE(vop);
 
-        std::ifstream source(ORBITFORGE_SRP_BOUNDARY_REFERENCE);
+        std::ifstream source(ORBELLE_SRP_BOUNDARY_REFERENCE);
         ASSERT_TRUE(source);
         std::string line;
         std::size_t count = 0;

@@ -5,13 +5,13 @@
 #include <limits>
 #include <numbers>
 #include <numeric>
-#include <orbitforge/runtime/gravity.hpp>
-#include <orbitforge/runtime/project.hpp>
-#include <orbitforge/runtime/report.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/gravity.hpp>
+#include <orbelle/runtime/project.hpp>
+#include <orbelle/runtime/report.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 #include <sstream>
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 constexpr double pi = std::numbers::pi;
 core::Epoch seconds(double t) {
@@ -46,7 +46,7 @@ struct Case {
     std::vector<Point> points;
 };
 std::vector<Case> reference() {
-    std::ifstream file(ORBITFORGE_COVERAGE_REFERENCE);
+    std::ifstream file(ORBELLE_COVERAGE_REFERENCE);
     if (!file)
         throw std::runtime_error("Missing coverage reference");
     std::vector<Case> cases;
@@ -99,7 +99,7 @@ runtime::ReportContext context(int mode = 0) {
                                  mode == 1 ? "" : "anchor"});
     }
     p.ground_stations.push_back({"anchor", "Anchor", {.2, .1, 0}});
-    auto eop = runtime::load_eop_snapshot(ORBITFORGE_REPORT_EOP);
+    auto eop = runtime::load_eop_snapshot(ORBELLE_REPORT_EOP);
     p.earth_orientation = eop->data_info();
     return {p, runtime::make_builtin_time_provider(), std::make_shared<IdentityFrames>(),
             std::move(eop)};

@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
-#include <orbitforge/render_vsg/labels.hpp>
-#include <orbitforge/render_vsg/marker_layer.hpp>
+#include <orbelle/render_vsg/labels.hpp>
+#include <orbelle/render_vsg/marker_layer.hpp>
 #include <vsg/all.h>
 
 namespace {
-using namespace orbitforge;
+using namespace orbelle;
 TEST(DisplayPicking, RejectsEarthOccludedBehindCameraAndOutsideViewport) {
     auto camera = vsg::Camera::create(
         vsg::Perspective::create(45.0, 1280.0 / 720.0, 1000.0, 1e8),

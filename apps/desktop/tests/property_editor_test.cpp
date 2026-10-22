@@ -27,15 +27,15 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/j2.hpp>
-#include <orbitforge/runtime/j4.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/j2.hpp>
+#include <orbelle/runtime/j4.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
 #include "support/property_editor_fixture.hpp"
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 TEST_F(QuantityTest, PreparingGroundStationDoesNotShowTemporaryWindows) {
     WindowShowObserver windows;
     GroundStationEditor editor;
@@ -67,7 +67,7 @@ TEST_F(QuantityTest, ResponsivePropertiesPreserveDraftsAndKeepFieldsInsideViewpo
         for (int i = 0; i < 12; ++i)
             QCoreApplication::processEvents();
     };
-    const auto capture = qEnvironmentVariable("ORBITFORGE_RESPONSIVE_UI_CAPTURE");
+    const auto capture = qEnvironmentVariable("ORBELLE_RESPONSIVE_UI_CAPTURE");
     if (!capture.isEmpty())
         ASSERT_TRUE(QDir().mkpath(capture));
     for (int width : {1120, 320, 560, 840, 320, 1120}) {
@@ -328,4 +328,4 @@ TEST_F(QuantityTest, GroundStationResetUsesCreationStateInsteadOfButtonCopy) {
     reset->click();
     EXPECT_EQ(apply->text(), QStringLiteral("应用"));
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

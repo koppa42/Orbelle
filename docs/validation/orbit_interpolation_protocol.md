@@ -4,11 +4,11 @@
 
 ## 独立参考
 
-`tools/validation/orekit/OrbitForgeInterpolationReference.java` 只调用固定 Hipparchus 4.0.2 的 `PolynomialFunctionLagrangeForm` 和 `HermiteInterpolator`，后者用 `UnivariateDerivative1` 同时提取函数值与导数。生成器不调用 OrbitForge。所需 `hipparchus-core-4.0.2.jar` 的来源与 SHA-256 固定在 `tools/validation/orekit/dependencies.json`，不增加生产依赖。
+`tools/validation/orekit/OrbelleInterpolationReference.java` 只调用固定 Hipparchus 4.0.2 的 `PolynomialFunctionLagrangeForm` 和 `HermiteInterpolator`，后者用 `UnivariateDerivative1` 同时提取函数值与导数。生成器不调用 Orbelle。所需 `hipparchus-core-4.0.2.jar` 的来源与 SHA-256 固定在 `tools/validation/orekit/dependencies.json`，不增加生产依赖。
 
 ```text
-javac -cp <jars>/hipparchus-core-4.0.2.jar -d <classes> tools/validation/orekit/OrbitForgeInterpolationReference.java
-java -cp <jars>/hipparchus-core-4.0.2.jar;<classes> OrbitForgeInterpolationReference <output.txt>
+javac -cp <jars>/hipparchus-core-4.0.2.jar -d <classes> tools/validation/orekit/OrbelleInterpolationReference.java
+java -cp <jars>/hipparchus-core-4.0.2.jar;<classes> OrbelleInterpolationReference <output.txt>
 ```
 
 Linux 将 classpath 分隔符 `;` 换为 `:`。先核验 JAR SHA-256，再生成两次，核对逐字节相同。输出使用 ASCII/LF，固定输入为 `tests/reference/propagators/orbit_interpolation.txt`，SHA-256 `8d8122d657c6ba438690e617c9e3ee22bd46a60207b22c42a818c87b6d6162fa`。
@@ -30,7 +30,7 @@ Linux 将 classpath 分隔符 `;` 换为 `:`。先核验 JAR SHA-256，再生成
 
 ## HPOP 连续传播节点
 
-`HpopEphemeris` 与 `HpopEphemerisSession` 验证真实积分节点进入插值的完整路径。固定输出遵循 [STK Integrator](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm) 的公开语义：积分步在报告时刻截短，也可经过多个较小步骤后才输出。当前天气跳变分段、局部窗口选择与 Gauss–Jackson 非完整步重启策略是 OrbitForge 的明确实现，尚无 STK 安装可实测其内部行为。
+`HpopEphemeris` 与 `HpopEphemerisSession` 验证真实积分节点进入插值的完整路径。固定输出遵循 [STK Integrator](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm) 的公开语义：积分步在报告时刻截短，也可经过多个较小步骤后才输出。当前天气跳变分段、局部窗口选择与 Gauss–Jackson 非完整步重启策略是 Orbelle 的明确实现，尚无 STK 安装可实测其内部行为。
 
 - 五种积分器分别使用接受端点及 `120.123456789 s` 固定输出，对照 `bulirsch_stoer.txt` 中全部 60 组 Hipparchus 4.0.2 参考，共 600 组终点。包括正反向传播、中心引力、J2 和移动月球。参考输入、生成器与散列沿用[HPOP 验证协议](hpop_protocol.md)，不重新生成或改写固定数据。RK4 步长为 2 s，Gauss–Jackson 为 30 s；自适应方法最大 60 s，相对容限 `1e-14`，位置/速度绝对容限分别 `1e-8 m`、`1e-11 m/s`。位置、速度范数差门限沿用 `5e-3 m`、`5e-6 m/s`。
 - CSPICE `prop2b` 是独立轨道参考：倾斜圆轨道和偏心率 0.72 的轨道、五种积分器、正反向 6000 s、Lagrange/Hermite 七阶，以及接受节点/30 s 固定输出，合计 400 次查询。覆盖端点内侧 1 ns、非整秒及结束节点。RK4 步长为 2 s，Gauss–Jackson 为 10 s；自适应方法最大 30 s，容限同上。两项范数门限为 `5e-3 m`、`5e-6 m/s`。
@@ -53,21 +53,21 @@ Linux 将 classpath 分隔符 `;` 换为 `:`。先核验 JAR SHA-256，再生成
 - 普通状态、单点报告与显式固定输出 Session 逐位相同；启用固定输出时修改轨道步长改变分析/报告身份，关闭时不改变；旧分析不可变。当前 v41 / OBJS32 固定样例由 `struct.pack` 独立组装，插值 `<IIdB>` 与正则化 `<BdI>` 字段均有双层 CRC 及逐字节重写检查，精确字节与 SHA-256 见[样例说明](../../tests/integration/fixtures/README.md)。非法方法、阶数、布尔值及所有非当前版本拒绝。
 - Qt offscreen 检查全部 HPOP 控件。新增交互覆盖偶数 Hermite 拒绝、切换保留各自草稿、键盘步进、应用、取消、重开和 430/720 逻辑宽度；原生 Windows 实际 DPR 1.5 / 2.25 各生成四张截图，人工核对代表性宽窄布局。独立 Python 3.13 与安装后 SDK 检查同一配置、公开入口和取消重试。
 
-命令、错误诊断、数值属性、独立安装和截图保留于 `out/validation/hpop-project-interpolation-20261017/`。短段支持点、固定输出点数不足时拒绝和局部窗口策略属于 OrbitForge 的公开政策，不能以本项通过代替 STK 实机数值验收。
+命令、错误诊断、数值属性、独立安装和截图保留于 `out/validation/hpop-project-interpolation-20261017/`。短段支持点、固定输出点数不足时拒绝和局部窗口策略属于 Orbelle 的公开政策，不能以本项通过代替 STK 实机数值验收。
 
 ## VOP 通用变量与独立 μ
 
-固定 JAR 版本仍为 Orekit 13.1.2 / Hipparchus 4.0.2，SHA-256 由 `tools/validation/orekit/dependencies.json` 核验。新生成器不调用 OrbitForge，不增加运行依赖，输出 ASCII/LF；两次生成应逐字节相同。
+固定 JAR 版本仍为 Orekit 13.1.2 / Hipparchus 4.0.2，SHA-256 由 `tools/validation/orekit/dependencies.json` 核验。新生成器不调用 Orbelle，不增加运行依赖，输出 ASCII/LF；两次生成应逐字节相同。
 
 ```text
-javac -cp <jars>/* -d <classes> tools/validation/orekit/OrbitForgeUniversalKeplerReference.java tools/validation/orekit/OrbitForgeVopInterpolationReference.java
-java -cp <classes>;<jars>/* OrbitForgeUniversalKeplerReference > universal_kepler.txt
-java -cp <classes>;<jars>/* OrbitForgeVopInterpolationReference vop_interpolation.txt
+javac -cp <jars>/* -d <classes> tools/validation/orekit/OrbelleUniversalKeplerReference.java tools/validation/orekit/OrbelleVopInterpolationReference.java
+java -cp <classes>;<jars>/* OrbelleUniversalKeplerReference > universal_kepler.txt
+java -cp <classes>;<jars>/* OrbelleVopInterpolationReference vop_interpolation.txt
 ```
 
 Linux 使用 `:` 分隔 classpath。通用变量基元对照 Orekit Cartesian NumericalPropagator + Hipparchus DP853 的直接 Newtonian 积分；参考不使用生产 Stumpff 求根器。80 组包含圆轨道、偏心率 .01/.7/.95/.999999/1/1.000001/1.4、倾斜方向、GEO、非零径向速度，以及正反向 1 ns、123.456789/6000/86400 s。参考自身用最大步长 10/5 s 检查，最大分量差 `1.16136e-5 m` / `1.18525e-8 m/s`；生产与参考以及来回映射的每轴门限均为 `5e-4 m` / `5e-7 m/s`。固定文件 `universal_kepler.txt` SHA-256 为 `ccce99eb79a1fa79b5d15d960ecc2eab6cb03d5f3d5f8bbce7b46f656bea8b93`。
 
-VOP 插值生成器使用 Orekit KeplerianPropagator 搬移节点，以 Hipparchus Neville 插值计算共同历元的参数，独立于生产重心算法。这是对 OrbitForge 公开配方的独立核对，不是 STK 导出的真值。153 组 / 1059 查询覆盖全部 0–29 阶、非均匀节点、圆/椭圆/双曲轨道、J2、正确 μ 和偏离底场 1% 的独立 μ、端点及内侧 1 ns。Core 和安装 Python 使用相同固定输入；绝对历元加上 `8000000000000000123 ns`。位置/速度范数差门限为 `2e-4 m` / `2e-7 m/s`，并分别验证纯二体真值。固定文件 `vop_interpolation.txt` SHA-256 为 `ed1d3d0ebcaf1869c25114e742ce64fc5d86deffd03505edef3e7750044de1f5`。
+VOP 插值生成器使用 Orekit KeplerianPropagator 搬移节点，以 Hipparchus Neville 插值计算共同历元的参数，独立于生产重心算法。这是对 Orbelle 公开配方的独立核对，不是 STK 导出的真值。153 组 / 1059 查询覆盖全部 0–29 阶、非均匀节点、圆/椭圆/双曲轨道、J2、正确 μ 和偏离底场 1% 的独立 μ、端点及内侧 1 ns。Core 和安装 Python 使用相同固定输入；绝对历元加上 `8000000000000000123 ns`。位置/速度范数差门限为 `2e-4 m` / `2e-7 m/s`，并分别验证纯二体真值。固定文件 `vop_interpolation.txt` SHA-256 为 `ed1d3d0ebcaf1869c25114e742ce64fc5d86deffd03505edef3e7750044de1f5`。
 
 另用 Orekit `J2OnlyPerturbation` 与 DP853 直接轨迹验证实际插值误差：GM `3.986004415e14 m³/s²`、参考半径 `6378136.3 m`、J2 `1.0826266835531513e-3`、固定 GCRF 对称轴、初态 `[7e6,0,0;0,6800,3000]` SI，七阶、17 个节点，间隔 600/300/150 s。参考自身最大步长 10/5 s 差为 `1.86265e-9 m` / `1.81899e-12 m/s`。两次减半均要求位置和速度误差至少减小 64 倍；150 s 的门限为 `2e-3 m` / `2e-6 m/s`。不预设 VOP 对任意轨道或普通 Lagrange 的固定改善倍数。
 

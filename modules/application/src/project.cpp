@@ -7,7 +7,7 @@
 #include <limits>
 #include <map>
 #include <numbers>
-#include <orbitforge/application/project.hpp>
+#include <orbelle/application/project.hpp>
 #include <picosha2.h>
 #include <random>
 #include <set>
@@ -21,12 +21,12 @@
 #include <unistd.h>
 #endif
 
-namespace orbitforge::application {
+namespace orbelle::application {
 namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 47;
+constexpr std::uint32_t project_version = 48;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -463,7 +463,7 @@ AnalysisStatus Project::analysis_status() const {
 }
 std::string analysis_input_sha256(const Project &project) {
     Writer out;
-    out.text("orbitforge-analysis-input-v1");
+    out.text("orbelle-analysis-input-v1");
     out.epoch(project.first);
     out.epoch(project.last);
     // Collection order is presentation, not a physical dependency.
@@ -1100,12 +1100,12 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
 Project decode_project(std::span<const std::uint8_t> bytes) {
     check(bytes.size() <= max_file, "Project exceeds 64 MiB");
     Reader file{bytes};
-    check(std::ranges::equal(file.raw(magic.size()), magic), "Not an OrbitForge project file");
+    check(std::ranges::equal(file.raw(magic.size()), magic), "Not an Orbelle project file");
     const auto version = file.number(4);
     if (version != project_version)
-        throw ProjectError("Unsupported OrbitForge project version " + std::to_string(version) +
+        throw ProjectError("Unsupported Orbelle project version " + std::to_string(version) +
                            "; this build reads only version " + std::to_string(project_version) +
-                           ". Use a matching OrbitForge build or recreate the project.");
+                           ". Use a matching Orbelle build or recreate the project.");
     const auto length = file.number();
     const auto checksum = file.number(4);
     check(length == file.bytes.size(), "Project length mismatch");
@@ -1377,7 +1377,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
     validate_project(project);
     {
         Reader locked{sections.at(lock_tag)};
-        check(locked.text() == "orbitforge-data-lock-v1", "Unsupported data lock encoding");
+        check(locked.text() == "orbelle-data-lock-v1", "Unsupported data lock encoding");
         const auto reference_count = locked.number(4);
         check(reference_count <= 64, "Data lock exceeds 64 references");
         std::vector<DataReference> references;
@@ -1420,7 +1420,7 @@ void save_project(const std::filesystem::path &path, const Project &project, boo
     std::filesystem::path temporary;
     std::random_device random;
     for (int attempt = 0; attempt < 32; ++attempt) {
-        auto candidate = target.parent_path() / (".orbitforge-save-" + std::to_string(random()) +
+        auto candidate = target.parent_path() / (".orbelle-save-" + std::to_string(random()) +
                                                  "-" + std::to_string(random()));
         if (std::filesystem::create_directory(candidate)) {
             temporary = std::move(candidate);
@@ -1469,4 +1469,4 @@ void save_project(const std::filesystem::path &path, const Project &project, boo
     }
     cleanup();
 }
-} // namespace orbitforge::application
+} // namespace orbelle::application

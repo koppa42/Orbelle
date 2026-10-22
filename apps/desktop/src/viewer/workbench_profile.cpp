@@ -7,7 +7,7 @@
 #include <numeric>
 #include <stdexcept>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 WorkbenchProfile *WorkbenchProfile::active = nullptr;
 WorkbenchProfile::WorkbenchProfile(QString output) : output_(std::move(output)) {
     if (QFile::exists(output_) || !QDir().mkpath(output_))
@@ -58,4 +58,4 @@ void WorkbenchProfile::capture(const QString &name, const QImage &image) const {
     if (!image.save(output_ + "/" + name + ".png"))
         throw std::runtime_error("Cannot save workbench profile image");
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -1,10 +1,10 @@
 #include "../src/viewer/project_scene.hpp"
 #include "../src/viewer/project_update.hpp"
 #include <gtest/gtest.h>
-#include <orbitforge/runtime/gravity.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/runtime/gravity.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 application::DataReference reference(std::string role, char content = 'a', char config = 'b') {
     return {std::move(role), "fixture", std::string(64, content), "fixture-v1",
@@ -41,7 +41,7 @@ TEST(ProjectUpdate, SnapshotsPreserveEveryForceDependency) {
     refs.push_back(reference("earth-orientation"));
     refs.push_back(reference("utc-time"));
     EXPECT_EQ(application::DataLock{refs}, lock);
-    const auto eop = runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+    const auto eop = runtime::load_eop_snapshot(ORBELLE_TEST_EOP);
     application::Project project{"all force references", eop->data_info().first_epoch,
                                  eop->data_info().last_epoch};
     project.earth_orientation = eop->data_info();
@@ -141,7 +141,7 @@ TEST(ProjectUpdate, EditingOneOfTenHpopSatellitesRetainsOtherNumericalSessions) 
     const std::shared_ptr<const core::ITimeProvider> time = runtime::make_builtin_time_provider();
     const std::shared_ptr<const core::IFrameProvider> frames = runtime::make_frame_provider();
     const std::shared_ptr<const core::IEarthOrientationProvider> eop =
-        runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+        runtime::load_eop_snapshot(ORBELLE_TEST_EOP);
     const auto first = time->from_utc({2026, 10, 9, 0, 0, 0, 0});
     const core::Epoch last{first.tai_nanoseconds() + 3600'000'000'000LL};
     application::Project project{"ten satellites", first, last};
@@ -178,4 +178,4 @@ TEST(ProjectUpdate, EditingOneOfTenHpopSatellitesRetainsOtherNumericalSessions) 
                   after->scenario.objects()[i].provenance().input_revision);
     EXPECT_EQ(before->scenario.objects()[3].provenance().input_revision, 1);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

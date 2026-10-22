@@ -6,14 +6,14 @@
 #include <iostream>
 #include <limits>
 #include <numbers>
-#include <orbitforge/orbitforge.hpp>
-#include <orbitforge/runtime/hpop.hpp>
-#include <orbitforge/runtime/project.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/orbelle.hpp>
+#include <orbelle/runtime/hpop.hpp>
+#include <orbelle/runtime/project.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 #include <sstream>
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
-const std::filesystem::path references{ORBITFORGE_SECULAR_REFERENCE};
+const std::filesystem::path references{ORBELLE_SECULAR_REFERENCE};
 class Eop final : public core::IEarthOrientationProvider {
     core::EopDataInfo info_{"reference",
                             {},
@@ -341,7 +341,7 @@ TEST_F(SecularFiles, CatalogMetadataAndCancellationPreserveFrozenResources) {
 TEST_F(SecularFiles, ProjectReportsAndReprepareRequireConfirmationForEpochChanges) {
     if (!runtime::time_frames_available())
         GTEST_SKIP();
-    auto data = runtime::DataSnapshot::load(ORBITFORGE_REPORT_EOP)
+    auto data = runtime::DataSnapshot::load(ORBELLE_REPORT_EOP)
                     .with_gravity_file("custom", write(example()));
     application::Project p{"Secular gravity", core::Epoch{0}, core::Epoch{600000000000LL}};
     application::ProjectSatellite sat;
@@ -354,8 +354,8 @@ TEST_F(SecularFiles, ProjectReportsAndReprepareRequireConfirmationForEpochChange
     const auto analysis = runtime::prepare(document, data);
     const auto object = document.objects().get("satellite-1");
     const auto state = analysis.state(object, p.last, core::FrameId::gcrf);
-    runtime::save_project(document, root / "scenario.orbitforge", analysis);
-    const auto stored = application::load_project(root / "scenario.orbitforge");
+    runtime::save_project(document, root / "scenario.orbelle", analysis);
+    const auto stored = application::load_project(root / "scenario.orbelle");
     EXPECT_TRUE(stored.satellites[0].orbit.hpop.include_secular_variations);
     runtime::ReportContext context{stored, data.time(), data.frames(), data.eop(),
                                    data.gravity_models()};
@@ -366,7 +366,7 @@ TEST_F(SecularFiles, ProjectReportsAndReprepareRequireConfirmationForEpochChange
     auto changed = example();
     changed.replace(changed.find("2451545.0"), 9, "2453371.5");
     const auto next = data.with_gravity_file("custom", write(changed));
-    runtime::ProjectOpenPlan plan(root / "scenario.orbitforge", next);
+    runtime::ProjectOpenPlan plan(root / "scenario.orbelle", next);
     ASSERT_EQ(plan.data_changes().size(), 1U);
     EXPECT_EQ(plan.data_changes()[0].role, "gravity/custom");
     EXPECT_THROW((void)plan.open(), runtime::OpenDataChangedError);

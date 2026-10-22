@@ -4,22 +4,22 @@ import struct
 import tempfile
 import unittest
 
-import orbitforge as of
+import orbelle as of
 from project_format import read_sections, with_sections
 
 
-FIXTURE = Path(__file__).resolve().parents[3] / "tests/integration/fixtures/project-current.orbitforge"
+FIXTURE = Path(__file__).resolve().parents[3] / "tests/integration/fixtures/project-current.orbelle"
 
 
 class ProjectFormatTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.path = Path(self.temp.name) / "project.orbitforge"
+        self.path = Path(self.temp.name) / "project.orbelle"
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 47)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 48)
         self.path.write_bytes(self.raw)
         project = of.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
@@ -139,14 +139,14 @@ class ProjectFormatTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(),altered)
 
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(47), 48, 0xFFFFFFFF):
+        for version in (*range(48), 49, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (of.load_project_data, of.load_project,
                                  of.Project.open, of.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 47"):
+                    with self.assertRaisesRegex(of.ProjectError, f"version {version};.*only version 48"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 

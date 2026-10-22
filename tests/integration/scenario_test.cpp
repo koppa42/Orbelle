@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
-#include <orbitforge/application/scenario.hpp>
-#include <orbitforge/core/propagation/circular_two_body.hpp>
+#include <orbelle/application/scenario.hpp>
+#include <orbelle/core/propagation/circular_two_body.hpp>
 
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 application::Session object(const char *id, std::uint64_t revision = 1) {
     return {std::make_shared<core::CircularTwoBody>(

@@ -3,11 +3,11 @@
 #include <future>
 #include <gtest/gtest.h>
 #include <limits>
-#include <orbitforge/core/propagation/circular_two_body.hpp>
-#include <orbitforge/core/propagation/tabulated_orbit.hpp>
+#include <orbelle/core/propagation/circular_two_body.hpp>
+#include <orbelle/core/propagation/tabulated_orbit.hpp>
 #include <sstream>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 constexpr std::int64_t base = 8'000'000'000'000'000'000LL;
 CartesianState polynomial(std::int64_t ns, double offset = 0) {
@@ -26,7 +26,7 @@ OrbitEphemerisArc arc(std::initializer_list<std::int64_t> seconds, double offset
 }
 } // namespace
 TEST(OrbitInterpolation, AllOrdersMatchIndependentHipparchusReference) {
-    std::ifstream input(ORBITFORGE_INTERPOLATION_REFERENCE);
+    std::ifstream input(ORBELLE_INTERPOLATION_REFERENCE);
     ASSERT_TRUE(input);
     std::string line;
     OrbitEphemerisArc nodes;

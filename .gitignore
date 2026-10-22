@@ -77,7 +77,7 @@ htmlcov/
 /docs/validation/*
 !/docs/validation/README.md
 !/docs/validation/*_protocol.md
-/docs/OrbitForge_*.md
+/docs/Orbelle_*.md
 /apps/desktop/resources/startup/README.md
 *.log
 *.log.*

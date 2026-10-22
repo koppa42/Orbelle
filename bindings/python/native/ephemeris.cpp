@@ -1,10 +1,10 @@
-#include <orbitforge/runtime/ephemeris.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl/filesystem.h>
 
 namespace py = pybind11;
-using namespace orbitforge;
+using namespace orbelle;
 void bind_ephemeris(py::module_ &module) {
     py::register_exception<core::EphemerisDataError>(module, "EphemerisDataError",
                                                      PyExc_ValueError);

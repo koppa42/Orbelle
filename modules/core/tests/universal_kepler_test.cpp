@@ -3,9 +3,9 @@
 #include <gtest/gtest.h>
 #include <sstream>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 TEST(UniversalKepler, MatchesIndependentOrekitAcrossAllConicsAndDirections) {
-    std::ifstream input(ORBITFORGE_UNIVERSAL_KEPLER_REFERENCE);
+    std::ifstream input(ORBELLE_UNIVERSAL_KEPLER_REFERENCE);
     ASSERT_TRUE(input);
     std::string line;
     std::size_t count = 0;
@@ -67,7 +67,7 @@ TEST(UniversalKepler, RejectsInvalidGeometryAndSupportsCancellation) {
 }
 
 TEST(UniversalKepler, DifferentialMatchesIndependentOrekitAndSymplecticInverse) {
-    std::ifstream input(ORBITFORGE_UNIVERSAL_KEPLER_STM_REFERENCE);
+    std::ifstream input(ORBELLE_UNIVERSAL_KEPLER_STM_REFERENCE);
     ASSERT_TRUE(input);
     std::string line;
     std::size_t count = 0;

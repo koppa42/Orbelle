@@ -1,9 +1,9 @@
 #include <algorithm>
 #include <cmath>
-#include <orbitforge/core/propagation/relative_motion.hpp>
+#include <orbelle/core/propagation/relative_motion.hpp>
 #include <stdexcept>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 using Vector = std::array<double, 3>;
 double dot(const Vector &a, const Vector &b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
@@ -79,4 +79,4 @@ double intersatellite_clearance(const CartesianState &a, const CartesianState &b
         throw std::invalid_argument("Intersatellite geometry overflow");
     return margin;
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

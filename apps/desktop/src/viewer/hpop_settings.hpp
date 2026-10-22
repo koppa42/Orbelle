@@ -1,10 +1,10 @@
 #pragma once
 #include <functional>
-#include <orbitforge/application/hpop_covariance.hpp>
-#include <orbitforge/core/propagation/hpop.hpp>
-#include <orbitforge/runtime/data_catalog.hpp>
+#include <orbelle/application/hpop_covariance.hpp>
+#include <orbelle/core/propagation/hpop.hpp>
+#include <orbelle/runtime/data_catalog.hpp>
 class QWidget;
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 class EopCatalog;
 // Desktop defaults for a newly selected HPOP model; saved and SDK settings are unchanged.
 inline core::HpopOptions new_hpop_options() {
@@ -21,4 +21,4 @@ bool edit_hpop_settings(
     const std::vector<runtime::CatalogEphemeris> &ephemerides = {},
     const std::function<std::vector<runtime::CatalogEphemeris>()> &manage_ephemerides = {},
     EopCatalog *catalog = nullptr, application::HpopCovarianceSettings *covariance = nullptr);
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

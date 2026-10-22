@@ -3,12 +3,12 @@
 #include "satellite_model.hpp"
 #include <algorithm>
 #include <limits>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/gravity.hpp>
-#include <orbitforge/runtime/ocean_tides.hpp>
-#include <orbitforge/runtime/space_weather.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/gravity.hpp>
+#include <orbelle/runtime/ocean_tides.hpp>
+#include <orbelle/runtime/space_weather.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 std::shared_ptr<PreparedProject> prepare_project_scene(
     application::Project project, const std::filesystem::path &path,
     std::shared_ptr<const core::IFrameProvider> frames,
@@ -194,4 +194,4 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
         throw OrbitCancelled{};
     return result;
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

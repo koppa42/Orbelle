@@ -1,22 +1,22 @@
 #include <gtest/gtest.h>
-#include <orbitforge/runtime/data_catalog.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/runtime/data_catalog.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 class CatalogFolder {
   public:
     std::filesystem::path path;
     CatalogFolder() {
-        const auto parent = std::filesystem::path(ORBITFORGE_INTEGRATION_WORKSPACE).parent_path();
+        const auto parent = std::filesystem::path(ORBELLE_INTEGRATION_WORKSPACE).parent_path();
         path =
             parent / ("catalog-analysis-" +
                       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         std::filesystem::create_directories(path);
     }
     ~CatalogFolder() {
-        const auto parent = std::filesystem::path(ORBITFORGE_INTEGRATION_WORKSPACE).parent_path();
+        const auto parent = std::filesystem::path(ORBELLE_INTEGRATION_WORKSPACE).parent_path();
         if (path.is_absolute() && path.parent_path() == parent &&
             path.filename().string().starts_with("catalog-analysis-")) {
             std::error_code error;
@@ -43,7 +43,7 @@ TEST(CatalogAnalysis, CapturesCurrentResourcesAndUsesPublicPrepare) {
     CatalogFolder folder;
     const auto fixed = [&] {
         runtime::DataCatalog catalog(folder.path);
-        const auto entry = catalog.install_eop(ORBITFORGE_REPORT_EOP);
+        const auto entry = catalog.install_eop(ORBELLE_REPORT_EOP);
         catalog.activate_eop(entry.lock_sha256);
         catalog.set_extrapolation_days(runtime::EopProduct::c04, 3);
         application::ProjectDocument project{
@@ -68,7 +68,7 @@ TEST(CatalogAnalysis, FullCoveragePrecedesExtrapolationAndUnusedPolicyDoesNotCha
         GTEST_SKIP();
     const std::shared_ptr<const core::ITimeProvider> time = runtime::make_builtin_time_provider();
     const std::shared_ptr<const core::IEarthOrientationProvider> full =
-        runtime::load_eop_snapshot(ORBITFORGE_REPORT_EOP);
+        runtime::load_eop_snapshot(ORBELLE_REPORT_EOP);
     const auto limited = std::make_shared<RestrictedEop>(full);
     const std::array candidates{runtime::EopCandidate{limited, 3}, runtime::EopCandidate{full, 3}};
     const auto first = full->data_info().first_epoch, last = full->data_info().last_epoch;
@@ -93,9 +93,9 @@ TEST(CatalogAnalysis, LightingLoadsSavedOrRecordedSolarResourceWithoutSrp) {
         GTEST_SKIP();
     CatalogFolder folder;
     runtime::DataCatalog catalog(folder.path);
-    const auto eop = catalog.install_eop(ORBITFORGE_DRAG_EOP);
+    const auto eop = catalog.install_eop(ORBELLE_DRAG_EOP);
     catalog.activate_eop(eop.lock_sha256);
-    const auto solar = catalog.install_ephemeris_snapshot(ORBITFORGE_INTEGRATION_PLANETS);
+    const auto solar = catalog.install_ephemeris_snapshot(ORBELLE_INTEGRATION_PLANETS);
     const auto first = core::Epoch{solar.info.first.tai_nanoseconds() + 600000000000LL};
     application::Project input{"Lighting", first,
                                core::Epoch{first.tai_nanoseconds() + 60000000000LL}};
@@ -114,7 +114,7 @@ TEST(CatalogAnalysis, LightingLoadsSavedOrRecordedSolarResourceWithoutSrp) {
     const auto analysis = runtime::prepare(document, catalog);
     EXPECT_TRUE(analysis.data().ephemerides().contains("de440s"));
     EXPECT_FALSE(analysis.report(report).table.rows().empty());
-    const auto file = folder.path / "lighting.orbitforge";
+    const auto file = folder.path / "lighting.orbelle";
     runtime::save_project(document, file, analysis);
     auto recorded = application::load_project(file);
     recorded.reports.clear();

@@ -1,8 +1,8 @@
 #include <cmath>
-#include <orbitforge/core/propagation/relativity.hpp>
+#include <orbelle/core/propagation/relativity.hpp>
 #include <stdexcept>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 using Vector = std::array<double, 3>;
 constexpr double c = 299792458, angular_momentum_per_mass = 9.8e8;
@@ -108,4 +108,4 @@ RelativityDifferential relativity_differential(const Vector &r, const Vector &v,
     }
     return result;
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

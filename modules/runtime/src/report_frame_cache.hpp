@@ -1,8 +1,8 @@
 #pragma once
 #include <map>
-#include <orbitforge/core/frames/frame_provider.hpp>
+#include <orbelle/core/frames/frame_provider.hpp>
 
-namespace orbitforge::runtime::detail {
+namespace orbelle::runtime::detail {
 // Owned by one sampled report, whose time/EOP providers are immutable snapshots.
 // Reuse exact state transforms across objects, never across queries or providers.
 class ReportFrameCache final : public core::IFrameProvider {
@@ -54,4 +54,4 @@ class ReportFrameCache final : public core::IFrameProvider {
         return transform;
     }
 };
-} // namespace orbitforge::runtime::detail
+} // namespace orbelle::runtime::detail

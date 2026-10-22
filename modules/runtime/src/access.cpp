@@ -2,10 +2,10 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
-#include <orbitforge/runtime/access.hpp>
-#include <orbitforge/runtime/project.hpp>
+#include <orbelle/runtime/access.hpp>
+#include <orbelle/runtime/project.hpp>
 
-namespace orbitforge::runtime {
+namespace orbelle::runtime {
 detail::AccessGeometry::AccessGeometry(const application::Project &project,
                                        const std::vector<std::string> &ids) {
     if (ids.size() != 2)
@@ -170,4 +170,4 @@ AccessSample AccessSession::at(core::Epoch epoch, const std::function<void()> &c
 std::string AccessSession::name() const {
     return impl_->pair.station.name() + " → " + impl_->pair.target_name();
 }
-} // namespace orbitforge::runtime
+} // namespace orbelle::runtime

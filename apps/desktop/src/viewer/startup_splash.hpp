@@ -6,7 +6,7 @@
 class QProgressBar;
 class QPushButton;
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 class StartupSplash final : public QSplashScreen {
   public:
     explicit StartupSplash(QScreen *screen);
@@ -32,4 +32,4 @@ class StartupSplash final : public QSplashScreen {
     std::atomic_bool cancelled_{false};
     bool preparing_ = false;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

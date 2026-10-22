@@ -58,7 +58,7 @@ def build_inputs(executable):
             key, value = line.split("=", 1)
             entries[key.split(":", 1)[0]] = value
     files = {"CMakeCache.txt": cache}
-    for name in ("compile_commands.json", "benchmarks/compute/orbitforge_compute_benchmark.vcxproj"):
+    for name in ("compile_commands.json", "benchmarks/compute/orbelle_compute_benchmark.vcxproj"):
         path = cache.parent / name
         if path.is_file():
             files[path.name] = path

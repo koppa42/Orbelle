@@ -1,8 +1,8 @@
 """A two-impulse Hohmann transfer, with no external data needed for GCRF queries."""
 import math
-import orbitforge as of
-from orbitforge import units as u
-from orbitforge.missions import Coast, Impulse
+import orbelle as of
+from orbelle import units as u
+from orbelle.missions import Coast, Impulse
 
 mu = of.central_body().gravitational_parameter_m3_s2
 r1, r2 = 7e6, 8e6

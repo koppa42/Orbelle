@@ -5,9 +5,9 @@
 #include <iostream>
 #include <limits>
 #include <numbers>
-#include <orbitforge/core/propagation/hpop.hpp>
+#include <orbelle/core/propagation/hpop.hpp>
 #include <sstream>
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 constexpr double sun_mu = 1.3271244004127942e20;
 GeometricBodyState sun(double t) {
@@ -92,7 +92,7 @@ HpopEnvironment environment() {
 }
 } // namespace
 TEST(Relativity, EachTermMatchesIndependentOrekitAtInclinedPolarAndGeostationaryStates) {
-    std::ifstream file(ORBITFORGE_RELATIVITY_REFERENCE);
+    std::ifstream file(ORBELLE_RELATIVITY_REFERENCE);
     ASSERT_TRUE(file.is_open());
     int count = 0;
     std::array<double, 4> maximum{};
@@ -130,7 +130,7 @@ TEST(Relativity, EachTermMatchesIndependentOrekitAtInclinedPolarAndGeostationary
 TEST(Relativity, ForwardBackwardPropagationMatchesOrekitAndIsIndependentOfThirdBodySwitch) {
     const auto on = make_hpop(initial, options(), environment()),
                off = make_hpop(initial, options(false));
-    std::ifstream file(ORBITFORGE_RELATIVITY_REFERENCE);
+    std::ifstream file(ORBELLE_RELATIVITY_REFERENCE);
     ASSERT_TRUE(file.is_open());
     int count = 0;
     double dr = 0, dv = 0;

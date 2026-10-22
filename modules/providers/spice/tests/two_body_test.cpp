@@ -3,11 +3,11 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <numbers>
-#include <orbitforge/providers/spice/provider.hpp>
+#include <orbelle/providers/spice/provider.hpp>
 
 namespace {
-using namespace orbitforge;
-using namespace orbitforge::core;
+using namespace orbelle;
+using namespace orbelle::core;
 constexpr double earth_mu = 3.986004418e14;
 
 CartesianState state(std::array<double, 3> r, std::array<double, 3> v, Epoch epoch = Epoch{0}) {
@@ -94,8 +94,8 @@ TEST(Keplerian, NearParabolicTrueAnomalyAvoidsMeanAnomalyCancellation) {
 }
 TEST(Keplerian, RejectsInvalidBranchesAndPreservesSpiceAfterFailure) {
     const auto workspace =
-        std::filesystem::path(ORBITFORGE_SPICE_TEST_DIR) / "element-error-recovery";
-    auto ephemeris = providers::spice::load_snapshot(ORBITFORGE_SPICE_SAMPLE, workspace);
+        std::filesystem::path(ORBELLE_SPICE_TEST_DIR) / "element-error-recovery";
+    auto ephemeris = providers::spice::load_snapshot(ORBELLE_SPICE_SAMPLE, workspace);
     const auto epoch = ephemeris->data_info().first_epoch;
     const auto moon = ephemeris->geometric_state(301, 399, epoch);
     KeplerianElements input{Epoch{0}, 7e6, 0.1, 0.9, 0, 0, 0};
@@ -225,8 +225,8 @@ TEST(TwoBody, NumericalFailureDoesNotPoisonSharedSpiceEngine) {
 
 TEST(TwoBody, ConcurrentPropagationAndEphemeridesMatchSerialQueries) {
     const auto workspace =
-        std::filesystem::path(ORBITFORGE_SPICE_TEST_DIR) / "two-body-concurrency";
-    auto ephemeris = providers::spice::load_snapshot(ORBITFORGE_SPICE_SAMPLE, workspace);
+        std::filesystem::path(ORBELLE_SPICE_TEST_DIR) / "two-body-concurrency";
+    auto ephemeris = providers::spice::load_snapshot(ORBELLE_SPICE_SAMPLE, workspace);
     const auto time = ephemeris->data_info().first_epoch;
     const auto moon = ephemeris->geometric_state(301, 399, time);
     const auto a = providers::spice::make_two_body(state({7e6, 0, 0}, {0, 5500, 5300}, time),

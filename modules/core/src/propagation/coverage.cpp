@@ -1,9 +1,9 @@
 #include <algorithm>
 #include <cmath>
-#include <orbitforge/core/propagation/coverage.hpp>
+#include <orbelle/core/propagation/coverage.hpp>
 #include <stdexcept>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 constexpr double pi = std::numbers::pi;
 void check(bool value, const char *message) {
@@ -121,4 +121,4 @@ CoverageTimeStatistics coverage_time_statistics(Epoch first, Epoch last,
         stats.mean_gap_seconds = gaps / double(stats.gap_count);
     return stats;
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

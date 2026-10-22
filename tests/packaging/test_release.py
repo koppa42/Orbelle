@@ -21,16 +21,16 @@ class ReleaseTests(unittest.TestCase):
         self.assets = Path(self.temporary.name)
         self.version = version.check(ROOT)
         self.tag = "v" + self.version
-        for name in (f"OrbitForge-{self.version}-win-x64.zip",
-                     f"OrbitForge-{self.version}-sdk-win-x64.zip",
-                     f"OrbitForge-{self.version}-sdk-linux-x64.tar.gz"):
+        for name in (f"Orbelle-{self.version}-win-x64.zip",
+                     f"Orbelle-{self.version}-sdk-win-x64.zip",
+                     f"Orbelle-{self.version}-sdk-linux-x64.tar.gz"):
             (self.assets / name).write_bytes(b"test archive")
         for python in version.python_versions()[1]:
             tag = "cp" + python.replace(".", "")
             for platform in ("win_amd64", "linux_x86_64"):
-                with zipfile.ZipFile(self.assets / f"orbitforge-{self.version}-{tag}-{tag}-{platform}.whl", "w") as wheel:
-                    wheel.writestr(f"orbitforge-{self.version}.dist-info/METADATA",
-                                   f"Metadata-Version: 2.1\nName: orbitforge\nVersion: {self.version}\n")
+                with zipfile.ZipFile(self.assets / f"orbelle-{self.version}-{tag}-{tag}-{platform}.whl", "w") as wheel:
+                    wheel.writestr(f"orbelle-{self.version}.dist-info/METADATA",
+                                   f"Metadata-Version: 2.1\nName: orbelle\nVersion: {self.version}\n")
         self.asset_count = 3 + 2 * len(version.python_versions()[1])
 
     def test_requires_every_platform_and_rejects_extra_files(self):

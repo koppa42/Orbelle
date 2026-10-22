@@ -1,7 +1,7 @@
 #include <cmath>
-#include <orbitforge/application/hpop_covariance.hpp>
+#include <orbelle/application/hpop_covariance.hpp>
 
-namespace orbitforge::application {
+namespace orbelle::application {
 core::HpopCovarianceInput HpopCovarianceSettings::active_input() const {
     core::HpopCovarianceInput result;
     result.state = state;
@@ -67,4 +67,4 @@ void validate_hpop_covariance_settings(const HpopCovarianceSettings &s,
         throw std::invalid_argument(
             "Covariance with hard atmosphere switching requires event jump propagation");
 }
-} // namespace orbitforge::application
+} // namespace orbelle::application

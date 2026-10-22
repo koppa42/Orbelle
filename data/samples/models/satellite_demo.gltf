@@ -1,8 +1,8 @@
 {
   "asset": {
     "version": "2.0",
-    "generator": "OrbitForge make_satellite_model.py",
-    "copyright": "OrbitForge project-authored schematic model"
+    "generator": "Orbelle make_satellite_model.py",
+    "copyright": "Orbelle project-authored schematic model"
   },
   "extensionsUsed": [
     "KHR_materials_unlit"

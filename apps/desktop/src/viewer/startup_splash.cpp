@@ -17,10 +17,10 @@
 #include <future>
 #include <stdexcept>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 QPixmap splash_picture(QScreen *screen) {
-    const QDir directory(QStringLiteral(":/orbitforge/startup"));
+    const QDir directory(QStringLiteral(":/orbelle/startup"));
     const auto pictures = directory.entryList({QStringLiteral("*.png")}, QDir::Files, QDir::Name);
     if (pictures.isEmpty())
         throw std::runtime_error("Startup artwork is missing from the application resources");
@@ -171,14 +171,8 @@ void StartupSplash::drawContents(QPainter *painter) {
     font.setWeight(QFont::DemiBold);
     painter->setFont(font);
     painter->setPen(theme::color(theme::text));
-    painter->drawText(QRectF(98, 37, 520, 58), Qt::AlignLeft | Qt::AlignVCenter, "OrbitForge");
-    font.setPixelSize(15);
-    font.setWeight(QFont::Normal);
-    font.setLetterSpacing(QFont::AbsoluteSpacing, 1.5);
-    painter->setFont(font);
-    painter->setPen(theme::color(theme::text_soft));
-    painter->drawText(QRectF(100, 94, 420, 26), Qt::AlignLeft | Qt::AlignVCenter,
-                      ui::text("startup_splash.label_2"));
+    painter->drawText(QRectF(98, 37, 520, 58), Qt::AlignLeft | Qt::AlignVCenter,
+                      ui::text("brand.name"));
     paint_sakura_blossom(*painter, QPointF(906, 48), 11, theme::color(theme::sakura, 200));
     paint_sakura_blossom(*painter, QPointF(878, 34), 5, theme::color(theme::sakura, 120));
 
@@ -192,6 +186,7 @@ void StartupSplash::drawContents(QPainter *painter) {
     painter->setBrush(theme::color(theme::sakura));
     painter->drawEllipse(QPointF(50, 496), 3, 3);
     font.setPixelSize(13);
+    font.setWeight(QFont::Normal);
     font.setLetterSpacing(QFont::AbsoluteSpacing, 0);
     painter->setFont(font);
     painter->setPen(theme::color(theme::text_soft));
@@ -201,4 +196,4 @@ void StartupSplash::drawContents(QPainter *painter) {
     painter->drawRect(QRectF(0.5, 0.5, 959, 539));
     painter->restore();
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

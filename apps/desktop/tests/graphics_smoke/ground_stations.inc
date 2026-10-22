@@ -146,7 +146,7 @@ void Workbench::smoke_ground_stations() {
                           selected_station_ == 0,
                       "Station deletion lost the surviving station selection");
         smoke_record("ground-station-rename-copy-and-delete");
-        save_project_to(smoke_dir_ + "/ground-stations.orbitforge");
+        save_project_to(smoke_dir_ + "/ground-stations.orbelle");
         start_project(
             application::load_project(std::filesystem::path(project_path_.toStdWString())),
             project_path_);
@@ -267,8 +267,8 @@ void Workbench::smoke_ground_stations() {
                       "Deleting the last station left a ghost marker or enabled object action");
         smoke_record("ground-station-only-defaults-mixed-insertion-and-delete-last");
         start_project(application::load_project(std::filesystem::path(
-                          (smoke_dir_ + "/scenario-edited.orbitforge").toStdWString())),
-                      smoke_dir_ + "/scenario-edited.orbitforge");
+                          (smoke_dir_ + "/scenario-edited.orbelle").toStdWString())),
+                      smoke_dir_ + "/scenario-edited.orbelle");
         ++orbit_smoke_stage_;
         break;
     case 119:

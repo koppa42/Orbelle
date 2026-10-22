@@ -5,14 +5,14 @@
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
-#include <orbitforge/core/propagation/circular_two_body.hpp>
-#include <orbitforge/core/propagation/tabulated_orbit.hpp>
-#include <orbitforge/runtime/project.hpp>
-#include <orbitforge/runtime/report.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/core/propagation/circular_two_body.hpp>
+#include <orbelle/core/propagation/tabulated_orbit.hpp>
+#include <orbelle/runtime/project.hpp>
+#include <orbelle/runtime/report.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 #include <tuple>
 
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 using Json = nlohmann::json;
 struct Digest {
@@ -78,7 +78,7 @@ std::uint64_t bytes_digest(const std::vector<std::uint8_t> &bytes) {
 int main(int argc, char **argv) {
     try {
         if ((argc != 3 && argc != 4) || (argc == 4 && std::string(argv[3]) != "--scenario-only") ||
-            std::string(ORBITFORGE_BENCHMARK_CONFIG) != "Release")
+            std::string(ORBELLE_BENCHMARK_CONFIG) != "Release")
             throw std::invalid_argument(
                 "Usage (Release): workflow_benchmark SAMPLE_ROOT NEW_OUTPUT");
         const std::filesystem::path samples = argv[1], output = argv[2];
@@ -86,7 +86,7 @@ int main(int argc, char **argv) {
             throw std::invalid_argument("Output must be a new directory");
         std::filesystem::create_directories(output);
         Json report{{"schema", 1},
-                    {"configuration", ORBITFORGE_BENCHMARK_CONFIG},
+                    {"configuration", ORBELLE_BENCHMARK_CONFIG},
                     {"warmups", 1},
                     {"repeats", 3}};
         if (argc == 4) {

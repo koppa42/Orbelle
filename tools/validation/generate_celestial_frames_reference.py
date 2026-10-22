@@ -1,4 +1,4 @@
-"""Generate pinned Orekit celestial and joint-covariance references without OrbitForge."""
+"""Generate pinned Orekit celestial and joint-covariance references without Orbelle."""
 import argparse
 import hashlib
 import json
@@ -26,9 +26,9 @@ def main():
     args.work_dir.mkdir(parents=True, exist_ok=True)
     cp = os.pathsep.join(jars)
     subprocess.run(["javac", "-cp", cp, "-d", str(args.work_dir),
-                    str(source / "OrbitForgeCelestialFramesReference.java")], check=True)
+                    str(source / "OrbelleCelestialFramesReference.java")], check=True)
     subprocess.run(["java", "-cp", str(args.work_dir.resolve()) + os.pathsep + cp,
-                    "OrbitForgeCelestialFramesReference", str(args.frames_output)], check=True)
+                    "OrbelleCelestialFramesReference", str(args.frames_output)], check=True)
     subprocess.run([sys.executable, str(root / "tools/validation/hpop_celestial_covariance_reference.py"),
                     "--frames", str(args.frames_output), "--output", str(args.covariance_output)],
                    check=True)

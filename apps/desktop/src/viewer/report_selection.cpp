@@ -23,7 +23,7 @@
 #include <QtMath>
 #include <algorithm>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 constexpr int subtitle_role = Qt::UserRole + 1;
 constexpr int unavailable_role = Qt::UserRole + 2;
@@ -639,4 +639,4 @@ void ReportSelectionDialog::resizeEvent(QResizeEvent *event) {
             list_->scrollToItem(list_->currentItem());
     });
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

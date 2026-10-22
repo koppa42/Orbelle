@@ -3,9 +3,9 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <orbitforge/runtime/analysis.hpp>
+#include <orbelle/runtime/analysis.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // A value copy of published inputs and owning, already confirmed providers.
 // Project/Analysis preparation runs on the report worker, not the GUI thread.
 struct ReportInput {
@@ -36,4 +36,4 @@ class ReportDialog final : public QDialog {
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

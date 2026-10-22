@@ -1,5 +1,5 @@
 /* Independent author C gtd7d: native daily Ap and historical Ap (switch 9=-1).
- * Does not include or link OrbitForge. Sources are pinned in density_sources.json. */
+ * Does not include or link Orbelle. Sources are pinned in density_sources.json. */
 #include "nrlmsise-00.h"
 #include <stdio.h>
 #include <string.h>
@@ -23,7 +23,7 @@ int main(int argc, char **argv) {
                                  {40, 400, 100, 50, 20, 7.125, 3.75},
                                  {40, 0, 2, 6, 18, 88.75, 222.125}};
     int d, z, g, w, i;
-    puts("# Author NRLMSISE-00 C bc9a2fe; gtd7d SI; daily/history Ap; independent of OrbitForge");
+    puts("# Author NRLMSISE-00 C bc9a2fe; gtd7d SI; daily/history Ap; independent of Orbelle");
     puts("# year month day UTC_seconds altitude_m latitude_rad longitude_rad solar_hour_angle_rad "
          "f107 f107_average history_mode ap0 ap1 ap2 ap3 ap4 ap5 ap6 density_kg_m3 "
          "temperature_K exospheric_temperature_K");

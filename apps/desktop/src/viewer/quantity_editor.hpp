@@ -6,7 +6,7 @@
 class QLineEdit;
 class QToolButton;
 class QMenu;
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 enum class Unit {
     one,
     metre,
@@ -54,7 +54,7 @@ class QuantityEditor final : public QFrame {
   signals:
     // SI value (or dimensionless), only emitted for a valid physical value change.
     void valueChanged(double base_value);
-    void unitChanged(orbitforge::desktop::Unit unit);
+    void unitChanged(orbelle::desktop::Unit unit);
 
   protected:
     bool eventFilter(QObject *object, QEvent *event) override;
@@ -77,4 +77,4 @@ class QuantityEditor final : public QFrame {
     QMenu *menu_ = nullptr;
     QString label_;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

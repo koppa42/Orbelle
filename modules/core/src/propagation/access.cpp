@@ -3,10 +3,10 @@
 #include <limits>
 #include <map>
 #include <numbers>
-#include <orbitforge/core/propagation/access.hpp>
+#include <orbelle/core/propagation/access.hpp>
 #include <stdexcept>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 double norm(const std::array<double, 3> &v) {
     for (auto x : v)
@@ -248,4 +248,4 @@ std::vector<AccessInterval> find_constraint_intervals(Epoch first, Epoch last, s
     return result;
 }
 
-} // namespace orbitforge::core
+} // namespace orbelle::core

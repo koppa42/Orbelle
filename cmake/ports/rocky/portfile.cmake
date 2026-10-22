@@ -9,9 +9,9 @@ vcpkg_from_github(
 
 # Upstream unconditionally adds demos/tests. They are not part of the dependency SDK.
 vcpkg_replace_string("${SOURCE_PATH}/src/CMakeLists.txt"
-    "add_subdirectory(apps)" "# OrbitForge port: do not build upstream demos")
+    "add_subdirectory(apps)" "# Orbelle port: do not build upstream demos")
 vcpkg_replace_string("${SOURCE_PATH}/src/CMakeLists.txt"
-    "add_subdirectory(tests)" "# OrbitForge port: do not build upstream tests")
+    "add_subdirectory(tests)" "# Orbelle port: do not build upstream tests")
 
 vcpkg_check_features(OUT_FEATURE_OPTIONS feature_options
     FEATURES gdal ROCKY_SUPPORTS_GDAL)

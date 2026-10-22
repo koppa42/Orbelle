@@ -29,7 +29,7 @@
 #include <QVBoxLayout>
 #include <algorithm>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 QString product_name(DataProduct p) {
     switch (p) {
@@ -1065,4 +1065,4 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     }
     dialog.exec();
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

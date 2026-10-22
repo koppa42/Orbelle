@@ -1,18 +1,18 @@
 #include <charconv>
 #include <limits>
-#include <orbitforge/runtime/data_catalog.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/gravity.hpp>
-#include <orbitforge/runtime/ocean_tides.hpp>
-#include <orbitforge/runtime/space_weather.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/runtime/data_catalog.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/gravity.hpp>
+#include <orbelle/runtime/ocean_tides.hpp>
+#include <orbelle/runtime/space_weather.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 #include <stdexcept>
 #include <string_view>
-#ifdef ORBITFORGE_HAS_SPICE
-#include <orbitforge/providers/spice/provider.hpp>
+#ifdef ORBELLE_HAS_SPICE
+#include <orbelle/providers/spice/provider.hpp>
 #endif
 
-namespace orbitforge::runtime {
+namespace orbelle::runtime {
 namespace {
 const char *product_name(EopProduct product) {
     switch (product) {
@@ -56,9 +56,9 @@ void DataCatalog::set_extrapolation_days(EopProduct product, int days) {
         throw std::invalid_argument("EOP extrapolation limit must be 0..30 days");
     set_setting(extrapolation_key(product), std::to_string(days));
 }
-} // namespace orbitforge::runtime
+} // namespace orbelle::runtime
 
-#ifdef ORBITFORGE_HAS_DATA_CATALOG
+#ifdef ORBELLE_HAS_DATA_CATALOG
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -77,7 +77,7 @@ void DataCatalog::set_extrapolation_days(EopProduct product, int days) {
 #include <thread>
 #endif
 
-namespace orbitforge::runtime {
+namespace orbelle::runtime {
 namespace {
 using Json = nlohmann::json;
 void check(bool value, const std::string &message) {
@@ -396,7 +396,7 @@ CatalogEphemeris DataCatalog::install_de440s(const std::filesystem::path &spk,
                         "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls"},
                        {"source_sha256",
                         "678e32bdb5a744117a467cd9601cd6b373f0e9bc9bbde1371d5eee39600a039b"},
-                       {"producer", "OrbitForge; NAIF uniform-time constants only"}},
+                       {"producer", "Orbelle; NAIF uniform-time constants only"}},
                       {{"file", "de440s.bsp"},
                        {"kind", "SPK"},
                        {"sha256", de440s_sha256},
@@ -507,7 +507,7 @@ CatalogEphemeris DataCatalog::install_planetary_centres(const std::filesystem::p
                                                         const std::string &url,
                                                         DataAcquisition acquisition,
                                                         const std::function<void()> &checkpoint) {
-#ifndef ORBITFORGE_HAS_SPICE
+#ifndef ORBELLE_HAS_SPICE
     (void)source;
     (void)url;
     (void)acquisition;
@@ -567,7 +567,7 @@ CatalogEphemeris DataCatalog::install_planetary_centres(const std::filesystem::p
                            {"sha256", picosha2::hash256_hex_string(content)},
                            {"source_url", url.empty() ? "urn:sha256:" + source_hash : url},
                            {"source_sha256", source_hash},
-                           {"producer", "OrbitForge; CSPICE spksub physical-centre subset"}});
+                           {"producer", "Orbelle; CSPICE spksub physical-centre subset"}});
     }
     std::stable_sort(kernels.begin(), kernels.end(), [](const auto &a, const auto &b) {
         const bool ca = a.at("kind") == "SPK_BODY_CENTRES";
@@ -1376,9 +1376,9 @@ CatalogSnapshot DataCatalog::import_finals(const std::filesystem::path &source,
     write(stage.path / "finals2000A.all", bytes);
     return install_eop(stage.path / "manifest.json", time_file);
 }
-} // namespace orbitforge::runtime
+} // namespace orbelle::runtime
 #else
-namespace orbitforge::runtime {
+namespace orbelle::runtime {
 struct DataCatalog::Impl {
     std::filesystem::path root;
 };
@@ -1469,5 +1469,5 @@ DataCatalog::resolve_eop(const application::DataLock &) const {
 std::string DataCatalog::setting(const std::string &) const { unavailable(); }
 void DataCatalog::set_setting(const std::string &, const std::string &) { unavailable(); }
 void DataCatalog::set_settings(const std::map<std::string, std::string> &) { unavailable(); }
-} // namespace orbitforge::runtime
+} // namespace orbelle::runtime
 #endif

@@ -1,7 +1,7 @@
 #pragma once
-#include <orbitforge/core/propagation/solar_radiation_pressure.hpp>
+#include <orbelle/core/propagation/solar_radiation_pressure.hpp>
 
-namespace orbitforge::core::detail {
+namespace orbelle::core::detail {
 // Signed spherical shadow contacts, in canonical Earth/Moon/planet order.
 // Cylinder: one external limb. Dual cone: external, full-umbra and annular
 // internal contacts. Negative means inside that contact. Gates have exactly the
@@ -16,4 +16,4 @@ srp_shadow_contacts(const std::array<double, 3> &satellite, const std::array<dou
                     const SrpOptions &options,
                     const std::optional<std::array<double, 3>> &moon = {},
                     std::span<const SrpBodyPosition> additional = {});
-} // namespace orbitforge::core::detail
+} // namespace orbelle::core::detail

@@ -1,8 +1,8 @@
 #include <cmath>
-#include <orbitforge/core/frames/frame_provider.hpp>
+#include <orbelle/core/frames/frame_provider.hpp>
 #include <stdexcept>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 void validate(const CartesianState &state, const PositionRotation &rotation, FrameId expected) {
     if (state.epoch != rotation.epoch || state.origin != rotation.origin ||
@@ -81,4 +81,4 @@ CartesianState transform_state(const CartesianState &state, FrameId target,
         return frames.teme_to_itrf_state(state.epoch, eop).inverse(fixed);
     return fixed;
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

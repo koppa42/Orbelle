@@ -7,5 +7,5 @@ source archive and SHA512. The tagged source still declares `project(VERSION
 Port 0.4.0#2 changes that release metadata to 0.4.0. The upstream SOVERSION 3
 is retained; the patch does not claim a new ABI or change rendering behavior.
 Qt6, dependency discovery, example exclusion and license installation follow
-the fixed registry port. Compatibility is verified by OrbitForge's graphics
+the fixed registry port. Compatibility is verified by Orbelle's graphics
 build and runtime checks.

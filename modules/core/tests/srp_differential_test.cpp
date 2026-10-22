@@ -4,10 +4,10 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <numbers>
-#include <orbitforge/core/propagation/solar_radiation_pressure.hpp>
-#include <orbitforge/core/propagation/state_provider.hpp>
+#include <orbelle/core/propagation/solar_radiation_pressure.hpp>
+#include <orbelle/core/propagation/state_provider.hpp>
 #include <sstream>
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 using Vector = std::array<double, 3>;
 using Matrix = std::array<Vector, 3>;
@@ -105,10 +105,10 @@ TEST(SrpDifferential, SingleSphereAndIsotropicFluxMatchIndependentOrekitGradient
     // The independent high-precision audit bounds Orekit's annular clipping at
     // 2.46e-9 in lighting and 4.75e-9 in gradient. Separate stricter tests below
     // retain sensitivity to our own numerical error.
-    check_sphere_reference(ORBITFORGE_SRP_DIFFERENTIAL_REFERENCE, 274, 3e-9, 8e-9);
+    check_sphere_reference(ORBELLE_SRP_DIFFERENTIAL_REFERENCE, 274, 3e-9, 8e-9);
 }
 TEST(SrpDifferential, SingleSphereMatchesHighPrecisionOverlapDerivative) {
-    check_sphere_reference(ORBITFORGE_SRP_DIFFERENTIAL_HIGH_REFERENCE, 256, 1e-11, 1e-10);
+    check_sphere_reference(ORBELLE_SRP_DIFFERENTIAL_HIGH_REFERENCE, 256, 1e-11, 1e-10);
 }
 TEST(SrpDifferential, ZeroAndSignedConsiderParametersAndDisabledModel) {
     SrpOptions options;
@@ -163,7 +163,7 @@ TEST(SrpDifferential, ContactsCoincidentDisksAndInvalidGeometryAreExplicit) {
 }
 
 TEST(SrpDifferential, DiskUnionMatchesIndependentScipyQuadratureAndCartesianDifferences) {
-    std::ifstream file(ORBITFORGE_SRP_UNION_DIFFERENTIAL_REFERENCE);
+    std::ifstream file(ORBELLE_SRP_UNION_DIFFERENTIAL_REFERENCE);
     ASSERT_TRUE(file.is_open());
     unsigned count = 0;
     double max_r = 0, max_sun = 0, max_light = 0;

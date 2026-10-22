@@ -1,8 +1,8 @@
 #include "intersatellite_report.hpp"
 #include <algorithm>
 #include <map>
-#include <orbitforge/core/propagation/relative_motion.hpp>
-namespace orbitforge::runtime::detail {
+#include <orbelle/core/propagation/relative_motion.hpp>
+namespace orbelle::runtime::detail {
 namespace {
 void check(bool ok, const char *message) {
     if (!ok)
@@ -119,4 +119,4 @@ intersatellite_report(const ReportContext &context, const application::ReportDef
     }
     return result;
 }
-} // namespace orbitforge::runtime::detail
+} // namespace orbelle::runtime::detail

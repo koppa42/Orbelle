@@ -26,7 +26,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 constexpr int timing_role = Qt::UserRole + 1;
 constexpr int detail_role = Qt::UserRole + 2;
@@ -704,4 +704,4 @@ bool edit_mission(core::MissionPlan &plan, core::HpopOptions &hpop, core::Epoch 
     hpop = dialog.hpop;
     return true;
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

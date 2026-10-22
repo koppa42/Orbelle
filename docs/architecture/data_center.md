@@ -25,7 +25,7 @@
 
 ## 存储与引用
 
-桌面使用 Qt `AppLocalDataLocation/data`，Windows 默认 `%LOCALAPPDATA%/OrbitForge/data`，可通过 `ORBITFORGE_DATA_HOME` 指定其他目录。指定目录后不自动搬迁旧目录；导入时仍保留原数据身份。C++/Python 可显式选择目录：
+桌面使用 Qt `AppLocalDataLocation/data`，Windows 默认 `%LOCALAPPDATA%/Orbelle/data`，可通过 `ORBELLE_DATA_HOME` 指定其他目录。指定目录后不自动搬迁旧目录；导入时仍保留原数据身份。C++/Python 可显式选择目录：
 
 ```text
 data/
@@ -44,7 +44,7 @@ SQLite schema 2 在 `snapshots`、`dependencies`、`settings` 之外增加 `acqu
 
 Runtime 的 `DataCatalog` 不依赖 Qt，提供目录查询、EOP 安装、finals2000A/C04 原文件导入、UTC 原文安装、偏好保存和按 `DataLock` 精确解析。每次加载核验清单、内容文件及时间依赖身份；EOP record schema 2 额外保存配套的 `leap-seconds.dat` 和内容哈希，因此重开目录时仍可验证对应 UTC 依赖。没有外部 UTC 文件的旧记录继续使用内置表。SQLite 使用 WAL、写事务和忙等待，串行化多个进程的发布；先验证临时副本、发布文件，再提交索引。启动时可恢复已发布而尚未写入数据库的有效快照，未发布临时目录不进入列表。Windows 发布目录时遇到临时访问拒绝或共享/锁冲突，最多额外重试 5 次，累计等待 620 ms；仍使用原子重命名，不退回部分复制。其他错误立即失败。这里不承诺断电时所有文件与数据库跨介质原子持久化。
 
-多个场景共用相同文件，不各自复制数据。启动时按原身份导入附带快照及旧 `%LOCALAPPDATA%/OrbitForge/eop` 目录；迁移不改写已有项目文件。重复导入复用内容，已有损坏文件不会被新导入静默覆盖。损坏用户条目在窗口提示并排除加载；内置数据仍可从应用资源读取。旧内容目前作为内部缓存保留，没有用户历史管理功能；缓存清理尚未实现，项目正常打开不再依赖旧缓存。
+多个场景共用相同文件，不各自复制数据。启动时按原身份导入附带快照及旧 `%LOCALAPPDATA%/Orbelle/eop` 目录；迁移不改写已有项目文件。重复导入复用内容，已有损坏文件不会被新导入静默覆盖。损坏用户条目在窗口提示并排除加载；内置数据仍可从应用资源读取。旧内容目前作为内部缓存保留，没有用户历史管理功能；缓存清理尚未实现，项目正常打开不再依赖旧缓存。
 
 每次导入通过随机名称原子创建独占临时目录，避免并发任务反复争用刚被发布或删除的目录名。目录发布后立即释放临时路径的所有权；清理只处理本次操作创建的目录，不删除共享的 `staging` 父目录。
 
@@ -91,8 +91,8 @@ EGM2008 / EGM96 从 [ICGEM 官方模型目录](https://icgem.gfz.de/tom_longtime
 重力收据以 `gravity/<ID>` 存入 SQLite settings，记录获取方式与时间，完整文件保存在 `gravity/<sha256>.dat`。`DataCatalog.install_gravity()` 先复制和校验再发布；`gravity_models()` 查询收据，`load_gravity(ID)` 校验并加载不可变资源。`DataSnapshot.with_gravity_file(ID, path)` 用于显式装配。`project.prepare(catalog)` 只加载对象实际选择的重力资源，项目以 `gravity/<ID>` 记录原文哈希和解析配置；下载时间不参与计算身份。
 
 ```python
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 catalog = of.DataCatalog("local/data")
 entry = catalog.install_gravity("EGM2008.gfc", model="egm2008")
@@ -103,7 +103,7 @@ sat = project.objects.satellite("Sat", orbit=of.orbits.Hpop(
     initial=of.orbits.Keplerian(of.Epoch(0), u.km(7000), 0, u.deg(30)),
     gravity_model=entry.selection, gravity_mu=entry.info.mu, gravity_degree=21))
 analysis = project.prepare(data=data)
-project.save("gravity.orbitforge", analysis=analysis)
+project.save("gravity.orbelle", analysis=analysis)
 ```
 
 此示例显式使用本地文件，EOP 必须覆盖示例时段。外部模型 GM 与轨道配置不符时需要重新选择模型、核对输入；不会仅通过接受新哈希静默改变初始根数的物理含义。系数更新沿用项目打开／重算的确认流程，运行中结果保持原资源。
@@ -123,8 +123,8 @@ HPOP 使用地心几何位置（无光行时/像差），通过专用 ICRF 轴�
 Python 显式装配本地文件的最小示例（点质量地球隔离 EOP 依赖；球谐地球还需覆盖全积分时段的 EOP）：
 
 ```python
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 catalog = of.DataCatalog("local/data")
 entry = catalog.install_de440s("de440s.bsp")  # 显式本地安装，不隐式联网
@@ -135,7 +135,7 @@ sat = project.objects.satellite("Sat", orbit=of.orbits.Hpop(
     initial=of.orbits.Keplerian(of.Epoch(0), u.km(42164), 0, u.deg(15)),
     gravity_degree=0, third_bodies=("sun", "moon")))
 analysis = project.prepare(data=data)
-project.save("sun-moon.orbitforge", analysis=analysis)
+project.save("sun-moon.orbelle", analysis=analysis)
 ```
 
 C++ 可用 `catalog.load_ephemeris("de440s")` 装配 `DataSnapshot::with_ephemeris()`，或设置 `HpopEnvironment::ephemeris` 后调用 `make_hpop()`；`HpopOptions::third_body(body)` 保存逐天体启用和 GM 来源（JPL DE / Cb file / User Specified）。Cb 常数是显式导入后捕获的配置值，位置仍来自统一管理的 DE440s，详见[第三体引力](third_body_gravity.md)。桌面、项目报告和任务序列 HPOP 滑行复用同一实现。
@@ -169,7 +169,7 @@ IERS 文件内已有预测属于文件数据；越过完整有效样本范围后
 已经安装数据的目录可直接用于 `project.prepare(data=catalog)`；C++ 对应 `runtime::prepare(document, catalog)`。接口按整个项目时段读取当前来源、优先级和外推设置，数据变化仍需明确确认；同一次分析持有固定资源。按需提前调用 `catalog.snapshot(first, last)`，或使用 `earth_orientation=False` 只选择时间表。契约与错误处理见[分析 API](analysis_api.md)。
 
 ```python
-import orbitforge as of
+import orbelle as of
 
 catalog = of.DataCatalog('local/shared-data')
 entry = catalog.install_eop('snapshot/manifest.json')
@@ -178,7 +178,7 @@ catalog.activate_eop(entry.lock_sha256)  # 安装后显式指定当前文件，�
 # 也可直接安装完整原文件，自动推导可计算范围，不需要手工准备清单：
 # entry = catalog.import_finals('finals2000A.all',
 #     'https://datacenter.iers.org/data/9/finals2000A.all', '2026-10-10')
-project = of.load_project('mission.orbitforge')
+project = of.load_project('mission.orbelle')
 provider = catalog.load_eop(entry.lock_sha256)
 project.earth_orientation = provider.data_info  # 记录本次实际使用的数据
 print(catalog.snapshots[0].acquired_at_unix_seconds)
@@ -187,7 +187,7 @@ limited = of.load_eop_snapshot(entry.manifest, extrapolation_days=3)
 project.earth_orientation = limited.data_info
 ```
 
-`ORBITFORGE_WITH_DATA_CATALOG` 默认关闭，图形桌面预设和标准 wheel 显式启用。关闭时 `data_catalog_available()` 返回 false，构造目录明确报告功能不可用；普通 headless 构建保持无 SQLite 依赖。
+`ORBELLE_WITH_DATA_CATALOG` 默认关闭，图形桌面预设和标准 wheel 显式启用。关闭时 `data_catalog_available()` 返回 false，构造目录明确报告功能不可用；普通 headless 构建保持无 SQLite 依赖。
 
 
 ## 空间天气

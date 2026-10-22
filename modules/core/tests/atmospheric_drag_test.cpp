@@ -7,15 +7,15 @@
 #include <iostream>
 #include <limits>
 #include <numbers>
-#include <orbitforge/core/propagation/atmospheric_drag.hpp>
-#include <orbitforge/core/propagation/hpop.hpp>
-#include <orbitforge/core/propagation/hpop_force.hpp>
-#include <orbitforge/core/propagation/hpop_variational.hpp>
-#include <orbitforge/core/propagation/state_provider.hpp>
+#include <orbelle/core/propagation/atmospheric_drag.hpp>
+#include <orbelle/core/propagation/hpop.hpp>
+#include <orbelle/core/propagation/hpop_force.hpp>
+#include <orbelle/core/propagation/hpop_variational.hpp>
+#include <orbelle/core/propagation/state_provider.hpp>
 #include <sstream>
 #include <vector>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 constexpr double spin = 7.292115e-5;
 class SyntheticTime final : public ITimeProvider {
@@ -164,7 +164,7 @@ TEST(AtmosphericDrag, InvalidDatesEnumsNonfiniteInputsAndModelDomainsAreRejected
                  std::invalid_argument);
 }
 TEST(AtmosphericDrag, DensityMatchesIndependentAuthorNrlmsiseGtd7dIncludingLowAltitudeBoundaries) {
-    std::ifstream source(ORBITFORGE_NRLMSISE_REFERENCE);
+    std::ifstream source(ORBELLE_NRLMSISE_REFERENCE);
     ASSERT_TRUE(source);
     std::string line;
     std::size_t count = 0;
@@ -223,7 +223,7 @@ TEST(AtmosphericDrag, JrNoonMidnightEquinoxAndPolarLimitsAreFiniteAndConcurrent)
     EXPECT_EQ(b.get(), expected.density_kg_m3);
 }
 TEST(AtmosphericDrag, JrDensityMatchesGmatAndHighPrecisionOriginalEquationsAcrossRegimesAndSeasonalDates) {
-    std::ifstream source(ORBITFORGE_JR_REFERENCE);
+    std::ifstream source(ORBELLE_JR_REFERENCE);
     ASSERT_TRUE(source);
     std::string line;
     std::size_t count = 0;
@@ -391,7 +391,7 @@ TEST(AtmosphericDrag, CoRotatingWgs84NrlmsisePropagationMatchesIndependentOrekit
         for (auto method : {HpopIntegrator::rkf78, HpopIntegrator::bulirsch_stoer}) {
             SCOPED_TRACE(vop);
 
-            std::ifstream source(ORBITFORGE_DRAG_REFERENCE);
+            std::ifstream source(ORBELLE_DRAG_REFERENCE);
             ASSERT_TRUE(source);
             std::string line;
             std::size_t count = 0;
@@ -470,7 +470,7 @@ TEST(AtmosphericDrag, CoRotatingWgs84NrlmsisePropagationMatchesIndependentOrekit
         }
 }
 TEST(AtmosphericDrag, SharedMassAndIndependentAreasMatchOrekitCombinedForcesAndPropagation) {
-    std::ifstream source(ORBITFORGE_MASS_REFERENCE);
+    std::ifstream source(ORBELLE_MASS_REFERENCE);
     ASSERT_TRUE(source);
     const auto env = environment();
     std::string line;
@@ -628,10 +628,10 @@ void check_nrl_ap_reference(const char *path, std::size_t expected_count) {
 }
 } // namespace
 TEST(AtmosphericDrag, NativeDailyAndHistoricalApMatchIndependentAuthorGtd7d) {
-    check_nrl_ap_reference(ORBITFORGE_NRLMSISE_AP_REFERENCE, 1056);
+    check_nrl_ap_reference(ORBELLE_NRLMSISE_AP_REFERENCE, 1056);
 }
 TEST(AtmosphericDrag, HighAltitudeDensityMatchesIndependentAuthorGtd7dThrough2500Km) {
-    check_nrl_ap_reference(ORBITFORGE_NRLMSISE_HIGH_REFERENCE, 576);
+    check_nrl_ap_reference(ORBELLE_NRLMSISE_HIGH_REFERENCE, 576);
 }
 
 TEST(AtmosphericDrag, CutoffUsesDensityHeightAndDoesNotClampOrExtrapolateDensity) {

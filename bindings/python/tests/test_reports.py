@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 # Native value/format tests; public editing is in test_objects.py.
-from orbitforge import _native as of
+from orbelle import _native as of
 from project_format import rewrite_section
 
 
@@ -28,7 +28,7 @@ class ReportsTest(unittest.TestCase):
         return project, definition
 
     def test_hpop_step_control_uses_only_effective_settings_in_report_identity(self):
-        fixture = Path(__file__).resolve().parents[3] / "tests/integration/fixtures/project-current.orbitforge"
+        fixture = Path(__file__).resolve().parents[3] / "tests/integration/fixtures/project-current.orbelle"
         for method in (of.HpopIntegrator.RKF78, of.HpopIntegrator.RKV89,
                        of.HpopIntegrator.BULIRSCH_STOER, of.HpopIntegrator.RK4,
                        of.HpopIntegrator.GAUSS_JACKSON):
@@ -107,7 +107,7 @@ class ReportsTest(unittest.TestCase):
             of.generate_report(project, definition)
         project.reports = [definition]
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'report.orbitforge'
+            path = Path(directory) / 'report.orbelle'
             project.save(path)
             restored = of.load_project(path)
             self.assertEqual(restored.reports[0].query.object_ids, ['missing'])
@@ -139,7 +139,7 @@ class ReportsTest(unittest.TestCase):
         definition.format.time_scale = of.ReportTimeScale.TT
         project.reports = [definition]
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'reports.orbitforge'
+            path = Path(directory) / 'reports.orbelle'
             project.save(path)
             raw = path.read_bytes()
             restored = of.load_project(path)
@@ -189,10 +189,10 @@ class ReportsTest(unittest.TestCase):
         self.assertAlmostEqual(result.numeric_value(0, 6), 0, delta=1e-8)
         project.reports = [definition]
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'derived.orbitforge'
+            path = Path(directory) / 'derived.orbelle'
             project.save(path)
             raw = path.read_bytes()
-            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 47)
+            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 48)
             self.assertEqual(of.load_project(path).reports[0].query.kind, of.ReportKind.GEODETIC_POSITION)
 
 

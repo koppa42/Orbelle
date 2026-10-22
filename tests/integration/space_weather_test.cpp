@@ -2,12 +2,12 @@
 #include <cmath>
 #include <fstream>
 #include <gtest/gtest.h>
-#include <orbitforge/orbitforge.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/space_weather.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/orbelle.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/space_weather.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 #include <sstream>
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 using Model = core::AtmosphereModel;
 using Update = core::GeomagneticUpdate;
@@ -226,10 +226,10 @@ TEST_F(WeatherFiles, HpopFileWeatherMatchesManualConstantAndPinsSessionReportAnd
     if (!runtime::time_frames_available() || !runtime::ephemeris_available())
         GTEST_SKIP();
     const auto data =
-        runtime::DataSnapshot::load(ORBITFORGE_DRAG_EOP)
+        runtime::DataSnapshot::load(ORBELLE_DRAG_EOP)
             .with_ephemeris("de440s",
                             runtime::make_third_body_ephemeris(
-                                runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root)));
+                                runtime::load_spice_snapshot(ORBELLE_INTEGRATION_SPICE, root)));
     const auto first = data.time()->from_utc({2016, 12, 30, 12, 0, 0, 0});
     const core::Epoch last{first.tai_nanoseconds() + 600000000000};
     application::Project p{"Weather", first, last};
@@ -270,8 +270,8 @@ TEST_F(WeatherFiles, HpopFileWeatherMatchesManualConstantAndPinsSessionReportAnd
     ASSERT_EQ(report.table.rows().size(), 3U);
     for (std::size_t i = 0; i < 3; ++i)
         EXPECT_EQ(std::get<double>(report.table.rows().back()[4 + i]), actual.position_m[i]);
-    project.save(root / "weather.orbitforge", analysis);
-    const auto reopened = Project::open(root / "weather.orbitforge", weather);
+    project.save(root / "weather.orbelle", analysis);
+    const auto reopened = Project::open(root / "weather.orbelle", weather);
     EXPECT_EQ(reopened.to_data().satellites[0].orbit.hpop.drag, drag);
     EXPECT_EQ(reopened.prepare(weather)
                   .state(reopened.objects().get("satellite-1"), last, FrameId::gcrf)
@@ -310,7 +310,7 @@ std::vector<core::SpaceWeatherDay> spline_records() {
         d.daily_ap = 15;
         d.daily_kp = 3;
     }
-    std::ifstream input(ORBITFORGE_WEATHER_SPLINE_REFERENCE);
+    std::ifstream input(ORBELLE_WEATHER_SPLINE_REFERENCE);
     if (!input)
         throw std::runtime_error("Missing SciPy weather spline reference");
     std::string line;
@@ -337,7 +337,7 @@ TEST(SpaceWeather, NaturalCubicMatchesIndependentScipyAcrossKnotsAndLeapSecond) 
         GTEST_SKIP();
     const auto time = runtime::make_builtin_time_provider();
     const core::SpaceWeather w{{}, spline_records()};
-    std::ifstream input(ORBITFORGE_WEATHER_SPLINE_REFERENCE);
+    std::ifstream input(ORBELLE_WEATHER_SPLINE_REFERENCE);
     std::string line;
     std::size_t count = 0;
     double maximum = 0;
@@ -454,7 +454,7 @@ TEST(SpaceWeather, SplineDrivenJacchiaRobertsMatchesOriginalGmatDensity) {
         GTEST_SKIP();
     const auto time = runtime::make_builtin_time_provider();
     const core::SpaceWeather w{{}, spline_records()};
-    std::ifstream input(ORBITFORGE_WEATHER_SPLINE_REFERENCE);
+    std::ifstream input(ORBELLE_WEATHER_SPLINE_REFERENCE);
     std::string line;
     std::size_t count = 0;
     double maximum = 0;
@@ -508,10 +508,10 @@ TEST_F(WeatherFiles, InterpolatedTrajectoriesConvergeAndSurviveProjectReopen) {
             offset += varied.size();
         }
         const auto data =
-            runtime::DataSnapshot::load(ORBITFORGE_DRAG_EOP)
+            runtime::DataSnapshot::load(ORBELLE_DRAG_EOP)
                 .with_ephemeris(
                     "de440s", runtime::make_third_body_ephemeris(
-                                  runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root)))
+                                  runtime::load_spice_snapshot(ORBELLE_INTEGRATION_SPICE, root)))
                 .with_space_weather_file("celestrak", write(text));
         const auto epoch = data.time()->from_utc({2017, 1, 1, 1, 0, 0, 0});
         const core::Epoch first{epoch.tai_nanoseconds() - 21600000000000LL};
@@ -564,7 +564,7 @@ TEST_F(WeatherFiles, InterpolatedTrajectoriesConvergeAndSurviveProjectReopen) {
                       .position_m,
                   b.position_m);
         const auto file =
-            root / ("interpolation-" + std::to_string(static_cast<int>(update)) + ".orbitforge");
+            root / ("interpolation-" + std::to_string(static_cast<int>(update)) + ".orbelle");
         project.save(file, analysis);
         const auto reopened = Project::open(file, data);
         EXPECT_EQ(reopened.to_data().satellites[0].orbit.hpop.drag.geomagnetic_update, update);
@@ -591,10 +591,10 @@ TEST_P(WeatherEphemeris, HpopEphemerisSplitsTheLeapSecondWeatherJumpInBothDirect
     ASSERT_NE(values, std::string::npos);
     csv.replace(values, 28, ",400,400,400,400,400,400,400,400,400,");
     const auto data =
-        runtime::DataSnapshot::load(ORBITFORGE_DRAG_EOP)
+        runtime::DataSnapshot::load(ORBELLE_DRAG_EOP)
             .with_ephemeris("de440s",
                             runtime::make_third_body_ephemeris(
-                                runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root)))
+                                runtime::load_spice_snapshot(ORBELLE_INTEGRATION_SPICE, root)))
             .with_space_weather_file("celestrak", write(csv));
     const auto first = data.time()->from_utc({2016, 12, 31, 23, 50, 0, 0});
     const auto boundary = data.time()->from_utc({2017, 1, 1, 0, 0, 0, 0});
@@ -729,10 +729,10 @@ TEST_F(WeatherFiles, VariationalStatesComposeContinuouslyAcrossTheLeapWeatherJum
     ASSERT_NE(values, std::string::npos);
     csv.replace(values, 28, ",400,400,400,400,400,400,400,400,400,");
     const auto data =
-        runtime::DataSnapshot::load(ORBITFORGE_DRAG_EOP)
+        runtime::DataSnapshot::load(ORBELLE_DRAG_EOP)
             .with_ephemeris("de440s",
                             runtime::make_third_body_ephemeris(
-                                runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root)))
+                                runtime::load_spice_snapshot(ORBELLE_INTEGRATION_SPICE, root)))
             .with_space_weather_file("celestrak", write(csv));
     const auto boundary = data.time()->from_utc({2017, 1, 1, 0, 0, 0, 0});
     for (auto integrator : {HpopIntegrator::rkf78, HpopIntegrator::gauss_jackson})

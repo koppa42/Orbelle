@@ -1,9 +1,9 @@
 #pragma once
 #include <algorithm>
 #include <map>
-#include <orbitforge/runtime/report.hpp>
+#include <orbelle/runtime/report.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // Relabel an immutable result without executing its query. Return no value when
 // nothing changed; source IDs also resolve names when a template hides the ID column.
 inline std::shared_ptr<runtime::ReportResult> renamed_report(const runtime::ReportResult &result,
@@ -50,4 +50,4 @@ inline std::shared_ptr<runtime::ReportResult> renamed_report(const runtime::Repo
     updated.source_table = std::make_shared<const results::Table>(columns, std::move(rows));
     return std::make_shared<runtime::ReportResult>(updated.with_template(result.definition.format));
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

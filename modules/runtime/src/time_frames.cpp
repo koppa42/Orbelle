@@ -1,12 +1,12 @@
-#include <orbitforge/application/data_lock.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/application/data_lock.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 #include <stdexcept>
-#ifdef ORBITFORGE_HAS_ERFA
-#include <orbitforge/providers/erfa/provider.hpp>
-#include <orbitforge/providers/iers/eop_snapshot.hpp>
+#ifdef ORBELLE_HAS_ERFA
+#include <orbelle/providers/erfa/provider.hpp>
+#include <orbelle/providers/iers/eop_snapshot.hpp>
 #endif
 
-namespace orbitforge::runtime {
+namespace orbelle::runtime {
 std::shared_ptr<const core::IEarthOrientationProvider>
 select_eop_for_interval(std::span<const EopCandidate> candidates, core::Epoch first,
                         core::Epoch last, std::shared_ptr<const core::ITimeProvider> time) {
@@ -47,14 +47,14 @@ select_eop_for_interval(std::span<const EopCandidate> candidates, core::Epoch fi
                                               "Update data or review extrapolation settings.");
 }
 core::GeodeticPosition itrf_to_wgs84(core::CartesianState state) {
-#ifdef ORBITFORGE_HAS_ERFA
+#ifdef ORBELLE_HAS_ERFA
     return providers::erfa::itrf_to_wgs84(state);
 #else
     (void)state;
-    throw std::runtime_error("WGS84 conversion requires ORBITFORGE_WITH_ERFA=ON");
+    throw std::runtime_error("WGS84 conversion requires ORBELLE_WITH_ERFA=ON");
 #endif
 }
-#ifdef ORBITFORGE_HAS_ERFA
+#ifdef ORBELLE_HAS_ERFA
 namespace {
 class LimitedEop final : public core::IEarthOrientationProvider {
   public:
@@ -106,7 +106,7 @@ class LimitedEop final : public core::IEarthOrientationProvider {
 std::unique_ptr<core::IEarthOrientationProvider>
 with_eop_extrapolation(std::shared_ptr<const core::IEarthOrientationProvider> source, int days,
                        std::shared_ptr<const core::ITimeProvider> time) {
-#ifdef ORBITFORGE_HAS_ERFA
+#ifdef ORBELLE_HAS_ERFA
     if (!source)
         throw std::invalid_argument("Missing EOP source");
     if (!time)
@@ -116,52 +116,52 @@ with_eop_extrapolation(std::shared_ptr<const core::IEarthOrientationProvider> so
     (void)source;
     (void)days;
     (void)time;
-    throw std::runtime_error("EOP extrapolation requires ORBITFORGE_WITH_ERFA=ON");
+    throw std::runtime_error("EOP extrapolation requires ORBELLE_WITH_ERFA=ON");
 #endif
 }
 bool time_frames_available() noexcept {
-#ifdef ORBITFORGE_HAS_ERFA
+#ifdef ORBELLE_HAS_ERFA
     return true;
 #else
     return false;
 #endif
 }
 std::unique_ptr<core::ITimeProvider> make_builtin_time_provider() {
-#ifdef ORBITFORGE_HAS_ERFA
+#ifdef ORBELLE_HAS_ERFA
     return providers::erfa::make_builtin_time_provider();
 #else
-    throw std::runtime_error("Time provider requires a build with ORBITFORGE_WITH_ERFA=ON");
+    throw std::runtime_error("Time provider requires a build with ORBELLE_WITH_ERFA=ON");
 #endif
 }
 std::unique_ptr<core::IFrameProvider> make_frame_provider() {
-#ifdef ORBITFORGE_HAS_ERFA
+#ifdef ORBELLE_HAS_ERFA
     return providers::erfa::make_frame_provider();
 #else
-    throw std::runtime_error("Frame provider requires a build with ORBITFORGE_WITH_ERFA=ON");
+    throw std::runtime_error("Frame provider requires a build with ORBELLE_WITH_ERFA=ON");
 #endif
 }
 std::unique_ptr<core::ITimeProvider> load_time_snapshot(const std::filesystem::path &file) {
-#ifdef ORBITFORGE_HAS_ERFA
+#ifdef ORBELLE_HAS_ERFA
     return providers::erfa::load_time_snapshot(file);
 #else
     (void)file;
-    throw std::runtime_error("Time data loading requires ORBITFORGE_WITH_ERFA=ON");
+    throw std::runtime_error("Time data loading requires ORBELLE_WITH_ERFA=ON");
 #endif
 }
 std::unique_ptr<core::IEarthOrientationProvider>
 load_eop_snapshot_with_time(const std::filesystem::path &manifest,
                             const core::ITimeProvider &time) {
-#ifdef ORBITFORGE_HAS_ERFA
+#ifdef ORBELLE_HAS_ERFA
     return providers::iers::load_eop_snapshot(manifest, time);
 #else
     (void)manifest;
     (void)time;
-    throw std::runtime_error("EOP loading requires ORBITFORGE_WITH_ERFA=ON");
+    throw std::runtime_error("EOP loading requires ORBELLE_WITH_ERFA=ON");
 #endif
 }
 std::unique_ptr<core::IEarthOrientationProvider>
 load_eop_snapshot(const std::filesystem::path &manifest, int extrapolation_days) {
-#ifdef ORBITFORGE_HAS_ERFA
+#ifdef ORBELLE_HAS_ERFA
     const auto time = make_builtin_time_provider();
     auto source = providers::iers::load_eop_snapshot(manifest, *time);
     return extrapolation_days == 0 ? std::move(source)
@@ -169,26 +169,26 @@ load_eop_snapshot(const std::filesystem::path &manifest, int extrapolation_days)
 #else
     (void)manifest;
     (void)extrapolation_days;
-    throw std::runtime_error("EOP loading requires a build with ORBITFORGE_WITH_ERFA=ON");
+    throw std::runtime_error("EOP loading requires a build with ORBELLE_WITH_ERFA=ON");
 #endif
 }
 std::filesystem::path import_eop_snapshot(const std::filesystem::path &manifest,
                                           const std::filesystem::path &store) {
-#ifdef ORBITFORGE_HAS_ERFA
+#ifdef ORBELLE_HAS_ERFA
     const auto time = make_builtin_time_provider();
     return providers::iers::import_eop_snapshot(manifest, store, *time);
 #else
     (void)manifest;
     (void)store;
-    throw std::runtime_error("EOP import requires a build with ORBITFORGE_WITH_ERFA=ON");
+    throw std::runtime_error("EOP import requires a build with ORBELLE_WITH_ERFA=ON");
 #endif
 }
 std::array<double, 3> display_sun_direction_gcrf(core::Epoch epoch) {
-#ifdef ORBITFORGE_HAS_ERFA
+#ifdef ORBELLE_HAS_ERFA
     return providers::erfa::display_sun_direction_gcrf(epoch);
 #else
     (void)epoch;
-    throw std::runtime_error("Display sunlight requires ORBITFORGE_WITH_ERFA=ON");
+    throw std::runtime_error("Display sunlight requires ORBELLE_WITH_ERFA=ON");
 #endif
 }
-} // namespace orbitforge::runtime
+} // namespace orbelle::runtime

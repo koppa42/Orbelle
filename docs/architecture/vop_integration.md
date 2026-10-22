@@ -1,6 +1,6 @@
 # HPOP 通用变量 VOP 积分
 
-[STK 积分设置](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)把 VOP 作为运动方程选项，仅与 RKF7(8)、Bulirsch–Stoer 组合。OrbitForge 使用同样的选项关系：`HpopOptions.vop` / Python `Hpop(vop=True)` 默认关闭；RK4、RKV89、Gauss–Jackson 保存但忽略该草稿。桌面积分器页按方法启用复选框。VOP 积分使用所选引力模型的 `gravity_mu`，与独立的插值方法及插值 μ 无关。
+[STK 积分设置](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm)把 VOP 作为运动方程选项，仅与 RKF7(8)、Bulirsch–Stoer 组合。Orbelle 使用同样的选项关系：`HpopOptions.vop` / Python `Hpop(vop=True)` 默认关闭；RK4、RKV89、Gauss–Jackson 保存但忽略该草稿。桌面积分器页按方法启用复选框。VOP 积分使用所选引力模型的 `gravity_mu`，与独立的插值方法及插值 μ 无关。
 
 ## 方程与误差控制
 

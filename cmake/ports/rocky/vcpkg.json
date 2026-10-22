@@ -2,7 +2,7 @@
   "name": "rocky",
   "version": "1.1.0",
   "port-version": 1,
-  "description": "Rocky geospatial renderer, fixed OrbitForge integration build",
+  "description": "Rocky geospatial renderer, fixed Orbelle integration build",
   "homepage": "https://github.com/pelicanmapping/rocky",
   "license": "MIT",
   "supports": "!(x86 | wasm32 | uwp)",

@@ -36,9 +36,9 @@
 
 ## 独立算法与容限
 
-`OrbitForgeCelestialFramesReference.java` 使用固定 Orekit 13.1.2 / Hipparchus 4.0.2
+`OrbelleCelestialFramesReference.java` 使用固定 Orekit 13.1.2 / Hipparchus 4.0.2
 的 IERS1996 基本角、章动、岁差函数及旋转类；现代路径采用独立 IERS2010 X/Y/s 级数。
-Hipparchus 自动微分给出时间导数，参考不使用有限差分，也不加载 OrbitForge/ERFA。
+Hipparchus 自动微分给出时间导数，参考不使用有限差分，也不加载 Orbelle/ERFA。
 ERA−GMST 的值用 80 位 Dfp 运算防止相减损失；导数来自 Orekit 的 Field 函数，
 另显式计入 UT1−TAI 变化率（Orekit GMST Field 函数将外部 offset 按常量取样）。
 

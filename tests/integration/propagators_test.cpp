@@ -1,14 +1,14 @@
 #include <cmath>
 #include <gtest/gtest.h>
-#include <orbitforge/runtime/hpop.hpp>
-#include <orbitforge/runtime/j4.hpp>
-#include <orbitforge/runtime/project.hpp>
-#include <orbitforge/runtime/report.hpp>
-#include <orbitforge/runtime/sgp4.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/hpop.hpp>
+#include <orbelle/runtime/j4.hpp>
+#include <orbelle/runtime/project.hpp>
+#include <orbelle/runtime/report.hpp>
+#include <orbelle/runtime/sgp4.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 core::Tle tle_at(std::string_view date) {
     core::Tle tle{"1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753",
@@ -54,7 +54,7 @@ TEST(Propagators, NewModelsRoundTripAndReportsUseConvertedStates) {
     const std::shared_ptr<const core::ITimeProvider> time = runtime::make_builtin_time_provider();
     const std::shared_ptr<const core::IFrameProvider> frames = runtime::make_frame_provider();
     const std::shared_ptr<const core::IEarthOrientationProvider> eop =
-        runtime::load_eop_snapshot(ORBITFORGE_REPORT_EOP);
+        runtime::load_eop_snapshot(ORBELLE_REPORT_EOP);
     const auto tle = tle_at("00001.50000000");
     const auto first = time->from_utc(core::parse_tle(tle).epoch_utc);
     application::Project project{"New propagators", first,
@@ -74,7 +74,7 @@ TEST(Propagators, NewModelsRoundTripAndReportsUseConvertedStates) {
     project.satellites.push_back(satellite);
     const auto bytes = application::encode_project(project);
     const auto restored = application::decode_project(bytes);
-    EXPECT_EQ(bytes[8], 47);
+    EXPECT_EQ(bytes[8], 48);
     EXPECT_EQ(application::encode_project(restored), bytes);
     EXPECT_EQ(restored.satellites[0].orbit.tle, tle);
     const auto scenario = runtime::make_project_scenario(restored, time.get());

@@ -7,7 +7,7 @@
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
-#include <orbitforge/providers/spice/provider.hpp>
+#include <orbelle/providers/spice/provider.hpp>
 #include <picosha2.h>
 #include <random>
 #include <set>
@@ -16,7 +16,7 @@
 #include <windows.h>
 #endif
 
-namespace orbitforge::providers::spice {
+namespace orbelle::providers::spice {
 namespace {
 using Json = nlohmann::json;
 struct Engine {
@@ -154,7 +154,7 @@ struct KernelCopies {
         const auto parent = std::filesystem::canonical(workspace);
         std::random_device random;
         for (int attempt = 0; attempt < 16; ++attempt) {
-            auto candidate = parent / ("orbitforge-spice-" + std::to_string(random()) + "-" +
+            auto candidate = parent / ("orbelle-spice-" + std::to_string(random()) + "-" +
                                        std::to_string(random()));
             if (std::filesystem::create_directory(candidate)) {
                 directory = std::move(candidate);
@@ -1007,12 +1007,12 @@ std::vector<std::int32_t> extract_planetary_centres(const std::filesystem::path 
                     throw core::EphemerisDataError(
                         "Planet-centre output already exists or its path is too long");
                 SpiceInt handle = 0;
-                spkopn_c(path.string().c_str(), "OrbitForge planet-centre subset", 1024, &handle);
+                spkopn_c(path.string().c_str(), "Orbelle planet-centre subset", 1024, &handle);
                 check_spice();
                 outputs[id] = handle;
                 created.push_back(path);
                 const char comments[][112] = {
-                    "Producer of this derived kernel: OrbitForge project.",
+                    "Producer of this derived kernel: Orbelle project.",
                     "CSPICE N0067 spksub copied original segments without coefficient refitting.",
                     "Only the physical planet centre relative to its own barycentre is retained.",
                     "The accompanying manifest records original source SHA256 and provenance."};
@@ -1220,4 +1220,4 @@ std::shared_ptr<const core::IStateProvider> make_j4(core::J4MeanElements initial
                                                     const core::CentralBody &body) {
     return std::make_shared<J2Secular>(initial, body, core::J2SecularOptions{}, true);
 }
-} // namespace orbitforge::providers::spice
+} // namespace orbelle::providers::spice

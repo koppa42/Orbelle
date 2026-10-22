@@ -1,6 +1,6 @@
 #include <algorithm>
 #include <cmath>
-#include <orbitforge/geo_rocky/globe.hpp>
+#include <orbelle/geo_rocky/globe.hpp>
 #include <rocky/GDALImageLayer.h>
 #include <rocky/vsg/DisplayManager.h>
 #include <rocky/vsg/MapNode.h>
@@ -9,7 +9,7 @@
 #include <stdexcept>
 #include <vsg/nodes/Switch.h>
 
-namespace orbitforge::geo_rocky {
+namespace orbelle::geo_rocky {
 namespace {
 class TraitsHelper : public rocky::DisplayManager {
   public:
@@ -114,4 +114,4 @@ std::unique_ptr<render_vsg::IEarthDisplay> make_globe(vsg::ref_ptr<vsg::Viewer> 
         throw std::invalid_argument("Rocky needs a live rendering viewer");
     return std::make_unique<Globe>(std::move(viewer), imagery);
 }
-} // namespace orbitforge::geo_rocky
+} // namespace orbelle::geo_rocky

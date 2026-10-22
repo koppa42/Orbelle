@@ -4,11 +4,11 @@
 #include <future>
 #include <gtest/gtest.h>
 #include <limits>
-#include <orbitforge/core/propagation/gravity.hpp>
-#include <orbitforge/core/propagation/hpop.hpp>
+#include <orbelle/core/propagation/gravity.hpp>
+#include <orbelle/core/propagation/hpop.hpp>
 #include <sstream>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 constexpr double mu = 3.986004415e14, radius_m = 6378136.3;
 using Vector = std::array<double, 3>;
@@ -85,7 +85,7 @@ TEST(GravityDifferential, MatchesIndependentOrekitAnalyticHessians) {
     double max_absolute = 0, max_scaled = 0, max_acceleration = 0;
     for (int profile : {0, 2, 3}) {
         const auto model = profile == 3 ? evolving() : synthetic(profile);
-        std::ifstream file(ORBITFORGE_GRAVITY_DIFFERENTIAL_REFERENCE);
+        std::ifstream file(ORBELLE_GRAVITY_DIFFERENTIAL_REFERENCE);
         ASSERT_TRUE(file.is_open());
         for (std::string line; std::getline(file, line);) {
             if (line.empty() || line[0] == '#')
@@ -147,7 +147,7 @@ TEST(GravityDifferential, FullDegreeExactPolesMatchHighPrecisionLegendreIdentiti
     double max_absolute = 0, max_scaled = 0;
     for (int profile : {0, 2}) {
         const auto model = synthetic(profile);
-        std::ifstream file(ORBITFORGE_GRAVITY_DIFFERENTIAL_POLE_REFERENCE);
+        std::ifstream file(ORBELLE_GRAVITY_DIFFERENTIAL_POLE_REFERENCE);
         ASSERT_TRUE(file.is_open());
         for (std::string line; std::getline(file, line);) {
             if (line.empty() || line[0] == '#')

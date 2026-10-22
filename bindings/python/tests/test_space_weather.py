@@ -8,8 +8,8 @@ import io
 import math
 import tempfile
 import unittest
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 ROOT = Path(__file__).resolve().parents[3]
 HEADER = ('DATE,BSRN,ND,KP1,KP2,KP3,KP4,KP5,KP6,KP7,KP8,KP_SUM,'
@@ -82,7 +82,7 @@ class WeatherTests(unittest.TestCase):
                                 gravity_degree=0,drag=drag)
             sat=project.objects.satellite('Sat',orbit=orbit)
             analysis=project.prepare(data=data); before=analysis.states(sat,step=u.s(60))
-            saved=root/'weather.orbitforge'; project.save(saved,analysis=analysis)
+            saved=root/'weather.orbelle'; project.save(saved,analysis=analysis)
             restored=of.Project.open(saved,data=data)
             self.assertEqual(restored.objects[sat.id].orbit.hpop.drag,drag)
             sat.orbit=replace(orbit,hpop=replace(orbit.hpop,drag=replace(drag,f107=999,kp=8)))
@@ -104,7 +104,7 @@ class WeatherTests(unittest.TestCase):
         sat=project.objects.satellite('Sat',orbit=orbit)
         project.prepare()
         with tempfile.TemporaryDirectory() as folder:
-            path=Path(folder)/'draft.orbitforge'; project.save(path)
+            path=Path(folder)/'draft.orbelle'; project.save(path)
             self.assertEqual(of.Project.open(path).objects[sat.id].orbit.hpop.drag,drag)
 
     @unittest.skipUnless(of.ephemeris_available() and of.time_frames_available(), 'requires CSPICE/ERFA')
@@ -277,7 +277,7 @@ class MeanInterpolationTests(unittest.TestCase):
             drag=of.orbits.DragSettings(weather_model='celestrak',geomagnetic_update='three_hourly_interpolated',geomagnetic_source='kp')
             sat=project.objects.satellite('Sat',orbit=of.orbits.Hpop(
                 initial=of.orbits.Cartesian(epoch,(7000000,0,0),(0,7500,0)),gravity_degree=0,drag=drag))
-            path=Path(folder)/'mean.orbitforge'; project.save(path)
+            path=Path(folder)/'mean.orbelle'; project.save(path)
             reopened=of.Project.open(path)
             self.assertEqual(reopened.objects[sat.id].orbit.hpop.drag,drag)
             reopened.save(path,overwrite=True)

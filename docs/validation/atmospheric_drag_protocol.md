@@ -1,6 +1,6 @@
 # 大气阻力验证协议
 
-模型范围见[阻力契约](../architecture/atmospheric_drag.md)。固定参考不链接 OrbitForge，普通测试只读取已提交参考，不联网重算。尚未完成 STK 同配置数值验收。
+模型范围见[阻力契约](../architecture/atmospheric_drag.md)。固定参考不链接 Orbelle，普通测试只读取已提交参考，不联网重算。尚未完成 STK 同配置数值验收。
 
 ## 密度参考
 
@@ -12,7 +12,7 @@
 
 `nrlmsise00_ap.txt` 另含 1056 个同一原作者 C `gtd7d` 参考，覆盖 3 个日期、11 个高度、4 组几何和 8 组地磁输入：3 组原生日 Ap（含非 Kp 表节点的 15.25）、5 组历史 Ap（全零、恒定、最大值、上升和衰减磁暴）。历史模式显式设置原生 `SW[9]=-1`；测试完整密度及两个温度。历史均值包含非整数，不舍入到离散 Kp 表。参考 SHA-256 为 `da884507a21fc53dd8f5c0002bedb6270f289fbf88fbb254366b71eb219e9037`。
 
-`nrlmsise00_high.txt` 使用同一原作者、同一输入网格，将高度替换为 1000、1000.001、1200、2000、2499.999、2500 km，共 576 组日／历史 Ap 参考。生成器 `nrlmsise_ap_reference.c --high-altitude` 不连接 OrbitForge，旧参考字节保持不变；SHA-256 为 `4823dba8337635f0d96dfd1b58012e127d5c8380229e4c98cbd74b9150930efa`。继续使用相对 `2e-10`、温度 `1e-7 K` 的原容限；这验证计算实现，不认证 1000 km 以上的经验物理精度。
+`nrlmsise00_high.txt` 使用同一原作者、同一输入网格，将高度替换为 1000、1000.001、1200、2000、2499.999、2500 km，共 576 组日／历史 Ap 参考。生成器 `nrlmsise_ap_reference.c --high-altitude` 不连接 Orbelle，旧参考字节保持不变；SHA-256 为 `4823dba8337635f0d96dfd1b58012e127d5c8380229e4c98cbd74b9150930efa`。继续使用相对 `2e-10`、温度 `1e-7 K` 的原容限；这验证计算实现，不认证 1000 km 以上的经验物理精度。
 
 生成器为 `tools/validation/nrlmsise_reference.c`、`nrlmsise_ap_reference.c` 和 `jacchia_roberts_reference.cpp`；上游文件 URL 与原始字节 SHA-256 固定于 `density_sources.json`。`atmosphere_reference.py` 下载后校验字节、独立编译并在指定目录写候选文件，不能自动覆盖参考：
 
@@ -29,7 +29,7 @@ Core/Python 对照密度相对容限 `2e-10`，NRL 温度绝对容限 `1e-7 K`�
 
 五种积分器分别从截止两侧正反向传播，使用允许的大面积质量比放大截止跳变，与 0.01 s RK4 作步长收敛对照（不是独立传播器参考）：20 s 轨迹位置差 <2 mm、速度差 <0.1 mm/s。固定 RK/GJ 的 0.25 s 步可能跨硬截止，容限按跳变在该时间内的贡献设定；自适应方法使用 1e−6 m / 1e−9 m/s / 1e−13 局部容限。所有跨截止变分查询须明确失败，防止发布缺少 saltation 的协方差。
 
-`drag.txt` 有 24 个独立 Orekit 13.1.2 / Hipparchus 4.0.2 `NRLMSISE00 + IsotropicDrag + DP853` 轨道和初始阻力加速度。固定 jars 及 SHA-256 复用 `tools/validation/orekit/dependencies.json`，生成器为 `OrbitForgeDragReference.java`。
+`drag.txt` 有 24 个独立 Orekit 13.1.2 / Hipparchus 4.0.2 `NRLMSISE00 + IsotropicDrag + DP853` 轨道和初始阻力加速度。固定 jars 及 SHA-256 复用 `tools/validation/orekit/dependencies.json`，生成器为 `OrbelleDragReference.java`。
 
 参考刻意使用 TAI 作为模型的合成 UTC 时钟，初始时刻 2000-01-01 12:00:00；不混入真实闰秒/EOP 差异。WGS84 参考系绕 z 轴以 `7.292115e-5 rad/s` 转动，太阳按年周期移动并带 `0.409 rad` 倾斜。两组倾斜 LEO 初值、三组天气/物性、±3600/±6000 s，完整输入及每轴结果随行保存。Core 使用完整状态变换和 RKF78，独立参考使用 Orekit 的椭球高度、大气速度和 DP853。
 
@@ -37,8 +37,8 @@ DP853 最大步长 1 s，绝对位置/速度容差 `1e-8 m / 1e-11 m/s`，相对
 
 ```powershell
 $dragClasspath = (Get-ChildItem out/validation/orekit/jars/*.jar | ForEach-Object FullName) -join ';'
-javac -cp $dragClasspath -d out/validation/drag tools/validation/orekit/OrbitForgeDragReference.java
-java -cp "out/validation/drag;$dragClasspath" OrbitForgeDragReference
+javac -cp $dragClasspath -d out/validation/drag tools/validation/orekit/OrbelleDragReference.java
+java -cp "out/validation/drag;$dragClasspath" OrbelleDragReference
 ```
 
 ## 生命周期与接口
@@ -66,7 +66,7 @@ Python 检查开关、返回的实际密度高度及加速度变化；C++/Python
 
 ## 自然三次样条与密度链路
 
-`space_weather_spline.txt` 由 `tools/validation/space_weather_spline_reference.py` 调用固定 SciPy 1.16.3 的 [CubicSpline](https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.CubicSpline.html)（`CubicSpline(bc_type="natural", extrapolate=False)`）生成，不读取 OrbitForge 算法或输出。112 个三小时输入节点包含独立的 Ap/Kp 序列，1112 个取样覆盖节点、节点后 1 ns、节点前 1 ns、中间值、跨 2016 正闰秒及首末端点。逐项绝对容限 Ap `5e-12`、Kp `5e-13`，覆盖独立三对角求解器和全局/局部坐标的浮点舍入。
+`space_weather_spline.txt` 由 `tools/validation/space_weather_spline_reference.py` 调用固定 SciPy 1.16.3 的 [CubicSpline](https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.CubicSpline.html)（`CubicSpline(bc_type="natural", extrapolate=False)`）生成，不读取 Orbelle 算法或输出。112 个三小时输入节点包含独立的 Ap/Kp 序列，1112 个取样覆盖节点、节点后 1 ns、节点前 1 ns、中间值、跨 2016 正闰秒及首末端点。逐项绝对容限 Ap `5e-12`、Kp `5e-13`，覆盖独立三对角求解器和全局/局部坐标的浮点舍入。
 
 66 个密度样例将 SciPy 的天气输出传给未修改 NASA GMAT `c9b78bd1` 标量 JR；几何、高度、UTC JD、150 sfu 日/平均通量及 Kp 显式输入。适配器为 `jacchia_roberts_weather_reference.cpp`，使用已有 `gmat_jr_stubs`；上游原文的两个 SHA-256 沿用 `density_sources.json`。选 Ap 时，参考侧用标准 28 点表和 NumPy 插值转为 Kp。Core 从同一原始日记录重新计算天气和密度，密度相对容限沿用 `2e-10`，不放宽原有标准。
 
@@ -84,7 +84,7 @@ python tools/validation/space_weather_spline_reference.py <候选文件> <输出
 
 ## FXM 调整通量与文件传播
 
-`tools/validation/fxm_weather_reference.py` 不导入 OrbitForge，用 NumPy 2.3.3 和 SciPy 1.16.3 `interp1d` 对独立计算的节点通量进行插值，并将预期天气输入交给原始 NASA GMAT JR 适配器。适配器、原始源码版本与散列沿用 `jacchia_roberts_weather_reference.cpp` / `density_sources.json`。复现方式：
+`tools/validation/fxm_weather_reference.py` 不导入 Orbelle，用 NumPy 2.3.3 和 SciPy 1.16.3 `interp1d` 对独立计算的节点通量进行插值，并将预期天气输入交给原始 NASA GMAT JR 适配器。适配器、原始源码版本与散列沿用 `jacchia_roberts_weather_reference.cpp` / `density_sources.json`。复现方式：
 
 ```text
 python tools/validation/fxm_weather_reference.py OUTPUT_DIR GMAT_DRIVER
@@ -99,7 +99,7 @@ C++ 集成测试另外用真实 DE440 星历，将 FXM 路径与显式转换的 
 
 ## 保持三小时均值的插值
 
-`tools/validation/space_weather_mean_reference.py` 使用固定 NumPy 2.3.3 / SciPy 1.16.3，将原始窗口值累积后调用 `CubicSpline(..., bc_type="natural").derivative()`，再用独立多项式 API 求极值并缩放。生成器不导入 OrbitForge，不使用生产求解器或其输出；密度参考调用上述未修改 GMAT JR。复现命令：
+`tools/validation/space_weather_mean_reference.py` 使用固定 NumPy 2.3.3 / SciPy 1.16.3，将原始窗口值累积后调用 `CubicSpline(..., bc_type="natural").derivative()`，再用独立多项式 API 求极值并缩放。生成器不导入 Orbelle，不使用生产求解器或其输出；密度参考调用上述未修改 GMAT JR。复现命令：
 
 ```text
 python tools/validation/space_weather_mean_reference.py OUTPUT GMAT_DRIVER
@@ -113,7 +113,7 @@ C++ 另测缺日期/月预报断档、窗口外拒绝、不可变数据、NRL �
 
 ## 月节点天气和 CSSI Predicts
 
-`tools/validation/monthly_weather_reference.py` 固定 NumPy 2.3.3 / SciPy 1.16.3，不导入 OrbitForge。它用 `interp1d` 计算月节点线性曲线、`numpy.convolve` 计算 81 日中心均值，独立组装七项历史，随后把预期天气交给原始 GMAT JR 适配器。时间节点以独立整数 UTC→TAI 映射构造；测试区间分别采用 36 / 37 s 偏移。复现命令：
+`tools/validation/monthly_weather_reference.py` 固定 NumPy 2.3.3 / SciPy 1.16.3，不导入 Orbelle。它用 `interp1d` 计算月节点线性曲线、`numpy.convolve` 计算 81 日中心均值，独立组装七项历史，随后把预期天气交给原始 GMAT JR 适配器。时间节点以独立整数 UTC→TAI 映射构造；测试区间分别采用 36 / 37 s 偏移。复现命令：
 
 ```text
 python tools/validation/monthly_weather_reference.py OUTPUT_DIR GMAT_DRIVER

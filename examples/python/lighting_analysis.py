@@ -6,8 +6,8 @@ Run with the sample SPICE manifest and a temporary kernel workspace:
 import json
 from pathlib import Path
 import sys
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 manifest, workspace = map(Path, sys.argv[1:3])
 first = of.Epoch(json.loads(manifest.read_text())["first_tai_ns"] + 600 * 10**9)
@@ -26,4 +26,4 @@ for label, stats in (("Sunlight", intervals.lighting_statistics.sunlight),
     print(f"{label}: {stats.count} intervals, {stats.total_duration_s:.6f} s, {100*stats.fraction:.3f}%")
 print(f"Illumination: {illumination.table.row_count} samples")
 # intervals.export_csv("lighting.csv")
-# project.save("lighting.orbitforge", analysis=analysis)
+# project.save("lighting.orbelle", analysis=analysis)

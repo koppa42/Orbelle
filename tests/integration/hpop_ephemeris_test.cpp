@@ -1,12 +1,12 @@
 #include <cmath>
 #include <future>
 #include <gtest/gtest.h>
-#include <orbitforge/orbitforge.hpp>
-#include <orbitforge/runtime/project.hpp>
-#include <orbitforge/runtime/report.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/orbelle.hpp>
+#include <orbelle/runtime/project.hpp>
+#include <orbelle/runtime/report.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 class BoundedMoon final : public core::IThirdBodyEphemeris {
     core::ThirdBodyDataInfo info_;

@@ -49,7 +49,7 @@
 ## API 示例
 
 ```python
-import orbitforge as of
+import orbelle as of
 
 request = of.EarthOrbitDesignRequest()
 request.type = of.EarthOrbitType.REPEATING_SUN_SYNC
@@ -64,7 +64,7 @@ session = of.make_j2_session(of.J2MeanElements(
 # 上面的 M=ν 只适用于圆轨道。一般椭圆应显式进行 ν→M 换算。
 ```
 
-C++ 包含 `<orbitforge/core/propagation/orbit_design.hpp>`；参数单位为 m、rad、连续 TAI 秒。返回值拥有自身数据，失败抛出带错误类别的 `OrbitDesignError`；Python 映射为 `ValueError`。求解不读取全局数据目录，输入不变，适合桌面即时计算与脚本批量设计。
+C++ 包含 `<orbelle/core/propagation/orbit_design.hpp>`；参数单位为 m、rad、连续 TAI 秒。返回值拥有自身数据，失败抛出带错误类别的 `OrbitDesignError`；Python 映射为 `ValueError`。求解不读取全局数据目录，输入不变，适合桌面即时计算与脚本批量设计。
 
 ## 验证
 

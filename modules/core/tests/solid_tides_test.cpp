@@ -6,9 +6,9 @@
 #include <iostream>
 #include <limits>
 #include <numbers>
-#include <orbitforge/core/propagation/hpop.hpp>
+#include <orbelle/core/propagation/hpop.hpp>
 #include <sstream>
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 GravityInfo field(bool zero = false, int degree = 21, int order = 21) {
     return {"reference",    {},     {},   zero ? "zero_tide" : "tide_free", egm96_mu,
@@ -119,7 +119,7 @@ class Ephemeris final : public IThirdBodyEphemeris {
 };
 } // namespace
 TEST(SolidTides, FullAccelerationMatchesIndependentOrekitAcrossTruncationsAndTideSystems) {
-    std::ifstream file(ORBITFORGE_SOLID_TIDE_REFERENCE);
+    std::ifstream file(ORBELLE_SOLID_TIDE_REFERENCE);
     ASSERT_TRUE(file.is_open());
     int rows = 0;
     for (std::string line; std::getline(file, line);) {
@@ -217,7 +217,7 @@ TEST(SolidTides, HpopMatchesIndependentMovingBodyPropagationWithoutDirectThirdBo
     EXPECT_FALSE(options.uses_third_bodies());
     EXPECT_TRUE(options.uses_ephemeris());
     const auto provider = make_hpop(initial, options, environment);
-    std::ifstream file(ORBITFORGE_SOLID_TIDE_REFERENCE);
+    std::ifstream file(ORBELLE_SOLID_TIDE_REFERENCE);
     ASSERT_TRUE(file.is_open());
     int rows = 0;
     for (std::string line; std::getline(file, line);) {
@@ -286,7 +286,7 @@ TEST(SolidTides, InvalidModelsBodiesAndAdditiveCoefficientsFailExplicitly) {
 }
 
 TEST(SolidTides, TimeDependentCoefficientsMatchIndependentIers2003AcrossDatesAndPoleHistory) {
-    std::ifstream file(ORBITFORGE_TIME_TIDE_REFERENCE);
+    std::ifstream file(ORBELLE_TIME_TIDE_REFERENCE);
     ASSERT_TRUE(file.is_open());
     const Time time;
     const auto info = field();
@@ -330,7 +330,7 @@ TEST(SolidTides, TimeDependentCoefficientsMatchIndependentIers2003AcrossDatesAnd
     std::cout << "Time-dependent tide maximum coefficient error: " << maximum << '\n';
 }
 TEST(SolidTides, TimeDependentAccelerationMatchesIndependentOrekitIncludingZonalTruncation) {
-    std::ifstream file(ORBITFORGE_TIME_TIDE_REFERENCE);
+    std::ifstream file(ORBELLE_TIME_TIDE_REFERENCE);
     ASSERT_TRUE(file.is_open());
     const auto info = field();
     const Time time;
@@ -380,7 +380,7 @@ TEST(SolidTides, TimeDependentHpopMatchesIndependentForwardAndBackwardPropagatio
     const CartesianState initial{
         Epoch{0}, OriginId::earth, FrameId::gcrf, {7e6, 0, 0}, {0, 6200, 5300}};
     const auto provider = make_hpop(initial, options, environment);
-    std::ifstream file(ORBITFORGE_TIME_TIDE_REFERENCE);
+    std::ifstream file(ORBELLE_TIME_TIDE_REFERENCE);
     ASSERT_TRUE(file.is_open());
     int count = 0;
     double dr = 0, dv = 0;
@@ -445,7 +445,7 @@ TEST(SolidTides, TimeDependentInputsAndInactiveDraftsAreExplicit) {
 }
 
 TEST(SolidTides, CustomLoveNumbersMatchIndependentOrekitCoefficientsForBothTideSystems) {
-    std::ifstream file(ORBITFORGE_LOVE_TIDE_REFERENCE);
+    std::ifstream file(ORBELLE_LOVE_TIDE_REFERENCE);
     ASSERT_TRUE(file.is_open());
     const Time time;
     const Eop eop;
@@ -486,7 +486,7 @@ TEST(SolidTides, CustomLoveNumbersMatchIndependentOrekitCoefficientsForBothTideS
     std::cout << "Custom k20 maximum coefficient difference: " << maximum << '\n';
 }
 TEST(SolidTides, CustomLoveNumbersMatchIndependentOrekitAccelerationAndPropagation) {
-    std::ifstream file(ORBITFORGE_LOVE_TIDE_REFERENCE);
+    std::ifstream file(ORBELLE_LOVE_TIDE_REFERENCE);
     ASSERT_TRUE(file.is_open());
     const auto time = std::make_shared<Time>();
     const auto eop = std::make_shared<Eop>();

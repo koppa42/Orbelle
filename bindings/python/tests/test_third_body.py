@@ -6,8 +6,8 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 SAMPLE = Path(__file__).resolve().parents[3] / "data/samples/spice/de440s_2016_leap"
 
@@ -32,7 +32,7 @@ class ThirdBodyTests(unittest.TestCase):
             # Open input-only files without ephemerides while retaining inactive source drafts.
             orbit = replace(orbit, hpop=replace(orbit.hpop, third_bodies=()))
             sat.orbit = orbit
-            scenario = Path(folder) / "scenario.orbitforge"
+            scenario = Path(folder) / "scenario.orbelle"
             project.save(scenario)
             restored = of.Project.open(scenario)
             self.assertEqual(restored.objects[sat.id].orbit.hpop, orbit.hpop)
@@ -98,7 +98,7 @@ class ThirdBodyTests(unittest.TestCase):
             analysis = project.prepare(data=data)
             before = analysis.states(sat, step=u.s(60)).position.values
             self.assertEqual(len(before), 11)
-            path = root / "scenario.orbitforge"
+            path = root / "scenario.orbelle"
             project.save(path, analysis=analysis)
             restored = of.Project.open(path, data=data)
             self.assertEqual(restored.objects[sat.id].orbit.hpop.third_bodies, ("sun", "moon"))

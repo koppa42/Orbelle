@@ -12,7 +12,7 @@ void Workbench::smoke_specialist_reports() {
         satellite.orbit.initial.epoch = workflow.first;
         satellite.orbit.propagator = OrbitPropagator::hpop;
         workflow.satellites.push_back(satellite);
-        start_project(std::move(workflow), smoke_dir_ + "/specialist-workflow.orbitforge");
+        start_project(std::move(workflow), smoke_dir_ + "/specialist-workflow.orbelle");
         ++orbit_smoke_stage_;
         break;
     }
@@ -96,7 +96,7 @@ void Workbench::smoke_specialist_reports() {
                                   .toDouble() == 40000,
                       "Regenerated covariance report reused stale settings");
         smoke_record("covariance-apply-invalidates-report-and-regenerate-uses-new-matrix");
-        save_project_to(smoke_dir_ + "/covariance-workflow.orbitforge");
+        save_project_to(smoke_dir_ + "/covariance-workflow.orbelle");
         const auto restored =
             application::load_project(std::filesystem::path(project_path_.toStdWString()));
         smoke_require(restored.satellites[0].orbit.covariance == orbit_->input.covariance,
@@ -211,7 +211,7 @@ void Workbench::smoke_specialist_reports() {
                           ->text()
                           .contains(QStringLiteral("场景已变化")),
                       "Mission Apply did not mark the old report stale");
-        save_project_to(smoke_dir_ + "/mission-workflow.orbitforge");
+        save_project_to(smoke_dir_ + "/mission-workflow.orbelle");
         const auto restored =
             application::load_project(std::filesystem::path(project_path_.toStdWString()));
         smoke_require(restored.satellites[0].orbit.mission == orbit_->input.mission,

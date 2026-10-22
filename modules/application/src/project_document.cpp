@@ -4,11 +4,11 @@
 #include <iomanip>
 #include <map>
 #include <mutex>
-#include <orbitforge/application/project_document.hpp>
+#include <orbelle/application/project_document.hpp>
 #include <random>
 #include <sstream>
 
-namespace orbitforge::application {
+namespace orbelle::application {
 namespace detail {
 struct DocumentState {
     std::mutex mutex;
@@ -630,4 +630,4 @@ void ObjectManager::remove(const ObjectRef &ref) {
         });
     });
 }
-} // namespace orbitforge::application
+} // namespace orbelle::application

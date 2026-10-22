@@ -1,8 +1,8 @@
 #pragma once
-#include <orbitforge/core/propagation/circular_two_body.hpp>
-#include <orbitforge/visualization/snapshot.hpp>
+#include <orbelle/core/propagation/circular_two_body.hpp>
+#include <orbelle/visualization/snapshot.hpp>
 
-namespace orbitforge::benchmarks {
+namespace orbelle::benchmarks {
 // Rendering fixture, not a catalog or the general P1 propagator. Positions use
 // Core's circular solution, rotated into deterministic GCRF orbital planes.
 class Constellation {
@@ -34,4 +34,4 @@ class DisplayCache {
     std::vector<std::string> ids_;
     std::vector<std::array<double, 3>> positions_;
 };
-} // namespace orbitforge::benchmarks
+} // namespace orbelle::benchmarks

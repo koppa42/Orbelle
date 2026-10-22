@@ -31,7 +31,7 @@
 #include <numbers>
 #include <optional>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 QTableWidgetItem *angle_item(double radians) {
     auto *item = new QTableWidgetItem(QString::number(radians * 180 / std::numbers::pi, 'g', 15));
@@ -917,4 +917,4 @@ void SensorEditor::update_project(const application::Project &project) {
     target_->set_objects(project_object_choices(project, {ObjectKind::ground_station}));
     update_pointing();
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

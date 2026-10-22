@@ -146,7 +146,7 @@ class Check:
         shutil.copy2(build / "CMakeCache.txt", self.reports / f"{name}-CMakeCache.txt")
         shutil.copy2(build / "compile_commands.json", self.reports / f"{name}-compile_commands.json")
         if not sanitizer:
-            self.run("cpp-example", build / "examples/cpp/orbitforge_example")
+            self.run("cpp-example", build / "examples/cpp/orbelle_example")
             if install:
                 self.run("sdk-install", "cmake", "--install", build, "--component", "SDK")
                 self.save_artifact("release", prefix)
@@ -157,7 +157,7 @@ class Check:
         self.run("python-api", sys.executable, self.source / "tools/ci/check_python.py",
                  "--dependency-prefix", self.prefix, "--work", self.work / "python",
                  "--reports", self.reports / "python", "--cpp-example",
-                 self.work / "build/release/examples/cpp/orbitforge_example")
+                 self.work / "build/release/examples/cpp/orbelle_example")
 
     def compute(self):
         """Validate portability and instrumented smoke workloads, not Linux performance."""
@@ -169,7 +169,7 @@ class Check:
             self.run(f"{name}-configure", "cmake", "--preset", "compute-benchmark", "-G", "Ninja",
                      "-S", self.source, "-B", build, f"-DCMAKE_PREFIX_PATH={self.prefix}",
                      f"-DCMAKE_BUILD_TYPE={'RelWithDebInfo' if sanitizer else 'Release'}",
-                     f"-DORBITFORGE_ENABLE_SANITIZERS={'ON' if sanitizer else 'OFF'}",
+                     f"-DORBELLE_ENABLE_SANITIZERS={'ON' if sanitizer else 'OFF'}",
                      cwd=self.source, extra_env=flags)
             self.run(f"{name}-build", "cmake", "--build", build, extra_env=flags)
             self.run(f"{name}-tests", "ctest", "--test-dir", build, "--output-on-failure",
@@ -177,7 +177,7 @@ class Check:
                      extra_env=flags)
             self.run(f"{name}-smoke", sys.executable,
                      self.source / "tools/validation/run_compute_benchmark.py",
-                     "--executable", build / "benchmarks/compute/orbitforge_compute_benchmark",
+                     "--executable", build / "benchmarks/compute/orbelle_compute_benchmark",
                      "--source", self.source, "--profile", "smoke",
                      "--output", self.reports / f"{name}-smoke", extra_env=flags)
 
@@ -225,8 +225,8 @@ class Check:
                  "--no-build-isolation", "--no-index", "--wheel-dir", dist,
                  f"--config-settings=build-dir={self.work / 'build/wheel' / identity}",
                  extra_env={"CMAKE_PREFIX_PATH": str(self.prefix)})
-        if len(list(dist.glob("orbitforge-*.whl"))) != 1:
-            raise RuntimeError("Expected exactly one freshly built OrbitForge wheel")
+        if len(list(dist.glob("orbelle-*.whl"))) != 1:
+            raise RuntimeError("Expected exactly one freshly built Orbelle wheel")
         self.save_artifact("wheel", dist)
 
     def export(self):
@@ -246,8 +246,8 @@ class Check:
         shutil.copy2(self.source / "tools/packaging/package_sdk.py", self.delivery)
         shutil.copy2(self.reports / "source-sha256.json", self.delivery)
         (self.delivery / "bin").mkdir()
-        shutil.copy2(self.work / "build/release/examples/cpp/orbitforge_example",
-                     self.delivery / "bin/orbitforge_example")
+        shutil.copy2(self.work / "build/release/examples/cpp/orbelle_example",
+                     self.delivery / "bin/orbelle_example")
         entries = []
         for path in sorted(self.delivery.rglob("*")):
             if path.is_file():
@@ -274,29 +274,29 @@ class Check:
                  delivery / "tests/packaging/sdk_consumer", "-B", build,
                  "-DCMAKE_BUILD_TYPE=Release",
                  f"-DCMAKE_PREFIX_PATH={sdk};{delivery / 'dependencies'}",
-                 "-DORBITFORGE_EXPECT_TIME_FRAMES=ON", "-DORBITFORGE_EXPECT_SPICE=ON",
-                 f"-DORBITFORGE_EOP_MANIFEST={sdk / 'share/OrbitForge/data/eop/iers_c04_2016_12_28_2017_01_04/manifest.json'}",
-                 f"-DORBITFORGE_SPICE_MANIFEST={sdk / 'share/OrbitForge/data/spice/de440s_2016_leap/manifest.json'}")
+                 "-DORBELLE_EXPECT_TIME_FRAMES=ON", "-DORBELLE_EXPECT_SPICE=ON",
+                 f"-DORBELLE_EOP_MANIFEST={sdk / 'share/Orbelle/data/eop/iers_c04_2016_12_28_2017_01_04/manifest.json'}",
+                 f"-DORBELLE_SPICE_MANIFEST={sdk / 'share/Orbelle/data/spice/de440s_2016_leap/manifest.json'}")
         self.run("sdk-consumer-build", "cmake", "--build", build)
         self.run("sdk-consumer-tests", "ctest", "--test-dir", build, "--output-on-failure",
                  "--no-tests=error", "--output-junit", self.reports / "sdk-consumer-tests.xml")
-        wheels = list((delivery / "wheels").glob("orbitforge-*.whl"))
+        wheels = list((delivery / "wheels").glob("orbelle-*.whl"))
         if len(wheels) != 1:
-            raise RuntimeError("Expected exactly one OrbitForge wheel")
+            raise RuntimeError("Expected exactly one Orbelle wheel")
         venv = self.work / "venvs/consumer"
         self.run("consumer-venv", sys.executable, "-m", "venv", venv)
         python = venv / "bin/python"
         self.run("wheel-install", python, "-m", "pip", "install", "--no-index", "--no-deps", wheels[0])
         self.run("python-runtime-packages", python, "-m", "pip", "freeze", "--all")
         self.run("python-import-path", python, "-I", "-c",
-                 "import orbitforge; print(orbitforge.__file__)")
+                 "import orbelle; print(orbelle.__file__)")
         self.run("python-api-tests", python, "-I", "-m", "unittest", "discover", "-v",
                  "-s", delivery / "bindings/python/tests")
         for name in PYTHON_EXAMPLES:
             self.run(f"python-example-{name}", python, "-I", delivery / f"examples/python/{name}.py")
         self.run("cpp-python-parity", python, "-I", delivery / "compare_examples.py",
-                 "--cpp-example", delivery / "bin/orbitforge_example")
-        native = list(venv.glob("lib/python*/site-packages/orbitforge/_native*.so"))
+                 "--cpp-example", delivery / "bin/orbelle_example")
+        native = list(venv.glob("lib/python*/site-packages/orbelle/_native*.so"))
         if len(native) != 1:
             raise RuntimeError("Expected exactly one installed native Python module")
         self.run("python-native-dependencies", "ldd", native[0])

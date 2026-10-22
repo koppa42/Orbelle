@@ -2,9 +2,9 @@ void Workbench::smoke_status_feedback() {
     switch (orbit_smoke_stage_) {
     case 192: {
         auto project = application::load_project(
-            std::filesystem::path((smoke_dir_ + "/apply-audit.orbitforge").toStdWString()));
+            std::filesystem::path((smoke_dir_ + "/apply-audit.orbelle").toStdWString()));
         project.ground_stations.push_back({"status-station", "Status station", {0, 0, 0}});
-        start_project(std::move(project), smoke_dir_ + "/status-audit.orbitforge");
+        start_project(std::move(project), smoke_dir_ + "/status-audit.orbelle");
         ++orbit_smoke_stage_;
         break;
     }

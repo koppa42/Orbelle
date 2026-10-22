@@ -8,15 +8,15 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <nlohmann/json.hpp>
-#include <orbitforge/core/propagation/hpop_force.hpp>
-#include <orbitforge/providers/spice/provider.hpp>
+#include <orbelle/core/propagation/hpop_force.hpp>
+#include <orbelle/providers/spice/provider.hpp>
 #include <picosha2.h>
-#ifdef ORBITFORGE_SPICE_TEST_ERFA
+#ifdef ORBELLE_SPICE_TEST_ERFA
 #include <erfa.h>
-#include <orbitforge/providers/erfa/provider.hpp>
+#include <orbelle/providers/erfa/provider.hpp>
 #endif
 
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 using Json = nlohmann::json;
 std::string read(const std::filesystem::path &path) {
@@ -38,10 +38,10 @@ void write_kernel(const std::filesystem::path &path, double offset) {
     erract_c("SET", 0, action);
     errprt_c("SET", 0, report);
     SpiceInt handle = 0;
-    spkopn_c(path.string().c_str(), "OrbitForge synthetic Chebyshev cubic", 0, &handle);
+    spkopn_c(path.string().c_str(), "Orbelle synthetic Chebyshev cubic", 0, &handle);
     spice_ok();
     const double coefficients[]{7000 + offset, 10, 2, 0.5, -1200, 0.2, 3, 0, 500, -0.3, 0, 0.6};
-    spkw02_c(handle, 100001, 399, "J2000", -3600, 3600, "OrbitForge synthetic cubic", 7200, 1, 3,
+    spkw02_c(handle, 100001, 399, "J2000", -3600, 3600, "Orbelle synthetic cubic", 7200, 1, 3,
              coefficients, -3600);
     spice_ok();
     spkcls_c(handle);
@@ -53,13 +53,13 @@ struct Fixture {
     std::filesystem::path workspace;
     Json document;
     Fixture() {
-        root = std::filesystem::path(ORBITFORGE_SPICE_TEST_DIR) /
+        root = std::filesystem::path(ORBELLE_SPICE_TEST_DIR) /
                ::testing::UnitTest::GetInstance()->current_test_info()->name();
         std::filesystem::create_directories(root);
         manifest = root / "manifest.json";
         workspace = root / "runtime";
         std::filesystem::copy_file(
-            std::filesystem::path(ORBITFORGE_SPICE_SAMPLE).parent_path() / "naif0012.tls",
+            std::filesystem::path(ORBELLE_SPICE_SAMPLE).parent_path() / "naif0012.tls",
             root / "naif0012.tls", std::filesystem::copy_options::overwrite_existing);
         write_kernel(root / "a.bsp", 0);
         write_kernel(root / "b.bsp", 100);
@@ -76,7 +76,7 @@ struct Fixture {
         const auto hash = picosha2::hash256_hex_string(read(root / name));
         return {{"file", name},          {"kind", kind},
                 {"sha256", hash},        {"source_url", "synthetic-test-fixture"},
-                {"source_sha256", hash}, {"producer", "OrbitForge test suite"}};
+                {"source_sha256", hash}, {"producer", "Orbelle test suite"}};
     }
     void save() const { std::ofstream(manifest) << document.dump(2); }
     auto load() const { return providers::spice::load_snapshot(manifest, workspace); }
@@ -312,10 +312,10 @@ TEST(Spice, InvalidSnapshotDoesNotReplaceLiveContext) {
     analytic(provider->geometric_state(100001, 399, core::Epoch(0)));
 }
 
-#ifdef ORBITFORGE_SPICE_TEST_ERFA
+#ifdef ORBELLE_SPICE_TEST_ERFA
 TEST(Spice, RealSnapshotSunMoonAndIndependentTdbModel) {
-    const auto workspace = std::filesystem::path(ORBITFORGE_SPICE_TEST_DIR) / "real-runtime";
-    const auto provider = providers::spice::load_snapshot(ORBITFORGE_SPICE_SAMPLE, workspace);
+    const auto workspace = std::filesystem::path(ORBELLE_SPICE_TEST_DIR) / "real-runtime";
+    const auto provider = providers::spice::load_snapshot(ORBELLE_SPICE_SAMPLE, workspace);
     const auto time = providers::erfa::make_builtin_time_provider();
     for (const auto utc : {core::UtcDateTime{2016, 12, 28, 0, 0, 0, 0},
                            core::UtcDateTime{2016, 12, 31, 23, 59, 60, 123456789},
@@ -706,8 +706,8 @@ TEST(Spice, ApparentSunDerivativesMatchIndependentSpkapoCartesianDifferences) {
                                        max_v);
     }
     const auto provider = providers::spice::load_snapshot(
-        ORBITFORGE_SPICE_SAMPLE,
-        std::filesystem::path(ORBITFORGE_SPICE_TEST_DIR) / "apparent-derivative-real");
+        ORBELLE_SPICE_SAMPLE,
+        std::filesystem::path(ORBELLE_SPICE_TEST_DIR) / "apparent-derivative-real");
     for (double fraction : {.1, .5, .9}) {
         const auto &info = provider->data_info();
         const auto epoch =
@@ -722,8 +722,8 @@ TEST(Spice, ApparentSunDerivativesMatchIndependentSpkapoCartesianDifferences) {
 }
 TEST(Spice, SrpStateChainMatchesIndependentApparentSunAndForceDifferences) {
     const auto provider = providers::spice::load_snapshot(
-        ORBITFORGE_SPICE_SAMPLE,
-        std::filesystem::path(ORBITFORGE_SPICE_TEST_DIR) / "srp-apparent-chain-real");
+        ORBELLE_SPICE_SAMPLE,
+        std::filesystem::path(ORBELLE_SPICE_TEST_DIR) / "srp-apparent-chain-real");
     const auto epoch =
         core::Epoch{provider->data_info().first_epoch.tai_nanoseconds() + 900000000000};
     DifferentialSolarSystem ephemeris(*provider);

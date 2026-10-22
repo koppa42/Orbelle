@@ -1,7 +1,7 @@
 #include <chrono>
 #include <future>
 #include <gtest/gtest.h>
-#include <orbitforge/render_vsg/compile_manager.hpp>
+#include <orbelle/render_vsg/compile_manager.hpp>
 #include <stdexcept>
 #include <vsg/app/Viewer.h>
 #include <vsg/nodes/Group.h>
@@ -13,7 +13,7 @@ using namespace std::chrono_literals;
 TEST(CompileManager, NestedExclusionBlocksWorkerAndReleasesAfterException) {
     auto viewer = vsg::Viewer::create();
     auto manager =
-        orbitforge::render_vsg::CompileManager::create(*viewer, vsg::ResourceHints::create());
+        orbelle::render_vsg::CompileManager::create(*viewer, vsg::ResourceHints::create());
     std::promise<void> entered;
     auto entered_future = entered.get_future();
     std::future<vsg::CompileResult> worker;
@@ -39,7 +39,7 @@ TEST(CompileManager, NestedExclusionBlocksWorkerAndReleasesAfterException) {
 TEST(CompileManager, ClosingAllViewsKeepsWorkersPausedUntilShutdown) {
     auto viewer = vsg::Viewer::create();
     auto manager =
-        orbitforge::render_vsg::CompileManager::create(*viewer, vsg::ResourceHints::create());
+        orbelle::render_vsg::CompileManager::create(*viewer, vsg::ResourceHints::create());
     manager->run_exclusive([&] {
         manager->begin_change(*viewer);
         // The last window has gone: no contexts may be returned to workers.

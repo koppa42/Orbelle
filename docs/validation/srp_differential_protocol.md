@@ -1,6 +1,6 @@
 # 太阳辐射压偏导验证
 
-契约见[SRP 局部偏导](../architecture/srp_differential.md)。固定参考离线生成，测试不联网、不依赖 Java、SciPy 或 mpmath，也不从 OrbitForge 输出生成期望值。
+契约见[SRP 局部偏导](../architecture/srp_differential.md)。固定参考离线生成，测试不联网、不依赖 Java、SciPy 或 mpmath，也不从 Orbelle 输出生成期望值。
 
 ## 三套独立参考
 
@@ -36,11 +36,11 @@
 
 ## 重现
 
-Orekit 依赖及哈希位于 `tools/validation/orekit/dependencies.json`。编译 `OrbitForgeSrpDifferentialReference.java`，依次生成标准与原坐标候选：
+Orekit 依赖及哈希位于 `tools/validation/orekit/dependencies.json`。编译 `OrbelleSrpDifferentialReference.java`，依次生成标准与原坐标候选：
 
 ```text
-java -cp <classes-and-pinned-jars> OrbitForgeSrpDifferentialReference <orekit.txt>
-java -cp <classes-and-pinned-jars> OrbitForgeSrpDifferentialReference <raw.txt> --raw-frame
+java -cp <classes-and-pinned-jars> OrbelleSrpDifferentialReference <orekit.txt>
+java -cp <classes-and-pinned-jars> OrbelleSrpDifferentialReference <raw.txt> --raw-frame
 python tools/validation/srp_sphere_differential_reference.py --input <orekit.txt> --output <high.txt> --raw-orekit <raw.txt>
 python tools/validation/srp_union_differential_reference.py --output <union.txt>
 ```

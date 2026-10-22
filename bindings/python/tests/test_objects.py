@@ -6,9 +6,9 @@ import inspect
 from pathlib import Path
 import tempfile
 import unittest
-import orbitforge as of
-from orbitforge import units as u
-from orbitforge.sensors import Cone, Pointing
+import orbelle as of
+from orbelle import units as u
+from orbelle.sensors import Cone, Pointing
 
 
 def make_project():
@@ -26,13 +26,13 @@ def make_project():
 
 class ObjectEditingTest(unittest.TestCase):
     def test_geometric_sensor_patterns_round_trip_and_atomic_rejection(self):
-        from orbitforge.sensors import ComplexConic, Rectangular, Custom
+        from orbelle.sensors import ComplexConic, Rectangular, Custom
         project, _, _, sensor = make_project()
         shapes = [ComplexConic(u.deg(10),u.deg(40),u.deg(300),u.deg(60)),
                   Rectangular(u.deg(30),u.deg(15)),
                   Custom(tuple((u.deg(20),u.deg(clock)) for clock in (0,90,180,270)))]
         with tempfile.TemporaryDirectory() as directory:
-            path=Path(directory)/"patterns.orbitforge"
+            path=Path(directory)/"patterns.orbelle"
             for shape in shapes:
                 sensor.field_of_view=shape
                 self.assertEqual(sensor.field_of_view,shape)
@@ -247,7 +247,7 @@ class ObjectEditingTest(unittest.TestCase):
         project, satellite, _, sensor = make_project()
         self.assertTrue(project.dirty)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "objects.orbitforge"
+            path = Path(directory) / "objects.orbelle"
             with project.edit():
                 with self.assertRaises(RuntimeError):
                     project.save(path)
@@ -290,7 +290,7 @@ class ObjectEditingTest(unittest.TestCase):
         self.assertEqual(project.to_data().satellites[0].orbit.last.tai_nanoseconds, 1000)
 
     def test_saved_ids_preserved_and_native_values_detached(self):
-        path = Path(__file__).resolve().parents[3] / "tests/integration/fixtures/project-current.orbitforge"
+        path = Path(__file__).resolve().parents[3] / "tests/integration/fixtures/project-current.orbelle"
         raw = of.load_project_data(path)
         project = of.Project.open(path)
         self.assertEqual({obj.id for obj in project.objects},

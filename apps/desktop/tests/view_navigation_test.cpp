@@ -11,7 +11,7 @@
 #include <limits>
 #include <vsg/app/ProjectionMatrix.h>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 class ViewNavigationTest : public ::testing::Test {
   protected:
     void SetUp() override {
@@ -204,4 +204,4 @@ TEST_F(ViewNavigationTest, KeyboardPanHasAPreciseStepAndResizePreservesTheCamera
     EXPECT_EQ(look_->center, center);
     EXPECT_EQ(look_->up, up);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -12,7 +12,7 @@
 namespace vsg {
 class PhysicalDevice;
 }
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 class BenchmarkMemory;
 class BenchmarkInputEvent final : public QEvent {
   public:
@@ -121,4 +121,4 @@ class BenchmarkRun {
     std::jthread input_thread_;
     std::unique_ptr<BenchmarkMemory> video_memory_;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -3,13 +3,13 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <limits>
-#include <orbitforge/core/propagation/orbital_events.hpp>
-#include <orbitforge/runtime/analysis.hpp>
-#include <orbitforge/runtime/gravity.hpp>
-#include <orbitforge/runtime/project.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/core/propagation/orbital_events.hpp>
+#include <orbelle/runtime/analysis.hpp>
+#include <orbelle/runtime/gravity.hpp>
+#include <orbelle/runtime/project.hpp>
+#include <orbelle/runtime/two_body.hpp>
 #include <sstream>
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 core::Epoch seconds(double s) {
     return core::Epoch{static_cast<std::int64_t>(std::llround(s * 1e9))};
@@ -42,7 +42,7 @@ struct Reference {
     std::vector<std::array<double, 4>> events;
 };
 std::vector<Reference> references() {
-    std::ifstream file(ORBITFORGE_ORBITAL_EVENTS_REFERENCE);
+    std::ifstream file(ORBELLE_ORBITAL_EVENTS_REFERENCE);
     if (!file)
         throw std::runtime_error("Missing orbital event reference");
     std::vector<Reference> cases;

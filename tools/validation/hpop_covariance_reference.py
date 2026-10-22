@@ -1,7 +1,7 @@
 """Independent joint covariance: pinned Orekit STM + NumPy/SciPy + 80/100-digit algebra.
 
 python tools/validation/hpop_covariance_reference.py OUTPUT
-No OrbitForge extension or production algorithm is imported.
+No Orbelle extension or production algorithm is imported.
 """
 from pathlib import Path
 import hashlib

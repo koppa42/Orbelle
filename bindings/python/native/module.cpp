@@ -1,12 +1,12 @@
-#include <orbitforge/application/scenario.hpp>
-#include <orbitforge/runtime/demo.hpp>
-#include <orbitforge/runtime/tabulated_orbit.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/application/scenario.hpp>
+#include <orbelle/runtime/demo.hpp>
+#include <orbelle/runtime/tabulated_orbit.hpp>
+#include <orbelle/runtime/two_body.hpp>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
 namespace py = pybind11;
-using namespace orbitforge;
+using namespace orbelle;
 
 void bind_time_frames(py::module_ &module);
 void bind_ephemeris(py::module_ &module);
@@ -20,8 +20,8 @@ void bind_reports(py::module_ &module);
 void bind_analysis(py::module_ &module);
 
 PYBIND11_MODULE(_native, module) {
-    module.doc() = "OrbitForge P0 native API. Time is explicit TAI, positions are metres.";
-    module.attr("__version__") = ORBITFORGE_VERSION;
+    module.doc() = "Orbelle P0 native API. Time is explicit TAI, positions are metres.";
+    module.attr("__version__") = ORBELLE_VERSION;
     py::class_<core::Epoch>(module, "Epoch")
         .def(py::init<std::int64_t>(), py::arg("tai_nanoseconds_since_2000_noon"))
         .def_property_readonly("tai_nanoseconds", &core::Epoch::tai_nanoseconds)

@@ -5,7 +5,7 @@ import struct
 import tempfile
 import unittest
 # Native value/format tests; public editing is in test_objects.py.
-from orbitforge import _native as of
+from orbelle import _native as of
 from project_format import rewrite_section
 
 
@@ -35,7 +35,7 @@ class ProjectTests(unittest.TestCase):
         with self.assertRaises(IndexError):
             changed.sample([original.first])
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / '修改时段.orbitforge'
+            path = Path(directory) / '修改时段.orbelle'
             revised.save(path)
             restored = of.load_project(path)
             self.assertEqual(restored.name, revised.name)
@@ -79,7 +79,7 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(original.data_lock.sha256, lock.sha256)
         self.assertEqual(project.renamed_satellite('二体', 'New name').data_lock.sha256, lock.sha256)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'bound.orbitforge'
+            path = Path(directory) / 'bound.orbelle'
             project.save(path)
             restored = of.load_project(path)
             self.assertEqual(restored.data_lock.sha256, lock.sha256)
@@ -95,10 +95,10 @@ class ProjectTests(unittest.TestCase):
     def test_missing_inconsistent_or_wrong_digest_locks_fail_even_with_valid_crcs(self):
         project = self.bound_project()
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'bound.orbitforge'
+            path = Path(directory) / 'bound.orbelle'
             project.save(path)
             original = path.read_bytes()
-            self.assertEqual(struct.unpack_from('<I', original, 8)[0], 47)
+            self.assertEqual(struct.unpack_from('<I', original, 8)[0], 48)
             def rewrite(tag_to_change, mutate):
                 path.write_bytes(rewrite_section(original, tag_to_change, mutate))
 
@@ -117,7 +117,7 @@ class ProjectTests(unittest.TestCase):
     def test_extrapolation_policy_roundtrip_and_integrity(self):
         project = self.bound_project()
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'policy.orbitforge'
+            path = Path(directory) / 'policy.orbelle'
             project.save(path)
             loaded = of.load_project(path)
             sample = Path(of.__file__).parent / 'data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json'
@@ -151,7 +151,7 @@ class ProjectTests(unittest.TestCase):
         with self.assertRaises(of.ProjectError):
             copied.renamed_satellite('copy-1', ' ')
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'names.orbitforge'
+            path = Path(directory) / 'names.orbelle'
             copied.save(path)
             self.assertEqual(of.load_project(path).satellites[0].name, '观测卫星')
 
@@ -169,7 +169,7 @@ class ProjectTests(unittest.TestCase):
         project = self.make_project()
         before = project.to_scenario().sample([project.first, project.current, project.last])
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / '任务.orbitforge'
+            path = Path(directory) / '任务.orbelle'
             project.save(path)
             restored = of.load_project(path)
             self.assertEqual(restored.name, project.name)
@@ -182,14 +182,14 @@ class ProjectTests(unittest.TestCase):
                 for x, y in zip(a.states, b.states):
                     self.assertEqual(x.position_m, y.position_m)
                     self.assertEqual(x.velocity_mps, y.velocity_mps)
-            second = Path(directory) / 'roundtrip.orbitforge'
+            second = Path(directory) / 'roundtrip.orbelle'
             restored.save(second)
             self.assertEqual(path.read_bytes(), second.read_bytes())
 
     def test_save_failures_leave_original_and_never_accept_corruption(self):
         project = self.make_project()
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'project.orbitforge'
+            path = Path(directory) / 'project.orbelle'
             project.save(path)
             original = path.read_bytes()
             project.name = 'Changed'
@@ -215,6 +215,6 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(len(project.satellites), 2)
         empty = of.Project('Empty', of.Epoch(0), of.Epoch(1))
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'empty.orbitforge'
+            path = Path(directory) / 'empty.orbelle'
             empty.save(path)
             self.assertEqual(of.load_project(path).to_scenario().object_count, 0)

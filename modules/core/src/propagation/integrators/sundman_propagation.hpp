@@ -3,9 +3,9 @@
 #include "one_step.hpp"
 #include "sundman.hpp"
 #include "vop.hpp"
-#include <orbitforge/core/propagation/hpop.hpp>
+#include <orbelle/core/propagation/hpop.hpp>
 
-namespace orbitforge::core::detail {
+namespace orbelle::core::detail {
 // Bounded physical-time adapter for the Sundman kernels. A rejected transformed
 // stage never calls the force outside the coast/force segment. At a boundary we
 // integrate the equivalent inverse equations (r,v,q) in physical time, using the
@@ -481,4 +481,4 @@ template <std::size_t Extra = 0> class SundmanSystemPropagation {
     }
 };
 using SundmanPropagation = SundmanSystemPropagation<>;
-} // namespace orbitforge::core::detail
+} // namespace orbelle::core::detail

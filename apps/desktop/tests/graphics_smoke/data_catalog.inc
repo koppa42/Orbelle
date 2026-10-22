@@ -191,7 +191,7 @@ void Workbench::smoke_data_catalog() {
                             }),
             "Recalculation did not use current data consistently for every object");
         smoke_record("recalculation-uses-current-data-and-rebuilds-all-tracks");
-        save_project_to(smoke_dir_ + "/imported-data.orbitforge");
+        save_project_to(smoke_dir_ + "/imported-data.orbelle");
         // Recreate the catalog as on a fresh process; source files are no longer needed.
         QFile changed(smoke_dir_ + "/import-source/manifest.json");
         smoke_require(changed.open(QIODevice::WriteOnly | QIODevice::Truncate),
@@ -253,7 +253,7 @@ void Workbench::smoke_data_catalog() {
         satellite.orbit.first = extrapolated.first;
         satellite.orbit.last = extrapolated.last;
         extrapolated.satellites.push_back(std::move(satellite));
-        start_project(std::move(extrapolated), smoke_dir_ + "/extrapolated.orbitforge");
+        start_project(std::move(extrapolated), smoke_dir_ + "/extrapolated.orbelle");
         ++orbit_smoke_stage_;
         break;
     }
@@ -270,7 +270,7 @@ void Workbench::smoke_data_catalog() {
                       "Scenario does not identify actual extrapolation");
         scenario_properties_->close();
         smoke_record("finite-eop-extrapolation-prepares-orbit-and-displays-provenance");
-        save_project_to(smoke_dir_ + "/extrapolated.orbitforge");
+        save_project_to(smoke_dir_ + "/extrapolated.orbelle");
         smoke_cache_ = orbit_;
         smoke_data_lock_ = scenario_->data_lock();
         const auto index = eop_catalog_->preferred_index();
@@ -310,8 +310,8 @@ void Workbench::smoke_data_catalog() {
         break;
     case 94:
         start_project(application::load_project(std::filesystem::path(
-                          (smoke_dir_ + "/imported-data.orbitforge").toStdWString())),
-                      smoke_dir_ + "/imported-data.orbitforge");
+                          (smoke_dir_ + "/imported-data.orbelle").toStdWString())),
+                      smoke_dir_ + "/imported-data.orbelle");
         ++orbit_smoke_stage_;
         break;
     default:

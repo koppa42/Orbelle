@@ -1,8 +1,8 @@
 """Global WGS84 coverage and revisit gaps from the shared prepared Analysis API."""
 import math
 from pathlib import Path
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 project = of.Project("Coverage", of.Epoch(0), of.Epoch(3600*10**9))
 satellite = project.objects.satellite("LEO", orbit=of.orbits.TwoBody(

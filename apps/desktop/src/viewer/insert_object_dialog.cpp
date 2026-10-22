@@ -13,7 +13,7 @@
 #include <QVBoxLayout>
 #include <array>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 struct ObjectSpec {
     InsertObjectType type;
@@ -353,4 +353,4 @@ void InsertObjectDialog::submit() {
         hide();
     insert(*request);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

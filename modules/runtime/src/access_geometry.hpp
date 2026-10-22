@@ -1,7 +1,7 @@
 #pragma once
-#include <orbitforge/runtime/access.hpp>
+#include <orbelle/runtime/access.hpp>
 
-namespace orbitforge::runtime::detail {
+namespace orbelle::runtime::detail {
 // Shared constraints for legacy reports and fixed Analysis queries. No propagation or I/O.
 struct AccessGeometry {
     application::ProjectGroundStation station;
@@ -15,4 +15,4 @@ struct AccessGeometry {
     [[nodiscard]] std::string target_name() const;
     [[nodiscard]] application::Project numerical_inputs(core::Epoch first, core::Epoch last) const;
 };
-} // namespace orbitforge::runtime::detail
+} // namespace orbelle::runtime::detail

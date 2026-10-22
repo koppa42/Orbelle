@@ -10,7 +10,7 @@ class QStyleOptionViewItem;
 class QRectF;
 class QPointF;
 class QWidget;
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 enum class WorkbenchIcon {
     new_scenario,
     folder,
@@ -64,4 +64,4 @@ QWidget *make_sakura_ribbon(QWidget *parent = nullptr);
 // row marked by an accent wash with a leading stripe (in `stripe`); focus adds a faint outline.
 void paint_list_row(QPainter *painter, const QStyleOptionViewItem &option, const QRectF &row,
                     const QColor &stripe);
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

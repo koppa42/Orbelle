@@ -2,15 +2,15 @@
 #include <cctype>
 #include <cmath>
 #include <fstream>
-#include <orbitforge/core/propagation/solar_radiation_pressure.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
+#include <orbelle/core/propagation/solar_radiation_pressure.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
 #include <picosha2.h>
 #include <sstream>
-#ifdef ORBITFORGE_HAS_SPICE
-#include <orbitforge/providers/spice/provider.hpp>
+#ifdef ORBELLE_HAS_SPICE
+#include <orbelle/providers/spice/provider.hpp>
 #endif
 
-namespace orbitforge::runtime {
+namespace orbelle::runtime {
 core::CbGravity load_cb_gravity(const std::filesystem::path &path, core::ThirdBody body,
                                 double mu_scale) {
     const auto lower = [](std::string value) {
@@ -209,7 +209,7 @@ void validate_ephemeris_reference(std::span<const application::DataReference> re
             "Ephemeris differs from the project's confirmed data; use a preparation plan");
 }
 bool ephemeris_available() noexcept {
-#ifdef ORBITFORGE_HAS_SPICE
+#ifdef ORBELLE_HAS_SPICE
     return true;
 #else
     return false;
@@ -217,7 +217,7 @@ bool ephemeris_available() noexcept {
 }
 std::unique_ptr<core::IEphemerisProvider>
 load_spice_snapshot(const std::filesystem::path &manifest, const std::filesystem::path &workspace) {
-#ifdef ORBITFORGE_HAS_SPICE
+#ifdef ORBELLE_HAS_SPICE
     return providers::spice::load_snapshot(manifest, workspace);
 #else
     (void)manifest;
@@ -225,4 +225,4 @@ load_spice_snapshot(const std::filesystem::path &manifest, const std::filesystem
     throw std::runtime_error("This build does not include the CSPICE ephemeris provider");
 #endif
 }
-} // namespace orbitforge::runtime
+} // namespace orbelle::runtime

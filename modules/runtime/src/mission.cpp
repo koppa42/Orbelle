@@ -1,9 +1,9 @@
-#include <orbitforge/core/propagation/central_body.hpp>
-#include <orbitforge/runtime/hpop.hpp>
-#include <orbitforge/runtime/mission.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/core/propagation/central_body.hpp>
+#include <orbelle/runtime/hpop.hpp>
+#include <orbelle/runtime/mission.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
-namespace orbitforge::runtime {
+namespace orbelle::runtime {
 namespace {
 // Keep the provider boundary behind Session: optional provider dependencies and
 // their algorithm identities remain owned by the existing runtime factories.
@@ -54,4 +54,4 @@ application::Session make_mission_session(core::CartesianState initial, core::Mi
     return {core::make_mission(initial, std::move(plan), std::move(factory), stop),
             {std::move(object_id), revision, algorithm}};
 }
-} // namespace orbitforge::runtime
+} // namespace orbelle::runtime

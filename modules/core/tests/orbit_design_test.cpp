@@ -3,14 +3,14 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <numbers>
-#include <orbitforge/core/propagation/orbit_design.hpp>
+#include <orbelle/core/propagation/orbit_design.hpp>
 #include <sstream>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 constexpr double pi = std::numbers::pi, rad = pi / 180;
 TEST(OrbitDesign, MatchesIndependentHighPrecisionRoots) {
-    std::ifstream file(ORBITFORGE_ORBIT_DESIGN_REFERENCE);
+    std::ifstream file(ORBELLE_ORBIT_DESIGN_REFERENCE);
     ASSERT_TRUE(file);
     std::string line;
     int count = 0;

@@ -1,4 +1,4 @@
-"""Capture explicit Vulkan presentation timing from the launched OrbitForge process.
+"""Capture explicit Vulkan presentation timing from the launched Orbelle process.
 
 The probe verifies IDs, clock calibration and coverage before a full run.
 Optional PresentMon diagnostics require permission to create an ETW session;
@@ -53,7 +53,7 @@ def run(args, directory, index):
     directory.mkdir()
     environment = desktop_environment(args.dependency_prefix, validation=args.validation)
     environment["DISABLE_VULKAN_OBS_CAPTURE"] = "1"
-    session = "OrbitForgeTiming-" + uuid.uuid4().hex
+    session = "OrbelleTiming-" + uuid.uuid4().hex
     app = capture = gpu = None
     resources = ExitStack()
     record = {"run": index, "session_name": session if args.presentmon else None,

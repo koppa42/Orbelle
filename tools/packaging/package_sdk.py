@@ -31,11 +31,11 @@ def copy_dependencies(prefix, output):
 def package(sdk, dependencies, output, version, platform):
     if not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version):
         raise ValueError("Invalid SDK version")
-    config = (sdk / "lib/cmake/OrbitForge/OrbitForgeConfigVersion.cmake").read_text(encoding="utf-8")
+    config = (sdk / "lib/cmake/Orbelle/OrbelleConfigVersion.cmake").read_text(encoding="utf-8")
     if not re.search(r'set\(PACKAGE_VERSION "' + re.escape(version) + r'"\)', config):
         raise ValueError("Installed SDK version differs from release version")
     output.mkdir(parents=True, exist_ok=True)
-    name = f"OrbitForge-{version}-sdk-{platform}"
+    name = f"Orbelle-{version}-sdk-{platform}"
     staging = output.parent / (name + "-staging")
     root = staging / name
     archive = output / (name + (".zip" if platform == "win-x64" else ".tar.gz"))
@@ -44,15 +44,15 @@ def package(sdk, dependencies, output, version, platform):
     shutil.copytree(sdk, root)
     copy_dependencies(dependencies, root / "dependencies")
     (root / "README.txt").write_text(
-        f"OrbitForge {version} C++ SDK ({platform}, Release)\n\n"
+        f"Orbelle {version} C++ SDK ({platform}, Release)\n\n"
         "Requires CMake 3.28+ and a compatible C++20 compiler.\n"
         "Windows: Visual Studio 2022 x64 (v143); Linux: Ubuntu 24.04 x86_64.\n"
         "This is a headless SDK with Core, Results, Application, Runtime, ERFA/IERS, CSPICE and SQLite.\n"
         "Set CMAKE_PREFIX_PATH to both this folder and its dependencies subfolder.\n"
-        "Use find_package(OrbitForge CONFIG REQUIRED COMPONENTS Runtime), then link OrbitForge::Runtime.\n"
+        "Use find_package(Orbelle CONFIG REQUIRED COMPONENTS Runtime), then link Orbelle::Runtime.\n"
         "On Windows, add dependencies/bin to PATH when running a linked executable.\n"
         "The supplied Release libraries require a compatible compiler and runtime; no stable ABI is promised.\n"
-        "Keep the dependency licenses and share/OrbitForge/notices when redistributing.\n"
+        "Keep the dependency licenses and share/Orbelle/notices when redistributing.\n"
         "Documentation: https://github.com/koppa42/OrbitForge/tree/" + f"v{version}/docs\n",
         encoding="utf-8")
     if platform == "win-x64":

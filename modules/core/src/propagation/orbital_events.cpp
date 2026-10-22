@@ -3,10 +3,10 @@
 #include <limits>
 #include <map>
 #include <optional>
-#include <orbitforge/core/propagation/orbital_events.hpp>
+#include <orbelle/core/propagation/orbital_events.hpp>
 #include <stdexcept>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 std::string_view orbital_event_name(OrbitalEventKind kind) {
     switch (kind) {
     case OrbitalEventKind::periapsis:
@@ -166,4 +166,4 @@ OrbitalEvents find_orbital_events(Epoch first, Epoch last, std::int64_t step,
     });
     return result;
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

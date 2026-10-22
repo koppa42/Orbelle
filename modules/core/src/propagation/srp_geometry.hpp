@@ -1,7 +1,7 @@
 #pragma once
-#include <orbitforge/core/propagation/solar_radiation_pressure.hpp>
+#include <orbelle/core/propagation/solar_radiation_pressure.hpp>
 
-namespace orbitforge::core::detail {
+namespace orbelle::core::detail {
 struct SrpGeometry {
     std::array<double, 3> sun{};
     std::optional<std::array<double, 3>> moon;
@@ -44,4 +44,4 @@ inline SrpGeometry resolve_srp_geometry(Epoch epoch, const std::array<double, 3>
     }
     return result;
 }
-} // namespace orbitforge::core::detail
+} // namespace orbelle::core::detail

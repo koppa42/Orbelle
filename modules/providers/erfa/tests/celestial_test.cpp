@@ -4,10 +4,10 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <limits>
-#include <orbitforge/core/propagation/hpop_covariance.hpp>
-#include <orbitforge/providers/erfa/provider.hpp>
+#include <orbelle/core/propagation/hpop_covariance.hpp>
+#include <orbelle/providers/erfa/provider.hpp>
 #include <sstream>
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 core::Matrix3 multiply(const core::Matrix3 &a, const core::Matrix3 &b) {
     core::Matrix3 c{};
@@ -21,7 +21,7 @@ core::Matrix3 multiply(const core::Matrix3 &a, const core::Matrix3 &b) {
 TEST(CelestialFrames, MatchesOrekitIers1996AndAutomaticRates) {
     const auto frames = providers::erfa::make_frame_provider();
     const auto time = providers::erfa::make_builtin_time_provider();
-    std::ifstream file(std::string(ORBITFORGE_REFERENCE_DIR) + "/hpop_celestial_frames.txt");
+    std::ifstream file(std::string(ORBELLE_REFERENCE_DIR) + "/hpop_celestial_frames.txt");
     ASSERT_TRUE(file);
     std::string line;
     int count = 0;
@@ -170,7 +170,7 @@ Joint joint(const core::HpopCovarianceInput &value) {
 TEST(CelestialFrames, JointCovarianceMatchesIndependentReferencesAtCoverageEndpoint) {
     const std::shared_ptr<const core::IFrameProvider> frames =
         providers::erfa::make_frame_provider();
-    std::ifstream file(std::string(ORBITFORGE_REFERENCE_DIR) +
+    std::ifstream file(std::string(ORBELLE_REFERENCE_DIR) +
                        "/../propagators/hpop_celestial_covariance.txt");
     ASSERT_TRUE(file);
     int count = 0;

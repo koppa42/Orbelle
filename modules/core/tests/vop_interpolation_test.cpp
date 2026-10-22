@@ -5,10 +5,10 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <map>
-#include <orbitforge/core/propagation/circular_two_body.hpp>
-#include <orbitforge/core/propagation/tabulated_orbit.hpp>
+#include <orbelle/core/propagation/circular_two_body.hpp>
+#include <orbelle/core/propagation/tabulated_orbit.hpp>
 #include <sstream>
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 constexpr std::int64_t base = 8'000'000'000'000'000'123;
 constexpr double mu = 3.986004415e14;
@@ -17,7 +17,7 @@ double distance(const std::array<double, 3> &a, const std::array<double, 3> &b) 
 }
 } // namespace
 TEST(VopInterpolation, AllOrdersConicsAndIndependentMuMatchOrekitHipparchus) {
-    std::ifstream input(ORBITFORGE_VOP_INTERPOLATION_REFERENCE);
+    std::ifstream input(ORBELLE_VOP_INTERPOLATION_REFERENCE);
     ASSERT_TRUE(input);
     std::string line;
     OrbitEphemerisArc nodes;

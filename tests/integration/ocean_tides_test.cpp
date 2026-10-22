@@ -6,14 +6,14 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <numbers>
-#include <orbitforge/orbitforge.hpp>
-#include <orbitforge/runtime/hpop.hpp>
-#include <orbitforge/runtime/project.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/orbelle.hpp>
+#include <orbelle/runtime/hpop.hpp>
+#include <orbelle/runtime/project.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 #include <sstream>
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
-const std::filesystem::path references{ORBITFORGE_OCEAN_REFERENCE};
+const std::filesystem::path references{ORBELLE_OCEAN_REFERENCE};
 core::GravityInfo field() {
     return {"reference", {}, {}, "tide_free", core::egm96_mu, core::egm96_radius_m, 2, 2};
 }
@@ -225,18 +225,18 @@ TEST(OceanTideReference, FullOfficialFesMatchesOrekitThroughDegreeOneHundred) {
 #ifdef _WIN32
     char *value = nullptr;
     std::size_t length = 0;
-    const auto error = _dupenv_s(&value, &length, "ORBITFORGE_FULL_OCEAN_FILE");
+    const auto error = _dupenv_s(&value, &length, "ORBELLE_FULL_OCEAN_FILE");
     const std::unique_ptr<char, decltype(&std::free)> owned(value, &std::free);
     ASSERT_EQ(error, 0);
     if (owned)
         source = owned.get();
 #else
-    if (const char *value = std::getenv("ORBITFORGE_FULL_OCEAN_FILE"))
+    if (const char *value = std::getenv("ORBELLE_FULL_OCEAN_FILE"))
         source = value;
 #endif
     if (source.empty())
         GTEST_SKIP()
-            << "Set ORBITFORGE_FULL_OCEAN_FILE to the pinned full FES2014bv1 potential file";
+            << "Set ORBELLE_FULL_OCEAN_FILE to the pinned full FES2014bv1 potential file";
     const auto model = runtime::load_ocean_tides(source);
     ASSERT_EQ(model->info().sha256, runtime::fes2014bv1_sha256);
     EXPECT_EQ(model->info().degree, 100);
@@ -352,14 +352,14 @@ TEST_F(OceanTideFiles, CatalogPublicationIsCancellablePinnedAndKeepsExistingSnap
 TEST_F(OceanTideFiles, ProjectAnalysisReportsAndDataChangesUseOneFrozenModel) {
     if (!runtime::time_frames_available())
         GTEST_SKIP();
-    const auto data = runtime::DataSnapshot::load(ORBITFORGE_REPORT_EOP)
+    const auto data = runtime::DataSnapshot::load(ORBELLE_REPORT_EOP)
                           .with_ocean_tide_file("custom-ocean", write(example()));
     application::ProjectDocument document{project()};
     const auto analysis = runtime::prepare(document, data);
     const auto id = document.objects().get("satellite-1");
     const auto original = analysis.state(id, project().last, core::FrameId::gcrf);
-    runtime::save_project(document, root / "test.orbitforge", analysis);
-    const auto saved = application::load_project(root / "test.orbitforge");
+    runtime::save_project(document, root / "test.orbelle", analysis);
+    const auto saved = application::load_project(root / "test.orbelle");
     ASSERT_EQ(saved.force_data.size(), 1U);
     EXPECT_EQ(saved.force_data[0].role, "ocean-tides/custom-ocean");
     EXPECT_EQ(saved.satellites[0].orbit.hpop.ocean_tides,
@@ -372,7 +372,7 @@ TEST_F(OceanTideFiles, ProjectAnalysisReportsAndDataChangesUseOneFrozenModel) {
     auto changed = example();
     changed.replace(changed.find("4.34727"), 7, "8.34727");
     const auto next = data.with_ocean_tide_file("custom-ocean", write(changed));
-    runtime::ProjectOpenPlan plan(root / "test.orbitforge", next);
+    runtime::ProjectOpenPlan plan(root / "test.orbelle", next);
     ASSERT_EQ(plan.data_changes().size(), 1U);
     EXPECT_EQ(plan.data_changes()[0].role, "ocean-tides/custom-ocean");
     EXPECT_THROW((void)plan.open(), runtime::OpenDataChangedError);
@@ -382,7 +382,7 @@ TEST_F(OceanTideFiles, ProjectAnalysisReportsAndDataChangesUseOneFrozenModel) {
     EXPECT_EQ(analysis.state(id, project().last, core::FrameId::gcrf).position_m,
               original.position_m);
     EXPECT_THROW(
-        (void)runtime::prepare(document, runtime::DataSnapshot::load(ORBITFORGE_REPORT_EOP)),
+        (void)runtime::prepare(document, runtime::DataSnapshot::load(ORBELLE_REPORT_EOP)),
         runtime::AnalysisCapabilityError);
 }
 TEST_F(OceanTideFiles, InactiveDraftsRoundtripWithoutDataAndDoNotChangePhysicalIdentity) {

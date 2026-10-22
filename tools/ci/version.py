@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def python_versions(root=ROOT):
-    config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["orbitforge"]["ci"]
+    config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["orbelle"]["ci"]
     versions = config["python-versions"]
     baseline = config["baseline-python"]
     if (not versions or baseline not in versions or len(set(versions)) != len(versions)
@@ -23,9 +23,9 @@ def python_versions(root=ROOT):
 
 def read_versions(root):
     cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8")
-    match = re.search(r"project\(OrbitForge\s+VERSION\s+(\S+)", cmake)
+    match = re.search(r"project\(Orbelle\s+VERSION\s+(\S+)", cmake)
     if not match:
-        raise ValueError("Cannot find the OrbitForge CMake project version")
+        raise ValueError("Cannot find the Orbelle CMake project version")
     return {
         "CMakeLists.txt": match[1],
         "pyproject.toml": tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"],
@@ -50,7 +50,7 @@ def set_version(root, version):
         raise ValueError("Version must be X.Y.Z without a v prefix, suffix or leading zeroes")
     old_versions = read_versions(root)
     replacements = {
-        "CMakeLists.txt": (r"(project\(OrbitForge\s+VERSION\s+)\S+", rf"\g<1>{version}"),
+        "CMakeLists.txt": (r"(project\(Orbelle\s+VERSION\s+)\S+", rf"\g<1>{version}"),
         "pyproject.toml": (r'(?m)^(version\s*=\s*)"' + re.escape(old_versions["pyproject.toml"]) + r'"', rf'\g<1>"{version}"'),
         "vcpkg.json": (r'("version-semver"\s*:\s*)"[^"]+"', rf'\g<1>"{version}"'),
     }

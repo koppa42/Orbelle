@@ -5,9 +5,9 @@
 #include <limits>
 #include <map>
 #include <optional>
-#include <orbitforge/core/propagation/state_provider.hpp>
+#include <orbelle/core/propagation/state_provider.hpp>
 
-namespace orbitforge::core::detail {
+namespace orbelle::core::detail {
 inline double shadow_time_resolution(double begin, double end) {
     return std::max(1e-9, 16 * std::numeric_limits<double>::epsilon() *
                               std::max(std::abs(begin), std::abs(end)));
@@ -130,4 +130,4 @@ std::optional<double> first_shadow_boundary(double begin, double end, const Samp
     }
     return earliest ? std::optional<double>{begin + direction * *earliest} : std::nullopt;
 }
-} // namespace orbitforge::core::detail
+} // namespace orbelle::core::detail

@@ -34,15 +34,15 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/j2.hpp>
-#include <orbitforge/runtime/j4.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/j2.hpp>
+#include <orbelle/runtime/j4.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
 #include "support/property_editor_fixture.hpp"
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 TEST_F(QuantityTest, PreparingOrbitPropertiesDoesNotShowTemporaryWindows) {
     WindowShowObserver windows;
     OrbitEditor editor(OrbitInput{});
@@ -263,7 +263,7 @@ TEST_F(QuantityTest, TrackStylePreviewApplyCustomColorAndObjectSwitchStayIndepen
     EXPECT_EQ(applied[0].line_width, 4);
     EXPECT_EQ(applied[0].past_minutes, 12);
     EXPECT_FALSE(applied[0].track_3d);
-    const auto capture = qEnvironmentVariable("ORBITFORGE_STYLE_UI_CAPTURE");
+    const auto capture = qEnvironmentVariable("ORBELLE_STYLE_UI_CAPTURE");
     if (!capture.isEmpty()) {
         ASSERT_TRUE(QDir{}.mkpath(capture));
         ASSERT_TRUE(editor.grab().save(capture + "/track-style.png"));
@@ -295,7 +295,7 @@ TEST_F(QuantityTest, TrackStylePreviewApplyCustomColorAndObjectSwitchStayIndepen
 
 TEST_F(QuantityTest, FrameSwitchAndItrfInputUseFullPositionVelocityTransform) {
     const auto frames = runtime::make_frame_provider();
-    const auto eop = runtime::load_eop_snapshot(ORBITFORGE_TEST_EOP);
+    const auto eop = runtime::load_eop_snapshot(ORBELLE_TEST_EOP);
     OrbitInput input;
     input.initial.epoch =
         runtime::make_builtin_time_provider()->from_utc({2026, 10, 9, 0, 0, 0, 0});
@@ -496,7 +496,7 @@ TEST_F(QuantityTest, J4AndTleEditingKeepSeparateDraftsAndRejectInvalidInput) {
                 std::numbers::pi / 4, 1e-10);
     editor.set_propagator(OrbitPropagator::sgp4);
     EXPECT_TRUE(input->toPlainText().contains("00005"));
-    const auto capture = qEnvironmentVariable("ORBITFORGE_PROPAGATOR_UI_CAPTURE");
+    const auto capture = qEnvironmentVariable("ORBELLE_PROPAGATOR_UI_CAPTURE");
     if (!capture.isEmpty()) {
         ASSERT_TRUE(QDir{}.mkpath(capture));
         editor.resize(1120, 720);
@@ -512,4 +512,4 @@ TEST_F(QuantityTest, J4AndTleEditingKeepSeparateDraftsAndRejectInvalidInput) {
         ASSERT_TRUE(editor.grab().save(capture + "/j4-wide.png"));
     }
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

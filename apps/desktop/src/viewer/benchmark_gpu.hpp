@@ -8,7 +8,7 @@
 #include <vsg/state/QueryPool.h>
 #include <vsg/vk/Fence.h>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 class BenchmarkRun;
 
 // Benchmark-only, GUI-thread recorder. Bracket one RenderGraph with command(true)
@@ -46,4 +46,4 @@ class BenchmarkGpu : public std::enable_shared_from_this<BenchmarkGpu> {
     std::uint64_t next_frame_ = 0, prepared_qpc_ = 0;
     VkCommandBuffer recording_ = VK_NULL_HANDLE;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

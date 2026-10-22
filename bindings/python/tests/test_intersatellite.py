@@ -4,8 +4,8 @@ import io
 from pathlib import Path
 import tempfile
 import unittest
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 EOP=Path(__file__).resolve().parents[3]/"data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
 
 def scene():
@@ -48,7 +48,7 @@ class IntersatelliteTests(unittest.TestCase):
             rows=list(csv.reader(io.StringIO(path.read_text(encoding="utf-8-sig"))))
             self.assertEqual(rows[0],["Distance (m)"])
             self.assertEqual(float(rows[1][0]),500000)
-            saved=Path(folder)/"relative.orbitforge"; p.save(saved,analysis=analysis)
+            saved=Path(folder)/"relative.orbelle"; p.save(saved,analysis=analysis)
             reopened=of.Project.open(saved,data=data)
             repeated=reopened.prepare(data=data).report(of.ReportKind.RELATIVE_MOTION,
                 objects=[reopened.objects[a.id],reopened.objects[b.id]],step=u.s(60))

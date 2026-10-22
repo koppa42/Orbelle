@@ -4,11 +4,11 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <iostream>
-#include <orbitforge/core/propagation/hpop.hpp>
+#include <orbelle/core/propagation/hpop.hpp>
 #include <sstream>
 
 namespace full_gravity_test {
-using namespace orbitforge::core;
+using namespace orbelle::core;
 class Frames final : public IFrameProvider {
   public:
     PositionRotation gcrf_to_itrf(Epoch e, const EarthOrientationSample &) const override {

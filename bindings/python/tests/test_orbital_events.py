@@ -4,8 +4,8 @@ import io
 from pathlib import Path
 import tempfile
 import unittest
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 class OrbitalEventsTests(unittest.TestCase):
     def test_events_units_statistics_templates_and_roundtrip(self):
@@ -47,8 +47,8 @@ class OrbitalEventsTests(unittest.TestCase):
             exported = list(csv.reader(io.StringIO(output.read_text(encoding="utf-8-sig"))))
             self.assertEqual(len(exported), result.table.row_count + 1)
             self.assertEqual(exported[1][3], "Periapsis")
-            project.save(Path(folder) / "events.orbitforge", analysis=analysis)
-            reopened = of.Project.open(Path(folder) / "events.orbitforge")
+            project.save(Path(folder) / "events.orbelle", analysis=analysis)
+            reopened = of.Project.open(Path(folder) / "events.orbelle")
             repeated = reopened.prepare().report(of.ReportKind.ORBITAL_EVENTS,
                 objects=reopened.objects[sat.id], step=u.s(60), boundary_tolerance=u.s(.000001))
             self.assertEqual(repeated.orbital_event_statistics.counts, stats.counts)

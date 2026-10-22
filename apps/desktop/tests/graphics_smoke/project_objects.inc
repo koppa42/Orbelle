@@ -101,7 +101,7 @@ void Workbench::smoke_project_objects() {
         seek_epoch(epoch);
         snapshot_ = sample_frame(epoch);
         update_satellite();
-        const auto path = smoke_dir_ + QStringLiteral("/项目.orbitforge");
+        const auto path = smoke_dir_ + QStringLiteral("/项目.orbelle");
         const auto recorded = project_snapshot(path);
         analysis_record_ = application::AnalysisRecord{application::analysis_input_sha256(recorded),
                                                        recorded.data_lock().sha256()};
@@ -187,7 +187,7 @@ void Workbench::smoke_project_objects() {
         smoke_record("project-unsaved-cancel-and-save");
         auto empty = application::Project{"Empty project", scenario_->first(), scenario_->last()};
         empty.earth_orientation = eop_->data_info();
-        start_project(std::move(empty), smoke_dir_ + "/empty.orbitforge");
+        start_project(std::move(empty), smoke_dir_ + "/empty.orbelle");
         ++orbit_smoke_stage_;
         break;
     }
@@ -199,7 +199,7 @@ void Workbench::smoke_project_objects() {
         const auto args = app_.arguments();
         const auto fixture_index = args.indexOf("--project-smoke-input");
         const auto path = fixture_index >= 0 ? args.value(fixture_index + 1)
-                                             : smoke_dir_ + QStringLiteral("/项目.orbitforge");
+                                             : smoke_dir_ + QStringLiteral("/项目.orbelle");
         start_project(application::load_project(std::filesystem::path(path.toStdWString())), path);
         ++orbit_smoke_stage_;
         break;
@@ -209,7 +209,7 @@ void Workbench::smoke_project_objects() {
                           satellites_[0].orbit->input.propagator == OrbitPropagator::two_body &&
                           satellites_[1].orbit->input.propagator == OrbitPropagator::j2_secular,
                       "Project interoperability input failed to open");
-        save_project_to(smoke_dir_ + "/desktop-roundtrip.orbitforge");
+        save_project_to(smoke_dir_ + "/desktop-roundtrip.orbelle");
         smoke_record("project-interoperability-load-and-save");
         smoke_cache_ = orbit_;
         start_project(project_snapshot(project_path_), project_path_);
@@ -238,7 +238,7 @@ void Workbench::smoke_project_objects() {
                           orbit_ == smoke_cache_ && project_dirty_ &&
                           scenario_->data_lock() == smoke_data_lock_,
                       "Rename changed the numerical session or failed to update the name");
-        save_project_to(smoke_dir_ + "/objects.orbitforge");
+        save_project_to(smoke_dir_ + "/objects.orbelle");
         const auto named =
             application::load_project(std::filesystem::path(project_path_.toStdWString()));
         smoke_require(named.satellites[0].display_name == "观测卫星 A" &&
@@ -321,7 +321,7 @@ void Workbench::smoke_project_objects() {
                           !delete_action_->isEnabled() && snapshot_.markers.empty(),
                       "Deleting the last object left stale graphical resources");
         smoke_record("object-delete-last-produces-valid-empty-scene");
-        const auto path = smoke_dir_ + "/objects.orbitforge";
+        const auto path = smoke_dir_ + "/objects.orbelle";
         start_project(application::load_project(std::filesystem::path(path.toStdWString())), path);
         ++orbit_smoke_stage_;
         break;

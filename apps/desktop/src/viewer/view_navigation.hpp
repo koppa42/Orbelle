@@ -6,7 +6,7 @@
 #include <functional>
 #include <vsg/app/Trackball.h>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // Qt logical-pixel input for an existing camera; owns no rendering or orbit resources.
 class ViewNavigation final : public QObject {
   public:
@@ -40,4 +40,4 @@ class ViewNavigation final : public QObject {
     Drag drag_ = Drag::none;
     bool moved_ = false;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -1,11 +1,11 @@
 #include <chrono>
 #include <gtest/gtest.h>
-#include <orbitforge/orbitforge.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/hpop.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/orbelle.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/hpop.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 application::Project drag_input(core::Epoch first = core::Epoch{0}) {
     application::Project p{"Drag", first, core::Epoch{first.tai_nanoseconds() + 600000000000}};
@@ -27,7 +27,7 @@ class DragFiles : public ::testing::Test {
   protected:
     std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        ("orbitforge-drag-" +
+        ("orbelle-drag-" +
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     void SetUp() override { std::filesystem::create_directories(root); }
     void TearDown() override { std::filesystem::remove_all(root); }
@@ -73,7 +73,7 @@ TEST(DragPersistence, DraftsRoundtripAndOnlyEffectiveFieldsChangeIdentity) {
 TEST_F(DragFiles, PointMassDragRetainsTimeEopSunAcrossSessionReportAndReopen) {
     if (!runtime::ephemeris_available() || !runtime::time_frames_available())
         GTEST_SKIP();
-    auto raw = runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root);
+    auto raw = runtime::load_spice_snapshot(ORBELLE_INTEGRATION_SPICE, root);
     const auto first = core::Epoch{raw->data_info().first_epoch.tai_nanoseconds() + 3600000000000};
     auto p = drag_input(first);
     auto &options = p.satellites[0].orbit.hpop;
@@ -84,7 +84,7 @@ TEST_F(DragFiles, PointMassDragRetainsTimeEopSunAcrossSessionReportAndReopen) {
     const auto time_only =
         runtime::DataSnapshot::builtin_time().with_ephemeris("de440s", ephemeris);
     const auto data =
-        runtime::DataSnapshot::load(ORBITFORGE_DRAG_EOP).with_ephemeris("de440s", ephemeris);
+        runtime::DataSnapshot::load(ORBELLE_DRAG_EOP).with_ephemeris("de440s", ephemeris);
     const auto project = Project::from_data(p);
     EXPECT_THROW((void)project.prepare(time_only), std::invalid_argument);
     const auto analysis = project.prepare(data);
@@ -113,8 +113,8 @@ TEST_F(DragFiles, PointMassDragRetainsTimeEopSunAcrossSessionReportAndReopen) {
     ASSERT_EQ(report.table.rows().size(), 3U);
     for (std::size_t axis = 0; axis < 3; ++axis)
         EXPECT_EQ(std::get<double>(report.table.rows().back()[4 + axis]), state.position_m[axis]);
-    project.save(root / "drag.orbitforge", analysis);
-    const auto reopened = Project::open(root / "drag.orbitforge", data);
+    project.save(root / "drag.orbelle", analysis);
+    const auto reopened = Project::open(root / "drag.orbelle", data);
     EXPECT_EQ(reopened.to_data().satellites[0].orbit.hpop.drag, options.drag);
     EXPECT_EQ(reopened.prepare(data)
                   .state(reopened.objects().get("satellite-1"), p.last, FrameId::gcrf)

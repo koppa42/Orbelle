@@ -4,8 +4,8 @@ import math
 import tempfile
 import unittest
 
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 
 class HpopProjectInterpolationTests(unittest.TestCase):
@@ -36,7 +36,7 @@ class HpopProjectInterpolationTests(unittest.TestCase):
         self.assertEqual(project.prepare().states(satellite, times=[time]).input_sha256, accepted.input_sha256)
         self.assertEqual(analysis.state(satellite, at=time).position_m, actual.position_m)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory)/"interpolation.orbitforge"
+            path = Path(directory)/"interpolation.orbelle"
             project.save(path)
             reopened = of.Project.open(path)
             restored = reopened.objects[satellite.id]

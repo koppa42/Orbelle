@@ -1,12 +1,12 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include <limits>
-#include <orbitforge/runtime/analysis.hpp>
-#include <orbitforge/runtime/project.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/runtime/analysis.hpp>
+#include <orbelle/runtime/project.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 
-using namespace orbitforge;
-namespace app = orbitforge::application;
+using namespace orbelle;
+namespace app = orbelle::application;
 namespace {
 app::Project example() {
     app::Project p{"Covariance", core::Epoch{-60000000000}, core::Epoch{60000000000}};
@@ -183,7 +183,7 @@ TEST(HpopCovarianceProject, CovarianceResourceRequirementsJoinNominalRequirement
     if (runtime::time_frames_available()) {
         o = example().satellites[0].orbit;
         o.covariance.coordinates.frame = core::HpopCovarianceFrame::true_of_date;
-        const auto data = runtime::DataSnapshot::load(ORBITFORGE_REPORT_EOP);
+        const auto data = runtime::DataSnapshot::load(ORBELLE_REPORT_EOP);
         app::ProjectDocument d{p};
         const auto analysis = runtime::prepare(d, data);
         EXPECT_NO_THROW((void)analysis.covariance(d.objects().get("satellite-1"), p.last));

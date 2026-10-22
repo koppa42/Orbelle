@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 ROOT = Path(__file__).resolve().parents[3]
 EOP = ROOT / "data/samples/eop/iers_c04_2016_12_28_2017_01_04/manifest.json"
@@ -41,7 +41,7 @@ class SolidTideTests(unittest.TestCase):
             self.assertEqual(before.input_sha256, after.input_sha256)
             self.assertEqual(before.position.values, after.position.values)
             with tempfile.TemporaryDirectory() as folder:
-                path = Path(folder) / "tides.orbitforge"
+                path = Path(folder) / "tides.orbelle"
                 project.save(path)
                 restored = of.Project.open(path)
                 self.assertEqual(restored.objects[sat.id].orbit.hpop.solid_tides, tides)
@@ -62,7 +62,7 @@ class SolidTideTests(unittest.TestCase):
             self.assertEqual(states.input_sha256, after.input_sha256)
             self.assertEqual(states.position.values, after.position.values)
             with tempfile.TemporaryDirectory() as folder:
-                path = Path(folder) / "inactive.orbitforge"
+                path = Path(folder) / "inactive.orbelle"
                 project.save(path, analysis=before)
                 reopened = of.Project.open(path, data=data)
                 self.assertFalse(reopened.objects[sat.id].orbit.hpop.solid_tides.truncate_to_gravity)
@@ -98,7 +98,7 @@ class SolidTideTests(unittest.TestCase):
                 states = result.states(sat, step=u.s(60))
                 identities.add(states.input_sha256)
                 endpoints.add(tuple(states.position.values[-1]))
-                path = root / f"{mode}-{secondary}.orbitforge"
+                path = root / f"{mode}-{secondary}.orbelle"
                 project.save(path, analysis=result)
                 reopened = of.Project.open(path, data=data)
                 self.assertEqual(reopened.objects[sat.id].orbit.hpop.solid_tides, tides)

@@ -11,9 +11,9 @@
 #include <QWheelEvent>
 #include <algorithm>
 #include <cmath>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 constexpr qint64 day_ms = 86'400'000;
 constexpr qint64 minimum_span = 1'000;
@@ -587,4 +587,4 @@ void MissionTimeline::leaveEvent(QEvent *event) {
     QToolTip::hideText();
     QSlider::leaveEvent(event);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

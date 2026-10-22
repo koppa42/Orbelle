@@ -1,9 +1,9 @@
 #include <algorithm>
 #include <cmath>
-#include <orbitforge/visualization/state_track.hpp>
+#include <orbelle/visualization/state_track.hpp>
 #include <stdexcept>
 
-namespace orbitforge::visualization {
+namespace orbelle::visualization {
 StateTrack::StateTrack(results::StateSeries samples) : samples_(std::move(samples)) {
     const auto &states = samples_.states();
     if (states.size() < 2)
@@ -58,4 +58,4 @@ std::vector<RenderSnapshot> StateTrack::nodes() const {
         snapshots.push_back(make_snapshot(samples_, i));
     return snapshots;
 }
-} // namespace orbitforge::visualization
+} // namespace orbelle::visualization

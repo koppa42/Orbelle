@@ -1,11 +1,11 @@
 #include <future>
 #include <gtest/gtest.h>
-#include <orbitforge/runtime/analysis.hpp>
-#include <orbitforge/runtime/project.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/analysis.hpp>
+#include <orbelle/runtime/project.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
-using namespace orbitforge;
+using namespace orbelle;
 using namespace std::chrono_literals;
 namespace {
 application::Project numerical_project() {
@@ -200,7 +200,7 @@ TEST(OrbitSessionCache, ChangedResourcesAndFramesRecomputeAndMissingResourcesAre
         GTEST_SKIP();
     auto orbit = numerical_project().satellites.front().orbit;
     orbit.hpop.gravity_degree = orbit.hpop.gravity_order = 2;
-    const auto data = runtime::DataSnapshot::load(ORBITFORGE_REPORT_EOP);
+    const auto data = runtime::DataSnapshot::load(ORBELLE_REPORT_EOP);
     auto environment = data.force_environment(orbit);
     runtime::OrbitSessionCache cache;
     int cold = 0;
@@ -259,7 +259,7 @@ TEST(OrbitSessionCache, SharedConcurrentReadersKeepExactResultsAndIndependentRev
 TEST(OrbitSessionCache, CachedSgp4CannotBorrowMissingUtcFromEopMetadata) {
     if (!runtime::time_frames_available())
         GTEST_SKIP();
-    const auto data = runtime::DataSnapshot::load(ORBITFORGE_REPORT_EOP);
+    const auto data = runtime::DataSnapshot::load(ORBELLE_REPORT_EOP);
     application::OrbitInput orbit;
     orbit.propagator = application::OrbitPropagator::sgp4;
     orbit.tle = {"1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753",

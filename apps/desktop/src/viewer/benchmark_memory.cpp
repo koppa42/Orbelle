@@ -18,7 +18,7 @@
 #include <wrl/client.h>
 #endif
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 struct BenchmarkMemory::Impl {
     QJsonObject metadata;
 #ifdef _WIN32
@@ -98,4 +98,4 @@ QJsonObject BenchmarkMemory::sample() const {
 #endif
 }
 QJsonObject BenchmarkMemory::metadata() const { return impl_->metadata; }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

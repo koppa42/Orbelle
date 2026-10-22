@@ -2,9 +2,9 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
-#include <orbitforge/core/propagation/atmospheric_drag.hpp>
+#include <orbelle/core/propagation/atmospheric_drag.hpp>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 using std::chrono::year, std::chrono::month, std::chrono::sys_days, std::chrono::year_month_day;
 int day_number(const UtcDateTime &u) {
@@ -532,4 +532,4 @@ void SpaceWeather::validate_interval(Epoch first, Epoch last, const ITimeProvide
     (void)sample(first, time, model, update, source, sun_distance_m);
     (void)sample(last, time, model, update, source, sun_distance_m);
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

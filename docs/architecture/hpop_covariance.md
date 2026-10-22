@@ -81,13 +81,13 @@ Pzz' = J Pzz Jᵀ;   Pwz' = Pwz Jᵀ;   Pww' = Pww
 `validate_hpop_covariance` 可在开始昂贵传播前校验输入。`transport_hpop_covariance` 可将已经求得的 GCRF STM / D/K 敏感度应用到多个 GCRF 初始矩阵；其他帧必须先显式转换，否则拒绝；调用方负责将其与正确的初始历元、状态及模型关联。返回值拥有独立数据，输入不被修改；取消和异常不返回部分结果。Python 在释放 GIL 前复制输入，嵌套结果按值读取。
 
 ```python
-p0 = orbitforge.HpopCovarianceInput()
+p0 = orbelle.HpopCovarianceInput()
 p0.state = [[(10000.0 if i < 3 else 1.0) if i == j else 0.0
              for j in range(6)] for i in range(6)]
-k = orbitforge.HpopConsiderParameter()
+k = orbelle.HpopConsiderParameter()
 k.variance = 1e-4  # (m²/kg)²
 p0.srp = k
-result = orbitforge.propagate_hpop_covariance(orbit_input, end, p0, data=data)
+result = orbelle.propagate_hpop_covariance(orbit_input, end, p0, data=data)
 p_end = result.covariance.state
 ```
 

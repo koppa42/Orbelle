@@ -1,10 +1,10 @@
 #include <algorithm>
 #include <bit>
-#include <orbitforge/application/data_lock.hpp>
+#include <orbelle/application/data_lock.hpp>
 #include <picosha2.h>
 #include <stdexcept>
 
-namespace orbitforge::application {
+namespace orbelle::application {
 namespace {
 void check(bool valid, const char *message) {
     if (!valid)
@@ -55,7 +55,7 @@ DataLock::DataLock(std::vector<DataReference> references) : references_(std::mov
 }
 std::vector<std::uint8_t> DataLock::canonical_bytes() const {
     Canonical result;
-    result.text("orbitforge-data-lock-v1");
+    result.text("orbelle-data-lock-v1");
     result.integer(references_.size(), 4);
     for (const auto &reference : references_) {
         result.text(reference.role);
@@ -70,7 +70,7 @@ DataLock time_data_lock(const core::TimeDataInfo &time) {
     check(valid_hash(time.sha256), "Invalid time content SHA256");
     check(time.utc_valid_from_mjd >= 0 && time.utc_valid_from_mjd < time.utc_valid_until_mjd,
           "Invalid time-reference coverage");
-    constexpr auto time_version = "orbitforge-utc-tai-v1";
+    constexpr auto time_version = "orbelle-utc-tai-v1";
     Canonical time_config;
     time_config.text(time_version);
     time_config.integer(static_cast<std::uint32_t>(time.utc_valid_from_mjd), 4);
@@ -86,7 +86,7 @@ DataLock eop_data_lock(const core::EopDataInfo &info) {
     auto time_ref = time_lock.references().front();
 
     const auto eop_version =
-        info.extrapolation_days == 0 ? "orbitforge-eop-reader-v1" : "orbitforge-eop-reader-v2";
+        info.extrapolation_days == 0 ? "orbelle-eop-reader-v1" : "orbelle-eop-reader-v2";
     Canonical eop_config;
     eop_config.text(eop_version);
     eop_config.text(info.reference_frame);
@@ -107,4 +107,4 @@ DataLock eop_data_lock(const core::EopDataInfo &info) {
                           eop_config.digest()};
     return DataLock({std::move(eop_ref), std::move(time_ref)});
 }
-} // namespace orbitforge::application
+} // namespace orbelle::application

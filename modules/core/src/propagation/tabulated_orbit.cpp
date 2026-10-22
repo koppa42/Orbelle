@@ -4,11 +4,11 @@
 #include <cmath>
 #include <iterator>
 #include <limits>
-#include <orbitforge/core/propagation/tabulated_orbit.hpp>
+#include <orbelle/core/propagation/tabulated_orbit.hpp>
 #include <span>
 #include <utility>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 void validate_orbit_interpolation(const OrbitInterpolationOptions &options) {
     if (options.method != OrbitInterpolationMethod::lagrange &&
         options.method != OrbitInterpolationMethod::hermite &&
@@ -269,4 +269,4 @@ make_tabulated_orbit(std::vector<OrbitEphemerisArc> arcs, OrbitInterpolationOpti
                      const std::function<void()> &checkpoint) {
     return std::make_shared<TabulatedOrbit>(std::move(arcs), options, checkpoint);
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

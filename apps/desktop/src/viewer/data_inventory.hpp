@@ -3,9 +3,9 @@
 #include <QString>
 #include <filesystem>
 #include <optional>
-#include <orbitforge/runtime/data_catalog.hpp>
+#include <orbelle/runtime/data_catalog.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 enum class DataProduct {
     finals2000a,
     c04,
@@ -80,4 +80,4 @@ struct DataInventoryItem {
     std::optional<core::OceanTideInfo> ocean_tides;
     std::optional<core::ThirdBodyDataInfo> ephemeris;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

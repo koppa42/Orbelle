@@ -7,23 +7,24 @@
 #include <QTableWidget>
 #include <QTimer>
 #include <QTreeWidget>
-#include <orbitforge/runtime/demo.hpp>
-#include <orbitforge/visualization/snapshot.hpp>
-#ifdef ORBITFORGE_DESKTOP_GRAPHICS
+#include <orbelle/runtime/demo.hpp>
+#include <orbelle/visualization/snapshot.hpp>
+#ifdef ORBELLE_DESKTOP_GRAPHICS
 #include "viewer/graphics_workbench.hpp"
 #endif
 
-namespace ui = orbitforge::desktop::ui;
+namespace ui = orbelle::desktop::ui;
 
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
-    app.setApplicationName("OrbitForge");
-#ifdef ORBITFORGE_DESKTOP_GRAPHICS
-    return orbitforge::desktop::run_graphics_workbench(app);
+    app.setApplicationName("Orbelle");
+    app.setApplicationDisplayName(ui::text("brand.name"));
+#ifdef ORBELLE_DESKTOP_GRAPHICS
+    return orbelle::desktop::run_graphics_workbench(app);
 #endif
-    const auto session = orbitforge::runtime::make_circular_demo_session();
-    const auto series = session.sample(orbitforge::runtime::demo_epochs());
-    const auto snapshot = orbitforge::visualization::make_snapshot(series, 0);
+    const auto session = orbelle::runtime::make_circular_demo_session();
+    const auto series = session.sample(orbelle::runtime::demo_epochs());
+    const auto snapshot = orbelle::visualization::make_snapshot(series, 0);
 
     QMainWindow window;
     window.setWindowTitle(ui::text("main.snapshot"));
@@ -44,7 +45,7 @@ int main(int argc, char **argv) {
     table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     for (std::size_t row = 0; row < series.states().size(); ++row) {
         const auto &state = series.states()[row];
-        const std::array<double, 7> values{state.epoch.seconds_since(orbitforge::core::Epoch{0}),
+        const std::array<double, 7> values{state.epoch.seconds_since(orbelle::core::Epoch{0}),
                                            state.position_m[0],
                                            state.position_m[1],
                                            state.position_m[2],

@@ -1,5 +1,5 @@
 """Explicit leap-second conversion and an upstream synthetic Earth-orientation fixture."""
-import orbitforge as of
+import orbelle as of
 
 time = of.make_builtin_time_provider()
 leap = time.from_utc(of.UtcDateTime(2016, 12, 31, 23, 59, 60, 123456789))

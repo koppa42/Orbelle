@@ -1,7 +1,7 @@
 """Satellite-pair range, RIC and WGS84 direct-view windows from one prepared snapshot."""
 from pathlib import Path
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 project=of.Project("Satellite pair",of.Epoch(0),of.Epoch(600*10**9))
 primary=project.objects.satellite("Primary",orbit=of.orbits.TwoBody(

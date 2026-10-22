@@ -6,12 +6,12 @@
 #include <locale>
 #include <nlohmann/json.hpp>
 #include <numbers>
-#include <orbitforge/providers/iers/eop_snapshot.hpp>
+#include <orbelle/providers/iers/eop_snapshot.hpp>
 #include <picosha2.h>
 #include <sstream>
 #include <vector>
 
-namespace orbitforge::providers::iers {
+namespace orbelle::providers::iers {
 namespace {
 constexpr double radians_per_arcsecond = std::numbers::pi / (180.0 * 3600.0);
 constexpr double seconds_per_day = 86400.0;
@@ -414,4 +414,4 @@ std::filesystem::path import_eop_snapshot(const std::filesystem::path &manifest_
         throw;
     }
 }
-} // namespace orbitforge::providers::iers
+} // namespace orbelle::providers::iers

@@ -111,7 +111,7 @@ void Workbench::smoke_reports() {
                            ->text()
                            .contains(QStringLiteral("场景已变化")),
                       "Renaming incorrectly invalidated the calculated report");
-        save_project_to(smoke_dir_ + "/reports.orbitforge");
+        save_project_to(smoke_dir_ + "/reports.orbelle");
         const auto restored =
             application::load_project(std::filesystem::path(project_path_.toStdWString()));
         smoke_require(restored.reports.size() == 1 &&
@@ -291,7 +291,7 @@ void Workbench::smoke_reports() {
             break;
         save_workbench_image("satellite-style-globe.png");
         ground_map_->grab().save(smoke_dir_ + "/satellite-style-map.png");
-        save_project_to(smoke_dir_ + "/satellite-styles.orbitforge");
+        save_project_to(smoke_dir_ + "/satellite-styles.orbelle");
         start_project(
             application::load_project(std::filesystem::path(project_path_.toStdWString())),
             project_path_);

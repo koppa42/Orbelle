@@ -16,7 +16,7 @@
 #include <numbers>
 #include <stdexcept>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 struct Definition {
     Unit unit, base;
@@ -304,4 +304,4 @@ bool QuantityEditor::eventFilter(QObject *object, QEvent *event) {
     }
     return QFrame::eventFilter(object, event);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -1,7 +1,7 @@
 """Reproduce independent density fixtures; requires MSVC tools or GCC in PATH.
 
 Downloads pinned, hash-checked sources into an explicit output directory, never
-links OrbitForge, and writes candidates for review (does not replace fixtures).
+links Orbelle, and writes candidates for review (does not replace fixtures).
 """
 import argparse
 import hashlib
@@ -25,7 +25,7 @@ def main():
     for record in json.loads((tools / "density_sources.json").read_text()):
         path = upstream / record["file"]
         if not path.exists():
-            request = urllib.request.Request(record["url"], headers={"User-Agent": "OrbitForge-validation"})
+            request = urllib.request.Request(record["url"], headers={"User-Agent": "Orbelle-validation"})
             with urllib.request.urlopen(request, timeout=60) as response:
                 raw = response.read()
             if hashlib.sha256(raw).hexdigest() != record["sha256"]:

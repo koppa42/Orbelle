@@ -8,7 +8,7 @@
 #include <functional>
 #include <utility>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // Observe the space actually allocated to a panel (or its scroll viewport).
 // Queue/coalesce changes so layouts settle before updating, without rebuilding controls.
 class WidthObserver final : public QObject {
@@ -74,4 +74,4 @@ inline void responsive_form(QFormLayout *form, int breakpoint = 380) {
                                                                   : QFormLayout::WrapLongRows);
         });
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

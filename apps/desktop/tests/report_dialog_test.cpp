@@ -33,14 +33,14 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 #include <stdexcept>
 
 #include "support/report_test_support.hpp"
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 using namespace report_test;
 TEST(ReportDialog, StalePreparationGenerationAndCancellationPreservePublishedResult) {
@@ -130,7 +130,7 @@ TEST(ReportDialog, StalePreparationGenerationAndCancellationPreservePublishedRes
 
 TEST(ReportDialog, AnalysisDoesNotSilentlyAcceptChangedDataAndUsesConfirmedPreflight) {
     (void)test_app();
-    auto data = runtime::DataSnapshot::load(ORBITFORGE_ACCESS_EOP);
+    auto data = runtime::DataSnapshot::load(ORBELLE_ACCESS_EOP);
     application::Project project("Confirmed data", core::Epoch{0}, core::Epoch{120'000'000'000});
     project.earth_orientation = data.eop()->data_info();
     project.ground_stations.push_back({"station", "Station", {0, 0, 0}});
@@ -157,7 +157,7 @@ TEST(ReportDialog, AnalysisDoesNotSilentlyAcceptChangedDataAndUsesConfirmedPrefl
     generate->click();
     release();
     ASSERT_EQ(publications, 1);
-    data = runtime::DataSnapshot::load(ORBITFORGE_ACCESS_EOP, {}, 2);
+    data = runtime::DataSnapshot::load(ORBELLE_ACCESS_EOP, {}, 2);
     generate->click();
     release();
     EXPECT_EQ(publications, 1);
@@ -191,7 +191,7 @@ TEST(ReportDialog, LatePreflightAfterWindowDestructionIsIgnored) {
 
 TEST(ReportDialog, RepeatedQueriesReuseAnalysisAndChangedInputsOrDataReplaceIt) {
     (void)test_app();
-    auto data = runtime::DataSnapshot::load(ORBITFORGE_ACCESS_EOP);
+    auto data = runtime::DataSnapshot::load(ORBELLE_ACCESS_EOP);
     application::Project project{"HPOP reports", core::Epoch{0}, core::Epoch{120'000'000'000}};
     project.earth_orientation = data.eop()->data_info();
     application::ProjectSatellite satellite;
@@ -266,7 +266,7 @@ TEST(ReportDialog, RepeatedQueriesReuseAnalysisAndChangedInputsOrDataReplaceIt) 
               project.satellites[0].orbit.initial.velocity_mps[1]);
     const auto changed = captured;
 
-    data = runtime::DataSnapshot::load(ORBITFORGE_ACCESS_EOP, {}, 2);
+    data = runtime::DataSnapshot::load(ORBELLE_ACCESS_EOP, {}, 2);
     project.earth_orientation = data.eop()->data_info();
     dialog.update_project(project, data.time());
     generate->click();
@@ -383,7 +383,7 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
     const auto capture = [&](const QString &file) {
         for (int i = 0; i < 3; ++i)
             QCoreApplication::processEvents();
-        const auto directory = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+        const auto directory = qEnvironmentVariable("ORBELLE_REPORT_UI_CAPTURE");
         if (!directory.isEmpty()) {
             ASSERT_TRUE(QDir().mkpath(directory));
             ASSERT_TRUE(dialog.grab().save(directory + "/" + file + ".png"));
@@ -458,7 +458,7 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
         EXPECT_TRUE(source->findChild<QPlainTextEdit *>("reportSource")
                         ->toPlainText()
                         .contains("builtin-reports-v2"));
-        const auto directory = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+        const auto directory = qEnvironmentVariable("ORBELLE_REPORT_UI_CAPTURE");
         if (!directory.isEmpty())
             EXPECT_TRUE(source->grab().save(directory + "/provenance.png"));
         source->accept();
@@ -526,7 +526,7 @@ TEST(ReportDialog, AsyncGenerationSavedBindingsStaleResultsAndCancellation) {
     EXPECT_FALSE(dialog.isWindow());
     for (int i = 0; i < 3; ++i)
         QCoreApplication::processEvents();
-    const auto directory = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    const auto directory = qEnvironmentVariable("ORBELLE_REPORT_UI_CAPTURE");
     if (!directory.isEmpty())
         EXPECT_TRUE(workspace.grab().save(directory + "/docked-settings.png"));
     EXPECT_TRUE(
@@ -587,7 +587,7 @@ TEST(ReportDialog, ObjectScopeSurvivesTemplateChangesSavedConfigurationsAndProje
                       ->data(table->model()->index(row, table_column(table, "object.name")))
                       .toString(),
                   QStringLiteral("东站"));
-    const auto capture_directory = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    const auto capture_directory = qEnvironmentVariable("ORBELLE_REPORT_UI_CAPTURE");
     if (!capture_directory.isEmpty()) {
         QCoreApplication::processEvents();
         EXPECT_TRUE(dialog.grab().save(capture_directory + "/object-scope-results.png"));
@@ -693,7 +693,7 @@ TEST(ReportDialog, ReportChoiceCancellationSameSelectionAndLiveTemplateUpdates) 
         std::reverse(project.reports.begin(), project.reports.end());
         dialog.update_project(project, time);
         EXPECT_EQ(list->currentItem()->data(Qt::UserRole).toString(), "template:west");
-        const auto directory = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+        const auto directory = qEnvironmentVariable("ORBELLE_REPORT_UI_CAPTURE");
         if (!directory.isEmpty()) {
             QDir().mkpath(directory);
             const auto capture = [&](const QString &name) {
@@ -739,4 +739,4 @@ TEST(ReportDialog, ReportChoiceCancellationSameSelectionAndLiveTemplateUpdates) 
     EXPECT_EQ(step->value(), 60);
 }
 } // namespace
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

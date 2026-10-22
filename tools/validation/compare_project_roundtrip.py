@@ -1,12 +1,12 @@
 """Check a Python-created project after the real desktop opened and saved it.
 
-Run with the installed wheel, passing the original and desktop-saved .orbitforge files.
+Run with the installed wheel, passing the original and desktop-saved .orbelle files.
 Only the formerly unbound EOP reference may be added by the desktop.
 """
 import argparse
 import json
 from pathlib import Path
-import orbitforge as of
+import orbelle as of
 
 
 def fingerprint(satellite):

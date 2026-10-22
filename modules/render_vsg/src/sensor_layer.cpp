@@ -1,9 +1,9 @@
 #include <cmath>
 #include <limits>
-#include <orbitforge/render_vsg/sensor_layer.hpp>
+#include <orbelle/render_vsg/sensor_layer.hpp>
 #include <stdexcept>
 #include <vsg/all.h>
-namespace orbitforge::render_vsg {
+namespace orbelle::render_vsg {
 namespace {
 constexpr const char *vertex = R"glsl(#version 450
 layout(push_constant) uniform Matrices { mat4 projection; mat4 modelview; } pc;
@@ -122,4 +122,4 @@ void SensorLayer::update(std::span<const visualization::SensorMesh> meshes, bool
     impl_->positions->dirty();
     impl_->colors->dirty();
 }
-} // namespace orbitforge::render_vsg
+} // namespace orbelle::render_vsg

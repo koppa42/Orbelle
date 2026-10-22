@@ -1,16 +1,16 @@
 #include <fstream>
 #include <gtest/gtest.h>
-#include <orbitforge/runtime/analysis.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/runtime/analysis.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 
-using namespace orbitforge;
-using namespace orbitforge::application;
+using namespace orbelle;
+using namespace orbelle::application;
 namespace {
 class ProjectPersistence : public ::testing::Test {
   protected:
     std::filesystem::path folder;
     void SetUp() override {
-        folder = std::filesystem::path(ORBITFORGE_INTEGRATION_WORKSPACE).parent_path() /
+        folder = std::filesystem::path(ORBELLE_INTEGRATION_WORKSPACE).parent_path() /
                  ("project-analysis-" +
                   std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         std::filesystem::create_directory(folder);
@@ -18,7 +18,7 @@ class ProjectPersistence : public ::testing::Test {
     void TearDown() override {
         if (folder.is_absolute() &&
             folder.parent_path() ==
-                std::filesystem::path(ORBITFORGE_INTEGRATION_WORKSPACE).parent_path() &&
+                std::filesystem::path(ORBELLE_INTEGRATION_WORKSPACE).parent_path() &&
             folder.filename().string().starts_with("project-analysis-")) {
             std::error_code ignored;
             std::filesystem::remove_all(folder, ignored);
@@ -35,30 +35,30 @@ TEST_F(ProjectPersistence, SavedAnalysisOwnsItsProjectAndIgnoresPresentationOnly
     const auto analysis = runtime::prepare(document);
     const auto station = document.objects().get("station");
     document.objects().rename(station, "Renamed");
-    runtime::save_project(document, folder / "current.orbitforge", analysis);
+    runtime::save_project(document, folder / "current.orbelle", analysis);
     EXPECT_FALSE(document.dirty());
-    const auto loaded = application::load_project(folder / "current.orbitforge");
+    const auto loaded = application::load_project(folder / "current.orbelle");
     EXPECT_EQ(loaded.ground_stations[0].name(), "Renamed");
     EXPECT_EQ(loaded.analysis_status(), AnalysisStatus::current);
     EXPECT_EQ(loaded.analysis_record->data_sha256, DataLock{}.sha256());
     EXPECT_EQ(encode_project(*document.snapshot().project), encode_project(loaded));
     auto other = ProjectDocument{loaded};
-    EXPECT_THROW(runtime::save_project(other, folder / "other.orbitforge", analysis), ProjectError);
+    EXPECT_THROW(runtime::save_project(other, folder / "other.orbelle", analysis), ProjectError);
     objects::GroundStationUpdate change;
     change.minimum_elevation_rad = 0.1;
     document.objects().update(station, change);
     EXPECT_EQ(document.snapshot().project->analysis_status(), AnalysisStatus::stale);
-    EXPECT_THROW(runtime::save_project(document, folder / "stale.orbitforge", analysis),
+    EXPECT_THROW(runtime::save_project(document, folder / "stale.orbelle", analysis),
                  RevisionConflictError);
-    EXPECT_FALSE(std::filesystem::exists(folder / "stale.orbitforge"));
-    document.save(folder / "inputs.orbitforge");
-    EXPECT_EQ(application::load_project(folder / "inputs.orbitforge").analysis_status(),
+    EXPECT_FALSE(std::filesystem::exists(folder / "stale.orbelle"));
+    document.save(folder / "inputs.orbelle");
+    EXPECT_EQ(application::load_project(folder / "inputs.orbelle").analysis_status(),
               AnalysisStatus::stale);
 }
 TEST_F(ProjectPersistence, FailureAndRevisionConflictDoNotPublishOrNotify) {
     auto document = make_project();
     const auto analysis = runtime::prepare(document);
-    const auto path = folder / "existing.orbitforge";
+    const auto path = folder / "existing.orbelle";
     document.save(path);
     const auto before = document.snapshot();
     int events = 0;
@@ -78,7 +78,7 @@ TEST_F(ProjectPersistence, FailureAndRevisionConflictDoNotPublishOrNotify) {
 TEST_F(ProjectPersistence, SaveObserversSeePublishedFileAndReentrantEditsRemainDirty) {
     auto document = make_project();
     const auto analysis = runtime::prepare(document);
-    const auto path = folder / "observed.orbitforge";
+    const auto path = folder / "observed.orbelle";
     int events = 0;
     const auto token = document.subscribe([&](const ChangeSet &event) {
         if (++events != 1)
@@ -101,11 +101,11 @@ TEST_F(ProjectPersistence, SavedCandidateCannotBeMutatedThroughTheCallersAlias) 
     auto alias = std::make_shared<Project>(*candidate.project);
     alias->name = "Saved candidate";
     candidate.project = alias;
-    document.save(folder / "candidate.orbitforge", candidate);
+    document.save(folder / "candidate.orbelle", candidate);
     alias->name = "Mutated after publication";
     EXPECT_EQ(document.snapshot().project->name, "Saved candidate");
     EXPECT_FALSE(document.dirty());
-    EXPECT_EQ(application::load_project(folder / "candidate.orbitforge").name, "Saved candidate");
+    EXPECT_EQ(application::load_project(folder / "candidate.orbelle").name, "Saved candidate");
 }
 TEST_F(ProjectPersistence, TimeOnlyRoundTripAndOpenConsentKeepExactPlan) {
     if (!runtime::time_frames_available())
@@ -113,7 +113,7 @@ TEST_F(ProjectPersistence, TimeOnlyRoundTripAndOpenConsentKeepExactPlan) {
     auto document = make_project();
     const auto data = runtime::DataSnapshot::builtin_time();
     const auto analysis = runtime::prepare(document, data);
-    const auto path = folder / "utc.orbitforge";
+    const auto path = folder / "utc.orbelle";
     runtime::save_project(document, path, analysis);
     auto stored = application::load_project(path);
     ASSERT_TRUE(stored.time_data);

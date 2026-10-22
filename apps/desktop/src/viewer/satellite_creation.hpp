@@ -3,14 +3,14 @@
 #include <QImage>
 #include <array>
 #include <optional>
-#include <orbitforge/application/project.hpp>
-#include <orbitforge/core/frames/frame_provider.hpp>
-#include <orbitforge/core/propagation/orbit_design.hpp>
+#include <orbelle/application/project.hpp>
+#include <orbelle/core/frames/frame_provider.hpp>
+#include <orbelle/core/propagation/orbit_design.hpp>
 class QLabel;
 class QComboBox;
 class QFormLayout;
 class QSpinBox;
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 class QuantityEditor;
 class OrbitDesignPreview;
 // A single fixed TLE, with an optional name line. Strict validation is shared with the editor.
@@ -52,4 +52,4 @@ class OrbitWizardDialog final : public QDialog {
     std::optional<core::EarthOrbitDesign> preview_design_;
     bool compact_results_ = false;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

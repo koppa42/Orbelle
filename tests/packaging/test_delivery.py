@@ -48,7 +48,7 @@ class WindowsManifestTests(unittest.TestCase):
             output, reports = root / 'package', root / 'reports'
             output.mkdir()
             reports.mkdir()
-            executable = output / 'OrbitForge.exe'
+            executable = output / 'Orbelle.exe'
             executable.write_bytes(b'fixture executable')
             library = output / 'runtime.dll'
             library.write_bytes(b'fixture runtime')
@@ -64,8 +64,8 @@ class WindowsManifestTests(unittest.TestCase):
             manifest = json.loads(manifest_text)
             self.assertNotIn('private-build-host', manifest_text)
             self.assertNotIn('source', manifest['dll_sources'][0])
-            self.assertEqual(manifest['executable_sha256'], windows.digest(relocated / 'OrbitForge.exe'))
-            self.assertEqual({entry['path'] for entry in manifest['files']}, {'OrbitForge.exe', 'runtime.dll'})
+            self.assertEqual(manifest['executable_sha256'], windows.digest(relocated / 'Orbelle.exe'))
+            self.assertEqual({entry['path'] for entry in manifest['files']}, {'Orbelle.exe', 'runtime.dll'})
             for entry in manifest['files']:
                 path = relocated / entry['path']
                 self.assertFalse(Path(entry['path']).is_absolute())
@@ -103,15 +103,15 @@ class LinuxDeliveryTests(unittest.TestCase):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(ROOT / relative, target)
             expected = {path.name: path.read_bytes()
-                        for path in (source / 'tests/integration/fixtures').glob('*.orbitforge')}
-            self.assertEqual(set(expected), {'project-current.orbitforge'})
+                        for path in (source / 'tests/integration/fixtures').glob('*.orbelle')}
+            self.assertEqual(set(expected), {'project-current.orbelle'})
             data_inputs = {
                 relative: (source / relative).read_bytes() for relative in (
                     'data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json',
                     'data/samples/eop/iers_c04_2000_01_01_2000_01_02/eop.c04',
                     'data/samples/time/iers_leap_seconds_2026_07.dat',
                     'data/samples/spice/de440s_2016_leap/manifest.json',
-                    'data/samples/spice/de440s_2016_leap/orbitforge_de440s_2016_leap.bsp',
+                    'data/samples/spice/de440s_2016_leap/orbelle_de440s_2016_leap.bsp',
                 )
             }
             args = argparse.Namespace(source=source, work=root / 'work',
@@ -127,7 +127,7 @@ class LinuxDeliveryTests(unittest.TestCase):
                 artifact.mkdir()
                 (artifact / 'placeholder').write_text('fixture artifact')
                 check.save_artifact(name, artifact)
-            example = check.work / 'build/release/examples/cpp/orbitforge_example'
+            example = check.work / 'build/release/examples/cpp/orbelle_example'
             example.parent.mkdir(parents=True)
             example.write_bytes(b'fixture example')
             check.export()
@@ -153,7 +153,7 @@ class LinuxDeliveryTests(unittest.TestCase):
                 cwd=relocated, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             self.assertEqual(result.returncode, 0, result.stdout)
             entries = json.loads((relocated / 'manifest.json').read_text())
-            self.assertIn('tests/integration/fixtures/project-current.orbitforge',
+            self.assertIn('tests/integration/fixtures/project-current.orbelle',
                           {entry['path'] for entry in entries})
             self.assertTrue(data_inputs.keys() <= {entry['path'] for entry in entries})
             for entry in entries:
@@ -180,8 +180,8 @@ class SdkDependencyTests(unittest.TestCase):
             self.assertFalse((root / 'delivery/share/qtbase').exists())
             for port in ('erfa', 'cspice', 'sqlite3'):
                 self.assertEqual((root / f'delivery/share/{port}/copyright').read_text(), port)
-            # Matrix jobs receive third-party dependencies, never an OrbitForge SDK or wheel.
-            (prefix / 'orbitforge.whl').write_bytes(b'not a dependency')
+            # Matrix jobs receive third-party dependencies, never an Orbelle SDK or wheel.
+            (prefix / 'orbelle.whl').write_bytes(b'not a dependency')
             archive = root / 'python-dependencies.tar.gz'
             python_dependencies.export(prefix, archive)
             with tarfile.open(archive) as bundle:

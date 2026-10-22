@@ -8,8 +8,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 from test_analysis_access import EOP, scene
 
 
@@ -134,7 +134,7 @@ class AnalysisAerTests(unittest.TestCase):
     def test_optional_dependencies_are_lazy(self):
         project, station, sat, _, data = scene()
         result = project.prepare(data=data).aer(station, sat, times=[])
-        with patch("orbitforge._analysis.import_module", side_effect=ImportError):
+        with patch("orbelle._analysis.import_module", side_effect=ImportError):
             with self.assertRaisesRegex(ImportError, "pip install numpy"):
                 result.range.to_numpy()
             with self.assertRaisesRegex(ImportError, "pip install pandas"):

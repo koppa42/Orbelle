@@ -3,11 +3,11 @@
 #include <cmath>
 #include <fstream>
 #include <map>
-#include <orbitforge/runtime/space_weather.hpp>
+#include <orbelle/runtime/space_weather.hpp>
 #include <picosha2.h>
 #include <sstream>
 
-namespace orbitforge::runtime {
+namespace orbelle::runtime {
 namespace {
 void require(bool condition, const std::string &message) {
     if (!condition)
@@ -388,4 +388,4 @@ void validate_space_weather_reference(std::span<const application::DataReference
             "resource differs from project data; use a preparation plan");
 }
 std::string space_weather_download_url() { return "https://celestrak.org/SpaceData/SW-All.csv"; }
-} // namespace orbitforge::runtime
+} // namespace orbelle::runtime

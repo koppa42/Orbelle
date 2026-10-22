@@ -1,7 +1,7 @@
 #pragma once
 #include <QDialog>
 #include <functional>
-#include <orbitforge/application/project.hpp>
+#include <orbelle/application/project.hpp>
 class QLineEdit;
 class QLabel;
 class QButtonGroup;
@@ -10,7 +10,7 @@ class QComboBox;
 class QTableWidget;
 class QCheckBox;
 class QSpinBox;
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 class QuantityEditor;
 class SensorAnglePreview;
 class SensorParentLabel;
@@ -58,4 +58,4 @@ class SensorEditor final : public QDialog {
     QWidget *target_row_;
     QPushButton *apply_, *close_;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

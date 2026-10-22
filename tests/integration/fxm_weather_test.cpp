@@ -4,18 +4,18 @@
 #include <gtest/gtest.h>
 #include <iomanip>
 #include <limits>
-#include <orbitforge/orbitforge.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/space_weather.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/orbelle.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/space_weather.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 #include <sstream>
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 using Model = core::AtmosphereModel;
 using Update = core::GeomagneticUpdate;
 using Source = core::GeomagneticSource;
 constexpr double au = 149597870700.0;
-const std::filesystem::path reference = ORBITFORGE_WEATHER_FXM_DIR;
+const std::filesystem::path reference = ORBELLE_WEATHER_FXM_DIR;
 std::string read(const std::filesystem::path &path) {
     std::ifstream input(path, std::ios::binary);
     if (!input)
@@ -252,9 +252,9 @@ TEST_F(FxmWeather, HpopUsesFrozenGeometricDistanceAndMatchesObservedFileThroughP
     if (!runtime::time_frames_available() || !runtime::ephemeris_available())
         GTEST_SKIP();
     const auto ephemeris = runtime::make_third_body_ephemeris(
-        runtime::load_spice_snapshot(ORBITFORGE_INTEGRATION_SPICE, root));
+        runtime::load_spice_snapshot(ORBELLE_INTEGRATION_SPICE, root));
     const auto base =
-        runtime::DataSnapshot::load(ORBITFORGE_DRAG_EOP).with_ephemeris("de440s", ephemeris);
+        runtime::DataSnapshot::load(ORBELLE_DRAG_EOP).with_ephemeris("de440s", ephemeris);
     const auto raw = runtime::load_space_weather(reference / "weather_fxm.fxm");
     std::ostringstream csv;
     csv << "DATE,BSRN,ND,KP1,KP2,KP3,KP4,KP5,KP6,KP7,KP8,KP_SUM,AP1,AP2,AP3,AP4,AP5,AP6,AP7,AP8,AP_"
@@ -307,7 +307,7 @@ TEST_F(FxmWeather, HpopUsesFrozenGeometricDistanceAndMatchesObservedFileThroughP
             EXPECT_NEAR(actual.velocity_mps[i], expected.velocity_mps[i], 1e-8);
         }
         const auto saved =
-            root / (model == Model::jacchia_roberts ? "jr.orbitforge" : "nrl.orbitforge");
+            root / (model == Model::jacchia_roberts ? "jr.orbelle" : "nrl.orbelle");
         project.save(saved, analysis);
         const auto reopened = Project::open(saved, adjusted);
         EXPECT_EQ(reopened.prepare(adjusted)

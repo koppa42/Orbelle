@@ -1,6 +1,6 @@
 # HPOP 联合协方差验证
 
-对象是[初始 6×6 状态矩阵与 D/K 考虑参数的联合传播](../architecture/hpop_covariance.md)。使用原有 Orekit 全弧 STM / 敏感度作为独立动力学输入，再以独立矩阵库和高精度直接乘法核对协方差。没有调用 OrbitForge 生成真值，也没有 STK 实机验收结果。
+对象是[初始 6×6 状态矩阵与 D/K 考虑参数的联合传播](../architecture/hpop_covariance.md)。使用原有 Orekit 全弧 STM / 敏感度作为独立动力学输入，再以独立矩阵库和高精度直接乘法核对协方差。没有调用 Orbelle 生成真值，也没有 STK 实机验收结果。
 
 ## 固定参考与复现
 

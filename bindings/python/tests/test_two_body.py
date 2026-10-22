@@ -2,7 +2,7 @@ import concurrent.futures
 import math
 import unittest
 
-import orbitforge as of
+import orbelle as of
 
 
 class TwoBodyTests(unittest.TestCase):

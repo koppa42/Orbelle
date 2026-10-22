@@ -11,7 +11,7 @@
 #include <QVBoxLayout>
 #include <gtest/gtest.h>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 QTabBar *tabs_for(Workspace &workspace, const QString &title) {
     for (auto *tabs : workspace.findChildren<QTabBar *>())
@@ -300,4 +300,4 @@ TEST_F(WorkspaceTest, PropertyDraftSurvivesNestedSplitsAndEmptyGroupsCollapse) {
     workspace.open(document);
     EXPECT_EQ(field->text(), "unsaved orbit");
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

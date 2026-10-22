@@ -1,8 +1,8 @@
 """Fixed-input orbit queries. Optional: python analysis.py --csv trajectory.csv"""
 import argparse
 from pathlib import Path
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 
 def main() -> None:

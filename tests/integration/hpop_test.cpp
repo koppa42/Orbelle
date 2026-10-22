@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
-#include <orbitforge/orbitforge.hpp>
-#include <orbitforge/runtime/access.hpp>
-#include <orbitforge/runtime/hpop.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/orbelle.hpp>
+#include <orbelle/runtime/access.hpp>
+#include <orbelle/runtime/hpop.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 
-using namespace orbitforge;
+using namespace orbelle;
 namespace {
 application::Project hpop_project() {
     application::Project project{"Numerical", core::Epoch{0}, core::Epoch{7200000000000}};
@@ -99,7 +99,7 @@ TEST(HpopProject, PreparedSessionsDriveReportsAccessAndRetainForceDependencies) 
     input.satellites[0].orbit.hpop = {};
     input.ground_stations.push_back({"station", "Equator", {0, 0, 0}});
     auto project = Project::from_data(input);
-    const auto data = runtime::DataSnapshot::load(ORBITFORGE_REPORT_EOP);
+    const auto data = runtime::DataSnapshot::load(ORBELLE_REPORT_EOP);
     input.earth_orientation = data.eop()->data_info();
     const auto session =
         runtime::make_hpop_session(input.satellites[0].orbit.initial,
@@ -146,7 +146,7 @@ TEST(HpopProject, RejectsMissingDataAndInitialEpochOutsideCoverageBeforeQueries)
     if (!runtime::time_frames_available()) {
         GTEST_SKIP();
     }
-    const auto data = runtime::DataSnapshot::load(ORBITFORGE_REPORT_EOP);
+    const auto data = runtime::DataSnapshot::load(ORBELLE_REPORT_EOP);
     input.satellites[0].orbit.initial.epoch = core::Epoch{-864000000000000};
     const auto interval = application::calculation_data_interval(input);
     EXPECT_EQ(interval.first, input.satellites[0].orbit.initial.epoch);

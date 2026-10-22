@@ -2,8 +2,8 @@ from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 import tempfile
 import unittest
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 ROOT = Path(__file__).resolve().parents[3]
 FILE = ROOT / "tests/reference/propagators/ocean_fes2014bv1_4x4.pot"
@@ -35,7 +35,7 @@ class OceanTideTests(unittest.TestCase):
         self.assertEqual(before.input_sha256, after.input_sha256)
         self.assertEqual(before.position.values, after.position.values)
         with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / "inactive.orbitforge"
+            path = Path(folder) / "inactive.orbelle"
             p.save(path, analysis=analysis)
             reopened = of.Project.open(path)
             self.assertEqual(reopened.objects[sat.id].orbit.hpop.ocean_tides,
@@ -67,7 +67,7 @@ class OceanTideTests(unittest.TestCase):
                 self.assertEqual(from_catalog.position.values, before.position.values)
                 self.assertEqual(from_catalog.data_sha256, before.data_sha256)
                 frozen.report(of.ReportKind.CARTESIAN_STATE, objects=[sat], step=u.s(60))
-                path = root / "ocean.orbitforge"
+                path = root / "ocean.orbelle"
                 p.save(path, analysis=frozen)
                 reopened = of.Project.open(path, data=data)
                 self.assertEqual(reopened.objects[sat.id].orbit.hpop.ocean_tides, settings)

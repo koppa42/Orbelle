@@ -34,15 +34,15 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/j2.hpp>
-#include <orbitforge/runtime/j4.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/j2.hpp>
+#include <orbelle/runtime/j4.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 
 #include "support/property_editor_fixture.hpp"
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 TEST_F(QuantityTest, SensorPatternFieldsPreserveGeometryAndRejectInvalidBoundaries) {
     application::Project project("Scenario", core::Epoch{0}, core::Epoch{120'000'000'000});
     application::ProjectSensor sensor;
@@ -76,7 +76,7 @@ TEST_F(QuantityTest, SensorPatternFieldsPreserveGeometryAndRejectInvalidBoundari
     QApplication::processEvents();
     auto *scroll = editor.findChild<QScrollArea *>("sensorScroll");
     EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
-    const auto capture = qEnvironmentVariable("ORBITFORGE_SENSOR_UI_CAPTURE");
+    const auto capture = qEnvironmentVariable("ORBELLE_SENSOR_UI_CAPTURE");
     if (!capture.isEmpty())
         EXPECT_TRUE(editor.grab().save(capture + "/sensor-custom.png"));
     editor.findChild<QuantityEditor *>("sensorInnerAngle")->set_value(10, Unit::degree);
@@ -261,7 +261,7 @@ TEST_F(QuantityTest, SensorLayoutFitsNarrowPanelsAndKeepsActionsVisible) {
     auto *angle = editor.findChild<QuantityEditor *>("sensorHalfAngle");
     auto *full_angle = editor.findChild<QLabel *>("sensorFullAngle");
     ASSERT_TRUE(scroll && targeted && submit && angle && full_angle);
-    const auto capture = qEnvironmentVariable("ORBITFORGE_SENSOR_UI_CAPTURE");
+    const auto capture = qEnvironmentVariable("ORBELLE_SENSOR_UI_CAPTURE");
     if (!capture.isEmpty())
         ASSERT_TRUE(QDir{}.mkpath(capture));
     const auto screenshot = [&](const QString &name) {
@@ -388,7 +388,7 @@ TEST_F(QuantityTest, SensorPagesPreserveDraftUnitsAndSelectionAcrossNavigationMo
             EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
             EXPECT_LE(scroll->widget()->width(), scroll->viewport()->width());
             EXPECT_LE(scroll->widget()->width(), 640);
-            const auto output = qEnvironmentVariable("ORBITFORGE_SENSOR_UI_CAPTURE");
+            const auto output = qEnvironmentVariable("ORBELLE_SENSOR_UI_CAPTURE");
             if (!output.isEmpty())
                 EXPECT_TRUE(editor.grab().save(
                     output + QString("/sensor-page-%1-%2.png").arg(width).arg(index)));
@@ -408,4 +408,4 @@ TEST_F(QuantityTest, SensorPagesPreserveDraftUnitsAndSelectionAcrossNavigationMo
     EXPECT_FALSE(editor.has_unapplied_changes());
     EXPECT_EQ(pages->currentIndex(), 2);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

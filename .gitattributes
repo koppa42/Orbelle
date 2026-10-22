@@ -13,7 +13,7 @@
 /modules/providers/sgp4/third_party/SGP4.cpp -text whitespace=-blank-at-eol,-blank-at-eof
 /modules/providers/sgp4/third_party/SGP4.h -text whitespace=-blank-at-eol,-blank-at-eof
 /tests/reference/propagators/*.txt text eol=lf
-/tests/integration/fixtures/*.orbitforge -text
+/tests/integration/fixtures/*.orbelle -text
 
 /tests/reference/propagators/*.pot -text
 

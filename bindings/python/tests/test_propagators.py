@@ -6,7 +6,7 @@ from threading import Event
 import unittest
 
 # Native value/format tests; public editing is in test_objects.py.
-from orbitforge import _native as of
+from orbelle import _native as of
 
 
 TLE = (
@@ -86,7 +86,7 @@ class PropagatorTests(unittest.TestCase):
             project.to_scenario()
         expected = project.to_scenario(time).sample([first])[0].states[0]
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'satellite.orbitforge'
+            path = Path(directory) / 'satellite.orbelle'
             project.save(path)
             restored = of.load_project(path)
             self.assertEqual(restored.satellites[0].orbit.tle.line1, TLE[0])

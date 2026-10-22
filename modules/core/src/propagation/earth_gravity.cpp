@@ -1,8 +1,8 @@
 #include <algorithm>
 #include <cmath>
-#include <orbitforge/core/propagation/hpop.hpp>
+#include <orbelle/core/propagation/hpop.hpp>
 
-namespace orbitforge::core {
+namespace orbelle::core {
 namespace {
 // Cartesian solid harmonics; compile out all second-derivative work on the
 // ordinary force path. Symmetric Hessians use xx,xy,xz,yy,yz,zz storage.
@@ -413,4 +413,4 @@ GravityDifferential GravityModel::evaluate(const std::array<double, 3> &r, int d
 std::array<double, 3> egm96_acceleration(const std::array<double, 3> &r, int degree, int order) {
     return builtin_egm96()->acceleration(r, degree, order);
 }
-} // namespace orbitforge::core
+} // namespace orbelle::core

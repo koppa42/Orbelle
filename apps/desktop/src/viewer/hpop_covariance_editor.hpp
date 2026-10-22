@@ -1,13 +1,13 @@
 #pragma once
 #include <QWidget>
-#include <orbitforge/application/hpop_covariance.hpp>
+#include <orbelle/application/hpop_covariance.hpp>
 
 class QCheckBox;
 class QComboBox;
 class QLineEdit;
 class QSpinBox;
 class QTableWidget;
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 class HpopCovarianceEditor final : public QWidget {
   public:
     explicit HpopCovarianceEditor(const application::HpopCovarianceSettings &settings,
@@ -25,4 +25,4 @@ class HpopCovarianceEditor final : public QWidget {
     QWidget *fields_;
     QTableWidget *state_, *parameters_, *cross_;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -9,13 +9,13 @@
 #include <QNetworkRequest>
 #include <QTimeZone>
 #include <algorithm>
-#include <orbitforge/application/project.hpp>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/gravity.hpp>
-#include <orbitforge/runtime/ocean_tides.hpp>
-#include <orbitforge/runtime/space_weather.hpp>
+#include <orbelle/application/project.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/gravity.hpp>
+#include <orbelle/runtime/ocean_tides.hpp>
+#include <orbelle/runtime/space_weather.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 QJsonArray ephemeris_kernels(const runtime::CatalogEphemeris &entry) {
     QFile file(QString::fromStdWString(entry.manifest.wstring()));
@@ -816,7 +816,7 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
                              QNetworkRequest::NoLessSafeRedirectPolicy);
         request.setMaximumRedirectsAllowed(3);
         request.setTransferTimeout(30000);
-        request.setRawHeader("User-Agent", "OrbitForge/0.1 data-center");
+        request.setRawHeader("User-Agent", "Orbelle data-center");
         request.setRawHeader("Accept-Encoding", "identity");
         request.setAttribute(QNetworkRequest::CacheLoadControlAttribute,
                              QNetworkRequest::AlwaysNetwork);
@@ -1009,4 +1009,4 @@ void EopCatalog::start_resource_install(const std::filesystem::path &file, DataP
     });
     resource_poll_.start(50);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -25,14 +25,14 @@
 
 `QuantityTest.BusyHintsEndWithoutErasingOrbitOrModelResults` 覆盖轨道计算与三维模型加载的等待提示：任务结束清除临时消息，成功、取消与错误结果在恢复控件时保留，重复恢复空闲及再次运行不会留下旧提示。
 
-真实工作台 smoke 同时核对 HPOP 场景更新、单星更新、无修改应用、场景时段成功／取消／失败、地面站取消及 HPOP 取消后重试。完成状态必须与已发布结果及按钮状态一致，取消保留草稿和原场景，不能把其他对象的状态写成失败。显示轨迹准备取消后不残留等待状态，也不能清除其他操作的新消息。`hpop-apply-complete.png` 保存实际属性页完成状态；报告生成、过期回调与取消继续由 `orbitforge_report_ui_tests` 的既有测试覆盖。
+真实工作台 smoke 同时核对 HPOP 场景更新、单星更新、无修改应用、场景时段成功／取消／失败、地面站取消及 HPOP 取消后重试。完成状态必须与已发布结果及按钮状态一致，取消保留草稿和原场景，不能把其他对象的状态写成失败。显示轨迹准备取消后不残留等待状态，也不能清除其他操作的新消息。`hpop-apply-complete.png` 保存实际属性页完成状态；报告生成、过期回调与取消继续由 `orbelle_report_ui_tests` 的既有测试覆盖。
 
 ## 日常工作台交互分析
 
 日常工作台的二维绘制与交互分析使用独立的小规模协议：
 
 ```powershell
-python tools/validation/run_workbench_profile.py --executable out/build/desktop-graphics/apps/desktop/Release/orbitforge_desktop.exe --dependency-prefix out/dependencies/installed/x64-windows --output out/validation/workbench-24-before --satellites 24 --scale 1.5
+python tools/validation/run_workbench_profile.py --executable out/build/desktop-graphics/apps/desktop/Release/orbelle_desktop.exe --dependency-prefix out/dependencies/installed/x64-windows --output out/validation/workbench-24-before --satellites 24 --scale 1.5
 ```
 
 在同一设备、相同采样轨迹、卫星数、窗口大小和实际 DPI 下运行修改前后的 Release 程序，每次使用新的输出目录。可再以96颗卫星比较较密集的场景。计时期间不同时构建、运行测试或启动另一图形任务；记录 `run-info.json` 中的程序散列及 `profile.json` 的实际尺寸和 `device_pixel_ratio`。`--scale` 会与系统缩放相乘，不代表最终 DPI。
@@ -44,12 +44,12 @@ python tools/validation/run_workbench_profile.py --executable out/build/desktop-
 大数据报告使用显式诊断目标，不加入常规构建或 CTest 的耗时门槛：
 
 ```powershell
-cmake --build --preset desktop-graphics --target orbitforge_report_plot_profile
+cmake --build --preset desktop-graphics --target orbelle_report_plot_profile
 $env:PATH = "$PWD/out/dependencies/installed/x64-windows/bin;$env:PATH"
 $env:QT_PLUGIN_PATH = "$PWD/out/dependencies/installed/x64-windows/Qt6/plugins"
 $env:QT_QPA_PLATFORM = "windows"
 $env:QT_SCALE_FACTOR = "1"
-out/build/desktop-graphics/apps/desktop/Release/orbitforge_report_plot_profile.exe out/validation/report-profile-before
+out/build/desktop-graphics/apps/desktop/Release/orbelle_report_plot_profile.exe out/validation/report-profile-before
 ```
 
 固定负载为 12 个对象、各 20,000 个时刻、6 个字段（72 条曲线、2 个单位分区），包含单样本尖峰。工具测量结果重建、缩放布局与鼠标悬停加抓图的 GUI CPU 时间；缩放指标不含后续栅格绘制，抓图指标不等于真实输入到显示延迟。每项先预热，再保存样本数、平均值、中位数和 P95，同时输出全范围／局部范围 PNG。比较必须使用同一台机器、Release 配置、窗口大小与实际 DPI，并检查图片、峰值及断线没有回退；新输出目录不可覆盖。日志和程序散列另存到本次 `out/validation/`。单次采样不代表通用性能承诺，建议重复运行确认收益稳定。
@@ -72,7 +72,7 @@ Qt 控件测试 `InsertionTest.*` 检查每类对象的默认方式持久化、�
 
 参数滑条需验证双向联动、m / km 和 rad / ° 切换、精确输入不被舍入、高轨输入自动扩展范围、隐藏草稿保留、键盘调节，以及未聚焦时滚轮不改变数值。长表单纵向滚动，主要操作始终可达，不得出现因摘要或滑条撑宽导致的横向滚动。
 
-预览性能可显式运行 `orbitforge_quantity_tests --gtest_also_run_disabled_tests --gtest_filter=*WizardPreviewInteractionProfile`。固定 2026-10-01 UTC、内置 EOP、相同 Qt 平台与窗口，分别在 1 / 3 圈下调整 RAAN 和高度；记录 12 次独立修改到地图轨迹准备完成的中位/最大耗时，再分别按 16 / 8 / 4 ms 间隔连续输入 1.6 s，统计实际交付的输入数、可绘制新轨迹次数、Qt Paint 事件中的轨迹变化次数、拖动期间最大绘制间隔及停止后的细化耗时。可设置 `ORBITFORGE_PREVIEW_PROFILE` 为新的输出目录，保存输入处理、交互投影和地图绘制的 CPU 分项统计。这是 Qt CPU / 轨迹缓存就绪测量，不是显示器呈现延迟，不作为 CI 时序门槛。普通回归以可阻塞的 Provider 检查高频编辑不会取消网格准备、完整作业阻塞时最新参数仍能更新、Provider 不在 GUI 线程执行、数据覆盖边界与旧结果丢弃，以及停止后 361 / 1081 个点和独立逐点计算的吻合。真实图形 smoke 同样覆盖三档输入间隔，并在 `orbit-preview-profile/profile.json` 中记录实际 DPI 和分项时间；该计数也不能解释为显示器刷新率。
+预览性能可显式运行 `orbelle_quantity_tests --gtest_also_run_disabled_tests --gtest_filter=*WizardPreviewInteractionProfile`。固定 2026-10-01 UTC、内置 EOP、相同 Qt 平台与窗口，分别在 1 / 3 圈下调整 RAAN 和高度；记录 12 次独立修改到地图轨迹准备完成的中位/最大耗时，再分别按 16 / 8 / 4 ms 间隔连续输入 1.6 s，统计实际交付的输入数、可绘制新轨迹次数、Qt Paint 事件中的轨迹变化次数、拖动期间最大绘制间隔及停止后的细化耗时。可设置 `ORBELLE_PREVIEW_PROFILE` 为新的输出目录，保存输入处理、交互投影和地图绘制的 CPU 分项统计。这是 Qt CPU / 轨迹缓存就绪测量，不是显示器呈现延迟，不作为 CI 时序门槛。普通回归以可阻塞的 Provider 检查高频编辑不会取消网格准备、完整作业阻塞时最新参数仍能更新、Provider 不在 GUI 线程执行、数据覆盖边界与旧结果丢弃，以及停止后 361 / 1081 个点和独立逐点计算的吻合。真实图形 smoke 同样覆盖三档输入间隔，并在 `orbit-preview-profile/profile.json` 中记录实际 DPI 和分项时间；该计数也不能解释为显示器刷新率。
 
 真实图形 smoke 还验证默认连续插入卫星、地面站与传感器、明确父对象绑定、快捷入口遵循偏好，以及向导和 TLE 文件导入取消与确认进入属性草稿的边界。保存 `insert-objects.png`、`insert-sensor.png`、`insert-sensor-narrow.png`、九类设计的 `orbit-wizard-0.png` 至 `orbit-wizard-8.png`、`orbit-wizard-narrow.png`，按至少两个 DPI 检查参数、地图和结果区。截图必须等待对应后台地图预览完成，不能以空地图代替通过。Qt 测试另检查快速参数修改、真实 EOP 定向的初始标记、无效输入清图、1 / 3 圈切换和取消；数值约束与传播闭合见[轨道设计](../architecture/orbit_design.md)。
 

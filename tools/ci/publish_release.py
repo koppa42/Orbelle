@@ -13,13 +13,13 @@ from version import ROOT, check, python_versions
 
 def validate_assets(directory, version):
     expected = {
-        f"OrbitForge-{version}-win-x64.zip",
-        f"OrbitForge-{version}-sdk-win-x64.zip",
-        f"OrbitForge-{version}-sdk-linux-x64.tar.gz",
+        f"Orbelle-{version}-win-x64.zip",
+        f"Orbelle-{version}-sdk-win-x64.zip",
+        f"Orbelle-{version}-sdk-linux-x64.tar.gz",
     }
     for python in python_versions()[1]:
         tag = "cp" + python.replace(".", "")
-        expected.update(f"orbitforge-{version}-{tag}-{tag}-{platform}.whl"
+        expected.update(f"orbelle-{version}-{tag}-{tag}-{platform}.whl"
                         for platform in ("win_amd64", "linux_x86_64"))
     actual = {p.name for p in directory.iterdir()}
     if actual != expected:
@@ -30,7 +30,7 @@ def validate_assets(directory, version):
             raise ValueError(f"Empty or invalid asset: {name}")
         if name.endswith(".whl"):
             with zipfile.ZipFile(path) as wheel:
-                metadata = wheel.read(f"orbitforge-{version}.dist-info/METADATA").decode("utf-8")
+                metadata = wheel.read(f"orbelle-{version}.dist-info/METADATA").decode("utf-8")
                 if f"\nVersion: {version}\n" not in metadata:
                     raise ValueError(f"Wheel metadata version differs: {name}")
                 if wheel.testzip() is not None:
@@ -71,7 +71,7 @@ def publish(tag, assets, repo, run=subprocess.run):
         with tempfile.TemporaryDirectory() as temporary:
             note_path = Path(temporary) / "release-notes.md"
             note_path.write_text(notes, encoding="utf-8")
-            gh("release", "create", tag, "--verify-tag", "--draft", "--title", f"OrbitForge {tag}",
+            gh("release", "create", tag, "--verify-tag", "--draft", "--title", f"星弦 Orbelle {tag}",
                "--generate-notes", "--notes-file", str(note_path), check=True)
     # A failed upload leaves a draft. Reruns can replace only these known assets.
     gh("release", "upload", tag, *map(str, files), "--clobber", check=True)

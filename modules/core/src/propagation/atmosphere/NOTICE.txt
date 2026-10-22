@@ -1,4 +1,4 @@
-OrbitForge atmospheric model adaptations
+Orbelle atmospheric model adaptations
 
 Jacchia-Roberts scalar formulas and fitted tables derive from NASA GMAT:
 Copyright (c) 2002-2026 United States Government as represented by the
@@ -13,7 +13,7 @@ The original NRLMSISE-00 model was developed by Mike Picone, Alan Hedin and
 Doug Drob (Naval Research Laboratory). C translation by Dominik Brodowski;
 Java translation by Pascal Parraud. See Orekit-NOTICE.txt for upstream notices.
 
-OrbitForge modifications: standard-library C++ types; explicit SI/model inputs;
+Orbelle modifications: standard-library C++ types; explicit SI/model inputs;
 per-evaluation local scratch arrays; no file lookup/global mutable atmosphere
 state; bounded Newton iterations; continuous Jacchia-Roberts angular/equinox
 limits; explicit validation and supported domains. Fitted coefficients are

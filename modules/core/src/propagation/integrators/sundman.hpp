@@ -4,10 +4,10 @@
 #include <cmath>
 #include <limits>
 #include <numbers>
-#include <orbitforge/core/propagation/state_provider.hpp>
+#include <orbelle/core/propagation/state_provider.hpp>
 #include <stdexcept>
 
-namespace orbitforge::core::detail {
+namespace orbelle::core::detail {
 // STK's dS = sqrt(gravitational_parameter) r^-n dt, with a constant nondimensionalization:
 // q = S / a0^(3/2-n), dt/dq = sqrt(a0^3/gravitational_parameter) (r/a0)^n.
 // a0 and e0 are the initial osculating ellipse. One unperturbed revolution spans
@@ -208,4 +208,4 @@ template <std::size_t Extra = 0> class SundmanSystemTransform {
     }
 };
 using SundmanTransform = SundmanSystemTransform<>;
-} // namespace orbitforge::core::detail
+} // namespace orbelle::core::detail

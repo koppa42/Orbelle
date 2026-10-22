@@ -23,14 +23,14 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 #include <stdexcept>
 
 #include "support/report_test_support.hpp"
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 using namespace report_test;
 TEST(ReportSelection, SearchSourcesStableKeysAndDeletedChoices) {
@@ -91,7 +91,7 @@ TEST(ReportSelection, SearchSourcesStableKeysAndDeletedChoices) {
     QCoreApplication::processEvents();
     for (auto *scroll : dialog.findChildren<QScrollArea *>())
         EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
-    const auto directory = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    const auto directory = qEnvironmentVariable("ORBELLE_REPORT_UI_CAPTURE");
     if (!directory.isEmpty()) {
         QDir().mkpath(directory);
         EXPECT_TRUE(dialog.grab().save(directory + "/report-selector-long-name.png"));
@@ -131,7 +131,7 @@ TEST(ReportSelection, CurveFieldsSearchKeepsCheckedItemsAndValidatesLimit) {
                     .contains(QStringLiteral("没有匹配")));
     EXPECT_TRUE(confirm->isEnabled()); // Searching does not discard hidden checked fields.
     search->clear();
-    const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    const auto capture = qEnvironmentVariable("ORBELLE_REPORT_UI_CAPTURE");
     for (int width : {560, 360}) {
         chooser.resize(width, 480);
         QCoreApplication::processEvents();
@@ -187,7 +187,7 @@ TEST(ReportSelection, ColumnSearchOrderDefaultsAndEmptySelection) {
     EXPECT_EQ(chooser.selection().size(), 4);
     EXPECT_TRUE(confirm->isEnabled());
     search->clear();
-    const auto capture = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+    const auto capture = qEnvironmentVariable("ORBELLE_REPORT_UI_CAPTURE");
     for (int width : {560, 340}) {
         chooser.resize(width, 500);
         QCoreApplication::processEvents();
@@ -214,4 +214,4 @@ TEST(ReportSelection, ColumnSearchOrderDefaultsAndEmptySelection) {
     EXPECT_EQ(chooser.result(), QDialog::Accepted);
 }
 } // namespace
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

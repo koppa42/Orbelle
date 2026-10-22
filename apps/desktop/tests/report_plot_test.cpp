@@ -35,14 +35,14 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include <numbers>
-#include <orbitforge/runtime/ephemeris.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
-#include <orbitforge/runtime/two_body.hpp>
+#include <orbelle/runtime/ephemeris.hpp>
+#include <orbelle/runtime/time_frames.hpp>
+#include <orbelle/runtime/two_body.hpp>
 #include <stdexcept>
 
 #include "support/report_test_support.hpp"
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 using namespace report_test;
 TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
@@ -192,7 +192,7 @@ TEST(ReportDialog, CurvesReuseRowsSupportObjectComparisonZoomSeekAndPngExport) {
     run();
     const auto capture = [&](const QString &name) {
         QCoreApplication::processEvents();
-        const auto directory = qEnvironmentVariable("ORBITFORGE_REPORT_UI_CAPTURE");
+        const auto directory = qEnvironmentVariable("ORBELLE_REPORT_UI_CAPTURE");
         if (!directory.isEmpty()) {
             ASSERT_TRUE(QDir().mkpath(directory));
             ASSERT_TRUE(dialog.grab().save(directory + "/" + name + ".png"));
@@ -480,4 +480,4 @@ TEST(ReportPlot, IndexedExtremaMatchVisibleSamplesAcrossPartialBlocks) {
     }
 }
 } // namespace
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

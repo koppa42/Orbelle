@@ -23,7 +23,7 @@
 #include <iterator>
 #include <stdexcept>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 class WorkbenchStyle final : public QProxyStyle {
   public:
@@ -176,7 +176,7 @@ QIcon workbench_icon(WorkbenchIcon icon, const QColor &color) {
     // Original vector geometry, painted at multiple sizes for native high-DPI controls.
     QIcon result;
     for (int size : {16, 20, 24, 32, 48, 64}) {
-        const auto key = QStringLiteral("orbitforge.icon.%1.%2.%3")
+        const auto key = QStringLiteral("orbelle.icon.%1.%2.%3")
                              .arg(static_cast<int>(icon))
                              .arg(color.rgba())
                              .arg(size);
@@ -665,7 +665,7 @@ QToolBar#commandBar QToolButton#insertObjectButton { padding: 3px 30px 3px 8px; 
 QToolButton#insertObjectButton::menu-button { subcontrol-origin: padding; subcontrol-position: top right; width: 24px; border: 0; border-left: 1px solid @line; border-top-right-radius: 3px; border-bottom-right-radius: 3px; }
 QToolButton#insertObjectButton::menu-button:hover { background: @accentHover; }
 QToolButton#insertObjectButton::menu-button:pressed { background: @accentWash; }
-QToolButton#insertObjectButton::menu-arrow { image: url(:/orbitforge/icons/chevron-down.png); width: 10px; height: 6px; }
+QToolButton#insertObjectButton::menu-arrow { image: url(:/orbelle/icons/chevron-down.png); width: 10px; height: 6px; }
 QToolButton[captionButton="true"] { padding: 0; border: 1px solid transparent; border-radius: 4px; }
 QToolButton[captionButton="true"]:hover { background: @overlay; }
 QToolButton[captionButton="true"]:focus { border-color: @accent; }
@@ -747,8 +747,8 @@ QTreeWidget::item:selected { background: @accentWash; color: @accentBright; }
 QTreeWidget::item:hover:!selected { background: @accentHover; color: @text; }
 QTreeWidget::branch { background: @chrome; }
 QTreeWidget::branch:selected, QTreeWidget::branch:hover { background: @chrome; }
-QTreeWidget#sceneObjects::branch:has-children:closed { image: url(:/orbitforge/icons/chevron-right.png); }
-QTreeWidget#sceneObjects::branch:has-children:open { image: url(:/orbitforge/icons/chevron-down.png); }
+QTreeWidget#sceneObjects::branch:has-children:closed { image: url(:/orbelle/icons/chevron-right.png); }
+QTreeWidget#sceneObjects::branch:has-children:open { image: url(:/orbelle/icons/chevron-down.png); }
 QTreeWidget#propertyNavigation { background: @panel; border: 0; border-right: 1px solid @line; padding: 10px 6px; outline: 0; }
 QTreeWidget#propertyNavigation::item { height: 26px; padding: 2px 8px; border-radius: 4px; color: @textMuted; }
 QTreeWidget#propertyNavigation::item:hover:!selected { background: @accentHover; color: @textSoft; }
@@ -797,10 +797,10 @@ QFrame[quantityField="true"] QLineEdit { background: transparent; border: 0; pad
 QToolButton#quantityUnit { color: @textSoft; border: 0; border-left: 1px solid @line; border-radius: 0; padding: 3px 17px 3px 7px; min-height: 20px; max-height: 20px; }
 QToolButton#quantityUnit:hover, QToolButton#quantityUnit:focus { color: @accentBright; background: @accentHover; }
 QToolButton#quantityUnit:disabled { color: @textFaint; }
-QToolButton#quantityUnit::menu-indicator { image: url(:/orbitforge/icons/chevron-down.png); subcontrol-origin: padding; subcontrol-position: right center; right: 5px; width: 9px; height: 6px; }
+QToolButton#quantityUnit::menu-indicator { image: url(:/orbelle/icons/chevron-down.png); subcontrol-origin: padding; subcontrol-position: right center; right: 5px; width: 9px; height: 6px; }
 QComboBox { padding-right: 24px; }
 QComboBox::drop-down { border: 0; width: 22px; }
-QComboBox::down-arrow { image: url(:/orbitforge/icons/chevron-down.png); width: 9px; height: 6px; }
+QComboBox::down-arrow { image: url(:/orbelle/icons/chevron-down.png); width: 9px; height: 6px; }
 QComboBox QAbstractItemView { background: @raised; color: @textSoft; border: 1px solid @border; selection-background-color: @accentWash; selection-color: @accentBright; outline: 0; padding: 3px; }
 QPushButton { background: @raised; color: @textSoft; border: 1px solid @border; border-radius: 3px; padding: 4px 12px; min-height: 18px; }
 QPushButton:hover { background: @overlay; border-color: @borderStrong; color: @text; }
@@ -877,8 +877,8 @@ QLineEdit#epochValue { font-family: "Cascadia Mono", "Consolas"; font-size: 12px
 QFrame#epochPopup { background: @raised; border: 1px solid @borderStrong; border-radius: 8px; }
 QCalendarWidget QWidget { background: @raised; }
 QCalendarWidget QToolButton { padding: 5px; color: @textSoft; font-weight: 600; border: 0; }
-QCalendarWidget QToolButton#qt_calendar_prevmonth { qproperty-icon: url(:/orbitforge/icons/chevron-left.png); }
-QCalendarWidget QToolButton#qt_calendar_nextmonth { qproperty-icon: url(:/orbitforge/icons/chevron-right.png); }
+QCalendarWidget QToolButton#qt_calendar_prevmonth { qproperty-icon: url(:/orbelle/icons/chevron-left.png); }
+QCalendarWidget QToolButton#qt_calendar_nextmonth { qproperty-icon: url(:/orbelle/icons/chevron-right.png); }
 QCalendarWidget QToolButton:hover { background: @accentHover; }
 QCalendarWidget QAbstractItemView { border: 0; outline: 0; color: @textSoft; background: @raised; selection-background-color: @accentDeep; selection-color: @onAccent; alternate-background-color: @overlay; }
 QListWidget#missionSegments { background: transparent; border: 0; padding: 0; outline: 0; }
@@ -1035,8 +1035,8 @@ QPushButton[objectSelector="true"]:disabled { color: @textFaint; border-color: @
 QTreeWidget#objectSelectionTree { background: @field; border: 1px solid @line; border-radius: 6px; outline: 0; padding: 3px; }
 QTreeWidget#objectSelectionTree::item { height: 24px; padding: 2px 6px; border: 0; border-radius: 4px; }
 QTreeWidget#objectSelectionTree::branch { background: @field; }
-QTreeWidget#objectSelectionTree::branch:closed:has-children { image: url(:/orbitforge/icons/chevron-right.png); }
-QTreeWidget#objectSelectionTree::branch:open:has-children { image: url(:/orbitforge/icons/chevron-down.png); }
+QTreeWidget#objectSelectionTree::branch:closed:has-children { image: url(:/orbelle/icons/chevron-right.png); }
+QTreeWidget#objectSelectionTree::branch:open:has-children { image: url(:/orbelle/icons/chevron-down.png); }
 QLabel#objectSelectionPurpose, QLabel#objectSelectionDetails, QLabel#objectSelectionCount { color: @textMuted; font-size: 12px; }
 QLabel#objectSelectionEmpty { color: @textMuted; background: transparent; padding: 20px; }
 QFrame#hpopResource { background: @panel; border: 1px solid @line; border-radius: 8px; }
@@ -1068,4 +1068,4 @@ QDialog#hpopSettingsDialog QComboBox { max-width: 242px; }
 QDialog#hpopSettingsDialog QSpinBox, QDialog#hpopSettingsDialog QDoubleSpinBox { max-width: 258px; }
 )QSS")));
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

@@ -1,11 +1,11 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <orbitforge/render_vsg/labels.hpp>
+#include <orbelle/render_vsg/labels.hpp>
 #include <stdexcept>
 #include <vsg/all.h>
 
-namespace orbitforge::render_vsg {
+namespace orbelle::render_vsg {
 namespace {
 bool earth_occludes(vsg::dvec3 eye, vsg::dvec3 position) {
     constexpr vsg::dvec3 axes(6378137.0, 6378137.0, 6356752.314245179);
@@ -169,4 +169,4 @@ void LabelLayer::update(const visualization::RenderSnapshot &snapshot,
     }
     impl_->count = count;
 }
-} // namespace orbitforge::render_vsg
+} // namespace orbelle::render_vsg

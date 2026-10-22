@@ -5,7 +5,7 @@
 class QHBoxLayout;
 class QToolButton;
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // Client-drawn Windows chrome; all move/resize operations remain owned by the OS.
 // Other platforms keep their native window manager decorations.
 class WorkbenchWindow : public QMainWindow {
@@ -28,4 +28,4 @@ class WorkbenchWindow : public QMainWindow {
     QToolButton *maximize_ = nullptr;
     QRect restore_geometry_;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

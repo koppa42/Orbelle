@@ -21,7 +21,7 @@ ASan/UBSan 仅在 **Actions → Sanitizers → Run workflow** 中手动执行；
 
 PR、`main` 与发布安装验证通过 `tools/ci/validation_inputs.py` 整理相同的独立测试目录，包含 Python 测试、十二个示例、SDK 消费端、固定参考值、项目文件样例及测试使用的 EOP / 闰秒 / SPICE 片段数据。测试目录保留相对路径，但不复制 Python 包源码或 C++ 实现；计算能力必须来自被测安装。普通 Python CI 也从此目录运行，提前发现发布验证输入遗漏。
 
-PR 的 `linux-python-dependencies` 和 `windows-python-dependencies` 由各平台独立的轻量依赖作业生成，仅供其他 Python 版本复用已编译的无界面依赖，内容不包括 OrbitForge 安装包。诊断日志另行保留。标签流程还传递 `linux-delivery`，供没有源码检出的新 runner 验证 SDK 和 wheel，然后整理发布附件。
+PR 的 `linux-python-dependencies` 和 `windows-python-dependencies` 由各平台独立的轻量依赖作业生成，仅供其他 Python 版本复用已编译的无界面依赖，内容不包括 Orbelle 安装包。诊断日志另行保留。标签流程还传递 `linux-delivery`，供没有源码检出的新 runner 验证 SDK 和 wheel，然后整理发布附件。
 
 PR 使用 GitHub 默认的[模拟合并引用](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)运行。合并后在实际 `main` 提交上执行基准测试，同时更新可供后续 PR 使用的依赖缓存。多版本兼容性在合并前完成；目标分支变化时先更新 PR 并等待新的检查结果。若启用合并队列，需先接入 `merge_group` 事件。
 
@@ -57,7 +57,7 @@ GitHub 将 PR 生成的缓存限制在该 PR 的合并引用中，其他 PR 和 
 
 完整 Release 数值回归及手动 ASan/UBSan 都执行预设中的全量用例，保留原算法、参考数据、断言与精度容限；新增测试自动纳入。两者使用 `--no-tests=error` 拒绝空测试运行。
 
-常规 CI 通过 `CTEST_PARALLEL_LEVEL=4` 在每个平台内最多并行四个测试进程，不新增分片作业或测试筛选。桌面测试共享 `orbitforge_desktop_tests` 资源锁，彼此串行，仍可与数值测试并行；手动 sanitizer 保持原并发设置。CSPICE 的进程内状态不会跨 CTest 进程共享；测试只读固定参考数据，写入各自的临时目录或具名 fixture 子目录。不要同时启动多个 CTest 操作同一个构建目录。
+常规 CI 通过 `CTEST_PARALLEL_LEVEL=4` 在每个平台内最多并行四个测试进程，不新增分片作业或测试筛选。桌面测试共享 `orbelle_desktop_tests` 资源锁，彼此串行，仍可与数值测试并行；手动 sanitizer 保持原并发设置。CSPICE 的进程内状态不会跨 CTest 进程共享；测试只读固定参考数据，写入各自的临时目录或具名 fixture 子目录。不要同时启动多个 CTest 操作同一个构建目录。
 
 天气跳变的 HPOP 星历回归按五种积分器参数化，仍覆盖正反向、Cowell/VOP、时间正则化开关、两种报告步长、三种插值方式及跳变前后 1 ns 和边界本身。相同配置的直接 RKV89 参考结果在每个方向和表示方式内复用；两条被测星历生成入口仍分别执行。时间范围、步长、输入、参考算法和 1 mm / 1e-6 m/s 门槛不变。其他长时天气收敛用例中的重新打开、冻结数据和新数据计算是不同的行为验证，继续保留。
 
@@ -67,7 +67,7 @@ GitHub 将 PR 生成的缓存限制在该 PR 的合并引用中，其他 PR 和 
 
 Windows、Linux 和 Python 的 `commands.json` 记录每条命令的 UTC 开始时间、耗时与退出码，Actions 作业摘要展示分阶段用时，失败命令同样保留。父任务中的 Python 总耗时包含其嵌套报告，不能跨表重复求和。依赖缓存命中率和安装时间查看对应 Actions 步骤；项目编译缓存需根据这些记录再评估，当前不缓存项目构建目录。
 
-本地日常开发只需验证 Python 3.13；多版本兼容性由 PR CI 负责，不必在开发机安装多套 Python。`pyproject.toml` 的 `[tool.orbitforge.ci]` 统一定义基准版本和测试版本，CI 矩阵与发布附件检查共用这份配置。其他解释器版本只编译 Python 扩展，标签流程再构建对应 wheel。
+本地日常开发只需验证 Python 3.13；多版本兼容性由 PR CI 负责，不必在开发机安装多套 Python。`pyproject.toml` 的 `[tool.orbelle.ci]` 统一定义基准版本和测试版本，CI 矩阵与发布附件检查共用这份配置。其他解释器版本只编译 Python 扩展，标签流程再构建对应 wheel。
 
 普通托管 runner 不承担真实 Vulkan GPU 验收；offscreen 测试通过不代表三维呈现或性能达标。带 GPU 的验证仍按[构建说明](build.md)执行。联网 IERS 服务检查是可选测试，CI 不依赖实时数据服务。
 
@@ -75,11 +75,11 @@ Windows、Linux 和 Python 的 `commands.json` 记录每条命令的 UTC 开始�
 
 | 文件 | 用途 |
 | --- | --- |
-| `OrbitForge-X.Y.Z-win-x64.zip` | Windows x64 便携桌面，解压后运行 `OrbitForge.exe` |
-| `OrbitForge-X.Y.Z-sdk-win-x64.zip` | Windows x64 / VS 2022 Release C++ 无界面 SDK |
-| `OrbitForge-X.Y.Z-sdk-linux-x64.tar.gz` | Ubuntu 24.04 x86_64 Release C++ 无界面 SDK |
-| `orbitforge-X.Y.Z-cpNNN-cpNNN-win_amd64.whl` | Windows x64；CPython 3.11～3.15，每个版本一个 wheel |
-| `orbitforge-X.Y.Z-cpNNN-cpNNN-linux_x86_64.whl` | Ubuntu 24.04 x86_64；CPython 3.11～3.15，每个版本一个 wheel |
+| `Orbelle-X.Y.Z-win-x64.zip` | Windows x64 便携桌面，解压后运行 `Orbelle.exe` |
+| `Orbelle-X.Y.Z-sdk-win-x64.zip` | Windows x64 / VS 2022 Release C++ 无界面 SDK |
+| `Orbelle-X.Y.Z-sdk-linux-x64.tar.gz` | Ubuntu 24.04 x86_64 Release C++ 无界面 SDK |
+| `orbelle-X.Y.Z-cpNNN-cpNNN-win_amd64.whl` | Windows x64；CPython 3.11～3.15，每个版本一个 wheel |
+| `orbelle-X.Y.Z-cpNNN-cpNNN-linux_x86_64.whl` | Ubuntu 24.04 x86_64；CPython 3.11～3.15，每个版本一个 wheel |
 | `SHA256SUMS` | 上述十三个文件的 SHA-256 |
 
 SDK 包含计算库、头文件、CMake 配置、样例数据及链接依赖。将 SDK 根目录和其 `dependencies` 子目录一起加入 `CMAKE_PREFIX_PATH`；Windows 消费程序运行时还需将 `dependencies/bin` 加入进程 `PATH`。具体用法见包内 `README.txt`。
@@ -98,7 +98,7 @@ git commit -m "chore: prepare v0.1.1"
 git switch main
 git pull --ff-only
 python tools/ci/version.py --tag v0.1.1
-git tag -a v0.1.1 -m "OrbitForge v0.1.1"
+git tag -a v0.1.1 -m "Orbelle v0.1.1"
 git push origin v0.1.1
 ```
 

@@ -1,6 +1,6 @@
 """Find physical apsis and GCRF node events without sampled-extremum estimates."""
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 first = of.Epoch(0)
 project = of.Project("Orbital events", first, of.Epoch(12000 * 10**9))

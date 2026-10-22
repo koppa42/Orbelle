@@ -26,7 +26,7 @@
 
 Runtime 的 `DataCatalog` 调用 IERS Provider 校验清单、SHA-256、覆盖范围和数据行，复验临时副本后发布并记录到 SQLite。内容文件按原始字节哈希去重，快照目录按 Scenario 数据锁命名；相同导入幂等，已有版本不覆盖。底层旧 API `import_eop_snapshot()` 仍保留原来的清单哈希目录格式，便于兼容已有工具。
 
-桌面使用 Qt `AppLocalDataLocation/data`，Windows 默认 `%LOCALAPPDATA%/OrbitForge/data`。旧 `eop` 目录在启动时按原身份导入并保留原文件；损坏条目的原因在窗口显示。测试将目录隔离到 smoke 输出，不改用户数据。导入后不依赖原文件位置，也不自动切换当前项目。
+桌面使用 Qt `AppLocalDataLocation/data`，Windows 默认 `%LOCALAPPDATA%/Orbelle/data`。旧 `eop` 目录在启动时按原身份导入并保留原文件；损坏条目的原因在窗口显示。测试将目录隔离到 smoke 输出，不改用户数据。导入后不依赖原文件位置，也不自动切换当前项目。
 
 不提供历史版本列表、默认版本选择或“应用到当前场景”。打开或重新计算时检查覆盖分析时段的当前数据；有数据或实际使用的外推策略变化时须用户允许，随后一起重建所有对象的显示轨迹和太阳方向。拒绝则不打开或重算。一次计算始终使用同一组 Provider；失败或取消不会影响正在显示的结果。项目保存实际使用的数据哈希作为来源记录，旧记录的文件缺失不阻止用户确认后使用当前数据打开。
 
@@ -46,9 +46,9 @@ Python 通过 `project.objects` 管理对象，属性赋值和关键字更新进
 
 ```python
 from pathlib import Path
-import orbitforge as of
+import orbelle as of
 
-project = of.load_project('mission.orbitforge')
+project = of.load_project('mission.orbelle')
 satellite = project.objects.find(type=of.objects.Satellite)[0]
 satellite.name = '观测卫星'
 copy = project.objects.duplicate(satellite, name='观测卫星 副本')
@@ -57,7 +57,7 @@ project.objects.remove(copy)
 catalog = of.DataCatalog(Path('data/shared-store'))
 installed = catalog.install_eop('snapshot/manifest.json')
 project.earth_orientation = catalog.load_eop(installed.lock_sha256).data_info
-project.save('mission-updated.orbitforge')
+project.save('mission-updated.orbelle')
 ```
 
 Python/C++ 导入可指定存储目录；桌面自动发现的是其用户目录。绑定数据的完整场景覆盖在项目校验/保存时检查。无 ERFA 的构建仍支持项目和对象操作，EOP 导入明确报告功能不可用。

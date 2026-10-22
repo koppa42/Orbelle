@@ -79,7 +79,7 @@ def main():
     if not args.release:
         run("python-api", sys.executable, source / "tools/ci/check_python.py",
             "--dependency-prefix", prefix, "--work", work / "python", "--reports", reports / "python",
-            "--cpp-example", desktop / "examples/cpp/Release/orbitforge_example.exe")
+            "--cpp-example", desktop / "examples/cpp/Release/orbelle_example.exe")
         (reports / "passed.json").write_text(json.dumps({
             "passed": True, "version": args.version, "release": False,
         }), encoding="utf-8")
@@ -87,9 +87,9 @@ def main():
     # Ordinary hosted runners do not provide the Vulkan GPU needed by --verify.
     run("desktop-package", sys.executable, source / "tools/packaging/package_windows.py",
         "--build-dir", desktop, "--dependency-prefix", prefix,
-        "--output", work / f"OrbitForge-{args.version}-win-x64",
+        "--output", work / f"Orbelle-{args.version}-win-x64",
         "--reports", reports / "desktop-package", "--version", args.version, "--zip")
-    shutil.copy2(work / f"OrbitForge-{args.version}-win-x64.zip", output)
+    shutil.copy2(work / f"Orbelle-{args.version}-win-x64.zip", output)
 
     # Copy tracked sources only: scikit-build must not walk vcpkg/build caches.
     wheel_source = work / "wheel-source"
@@ -105,7 +105,7 @@ def main():
     wheel_build = work / "wheel-build"
     run("wheel-build", builder, "-m", "pip", "wheel", wheel_source, "--no-deps", "--no-build-isolation",
         "--no-index", "--wheel-dir", output, f"--config-settings=build-dir={wheel_build}",
-        "--config-settings=cmake.define.ORBITFORGE_INSTALL_SDK=ON",
+        "--config-settings=cmake.define.ORBELLE_INSTALL_SDK=ON",
         "--config-settings=cmake.define.CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
     sdk = work / "sdk"
     run("sdk-install", "cmake", "--install", wheel_build, "--config", "Release", "--component", "SDK",
@@ -116,41 +116,41 @@ def main():
     # Validate the archive after relocation; no development DLL paths in this phase.
     relocated = work / "consumer"
     relocated.mkdir()
-    with zipfile.ZipFile(output / f"OrbitForge-{args.version}-sdk-win-x64.zip") as archive:
+    with zipfile.ZipFile(output / f"Orbelle-{args.version}-sdk-win-x64.zip") as archive:
         archive.extractall(relocated)
-    installed = relocated / f"OrbitForge-{args.version}-sdk-win-x64"
+    installed = relocated / f"Orbelle-{args.version}-sdk-win-x64"
     clean = dict(environment)
     clean["PATH"] = os.environ["PATH"]
     clean.pop("CMAKE_PREFIX_PATH", None)
-    clean["ORBITFORGE_DATA_HOME"] = str(work / "user-data")
+    clean["ORBELLE_DATA_HOME"] = str(work / "user-data")
     sdk_environment = dict(clean, PATH=str(installed / "dependencies/bin") + os.pathsep + clean["PATH"])
     stage_validation_inputs(source, relocated)
     run("sdk-consumer-configure", "cmake", "-S", relocated / "tests/packaging/sdk_consumer",
         "-B", work / "sdk-consumer", "-G", args.generator, *architecture,
         f"-DCMAKE_PREFIX_PATH={installed};{installed / 'dependencies'}",
         "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>",
-        "-DORBITFORGE_EXPECT_TIME_FRAMES=ON", "-DORBITFORGE_EXPECT_SPICE=ON",
-        f"-DORBITFORGE_EOP_MANIFEST={installed / 'share/OrbitForge/data/eop/iers_c04_2016_12_28_2017_01_04/manifest.json'}",
-        f"-DORBITFORGE_SPICE_MANIFEST={installed / 'share/OrbitForge/data/spice/de440s_2016_leap/manifest.json'}",
+        "-DORBELLE_EXPECT_TIME_FRAMES=ON", "-DORBELLE_EXPECT_SPICE=ON",
+        f"-DORBELLE_EOP_MANIFEST={installed / 'share/Orbelle/data/eop/iers_c04_2016_12_28_2017_01_04/manifest.json'}",
+        f"-DORBELLE_SPICE_MANIFEST={installed / 'share/Orbelle/data/spice/de440s_2016_leap/manifest.json'}",
         env=sdk_environment)
     run("sdk-consumer-build", "cmake", "--build", work / "sdk-consumer", "--config", "Release", env=sdk_environment)
     run("sdk-consumer-tests", "ctest", "--test-dir", work / "sdk-consumer", "-C", "Release",
         "--output-on-failure", "--no-tests=error", "--output-junit", reports / "sdk-consumer-tests.xml",
         env=sdk_environment)
-    wheels = list(output.glob("orbitforge-*.whl"))
+    wheels = list(output.glob("orbelle-*.whl"))
     if len(wheels) != 1:
         raise RuntimeError("Expected exactly one freshly built Windows wheel")
     python = work / "python-consumer/Scripts/python.exe"
     run("consumer-venv", sys.executable, "-m", "venv", work / "python-consumer", env=clean)
     run("wheel-install", python, "-m", "pip", "install", "--no-index", "--no-deps", wheels[0], env=clean)
     run("wheel-version", python, "-I", "-c",
-        "import orbitforge, sys; print(orbitforge.__file__); assert orbitforge.__version__ == sys.argv[1]",
+        "import orbelle, sys; print(orbelle.__file__); assert orbelle.__version__ == sys.argv[1]",
         args.version, env=clean)
     run("python-tests", python, "-I", "-m", "unittest", "discover", "-s", relocated / "bindings/python/tests", "-v", env=clean)
     for name in PYTHON_EXAMPLES:
         run(f"example-{name}", python, "-I", relocated / f"examples/python/{name}.py", env=clean)
     run("cpp-python-parity", python, "-I", relocated / "compare_examples.py", "--cpp-example",
-        desktop / "examples/cpp/Release/orbitforge_example.exe", env=sdk_environment)
+        desktop / "examples/cpp/Release/orbelle_example.exe", env=sdk_environment)
     (reports / "passed.json").write_text(json.dumps({
         "passed": True, "version": args.version, "release": True,
     }), encoding="utf-8")

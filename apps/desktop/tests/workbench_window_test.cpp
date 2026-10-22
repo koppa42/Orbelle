@@ -16,7 +16,7 @@
 #endif
 #include <gtest/gtest.h>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 namespace {
 #ifdef Q_OS_WIN
 QApplication &application() {
@@ -109,7 +109,7 @@ TEST(WorkbenchWindow, TitleControlsDoNotStealDragAndResizeTargets) {
     auto *bar = new QWidget(&window);
     bar->setFixedHeight(44);
     auto *layout = new QHBoxLayout(bar);
-    auto *name = new QLabel("OrbitForge", bar);
+    auto *name = new QLabel(QStringLiteral("星弦 Orbelle"), bar);
     auto *menu = new QMenuBar(bar);
     menu->addMenu(QStringLiteral("场景"));
     layout->addWidget(name);
@@ -184,4 +184,4 @@ TEST(WorkbenchWindow, CloseButtonHonorsVetoAndDoesNotCommitDraft) {
     EXPECT_FALSE(window.isVisible());
 }
 #endif
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

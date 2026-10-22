@@ -6,9 +6,9 @@
 
 按 [STK Integrator](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm) 的定义，`lagrange` 对位置和速度各分量分别插值；输出速度一般不等于位置多项式的导数。`hermite` 同时约束节点位置与速度，输出同一个位置多项式及其对 TAI 秒的导数。调用者必须提供该参考系中相对于 TAI 秒的坐标导数，不能将 TDB 速度或不同坐标系混入。
 
-[STK Connect](https://help.agi.com/stk/SubSystems/connectCmds/Content/cmd_HPOPIntegrator.htm) 的阶数范围对应多项式次数：Lagrange / VOP 为 0–29，需要 `order+1` 点；Hermite 为奇数 3–29，需要 `(order+1)/2` 点。`OrbitInterpolationOptions` 默认 Hermite 7 是本接口的选择，不声称是 STK 默认值。VOP 使用独立、有限且正的 `vop_mu`（m³/s²），默认 `3.986004415e14`；此默认是 OrbitForge 的选择，不覆盖底场 GM。VOP 插值独立于积分方程，当前积分仍采用 Cowell。
+[STK Connect](https://help.agi.com/stk/SubSystems/connectCmds/Content/cmd_HPOPIntegrator.htm) 的阶数范围对应多项式次数：Lagrange / VOP 为 0–29，需要 `order+1` 点；Hermite 为奇数 3–29，需要 `(order+1)/2` 点。`OrbitInterpolationOptions` 默认 Hermite 7 是本接口的选择，不声称是 STK 默认值。VOP 使用独立、有限且正的 `vop_mu`（m³/s²），默认 `3.986004415e14`；此默认是 Orbelle 的选择，不覆盖底场 GM。VOP 插值独立于积分方程，当前积分仍采用 Cowell。
 
-查询先保留左右包围节点，再按距离补齐连续窗口，距离相同优先较早节点；这样不等间隔采样也不会在局部窗口外求值。窗口在同一段内向端点移动，不减少阶数。Lagrange 0 阶按左节点保持，并将节点时刻标为间断。精确命中任一整数纳秒节点时直接返回原状态，包括输入速度。这些窗口、零阶及端点约定是 OrbitForge 的明确政策，仍需 STK 同配置实测核对。
+查询先保留左右包围节点，再按距离补齐连续窗口，距离相同优先较早节点；这样不等间隔采样也不会在局部窗口外求值。窗口在同一段内向端点移动，不减少阶数。Lagrange 0 阶按左节点保持，并将节点时刻标为间断。精确命中任一整数纳秒节点时直接返回原状态，包括输入速度。这些窗口、零阶及端点约定是 Orbelle 的明确政策，仍需 STK 同配置实测核对。
 
 计算先求局部 TAI 秒差，以窗口跨度归一化，避免大绝对历元损失相邻纳秒。Lagrange 用第二重心公式、权重归一化及补偿求和，并减去邻近节点的状态常数。Hermite 用合流 Newton 差商，先扣除邻近节点的直线运动，再用同一嵌套多项式同时求值及导数。无法分辨的浮点节点、病态重心权重或非有限结果明确报错。高阶并不保证高精度；调用者仍须用减半采样间隔和独立轨迹检验误差。
 
@@ -34,10 +34,10 @@ Hermite 的三个轴在同一次合流差商遍历中计算，共用历元差和
 
 ## C++ 与 Python
 
-C++ 经 `orbitforge/orbitforge.hpp` 使用 `OrbitInterpolationMethod`、`OrbitInterpolationOptions`、`OrbitEphemerisArc`、`make_tabulated_orbit_session`，只依赖 Runtime，不需要 CSPICE、ERFA 或 Qt。Core 工厂只依赖标准库。
+C++ 经 `orbelle/orbelle.hpp` 使用 `OrbitInterpolationMethod`、`OrbitInterpolationOptions`、`OrbitEphemerisArc`、`make_tabulated_orbit_session`，只依赖 Runtime，不需要 CSPICE、ERFA 或 Qt。Core 工厂只依赖标准库。
 
 ```python
-import orbitforge as of
+import orbelle as of
 
 options = of.OrbitInterpolationOptions()
 options.method = of.OrbitInterpolationMethod.HERMITE
@@ -72,7 +72,7 @@ Python 使用同名入口，`input` 为低层 `OrbitInput`，必须选择 HPOP�
 
 ```python
 import math
-import orbitforge as of
+import orbelle as of
 
 orbit = of.OrbitInput()
 orbit.propagator = of.OrbitPropagator.HPOP
@@ -97,7 +97,7 @@ state = session.sample([of.Epoch(17_123_456_789)]).states[0]
 
 `core::make_hpop_interpolated(initial, first, last, options, environment, reporting_step_nanoseconds)` 与 Runtime 同名 Session 工厂只允许在 `[first,last]` 内查询。构造检查从初始历元至整个区间的资源覆盖和参数；首次状态或间断查询才生成完整前向/反向滑行段，并发布不可变节点。取消与失败不发布半成品，之后可重试；发布后查询不再求力。可取消入口包括 `state_at(epoch, checkpoint)`、`discontinuities(checkpoint)`、报告与桌面后台准备；Python 单点 `Analysis.state()` 仍是同步接口。
 
-接受节点模式在短滑行或短天气段内增加实际积分终点，以满足指定阶数所需点数。触发条件为该段长度小于 `(所需点数−1) × 有效最大步长`；内部支持时刻按整数纳秒等分，保留初始固定积分网格及真实接受端点。所有点位于该段内，不延长资源覆盖、不降阶。过短而不能表示足够独立纳秒时刻的段明确失败。这个支持点政策是 OrbitForge 的实现，尚未取得 STK 实机对照。
+接受节点模式在短滑行或短天气段内增加实际积分终点，以满足指定阶数所需点数。触发条件为该段长度小于 `(所需点数−1) × 有效最大步长`；内部支持时刻按整数纳秒等分，保留初始固定积分网格及真实接受端点。所有点位于该段内，不延长资源覆盖、不降阶。过短而不能表示足够独立纳秒时刻的段明确失败。这个支持点政策是 Orbelle 的实现，尚未取得 STK 实机对照。
 
 固定输出模式严格使用显式网格和天气边界，不补额外支持点。如果任一天气段或机动滑行段的点数不足以满足所选阶数，生成失败；用户需减小轨道步长或选择合法的较低阶数。零时长且等于初始历元的段返回精确初态，允许同一时刻连续机动和最终机动，不构造假节点。
 

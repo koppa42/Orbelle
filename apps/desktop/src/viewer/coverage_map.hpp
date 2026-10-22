@@ -2,9 +2,9 @@
 #include <QWidget>
 #include <functional>
 #include <memory>
-#include <orbitforge/runtime/report.hpp>
+#include <orbelle/runtime/report.hpp>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // Immutable scientific results; display never launches propagation or changes the grid.
 class CoverageMap final : public QWidget {
   public:
@@ -33,4 +33,4 @@ class CoverageMap final : public QWidget {
     double maximum() const;
     void draw(QPainter &) const;
 };
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

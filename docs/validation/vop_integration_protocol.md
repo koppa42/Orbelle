@@ -4,7 +4,7 @@
 
 ## 独立二体流及状态转移矩阵
 
-`tools/validation/orekit/OrbitForgeKeplerJacobianReference.java` 使用锁定的 Orekit 13.1.2 / Hipparchus 4.0.2。Cartesian NumericalPropagator 在 DP853 中独立积分纯 Newtonian 运动及变分方程，由 MatricesHarvester 读取 STM；没有调用 OrbitForge。依赖散列见同目录 `dependencies.json`。
+`tools/validation/orekit/OrbelleKeplerJacobianReference.java` 使用锁定的 Orekit 13.1.2 / Hipparchus 4.0.2。Cartesian NumericalPropagator 在 DP853 中独立积分纯 Newtonian 运动及变分方程，由 MatricesHarvester 读取 STM；没有调用 Orbelle。依赖散列见同目录 `dependencies.json`。
 
 固定输入 `tests/reference/propagators/universal_kepler_stm.txt` 含 88 行：已有 80 个圆/椭圆/近抛物/抛物/双曲线状态与双向时间，加整圈、多圈、零时间和半周期两侧。ASCII/LF，SHA-256 `4427bfdf3260aa4826e09b4153d29a7ea99d4f418ac5582c774b65a6d14523db`。参考生成同时将最大步长 10 s 减半为 5 s；最大差为 1.162e-5 m、1.186e-8 m/s、5.801e-10 无量纲 STM。
 
@@ -13,8 +13,8 @@
 可复现命令（classpath 分隔符依平台调整）：
 
 ```text
-javac -cp "jars/*" -d classes tools/validation/orekit/OrbitForgeKeplerJacobianReference.java
-java -cp "classes;jars/*" OrbitForgeKeplerJacobianReference tests/reference/propagators/universal_kepler.txt universal_kepler_stm.txt
+javac -cp "jars/*" -d classes tools/validation/orekit/OrbelleKeplerJacobianReference.java
+java -cp "classes;jars/*" OrbelleKeplerJacobianReference tests/reference/propagators/universal_kepler.txt universal_kepler_stm.txt
 ```
 
 ## 完整积分及摄动

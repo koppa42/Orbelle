@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 ROOT = Path(__file__).resolve().parents[3]
 EOP = ROOT / "data/samples/eop/iers_c04_2016_12_28_2017_01_04/manifest.json"
@@ -67,7 +67,7 @@ class RelativityTests(unittest.TestCase):
                                      units=of.ReportUnits.SI, time_scale=of.ReportTimeScale.TAI)
             self.assertEqual(tuple(report.table.rows[-1][4:7]), states.position.values[-1])
             self.assertEqual(satellite.orbit.hpop.third_bodies, ())
-            path = root / "relativity.orbitforge"
+            path = root / "relativity.orbelle"
             project.save(path, analysis=analysis)
             restored = of.Project.open(path, data=data)
             self.assertTrue(restored.objects[satellite.id].orbit.hpop.include_relativistic_accelerations)
@@ -80,7 +80,7 @@ class RelativityTests(unittest.TestCase):
             self.assertNotEqual(other.position.values[-1], states.position.values[-1])
             self.assertEqual(analysis.states(satellite, step=u.s(60)).position.values, states.position.values)
             with self.assertRaises(of.RevisionConflictError):
-                project.save(root / "stale.orbitforge", analysis=analysis)
+                project.save(root / "stale.orbelle", analysis=analysis)
             del analysis, data, without_frames, restored
 
 if __name__ == "__main__":

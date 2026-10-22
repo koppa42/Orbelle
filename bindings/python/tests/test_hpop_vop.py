@@ -4,8 +4,8 @@ from pathlib import Path
 import math
 import tempfile
 import unittest
-import orbitforge as of
-from orbitforge import units as u
+import orbelle as of
+from orbelle import units as u
 
 MU = 3.986004415e14
 REFERENCE = Path(__file__).resolve().parents[3] / "tests/reference/propagators/universal_kepler.txt"
@@ -56,7 +56,7 @@ class HpopVopTests(unittest.TestCase):
             self.assertTrue(satellite.orbit.hpop.vop)
             self.assertEqual(satellite.orbit.hpop._native().uses_vop(), method in ("rkf78", "bulirsch_stoer"))
             with tempfile.TemporaryDirectory() as directory:
-                path = Path(directory)/"vop.orbitforge"
+                path = Path(directory)/"vop.orbelle"
                 project.save(path)
                 restored = of.Project.open(path)
                 self.assertEqual(restored.objects[satellite.id].orbit.hpop, satellite.orbit.hpop)

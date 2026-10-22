@@ -6,10 +6,10 @@
 #include <iomanip>
 #include <limits>
 #include <numbers>
-#include <orbitforge/core/propagation/hpop.hpp>
+#include <orbelle/core/propagation/hpop.hpp>
 #include <sstream>
 
-using namespace orbitforge::core;
+using namespace orbelle::core;
 namespace {
 CartesianState circular() {
     return {
@@ -189,7 +189,7 @@ TEST(EarthGravity, DegreeTwoZonalMatchesClosedFormIncludingThePoles) {
     }
 }
 TEST(Hpop, MatchesIndependentOrekitHolmesFeatherstoneAndDp853Reference) {
-    std::ifstream file{ORBITFORGE_HPOP_REFERENCE};
+    std::ifstream file{ORBELLE_HPOP_REFERENCE};
     ASSERT_TRUE(file.good());
     const HpopEnvironment environment{std::make_shared<FixedFrames>(),
                                       std::make_shared<FixedEop>()};
@@ -279,7 +279,7 @@ CartesianState eccentric_analytic(double seconds) {
 }
 } // namespace
 TEST(Hpop, Rkv89MatchesIndependentScipyDop853ForEccentricJ2AndTimeVaryingForces) {
-    std::ifstream file{ORBITFORGE_RKV89_REFERENCE};
+    std::ifstream file{ORBELLE_RKV89_REFERENCE};
     ASSERT_TRUE(file.good());
     HpopEnvironment environment{std::make_shared<FixedFrames>(), std::make_shared<FixedEop>()};
     environment.ephemeris = std::make_shared<MovingMoon>();
@@ -335,7 +335,7 @@ TEST(Hpop, FixedStepMethodsMatchIndependentHipparchusAndConverge) {
     for (auto integrator : {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
                             HpopIntegrator::bulirsch_stoer}) {
         SCOPED_TRACE(static_cast<int>(integrator));
-        std::ifstream file{ORBITFORGE_BS_REFERENCE};
+        std::ifstream file{ORBELLE_BS_REFERENCE};
         ASSERT_TRUE(file.good());
         HpopEnvironment environment{std::make_shared<FixedFrames>(), std::make_shared<FixedEop>()};
         environment.ephemeris = std::make_shared<MovingMoon>();
@@ -444,7 +444,7 @@ TEST(Hpop, LongAdaptiveStepsMatchIndependentHipparchusAndConverge) {
     for (auto integrator :
          {HpopIntegrator::rkf78, HpopIntegrator::rkv89, HpopIntegrator::bulirsch_stoer}) {
         double max_r = 0, max_v = 0, max_refinement = 0;
-        for (const auto *path : {ORBITFORGE_BS_REFERENCE, ORBITFORGE_LONG_STEP_REFERENCE}) {
+        for (const auto *path : {ORBELLE_BS_REFERENCE, ORBELLE_LONG_STEP_REFERENCE}) {
             std::ifstream file{path};
             ASSERT_TRUE(file.good());
             HpopEnvironment environment{std::make_shared<FixedFrames>(),
@@ -501,7 +501,7 @@ TEST(Hpop, LongAdaptiveStepsMatchIndependentHipparchusAndConverge) {
                 }
                 ++count;
             }
-            EXPECT_EQ(count, std::string_view(path) == ORBITFORGE_BS_REFERENCE ? 60 : 52);
+            EXPECT_EQ(count, std::string_view(path) == ORBELLE_BS_REFERENCE ? 60 : 52);
         }
         const auto metric = [&](const char *name, double value) {
             std::ostringstream text;
@@ -516,7 +516,7 @@ TEST(Hpop, LongAdaptiveStepsMatchIndependentHipparchusAndConverge) {
 TEST(Hpop, FullDayFixedStepsMatchIndependentLongPeriodReference) {
     for (auto integrator : {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
                             HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
-        std::ifstream file{ORBITFORGE_LONG_STEP_REFERENCE};
+        std::ifstream file{ORBELLE_LONG_STEP_REFERENCE};
         ASSERT_TRUE(file.good());
         std::string line;
         int count = 0;
@@ -632,7 +632,7 @@ TEST(Hpop, AdaptiveCacheAllowsFullDayStepsAndPreservesCancellationAndQueryOrder)
     }
 }
 TEST(Hpop, Rkf78MatchesIndependentHipparchusForEccentricJ2AndTimeVaryingForces) {
-    std::ifstream file{ORBITFORGE_BS_REFERENCE};
+    std::ifstream file{ORBELLE_BS_REFERENCE};
     ASSERT_TRUE(file.good());
     HpopEnvironment environment{std::make_shared<FixedFrames>(), std::make_shared<FixedEop>()};
     environment.ephemeris = std::make_shared<MovingMoon>();
@@ -685,7 +685,7 @@ TEST(Hpop, Rkf78MatchesIndependentHipparchusForEccentricJ2AndTimeVaryingForces) 
     RecordProperty("max_velocity_error_mps", metrics_v.str());
 }
 TEST(Hpop, BulirschStoerMatchesIndependentHipparchusForEccentricJ2AndTimeVaryingForces) {
-    std::ifstream file{ORBITFORGE_BS_REFERENCE};
+    std::ifstream file{ORBELLE_BS_REFERENCE};
     ASSERT_TRUE(file.good());
     HpopEnvironment environment{std::make_shared<FixedFrames>(), std::make_shared<FixedEop>()};
     environment.ephemeris = std::make_shared<MovingMoon>();
@@ -876,7 +876,7 @@ TEST(Hpop, BulirschStoerAdaptsOrderAndRejectsUnresolvedMinimumSteps) {
 
 TEST(Hpop, GaussJacksonMatchesIndependentHipparchusForBothCorrections) {
     for (auto correction : {HpopCorrection::full, HpopCorrection::pseudo}) {
-        std::ifstream file{ORBITFORGE_BS_REFERENCE};
+        std::ifstream file{ORBELLE_BS_REFERENCE};
         ASSERT_TRUE(file.good());
         HpopEnvironment environment{std::make_shared<FixedFrames>(), std::make_shared<FixedEop>()};
         environment.ephemeris = std::make_shared<MovingMoon>();
@@ -1016,7 +1016,7 @@ TEST(HpopEphemeris, AcceptedAndReportedEndpointsMatchIndependentHipparchus) {
     for (const auto integrator : {HpopIntegrator::rk4, HpopIntegrator::rkf78, HpopIntegrator::rkv89,
                                   HpopIntegrator::bulirsch_stoer, HpopIntegrator::gauss_jackson}) {
         for (const auto reporting : {0LL, 120'123'456'789LL}) {
-            std::ifstream file{ORBITFORGE_BS_REFERENCE};
+            std::ifstream file{ORBELLE_BS_REFERENCE};
             ASSERT_TRUE(file.good());
             HpopEnvironment environment{std::make_shared<FixedFrames>(),
                                         std::make_shared<FixedEop>()};
@@ -1172,7 +1172,7 @@ TEST(HpopVop, MatchesIndependentHipparchusWithPerturbationsAndRegularization) {
                 SCOPED_TRACE(static_cast<int>(integrator));
                 SCOPED_TRACE(regularized);
                 SCOPED_TRACE(fixed);
-                std::ifstream file{ORBITFORGE_BS_REFERENCE};
+                std::ifstream file{ORBELLE_BS_REFERENCE};
                 ASSERT_TRUE(file);
                 HpopEnvironment environment{std::make_shared<FixedFrames>(),
                                             std::make_shared<FixedEop>()};
@@ -1237,7 +1237,7 @@ TEST(HpopVop, MatchesIndependentHipparchusWithPerturbationsAndRegularization) {
 }
 TEST(HpopVop, OneLargeStepMatchesOrekitAcrossAllConics) {
     for (auto integrator : {HpopIntegrator::rkf78, HpopIntegrator::bulirsch_stoer}) {
-        std::ifstream input(ORBITFORGE_UNIVERSAL_KEPLER_REFERENCE);
+        std::ifstream input(ORBELLE_UNIVERSAL_KEPLER_REFERENCE);
         ASSERT_TRUE(input);
         std::string line;
         int count = 0;

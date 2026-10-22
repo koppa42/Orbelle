@@ -3,9 +3,9 @@ requires = ["scikit-build-core==0.12.2", "pybind11==3.1.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "orbitforge"
+name = "orbelle"
 version = "0.3.0"
-description = "OrbitForge orbital analysis, scenario management, and reporting"
+description = "Orbelle orbital analysis, scenario management, and reporting"
 readme = "README.md"
 requires-python = ">=3.11"
 classifiers = ["Programming Language :: Python :: 3", "Programming Language :: C++"]
@@ -17,24 +17,24 @@ Issues = "https://github.com/koppa42/OrbitForge/issues"
 [tool.scikit-build]
 minimum-version = "build-system.requires"
 cmake.version = ">=3.28"
-wheel.packages = ["bindings/python/src/orbitforge"]
+wheel.packages = ["bindings/python/src/orbelle"]
 install.components = ["Python"]
 build-dir = "out/build/wheel/{wheel_tag}"
 sdist.exclude = ["out", "local", ".git"]
 
-[tool.orbitforge.ci]
+[tool.orbelle.ci]
 baseline-python = "3.13"
 python-versions = ["3.11", "3.12", "3.13", "3.14", "3.15"]
 
 [tool.scikit-build.cmake.define]
 BUILD_TESTING = "OFF"
-ORBITFORGE_BUILD_PYTHON = "ON"
-ORBITFORGE_BUILD_APPLICATION = "ON"
-ORBITFORGE_WITH_ERFA = "ON"
-ORBITFORGE_WITH_DATA_CATALOG = "ON"
-ORBITFORGE_WITH_SPICE = "ON"
-ORBITFORGE_BUILD_VISUALIZATION = "OFF"
-ORBITFORGE_BUILD_DESKTOP = "OFF"
-ORBITFORGE_BUILD_EXAMPLES = "OFF"
-ORBITFORGE_INSTALL_SDK = "OFF"
+ORBELLE_BUILD_PYTHON = "ON"
+ORBELLE_BUILD_APPLICATION = "ON"
+ORBELLE_WITH_ERFA = "ON"
+ORBELLE_WITH_DATA_CATALOG = "ON"
+ORBELLE_WITH_SPICE = "ON"
+ORBELLE_BUILD_VISUALIZATION = "OFF"
+ORBELLE_BUILD_DESKTOP = "OFF"
+ORBELLE_BUILD_EXAMPLES = "OFF"
+ORBELLE_INSTALL_SDK = "OFF"
 

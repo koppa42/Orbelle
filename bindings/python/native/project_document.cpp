@@ -1,4 +1,4 @@
-#include <orbitforge/application/project_document.hpp>
+#include <orbelle/application/project_document.hpp>
 #include <pybind11/functional.h>
 #include <pybind11/operators.h>
 #include <pybind11/pybind11.h>
@@ -6,7 +6,7 @@
 #include <pybind11/stl/filesystem.h>
 
 namespace py = pybind11;
-using namespace orbitforge::application;
+using namespace orbelle::application;
 void bind_project_document(py::module_ &module) {
     py::register_exception<ObjectNotFoundError>(module, "ObjectNotFoundError",
                                                 PyExc_ReferenceError);
@@ -25,14 +25,14 @@ void bind_project_document(py::module_ &module) {
         .def(py::init<std::string, OrbitInput, OrbitDisplay>(), py::arg("name"), py::arg("orbit"),
              py::arg("display"));
     py::class_<objects::GroundStation>(module, "GroundStationDefinition")
-        .def(py::init<std::string, orbitforge::core::GroundStationLocation, double>(),
+        .def(py::init<std::string, orbelle::core::GroundStationLocation, double>(),
              py::arg("name"), py::arg("location"), py::arg("minimum_elevation_rad"));
     py::class_<objects::Pointing>(module, "PointingDefinition")
         .def(py::init<std::optional<ObjectRef>>(), py::arg("target") = py::none());
     py::class_<objects::Sensor>(module, "SensorDefinition")
         .def(py::init<std::string, ObjectRef, double, objects::Pointing>(), py::arg("name"),
              py::arg("parent"), py::arg("half_angle_rad"), py::arg("pointing"))
-        .def(py::init<std::string, ObjectRef, orbitforge::core::SensorPattern, objects::Pointing,
+        .def(py::init<std::string, ObjectRef, orbelle::core::SensorPattern, objects::Pointing,
                       double, SensorDisplay>(),
              py::arg("name"), py::arg("parent"), py::arg("pattern"), py::arg("pointing"),
              py::arg("roll_rad") = 0, py::arg("display") = SensorDisplay{});
@@ -56,7 +56,7 @@ void bind_project_document(py::module_ &module) {
                 return s.pattern ? std::optional<double>(s.pattern->half_angle_rad) : std::nullopt;
             },
             [](objects::SensorUpdate &s, std::optional<double> v) {
-                s.pattern = v ? std::optional<orbitforge::core::SensorPattern>(*v) : std::nullopt;
+                s.pattern = v ? std::optional<orbelle::core::SensorPattern>(*v) : std::nullopt;
             })
         .def_readwrite("pattern", &objects::SensorUpdate::pattern)
         .def_readwrite("roll_rad", &objects::SensorUpdate::roll_rad)

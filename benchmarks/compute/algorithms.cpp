@@ -6,14 +6,14 @@
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
-#include <orbitforge/core/propagation/access.hpp>
-#include <orbitforge/core/propagation/gravity.hpp>
-#include <orbitforge/core/propagation/hpop.hpp>
-#include <orbitforge/runtime/report.hpp>
-#include <orbitforge/runtime/time_frames.hpp>
+#include <orbelle/core/propagation/access.hpp>
+#include <orbelle/core/propagation/gravity.hpp>
+#include <orbelle/core/propagation/hpop.hpp>
+#include <orbelle/runtime/report.hpp>
+#include <orbelle/runtime/time_frames.hpp>
 
 namespace {
-using namespace orbitforge;
+using namespace orbelle;
 using Json = nlohmann::json;
 using Clock = std::chrono::steady_clock;
 struct Digest {
@@ -53,8 +53,8 @@ void measure(Json &report, const char *name, Operation operation, Verify verify)
 } // namespace
 
 int main(int argc, char **argv) {
-    if (argc != 3 || std::string(ORBITFORGE_BENCHMARK_CONFIG) != "Release") {
-        std::cerr << "Usage (Release): orbitforge_algorithm_benchmark <data-root> <new-output>\n";
+    if (argc != 3 || std::string(ORBELLE_BENCHMARK_CONFIG) != "Release") {
+        std::cerr << "Usage (Release): orbelle_algorithm_benchmark <data-root> <new-output>\n";
         return 1;
     }
     const std::filesystem::path data = argv[1], output = argv[2];

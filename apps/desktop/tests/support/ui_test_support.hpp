@@ -6,7 +6,7 @@
 #include <QThread>
 #include <memory>
 
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // A test binary may contain several suites. Qt permits one QApplication per process.
 inline QApplication &test_application(const char *application_name) {
     static int argc = 1;
@@ -28,4 +28,4 @@ template <typename Predicate> bool wait_for_ui(Predicate ready, int timeout_ms =
     }
     return ready();
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

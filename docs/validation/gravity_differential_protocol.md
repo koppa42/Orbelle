@@ -6,9 +6,9 @@
 
 ### Orekit 解析 Hessian
 
-`tools/validation/orekit/OrbitForgeGravityDifferentialReference.java` 使用未修改的 Orekit **13.1.2** / Hipparchus **4.0.2**。生产二阶 Jet 不参与参考生成；参考通过公共 `FieldSpacecraftState<Gradient>`、`HolmesFeatherstoneAttractionModel.acceleration` 得到 Orekit 自己的解析 Hessian，再叠加 `NewtonianAttraction`。版本及八个 JAR 的 SHA-256 固定在 `tools/validation/orekit/dependencies.json`。
+`tools/validation/orekit/OrbelleGravityDifferentialReference.java` 使用未修改的 Orekit **13.1.2** / Hipparchus **4.0.2**。生产二阶 Jet 不参与参考生成；参考通过公共 `FieldSpacecraftState<Gradient>`、`HolmesFeatherstoneAttractionModel.acceleration` 得到 Orekit 自己的解析 Hessian，再叠加 `NewtonianAttraction`。版本及八个 JAR 的 SHA-256 固定在 `tools/validation/orekit/dependencies.json`。
 
-复用 `OrbitForgeFullGravityReference.synthetic` 的系数定义，168 组涵盖：
+复用 `OrbelleFullGravityReference.synthetic` 的系数定义，168 组涵盖：
 
 - 0、2、4、20、360、720、1440、2190 阶，零阶次、全阶次及 2190×2159；
 - 密集 sin/cos 合成场，及 C20 加放大的 2190 阶 zonal / tesseral / sectorial 边界项；
@@ -25,7 +25,7 @@ SHA-256 014aa617884e115dd250208758cde4e72a4182b28a4994ad367509e389cb82a7
 
 ### 80 位精度的极轴解析值
 
-`tools/validation/gravity_differential_poles.py` 只用 Python 标准库 Decimal，精度 80 位。它依据 `P_n(±1)`、`P'_n(±1)`、`P''_n(±1)` 及势函数的调和性，直接计算极轴上的加速度和 Hessian，不调用生产 Cartesian 递推或 OrbitForge 模块。binary64 输入通过 `Decimal.from_float` 精确保留。
+`tools/validation/gravity_differential_poles.py` 只用 Python 标准库 Decimal，精度 80 位。它依据 `P_n(±1)`、`P'_n(±1)`、`P''_n(±1)` 及势函数的调和性，直接计算极轴上的加速度和 Hessian，不调用生产 Cartesian 递推或 Orbelle 模块。binary64 输入通过 `Decimal.from_float` 精确保留。
 
 在精确轴上只有 m=0、1、2 能贡献二阶导数。76 组覆盖 2、20、360、2190 阶、不同独立次数、密集／放大边界系数场、南北极以及两种半径。高阶 m>2 项也存在于被测模型中，应在轴上自然给出零贡献。
 
@@ -42,15 +42,15 @@ SHA-256 cef3d0c52b89abbe566f831500f405590f169e824c3ec355eef566cd52432cae
 先按清单下载并逐项校验 JAR，将下面的 `<classpath>` 替换为这些 JAR 的平台类路径；所有输出放入新的 `out/validation/` 子目录：
 
 ```text
-javac -cp <classpath> -d <classes> tools/validation/orekit/OrbitForgeFullGravityReference.java tools/validation/orekit/OrbitForgeGravityDifferentialReference.java
-java -Xmx2g -cp <classes-and-jars> org.orekit.forces.gravity.potential.OrbitForgeGravityDifferentialReference <output.txt>
+javac -cp <classpath> -d <classes> tools/validation/orekit/OrbelleFullGravityReference.java tools/validation/orekit/OrbelleGravityDifferentialReference.java
+java -Xmx2g -cp <classes-and-jars> org.orekit.forces.gravity.potential.OrbelleGravityDifferentialReference <output.txt>
 python tools/validation/gravity_differential_poles.py <poles.txt>
 ```
 
 对每个生成器重复运行，核对原始 LF 字节和上述 SHA-256。CMake 已将固定数据注册到核心测试：
 
 ```text
-orbitforge_core_tests --gtest_filter=GravityDifferential.*:Gravity.*
+orbelle_core_tests --gtest_filter=GravityDifferential.*:Gravity.*
 ```
 
 每组参考另外要求 `differential().acceleration_mps2` 与普通 `acceleration()` 逐位相同。核心测试还覆盖单极闭式 Jacobian、非法阶次／位置／系数／缺失长期变化元数据、底场外加性项、计算中取消和共享不可变模型的并发历元。SDK 消费端从安装目录实际调用新方法。

@@ -22,7 +22,7 @@
 //     the page, as cautions;
 //   * label columns are aligned across every group of a page (align_form_labels);
 //   * optional models are switched on from a toggle-styled check box (make_switch).
-namespace orbitforge::desktop {
+namespace orbelle::desktop {
 // A small "i" button whose tooltip and accessible description hold the explanation; a
 // click shows it immediately so it also works without hovering.
 inline QToolButton *info_marker(QWidget *parent = nullptr) {
@@ -202,4 +202,4 @@ inline void align_form_labels(QWidget *root, int maximum = 120) {
     for (auto *label : labels)
         label->setMinimumWidth(width);
 }
-} // namespace orbitforge::desktop
+} // namespace orbelle::desktop

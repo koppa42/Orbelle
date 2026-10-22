@@ -4,13 +4,13 @@
 
 ## Orekit 独立组合参考
 
-`tools/validation/orekit/OrbitForgeHpopForceReference.java` 调用未修改的 Orekit 13.1.2 力模型与 Hipparchus 4.0.2 `Gradient`，八个独立变量为 r、v、D、K。`NRLMSISE00` / `DragForce` 显式关闭密度有限差分；参考的密度导数为自动微分，生产仍采用既有局部密度梯度方法。
+`tools/validation/orekit/OrbelleHpopForceReference.java` 调用未修改的 Orekit 13.1.2 力模型与 Hipparchus 4.0.2 `Gradient`，八个独立变量为 r、v、D、K。`NRLMSISE00` / `DragForce` 显式关闭密度有限差分；参考的密度导数为自动微分，生产仍采用既有局部密度梯度方法。
 
 216 组 = 三个旋转 × 两个高度 × 两个纬度 × 三组有符号系数 × 六种力组合。高度 245 / 750 km，纬度 −0.8 / 0.6 rad、经度 1.2 rad，WGS84 椭球；固定接收历元为 2000-01-01 12:00:00 TAI，合成 UTC 与它相同。平滑偏导案例避开 NRLMSISE-00 的 240 km 内部分界，分界行为由专门错误测试保留。
 
 - 地固轴绕 `(1,2,−1)` 旋转 −0.7、0.2、1.1 rad，角速度 `(2e−5,−3e−5,7e−5)` rad/s。参考直接输出 Orekit 变换的 R 与 Rdot，C++ 用同一矩阵定义外部环境，独立检查张量旋转和位置到速度耦合。
 - 中心 GM=`3.986004415e14` m³/s²，参考半径 `6378136.3` m，tide-free 2×2 归一化场；C20=`−4.84165371736e−4`，C21/S21=`3e−7/−4e−7`，C22/S22=`2e−6/−7e−7`。调用 `NewtonianAttraction` 与 `HolmesFeatherstoneAttractionModel`。
-- 相对论调用 `Relativity`、`LenseThirringRelativity`、`DeSitterRelativity`；太阳位置／速度复用 `OrbitForgeRelativityReference.java` 的明确合成星历，月球位置 `(3e8,−2e8,1e8)` m、GM=`4.902800118e12` m³/s²。日月引力使用 `ThirdBodyAttraction`。
+- 相对论调用 `Relativity`、`LenseThirringRelativity`、`DeSitterRelativity`；太阳位置／速度复用 `OrbelleRelativityReference.java` 的明确合成星历，月球位置 `(3e8,−2e8,1e8)` m、GM=`4.902800118e12` m³/s²。日月引力使用 `ThirdBodyAttraction`。
 - 无阴影 SRP 使用 `IsotropicRadiationSingleCoefficient`，4.56e−6 Pa、149597870700 m。阻力使用 `NRLMSISE00` / `IsotropicDrag`，F10.7 与平均通量均为 150、日 Ap=15。D=`Cd×0.02`，K=`Cr×0.03`；Cd/Cr 为 `(2.2,1.7)`、零和相应负值，独立变量直接是 D/K。
 - 六种组合分别为重力单独，以及重力加相对论、加日月、加 SRP、加阻力、全部开启。该参考不包含 JR、潮汐、视太阳或阴影；它们分别由已有独立协议和下述链式测试覆盖。
 
@@ -20,7 +20,7 @@
 3e1b6fe27cfd6b66e14849aed2e49fb4ac71a84902b784a83c4ef2721d7df310
 ```
 
-使用 `tools/validation/orekit/dependencies.json` 的固定 JAR，编译生成器及 `OrbitForgeRelativityReference.java`，运行主类 `OrbitForgeHpopForceReference <输出文件>`。例如 classpath 使用 `out/validation/orekit/jars/*`，编译输出写入独立的 `out/validation/<run>/java/`，运行时把它加入 classpath（Windows 分隔符 `;`，Linux `:`）。重复生成须字节一致；不让普通 CI 联网生成参考。
+使用 `tools/validation/orekit/dependencies.json` 的固定 JAR，编译生成器及 `OrbelleRelativityReference.java`，运行主类 `OrbelleHpopForceReference <输出文件>`。例如 classpath 使用 `out/validation/orekit/jars/*`，编译输出写入独立的 `out/validation/<run>/java/`，运行时把它加入 classpath（Windows 分隔符 `;`，Linux `:`）。重复生成须字节一致；不让普通 CI 联网生成参考。
 
 ## 容限与已观测差异
 
