@@ -841,10 +841,13 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
         update_.state = DataUpdateState::checking;
         update_.message = status_ = ui::text("eop_catalog.label_12");
         save_update_status();
-        reply_ = network_.get(request);
-        reply_->setReadBufferSize(64 * 1024);
+        auto *reply = network_.get(request);
+        reply_ = reply;
+        reply->setReadBufferSize(64 * 1024);
         deadline_.start(force_product(product) ? 1800000 : 120000);
-        connect(reply_, &QNetworkReply::metaDataChanged, this, [this] {
+        connect(reply, &QNetworkReply::metaDataChanged, this, [this, reply] {
+            if (reply_ != reply)
+                return;
             // Progress notifications may be delayed until the next body chunk arrives.
             // Use an uncompressed Content-Length as soon as headers are available.
             const auto encoding = reply_->rawHeader("Content-Encoding").toLower();
@@ -861,11 +864,13 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
                 }
             }
         });
-        connect(reply_, &QNetworkReply::downloadProgress, this, [this](qint64, qint64 total) {
-            if (total > 0)
+        connect(reply, &QNetworkReply::downloadProgress, this, [this, reply](qint64, qint64 total) {
+            if (reply_ == reply && total > 0)
                 total_ = total;
         });
-        connect(reply_, &QNetworkReply::readyRead, this, [this] {
+        connect(reply, &QNetworkReply::readyRead, this, [this, reply] {
+            if (reply_ != reply)
+                return;
             auto &update_ = update(active_product_);
             const auto bytes = reply_->readAll();
             received_ += bytes.size();
@@ -881,11 +886,16 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
             }
         });
         connect(
-            reply_, &QNetworkReply::finished, this,
-            [this, url, conditional, current_hash, product] {
+            reply, &QNetworkReply::finished, this,
+            [this, reply, url, conditional, current_hash, product] {
+                if (reply_ != reply)
+                    return;
                 auto &update_ = update(product);
                 deadline_.stop();
-                auto *finished = reply_;
+                // abort() finishes synchronously, but HTTP worker events can still arrive
+                // before deleteLater(). They must not touch cleared or replacement state.
+                disconnect(reply, nullptr, this, nullptr);
+                auto *finished = reply;
                 reply_ = nullptr;
                 try {
                     if (cancelled_)

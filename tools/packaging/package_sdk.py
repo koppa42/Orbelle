@@ -53,7 +53,7 @@ def package(sdk, dependencies, output, version, platform):
         "On Windows, add dependencies/bin to PATH when running a linked executable.\n"
         "The supplied Release libraries require a compatible compiler and runtime; no stable ABI is promised.\n"
         "Keep the dependency licenses and share/Orbelle/notices when redistributing.\n"
-        "Documentation: https://github.com/koppa42/OrbitForge/tree/" + f"v{version}/docs\n",
+        "Documentation: https://github.com/koppa42/Orbelle/tree/" + f"v{version}/docs\n",
         encoding="utf-8")
     if platform == "win-x64":
         with zipfile.ZipFile(archive, "x", zipfile.ZIP_DEFLATED) as bundle:

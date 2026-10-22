@@ -11,8 +11,8 @@ requires-python = ">=3.11"
 classifiers = ["Programming Language :: Python :: 3", "Programming Language :: C++"]
 
 [project.urls]
-Repository = "https://github.com/koppa42/OrbitForge"
-Issues = "https://github.com/koppa42/OrbitForge/issues"
+Repository = "https://github.com/koppa42/Orbelle"
+Issues = "https://github.com/koppa42/Orbelle/issues"
 
 [tool.scikit-build]
 minimum-version = "build-system.requires"
