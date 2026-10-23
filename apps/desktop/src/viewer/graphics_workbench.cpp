@@ -1,5 +1,6 @@
 #include "graphics_workbench.hpp"
 #include "../ui_text.hpp"
+#include "apply_timing.hpp"
 #include "eop_catalog.hpp"
 #include "epoch_editor.hpp"
 #include "form_kit.hpp"
@@ -85,6 +86,7 @@
 #include <QPlatformSurfaceEvent>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QScopeGuard>
 #include <QScopedValueRollback>
 #include <QScreen>
 #include <QScrollArea>
@@ -689,7 +691,9 @@ class Workbench final : public WorkbenchWindow {
                     ui::text("graphics_workbench.properties_dialog.set_window_title"));
                 properties_dialog_->resize(
                     980, std::min(660, screen()->availableGeometry().height() - 100));
-                properties_dialog_->setMinimumSize(320, 280);
+                // The editor scrolls its content and pins actions to the available height.
+                // A top-level dialog minimum would otherwise clip the embedded footer.
+                properties_dialog_->setMinimumWidth(320);
                 auto *dialog_layout = new QVBoxLayout(properties_dialog_);
                 dialog_layout->setSizeConstraint(QLayout::SetNoConstraint);
                 dialog_layout->setContentsMargins(0, 0, 0, 0);
@@ -1265,7 +1269,8 @@ class Workbench final : public WorkbenchWindow {
                 splash->hide();
                 QMessageBox message(QMessageBox::Warning, ui::text("startup_splash.failed_title"),
                                     ui::text("startup_splash.failed"),
-                                    QMessageBox::Retry | QMessageBox::Cancel, this);
+                                    QMessageBox::Retry | QMessageBox::Cancel, nullptr);
+                message.setScreen(screen());
                 message.setObjectName("startupPreparationError");
                 message.setDetailedText(QString::fromUtf8(error.what()));
                 message.button(QMessageBox::Retry)->setText(ui::text("startup_splash.retry"));
@@ -1274,7 +1279,7 @@ class Workbench final : public WorkbenchWindow {
                     message.addButton(ui::text("startup_splash.manage"), QMessageBox::ActionRole);
                 message.exec();
                 if (message.clickedButton() == manage)
-                    show_data_center(this, *eop_catalog_);
+                    show_data_center(nullptr, *eop_catalog_);
                 else if (message.standardButton(message.clickedButton()) != QMessageBox::Retry)
                     return false;
             }
@@ -1325,6 +1330,7 @@ class Workbench final : public WorkbenchWindow {
             model_candidate_.wait();
         if (profile_orbits_.valid())
             profile_orbits_.wait();
+        finish_apply_timing("cancelled");
 #ifdef ORBELLE_DESKTOP_BENCHMARK
         if (run_)
             run_->stop_inputs();
@@ -1576,15 +1582,16 @@ class Workbench final : public WorkbenchWindow {
             return benchmark_->cache->sample(epoch);
 #endif
         visualization::RenderSnapshot result{epoch, display_frame_, core::OriginId::earth, {}};
+        result.markers.reserve(satellites_.size() + stations_.size());
         std::optional<core::PositionRotation> rotation;
         for (const auto &satellite : satellites_) {
-            if (cache_covers(*satellite.orbit, epoch, epoch))
-                result.markers.push_back((display_frame_ == core::FrameId::gcrf
-                                              ? satellite.orbit->inertial_track
-                                              : satellite.orbit->track)
-                                             .sample(epoch)
-                                             .markers.front());
-            else {
+            if (cache_covers(*satellite.orbit, epoch, epoch)) {
+                const auto &track = display_frame_ == core::FrameId::gcrf
+                                        ? satellite.orbit->inertial_track
+                                        : satellite.orbit->track;
+                result.markers.push_back(
+                    {track.samples().provenance().object_id, track.sample_state(epoch).position_m});
+            } else {
                 const auto native =
                     satellite.orbit->session.sample(std::array{epoch}).states().front();
                 const auto state =
@@ -2419,12 +2426,27 @@ class Workbench final : public WorkbenchWindow {
                                     .arg(info.extrapolation_days)
                                     .arg(ranges.join(QStringLiteral("\n")));
     }
+    void finish_apply_timing(const QString &outcome) {
+        if (auto timing = std::exchange(apply_timing_, {}))
+            timing->finish(outcome);
+    }
     bool start_project(application::Project project, const QString &path, bool editing = false,
                        std::optional<std::size_t> selection = std::nullopt,
                        std::optional<std::string> edited_object = std::nullopt,
                        std::optional<ScenarioSettings> settings = std::nullopt) {
         if (busy())
             throw std::logic_error("Finish the pending update before opening a project");
+        const bool own_timing = editing && !apply_timing_;
+        if (own_timing)
+            apply_timing_ = ApplyTiming::begin("project_apply", ++apply_timing_sequence_);
+        last_project_outcome_ = "rejected";
+        const auto finish_request = qScopeGuard([&] {
+            if (own_timing && apply_timing_ && !project_candidate_.valid()) {
+                apply_timing_->requested();
+                finish_apply_timing(last_project_outcome_.isEmpty() ? "rejected"
+                                                                    : last_project_outcome_);
+            }
+        });
         const auto first = settings ? settings->first : project.first;
         const auto last = settings ? settings->last : project.last;
         // Check edits before asking to replace calculation data. The original lock
@@ -2557,6 +2579,11 @@ class Workbench final : public WorkbenchWindow {
             editing ? orbit_sessions_->fork() : std::make_shared<runtime::OrbitSessionCache>();
         project_progress_ = std::make_shared<ProjectProgress>();
         project_progress_->count = project.satellites.size();
+        if (apply_timing_) {
+            apply_timing_->route = "project";
+            apply_timing_->asynchronous = true;
+            apply_timing_->requested();
+        }
         project_candidate_ = std::async(
             std::launch::async,
             [this, project = std::move(project),
@@ -2565,7 +2592,10 @@ class Workbench final : public WorkbenchWindow {
              ephemeris_files, weather_files, ocean_files, retained_gravity = gravity_,
              retained_ephemerides = ephemerides_, retained_weather = weather_,
              retained_ocean_tides = ocean_tides_, cancel = project_cancellation_,
-             progress = project_progress_, warmed = startup_resources_]() mutable {
+             progress = project_progress_, warmed = startup_resources_,
+             timing = apply_timing_]() mutable {
+                const ApplyWorkerTiming worker_timing(timing);
+                StageTiming resource_timing(timing ? &timing->resources_ms : nullptr);
                 const auto checkpoint = [cancel] {
                     if (*cancel)
                         throw OrbitCancelled{};
@@ -2604,11 +2634,13 @@ class Workbench final : public WorkbenchWindow {
                     },
                     checkpoint, warmed.ephemerides);
                 progress->phase = ProjectProgress::Phase::orbits;
+                resource_timing.stop();
                 return prepare_project_scene(
                     std::move(project), source, frames_, installed_data, *cancel, retained,
                     edited_object, calculation_time, gravity, ephemerides, weather, ocean_tides,
                     previous_project, sessions,
-                    [progress](std::size_t index) { progress->index = index; });
+                    [progress](std::size_t index) { progress->index = index; },
+                    timing ? &timing->preparation : nullptr);
             });
         update_actions();
         statusBar()->showMessage(editing ? ui::text("graphics_workbench.label_50")
@@ -2648,7 +2680,10 @@ class Workbench final : public WorkbenchWindow {
             statusBar()->showMessage(status);
             return;
         }
+        if (apply_timing_)
+            apply_timing_->ready();
         try {
+            const StageTiming publish_timing(apply_timing_ ? &apply_timing_->publish_ms : nullptr);
             auto candidate = project_candidate_.get();
             if (project_cancellation_->load())
                 throw OrbitCancelled{};
@@ -2857,6 +2892,8 @@ class Workbench final : public WorkbenchWindow {
                                              : ui::text("graphics_workbench.title_2");
             statusBar()->showMessage(title + QStringLiteral("：") +
                                      QString::fromUtf8(error.what()));
+            // Stop the measurement before waiting for the error dialog to be dismissed.
+            finish_apply_timing(last_project_outcome_);
             if (smoke_dir_.isEmpty())
                 QMessageBox::warning(this, title, QString::fromUtf8(error.what()));
         } catch (const vsg::Exception &error) {
@@ -2864,6 +2901,7 @@ class Workbench final : public WorkbenchWindow {
             statusBar()->showMessage(
                 ui::text("graphics_workbench.label_55").arg(QString::fromStdString(error.message)));
         }
+        finish_apply_timing(last_project_outcome_ == "opened" ? "applied" : last_project_outcome_);
         if (project_orbit_edit_) {
             editor_->set_busy(false);
             last_orbit_outcome_ =
@@ -3848,6 +3886,9 @@ class Workbench final : public WorkbenchWindow {
         visualization::RenderSnapshot points{
             snapshot_.epoch, snapshot_.frame, snapshot_.origin, {}};
         std::vector<std::uint32_t> point_colors;
+        fixed.markers.reserve(satellites_.size() + stations_.size());
+        points.markers.reserve(satellites_.size());
+        point_colors.reserve(satellites_.size());
         const auto format = slots_.empty() || !slots_.front()->window->windowAdapter
                                 ? VK_FORMAT_B8G8R8A8_SRGB
                                 : slots_.front()->window->windowAdapter->surfaceFormat().format;
@@ -3857,7 +3898,8 @@ class Workbench final : public WorkbenchWindow {
             const auto &marker = snapshot_.markers.at(i);
             if (cache_covers(*satellite.orbit, snapshot_.epoch, snapshot_.epoch))
                 fixed.markers.push_back(
-                    satellite.orbit->track.sample(snapshot_.epoch).markers.front());
+                    {satellite.orbit->track.samples().provenance().object_id,
+                     satellite.orbit->track.sample_state(snapshot_.epoch).position_m});
             else
                 fixed.markers.push_back(
                     {marker.object_id, display_frame_ == core::FrameId::gcrf
@@ -4064,6 +4106,15 @@ class Workbench final : public WorkbenchWindow {
     void start_orbit(OrbitInput input, const std::string &name) {
         if (busy() || !scenario_)
             return;
+        apply_timing_ = ApplyTiming::begin("orbit_apply", ++apply_timing_sequence_);
+        last_orbit_outcome_ = "rejected";
+        const auto finish_request = qScopeGuard([&] {
+            if (apply_timing_ && !candidate_.valid() && !project_candidate_.valid()) {
+                apply_timing_->requested();
+                finish_apply_timing(last_orbit_outcome_.isEmpty() ? "rejected"
+                                                                  : last_orbit_outcome_);
+            }
+        });
         pending_orbit_target_ = editor_target_;
         pending_orbit_name_ = name;
         input.first = scenario_->first();
@@ -4149,22 +4200,36 @@ class Workbench final : public WorkbenchWindow {
         const auto eop = eop_;
         const auto calculation_time = time_for(eop->data_info().time_data);
         pending_orbit_sessions_ = orbit_sessions_->fork();
+        if (apply_timing_) {
+            apply_timing_->route = "single_orbit";
+            apply_timing_->asynchronous = true;
+            apply_timing_->requested();
+        }
         candidate_ = std::async(std::launch::async, [this, input = std::move(input), previous,
                                                      reuse, cache, eop, calculation_time,
                                                      sessions = pending_orbit_sessions_,
-                                                     cancel = cancellation_] {
+                                                     cancel = cancellation_,
+                                                     timing = apply_timing_] {
+            const ApplyWorkerTiming worker_timing(timing);
+            StageTiming session_timing(timing ? &timing->preparation.session_ms : nullptr);
             if (*cancel)
                 throw OrbitCancelled{};
             if (!reuse && previous &&
                 previous->session.provenance().input_revision ==
                     std::numeric_limits<std::uint64_t>::max())
                 throw std::overflow_error("Object input revision exhausted");
+            if (timing) {
+                timing->preparation.sessions_acquired += !reuse;
+                timing->preparation.sessions_reused += reuse;
+            }
             auto session =
                 reuse ? previous->session
                       : sessions->acquire(
                             input, previous ? previous->session.provenance().input_revision + 1 : 1,
                             calculation_time.get(), {frames_, eop});
-            return prepare_orbit_scene(input, std::move(session), *frames_, *eop, *cancel, cache);
+            session_timing.stop();
+            return prepare_orbit_scene(input, std::move(session), *frames_, *eop, *cancel, cache,
+                                       timing ? &timing->preparation : nullptr);
         });
         editor_->set_busy(true);
         update_actions();
@@ -4174,7 +4239,10 @@ class Workbench final : public WorkbenchWindow {
             candidate_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
             return;
         editor_->set_busy(false);
+        if (apply_timing_)
+            apply_timing_->ready();
         try {
+            StageTiming publish_timing(apply_timing_ ? &apply_timing_->publish_ms : nullptr);
             auto candidate = candidate_.get();
             if (cancellation_->load())
                 throw OrbitCancelled{};
@@ -4213,6 +4281,8 @@ class Workbench final : public WorkbenchWindow {
                     rebuild();
                 } catch (...) {
                     fail("Cannot restore the previous orbit after scene compilation failed");
+                    publish_timing.stop();
+                    finish_apply_timing("rejected");
                     return;
                 }
                 throw;
@@ -4285,6 +4355,7 @@ class Workbench final : public WorkbenchWindow {
                                  true);
             last_orbit_outcome_ = "rejected";
         }
+        finish_apply_timing(last_orbit_outcome_);
         if (insert_defaults_pending_ && last_orbit_outcome_ == "rejected")
             show_properties_dialog();
         insert_defaults_pending_ = false;
@@ -5026,6 +5097,12 @@ class Workbench final : public WorkbenchWindow {
                 {"map_width", ground_map_->width()},
                 {"map_height", ground_map_->height()},
                 {"device_pixel_ratio", devicePixelRatioF()},
+                {"navigation",
+                 QJsonObject{{"map_pan_moves", profile_pan_moves_},
+                             {"map_pan_max_displacement_pixels", profile_pan_distance_},
+                             {"map_zoom_changes", profile_zoom_changes_},
+                             {"map_zoom_min", profile_zoom_min_},
+                             {"map_zoom_max", profile_zoom_max_}}},
                 {"map_quality_restored_after_zoom", true},
                 {"scope",
                  "GUI CPU and timer cadence; synthetic Qt input, not input-to-photon latency"}});
@@ -5041,6 +5118,12 @@ class Workbench final : public WorkbenchWindow {
             QMouseEvent event(type, p, p, button, buttons, Qt::NoModifier);
             QCoreApplication::sendEvent(target, &event);
         };
+        const auto map_plot = [this] {
+            return QRectF(ground_map_->rect()).adjusted(38, 14, -16, -44);
+        };
+        const auto view_plot = [this] {
+            return QRectF(QPointF{}, QSizeF(slots_[0]->window->size()));
+        };
         if (local == 0) {
             std::cerr << "Profile phase: " << phases[phase].toStdString() << '\n';
             set_playing(phase == 5 || phase == 6);
@@ -5055,35 +5138,64 @@ class Workbench final : public WorkbenchWindow {
                 workspace_->select_view(phase == 7 ? 1 : 0);
             }
             if (phase == 1)
-                mouse(slots_[0]->window, QEvent::MouseButtonPress, QPointF(300, 250),
+                mouse(slots_[0]->window, QEvent::MouseButtonPress, view_plot().center(),
                       Qt::LeftButton, Qt::LeftButton);
             if (phase == 4) {
-                ground_map_->zoom(2, ground_map_->rect().center());
-                mouse(ground_map_, QEvent::MouseButtonPress, QPointF(300, 250), Qt::LeftButton,
+                ground_map_->zoom(2, map_plot().center());
+                profile_pan_origin_ = ground_map_->marker_position(0);
+                mouse(ground_map_, QEvent::MouseButtonPress, map_plot().center(), Qt::LeftButton,
                       Qt::LeftButton);
             }
             if (phase == 5)
                 ground_map_->reset_view();
+            if (phase == 7)
+                profile_zoom_min_ = profile_zoom_max_ = ground_map_->zoom_factor();
         }
         if (phase == 1 || phase == 3 || phase == 4) {
-            const QPointF point(300 + 75 * std::sin(local * 0.045),
-                                250 + 45 * std::cos(local * 0.045));
+            const auto area = phase == 1 ? view_plot() : map_plot();
+            const auto point =
+                area.center() + QPointF(area.width() * .18 * std::sin(local * 0.045),
+                                        area.height() * .18 * std::cos(local * 0.045));
+            const auto before = phase == 4 ? ground_map_->marker_position(0) : QPointF{};
             mouse(phase == 1 ? static_cast<QObject *>(slots_[0]->window) : ground_map_,
                   QEvent::MouseMove, point, Qt::NoButton,
                   phase == 3 ? Qt::NoButton : Qt::LeftButton);
+            if (phase == 4) {
+                const auto after = ground_map_->marker_position(0);
+                if (QLineF(before, after).length() > .1)
+                    ++profile_pan_moves_;
+                profile_pan_distance_ =
+                    std::max(profile_pan_distance_, QLineF(profile_pan_origin_, after).length());
+            }
             if (local == length - 1 && phase != 3)
                 mouse(phase == 1 ? static_cast<QObject *>(slots_[0]->window) : ground_map_,
                       QEvent::MouseButtonRelease, point, Qt::LeftButton, Qt::NoButton);
         }
         if ((phase == 7 || phase == 9) && local % 3 == 0) {
-            QWheelEvent wheel(QPointF(300, 250), QPointF(300, 250), {},
-                              QPoint(0, local % 60 < 30 ? 120 : -120), Qt::NoButton, Qt::NoModifier,
-                              Qt::NoScrollPhase, false);
+            const auto anchor = (phase == 7 ? map_plot() : view_plot()).center();
+            const auto before = ground_map_->zoom_factor();
+            QWheelEvent wheel(anchor, anchor, {}, QPoint(0, local % 60 < 30 ? 120 : -120),
+                              Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+            wheel.setAccepted(false);
             QCoreApplication::sendEvent(
                 phase == 7 ? static_cast<QObject *>(ground_map_) : slots_[0]->window, &wheel);
+            if (phase == 7 && !wheel.isAccepted())
+                throw std::runtime_error("Map zoom profile input was outside its active plot");
+            if (phase == 7 && ground_map_->zoom_factor() != before)
+                ++profile_zoom_changes_;
             if (phase == 7 && local % 30 == 0)
                 set_selection(static_cast<std::size_t>(local / 30) % satellites_.size());
         }
+        if (phase == 7) {
+            profile_zoom_min_ = std::min(profile_zoom_min_, ground_map_->zoom_factor());
+            profile_zoom_max_ = std::max(profile_zoom_max_, ground_map_->zoom_factor());
+        }
+        if (phase == 4 && local == length - 1 &&
+            (!profile_pan_moves_ || profile_pan_distance_ <= 1))
+            throw std::runtime_error("Map pan profile did not move the viewport");
+        if (phase == 7 && local == length - 1 &&
+            (!profile_zoom_changes_ || profile_zoom_max_ <= profile_zoom_min_))
+            throw std::runtime_error("Map zoom profile did not change its scale");
         // The final idle phase must restore exact-scale quality after the zoom burst.
         // Capture outside a measured interval; the next phase resets the cadence clock.
         if (phase == 8 && local == length - 1) {
@@ -5209,7 +5321,10 @@ class Workbench final : public WorkbenchWindow {
         }
         if (!active)
             throw std::runtime_error("VSG viewer became inactive");
-        viewer_->handleEvents();
+        {
+            const ProfileScope events("handle_events_ms");
+            viewer_->handleEvents();
+        }
         // RenderGraph normally adjusts the camera during recording, which is
         // too late for this frame's CPU label/pick projection. Resize once here.
         for (const auto &slot : slots_) {
@@ -5224,41 +5339,47 @@ class Workbench final : public WorkbenchWindow {
             fit_views();
             fit_pending_ = false;
         }
-        viewer_->update();
-        for (const auto &slot : slots_) {
-            if (!slot->graph)
-                continue;
-            const auto extent = slot->window->windowAdapter->extent2D();
+        {
+            const ProfileScope update("viewer_update_ms");
+            viewer_->update();
+        }
+        {
+            const ProfileScope projection("projection_ms");
+            for (const auto &slot : slots_) {
+                if (!slot->graph)
+                    continue;
+                const auto extent = slot->window->windowAdapter->extent2D();
 #ifdef ORBELLE_DESKTOP_BENCHMARK
-            if (run_ && (extent.width != 1280 || extent.height != 720 ||
-                         !slot->window->isExposed() || !slot->container->isVisible()))
-                throw std::runtime_error("Timing requires two exposed 1280x720 views");
+                if (run_ && (extent.width != 1280 || extent.height != 720 ||
+                             !slot->window->isExposed() || !slot->container->isVisible()))
+                    throw std::runtime_error("Timing requires two exposed 1280x720 views");
 #endif
-            slot->pick_candidates = render_vsg::visible_markers(
-                snapshot_, *slot->camera, extent.width, extent.height, 0,
-                snapshot_.frame == core::FrameId::gcrf ? &*display_to_itrf_ : nullptr);
-            if (slot->station_markers) {
-                visualization::RenderSnapshot visible_stations{
-                    snapshot_.epoch, snapshot_.frame, snapshot_.origin, {}};
-                auto selected_station = visible_stations;
-                for (const auto &point : slot->pick_candidates) {
-                    if (point.index < satellites_.size())
-                        continue;
-                    const auto &marker = snapshot_.markers.at(point.index);
-                    visible_stations.markers.push_back(marker);
-                    if (selected_marker_index() == point.index)
-                        selected_station.markers.push_back(marker);
+                slot->pick_candidates = render_vsg::visible_markers(
+                    snapshot_, *slot->camera, extent.width, extent.height, 0,
+                    snapshot_.frame == core::FrameId::gcrf ? &*display_to_itrf_ : nullptr);
+                if (slot->station_markers) {
+                    visualization::RenderSnapshot visible_stations{
+                        snapshot_.epoch, snapshot_.frame, snapshot_.origin, {}};
+                    auto selected_station = visible_stations;
+                    for (const auto &point : slot->pick_candidates) {
+                        if (point.index < satellites_.size())
+                            continue;
+                        const auto &marker = snapshot_.markers.at(point.index);
+                        visible_stations.markers.push_back(marker);
+                        if (selected_marker_index() == point.index)
+                            selected_station.markers.push_back(marker);
+                    }
+                    slot->station_markers->update(visible_stations);
+                    slot->station_selection->update(selected_station);
                 }
-                slot->station_markers->update(visible_stations);
-                slot->station_selection->update(selected_station);
-            }
-            if (slot->labels) {
-                const auto eligible = render_vsg::visible_markers(snapshot_, *slot->camera,
-                                                                  extent.width, extent.height, 80);
-                slot->labels->update(snapshot_, eligible, *slot->camera, extent.height);
-                if (slot->labels->size() != 200)
-                    throw std::runtime_error(
-                        "The fixed benchmark requires 200 eligible labels per view");
+                if (slot->labels) {
+                    const auto eligible = render_vsg::visible_markers(
+                        snapshot_, *slot->camera, extent.width, extent.height, 80);
+                    slot->labels->update(snapshot_, eligible, *slot->camera, extent.height);
+                    if (slot->labels->size() != 200)
+                        throw std::runtime_error(
+                            "The fixed benchmark requires 200 eligible labels per view");
+                }
             }
         }
         const bool capture =
@@ -5277,83 +5398,91 @@ class Workbench final : public WorkbenchWindow {
                 if (slot->capture && slot->window->isExposed())
                     slot->capture->request();
         // VSG's convenience wrappers discard VkResult. This GUI-thread loop checks them.
-        for (const auto &task : viewer_->recordAndSubmitTasks)
-            for (const auto &graph : task->commandGraphs)
-                graph->reset();
-        for (const auto &task : viewer_->recordAndSubmitTasks) {
+        {
+            const ProfileScope submit("submit_ms");
+            for (const auto &task : viewer_->recordAndSubmitTasks)
+                for (const auto &graph : task->commandGraphs)
+                    graph->reset();
+            for (const auto &task : viewer_->recordAndSubmitTasks) {
 #ifdef ORBELLE_DESKTOP_BENCHMARK
-            if (run_)
-                for (const auto &slot : slots_)
-                    if (std::find(task->commandGraphs.begin(), task->commandGraphs.end(),
-                                  slot->graph) != task->commandGraphs.end())
-                        slot->gpu->prepare(frame_count_, *task);
+                if (run_)
+                    for (const auto &slot : slots_)
+                        if (std::find(task->commandGraphs.begin(), task->commandGraphs.end(),
+                                      slot->graph) != task->commandGraphs.end())
+                            slot->gpu->prepare(frame_count_, *task);
 #endif
-            const auto result =
-                task->submit(vsg::ref_ptr<vsg::FrameStamp>(viewer_->getFrameStamp()));
-            if (result != VK_SUCCESS)
-                throw std::runtime_error("Vulkan submission failed: " + std::to_string(result));
+                const auto result =
+                    task->submit(vsg::ref_ptr<vsg::FrameStamp>(viewer_->getFrameStamp()));
+                if (result != VK_SUCCESS)
+                    throw std::runtime_error("Vulkan submission failed: " + std::to_string(result));
 #ifdef ORBELLE_DESKTOP_BENCHMARK
-            if (run_)
-                for (const auto &slot : slots_)
-                    if (std::find(task->commandGraphs.begin(), task->commandGraphs.end(),
-                                  slot->graph) != task->commandGraphs.end())
-                        slot->gpu->submitted();
+                if (run_)
+                    for (const auto &slot : slots_)
+                        if (std::find(task->commandGraphs.begin(), task->commandGraphs.end(),
+                                      slot->graph) != task->commandGraphs.end())
+                            slot->gpu->submitted();
 #endif
-            if (capture)
-                for (const auto &slot : slots_)
-                    if (slot->window->isExposed() &&
-                        std::find(task->commandGraphs.begin(), task->commandGraphs.end(),
-                                  slot->graph) != task->commandGraphs.end()) {
-                        const auto pixels = slot->capture->read_after_submit(*task->fence());
-                        slot->captured_image =
-                            QImage(pixels.rgba.data(), static_cast<int>(pixels.width),
-                                   static_cast<int>(pixels.height), QImage::Format_RGBA8888)
-                                .copy();
-                    }
+                if (capture)
+                    for (const auto &slot : slots_)
+                        if (slot->window->isExposed() &&
+                            std::find(task->commandGraphs.begin(), task->commandGraphs.end(),
+                                      slot->graph) != task->commandGraphs.end()) {
+                            const auto pixels = slot->capture->read_after_submit(*task->fence());
+                            slot->captured_image =
+                                QImage(pixels.rgba.data(), static_cast<int>(pixels.width),
+                                       static_cast<int>(pixels.height), QImage::Format_RGBA8888)
+                                    .copy();
+                        }
+            }
         }
 #ifdef ORBELLE_DESKTOP_BENCHMARK
         const auto submit_qpc = run_ ? BenchmarkRun::qpc() : 0;
 #endif
-        for (const auto &presentation : viewer_->presentations) {
-            VkResult result = VK_SUCCESS;
+        {
+            const ProfileScope present("present_ms");
+            for (const auto &presentation : viewer_->presentations) {
+                VkResult result = VK_SUCCESS;
 #ifdef ORBELLE_DESKTOP_BENCHMARK
-            if (run_) {
-                if (viewer_->presentations.size() != 1 || presentation->windows.size() != 2)
-                    throw std::runtime_error(
-                        "Timing expects one shared-device dual-view presentation batch");
-                if (!timing_presentation_) {
-                    timing_presentation_ = std::make_unique<BenchmarkPresentation>(
-                        std::array<vsg::ref_ptr<vsg::Window>, 2>{slots_[0]->window->windowAdapter,
-                                                                 slots_[1]->window->windowAdapter},
-                        run_->output_only_probe());
-                    timing_metadata_ = timing_presentation_->metadata();
-                }
-                result = timing_presentation_->present(*presentation, frame_count_, *run_);
-                if (result != VK_SUCCESS)
-                    throw std::runtime_error(
-                        "A timing swapchain changed or failed; this run is invalid");
-            } else
+                if (run_) {
+                    if (viewer_->presentations.size() != 1 || presentation->windows.size() != 2)
+                        throw std::runtime_error(
+                            "Timing expects one shared-device dual-view presentation batch");
+                    if (!timing_presentation_) {
+                        timing_presentation_ = std::make_unique<BenchmarkPresentation>(
+                            std::array<vsg::ref_ptr<vsg::Window>, 2>{
+                                slots_[0]->window->windowAdapter, slots_[1]->window->windowAdapter},
+                            run_->output_only_probe());
+                        timing_metadata_ = timing_presentation_->metadata();
+                    }
+                    result = timing_presentation_->present(*presentation, frame_count_, *run_);
+                    if (result != VK_SUCCESS)
+                        throw std::runtime_error(
+                            "A timing swapchain changed or failed; this run is invalid");
+                } else
 #endif
-            {
-                result = presentation->present();
-            }
-            if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR &&
-                result != VK_ERROR_OUT_OF_DATE_KHR)
-                throw std::runtime_error("Vulkan presentation failed: " + std::to_string(result));
-            if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) {
-                for (auto &slot : slots_) {
-                    const auto window = slot->window->windowAdapter;
-                    if (window && window->visible() && window->imageIndex() < window->numFrames() &&
-                        std::find(presentation->windows.begin(), presentation->windows.end(),
-                                  window) != presentation->windows.end())
-                        ++slot->presentations;
+                {
+                    result = presentation->present();
                 }
+                if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR &&
+                    result != VK_ERROR_OUT_OF_DATE_KHR)
+                    throw std::runtime_error("Vulkan presentation failed: " +
+                                             std::to_string(result));
+                if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) {
+                    for (auto &slot : slots_) {
+                        const auto window = slot->window->windowAdapter;
+                        if (window && window->visible() &&
+                            window->imageIndex() < window->numFrames() &&
+                            std::find(presentation->windows.begin(), presentation->windows.end(),
+                                      window) != presentation->windows.end())
+                            ++slot->presentations;
+                    }
+                }
+                if (result != VK_SUCCESS)
+                    run_exclusive([&] {
+                        for (const auto &window : presentation->windows)
+                            window->resize();
+                    });
             }
-            if (result != VK_SUCCESS)
-                run_exclusive([&] {
-                    for (const auto &window : presentation->windows)
-                        window->resize();
-                });
         }
 #ifdef ORBELLE_DESKTOP_BENCHMARK
         if (run_) {
@@ -6098,6 +6227,8 @@ class Workbench final : public WorkbenchWindow {
     QStackedWidget *inspector_pages_ = nullptr;
     QAction *properties_action_ = nullptr, *focus_action_ = nullptr, *play_action_ = nullptr;
     QString last_orbit_outcome_;
+    std::shared_ptr<ApplyTiming> apply_timing_;
+    qint64 apply_timing_sequence_ = 0;
     QString last_model_outcome_;
     std::future<vsg::ref_ptr<vsg::MatrixTransform>> model_candidate_;
     vsg::ref_ptr<vsg::MatrixTransform> model_node_;
@@ -6139,6 +6270,9 @@ class Workbench final : public WorkbenchWindow {
     std::future<std::vector<std::shared_ptr<const OrbitScene>>> profile_orbits_;
     int profile_count_ = 24, profile_frame_ = 0;
     bool profile_started_ = false;
+    QPointF profile_pan_origin_;
+    int profile_pan_moves_ = 0, profile_zoom_changes_ = 0;
+    double profile_pan_distance_ = 0, profile_zoom_min_ = 1, profile_zoom_max_ = 1;
     QElapsedTimer clock_;
     QJsonArray view_report_;
     QJsonArray interaction_report_;

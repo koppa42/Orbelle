@@ -228,6 +228,34 @@ TEST_F(WorkspaceTest, DragViewsToSplitMergeAndReorderWithoutReplacingContent) {
     EXPECT_TRUE(globe->isVisible());
     EXPECT_EQ(tabs->count(), 2);
 }
+TEST_F(WorkspaceTest, InsufficientSpaceKeepsTabsUsableWithoutGrowingTheWindow) {
+    Workspace workspace;
+    auto *globe = new QLineEdit("camera draft");
+    auto *map = new QLineEdit("map zoom draft");
+    workspace.add_view(globe, "3D", {});
+    workspace.add_view(map, "2D", {});
+    workspace.resize(800, 170);
+    workspace.show();
+    QCoreApplication::processEvents();
+    workspace.split_page(map, globe, Qt::BottomEdge);
+    QCoreApplication::processEvents();
+    EXPECT_EQ(tabs_for(workspace, "3D"), tabs_for(workspace, "2D"));
+    drag_tab(workspace, "2D", workspace.mapToGlobal(QPoint{400, 158}));
+    EXPECT_EQ(tabs_for(workspace, "3D"), tabs_for(workspace, "2D"));
+    EXPECT_EQ(workspace.size(), QSize(800, 170));
+    EXPECT_TRUE(map->isVisible());
+    EXPECT_TRUE(workspace.rect().contains(QRect(map->mapTo(&workspace, QPoint{}), map->size())));
+    workspace.resize(800, 500);
+    QCoreApplication::processEvents();
+    workspace.split_page(map, globe, Qt::BottomEdge);
+    QCoreApplication::processEvents();
+    EXPECT_NE(tabs_for(workspace, "3D"), tabs_for(workspace, "2D"));
+    for (auto *content : {globe, map})
+        EXPECT_TRUE(workspace.rect().contains(
+            QRect(content->mapTo(&workspace, QPoint{}), content->size())));
+    EXPECT_EQ(globe->text(), "camera draft");
+    EXPECT_EQ(map->text(), "map zoom draft");
+}
 TEST_F(WorkspaceTest, EscapeCancelsTabDrag) {
     Workspace workspace;
     auto *globe = new QWidget;

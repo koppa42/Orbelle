@@ -249,6 +249,32 @@ python tools/validation/run_graphics_smoke.py --executable out/build/desktop-gra
 
 日常打开图形工作台可执行 `pwsh tools/dev/run-desktop.ps1`。启动器为子进程设置固定依赖和 PROJ/GDAL 数据路径，不改变调用者的环境；它会等待窗口关闭。使用 `-Executable`、`-DependencyPrefix` 可覆盖开发路径，附加程序参数通过 `-DesktopArguments` 传入。
 
+排查轨道属性“应用”耗时时，可设置 `ORBELLE_APPLY_TIMINGS` 为本地 JSONL 文件的绝对路径，然后正常启动工作台。例如，在 PowerShell 中：
+
+```powershell
+New-Item -ItemType Directory -Force out/validation/apply-timing | Out-Null
+$env:ORBELLE_APPLY_TIMINGS = "$PWD/out/validation/apply-timing/apply.jsonl"
+try { pwsh tools/dev/run-desktop.ps1 }
+finally { Remove-Item Env:ORBELLE_APPLY_TIMINGS }
+```
+
+默认不记录；启用后，每次轨道应用或进入场景重建的属性应用结束时追加一行，包括成功、未修改、取消和失败。文件写入失败只输出诊断，不阻止应用。记录不含对象名称、轨道参数或数据文件路径。
+
+`operation` 区分 `orbit_apply` / `project_apply`，`route` 区分同步返回（`inline`）、单轨道更新（`single_orbit`）和场景重建（`project`）；`process_id` 与 `sequence` 标识进程和进程内序号。`stages_ms` 的单位均为毫秒：
+
+| 字段 | 范围 |
+| --- | --- |
+| `request_ms` | 校验、数据选择、提交后台任务；若弹出数据变更确认，也包含用户等待时间。同步应用包含整个处理过程 |
+| `resources_ms` | 后台准备或复用重力场、星历、空间天气、海潮资源 |
+| `session_ms` | 获取或复用卫星计算会话 |
+| `propagation_sampling_ms` | 会话采样及不连续点查询，包括惰性轨道积分和数值插值，不等同于纯积分耗时 |
+| `display_ms` | 后台准备显示轨迹、坐标变换、误差校验及二维地图缓存，扣除上述采样时间 |
+| `models_ms` | 后台准备卫星模型 |
+| `dispatch_ms` | 后台完成后，等待 GUI 线程接收结果 |
+| `publish_ms` | GUI 线程构建和发布场景、编译图形资源、更新对象树和当前状态 |
+
+`worker_ms` 是后台任务总耗时，包含对应的子阶段，不能再次与它们相加；`total_ms` 从收到应用请求计到结果处理完成。各阶段使用单调时钟记录墙钟时间，不是 GPU 计时，也不包含后续屏幕呈现。`sessions_reused` 统计直接沿用的卫星会话，`sessions_acquired` 统计从会话缓存获取的次数（缓存本身可能命中），`sample_calls` 统计轨道显示准备调用采样的次数。这些计数用于辨别重复计算；不含地面站会话、后续报告和播放采样。纯显示属性等未经过上述流程的修改不在此日志内。
+
 ## Windows 便携包
 
 完成 `desktop-graphics` 的 Release 构建后，使用全新的输出目录打包：

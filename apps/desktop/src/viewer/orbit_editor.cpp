@@ -45,6 +45,14 @@ void restyle_message(QLabel *label, bool error) {
     label->style()->unpolish(label);
     label->style()->polish(label);
 }
+void reveal_message(QLabel *label) {
+    // Result text scrolls with the form so long errors cannot push actions out of view.
+    for (auto *parent = label->parentWidget(); parent; parent = parent->parentWidget())
+        if (auto *scroll = qobject_cast<QScrollArea *>(parent)) {
+            scroll->ensureWidgetVisible(label, 0, 0);
+            break;
+        }
+}
 constexpr std::array element_units{Unit::metre,  Unit::one,    Unit::radian,
                                    Unit::radian, Unit::radian, Unit::radian};
 class StatePages final : public QStackedWidget {
@@ -66,7 +74,26 @@ QFrame *divider() {
     line->setFixedHeight(1);
     return line;
 }
+QScrollArea *scrolling_content(QVBoxLayout *layout, QWidget *content) {
+    auto *scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    // Reserve space for the page footer even when the workspace is very short.
+    scroll->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
+    scroll->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setWidget(content);
+    layout->addWidget(scroll, 1);
+    return scroll;
+}
 } // namespace
+void OrbitEditor::resizeEvent(QResizeEvent *event) {
+    QWidget::resizeEvent(event);
+    const bool compact = height() < 300;
+    for (auto *layout : page_layouts_) {
+        layout->setContentsMargins(compact ? QMargins{24, 8, 24, 8} : theme::space::page);
+        layout->setSpacing(compact ? 8 : 12);
+    }
+}
 void OrbitEditor::set_time_provider(std::shared_ptr<const core::ITimeProvider> time) {
     time_ = time;
     for (auto *field : {epoch_, first_, last_})
@@ -177,6 +204,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     auto *orbit_tab = new QWidget;
     tabs->addWidget(orbit_tab);
     auto *layout = new QVBoxLayout(orbit_tab);
+    page_layouts_.push_back(layout);
     layout->setContentsMargins(theme::space::page);
     layout->setSpacing(12);
     auto *header = new QHBoxLayout;
@@ -206,8 +234,12 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     auto *body = new QLabel(ui::text("orbit_editor.body"));
     body->setObjectName("hint");
     header->addWidget(body);
-    layout->addLayout(header);
-    responsive_columns(orbit_tab, header, 480);
+    auto *orbit_content = new QWidget;
+    auto *orbit_content_layout = new QVBoxLayout(orbit_content);
+    orbit_content_layout->setContentsMargins(0, 0, 0, 0);
+    orbit_content_layout->setSpacing(12);
+    orbit_content_layout->addLayout(header);
+    responsive_columns(orbit_content, header, 480);
     new WidthObserver(orbit_tab, [body](int width) { body->setVisible(width >= 600); });
     // The first group's top rule separates the header; no extra divider here.
     fields_ = new QWidget;
@@ -422,19 +454,16 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     time_row(ui::text("orbit_editor.label_30"), last_);
     first_->setToolTip(ui::text("orbit_editor.first.set_tool_tip"));
     last_->setToolTip(first_->toolTip());
-    auto *parameters = new QScrollArea;
+    orbit_content_layout->addWidget(fields_);
+    orbit_content_layout->addStretch();
+    auto *parameters = scrolling_content(layout, orbit_content);
     parameters->setObjectName("orbitParametersScroll");
-    parameters->setWidgetResizable(true);
-    parameters->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-    parameters->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    parameters->setWidget(fields_);
     responsive_columns(parameters->viewport(), columns, 720);
     // Labels stay beside fields down to inspector-column widths.
     responsive_form(form, 360);
     responsive_form(span_form, 360);
     responsive_form(keplerian_form, 350);
     align_form_labels(settings);
-    layout->addWidget(parameters, 1);
     layout->addWidget(divider());
     message_ = new QLabel;
     message_->setObjectName("orbitResult");
@@ -442,7 +471,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     message_->setTextFormat(Qt::PlainText);
     message_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     message_->hide();
-    layout->addWidget(message_);
+    orbit_content_layout->insertWidget(0, message_);
     auto *buttons = new QHBoxLayout;
     auto *reset = new QPushButton(ui::text("orbit_editor.reset"));
     reset_orbit_ = reset;
@@ -483,18 +512,24 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         auto *page = new QWidget;
         tabs->addWidget(page);
         auto *stack = new QVBoxLayout(page);
+        page_layouts_.push_back(stack);
         stack->setContentsMargins(theme::space::page);
         stack->setSpacing(12);
+        auto *content = new QWidget;
+        auto *fields = new QVBoxLayout(content);
+        fields->setContentsMargins(0, 0, 0, 0);
+        fields->setSpacing(12);
         auto *title = new QLabel(heading);
         title->setObjectName("panelTitle");
-        stack->addWidget(title);
+        fields->addWidget(title);
         auto *caption = new QLabel(description);
         caption->setObjectName("dialogDescription");
         caption->setWordWrap(true);
-        stack->addWidget(caption);
-        return stack;
+        fields->addWidget(caption);
+        scrolling_content(stack, content);
+        return std::pair{stack, fields};
     };
-    const auto apply_display = [&](QVBoxLayout *stack) {
+    const auto apply_display = [&](QVBoxLayout *stack, QVBoxLayout *fields) {
         auto *apply = new QPushButton(ui::text("common.apply"));
         apply->setObjectName("applyDisplay");
         apply->setToolTip(ui::text("orbit_editor.apply.set_tool_tip_2"));
@@ -502,7 +537,6 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         apply->setProperty("primary", true);
         display_buttons_.push_back(apply);
         connect(apply, &QPushButton::clicked, this, [this] { submit_display(); });
-        stack->addStretch();
         stack->addWidget(divider());
         auto *error = new QLabel;
         error->setObjectName("inputError");
@@ -510,7 +544,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         error->setTextFormat(Qt::PlainText);
         error->hide();
         display_messages_.push_back(error);
-        stack->addWidget(error);
+        fields->insertWidget(0, error);
         // Same footer as the orbit and 3D pages: Close, then the page's single Apply.
         auto *buttons = new QHBoxLayout;
         auto *reset = new QPushButton(ui::text("orbit_editor.reset"));
@@ -530,7 +564,8 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         buttons->addWidget(apply);
         stack->addLayout(buttons);
     };
-    auto *common = display_page(ui::text("orbit_editor.label_2"), ui::text("orbit_editor.common"));
+    auto [common, common_fields] =
+        display_page(ui::text("orbit_editor.label_2"), ui::text("orbit_editor.common"));
     auto *style_group = new FormGroup(ui::text("orbit_editor.style_group"));
     auto *extent_group = new FormGroup(ui::text("orbit_editor.extent_group"));
     auto *common_form = extent_group->form();
@@ -576,16 +611,13 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     range_layout->addWidget(style_group);
     range_layout->addWidget(extent_group);
     range_layout->addStretch();
-    auto *range_scroll = new QScrollArea;
-    range_scroll->setWidgetResizable(true);
-    range_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    range_scroll->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-    range_scroll->setWidget(range_fields);
     responsive_form(common_form, 400);
     align_form_labels(range_fields);
-    common->addWidget(range_scroll, 1);
-    apply_display(common);
-    auto *map = display_page(ui::text("orbit_editor.map"), ui::text("orbit_editor.map_2"));
+    common_fields->addWidget(range_fields);
+    common_fields->addStretch();
+    apply_display(common, common_fields);
+    auto [map, map_fields] =
+        display_page(ui::text("orbit_editor.map"), ui::text("orbit_editor.map_2"));
     auto *map_options = new FormGroup(ui::text("orbit_editor.map_options"));
     map_options->setMaximumWidth(480);
     track_2d_ = new QCheckBox(ui::text("orbit_editor.map_options_2"));
@@ -595,20 +627,26 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
         make_switch(toggle);
         map_options->form()->addRow(toggle);
     }
-    map->addWidget(map_options);
-    apply_display(map);
+    map_fields->addWidget(map_options);
+    map_fields->addStretch();
+    apply_display(map, map_fields);
     auto *appearance_tab = new QWidget;
     tabs->addWidget(appearance_tab);
     auto *appearance_layout = new QVBoxLayout(appearance_tab);
+    page_layouts_.push_back(appearance_layout);
     appearance_layout->setContentsMargins(theme::space::page);
     appearance_layout->setSpacing(12);
     auto *appearance_title = new QLabel(ui::text("orbit_editor.appearance_title"));
     appearance_title->setObjectName("panelTitle");
-    appearance_layout->addWidget(appearance_title);
     auto *appearance_description = new QLabel(ui::text("orbit_editor.appearance_description"));
     appearance_description->setObjectName("dialogDescription");
     appearance_description->setWordWrap(true);
-    appearance_layout->addWidget(appearance_description);
+    auto *appearance_body = new QWidget;
+    auto *appearance_body_layout = new QVBoxLayout(appearance_body);
+    appearance_body_layout->setContentsMargins(0, 0, 0, 0);
+    appearance_body_layout->setSpacing(12);
+    appearance_body_layout->addWidget(appearance_title);
+    appearance_body_layout->addWidget(appearance_description);
     auto *appearance_fields = new QWidget;
     appearance_fields->setObjectName("propertyFields");
     appearance_fields->setMaximumWidth(560);
@@ -664,14 +702,11 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     model_group->addRow(model_fields_);
     model_diameter_->setToolTip(ui::text("orbit_editor.model_diameter.set_tool_tip"));
     appearance_content->addStretch();
-    auto *appearance_scroll = new QScrollArea;
-    appearance_scroll->setWidgetResizable(true);
-    appearance_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    appearance_scroll->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-    appearance_scroll->setWidget(appearance_fields);
+    appearance_body_layout->addWidget(appearance_fields);
+    appearance_body_layout->addStretch();
+    scrolling_content(appearance_layout, appearance_body);
     responsive_form(form_model, 400);
     align_form_labels(appearance_fields);
-    appearance_layout->addWidget(appearance_scroll, 1);
     apply_model_ = new QPushButton(ui::text("common.apply"));
     apply_model_->setObjectName("applyAppearance");
     apply_model_->setToolTip(ui::text("orbit_editor.apply_model.set_tool_tip"));
@@ -683,7 +718,7 @@ OrbitEditor::OrbitEditor(const OrbitInput &input, QWidget *parent) : QWidget(par
     model_message_->hide();
     model_message_->setWordWrap(true);
     model_message_->setTextFormat(Qt::PlainText);
-    appearance_layout->addWidget(model_message_);
+    appearance_body_layout->insertWidget(0, model_message_);
     auto *appearance_buttons = new QHBoxLayout;
     auto *reset_model = new QPushButton(ui::text("orbit_editor.reset"));
     reset_model->setObjectName("resetAppearance");
@@ -1288,6 +1323,8 @@ void OrbitEditor::show_result(const QString &message, bool error) {
     restyle_message(message_, error);
     message_->setText(message);
     message_->setVisible(!message.isEmpty());
+    if (error && !message.isEmpty())
+        reveal_message(message_);
 }
 void OrbitEditor::configure_appearance(int kind, const QString &path, double diameter_km) {
     model_kind_->setCurrentIndex(kind);
@@ -1350,6 +1387,8 @@ void OrbitEditor::show_appearance_result(const QString &message, bool error) {
     restyle_message(model_message_, error);
     model_message_->setText(message);
     model_message_->setVisible(!message.isEmpty());
+    if (error && !message.isEmpty())
+        reveal_message(model_message_);
 }
 void OrbitEditor::set_display(const DisplaySettings &settings) {
     track_style_->set_settings(settings);
@@ -1383,6 +1422,7 @@ void OrbitEditor::submit_display() {
         for (auto *error : display_messages_) {
             error->setText(QString::fromUtf8(exception.what()));
             error->show();
+            reveal_message(error);
         }
     }
 }

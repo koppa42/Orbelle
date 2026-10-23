@@ -40,7 +40,27 @@ void Workbench::smoke_reports() {
             break;
         const auto *table = report_dialog_->findChild<QTableView *>("reportTable");
         smoke_require(table->model()->rowCount() > 0, "Report generation did not produce a table");
+        // Generation must work in the original short pane (checked above). Reading
+        // several rows also needs room: exercise the user's timeline collapse action
+        // instead of relying on an earlier split enlarging the window beyond the screen.
+        if (table->viewport()->height() < 5 * table->rowHeight(0)) {
+            auto *expand = findChild<QAction *>("expandTimeline");
+            if (expand->isChecked()) {
+                expand->setChecked(false);
+                smoke_record("collapse-timeline-to-read-report-rows");
+                break;
+            }
+            if (!workspace_->is_floating(report_dialog_)) {
+                workspace_->detach_page(report_dialog_);
+                smoke_record("float-report-when-dpi-leaves-insufficient-row-space");
+                break;
+            }
+        }
         save_workbench_image("report-results.png");
+        if (workspace_->is_floating(report_dialog_))
+            smoke_require(
+                report_dialog_->window()->grab().save(smoke_dir_ + "/report-results-floating.png"),
+                "Cannot capture the floating report");
         const auto row_count = table->model()->rowCount();
         QTimer::singleShot(0, this, [this] {
             auto *chooser =

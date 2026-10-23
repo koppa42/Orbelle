@@ -12,11 +12,12 @@ application::Session make_orbit_session(const OrbitInput &input, std::uint64_t r
                                         core::HpopEnvironment environment) {
     return runtime::make_orbit_session(input, revision, time, std::move(environment));
 }
-std::shared_ptr<const OrbitScene>
-prepare_orbit_scene(OrbitInput input, application::Session session,
-                    const core::IFrameProvider &frames, const core::IEarthOrientationProvider &eop,
-                    const std::atomic_bool &cancelled,
-                    std::optional<std::pair<core::Epoch, core::Epoch>> cache_interval) {
+std::shared_ptr<const OrbitScene> prepare_orbit_scene(
+    OrbitInput input, application::Session session, const core::IFrameProvider &frames,
+    const core::IEarthOrientationProvider &eop, const std::atomic_bool &cancelled,
+    std::optional<std::pair<core::Epoch, core::Epoch>> cache_interval, PreparationTiming *timing) {
+    StageTiming display(timing ? &timing->display_ms : nullptr,
+                        timing ? &timing->sampling_ms : nullptr);
     const auto started = std::chrono::steady_clock::now();
     const auto check_cancel = [&] {
         if (cancelled.load())
@@ -40,6 +41,9 @@ prepare_orbit_scene(OrbitInput input, application::Session session,
     if (static_cast<double>(last - first) * 1e-9 > input.step_seconds * 10000.0)
         throw std::invalid_argument("Display cache exceeds 10001 nodes; shorten the interval");
     const auto sample = [&](core::Epoch epoch) {
+        StageTiming sampling(timing ? &timing->sampling_ms : nullptr);
+        if (timing)
+            ++timing->sample_calls;
         check_cancel();
         const auto result = session.sample(std::array{epoch}, check_cancel);
         return result.states().front();
@@ -57,7 +61,10 @@ prepare_orbit_scene(OrbitInput input, application::Session session,
     // Adjacent TAI nanoseconds straddle an impulse: no representable query can
     // interpolate across the velocity discontinuity. Both smooth arcs retain
     // their own endpoint tangents, including for a burn off the display grid.
-    for (const auto epoch : session.discontinuities(check_cancel)) {
+    StageTiming discontinuities(timing ? &timing->sampling_ms : nullptr);
+    const auto breaks = session.discontinuities(check_cancel);
+    discontinuities.stop();
+    for (const auto epoch : breaks) {
         const auto ns = epoch.tai_nanoseconds();
         if (ns >= first && ns <= last) {
             if (ns > first)

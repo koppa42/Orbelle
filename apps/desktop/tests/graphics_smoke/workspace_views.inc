@@ -109,13 +109,53 @@ void Workbench::smoke_workspace_views() {
         smoke_require(ground_map_->zoom_factor() > 1, "2D wheel zoom did not respond");
         workspace_->detach_page(map_panel_);
         map_panel_->window()->resize(780, 480);
+        smoke_final_frames_ = 0;
         smoke_record("2d-3d-shared-time-and-zoom");
         ++orbit_smoke_stage_;
         break;
     }
-    case 31:
+    case 31: {
         smoke_require(workspace_->is_floating(map_panel_) && map_panel_->isVisible(),
                       "2D view cannot float");
+        const auto plot = QRectF(ground_map_->rect()).adjusted(38, 14, -16, -44);
+        if (smoke_final_frames_ == 0) {
+            ground_map_->reset_view();
+            ground_map_->zoom(4, plot.center());
+            const auto period =
+                std::max(plot.width(), 2 * plot.height()) * ground_map_->zoom_factor();
+            const auto start = plot.center(), end = start + QPointF(-3.5 * period, 0);
+            QMouseEvent press(QEvent::MouseButtonPress, start, ground_map_->mapToGlobal(start),
+                              Qt::MiddleButton, Qt::MiddleButton, Qt::NoModifier);
+            QMouseEvent move(QEvent::MouseMove, end, ground_map_->mapToGlobal(end), Qt::NoButton,
+                             Qt::MiddleButton, Qt::NoModifier);
+            QMouseEvent release(QEvent::MouseButtonRelease, end, ground_map_->mapToGlobal(end),
+                                Qt::MiddleButton, Qt::NoButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(ground_map_, &press);
+            QCoreApplication::sendEvent(ground_map_, &move);
+            QCoreApplication::sendEvent(ground_map_, &release);
+            smoke_final_frames_ = 1;
+            break;
+        }
+        if (!ground_map_->tracks_ready())
+            return;
+        if (smoke_final_frames_ == 1) {
+            smoke_require(map_panel_->window()->grab().save(smoke_dir_ + "/ground-map-wrapped.png"),
+                          "Cannot save wrapped 2D view");
+            const auto prepared = orbit_;
+            const auto epoch = ground_map_->epoch();
+            ground_map_->focus_selection();
+            const auto anchor = ground_map_->marker_position(0);
+            ground_map_->zoom(1024 / ground_map_->zoom_factor(), anchor);
+            smoke_require(ground_map_->zoom_factor() == 1024 &&
+                              QLineF(ground_map_->marker_position(0), anchor).length() < 1e-6 &&
+                              ground_map_->epoch() == epoch && orbit_ == prepared && !busy(),
+                          "High map zoom changed its anchor, epoch or scientific orbit");
+            smoke_final_frames_ = 2;
+            break;
+        }
+        smoke_require(map_panel_->window()->grab().save(smoke_dir_ + "/ground-map-1024x.png"),
+                      "Cannot save high-zoom 2D view");
+        smoke_record("2d-cyclic-pan-and-high-zoom-preserve-orbit");
         ground_map_->reset_view();
         smoke_require(map_panel_->window()->grab().save(smoke_dir_ + "/ground-map-floating.png"),
                       "Cannot save floating 2D view");
@@ -127,6 +167,7 @@ void Workbench::smoke_workspace_views() {
         smoke_record("2d-floating-and-dock-restore");
         ++orbit_smoke_stage_;
         break;
+    }
     case 32:
         smoke_require(ground_map_->epoch() == snapshot_.epoch,
                       "Hidden 2D view lost its current epoch");

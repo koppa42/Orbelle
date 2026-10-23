@@ -330,15 +330,33 @@ void Workbench::smoke_sensors_navigation() {
         smoke_record("responsive-workbench-and-native-view-resize");
         workspace_->detach_page(properties_dialog_);
         properties_dialog_->window()->resize(360, 520);
+        smoke_final_frames_ = 0;
+        smoke_wait_frame_ = frame_count_ + 4;
         ++orbit_smoke_stage_;
         break;
     }
     case 152:
+        if (frame_count_ < smoke_wait_frame_)
+            return;
+        if (++smoke_final_frames_ == 1) {
+            // As for the docked case, allow the first native show and responsive
+            // minimums to settle before checking the deliberately narrow size.
+            properties_dialog_->window()->resize(360, 520);
+            smoke_wait_frame_ = frame_count_ + 3;
+            return;
+        }
         smoke_require(
             properties_dialog_->window()->width() == 360 &&
                 editor_->findChild<QComboBox *>("propertyPageSelector")->isVisible() &&
                 editor_->findChild<QuantityEditor *>("displayStep")->value(Unit::second) == 17,
-            "Narrow floating properties lost the draft or retained a fixed width");
+            qPrintable(
+                QString("Narrow floating properties: window=%1, editor=%2, selector=%3, "
+                        "draft=%4")
+                    .arg(properties_dialog_->window()->width())
+                    .arg(editor_->width())
+                    .arg(editor_->findChild<QComboBox *>("propertyPageSelector")->isVisible())
+                    .arg(
+                        editor_->findChild<QuantityEditor *>("displayStep")->value(Unit::second))));
         smoke_require(properties_dialog_->window()->grab().save(
                           smoke_dir_ + "/responsive-floating-properties.png"),
                       "Cannot capture narrow floating properties");

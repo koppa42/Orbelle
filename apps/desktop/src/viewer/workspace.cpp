@@ -22,6 +22,8 @@
 
 namespace orbelle::desktop {
 namespace {
+constexpr int pane_minimum_height = 170;
+constexpr int splitter_handle_width = 3;
 // Mouse capture keeps dragging reliable over the native Vulkan child window.
 class PageTabs final : public QTabBar {
   public:
@@ -104,7 +106,7 @@ Workspace::Workspace(QWidget *parent) : QWidget(parent) {
     parking_->hide();
     root_ = new QSplitter(Qt::Horizontal);
     root_->setChildrenCollapsible(false);
-    root_->setHandleWidth(3);
+    root_->setHandleWidth(splitter_handle_width);
     layout->addWidget(root_);
     root_->addWidget(make_pane());
     drop_hint_ = new QRubberBand(QRubberBand::Rectangle);
@@ -142,7 +144,7 @@ Workspace::~Workspace() {
 Workspace::Pane *Workspace::make_pane(QDialog *window) {
     auto *pane = new Pane;
     pane->setObjectName("workspacePane");
-    pane->setMinimumSize(160, 170);
+    pane->setMinimumSize(160, pane_minimum_height);
     pane->window = window;
     auto *layout = new QVBoxLayout(pane);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -390,9 +392,24 @@ void Workspace::close_page(QWidget *content) {
     remove(*page);
     tidy(source);
 }
+bool Workspace::can_split(const Page &page, const Pane *pane, Qt::Edge edge) const {
+    if (!pane || pane->window)
+        return false;
+    // Splitting must fit the allocated pane. Growing the top-level minimum can
+    // put controls below the screen; shrinking below child minima overlaps native views.
+    if (edge == Qt::TopEdge || edge == Qt::BottomEdge)
+        return pane->height() >=
+               pane->minimumHeight() + pane_minimum_height + splitter_handle_width;
+    const int width = qobject_cast<QDialog *>(page.content.data())
+                          ? std::max(320, page.host->minimumWidth())
+                          : 200;
+    return pane->width() >= pane->minimumWidth() + width + splitter_handle_width;
+}
 void Workspace::move(Page &page, Pane *target, Qt::Edge edge, int insertion) {
     auto *source = page.pane;
     if (!target || (source == target && edge != Qt::Edge{} && target->tabs->count() == 1))
+        return;
+    if (edge != Qt::Edge{} && !can_split(page, target, edge))
         return;
     if (source == target && edge == Qt::Edge{}) {
         int from = -1;
@@ -424,7 +441,7 @@ void Workspace::move(Page &page, Pane *target, Qt::Edge edge, int insertion) {
         } else {
             auto *branch = new QSplitter(orientation);
             branch->setChildrenCollapsible(false);
-            branch->setHandleWidth(3);
+            branch->setHandleWidth(splitter_handle_width);
             splitter->replaceWidget(splitter->indexOf(target), branch);
             branch->addWidget(before ? next : target);
             branch->addWidget(before ? target : next);
@@ -493,8 +510,8 @@ void Workspace::context_menu(Pane *pane, int tab, const QPoint &global) {
     QMenu menu;
     auto *right = menu.addAction(ui::text("workspace.right"));
     auto *below = menu.addAction(ui::text("workspace.below"));
-    right->setEnabled(!pane->window && pane->tabs->count() > 1);
-    below->setEnabled(right->isEnabled());
+    right->setEnabled(pane->tabs->count() > 1 && can_split(*page, pane, Qt::RightEdge));
+    below->setEnabled(pane->tabs->count() > 1 && can_split(*page, pane, Qt::BottomEdge));
     auto *merge = menu.addAction(ui::text("workspace.merge"));
     auto *other = main_pane();
     for (auto *candidate : panes_)
@@ -520,7 +537,7 @@ void Workspace::context_menu(Pane *pane, int tab, const QPoint &global) {
     } else if (chosen == close)
         close_page(page->content);
 }
-Workspace::DropTarget Workspace::drop_target(const QPoint &global) const {
+Workspace::DropTarget Workspace::drop_target(const Page &page, const QPoint &global) const {
     for (int floating : {1, 0})
         for (auto *pane : panes_) {
             if (!pane->isVisible() || bool(pane->window) != bool(floating))
@@ -546,6 +563,9 @@ Workspace::DropTarget Workspace::drop_target(const QPoint &global) const {
                     target.edge = Qt::TopEdge;
                 else if (point.y() >= pane->height() - y_margin)
                     target.edge = Qt::BottomEdge;
+                // Preview a tab merge when there is no room for another usable pane.
+                if (target.edge != Qt::Edge{} && !can_split(page, pane, target.edge))
+                    target.edge = {};
             }
             return target;
         }
@@ -554,7 +574,7 @@ Workspace::DropTarget Workspace::drop_target(const QPoint &global) const {
 void Workspace::drag_to(Page *page, const QPoint &global) {
     if (!page)
         return;
-    const auto target = drop_target(global);
+    const auto target = drop_target(*page, global);
     if (target.pane) {
         QRect rect(target.pane->mapToGlobal(QPoint{0, 0}), target.pane->size());
         if (target.insertion >= 0) {
@@ -588,7 +608,7 @@ void Workspace::finish_drag(Page *page, const QPoint &global, bool cancelled) {
     drag_label_->hide();
     if (!page || cancelled)
         return;
-    const auto target = drop_target(global);
+    const auto target = drop_target(*page, global);
     if (target.pane) {
         move(*page, target.pane, target.edge, target.insertion);
     } else if (!rect().contains(mapFromGlobal(global))) {

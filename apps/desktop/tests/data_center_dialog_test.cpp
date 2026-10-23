@@ -25,7 +25,11 @@
 #include <QTemporaryDir>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QWindow>
 #include <gtest/gtest.h>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
 
 namespace orbelle::desktop {
 namespace {
@@ -656,6 +660,43 @@ TEST(DataCenterDialog, InitialSetupDownloadsInDependencyOrderSkipsInstalledAndRe
     timeout.stop();
     EXPECT_EQ(requests, std::vector{DataProduct::custom_gravity});
     EXPECT_TRUE(std::filesystem::is_regular_file(file));
+}
+TEST(DataCenterDialog, InitialSetupWithHiddenNativeWorkbenchIsExposedAndCancellable) {
+    (void)test_app();
+    QWidget workbench;
+    // Match startup: a native child surface forces an HWND before the workbench is shown.
+    auto *surface = new QWindow;
+    auto *container = QWidget::createWindowContainer(surface, &workbench);
+    container->resize(64, 64);
+    (void)workbench.winId();
+    ASSERT_FALSE(workbench.isVisible());
+    QTemporaryDir temporary;
+    EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
+    DownloadServer clock(initial_fixture(ORBELLE_TEST_TIME));
+    bool inspected = false;
+    QTimer::singleShot(120, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        ASSERT_TRUE(dialog);
+        inspected = true;
+        EXPECT_TRUE(dialog->isVisible());
+        EXPECT_EQ(dialog->parentWidget(), nullptr);
+        EXPECT_FALSE(workbench.isVisible());
+        if (QGuiApplication::platformName() == "windows") {
+            EXPECT_TRUE(dialog->windowHandle()->isExposed());
+#ifdef Q_OS_WIN
+            EXPECT_TRUE(IsWindowVisible(reinterpret_cast<HWND>(dialog->winId())));
+            EXPECT_EQ(GetWindow(reinterpret_cast<HWND>(dialog->winId()), GW_OWNER), nullptr);
+#endif
+        }
+        capture_initial_setup(dialog, "initial-data-hidden-workbench");
+        dialog->findChild<QPushButton *>("initialDataCancel")->click();
+    });
+    EXPECT_FALSE(prepare_initial_data(&workbench, catalog, {DataProduct::utc}, [&](auto product) {
+        catalog.start_download(clock.url(), product);
+    }));
+    finish_initial_cancel(catalog);
+    EXPECT_TRUE(inspected);
+    EXPECT_FALSE(workbench.isVisible());
 }
 TEST(DataCenterDialog, InitialSetupFailureStopsTheQueueAndRetryKeepsCompletedDownloads) {
     (void)test_app();

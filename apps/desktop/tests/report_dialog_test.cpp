@@ -301,6 +301,35 @@ TEST(ReportDialog, PreparingTemplatesAndDockingDoesNotShowTemporaryWindows) {
     EXPECT_TRUE(windows.shown.isEmpty()) << windows.shown.join(", ").toStdString();
 }
 
+TEST(ReportDialog, ShortWorkspaceKeepsGenerationReachableAndPreservesSettings) {
+    (void)test_app();
+    apply_workbench_style(test_app());
+    application::Project project("Short report", core::Epoch{0}, core::Epoch{120'000'000'000});
+    Workspace workspace;
+    auto *dialog = new ReportDialog(
+        project, runtime::make_builtin_time_provider(),
+        [](const application::ReportQuery &, ReportDialog::Ready) {}, [](auto) {},
+        [](core::Epoch) {}, &workspace);
+    workspace.open(dialog, false);
+    workspace.show();
+    auto *step = dialog->findChild<QDoubleSpinBox *>("reportStep");
+    step->setValue(17);
+    for (const auto size : {QSize{640, 170}, QSize{1000, 640}, QSize{640, 170}}) {
+        workspace.resize(size);
+        for (int i = 0; i < 12; ++i)
+            QCoreApplication::processEvents();
+        EXPECT_EQ(workspace.size(), size);
+        auto *generate = dialog->findChild<QPushButton *>("generateReport");
+        ASSERT_TRUE(generate->isVisible());
+        EXPECT_TRUE(workspace.rect().contains(
+            QRect(generate->mapTo(&workspace, QPoint{}), generate->size())));
+        EXPECT_TRUE(generate->visibleRegion().contains(generate->rect()));
+        auto *scroll = dialog->findChild<QScrollArea *>("reportSettingsScroll");
+        EXPECT_GE(scroll->viewport()->height(), 24);
+        EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+        EXPECT_EQ(step->value(), 17);
+    }
+}
 TEST(ReportDialog, FirstResultFillsInitiallyNarrowWorkspace) {
     (void)test_app();
     std::shared_ptr<const core::ITimeProvider> time = runtime::make_builtin_time_provider();

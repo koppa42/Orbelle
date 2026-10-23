@@ -19,6 +19,125 @@
 
 namespace orbelle::desktop {
 namespace {
+constexpr double maximum_zoom = 1024;
+constexpr double preview_width = 2048;
+double axis_step(double pixels_per_degree, int spacing) {
+    for (const double step : {0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5,  1.,
+                              2.,    5.,    10.,   15.,  30.,  45.,  60., 90., 180., 360.})
+        if (step * pixels_per_degree >= spacing)
+            return step;
+    return 360;
+}
+QFont axis_font() {
+    QFont font("Consolas");
+    font.setPixelSize(10);
+    return font;
+}
+QPointF axis_steps(double pixels_per_degree) {
+    const QFontMetrics metrics(axis_font());
+    return {axis_step(pixels_per_degree, metrics.horizontalAdvance("180.000 W") + 12),
+            axis_step(pixels_per_degree, std::max(36, metrics.height() * 3))};
+}
+double wrap(double value, double period) {
+    return value - period * std::floor(value / period + 0.5);
+}
+QRectF world_rect(const QTransform &transform) {
+    return transform.mapRect(QRectF(-180, -90, 360, 180));
+}
+// Enumerate only the longitude copies intersecting a bounded viewport. Latitude
+// never repeats. No bitmap or cache grows with the number of revolutions.
+template <typename Draw>
+void each_world(const QTransform &transform, const QRectF &bounds, Draw draw) {
+    const auto world = world_rect(transform);
+    if (world.width() <= 0 || bounds.bottom() <= world.top() || bounds.top() >= world.bottom())
+        return;
+    const int first = static_cast<int>(std::floor((bounds.left() - world.right()) / world.width()));
+    const int last = static_cast<int>(std::ceil((bounds.right() - world.left()) / world.width()));
+    for (int index = first; index <= last; ++index) {
+        const auto offset = index * world.width();
+        const auto area = world.translated(offset, 0);
+        if (!bounds.intersects(area))
+            continue;
+        draw(QTransform(transform.m11(), 0, 0, transform.m22(), transform.dx() + offset,
+                        transform.dy()),
+             area);
+    }
+}
+void draw_world_image(QPainter &p, const QImage &image, const QRectF &area, const QRectF &bounds) {
+    const auto target = area.intersected(bounds);
+    if (target.isEmpty())
+        return;
+    // Crop before drawing: even at maximum zoom the raster engine sees only a
+    // viewport-sized target, not a million-pixel world rectangle.
+    const QRectF source((target.left() - area.left()) * image.width() / area.width(),
+                        (target.top() - area.top()) * image.height() / area.height(),
+                        target.width() * image.width() / area.width(),
+                        target.height() * image.height() / area.height());
+    p.drawImage(target, image, source);
+}
+bool clip_line(QLineF &line, const QRectF &bounds, double &first) {
+    const auto start = line.p1(), delta = line.p2() - start;
+    first = 0;
+    double last = 1;
+    const auto edge = [&](double direction, double distance) {
+        if (direction == 0)
+            return distance >= 0;
+        const auto fraction = distance / direction;
+        if (direction < 0)
+            first = std::max(first, fraction);
+        else
+            last = std::min(last, fraction);
+        return first <= last;
+    };
+    if (!edge(-delta.x(), start.x() - bounds.left()) ||
+        !edge(delta.x(), bounds.right() - start.x()) ||
+        !edge(-delta.y(), start.y() - bounds.top()) ||
+        !edge(delta.y(), bounds.bottom() - start.y()))
+        return false;
+    line = QLineF(start + delta * first, start + delta * last);
+    return true;
+}
+// Facets have at most eight points, including the closing point. Each clipping
+// plane can at most double that count, so two fixed buffers cover all four
+// planes without allocating for every visible facet.
+using FootprintClipBuffer = std::array<QPointF, 8 * 16>;
+std::span<const QPointF> clip_footprint_polygon(FootprintClipBuffer &projected, int count,
+                                                const QRectF &bounds,
+                                                FootprintClipBuffer &scratch) {
+    auto *input = &projected;
+    auto *output = &scratch;
+    for (int side = 0; side < 4 && count; ++side) {
+        const auto distance = [&](QPointF point) {
+            switch (side) {
+            case 0:
+                return point.x() - bounds.left();
+            case 1:
+                return bounds.right() - point.x();
+            case 2:
+                return point.y() - bounds.top();
+            default:
+                return bounds.bottom() - point.y();
+            }
+        };
+        int next_count = 0;
+        auto previous = (*input)[count - 1];
+        auto before = distance(previous);
+        for (int index = 0; index < count; ++index) {
+            const auto point = (*input)[index];
+            const auto after = distance(point);
+            if ((before < 0) != (after < 0))
+                output->at(next_count++) =
+                    previous + (point - previous) * (before / (before - after));
+            if (after >= 0)
+                output->at(next_count++) = point;
+            previous = point;
+            before = after;
+        }
+        count = next_count;
+        std::swap(input, output);
+    }
+    return {input->data(), static_cast<std::size_t>(count)};
+}
 bool draw_track(QPainter &painter, const QPainterPath &path,
                 const std::atomic_bool *cancelled = nullptr) {
     // Independent line primitives avoid the raster stroker's large intersecting
@@ -41,14 +160,12 @@ bool draw_track(QPainter &painter, const QPainterPath &path,
         const QPointF point(element.x, element.y);
         if (element.isMoveTo())
             phase = 0;
-        const QLineF segment(previous, point);
-        const bool outside = (previous.x() < clip.left() && point.x() < clip.left()) ||
-                             (previous.x() > clip.right() && point.x() > clip.right()) ||
-                             (previous.y() < clip.top() && point.y() < clip.top()) ||
-                             (previous.y() > clip.bottom() && point.y() > clip.bottom());
-        if (!element.isMoveTo() && !outside) {
+        QLineF segment(previous, point);
+        const auto length = segment.length();
+        double first = 0;
+        if (!element.isMoveTo() && clip_line(segment, clip, first)) {
             if (dashed) {
-                pen.setDashOffset(phase / pen.widthF());
+                pen.setDashOffset((phase + length * first) / pen.widthF());
                 painter.setPen(pen);
                 painter.drawLine(segment);
             } else
@@ -59,7 +176,7 @@ bool draw_track(QPainter &painter, const QPainterPath &path,
             }
         }
         if (dashed && !element.isMoveTo() && cycle > 0)
-            phase = std::fmod(phase + segment.length(), cycle);
+            phase = std::fmod(phase + length, cycle);
         previous = point;
     }
     if (count)
@@ -112,6 +229,9 @@ GroundMap::GroundMap(QImage imagery, QWidget *parent)
     connect(&raster_timer_, &QTimer::timeout, this, [this] { poll_raster(); });
     footprint_timer_.setInterval(16);
     connect(&footprint_timer_, &QTimer::timeout, this, [this] { poll_footprints(); });
+    pan_settle_timer_.setSingleShot(true);
+    pan_settle_timer_.setInterval(120);
+    connect(&pan_settle_timer_, &QTimer::timeout, this, [this] { update(); });
     zoom_animation_.setDuration(120);
     zoom_animation_.setEasingCurve(QEasingCurve::OutCubic);
     connect(&zoom_animation_, &QVariantAnimation::valueChanged, this,
@@ -274,6 +394,7 @@ void GroundMap::set_snapshot(const visualization::RenderSnapshot &snapshot) {
     if (snapshot.frame != core::FrameId::itrf || snapshot.origin != core::OriginId::earth)
         throw std::invalid_argument("2D map requires an Earth/ITRF snapshot");
     std::vector<Point> points;
+    points.reserve(snapshot.markers.size());
     for (std::size_t i = 0; i < snapshot.markers.size(); ++i) {
         const auto &marker = snapshot.markers[i];
         const auto station = station_names_.find(marker.object_id);
@@ -462,9 +583,20 @@ void GroundMap::focus_selection() {
 QRectF GroundMap::plot_rect() const { return QRectF(rect()).adjusted(38, 14, -16, -44); }
 QRectF GroundMap::map_rect() const {
     const auto plot = plot_rect();
-    const double width = std::min(plot.width(), plot.height() * 2) * zoom_;
+    // Fill the viewport at 1x without stretching the equirectangular projection.
+    // A short split shows a latitude band instead of a tiny, letterboxed world.
+    const double width = std::max(plot.width(), plot.height() * 2) * zoom_;
     const QSizeF size(width, width / 2);
     return {plot.center() + pan_ * width - QPointF(size.width() / 2, size.height() / 2), size};
+}
+QRectF GroundMap::visible_map_rect() const {
+    const auto plot = plot_rect(), area = map_rect();
+    return plot.intersected(QRectF(plot.left(), area.top(), plot.width(), area.height()));
+}
+double GroundMap::minimum_zoom() const {
+    const auto plot = plot_rect();
+    // Zooming out can still reveal the complete world, including both poles.
+    return std::min(plot.width(), 2 * plot.height()) / std::max(plot.width(), 2 * plot.height());
 }
 QTransform GroundMap::map_transform() const {
     const auto area = map_rect();
@@ -475,13 +607,15 @@ QPointF GroundMap::marker_coordinates(std::size_t index) const {
     return points_.at(index).geographic;
 }
 QPointF GroundMap::marker_position(std::size_t index) const {
-    return map_transform().map(marker_coordinates(index));
+    auto point = map_transform().map(marker_coordinates(index));
+    point.setX(plot_rect().center().x() +
+               wrap(point.x() - plot_rect().center().x(), map_rect().width()));
+    return point;
 }
 void GroundMap::clamp_pan() {
     const auto plot = plot_rect(), map = map_rect();
-    const auto x = std::max(0.0, (map.width() - plot.width()) / (2 * map.width()));
     const auto y = std::max(0.0, (map.height() - plot.height()) / (2 * map.width()));
-    pan_.setX(std::clamp(pan_.x(), -x, x));
+    pan_.setX(wrap(pan_.x(), 1));
     pan_.setY(std::clamp(pan_.y(), -y, y));
 }
 void GroundMap::reset_view() {
@@ -498,7 +632,7 @@ void GroundMap::zoom(double factor, QPointF anchor) {
         return;
     zoom_animation_.stop();
     finish_drag();
-    apply_zoom(std::clamp(zoom_ * factor, 1.0, 12.0), anchor);
+    apply_zoom(std::clamp(zoom_ * factor, minimum_zoom(), maximum_zoom), anchor);
 }
 void GroundMap::zoom_centered(double factor) { request_zoom(factor, plot_rect().center()); }
 void GroundMap::apply_zoom(double next, QPointF anchor, std::optional<QPointF> location) {
@@ -508,7 +642,7 @@ void GroundMap::apply_zoom(double next, QPointF anchor, std::optional<QPointF> l
     const auto offset = anchor - plot.center();
     const auto width = map_rect().width();
     const auto fixed_location = location.value_or(offset / width - pan_);
-    const auto next_width = std::min(plot.width(), plot.height() * 2) * next;
+    const auto next_width = std::max(plot.width(), plot.height() * 2) * next;
     pan_ = offset / next_width - fixed_location;
     zoom_ = next;
     clamp_pan();
@@ -531,7 +665,7 @@ void GroundMap::request_zoom(double factor, QPointF anchor) {
         }
     }
     zoom_animation_.stop();
-    const auto target = std::clamp(base * factor, 1.0, 12.0);
+    const auto target = std::clamp(base * factor, minimum_zoom(), maximum_zoom);
     if (target == zoom_)
         return;
     zoom_anchor_ = anchor;
@@ -564,6 +698,8 @@ void GroundMap::pan_by(QPointF delta) {
     clamp_pan();
     if (pan_ == before)
         return;
+    if (dragging_ && moved_)
+        pan_settle_timer_.start();
     imagery_raster_ = {};
     cancel_obsolete_raster();
     update();
@@ -580,15 +716,16 @@ void GroundMap::invalidate_tracks(bool geometry_changed) {
 void GroundMap::paint_background(QPainter &p, const QRectF &bounds, bool cache_imagery) {
     p.setRenderHint(QPainter::Antialiasing);
     p.setRenderHint(QPainter::SmoothPixmapTransform);
-    const auto area = map_rect();
     const auto transform = map_transform();
     p.save();
     p.setClipRect(bounds);
     const auto paint_imagery = [&](QPainter &target) {
         target.setRenderHint(QPainter::SmoothPixmapTransform);
         target.fillRect(bounds, theme::color(theme::chrome));
-        target.drawImage(area, imagery_);
-        target.fillRect(area, QColor(4, 12, 24, 35));
+        each_world(transform, bounds, [&](const auto &, const QRectF &area) {
+            draw_world_image(target, imagery_, area, bounds);
+            target.fillRect(area.intersected(bounds), QColor(4, 12, 24, 35));
+        });
     };
     if (cache_imagery) {
         // Sunlight changes while the viewport stays still. Keep its expensive
@@ -615,21 +752,28 @@ void GroundMap::paint_background(QPainter &p, const QRectF &bounds, bool cache_i
         if (night_dirty_)
             rebuild_night();
         p.setCompositionMode(QPainter::CompositionMode_Multiply);
-        p.drawImage(area, night_);
+        each_world(transform, bounds, [&](const auto &, const QRectF &area) {
+            draw_world_image(p, night_, area, bounds);
+        });
         p.setCompositionMode(QPainter::CompositionMode_SourceOver);
     }
     if (show_sun_) {
-        const auto sun = transform.map(
-            QPointF(std::atan2(sun_direction_[1], sun_direction_[0]) * 180 / std::numbers::pi,
-                    std::asin(std::clamp(sun_direction_[2], -1.0, 1.0)) * 180 / std::numbers::pi));
         p.setPen(QPen(QColor("#efd69b"), 1));
         p.setBrush(QColor("#efd69b"));
-        p.drawEllipse(sun, 3, 3);
-        for (int i = 0; i < 8; ++i) {
-            const double angle = i * std::numbers::pi / 4;
-            const QPointF ray(std::cos(angle), std::sin(angle));
-            p.drawLine(sun + ray * 6, sun + ray * 9);
-        }
+        each_world(
+            transform, bounds.adjusted(-10, -10, 10, 10), [&](const auto &copy, const auto &) {
+                const auto sun = copy.map(QPointF(
+                    std::atan2(sun_direction_[1], sun_direction_[0]) * 180 / std::numbers::pi,
+                    std::asin(std::clamp(sun_direction_[2], -1.0, 1.0)) * 180 / std::numbers::pi));
+                if (!bounds.adjusted(-10, -10, 10, 10).contains(sun))
+                    return;
+                p.drawEllipse(sun, 3, 3);
+                for (int i = 0; i < 8; ++i) {
+                    const double angle = i * std::numbers::pi / 4;
+                    const QPointF ray(std::cos(angle), std::sin(angle));
+                    p.drawLine(sun + ray * 6, sun + ray * 9);
+                }
+            });
     }
     p.restore();
 }
@@ -639,27 +783,23 @@ void GroundMap::paint_grid(QPainter &p) {
         return;
     const auto area = map_rect();
     const auto transform = map_transform();
-    const int grid_step = area.width() > 6000   ? 5
-                          : area.width() > 3000 ? 10
-                          : area.width() > 1600 ? 15
-                                                : 30;
+    const auto steps = axis_steps(area.width() / 360);
     auto pen = QPen(theme::color(theme::accent, 60), 0.7, Qt::DotLine);
     // Qt's wide/dashed stroker can process the entire world-length line before
     // applying the clip, especially above DPR 1. Trim it first and preserve the
     // geographic dash phase so dots do not crawl when the viewport moves.
-    const auto visible = area.intersected(plot_rect().adjusted(-2, -2, 2, 2));
-    for (int lon = -180; lon <= 180; lon += grid_step) {
-        const auto x = transform.map(QPointF(lon, 0)).x();
-        if (x < visible.left() || x > visible.right())
-            continue;
+    const auto visible = visible_map_rect().adjusted(-2, 0, 2, 0);
+    const auto geographic = transform.inverted().mapRect(visible);
+    for (auto tick = std::ceil(geographic.left() / steps.x());
+         tick <= std::floor(geographic.right() / steps.x()); ++tick) {
+        const auto x = transform.map(QPointF(tick * steps.x(), 0)).x();
         pen.setDashOffset((area.bottom() - visible.bottom()) / pen.widthF());
         p.setPen(pen);
         p.drawLine(QPointF(x, visible.bottom()), QPointF(x, visible.top()));
     }
-    for (int lat = -90; lat <= 90; lat += grid_step) {
-        const auto y = transform.map(QPointF(0, lat)).y();
-        if (y < visible.top() || y > visible.bottom())
-            continue;
+    for (auto tick = std::ceil(std::max(-90.0, geographic.top()) / steps.y());
+         tick <= std::floor(std::min(90.0, geographic.bottom()) / steps.y()); ++tick) {
+        const auto y = transform.map(QPointF(0, tick * steps.y())).y();
         pen.setDashOffset((visible.left() - area.left()) / pen.widthF());
         p.setPen(pen);
         p.drawLine(QPointF(visible.left(), y), QPointF(visible.right(), y));
@@ -669,30 +809,36 @@ void GroundMap::paint_axes(QPainter &p) {
     const ProfileScope profile("map_axes_ms");
     const auto plot = plot_rect(), area = map_rect();
     const auto transform = map_transform();
-    const int grid_step = area.width() > 6000   ? 5
-                          : area.width() > 3000 ? 10
-                          : area.width() > 1600 ? 15
-                                                : 30;
     p.setPen(theme::color(theme::text_muted));
-    QFont mono("Consolas");
-    mono.setPixelSize(10);
-    p.setFont(mono);
-    for (int lon = -180; grid_ && lon <= 180; lon += grid_step * (area.width() < 800 ? 2 : 1)) {
-        const double x = transform.map(QPointF(lon, 0)).x();
-        if (x >= plot.left() && x <= plot.right())
-            p.drawText(QRectF(x - 24, std::min(area.bottom(), plot.bottom()) + 3, 48, 16),
-                       Qt::AlignCenter,
-                       QString::number(std::abs(lon)) + (lon < 0   ? " W"
-                                                         : lon > 0 ? " E"
-                                                                   : ""));
+    p.setFont(axis_font());
+    const auto steps = axis_steps(area.width() / 360);
+    const auto longitude_step = steps.x(), latitude_step = steps.y();
+    const auto geographic = transform.inverted().mapRect(visible_map_rect());
+    const auto number = [](double value, double step) {
+        return QString::number(std::abs(value), 'f',
+                               std::max(0, static_cast<int>(-std::floor(std::log10(step)))));
+    };
+    for (auto tick = std::ceil(geographic.left() / longitude_step);
+         grid_ && tick <= std::floor(geographic.right() / longitude_step); ++tick) {
+        const auto longitude = tick * longitude_step;
+        const auto lon = wrap(longitude, 360);
+        const double x = transform.map(QPointF(longitude, 0)).x();
+        const auto label = number(lon, longitude_step) + (lon < 0 ? " W" : lon > 0 ? " E" : "");
+        const auto label_width = p.fontMetrics().horizontalAdvance(label) + 4;
+        p.drawText(QRectF(x - label_width / 2., std::min(area.bottom(), plot.bottom()) + 3,
+                          label_width, 16),
+                   Qt::AlignCenter, label);
     }
-    for (int lat = -90; grid_ && lat <= 90; lat += grid_step) {
+    for (auto tick = std::ceil(std::max(-90.0, geographic.top()) / latitude_step);
+         grid_ && tick <= std::floor(std::min(90.0, geographic.bottom()) / latitude_step); ++tick) {
+        const auto lat = tick * latitude_step;
         const double y = transform.map(QPointF(0, lat)).y();
-        if (y >= plot.top() && y <= plot.bottom())
-            p.drawText(QRectF(0, y - 9, 31, 18), Qt::AlignRight | Qt::AlignVCenter,
-                       QString::number(std::abs(lat)) + (lat < 0   ? "S"
-                                                         : lat > 0 ? "N"
-                                                                   : ""));
+        // Small-degree labels need more than the fixed world-view left margin.
+        const auto label = number(lat, latitude_step) + (lat < 0 ? "S" : lat > 0 ? "N" : "");
+        const auto label_width = p.fontMetrics().horizontalAdvance(label) + 4;
+        const auto left = std::max(0.0, plot.left() - label_width - 4);
+        p.fillRect(QRectF(left, y - 9, label_width, 18), theme::color(theme::chrome, 220));
+        p.drawText(QRectF(left, y - 9, label_width, 18), Qt::AlignRight | Qt::AlignVCenter, label);
     }
 }
 std::vector<GroundMap::Stroke> GroundMap::strokes() const {
@@ -723,32 +869,38 @@ GroundMap::Raster GroundMap::rasterize(Raster result, const std::vector<Stroke> 
             result.complete = false;
             break;
         }
-        const auto path = result.transform.map(stroke.path);
-        if (result.preview) {
-            QPen pen = track_pen(stroke.color, stroke.width, stroke.style);
-            pen.setCosmetic(true);
-            p.setPen(pen);
-        } else {
-            auto halo = track_pen(theme::color(theme::canvas, 140), stroke.width, stroke.style);
-            const auto dash = halo.dashPattern();
-            halo.setWidthF(stroke.width + 1.5);
-            if (stroke.style != application::LineStyle::solid) {
-                auto pattern = dash;
-                for (auto &length : pattern)
-                    length *= stroke.width / halo.widthF();
-                halo.setDashPattern(pattern);
+        each_world(result.transform, result.bounds, [&](const auto &transform, const auto &area) {
+            if (!result.complete)
+                return;
+            p.setClipRect(result.bounds.intersected(area));
+            const auto path = transform.map(stroke.path);
+            if (result.preview) {
+                QPen pen = track_pen(stroke.color, stroke.width, stroke.style);
+                pen.setCosmetic(true);
+                p.setPen(pen);
+            } else {
+                auto halo = track_pen(theme::color(theme::canvas, 140), stroke.width, stroke.style);
+                const auto dash = halo.dashPattern();
+                halo.setWidthF(stroke.width + 1.5);
+                if (stroke.style != application::LineStyle::solid) {
+                    auto pattern = dash;
+                    for (auto &length : pattern)
+                        length *= stroke.width / halo.widthF();
+                    halo.setDashPattern(pattern);
+                }
+                p.setPen(halo);
+                if (!draw_track(p, path, &cancelled)) {
+                    result.complete = false;
+                    return;
+                }
+                p.setPen(track_pen(stroke.color, stroke.width, stroke.style));
             }
-            p.setPen(halo);
             if (!draw_track(p, path, &cancelled)) {
                 result.complete = false;
-                break;
             }
-            p.setPen(track_pen(stroke.color, stroke.width, stroke.style));
-        }
-        if (!draw_track(p, path, &cancelled)) {
-            result.complete = false;
+        });
+        if (!result.complete)
             break;
-        }
     }
     p.end();
     result.milliseconds = elapsed.nsecsElapsed() * 1e-6;
@@ -773,11 +925,17 @@ GroundMap::Raster GroundMap::preview_request() const {
     Raster request;
     // A bounded whole-map image covers every viewport, including zooming out and
     // crossing a cached viewport edge. It is only a transient visual fallback.
-    request.bounds = QRectF(0, 0, 2048, 1024);
-    request.transform = QTransform(2048.0 / 360, 0, 0, -1024.0 / 180, 1024, 512);
+    request.bounds = QRectF(0, 0, preview_width, preview_width / 2);
+    request.transform = QTransform(preview_width / 360, 0, 0, -preview_width / 360,
+                                   preview_width / 2, preview_width / 4);
     request.revision = geometry_revision_;
     request.preview = true;
     return request;
+}
+bool GroundMap::preview_usable() const {
+    // A whole-world raster has fixed-pixel strokes. At large scales those would
+    // become viewport-wide bands; refresh bounded viewport detail instead.
+    return map_rect().width() <= 2 * preview_width;
 }
 void GroundMap::allocate_raster(Raster &raster, QImage::Format format) {
     // Request bounds have already been aligned to physical pixels. A second ceil
@@ -792,30 +950,96 @@ void GroundMap::allocate_raster(Raster &raster, QImage::Format format) {
 QTransform GroundMap::raster_transform(const Raster &raster) const {
     const auto current = map_transform();
     const auto scale = current.m11() / raster.transform.m11();
-    return QTransform(scale, 0, 0, scale, current.dx() - scale * raster.transform.dx(),
+    const auto horizontal = current.dx() - scale * raster.transform.dx();
+    return QTransform(scale, 0, 0, scale,
+                      raster.preview ? horizontal : wrap(horizontal, map_rect().width()),
                       current.dy() - scale * raster.transform.dy());
 }
-bool GroundMap::covers_view(const Raster &raster, bool exact_scale) const {
+bool GroundMap::same_scale(const Raster &raster) const {
+    return !raster.bounds.isEmpty() && !raster.preview && raster.ratio == devicePixelRatioF() &&
+           qFuzzyCompare(raster_transform(raster).m11(), 1.0);
+}
+QRectF GroundMap::raster_draw_bounds(const Raster &raster) const {
+    auto bounds = raster_transform(raster).mapRect(raster.bounds);
+    if (same_scale(raster)) {
+        // Move cached pixels without filtering them a second time. Navigation,
+        // coordinates and vector overlays retain their continuous transform;
+        // only this transient bitmap placement rounds by at most half a device pixel.
+        bounds.moveTopLeft(QPointF(std::floor(bounds.left() * raster.ratio + .5) / raster.ratio,
+                                   std::floor(bounds.top() * raster.ratio + .5) / raster.ratio));
+    }
+    return bounds;
+}
+bool GroundMap::useful_detail(const Raster &raster) const {
+    return same_scale(raster) && raster_draw_bounds(raster).intersects(plot_rect());
+}
+bool GroundMap::prefer_detail(const Raster &candidate, const Raster &current) const {
+    if (!useful_detail(candidate))
+        return false;
+    if (!useful_detail(current) || covers_view(candidate))
+        return true;
+    const auto overlap = [&](const Raster &raster) {
+        const auto visible = raster_draw_bounds(raster).intersected(plot_rect());
+        return visible.width() * visible.height();
+    };
+    // A late result after a direction reversal must not reduce visible coverage.
+    return overlap(candidate) >= overlap(current);
+}
+void GroundMap::draw_raster(QPainter &p, const Raster &raster) const {
+    if (raster.preview) {
+        each_world(map_transform(), plot_rect(), [&](const auto &, const auto &area) {
+            draw_world_image(p, raster.image, area, plot_rect());
+        });
+        return;
+    }
+    const auto bounds = raster_draw_bounds(raster);
+    // Viewport rasters already contain all visible copies. Repeating an overscan
+    // bitmap would overlap translucent layers at the wrap boundary.
+    // Keep the smooth hint: Qt folds matching DPR into a direct pixel copy;
+    // disabling it sends fractional-DPR blits through the general scaler.
+    if (same_scale(raster))
+        p.drawImage(bounds.topLeft(), raster.image);
+    else
+        p.drawImage(bounds, raster.image);
+}
+void GroundMap::draw_layer(QPainter &p, const Raster *detail, const Raster *fallback) const {
+    if (fallback && (!detail || !raster_draw_bounds(*detail).contains(plot_rect()))) {
+        p.save();
+        QPainterPath uncovered;
+        uncovered.addRect(plot_rect());
+        if (detail)
+            uncovered.addRect(raster_draw_bounds(*detail));
+        // Odd-even clipping uses the actual rounded bitmap bounds, preventing
+        // gaps or double opacity where detailed and preview coverage meet.
+        p.setClipPath(uncovered, Qt::IntersectClip);
+        draw_raster(p, *fallback);
+        p.restore();
+    }
+    if (detail)
+        draw_raster(p, *detail);
+}
+bool GroundMap::covers_view(const Raster &raster, bool exact_scale, double margin) const {
     if (raster.bounds.isEmpty() || raster.ratio != devicePixelRatioF())
         return false;
     const auto transform = raster_transform(raster);
     if (exact_scale ? transform.m11() != 1 : transform.m11() < 0.5 || transform.m11() > 2)
         return false;
     if (exact_scale) {
-        // Fractional device-pixel pans may reuse a preview, but the settled image
-        // must be rasterized at its current phase rather than remain resampled.
+        // Bitmap placement stays sharp during a fractional pan, but the settled
+        // image must still be rasterized at the exact continuous coordinate phase.
         for (const auto offset : {transform.dx(), transform.dy()}) {
             const auto pixels = offset * raster.ratio;
             if (std::abs(pixels - std::round(pixels)) > 1e-6)
                 return false;
         }
     }
-    return transform.mapRect(raster.bounds).contains(plot_rect());
+    return raster_draw_bounds(raster).contains(
+        plot_rect().adjusted(-margin, -margin, margin, margin));
 }
 void GroundMap::cancel_obsolete_raster() {
     if (cancel_raster_ && (pending_view_.preview ? pending_view_.revision != geometry_revision_
                                                  : pending_view_.revision != trails_revision_ ||
-                                                       !covers_view(pending_view_)))
+                                                       !useful_detail(pending_view_)))
         cancel_raster_->store(true, std::memory_order_relaxed);
 }
 void GroundMap::install_raster(Raster result) {
@@ -824,7 +1048,8 @@ void GroundMap::install_raster(Raster result) {
             preview_ = std::move(result);
         return;
     }
-    if (!result.complete || result.revision != trails_revision_ || !covers_view(result))
+    if (!result.complete || result.revision != trails_revision_ ||
+        !(trails_dirty_ ? useful_detail(result) : prefer_detail(result, trails_)))
         return;
     trails_ = std::move(result);
     trails_dirty_ = false;
@@ -919,13 +1144,29 @@ GroundMap::Raster GroundMap::rasterize_footprints(Raster result,
     output.translate(-result.bounds.topLeft());
     output.setClipRect(result.bounds);
     output.setRenderHint(QPainter::Antialiasing);
-    const auto geographic = result.transform.inverted().mapRect(result.bounds);
+    struct VisibleWorld {
+        QTransform transform;
+        QRectF bounds, geographic;
+    };
+    std::vector<VisibleWorld> worlds;
+    each_world(result.transform, result.bounds, [&](const auto &transform, const auto &area) {
+        const auto bounds = result.bounds.intersected(area);
+        worlds.push_back({transform, bounds, transform.inverted().mapRect(bounds)});
+    });
+    FootprintClipBuffer projected, scratch;
     Raster mask = result;
     mask.image = {};
     for (const auto &footprint : footprints) {
         if (cancelled.load(std::memory_order_relaxed))
             break;
+        bool fill_visible = false;
         if (footprint.filled && footprint.opacity > 0) {
+            const auto fill_bounds = footprint.fill.boundingRect();
+            fill_visible = std::any_of(worlds.begin(), worlds.end(), [&](const auto &world) {
+                return world.geographic.intersects(fill_bounds);
+            });
+        }
+        if (fill_visible) {
             if (mask.image.isNull())
                 allocate_raster(mask, QImage::Format_ARGB32_Premultiplied);
             mask.image.fill(Qt::transparent);
@@ -950,11 +1191,24 @@ GroundMap::Raster GroundMap::rasterize_footprints(Raster result,
                     top = std::min(top, polygon[j].y());
                     bottom = std::max(bottom, polygon[j].y());
                 }
-                if (!geographic.intersects(QRectF(QPointF(left, top), QPointF(right, bottom))))
-                    return;
-                for (int j = 0; j < count; ++j)
-                    polygon[j] = result.transform.map(polygon[j]);
-                fill.drawPolygon(polygon.data(), count, Qt::WindingFill);
+                const QRectF geographic_bounds(QPointF(left, top), QPointF(right, bottom));
+                for (const auto &world : worlds) {
+                    if (!world.geographic.intersects(geographic_bounds))
+                        continue;
+                    bool contained = true;
+                    for (int j = 0; j < count; ++j) {
+                        projected[j] = world.transform.map(polygon[j]);
+                        contained = contained && world.bounds.contains(projected[j]);
+                    }
+                    if (contained) {
+                        fill.drawPolygon(projected.data(), count, Qt::WindingFill);
+                    } else {
+                        const auto clipped =
+                            clip_footprint_polygon(projected, count, world.bounds, scratch);
+                        fill.drawPolygon(clipped.data(), static_cast<int>(clipped.size()),
+                                         Qt::WindingFill);
+                    }
+                }
             };
             for (int i = 0; i < footprint.fill.elementCount(); ++i) {
                 if ((i % 256) == 0 && cancelled.load(std::memory_order_relaxed))
@@ -978,8 +1232,13 @@ GroundMap::Raster GroundMap::rasterize_footprints(Raster result,
         color.setAlphaF(.85f);
         output.setPen(QPen(color, 1.2));
         output.setBrush(Qt::NoBrush);
-        if (!draw_track(output, result.transform.map(footprint.edges), &cancelled))
-            break;
+        output.save();
+        for (const auto &world : worlds) {
+            output.setClipRect(world.bounds);
+            if (!draw_track(output, world.transform.map(footprint.edges), &cancelled))
+                break;
+        }
+        output.restore();
     }
     output.end();
     result.complete = !cancelled.load(std::memory_order_relaxed);
@@ -997,7 +1256,7 @@ void GroundMap::poll_footprints() {
         if (result.complete && result.revision == footprints_revision_) {
             if (result.preview)
                 footprint_preview_ = std::move(result);
-            else if (covers_view(result, false))
+            else if (prefer_detail(result, footprint_raster_))
                 footprint_raster_ = std::move(result);
         }
     } catch (const std::exception &) {
@@ -1008,19 +1267,22 @@ void GroundMap::poll_footprints() {
     update();
 }
 void GroundMap::prepare_footprints(bool navigating) {
-    if (cancel_footprints_ &&
-        (footprint_request_.revision != footprints_revision_ ||
-         (!footprint_request_.preview && !covers_view(footprint_request_, !navigating))))
+    if (cancel_footprints_ && (footprint_request_.revision != footprints_revision_ ||
+                               (!footprint_request_.preview && !useful_detail(footprint_request_))))
         cancel_footprints_->store(true, std::memory_order_relaxed);
     poll_footprints();
-    if (!footprints_ || footprints_ready() || pending_footprints_.valid())
+    if (!footprints_ || pending_footprints_.valid())
         return;
-    const bool preview = footprint_preview_.image.isNull();
-    // Keep the current bitmap while it covers the view; refill the overscan in
-    // the background when a longer drag leaves it, even before input stops.
-    if (navigating && !preview && !footprint_raster_.image.isNull() &&
-        covers_view(footprint_raster_, false))
+    const bool ready =
+        navigating ? same_scale(footprint_raster_) && covers_view(footprint_raster_, false, 64)
+                   : footprints_ready();
+    if (ready)
         return;
+    const bool preview = preview_usable() && footprint_preview_.image.isNull();
+    if (zoom_animation_.state() == QAbstractAnimation::Running && !preview && preview_usable())
+        return;
+    // Refill before the overscan runs out. A same-scale worker keeps running
+    // through fractional input while any of its coverage remains useful.
     auto request = preview ? preview_request() : raster_request();
     request.revision = footprints_revision_;
     footprint_request_ = request;
@@ -1032,37 +1294,39 @@ void GroundMap::prepare_footprints(bool navigating) {
         });
     footprint_timer_.start();
 }
-void GroundMap::paint_base(QPainter &p, const Raster *display) {
+void GroundMap::paint_foreground(QPainter &p, const Raster *display, const Raster *fallback) {
+    p.save();
+    p.setClipRect(plot_rect());
+    paint_grid(p);
+    draw_layer(p, display, fallback);
+    p.restore();
+}
+void GroundMap::paint_base(QPainter &p, const Raster *display, const Raster *fallback,
+                           bool cached_foreground) {
     p.setRenderHint(QPainter::Antialiasing);
     p.setRenderHint(QPainter::SmoothPixmapTransform);
     p.fillRect(rect(), theme::color(theme::chrome));
     p.save();
     p.setClipRect(plot_rect());
-    const auto draw = [&](const Raster &raster) {
-        const auto transform = raster_transform(raster);
-        const auto bounds = transform.mapRect(raster.bounds);
-        // Preserve the native pixel size when a cached layer only translates.
-        if (qFuzzyCompare(transform.m11(), 1.0))
-            p.drawImage(bounds.topLeft(), raster.image);
-        else
-            p.drawImage(bounds, raster.image);
-    };
     {
         const ProfileScope profile("map_background_blit_ms");
-        draw(background_);
+        draw_raster(p, background_);
     }
-    paint_grid(p);
-    if (display)
-        draw(*display);
     p.restore();
+    if (cached_foreground)
+        p.drawImage(QPointF(0, 0), foreground_image_);
+    else
+        paint_foreground(p, display, fallback);
+    // Text stays on the opaque target: transparent glyph caching can change
+    // Qt's subpixel antialiasing and gamma-correct blending.
     paint_axes(p);
 }
 void GroundMap::paintEvent(QPaintEvent *event) {
     const ProfileScope profile("map_paint_ms");
     const auto plot = plot_rect();
     const bool footer_only = event->rect().top() >= height() - 24;
-    const bool navigating =
-        (dragging_ && moved_) || zoom_animation_.state() == QAbstractAnimation::Running;
+    const bool zooming = zoom_animation_.state() == QAbstractAnimation::Running;
+    const bool navigating = (dragging_ && moved_ && pan_settle_timer_.isActive()) || zooming;
     if (!footer_only)
         prepare_footprints(navigating);
     if (tracks_transitioning() &&
@@ -1083,7 +1347,10 @@ void GroundMap::paintEvent(QPaintEvent *event) {
     // Heavy rasterization must not hold the shared Qt input / Vulkan frame thread.
     cancel_obsolete_raster();
     poll_raster();
-    if (!footer_only && !tracks_ready() && !pending_raster_.valid()) {
+    const bool detail_ready =
+        !trails_dirty_ &&
+        (navigating ? same_scale(trails_) && covers_view(trails_, false, 64) : tracks_ready());
+    if (!footer_only && !detail_ready && !pending_raster_.valid()) {
         const auto paths = strokes();
         std::size_t vertices = 0;
         for (const auto &stroke : paths)
@@ -1091,11 +1358,11 @@ void GroundMap::paintEvent(QPaintEvent *event) {
         auto request = raster_request();
         if (vertices > 1024) {
             const bool needs_preview =
-                !refinement_pending_ &&
+                preview_usable() && !refinement_pending_ &&
                 (preview_.image.isNull() || preview_.revision != geometry_revision_);
-            // Continuous input reprojects immutable coverage. Build full detail
-            // once input stops, instead of cancelling a new worker every frame.
-            if (!navigating || needs_preview) {
+            // Panning always refills detail, including before the pointer is
+            // released. Zoom bursts may reproject the overview until they settle.
+            if (!zooming || needs_preview || !preview_usable()) {
                 if (needs_preview)
                     request = preview_request();
                 pending_view_ = request;
@@ -1119,13 +1386,18 @@ void GroundMap::paintEvent(QPaintEvent *event) {
     if (footer_only)
         p.fillRect(event->rect(), theme::color(theme::chrome));
     else {
-        // Reproject a complete cached image during zooming, only while its coverage
-        // includes the whole viewport. A new exact-scale image still replaces it.
+        // Preserve every useful portion of detailed coverage. Only newly exposed
+        // regions use the overview while the next immutable viewport is prepared.
         const Raster *display = nullptr;
-        if (!trails_dirty_ && !trails_.image.isNull() && covers_view(trails_, false))
-            display = &trails_;
-        else if (!preview_.image.isNull() && preview_.revision == geometry_revision_)
-            display = &preview_;
+        if (!trails_dirty_ && !trails_.image.isNull() && trails_.ratio == devicePixelRatioF()) {
+            const auto scale = raster_transform(trails_).m11();
+            if (scale >= .5 && scale <= 2 && raster_draw_bounds(trails_).intersects(plot))
+                display = &trails_;
+        }
+        const Raster *fallback =
+            preview_usable() && !preview_.image.isNull() && preview_.revision == geometry_revision_
+                ? &preview_
+                : nullptr;
         if (const auto *detail = refinement_display())
             display = detail;
         const BaseKey key{map_transform(),
@@ -1133,6 +1405,7 @@ void GroundMap::paintEvent(QPaintEvent *event) {
                           devicePixelRatioF(),
                           background_.image.cacheKey(),
                           display ? display->image.cacheKey() : 0,
+                          fallback ? fallback->image.cacheKey() : 0,
                           grid_,
                           font()};
         const bool stable_view = key.transform == base_key_.transform &&
@@ -1143,19 +1416,38 @@ void GroundMap::paintEvent(QPaintEvent *event) {
             // During dragging/zooming draw directly; avoid allocating an extra image
             // for a viewport that may only be shown once.
             base_image_ = {};
-            paint_base(p, display);
+            foreground_image_ = {};
+            paint_base(p, display, fallback);
         } else {
             if (base_image_.isNull() || key != base_key_) {
                 const ProfileScope compose("map_composite_ms");
                 const QSize pixels(static_cast<int>(std::ceil(width() * key.ratio)),
                                    static_cast<int>(std::ceil(height() * key.ratio)));
+                // Playback changes sunlight independently of the grid and
+                // track raster. Keep one viewport-sized transparent layer so those
+                // static elements need not be stroked again each time.
+                auto foreground_key = key;
+                foreground_key.background = 0;
+                if (foreground_image_.isNull() || foreground_key != foreground_key_) {
+                    const ProfileScope foreground("map_foreground_ms");
+                    if (foreground_image_.size() != pixels)
+                        foreground_image_ = QImage(pixels, QImage::Format_ARGB32_Premultiplied);
+                    foreground_image_.setDevicePixelRatio(key.ratio);
+                    foreground_image_.fill(Qt::transparent);
+                    QPainter overlay(&foreground_image_);
+                    overlay.setRenderHint(QPainter::Antialiasing);
+                    overlay.setRenderHint(QPainter::SmoothPixmapTransform);
+                    overlay.setFont(font());
+                    paint_foreground(overlay, display, fallback);
+                    foreground_key_ = foreground_key;
+                }
                 if (base_image_.size() != pixels) {
                     base_image_ = QImage(pixels, QImage::Format_RGB32);
-                    base_image_.setDevicePixelRatio(key.ratio);
                 }
+                base_image_.setDevicePixelRatio(key.ratio);
                 QPainter cache(&base_image_);
                 cache.setFont(font());
-                paint_base(cache, display);
+                paint_base(cache, display, fallback, true);
             }
             p.drawImage(QPointF(0, 0), base_image_);
         }
@@ -1163,95 +1455,99 @@ void GroundMap::paintEvent(QPaintEvent *event) {
         p.setFont(font());
         p.save();
         p.setClipRect(plot);
-        const auto &footprint = !footprint_raster_.image.isNull() &&
-                                        covers_view(footprint_raster_, false)
-                                    ? footprint_raster_
-                                    : footprint_preview_;
-        if (!footprint.image.isNull()) {
-            const auto transform = raster_transform(footprint);
-            const auto bounds = transform.mapRect(footprint.bounds);
-            if (qFuzzyCompare(transform.m11(), 1.0))
-                p.drawImage(bounds.topLeft(), footprint.image);
-            else
-                p.drawImage(bounds, footprint.image);
+        const Raster *footprint = nullptr;
+        if (!footprint_raster_.image.isNull() && footprint_raster_.ratio == devicePixelRatioF()) {
+            const auto scale = raster_transform(footprint_raster_).m11();
+            if (scale >= .5 && scale <= 2 && raster_draw_bounds(footprint_raster_).intersects(plot))
+                footprint = &footprint_raster_;
         }
+        const auto *footprint_fallback = preview_usable() && !footprint_preview_.image.isNull() &&
+                                                 footprint_preview_.revision == footprints_revision_
+                                             ? &footprint_preview_
+                                             : nullptr;
+        draw_layer(p, footprint, footprint_fallback);
         p.setRenderHint(QPainter::SmoothPixmapTransform, false);
         const auto label_context = font().toString() + '/' + QString::number(devicePixelRatioF());
         if (access_visible_ && access_pair_ && access_pair_->first < points_.size() &&
             access_pair_->second < points_.size()) {
             p.setPen(QPen(theme::color(theme::success), 2, Qt::DashLine));
-            p.drawPath(
-                map_transform().map(ground_path({points_[access_pair_->first].geographic,
-                                                 points_[access_pair_->second].geographic})));
+            const auto path = ground_path({points_[access_pair_->first].geographic,
+                                           points_[access_pair_->second].geographic});
+            each_world(map_transform(), plot, [&](const auto &transform, const auto &) {
+                draw_track(p, transform.map(path));
+            });
         }
-        for (std::size_t i = 0; i < points_.size(); ++i) {
-            const auto point = marker_position(i);
-            if (!plot.contains(point))
-                continue;
-            p.setPen(QPen(theme::color(theme::canvas), 1.5));
-            p.setBrush(selected_ == i              ? theme::color(theme::sakura)
-                       : points_[i].ground_station ? theme::color(theme::success)
-                       : i < tracks_.size()        ? QColor::fromRgb(tracks_[i].display.line_color)
-                                                   : theme::color(theme::accent_bright));
-            if (points_[i].ground_station)
-                p.drawPolygon(QPolygonF{point + QPointF(0, -6), point + QPointF(6, 0),
-                                        point + QPointF(0, 6), point + QPointF(-6, 0)});
-            else
-                p.drawEllipse(point, 4, 4);
-            if (selected_ == i) {
-                p.setBrush(Qt::NoBrush);
-                p.setPen(QPen(theme::color(theme::sakura), 1));
-                p.drawEllipse(point, 8, 8);
-            }
-            if (!labels_ || (i < tracks_.size() && !tracks_[i].label))
-                continue;
-            const auto name = fontMetrics().elidedText(points_[i].name, Qt::ElideRight,
-                                                       static_cast<int>(plot.width()) - 12);
-            const auto label_width = fontMetrics().horizontalAdvance(name) + 12;
-            const QRectF label(std::clamp(point.x() + 12, plot.left(), plot.right() - label_width),
-                               std::clamp(point.y() - 12, plot.top(), plot.bottom() - 22),
-                               label_width, 22);
-            const auto ratio = devicePixelRatioF();
-            // Resolve half-pixel ties consistently after repeated anchored zooms.
-            const auto label_pixel = [ratio](double value) {
-                return std::floor(value * ratio + 0.5 + 1e-7) / ratio;
-            };
-            const QPointF label_origin(label_pixel(label.x()), label_pixel(label.y()));
-            const auto label_key = label_context + '/' + name;
-            auto *image = labels_cache_.object(label_key);
-            if (!image) {
-                auto prepared = std::make_unique<QImage>(
-                    QSize(static_cast<int>(std::ceil(label.width() * ratio)),
-                          static_cast<int>(std::ceil(label.height() * ratio))),
-                    QImage::Format_ARGB32_Premultiplied);
-                prepared->setDevicePixelRatio(ratio);
-                prepared->fill(Qt::transparent);
-                {
-                    QPainter text(prepared.get());
-                    text.setRenderHint(QPainter::Antialiasing);
-                    text.setFont(font());
-                    text.setPen(Qt::NoPen);
-                    text.setBrush(theme::color(theme::chrome, 220));
-                    const QRectF bounds(QPointF(0, 0), label.size());
-                    text.drawRoundedRect(bounds, 3, 3);
-                    text.setPen(theme::color(theme::text));
-                    text.drawText(bounds, Qt::AlignCenter, name);
+        each_world(map_transform(), plot, [&](const auto &transform, const auto &) {
+            for (std::size_t i = 0; i < points_.size(); ++i) {
+                const auto point = transform.map(points_[i].geographic);
+                if (!plot.contains(point))
+                    continue;
+                p.setPen(QPen(theme::color(theme::canvas), 1.5));
+                p.setBrush(selected_ == i              ? theme::color(theme::sakura)
+                           : points_[i].ground_station ? theme::color(theme::success)
+                           : i < tracks_.size() ? QColor::fromRgb(tracks_[i].display.line_color)
+                                                : theme::color(theme::accent_bright));
+                if (points_[i].ground_station)
+                    p.drawPolygon(QPolygonF{point + QPointF(0, -6), point + QPointF(6, 0),
+                                            point + QPointF(0, 6), point + QPointF(-6, 0)});
+                else
+                    p.drawEllipse(point, 4, 4);
+                if (selected_ == i) {
+                    p.setBrush(Qt::NoBrush);
+                    p.setPen(QPen(theme::color(theme::sakura), 1));
+                    p.drawEllipse(point, 8, 8);
                 }
-                image = prepared.get();
-                const auto cost = static_cast<int>((image->sizeInBytes() + 1023) / 1024);
-                // An unusually wide label can exceed the cache; still draw it once.
-                p.drawImage(label_origin, *image);
-                labels_cache_.insert(label_key, prepared.release(), cost);
-            } else
-                p.drawImage(label_origin, *image);
-        }
+                if (!labels_ || (i < tracks_.size() && !tracks_[i].label))
+                    continue;
+                const auto name = fontMetrics().elidedText(points_[i].name, Qt::ElideRight,
+                                                           static_cast<int>(plot.width()) - 12);
+                const auto label_width = fontMetrics().horizontalAdvance(name) + 12;
+                const QRectF label(
+                    std::clamp(point.x() + 12, plot.left(), plot.right() - label_width),
+                    std::clamp(point.y() - 12, plot.top(), plot.bottom() - 22), label_width, 22);
+                const auto ratio = devicePixelRatioF();
+                // Resolve half-pixel ties consistently after repeated anchored zooms.
+                const auto label_pixel = [ratio](double value) {
+                    return std::floor(value * ratio + 0.5 + 1e-7) / ratio;
+                };
+                const QPointF label_origin(label_pixel(label.x()), label_pixel(label.y()));
+                const auto label_key = label_context + '/' + name;
+                auto *image = labels_cache_.object(label_key);
+                if (!image) {
+                    auto prepared = std::make_unique<QImage>(
+                        QSize(static_cast<int>(std::ceil(label.width() * ratio)),
+                              static_cast<int>(std::ceil(label.height() * ratio))),
+                        QImage::Format_ARGB32_Premultiplied);
+                    prepared->setDevicePixelRatio(ratio);
+                    prepared->fill(Qt::transparent);
+                    {
+                        QPainter text(prepared.get());
+                        text.setRenderHint(QPainter::Antialiasing);
+                        text.setFont(font());
+                        text.setPen(Qt::NoPen);
+                        text.setBrush(theme::color(theme::chrome, 220));
+                        const QRectF bounds(QPointF(0, 0), label.size());
+                        text.drawRoundedRect(bounds, 3, 3);
+                        text.setPen(theme::color(theme::text));
+                        text.drawText(bounds, Qt::AlignCenter, name);
+                    }
+                    image = prepared.get();
+                    const auto cost = static_cast<int>((image->sizeInBytes() + 1023) / 1024);
+                    // An unusually wide label can exceed the cache; still draw it once.
+                    p.drawImage(label_origin, *image);
+                    labels_cache_.insert(label_key, prepared.release(), cost);
+                } else
+                    p.drawImage(label_origin, *image);
+            }
+        });
         p.restore();
     }
     p.setFont(font());
     p.setPen(theme::color(theme::text_muted));
     QString caption = ui::text("ground_map.caption");
     if (cursor_position_) {
-        const auto ll = map_transform().inverted().map(*cursor_position_);
+        auto ll = map_transform().inverted().map(*cursor_position_);
+        ll.setX(wrap(ll.x(), 360));
         caption = ui::text("ground_map.ll")
                       .arg(std::abs(ll.x()), 0, 'f', 3)
                       .arg(ll.x() < 0 ? "W" : "E")
@@ -1266,7 +1562,7 @@ void GroundMap::paintEvent(QPaintEvent *event) {
                                    .arg(point.geographic.x() < 0 ? "W" : "E");
     }
     const auto scale = QStringLiteral("%1×").arg(zoom_, 0, 'f', 2);
-    const int scale_width = fontMetrics().horizontalAdvance(QStringLiteral("12.00×"));
+    const int scale_width = fontMetrics().horizontalAdvance(scale);
     const int caption_width = std::max(0, width() - 48 - scale_width);
     p.drawText(QRectF(16, height() - 22, caption_width, 18), Qt::AlignVCenter,
                fontMetrics().elidedText(caption, Qt::ElideRight, caption_width));
@@ -1275,7 +1571,7 @@ void GroundMap::paintEvent(QPaintEvent *event) {
 }
 void GroundMap::mousePressEvent(QMouseEvent *event) {
     if ((event->button() != Qt::LeftButton && event->button() != Qt::MiddleButton) ||
-        !plot_rect().intersected(map_rect()).contains(event->position())) {
+        !visible_map_rect().contains(event->position())) {
         event->ignore();
         return;
     }
@@ -1292,13 +1588,13 @@ void GroundMap::mousePressEvent(QMouseEvent *event) {
     event->accept();
 }
 void GroundMap::mouseMoveEvent(QMouseEvent *event) {
-    cursor_position_ = plot_rect().intersected(map_rect()).contains(event->position())
+    cursor_position_ = visible_map_rect().contains(event->position())
                            ? std::optional<QPointF>(event->position())
                            : std::nullopt;
     update(QRect(0, height() - 24, width(), 24));
     if (dragging_)
         drag_to(event->position());
-    else if (cursor_position_ && zoom_ > 1)
+    else if (cursor_position_)
         setCursor(Qt::OpenHandCursor);
     else
         unsetCursor();
@@ -1319,6 +1615,7 @@ void GroundMap::finish_drag(bool restore) {
     if (!dragging_)
         return;
     dragging_ = false;
+    pan_settle_timer_.stop();
     drag_button_ = Qt::NoButton;
     unsetCursor();
     if (restore) {
@@ -1341,13 +1638,15 @@ void GroundMap::mouseReleaseEvent(QMouseEvent *event) {
     }
     drag_to(event->position());
     const bool pick = event->button() == Qt::LeftButton && !moved_ &&
-                      plot_rect().intersected(map_rect()).contains(event->position());
+                      visible_map_rect().contains(event->position());
     finish_drag();
     if (pick && select) {
         std::optional<std::size_t> hit;
         double nearest = 12;
         for (std::size_t i = 0; i < points_.size(); ++i) {
-            const auto point = marker_position(i);
+            auto point = marker_position(i);
+            point.setX(event->position().x() +
+                       wrap(point.x() - event->position().x(), map_rect().width()));
             const auto distance = QLineF(point, event->position()).length();
             if (plot_rect().contains(point) && distance < nearest) {
                 nearest = distance;
@@ -1359,8 +1658,7 @@ void GroundMap::mouseReleaseEvent(QMouseEvent *event) {
     event->accept();
 }
 void GroundMap::mouseDoubleClickEvent(QMouseEvent *event) {
-    if (event->button() != Qt::LeftButton ||
-        !plot_rect().intersected(map_rect()).contains(event->position())) {
+    if (event->button() != Qt::LeftButton || !visible_map_rect().contains(event->position())) {
         event->ignore();
         return;
     }
@@ -1368,7 +1666,7 @@ void GroundMap::mouseDoubleClickEvent(QMouseEvent *event) {
     event->accept();
 }
 void GroundMap::wheelEvent(QWheelEvent *event) {
-    if (!plot_rect().intersected(map_rect()).contains(event->position()) || dragging_) {
+    if (!visible_map_rect().contains(event->position()) || dragging_) {
         event->ignore();
         return;
     }

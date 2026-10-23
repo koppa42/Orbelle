@@ -22,7 +22,7 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
     const std::map<std::string, std::shared_ptr<const core::OceanTideModel>> &ocean_tides,
     const std::optional<application::Project> &previous_project,
     std::shared_ptr<runtime::OrbitSessionCache> sessions,
-    const std::function<void(std::size_t)> &orbit_progress) {
+    const std::function<void(std::size_t)> &orbit_progress, PreparationTiming *timing) {
     application::validate_project(project);
     const auto [data_first, data_last] = application::calculation_data_interval(project);
     std::shared_ptr<const core::IEarthOrientationProvider> eop;
@@ -124,6 +124,11 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
         if (retained && recompute &&
             existing->provenance().input_revision == std::numeric_limits<std::uint64_t>::max())
             throw std::overflow_error("Object input revision exhausted");
+        StageTiming session_timing(timing ? &timing->session_ms : nullptr);
+        if (timing) {
+            timing->sessions_reused += retained && !recompute;
+            timing->sessions_acquired += !retained || recompute;
+        }
         auto session =
             retained && !recompute
                 ? *existing
@@ -144,9 +149,11 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
                        ocean_tides.contains(input.hpop.ocean_tides.model)
                            ? ocean_tides.at(input.hpop.ocean_tides.model)
                            : nullptr});
+        session_timing.stop();
         auto orbit = prepare_orbit_scene(
             satellite.orbit, session, *frames, *eop, cancelled,
-            display_cache_interval(satellite.orbit, satellite.display, project.current));
+            display_cache_interval(satellite.orbit, satellite.display, project.current), timing);
+        StageTiming model_timing(timing ? &timing->models_ms : nullptr);
         vsg::ref_ptr<vsg::MatrixTransform> model;
         if (satellite.model_kind != 0) {
             std::filesystem::path model_path;
@@ -186,6 +193,7 @@ std::shared_ptr<PreparedProject> prepare_project_scene(
         throw OrbitCancelled{};
     // Existing pointers refer to the old scenario only; all reads precede this replacement.
     result->scenario = result->scenario.with_objects(std::move(updates));
+    StageTiming map_timing(timing ? &timing->display_ms : nullptr);
     result->ground_tracks = GroundMap::prepare_tracks(result->orbits);
     for (std::size_t i = 0; i < result->ground_tracks.size(); ++i)
         result->ground_tracks[i].name =

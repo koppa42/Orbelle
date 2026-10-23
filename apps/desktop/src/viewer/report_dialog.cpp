@@ -508,7 +508,7 @@ struct ReportDialog::Impl {
         owner->setObjectName("reportDialog");
         owner->setWindowTitle(ui::text("common.report"));
         owner->setWindowIcon(workbench_icon(WorkbenchIcon::properties));
-        owner->setMinimumSize(320, 320);
+        owner->setMinimumWidth(320);
         owner->resize(1120, 740);
         auto *root = new QVBoxLayout(owner);
         root->setSizeConstraint(QLayout::SetNoConstraint);
@@ -536,6 +536,7 @@ struct ReportDialog::Impl {
         auto *scroll = new QScrollArea(settings_panel);
         scroll->setObjectName("reportSettingsScroll");
         scroll->setWidgetResizable(true);
+        scroll->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
         scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         scroll->setFrameShape(QFrame::NoFrame);
         panel_layout->addWidget(scroll, 1);
@@ -778,9 +779,9 @@ struct ReportDialog::Impl {
         auto *actions_layout = new QVBoxLayout(actions);
         actions_layout->setContentsMargins(12, 8, 12, 8);
         actions_layout->setSpacing(6);
-        estimate = note({}, actions);
+        estimate = note({}, settings);
         estimate->setObjectName("reportEstimate");
-        actions_layout->addWidget(estimate);
+        config->insertWidget(0, estimate);
         generate = new QPushButton(ui::text("report_dialog.label_99"), actions);
         generate->setObjectName("generateReport");
         generate->setProperty("primary", true);

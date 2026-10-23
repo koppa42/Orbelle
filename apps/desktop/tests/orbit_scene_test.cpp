@@ -6,6 +6,42 @@
 #include <orbelle/runtime/two_body.hpp>
 
 namespace orbelle::desktop {
+TEST(OrbitPreparation, TimingsPreserveHpopSamplesAndCancellation) {
+    const auto time = runtime::make_builtin_time_provider();
+    const std::shared_ptr<const core::IFrameProvider> frames = runtime::make_frame_provider();
+    const std::shared_ptr<const core::IEarthOrientationProvider> eop =
+        runtime::load_eop_snapshot(ORBELLE_TEST_EOP);
+    OrbitInput input;
+    input.first = time->from_utc({2026, 10, 9, 0, 0, 0, 0});
+    input.last = core::Epoch{input.first.tai_nanoseconds() + 3600'000'000'000LL};
+    input.initial.epoch = input.first;
+    input.propagator = OrbitPropagator::hpop;
+    const auto prepare = [&](PreparationTiming *timing, bool cancel = false) {
+        // Fresh numerical state each time: diagnostics must not warm or resample a session.
+        return prepare_orbit_scene(input, make_orbit_session(input, 1, time.get(), {frames, eop}),
+                                   *frames, *eop, std::atomic_bool{cancel}, {}, timing);
+    };
+    const auto baseline = prepare(nullptr);
+    PreparationTiming timing;
+    const auto measured = prepare(&timing);
+    const auto compare = [](const auto &a, const auto &b) {
+        ASSERT_EQ(a.size(), b.size());
+        for (std::size_t i = 0; i < a.size(); ++i) {
+            EXPECT_EQ(a[i].epoch, b[i].epoch);
+            EXPECT_EQ(a[i].position_m, b[i].position_m);
+            EXPECT_EQ(a[i].velocity_mps, b[i].velocity_mps);
+        }
+    };
+    compare(baseline->track.samples().states(), measured->track.samples().states());
+    compare(baseline->inertial_track.samples().states(),
+            measured->inertial_track.samples().states());
+    EXPECT_GT(timing.sampling_ms, 0);
+    EXPECT_GT(timing.display_ms, 0);
+    EXPECT_GT(timing.sample_calls, 0);
+    PreparationTiming cancelled;
+    EXPECT_THROW(prepare(&cancelled, true), OrbitCancelled);
+    EXPECT_EQ(cancelled.sample_calls, 0);
+}
 TEST(OrbitPreparation, MissionBurnsKeepSeparateTangentsOnAndOffTheDisplayGrid) {
     const auto time = runtime::make_builtin_time_provider();
     const auto frames = runtime::make_frame_provider();

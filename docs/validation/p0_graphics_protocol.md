@@ -37,7 +37,9 @@ python tools/validation/run_workbench_profile.py --executable out/build/desktop-
 
 在同一设备、相同采样轨迹、卫星数、窗口大小和实际 DPI 下运行修改前后的 Release 程序，每次使用新的输出目录。可再以96颗卫星比较较密集的场景。计时期间不同时构建、运行测试或启动另一图形任务；记录 `run-info.json` 中的程序散列及 `profile.json` 的实际尺寸和 `device_pixel_ratio`。`--scale` 会与系统缩放相乘，不代表最终 DPI。
 
-比较 `map_paint_ms` 的平均值及 P95，并分别查看平移、播放、缩放和并排播放。`map_background_ms`、`map_composite_ms`、轨迹工作线程耗时用于定位开销；悬停只重绘坐标栏，不应与整幅地图绘制混在一起比较。缩放后的 `map_quality_restored_after_zoom` 必须为真。窗口隐藏、缓存更新、字体和 DPI 变化另做正确性检查。这些是 GUI CPU 计时，不能当作 GPU 帧时间、输入到屏幕延迟或万星验收结果。
+比较 `map_paint_ms` 的平均值及 P95，并分别查看平移、播放、缩放和并排播放。`map_background_ms`、`map_composite_ms`、`map_foreground_ms` 和轨迹工作线程耗时用于定位开销；悬停只重绘坐标栏，不应与整幅地图绘制混在一起比较。输入按实际视区大小生成；`navigation` 中平移次数、位移和缩放次数必须非零，不能把落在视区外的合成输入当作有效负载。缩放后的 `map_quality_restored_after_zoom` 必须为真。三维查看 `satellite_update_ms`、`handle_events_ms`、`viewer_update_ms`、`projection_ms`、`submit_ms` 和 `present_ms`，其中提交和呈现指标仅表示调用的 CPU 时间。窗口隐藏、缓存更新、字体和 DPI 变化另做正确性检查。这些是 GUI CPU 计时，不能当作 GPU 帧时间、输入到屏幕延迟或万星验收结果。
+
+传感器覆盖平移可设置 `ORBELLE_SENSOR_PAN_PROFILE` 为新目录，运行 `orbelle_ground_map_tests --gtest_filter=GroundMapTest.ProfileZoomedSensorPanning`。固定逻辑视口1280×800、12倍缩放，比较无覆盖、LEO 45°和 GEO 80°半角三种情况；除连续平移外，各执行20次超过缓存边距的交替平移，等待当前细节就绪，分别记录绘制、覆盖工作线程和 `map_detail_settle_ms`。保持同一 Qt 平台、DPI 和 Release 配置，多次独立运行比较；这是 CPU 工作及缓存就绪耗时，不是呈现延迟，也不作为 CI 的时序门槛。
 
 ## 报告曲线 CPU 对照
 
