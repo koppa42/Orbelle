@@ -20,6 +20,8 @@ void Workbench::smoke_ground_stations() {
         station_editor_->findChild<QuantityEditor *>("stationLatitude")
             ->set_value(22.3, Unit::degree);
         station_editor_->findChild<QuantityEditor *>("stationHeight")->set_value(-200, Unit::metre);
+        station_editor_->findChild<QuantityEditor *>("stationHeightAboveGround")
+            ->set_value(25, Unit::metre);
         station_editor_->findChild<QPushButton *>("applyGroundStation")->click();
         smoke_require(busy(), "Station creation did not start");
         smoke_record("ground-station-insert-via-object-chooser");
@@ -43,7 +45,7 @@ void Workbench::smoke_ground_stations() {
         double offset = 0;
         for (std::size_t i = 0; i < 3; ++i)
             offset += std::pow(displayed[i] - exact[i], 2);
-        smoke_require(std::abs(std::sqrt(offset) - 300) < 1e-6,
+        smoke_require(std::abs(std::sqrt(offset) - 275) < 1e-6,
                       "Station display clearance changed the numerical height");
         workspace_->select_view(0);
         focus_satellite(0);
@@ -103,6 +105,19 @@ void Workbench::smoke_ground_stations() {
         smoke_require(!busy() && scenario_->revision() == station_revision,
                       "Unchanged station Apply started work after a unit change");
         smoke_record("unchanged-ground-station-apply-preserves-scene");
+        station_editor_->findChild<QPlainTextEdit *>("stationDescription")
+            ->setPlainText("Facility smoke antenna");
+        station_editor_->findChild<QComboBox *>("stationPositionType")->setCurrentIndex(2);
+        station_editor_->findChild<QPushButton *>("applyGroundStation")->click();
+        smoke_require(!busy() && scenario_->revision() == station_revision &&
+                          stations_[0].config.description == "Facility smoke antenna" &&
+                          stations_[0].config.position_type ==
+                              core::GroundPositionType::cartesian &&
+                          stations_[0].config.location.height_above_ground_m == 25,
+                      "Facility metadata apply changed computation or lost height");
+        station_editor_->findChild<QComboBox *>("stationPositionType")->setCurrentIndex(0);
+        station_editor_->findChild<QPushButton *>("applyGroundStation")->click();
+        smoke_record("facility-coordinate-and-description-apply-preserves-computation");
         station_editor_->findChild<QuantityEditor *>("stationHeight")
             ->set_value(0.35, Unit::kilometre);
         station_editor_->findChild<QPushButton *>("applyGroundStation")->click();

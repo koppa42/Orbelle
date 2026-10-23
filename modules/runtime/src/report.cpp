@@ -185,8 +185,11 @@ std::string report_input_sha256(const application::Project &project) {
     auto p = project;
     p.reports.clear();
     p.current = p.first;
-    for (auto &s : p.ground_stations)
+    for (auto &s : p.ground_stations) {
         s.display_name.clear();
+        s.description.clear();
+        s.position_type = core::GroundPositionType::geodetic;
+    }
     for (auto &s : p.sensors) {
         s.display_name.clear();
         s.display = {};
@@ -462,7 +465,9 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                 const auto &location = object.station->location;
                 const auto p = core::ground_station_position(location);
                 rows.push_back({object.id, object.name, location.longitude_rad,
-                                location.latitude_rad, location.height_m, p[0], p[1], p[2]});
+                                location.latitude_rad, location.height_m, p[0], p[1], p[2],
+                                location.height_above_ground_m,
+                                location.height_m + location.height_above_ground_m});
             }
         } else if (d.query.kind == ReportKind::orbital_events) {
             orbital_event_statistics = results::OrbitalEventStatistics{selected.size()};
@@ -729,7 +734,7 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                         report_input_sha256(context.project),
                         context.project.data_lock().sha256(),
                         context.time ? context.time->data_info().sha256 : "",
-                        report_is_access(d.query.kind) ? "geometric-access-wgs84-v1"
+                        report_is_access(d.query.kind) ? "geometric-access-wgs84-local-ground-v2"
                         : d.query.kind == ReportKind::state_covariance
                             ? "hpop-joint-covariance-sequential-samples-v2"
                             : "builtin-reports-v2",

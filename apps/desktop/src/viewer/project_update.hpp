@@ -29,7 +29,8 @@ inline bool same_sensor_input(const application::ProjectSensor &a,
 inline bool same_station_input(const application::ProjectGroundStation &a,
                                const application::ProjectGroundStation &b) {
     return a.object_id == b.object_id && a.name() == b.name() && a.location == b.location &&
-           a.minimum_elevation_rad == b.minimum_elevation_rad;
+           a.minimum_elevation_rad == b.minimum_elevation_rad &&
+           a.position_type == b.position_type && a.description == b.description;
 }
 
 using runtime::orbit_calculation_data;

@@ -23,6 +23,8 @@ class GroundStation:
     name: str
     location: Wgs84Location
     minimum_elevation: u.Angle = u.deg(0)
+    position_type: n.GroundPositionType = n.GroundPositionType.GEODETIC
+    description: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +52,8 @@ class GroundStationState:
     name: str
     location: Wgs84Location
     minimum_elevation: u.Angle
+    position_type: n.GroundPositionType
+    description: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +138,22 @@ class GroundStationHandle(ObjectHandle):
     __slots__ = ()
 
     @property
+    def position_type(self) -> n.GroundPositionType:
+        return self._project.objects.read(self).position_type
+
+    @position_type.setter
+    def position_type(self, value: n.GroundPositionType) -> None:
+        self.update(position_type=value)
+
+    @property
+    def description(self) -> str:
+        return self._project.objects.read(self).description
+
+    @description.setter
+    def description(self, value: str) -> None:
+        self.update(description=value)
+
+    @property
     def location(self) -> Wgs84Location:
         return self._project.objects.read(self).location
 
@@ -150,7 +170,9 @@ class GroundStationHandle(ObjectHandle):
         self.update(minimum_elevation=value)
 
     def update(self, *, name: str | Unset = UNSET, location: Wgs84Location | Unset = UNSET,
-               minimum_elevation: u.Angle | Unset = UNSET) -> None:
+               minimum_elevation: u.Angle | Unset = UNSET,
+               position_type: n.GroundPositionType | Unset = UNSET,
+               description: str | Unset = UNSET) -> None:
         patch = n.GroundStationUpdate()
         if name is not UNSET:
             patch.name = require(name, str, "name")
@@ -158,6 +180,10 @@ class GroundStationHandle(ObjectHandle):
             patch.location = require(location, Wgs84Location, "location")._native()
         if minimum_elevation is not UNSET:
             patch.minimum_elevation_rad = require(minimum_elevation, u.Angle, "minimum_elevation").radians
+        if position_type is not UNSET:
+            patch.position_type = require(position_type, n.GroundPositionType, "position_type")
+        if description is not UNSET:
+            patch.description = require(description, str, "description")
         self._project._manager().update(self._ref, patch)
 
 
@@ -262,7 +288,8 @@ class ObjectCollection:
             return self.satellite(definition.name, orbit=definition.orbit, display=definition.display)
         if isinstance(definition, GroundStation):
             return self.ground_station(definition.name, location=definition.location,
-                                       minimum_elevation=definition.minimum_elevation)
+                                       minimum_elevation=definition.minimum_elevation,
+                                       position_type=definition.position_type, description=definition.description)
         if isinstance(definition, Sensor):
             return self.sensor(definition.name, parent=definition.parent,
                                field_of_view=definition.field_of_view, pointing=definition.pointing)
@@ -274,10 +301,13 @@ class ObjectCollection:
         return SatelliteHandle(self._project, self._project._manager().create(definition))
 
     def ground_station(self, name: str, *, location: Wgs84Location,
-                       minimum_elevation: u.Angle = u.deg(0)) -> GroundStationHandle:
+                       minimum_elevation: u.Angle = u.deg(0),
+                       position_type: n.GroundPositionType = n.GroundPositionType.GEODETIC,
+                       description: str = "") -> GroundStationHandle:
         definition = n.GroundStationDefinition(require(name, str, "name"),
             require(location, Wgs84Location, "location")._native(),
-            require(minimum_elevation, u.Angle, "minimum_elevation").radians)
+            require(minimum_elevation, u.Angle, "minimum_elevation").radians,
+            require(position_type, n.GroundPositionType, "position_type"), require(description, str, "description"))
         return GroundStationHandle(self._project, self._project._manager().create(definition))
 
     def sensor(self, name: str, *, parent: SatelliteHandle, field_of_view: FieldOfView,
@@ -303,8 +333,9 @@ class ObjectCollection:
                                   state.model_kind, state.model_diameter_m, state.model_path)
         if isinstance(state, n.ProjectGroundStation):
             location = Wgs84Location(u.rad(state.location.longitude_rad), u.rad(state.location.latitude_rad),
-                                     u.m(state.location.height_m))
-            return GroundStationState(obj.id, state.name, location, u.rad(state.minimum_elevation_rad))
+                                     u.m(state.location.height_m), u.m(state.location.height_above_ground_m))
+            return GroundStationState(obj.id, state.name, location, u.rad(state.minimum_elevation_rad),
+                                      state.position_type, state.description)
         pointing = Pointing(state.target_station_id, self._project) if state.pointing == n.SensorPointing.TARGETED else Pointing()
         return SensorState(obj.id, state.name, state.parent_satellite_id, _from_native(state.pattern), pointing)
 
@@ -316,21 +347,24 @@ class ObjectCollection:
                orbit: Orbit | Unset = UNSET, display: OrbitStyle | Unset = UNSET) -> None: ...
     @overload
     def update(self, obj: GroundStationHandle, *, name: str | Unset = UNSET,
-               location: Wgs84Location | Unset = UNSET, minimum_elevation: u.Angle | Unset = UNSET) -> None: ...
+               location: Wgs84Location | Unset = UNSET, minimum_elevation: u.Angle | Unset = UNSET,
+               position_type: n.GroundPositionType | Unset = UNSET, description: str | Unset = UNSET) -> None: ...
     @overload
     def update(self, obj: SensorHandle, *, name: str | Unset = UNSET,
                field_of_view: FieldOfView | Unset = UNSET, pointing: Pointing | Unset = UNSET) -> None: ...
     def update(self, obj: ObjectHandle, *, name: str | Unset = UNSET, orbit: Orbit | Unset = UNSET,
                display: OrbitStyle | Unset = UNSET, location: Wgs84Location | Unset = UNSET,
                minimum_elevation: u.Angle | Unset = UNSET, field_of_view: FieldOfView | Unset = UNSET,
-               pointing: Pointing | Unset = UNSET) -> None:
+               pointing: Pointing | Unset = UNSET,
+               position_type: n.GroundPositionType | Unset = UNSET, description: str | Unset = UNSET) -> None:
         self._project._manager().read(require(obj, ObjectHandle, "object")._ref)
         values = {"name": name, "orbit": orbit, "display": display, "location": location,
-                  "minimum_elevation": minimum_elevation, "field_of_view": field_of_view, "pointing": pointing}
+                  "minimum_elevation": minimum_elevation, "field_of_view": field_of_view, "pointing": pointing,
+                  "position_type": position_type, "description": description}
         if isinstance(obj, SatelliteHandle):
             allowed = {"name", "orbit", "display"}
         elif isinstance(obj, GroundStationHandle):
-            allowed = {"name", "location", "minimum_elevation"}
+            allowed = {"name", "location", "minimum_elevation", "position_type", "description"}
         elif isinstance(obj, SensorHandle):
             allowed = {"name", "field_of_view", "pointing"}
         else:
@@ -342,7 +376,8 @@ class ObjectCollection:
         if isinstance(obj, SatelliteHandle):
             obj.update(name=name, orbit=orbit, display=display)
         elif isinstance(obj, GroundStationHandle):
-            obj.update(name=name, location=location, minimum_elevation=minimum_elevation)
+            obj.update(name=name, location=location, minimum_elevation=minimum_elevation,
+                       position_type=position_type, description=description)
         elif isinstance(obj, SensorHandle):
             obj.update(name=name, field_of_view=field_of_view, pointing=pointing)
 

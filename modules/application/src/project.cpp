@@ -26,7 +26,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 48;
+constexpr std::uint32_t project_version = 49;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -46,7 +46,7 @@ constexpr std::array section_schemas{
     SectionSchema{scene_tag, 1, "Missing scene section"},
     SectionSchema{objects_tag, 32, "Missing satellites section"},
     SectionSchema{styles_tag, 1, "Missing track styles section"},
-    SectionSchema{stations_tag, 2, "Missing ground stations section"},
+    SectionSchema{stations_tag, 3, "Missing ground stations section"},
     SectionSchema{sensors_tag, 2, "Missing sensors section"},
     SectionSchema{reports_tag, 7, "Missing reports section"},
     SectionSchema{data_tag, 2, nullptr},
@@ -571,6 +571,7 @@ std::string analysis_input_sha256(const Project &project) {
         out.real(s->location.longitude_rad);
         out.real(s->location.latitude_rad);
         out.real(s->location.height_m);
+        out.real(s->location.height_above_ground_m);
         out.real(s->minimum_elevation_rad);
     }
     std::map<std::string, const ProjectSensor *> sensors;
@@ -700,12 +701,14 @@ void validate_project(const Project &project, bool relationships) {
     for (const auto &station : project.ground_stations) {
         text_check(station.object_id, true);
         text_check(station.display_name, !station.display_name.empty());
+        text_check(station.description);
         check(ids.emplace(station.object_id, Kind::station).second, "Duplicate project object ID");
-        check(std::isfinite(station.minimum_elevation_rad) && station.minimum_elevation_rad >= 0 &&
+        check(std::isfinite(station.minimum_elevation_rad) &&
+                  station.minimum_elevation_rad >= -std::numbers::pi / 2 &&
                   station.minimum_elevation_rad <= std::numbers::pi / 2,
-              "Station minimum elevation must be in [0, 90] degrees");
+              "Station minimum elevation must be in [-90, 90] degrees");
         try {
-            (void)core::ground_station_position(station.location);
+            (void)core::ground_station_coordinates(station.location, station.position_type);
         } catch (const std::invalid_argument &error) {
             throw ProjectError(error.what());
         }
@@ -1010,7 +1013,10 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         stations.real(station.location.longitude_rad);
         stations.real(station.location.latitude_rad);
         stations.real(station.location.height_m);
+        stations.real(station.location.height_above_ground_m);
         stations.real(station.minimum_elevation_rad);
+        stations.number(static_cast<unsigned>(station.position_type), 4);
+        stations.text(station.description);
     }
     payload.section(stations_tag, stations);
     Writer sensors;
@@ -1264,8 +1270,10 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             ProjectGroundStation station;
             station.object_id = stations.text();
             station.display_name = stations.text();
-            station.location = {stations.real(), stations.real(), stations.real()};
+            station.location = {stations.real(), stations.real(), stations.real(), stations.real()};
             station.minimum_elevation_rad = stations.real();
+            station.position_type = static_cast<core::GroundPositionType>(stations.number(4));
+            station.description = stations.text();
             project.ground_stations.push_back(std::move(station));
         }
         stations.done();

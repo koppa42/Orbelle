@@ -14,7 +14,7 @@ namespace orbelle::runtime {
 application::Session make_ground_station_session(const application::ProjectGroundStation &station,
                                                  std::uint64_t revision) {
     return {std::make_shared<core::GroundStation>(station.location),
-            {station.object_id, revision, "ground-station-wgs84-fixed-itrf-v1"}};
+            {station.object_id, revision, "ground-station-wgs84-fixed-itrf-v2"}};
 }
 application::Session make_orbit_session(const application::OrbitInput &input,
                                         std::uint64_t revision, const core::ITimeProvider *time,

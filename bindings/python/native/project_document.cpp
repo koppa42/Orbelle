@@ -25,8 +25,11 @@ void bind_project_document(py::module_ &module) {
         .def(py::init<std::string, OrbitInput, OrbitDisplay>(), py::arg("name"), py::arg("orbit"),
              py::arg("display"));
     py::class_<objects::GroundStation>(module, "GroundStationDefinition")
-        .def(py::init<std::string, orbelle::core::GroundStationLocation, double>(),
-             py::arg("name"), py::arg("location"), py::arg("minimum_elevation_rad"));
+        .def(py::init<std::string, orbelle::core::GroundStationLocation, double,
+                      orbelle::core::GroundPositionType, std::string>(),
+             py::arg("name"), py::arg("location"), py::arg("minimum_elevation_rad"),
+             py::arg("position_type") = orbelle::core::GroundPositionType::geodetic,
+             py::arg("description") = "");
     py::class_<objects::Pointing>(module, "PointingDefinition")
         .def(py::init<std::optional<ObjectRef>>(), py::arg("target") = py::none());
     py::class_<objects::Sensor>(module, "SensorDefinition")
@@ -45,6 +48,8 @@ void bind_project_document(py::module_ &module) {
         .def(py::init<>())
         .def_readwrite("name", &objects::GroundStationUpdate::name)
         .def_readwrite("location", &objects::GroundStationUpdate::location)
+        .def_readwrite("position_type", &objects::GroundStationUpdate::position_type)
+        .def_readwrite("description", &objects::GroundStationUpdate::description)
         .def_readwrite("minimum_elevation_rad",
                        &objects::GroundStationUpdate::minimum_elevation_rad);
     py::class_<objects::SensorUpdate>(module, "SensorUpdate")

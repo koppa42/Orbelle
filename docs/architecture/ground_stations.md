@@ -1,27 +1,45 @@
-# 地面站
+# 地面站与 Facility 基本属性
 
-通过“插入 → 插入对象 → 地面站”创建。默认选择“定义属性”，在工作区输入名称、经度、纬度与椭球高，点击“插入地面站”生效。选择“使用默认参数”则直接创建经度 0°、纬度 0°、椭球高 0 m 的站点。属性分“站点”“位置 · WGS84”“可见性约束”三组，ITRF 坐标预览作为位置组的最后一行；支持度/弧度、m/km 换算、重置和错误提示；关闭页面不会提交草稿。
+通过“插入 → 插入对象 → 地面站”创建固定于地球的设施。Facility 沿用已有地面站对象、稳定 ID、Access/AER 与传感器指向关系。选择“定义属性”时先编辑草稿，点击“插入地面站”生效；“使用默认参数”创建经纬度、地面椭球高与离地高度均为零的站点。
 
-地面站与卫星共用对象树、搜索、选择、定位、重命名、复制和删除。二维显示青绿色菱形及名称，三维显示青绿色菱形；所选对象显示选中环。地固视图中位置固定，惯性视图中随地球转动。允许只有地面站的场景，也允许删除最后一个对象后继续插入。
+属性页分为“基本 → 位置 / 描述”和“约束 → 基本”。宽面板使用左侧树，较窄面板使用页签或页面选择框；各页内部滚动，操作按钮固定在底部。位置页集中显示名称、坐标与离地高度；WGS84 基准在分组标题旁标注，解释文字通过帮助按钮查看，设备位置预览默认收起。切页、缩放和调整面板宽度不重建输入控件，保留草稿、单位与页面选择。重置恢复上次应用值，关闭不会提交草稿。描述为最多 16 KiB 的 UTF-8 纯文本，可包含换行。
 
-## 坐标与计算约定
+## 位置与高度
 
-- WGS84 大地纬度，东经和北纬为正；公共 API 使用弧度、米。
-- 经度范围 ±180°，纬度范围 ±90°。当前地面站模型支持椭球高 −12,000 至 100,000 m，拒绝范围外和非有限输入。
-- 椭球高以 WGS84 椭球面为零，与海拔不同；不自动进行大地水准面、地形或地图拾点换算。
-- 半长轴 6,378,137 m，扁率 1 / 298.257223563。约定与 [ERFA 的 WGS84 参数](https://github.com/liberfa/erfa/blob/master/src/eform.c)及[大地坐标转换接口](https://github.com/liberfa/erfa/blob/master/src/gd2gc.c)一致。
-- `core::GroundStation` 是地心 ITRF 状态提供者，位置固定、ITRF 速度为零，历元保持请求的纳秒值。不含板块运动、固体潮、海潮负荷或站点实测速度。
-- 转换到 GCRF 时必须使用完整 `StateTransform::inverse()`，包含地球旋转的速度项。桌面位置显示只调用位置旋转；显示缓存不能作为Access 分析的输入。
+坐标定义**地面点**；设备位置沿该点的 WGS84 法线叠加离地高度。东经和北纬为正，公共计算 API 使用弧度和米。
 
-三维地球目前使用参考椭球。为使负椭球高的站点能被看到，三维标记使用 `max(椭球高, 100 m)` 的显示位置；拾取与选中环使用相同位置。每个视图独立进行椭球遮挡判断，正面的菱形与选中环作为标注叠加显示，背面的站点不绘制也不能拾取。计算状态、属性预览、二维经纬度和项目文件始终使用原始坐标。这是显示间距，不是地面站的实际高度改写。
+| 坐标类型 | `ground_station_coordinates` / `ground_station_location` 的三个值（SI） |
+| --- | --- |
+| `geodetic` / `GEODETIC` | 大地纬度、经度、地面椭球高 |
+| `geocentric` / `GEOCENTRIC` | 地面点在椭球上法线投影点的地心纬度、经度、地面椭球高 |
+| `cartesian` / `CARTESIAN` | 地面点的地心 ITRF X、Y、Z |
+| `spherical` / `SPHERICAL` | 地面点位置向量的球面纬度、经度、地心距离 |
+| `cylindrical` / `CYLINDRICAL` | 地面点距极轴的距离、经度、ITRF Z |
 
-## 场景与文件
+地心纬度按 STK 的椭球投影点约定解释；地心坐标中的高度仍沿椭球法线量取。有高度时，它不等同于球坐标的位置向量纬度。参考 [STK Facility Position](https://help.agi.com/stk/Content/stk/fac-01.htm)。UI 坐标类型切换转换当前有效草稿；无效输入阻止切换并保留原文字。仅切换坐标表示与单位保留精确的大地坐标，不将数值往返误差写回物理输入。
 
-`ProjectGroundStation` 保存稳定 ID、显示名称、`GroundStationLocation` 和最低仰角；ID 在所有对象间必须唯一。文件层 `application::Project.ground_stations`（Python `ProjectData.ground_stations`）保存站点集合；当前项目 v46 的必需 `GSTN` v2 段保存精确弧度、米值及最低仰角。开发阶段只读写当前格式，非当前版本或缺失必需段均拒绝，不从旧格式补默认值。
+- 经度范围 ±180°，纬度范围 ±90°；与 STK 接受 ±360° 的输入范围有差异。极轴上的直角坐标逆变换约定经度为 0；球/柱坐标保留传入的经度。
+- 地面椭球高支持 −12,000 至 100,000 m，离地高度支持 0 至 100,000 m，设备总椭球高不得超过 100,000 m。非有限值、地心内部不可用坐标及越界输入均明确拒绝。
+- 高度基准固定为 WGS84。椭球高不是海拔；当前不接入 MSL、大地水准面或地形服务，也不提供会暗示这些功能可用的选项。
+- WGS84 半长轴 6,378,137 m、扁率 1 / 298.257223563，与 [ERFA WGS84 参数](https://github.com/liberfa/erfa/blob/master/src/eform.c)一致。
+- `GroundStationLocation.height_m` 是地面椭球高，`height_above_ground_m` 是设备离地高度。`ground_station_position` 和 `core::GroundStation` 返回设备的实际位置；坐标表示转换排除离地高度。
+- `core::GroundStation` 是地心 ITRF 状态提供者，ITRF 速度为零，历元保持请求的纳秒值。不含板块运动、固体潮、海潮负荷或站点实测速度。转为 GCRF 必须使用完整状态变换，包含地球旋转速度项。
 
-Runtime 构建固定 ITRF Session，模型标识为 `ground-station-wgs84-fixed-itrf-v1`。同一 Scenario 可同时包含 GCRF 卫星和 ITRF 地面站；每条 `StateSeries` 的参考系必须显式检查后再做相对位置计算。位置编辑增加该站点输入修订；重命名、场景时段编辑以及其他对象的操作保留存续数值 Session。复制使用新 ID 和修订 1，重新从文件打开也从修订 1 开始。
+## 可见性与显示
 
-桌面编辑通过已有的场景候选准备流程发布。准备开始前检查当前 EOP 数据及策略；如有变化，须用户同意更新。准备使用捕获的同一 Provider，成功后一起发布树、地图、三维标记、场景及数据来源；取消或失败保留原场景。所有对象合计上限为 10,000。
+AER 从设备位置计算，仰角相对于当地椭球法线确定的水平面。最低仰角支持 −90° 至 90°，默认 0°；可见性还必须满足地面遮挡。离地高度大于 1 mm 时可向下看到当地地面，负的最低仰角不会绕过地面遮挡。
+
+地面遮挡使用地心对称、经过站点地面点且具有相同法线的扁椭球，而非总是使用零高 WGS84。令大地纬度为 φ、地面椭球高为 h、卯酉圈曲率半径为 N、WGS84 第一偏心率平方为 e²，取 u=N+h、v=N(1−e²)+h、k=u cos²φ+v sin²φ；地面椭球半轴满足 A²=uk、B²=vk。这些式子在赤道及极点均有有限值。对设备至目标的 ITRF 线段做椭球相交判断；不包含光行时、折射或地形起伏。该模型符合 [STK Line of Sight 的地面设施定义](https://help.agi.com/stk/LinkedDocuments/LineOfSight.pdf)，尚未做 STK 实机同输入对照。
+
+地面站与卫星共用对象树、搜索、选择、定位、重命名、复制和删除。二维显示青绿色菱形及名称，三维显示青绿色菱形和独立选中环；地固视图中固定，惯性视图中随地球转动。只有地面站或没有对象的场景均可继续编辑。
+
+三维地球仍使用参考椭球。标记以 `max(设备总椭球高, 100 m)` 留出显示间距，拾取与选中环使用相同位置；背面站点不可见、不可拾取。数值状态、属性预览、传感器指向和项目文件保留实际位置。地面站报告的 `station.height` 是地面椭球高，新增 `station.height_above_ground` 与 `station.observer_height` 分别给出离地高度和设备总椭球高；ITRF XYZ 对应设备位置。
+
+## 场景、接口与文件
+
+`ProjectGroundStation` 保存稳定 ID、显示名称、`GroundStationLocation`、最低仰角、`position_type` 和 `description`。ID 在所有对象中唯一；坐标类型与描述为元数据，不进入数值输入哈希。位置改变更新状态修订；名称、描述或坐标表示改变不会重算数值 Session。物理修改沿用后台候选准备与原子发布，失败或取消保留原场景；所有对象合计上限 10,000。
+
+当前项目为 v49，必需 `GSTN` v3 段保存上述字段；只接受当前格式，旧项目明确报错，详见[项目文件](project_files.md)。复制和保存重开保留新增字段。Runtime 模型标识为 `ground-station-wgs84-fixed-itrf-v2`。
 
 Python 示例：
 
@@ -30,14 +48,23 @@ import orbelle as of
 from orbelle import units as u
 
 project = of.Project("观测任务", of.Epoch(0), of.Epoch(7_200_000_000_000))
-station = project.objects.ground_station("示例地面站", location=of.Wgs84Location(
-    longitude=u.deg(114.2), latitude=u.deg(22.3), ellipsoid_height=u.m(350)))
-states = project.to_scenario().sample([project.first, project.last])[0]  # ITRF
+station = project.objects.ground_station("楼顶天线",
+    location=of.Wgs84Location(longitude=u.deg(114.2), latitude=u.deg(22.3),
+                             ellipsoid_height=u.m(350), height_above_ground=u.m(25)),
+    minimum_elevation=u.deg(5),
+    position_type=of.GroundPositionType.GEODETIC,
+    description="屋顶天线，设备离地 25 m")
+xyz = station.location.coordinates(of.GroundPositionType.CARTESIAN)  # 地面点，米
+station.location = of.Wgs84Location.from_coordinates(
+    of.GroundPositionType.CARTESIAN, xyz, height_above_ground=u.m(30))
+station.description = "设备离地高度已调整"
 project.save("station.orbelle")
 ```
 
-Python 普通脚本通过 `project.objects` 和站点句柄修改，例如 `station.minimum_elevation = u.deg(5)`；多对象原子修改使用 `with project.edit():`。文件层可变值保留为 `ProjectData`，详见[对象编辑 API](object_editing.md)。
+C++ 使用 `of::GroundPositionType`、`of::ground_station_coordinates`、`of::ground_station_location`，创建与修改字段位于 `of::objects::GroundStation` / `GroundStationUpdate`；与 Python 共用校验、事务和计算实现。
 
-已支持卫星过站、AER、最低仰角、椭球遮挡与传感器视场限制，参见[可见性与传感器](access_sensors.md)。尚无地形、方位遮挡掩模、折射和通信链路预算。
+当前不包含地形服务、方位仰角掩模、地形坡度、当地时间显示、通信/雷达模型或地面站子传感器。已有几何 Access 与卫星传感器能力见[可见性与传感器](access_sensors.md)。
 
-数值与文件兼容检查位于 C++ 集成测试和 Python API 测试中，图形交互及便携包检查使用[构建说明](../development/build.md)中的验证入口。
+## 验证
+
+Core 测试使用 ERFA 已发布的 WGS84 参考坐标作正/逆变换对照，位置容限 1e−7 m；覆盖极点、日期变更线、高度边界、五种表示、非法输入，以及负地面高与塔顶视线的解析几何。文件独立样例手工编码 GSTN v3，由 C++ 和 Python 逐字节复现；同时验证损坏数据、元数据/物理输入身份、事务失败、复制与重开。Qt offscreen 验证分页、单位、无效输入、应用/重置/关闭与 320–920 逻辑像素布局。真实 GPU smoke 检查离地高度、显示间距和元数据应用不重算；执行方法见[构建说明](../development/build.md)。

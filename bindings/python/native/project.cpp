@@ -31,17 +31,33 @@ void bind_data_lock(py::module_ &module) {
 }
 void bind_project(py::module_ &module) {
     py::register_exception<application::ProjectError>(module, "ProjectError", PyExc_ValueError);
+    py::enum_<core::GroundPositionType>(module, "GroundPositionType")
+        .value("GEODETIC", core::GroundPositionType::geodetic)
+        .value("GEOCENTRIC", core::GroundPositionType::geocentric)
+        .value("CARTESIAN", core::GroundPositionType::cartesian)
+        .value("SPHERICAL", core::GroundPositionType::spherical)
+        .value("CYLINDRICAL", core::GroundPositionType::cylindrical);
     py::class_<core::GroundStationLocation>(module, "GroundStationLocation")
-        .def(py::init<double, double, double>(), py::arg("longitude_rad") = 0,
-             py::arg("latitude_rad") = 0, py::arg("height_m") = 0)
+        .def(py::init<double, double, double, double>(), py::arg("longitude_rad") = 0,
+             py::arg("latitude_rad") = 0, py::arg("height_m") = 0,
+             py::arg("height_above_ground_m") = 0)
         .def_readwrite("longitude_rad", &core::GroundStationLocation::longitude_rad)
         .def_readwrite("latitude_rad", &core::GroundStationLocation::latitude_rad)
-        .def_readwrite("height_m", &core::GroundStationLocation::height_m);
+        .def_readwrite("height_m", &core::GroundStationLocation::height_m)
+        .def_readwrite("height_above_ground_m",
+                       &core::GroundStationLocation::height_above_ground_m);
+    module.def("ground_station_coordinates", &core::ground_station_coordinates, py::arg("location"),
+               py::arg("type"));
+    module.def("ground_station_location", &core::ground_station_location, py::arg("type"),
+               py::arg("coordinates"), py::arg("height_above_ground_m") = 0);
+    module.def("ground_station_position", &core::ground_station_position, py::arg("location"));
     py::class_<application::ProjectGroundStation>(module, "ProjectGroundStation")
         .def(py::init<>())
         .def_readwrite("object_id", &application::ProjectGroundStation::object_id)
         .def_readwrite("display_name", &application::ProjectGroundStation::display_name)
         .def_readwrite("location", &application::ProjectGroundStation::location)
+        .def_readwrite("position_type", &application::ProjectGroundStation::position_type)
+        .def_readwrite("description", &application::ProjectGroundStation::description)
         .def_readwrite("minimum_elevation_rad",
                        &application::ProjectGroundStation::minimum_elevation_rad)
         .def_property_readonly("name", &application::ProjectGroundStation::name);

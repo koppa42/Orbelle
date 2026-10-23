@@ -4,9 +4,39 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <orbelle/runtime/project.hpp>
+#include <orbelle/runtime/report.hpp>
 #include <orbelle/runtime/time_frames.hpp>
 
 using namespace orbelle;
+TEST(ProjectGroundStation, FacilityPropertiesRoundTripAndMetadataDoNotChangeNumericalIdentity) {
+    application::Project project("Facility", core::Epoch{0}, core::Epoch{60'000'000'000});
+    application::ProjectGroundStation station{
+        "facility", "Roof antenna", {1.2, 0.4, 350, 25}, -0.1};
+    station.position_type = core::GroundPositionType::cartesian;
+    station.description = "First line\nSecond line";
+    project.ground_stations.push_back(station);
+    const auto restored = application::decode_project(application::encode_project(project));
+    EXPECT_EQ(restored.ground_stations[0].location, station.location);
+    EXPECT_EQ(restored.ground_stations[0].position_type, station.position_type);
+    EXPECT_EQ(restored.ground_stations[0].description, station.description);
+    const auto hash = application::analysis_input_sha256(project);
+    const auto report_hash = runtime::report_input_sha256(project);
+    project.ground_stations[0].position_type = core::GroundPositionType::spherical;
+    project.ground_stations[0].description = "Updated metadata";
+    EXPECT_EQ(application::analysis_input_sha256(project), hash);
+    EXPECT_EQ(runtime::report_input_sha256(project), report_hash);
+    project.ground_stations[0].location.height_above_ground_m += 1;
+    EXPECT_NE(application::analysis_input_sha256(project), hash);
+    EXPECT_NE(runtime::report_input_sha256(project), report_hash);
+    const auto copy = project.with_ground_station_copy("facility", "copy", "Copy");
+    EXPECT_EQ(copy.ground_stations[1].description, "Updated metadata");
+    EXPECT_EQ(copy.ground_stations[1].location.height_above_ground_m, 26);
+    project.ground_stations[0].position_type = static_cast<core::GroundPositionType>(99);
+    EXPECT_THROW(application::validate_project(project), application::ProjectError);
+    project.ground_stations[0].position_type = core::GroundPositionType::geodetic;
+    project.ground_stations[0].description = std::string(16385, 'a');
+    EXPECT_THROW(application::validate_project(project), application::ProjectError);
+}
 TEST(ProjectGroundStation, RoundTripMixedObjectsAndImmutableEditsPreserveIdentityAndLocation) {
     application::Project project("Mixed", core::Epoch{0}, core::Epoch{7200000000000});
     application::ProjectSatellite satellite;
@@ -429,6 +459,9 @@ TEST(Project, CurrentSchemaFixturePreservesInputsRelationshipsAndExactEncoding) 
     EXPECT_EQ(mission.segments[1].delta_v_mps, (std::array{12.0, -3.0, 0.5}));
     ASSERT_EQ(project.ground_stations.size(), 1U);
     EXPECT_EQ(project.ground_stations[0].minimum_elevation_rad, 0.2);
+    EXPECT_EQ(project.ground_stations[0].location.height_above_ground_m, 12.5);
+    EXPECT_EQ(project.ground_stations[0].position_type, core::GroundPositionType::cartesian);
+    EXPECT_EQ(project.ground_stations[0].description, "Facility schema fixture\nRoof antenna");
     ASSERT_EQ(project.sensors.size(), 1U);
     EXPECT_EQ(project.sensors[0].parent_satellite_id, "satellite-a");
     EXPECT_EQ(project.sensors[0].target_station_id, "station-a");
@@ -510,8 +543,8 @@ TEST(Project, DataLocksHaveStableCanonicalOrderAndRejectDuplicateRoles) {
 }
 TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
     const auto bytes = application::encode_project(example());
-    for (std::uint32_t version = 0; version <= 49; ++version) {
-        if (version == 48)
+    for (std::uint32_t version = 0; version <= 50; ++version) {
+        if (version == 49)
             continue;
         SCOPED_TRACE(version);
         auto unsupported = bytes;
@@ -523,7 +556,7 @@ TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
         } catch (const application::ProjectError &error) {
             EXPECT_NE(std::string(error.what()).find("version " + std::to_string(version) + ";"),
                       std::string::npos);
-            EXPECT_NE(std::string(error.what()).find("reads only version 48"), std::string::npos);
+            EXPECT_NE(std::string(error.what()).find("reads only version 49"), std::string::npos);
         }
     }
 }

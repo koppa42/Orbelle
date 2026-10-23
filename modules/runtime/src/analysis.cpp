@@ -357,7 +357,7 @@ struct Analysis::Impl {
                 analysis_input_sha256(pair.numerical_inputs(p.first, p.last)),
                 data.data_lock().sha256(),
                 entries.at(pair.satellite.orbit.object_id).session.provenance().algorithm +
-                    ";frames=state-frame-routing-v1;geometric-access-wgs84-v1"};
+                    ";frames=state-frame-routing-v1;geometric-access-wgs84-local-ground-v2"};
     }
 };
 Analysis::Analysis(ProjectSnapshot snapshot, DataSnapshot data,

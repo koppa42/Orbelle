@@ -165,6 +165,7 @@ if(ORBELLE_WITH_VSG)
         add_executable(orbelle_quantity_tests tests/quantity_editor_test.cpp
             tests/orbit_editor_test.cpp
             tests/property_editor_test.cpp
+            tests/facility_editor_test.cpp
             tests/sensor_editor_test.cpp
             tests/mission_editor_test.cpp
             tests/hpop_settings_test.cpp

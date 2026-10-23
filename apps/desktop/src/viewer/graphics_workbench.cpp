@@ -1596,7 +1596,8 @@ class Workbench final : public WorkbenchWindow {
             auto location = station.config.location;
             // A display-only surface clearance prevents z-fighting and keeps negative-height
             // stations visible on the reference globe. Numerical sessions retain exact height.
-            location.height_m = std::max(location.height_m, 100.0);
+            location.height_m = std::max(location.height_m + location.height_above_ground_m, 100.0);
+            location.height_above_ground_m = 0;
             auto position = core::ground_station_position(location);
             if (display_frame_ == core::FrameId::gcrf) {
                 if (!rotation)
@@ -3409,14 +3410,17 @@ class Workbench final : public WorkbenchWindow {
                     if (found == project.ground_stations.end())
                         throw std::invalid_argument(ui::utf8("graphics_workbench.validation_10"));
                     index = static_cast<std::size_t>(found - project.ground_stations.begin());
-                    if (found->location == value.location && found->name() == value.name() &&
-                        found->minimum_elevation_rad == value.minimum_elevation_rad) {
+                    if (same_station_input(*found, value)) {
                         station_editor_->show_result(ui::text("graphics_workbench.label_67"));
                         return;
                     }
                     if (found->location == value.location &&
                         found->minimum_elevation_rad == value.minimum_elevation_rad) {
+                        *found = value;
+                        application::validate_project(project);
                         rename_object(id, value.name());
+                        stations_.at(index).config = value;
+                        mark_project_dirty();
                         station_editor_->accept_station(value);
                         station_editor_->show_result(ui::text("graphics_workbench.label_31"));
                         return;
