@@ -1,3 +1,4 @@
+#include "de_type2_cache.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -252,6 +253,25 @@ void validate_centre_segment(const double *bounds, const SpiceInt *integers) {
 }
 
 class Snapshot final : public core::IEphemerisProvider {
+    auto daf_reader() const {
+        return [this](std::size_t file, SpiceInt begin, SpiceInt end, double *data) {
+            SpiceInt handle = 0;
+            dafopr_c(copies_->paths[file].string().c_str(), &handle);
+            check_spice();
+            try {
+                dafgda_c(handle, begin, end, data);
+                check_spice();
+                dafcls_c(handle);
+                check_spice();
+            } catch (...) {
+                reset_c();
+                dafcls_c(handle);
+                reset_c();
+                throw;
+            }
+        };
+    }
+
   public:
     Snapshot(core::EphemerisDataInfo info, std::unique_ptr<KernelCopies> copies)
         : info_(std::move(info)), copies_(std::move(copies)),
@@ -273,17 +293,21 @@ class Snapshot final : public core::IEphemerisProvider {
         (void)tdb_unlocked(info_.first_epoch);
         (void)tdb_unlocked(info_.last_epoch);
         for (std::size_t i = 0; i < info_.kernels.size(); ++i) {
-            if (info_.kernels[i].kind != "SPK_BODY_CENTRES")
+            if (info_.kernels[i].kind == "LSK")
                 continue;
             std::optional<SpiceInt> body;
             visit_segments(copies_->paths[i], [&](SpiceInt, const double *, const double *bounds,
                                                   const SpiceInt *integers) {
+                type2_cache_.add(i, bounds, integers);
+                if (info_.kernels[i].kind != "SPK_BODY_CENTRES")
+                    return;
                 validate_centre_segment(bounds, integers);
                 if (body && *body != integers[0])
                     throw core::EphemerisDataError("Each supplemental SPK must contain one planet");
                 body = integers[0];
             });
-            if (!body || info_.kernels[i].file != "centre-" + std::to_string(*body) + ".bsp")
+            if (info_.kernels[i].kind == "SPK_BODY_CENTRES" &&
+                (!body || info_.kernels[i].file != "centre-" + std::to_string(*body) + ".bsp"))
                 throw core::EphemerisDataError(
                     "Supplemental SPK must be named centre-<physical NAIF ID>.bsp");
         }
@@ -379,7 +403,12 @@ class Snapshot final : public core::IEphemerisProvider {
         // This interface needs only position. SPKEZP applies the same LT+S
         // corrections without also differentiating light time and aberration
         // for an unused apparent velocity.
-        spkezp_c(10, tdb.seconds_past_j2000, "J2000", "LT+S", 399, position.data(), &light_time);
+        const auto cached = type2_cache_.apparent_sun(tdb.seconds_past_j2000, daf_reader());
+        if (cached)
+            position = *cached;
+        else
+            spkezp_c(10, tdb.seconds_past_j2000, "J2000", "LT+S", 399, position.data(),
+                     &light_time);
         check_spice();
         for (auto &component : position) {
             component *= 1000;
@@ -699,11 +728,21 @@ class Snapshot final : public core::IEphemerisProvider {
         }
     }
     core::TdbTime tdb_unlocked(core::Epoch epoch) const {
+        // The immutable LSK and exact TAI ns fully determine this conversion.
+        // Several force models use it at the same RK stage; no epoch rounding.
+        for (std::size_t i = 0; i < tdb_cache_.size(); ++i) {
+            const auto &entry =
+                tdb_cache_[(next_tdb_ + tdb_cache_.size() - 1 - i) % tdb_cache_.size()];
+            if (entry && entry->first == epoch)
+                return entry->second;
+        }
         const double et = unitim_c(epoch.seconds_since(core::Epoch(0)), "TAI", "TDB");
         check_spice();
         if (!std::isfinite(et)) {
             throw core::EphemerisQueryError("CSPICE returned a nonfinite TDB time");
         }
+        tdb_cache_[next_tdb_] = std::pair{epoch, core::TdbTime{et}};
+        next_tdb_ = (next_tdb_ + 1) % tdb_cache_.size();
         return {et};
     }
     core::EphemerisState state_unlocked(std::int32_t target, std::int32_t observer,
@@ -713,16 +752,32 @@ class Snapshot final : public core::IEphemerisProvider {
         // snapshot. RK stages and separate force models often request the same
         // Sun/Moon state: reuse exact queries, never rounded epochs or states
         // from another kernel set. Failed queries are not cached.
-        for (std::size_t i = 0; i < state_cache_.size(); ++i) {
-            const auto &entry =
-                state_cache_[(next_state_ + state_cache_.size() - 1 - i) % state_cache_.size()];
+        // Four ways per bucket bound miss lookup work; the full key is always
+        // checked, so collisions affect hit rate only. Mix high/low epoch bits
+        // because integrator grids frequently have many identical low bits.
+        auto hash = static_cast<std::uint64_t>(epoch.tai_nanoseconds()) ^
+                    (static_cast<std::uint64_t>(static_cast<std::uint32_t>(target)) << 32) ^
+                    static_cast<std::uint32_t>(observer);
+        hash ^= hash >> 33;
+        hash *= 0xff51afd7ed558ccdULL;
+        hash ^= hash >> 33;
+        hash *= 0xc4ceb9fe1a85ec53ULL;
+        hash ^= hash >> 33;
+        const auto bucket = static_cast<std::size_t>(hash & 15);
+        for (std::size_t i = 0; i < 4; ++i) {
+            const auto &entry = state_cache_[4 * bucket + i];
             if (entry && entry->epoch == epoch && entry->target_naif_id == target &&
                 entry->observer_naif_id == observer)
                 return *entry;
         }
         const auto tdb = tdb_unlocked(epoch);
         double state[6]{}, light_time = 0;
-        spkez_c(target, tdb.seconds_past_j2000, "J2000", "NONE", observer, state, &light_time);
+        const auto cached =
+            type2_cache_.geometric(target, observer, tdb.seconds_past_j2000, daf_reader());
+        if (cached)
+            std::copy(cached->begin(), cached->end(), state);
+        else
+            spkgeo_c(target, tdb.seconds_past_j2000, "J2000", observer, state, &light_time);
         check_spice();
         for (auto &value : state) {
             value *= 1000; // CSPICE km and km/s -> public SI units.
@@ -739,16 +794,19 @@ class Snapshot final : public core::IEphemerisProvider {
                                     core::TimeScale::tdb,
                                     tdb,
                                     source_};
-        state_cache_[next_state_] = result;
-        next_state_ = (next_state_ + 1) % state_cache_.size();
+        state_cache_[4 * bucket + next_state_[bucket]] = result;
+        next_state_[bucket] = (next_state_[bucket] + 1) % 4;
         return result;
     }
     core::EphemerisDataInfo info_;
     std::unique_ptr<KernelCopies> copies_;
     std::string source_;
     // Protected by the same process-wide mutex as the CSPICE kernel pool.
+    mutable detail::DeType2Cache type2_cache_;
+    mutable std::array<std::optional<std::pair<core::Epoch, core::TdbTime>>, 16> tdb_cache_;
+    mutable std::size_t next_tdb_ = 0;
     mutable std::array<std::optional<core::EphemerisState>, 64> state_cache_;
-    mutable std::size_t next_state_ = 0;
+    mutable std::array<std::size_t, 16> next_state_{};
     mutable std::array<std::optional<std::pair<core::Epoch, std::array<double, 3>>>, 16>
         apparent_cache_;
     mutable std::size_t next_apparent_ = 0;
