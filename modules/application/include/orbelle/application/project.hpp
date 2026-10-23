@@ -120,7 +120,7 @@ struct ProjectGroundStation {
     core::GroundStationLocation location;
     double minimum_elevation_rad = 0; // Geodetic horizon, [-pi/2, pi/2], plus ground LOS.
     core::GroundPositionType position_type = core::GroundPositionType::geodetic;
-    std::string description; // Metadata; excluded from numerical identity.
+    std::string description = {}; // Metadata; excluded from numerical identity.
     [[nodiscard]] const std::string &name() const {
         return display_name.empty() ? object_id : display_name;
     }

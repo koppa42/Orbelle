@@ -48,7 +48,7 @@ struct GroundStation {
     core::GroundStationLocation location = {};
     double minimum_elevation_rad = 0;
     core::GroundPositionType position_type = core::GroundPositionType::geodetic;
-    std::string description;
+    std::string description = {};
 };
 // A complete pointing value: null target means geocentric nadir.
 struct Pointing {
