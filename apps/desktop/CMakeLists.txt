@@ -93,7 +93,7 @@ if(ORBELLE_WITH_VSG)
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbelle_welcome_tests tests/welcome_page_test.cpp
-            tests/workbench_window_test.cpp src/viewer/workbench_window.cpp
+            tests/workbench_window_test.cpp tests/workbench_input_test.cpp src/viewer/workbench_window.cpp
             src/viewer/welcome_page.cpp src/viewer/workbench_style.cpp)
         qt_add_resources(orbelle_welcome_tests "welcome_resources" PREFIX "/orbelle"
             BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/artwork/orbital-welcome.png)

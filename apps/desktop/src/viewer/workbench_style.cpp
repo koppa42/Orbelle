@@ -3,7 +3,9 @@
 #include "workbench_theme.hpp"
 #include <QAbstractSpinBox>
 #include <QApplication>
+#include <QComboBox>
 #include <QDockWidget>
+#include <QEvent>
 #include <QFont>
 #include <QFontDatabase>
 #include <QHBoxLayout>
@@ -30,10 +32,36 @@ class WorkbenchStyle final : public QProxyStyle {
     WorkbenchStyle() : QProxyStyle(QStyleFactory::create("Fusion")) {}
     void polish(QWidget *widget) override {
         QProxyStyle::polish(widget);
-        if (auto *number = qobject_cast<QAbstractSpinBox *>(widget))
+        const bool input =
+            qobject_cast<QComboBox *>(widget) || qobject_cast<QAbstractSpinBox *>(widget);
+        // Scrolling a form must neither edit a value nor move keyboard focus.
+        if (input && widget->focusPolicy() == Qt::WheelFocus)
+            widget->setFocusPolicy(Qt::StrongFocus);
+        if (auto *number = qobject_cast<QAbstractSpinBox *>(widget)) {
             number->setButtonSymbols(widget->property("stepButtons").toBool()
                                          ? QAbstractSpinBox::UpDownArrows
                                          : QAbstractSpinBox::NoButtons);
+            number->installEventFilter(this);
+        }
+    }
+    void unpolish(QWidget *widget) override {
+        if (qobject_cast<QAbstractSpinBox *>(widget))
+            widget->removeEventFilter(this);
+        QProxyStyle::unpolish(widget);
+    }
+    bool eventFilter(QObject *watched, QEvent *event) override {
+        if (event->type() == QEvent::Wheel && qobject_cast<QAbstractSpinBox *>(watched)) {
+            // Ignored native wheel events continue to the surrounding scroll area.
+            event->ignore();
+            return true;
+        }
+        return QProxyStyle::eventFilter(watched, event);
+    }
+    int styleHint(StyleHint hint, const QStyleOption *option, const QWidget *widget,
+                  QStyleHintReturn *return_data) const override {
+        if (hint == SH_ComboBox_AllowWheelScrolling)
+            return false; // The open popup keeps its ordinary item-view scrolling.
+        return QProxyStyle::styleHint(hint, option, widget, return_data);
     }
     int pixelMetric(PixelMetric metric, const QStyleOption *option,
                     const QWidget *widget) const override {
