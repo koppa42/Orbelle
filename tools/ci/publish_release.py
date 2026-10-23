@@ -64,7 +64,7 @@ def publish(tag, assets, repo, run=subprocess.run):
             "Python wheels: CPython " + ", ".join(python_versions()[1]) + " x64 on Windows and Ubuntu 24.04. "
             "The Linux wheel is a native linux_x86_64 build, not a manylinux wheel. "
             "Install the matching file with pip install <wheel>.\n\n"
-            "CI checks C++, sanitizers, installed SDK/Python APIs and Qt offscreen tests. "
+            "CI checks C++, installed SDK/Python APIs and Qt offscreen tests. "
             "GPU rendering and performance require separate hardware validation. "
             "SHA256SUMS covers every uploaded package.\n"
         )
