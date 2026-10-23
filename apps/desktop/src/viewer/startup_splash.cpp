@@ -43,7 +43,7 @@ QPixmap splash_picture(QScreen *screen) {
 StartupSplash::StartupSplash(QScreen *screen) : QSplashScreen(screen, splash_picture(screen)) {
     setObjectName("startupSplash");
     setWindowTitle(ui::text("startup_splash.label"));
-    setWindowIcon(workbench_icon(WorkbenchIcon::orbit, theme::color(theme::accent)));
+    setWindowIcon(application_icon());
     if (screen)
         move(screen->availableGeometry().center() - rect().center());
     progress_ = new QProgressBar(this);

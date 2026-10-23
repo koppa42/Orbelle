@@ -491,27 +491,6 @@ QIcon workbench_icon(WorkbenchIcon icon, const QColor &color) {
     }
     return result;
 }
-QPixmap brand_mark(int size, qreal device_pixel_ratio) {
-    QPixmap pixels(QSize(size, size) * device_pixel_ratio);
-    pixels.setDevicePixelRatio(device_pixel_ratio);
-    pixels.fill(Qt::transparent);
-    QPainter p(&pixels);
-    p.setRenderHint(QPainter::Antialiasing);
-    const QRectF tile(0.5, 0.5, size - 1.0, size - 1.0);
-    QLinearGradient fill(tile.topLeft(), tile.bottomRight());
-    fill.setColorAt(0, theme::color(theme::accent_bright));
-    fill.setColorAt(0.6, theme::color(theme::accent));
-    fill.setColorAt(1, theme::color(theme::sakura));
-    p.setPen(Qt::NoPen);
-    p.setBrush(fill);
-    p.drawRoundedRect(tile, size * 0.28, size * 0.28);
-    const int glyph = qRound(size * 0.68);
-    const auto icon = workbench_icon(WorkbenchIcon::orbit, theme::color(theme::canvas));
-    const int inset = (size - glyph) / 2;
-    p.drawPixmap(QRect(inset, inset, glyph, glyph),
-                 icon.pixmap(QSize(glyph, glyph), device_pixel_ratio));
-    return pixels;
-}
 void paint_sakura_blossom(QPainter &painter, const QPointF &center, qreal radius,
                           const QColor &color) {
     painter.save();
@@ -660,7 +639,7 @@ void apply_workbench_style(QApplication &app) {
     font.setPixelSize(12);
     app.setFont(font);
     QFontDatabase::addApplicationFallbackFontFamily(QChar::Script_Han, "Microsoft YaHei UI");
-    app.setWindowIcon(workbench_icon(WorkbenchIcon::orbit, theme::color(theme::accent)));
+    app.setWindowIcon(application_icon());
     // Keep each raw literal below VS 2022's limit; C++ concatenates them unchanged.
     // Desktop density: 12 px text, 26-28 px controls, 3 px dock splitters.
     // Continuous square-edged work surfaces; small radii belong to interactive controls.
