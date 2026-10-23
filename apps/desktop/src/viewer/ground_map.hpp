@@ -146,13 +146,14 @@ class GroundMap final : public QWidget {
         bool complete = true;
         bool preview = false;
     };
-    void paint_foreground(QPainter &p, const Raster *display);
-    void paint_base(QPainter &p, const Raster *display, bool cached_foreground = false);
+    void paint_foreground(QPainter &p, const Raster *display, const Raster *fallback);
+    void paint_base(QPainter &p, const Raster *display, const Raster *fallback,
+                    bool cached_foreground = false);
     struct BaseKey {
         QTransform transform;
         QSize size;
         double ratio = 1;
-        qint64 background = 0, trails = 0;
+        qint64 background = 0, trails = 0, preview = 0;
         bool grid = true;
         QFont font;
         bool operator==(const BaseKey &) const = default;
@@ -167,8 +168,13 @@ class GroundMap final : public QWidget {
     Raster preview_request() const;
     bool preview_usable() const;
     QTransform raster_transform(const Raster &raster) const;
+    bool same_scale(const Raster &raster) const;
+    QRectF raster_draw_bounds(const Raster &raster) const;
+    bool useful_detail(const Raster &raster) const;
+    bool prefer_detail(const Raster &candidate, const Raster &current) const;
     void draw_raster(QPainter &p, const Raster &raster) const;
-    bool covers_view(const Raster &raster, bool exact_scale = true) const;
+    void draw_layer(QPainter &p, const Raster *detail, const Raster *fallback) const;
+    bool covers_view(const Raster &raster, bool exact_scale = true, double margin = 0) const;
     void cancel_obsolete_raster();
     static void allocate_raster(Raster &raster, QImage::Format format);
     std::vector<Stroke> strokes() const;
@@ -212,6 +218,7 @@ class GroundMap final : public QWidget {
     double zoom_ = 1;
     // Fractions of projected map width preserve the geographic center on resize.
     QPointF pan_, press_pan_, press_, last_mouse_;
+    QTimer pan_settle_timer_;
     QVariantAnimation zoom_animation_;
     QPointF zoom_anchor_, zoom_location_;
     QSize navigation_size_;

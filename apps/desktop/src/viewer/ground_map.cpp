@@ -229,6 +229,9 @@ GroundMap::GroundMap(QImage imagery, QWidget *parent)
     connect(&raster_timer_, &QTimer::timeout, this, [this] { poll_raster(); });
     footprint_timer_.setInterval(16);
     connect(&footprint_timer_, &QTimer::timeout, this, [this] { poll_footprints(); });
+    pan_settle_timer_.setSingleShot(true);
+    pan_settle_timer_.setInterval(120);
+    connect(&pan_settle_timer_, &QTimer::timeout, this, [this] { update(); });
     zoom_animation_.setDuration(120);
     zoom_animation_.setEasingCurve(QEasingCurve::OutCubic);
     connect(&zoom_animation_, &QVariantAnimation::valueChanged, this,
@@ -695,6 +698,8 @@ void GroundMap::pan_by(QPointF delta) {
     clamp_pan();
     if (pan_ == before)
         return;
+    if (dragging_ && moved_)
+        pan_settle_timer_.start();
     imagery_raster_ = {};
     cancel_obsolete_raster();
     update();
@@ -950,43 +955,91 @@ QTransform GroundMap::raster_transform(const Raster &raster) const {
                       raster.preview ? horizontal : wrap(horizontal, map_rect().width()),
                       current.dy() - scale * raster.transform.dy());
 }
+bool GroundMap::same_scale(const Raster &raster) const {
+    return !raster.bounds.isEmpty() && !raster.preview && raster.ratio == devicePixelRatioF() &&
+           qFuzzyCompare(raster_transform(raster).m11(), 1.0);
+}
+QRectF GroundMap::raster_draw_bounds(const Raster &raster) const {
+    auto bounds = raster_transform(raster).mapRect(raster.bounds);
+    if (same_scale(raster)) {
+        // Move cached pixels without filtering them a second time. Navigation,
+        // coordinates and vector overlays retain their continuous transform;
+        // only this transient bitmap placement rounds by at most half a device pixel.
+        bounds.moveTopLeft(QPointF(std::floor(bounds.left() * raster.ratio + .5) / raster.ratio,
+                                   std::floor(bounds.top() * raster.ratio + .5) / raster.ratio));
+    }
+    return bounds;
+}
+bool GroundMap::useful_detail(const Raster &raster) const {
+    return same_scale(raster) && raster_draw_bounds(raster).intersects(plot_rect());
+}
+bool GroundMap::prefer_detail(const Raster &candidate, const Raster &current) const {
+    if (!useful_detail(candidate))
+        return false;
+    if (!useful_detail(current) || covers_view(candidate))
+        return true;
+    const auto overlap = [&](const Raster &raster) {
+        const auto visible = raster_draw_bounds(raster).intersected(plot_rect());
+        return visible.width() * visible.height();
+    };
+    // A late result after a direction reversal must not reduce visible coverage.
+    return overlap(candidate) >= overlap(current);
+}
 void GroundMap::draw_raster(QPainter &p, const Raster &raster) const {
-    const auto transform = raster_transform(raster);
     if (raster.preview) {
         each_world(map_transform(), plot_rect(), [&](const auto &, const auto &area) {
             draw_world_image(p, raster.image, area, plot_rect());
         });
         return;
     }
-    const auto bounds = transform.mapRect(raster.bounds);
+    const auto bounds = raster_draw_bounds(raster);
     // Viewport rasters already contain all visible copies. Repeating an overscan
     // bitmap would overlap translucent layers at the wrap boundary.
-    if (qFuzzyCompare(transform.m11(), 1.0))
+    // Keep the smooth hint: Qt folds matching DPR into a direct pixel copy;
+    // disabling it sends fractional-DPR blits through the general scaler.
+    if (same_scale(raster))
         p.drawImage(bounds.topLeft(), raster.image);
     else
         p.drawImage(bounds, raster.image);
 }
-bool GroundMap::covers_view(const Raster &raster, bool exact_scale) const {
+void GroundMap::draw_layer(QPainter &p, const Raster *detail, const Raster *fallback) const {
+    if (fallback && (!detail || !raster_draw_bounds(*detail).contains(plot_rect()))) {
+        p.save();
+        QPainterPath uncovered;
+        uncovered.addRect(plot_rect());
+        if (detail)
+            uncovered.addRect(raster_draw_bounds(*detail));
+        // Odd-even clipping uses the actual rounded bitmap bounds, preventing
+        // gaps or double opacity where detailed and preview coverage meet.
+        p.setClipPath(uncovered, Qt::IntersectClip);
+        draw_raster(p, *fallback);
+        p.restore();
+    }
+    if (detail)
+        draw_raster(p, *detail);
+}
+bool GroundMap::covers_view(const Raster &raster, bool exact_scale, double margin) const {
     if (raster.bounds.isEmpty() || raster.ratio != devicePixelRatioF())
         return false;
     const auto transform = raster_transform(raster);
     if (exact_scale ? transform.m11() != 1 : transform.m11() < 0.5 || transform.m11() > 2)
         return false;
     if (exact_scale) {
-        // Fractional device-pixel pans may reuse a preview, but the settled image
-        // must be rasterized at its current phase rather than remain resampled.
+        // Bitmap placement stays sharp during a fractional pan, but the settled
+        // image must still be rasterized at the exact continuous coordinate phase.
         for (const auto offset : {transform.dx(), transform.dy()}) {
             const auto pixels = offset * raster.ratio;
             if (std::abs(pixels - std::round(pixels)) > 1e-6)
                 return false;
         }
     }
-    return transform.mapRect(raster.bounds).contains(plot_rect());
+    return raster_draw_bounds(raster).contains(
+        plot_rect().adjusted(-margin, -margin, margin, margin));
 }
 void GroundMap::cancel_obsolete_raster() {
     if (cancel_raster_ && (pending_view_.preview ? pending_view_.revision != geometry_revision_
                                                  : pending_view_.revision != trails_revision_ ||
-                                                       !covers_view(pending_view_)))
+                                                       !useful_detail(pending_view_)))
         cancel_raster_->store(true, std::memory_order_relaxed);
 }
 void GroundMap::install_raster(Raster result) {
@@ -995,7 +1048,8 @@ void GroundMap::install_raster(Raster result) {
             preview_ = std::move(result);
         return;
     }
-    if (!result.complete || result.revision != trails_revision_ || !covers_view(result))
+    if (!result.complete || result.revision != trails_revision_ ||
+        !(trails_dirty_ ? useful_detail(result) : prefer_detail(result, trails_)))
         return;
     trails_ = std::move(result);
     trails_dirty_ = false;
@@ -1202,7 +1256,7 @@ void GroundMap::poll_footprints() {
         if (result.complete && result.revision == footprints_revision_) {
             if (result.preview)
                 footprint_preview_ = std::move(result);
-            else if (covers_view(result, false))
+            else if (prefer_detail(result, footprint_raster_))
                 footprint_raster_ = std::move(result);
         }
     } catch (const std::exception &) {
@@ -1213,19 +1267,22 @@ void GroundMap::poll_footprints() {
     update();
 }
 void GroundMap::prepare_footprints(bool navigating) {
-    if (cancel_footprints_ &&
-        (footprint_request_.revision != footprints_revision_ ||
-         (!footprint_request_.preview && !covers_view(footprint_request_, !navigating))))
+    if (cancel_footprints_ && (footprint_request_.revision != footprints_revision_ ||
+                               (!footprint_request_.preview && !useful_detail(footprint_request_))))
         cancel_footprints_->store(true, std::memory_order_relaxed);
     poll_footprints();
-    if (!footprints_ || footprints_ready() || pending_footprints_.valid())
+    if (!footprints_ || pending_footprints_.valid())
+        return;
+    const bool ready =
+        navigating ? same_scale(footprint_raster_) && covers_view(footprint_raster_, false, 64)
+                   : footprints_ready();
+    if (ready)
         return;
     const bool preview = preview_usable() && footprint_preview_.image.isNull();
-    // Keep the current bitmap while it covers the view; refill the overscan in
-    // the background when a longer drag leaves it, even before input stops.
-    if (navigating && !preview && !footprint_raster_.image.isNull() &&
-        covers_view(footprint_raster_, false))
+    if (zoom_animation_.state() == QAbstractAnimation::Running && !preview && preview_usable())
         return;
+    // Refill before the overscan runs out. A same-scale worker keeps running
+    // through fractional input while any of its coverage remains useful.
     auto request = preview ? preview_request() : raster_request();
     request.revision = footprints_revision_;
     footprint_request_ = request;
@@ -1237,15 +1294,15 @@ void GroundMap::prepare_footprints(bool navigating) {
         });
     footprint_timer_.start();
 }
-void GroundMap::paint_foreground(QPainter &p, const Raster *display) {
+void GroundMap::paint_foreground(QPainter &p, const Raster *display, const Raster *fallback) {
     p.save();
     p.setClipRect(plot_rect());
     paint_grid(p);
-    if (display)
-        draw_raster(p, *display);
+    draw_layer(p, display, fallback);
     p.restore();
 }
-void GroundMap::paint_base(QPainter &p, const Raster *display, bool cached_foreground) {
+void GroundMap::paint_base(QPainter &p, const Raster *display, const Raster *fallback,
+                           bool cached_foreground) {
     p.setRenderHint(QPainter::Antialiasing);
     p.setRenderHint(QPainter::SmoothPixmapTransform);
     p.fillRect(rect(), theme::color(theme::chrome));
@@ -1259,7 +1316,7 @@ void GroundMap::paint_base(QPainter &p, const Raster *display, bool cached_foreg
     if (cached_foreground)
         p.drawImage(QPointF(0, 0), foreground_image_);
     else
-        paint_foreground(p, display);
+        paint_foreground(p, display, fallback);
     // Text stays on the opaque target: transparent glyph caching can change
     // Qt's subpixel antialiasing and gamma-correct blending.
     paint_axes(p);
@@ -1268,8 +1325,8 @@ void GroundMap::paintEvent(QPaintEvent *event) {
     const ProfileScope profile("map_paint_ms");
     const auto plot = plot_rect();
     const bool footer_only = event->rect().top() >= height() - 24;
-    const bool navigating =
-        (dragging_ && moved_) || zoom_animation_.state() == QAbstractAnimation::Running;
+    const bool zooming = zoom_animation_.state() == QAbstractAnimation::Running;
+    const bool navigating = (dragging_ && moved_ && pan_settle_timer_.isActive()) || zooming;
     if (!footer_only)
         prepare_footprints(navigating);
     if (tracks_transitioning() &&
@@ -1290,7 +1347,10 @@ void GroundMap::paintEvent(QPaintEvent *event) {
     // Heavy rasterization must not hold the shared Qt input / Vulkan frame thread.
     cancel_obsolete_raster();
     poll_raster();
-    if (!footer_only && !tracks_ready() && !pending_raster_.valid()) {
+    const bool detail_ready =
+        !trails_dirty_ &&
+        (navigating ? same_scale(trails_) && covers_view(trails_, false, 64) : tracks_ready());
+    if (!footer_only && !detail_ready && !pending_raster_.valid()) {
         const auto paths = strokes();
         std::size_t vertices = 0;
         for (const auto &stroke : paths)
@@ -1300,10 +1360,9 @@ void GroundMap::paintEvent(QPaintEvent *event) {
             const bool needs_preview =
                 preview_usable() && !refinement_pending_ &&
                 (preview_.image.isNull() || preview_.revision != geometry_revision_);
-            // At overview scales, continuous input reprojects immutable coverage.
-            // High zoom needs viewport detail even while dragging: enlarging the
-            // whole-world preview would turn thin tracks into broad color bands.
-            if (!navigating || needs_preview || !preview_usable()) {
+            // Panning always refills detail, including before the pointer is
+            // released. Zoom bursts may reproject the overview until they settle.
+            if (!zooming || needs_preview || !preview_usable()) {
                 if (needs_preview)
                     request = preview_request();
                 pending_view_ = request;
@@ -1327,19 +1386,18 @@ void GroundMap::paintEvent(QPaintEvent *event) {
     if (footer_only)
         p.fillRect(event->rect(), theme::color(theme::chrome));
     else {
-        // Reproject a complete cached image during zooming, only while its coverage
-        // includes the whole viewport. A new exact-scale image still replaces it.
+        // Preserve every useful portion of detailed coverage. Only newly exposed
+        // regions use the overview while the next immutable viewport is prepared.
         const Raster *display = nullptr;
-        if (!trails_dirty_ && !trails_.image.isNull() && covers_view(trails_, false))
-            display = &trails_;
-        else if (preview_usable() && !preview_.image.isNull() &&
-                 preview_.revision == geometry_revision_)
-            display = &preview_;
-        else if (!trails_dirty_ && !trails_.image.isNull()) {
+        if (!trails_dirty_ && !trails_.image.isNull() && trails_.ratio == devicePixelRatioF()) {
             const auto scale = raster_transform(trails_).m11();
-            if (scale >= .5 && scale <= 2)
-                display = &trails_; // Partial detail while a high-zoom viewport is prepared.
+            if (scale >= .5 && scale <= 2 && raster_draw_bounds(trails_).intersects(plot))
+                display = &trails_;
         }
+        const Raster *fallback =
+            preview_usable() && !preview_.image.isNull() && preview_.revision == geometry_revision_
+                ? &preview_
+                : nullptr;
         if (const auto *detail = refinement_display())
             display = detail;
         const BaseKey key{map_transform(),
@@ -1347,6 +1405,7 @@ void GroundMap::paintEvent(QPaintEvent *event) {
                           devicePixelRatioF(),
                           background_.image.cacheKey(),
                           display ? display->image.cacheKey() : 0,
+                          fallback ? fallback->image.cacheKey() : 0,
                           grid_,
                           font()};
         const bool stable_view = key.transform == base_key_.transform &&
@@ -1358,7 +1417,7 @@ void GroundMap::paintEvent(QPaintEvent *event) {
             // for a viewport that may only be shown once.
             base_image_ = {};
             foreground_image_ = {};
-            paint_base(p, display);
+            paint_base(p, display, fallback);
         } else {
             if (base_image_.isNull() || key != base_key_) {
                 const ProfileScope compose("map_composite_ms");
@@ -1379,7 +1438,7 @@ void GroundMap::paintEvent(QPaintEvent *event) {
                     overlay.setRenderHint(QPainter::Antialiasing);
                     overlay.setRenderHint(QPainter::SmoothPixmapTransform);
                     overlay.setFont(font());
-                    paint_foreground(overlay, display);
+                    paint_foreground(overlay, display, fallback);
                     foreground_key_ = foreground_key;
                 }
                 if (base_image_.size() != pixels) {
@@ -1388,7 +1447,7 @@ void GroundMap::paintEvent(QPaintEvent *event) {
                 base_image_.setDevicePixelRatio(key.ratio);
                 QPainter cache(&base_image_);
                 cache.setFont(font());
-                paint_base(cache, display, true);
+                paint_base(cache, display, fallback, true);
             }
             p.drawImage(QPointF(0, 0), base_image_);
         }
@@ -1397,17 +1456,16 @@ void GroundMap::paintEvent(QPaintEvent *event) {
         p.save();
         p.setClipRect(plot);
         const Raster *footprint = nullptr;
-        if (!footprint_raster_.image.isNull() && covers_view(footprint_raster_, false))
-            footprint = &footprint_raster_;
-        else if (preview_usable())
-            footprint = &footprint_preview_;
-        else if (!footprint_raster_.image.isNull()) {
+        if (!footprint_raster_.image.isNull() && footprint_raster_.ratio == devicePixelRatioF()) {
             const auto scale = raster_transform(footprint_raster_).m11();
-            if (scale >= .5 && scale <= 2)
+            if (scale >= .5 && scale <= 2 && raster_draw_bounds(footprint_raster_).intersects(plot))
                 footprint = &footprint_raster_;
         }
-        if (footprint && !footprint->image.isNull())
-            draw_raster(p, *footprint);
+        const auto *footprint_fallback = preview_usable() && !footprint_preview_.image.isNull() &&
+                                                 footprint_preview_.revision == footprints_revision_
+                                             ? &footprint_preview_
+                                             : nullptr;
+        draw_layer(p, footprint, footprint_fallback);
         p.setRenderHint(QPainter::SmoothPixmapTransform, false);
         const auto label_context = font().toString() + '/' + QString::number(devicePixelRatioF());
         if (access_visible_ && access_pair_ && access_pair_->first < points_.size() &&
@@ -1557,6 +1615,7 @@ void GroundMap::finish_drag(bool restore) {
     if (!dragging_)
         return;
     dragging_ = false;
+    pan_settle_timer_.stop();
     drag_button_ = Qt::NoButton;
     unsetCursor();
     if (restore) {

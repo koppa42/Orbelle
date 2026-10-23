@@ -1071,9 +1071,11 @@ TEST_F(GroundMapTest, DenseTrackPreviewRepeatsAcrossTheDateLineDuringAnUnfinishe
         displacement = {turns * period, 0};
         mouse(map, QEvent::MouseMove, origin + displacement, Qt::MiddleButton);
         const auto preview = pixels(map);
-        // The drag remains active, so this cannot silently pass by waiting for
-        // a replacement exact raster instead of displaying the repeated preview.
-        ASSERT_FALSE(map.tracks_ready());
+        // The first jump must show the repeated preview before detail is ready.
+        // Later turns reach the same canonical longitude; the useful background
+        // request may finish while the button remains held.
+        if (turns == .5)
+            ASSERT_FALSE(map.tracks_ready());
         for (const auto offset : {-100, -40, 40, 100}) {
             bool visible = false;
             const auto point = ((origin + QPointF(offset, 0)) * map.devicePixelRatioF()).toPoint();
@@ -1088,6 +1090,167 @@ TEST_F(GroundMapTest, DenseTrackPreviewRepeatsAcrossTheDateLineDuringAnUnfinishe
     }
     mouse(map, QEvent::MouseButtonRelease, origin + displacement, Qt::MiddleButton);
     ASSERT_TRUE(settle(map));
+}
+TEST_F(GroundMapTest, FractionalPanPreservesCachedTextureAndThinTracksWithoutQuantizingInput) {
+    QImage imagery(720, 360, QImage::Format_RGB32);
+    for (int y = 0; y < imagery.height(); ++y)
+        for (int x = 0; x < imagery.width(); ++x)
+            imagery.setPixel(x, y, (x + y) % 2 ? qRgb(230, 230, 230) : qRgb(25, 25, 25));
+    GroundMap map(imagery);
+    configure(map);
+    auto dense = dense_track();
+    for (auto &point : dense.points)
+        point.setY(0);
+    dense.path = ground_path(dense.points);
+    dense.display.line_color = 0xff3040;
+    dense.display.line_width = 1;
+    map.publish_tracks({dense});
+    map.set_labels_visible(false);
+    map.set_grid_visible(false);
+    map.set_lighting(false);
+    map.set_sun_visible(false);
+    const auto plot = QRectF(map.rect()).adjusted(38, 14, -16, -44);
+    map.zoom(2, plot.center());
+    ASSERT_TRUE(settle(map));
+    const auto before = pixels(map);
+    const auto marker = map.marker_position(0);
+    const auto ratio = map.devicePixelRatioF();
+    const QRect region(qRound(100 * ratio), qRound(80 * ratio), qRound(150 * ratio),
+                       qRound(200 * ratio));
+    mouse(map, QEvent::MouseButtonPress, plot.center(), Qt::MiddleButton);
+    QPointF displacement;
+    for (int step = 1; step <= 16; ++step) {
+        SCOPED_TRACE(step);
+        displacement = {12 + step * .17 / ratio, 1 + step * .11 / ratio};
+        mouse(map, QEvent::MouseMove, plot.center() + displacement, Qt::MiddleButton);
+        EXPECT_NEAR(QLineF(map.marker_position(0), marker + displacement).length(), 0, 1e-8);
+        const auto navigating = pixels(map);
+        const QPoint device_offset(qRound(displacement.x() * ratio),
+                                   qRound(displacement.y() * ratio));
+        // A pure pan copies the already filtered texture and track pixels once.
+        // Nearest-device-pixel placement bounds its visual offset by half a pixel
+        // without softening the entire frame or rounding geographic interaction.
+        expect_same_pixels(navigating.copy(region), before.copy(region.translated(-device_offset)));
+    }
+    capture(pixels(map), "fractional-pan-sharp");
+    // Pausing within a drag restores the exact fractional sampling phase too;
+    // users should not have to release the button to finish this refinement.
+    ASSERT_EQ(map.cursor().shape(), Qt::ClosedHandCursor);
+    ASSERT_TRUE(settle(map));
+    ASSERT_EQ(map.cursor().shape(), Qt::ClosedHandCursor);
+    GroundMap fresh(imagery);
+    configure(fresh);
+    fresh.publish_tracks({dense});
+    fresh.set_labels_visible(false);
+    fresh.set_grid_visible(false);
+    fresh.set_lighting(false);
+    fresh.set_sun_visible(false);
+    fresh.zoom(2, plot.center());
+    drag(fresh, displacement);
+    ASSERT_TRUE(settle(fresh));
+    EXPECT_NEAR(QLineF(map.marker_position(0), fresh.marker_position(0)).length(), 0, 1e-8);
+    expect_same_pixels(pixels(map).copy(region), pixels(fresh).copy(region));
+    capture(pixels(map), "fractional-pan-settled-button-held");
+    key(map, Qt::Key_Escape);
+    EXPECT_NEAR(QLineF(map.marker_position(0), marker).length(), 0, 1e-8);
+    ASSERT_TRUE(settle(map));
+    expect_same_pixels(pixels(map).copy(region), before.copy(region));
+}
+TEST_F(GroundMapTest, PanBeyondOverscanKeepsVisibleTrackDetailAndRefillsWhileButtonIsHeld) {
+    QImage imagery(720, 360, QImage::Format_RGB32);
+    imagery.fill(QColor(90, 110, 130));
+    GroundMap map(imagery);
+    configure(map);
+    auto dense = dense_track();
+    for (auto &point : dense.points)
+        point.setY(0);
+    dense.path = ground_path(dense.points);
+    dense.display.line_color = 0xff3040;
+    dense.display.line_width = 1;
+    map.publish_tracks({dense});
+    map.set_snapshot({core::Epoch{10}, core::FrameId::itrf, core::OriginId::earth, {}});
+    map.set_labels_visible(false);
+    map.set_grid_visible(false);
+    map.set_lighting(false);
+    map.set_sun_visible(false);
+    const auto plot = QRectF(map.rect()).adjusted(38, 14, -16, -44);
+    map.zoom(4, plot.center());
+    ASSERT_TRUE(settle(map));
+    const auto before = pixels(map);
+    const auto ratio = map.devicePixelRatioF();
+    const QPointF displacement(240, 0);
+    mouse(map, QEvent::MouseButtonPress, plot.center(), Qt::MiddleButton);
+    mouse(map, QEvent::MouseMove, plot.center() + displacement, Qt::MiddleButton);
+    const auto navigating = pixels(map);
+    ASSERT_FALSE(map.tracks_ready());
+    const QRect retained(qRound(300 * ratio), qRound((plot.center().y() - 12) * ratio),
+                         qRound(200 * ratio), qRound(24 * ratio));
+    // The left edge is newly exposed, but the rest still has exact viewport
+    // detail. Switching that retained region to the world preview widens lines.
+    expect_same_pixels(navigating.copy(retained),
+                       before.copy(retained.translated(-qRound(displacement.x() * ratio), 0)));
+    capture(navigating, "retained-detail-during-pan");
+    ASSERT_EQ(map.cursor().shape(), Qt::ClosedHandCursor);
+    ASSERT_TRUE(settle(map));
+    ASSERT_EQ(map.cursor().shape(), Qt::ClosedHandCursor);
+    const auto detailed = pixels(map);
+    for (const int x : {65, 100, 300, 500}) {
+        bool visible = false;
+        const auto center = (QPointF(x, plot.center().y()) * ratio).toPoint();
+        for (int dy = -qCeil(2 * ratio); dy <= qCeil(2 * ratio); ++dy) {
+            const auto color = detailed.pixelColor(center + QPoint(0, dy));
+            visible |= color.red() > 180 && color.green() < 100;
+        }
+        EXPECT_TRUE(visible) << "detail at x=" << x;
+    }
+    expect_same_pixels(detailed.copy(retained), navigating.copy(retained));
+    capture(detailed, "refilled-detail-button-held");
+    mouse(map, QEvent::MouseButtonRelease, plot.center() + displacement, Qt::MiddleButton);
+}
+TEST_F(GroundMapTest, PartialSensorDetailAndPreviewApplyOpacityOnceAcrossTheirBoundary) {
+    QImage imagery(720, 360, QImage::Format_RGB32);
+    imagery.fill(QColor(90, 110, 130));
+    GroundMap map(imagery);
+    configure(map);
+    map.publish_tracks({});
+    map.set_snapshot({core::Epoch{10}, core::FrameId::itrf, core::OriginId::earth, {}});
+    map.set_labels_visible(false);
+    map.set_grid_visible(false);
+    map.set_lighting(false);
+    map.set_sun_visible(false);
+    const auto plot = QRectF(map.rect()).adjusted(38, 14, -16, -44);
+    map.zoom(4, plot.center());
+    const auto unfilled = pixels(map);
+    visualization::SensorMesh mesh;
+    mesh.ground = {{position(-80, -50), position(80, -50), position(80, 50)},
+                   {position(-80, -50), position(80, 50), position(-80, 50)}};
+    mesh.color = 0x00ddff;
+    mesh.opacity = .4;
+    map.set_sensor_footprints(std::span(&mesh, 1));
+    ASSERT_TRUE(settle(map));
+    const auto ratio = map.devicePixelRatioF();
+    const auto center = (plot.center() * ratio).toPoint();
+    const auto coverage = pixels(map).pixelColor(center);
+    ASSERT_GT(coverage.blue(), unfilled.pixelColor(center).blue());
+    const QPointF displacement(240, 0);
+    mouse(map, QEvent::MouseButtonPress, plot.center(), Qt::MiddleButton);
+    mouse(map, QEvent::MouseMove, plot.center() + displacement, Qt::MiddleButton);
+    const auto navigating = pixels(map);
+    ASSERT_FALSE(map.footprints_ready());
+    // Include both sides of the old overscan edge (38 - 160 + 240 = 118).
+    // The new strip uses preview coverage, while the old strip keeps detail;
+    // compositing both at once would visibly darken the overlap.
+    for (int x = 65; x <= 500; ++x)
+        EXPECT_EQ(navigating.pixelColor((QPointF(x, plot.center().y()) * ratio).toPoint()),
+                  coverage)
+            << "coverage at x=" << x;
+    capture(navigating, "sensor-detail-preview-boundary");
+    ASSERT_TRUE(settle(map));
+    const auto detailed = pixels(map);
+    const QRect interior(qRound(65 * ratio), qRound(80 * ratio), qRound(435 * ratio),
+                         qRound(200 * ratio));
+    expect_same_pixels(detailed.copy(interior), navigating.copy(interior));
+    mouse(map, QEvent::MouseButtonRelease, plot.center() + displacement, Qt::MiddleButton);
 }
 TEST_F(GroundMapTest, HighZoomDragKeepsDenseTracksThinAndPublishesTheCurrentViewport) {
     QImage imagery(720, 360, QImage::Format_RGB32);
