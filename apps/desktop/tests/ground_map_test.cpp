@@ -209,6 +209,50 @@ class GroundMapTest : public ::testing::Test {
     QTemporaryDir directory_;
     QString imagery_;
 };
+TEST_F(GroundMapTest, ShortViewportFillsWithoutStretchingAndCanPanOrShowTheWholeWorld) {
+    GroundMap map(imagery_);
+    map.resize(1000, 110);
+    const auto p = [](double longitude, double latitude) {
+        return core::ground_station_position(
+            {longitude * std::numbers::pi / 180, latitude * std::numbers::pi / 180, 0});
+    };
+    map.set_snapshot({core::Epoch{10},
+                      core::FrameId::itrf,
+                      core::OriginId::earth,
+                      {{"Origin", p(0, 0)},
+                       {"East", p(1, 0)},
+                       {"North", p(0, 1)},
+                       {"West edge", p(-179, 0)},
+                       {"East edge", p(179, 0)},
+                       {"South edge", p(0, -89)},
+                       {"North edge", p(0, 89)}}});
+    map.set_lighting(false);
+    map.set_sun_visible(false);
+    map.set_grid_visible(false);
+    map.set_labels_visible(false);
+    const auto image = pixels(map);
+    const auto plot = QRectF(map.rect()).adjusted(38, 14, -16, -44);
+    const auto inset = plot.adjusted(2, 2, -2, -2);
+    for (const auto point :
+         {inset.topLeft(), inset.topRight(), inset.bottomLeft(), inset.bottomRight()}) {
+        const auto pixel = (point * map.devicePixelRatioF()).toPoint();
+        EXPECT_NE(image.pixelColor(pixel), image.pixelColor(0, 0));
+    }
+    const auto origin = map.marker_position(0);
+    EXPECT_NEAR(map.marker_position(1).x() - origin.x(), origin.y() - map.marker_position(2).y(),
+                1e-8);
+    mouse(map, QEvent::MouseButtonPress, origin, Qt::MiddleButton);
+    mouse(map, QEvent::MouseMove, origin + QPointF(0, 20), Qt::MiddleButton);
+    mouse(map, QEvent::MouseButtonRelease, origin + QPointF(0, 20), Qt::MiddleButton);
+    EXPECT_NEAR(map.marker_position(0).y(), origin.y() + 20, 1e-8);
+    map.zoom(0.0001, plot.center());
+    EXPECT_LT(map.zoom_factor(), 1);
+    for (std::size_t i = 3; i < 7; ++i)
+        EXPECT_TRUE(plot.contains(map.marker_position(i)));
+    map.reset_view();
+    EXPECT_EQ(map.zoom_factor(), 1);
+    EXPECT_NEAR(QLineF(map.marker_position(0), origin).length(), 0, 1e-8);
+}
 TEST_F(GroundMapTest, ProfileZoomedSensorPanning) {
     const auto output = qEnvironmentVariable("ORBELLE_SENSOR_PAN_PROFILE");
     if (output.isEmpty())
@@ -666,7 +710,7 @@ TEST_F(GroundMapTest, InvalidZoomAndWheelOutsideTheMapDoNotChangeTheViewport) {
     (void)pixels(map);
     const auto anchor = map.marker_position(0);
     EXPECT_FALSE(wheel(map, {10, 10}, {0, 120}));
-    EXPECT_FALSE(wheel(map, {320, 20}, {0, 120})); // Letterboxing above the globe.
+    EXPECT_FALSE(wheel(map, {320, 8}, {0, 120})); // Outside the plotting area.
     EXPECT_FALSE(wheel(map, anchor, {120, 0}));
     EXPECT_FALSE(wheel(map, anchor, {}));
     for (double factor : {0.0, -1.0, std::numeric_limits<double>::infinity(),
@@ -681,8 +725,12 @@ TEST_F(GroundMapTest, InvalidZoomAndWheelOutsideTheMapDoNotChangeTheViewport) {
     wheel(map, anchor, {0, 120});
     EXPECT_EQ(map.zoom_factor(), 12);
     map.zoom(0.0001, anchor);
+    const auto minimum = map.zoom_factor();
+    EXPECT_LT(minimum, 1);
+    EXPECT_GT(minimum, 0);
     wheel(map, anchor, {0, -120});
-    EXPECT_EQ(map.zoom_factor(), 1);
+    EXPECT_EQ(map.zoom_factor(), minimum);
+    EXPECT_FALSE(wheel(map, {320, 20}, {0, 120})); // Letterboxing at the whole-world scale.
 }
 TEST_F(GroundMapTest, DragKeepsTheFullDisplacementAndReleasePositionWithoutSelecting) {
     GroundMap map(imagery_);
@@ -779,7 +827,7 @@ TEST_F(GroundMapTest, ResizeAndCenteredZoomPreserveTheGeographicCenter) {
     // identifies the geographic location at the center, independently of window size.
     const auto centered_offset = [&] {
         const auto plot = QRectF(map.rect()).adjusted(38, 14, -16, -44);
-        const auto map_width = std::min(plot.width(), 2 * plot.height()) * map.zoom_factor();
+        const auto map_width = std::max(plot.width(), 2 * plot.height()) * map.zoom_factor();
         return (map.marker_position(0) - plot.center()) / map_width;
     };
     const auto offset = centered_offset();

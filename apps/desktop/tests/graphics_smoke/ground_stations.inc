@@ -180,6 +180,8 @@ void Workbench::smoke_ground_stations() {
         search->clear();
         workspace_->split_page(map_panel_, view_panel_, Qt::RightEdge);
         ground_map_->reset_view();
+        // Reset now fills the pane; zoom out before picking an arbitrary global station.
+        ground_map_->zoom(0.0001, ground_map_->rect().center());
         const auto index = satellites_.size();
         const auto point = ground_map_->marker_position(index);
         const auto global = ground_map_->mapToGlobal(point);

@@ -254,6 +254,18 @@ void Workbench::smoke_display_cache_docking() {
     case 66: {
         if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
             return;
+        if (smoke_tabs(QStringLiteral("二维视图")) == smoke_tabs(QStringLiteral("三维视图"))) {
+            smoke_require(workspace_->height() < 343 && ground_map_->isVisible() &&
+                              workspace_->rect().contains(QRect(
+                                  ground_map_->mapTo(workspace_, QPoint{}), ground_map_->size())),
+                          "Vertical split was rejected with enough space or clipped the tab");
+            save_workbench_image("workspace-short-tabs.png");
+            smoke_record("insufficient-height-keeps-view-tabs-usable");
+            workspace_->select_view(0);
+            smoke_wait_frame_ = frame_count_ + 3;
+            ++orbit_smoke_stage_;
+            break;
+        }
         smoke_require(ground_map_->isVisible() && slots_[0]->container->isVisible() &&
                           map_panel_->mapTo(workspace_, QPoint{}).y() >
                               view_panel_->mapTo(workspace_, QPoint{}).y(),
@@ -261,11 +273,24 @@ void Workbench::smoke_display_cache_docking() {
         const auto globe_rect =
             QRect(slots_[0]->container->mapTo(workspace_, QPoint{}), slots_[0]->container->size());
         const auto map_tabs = smoke_tabs(QStringLiteral("二维视图"));
-        smoke_require(globe_rect.bottom() < map_tabs->mapTo(workspace_, QPoint{}).y() &&
-                          workspace_->rect().contains(
-                              QRect(ground_map_->mapTo(workspace_, QPoint{}), ground_map_->size())),
-                      "Vertical split clips the map tabs or the map content");
+        const auto map_rect = QRect(ground_map_->mapTo(workspace_, QPoint{}), ground_map_->size());
+        const auto workspace_size = workspace_->size();
+        const auto map_tabs_top = map_tabs->mapTo(workspace_, QPoint{}).y();
+        const bool contained =
+            globe_rect.bottom() < map_tabs_top && workspace_->rect().contains(map_rect);
         save_workbench_image("workspace-drag-vertical.png");
+        smoke_require(contained,
+                      qPrintable(QString("Vertical split clips the map tabs or the map content: "
+                                         "workspace=%1x%2, globe bottom=%3, map tabs top=%4, "
+                                         "map=(%5,%6,%7,%8)")
+                                     .arg(workspace_size.width())
+                                     .arg(workspace_size.height())
+                                     .arg(globe_rect.bottom())
+                                     .arg(map_tabs_top)
+                                     .arg(map_rect.x())
+                                     .arg(map_rect.y())
+                                     .arg(map_rect.width())
+                                     .arg(map_rect.height())));
         smoke_record("drag-pages-to-vertical-split");
         auto *tabs = smoke_tabs(QStringLiteral("三维视图"));
         smoke_drag_page(QStringLiteral("二维视图"),

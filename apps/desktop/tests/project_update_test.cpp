@@ -159,9 +159,15 @@ TEST(ProjectUpdate, EditingOneOfTenHpopSatellitesRetainsOtherNumericalSessions) 
     const auto before = prepare_project_scene(project, {}, frames, {eop}, cancelled, {}, {}, time);
     auto changed = before->project;
     changed.satellites[3].orbit.initial.velocity_mps[1] += 10;
+    PreparationTiming changed_timing;
     const auto after =
         prepare_project_scene(changed, {}, frames, {eop}, cancelled, before->scenario, "sat-3",
-                              time, {}, {}, {}, {}, before->project);
+                              time, {}, {}, {}, {}, before->project, {}, {}, &changed_timing);
+    EXPECT_EQ(changed_timing.sessions_acquired, 1);
+    EXPECT_EQ(changed_timing.sessions_reused, 9);
+    EXPECT_GT(changed_timing.sample_calls, 0);
+    EXPECT_GT(changed_timing.sampling_ms, 0);
+    EXPECT_GT(changed_timing.display_ms, 0);
     ASSERT_EQ(after->scenario.objects().size(), 10);
     for (std::size_t i = 0; i < 10; ++i) {
         EXPECT_EQ(after->scenario.objects()[i].provenance().input_revision, i == 3 ? 2 : 1);
@@ -170,9 +176,12 @@ TEST(ProjectUpdate, EditingOneOfTenHpopSatellitesRetainsOtherNumericalSessions) 
                 after->scenario.objects()[i].sample(std::array{last}).states()[0].position_m,
                 before->scenario.objects()[i].sample(std::array{last}).states()[0].position_m);
     }
-    const auto unchanged =
-        prepare_project_scene(after->project, {}, frames, {eop}, cancelled, after->scenario,
-                              "sat-3", time, {}, {}, {}, {}, after->project);
+    PreparationTiming unchanged_timing;
+    const auto unchanged = prepare_project_scene(after->project, {}, frames, {eop}, cancelled,
+                                                 after->scenario, "sat-3", time, {}, {}, {}, {},
+                                                 after->project, {}, {}, &unchanged_timing);
+    EXPECT_EQ(unchanged_timing.sessions_acquired, 0);
+    EXPECT_EQ(unchanged_timing.sessions_reused, 10);
     for (std::size_t i = 0; i < 10; ++i)
         EXPECT_EQ(unchanged->scenario.objects()[i].provenance().input_revision,
                   after->scenario.objects()[i].provenance().input_revision);

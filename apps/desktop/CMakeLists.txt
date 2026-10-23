@@ -139,7 +139,7 @@ if(ORBELLE_WITH_VSG)
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
     endif()
     if(BUILD_TESTING AND ORBELLE_WITH_ERFA AND ORBELLE_WITH_SPICE)
-        add_executable(orbelle_project_update_tests tests/project_update_test.cpp
+        add_executable(orbelle_project_update_tests tests/project_update_test.cpp tests/apply_timing_test.cpp
             src/viewer/project_scene.cpp src/viewer/orbit_scene.cpp src/viewer/ground_map.cpp
             src/viewer/satellite_model.cpp src/viewer/workbench_profile.cpp)
         target_link_libraries(orbelle_project_update_tests PRIVATE

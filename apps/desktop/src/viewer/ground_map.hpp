@@ -116,6 +116,7 @@ class GroundMap final : public QWidget {
     std::shared_ptr<const std::vector<Footprint>> footprints_;
     QRectF plot_rect() const;
     QRectF map_rect() const;
+    double minimum_zoom() const;
     QTransform map_transform() const;
     void clamp_pan();
     void apply_zoom(double value, QPointF anchor, std::optional<QPointF> location = std::nullopt);

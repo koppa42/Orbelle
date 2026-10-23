@@ -54,7 +54,12 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
     };
     if (complete())
         return true;
-    QDialog dialog(parent);
+    // The workbench already owns native Vulkan children but is not shown until
+    // setup succeeds. Windows can hide dialogs owned by that hidden HWND even
+    // while Qt reports isVisible(). Give first-launch setup its own taskbar window.
+    QDialog dialog(parent && parent->isVisible() ? parent : nullptr);
+    if (parent)
+        dialog.setScreen(parent->screen());
     dialog.setObjectName("initialDataSetupDialog");
     dialog.setWindowTitle(ui::text("initial_data_setup.label_8"));
     auto *layout = new QVBoxLayout(&dialog);

@@ -16,6 +16,7 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QDir>
+#include <QHBoxLayout>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QScrollArea>
@@ -36,6 +37,76 @@
 #include "support/property_editor_fixture.hpp"
 
 namespace orbelle::desktop {
+TEST_F(QuantityTest, ShortPropertyPagesKeepActionsVisibleAndPreserveDrafts) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    QWidget host;
+    auto *layout = new QHBoxLayout(&host);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSizeConstraint(QLayout::SetNoConstraint);
+    auto *editor = new OrbitEditor(OrbitInput{});
+    editor->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+    layout->addWidget(editor);
+    auto *selector = editor->findChild<QComboBox *>("propertyPageSelector");
+    auto &axis = field(*editor, "semiMajorAxis");
+    text(axis)->setText("7123.456");
+    field(*editor, "displayStep").set_value(45, Unit::second);
+    editor->show_result("Applied orbit\nMore details", false);
+    editor->show_appearance_result("Model failed\nCorrect the file path and retry", true);
+    int submissions = 0;
+    editor->apply = [&](auto input) {
+        ++submissions;
+        EXPECT_EQ(input.step_seconds, 45);
+    };
+    host.show();
+    const auto settle = [] {
+        for (int i = 0; i < 12; ++i)
+            QCoreApplication::processEvents();
+    };
+    const auto capture = qEnvironmentVariable("ORBELLE_RESPONSIVE_UI_CAPTURE");
+    if (!capture.isEmpty())
+        ASSERT_TRUE(QDir().mkpath(capture));
+    for (const auto size : {QSize{640, 140}, QSize{320, 180}, QSize{1120, 620}, QSize{640, 140}}) {
+        host.resize(size);
+        for (int page = 0; page < 4; ++page) {
+            selector->setCurrentIndex(page);
+            settle();
+            SCOPED_TRACE(std::to_string(size.width()) + "x" + std::to_string(size.height()) +
+                         " page=" + std::to_string(page));
+            EXPECT_EQ(host.size(), size);
+            EXPECT_EQ(editor->size(), size);
+            bool applied_button = false;
+            for (auto *button : editor->findChildren<QPushButton *>()) {
+                if (!button->isVisible() || !button->objectName().startsWith("apply"))
+                    continue;
+                applied_button = true;
+                for (auto *parent = button->parentWidget(); parent; parent = parent->parentWidget())
+                    EXPECT_TRUE(parent->rect().contains(
+                        QRect(button->mapTo(parent, QPoint{}), button->size())))
+                        << parent->metaObject()->className();
+            }
+            EXPECT_TRUE(applied_button);
+            for (auto *scroll : editor->findChildren<QScrollArea *>())
+                if (scroll->isVisible()) {
+                    EXPECT_GE(scroll->viewport()->height(), 24);
+                    EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+                    scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
+                    settle();
+                    scroll->verticalScrollBar()->setValue(0);
+                }
+            if (!capture.isEmpty())
+                EXPECT_TRUE(host.grab().save(
+                    capture +
+                    QString("/short-%1x%2-%3.png").arg(size.width()).arg(size.height()).arg(page)));
+        }
+        EXPECT_EQ(text(axis)->text(), "7123.456");
+        EXPECT_EQ(field(*editor, "displayStep").value(Unit::second), 45);
+        EXPECT_EQ(submissions, 0);
+    }
+    selector->setCurrentIndex(0);
+    settle();
+    editor->findChild<QPushButton *>("applyOrbit")->click();
+    EXPECT_EQ(submissions, 1);
+}
 TEST_F(QuantityTest, PreparingGroundStationDoesNotShowTemporaryWindows) {
     WindowShowObserver windows;
     GroundStationEditor editor;

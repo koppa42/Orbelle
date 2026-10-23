@@ -1,5 +1,6 @@
 #include "graphics_workbench.hpp"
 #include "../ui_text.hpp"
+#include "apply_timing.hpp"
 #include "eop_catalog.hpp"
 #include "epoch_editor.hpp"
 #include "form_kit.hpp"
@@ -85,6 +86,7 @@
 #include <QPlatformSurfaceEvent>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QScopeGuard>
 #include <QScopedValueRollback>
 #include <QScreen>
 #include <QScrollArea>
@@ -689,7 +691,9 @@ class Workbench final : public WorkbenchWindow {
                     ui::text("graphics_workbench.properties_dialog.set_window_title"));
                 properties_dialog_->resize(
                     980, std::min(660, screen()->availableGeometry().height() - 100));
-                properties_dialog_->setMinimumSize(320, 280);
+                // The editor scrolls its content and pins actions to the available height.
+                // A top-level dialog minimum would otherwise clip the embedded footer.
+                properties_dialog_->setMinimumWidth(320);
                 auto *dialog_layout = new QVBoxLayout(properties_dialog_);
                 dialog_layout->setSizeConstraint(QLayout::SetNoConstraint);
                 dialog_layout->setContentsMargins(0, 0, 0, 0);
@@ -1265,7 +1269,8 @@ class Workbench final : public WorkbenchWindow {
                 splash->hide();
                 QMessageBox message(QMessageBox::Warning, ui::text("startup_splash.failed_title"),
                                     ui::text("startup_splash.failed"),
-                                    QMessageBox::Retry | QMessageBox::Cancel, this);
+                                    QMessageBox::Retry | QMessageBox::Cancel, nullptr);
+                message.setScreen(screen());
                 message.setObjectName("startupPreparationError");
                 message.setDetailedText(QString::fromUtf8(error.what()));
                 message.button(QMessageBox::Retry)->setText(ui::text("startup_splash.retry"));
@@ -1274,7 +1279,7 @@ class Workbench final : public WorkbenchWindow {
                     message.addButton(ui::text("startup_splash.manage"), QMessageBox::ActionRole);
                 message.exec();
                 if (message.clickedButton() == manage)
-                    show_data_center(this, *eop_catalog_);
+                    show_data_center(nullptr, *eop_catalog_);
                 else if (message.standardButton(message.clickedButton()) != QMessageBox::Retry)
                     return false;
             }
@@ -1325,6 +1330,7 @@ class Workbench final : public WorkbenchWindow {
             model_candidate_.wait();
         if (profile_orbits_.valid())
             profile_orbits_.wait();
+        finish_apply_timing("cancelled");
 #ifdef ORBELLE_DESKTOP_BENCHMARK
         if (run_)
             run_->stop_inputs();
@@ -2419,12 +2425,27 @@ class Workbench final : public WorkbenchWindow {
                                     .arg(info.extrapolation_days)
                                     .arg(ranges.join(QStringLiteral("\n")));
     }
+    void finish_apply_timing(const QString &outcome) {
+        if (auto timing = std::exchange(apply_timing_, {}))
+            timing->finish(outcome);
+    }
     bool start_project(application::Project project, const QString &path, bool editing = false,
                        std::optional<std::size_t> selection = std::nullopt,
                        std::optional<std::string> edited_object = std::nullopt,
                        std::optional<ScenarioSettings> settings = std::nullopt) {
         if (busy())
             throw std::logic_error("Finish the pending update before opening a project");
+        const bool own_timing = editing && !apply_timing_;
+        if (own_timing)
+            apply_timing_ = ApplyTiming::begin("project_apply", ++apply_timing_sequence_);
+        last_project_outcome_ = "rejected";
+        const auto finish_request = qScopeGuard([&] {
+            if (own_timing && apply_timing_ && !project_candidate_.valid()) {
+                apply_timing_->requested();
+                finish_apply_timing(last_project_outcome_.isEmpty() ? "rejected"
+                                                                    : last_project_outcome_);
+            }
+        });
         const auto first = settings ? settings->first : project.first;
         const auto last = settings ? settings->last : project.last;
         // Check edits before asking to replace calculation data. The original lock
@@ -2557,6 +2578,11 @@ class Workbench final : public WorkbenchWindow {
             editing ? orbit_sessions_->fork() : std::make_shared<runtime::OrbitSessionCache>();
         project_progress_ = std::make_shared<ProjectProgress>();
         project_progress_->count = project.satellites.size();
+        if (apply_timing_) {
+            apply_timing_->route = "project";
+            apply_timing_->asynchronous = true;
+            apply_timing_->requested();
+        }
         project_candidate_ = std::async(
             std::launch::async,
             [this, project = std::move(project),
@@ -2565,7 +2591,10 @@ class Workbench final : public WorkbenchWindow {
              ephemeris_files, weather_files, ocean_files, retained_gravity = gravity_,
              retained_ephemerides = ephemerides_, retained_weather = weather_,
              retained_ocean_tides = ocean_tides_, cancel = project_cancellation_,
-             progress = project_progress_, warmed = startup_resources_]() mutable {
+             progress = project_progress_, warmed = startup_resources_,
+             timing = apply_timing_]() mutable {
+                const ApplyWorkerTiming worker_timing(timing);
+                StageTiming resource_timing(timing ? &timing->resources_ms : nullptr);
                 const auto checkpoint = [cancel] {
                     if (*cancel)
                         throw OrbitCancelled{};
@@ -2604,11 +2633,13 @@ class Workbench final : public WorkbenchWindow {
                     },
                     checkpoint, warmed.ephemerides);
                 progress->phase = ProjectProgress::Phase::orbits;
+                resource_timing.stop();
                 return prepare_project_scene(
                     std::move(project), source, frames_, installed_data, *cancel, retained,
                     edited_object, calculation_time, gravity, ephemerides, weather, ocean_tides,
                     previous_project, sessions,
-                    [progress](std::size_t index) { progress->index = index; });
+                    [progress](std::size_t index) { progress->index = index; },
+                    timing ? &timing->preparation : nullptr);
             });
         update_actions();
         statusBar()->showMessage(editing ? ui::text("graphics_workbench.label_50")
@@ -2648,7 +2679,10 @@ class Workbench final : public WorkbenchWindow {
             statusBar()->showMessage(status);
             return;
         }
+        if (apply_timing_)
+            apply_timing_->ready();
         try {
+            const StageTiming publish_timing(apply_timing_ ? &apply_timing_->publish_ms : nullptr);
             auto candidate = project_candidate_.get();
             if (project_cancellation_->load())
                 throw OrbitCancelled{};
@@ -2857,6 +2891,8 @@ class Workbench final : public WorkbenchWindow {
                                              : ui::text("graphics_workbench.title_2");
             statusBar()->showMessage(title + QStringLiteral("：") +
                                      QString::fromUtf8(error.what()));
+            // Stop the measurement before waiting for the error dialog to be dismissed.
+            finish_apply_timing(last_project_outcome_);
             if (smoke_dir_.isEmpty())
                 QMessageBox::warning(this, title, QString::fromUtf8(error.what()));
         } catch (const vsg::Exception &error) {
@@ -2864,6 +2900,7 @@ class Workbench final : public WorkbenchWindow {
             statusBar()->showMessage(
                 ui::text("graphics_workbench.label_55").arg(QString::fromStdString(error.message)));
         }
+        finish_apply_timing(last_project_outcome_ == "opened" ? "applied" : last_project_outcome_);
         if (project_orbit_edit_) {
             editor_->set_busy(false);
             last_orbit_outcome_ =
@@ -4064,6 +4101,15 @@ class Workbench final : public WorkbenchWindow {
     void start_orbit(OrbitInput input, const std::string &name) {
         if (busy() || !scenario_)
             return;
+        apply_timing_ = ApplyTiming::begin("orbit_apply", ++apply_timing_sequence_);
+        last_orbit_outcome_ = "rejected";
+        const auto finish_request = qScopeGuard([&] {
+            if (apply_timing_ && !candidate_.valid() && !project_candidate_.valid()) {
+                apply_timing_->requested();
+                finish_apply_timing(last_orbit_outcome_.isEmpty() ? "rejected"
+                                                                  : last_orbit_outcome_);
+            }
+        });
         pending_orbit_target_ = editor_target_;
         pending_orbit_name_ = name;
         input.first = scenario_->first();
@@ -4149,22 +4195,36 @@ class Workbench final : public WorkbenchWindow {
         const auto eop = eop_;
         const auto calculation_time = time_for(eop->data_info().time_data);
         pending_orbit_sessions_ = orbit_sessions_->fork();
+        if (apply_timing_) {
+            apply_timing_->route = "single_orbit";
+            apply_timing_->asynchronous = true;
+            apply_timing_->requested();
+        }
         candidate_ = std::async(std::launch::async, [this, input = std::move(input), previous,
                                                      reuse, cache, eop, calculation_time,
                                                      sessions = pending_orbit_sessions_,
-                                                     cancel = cancellation_] {
+                                                     cancel = cancellation_,
+                                                     timing = apply_timing_] {
+            const ApplyWorkerTiming worker_timing(timing);
+            StageTiming session_timing(timing ? &timing->preparation.session_ms : nullptr);
             if (*cancel)
                 throw OrbitCancelled{};
             if (!reuse && previous &&
                 previous->session.provenance().input_revision ==
                     std::numeric_limits<std::uint64_t>::max())
                 throw std::overflow_error("Object input revision exhausted");
+            if (timing) {
+                timing->preparation.sessions_acquired += !reuse;
+                timing->preparation.sessions_reused += reuse;
+            }
             auto session =
                 reuse ? previous->session
                       : sessions->acquire(
                             input, previous ? previous->session.provenance().input_revision + 1 : 1,
                             calculation_time.get(), {frames_, eop});
-            return prepare_orbit_scene(input, std::move(session), *frames_, *eop, *cancel, cache);
+            session_timing.stop();
+            return prepare_orbit_scene(input, std::move(session), *frames_, *eop, *cancel, cache,
+                                       timing ? &timing->preparation : nullptr);
         });
         editor_->set_busy(true);
         update_actions();
@@ -4174,7 +4234,10 @@ class Workbench final : public WorkbenchWindow {
             candidate_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
             return;
         editor_->set_busy(false);
+        if (apply_timing_)
+            apply_timing_->ready();
         try {
+            StageTiming publish_timing(apply_timing_ ? &apply_timing_->publish_ms : nullptr);
             auto candidate = candidate_.get();
             if (cancellation_->load())
                 throw OrbitCancelled{};
@@ -4213,6 +4276,8 @@ class Workbench final : public WorkbenchWindow {
                     rebuild();
                 } catch (...) {
                     fail("Cannot restore the previous orbit after scene compilation failed");
+                    publish_timing.stop();
+                    finish_apply_timing("rejected");
                     return;
                 }
                 throw;
@@ -4285,6 +4350,7 @@ class Workbench final : public WorkbenchWindow {
                                  true);
             last_orbit_outcome_ = "rejected";
         }
+        finish_apply_timing(last_orbit_outcome_);
         if (insert_defaults_pending_ && last_orbit_outcome_ == "rejected")
             show_properties_dialog();
         insert_defaults_pending_ = false;
@@ -6098,6 +6164,8 @@ class Workbench final : public WorkbenchWindow {
     QStackedWidget *inspector_pages_ = nullptr;
     QAction *properties_action_ = nullptr, *focus_action_ = nullptr, *play_action_ = nullptr;
     QString last_orbit_outcome_;
+    std::shared_ptr<ApplyTiming> apply_timing_;
+    qint64 apply_timing_sequence_ = 0;
     QString last_model_outcome_;
     std::future<vsg::ref_ptr<vsg::MatrixTransform>> model_candidate_;
     vsg::ref_ptr<vsg::MatrixTransform> model_node_;

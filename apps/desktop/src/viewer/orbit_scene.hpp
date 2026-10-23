@@ -1,4 +1,5 @@
 #pragma once
+#include "preparation_timing.hpp"
 #include <atomic>
 #include <memory>
 #include <optional>
@@ -34,6 +35,7 @@ class OrbitCancelled : public std::runtime_error {
 [[nodiscard]] std::shared_ptr<const OrbitScene> prepare_orbit_scene(
     OrbitInput input, application::Session session, const core::IFrameProvider &frames,
     const core::IEarthOrientationProvider &eop, const std::atomic_bool &cancelled,
-    std::optional<std::pair<core::Epoch, core::Epoch>> cache_interval = std::nullopt);
+    std::optional<std::pair<core::Epoch, core::Epoch>> cache_interval = std::nullopt,
+    PreparationTiming *timing = nullptr);
 [[nodiscard]] bool cache_covers(const OrbitScene &orbit, core::Epoch first, core::Epoch last);
 } // namespace orbelle::desktop

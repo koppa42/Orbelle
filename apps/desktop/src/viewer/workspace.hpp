@@ -55,9 +55,10 @@ class Workspace final : public QWidget {
     void activate(Page &page);
     void update_title(Page &page);
     void tidy(Pane *pane);
+    bool can_split(const Page &page, const Pane *pane, Qt::Edge edge) const;
     void move(Page &page, Pane *target, Qt::Edge edge = {}, int insertion = -1);
     void context_menu(Pane *pane, int tab, const QPoint &global);
-    DropTarget drop_target(const QPoint &global) const;
+    DropTarget drop_target(const Page &page, const QPoint &global) const;
     void drag_to(Page *page, const QPoint &global);
     void finish_drag(Page *page, const QPoint &global, bool cancelled);
     QWidget *parking_;

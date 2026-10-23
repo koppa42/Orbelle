@@ -19,6 +19,12 @@
 
 namespace orbelle::desktop {
 namespace {
+int axis_step(double pixels_per_degree, int spacing) {
+    for (const int step : {5, 10, 15, 30, 45, 60, 90, 180, 360})
+        if (step * pixels_per_degree >= spacing)
+            return step;
+    return 360;
+}
 bool draw_track(QPainter &painter, const QPainterPath &path,
                 const std::atomic_bool *cancelled = nullptr) {
     // Independent line primitives avoid the raster stroker's large intersecting
@@ -462,9 +468,16 @@ void GroundMap::focus_selection() {
 QRectF GroundMap::plot_rect() const { return QRectF(rect()).adjusted(38, 14, -16, -44); }
 QRectF GroundMap::map_rect() const {
     const auto plot = plot_rect();
-    const double width = std::min(plot.width(), plot.height() * 2) * zoom_;
+    // Fill the viewport at 1x without stretching the equirectangular projection.
+    // A short split shows a latitude band instead of a tiny, letterboxed world.
+    const double width = std::max(plot.width(), plot.height() * 2) * zoom_;
     const QSizeF size(width, width / 2);
     return {plot.center() + pan_ * width - QPointF(size.width() / 2, size.height() / 2), size};
+}
+double GroundMap::minimum_zoom() const {
+    const auto plot = plot_rect();
+    // Zooming out can still reveal the complete world, including both poles.
+    return std::min(plot.width(), 2 * plot.height()) / std::max(plot.width(), 2 * plot.height());
 }
 QTransform GroundMap::map_transform() const {
     const auto area = map_rect();
@@ -498,7 +511,7 @@ void GroundMap::zoom(double factor, QPointF anchor) {
         return;
     zoom_animation_.stop();
     finish_drag();
-    apply_zoom(std::clamp(zoom_ * factor, 1.0, 12.0), anchor);
+    apply_zoom(std::clamp(zoom_ * factor, minimum_zoom(), 12.0), anchor);
 }
 void GroundMap::zoom_centered(double factor) { request_zoom(factor, plot_rect().center()); }
 void GroundMap::apply_zoom(double next, QPointF anchor, std::optional<QPointF> location) {
@@ -508,7 +521,7 @@ void GroundMap::apply_zoom(double next, QPointF anchor, std::optional<QPointF> l
     const auto offset = anchor - plot.center();
     const auto width = map_rect().width();
     const auto fixed_location = location.value_or(offset / width - pan_);
-    const auto next_width = std::min(plot.width(), plot.height() * 2) * next;
+    const auto next_width = std::max(plot.width(), plot.height() * 2) * next;
     pan_ = offset / next_width - fixed_location;
     zoom_ = next;
     clamp_pan();
@@ -531,7 +544,7 @@ void GroundMap::request_zoom(double factor, QPointF anchor) {
         }
     }
     zoom_animation_.stop();
-    const auto target = std::clamp(base * factor, 1.0, 12.0);
+    const auto target = std::clamp(base * factor, minimum_zoom(), 12.0);
     if (target == zoom_)
         return;
     zoom_anchor_ = anchor;
@@ -669,15 +682,15 @@ void GroundMap::paint_axes(QPainter &p) {
     const ProfileScope profile("map_axes_ms");
     const auto plot = plot_rect(), area = map_rect();
     const auto transform = map_transform();
-    const int grid_step = area.width() > 6000   ? 5
-                          : area.width() > 3000 ? 10
-                          : area.width() > 1600 ? 15
-                                                : 30;
     p.setPen(theme::color(theme::text_muted));
     QFont mono("Consolas");
     mono.setPixelSize(10);
     p.setFont(mono);
-    for (int lon = -180; grid_ && lon <= 180; lon += grid_step * (area.width() < 800 ? 2 : 1)) {
+    const auto longitude_step =
+        axis_step(area.width() / 360, p.fontMetrics().horizontalAdvance("180 W") + 12);
+    const auto latitude_step = axis_step(area.height() / 180, p.fontMetrics().height() + 6);
+    for (int lon = -180 / longitude_step * longitude_step; grid_ && lon <= 180;
+         lon += longitude_step) {
         const double x = transform.map(QPointF(lon, 0)).x();
         if (x >= plot.left() && x <= plot.right())
             p.drawText(QRectF(x - 24, std::min(area.bottom(), plot.bottom()) + 3, 48, 16),
@@ -686,7 +699,7 @@ void GroundMap::paint_axes(QPainter &p) {
                                                          : lon > 0 ? " E"
                                                                    : ""));
     }
-    for (int lat = -90; grid_ && lat <= 90; lat += grid_step) {
+    for (int lat = -90 / latitude_step * latitude_step; grid_ && lat <= 90; lat += latitude_step) {
         const double y = transform.map(QPointF(0, lat)).y();
         if (y >= plot.top() && y <= plot.bottom())
             p.drawText(QRectF(0, y - 9, 31, 18), Qt::AlignRight | Qt::AlignVCenter,

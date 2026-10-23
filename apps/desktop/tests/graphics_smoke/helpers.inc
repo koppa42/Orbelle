@@ -81,7 +81,9 @@ bool Workbench::smoke_caches_ready() {
 bool Workbench::smoke_action_in_workspace(const char *name) {
     for (auto *button : editor_->findChildren<QPushButton *>(name))
         if (button->isVisible() &&
-            workspace_->rect().contains(button->mapTo(workspace_, button->rect().center())))
+            workspace_->rect().contains(
+                QRect(button->mapTo(workspace_, QPoint{}), button->size())) &&
+            button->visibleRegion().contains(button->rect()))
             return true;
     return false;
 }

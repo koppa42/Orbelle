@@ -15,6 +15,7 @@ class QCheckBox;
 class QTreeWidget;
 class QStackedWidget;
 class QPlainTextEdit;
+class QVBoxLayout;
 namespace orbelle::desktop {
 class EpochEditor;
 class QuantityEditor;
@@ -58,7 +59,11 @@ class OrbitEditor final : public QWidget {
     void set_appearance_busy(bool busy);
     void show_appearance_result(const QString &message, bool error = false);
 
+  protected:
+    void resizeEvent(QResizeEvent *event) override;
+
   private:
+    std::vector<QVBoxLayout *> page_layouts_;
     void refresh_enabled();
     [[nodiscard]] OrbitInput read_input() const;
     [[nodiscard]] DisplaySettings read_display() const;
