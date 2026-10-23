@@ -192,7 +192,7 @@ class ReportsTest(unittest.TestCase):
             path = Path(directory) / 'derived.orbelle'
             project.save(path)
             raw = path.read_bytes()
-            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 48)
+            self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 49)
             self.assertEqual(of.load_project(path).reports[0].query.kind, of.ReportKind.GEODETIC_POSITION)
 
 

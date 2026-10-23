@@ -75,7 +75,7 @@ TEST(Access, EnuAnglesRangeRateAndEllipsoidOcclusion) {
     state.position_m = {-7e6, 0, 0};
     EXPECT_FALSE(core::observe_ground_target({}, state).line_of_sight);
     state.position_m = {7e6, 0, 0};
-    EXPECT_FALSE(core::observe_ground_target({0, 0, -100}, state).line_of_sight);
+    EXPECT_TRUE(core::observe_ground_target({0, 0, -100}, state).line_of_sight);
     state.frame = core::FrameId::gcrf;
     EXPECT_THROW((void)core::observe_ground_target({}, state), std::invalid_argument);
     EXPECT_NEAR(core::vector_angle({1, 0, 0}, {0, 1, 0}), pi / 2, 1e-14);

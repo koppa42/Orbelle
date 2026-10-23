@@ -27,13 +27,28 @@ class Wgs84Location:
     longitude: u.Angle
     latitude: u.Angle
     ellipsoid_height: u.Length = u.m(0)
+    height_above_ground: u.Length = u.m(0)
 
     def _native(self) -> n.GroundStationLocation:
         return n.GroundStationLocation(
             require(self.longitude, u.Angle, "longitude").radians,
             require(self.latitude, u.Angle, "latitude").radians,
             require(self.ellipsoid_height, u.Length, "ellipsoid_height").metres,
+            require(self.height_above_ground, u.Length, "height_above_ground").metres,
         )
+
+    def coordinates(self, type: n.GroundPositionType) -> tuple[float, float, float]:
+        """Ground-point coordinates in SI units; excludes height above ground."""
+        return tuple(n.ground_station_coordinates(self._native(), type))
+
+    @classmethod
+    def from_coordinates(cls, type: n.GroundPositionType, coordinates: tuple[float, float, float],
+                         *, height_above_ground: u.Length = u.m(0)) -> "Wgs84Location":
+        """Create from ground-point coordinates (radians/metres); see GroundPositionType."""
+        value = n.ground_station_location(type, coordinates,
+            require(height_above_ground, u.Length, "height_above_ground").metres)
+        return cls(u.rad(value.longitude_rad), u.rad(value.latitude_rad), u.m(value.height_m),
+                   u.m(value.height_above_ground_m))
 
 
 @dataclass(frozen=True, slots=True)

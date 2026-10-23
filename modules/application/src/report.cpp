@@ -12,12 +12,15 @@ std::vector<results::Column> report_columns(ReportKind kind) {
     if (kind == ReportKind::object_summary) {
         columns.insert(columns.end(), {{"object.type", "Type", ""}, {"object.model", "Model", ""}});
     } else if (kind == ReportKind::ground_stations) {
-        columns.insert(columns.end(), {{"station.longitude", "Longitude", "rad"},
-                                       {"station.latitude", "Geodetic latitude", "rad"},
-                                       {"station.height", "Ellipsoid height", "m"},
-                                       {"state.x", "ITRF X", "m"},
-                                       {"state.y", "ITRF Y", "m"},
-                                       {"state.z", "ITRF Z", "m"}});
+        columns.insert(columns.end(),
+                       {{"station.longitude", "Longitude", "rad"},
+                        {"station.latitude", "Geodetic latitude", "rad"},
+                        {"station.height", "Ellipsoid height", "m"},
+                        {"state.x", "ITRF X", "m"},
+                        {"state.y", "ITRF Y", "m"},
+                        {"state.z", "ITRF Z", "m"},
+                        {"station.height_above_ground", "Height above ground", "m"},
+                        {"station.observer_height", "Observer ellipsoid height", "m"}});
     } else if (report_is_coverage(kind)) {
         if (kind == ReportKind::coverage_grid)
             columns.insert(columns.end(), {{"coverage.longitude", "Longitude", "rad"},

@@ -227,6 +227,8 @@ QString localized(QString value) {
         {"Longitude", ui::text("report_dialog.label_34")},
         {"Geodetic latitude", ui::text("report_dialog.label_18")},
         {"Ellipsoid height", ui::text("report_dialog.label_35")},
+        {"Height above ground", ui::text("facility.report.above_ground")},
+        {"Observer ellipsoid height", ui::text("facility.report.observer_height")},
         {"Semi-major axis", ui::text("report_dialog.label_36")},
         {"Eccentricity", ui::text("report_dialog.label_37")},
         {"Inclination", ui::text("report_dialog.label_38")},

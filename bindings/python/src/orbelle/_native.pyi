@@ -711,7 +711,7 @@ class SatelliteDefinition:
     def __init__(self, name: str, orbit: OrbitInput, display: OrbitDisplay) -> None: ...
 
 class GroundStationDefinition:
-    def __init__(self, name: str, location: GroundStationLocation, minimum_elevation_rad: float) -> None: ...
+    def __init__(self, name: str, location: GroundStationLocation, minimum_elevation_rad: float, position_type: GroundPositionType = ..., description: str = "") -> None: ...
 
 class PointingDefinition:
     def __init__(self, target: ObjectRef | None = None) -> None: ...
@@ -733,6 +733,8 @@ class GroundStationUpdate:
     name: str | None
     location: GroundStationLocation | None
     minimum_elevation_rad: float | None
+    position_type: GroundPositionType | None
+    description: str | None
 
 class SensorUpdate:
     def __init__(self) -> None: ...
@@ -1248,13 +1250,27 @@ class ProjectSatellite:
     model_diameter_m: float
     model_path: str
 
+class GroundPositionType:
+    GEODETIC: ClassVar[GroundPositionType]
+    GEOCENTRIC: ClassVar[GroundPositionType]
+    CARTESIAN: ClassVar[GroundPositionType]
+    SPHERICAL: ClassVar[GroundPositionType]
+    CYLINDRICAL: ClassVar[GroundPositionType]
+
+def ground_station_coordinates(location: GroundStationLocation, type: GroundPositionType) -> list[float]: ...
+def ground_station_location(type: GroundPositionType, coordinates: Sequence[float], height_above_ground_m: float = 0) -> GroundStationLocation: ...
+def ground_station_position(location: GroundStationLocation) -> list[float]: ...
+
 class GroundStationLocation:
-    def __init__(self, longitude_rad: float = 0, latitude_rad: float = 0, height_m: float = 0) -> None: ...
+    def __init__(self, longitude_rad: float = 0, latitude_rad: float = 0, height_m: float = 0, height_above_ground_m: float = 0) -> None: ...
     longitude_rad: float
     latitude_rad: float
     height_m: float
+    height_above_ground_m: float
 
 class ProjectGroundStation:
+    position_type: GroundPositionType
+    description: str
     minimum_elevation_rad: float
     def __init__(self) -> None: ...
     object_id: str

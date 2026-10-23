@@ -6,7 +6,11 @@
 class QLineEdit;
 class QLabel;
 class QPushButton;
+class QComboBox;
+class QPlainTextEdit;
+class QStackedWidget;
 namespace orbelle::desktop {
+class FormGroup;
 class QuantityEditor;
 class GroundStationEditor final : public QDialog {
   public:
@@ -23,10 +27,21 @@ class GroundStationEditor final : public QDialog {
 
   private:
     void preview();
+    void switch_position_type(int index);
+    void load_coordinates(core::GroundStationLocation location);
+    [[nodiscard]] core::GroundStationLocation location() const;
     application::ProjectGroundStation original_;
+    core::GroundStationLocation canonical_;
+    core::GroundPositionType position_type_ = core::GroundPositionType::geodetic;
+    std::array<double, 3> represented_{};
+    std::array<std::array<QuantityEditor *, 3>, 5> coordinates_{};
     bool creating_ = false;
     QLineEdit *name_;
-    QuantityEditor *longitude_, *latitude_, *height_, *minimum_elevation_;
+    QComboBox *position_type_box_;
+    QStackedWidget *coordinate_pages_;
+    QPlainTextEdit *description_;
+    QuantityEditor *above_ground_, *minimum_elevation_;
+    FormGroup *preview_group_;
     QLabel *preview_, *result_;
     QWidget *fields_;
     QPushButton *apply_, *reset_;

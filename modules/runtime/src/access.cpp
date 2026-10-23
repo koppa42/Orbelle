@@ -114,10 +114,9 @@ calculate_access_passes(const application::Project &project, const std::vector<s
                                                        geometry.station.minimum_elevation_rad;
                                          if (geometry.sensor)
                                              margin = std::min(margin, s.sensor_margin_rad.value());
-                                         // For above-surface stations with nonnegative minimum
-                                         // elevation, the angular constraints imply ellipsoid
-                                         // clearance. Preserve the separate segment test for
-                                         // below-ellipsoid stations and numerical tangency.
+                                         // Negative elevations from a raised observer must also
+                                         // clear the station's local ground ellipsoid. Preserve
+                                         // the separate segment test near its tangent boundary.
                                          if (!s.observation.line_of_sight)
                                              margin = std::min(margin, -1e-14);
                                          return margin;

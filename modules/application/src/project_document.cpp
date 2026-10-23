@@ -92,6 +92,10 @@ std::vector<std::string> fields(const ProjectGroundStation &a, const ProjectGrou
         result.emplace_back("location");
     if (a.minimum_elevation_rad != b.minimum_elevation_rad)
         result.emplace_back("minimum_elevation");
+    if (a.position_type != b.position_type)
+        result.emplace_back("position_type");
+    if (a.description != b.description)
+        result.emplace_back("description");
     return result;
 }
 std::vector<std::string> fields(const ProjectSensor &a, const ProjectSensor &b) {
@@ -476,8 +480,9 @@ ObjectRef ObjectManager::create(const objects::Satellite &definition) {
 ObjectRef ObjectManager::create(const objects::GroundStation &definition) {
     const auto ref = allocate(ObjectKind::ground_station);
     mutate([&](Project &next) {
-        next.ground_stations.push_back(
-            {ref.id(), definition.name, definition.location, definition.minimum_elevation_rad});
+        next.ground_stations.push_back({ref.id(), definition.name, definition.location,
+                                        definition.minimum_elevation_rad, definition.position_type,
+                                        definition.description});
     });
     return ref;
 }
@@ -528,6 +533,10 @@ void ObjectManager::update(const ObjectRef &ref, const objects::GroundStationUpd
             value.location = *patch.location;
         if (patch.minimum_elevation_rad)
             value.minimum_elevation_rad = *patch.minimum_elevation_rad;
+        if (patch.position_type)
+            value.position_type = *patch.position_type;
+        if (patch.description)
+            value.description = *patch.description;
     });
 }
 void ObjectManager::update(const ObjectRef &ref, const objects::SensorUpdate &patch) {

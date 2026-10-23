@@ -57,15 +57,24 @@ GroundObservation observe_ground_target(GroundStationLocation location,
         if (*azimuth < 0)
             *azimuth += 2 * std::numbers::pi;
     }
-    // Scale the WGS84 ellipsoid to a sphere, then minimize squared radius on the segment.
-    constexpr double a = 6378137.0, b = a * (1 - 1 / 298.257223563);
+    // A centred oblate ground ellipsoid through the ground point with the same
+    // normal as WGS84. With u=N+h, v=N(1-e2)+h, k=u*cos(phi)^2+v*sin(phi)^2,
+    // its axes satisfy A^2=u*k and B^2=v*k. This also has finite polar limits.
+    // The observer's height above ground does not inflate the obstruction surface.
+    constexpr double wgs_a = 6378137.0, f = 1 / 298.257223563, e2 = f * (2 - f);
+    const auto n = wgs_a / std::sqrt(1 - e2 * sp * sp);
+    const auto u = n + location.height_m, v = n * (1 - e2) + location.height_m;
+    const auto k = u * cp * cp + v * sp * sp;
+    const auto a = std::sqrt(u * k), b = std::sqrt(v * k);
+    // Scale that ellipsoid to a sphere and minimize squared radius on the segment.
     const std::array<double, 3> q{p[0] / a, p[1] / a, p[2] / b},
         delta{d[0] / a, d[1] / a, d[2] / b};
     const double t = std::clamp(-dot(q, delta) / dot(delta, delta), 0.0, 1.0);
     const std::array<double, 3> nearest{q[0] + t * delta[0], q[1] + t * delta[1],
                                         q[2] + t * delta[2]};
     return {azimuth, std::atan2(up, horizontal), range, dot(d, target.velocity_mps) / range,
-            dot(nearest, nearest) >= 1 - 1e-14};
+            (location.height_above_ground_m > 0.001 || up >= 0) &&
+                dot(nearest, nearest) >= 1 - 1e-14};
 }
 std::vector<AccessInterval> find_access_intervals(Epoch first, Epoch last, std::int64_t step,
                                                   const std::function<bool(Epoch)> &visible,
