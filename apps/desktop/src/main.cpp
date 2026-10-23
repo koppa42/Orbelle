@@ -20,6 +20,7 @@ int main(int argc, char **argv) {
     QApplication app(argc, argv);
     app.setApplicationName("Orbelle");
     app.setApplicationVersion(ORBELLE_APPLICATION_VERSION);
+    // Qt appends the display name to native captions; window titles need no brand prefix.
     app.setApplicationDisplayName(ui::text("brand.name"));
     app.setWindowIcon(orbelle::desktop::application_icon());
 #ifdef ORBELLE_DESKTOP_GRAPHICS
