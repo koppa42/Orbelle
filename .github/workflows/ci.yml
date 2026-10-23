@@ -39,6 +39,7 @@ jobs:
       vcpkg-baseline: ${{ steps.version.outputs.vcpkg-baseline }}
       baseline-python: ${{ steps.version.outputs.baseline-python }}
       python-matrix: ${{ steps.version.outputs.python-matrix }}
+      python-versions: ${{ steps.version.outputs.python-versions }}
       scope: ${{ steps.plan.outputs.scope }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -83,7 +84,7 @@ jobs:
           python -m unittest discover -s tests/packaging -v
 
   linux:
-    name: Linux C++ and Python ${{ needs.metadata.outputs.baseline-python }}
+    name: Linux C++
     needs: metadata
     if: needs.metadata.outputs.scope == 'full' || needs.metadata.outputs.scope == 'baseline' || needs.metadata.outputs.scope == 'release'
     runs-on: ubuntu-24.04
@@ -123,7 +124,7 @@ jobs:
         env:
           CI_SCOPE: ${{ needs.metadata.outputs.scope }}
         run: |
-          args=(--stage tests)
+          args=(--stage tests --skip-python)
           if [[ "$CI_SCOPE" == release ]]; then
             args=(--stage package --delivery "$RUNNER_TEMP/delivery")
           fi
@@ -213,7 +214,7 @@ jobs:
           retention-days: 14
 
   windows:
-    name: Windows desktop and Python ${{ needs.metadata.outputs.baseline-python }}
+    name: Windows desktop
     needs: metadata
     if: needs.metadata.outputs.scope == 'full' || needs.metadata.outputs.scope == 'baseline' || needs.metadata.outputs.scope == 'release'
     runs-on: windows-2022
@@ -284,6 +285,8 @@ jobs:
             '--version', $env:VERSION)
           if ($env:CI_SCOPE -eq 'release') {
             $checkArgs += @('--release', '--output', "$env:RUNNER_TEMP/assets")
+          } else {
+            $checkArgs += '--skip-python'
           }
           python tools/ci/check_windows.py @checkArgs
           if ($LASTEXITCODE) { throw 'Windows validation failed' }
@@ -316,25 +319,31 @@ jobs:
   python-linux:
     name: Linux compatibility
     needs: metadata
-    if: needs.metadata.outputs.scope == 'full' || needs.metadata.outputs.scope == 'release'
+    if: needs.metadata.outputs.scope == 'full' || needs.metadata.outputs.scope == 'baseline' || needs.metadata.outputs.scope == 'release'
     uses: ./.github/workflows/python.yml
     with:
       platform: linux
       vcpkg-baseline: ${{ needs.metadata.outputs.vcpkg-baseline }}
       baseline-python: ${{ needs.metadata.outputs.baseline-python }}
-      python-versions: ${{ needs.metadata.outputs.python-matrix }}
+      python-versions: >-
+        ${{ needs.metadata.outputs.scope == 'baseline' && format('["{0}"]', needs.metadata.outputs.baseline-python)
+            || needs.metadata.outputs.scope == 'release' && needs.metadata.outputs.python-matrix
+            || needs.metadata.outputs.python-versions }}
       release: ${{ inputs.release-tag != '' }}
 
   python-windows:
     name: Windows compatibility
     needs: metadata
-    if: needs.metadata.outputs.scope == 'full' || needs.metadata.outputs.scope == 'release'
+    if: needs.metadata.outputs.scope == 'full' || needs.metadata.outputs.scope == 'baseline' || needs.metadata.outputs.scope == 'release'
     uses: ./.github/workflows/python.yml
     with:
       platform: windows
       vcpkg-baseline: ${{ needs.metadata.outputs.vcpkg-baseline }}
       baseline-python: ${{ needs.metadata.outputs.baseline-python }}
-      python-versions: ${{ needs.metadata.outputs.python-matrix }}
+      python-versions: >-
+        ${{ needs.metadata.outputs.scope == 'baseline' && format('["{0}"]', needs.metadata.outputs.baseline-python)
+            || needs.metadata.outputs.scope == 'release' && needs.metadata.outputs.python-matrix
+            || needs.metadata.outputs.python-versions }}
       release: ${{ inputs.release-tag != '' }}
 
   passed:

@@ -15,12 +15,20 @@ from version import check
 from validation_inputs import PYTHON_EXAMPLES, stage_validation_inputs
 
 
+def copy_desktop_assets(work, output, version):
+    """Stage both the complete installation and all incremental update assets."""
+    for suffix in (".zip", "-app.zip", "-runtime.zip", "-resources.zip", "-update.json"):
+        shutil.copy2(work / f"Orbelle-{version}-win-x64{suffix}", output)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dependency-prefix", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--reports", type=Path, required=True)
     parser.add_argument("--release", action="store_true")
+    parser.add_argument("--skip-python", action="store_true",
+                        help="Run native tests only; Python is validated by a separate CI job")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--test-dependencies", type=Path)
     parser.add_argument("--version", required=True)
@@ -28,6 +36,8 @@ def main():
     args = parser.parse_args()
     if args.release != bool(args.output):
         parser.error("--release and --output must be supplied together")
+    if args.release and args.skip_python:
+        parser.error("--skip-python cannot be used with --release")
     if os.name != "nt":
         parser.error("Windows is required")
     source = Path(__file__).resolve().parents[2]
@@ -77,9 +87,10 @@ def main():
         run("export-python-dependencies", sys.executable, source / "tools/ci/export_python_dependencies.py",
             "--dependency-prefix", prefix, "--output", args.test_dependencies.resolve())
     if not args.release:
-        run("python-api", sys.executable, source / "tools/ci/check_python.py",
-            "--dependency-prefix", prefix, "--work", work / "python", "--reports", reports / "python",
-            "--cpp-example", desktop / "examples/cpp/Release/orbelle_example.exe")
+        if not args.skip_python:
+            run("python-api", sys.executable, source / "tools/ci/check_python.py",
+                "--dependency-prefix", prefix, "--work", work / "python", "--reports", reports / "python",
+                "--cpp-example", desktop / "examples/cpp/Release/orbelle_example.exe")
         (reports / "passed.json").write_text(json.dumps({
             "passed": True, "version": args.version, "release": False,
         }), encoding="utf-8")
@@ -89,7 +100,7 @@ def main():
         "--build-dir", desktop, "--dependency-prefix", prefix,
         "--output", work / f"Orbelle-{args.version}-win-x64",
         "--reports", reports / "desktop-package", "--version", args.version, "--zip")
-    shutil.copy2(work / f"Orbelle-{args.version}-win-x64.zip", output)
+    copy_desktop_assets(work, output, args.version)
 
     # Copy tracked sources only: scikit-build must not walk vcpkg/build caches.
     wheel_source = work / "wheel-source"

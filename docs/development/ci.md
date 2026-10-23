@@ -4,6 +4,8 @@
 
 ## 触发与测试范围
 
+Windows 桌面发布同时生成完整便携包和 `app`、`runtime`、`resources` 三个更新分包及更新清单，全部纳入 `SHA256SUMS`。发布前核对整包与分包内容一致、版本与路径合法、文件和归档散列正确。资源采用运行白名单，固定测试输入留在验证目录；详见[桌面软件更新](../architecture/application_updates.md)。
+
 | 触发 | 执行范围 |
 | --- | --- |
 | 代码、测试、CI、依赖或资源 PR | Windows / Linux 完整数值与行为回归、Python 3.11–3.15 API 测试；不构建发布包 |
@@ -21,7 +23,7 @@ ASan/UBSan 仅在 **Actions → Sanitizers → Run workflow** 中手动执行；
 
 PR、`main` 与发布安装验证通过 `tools/ci/validation_inputs.py` 整理相同的独立测试目录，包含 Python 测试、十二个示例、SDK 消费端、固定参考值、项目文件样例及测试使用的 EOP / 闰秒 / SPICE 片段数据。测试目录保留相对路径，但不复制 Python 包源码或 C++ 实现；计算能力必须来自被测安装。普通 Python CI 也从此目录运行，提前发现发布验证输入遗漏。
 
-PR 的 `linux-python-dependencies` 和 `windows-python-dependencies` 由各平台独立的轻量依赖作业生成，仅供其他 Python 版本复用已编译的无界面依赖，内容不包括 Orbelle 安装包。诊断日志另行保留。标签流程还传递 `linux-delivery`，供没有源码检出的新 runner 验证 SDK 和 wheel，然后整理发布附件。
+`linux-python-dependencies` 和 `windows-python-dependencies` 由各平台独立的轻量依赖作业生成，供本次 Python 矩阵复用已编译的无界面依赖，内容不包括 Orbelle 安装包。诊断日志另行保留。标签流程还传递 `linux-delivery`，供没有源码检出的新 runner 验证 SDK 和 wheel，然后整理发布附件。
 
 PR 使用 GitHub 默认的[模拟合并引用](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)运行。合并后在实际 `main` 提交上执行基准测试，同时更新可供后续 PR 使用的依赖缓存。多版本兼容性在合并前完成；目标分支变化时先更新 PR 并等待新的检查结果。若启用合并队列，需先接入 `merge_group` 事件。
 
@@ -30,18 +32,18 @@ PR 使用 GitHub 默认的[模拟合并引用](https://docs.github.com/en/action
 | 检查 | 内容 |
 | --- | --- |
 | Versions and tooling | actionlint 工作流静态检查；CMake、Python、vcpkg 版本一致性；数据导入、CI 规划、交付与发布脚本测试；标签提交归属检查 |
-| Linux C++ and Python 3.13 | Ubuntu 24.04：完整无界面 C++ 数值与行为测试、Python API、十二个示例和 C++/Python 对照；标签流程额外构建 SDK 和基准 wheel |
+| Linux C++ | Ubuntu 24.04：完整无界面 C++ 数值与行为测试；标签流程额外构建 SDK 和基准 wheel，由隔离消费端检查安装后的 Python |
 | Linux ASan/UBSan | 独立的手动 `Sanitizers` 工作流；Ubuntu 24.04，全量用例，不加筛选；保存命令、构建配置和 JUnit |
 | Linux SDK and installed Python API | 仅标签流程：新 runner 不检出源码，校验交付散列、迁移 SDK、离线安装 wheel，运行消费端、API、示例和 C++/Python 对照 |
-| Windows desktop and Python 3.13 | Windows Server 2022 / VS 2022：桌面编译、CTest 与 Qt offscreen、Python API 及示例；标签流程额外构建便携包、SDK 和基准 wheel，验证 SDK 解压迁移及 wheel 安装 |
-| Python 3.11 / 3.12 / 3.14 / 3.15 × Windows / Linux | PR、手动 `CI` 及标签流程执行；复用相应平台的原生依赖，编译各解释器扩展，运行 API 测试及十二个示例；标签流程改为构建、安装 wheel 后测试 |
+| Windows desktop | Windows Server 2022 / VS 2022：桌面编译、CTest 与 Qt offscreen；标签流程额外构建便携包、SDK 和基准 wheel，验证 SDK 解压迁移及 wheel 安装 |
+| Python 3.11–3.15 × Windows / Linux | PR 和手动 `CI` 执行全部版本，普通 `main` 只执行基准 3.13；复用相应平台的原生依赖，独立编译扩展，运行全部 API 测试及十二个示例。基准版本同时构建 C++ 示例并验证跨语言结果。标签流程只在此运行非基准版本，构建、安装 wheel 后测试；基准 wheel 由原生及安装验证作业负责 |
 | CI passed | 按本次范围检查全部预期常规作业；失败、取消或意外跳过都会失败，仅允许该范围明确计划的跳过 |
 
 GitHub 的 `main` 分支规则应要求通过 PR 合并、**CI passed** 成功，并要求分支合并前保持最新；禁用绕过和强制推送。仓库中的规范和工作流不会自动修改 GitHub 分支保护设置。
 
 可审阅的服务器规则配置保存在 [main.json](../../.github/rulesets/main.json) 和 [version-tags.json](../../.github/rulesets/version-tags.json)。管理员在 GitHub 应用或更新对应规则集：`main` 必须走 PR，必需的 `CI passed` 限定由 GitHub Actions 提供，合并前要求与目标分支保持最新；`v*` 标签允许新建，但禁止修改和删除。两套规则均不配置绕过名单。规则文件的修改也走 PR，文件本身不会自动调用管理 API。
 
-Linux 和 Windows 原生作业与两平台的 Python 依赖准备在前置工具检查通过后同时启动。Python 矩阵只等待本平台的轻量依赖包，不再等待原生编译、HPOP 回归或基准 Python；依赖准备按固定 vcpkg 基线恢复或构建 ERFA、CSPICE、SQLite 等无界面依赖，每个平台只准备一次，通过同一份可复用工作流供各解释器使用。`CI passed` 检查两平台及相应 Python 测试。手动 `Sanitizers` 使用独立工作流和检查名称，其结果不能替代 PR 必需的 `CI passed`。
+Linux 和 Windows 原生作业与两平台的 Python 依赖准备在前置工具检查通过后同时启动。普通 CI 的全部 Python 版本（包括基准 3.13）只等待本平台的轻量依赖包，不等待原生编译或 HPOP 回归。原生作业不再串行重复调用基准 Python；基准作业使用自己的 C++ 示例完成跨语言对照，并在全新消费环境中运行 API 测试。依赖准备按固定 vcpkg 基线恢复或构建 ERFA、CSPICE、SQLite 等无界面依赖，每个平台只准备一次，通过同一份可复用工作流供各解释器使用。普通 `main` 同样运行两平台的基准 Python 作业并预热轻量依赖缓存。`CI passed` 要求这些作业成功，意外跳过不能放行。标签流程保留基准 wheel 与 SDK 的原生交付链，避免矩阵重复生成同一个 wheel。手动 `Sanitizers` 使用独立工作流和检查名称，其结果不能替代 PR 必需的 `CI passed`。
 
 actionlint 在原生构建前运行，固定工具版本与 SHA-256，检查所有工作流及其 shell 脚本。更新版本时同步核验上游发布文件和校验值。
 
@@ -59,7 +61,9 @@ GitHub 将 PR 生成的缓存限制在该 PR 的合并引用中，其他 PR 和 
 
 常规 CI 通过 `CTEST_PARALLEL_LEVEL=4` 在每个平台内最多并行四个测试进程，不新增分片作业或测试筛选。桌面测试共享 `orbelle_desktop_tests` 资源锁，彼此串行，仍可与数值测试并行；手动 sanitizer 保持原并发设置。CSPICE 的进程内状态不会跨 CTest 进程共享；测试只读固定参考数据，写入各自的临时目录或具名 fixture 子目录。不要同时启动多个 CTest 操作同一个构建目录。
 
-天气跳变的 HPOP 星历回归按五种积分器参数化，仍覆盖正反向、Cowell/VOP、时间正则化开关、两种报告步长、三种插值方式及跳变前后 1 ns 和边界本身。相同配置的直接 RKV89 参考结果在每个方向和表示方式内复用；两条被测星历生成入口仍分别执行。时间范围、步长、输入、参考算法和 1 mm / 1e-6 m/s 门槛不变。其他长时天气收敛用例中的重新打开、冻结数据和新数据计算是不同的行为验证，继续保留。
+天气跳变的 HPOP 星历回归按五种积分器参数化，仍覆盖正反向、Cowell/VOP、时间正则化开关、两种报告步长、三种插值方式及跳变前后 1 ns 和边界本身。直接参考固定使用不受 VOP 开关影响的 RKV89，在每个方向内计算一次并复用；两条被测星历生成入口仍分别执行。时间范围、步长、输入、参考算法和 1 mm / 1e-6 m/s 门槛不变。其他长时天气收敛用例中的重新打开、冻结数据和新数据计算是不同的行为验证，继续保留。
+
+太阳光压边界回归将五种积分器与两种 VOP 设置展开为十个独立 CTest 项，继续覆盖时间正则化开关、八个独立参考场景和两种步长，共 320 条轨迹。只调整调度粒度，不减少数值组合或断言；仍共享原有四进程并发额度。参考结果的复用只发生在一次测试进程内，不缓存跨提交的测试结果。
 
 `linux-sanitizer-reports` 保存手动检查的环境、命令耗时、构建配置和 JUnit；普通 Linux 报告保存在 `linux-build-reports`。原生 Linux 上限 180 分钟，sanitizer 上限 360 分钟，以实际命令记录评估耗时；不在同一构建目录中并发运行有共享文件的测试。
 
@@ -76,11 +80,13 @@ Windows、Linux 和 Python 的 `commands.json` 记录每条命令的 UTC 开始�
 | 文件 | 用途 |
 | --- | --- |
 | `Orbelle-X.Y.Z-win-x64.zip` | Windows x64 便携桌面，解压后运行 `Orbelle.exe` |
+| `Orbelle-X.Y.Z-win-x64-{app,runtime,resources}.zip` | Windows 自动更新分包，分别包含程序、依赖与资源 |
+| `Orbelle-X.Y.Z-win-x64-update.json` | 分包和完整版本的文件、大小及 SHA-256 清单 |
 | `Orbelle-X.Y.Z-sdk-win-x64.zip` | Windows x64 / VS 2022 Release C++ 无界面 SDK |
 | `Orbelle-X.Y.Z-sdk-linux-x64.tar.gz` | Ubuntu 24.04 x86_64 Release C++ 无界面 SDK |
 | `orbelle-X.Y.Z-cpNNN-cpNNN-win_amd64.whl` | Windows x64；CPython 3.11～3.15，每个版本一个 wheel |
 | `orbelle-X.Y.Z-cpNNN-cpNNN-linux_x86_64.whl` | Ubuntu 24.04 x86_64；CPython 3.11～3.15，每个版本一个 wheel |
-| `SHA256SUMS` | 上述十三个文件的 SHA-256 |
+| `SHA256SUMS` | 上述十七个文件的 SHA-256 |
 
 SDK 包含计算库、头文件、CMake 配置、样例数据及链接依赖。将 SDK 根目录和其 `dependencies` 子目录一起加入 `CMAKE_PREFIX_PATH`；Windows 消费程序运行时还需将 `dependencies/bin` 加入进程 `PATH`。具体用法见包内 `README.txt`。
 

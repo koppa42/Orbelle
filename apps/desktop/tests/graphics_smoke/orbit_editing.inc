@@ -157,7 +157,7 @@ void Workbench::smoke_orbit_editing() {
     case 14:
         save_interaction_images("satellite-model");
         editor_->configure_appearance(
-            2, QCoreApplication::applicationDirPath() + "/resources/models/satellite_demo.gltf",
+            2, test_resources_ + "/models/satellite_demo.gltf",
             1000);
         ++orbit_smoke_stage_;
         break;

@@ -87,6 +87,7 @@ def main():
             python_baseline, versions = python_versions()
             extra_versions = [item for item in versions if item != python_baseline]
             output.write(f"baseline-python={python_baseline}\npython-matrix={json.dumps(extra_versions)}\n")
+            output.write(f"python-versions={json.dumps(versions)}\n")
     print(version)
 
 

@@ -6,6 +6,7 @@ orbelle_warnings(orbelle_desktop_text)
 qt_add_resources(orbelle_desktop_text "desktop_text" PREFIX "/orbelle"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/text/zh_CN.json)
 add_executable(orbelle_desktop WIN32 src/main.cpp)
+target_compile_definitions(orbelle_desktop PRIVATE ORBELLE_APPLICATION_VERSION="${PROJECT_VERSION}")
 if(WIN32)
     enable_language(RC)
     configure_file(resources/orbelle.rc.in orbelle.rc @ONLY)
@@ -21,6 +22,11 @@ if(ORBELLE_WITH_VSG)
         message(FATAL_ERROR "The graphical desktop requires ORBELLE_WITH_DATA_CATALOG")
     endif()
     find_package(Qt6 6.8 CONFIG REQUIRED COMPONENTS Network)
+    find_package(unofficial-minizip CONFIG REQUIRED)
+    if(WIN32)
+        add_subdirectory(updater)
+        add_dependencies(orbelle_desktop orbelle_launcher orbelle_updater)
+    endif()
     if(NOT QT_FEATURE_imageformat_png OR NOT QT_FEATURE_imageformat_jpeg)
         message(FATAL_ERROR
             "The graphical desktop requires Qt PNG and JPEG support for artwork, "
@@ -31,7 +37,7 @@ if(ORBELLE_WITH_VSG)
             "Desktop UI tests require Qt's offscreen platform plugin. "
             "Enable qtbase[freetype] in vcpkg and allow Qt plugin target imports.")
     endif()
-    target_link_libraries(orbelle_desktop PRIVATE Qt6::Network)
+    target_link_libraries(orbelle_desktop PRIVATE Qt6::Network unofficial::minizip::minizip)
     set(orbelle_startup_artwork
         resources/startup/star-gazing.png
         resources/startup/sakura-path.png
@@ -51,6 +57,8 @@ if(ORBELLE_WITH_VSG)
     find_package(rocky 1.1.0 EXACT CONFIG REQUIRED)
     find_package(vsgXchange 1.1.13 EXACT CONFIG REQUIRED)
     target_sources(orbelle_desktop PRIVATE src/viewer/graphics_workbench.cpp
+        src/viewer/application_update.cpp src/viewer/application_update_ui.cpp
+        src/viewer/update_package.cpp
         src/viewer/workbench_window.cpp
         src/viewer/view_navigation.cpp
         src/viewer/report_dialog.cpp src/viewer/coverage_map.cpp src/viewer/report_plot.cpp src/viewer/report_selection.cpp
@@ -79,6 +87,18 @@ if(ORBELLE_WITH_VSG)
     # Serialize desktop interaction/timing tests while numerical tests run alongside them.
     # A resource lock leaves the other CTest slots available (unlike RUN_SERIAL).
     if(BUILD_TESTING)
+        add_executable(orbelle_update_tests tests/application_update_test.cpp
+            tests/update_package_test.cpp src/viewer/application_update.cpp
+            src/viewer/application_update_ui.cpp src/viewer/update_package.cpp
+            src/viewer/workbench_style.cpp)
+        target_link_libraries(orbelle_update_tests PRIVATE Qt6::Widgets Qt6::Network
+            unofficial::minizip::minizip GTest::gtest_main)
+        orbelle_warnings(orbelle_update_tests)
+        orbelle_copy_runtime_dlls(orbelle_update_tests)
+        gtest_discover_tests(orbelle_update_tests DISCOVERY_MODE PRE_TEST
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests TIMEOUT 30
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+            ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbelle_object_selection_tests tests/object_selection_test.cpp
             src/viewer/object_selection.cpp src/viewer/object_selection.hpp src/viewer/workbench_style.cpp)
         set_target_properties(orbelle_object_selection_tests PROPERTIES AUTOMOC ON)

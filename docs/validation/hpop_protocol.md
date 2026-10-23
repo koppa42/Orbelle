@@ -337,7 +337,7 @@ CSPICE 固定 DE440s 样例检查水星／金星物理中心与原生 `geometric
 
 事件与轨迹参考使用 `OrbelleSrpBoundaryReference.java`，与同目录 `OrbelleSrpReference.java` 一起用 Orekit 13.1.2 / Hipparchus 4.0.2 编译。运行主类 `OrbelleSrpBoundaryReference`，标准输出对应 `tests/reference/propagators/srp_boundaries.txt`；生成器内部先验证 2/1 s 最大步长收敛，不通过则失败退出。常数、圆柱方向区别、误差限和适用范围见[光压契约](../architecture/solar_radiation_pressure.md#阴影边界修正)。
 
-`SrpBoundary.*` 覆盖 160 条两档步长的事件/轨迹对照、24 条高阶方法显式固定步长对照、掠影、正反向、短弧科学插值、整数历元状态一致性、取消后重试和非活动草稿。保留 `SolarRadiationPressure.*` 原有参考以及 `Sundman*` 的独立时间正则化参考；不能以新增测试取代这些回归。Python 检查生效身份、不可变旧分析和关闭阴影的草稿；当前二进制样例独立打包新的布尔字段，并以修复 CRC 的非法布尔值验证拒绝路径。Qt offscreen 加两档原生 DPI 检查开关、灰显草稿、重开/取消及窄宽布局。
+`*SrpBoundary*` 覆盖 320 条两档步长的事件/轨迹对照：5 种积分器 × 2 种 VOP 模式 × 2 种时间正则化模式 × 8 个独立参考场景 × 2 档步长。按积分器与 VOP 模式参数化为 10 项测试，每项保留 32 条传播及原有误差、事件和收敛断言，便于 CTest 并行调度。该过滤规则也包含 24 条高阶方法显式固定步长对照、掠影、正反向、短弧科学插值、整数历元状态一致性、取消后重试和非活动草稿。保留 `SolarRadiationPressure.*` 原有参考以及 `Sundman*` 的独立时间正则化参考；不能以新增测试取代这些回归。Python 检查生效身份、不可变旧分析和关闭阴影的草稿；当前二进制样例独立打包新的布尔字段，并以修复 CRC 的非法布尔值验证拒绝路径。Qt offscreen 加两档原生 DPI 检查开关、灰显草稿、重开/取消及窄宽布局。
 
 ## 光压局部偏导
 

@@ -110,10 +110,13 @@ class RequiredChecksTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             plan.check_results("release", results)
         results = self.results("baseline")
-        self.assertEqual(results["python-linux"]["result"], "skipped")
-        self.assertEqual(results["python-windows"]["result"], "skipped")
-        with self.assertRaises(ValueError):
-            plan.check_results("full", results)
+        self.assertEqual(results["linux-consumer"]["result"], "skipped")
+        for name in ("python-linux", "python-windows"):
+            self.assertEqual(results[name]["result"], "success")
+            missing_python = {key: dict(value) for key, value in results.items()}
+            missing_python[name]["result"] = "skipped"
+            with self.assertRaises(ValueError):
+                plan.check_results("baseline", missing_python)
 
 
 class MergeDiffTests(unittest.TestCase):

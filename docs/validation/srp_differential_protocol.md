@@ -45,7 +45,7 @@ python tools/validation/srp_sphere_differential_reference.py --input <orekit.txt
 python tools/validation/srp_union_differential_reference.py --output <union.txt>
 ```
 
-高精度生成器同时输出 Orekit 两种求值方式的审计结果；多体生成器必须通过逐样本收敛检查才写出文件。重复生成并核对候选字节，再审阅更新固定输入。C++ 入口为 `SrpDifferential.*`，名义回归为 `SolarRadiationPressure.*` / `SrpBoundary.*`，安装 Python 验证 `test_srp.py` 与 HPOP，SDK 消费端实际调用新增 C++ 接口。
+高精度生成器同时输出 Orekit 两种求值方式的审计结果；多体生成器必须通过逐样本收敛检查才写出文件。重复生成并核对候选字节，再审阅更新固定输入。C++ 入口为 `SrpDifferential.*`，名义回归为 `SolarRadiationPressure.*` / `*SrpBoundary*`；后者包含按积分器与 VOP 模式分成的 10 项事件/轨迹参数化测试，共执行 320 条传播，保留原有参考和误差阈值。安装 Python 验证 `test_srp.py` 与 HPOP，SDK 消费端实际调用新增 C++ 接口。
 
 | 固定文件 | SHA-256（LF） |
 | --- | --- |

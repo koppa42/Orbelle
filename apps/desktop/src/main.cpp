@@ -18,6 +18,7 @@ namespace ui = orbelle::desktop::ui;
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
     app.setApplicationName("Orbelle");
+    app.setApplicationVersion(ORBELLE_APPLICATION_VERSION);
     app.setApplicationDisplayName(ui::text("brand.name"));
 #ifdef ORBELLE_DESKTOP_GRAPHICS
     return orbelle::desktop::run_graphics_workbench(app);

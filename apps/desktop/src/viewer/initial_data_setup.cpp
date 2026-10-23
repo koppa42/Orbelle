@@ -47,7 +47,8 @@ QString product_title(DataProduct product) {
 } // namespace
 bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
                           const std::vector<DataProduct> &required,
-                          const std::function<void(DataProduct)> &download) {
+                          const std::function<void(DataProduct)> &download,
+                          const std::function<void()> &visible_ready) {
     const auto complete = [&] {
         return std::all_of(required.begin(), required.end(),
                            [&](auto product) { return catalog.has_full_download(product); });
@@ -184,6 +185,11 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
     QTimer::singleShot(0, &dialog, advance);
     const auto available = dialog.screen()->availableGeometry().size();
     dialog.resize(std::min(640, available.width() - 32), std::min(540, available.height() - 64));
+    if (visible_ready)
+        QTimer::singleShot(3000, &dialog, [&dialog, visible_ready] {
+            if (dialog.isVisible())
+                visible_ready();
+        });
     const bool accepted = dialog.exec() == QDialog::Accepted;
     poll.stop();
     if (owned && catalog.downloading() && catalog.active_product() == *owned)

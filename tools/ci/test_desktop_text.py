@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from check_desktop_text import read_catalogue, string_literals, validate_source
+from check_desktop_text import check, read_catalogue, string_literals, validate_source
 
 
 class DesktopTextValidatorTest(unittest.TestCase):
@@ -29,6 +29,28 @@ auto escaped = "\\u5173\\u95ed";
         errors, _ = validate_source(Path("units.cpp"),
             'constexpr auto label = ui::key("missing");', {"known": "已知"})
         self.assertEqual(len(errors), 1)
+
+    def test_native_text_keys_are_checked(self):
+        errors, used = validate_source(Path("native_main.cpp"),
+            'native_text("updates.native.title"); native_text("missing");',
+            {"updates.native.title": "星弦 Orbelle"})
+        self.assertEqual(used, {"updates.native.title"})
+        self.assertEqual(len(errors), 1)
+
+    def test_native_sources_are_scanned_but_test_fixtures_are_excluded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            desktop = root / "apps/desktop"
+            (desktop / "resources/text").mkdir(parents=True)
+            (desktop / "updater/tests").mkdir(parents=True)
+            (desktop / "resources/text/zh_CN.json").write_text(json.dumps({
+                "locale": "zh-CN", "messages": {"updates.native.title": "星弦 Orbelle"}}),
+                encoding="utf-8")
+            (desktop / "updater/native_main.cpp").write_text(
+                'native_text("updates.native.title");', encoding="utf-8")
+            (desktop / "updater/tests/stub.cpp").write_text(
+                'const auto fixture = "测试输入";', encoding="utf-8")
+            self.assertEqual(check(root), ([], 1))
 
     def test_english_labels_are_checked_but_comments_and_frame_ids_are_not(self):
         errors, _ = validate_source(Path("window.cpp"),
