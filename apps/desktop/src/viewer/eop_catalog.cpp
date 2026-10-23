@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkRequest>
+#include <QTemporaryDir>
 #include <QTimeZone>
 #include <algorithm>
 #include <orbelle/application/project.hpp>
@@ -68,6 +69,33 @@ std::string setting_key(DataProduct product, const char *suffix) {
                         : product == DataProduct::c04         ? "c04"
                                                               : "utc";
     return std::string(prefix) + "-" + suffix;
+}
+QList<QUrl> download_sources(DataProduct product) {
+    QList<QUrl> sources{QUrl(QString::fromStdString(source_url(product)))};
+    switch (product) {
+    case DataProduct::utc:
+        sources.append(QUrl("https://data.iana.org/time-zones/data/leap-seconds.list"));
+        break;
+    case DataProduct::c04:
+        sources.append(QUrl("https://hpiers.obspm.fr/iers/eop/eopc04/eopc04.1962-now"));
+        sources.append(QUrl("https://raw.githubusercontent.com/astropy/astropy-iers-data/main/"
+                            "astropy_iers_data/data/eopc04.1962-now"));
+        break;
+    case DataProduct::finals2000a:
+        sources.append(QUrl("https://maia.usno.navy.mil/ser7/finals2000A.all"));
+        sources.append(QUrl("https://raw.githubusercontent.com/astropy/astropy-iers-data/main/"
+                            "astropy_iers_data/data/finals2000A.all"));
+        break;
+    default:
+        break;
+    }
+    return sources;
+}
+QString diagnostic_url(QUrl url) {
+    url.setUserInfo({});
+    url.setQuery({});
+    url.setFragment({});
+    return url.toString();
 }
 qint64 download_limit(DataProduct p) {
     if (ocean_product(p))
@@ -175,6 +203,7 @@ EopCatalog::EopCatalog(std::filesystem::path store, std::vector<std::filesystem:
             update_.attempted_at = timestamp(saved.value("attempted_at").toString());
             update_.checked_sha256 = saved.value("checked_sha256").toString();
             update_.message = saved.value("message").toString();
+            update_.diagnostics = saved.value("diagnostics").toString().left(24576);
             if (update_.state == DataUpdateState::checking ||
                 update_.state == DataUpdateState::downloading) {
                 update_.state = DataUpdateState::interrupted;
@@ -186,6 +215,8 @@ EopCatalog::EopCatalog(std::filesystem::path store, std::vector<std::filesystem:
                 QString::fromStdString(data_.setting(setting_key(product, "last-attempt"))));
     }
     deadline_.setSingleShot(true);
+    retry_.setSingleShot(true);
+    connect(&retry_, &QTimer::timeout, this, &EopCatalog::start_download_attempt);
     connect(&resource_poll_, &QTimer::timeout, this, [this] {
         if (!resource_job_.valid() ||
             resource_job_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
@@ -223,6 +254,8 @@ EopCatalog::EopCatalog(std::filesystem::path store, std::vector<std::filesystem:
         transfer_error_ = ui::text("eop_catalog.label_9");
         if (reply_)
             reply_->abort();
+        else if (retry_.isActive())
+            finish_download_failure(transfer_error_);
     });
     connect(&schedule_, &QTimer::timeout, this,
             [this] { check_updates_if_due(QDateTime::currentSecsSinceEpoch()); });
@@ -425,6 +458,9 @@ std::vector<DataInventoryItem> EopCatalog::inventory() const {
                                ? DataInstallation::local_file
                                : DataInstallation::downloaded;
         utc.acquired_at = timestamp(QString::fromStdString(data_.setting("utc-acquired-at")));
+        if (data_.setting("utc-installed-source") == time.sha256 &&
+            !data_.setting("utc-source-url").empty())
+            utc.source_url = QString::fromStdString(data_.setting("utc-source-url"));
         std::error_code error;
         const auto size = std::filesystem::file_size(time_file_, error);
         if (!error)
@@ -565,7 +601,8 @@ void EopCatalog::save_update_status() {
                              {"attempted_at", text(update_.attempted_at)},
                              {"checked_at", text(update_.checked_at)},
                              {"checked_sha256", update_.checked_sha256},
-                             {"message", update_.message}};
+                             {"message", update_.message},
+                             {"diagnostics", update_.diagnostics}};
     data_.set_setting(setting_key(active_product_, "update-record"),
                       QJsonDocument(record).toJson(QJsonDocument::Compact).toStdString());
 }
@@ -730,9 +767,31 @@ void EopCatalog::install_source(const std::filesystem::path &source, DataProduct
     const auto retrieved =
         QDateTime::currentDateTimeUtc().date().toString(Qt::ISODate).toStdString();
     if (product != DataProduct::utc) {
-        const auto entry = product == DataProduct::finals2000a
-                               ? data_.import_finals(source, url, retrieved, time_file_)
-                               : data_.import_c04(source, url, retrieved, time_file_);
+        const auto import_into = [&](runtime::DataCatalog &target) {
+            return product == DataProduct::finals2000a
+                       ? target.import_finals(source, url, retrieved, time_file_)
+                       : target.import_c04(source, url, retrieved, time_file_);
+        };
+        runtime::CatalogSnapshot entry;
+        const auto current = current_index(product);
+        if (acquisition == runtime::DataAcquisition::downloaded && current &&
+            has_full_download(product)) {
+            // Mirrors can lag behind an installed official file. Validate in isolation
+            // before publishing either the snapshot or its acquisition receipt.
+            QTemporaryDir staging(
+                QString::fromStdWString((store_ / "staging" / "eop-check-XXXXXX").wstring()));
+            if (!staging.isValid())
+                throw std::runtime_error(ui::utf8("eop_catalog.validation_8"));
+            runtime::DataCatalog candidate(std::filesystem::path(staging.path().toStdWString()));
+            const auto preview = import_into(candidate);
+            const auto &installed = providers_[*current]->data_info();
+            if (preview.first.tai_nanoseconds() > installed.first_epoch.tai_nanoseconds() ||
+                preview.last.tai_nanoseconds() < installed.last_epoch.tai_nanoseconds())
+                throw std::runtime_error(ui::utf8("eop_catalog.older_coverage"));
+            entry = data_.install_eop(preview.manifest, time_file_);
+        } else {
+            entry = import_into(data_);
+        }
         data_.record_acquisition(entry.lock_sha256, acquisition);
         last_installed_ = append(data_.load_eop(entry.lock_sha256));
         refresh_current(last_installed_);
@@ -782,14 +841,19 @@ void EopCatalog::install_source(const std::filesystem::path &source, DataProduct
     refresh_current();
 }
 void EopCatalog::cancel_download() {
+    cancelled_ = true;
     if (resource_cancel_)
         *resource_cancel_ = true;
     if (reply_) {
-        cancelled_ = true;
         reply_->abort();
-    }
+    } else if (retry_.isActive())
+        finish_download_failure(ui::text("eop_catalog.validation_9"));
 }
 void EopCatalog::start_download(QUrl url, DataProduct product) {
+    start_download_from_sources(url.isEmpty() ? download_sources(product) : QList<QUrl>{url},
+                                product);
+}
+void EopCatalog::start_download_from_sources(const QList<QUrl> &sources, DataProduct product) {
     if (downloading())
         return;
     active_product_ = product;
@@ -800,11 +864,138 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
         cancelled_ = false;
         transfer_error_.clear();
         last_installed_.reset();
+        update_.diagnostics.clear();
         update_.attempted_at = QDateTime::currentSecsSinceEpoch();
         data_.set_setting(setting_key(product, "last-attempt"),
                           std::to_string(*update_.attempted_at));
-        if (url.isEmpty())
-            url = QUrl(QString::fromStdString(source_url(product)));
+        if (sources.empty() || sources.size() > 3)
+            throw std::invalid_argument("Expected one to three download sources");
+        for (const auto &url : sources)
+            if (!url.isValid() || url.host().isEmpty() || !url.userInfo().isEmpty() ||
+                (url.scheme() != "https" && !(url.scheme() == "http" && url.host() == "127.0.0.1")))
+                throw std::runtime_error(ui::utf8("eop_catalog.validation_7"));
+        download_sources_ = sources;
+        request_url_ = sources.front();
+        source_index_ = 0;
+        source_attempt_ = 0;
+        redirects_ = 0;
+        unconditional_ = false;
+        // One deadline includes connection setup, every source and retry delays.
+        deadline_.start(force_product(product) ? 1800000 : 120000);
+        start_download_attempt();
+    } catch (const std::exception &error) {
+        finish_download_failure(QString::fromUtf8(error.what()));
+    }
+}
+void EopCatalog::finish_download_failure(const QString &message) {
+    retry_.stop();
+    deadline_.stop();
+    download_.reset();
+    auto &record = update(active_product_);
+    record.state = cancelled_ ? DataUpdateState::cancelled : DataUpdateState::failed;
+    record.message = status_ = message;
+    try {
+        save_update_status();
+    } catch (const std::exception &) {
+    }
+}
+void EopCatalog::record_download_failure(const QNetworkReply &reply, int http,
+                                         const QString &message) {
+    // A remote error page (and Qt's errorString) may echo query strings.
+    // Keep Qt's enum and omit the body for parameterized URLs.
+    const bool plain_url = reply.request().url().query().isEmpty() &&
+                           reply.url().query().isEmpty() && reply.url().userInfo().isEmpty();
+    const auto details =
+        QStringLiteral("%1\n%2 -> %3\nHTTP %4; Qt %5; HTTP/2 %6\n%7\n%8\n")
+            .arg(QDateTime::currentDateTimeUtc().toString(Qt::ISODate),
+                 diagnostic_url(reply.request().url()), diagnostic_url(reply.url()))
+            .arg(http)
+            .arg(static_cast<int>(reply.error()))
+            .arg(reply.attribute(QNetworkRequest::Http2WasUsedAttribute).toBool() ? 1 : 0)
+            .arg(message, plain_url ? QString::fromUtf8(error_response_).simplified().left(1024)
+                                    : QString{});
+    auto &record = update(active_product_);
+    record.diagnostics = (record.diagnostics + details).right(24576);
+}
+bool EopCatalog::recover_download(QNetworkReply &reply, int http, bool conditional) {
+    if (cancelled_ || !transfer_error_.isEmpty())
+        return false;
+    qint64 delay = 0;
+    bool retry_same_source = false;
+    if (http == 400 && conditional && !unconditional_ && source_attempt_ < 3) {
+        // Some upstreams reject conditional requests. Do not reuse the same validators.
+        unconditional_ = true;
+        retry_same_source = true;
+        delay = 100;
+    } else {
+        const auto error = reply.error();
+        const bool transient =
+            http == 408 || http == 429 || http == 500 || http == 502 || http == 503 ||
+            http == 504 ||
+            ((http == 0 || http == 200) && (error == QNetworkReply::TimeoutError ||
+                                            error == QNetworkReply::RemoteHostClosedError ||
+                                            error == QNetworkReply::TemporaryNetworkFailureError ||
+                                            error == QNetworkReply::ConnectionRefusedError));
+        retry_same_source = transient && source_attempt_ < 3;
+        delay = 1000LL * source_attempt_;
+        const auto retry_after = reply.rawHeader("Retry-After");
+        bool valid = false;
+        auto seconds = retry_after.toLongLong(&valid);
+        if (!valid && !retry_after.isEmpty()) {
+            const auto date =
+                QDateTime::fromString(QString::fromLatin1(retry_after), Qt::RFC2822Date);
+            valid = date.isValid();
+            seconds = QDateTime::currentDateTimeUtc().secsTo(date);
+        }
+        // Never shorten the server's requested wait. A wait outside the operation's
+        // budget can still fall back to an independent official host below.
+        if (valid && seconds > 0)
+            delay = std::max(delay, std::min(seconds, 1800000LL) * 1000);
+    }
+    if (retry_same_source && delay < deadline_.remainingTime()) {
+        status_ = ui::text("eop_catalog.retry_wait")
+                      .arg((delay + 999) / 1000)
+                      .arg(download_sources_[source_index_].host())
+                      .arg(source_attempt_ + 1);
+    } else if (source_index_ + 1 < download_sources_.size() && deadline_.remainingTime() > 100) {
+        ++source_index_;
+        source_attempt_ = 0;
+        unconditional_ = false;
+        delay = 100;
+        status_ =
+            ui::text("eop_catalog.switch_source").arg(download_sources_[source_index_].host());
+    } else {
+        return false;
+    }
+    download_.reset();
+    received_ = 0;
+    total_ = -1;
+    request_url_ = download_sources_[source_index_];
+    redirects_ = 0;
+    auto &record = update(active_product_);
+    record.state = DataUpdateState::checking;
+    record.message = status_;
+    retry_.start(static_cast<int>(delay));
+    try {
+        save_update_status();
+    } catch (const std::exception &) {
+    }
+    return true;
+}
+void EopCatalog::start_download_attempt() {
+    const auto product = active_product_;
+    const auto url = request_url_;
+    auto &update_ = update(product);
+    try {
+        if (cancelled_)
+            throw std::runtime_error(ui::utf8("eop_catalog.validation_9"));
+        if (!deadline_.isActive())
+            throw std::runtime_error(ui::utf8("eop_catalog.label_9"));
+        if (redirects_ == 0)
+            ++source_attempt_;
+        received_ = 0;
+        total_ = -1;
+        error_response_.clear();
         if (url.scheme() != "https" && !(url.scheme() == "http" && url.host() == "127.0.0.1"))
             throw std::runtime_error(ui::utf8("eop_catalog.validation_7"));
         download_ = std::make_unique<QTemporaryFile>(
@@ -813,8 +1004,7 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
             throw std::runtime_error(ui::utf8("eop_catalog.validation_8"));
         QNetworkRequest request(url);
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                             QNetworkRequest::NoLessSafeRedirectPolicy);
-        request.setMaximumRedirectsAllowed(3);
+                             QNetworkRequest::ManualRedirectPolicy);
         request.setTransferTimeout(30000);
         request.setRawHeader("User-Agent", "Orbelle data-center");
         request.setRawHeader("Accept-Encoding", "identity");
@@ -827,26 +1017,28 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
             data_.setting(setting_key(product, "source-url")) == url.toString().toStdString() &&
             !current_hash.empty() && current_hash == installed_hash && has_full_download(product);
         bool conditional = false;
-        if (cached) {
+        if (cached && !unconditional_) {
             for (const auto &[setting, header] :
                  {std::pair{"etag", "If-None-Match"},
                   std::pair{"last-modified", "If-Modified-Since"}}) {
                 const auto value = data_.setting(setting_key(product, setting));
-                if (!value.empty()) {
+                if (!value.empty() && value.size() <= 1024 &&
+                    value.find_first_of("\r\n") == std::string::npos) {
                     request.setRawHeader(header, QByteArray::fromStdString(value));
                     conditional = true;
                 }
             }
         }
         update_.state = DataUpdateState::checking;
-        update_.message = status_ = ui::text("eop_catalog.label_12");
+        update_.message = status_ = ui::text("eop_catalog.label_12").arg(url.host());
         save_update_status();
         auto *reply = network_.get(request);
         reply_ = reply;
         reply->setReadBufferSize(64 * 1024);
-        deadline_.start(force_product(product) ? 1800000 : 120000);
         connect(reply, &QNetworkReply::metaDataChanged, this, [this, reply] {
             if (reply_ != reply)
+                return;
+            if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() != 200)
                 return;
             // Progress notifications may be delayed until the next body chunk arrives.
             // Use an uncompressed Content-Length as soon as headers are available.
@@ -865,7 +1057,8 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
             }
         });
         connect(reply, &QNetworkReply::downloadProgress, this, [this, reply](qint64, qint64 total) {
-            if (reply_ == reply && total > 0)
+            if (reply_ == reply && total > 0 &&
+                reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 200)
                 total_ = total;
         });
         connect(reply, &QNetworkReply::readyRead, this, [this, reply] {
@@ -873,6 +1066,13 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
                 return;
             auto &update_ = update(active_product_);
             const auto bytes = reply_->readAll();
+            if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() != 200) {
+                error_response_.append(
+                    bytes.first(std::min<qsizetype>(bytes.size(), 4096 - error_response_.size())));
+                if (error_response_.size() >= 4096)
+                    reply_->abort();
+                return;
+            }
             received_ += bytes.size();
             if (received_ > 0) {
                 update_.state = DataUpdateState::downloading;
@@ -891,19 +1091,42 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
                 if (reply_ != reply)
                     return;
                 auto &update_ = update(product);
-                deadline_.stop();
                 // abort() finishes synchronously, but HTTP worker events can still arrive
                 // before deleteLater(). They must not touch cleared or replacement state.
                 disconnect(reply, nullptr, this, nullptr);
                 auto *finished = reply;
                 reply_ = nullptr;
+                const auto http =
+                    finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
                 try {
                     if (cancelled_)
                         throw std::runtime_error(ui::utf8("eop_catalog.validation_9"));
                     if (!transfer_error_.isEmpty())
                         throw std::runtime_error(transfer_error_.toStdString());
-                    const auto http =
-                        finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                    if (finished->error() == QNetworkReply::NoError &&
+                        (http == 301 || http == 302 || http == 303 || http == 307 || http == 308)) {
+                        const auto target =
+                            finished->attribute(QNetworkRequest::RedirectionTargetAttribute)
+                                .toUrl();
+                        const auto next = url.resolved(target);
+                        if (target.isEmpty() || !next.isValid() || next.host().isEmpty() ||
+                            !next.userInfo().isEmpty() ||
+                            (next.scheme() != "https" &&
+                             !(url.scheme() == "http" && next.scheme() == "http" &&
+                               next.host() == "127.0.0.1")) ||
+                            redirects_ >= 3)
+                            throw std::runtime_error(ui::utf8("eop_catalog.redirect_failed"));
+                        // Rebuild each hop so validators never cross URLs and an
+                        // unrelated 304 cannot make a different cached file look current.
+                        ++redirects_;
+                        request_url_ = next;
+                        download_.reset();
+                        received_ = 0;
+                        total_ = -1;
+                        retry_.start(0);
+                        finished->deleteLater();
+                        return;
+                    }
                     if (finished->error() != QNetworkReply::NoError ||
                         (http != 200 && !(http == 304 && conditional)))
                         throw std::runtime_error(download_error(*finished, http).toStdString());
@@ -917,6 +1140,7 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
                         status_ = ui::text("eop_catalog.label_16");
                     } else {
                         if (force_product(product)) {
+                            deadline_.stop();
                             resource_response_ = {
                                 {setting_key(product, "source-url"), url.toString().toStdString()},
                                 {setting_key(product, "etag"),
@@ -952,10 +1176,19 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
                     }
                     update_.checked_at = QDateTime::currentSecsSinceEpoch();
                 } catch (const std::exception &error) {
-                    update_.state =
-                        cancelled_ ? DataUpdateState::cancelled : DataUpdateState::failed;
-                    status_ = QString::fromUtf8(error.what());
+                    const auto message = QString::fromUtf8(error.what());
+                    record_download_failure(*finished, http, message);
+                    if ((finished->error() != QNetworkReply::NoError ||
+                         (http != 200 && !(http == 304 && conditional))) &&
+                        recover_download(*finished, http, conditional)) {
+                        finished->deleteLater();
+                        return;
+                    }
+                    finish_download_failure(message);
+                    finished->deleteLater();
+                    return;
                 }
+                deadline_.stop();
                 update_.message = status_;
                 try {
                     save_update_status();
@@ -965,14 +1198,7 @@ void EopCatalog::start_download(QUrl url, DataProduct product) {
                 finished->deleteLater();
             });
     } catch (const std::exception &error) {
-        if (!reply_)
-            download_.reset();
-        update_.state = DataUpdateState::failed;
-        update_.message = status_ = QString::fromUtf8(error.what());
-        try {
-            save_update_status();
-        } catch (const std::exception &) {
-        }
+        finish_download_failure(QString::fromUtf8(error.what()));
     }
 }
 void EopCatalog::start_resource_install(const std::filesystem::path &file, DataProduct product,

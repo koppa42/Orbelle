@@ -16,21 +16,28 @@
 #include <gtest/gtest.h>
 #include <orbelle/application/project.hpp>
 #include <orbelle/runtime/ephemeris.hpp>
+#include <sstream>
 
 namespace orbelle::desktop {
 namespace {
 QByteArray payload() {
     QFile file(QString::fromStdString(
-        (std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() / "finals2000A.data")
-            .string()));
+        (std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() / "finals2000A.data").string()));
     if (!file.open(QIODevice::ReadOnly))
         throw std::runtime_error("Missing finals fixture");
     return file.readAll();
 }
 class Server : public QTcpServer {
   public:
-    QByteArray bytes, etag;
+    struct Response {
+        QByteArray bytes;
+        int code = 200;
+        QByteArray headers{};
+        bool truncate = false;
+    };
+    QByteArray bytes, etag, last_modified;
     QList<QByteArray> requests;
+    std::function<Response(const QByteArray &, qsizetype)> respond;
     explicit Server(QByteArray body, int code = 200, bool truncate = false)
         : bytes(std::move(body)) {
         if (!listen(QHostAddress::LocalHost))
@@ -39,21 +46,33 @@ class Server : public QTcpServer {
             auto *socket = nextPendingConnection();
             QObject::connect(
                 socket, &QTcpSocket::readyRead, socket, [this, socket, code, truncate] {
-                    const auto request = socket->readAll();
+                    const auto request =
+                        socket->property("request").toByteArray() + socket->readAll();
                     if (socket->property("answered").toBool())
                         return;
-                    socket->setProperty("answered", true);
-                    requests.push_back(request);
-                    if (!etag.isEmpty() && request.contains("If-None-Match: " + etag)) {
-                        socket->write("HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n");
-                        socket->disconnectFromHost();
+                    if (!request.contains("\r\n\r\n")) {
+                        socket->setProperty("request", request);
                         return;
                     }
-                    socket->write("HTTP/1.1 " + QByteArray::number(code) +
-                                  " Test\r\nContent-Length: " +
-                                  QByteArray::number(bytes.size() + (truncate ? 30 : 0)) +
-                                  (etag.isEmpty() ? QByteArray{} : "\r\nETag: " + etag) +
-                                  "\r\nConnection: close\r\n\r\n" + bytes);
+                    socket->setProperty("answered", true);
+                    requests.push_back(request);
+                    Response response{bytes, code, {}, truncate};
+                    if (!etag.isEmpty())
+                        response.headers += "\r\nETag: " + etag;
+                    if (!last_modified.isEmpty())
+                        response.headers += "\r\nLast-Modified: " + last_modified;
+                    if (respond)
+                        response = respond(request, requests.size());
+                    else if (!etag.isEmpty() && request.contains("If-None-Match: " + etag))
+                        response = {{}, 304};
+                    const auto length = response.code == 304
+                                            ? QByteArray{}
+                                            : "\r\nContent-Length: " +
+                                                  QByteArray::number(response.bytes.size() +
+                                                                     (response.truncate ? 30 : 0));
+                    socket->write("HTTP/1.1 " + QByteArray::number(response.code) + " Test" +
+                                  length + response.headers + "\r\nConnection: close\r\n\r\n" +
+                                  response.bytes);
                     socket->disconnectFromHost();
                 });
             QObject::connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
@@ -79,10 +98,17 @@ class DataCenterTest : public ::testing::Test {
         const int limit = qEnvironmentVariableIsEmpty("ORBELLE_LIVE_IERS_URL") &&
                                   qEnvironmentVariableIsEmpty("ORBELLE_LIVE_IERS")
                               ? 15000
-                              : 120000;
+                              : 125000;
         while (catalog.downloading() && timer.elapsed() < limit)
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
         ASSERT_FALSE(catalog.downloading()) << catalog.status().toStdString();
+    }
+    static bool until(const std::function<bool()> &condition, int timeout = 5000) {
+        QElapsedTimer timer;
+        timer.start();
+        while (!condition() && timer.elapsed() < timeout)
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        return condition();
     }
     QTemporaryDir temp;
 };
@@ -204,6 +230,440 @@ TEST_F(DataCenterTest, CancelHttpFailureTruncationAndInvalidDataNeverInstall) {
         EXPECT_EQ(catalog.update_status().state, DataUpdateState::failed);
         EXPECT_FALSE(catalog.update_status().checked_at);
         EXPECT_TRUE(std::filesystem::is_empty(root() / "data/staging"));
+    }
+}
+TEST_F(DataCenterTest, RejectedPrimaryFallsBackWithoutInstallingOrCountingItsErrorBody) {
+    EopCatalog catalog(root() / "data", {ORBELLE_TEST_C04}, {}, false);
+    Server rejected("<html>Request Rejected</html>", 400), backup(payload());
+    catalog.start_download_from_sources({rejected.url(), backup.url()});
+    ASSERT_TRUE(until([&] { return catalog.update_status().diagnostics.contains("HTTP 400"); }));
+    EXPECT_TRUE(catalog.downloading());
+    EXPECT_EQ(catalog.received_bytes(), 0);
+    EXPECT_FALSE(catalog.last_installed());
+    complete(catalog);
+    ASSERT_TRUE(catalog.last_installed()) << catalog.status().toStdString();
+    EXPECT_EQ(rejected.requests.size(), 1);
+    EXPECT_EQ(backup.requests.size(), 1);
+    EXPECT_EQ(catalog.received_bytes(), payload().size());
+    EXPECT_EQ(catalog.providers().size(), 2);
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::updated);
+    EXPECT_EQ(catalog.data().setting("finals-source-url"), backup.url().toString().toStdString());
+    EXPECT_EQ(catalog.update_status().checked_sha256,
+              QString::fromLatin1(
+                  QCryptographicHash::hash(payload(), QCryptographicHash::Sha256).toHex()));
+    EXPECT_TRUE(std::filesystem::is_empty(catalog.store() / "staging"));
+}
+TEST_F(DataCenterTest, AllSourcesRejectedPreserveInstalledDataAndDiagnoseEachSource) {
+    const auto store = root() / "data";
+    QString diagnostics;
+    {
+        EopCatalog catalog(store, {ORBELLE_TEST_C04}, {}, false);
+        Server installed(payload());
+        catalog.start_download(installed.url());
+        complete(catalog);
+        ASSERT_TRUE(catalog.last_installed());
+        const auto before = catalog.update_status();
+        const auto current = catalog.inventory()[0];
+        const auto revision = catalog.revision();
+        Server primary("<html>Request Rejected</html>", 400), backup("Forbidden", 403);
+        catalog.start_download_from_sources({primary.url(), backup.url()});
+        complete(catalog);
+        EXPECT_EQ(primary.requests.size(), 1);
+        EXPECT_EQ(backup.requests.size(), 1);
+        EXPECT_EQ(catalog.update_status().state, DataUpdateState::failed);
+        EXPECT_EQ(catalog.update_status().checked_at, before.checked_at);
+        EXPECT_EQ(catalog.update_status().checked_sha256, before.checked_sha256);
+        EXPECT_EQ(catalog.inventory()[0].sha256, current.sha256);
+        EXPECT_EQ(catalog.inventory()[0].acquired_at, current.acquired_at);
+        EXPECT_EQ(catalog.revision(), revision);
+        EXPECT_FALSE(catalog.last_installed());
+        EXPECT_TRUE(catalog.has_full_download());
+        EXPECT_EQ(catalog.received_bytes(), 0);
+        diagnostics = catalog.update_status().diagnostics;
+        EXPECT_TRUE(diagnostics.contains(primary.url().toString()));
+        EXPECT_TRUE(diagnostics.contains(backup.url().toString()));
+        EXPECT_TRUE(diagnostics.contains("HTTP 400"));
+        EXPECT_TRUE(diagnostics.contains("HTTP 403"));
+        EXPECT_TRUE(std::filesystem::is_empty(store / "staging"));
+    }
+    EopCatalog reopened(store, {ORBELLE_TEST_C04}, {}, false);
+    EXPECT_TRUE(reopened.has_full_download());
+    EXPECT_EQ(reopened.update_status().state, DataUpdateState::failed);
+    EXPECT_EQ(reopened.update_status().diagnostics, diagnostics);
+}
+TEST_F(DataCenterTest, TwoUnavailableSourcesReachThirdMirrorAndReuseOnlyItsValidators) {
+    EopCatalog catalog(root() / "data", {}, {}, false);
+    Server primary("Request Rejected", 400), secondary("Unavailable", 403), mirror(payload());
+    mirror.etag = "\"mirror\"";
+    catalog.start_download_from_sources({primary.url(), secondary.url(), mirror.url()});
+    complete(catalog);
+    ASSERT_EQ(catalog.update_status().state, DataUpdateState::updated)
+        << catalog.status().toStdString();
+    EXPECT_EQ(primary.requests.size(), 1);
+    EXPECT_EQ(secondary.requests.size(), 1);
+    ASSERT_EQ(mirror.requests.size(), 1);
+    EXPECT_FALSE(mirror.requests.back().contains("If-None-Match"));
+    EXPECT_EQ(catalog.inventory()[0].source_url, mirror.url().toString());
+    const auto acquired = catalog.inventory()[0].acquired_at;
+    catalog.start_download_from_sources({primary.url(), secondary.url(), mirror.url()});
+    complete(catalog);
+    EXPECT_EQ(primary.requests.size(), 2);
+    EXPECT_EQ(secondary.requests.size(), 2);
+    ASSERT_EQ(mirror.requests.size(), 2);
+    EXPECT_FALSE(primary.requests.back().contains("If-None-Match"));
+    EXPECT_FALSE(secondary.requests.back().contains("If-None-Match"));
+    EXPECT_TRUE(mirror.requests.back().contains("If-None-Match: " + mirror.etag));
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::unchanged);
+    EXPECT_EQ(catalog.inventory()[0].acquired_at, acquired);
+    EXPECT_EQ(catalog.received_bytes(), 0);
+    EXPECT_TRUE(std::filesystem::is_empty(catalog.store() / "staging"));
+}
+TEST_F(DataCenterTest, OlderEopDownloadsCannotShrinkInstalledCoverageEvenAfterRestart) {
+    for (const auto product : {DataProduct::finals2000a, DataProduct::c04}) {
+        auto full = payload();
+        if (product == DataProduct::c04) {
+            QFile file(QString::fromStdWString(
+                (std::filesystem::path(ORBELLE_TEST_C04).parent_path() / "eop.c04").wstring()));
+            ASSERT_TRUE(file.open(QIODevice::ReadOnly));
+            full = file.readAll();
+            for (const auto &row : full.split('\n')) {
+                if (!row.contains("51545.00"))
+                    continue;
+                auto third = row;
+                third.replace("2000   1   2", "2000   1   3");
+                third.replace("51545.00", "51546.00");
+                full += third + '\n';
+                break;
+            }
+        }
+        for (const bool remove_first : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << static_cast<int>(product) << '/' << remove_first);
+            auto rows = full.split('\n');
+            QList<qsizetype> records;
+            for (qsizetype i = 0; i < rows.size(); ++i)
+                if (!rows[i].trimmed().isEmpty() && !rows[i].trimmed().startsWith('#'))
+                    records.append(i);
+            ASSERT_GE(records.size(), 3);
+            rows.removeAt(remove_first ? records.front() : records.back());
+            const auto shorter = rows.join('\n');
+            const auto store = root() / (std::to_string(static_cast<int>(product)) +
+                                         (remove_first ? "-first" : "-last"));
+            QString original_hash;
+            DataUpdateStatus before;
+            {
+                EopCatalog catalog(store, {}, {}, false);
+                Server current(full);
+                current.etag = "\"current\"";
+                catalog.start_download(current.url(), product);
+                complete(catalog);
+                ASSERT_TRUE(catalog.has_full_download(product)) << catalog.status().toStdString();
+                const auto inventory_before =
+                    catalog.inventory()[static_cast<std::size_t>(product)];
+                original_hash = inventory_before.sha256;
+                before = catalog.update_status(product);
+                const auto revision = catalog.revision();
+                const auto snapshots = catalog.data().snapshots().size();
+                Server primary("Rejected", 400), secondary("Unavailable", 403), mirror(shorter);
+                catalog.start_download_from_sources({primary.url(), secondary.url(), mirror.url()},
+                                                    product);
+                complete(catalog);
+                ASSERT_EQ(mirror.requests.size(), 1);
+                EXPECT_EQ(catalog.update_status(product).state, DataUpdateState::failed);
+                EXPECT_TRUE(catalog.status().contains(QStringLiteral("覆盖范围小于现有数据")));
+                EXPECT_EQ(catalog.update_status(product).checked_at, before.checked_at);
+                EXPECT_EQ(catalog.update_status(product).checked_sha256, before.checked_sha256);
+                const auto item = catalog.inventory()[static_cast<std::size_t>(product)];
+                EXPECT_EQ(item.sha256, original_hash);
+                EXPECT_EQ(item.acquired_at, inventory_before.acquired_at);
+                EXPECT_EQ(item.source_url, inventory_before.source_url);
+                EXPECT_EQ(catalog.data().snapshots().size(), snapshots);
+                EXPECT_EQ(catalog.revision(), revision);
+                EXPECT_FALSE(catalog.last_installed());
+                EXPECT_TRUE(std::filesystem::is_empty(store / "staging"));
+            }
+            EopCatalog reopened(store, {}, {}, false);
+            EXPECT_TRUE(reopened.has_full_download(product));
+            EXPECT_EQ(reopened.inventory()[static_cast<std::size_t>(product)].sha256,
+                      original_hash);
+            EXPECT_EQ(reopened.update_status(product).checked_sha256, before.checked_sha256);
+            // An explicit local import remains available for intentional historical selection.
+            QFile manual(QString::fromStdWString((store / "manual.dat").wstring()));
+            ASSERT_TRUE(manual.open(QIODevice::WriteOnly));
+            ASSERT_EQ(manual.write(shorter), shorter.size());
+            manual.close();
+            ASSERT_NO_THROW(reopened.import_raw(store / "manual.dat", product));
+            EXPECT_NE(reopened.inventory()[static_cast<std::size_t>(product)].sha256,
+                      original_hash);
+        }
+    }
+}
+TEST_F(DataCenterTest, TemporaryServerFailureRetriesTheSameSourceBeforeUsingBackup) {
+    EopCatalog catalog(root() / "data", {ORBELLE_TEST_C04}, {}, false);
+    Server primary(QByteArray{}), backup(payload());
+    primary.respond = [](const QByteArray &, qsizetype request) {
+        return request == 1 ? Server::Response{"Service unavailable", 503}
+                            : Server::Response{payload()};
+    };
+    catalog.start_download_from_sources({primary.url(), backup.url()});
+    complete(catalog);
+    EXPECT_EQ(primary.requests.size(), 2);
+    EXPECT_TRUE(backup.requests.isEmpty());
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::updated);
+    EXPECT_EQ(catalog.received_bytes(), payload().size());
+    EXPECT_TRUE(std::filesystem::is_empty(catalog.store() / "staging"));
+}
+TEST_F(DataCenterTest, TruncatedSuccessfulResponseRetriesWithoutAppendingPartialBytes) {
+    EopCatalog catalog(root() / "data", {ORBELLE_TEST_C04}, {}, false);
+    Server primary(QByteArray{}), backup(payload());
+    primary.respond = [](const QByteArray &, qsizetype request) {
+        return Server::Response{payload(), 200, {}, request == 1};
+    };
+    catalog.start_download_from_sources({primary.url(), backup.url()});
+    complete(catalog);
+    EXPECT_EQ(primary.requests.size(), 2);
+    EXPECT_TRUE(backup.requests.isEmpty());
+    ASSERT_EQ(catalog.update_status().state, DataUpdateState::updated)
+        << catalog.status().toStdString();
+    EXPECT_EQ(catalog.received_bytes(), payload().size());
+    EXPECT_EQ(catalog.update_status().checked_sha256,
+              QString::fromLatin1(
+                  QCryptographicHash::hash(payload(), QCryptographicHash::Sha256).toHex()));
+    EXPECT_EQ(catalog.providers().size(), 2);
+    EXPECT_TRUE(catalog.update_status().diagnostics.contains("HTTP 200"));
+    EXPECT_TRUE(std::filesystem::is_empty(catalog.store() / "staging"));
+}
+TEST_F(DataCenterTest, RetryBudgetIsBoundedAndThenTriesTheBackup) {
+    EopCatalog catalog(root() / "data", {ORBELLE_TEST_C04}, {}, false);
+    Server primary("Service unavailable", 503), backup(payload());
+    catalog.start_download_from_sources({primary.url(), backup.url()});
+    complete(catalog);
+    EXPECT_EQ(primary.requests.size(), 3);
+    EXPECT_EQ(backup.requests.size(), 1);
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::updated);
+    EXPECT_EQ(catalog.received_bytes(), payload().size());
+    EXPECT_TRUE(std::filesystem::is_empty(catalog.store() / "staging"));
+}
+TEST_F(DataCenterTest, CancelDuringRetryDelayDoesNotStartAnotherAttemptOrTouchReplacement) {
+    EopCatalog catalog(root() / "data", {ORBELLE_TEST_C04}, {}, false);
+    Server delayed(QByteArray{}), backup(payload()), replacement(payload());
+    delayed.respond = [](const QByteArray &, qsizetype) {
+        return Server::Response{"Please retry later", 503, "\r\nRetry-After: 1"};
+    };
+    catalog.start_download_from_sources({delayed.url(), backup.url()});
+    ASSERT_TRUE(until([&] { return catalog.update_status().diagnostics.contains("HTTP 503"); }));
+    ASSERT_TRUE(catalog.downloading());
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::checking);
+    EXPECT_EQ(catalog.received_bytes(), 0);
+    catalog.cancel_download();
+    EXPECT_FALSE(catalog.downloading());
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::cancelled);
+    EXPECT_FALSE(catalog.update_status().checked_at);
+    EXPECT_TRUE(std::filesystem::is_empty(catalog.store() / "staging"));
+    catalog.start_download(replacement.url());
+    complete(catalog);
+    // Let the cancelled attempt's original retry deadline pass after replacement succeeds.
+    QElapsedTimer cancelled_deadline;
+    cancelled_deadline.start();
+    ASSERT_TRUE(until([&] { return cancelled_deadline.elapsed() >= 1200; }, 2000));
+    EXPECT_EQ(delayed.requests.size(), 1);
+    EXPECT_TRUE(backup.requests.isEmpty());
+    EXPECT_EQ(replacement.requests.size(), 1);
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::updated);
+    EXPECT_TRUE(catalog.has_full_download());
+    EXPECT_TRUE(std::filesystem::is_empty(catalog.store() / "staging"));
+}
+TEST_F(DataCenterTest, ConditionalBadRequestRetriesOnceWithoutEitherValidator) {
+    EopCatalog catalog(root() / "data", {ORBELLE_TEST_C04}, {}, false);
+    Server server(payload());
+    server.etag = "\"installed\"";
+    server.last_modified = "Fri, 23 Oct 2026 00:00:00 GMT";
+    catalog.start_download(server.url());
+    complete(catalog);
+    ASSERT_TRUE(catalog.has_full_download());
+    server.respond = [](const QByteArray &request, qsizetype) {
+        return request.contains("If-None-Match") || request.contains("If-Modified-Since")
+                   ? Server::Response{"Conditional request rejected", 400}
+                   : Server::Response{payload(), 200, "\r\nETag: \"revalidated\""};
+    };
+    catalog.start_download(server.url());
+    complete(catalog);
+    ASSERT_EQ(server.requests.size(), 3);
+    EXPECT_TRUE(server.requests[1].contains("If-None-Match: \"installed\""));
+    EXPECT_TRUE(server.requests[1].contains("If-Modified-Since: " + server.last_modified));
+    EXPECT_FALSE(server.requests[2].contains("If-None-Match"));
+    EXPECT_FALSE(server.requests[2].contains("If-Modified-Since"));
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::unchanged);
+    EXPECT_EQ(catalog.data().setting("finals-etag"), "\"revalidated\"");
+    EXPECT_TRUE(std::filesystem::is_empty(catalog.store() / "staging"));
+}
+TEST_F(DataCenterTest, FallbackDoesNotSendAnotherSourcesValidatorsAndRetainsItsOwnCache) {
+    EopCatalog catalog(root() / "data", {ORBELLE_TEST_C04}, {}, false);
+    Server primary(payload()), backup(payload());
+    primary.etag = "\"primary\"";
+    primary.last_modified = "Fri, 23 Oct 2026 00:00:00 GMT";
+    backup.etag = "\"backup\"";
+    catalog.start_download(primary.url());
+    complete(catalog);
+    ASSERT_TRUE(catalog.has_full_download());
+    primary.respond = [](const QByteArray &, qsizetype) {
+        return Server::Response{"Request Rejected", 400};
+    };
+    catalog.start_download_from_sources({primary.url(), backup.url()});
+    complete(catalog);
+    ASSERT_EQ(primary.requests.size(), 3);
+    EXPECT_TRUE(primary.requests[1].contains("If-None-Match: \"primary\""));
+    EXPECT_FALSE(primary.requests[2].contains("If-None-Match"));
+    ASSERT_EQ(backup.requests.size(), 1);
+    EXPECT_FALSE(backup.requests.front().contains("If-None-Match"));
+    EXPECT_FALSE(backup.requests.front().contains("If-Modified-Since"));
+    EXPECT_EQ(catalog.data().setting("finals-etag"), "\"backup\"");
+    const auto acquired = catalog.inventory()[0].acquired_at;
+    catalog.start_download_from_sources({primary.url(), backup.url()});
+    complete(catalog);
+    ASSERT_EQ(primary.requests.size(), 4);
+    EXPECT_FALSE(primary.requests.back().contains("If-None-Match"));
+    EXPECT_FALSE(primary.requests.back().contains("If-Modified-Since"));
+    ASSERT_EQ(backup.requests.size(), 2);
+    EXPECT_TRUE(backup.requests.back().contains("If-None-Match: \"backup\""));
+    EXPECT_EQ(catalog.received_bytes(), 0);
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::unchanged);
+    EXPECT_EQ(catalog.inventory()[0].acquired_at, acquired);
+    EXPECT_TRUE(std::filesystem::is_empty(catalog.store() / "staging"));
+}
+TEST_F(DataCenterTest, ErrorDiagnosticsExcludeQuerySecretsEvenWhenTheServerEchoesThem) {
+    EopCatalog catalog(root() / "data", {ORBELLE_TEST_C04}, {}, false);
+    const QByteArray secret = "private-download-query-token";
+    Server server(QByteArray{});
+    server.respond = [secret](const QByteArray &request, qsizetype) {
+        EXPECT_TRUE(request.contains("token=" + secret));
+        return Server::Response{"Rejected URL: " + request + " token=" + secret, 400};
+    };
+    auto source = server.url();
+    source.setQuery(QStringLiteral("token=%1").arg(QString::fromLatin1(secret)));
+    catalog.start_download(source);
+    complete(catalog);
+    ASSERT_EQ(server.requests.size(), 1);
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::failed);
+    const auto diagnostics = catalog.update_status().diagnostics;
+    EXPECT_TRUE(diagnostics.contains(server.url().toString()));
+    EXPECT_TRUE(diagnostics.contains("HTTP 400"));
+    EXPECT_FALSE(diagnostics.contains(QString::fromLatin1(secret)));
+    EXPECT_FALSE(catalog.status().contains(QString::fromLatin1(secret)));
+    EXPECT_EQ(catalog.data().setting("finals-update-record").find(secret.toStdString()),
+              std::string::npos);
+    EXPECT_TRUE(std::filesystem::is_empty(catalog.store() / "staging"));
+}
+TEST_F(DataCenterTest, RedirectValidatorsBelongToTheFinalUrlAndCannotCrossOrigins) {
+    EopCatalog catalog(root() / "data", {ORBELLE_TEST_C04}, {}, false);
+    Server entry(payload()), destination(payload() + '\n');
+    entry.etag = "\"entry\"";
+    entry.last_modified = "Fri, 23 Oct 2026 00:00:00 GMT";
+    destination.etag = "\"destination\"";
+    destination.last_modified = "Sat, 24 Oct 2026 00:00:00 GMT";
+    catalog.start_download(entry.url());
+    complete(catalog);
+    ASSERT_TRUE(catalog.has_full_download());
+    entry.respond = [&](const QByteArray &, qsizetype) {
+        return Server::Response{"Moved", 302, "\r\nLocation: " + destination.url().toEncoded()};
+    };
+    catalog.start_download(entry.url());
+    complete(catalog);
+    ASSERT_EQ(entry.requests.size(), 2);
+    EXPECT_TRUE(entry.requests.back().contains("If-None-Match: " + entry.etag));
+    EXPECT_TRUE(entry.requests.back().contains("If-Modified-Since: " + entry.last_modified));
+    ASSERT_EQ(destination.requests.size(), 1);
+    EXPECT_FALSE(destination.requests.back().contains("If-None-Match"));
+    EXPECT_FALSE(destination.requests.back().contains("If-Modified-Since"));
+    ASSERT_EQ(catalog.update_status().state, DataUpdateState::updated)
+        << catalog.status().toStdString();
+    EXPECT_EQ(catalog.data().setting("finals-source-url"),
+              destination.url().toString().toStdString());
+    EXPECT_EQ(catalog.data().setting("finals-etag"), destination.etag.toStdString());
+    EXPECT_EQ(catalog.data().setting("finals-last-modified"),
+              destination.last_modified.toStdString());
+    const auto acquired = catalog.inventory()[0].acquired_at;
+    const auto revision = catalog.revision();
+    catalog.start_download(entry.url());
+    complete(catalog);
+    ASSERT_EQ(entry.requests.size(), 3);
+    EXPECT_FALSE(entry.requests.back().contains("If-None-Match"));
+    EXPECT_FALSE(entry.requests.back().contains("If-Modified-Since"));
+    ASSERT_EQ(destination.requests.size(), 2);
+    EXPECT_TRUE(destination.requests.back().contains("If-None-Match: " + destination.etag));
+    EXPECT_TRUE(
+        destination.requests.back().contains("If-Modified-Since: " + destination.last_modified));
+    EXPECT_EQ(catalog.received_bytes(), 0);
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::unchanged);
+    EXPECT_EQ(catalog.inventory()[0].acquired_at, acquired);
+    EXPECT_EQ(catalog.revision(), revision);
+    EXPECT_TRUE(std::filesystem::is_empty(catalog.store() / "staging"));
+}
+TEST_F(DataCenterTest, RedirectedUnconditional304CannotValidateAnotherUrlsInstalledData) {
+    EopCatalog catalog(root() / "data", {ORBELLE_TEST_C04}, {}, false);
+    Server entry(payload()), destination({}, 304);
+    entry.etag = "\"entry\"";
+    catalog.start_download(entry.url());
+    complete(catalog);
+    ASSERT_TRUE(catalog.has_full_download());
+    const auto before = catalog.update_status();
+    const auto revision = catalog.revision();
+    entry.respond = [&](const QByteArray &, qsizetype) {
+        return Server::Response{{}, 302, "\r\nLocation: " + destination.url().toEncoded()};
+    };
+    catalog.start_download(entry.url());
+    complete(catalog);
+    ASSERT_EQ(destination.requests.size(), 1);
+    EXPECT_FALSE(destination.requests.back().contains("If-None-Match"));
+    EXPECT_FALSE(destination.requests.back().contains("If-Modified-Since"));
+    EXPECT_EQ(catalog.update_status().state, DataUpdateState::failed);
+    EXPECT_EQ(catalog.update_status().checked_at, before.checked_at);
+    EXPECT_EQ(catalog.update_status().checked_sha256, before.checked_sha256);
+    EXPECT_EQ(catalog.revision(), revision);
+    EXPECT_EQ(catalog.data().setting("finals-source-url"), entry.url().toString().toStdString());
+    EXPECT_EQ(catalog.data().setting("finals-etag"), entry.etag.toStdString());
+    EXPECT_TRUE(catalog.has_full_download());
+    EXPECT_TRUE(std::filesystem::is_empty(catalog.store() / "staging"));
+}
+TEST_F(DataCenterTest, RedirectsAllowThreeHopsButRejectAFourth) {
+    for (const auto redirects : {3, 4}) {
+        SCOPED_TRACE(redirects);
+        EopCatalog catalog(root() / std::to_string(redirects), {ORBELLE_TEST_C04}, {}, false);
+        Server server(QByteArray{});
+        server.respond = [&](const QByteArray &, qsizetype request) {
+            if (request > redirects)
+                return Server::Response{payload()};
+            return Server::Response{{}, 302, "\r\nLocation: /hop-" + QByteArray::number(request)};
+        };
+        catalog.start_download(server.url());
+        complete(catalog);
+        EXPECT_EQ(server.requests.size(), 4);
+        EXPECT_EQ(catalog.has_full_download(), redirects == 3);
+        EXPECT_EQ(catalog.update_status().state,
+                  redirects == 3 ? DataUpdateState::updated : DataUpdateState::failed)
+            << catalog.status().toStdString();
+        EXPECT_TRUE(std::filesystem::is_empty(catalog.store() / "staging"));
+    }
+}
+TEST_F(DataCenterTest, RedirectsCannotOpenLocalFilesOrUnencryptedRemoteHosts) {
+    Server forbidden(payload());
+    auto non_exempt_http = forbidden.url();
+    non_exempt_http.setHost(
+        "localhost"); // Only explicit 127.0.0.1 is the test-only HTTP exception.
+    for (const auto &target : {QByteArray("file:///download.dat"), non_exempt_http.toEncoded()}) {
+        SCOPED_TRACE(target.toStdString());
+        EopCatalog catalog(root() / (target.startsWith("file") ? "file" : "http"),
+                           {ORBELLE_TEST_C04}, {}, false);
+        Server server(QByteArray{});
+        server.respond = [target](const QByteArray &, qsizetype) {
+            return Server::Response{{}, 302, "\r\nLocation: " + target};
+        };
+        catalog.start_download(server.url());
+        complete(catalog);
+        EXPECT_EQ(server.requests.size(), 1);
+        EXPECT_EQ(catalog.update_status().state, DataUpdateState::failed);
+        EXPECT_FALSE(catalog.has_full_download());
+        EXPECT_TRUE(forbidden.requests.isEmpty());
+        EXPECT_TRUE(std::filesystem::is_empty(catalog.store() / "staging"));
     }
 }
 TEST_F(DataCenterTest, OversizedResponseIsRejectedAndCanRetry) {
@@ -473,27 +933,55 @@ TEST_F(DataCenterTest, InterruptedAndLegacyChecksNeverClaimThatCurrentDataIsLate
     EXPECT_EQ(interrupted.update_status().attempted_at, 1234567890);
     EXPECT_EQ(interrupted.update_status().checked_at, 1234567800);
 }
-TEST_F(DataCenterTest, LiveOfficialProductsAreValidated) {
+class LiveDataCenterTest : public DataCenterTest,
+                           public ::testing::WithParamInterface<DataProduct> {};
+TEST_P(LiveDataCenterTest, ProductDownloadIsValidated) {
     if (qEnvironmentVariableIsEmpty("ORBELLE_LIVE_IERS"))
-        GTEST_SKIP() << "Opt-in official network check";
+        GTEST_SKIP() << "Opt-in default-source network check";
+    const auto product = GetParam();
     EopCatalog catalog(root() / "data", {ORBELLE_TEST_FINALS, ORBELLE_TEST_C04}, {}, false);
-    for (const auto product : {DataProduct::utc, DataProduct::c04, DataProduct::finals2000a}) {
-        catalog.start_download({}, product);
-        complete(catalog);
-        const auto state = catalog.update_status(product).state;
-        ASSERT_TRUE(state == DataUpdateState::updated || state == DataUpdateState::unchanged)
-            << catalog.status().toStdString();
-        EXPECT_TRUE(catalog.has_full_download(product));
-        const auto item = catalog.inventory()[static_cast<std::size_t>(product)];
-        EXPECT_EQ(item.installation, DataInstallation::downloaded);
-        EXPECT_TRUE(item.acquired_at);
-        std::cout << "product=" << static_cast<int>(product)
-                  << " bytes=" << item.file_size.value_or(0)
-                  << " coverage=" << item.first.toString(Qt::ISODate).toStdString() << " / "
-                  << item.last.toString(Qt::ISODate).toStdString()
-                  << " sha256=" << item.sha256.toStdString() << '\n';
+    catalog.start_download({}, product);
+    complete(catalog);
+    const auto status = catalog.update_status(product);
+    std::cout << "product=" << static_cast<int>(product)
+              << " status=" << catalog.status().toStdString() << "\ndiagnostics:\n"
+              << status.diagnostics.toStdString() << '\n';
+    ASSERT_TRUE(status.state == DataUpdateState::updated ||
+                status.state == DataUpdateState::unchanged)
+        << catalog.status().toStdString();
+    EXPECT_TRUE(catalog.has_full_download(product));
+    const auto item = catalog.inventory()[static_cast<std::size_t>(product)];
+    EXPECT_EQ(item.installation, DataInstallation::downloaded);
+    EXPECT_TRUE(item.acquired_at);
+    if (product == DataProduct::finals2000a) {
+        const auto today = QDateTime::currentDateTimeUtc().date();
+        EXPECT_LE(item.first.date(), today);
+        EXPECT_GE(item.last.date(), today.addDays(1));
+        EXPECT_NO_THROW((void)catalog.for_interval(
+            catalog.time_provider()->from_utc(
+                {today.year(), today.month(), today.day(), 0, 0, 0, 0}),
+            catalog.time_provider()->from_utc({today.addDays(1).year(), today.addDays(1).month(),
+                                               today.addDays(1).day(), 0, 0, 0, 0})));
     }
+    std::cout << "source=" << item.source_url.toStdString()
+              << " bytes=" << item.file_size.value_or(0)
+              << " coverage=" << item.first.toString(Qt::ISODate).toStdString() << " / "
+              << item.last.toString(Qt::ISODate).toStdString()
+              << " sha256=" << item.sha256.toStdString() << '\n';
 }
+INSTANTIATE_TEST_SUITE_P(DefaultSources, LiveDataCenterTest,
+                         ::testing::Values(DataProduct::utc, DataProduct::c04,
+                                           DataProduct::finals2000a),
+                         [](const ::testing::TestParamInfo<DataProduct> &info) {
+                             switch (info.param) {
+                             case DataProduct::utc:
+                                 return "Utc";
+                             case DataProduct::c04:
+                                 return "C04";
+                             default:
+                                 return "Finals2000A";
+                             }
+                         });
 TEST_F(DataCenterTest, C04AndUtcDownloadsAreIndependentAndRebindCalculationTimeAtomically) {
     QFile c04(QString::fromStdWString(
         (std::filesystem::path(ORBELLE_TEST_C04).parent_path() / "eop.c04").wstring()));
@@ -579,6 +1067,84 @@ TEST_F(DataCenterTest, C04AndUtcDownloadsAreIndependentAndRebindCalculationTimeA
     EXPECT_EQ(reopened.update_interval_hours(DataProduct::utc), 168);
     EXPECT_EQ(reopened.update_status(DataProduct::utc).state, DataUpdateState::failed);
     EXPECT_EQ(reopened.update_status(DataProduct::c04).state, DataUpdateState::unchanged);
+}
+TEST_F(DataCenterTest, IanaFallbackPreservesOriginalBytesAndRebindsEopAcrossRestart) {
+    QFile original(QString::fromStdString(ORBELLE_TEST_TIME));
+    ASSERT_TRUE(original.open(QIODevice::ReadOnly));
+    const QDate ntp_origin(1900, 1, 1);
+    const auto ntp_seconds = [ntp_origin](QDate date) {
+        return ntp_origin.daysTo(date) * qint64{86400};
+    };
+    QByteArray iana = "# Synthetic IANA-format fixture with a positive leap in 2027\n#@ " +
+                      QByteArray::number(ntp_seconds(QDate(2028, 6, 28))) + '\n';
+    for (const auto &line : original.readAll().split('\n')) {
+        std::istringstream row(line.toStdString());
+        double mjd;
+        int day, month, year, offset;
+        if (row >> mjd >> day >> month >> year >> offset)
+            iana += QByteArray::number(ntp_seconds(QDate(year, month, day))) + ' ' +
+                    QByteArray::number(offset) + '\n';
+    }
+    iana += QByteArray::number(ntp_seconds(QDate(2027, 1, 1))) + " 38\n";
+    const auto expected_hash =
+        QCryptographicHash::hash(iana, QCryptographicHash::Sha256).toHex().toStdString();
+    QFile c04(QString::fromStdWString(
+        (std::filesystem::path(ORBELLE_TEST_C04).parent_path() / "eop.c04").wstring()));
+    ASSERT_TRUE(c04.open(QIODevice::ReadOnly));
+    auto c04_bytes = c04.readAll();
+    const auto day = QDate(1858, 11, 17).daysTo(QDate(2027, 1, 1));
+    c04_bytes.replace("2000   1   1   0  51544.00",
+                      "2027   1   1   0  " + QByteArray::number(day) + ".00");
+    c04_bytes.replace("2000   1   2   0  51545.00",
+                      "2027   1   2   0  " + QByteArray::number(day + 1) + ".00");
+    const auto store = root() / "data";
+    application::DataLock new_eop_lock;
+    {
+        EopCatalog catalog(store, {}, {}, false);
+        Server c04_source(c04_bytes);
+        catalog.start_download(c04_source.url(), DataProduct::c04);
+        complete(catalog);
+        ASSERT_TRUE(catalog.has_full_download(DataProduct::c04));
+        const auto old_time = catalog.time_provider();
+        const auto first = old_time->from_utc({2027, 1, 1, 0, 0, 0, 0});
+        const auto last = old_time->from_utc({2027, 1, 2, 0, 0, 0, 0});
+        const auto active = catalog.for_interval(first, last);
+        const auto value = active->at(first).sample.ut1_minus_tai_seconds;
+        Server rejected("Request Rejected", 400), iana_source(iana);
+        catalog.start_download_from_sources({rejected.url(), iana_source.url()}, DataProduct::utc);
+        complete(catalog);
+        ASSERT_EQ(catalog.update_status(DataProduct::utc).state, DataUpdateState::updated)
+            << catalog.status().toStdString();
+        EXPECT_EQ(rejected.requests.size(), 1);
+        EXPECT_EQ(iana_source.requests.size(), 1);
+        EXPECT_TRUE(catalog.has_full_download(DataProduct::utc));
+        EXPECT_EQ(catalog.time_provider()->data_info().sha256, expected_hash);
+        const auto item = catalog.inventory()[static_cast<std::size_t>(DataProduct::utc)];
+        EXPECT_EQ(item.installation, DataInstallation::downloaded);
+        EXPECT_EQ(item.last.date(), QDate(2028, 6, 28));
+        EXPECT_TRUE(item.exclusive_end);
+        QFile installed(QString::fromStdWString(item.file.wstring()));
+        ASSERT_TRUE(installed.open(QIODevice::ReadOnly));
+        EXPECT_EQ(installed.readAll(), iana);
+        const auto time = catalog.time_provider();
+        const auto next_first = time->from_utc({2027, 1, 1, 0, 0, 0, 0});
+        const auto next_last = time->from_utc({2027, 1, 2, 0, 0, 0, 0});
+        EXPECT_DOUBLE_EQ(next_first.seconds_since(first), 1);
+        EXPECT_NO_THROW((void)time->from_utc({2028, 1, 1, 0, 0, 0, 0}));
+        EXPECT_THROW((void)time->from_utc({2028, 6, 28, 0, 0, 0, 0}), core::TimeDataRangeError);
+        const auto rebound = catalog.for_interval(next_first, next_last);
+        EXPECT_EQ(rebound->data_info().time_data.sha256, expected_hash);
+        EXPECT_DOUBLE_EQ(rebound->at(next_first).sample.ut1_minus_tai_seconds, value - 1);
+        EXPECT_DOUBLE_EQ(active->at(first).sample.ut1_minus_tai_seconds, value);
+        new_eop_lock = application::eop_data_lock(rebound->data_info());
+        EXPECT_TRUE(std::filesystem::is_empty(store / "staging"));
+    }
+    EopCatalog reopened(store, {}, {}, false);
+    EXPECT_TRUE(reopened.warnings().empty()) << reopened.warnings().join('\n').toStdString();
+    EXPECT_EQ(reopened.time_provider()->data_info().sha256, expected_hash);
+    EXPECT_EQ(reopened.data().resolve_eop(new_eop_lock)->data_info().time_data.sha256,
+              expected_hash);
+    EXPECT_EQ(reopened.update_status(DataProduct::utc).state, DataUpdateState::updated);
 }
 TEST_F(DataCenterTest, SourcePriorityPersistsAndRealCoveragePrecedesExtrapolation) {
     // Synthetic overlapping dates exercise source selection, not scientific accuracy.

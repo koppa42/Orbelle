@@ -10,24 +10,66 @@
 #include <orbelle/providers/erfa/provider.hpp>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace orbelle;
 
+namespace {
+struct TemporaryLeapFile {
+    std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        ("orbelle-leaps-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".dat");
+    ~TemporaryLeapFile() {
+        std::error_code error;
+        std::filesystem::remove(path, error);
+    }
+    void write(const std::string &bytes) {
+        std::ofstream out(path, std::ios::binary);
+        out << bytes;
+    }
+};
+
+// Public-domain IANA/IERS Bulletin C 72 records, with prose removed. The published
+// #h checksum is unchanged because NTP hashes only numeric data and #$/#@ values.
+const std::string ntp_leaps = R"(#$ 3992312697
+#@ 4023129600
+# File expires on 28 June 2027
+2272060800 10
+2287785600 11
+2303683200 12
+2335219200 13
+2366755200 14
+2398291200 15
+2429913600 16
+2461449600 17
+2492985600 18
+2524521600 19
+2571782400 20
+2603318400 21
+2634854400 22
+2698012800 23
+2776982400 24
+2840140800 25
+2871676800 26
+2918937600 27
+2950473600 28
+2982009600 29
+3029443200 30
+3076704000 31
+3124137600 32
+3345062400 33
+3439756800 34
+3550089600 35
+3644697600 36
+3692217600 37
+#h a9bad145 84c31c70 758402aa b37bfd54 5923836a
+)";
+} // namespace
+
 TEST(ErfaTime, DownloadedLeapTablesValidateDatesAndOwnTheirPositiveAndNegativeTransitions) {
-    struct TemporaryFile {
-        std::filesystem::path path =
-            std::filesystem::temp_directory_path() /
-            ("orbelle-leaps-" +
-             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".dat");
-        ~TemporaryFile() {
-            std::error_code error;
-            std::filesystem::remove(path, error);
-        }
-        void write(const std::string &bytes) {
-            std::ofstream out(path, std::ios::binary);
-            out << bytes;
-        }
-    } file;
+    TemporaryLeapFile file;
     const std::string header = "# File expires on 1 January 1973\n";
     const std::string first = "41317.0 1 1 1972 10\n";
     file.write(header + first + "41499.0 1 7 1972 11\n");
@@ -52,6 +94,118 @@ TEST(ErfaTime, DownloadedLeapTablesValidateDatesAndOwnTheirPositiveAndNegativeTr
         file.write(bytes);
         EXPECT_THROW((void)providers::erfa::load_time_snapshot(file.path), std::invalid_argument);
     }
+}
+
+TEST(ErfaTime, NtpLeapTableMatchesIersHistoryAndPreservesRawContentIdentity) {
+    TemporaryLeapFile file;
+    file.write(ntp_leaps);
+    const auto time = providers::erfa::load_time_snapshot(file.path);
+    const auto builtin = providers::erfa::make_builtin_time_provider();
+    EXPECT_EQ(time->data_info().utc_valid_from_mjd, builtin->data_info().utc_valid_from_mjd);
+    EXPECT_EQ(time->data_info().utc_valid_until_mjd, builtin->data_info().utc_valid_until_mjd);
+    EXPECT_EQ(time->data_info().source_url,
+              "https://data.iana.org/time-zones/data/leap-seconds.list");
+    // Independently calculated with Python hashlib.sha256 over the fixture's UTF-8 bytes.
+    EXPECT_EQ(time->data_info().sha256,
+              "d1abb5a23e25b3332bf8999226a4d53fd3e8406860b3cc0472d39791e7903fa2");
+    EXPECT_NE(time->data_info().sha256, builtin->data_info().sha256);
+    // All published transitions are January/July boundaries; include years without leaps.
+    for (int year = 1972; year <= 2027; ++year) {
+        for (const int month : {1, 7}) {
+            if (year == 2027 && month == 7)
+                continue;
+            const auto midnight = builtin->from_utc({year, month, 1, 0, 0, 0, 0});
+            EXPECT_EQ(time->from_utc({year, month, 1, 0, 0, 0, 0}), midnight);
+            if (year != 1972 || month != 1) {
+                const core::Epoch before(midnight.tai_nanoseconds() - 1);
+                EXPECT_EQ(time->to_utc(before), builtin->to_utc(before));
+                EXPECT_EQ(time->from_utc(time->to_utc(before)), before);
+            }
+        }
+    }
+    const auto last = time->from_utc({2027, 6, 27, 23, 59, 59, 999999999});
+    EXPECT_THROW((void)time->to_utc(core::Epoch(last.tai_nanoseconds() + 1)),
+                 core::TimeDataRangeError);
+    EXPECT_THROW((void)time->from_utc({2027, 6, 28, 0, 0, 0, 0}), core::TimeDataRangeError);
+    file.write(ntp_leaps + "# provenance comment\n");
+    const auto commented = providers::erfa::load_time_snapshot(file.path);
+    EXPECT_NE(commented->data_info().sha256, time->data_info().sha256);
+    EXPECT_EQ(commented->from_utc({2016, 12, 31, 23, 59, 60, 123456789}),
+              time->from_utc({2016, 12, 31, 23, 59, 60, 123456789}));
+}
+
+TEST(ErfaTime, NtpLeapTablesSupportNegativeTransitionsAndDatesAfter2036) {
+    TemporaryLeapFile file;
+    file.write("#@ 4417977600\n2272060800 10 # 1972-01-01\n"
+               "2287785600 9 # synthetic negative leap\n4354905600 10 # 2038-01-01\n");
+    const auto time = providers::erfa::load_time_snapshot(file.path);
+    EXPECT_THROW((void)time->from_utc({1972, 6, 30, 23, 59, 59, 0}), std::invalid_argument);
+    const auto before = time->from_utc({1972, 6, 30, 23, 59, 58, 999999999});
+    const auto next = time->from_utc({1972, 7, 1, 0, 0, 0, 0});
+    EXPECT_EQ(next.tai_nanoseconds() - before.tai_nanoseconds(), 1);
+    const auto leap = time->from_utc({2037, 12, 31, 23, 59, 60, 999999999});
+    EXPECT_EQ(time->to_utc(leap), (core::UtcDateTime{2037, 12, 31, 23, 59, 60, 999999999}));
+    EXPECT_NO_THROW((void)time->from_utc({2039, 12, 31, 23, 59, 59, 0}));
+    EXPECT_THROW((void)time->from_utc({2040, 1, 1, 0, 0, 0, 0}), core::TimeDataRangeError);
+}
+
+TEST(ErfaTime, NtpChecksumAcceptsUnpaddedHexWordsAndIgnoresFormatting) {
+    TemporaryLeapFile file;
+    // Python hashlib.sha1 of 56 checksum digits; exercises SHA-1's extra padding block
+    // and NTP's permitted omission of leading zeroes in a checksum word (0683154b).
+    file.write(" \t#$ 2303683203\r\n#@\t2335219200 # expiration\r\n"
+               "2272060800\t10 # 1972\r\n2287785600 11\r\n2303683200 12\r\n"
+               "#h aac09e42 14360c42 683154b 1478b51b c0ae4994\r\n");
+    const auto time = providers::erfa::load_time_snapshot(file.path);
+    EXPECT_EQ(time->tai_minus_utc_seconds(time->from_utc({1973, 1, 1, 0, 0, 0, 0})), 12);
+}
+
+TEST(ErfaTime, NtpLeapTablesRejectCorruptionInvalidExpiryAndMixedFormats) {
+    TemporaryLeapFile file;
+    const std::string header = "#@ 2303683200\n";
+    const std::string first = "2272060800 10\n";
+    for (const auto &bytes :
+         std::vector<std::string>{first,
+                                  header,
+                                  header + header + first,
+                                  "#@ tomorrow\n" + first,
+                                  "#@ 2303683201\n" + first,
+                                  "#@ 18446744073709551615\n" + first,
+                                  "#@ 18446744073709551616\n" + first,
+                                  "#@ -1\n" + first,
+                                  "#@ 2272060800\n" + first,
+                                  header + "2272060801 10\n",
+                                  header + first + first,
+                                  header + "2272060800 11\n",
+                                  header + first + "2287785600 12\n",
+                                  header + first + "2287785600 10\n",
+                                  header + first + "2287785600 -1\n",
+                                  header + first + "2287785600 11 extra\n",
+                                  header + "#$ 2303683200\n" + first,
+                                  header + "#$ 2287785600\n#$ 2287785600\n" + first,
+                                  header + "# File expires on 1 January 1974\n" + first,
+                                  header + "41317.0 1 1 1972 10\n",
+                                  header + first + "41499.0 1 7 1972 11\n",
+                                  "# File expires on 1 January 1973\n" + first,
+                                  header + first + "#h 0 0 0 0 0\n",
+                                  header + first + "#h 0 0 0 0\n",
+                                  header + first + "#h 100000000 0 0 0 0\n",
+                                  header + first + "#h 0 0 0 0 xyz\n",
+                                  header + first + "<html>error</html>\n"}) {
+        SCOPED_TRACE(bytes);
+        file.write(bytes);
+        EXPECT_THROW((void)providers::erfa::load_time_snapshot(file.path), std::invalid_argument);
+    }
+    for (const auto &changed :
+         {std::pair{"3992312697", "3992312698"}, std::pair{"4023129600", "4023216000"},
+          std::pair{"3692217600", "3692304000"}}) {
+        auto bytes = ntp_leaps;
+        bytes.replace(bytes.find(changed.first), std::string(changed.first).size(), changed.second);
+        file.write(bytes);
+        EXPECT_THROW((void)providers::erfa::load_time_snapshot(file.path), std::invalid_argument);
+    }
+    file.write(ntp_leaps + "#h a9bad145 84c31c70 758402aa b37bfd54 5923836a\n");
+    EXPECT_THROW((void)providers::erfa::load_time_snapshot(file.path), std::invalid_argument);
 }
 
 TEST(ErfaDisplaySun, MatchesPublishedEpv00ReferenceAndRejectsUnsupportedDates) {

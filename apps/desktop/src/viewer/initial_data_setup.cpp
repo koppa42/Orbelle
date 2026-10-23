@@ -3,6 +3,8 @@
 #include "eop_catalog.hpp"
 #include "responsive_layout.hpp"
 #include "workbench_theme.hpp"
+#include <QApplication>
+#include <QClipboard>
 #include <QDialog>
 #include <QFormLayout>
 #include <QLabel>
@@ -23,6 +25,22 @@ std::vector<DataProduct> initial_data_products() {
     if (runtime::ephemeris_available())
         products.push_back(DataProduct::de440s);
     return products;
+}
+bool initial_data_ready(const EopCatalog &catalog, DataProduct product, QDate utc_day) {
+    if (product != DataProduct::utc)
+        return catalog.has_full_download(product);
+    const auto time = catalog.time_provider();
+    if (!time)
+        return false;
+    if (!utc_day.isValid())
+        utc_day = QDateTime::currentDateTimeUtc().date();
+    try {
+        for (const auto day : {utc_day, utc_day.addDays(1)})
+            (void)time->from_utc({day.year(), day.month(), day.day(), 0, 0, 0, 0});
+        return true;
+    } catch (const core::TimeDataRangeError &) {
+        return false;
+    }
 }
 namespace {
 QString product_title(DataProduct product) {
@@ -48,11 +66,11 @@ QString product_title(DataProduct product) {
 bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
                           const std::vector<DataProduct> &required,
                           const std::function<void(DataProduct)> &download,
-                          const std::function<void()> &visible_ready) {
-    const auto complete = [&] {
-        return std::all_of(required.begin(), required.end(),
-                           [&](auto product) { return catalog.has_full_download(product); });
-    };
+                          const std::function<void()> &visible_ready, QDate utc_day) {
+    if (!utc_day.isValid())
+        utc_day = QDateTime::currentDateTimeUtc().date();
+    const auto ready = [&](auto product) { return initial_data_ready(catalog, product, utc_day); };
+    const auto complete = [&] { return std::all_of(required.begin(), required.end(), ready); };
     if (complete())
         return true;
     // The workbench already owns native Vulkan children but is not shown until
@@ -92,6 +110,7 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
     auto *status = new QLabel;
     status->setObjectName("initialDataStatus");
     status->setWordWrap(true);
+    status->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
     layout->addWidget(status);
     auto *progress = new QProgressBar;
     progress->setObjectName("initialDataProgress");
@@ -102,10 +121,13 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
     retry->setProperty("primary", true);
     auto *manage = new QPushButton(ui::text("initial_data_setup.manage"));
     manage->setObjectName("initialDataImport");
+    auto *copy = new QPushButton(ui::text("initial_data_setup.copy_diagnostics"));
+    copy->setObjectName("initialDataCopyDiagnostics");
     auto *cancel = new QPushButton(ui::text("initial_data_setup.cancel"));
     cancel->setObjectName("initialDataCancel");
     actions->addWidget(retry);
     actions->addWidget(manage);
+    actions->addWidget(copy);
     actions->addStretch();
     actions->addWidget(cancel);
     layout->addLayout(actions);
@@ -117,14 +139,25 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
             const auto product = required[i];
             const bool running = catalog.downloading() && catalog.active_product() == product;
             const auto state = catalog.update_status(product).state;
-            states[i]->setText(
-                catalog.has_full_download(product) ? ui::text("initial_data_setup.state")
-                : running                          ? ui::text("initial_data_setup.label_9")
-                : state == DataUpdateState::failed ? ui::text("initial_data_setup.label_10")
-                                                   : ui::text("initial_data_setup.label_11"));
+            if (ready(product) && product == DataProduct::utc &&
+                !catalog.has_full_download(product)) {
+                const auto until =
+                    QDate(1858, 11, 17)
+                        .addDays(catalog.time_provider()->data_info().utc_valid_until_mjd);
+                states[i]->setText(
+                    ui::text("initial_data_setup.builtin_state").arg(until.toString(Qt::ISODate)));
+                states[i]->setWordWrap(true);
+            } else {
+                states[i]->setText(ready(product) ? ui::text("initial_data_setup.state")
+                                   : running      ? ui::text("initial_data_setup.label_9")
+                                   : state == DataUpdateState::failed
+                                       ? ui::text("initial_data_setup.label_10")
+                                       : ui::text("initial_data_setup.label_11"));
+            }
         }
         retry->setVisible(paused);
         manage->setEnabled(!catalog.downloading());
+        copy->setVisible(!catalog.update_status(catalog.active_product()).diagnostics.isEmpty());
         progress->setVisible(catalog.downloading());
         if (catalog.downloading()) {
             const auto received = catalog.received_bytes(), total = catalog.total_bytes();
@@ -149,13 +182,12 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
     };
     const auto advance = [&] {
         if (owned && !catalog.downloading()) {
-            paused = !catalog.has_full_download(*owned);
+            paused = !ready(*owned);
             owned.reset();
         }
         if (!paused && !catalog.downloading()) {
-            const auto missing = std::find_if(required.begin(), required.end(), [&](auto product) {
-                return !catalog.has_full_download(product);
-            });
+            const auto missing = std::find_if(required.begin(), required.end(),
+                                              [&](auto product) { return !ready(product); });
             if (missing == required.end()) {
                 dialog.accept();
                 return;
@@ -176,6 +208,10 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
         show_data_center(&dialog, catalog);
         paused = false;
         advance();
+    });
+    QObject::connect(copy, &QPushButton::clicked, &dialog, [&] {
+        QApplication::clipboard()->setText(
+            catalog.update_status(catalog.active_product()).diagnostics);
     });
     QObject::connect(cancel, &QPushButton::clicked, &dialog, &QDialog::reject);
     QTimer poll;

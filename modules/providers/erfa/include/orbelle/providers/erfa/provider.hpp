@@ -9,7 +9,9 @@
 namespace orbelle::providers::erfa {
 [[nodiscard]] core::GeodeticPosition itrf_to_wgs84(core::CartesianState state);
 [[nodiscard]] std::unique_ptr<core::ITimeProvider> make_builtin_time_provider();
-// IERS Leap_Second.dat; each instance owns an immutable, validated table.
+// IERS Leap_Second.dat or NTP leap-seconds.list; owns an immutable, validated table.
+// NTP #@ expiry is required; an optional #h checksum is verified. The original bytes
+// determine SHA-256 identity. UTC conversion rejects the published expiry and later.
 [[nodiscard]] std::unique_ptr<core::ITimeProvider>
 load_time_snapshot(const std::filesystem::path &file);
 [[nodiscard]] std::unique_ptr<core::IFrameProvider> make_frame_provider();
