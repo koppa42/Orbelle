@@ -44,7 +44,8 @@
           "name": "qtbase",
           "default-features": false,
           "features": [
-            "widgets"
+            "widgets",
+            "png"
           ]
         }
       ]

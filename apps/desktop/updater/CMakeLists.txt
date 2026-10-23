@@ -3,6 +3,8 @@ if(NOT WIN32)
 endif()
 enable_language(RC)
 configure_file(updater.rc.in updater.rc @ONLY)
+set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/updater.rc" APPEND PROPERTY
+    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../resources/icons/orbelle.ico")
 
 # Embed the shared catalogue at configure time without adding a Qt or Python dependency.
 set(native_catalogue "${CMAKE_CURRENT_SOURCE_DIR}/../resources/text/zh_CN.json")

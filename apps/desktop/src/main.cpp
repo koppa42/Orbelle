@@ -1,3 +1,4 @@
+#include "application_icon.hpp"
 #include "ui_text.hpp"
 #include <QApplication>
 #include <QDockWidget>
@@ -20,6 +21,7 @@ int main(int argc, char **argv) {
     app.setApplicationName("Orbelle");
     app.setApplicationVersion(ORBELLE_APPLICATION_VERSION);
     app.setApplicationDisplayName(ui::text("brand.name"));
+    app.setWindowIcon(orbelle::desktop::application_icon());
 #ifdef ORBELLE_DESKTOP_GRAPHICS
     return orbelle::desktop::run_graphics_workbench(app);
 #endif

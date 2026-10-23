@@ -217,9 +217,15 @@ cmake --preset desktop "-DCMAKE_PREFIX_PATH=<Qt安装前缀>"
 cmake --build --preset desktop
 ```
 
-桌面目标需要 Qt 6.8+ Widgets。manifest 的 `desktop` feature 提供 Qt Widgets 依赖；完整图形路径的固定版本由 vcpkg 基线与 overlay 管理，模块边界见[图形集成约定](../architecture/graphics.md)。
+桌面目标需要 Qt 6.8+ Widgets 和 PNG 支持。manifest 的 `desktop` feature 提供这些依赖；完整图形路径的固定版本由 vcpkg 基线与 overlay 管理，模块边界见[图形集成约定](../architecture/graphics.md)。
 
 程序位置：`out/build/desktop/apps/desktop/Release/orbelle_desktop.exe`。本机运行时需要 Qt DLL 和 platform plugin 可被找到，可在当前进程环境设置 Qt `bin` 与 `plugins` 路径。支持 `-platform offscreen --smoke-test` 自动退出，用于窗口创建和结果填充验证。完整工作台的 Windows 便携打包方式见下文。
+
+### 应用图标
+
+`apps/desktop/resources/icons/orbelle.svg` 是应用标志的源图。修改后，在可加载 `sharp` 的 Node.js 环境执行 `node tools/dev/export-application-icon.cjs`，同步提交生成的 `orbelle.png` 和 `orbelle.ico`。导出器通过超采样生成 512 像素 PNG，以及 16、20、24、32、40、48、64、128、256 像素的 ICO 图层。
+
+桌面界面使用嵌入的 PNG 并按屏幕 DPI 缩放，保留 SVG 的遮罩和渐变，不要求运行时安装 SVG 或 ICO 插件。Windows 主程序、启动器和更新器嵌入同一个 ICO，修改 ICO 后增量构建也会更新三者。Node.js 和 `sharp` 只用于更新图标，正常构建及打包直接使用已提交的资源。
 
 ## 双视窗图形集成
 

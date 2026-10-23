@@ -1,4 +1,5 @@
 #pragma once
+#include "../application_icon.hpp"
 #include "workbench_theme.hpp"
 #include <QColor>
 #include <QIcon>
@@ -54,8 +55,6 @@ enum class WorkbenchIcon {
 void apply_workbench_style(QApplication &app);
 QIcon workbench_icon(WorkbenchIcon icon, const QColor &color = theme::color(theme::text_soft));
 void style_dock(QDockWidget *dock, WorkbenchIcon icon);
-// Application mark: the orbit glyph on a rounded ice-to-sakura tile, in logical pixels.
-QPixmap brand_mark(int size, qreal device_pixel_ratio = 1.0);
 // Static brand ornaments. Ribbons do not take focus or pointer input.
 void paint_sakura_blossom(QPainter &painter, const QPointF &center, qreal radius,
                           const QColor &color);

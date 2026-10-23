@@ -1,10 +1,20 @@
 find_package(Qt6 6.8 CONFIG REQUIRED COMPONENTS Widgets)
+if(NOT QT_FEATURE_imageformat_png)
+    message(FATAL_ERROR "The desktop application icon requires Qt PNG support. Enable qtbase[png].")
+endif()
 add_library(orbelle_desktop_text STATIC src/ui_text.cpp src/ui_text.hpp)
 target_compile_features(orbelle_desktop_text PUBLIC cxx_std_20)
 target_link_libraries(orbelle_desktop_text PUBLIC Qt6::Core)
 orbelle_warnings(orbelle_desktop_text)
 qt_add_resources(orbelle_desktop_text "desktop_text" PREFIX "/orbelle"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/text/zh_CN.json)
+add_library(orbelle_desktop_brand STATIC src/application_icon.cpp src/application_icon.hpp)
+target_compile_features(orbelle_desktop_brand PUBLIC cxx_std_20)
+target_link_libraries(orbelle_desktop_brand PUBLIC Qt6::Gui)
+orbelle_warnings(orbelle_desktop_brand)
+# Pre-render the SVG's masks and gradients; no runtime QtSvg or ICO plugin is needed.
+qt_add_resources(orbelle_desktop_brand "application_icon" PREFIX "/orbelle"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/icons/orbelle.png)
 add_executable(orbelle_desktop WIN32 src/main.cpp)
 target_compile_definitions(orbelle_desktop PRIVATE ORBELLE_APPLICATION_VERSION="${PROJECT_VERSION}")
 if(WIN32)
@@ -335,12 +345,13 @@ if(BUILD_TESTING)
             -s "${PROJECT_SOURCE_DIR}/tools/validation/tests" -p "test_desktop_*.py")
     set_tests_properties(desktop.ValidationTools PROPERTIES TIMEOUT 30)
 endif()
-# All desktop executables (including isolated UI fixtures) use the same embedded copy.
+# All desktop executables (including isolated UI fixtures) use the same embedded resources.
 get_property(orbelle_desktop_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(orbelle_desktop_target IN LISTS orbelle_desktop_targets)
     get_target_property(orbelle_desktop_target_type "${orbelle_desktop_target}" TYPE)
     if(orbelle_desktop_target_type STREQUAL "EXECUTABLE")
-        target_link_libraries("${orbelle_desktop_target}" PRIVATE orbelle_desktop_text)
+        target_link_libraries("${orbelle_desktop_target}" PRIVATE
+            orbelle_desktop_text orbelle_desktop_brand)
     endif()
 endforeach()
 # The relocatable Windows preview is assembled by tools/packaging/package_windows.py.

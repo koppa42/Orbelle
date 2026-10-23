@@ -1,16 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <defs>
-    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#ffdaea"/>
-      <stop offset="0.6" stop-color="#efb2ce"/>
-      <stop offset="1" stop-color="#f4b8d4"/>
-    </linearGradient>
-  </defs>
-  <rect x="0.5" y="0.5" width="255" height="255" rx="71.68" fill="url(#tile)"/>
-  <g transform="translate(40.96 40.96) scale(7.2533333333)" fill="none"
-     stroke="#10111b" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="12" cy="12" r="7"/>
-    <ellipse cx="12" cy="12" rx="11" ry="4" transform="rotate(-32 12 12)"/>
-    <circle cx="19.8" cy="6.8" r="2" fill="#10111b"/>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><defs><radialGradient id="bg" cx="0.35" cy="0.25" r="0.95"><stop offset="0" stop-color="#2a2c44"/><stop offset="1" stop-color="#10111b"/></radialGradient><linearGradient id="pg" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#e08ab6"/><stop offset="1" stop-color="#ffe4ef"/></linearGradient><linearGradient id="ogl" gradientUnits="userSpaceOnUse" x1="14" y1="150" x2="242" y2="106"><stop offset="0" stop-color="#de8cb5"/><stop offset="1" stop-color="#ffffff"/></linearGradient><linearGradient id="fade" gradientUnits="userSpaceOnUse" x1="14" y1="0" x2="242" y2="0"><stop offset="0" stop-color="#fff"/><stop offset="0.3" stop-color="#fff" stop-opacity="0.72"/><stop offset="0.5" stop-color="#fff" stop-opacity="0.45"/><stop offset="0.7" stop-color="#fff" stop-opacity="0.72"/><stop offset="1" stop-color="#fff"/></linearGradient><mask id="depth" maskUnits="userSpaceOnUse" x="-50" y="-50" width="356" height="356"><rect x="-50" y="-50" width="356" height="356" fill="url(#fade)"/></mask><mask id="cut" maskUnits="userSpaceOnUse" x="0" y="0" width="256" height="256"><rect width="256" height="256" fill="#fff"/><path d="M242,128 A114,22 0 0 1 14,128" transform="rotate(-22 128 128)" fill="none" stroke="#000" stroke-width="19" stroke-linecap="round" /></mask></defs><rect width="256" height="256" rx="58" fill="url(#bg)"/><g transform="rotate(-22 128 128)" mask="url(#depth)"><path d="M14,128 A114,22 0 0 1 242,128" fill="none" stroke="url(#ogl)" stroke-width="11" stroke-linecap="round"/></g><g mask="url(#cut)"><g transform="translate(0 -6)"><path transform="rotate(36 128 128) translate(128 121) scale(50)" d="M0,0 C-0.36,-0.2 -0.44,-0.78 -0.2,-1 L0,-0.85 L0.2,-1 C0.44,-0.78 0.36,-0.2 0,0 Z" fill="url(#pg)"/><path transform="rotate(108 128 128) translate(128 121) scale(50)" d="M0,0 C-0.36,-0.2 -0.44,-0.78 -0.2,-1 L0,-0.85 L0.2,-1 C0.44,-0.78 0.36,-0.2 0,0 Z" fill="url(#pg)"/><path transform="rotate(180 128 128) translate(128 121) scale(50)" d="M0,0 C-0.36,-0.2 -0.44,-0.78 -0.2,-1 L0,-0.85 L0.2,-1 C0.44,-0.78 0.36,-0.2 0,0 Z" fill="url(#pg)"/><path transform="rotate(252 128 128) translate(128 121) scale(50)" d="M0,0 C-0.36,-0.2 -0.44,-0.78 -0.2,-1 L0,-0.85 L0.2,-1 C0.44,-0.78 0.36,-0.2 0,0 Z" fill="url(#pg)"/><path transform="rotate(324 128 128) translate(128 121) scale(50)" d="M0,0 C-0.36,-0.2 -0.44,-0.78 -0.2,-1 L0,-0.85 L0.2,-1 C0.44,-0.78 0.36,-0.2 0,0 Z" fill="url(#pg)"/><circle cx="128" cy="128" r="5" fill="#c46499"/></g></g><g transform="rotate(-22 128 128)"><path d="M242,128 A114,22 0 0 1 14,128" fill="none" stroke="url(#ogl)" stroke-width="11" stroke-linecap="round"/></g></svg>
