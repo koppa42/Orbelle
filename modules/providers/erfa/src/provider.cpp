@@ -1,16 +1,20 @@
 #include "iers1996_nutation.hpp"
 #include "leap_seconds.hpp"
 #include <algorithm>
+#include <bit>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <erfa.h>
 #include <fstream>
 #include <locale>
 #include <numbers>
+#include <optional>
 #include <orbelle/providers/erfa/provider.hpp>
 #include <picosha2.h>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 namespace orbelle::providers::erfa {
@@ -31,6 +35,49 @@ constexpr std::int64_t ns_per_second = 1'000'000'000;
 constexpr std::int64_t seconds_per_day = 86'400;
 constexpr std::int64_t ns_per_day = seconds_per_day * ns_per_second;
 constexpr int epoch_mjd = 51544;
+
+// The NTP leap-file #h checksum uses SHA-1 only for accidental corruption detection.
+// Content identity remains SHA-256 of the complete original file, including comments.
+std::array<std::uint32_t, 5> leap_file_checksum(std::string bytes) {
+    const auto bits = static_cast<std::uint64_t>(bytes.size()) * 8;
+    bytes.push_back(static_cast<char>(0x80));
+    while (bytes.size() % 64 != 56)
+        bytes.push_back('\0');
+    for (int shift = 56; shift >= 0; shift -= 8)
+        bytes.push_back(static_cast<char>((bits >> shift) & 0xff));
+    std::array<std::uint32_t, 5> hash{0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0};
+    for (std::size_t block = 0; block < bytes.size(); block += 64) {
+        std::array<std::uint32_t, 80> words{};
+        for (std::size_t i = 0; i < 16; ++i)
+            for (std::size_t j = 0; j < 4; ++j)
+                words[i] = (words[i] << 8) | static_cast<unsigned char>(bytes[block + 4 * i + j]);
+        for (std::size_t i = 16; i < words.size(); ++i)
+            words[i] = std::rotl(words[i - 3] ^ words[i - 8] ^ words[i - 14] ^ words[i - 16], 1);
+        auto [a, b, c, d, e] = hash;
+        for (std::size_t i = 0; i < words.size(); ++i) {
+            const auto f = i < 20   ? (b & c) | (~b & d)
+                           : i < 40 ? b ^ c ^ d
+                           : i < 60 ? (b & c) | (b & d) | (c & d)
+                                    : b ^ c ^ d;
+            const std::uint32_t k = i < 20   ? 0x5a827999
+                                    : i < 40 ? 0x6ed9eba1
+                                    : i < 60 ? 0x8f1bbcdc
+                                             : 0xca62c1d6;
+            const auto next = std::rotl(a, 5) + f + e + k + words[i];
+            e = d;
+            d = c;
+            c = std::rotl(b, 30);
+            b = a;
+            a = next;
+        }
+        hash[0] += a;
+        hash[1] += b;
+        hash[2] += c;
+        hash[3] += d;
+        hash[4] += e;
+    }
+    return hash;
+}
 
 // This provider deliberately supports the pinned post-1972 integer-offset table only.
 // Validate the compiled data, including bounds that make all nanosecond arithmetic safe.
@@ -562,9 +609,9 @@ std::unique_ptr<core::ITimeProvider> load_time_snapshot(const std::filesystem::p
             throw std::invalid_argument(message);
     };
     std::ifstream input(file, std::ios::binary | std::ios::ate);
-    check(static_cast<bool>(input), "Cannot read IERS leap-second file");
+    check(static_cast<bool>(input), "Cannot read leap-second file");
     const auto size = input.tellg();
-    check(size > 0 && size <= 65536, "Invalid IERS leap-second file size");
+    check(size > 0 && size <= 65536, "Invalid leap-second file size");
     std::string bytes(static_cast<std::size_t>(size), '\0');
     input.seekg(0);
     check(static_cast<bool>(input.read(bytes.data(), size)), "Incomplete leap-second file");
@@ -578,8 +625,39 @@ std::unique_ptr<core::ITimeProvider> load_time_snapshot(const std::filesystem::p
     constexpr std::array months{"January",   "February", "March",    "April",
                                 "May",       "June",     "July",     "August",
                                 "September", "October",  "November", "December"};
+    const auto decimal = [&](const std::string &text) {
+        std::uint64_t value = 0;
+        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+        check(!text.empty() && parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size(),
+              "Invalid unsigned integer in NTP leap-second file");
+        return value;
+    };
+    const auto ntp_mjd = [&](std::uint64_t seconds) {
+        // File timestamps are full-width seconds since 1900, not wrapped NTP wire timestamps.
+        const auto days = seconds / 86400;
+        check(seconds % 86400 == 0 && days >= 41317 - 15020 && days <= 100000 - 15020,
+              "NTP leap-second date must be a supported UTC midnight");
+        return static_cast<int>(days) + 15020;
+    };
+    const auto fields = [](std::string_view text) {
+        std::istringstream stream(std::string{text.substr(0, text.find('#'))});
+        stream.imbue(std::locale::classic());
+        std::vector<std::string> result;
+        for (std::string word; stream >> word;)
+            result.push_back(std::move(word));
+        return result;
+    };
     std::vector<detail::LeapSecond> rows;
     int expires = 0;
+    std::optional<bool> ntp_records;
+    std::optional<std::uint64_t> ntp_expiry, ntp_updated;
+    std::optional<std::array<std::uint32_t, 5>> checksum;
+    std::string checksum_input;
+    const auto append_checksum = [&](std::string_view text) {
+        for (const char ch : text.substr(0, text.find('#')))
+            if (ch >= '0' && ch <= '9')
+                checksum_input.push_back(ch);
+    };
     std::istringstream lines(bytes);
     std::string line;
     while (std::getline(lines, line)) {
@@ -587,6 +665,32 @@ std::unique_ptr<core::ITimeProvider> load_time_snapshot(const std::filesystem::p
         if (first == std::string::npos)
             continue;
         if (line[first] == '#') {
+            const auto text = std::string_view(line).substr(first);
+            if (text.starts_with("#@") || text.starts_with("#$")) {
+                const auto values = fields(text.substr(2));
+                check(values.size() == 1, "Malformed NTP leap-second timestamp");
+                auto &target = text[1] == '@' ? ntp_expiry : ntp_updated;
+                check(!target, "Duplicate NTP leap-second timestamp");
+                target = decimal(values.front());
+                append_checksum(text.substr(2));
+                continue;
+            }
+            if (text.starts_with("#h")) {
+                check(!checksum, "Duplicate NTP leap-second checksum");
+                const auto values = fields(text.substr(2));
+                check(values.size() == 5, "Malformed NTP leap-second checksum");
+                std::array<std::uint32_t, 5> words{};
+                for (std::size_t i = 0; i < words.size(); ++i) {
+                    const auto &word = values[i];
+                    const auto parsed =
+                        std::from_chars(word.data(), word.data() + word.size(), words[i], 16);
+                    check(!word.empty() && word.size() <= 8 && parsed.ec == std::errc{} &&
+                              parsed.ptr == word.data() + word.size(),
+                          "Malformed NTP leap-second checksum");
+                }
+                checksum = words;
+                continue;
+            }
             const auto marker = line.find("File expires on ");
             if (marker != std::string::npos) {
                 check(expires == 0, "Duplicate leap-second expiration date");
@@ -601,28 +705,59 @@ std::unique_ptr<core::ITimeProvider> load_time_snapshot(const std::filesystem::p
             }
             continue;
         }
-        std::istringstream row(line);
-        row.imbue(std::locale::classic());
-        double mjd = 0;
-        int day = 0, month = 0, year = 0, offset = 0;
-        check(static_cast<bool>(row >> mjd >> day >> month >> year >> offset),
-              "Malformed IERS leap-second record");
-        row >> std::ws;
-        const auto date = calendar_mjd(year, month, day);
-        check(row.eof() && mjd == date && offset >= 0 && offset <= 1000 && rows.size() < 512,
-              "Invalid IERS leap-second record");
+        const auto values = fields(line);
+        check(values.size() == 2 || values.size() == 5, "Malformed leap-second record");
+        const bool ntp = values.size() == 2;
+        check(!ntp_records || *ntp_records == ntp, "Mixed leap-second file formats");
+        ntp_records = ntp;
+        int date = 0, offset = 0;
+        if (ntp) {
+            date = ntp_mjd(decimal(values[0]));
+            const auto parsed_offset = decimal(values[1]);
+            check(parsed_offset <= 1000, "Invalid NTP leap-second offset");
+            offset = static_cast<int>(parsed_offset);
+            append_checksum(line);
+        } else {
+            std::istringstream row(line);
+            row.imbue(std::locale::classic());
+            double mjd = 0;
+            int day = 0, month = 0, year = 0;
+            check(static_cast<bool>(row >> mjd >> day >> month >> year >> offset),
+                  "Malformed IERS leap-second record");
+            row >> std::ws;
+            date = calendar_mjd(year, month, day);
+            check(row.eof() && mjd == date && offset >= 0 && offset <= 1000,
+                  "Invalid IERS leap-second record");
+        }
+        check(rows.size() < 512, "Too many leap-second records");
         check(rows.empty()
                   ? date == 41317 && offset == 10
                   : date > rows.back().mjd && std::abs(offset - rows.back().tai_minus_utc) == 1,
               "Leap-second table must start in 1972 and contain ordered one-second changes");
         rows.push_back({date, offset});
     }
+    const bool ntp = ntp_records.value_or(false);
+    if (ntp) {
+        check(ntp_expiry.has_value(), "Missing NTP leap-second expiration");
+        const auto date = ntp_mjd(*ntp_expiry);
+        check(expires == 0 || expires == date, "Conflicting leap-second expiration dates");
+        expires = date;
+        check(!ntp_updated || (*ntp_updated >= 2272060800ULL && *ntp_updated < *ntp_expiry),
+              "Invalid NTP leap-second update timestamp");
+        if (checksum)
+            check(*checksum == leap_file_checksum(checksum_input),
+                  "NTP leap-second checksum mismatch");
+    } else {
+        check(!ntp_expiry && !ntp_updated && !checksum, "Mixed leap-second file formats");
+    }
     check(!rows.empty() && expires > rows.back().mjd, "Missing or invalid leap-second expiration");
     const auto hash = picosha2::hash256_hex_string(bytes);
     if (hash == detail::time_data_info.sha256)
         return make_builtin_time_provider();
-    core::TimeDataInfo info{"iers-leap-seconds-" + hash.substr(0, 16), hash,
-                            "https://hpiers.obspm.fr/iers/bul/bulc/Leap_Second.dat",
+    core::TimeDataInfo info{(ntp ? "ntp-leap-seconds-" : "iers-leap-seconds-") + hash.substr(0, 16),
+                            hash,
+                            ntp ? "https://data.iana.org/time-zones/data/leap-seconds.list"
+                                : "https://hpiers.obspm.fr/iers/bul/bulc/Leap_Second.dat",
                             rows.front().mjd, expires};
     return std::make_unique<TimeProvider>(std::move(rows), std::move(info));
 }

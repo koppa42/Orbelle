@@ -59,6 +59,7 @@ struct DataUpdateStatus {
     std::optional<qint64> checked_at;
     QString checked_sha256;
     QString message;
+    QString diagnostics;
 };
 // One current item per product. Installation, coverage and online checks are independent.
 struct DataInventoryItem {

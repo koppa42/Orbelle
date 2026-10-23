@@ -4,6 +4,7 @@
 #include "window_show_observer.hpp"
 #include <QApplication>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QComboBox>
 #include <QDialog>
 #include <QDir>
@@ -121,8 +122,7 @@ TEST(DataCenterDialog, GroupedSourcesKeepDownloadStateAndPriorityIndependent) {
     ASSERT_TRUE(temporary.isValid());
     const auto root = std::filesystem::path(temporary.path().toStdWString());
     QFile file(QString::fromStdWString(
-        (std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() / "finals2000A.data")
-            .wstring()));
+        (std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() / "finals2000A.data").wstring()));
     ASSERT_TRUE(file.open(QIODevice::ReadOnly));
     DownloadServer server(file.readAll());
     EopCatalog catalog(root / "data", {ORBELLE_TEST_FINALS}, {}, false);
@@ -355,8 +355,7 @@ TEST(DataCenterDialog, ResponsiveNavigationPreservesSelectionSettingsAndDownload
     ASSERT_TRUE(temporary.isValid());
     const auto root = std::filesystem::path(temporary.path().toStdWString());
     QFile file(QString::fromStdWString(
-        (std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() / "finals2000A.data")
-            .wstring()));
+        (std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() / "finals2000A.data").wstring()));
     ASSERT_TRUE(file.open(QIODevice::ReadOnly));
     DownloadServer server(file.readAll());
     EopCatalog catalog(root / "data", {ORBELLE_TEST_FINALS}, {}, false);
@@ -592,6 +591,10 @@ QByteArray initial_gravity() {
            "Normalized Yes\nIncludesPermTide No\nBEGIN Coefficients\n2 0 -0.000484 0\nEND "
            "Coefficients\n";
 }
+QByteArray initial_refreshed_time() {
+    // A later bulletin is controlled test input, not an extension of production validity.
+    return initial_fixture(ORBELLE_TEST_TIME).replace("28 June 2027", "28 June 2030");
+}
 void finish_initial_cancel(EopCatalog &catalog) {
     QElapsedTimer elapsed;
     elapsed.start();
@@ -609,6 +612,46 @@ void capture_initial_setup(QDialog *dialog, const QString &name) {
         EXPECT_TRUE(dialog->grab().save(output + '/' + name + ".png"));
     }
 }
+TEST(DataCenterDialog, InitialSetupUsesValidBuiltinUtcWithoutClaimingItWasDownloaded) {
+    (void)test_app();
+    QTemporaryDir temporary;
+    EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
+    WindowShowObserver windows;
+    bool requested = false;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    QObject::connect(&timeout, &QTimer::timeout, [&] {
+        ADD_FAILURE() << "Valid builtin UTC unexpectedly blocked startup";
+        if (auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget()))
+            dialog->reject();
+    });
+    timeout.start(1000);
+    EXPECT_TRUE(prepare_initial_data(
+        nullptr, catalog, {DataProduct::utc}, [&](auto) { requested = true; }, {},
+        QDate(2026, 10, 24)));
+    timeout.stop();
+    EXPECT_FALSE(requested);
+    EXPECT_TRUE(windows.shown.empty());
+    EXPECT_FALSE(catalog.has_full_download(DataProduct::utc));
+    EXPECT_EQ(catalog.update_status(DataProduct::utc).state, DataUpdateState::never_checked);
+    EXPECT_TRUE(catalog.automatic_updates(DataProduct::utc));
+}
+TEST(DataCenterDialog, InitialSetupUtcRequiresBothDefaultScenarioEndpointsWithinValidity) {
+    (void)test_app();
+    QTemporaryDir temporary;
+    EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
+    EXPECT_FALSE(initial_data_ready(catalog, DataProduct::utc, QDate(1971, 12, 31)));
+    EXPECT_TRUE(initial_data_ready(catalog, DataProduct::utc, QDate(2027, 6, 26)));
+    // Expiration is exclusive: tomorrow's midnight is already outside this table.
+    EXPECT_FALSE(initial_data_ready(catalog, DataProduct::utc, QDate(2027, 6, 27)));
+    EXPECT_FALSE(initial_data_ready(catalog, DataProduct::utc, QDate(2027, 6, 28)));
+    EXPECT_FALSE(initial_data_ready(catalog, DataProduct::utc, QDate(2030, 1, 1)));
+    catalog.import_raw(ORBELLE_TEST_TIME, DataProduct::utc);
+    EXPECT_TRUE(catalog.has_full_download(DataProduct::utc));
+    EXPECT_TRUE(initial_data_ready(catalog, DataProduct::utc, QDate(2027, 6, 26)));
+    EXPECT_FALSE(initial_data_ready(catalog, DataProduct::utc, QDate(2027, 6, 27)));
+    EXPECT_FALSE(initial_data_ready(catalog, DataProduct::utc, QDate(2030, 1, 1)));
+}
 TEST(DataCenterDialog, InitialSetupDownloadsInDependencyOrderSkipsInstalledAndRepairsMissingFiles) {
     (void)test_app();
     const auto expected = initial_data_products();
@@ -619,9 +662,9 @@ TEST(DataCenterDialog, InitialSetupDownloadsInDependencyOrderSkipsInstalledAndRe
     EXPECT_EQ(expected[3], DataProduct::egm2008);
     QTemporaryDir temporary;
     EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
-    DownloadServer clock(initial_fixture(ORBELLE_TEST_TIME));
-    DownloadServer finals(initial_fixture(
-        std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() / "finals2000A.data"));
+    DownloadServer clock(initial_refreshed_time());
+    DownloadServer finals(initial_fixture(std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() /
+                                          "finals2000A.data"));
     DownloadServer gravity(initial_gravity());
     clock.hold = finals.hold = gravity.hold = false;
     const std::vector required{DataProduct::utc, DataProduct::finals2000a,
@@ -644,19 +687,19 @@ TEST(DataCenterDialog, InitialSetupDownloadsInDependencyOrderSkipsInstalledAndRe
             dialog->reject();
     });
     timeout.start(5000);
-    EXPECT_TRUE(prepare_initial_data(nullptr, catalog, required, download));
+    EXPECT_TRUE(prepare_initial_data(nullptr, catalog, required, download, {}, QDate(2027, 6, 27)));
     timeout.stop();
     EXPECT_EQ(requests, required);
     requests.clear();
     WindowShowObserver windows;
-    EXPECT_TRUE(prepare_initial_data(nullptr, catalog, required, download));
+    EXPECT_TRUE(prepare_initial_data(nullptr, catalog, required, download, {}, QDate(2027, 6, 27)));
     EXPECT_TRUE(windows.shown.empty());
     EXPECT_TRUE(requests.empty());
     const auto file = catalog.data().gravity_models().front().file;
     ASSERT_TRUE(QFile::remove(QString::fromStdWString(file.wstring())));
     EXPECT_FALSE(catalog.has_full_download(DataProduct::custom_gravity));
     timeout.start(5000);
-    EXPECT_TRUE(prepare_initial_data(nullptr, catalog, required, download));
+    EXPECT_TRUE(prepare_initial_data(nullptr, catalog, required, download, {}, QDate(2027, 6, 27)));
     timeout.stop();
     EXPECT_EQ(requests, std::vector{DataProduct::custom_gravity});
     EXPECT_TRUE(std::filesystem::is_regular_file(file));
@@ -691,9 +734,10 @@ TEST(DataCenterDialog, InitialSetupWithHiddenNativeWorkbenchIsExposedAndCancella
         capture_initial_setup(dialog, "initial-data-hidden-workbench");
         dialog->findChild<QPushButton *>("initialDataCancel")->click();
     });
-    EXPECT_FALSE(prepare_initial_data(&workbench, catalog, {DataProduct::utc}, [&](auto product) {
-        catalog.start_download(clock.url(), product);
-    }));
+    EXPECT_FALSE(prepare_initial_data(
+        &workbench, catalog, {DataProduct::utc},
+        [&](auto product) { catalog.start_download(clock.url(), product); }, {},
+        QDate(2027, 6, 27)));
     finish_initial_cancel(catalog);
     EXPECT_TRUE(inspected);
     EXPECT_FALSE(workbench.isVisible());
@@ -702,9 +746,9 @@ TEST(DataCenterDialog, InitialSetupFailureStopsTheQueueAndRetryKeepsCompletedDow
     (void)test_app();
     QTemporaryDir temporary;
     EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
-    DownloadServer clock(initial_fixture(ORBELLE_TEST_TIME));
-    DownloadServer finals(initial_fixture(
-        std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() / "finals2000A.data"));
+    DownloadServer clock(initial_refreshed_time());
+    DownloadServer finals(initial_fixture(std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() /
+                                          "finals2000A.data"));
     clock.hold = finals.hold = false;
     finals.fail = true;
     std::vector<DataProduct> requests;
@@ -728,6 +772,11 @@ TEST(DataCenterDialog, InitialSetupFailureStopsTheQueueAndRetryKeepsCompletedDow
             EXPECT_FALSE(catalog.has_full_download(DataProduct::finals2000a));
             EXPECT_EQ(requests.size(), 2U);
             EXPECT_TRUE(dialog->findChild<QLabel *>("initialDataStatus")->text().contains("503"));
+            auto *copy = dialog->findChild<QPushButton *>("initialDataCopyDiagnostics");
+            ASSERT_NE(copy, nullptr);
+            EXPECT_TRUE(copy->isVisible());
+            copy->click();
+            EXPECT_TRUE(QApplication::clipboard()->text().contains("503"));
             capture_initial_setup(dialog, "initial-data-failure");
             dialog->resize(400, 450);
             capture_initial_setup(dialog, "initial-data-compact");
@@ -737,10 +786,14 @@ TEST(DataCenterDialog, InitialSetupFailureStopsTheQueueAndRetryKeepsCompletedDow
     });
     inspect.start(25);
     const std::vector required{DataProduct::utc, DataProduct::finals2000a};
-    EXPECT_TRUE(prepare_initial_data(nullptr, catalog, required, [&](auto product) {
-        requests.push_back(product);
-        catalog.start_download(product == DataProduct::utc ? clock.url() : finals.url(), product);
-    }));
+    EXPECT_TRUE(prepare_initial_data(
+        nullptr, catalog, required,
+        [&](auto product) {
+            requests.push_back(product);
+            catalog.start_download(product == DataProduct::utc ? clock.url() : finals.url(),
+                                   product);
+        },
+        {}, QDate(2027, 6, 27)));
     inspect.stop();
     EXPECT_TRUE(retried);
     EXPECT_EQ(requests,
@@ -751,9 +804,9 @@ TEST(DataCenterDialog,
     (void)test_app();
     QTemporaryDir temporary;
     EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
-    DownloadServer clock(initial_fixture(ORBELLE_TEST_TIME));
-    DownloadServer finals(initial_fixture(
-        std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() / "finals2000A.data"));
+    DownloadServer clock(initial_refreshed_time());
+    DownloadServer finals(initial_fixture(std::filesystem::path(ORBELLE_TEST_FINALS).parent_path() /
+                                          "finals2000A.data"));
     clock.hold = false;
     std::vector<DataProduct> requests;
     const auto download = [&](DataProduct product) {
@@ -779,7 +832,8 @@ TEST(DataCenterDialog,
     });
     inspect.start(25);
     const std::vector required{DataProduct::utc, DataProduct::finals2000a};
-    EXPECT_FALSE(prepare_initial_data(nullptr, catalog, required, download));
+    EXPECT_FALSE(
+        prepare_initial_data(nullptr, catalog, required, download, {}, QDate(2027, 6, 27)));
     inspect.stop();
     EXPECT_TRUE(cancelled);
     finish_initial_cancel(catalog);
@@ -795,7 +849,7 @@ TEST(DataCenterDialog,
             dialog->reject();
     });
     timeout.start(5000);
-    EXPECT_TRUE(prepare_initial_data(nullptr, catalog, required, download));
+    EXPECT_TRUE(prepare_initial_data(nullptr, catalog, required, download, {}, QDate(2027, 6, 27)));
     timeout.stop();
     EXPECT_EQ(requests, std::vector{DataProduct::finals2000a});
 }
@@ -811,6 +865,12 @@ TEST(DataCenterDialog, InitialSetupDefaultResourcesRemainReadableAtNarrowWidths)
         for (auto product : initial_data_products())
             EXPECT_TRUE(dialog->findChild<QLabel *>(
                 QStringLiteral("initialDataState%1").arg(static_cast<int>(product))));
+        const auto *utc = dialog->findChild<QLabel *>(
+            QStringLiteral("initialDataState%1").arg(static_cast<int>(DataProduct::utc)));
+        ASSERT_NE(utc, nullptr);
+        EXPECT_TRUE(utc->text().contains(QStringLiteral("程序内置表")));
+        EXPECT_TRUE(utc->text().contains("2027-06-28"));
+        EXPECT_FALSE(dialog->findChild<QPushButton *>("initialDataCopyDiagnostics")->isVisible());
         capture_initial_setup(dialog, "initial-data-all-resources");
         dialog->resize(400, 450);
         QEventLoop settled;
@@ -822,19 +882,19 @@ TEST(DataCenterDialog, InitialSetupDefaultResourcesRemainReadableAtNarrowWidths)
         capture_initial_setup(dialog, "initial-data-all-resources-compact");
         dialog->findChild<QPushButton *>("initialDataCancel")->click();
     });
-    EXPECT_FALSE(prepare_initial_data(nullptr, catalog, initial_data_products(), [&](auto product) {
-        catalog.start_download(source.url(), product);
-    }));
+    EXPECT_FALSE(prepare_initial_data(
+        nullptr, catalog, initial_data_products(),
+        [&](auto product) { catalog.start_download(source.url(), product); }, {},
+        QDate(2026, 10, 24)));
     finish_initial_cancel(catalog);
 }
 TEST(DataCenterDialog, LiveInitialDataSetup) {
     if (qEnvironmentVariableIsEmpty("ORBELLE_LIVE_INITIAL_DATA_HOME"))
         GTEST_SKIP();
     (void)test_app();
-    EopCatalog catalog(
-        std::filesystem::path(
-            qEnvironmentVariable("ORBELLE_LIVE_INITIAL_DATA_HOME").toStdWString()),
-        {}, {}, false);
+    EopCatalog catalog(std::filesystem::path(
+                           qEnvironmentVariable("ORBELLE_LIVE_INITIAL_DATA_HOME").toStdWString()),
+                       {}, {}, false);
     const auto required = initial_data_products();
     QElapsedTimer elapsed;
     elapsed.start();
@@ -855,7 +915,7 @@ TEST(DataCenterDialog, LiveInitialDataSetup) {
     EXPECT_TRUE(prepare_initial_data(nullptr, catalog));
     inspect.stop();
     for (auto product : required)
-        EXPECT_TRUE(catalog.has_full_download(product));
+        EXPECT_TRUE(initial_data_ready(catalog, product));
     EXPECT_TRUE(prepare_initial_data(nullptr, catalog));
 }
 } // namespace

@@ -1269,7 +1269,7 @@ class Workbench final : public WorkbenchWindow {
         for (;;) {
             const auto required = initial_data_products();
             if (!std::all_of(required.begin(), required.end(), [&](auto product) {
-                    return eop_catalog_->has_full_download(product);
+                    return initial_data_ready(*eop_catalog_, product);
                 }))
                 splash->hide();
             if (!prepare_initial_data(this, *eop_catalog_, required, {},

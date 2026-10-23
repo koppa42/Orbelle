@@ -5,6 +5,7 @@
 #include "workbench_spin_box.hpp"
 #include "workbench_style.hpp"
 #include <QCheckBox>
+#include <QClipboard>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDialog>
@@ -537,8 +538,12 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     auto *status = new QLabel;
     status->setObjectName("dataCenterStatus");
     status->setTextFormat(Qt::PlainText);
+    status->setTextInteractionFlags(Qt::TextSelectableByMouse);
     status->setWordWrap(true);
     acquisition_layout->addWidget(status);
+    auto *copy_diagnostics = new QPushButton(ui::text("data_center_dialog.copy_diagnostics"));
+    copy_diagnostics->setObjectName("copyDownloadDiagnostics");
+    acquisition_layout->addWidget(copy_diagnostics, 0, Qt::AlignLeft);
     auto *footer_panel = new QWidget;
     footer_panel->setObjectName("dataFooter");
     auto *footer = new QHBoxLayout(footer_panel);
@@ -915,6 +920,10 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     QObject::connect(allow, &QCheckBox::toggled, &dialog, save_extrapolation);
     QObject::connect(days, &QSpinBox::valueChanged, &dialog, save_extrapolation);
     QObject::connect(cancel, &QPushButton::clicked, &dialog, [&] { catalog.cancel_download(); });
+    QObject::connect(copy_diagnostics, &QPushButton::clicked, &dialog, [&] {
+        if (const auto product = selected())
+            QGuiApplication::clipboard()->setText(catalog.update_status(*product).diagnostics);
+    });
     QObject::connect(close, &QPushButton::clicked, &dialog, &QDialog::reject);
     QTimer timer;
     std::uint64_t seen_revision = 0;
@@ -978,6 +987,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
             return;
         const auto &item = selected_item();
         const auto update = catalog.update_status(item.product);
+        copy_diagnostics->setVisible(!update.diagnostics.isEmpty());
         const bool downloading_this = busy && catalog.active_product() == item.product;
         checked->setText(
             item.online_updates

@@ -46,11 +46,15 @@ class EopCatalog : public QObject {
     [[nodiscard]] int extrapolation_days(std::size_t index) const;
     [[nodiscard]] Provider for_interval(core::Epoch first, core::Epoch last) const;
     void start_download(QUrl url = {}, DataProduct product = DataProduct::finals2000a);
+    void start_download_from_sources(const QList<QUrl> &sources,
+                                     DataProduct product = DataProduct::finals2000a);
     void cancel_download();
     void check_updates_if_due(qint64 now, QUrl source = {});
     void set_update_schedule_enabled(bool enabled);
     [[nodiscard]] bool has_full_download(DataProduct product = DataProduct::finals2000a) const;
-    [[nodiscard]] bool downloading() const { return reply_ != nullptr || resource_job_.valid(); }
+    [[nodiscard]] bool downloading() const {
+        return reply_ != nullptr || retry_.isActive() || resource_job_.valid();
+    }
     [[nodiscard]] DataProduct active_product() const { return active_product_; }
     [[nodiscard]] const QString &status() const { return status_; }
     [[nodiscard]] qint64 received_bytes() const { return received_; }
@@ -74,6 +78,10 @@ class EopCatalog : public QObject {
         return updates_[static_cast<std::size_t>(product)];
     }
     void save_update_status();
+    void start_download_attempt();
+    void finish_download_failure(const QString &message);
+    bool recover_download(QNetworkReply &reply, int http, bool conditional);
+    void record_download_failure(const QNetworkReply &reply, int http, const QString &message);
     void start_resource_install(const std::filesystem::path &file, DataProduct product,
                                 const std::string &url, runtime::DataAcquisition acquisition,
                                 EphemerisImport ephemeris_import = EphemerisImport::base);
@@ -86,7 +94,14 @@ class EopCatalog : public QObject {
     QNetworkAccessManager network_;
     QNetworkReply *reply_ = nullptr;
     std::unique_ptr<QTemporaryFile> download_;
-    QTimer schedule_, deadline_;
+    QTimer schedule_, deadline_, retry_;
+    QList<QUrl> download_sources_;
+    QUrl request_url_;
+    qsizetype source_index_ = 0;
+    int source_attempt_ = 0;
+    int redirects_ = 0;
+    bool unconditional_ = false;
+    QByteArray error_response_;
     QString status_;
     qint64 received_ = 0;
     qint64 total_ = -1;

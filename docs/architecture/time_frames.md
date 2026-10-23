@@ -10,7 +10,9 @@ ERFA 2.0.1 与 IERS C04 / finals2000A Provider 通过 Runtime 供 C++ SDK 和独
 
 快照覆盖 **[1972-01-01 00:00:00 UTC, 2027-06-28 00:00:00 UTC)**。官方文件只给出到期日期，本项目保守地取到期日零点为排他上界。超出范围抛出 `TimeDataRangeError`，Python 中继承 `ValueError`；不使用 ERFA 内建的旧表兜底，也不自动延长有效期。日期非法或不存在的 `second=60` 抛出 `std::invalid_argument`，Python 映射为 `ValueError`。
 
-ERFA 的 `eraCal2jd` / `eraJd2cal` 提供日历换算。UTC↔TAI 的偏移选择与正闰秒纳秒记账使用整数，避免经过双精度 JD 丢失原始纳秒。当前编译数据仅支持 1972 年以后、每次增加一秒的已公布历史记录；不支持 1972 年前的 UTC 频率调整。`load_time_snapshot(file)` 可加载 IERS Leap_Second.dat，每个实例持有独立只读记录及有效期，验证正／负单秒变化；负闰秒删除的 UTC 秒不可输入，正闰秒保留 `23:59:60`。内置编译表仍校验已公布的正闰秒历史。代码不调用 `eraSetLeapSeconds`，不改变 ERFA 全局数据。
+ERFA 的 `eraCal2jd` / `eraJd2cal` 提供日历换算。UTC↔TAI 的偏移选择与正闰秒纳秒记账使用整数，避免经过双精度 JD 丢失原始纳秒。当前编译数据仅支持 1972 年以后、每次增加一秒的已公布历史记录；不支持 1972 年前的 UTC 频率调整。`load_time_snapshot(file)` 可加载 IERS `Leap_Second.dat` 或 IANA/NTP `leap-seconds.list`，每个实例持有独立只读记录及有效期，验证正／负单秒变化；负闰秒删除的 UTC 秒不可输入，正闰秒保留 `23:59:60`。内置编译表仍校验已公布的正闰秒历史。代码不调用 `eraSetLeapSeconds`，不改变 ERFA 全局数据。
+
+两种闰秒文件都要求从 1972-01-01 的 TAI−UTC = 10 s 开始，记录严格递增且偏移每次只改变一秒，拒绝混合格式。IERS 文件要求明确的英文到期日期；NTP 文件要求 `#@` 到期时间，若同时给出英文日期，两者必须一致。NTP 时间戳按自 1900-01-01 起的 64 位整秒解析，不按网络协议的 32 位时间戳处理，因而不会在 2036 年回绕；记录与到期时间必须落在支持范围内的 UTC 午夜。可选 `#$` 更新时间不能晚于或等于到期时间；可选 `#h` 按 [NTP 官方格式](https://github.com/ntp-project/ntp/blob/master/ntpd/ntp_leapsec.c)校验：按行顺序拼接 `#$`、`#@` 和数据行注释前的十进制数字，核对 SHA-1 的五个 32 位十六进制字。该校验用于发现文件损坏，不用于认证来源。文件计算身份始终使用包含注释和换行的原始字节 SHA256，不转换或重写下载内容；NTP 格式的规范来源标记为 [IANA](https://data.iana.org/time-zones/data/leap-seconds.list)，桌面目录另记录实际获取地址。历史表仍可导入用于其覆盖内的历元，加载器不依据当前系统日期改写有效期，UTC 转换继续拒绝到期日及之后的历元。
 
 `julian_date(epoch, TimeScale::tai/tt)` 返回带时间尺度标签的两部分 JD。内部算法应分别传递 `day` 和 `fraction`，不要先求和。TAI→TT 使用 `eraTaitt`，偏移为 32.184 s；它不依赖 UTC 表的覆盖范围。两部分 JD 属于浮点算法输入，不承诺覆盖整个 Epoch 范围的无损反向转换，目前也没有从任意浮点 JD 构造 Epoch 的 API。
 
