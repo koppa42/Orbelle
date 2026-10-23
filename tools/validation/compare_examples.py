@@ -6,7 +6,7 @@ import math
 from pathlib import Path
 import subprocess
 
-import orbelle as of
+import orbelle as ob
 
 
 def main():
@@ -15,7 +15,7 @@ def main():
     args = parser.parse_args()
     output = subprocess.check_output([str(args.cpp_example.resolve())], text=True)
     rows = list(csv.DictReader(io.StringIO(output)))
-    states = of.make_circular_demo_session().sample(of.demo_epochs()).states
+    states = ob.make_circular_demo_session().sample(ob.demo_epochs()).states
     if len(rows) != len(states) or not states:
         raise RuntimeError("C++ and Python sample counts differ or are empty")
     for row, state in zip(rows, states):

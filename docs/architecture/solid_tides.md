@@ -26,7 +26,7 @@ HPOP 的固体潮由共享 Core 计算，桌面、Python、C++ SDK 和任务序�
 
 ## 接口与来源
 
-C++ 使用 `HpopOptions::solid_tides`（`SolidTideOptions`），Python 使用 `of.orbits.SolidTideSettings(mode="full", truncate_to_gravity=False, include_time_dependent_terms=True)` 并传入 `Hpop(..., solid_tides=...)`。SDK/Python 默认 None；桌面新配置默认仅永久潮，按参考截图。完整模式独立要求 Sun/Moon 星历和 EOP/Frame Provider，覆盖校验包括初始历元至全部积分路径，计算核心不联网。
+C++ 使用 `HpopOptions::solid_tides`（`SolidTideOptions`），Python 使用 `ob.orbits.SolidTideSettings(mode="full", truncate_to_gravity=False, include_time_dependent_terms=True)` 并传入 `Hpop(..., solid_tides=...)`。SDK/Python 默认 None；桌面新配置默认仅永久潮，按参考截图。完整模式独立要求 Sun/Moon 星历和 EOP/Frame Provider，覆盖校验包括初始历元至全部积分路径，计算核心不联网。
 
 模型标识 `iers2003-anelastic-v3` 记录模式、截断、k20、频率/极潮约定及其开关、实际日月 GM 及星历/EOP 身份。项目 v46 / OBJS32 保存三个选项及非活动草稿；修改设置不改变旧分析。只接受当前格式。重力元数据 `GravityInfo::solid_tide_k20` / Python `GravityInfo.solid_tide_k20` 保存实际实部；HPOP 引力页和数据中心只读显示该值，不增设与文件配置相互覆盖的编辑项。重力目录收据使用 schema 3，明确保存 k20 与可空的长期变化元数据；旧收据须重新导入或下载，不按旧格式补默认值。Love 数从资源元数据读取，不额外写入项目对象字段；原文件 SHA-256 与 `normalized-gravity-2190-secular-julian-year-v4` 解释版本进入数据引用，改变后沿用确认流程。
 

@@ -49,16 +49,16 @@
 ## API 示例
 
 ```python
-import orbelle as of
+import orbelle as ob
 
-request = of.EarthOrbitDesignRequest()
-request.type = of.EarthOrbitType.REPEATING_SUN_SYNC
-request.epoch = of.Epoch(0)  # 显式 TAI 历元，实际任务使用场景历元
+request = ob.EarthOrbitDesignRequest()
+request.type = ob.EarthOrbitType.REPEATING_SUN_SYNC
+request.epoch = ob.Epoch(0)  # 显式 TAI 历元，实际任务使用场景历元
 request.repeat_revolutions = 233
 request.repeat_days = 16
-design = of.design_earth_orbit(request)
+design = ob.design_earth_orbit(request)
 e = design.elements  # 此例为圆形 J2 平均椭圆
-session = of.make_j2_session(of.J2MeanElements(
+session = ob.make_j2_session(ob.J2MeanElements(
     e.epoch, e.semi_major_axis_m, e.eccentricity, e.inclination_rad,
     e.raan_rad, e.argument_of_periapsis_rad, e.true_anomaly_rad), "designed")
 # 上面的 M=ν 只适用于圆轨道。一般椭圆应显式进行 ν→M 换算。

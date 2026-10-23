@@ -34,7 +34,7 @@ STK 的 [Pass Data](https://help.agi.com/stk/SubSystems/dataProviders/Content/ht
 “分析 → 报告”或卫星对象菜单中选择“轨道事件 · 近远地点 / 交点”。四张摘要卡显示分类数量，事件表通过颜色区分类别；宽布局并排显示设置与结果，窄布局沿用设置／结果切换及两列摘要卡。双击任意事件行定位场景时刻；支持模板、逐列单位、精确时间提示和 CSV。离散事件不连接成采样曲线，PNG 曲线导出不适用于此表。
 
 ```python
-events = analysis.report(of.ReportKind.ORBITAL_EVENTS, objects=satellite,
+events = analysis.report(ob.ReportKind.ORBITAL_EVENTS, objects=satellite,
                          step=u.s(60), boundary_tolerance=u.s(.001))
 print(events.orbital_event_statistics.counts)
 events.export_csv("events.csv")

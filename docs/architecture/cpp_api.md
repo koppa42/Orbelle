@@ -7,37 +7,37 @@
 ```cpp
 #include <orbelle/orbelle.hpp>
 
-namespace of = orbelle;
 using namespace std::chrono_literals;
 
 int main() {
-    of::Project project{"Observation", of::Epoch{0}, of::Epoch{120'000'000'000}};
+    orbelle::Project project{"Observation", orbelle::Epoch{0}, orbelle::Epoch{120'000'000'000}};
     auto edit = project.edit();
-    auto satellite = edit.objects().create(of::objects::Satellite{"Observer", {}, {}});
-    auto station = edit.objects().create(of::objects::GroundStation{
+    auto satellite = edit.objects().create(orbelle::objects::Satellite{"Observer", {}, {}});
+    auto station = edit.objects().create(orbelle::objects::GroundStation{
         .name = "Station", .location = {0, 0, 100}, .minimum_elevation_rad = 0.1,
     });
-    auto sensor = edit.objects().create(of::objects::Sensor{
-        .name = "Camera", .parent = satellite, .half_angle_rad = 0.2,
+    auto sensor = edit.objects().create(orbelle::objects::Sensor{
+        .name = "Camera", .parent = satellite, .pattern = orbelle::core::SensorPattern{0.2},
         .pointing = {station}, // 空 Pointing{} 表示对地心。
     });
     edit.commit();
 
-    project.objects().update(sensor, of::objects::SensorUpdate{.half_angle_rad = 0.15});
+    project.objects().update(sensor, orbelle::objects::SensorUpdate{
+        .pattern = orbelle::core::SensorPattern{0.15}});
     auto analysis = project.prepare();
-    auto trajectory = analysis.states(satellite, 30s, of::FrameId::gcrf);
+    auto trajectory = analysis.states(satellite, 30s, orbelle::FrameId::gcrf);
     auto report = analysis.report(
-        {.kind = of::ReportKind::cartesian_state, .object_ids = {satellite.id()}},
+        {.kind = orbelle::ReportKind::cartesian_state, .object_ids = {satellite.id()}},
         {.columns = {{"time.epoch", "", "TAI"}, {"state.x", "km", "Position X"}},
-         .time_scale = of::ReportTimeScale::tai});
+         .time_scale = orbelle::ReportTimeScale::tai});
 
     project.save("observation.orbelle", analysis);
-    auto reopened = of::Project::open("observation.orbelle");
+    auto reopened = orbelle::Project::open("observation.orbelle");
     auto restored_satellite = reopened.objects().get(satellite.id());
 }
 ```
 
-该示例不需要外部数据文件；默认卫星的通用二体传播需要启用 CSPICE（`ORBELLE_WITH_SPICE=ON`，如 `astronomy` 预设）。创建自定义轨道时传入 `of::OrbitInput`，其 `initial` 为 SI 制 Cartesian 状态。地面站经纬度、最低仰角、传感器半锥角均为弧度，椭球高为米。`Epoch` 为从 2000-01-01 12:00:00 TAI 起算的 int64 纳秒，采样步长使用 `std::chrono` 整数时长。C++ 强类型轨道配置、单位构造器仍待后续实施，不应把 Python 的 `of.orbits` / `of.units` 示例直接当成 C++ 接口。
+该示例不需要外部数据文件；默认卫星的通用二体传播需要启用 CSPICE（`ORBELLE_WITH_SPICE=ON`，如 `astronomy` 预设）。创建自定义轨道时传入 `orbelle::OrbitInput`，其 `initial` 为 SI 制 Cartesian 状态。地面站经纬度、最低仰角、传感器半锥角均为弧度，椭球高为米。`Epoch` 为从 2000-01-01 12:00:00 TAI 起算的 int64 纳秒，采样步长使用 `std::chrono` 整数时长。C++ 强类型轨道配置、单位构造器仍待后续实施，不应把 Python 的 `ob.orbits` / `ob.units` 示例直接当成 C++ 接口。
 
 可运行示例为 [`examples/cpp/project_analysis.cpp`](../../examples/cpp/project_analysis.cpp)，启用 CSPICE 时生成 `orbelle_project_example`。独立安装验证 [`sdk_consumer/project_api.cpp`](../../tests/packaging/sdk_consumer/project_api.cpp) 仅包含聚合头文件，通过地面站 ITRF 状态完成编辑、查询、报告、保存与重开；这条基础流程不依赖天文库。
 
@@ -66,9 +66,9 @@ C++ 事务显式操作 `edit.objects()`、`edit.settings()`，提交用 `commit(
 跨参考系、Access 和 AER 查询需要明确提供数据。例如，使用已有本地数据目录：
 
 ```cpp
-of::DataCatalog catalog{"local/shared-data"};
+orbelle::DataCatalog catalog{"local/shared-data"};
 auto analysis = project.prepare(catalog);
-auto trajectory = analysis.states(satellite, 30s, of::FrameId::itrf);
+auto trajectory = analysis.states(satellite, 30s, orbelle::FrameId::itrf);
 auto windows = analysis.access(station, sensor, {.search_step = 1s});
 auto aer = analysis.aer(station, sensor, 10s);
 ```
@@ -79,14 +79,14 @@ auto aer = analysis.aer(station, sensor, 10s);
 
 | 场景 | 入口 | 数据变化时的异常及后续操作 |
 | --- | --- | --- |
-| 准备分析 | `project.prepare(data)` | `of::DataChangedError`；取得 `error.plan()` |
-| 预先检查准备 | `project.plan_prepare(data)` | 返回 `of::AnalysisPlan`，读取 `data_changes()` 后调用 `prepare()` |
-| 打开文件 | `of::Project::open(path, data)` | `of::OpenDataChangedError`；取得 `error.plan()` |
-| 预先检查打开 | `of::Project::plan_open(path, data)` | 返回 `of::ProjectOpenPlan`，读取 `data_changes()` 后调用 `open()` |
+| 准备分析 | `project.prepare(data)` | `orbelle::DataChangedError`；取得 `error.plan()` |
+| 预先检查准备 | `project.plan_prepare(data)` | 返回 `orbelle::AnalysisPlan`，读取 `data_changes()` 后调用 `prepare()` |
+| 打开文件 | `orbelle::Project::open(path, data)` | `orbelle::OpenDataChangedError`；取得 `error.plan()` |
+| 预先检查打开 | `orbelle::Project::plan_open(path, data)` | 返回 `orbelle::ProjectOpenPlan`，读取 `data_changes()` 后调用 `open()` |
 
-上述 `data` 可以是 `DataSnapshot` 或 `DataCatalog`。只有调用方取得本次明确同意后，才对同一计划调用 `prepare(true)` 或 `open(true)`；拒绝则丢弃计划。类型区分准备和打开两个结果，`OpenDataChangedError::plan().open(true)` 返回公开的 `of::Project`。接受不会变成以后自动同意的设置，也不会重新读取磁盘。计划创建时已经校验资源与覆盖，错误不能通过接受参数绕过。
+上述 `data` 可以是 `DataSnapshot` 或 `DataCatalog`。只有调用方取得本次明确同意后，才对同一计划调用 `prepare(true)` 或 `open(true)`；拒绝则丢弃计划。类型区分准备和打开两个结果，`OpenDataChangedError::plan().open(true)` 返回公开的 `orbelle::Project`。接受不会变成以后自动同意的设置，也不会重新读取磁盘。计划创建时已经校验资源与覆盖，错误不能通过接受参数绕过。
 
-`save(path)` 保存当前已提交输入，`save(path, analysis)` 另外记录匹配的分析来源。分析必须属于同一文档且物理输入仍一致；改名、样式与报告修改不使分析失效。文件已存在时默认报错；允许覆盖需显式传 `true`。写入失败不改变原文件、内存来源或已保存标记。文件使用当前 v46，包含 HPOP 配置。
+`save(path)` 保存当前已提交输入，`save(path, analysis)` 另外记录匹配的分析来源。分析必须属于同一文档且物理输入仍一致；改名、样式与报告修改不使分析失效。文件已存在时默认报错；允许覆盖需显式传 `true`。写入失败不改变原文件、内存来源或已保存标记。文件格式版本与字段约定见[项目文件](project_files.md)。
 
 ## 安装后链接
 

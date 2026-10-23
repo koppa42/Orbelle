@@ -5,14 +5,14 @@ import struct
 import tempfile
 import unittest
 # Native value/format tests; public editing is in test_objects.py.
-from orbelle import _native as of
+from orbelle import _native as native
 from project_format import rewrite_section
 
 
 class ProjectTests(unittest.TestCase):
     def test_settings_keep_two_body_and_j2_initial_conditions_and_roundtrip(self):
         original = self.make_project()
-        first, last = of.Epoch(700123456790), of.Epoch(1800123456789)
+        first, last = native.Epoch(700123456790), native.Epoch(1800123456789)
         revised = original.with_settings('修改后的任务', first, last)
         self.assertEqual(revised.current.tai_nanoseconds, first.tai_nanoseconds)
         before = original.to_scenario().sample([first, last])
@@ -37,7 +37,7 @@ class ProjectTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / '修改时段.orbelle'
             revised.save(path)
-            restored = of.load_project(path)
+            restored = native.load_project(path)
             self.assertEqual(restored.name, revised.name)
             self.assertEqual(restored.first.tai_nanoseconds, first.tai_nanoseconds)
             self.assertEqual(restored.current.tai_nanoseconds, first.tai_nanoseconds)
@@ -46,22 +46,22 @@ class ProjectTests(unittest.TestCase):
 
     def test_settings_validate_existing_coverage_and_invalid_intervals(self):
         original = self.bound_project()
-        beyond = of.Epoch(original.earth_orientation.last_epoch.tai_nanoseconds + 1)
-        with self.assertRaises(of.ProjectError):
+        beyond = native.Epoch(original.earth_orientation.last_epoch.tai_nanoseconds + 1)
+        with self.assertRaises(native.ProjectError):
             original.with_settings('Out of coverage', original.first, beyond)
-        with self.assertRaises(of.ProjectError):
+        with self.assertRaises(native.ProjectError):
             original.with_settings('Reversed', original.last, original.first)
-        with self.assertRaises(of.ProjectError):
+        with self.assertRaises(native.ProjectError):
             original.with_settings(' ', original.first, original.last)
-        earlier = of.Epoch(original.current.tai_nanoseconds - 1)
+        earlier = native.Epoch(original.current.tai_nanoseconds - 1)
         changed = original.with_settings('Clamped', original.first, earlier)
         self.assertEqual(changed.current.tai_nanoseconds, earlier.tai_nanoseconds)
         self.assertEqual(changed.data_lock.sha256, original.data_lock.sha256)
 
     def bound_project(self):
         project = self.make_project()
-        manifest = Path(of.__file__).parent / 'data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json'
-        project.earth_orientation = of.load_eop_snapshot(manifest).data_info
+        manifest = Path(native.__file__).parent / 'data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json'
+        project.earth_orientation = native.load_eop_snapshot(manifest).data_info
         return project
 
     def test_data_lock_has_independent_sha256_and_is_preserved_in_runtime_scenarios(self):
@@ -71,22 +71,22 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual([r.role for r in lock.references], ['earth-orientation', 'utc-time'])
         self.assertEqual(lock.references[0].content_sha256, project.earth_orientation.sha256)
         self.assertEqual(lock.references[1].content_sha256, project.earth_orientation.time_data.sha256)
-        self.assertEqual(of.DataLock(list(reversed(lock.references))).sha256, lock.sha256)
+        self.assertEqual(native.DataLock(list(reversed(lock.references))).sha256, lock.sha256)
         original = project.to_scenario()
         self.assertEqual(original.data_lock.sha256, lock.sha256)
-        changed = original.with_data_lock(of.DataLock())
+        changed = original.with_data_lock(native.DataLock())
         self.assertEqual(changed.revision, original.revision + 1)
         self.assertEqual(original.data_lock.sha256, lock.sha256)
         self.assertEqual(project.renamed_satellite('二体', 'New name').data_lock.sha256, lock.sha256)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'bound.orbelle'
             project.save(path)
-            restored = of.load_project(path)
+            restored = native.load_project(path)
             self.assertEqual(restored.data_lock.sha256, lock.sha256)
             self.assertEqual(restored.to_scenario().data_lock.sha256, lock.sha256)
 
     def test_content_hash_matches_the_actual_pinned_file(self):
-        directory = Path(of.__file__).parent / 'data/eop/iers_c04_2000_01_01_2000_01_02'
+        directory = Path(native.__file__).parent / 'data/eop/iers_c04_2000_01_01_2000_01_02'
         manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8'))
         raw = (directory / manifest['data_file']).read_bytes()
         self.assertEqual(self.bound_project().data_lock.references[0].content_sha256,
@@ -103,27 +103,27 @@ class ProjectTests(unittest.TestCase):
                 path.write_bytes(rewrite_section(original, tag_to_change, mutate))
 
             rewrite(b'LOCK', lambda body: None)
-            with self.assertRaisesRegex(of.ProjectError, 'Missing scenario data lock'):
-                of.load_project(path)
+            with self.assertRaisesRegex(native.ProjectError, 'Missing scenario data lock'):
+                native.load_project(path)
             rewrite(b'LOCK', lambda body: body[:-1] + (b'0' if body[-1:] != b'0' else b'1'))
-            with self.assertRaisesRegex(of.ProjectError, 'SHA256 mismatch'):
-                of.load_project(path)
+            with self.assertRaisesRegex(native.ProjectError, 'SHA256 mismatch'):
+                native.load_project(path)
             digest = project.earth_orientation.sha256.encode('ascii')
             changed = (b'0' if digest[:1] != b'0' else b'1') + digest[1:]
             rewrite(b'DATA', lambda body: body.replace(digest, changed, 1))
-            with self.assertRaisesRegex(of.ProjectError, 'references disagree'):
-                of.load_project(path)
+            with self.assertRaisesRegex(native.ProjectError, 'references disagree'):
+                native.load_project(path)
 
     def test_extrapolation_policy_roundtrip_and_integrity(self):
         project = self.bound_project()
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'policy.orbelle'
             project.save(path)
-            loaded = of.load_project(path)
-            sample = Path(of.__file__).parent / 'data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json'
-            loaded.earth_orientation = of.load_eop_snapshot(sample, 3).data_info
+            loaded = native.load_project(path)
+            sample = Path(native.__file__).parent / 'data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json'
+            loaded.earth_orientation = native.load_eop_snapshot(sample, 3).data_info
             loaded.save(path, overwrite=True)
-            restored = of.load_project(path)
+            restored = native.load_project(path)
             self.assertEqual(restored.earth_orientation.extrapolation_days, 3)
             self.assertEqual(restored.data_lock.sha256, loaded.data_lock.sha256)
             self.assertNotEqual(restored.data_lock.sha256, project.data_lock.sha256)
@@ -131,8 +131,8 @@ class ProjectTests(unittest.TestCase):
             original = path.read_bytes()
             # A changed policy with repaired CRCs must still fail the independent data hash.
             path.write_bytes(rewrite_section(original, b'DATA', lambda body: body[:-4] + struct.pack('<I', 4)))
-            with self.assertRaisesRegex(of.ProjectError, 'references disagree'):
-                of.load_project(path)
+            with self.assertRaisesRegex(native.ProjectError, 'references disagree'):
+                native.load_project(path)
 
     def test_names_copies_and_deletions_preserve_stable_ids_and_old_values(self):
         original = self.make_project()
@@ -146,22 +146,22 @@ class ProjectTests(unittest.TestCase):
         reduced = copied.without_satellite('二体')
         self.assertEqual([s.orbit.object_id for s in reduced.satellites], ['J2', 'copy-1'])
         self.assertEqual(copied.to_scenario().without_object('二体').object_count, 2)
-        with self.assertRaises(of.ProjectError):
+        with self.assertRaises(native.ProjectError):
             copied.with_satellite_copy('copy-1', 'J2', 'duplicate ID')
-        with self.assertRaises(of.ProjectError):
+        with self.assertRaises(native.ProjectError):
             copied.renamed_satellite('copy-1', ' ')
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'names.orbelle'
             copied.save(path)
-            self.assertEqual(of.load_project(path).satellites[0].name, '观测卫星')
+            self.assertEqual(native.load_project(path).satellites[0].name, '观测卫星')
 
     def make_project(self):
-        project = of.Project('任务 Python', of.Epoch(123456789), of.Epoch(7200123456789))
-        project.current = of.Epoch(600123456789)
-        for name, kind in [('二体', of.OrbitPropagator.TWO_BODY), ('J2', of.OrbitPropagator.J2_SECULAR)]:
-            orbit = of.OrbitInput()
+        project = native.Project('任务 Python', native.Epoch(123456789), native.Epoch(7200123456789))
+        project.current = native.Epoch(600123456789)
+        for name, kind in [('二体', native.OrbitPropagator.TWO_BODY), ('J2', native.OrbitPropagator.J2_SECULAR)]:
+            orbit = native.OrbitInput()
             orbit.object_id, orbit.propagator = name, kind
-            orbit.input_frame = of.FrameId.ITRF
+            orbit.input_frame = native.FrameId.ITRF
             project.add_satellite(orbit)
         return project
 
@@ -171,11 +171,11 @@ class ProjectTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / '任务.orbelle'
             project.save(path)
-            restored = of.load_project(path)
+            restored = native.load_project(path)
             self.assertEqual(restored.name, project.name)
             self.assertEqual(restored.current.tai_nanoseconds, project.current.tai_nanoseconds)
-            self.assertEqual(restored.satellites[1].orbit.propagator, of.OrbitPropagator.J2_SECULAR)
-            self.assertEqual(restored.satellites[1].orbit.input_frame, of.FrameId.ITRF)
+            self.assertEqual(restored.satellites[1].orbit.propagator, native.OrbitPropagator.J2_SECULAR)
+            self.assertEqual(restored.satellites[1].orbit.input_frame, native.FrameId.ITRF)
             after = restored.to_scenario().sample([project.first, project.current, project.last])
             for a, b in zip(before, after):
                 self.assertEqual(a.provenance.algorithm, b.provenance.algorithm)
@@ -193,28 +193,28 @@ class ProjectTests(unittest.TestCase):
             project.save(path)
             original = path.read_bytes()
             project.name = 'Changed'
-            with self.assertRaises(of.ProjectError):
+            with self.assertRaises(native.ProjectError):
                 project.save(path)
             self.assertEqual(path.read_bytes(), original)
             project.save(path, overwrite=True)
-            self.assertEqual(of.load_project(path).name, 'Changed')
-            project.current = of.Epoch(-1)
-            with self.assertRaises(of.ProjectError):
+            self.assertEqual(native.load_project(path).name, 'Changed')
+            project.current = native.Epoch(-1)
+            with self.assertRaises(native.ProjectError):
                 project.save(path, overwrite=True)
-            self.assertEqual(of.load_project(path).name, 'Changed')
+            self.assertEqual(native.load_project(path).name, 'Changed')
             bad = bytearray(original)
             bad[-1] ^= 1
             path.write_bytes(bad)
-            with self.assertRaises(of.ProjectError):
-                of.load_project(path)
+            with self.assertRaises(native.ProjectError):
+                native.load_project(path)
 
     def test_duplicate_insert_is_transactional_and_empty_project_is_valid(self):
         project = self.make_project()
-        with self.assertRaises(of.ProjectError):
+        with self.assertRaises(native.ProjectError):
             project.add_satellite(project.satellites[0].orbit)
         self.assertEqual(len(project.satellites), 2)
-        empty = of.Project('Empty', of.Epoch(0), of.Epoch(1))
+        empty = native.Project('Empty', native.Epoch(0), native.Epoch(1))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'empty.orbelle'
             empty.save(path)
-            self.assertEqual(of.load_project(path).to_scenario().object_count, 0)
+            self.assertEqual(native.load_project(path).to_scenario().object_count, 0)

@@ -3,13 +3,13 @@ import math
 from pathlib import Path
 import tempfile
 
-import orbelle as of
+import orbelle as ob
 
 
-sample = Path(of.__file__).parent / "data/spice/de440s_2016_leap/manifest.json"
-epoch = of.make_builtin_time_provider().from_utc(of.UtcDateTime(2017, 1, 1))
+sample = Path(ob.__file__).parent / "data/spice/de440s_2016_leap/manifest.json"
+epoch = ob.make_builtin_time_provider().from_utc(ob.UtcDateTime(2017, 1, 1))
 with tempfile.TemporaryDirectory(prefix="orbelle-example-") as workspace:
-    ephemeris = of.load_spice_snapshot(sample, workspace)
+    ephemeris = ob.load_spice_snapshot(sample, workspace)
     for name, target in (("Sun", 10), ("Moon", 301)):
         state = ephemeris.geometric_state(target, 399, epoch)
         print(f"{name}, observer Earth, SPICE J2000 axes:")

@@ -41,19 +41,19 @@ Orbelle 默认采用地心视太阳；几何太阳的独立 Orekit 参考显式�
 会话和分析持有不可变星历；来源包含 `spherical-uniform-angular-union-v3`、太阳方法、`NONE` / `earth-LT+S-v1` / `spacecraft-LT+S-tai-rate-v1` 及 `occultors=geometric`、有效光压参数及星历解释／内容身份。禁用光压的草稿，以及无阴影或未分配遮挡体的半径草稿不改变分析和报告身份。项目 v46／OBJS32 保存全部有效草稿；不提供旧版本解码。
 
 ```python
-data = of.DataSnapshot.builtin_time().with_ephemeris("de440s", manifest, workspace)
-orbit = of.orbits.Hpop(
+data = ob.DataSnapshot.builtin_time().with_ephemeris("de440s", manifest, workspace)
+orbit = ob.orbits.Hpop(
     initial=initial, gravity_degree=0,
-    srp=of.orbits.SrpSettings(enabled=True, cr=1.2,
+    srp=ob.orbits.SrpSettings(enabled=True, cr=1.2,
                              area_mass_ratio_m2_per_kg=0.02,
                              shadow_model="dual_cone", sun_position_method="apparent_to_true_cb",
                              earth_shadow=True, moon_shadow=True))
 sat = project.objects.satellite("SRP", orbit=orbit)
 analysis = project.prepare(data=data)
-trajectory = analysis.states(sat, step=of.units.s(60))
+trajectory = analysis.states(sat, step=ob.units.s(60))
 ```
 
-C++ 使用 `HpopOptions::srp`／`SrpOptions`，通过显式 `HpopEnvironment` 或 `Project::prepare(data)` 装配资源。低层 `evaluate_srp` 返回加速度与照明比例，便于独立几何验证；它消费调用者已经选好的太阳向量，不自行解释太阳方法或查询 Provider。Python 提供对应原生 `SrpOptions`、`SrpSunPositionMethod`、`SrpShadowModel`、`SrpEvaluation`、`evaluate_srp`，易用接口使用不可变 `of.orbits.SrpSettings`。
+C++ 使用 `HpopOptions::srp`／`SrpOptions`，通过显式 `HpopEnvironment` 或 `Project::prepare(data)` 装配资源。低层 `evaluate_srp` 返回加速度与照明比例，便于独立几何验证；它消费调用者已经选好的太阳向量，不自行解释太阳方法或查询 Provider。Python 提供对应原生 `SrpOptions`、`SrpSunPositionMethod`、`SrpShadowModel`、`SrpEvaluation`、`evaluate_srp`，易用接口使用不可变 `ob.orbits.SrpSettings`。
 
 独立 Orekit 轨迹参考、独立面积积分和边界测试见 [HPOP 验证协议](../validation/hpop_protocol.md)。这些验证不代表同配置 STK 的直接轨迹对照或实际预报精度。
 

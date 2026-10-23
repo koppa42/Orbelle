@@ -72,7 +72,7 @@ EOP 来源记录包含快照 ID、SHA256、参考系、插值版本、覆盖区�
 
 卫星属性 → 基本 → 轨迹显示：提供六种预设色、自定义 RGB 颜色、四种线型、0.5–8 px 粗细与实时预览，点击“应用”后更新视图。颜色同时用于卫星点标记；三维模型的材质保持原定义。二维、三维轨迹共用样式，缩放不改变屏幕线宽，按显示器 DPI 换算。选中对象保留独立的选择标记，线宽不随选择变化。
 
-样式变化仅刷新绘制，不触发物理传播，也不改变报告的计算输入哈希。复制卫星继承样式后可独立修改。Python 通过不可变 `OrbitStyle` 设置，例如 `satellite.display = of.OrbitStyle(line_style=of.LineStyle.DASHED)`；新增卫星在 `project.objects.satellite()` 中传入 `display=`。
+样式变化仅刷新绘制，不触发物理传播，也不改变报告的计算输入哈希。复制卫星继承样式后可独立修改。Python 通过不可变 `OrbitStyle` 设置，例如 `satellite.display = ob.OrbitStyle(line_style=ob.LineStyle.DASHED)`；新增卫星在 `project.objects.satellite()` 中传入 `display=`。
 
 ## 保存和恢复
 
@@ -84,19 +84,19 @@ C++ 文件层保留 `application::Project`、`save_project/load_project`、`runt
 
 ```python
 from pathlib import Path
-import orbelle as of
+import orbelle as ob
 
-project = of.Project("Mission", of.Epoch(0), of.Epoch(7_200_000_000_000))
-satellite = project.objects.satellite("Satellite1", orbit=of.orbits.TwoBody(
-    initial=of.OrbitInput().initial))
+project = ob.Project("Mission", ob.Epoch(0), ob.Epoch(7_200_000_000_000))
+satellite = project.objects.satellite("Satellite1", orbit=ob.orbits.TwoBody(
+    initial=ob.OrbitInput().initial))
 project.save(Path("mission.orbelle"))
 
-restored = of.load_project("mission.orbelle")
+restored = ob.load_project("mission.orbelle")
 states = restored.to_scenario().sample([restored.first, restored.last])
 
 # 一次提交项目设置；同步对象分析范围，保留初始条件。
-restored.update(name="Mission · revised", first=of.Epoch(1_000_000_000),
-                last=of.Epoch(3_600_000_000_000))
+restored.update(name="Mission · revised", first=ob.Epoch(1_000_000_000),
+                last=ob.Epoch(3_600_000_000_000))
 restored.save("mission-revised.orbelle")
 ```
 

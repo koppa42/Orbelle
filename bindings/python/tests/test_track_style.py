@@ -4,18 +4,18 @@ import struct
 import tempfile
 import unittest
 # Native value/format tests; public editing is in test_objects.py.
-from orbelle import _native as of
+from orbelle import _native as native
 from project_format import rewrite_section
 
 
 class TrackStyleTests(unittest.TestCase):
     @staticmethod
     def project():
-        project = of.Project('Styles', of.Epoch(0), of.Epoch(7200000000000))
-        orbit = of.OrbitInput()
-        display = of.OrbitDisplay()
+        project = native.Project('Styles', native.Epoch(0), native.Epoch(7200000000000))
+        orbit = native.OrbitInput()
+        display = native.OrbitDisplay()
         display.line_color = 0xE9A2BA
-        display.line_style = of.LineStyle.DASH_DOT
+        display.line_style = native.LineStyle.DASH_DOT
         display.line_width = 3.25
         project.add_satellite(orbit, display)
         return project
@@ -23,28 +23,28 @@ class TrackStyleTests(unittest.TestCase):
     def test_styles_roundtrip_copy_and_do_not_change_numerical_results_or_report_hash(self):
         project = self.project()
         states = project.to_scenario().sample([project.first, project.last])[0].states
-        digest = of.report_input_sha256(project)
+        digest = native.report_input_sha256(project)
         revised = project.with_satellite_copy('satellite-1', 'copy', 'Copy')
         self.assertEqual(revised.satellites[1].display.line_color, 0xE9A2BA)
         satellites = revised.satellites
         satellites[1].display.line_color = 0x123456
-        satellites[1].display.line_style = of.LineStyle.DOTTED
+        satellites[1].display.line_style = native.LineStyle.DOTTED
         revised.satellites = satellites
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'styles.orbelle'
             revised.save(path)
-            restored = of.load_project(path)
+            restored = native.load_project(path)
             self.assertEqual(restored.satellites[0].display.line_color, 0xE9A2BA)
             self.assertEqual(restored.satellites[1].display.line_color, 0x123456)
-            self.assertEqual(restored.satellites[1].display.line_style, of.LineStyle.DOTTED)
+            self.assertEqual(restored.satellites[1].display.line_style, native.LineStyle.DOTTED)
             self.assertEqual(restored.satellites[1].display.line_width, 3.25)
             original_bytes = path.read_bytes()
             restored.save(path, overwrite=True)
             self.assertEqual(path.read_bytes(), original_bytes)
         satellites = project.satellites
-        satellites[0].display = of.OrbitDisplay()
+        satellites[0].display = native.OrbitDisplay()
         project.satellites = satellites
-        self.assertEqual(of.report_input_sha256(project), digest)
+        self.assertEqual(native.report_input_sha256(project), digest)
         after = project.to_scenario().sample([project.first, project.last])[0].states
         for a, b in zip(states, after):
             self.assertEqual(a.position_m, b.position_m)
@@ -67,8 +67,8 @@ class TrackStyleTests(unittest.TestCase):
                 lambda b: b + b'\0',
             ):
                 path.write_bytes(rewrite_section(raw, b"STYL", mutate))
-                with self.assertRaises(of.ProjectError):
-                    of.load_project(path)
+                with self.assertRaises(native.ProjectError):
+                    native.load_project(path)
 
     def test_invalid_style_is_rejected_before_replacing_existing_project(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -80,6 +80,6 @@ class TrackStyleTests(unittest.TestCase):
                 satellites = project.satellites
                 satellites[0].display.line_width = value
                 project.satellites = satellites
-                with self.assertRaises(of.ProjectError):
+                with self.assertRaises(native.ProjectError):
                     project.save(path, overwrite=True)
                 self.assertEqual(path.read_bytes(), raw)

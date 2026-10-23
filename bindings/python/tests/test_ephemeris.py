@@ -8,15 +8,15 @@ import shutil
 import tempfile
 import unittest
 
-import orbelle as of
+import orbelle as ob
 
 ROOT = Path(__file__).resolve().parents[3]
-SAMPLE = Path(of.__file__).parent / "data/spice/de440s_2016_leap"
+SAMPLE = Path(ob.__file__).parent / "data/spice/de440s_2016_leap"
 
 
 class EphemerisApiTests(unittest.TestCase):
     def setUp(self):
-        self.assertTrue(of.ephemeris_available())
+        self.assertTrue(ob.ephemeris_available())
         parent = ROOT / "out/tests/python-spice"
         parent.mkdir(parents=True, exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(dir=parent)
@@ -24,10 +24,10 @@ class EphemerisApiTests(unittest.TestCase):
         self.assertTrue(self.directory.resolve().is_relative_to(parent.resolve()))
         self.addCleanup(self.temporary.cleanup)
         self.workspace = self.directory / "workspace"
-        self.provider = of.load_spice_snapshot(SAMPLE / "manifest.json", self.workspace)
+        self.provider = ob.load_spice_snapshot(SAMPLE / "manifest.json", self.workspace)
         self.addCleanup(lambda: setattr(self, "provider", None))
-        self.time = of.make_builtin_time_provider()
-        self.epoch = self.time.from_utc(of.UtcDateTime(2016, 12, 31, 23, 59, 60, 123456789))
+        self.time = ob.make_builtin_time_provider()
+        self.epoch = self.time.from_utc(ob.UtcDateTime(2016, 12, 31, 23, 59, 60, 123456789))
 
     def relocate(self):
         destination = self.directory / "relocated data"
@@ -38,16 +38,16 @@ class EphemerisApiTests(unittest.TestCase):
         state = self.provider.geometric_state(301, 399, self.epoch)
         self.assertEqual(state.epoch.tai_nanoseconds, self.epoch.tai_nanoseconds)
         self.assertEqual((state.target_naif_id, state.observer_naif_id), (301, 399))
-        self.assertEqual(state.frame, of.FrameId.SPICE_J2000)
-        self.assertEqual(state.velocity_time_scale, of.TimeScale.TDB)
+        self.assertEqual(state.frame, ob.FrameId.SPICE_J2000)
+        self.assertEqual(state.velocity_time_scale, ob.TimeScale.TDB)
         self.assertGreater(math.hypot(*state.position_m), 3.5e8)
         self.assertLess(math.hypot(*state.position_m), 4.1e8)
         self.assertLess(abs(self.provider.from_tdb(state.tdb).seconds_since(self.epoch)), 1e-6)
-        midnight = self.time.from_utc(of.UtcDateTime(2017, 1, 1, 0, 0, 0, 123456789))
+        midnight = self.time.from_utc(ob.UtcDateTime(2017, 1, 1, 0, 0, 0, 123456789))
         self.assertAlmostEqual(self.provider.to_tdb(midnight).seconds_past_j2000 - state.tdb.seconds_past_j2000,
                                1.0, delta=1e-6)
         with self.assertRaises(ValueError):
-            self.time.julian_date(self.epoch, of.TimeScale.TDB)
+            self.time.julian_date(self.epoch, ob.TimeScale.TDB)
         with self.assertRaises(AttributeError):
             state.position_m = [0, 0, 0]
 
@@ -58,24 +58,24 @@ class EphemerisApiTests(unittest.TestCase):
         self.assertEqual([s.position_m for s in batch],
                          [self.provider.geometric_state(10, 399, t).position_m for t in epochs])
         self.assertEqual(self.provider.geometric_states(10, 399, []), [])
-        with self.assertRaises(of.EphemerisCoverageError):
+        with self.assertRaises(ob.EphemerisCoverageError):
             self.provider.geometric_state(999999, 399, self.epoch)
-        with self.assertRaises(of.EphemerisCoverageError):
-            self.provider.geometric_states(10, 399, [self.epoch, of.Epoch(info.last_epoch.tai_nanoseconds+1)])
+        with self.assertRaises(ob.EphemerisCoverageError):
+            self.provider.geometric_states(10, 399, [self.epoch, ob.Epoch(info.last_epoch.tai_nanoseconds+1)])
         with self.assertRaises(ValueError):
-            self.provider.from_tdb(of.TdbTime(float("nan")))
+            self.provider.from_tdb(ob.TdbTime(float("nan")))
         self.assertEqual(self.provider.geometric_state(10, 399, self.epoch).position_m, batch[1].position_m)
 
     def test_owned_snapshot_ignores_original_file_changes_and_cleans_up(self):
         relocated = self.relocate()
         workspace = self.directory / "relocated-runtime"
-        provider = of.load_spice_snapshot(relocated / "manifest.json", workspace)
+        provider = ob.load_spice_snapshot(relocated / "manifest.json", workspace)
         state = provider.geometric_state(301, 399, self.epoch)
         info = provider.data_info
         (relocated / info.kernels[1].file).write_bytes(b"changed after loading")
         self.assertEqual(provider.geometric_state(301, 399, self.epoch).position_m, state.position_m)
-        with self.assertRaises(of.EphemerisDataError):
-            of.load_spice_snapshot(relocated / "manifest.json", workspace)
+        with self.assertRaises(ob.EphemerisDataError):
+            ob.load_spice_snapshot(relocated / "manifest.json", workspace)
         del provider
         gc.collect()
         self.assertEqual(list(workspace.iterdir()), [])
@@ -92,8 +92,8 @@ class EphemerisApiTests(unittest.TestCase):
             (relocated / "naif0012.tls").write_bytes(payload)
             manifest["kernels"][0]["sha256"] = hashlib.sha256(payload).hexdigest()
             path.write_text(json.dumps(manifest))
-            with self.assertRaises(of.EphemerisDataError):
-                of.load_spice_snapshot(path, self.workspace)
+            with self.assertRaises(ob.EphemerisDataError):
+                ob.load_spice_snapshot(path, self.workspace)
         self.assertTrue(math.isfinite(self.provider.to_tdb(self.epoch).seconds_past_j2000))
 
     def test_threads_switch_distinct_time_contexts_without_contamination(self):
@@ -107,7 +107,7 @@ class EphemerisApiTests(unittest.TestCase):
         manifest["kernels"][0]["sha256"] = hashlib.sha256(payload).hexdigest()
         manifest["kernels"][0]["producer"] = "Orbelle test fixture"
         path.write_text(json.dumps(manifest))
-        second = of.load_spice_snapshot(path, self.workspace)
+        second = ob.load_spice_snapshot(path, self.workspace)
         def query(provider):
             state = provider.geometric_state(10, 399, self.epoch)
             partials = provider.apparent_sun_from_spacecraft_differential(self.epoch, [7e6, 0, 0], [0, 7500, 0])
@@ -124,7 +124,7 @@ class EphemerisApiTests(unittest.TestCase):
     def test_apparent_sun_derivative_values_units_readonly_and_recovery(self):
         position, velocity = [7e6, 2e6, -1e6], [1000, 7500, -2000]
         result = self.provider.apparent_sun_from_spacecraft_differential(self.epoch, position, velocity)
-        self.assertIsInstance(result, of.ApparentSunDifferential)
+        self.assertIsInstance(result, ob.ApparentSunDifferential)
         self.assertEqual(result.position_m,
                          self.provider.apparent_sun_from_spacecraft(self.epoch, position, velocity))
         self.assertEqual((len(result.position_jacobian), len(result.velocity_jacobian_s)), (3, 3))

@@ -8,23 +8,23 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import orbelle as of
+import orbelle as ob
 from orbelle import units as u
 
 EOP = Path(__file__).resolve().parents[3] / "data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
 
 
 def scene(data=None):
-    data = data if data is not None else of.DataSnapshot.load(eop_manifest=EOP)
-    project = of.Project("Access", of.Epoch(0), of.Epoch(7_200_000_000_000))
-    initial = of.CartesianState(project.first, of.OriginId.EARTH, of.FrameId.GCRF,
+    data = data if data is not None else ob.DataSnapshot.load(eop_manifest=EOP)
+    project = ob.Project("Access", ob.Epoch(0), ob.Epoch(7_200_000_000_000))
+    initial = ob.CartesianState(project.first, ob.OriginId.EARTH, ob.FrameId.GCRF,
                                [7e6, 0, 0], [0, math.sqrt(3.986004418e14 / 7e6), 0])
-    satellite = project.objects.satellite("Observer", orbit=of.orbits.TwoBody(initial=initial))
-    r = project.prepare(data=data).state(satellite, at=project.first, frame=of.FrameId.ITRF).position_m
-    station = project.objects.ground_station("Station", location=of.Wgs84Location(
+    satellite = project.objects.satellite("Observer", orbit=ob.orbits.TwoBody(initial=initial))
+    r = project.prepare(data=data).state(satellite, at=project.first, frame=ob.FrameId.ITRF).position_m
+    station = project.objects.ground_station("Station", location=ob.Wgs84Location(
         u.rad(math.atan2(r[1], r[0])), u.rad(math.atan2(r[2], math.hypot(r[0], r[1])))))
     sensor = project.objects.sensor("Camera", parent=satellite,
-                                   field_of_view=of.sensors.Cone(half_angle=u.deg(10)))
+                                   field_of_view=ob.sensors.Cone(half_angle=u.deg(10)))
     return project, station, satellite, sensor, data
 
 
@@ -34,8 +34,8 @@ class AnalysisAccessTests(unittest.TestCase):
         analysis = project.prepare(data=data)
         wide = analysis.access(station, satellite, search_step=u.s(10))
         narrow = analysis.access(station, sensor, search_step=u.s(10))
-        self.assertIsInstance(narrow, of.AccessWindows)
-        self.assertIsInstance(narrow[0], of.AccessWindow)
+        self.assertIsInstance(narrow, ob.AccessWindows)
+        self.assertIsInstance(narrow[0], ob.AccessWindow)
         self.assertLess(narrow[0].duration.nanoseconds, wide[0].duration.nanoseconds)
         self.assertEqual(len(tuple(narrow)), len(narrow))
         self.assertEqual(narrow[-1].end.tai_nanoseconds, tuple(narrow)[-1].end.tai_nanoseconds)
@@ -60,7 +60,7 @@ class AnalysisAccessTests(unittest.TestCase):
         self.assertEqual(narrow.last.tai_nanoseconds, project.last.tai_nanoseconds)
         with self.assertRaises(AttributeError):
             narrow[0].duration = u.s(1)
-        sensor.pointing = of.sensors.Pointing.track(station)
+        sensor.pointing = ob.sensors.Pointing.track(station)
         tracked = project.prepare(data=data).access(station, sensor, search_step=u.s(10))
         self.assertEqual(tracked[0].duration, wide[0].duration)
         old_end = narrow[0].end.tai_nanoseconds
@@ -74,12 +74,12 @@ class AnalysisAccessTests(unittest.TestCase):
         project, station, satellite, _, data = scene()
         analysis = project.prepare(data=data)
         windows = analysis.access(station, satellite, search_step=u.s(60))
-        self.assertEqual(windows.search_mode, of.AccessSearchMode.EXTREMUM_ASSISTED)
+        self.assertEqual(windows.search_mode, ob.AccessSearchMode.EXTREMUM_ASSISTED)
         stats = windows.statistics
         self.assertEqual(stats.count, len(windows))
         self.assertAlmostEqual(stats.total_duration_s, sum(w.duration.nanoseconds/1e9 for w in windows))
         self.assertAlmostEqual(stats.mean_duration_s, stats.total_duration_s/len(windows))
-        fixed = analysis.access(station, satellite, search_step=u.s(1), search_mode=of.AccessSearchMode.FIXED_GRID)
+        fixed = analysis.access(station, satellite, search_step=u.s(1), search_mode=ob.AccessSearchMode.FIXED_GRID)
         self.assertEqual(len(windows), len(fixed))
         for w, f in zip(windows, fixed):
             self.assertLessEqual(abs(w.start.tai_nanoseconds-f.start.tai_nanoseconds), 1_000_000)
@@ -91,7 +91,7 @@ class AnalysisAccessTests(unittest.TestCase):
             aer = analysis.aer(station,satellite,times=[w.extrema.maximum_elevation.epoch,w.extrema.minimum_range.epoch])
             self.assertAlmostEqual(w.extrema.maximum_elevation.value,aer[0].elevation_rad)
             self.assertAlmostEqual(w.extrema.minimum_range.value,aer[1].range_m)
-        report = analysis.report(of.ReportKind.ACCESS_INTERVALS,station=station,target=satellite,step=u.s(60))
+        report = analysis.report(ob.ReportKind.ACCESS_INTERVALS,station=station,target=satellite,step=u.s(60))
         self.assertEqual(report.access_statistics.count,stats.count)
         self.assertEqual(report.access_statistics.total_duration_s,stats.total_duration_s)
         with tempfile.TemporaryDirectory() as directory:
@@ -106,11 +106,11 @@ class AnalysisAccessTests(unittest.TestCase):
         project, station, _, sensor, data = scene()
         analysis = project.prepare(data=data)
         result = analysis.access(station, sensor, search_step=u.s(10),
-                                 first=of.Epoch(3), last=of.Epoch(10_000_000_007))
+                                 first=ob.Epoch(3), last=ob.Epoch(10_000_000_007))
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].duration, u.ns(10_000_000_004))
         self.assertTrue(result[0].start_clipped and result[0].end_clipped)
-        empty = analysis.access(station, sensor, search_step=u.s(10), first=of.Epoch(0), last=of.Epoch(0))
+        empty = analysis.access(station, sensor, search_step=u.s(10), first=ob.Epoch(0), last=ob.Epoch(0))
         self.assertEqual(len(empty), 0)
         self.assertEqual(empty.input_sha256, result.input_sha256)
         self.assertEqual(empty.data_sha256, result.data_sha256)
@@ -136,18 +136,18 @@ class AnalysisAccessTests(unittest.TestCase):
                         {"search_step": u.s(1), "boundary_tolerance": u.s(2)},
                         {"search_step": u.s(1), "boundary_tolerance": u.ns(0)},
                         {"search_step": u.ns(1), "boundary_tolerance": u.ns(1)},
-                        {"search_step": u.s(1), "first": of.Epoch(1), "last": of.Epoch(0)}):
+                        {"search_step": u.s(1), "first": ob.Epoch(1), "last": ob.Epoch(0)}):
             with self.assertRaises(ValueError):
                 analysis.access(station, sensor, **options)
         with self.assertRaises(IndexError):
-            analysis.access(station, sensor, search_step=u.s(10), first=of.Epoch(-1))
-        with self.assertRaises(of.AnalysisCapabilityError):
+            analysis.access(station, sensor, search_step=u.s(10), first=ob.Epoch(-1))
+        with self.assertRaises(ob.AnalysisCapabilityError):
             project.prepare().access(station, sensor, search_step=u.s(10))
-        other = of.Project.from_data(project.to_data())
-        with self.assertRaises(of.ProjectError):
+        other = ob.Project.from_data(project.to_data())
+        with self.assertRaises(ob.ProjectError):
             analysis.access(other.objects[station.id], sensor, search_step=u.s(10))
         added = project.objects.duplicate(station, name="Later")
-        with self.assertRaises(of.ObjectNotFoundError):
+        with self.assertRaises(ob.ObjectNotFoundError):
             analysis.access(added, sensor, search_step=u.s(10))
 
     def test_cancellation_callback_errors_and_repeat_query(self):
@@ -158,7 +158,7 @@ class AnalysisAccessTests(unittest.TestCase):
             def cancelled():
                 calls.append(True)
                 return len(calls) == count
-            with self.assertRaises(of.AnalysisCancelled):
+            with self.assertRaises(ob.AnalysisCancelled):
                 analysis.access(station, sensor, search_step=u.s(100), cancelled=cancelled)
             self.assertEqual(len(calls), count)
         def broken():
@@ -173,23 +173,23 @@ class AnalysisAccessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "eop"
             shutil.copytree(EOP.parent, source)
-            data = of.DataSnapshot.load(eop_manifest=source / "manifest.json")
+            data = ob.DataSnapshot.load(eop_manifest=source / "manifest.json")
             project, station, satellite, sensor, _ = scene(data)
             analysis = project.prepare(data=data)
         original = analysis.access(station, sensor, search_step=u.s(10))
         sensor.name = "Renamed"
-        satellite.display = of.OrbitStyle(line_color=0x123456)
-        project.objects.ground_station("Unrelated", location=of.Wgs84Location(u.deg(0), u.deg(0)))
+        satellite.display = ob.OrbitStyle(line_color=0x123456)
+        project.objects.ground_station("Unrelated", location=ob.Wgs84Location(u.deg(0), u.deg(0)))
         renamed = project.prepare(data=data).access(station, sensor, search_step=u.s(10))
         self.assertEqual(original.input_sha256, renamed.input_sha256)
-        sensor.field_of_view = of.sensors.Cone(half_angle=u.deg(20))
+        sensor.field_of_view = ob.sensors.Cone(half_angle=u.deg(20))
         changed = project.prepare(data=data).access(station, sensor, search_step=u.s(10))
         self.assertNotEqual(original.input_sha256, changed.input_sha256)
 
     def test_csv_is_independent_exact_and_protects_existing_file(self):
         project, station, _, sensor, data = scene()
         result = project.prepare(data=data).access(station, sensor, search_step=u.s(10),
-                                                  first=of.Epoch(3), last=of.Epoch(10_000_000_007))
+                                                  first=ob.Epoch(3), last=ob.Epoch(10_000_000_007))
         del project, station, sensor, data
         gc.collect()
         with tempfile.TemporaryDirectory() as directory:
@@ -222,7 +222,7 @@ class AnalysisAccessTests(unittest.TestCase):
         project, station, _, sensor, data = scene()
         analysis = project.prepare(data=data)
         for end in (0, 10_000_000_003):
-            result = analysis.access(station, sensor, search_step=u.s(10), last=of.Epoch(end))
+            result = analysis.access(station, sensor, search_step=u.s(10), last=ob.Epoch(end))
             frame = result.to_pandas()
             self.assertEqual(str(frame["duration_ns"].dtype), "int64")
             self.assertEqual(str(frame["start_clipped"].dtype), "bool")

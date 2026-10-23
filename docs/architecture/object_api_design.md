@@ -37,14 +37,14 @@ Python 以脚本易用性为优先，提供可补全的创建方法、关键字�
 
 | 入口 | 职责 |
 | --- | --- |
-| `of.Project` | 项目创建、打开、事务、分析准备与保存的公共门面 |
-| `of.objects` | 卫星、地面站、传感器的类型与配置值 |
+| `ob.Project` | 项目创建、打开、事务、分析准备与保存的公共门面 |
+| `ob.objects` | 卫星、地面站、传感器的类型与配置值 |
 | `project.objects` | 对象创建、查询、修改、复制和删除 |
 | `project.edit()` | 将一组对象或项目设置修改组成一次事务；Python 在上下文中继续使用原对象 |
-| `of.DataCatalog` | 本机当前数据文件、导入和更新的管理入口 |
+| `ob.DataCatalog` | 本机当前数据文件、导入和更新的管理入口 |
 | `DataSnapshot` | 固定本次可使用的数据资源及策略 |
 | `Analysis` | 在固定项目输入与数据上执行数值查询 |
-| `of.reports` | 查询配置、报告模板和结果呈现 |
+| `ob.reports` | 查询配置、报告模板和结果呈现 |
 
 常用接口不要求用户手工组装 `Scenario`、`Session` 和 Provider。独立传播器及其他低层计算接口仍可按需使用，无界面调用不引入桌面依赖。
 
@@ -52,7 +52,7 @@ Python 以脚本易用性为优先，提供可补全的创建方法、关键字�
 
 ### 配置与引用
 
-`of.objects.Satellite(...)` 等构造调用产生配置值；`project.objects.create(definition)` 将配置加入项目。C++ 返回带类型的 `ObjectRef`，Python 返回包装该引用与所属项目的带类型对象句柄。修改调用方原有的配置值不会回写项目。
+`ob.objects.Satellite(...)` 等构造调用产生配置值；`project.objects.create(definition)` 将配置加入项目。C++ 返回带类型的 `ObjectRef`，Python 返回包装该引用与所属项目的带类型对象句柄。修改调用方原有的配置值不会回写项目。
 
 Python 的日常创建入口为 `project.objects.satellite(name, *, orbit, ...)`、`ground_station(name, *, location, ...)` 和 `sensor(name, *, parent, field_of_view, ...)`。每个方法给出固定签名、参数提示和返回类型；名称可以按位置传入，物理配置使用关键字参数。门面转换成相应配置值并调用公共创建命令，不重复实现业务规则。
 
@@ -88,7 +88,7 @@ optional_sensor = project.objects.get(sensor_id)  # 允许缺失
 for obj in project.objects:
     print(obj.id, obj.name)
 
-matches = project.objects.find(name="Camera", type=of.objects.Sensor)
+matches = project.objects.find(name="Camera", type=ob.objects.Sensor)
 ```
 
 ID 查询不会退回名称查询；名称允许重复，`find()` 返回全部匹配项。`get()` 的缺省行为采用 Python 用户熟悉的返回默认值约定，见 [dict.get](https://docs.python.org/3/library/stdtypes.html#dict.get)。集合支持 `len()` 和对象迭代，迭代开始时固定成员 ID，属性读取仍遵循当前上下文；需要一致的整组属性时显式取得状态快照。集合不提供下标赋值来替换对象身份。
@@ -133,7 +133,7 @@ C++ 及公共命令内部继续使用按对象类型定义的 `SatelliteUpdate`�
 | --- | --- | --- | --- |
 | 未提供 | 省略字段 | 默认更新字段 | 保持原值 |
 | 设置 | 具体值 | 具体值 | 替换并校验 |
-| 清空 | `None` | `of::clear` | 仅对可空字段合法 |
+| 清空 | `None` | `orbelle::clear` | 仅对可空字段合法 |
 
 C++ 更新字段使用三态类型，普通 `optional<T>` 不同时承担“未提供”和“清空”两种含义。轨道、视场与指向等配置按完整变体替换，避免切换模式后残留无效字段。
 
@@ -204,21 +204,21 @@ with project.edit():
 以下为目标工作流。示例目录应已安装覆盖该时段的数据；`snapshot()`、`prepare()` 和查询不会隐式下载。
 
 ```python
-import orbelle as of
+import orbelle as ob
 from orbelle import units as u
 from orbelle.sensors import Cone, Pointing
 
-data = of.DataCatalog.open("local/data").snapshot()
+data = ob.DataCatalog.open("local/data").snapshot()
 t0 = data.time.parse_utc("2026-10-01T00:00:00Z")
 
-project = of.Project.create(
+project = ob.Project.create(
     name="Observation Demo",
-    interval=of.Interval(t0, t0 + u.h(2)),
+    interval=ob.Interval(t0, t0 + u.h(2)),
 )
 
-initial = of.orbits.Keplerian(
+initial = ob.orbits.Keplerian(
     epoch=t0,
-    frame=of.Frame.GCRF,
+    frame=ob.Frame.GCRF,
     semi_major_axis=u.km(7000),
     eccentricity=0.001,
     inclination=u.deg(53),
@@ -230,12 +230,12 @@ initial = of.orbits.Keplerian(
 with project.edit():
     satellite = project.objects.satellite(
         "Observer",
-        orbit=of.orbits.TwoBody(initial=initial),
+        orbit=ob.orbits.TwoBody(initial=initial),
     )
 
     station = project.objects.ground_station(
         "Hong Kong",
-        location=of.Wgs84Location(
+        location=ob.Wgs84Location(
             longitude=u.deg(114.2),
             latitude=u.deg(22.3),
             ellipsoid_height=u.m(350),
@@ -255,7 +255,7 @@ analysis = project.prepare(data=data)
 trajectory = analysis.states(
     satellite,
     step=u.s(30),
-    frame=of.Frame.GCRF,
+    frame=ob.Frame.GCRF,
 )
 
 windows = analysis.access(
@@ -275,28 +275,27 @@ project.save("observation.orbelle", analysis=analysis)
 
 ## C++ 使用示例
 
-C++ 已提供不依赖 Qt 的聚合头文件和 `of::Project`。以下为当前可用接口，创建方式与 Python 项目构造器一致，候选事务仍须显式提交。
+C++ 已提供不依赖 Qt 的聚合头文件和 `orbelle::Project`。以下为当前可用接口，创建方式与 Python 项目构造器一致，候选事务仍须显式提交。
 
 ```cpp
 #include <orbelle/orbelle.hpp>
-namespace of = orbelle;
 using namespace std::chrono_literals;
 
 int main() {
-    of::Project project{"Observation", of::Epoch{0}, of::Epoch{120'000'000'000}};
+    orbelle::Project project{"Observation", orbelle::Epoch{0}, orbelle::Epoch{120'000'000'000}};
     auto edit = project.edit();
-    auto satellite = edit.objects().create(of::objects::Satellite{"Observer", {}, {}});
-    auto sensor = edit.objects().create(of::objects::Sensor{"Camera", satellite, 0.2, {}});
+    auto satellite = edit.objects().create(orbelle::objects::Satellite{"Observer", {}, {}});
+    auto sensor = edit.objects().create(orbelle::objects::Sensor{"Camera", satellite, 0.2, {}});
     edit.commit();
 
     auto analysis = project.prepare();
-    auto trajectory = analysis.states(satellite, 30s, of::FrameId::gcrf);
+    auto trajectory = analysis.states(satellite, 30s, orbelle::FrameId::gcrf);
     project.save("observation.orbelle", analysis);
-    auto reopened = of::Project::open("observation.orbelle");
+    auto reopened = orbelle::Project::open("observation.orbelle");
 }
 ```
 
-C++ `objects::Satellite` 当前接受 `OrbitInput`，位置、速度、角度使用明确的 SI 字段；时长使用 `std::chrono`。此前设想的 `of::orbits`、`of::units` 和强类型视场配置仍属后续设计。完整当前签名、对象身份、目录选择及确认规则见 [C++ 项目 API](cpp_api.md)。Python 继续使用关键字参数与单位值；两端复用同一文档、校验、分析和持久化实现，不要求逐字对应的语法。
+C++ `objects::Satellite` 当前接受 `OrbitInput`，位置、速度、角度使用明确的 SI 字段；时长使用 `std::chrono`。此前设想的 `orbelle::orbits`、`orbelle::units` 和强类型视场配置仍属后续设计。完整当前签名、对象身份、目录选择及确认规则见 [C++ 项目 API](cpp_api.md)。Python 继续使用关键字参数与单位值；两端复用同一文档、校验、分析和持久化实现，不要求逐字对应的语法。
 
 ## Python 参数与结果约定
 
@@ -401,13 +400,13 @@ pandas 默认表保留精确的 `epoch_tai_ns` 整数列，展开的数值列采
 `analysis.states()`、`access()`、`aer()` 等便捷方法与类型化查询共用执行入口。普通脚本直接读取或导出结果；需要复用列选择和格式时再创建模板。保存的报告配置组合查询和模板；结果直接导出与显式模板共用格式化实现，不隐式发起新的轨道计算。目前 `analysis.report()` 已将九类内置报告接入固定分析并复用共享表格引擎，自由模板与字段描述表仍按后续阶段推进。
 
 ```python
-template = of.reports.Template(
+template = ob.reports.Template(
     source="orbit.state",
     columns=[
-        of.reports.Column("epoch", time_scale=of.TimeScale.UTC),
-        of.reports.Column("position.x", unit="km"),
-        of.reports.Column("position.y", unit="km"),
-        of.reports.Column("position.z", unit="km"),
+        ob.reports.Column("epoch", time_scale=ob.TimeScale.UTC),
+        ob.reports.Column("position.x", unit="km"),
+        ob.reports.Column("position.y", unit="km"),
+        ob.reports.Column("position.z", unit="km"),
     ],
 )
 

@@ -22,7 +22,7 @@ IERS 原文 de Sitter 使用地球相对太阳的 R、V；这里两向量同时�
 
 开启后即使静态重力为 0/0、第三体引力全部关闭，也必须注入覆盖初始至查询完整路径的 EOP、Frame 和太阳星历。太阳 GM 来自星历解，不受未启用的第三体 GM 草稿覆盖。缺失速度能力明确报错；不偷偷差分位置、不补零速度，也不在计算中下载数据。范围、内部星历缺口及无效输入均由共享校验拒绝。`evaluate_relativity` 拒绝非有限输入、非正 GM、零距离、非单位自转轴及达到光速的速度；返回每项与总加速度，便于诊断和数值对照。
 
-Python 使用 `of.orbits.Hpop(..., include_relativistic_accelerations=True)`，或不可变 `HpopSettings` 的同名严格布尔字段；`of.evaluate_relativity` 调用同一个核心函数。桌面在“力模型 → 其他 → 相对论”提供开关与模型说明，取消不提交草稿。
+Python 使用 `ob.orbits.Hpop(..., include_relativistic_accelerations=True)`，或不可变 `HpopSettings` 的同名严格布尔字段；`ob.evaluate_relativity` 调用同一个核心函数。桌面在“力模型 → 其他 → 相对论”提供开关与模型说明，取消不提交草稿。
 
 项目 v46 / OBJS32 在海潮设置之后保存一个严格布尔字节；旧版本明确拒绝。物理输入哈希包含开关，启用后的来源标识包含 `iers2003-three-terms-v1`、三项常数、ITRF 极轴约定、速度时间尺度、地球/太阳 GM 和所选 EOP/星历身份。DE440 解释版本为 `de440-newtonian-geocentric-icrf-none-gm440-planets-tai-rate-v3`。开关或输入变化不会改变已经捕获的分析快照。
 

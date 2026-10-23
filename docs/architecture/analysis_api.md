@@ -5,20 +5,20 @@
 ## Python 状态查询
 
 ```python
-import orbelle as of
+import orbelle as ob
 from orbelle import units as u
 
-project = of.Project("Observation", of.Epoch(0), of.Epoch(300_000_000_000))
-sat = project.objects.satellite("Observer", orbit=of.orbits.TwoBody(
-    initial=of.orbits.Keplerian(
+project = ob.Project("Observation", ob.Epoch(0), ob.Epoch(300_000_000_000))
+sat = project.objects.satellite("Observer", orbit=ob.orbits.TwoBody(
+    initial=ob.orbits.Keplerian(
         epoch=project.first, semi_major_axis=u.km(7000), eccentricity=0.001,
         inclination=u.deg(53), raan=u.deg(0), argument_of_periapsis=u.deg(0),
     ),
 ))
 
 analysis = project.prepare()
-state = analysis.state(sat, at=project.first, frame=of.FrameId.GCRF)
-trajectory = analysis.states(sat, step=u.s(30), frame=of.FrameId.GCRF)
+state = analysis.state(sat, at=project.first, frame=ob.FrameId.GCRF)
+trajectory = analysis.states(sat, step=u.s(30), frame=ob.FrameId.GCRF)
 trajectory.to_csv("trajectory.csv")
 
 # 显式历元保持顺序和重复项，不增加额外端点。
@@ -27,7 +27,7 @@ selected = analysis.states(sat, times=[project.last, project.first, project.last
 # 修改甚至删除当前对象后，旧分析仍可使用原句柄查询其捕获的对象。
 sat.name = "Renamed"
 project.objects.remove(sat)
-original = analysis.state(sat, at=of.Epoch(0))
+original = analysis.state(sat, at=ob.Epoch(0))
 ```
 
 状态包含历元、地心原点、参考系、米和米每秒数值。二体、J2、J4、SGP4 和 HPOP 复用共用传播器；HPOP 与任务 HPOP 滑行使用[有界科学插值星历](orbit_interpolation.md)，准备时捕获资源，首次查询时生成所需完整滑行段；地面站使用 WGS84 固定 ITRF 模型。当前 `state()` / `states()` 接受卫星和地面站；需要传感器位置时，调用方应传入其父卫星引用，直接传传感器会报能力错误。GCRF 是 Python 查询的显式默认值，SGP4 原生输出为 TEME，地面站原生输出为 ITRF；跨参考系查询必须准备 EOP 数据，HPOP 的非中心引力在 GCRF 查询中也依赖 EOP，绝不把 TEME 当成 GCRF。
@@ -50,13 +50,13 @@ original = analysis.state(sat, at=of.Epoch(0))
 推荐从已经安装数据的目录准备分析，Python 和 C++ 与桌面共用完整覆盖优先、来源优先级和有限外推的选择规则：
 
 ```python
-catalog = of.DataCatalog("local/shared-data")
+catalog = ob.DataCatalog("local/shared-data")
 analysis = project.prepare(data=catalog)
-trajectory = analysis.states(sat, step=u.s(30), frame=of.FrameId.ITRF)
+trajectory = analysis.states(sat, step=u.s(30), frame=ob.FrameId.ITRF)
 
 # 可选：显式修改这个目录的共享策略，之后的准备才会使用。
-catalog.preferred_eop = of.EopProduct.C04
-catalog.set_extrapolation_days(of.EopProduct.C04, 3)  # 0 关闭；最多 30 天
+catalog.preferred_eop = ob.EopProduct.C04
+catalog.set_extrapolation_days(ob.EopProduct.C04, 3)  # 0 关闭；最多 30 天
 
 # 也可以提前取得固定资源，传给一个或多个分析。
 data = catalog.snapshot(project.first, project.last)
@@ -72,7 +72,7 @@ analysis = project.prepare(data=data)
 无外部时间依赖的原生状态查询不需要 EOP、联网或图形资源。SGP4 显式选择时间表：
 
 ```python
-analysis = project.prepare(data=of.DataSnapshot.builtin_time())
+analysis = project.prepare(data=ob.DataSnapshot.builtin_time())
 # 只需要目录当前时间表时，不要求安装 EOP：
 data = catalog.snapshot(project.first, project.last, earth_orientation=False)
 analysis = project.prepare(data=data)
@@ -81,7 +81,7 @@ analysis = project.prepare(data=data)
 参考系转换显式加载本机文件：
 
 ```python
-data = of.DataSnapshot.load(
+data = ob.DataSnapshot.load(
     eop_manifest="data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json",
     # 可选；未指定时，此次显式加载使用程序内置闰秒表。
     time_file="data/samples/time/iers_leap_seconds_2026_07.dat",
@@ -94,12 +94,12 @@ analysis = project.prepare(data=data)
 
 `project.plan_prepare(data=data)` 固定对象输入、修订、数据和传播会话，先检查资源完整性与整个准备区间的覆盖。有限 EOP 外推为 0–30 天，0 表示关闭；它不延长 UTC 表有效期。无法覆盖或时间失效时立即抛出相应错误，不能通过同意更新绕过。
 
-所选数据与项目记录的相同角色比较，身份或解释策略不同则列入 `plan.data_changes`。新项目没有相应记录时可直接准备；未选用的旧 EOP 不妨碍纯惯性轨道查询。直接 `project.prepare()` 遇到变化时抛出 `of.DataChangedError`，其 `plan` 是本次已固定的计划。
+所选数据与项目记录的相同角色比较，身份或解释策略不同则列入 `plan.data_changes`。新项目没有相应记录时可直接准备；未选用的旧 EOP 不妨碍纯惯性轨道查询。直接 `project.prepare()` 遇到变化时抛出 `ob.DataChangedError`，其 `plan` 是本次已固定的计划。
 
 ```python
 try:
     analysis = project.prepare(data=data)
-except of.DataChangedError as error:
+except ob.DataChangedError as error:
     plan = error.plan
     # 应用展示 plan.data_changes，并取得本次明确决定。
     # 用户同意后调用；拒绝则不继续，保留已有分析。
@@ -118,8 +118,8 @@ project.save("mission.orbelle", analysis=analysis)
 
 # 相同数据直接打开；数据变化时由应用取得确认。
 try:
-    restored = of.Project.open("mission.orbelle", data=data)
-except of.DataChangedError as error:
+    restored = ob.Project.open("mission.orbelle", data=data)
+except ob.DataChangedError as error:
     plan = error.plan
     # 展示 plan.data_changes；仅在用户明确同意的分支执行：
     restored = plan.open(accept_data_changes=True)
@@ -133,7 +133,7 @@ except of.DataChangedError as error:
 
 开发预览阶段只读写当前 `.orbelle` v49；所有打开入口（包括 `load_project_data()`）在解析内容前拒绝非当前版本，并给出实际与支持的版本。没有旧格式迁移或缺字段补默认值的读取路径；输入项目仍可以不包含可选的分析准备记录。详见[项目文件](project_files.md)。
 
-`Project.plan_open(path, data=...)` 固定解析后的文件和已验证资源；`name`、`data`、`data_changes` 可供确认界面读取。直接 `Project.open()` 和 `of.load_project()` 使用同一流程。已有来源依赖必须提供相应当前数据；不传数据只适合没有 UTC / EOP 依赖的原生坐标计算项目，SGP4 仍须显式提供 UTC。需要仅检查或导入原始输入而不准备计算时，使用 `load_project_data()`，再按需 `Project.from_data()`。
+`Project.plan_open(path, data=...)` 固定解析后的文件和已验证资源；`name`、`data`、`data_changes` 可供确认界面读取。直接 `Project.open()` 和 `ob.load_project()` 使用同一流程。已有来源依赖必须提供相应当前数据；不传数据只适合没有 UTC / EOP 依赖的原生坐标计算项目，SGP4 仍须显式提供 UTC。需要仅检查或导入原始输入而不准备计算时，使用 `load_project_data()`，再按需 `Project.from_data()`。
 
 文件、目录或当前数据指针在确认期间变化，不影响该计划；每次 `plan.open()` 返回独立项目，接受决定不保存为后续自动同意。缺失依赖、覆盖不足和 UTC 失效在创建计划时即报错，不能用确认参数绕过。数据相同时新打开的项目不标记未保存；接受不同来源后更新来源并标记未保存，旧准备记录按哈希判断是否过期。打开不自动写回原文件，也不自动刷新旧准备记录；以新分析显式保存后才更新它。桌面接入新计划仍属后续工作。
 
@@ -217,24 +217,24 @@ table = aer.to_pandas()                           # 可选 pandas
 
 ```python
 state_report = analysis.report(
-    of.ReportKind.CARTESIAN_STATE, objects=[sat], step=u.s(30),
-    frame=of.FrameId.GCRF, units=of.ReportUnits.ENGINEERING,
-    time_scale=of.ReportTimeScale.TAI,
+    ob.ReportKind.CARTESIAN_STATE, objects=[sat], step=u.s(30),
+    frame=ob.FrameId.GCRF, units=ob.ReportUnits.ENGINEERING,
+    time_scale=ob.ReportTimeScale.TAI,
 )
-aer_report = analysis.report(of.ReportKind.AER, station=station, target=sensor, step=u.s(10))
-summary = analysis.report(of.ReportKind.OBJECT_SUMMARY, objects=sat)
+aer_report = analysis.report(ob.ReportKind.AER, station=station, target=sensor, step=u.s(10))
+summary = analysis.report(ob.ReportKind.OBJECT_SUMMARY, objects=sat)
 state_report.export_csv("states-report.csv")
 ```
 
 支持十类内置报告：场景摘要、对象摘要、地面站、笛卡尔状态、经典轨道根数、地理坐标、轨道运动、可见区间、AER 和 HPOP 位置速度协方差。前三类无需步长；其余显式提供 `step`，可用 `first` / `last` 限定子区间。派生报告使用各自的物理参考系，与桌面规则一致。
 
-Python 直接接收对象句柄，不需要构造 `ReportDefinition` 或填写 ID、名称。普通报告必须显式指定单个对象、对象集合或 `of.reports.ALL`；空集合报错，不扩展为全部对象；场景摘要不接受对象筛选。Access/AER 使用明确的 `station` / `target` 参数。选择按分析快照验证，当前已删除的旧对象仍可查询，其他项目或准备后新增的对象报错。
+Python 直接接收对象句柄，不需要构造 `ReportDefinition` 或填写 ID、名称。普通报告必须显式指定单个对象、对象集合或 `ob.reports.ALL`；空集合报错，不扩展为全部对象；场景摘要不接受对象筛选。Access/AER 使用明确的 `station` / `target` 参数。选择按分析快照验证，当前已删除的旧对象仍可查询，其他项目或准备后新增的对象报错。
 
 返回现有 `ReportResult`，可读取 `table`、`column_title()`、`numeric_value()`、`cell_text()`，并沿用原子 CSV 导出。默认工程显示单位（km、km/s、deg）及 TAI；指定 UTC 必须在准备时提供 UTC 数据，不会隐式读取当前目录。表内数据仍为 SI，显示转换只影响格式化接口。报告保存 `input_revision` 和数据身份；输入哈希沿用报告语义，覆盖项目范围的计算输入，排除对象显示名称。SDK 结果保留捕获时的名称和数值；修改项目名称不会改写已有结果。`AerSeries` / `AccessWindows` 的哈希只覆盖各自查询相关的物理输入，范围与报告不同。
 
 `cancelled=callable` 必须返回 bool，取消抛出 `AnalysisCancelled`；`progress(done, total)` 提供同步进度，两者均可省略。即使在完成进度回调中取消，也不返回结果；回调异常传回调用方。生成时固定报告配置，回调修改原配置或当前项目不影响本次计算。报告查询不重建传播器、不重新读取数据文件，也不写入项目的已保存报告配置。
 
-报告查询与显示已拆为 `ReportQuery` / `ReportTemplate`。Python 可传 `template=of.reports.Template([...])`，或生成后用 `template.apply(result)` 重排列、切换单位和时间系统，不重新计算。C++ 支持 `Analysis::report(query, format)` 和 `ReportResult::with_template(format)`。原始 SI 表始终保留，可恢复被隐藏的列；逐列单位优先于默认单位。详见[报告](reports.md)。项目当前为 v49（RPTS v7），保存显式选择模式及显示模板；不增加旧格式兼容路径。
+报告查询与显示已拆为 `ReportQuery` / `ReportTemplate`。Python 可传 `template=ob.reports.Template([...])`，或生成后用 `template.apply(result)` 重排列、切换单位和时间系统，不重新计算。C++ 支持 `Analysis::report(query, format)` 和 `ReportResult::with_template(format)`。原始 SI 表始终保留，可恢复被隐藏的列；逐列单位优先于默认单位。详见[报告](reports.md)。项目当前为 v49（RPTS v7），保存显式选择模式及显示模板；不增加旧格式兼容路径。
 
 ## C++ 入口与验证
 
@@ -300,12 +300,12 @@ AER 与统一报告还由 `test_analysis_aer_reports.py` 和 `AnalysisAccess.*` 
 ### 本体星历导入
 
 ```python
-catalog = of.DataCatalog("local/shared-data")
+catalog = ob.DataCatalog("local/shared-data")
 catalog.install_de440s("local/de440s.bsp")
 entry = catalog.install_planetary_centres("local/mar099s.bsp")
 # 也可导入已有完整快照：
 # entry = catalog.install_ephemeris_snapshot("local/ephemeris/manifest.json")
-data = of.DataSnapshot.builtin_time().with_ephemeris(
+data = ob.DataSnapshot.builtin_time().with_ephemeris(
     "de440s", entry.manifest, "local/spice-runtime")
 ```
 
@@ -318,6 +318,6 @@ HPOP 协方差已接入项目配置和 Analysis。启用后可查询精确历元
 
 ## 轨道事件报告
 
-`analysis.report(of.ReportKind.ORBITAL_EVENTS, objects=sat, step=u.s(60), boundary_tolerance=u.s(.001))` 查询四类事件。返回源表为精确历元、事件类型、地心距离和速率；`orbital_event_statistics` 保留分类计数及退化对象数。GCRF 赤道面固定，Mission 暂不支持，见[模型与界面契约](orbital_events.md)及[Python 示例](../../examples/python/orbital_events.py)。
+`analysis.report(ob.ReportKind.ORBITAL_EVENTS, objects=sat, step=u.s(60), boundary_tolerance=u.s(.001))` 查询四类事件。返回源表为精确历元、事件类型、地心距离和速率；`orbital_event_statistics` 保留分类计数及退化对象数。GCRF 赤道面固定，Mission 暂不支持，见[模型与界面契约](orbital_events.md)及[Python 示例](../../examples/python/orbital_events.py)。
 
 区域/全球多资产覆盖、面积权重与重访空档见[覆盖分析](coverage.md)及 [Python 示例](../../examples/python/coverage.py)。

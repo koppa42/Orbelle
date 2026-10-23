@@ -37,19 +37,19 @@ Hermite 的三个轴在同一次合流差商遍历中计算，共用历元差和
 C++ 经 `orbelle/orbelle.hpp` 使用 `OrbitInterpolationMethod`、`OrbitInterpolationOptions`、`OrbitEphemerisArc`、`make_tabulated_orbit_session`，只依赖 Runtime，不需要 CSPICE、ERFA 或 Qt。Core 工厂只依赖标准库。
 
 ```python
-import orbelle as of
+import orbelle as ob
 
-options = of.OrbitInterpolationOptions()
-options.method = of.OrbitInterpolationMethod.HERMITE
+options = ob.OrbitInterpolationOptions()
+options.method = ob.OrbitInterpolationMethod.HERMITE
 options.order = 3
 nodes = [
-    of.CartesianState(of.Epoch(0), of.OriginId.EARTH, of.FrameId.GCRF,
+    ob.CartesianState(ob.Epoch(0), ob.OriginId.EARTH, ob.FrameId.GCRF,
                       [0, 0, 0], [0, 0, 0]),
-    of.CartesianState(of.Epoch(2_000_000_000), of.OriginId.EARTH, of.FrameId.GCRF,
+    ob.CartesianState(ob.Epoch(2_000_000_000), ob.OriginId.EARTH, ob.FrameId.GCRF,
                       [8, 0, 0], [12, 0, 0]),
 ]
-session = of.make_tabulated_orbit_session([nodes], options, "cubic", 1)
-state = session.sample([of.Epoch(1_000_000_000)]).states[0]
+session = ob.make_tabulated_orbit_session([nodes], options, "cubic", 1)
+state = session.sample([ob.Epoch(1_000_000_000)]).states[0]
 assert state.position_m == [1, 0, 0]
 assert state.velocity_mps == [3, 0, 0]
 ```
@@ -72,23 +72,23 @@ Python 使用同名入口，`input` 为低层 `OrbitInput`，必须选择 HPOP�
 
 ```python
 import math
-import orbelle as of
+import orbelle as ob
 
-orbit = of.OrbitInput()
-orbit.propagator = of.OrbitPropagator.HPOP
-orbit.initial = of.CartesianState(of.Epoch(0), of.OriginId.EARTH, of.FrameId.GCRF,
+orbit = ob.OrbitInput()
+orbit.propagator = ob.OrbitPropagator.HPOP
+orbit.initial = ob.CartesianState(ob.Epoch(0), ob.OriginId.EARTH, ob.FrameId.GCRF,
                                   [7e6, 0, 0], [0, math.sqrt(3.986004415e14 / 7e6), 0])
-force = of.HpopOptions()
+force = ob.HpopOptions()
 force.gravity_degree = force.gravity_order = 0
 orbit.hpop = force
-interp = of.OrbitInterpolationOptions()
-interp.method = of.OrbitInterpolationMethod.HERMITE
+interp = ob.OrbitInterpolationOptions()
+interp.method = ob.OrbitInterpolationMethod.HERMITE
 interp.order = 7
-nodes = of.propagate_hpop_ephemeris(orbit, of.Epoch(600_000_000_000),
+nodes = ob.propagate_hpop_ephemeris(orbit, ob.Epoch(600_000_000_000),
                                    reporting_step_nanoseconds=30_000_000_000)
-session = of.make_hpop_ephemeris_session(orbit, of.Epoch(600_000_000_000), interp,
+session = ob.make_hpop_ephemeris_session(orbit, ob.Epoch(600_000_000_000), interp,
                                         reporting_step_nanoseconds=30_000_000_000)
-state = session.sample([of.Epoch(17_123_456_789)]).states[0]
+state = session.sample([ob.Epoch(17_123_456_789)]).states[0]
 ```
 
 这是一段显式的点质量测试轨道。非中心引力、第三体、阻力、光压等照常要求对应的数据快照，不隐式下载或查找本机数据。输入与资源在调用时捕获；后续修改输入、取消另一次生成或销毁原数组均不影响已生成 Session。
@@ -110,7 +110,7 @@ state = session.sample([of.Epoch(17_123_456_789)]).states[0]
 高层 Python 的 VOP 配置示例（`initial` 为显式地心 GCRF 初态）：
 
 ```python
-orbit = of.orbits.Hpop(initial=initial, gravity_degree=0,
+orbit = ob.orbits.Hpop(initial=initial, gravity_degree=0,
                       interpolation="vop", interpolation_order=7,
                       interpolation_mu=3.986004415e14)
 ```
