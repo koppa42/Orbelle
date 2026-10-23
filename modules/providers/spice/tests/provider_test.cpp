@@ -248,6 +248,38 @@ TEST(Spice, KernelOrderAndContextSwitchingAreDeterministic) {
     EXPECT_NE(first_wins->data_info().manifest_sha256, second_wins->data_info().manifest_sha256);
 }
 
+TEST(Spice, RepeatedQueriesKeepExactEpochBodyObserverAndSurviveEvictionAndErrors) {
+    Fixture input;
+    const auto provider = input.load();
+    const core::Epoch epoch{1234567890123LL};
+    const auto original = provider->geometric_state(100001, 399, epoch);
+    for (int pass = 0; pass < 2; ++pass) {
+        const auto repeated = provider->geometric_state(100001, 399, epoch);
+        EXPECT_EQ(original.position_m, repeated.position_m);
+        EXPECT_EQ(original.velocity_mps, repeated.velocity_mps);
+        EXPECT_EQ(original.tdb.seconds_past_j2000, repeated.tdb.seconds_past_j2000);
+        EXPECT_EQ(original.source_id, repeated.source_id);
+        const auto reverse = provider->geometric_state(399, 100001, epoch);
+        EXPECT_EQ(reverse.target_naif_id, 399);
+        EXPECT_EQ(reverse.observer_naif_id, 100001);
+        for (std::size_t axis = 0; axis < 3; ++axis) {
+            EXPECT_DOUBLE_EQ(reverse.position_m[axis], -original.position_m[axis]);
+            EXPECT_DOUBLE_EQ(reverse.velocity_mps[axis], -original.velocity_mps[axis]);
+        }
+        const core::Epoch adjacent{epoch.tai_nanoseconds() + 1};
+        const auto next = provider->geometric_state(100001, 399, adjacent);
+        EXPECT_EQ(next.epoch, adjacent);
+        EXPECT_NE(next.position_m, original.position_m);
+        analytic(next);
+        EXPECT_THROW((void)provider->geometric_state(999999, 399, epoch),
+                     core::EphemerisCoverageError);
+        EXPECT_THROW((void)provider->geometric_state(100001, 399, core::Epoch{3600000000001LL}),
+                     core::EphemerisCoverageError);
+        for (int i = 0; i < 128; ++i)
+            analytic(provider->geometric_state(100001, 399, core::Epoch{i * 1000000000LL}));
+    }
+}
+
 TEST(Spice, ConcurrentAlternatingSnapshotsMatchSerialQueries) {
     Fixture input;
     const auto a = input.load();
@@ -441,6 +473,13 @@ TEST(Spice, MovingSunLightTimeAndAberration) {
         const auto earth = provider->apparent_sun_from_earth(core::Epoch{0});
         for (std::size_t i = 0; i < 3; ++i)
             EXPECT_NEAR(centre[i], earth[i], 1e-3);
+        // A geometric Sun entry must never be returned for the same-epoch
+        // light-time/aberration query, or vice versa.
+        const auto geometric = provider->geometric_state(10, 399, core::Epoch{0});
+        EXPECT_NE(geometric.position_m, earth);
+        EXPECT_EQ(provider->apparent_sun_from_earth(core::Epoch{0}), earth);
+        EXPECT_EQ(provider->geometric_state(10, 399, core::Epoch{0}).position_m,
+                  geometric.position_m);
         EXPECT_THROW((void)provider->apparent_sun_from_spacecraft(core::Epoch{0}, {2e15, 0, 0}, {}),
                      core::EphemerisCoverageError);
         EXPECT_THROW((void)provider->apparent_sun_from_spacecraft(

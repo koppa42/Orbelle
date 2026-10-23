@@ -28,7 +28,8 @@ std::string hpop_algorithm(const core::HpopOptions &options,
         (options.gravity_model.empty() ? std::string(core::egm96_model_id())
                                        : options.gravity_model) +
         ";degree=" + std::to_string(options.gravity_degree) +
-        ";order=" + std::to_string(options.gravity_order);
+        ";order=" + std::to_string(options.gravity_order) +
+        ";force-evaluation=normalized-neighbour32-v1";
     if (options.time_regularization) {
         std::ostringstream config;
         config.imbue(std::locale::classic());

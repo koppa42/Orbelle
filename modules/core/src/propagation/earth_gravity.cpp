@@ -1,3 +1,4 @@
+#include "low_degree_gravity.hpp"
 #include <algorithm>
 #include <cmath>
 #include <orbelle/core/propagation/hpop.hpp>
@@ -238,6 +239,26 @@ GravityDifferential GravityModel::evaluate(const std::array<double, 3> &r, int d
         }
         return result;
     }
+    std::optional<std::array<double, 3>> direct;
+    if (effective_degree <= detail::direct_gravity_degree) {
+        direct = detail::low_degree_acceleration(
+            r, radius, info_.radius_m, info_.mu, effective_degree, effective_order,
+            [&](int n, int m) {
+                const auto i = index(n, m);
+                double c = n <= degree && m <= order ? terms_[i].c : 0;
+                double s = n <= degree && m <= order ? terms_[i].s : 0;
+                if (i < delta.size()) {
+                    c += delta[i].c;
+                    s += delta[i].s;
+                }
+                return std::pair{c, s};
+            });
+        for (const auto component : *direct)
+            if (!std::isfinite(component))
+                throw PropagationError("Gravity acceleration is not finite at this position");
+        if constexpr (!Second)
+            return {*direct, {}};
+    }
     const double inverse_radius = 1 / radius;
     const std::array<double, 3> direction{r[0] * inverse_radius, r[1] * inverse_radius,
                                           r[2] * inverse_radius};
@@ -395,7 +416,9 @@ GravityDifferential GravityModel::evaluate(const std::array<double, 3> &r, int d
         if (!std::isfinite(component))
             throw PropagationError("Gravity acceleration is not finite at this position");
     }
-    GravityDifferential result{acceleration, {}};
+    // The nominal value must be identical with and without variational work.
+    // The existing analytic Hessian remains responsible for all second partials.
+    GravityDifferential result{direct.value_or(acceleration), {}};
     if constexpr (Second) {
         for (std::size_t a = 0; a < 3; ++a)
             for (std::size_t b = a; b < 3; ++b) {

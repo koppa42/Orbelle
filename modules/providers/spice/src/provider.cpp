@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cspice/SpiceUsr.h>
 #include <fstream>
@@ -369,7 +370,25 @@ class Snapshot final : public core::IEphemerisProvider {
         check_epoch(core::Epoch{epoch.tai_nanoseconds() - margin});
         std::scoped_lock guard(engine().mutex);
         activate();
-        return state_unlocked(10, 399, epoch, "LT+S").position_m;
+        for (const auto &entry : apparent_cache_)
+            if (entry && entry->first == epoch)
+                return entry->second;
+        const auto tdb = tdb_unlocked(epoch);
+        std::array<double, 3> position;
+        double light_time = 0;
+        // This interface needs only position. SPKEZP applies the same LT+S
+        // corrections without also differentiating light time and aberration
+        // for an unused apparent velocity.
+        spkezp_c(10, tdb.seconds_past_j2000, "J2000", "LT+S", 399, position.data(), &light_time);
+        check_spice();
+        for (auto &component : position) {
+            component *= 1000;
+            if (!std::isfinite(component))
+                throw core::EphemerisQueryError("CSPICE returned a nonfinite apparent Sun");
+        }
+        apparent_cache_[next_apparent_] = std::pair{epoch, position};
+        next_apparent_ = (next_apparent_ + 1) % apparent_cache_.size();
+        return position;
     }
     std::array<double, 3>
     apparent_sun_from_spacecraft(core::Epoch epoch, const std::array<double, 3> &position,
@@ -688,11 +707,22 @@ class Snapshot final : public core::IEphemerisProvider {
         return {et};
     }
     core::EphemerisState state_unlocked(std::int32_t target, std::int32_t observer,
-                                        core::Epoch epoch, const char *correction = "NONE") const {
+                                        core::Epoch epoch) const {
         static_assert(sizeof(SpiceInt) == sizeof(std::int32_t));
+        // All callers hold the engine mutex and have activated this immutable
+        // snapshot. RK stages and separate force models often request the same
+        // Sun/Moon state: reuse exact queries, never rounded epochs or states
+        // from another kernel set. Failed queries are not cached.
+        for (std::size_t i = 0; i < state_cache_.size(); ++i) {
+            const auto &entry =
+                state_cache_[(next_state_ + state_cache_.size() - 1 - i) % state_cache_.size()];
+            if (entry && entry->epoch == epoch && entry->target_naif_id == target &&
+                entry->observer_naif_id == observer)
+                return *entry;
+        }
         const auto tdb = tdb_unlocked(epoch);
         double state[6]{}, light_time = 0;
-        spkez_c(target, tdb.seconds_past_j2000, "J2000", correction, observer, state, &light_time);
+        spkez_c(target, tdb.seconds_past_j2000, "J2000", "NONE", observer, state, &light_time);
         check_spice();
         for (auto &value : state) {
             value *= 1000; // CSPICE km and km/s -> public SI units.
@@ -700,19 +730,28 @@ class Snapshot final : public core::IEphemerisProvider {
                 throw core::EphemerisQueryError("CSPICE returned a nonfinite geometric state");
             }
         }
-        return {epoch,
-                target,
-                observer,
-                core::FrameId::spice_j2000,
-                {state[0], state[1], state[2]},
-                {state[3], state[4], state[5]},
-                core::TimeScale::tdb,
-                tdb,
-                source_};
+        core::EphemerisState result{epoch,
+                                    target,
+                                    observer,
+                                    core::FrameId::spice_j2000,
+                                    {state[0], state[1], state[2]},
+                                    {state[3], state[4], state[5]},
+                                    core::TimeScale::tdb,
+                                    tdb,
+                                    source_};
+        state_cache_[next_state_] = result;
+        next_state_ = (next_state_ + 1) % state_cache_.size();
+        return result;
     }
     core::EphemerisDataInfo info_;
     std::unique_ptr<KernelCopies> copies_;
     std::string source_;
+    // Protected by the same process-wide mutex as the CSPICE kernel pool.
+    mutable std::array<std::optional<core::EphemerisState>, 64> state_cache_;
+    mutable std::size_t next_state_ = 0;
+    mutable std::array<std::optional<std::pair<core::Epoch, std::array<double, 3>>>, 16>
+        apparent_cache_;
+    mutable std::size_t next_apparent_ = 0;
 };
 
 class TwoBody final : public core::IStateProvider {

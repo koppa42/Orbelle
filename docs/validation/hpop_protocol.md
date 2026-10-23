@@ -360,7 +360,25 @@ out/build/compute-benchmark/benchmarks/compute/Release/orbelle_hpop_benchmark.ex
 
 首次读取是进程内未加载模型时的完整解析，操作系统文件缓存可能已热，不能称作物理磁盘冷启动。参考系包装器计时也有开销。先单独运行基准，再运行回归或 GUI 测试，避免同时争用 CPU。精确复用优化要求所有轨道样本及文件哈希不变；数值算法变更仍须执行本文既有独立参考和收敛验证，不可以性能代替精度验收。
 
-桌面另外运行 `run_graphics_smoke.py`，核对无修改应用、资源复用、取消、失败后保留原状态和数据变化确认。基准不包含 GUI 发布和 GPU 呈现，也不包含 STK 实机对比。
+桌面另外运行 `run_graphics_smoke.py`，核对无修改应用、资源复用、取消、失败后保留原状态和数据变化确认。基准不包含 GUI 发布和 GPU 呈现。星历包装器另记录调用次数和耗时，计时开销也包含在总时间内；STK 对比使用下述独立工具。
+
+常用的有效阶次不超过 32 时，加速度通过归一化 Cartesian solid harmonics 的相邻项直接求梯度，避免逐项传播三个一阶导数；系数修正、长期变化、补偿累加、正负极点和独立阶次均保留。32 阶以上继续使用原有 O(degree) 空间及近极点稳定递推。解析 Hessian 仍由原算法求值，含 Hessian 的名义加速度与普通调用逐位一致。新增低阶交叉检查使用只含低阶系数的 33 阶模型调用原梯度递推，覆盖 2/10/21/32 阶、不同次数、低轨／高轨和正负极点；原有 Orekit 参考容限不变。算法身份追加 `force-evaluation=normalized-neighbour32-v1`。
+
+### STK 实机性能对照
+
+`tests/reference/propagators/hpop_performance.json` 固定地心 ICRF/GCRF 初始状态、2026-10-24 04:00 UTC、60 s 输出，以及 Scenario4、低轨、导航轨道、同步轨道、高偏心率和七天传播六组输入。初始笛卡尔值由双方直接读取，避免将 TOD 转换差异计入优化误差。`measure_hpop_orbelle.py` 使用已安装 wheel 或显式 Release 扩展；`measure_hpop_stk.ps1` 创建独立无图形 Engine 实例，不连接已有用户场景。已在 STK Engine 11.6 验证，其他版本须重新核对对象模型和保存的场景参数。两者均不列入普通 CI，也不要求维护者安装 STK 才能运行数值回归。
+
+固定配置：RKF78、相对容差 1e−13、1/86400 s 最小／最大积分步、60 s 固定星历报告、Lagrange 7、关闭 VOP／时间正则化。完整力模型使用 21×21 EGM2008、永久潮、显式日月 GM、JR 手动 F10.7=150、Kp=3、Cd=2.2、Cr=1、A/m=0.02，以及地月双锥遮挡和地心视太阳。长期变化、相对论、边界修正、海潮及协方差关闭；Orbelle 绝对误差底限保持 1 mm / 1 µm/s。`point_mass` / `gravity21` 模式逐项关闭摄动，便于定位性能来源。
+
+```powershell
+python tools/validation/measure_hpop_orbelle.py --gravity <force-only-EGM2008.grv> --ephemeris <DE440s-manifest.json> --output out/validation/<orbelle-run>
+./tools/validation/measure_hpop_stk.ps1 -GravityFile <STK-EGM2008.grv> -OutputDirectory out/validation/<stk-run>
+python tools/validation/compare_hpop_stk.py --before out/validation/<before> --after out/validation/<after> --stk out/validation/<stk-run> --output out/validation/<comparison.json>
+```
+
+使用同一 STK 重力文件；若文件尾含当前导入器不支持的 `ProcessNoise` 块，仅为此关闭协方差的基准生成截至 `END Coefficients` 的原始字节前缀副本。保留头部、GM、参考半径、归一化标志、潮汐和长期变化元数据、全部系数，不把过程噪声解释成力系数；在运行目录记录原文件／副本哈希及操作。现有 Orbelle 重力文件也可计时，但不能宣称双方系数完全相同。
+
+每次使用新输出目录，保留两端实际版本、资源哈希、STK `.sc/.sa` 设置、各次耗时及全部输出点。顺序运行，避免编译和其他测试竞争 CPU；比较三次传播中位数，首次加载、准备和后续采样单独记录。比较工具验证输入身份、初始状态和逐点时间网格，分别报告优化前后及两者对 STK 的位置／速度／RTN 最大、RMS、终点差。EOP、行星星历版本与误差范数尚未全部匹配，所以 STK 差异不能等同于 Orbelle 的积分误差；完整模型验收仍依靠各专项独立参考和收敛测试。性能结果只覆盖计算，不包含桌面启动、属性发布和渲染。
 
 ### 启动预加载与内存
 

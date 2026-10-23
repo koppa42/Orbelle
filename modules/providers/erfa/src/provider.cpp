@@ -1,3 +1,4 @@
+#include "cip_interpolation.hpp"
 #include "iers1996_nutation.hpp"
 #include "leap_seconds.hpp"
 #include <algorithm>
@@ -270,15 +271,14 @@ std::array<double, 3> model_cip(core::JulianDate tt) {
     };
     // The uncorrected IAU series depends only on these exact two TT doubles.
     // RK stages repeat epochs; gravity, drag and their derivatives also share them.
-    // No time rounding, interpolation, EOP values or provider identities enter this cache.
+    // No time rounding, EOP values or provider identities enter this lookup.
     // Thread-local bounded storage avoids locks and races between concurrent analyses.
     thread_local std::array<Entry, 64> entries;
     thread_local std::size_t count = 0, next = 0;
     for (std::size_t i = 0; i < count; ++i)
         if (entries[i].tt.day == tt.day && entries[i].tt.fraction == tt.fraction)
             return entries[i].value;
-    std::array<double, 3> value;
-    eraXys06a(tt.day, tt.fraction, &value[0], &value[1], &value[2]);
+    const auto value = detail::interpolated_cip(tt);
     entries[next] = {tt, value};
     next = (next + 1) % entries.size();
     count = std::min(count + 1, entries.size());
@@ -421,7 +421,7 @@ class FrameProvider final : public core::IFrameProvider {
                 core::FrameId::gcrf,
                 target,
                 fk5_rotation(epoch, {eop, {}}, target, 0),
-                "erfa-2.0.1-iau2006-2000a-to-fk5-iers1996-c7-pseudo-fixed",
+                "erfa-2.0.1-iau2006-2000a-to-fk5-iers1996-c7-pseudo-fixed-cip-cheb8-v1",
                 eop.source_id};
     }
     core::StateTransform gcrf_to_celestial_state(core::Epoch epoch,
@@ -548,7 +548,7 @@ class FrameProvider final : public core::IFrameProvider {
                 core::FrameId::gcrf,
                 core::FrameId::itrf,
                 multiply(multiply(slow.polar, spin(earth_angle(epoch, eop))), slow.celestial),
-                "erfa-2.0.1-iau2006-2000a-cpo-model-s",
+                "erfa-2.0.1-iau2006-2000a-cpo-model-s-cip-cheb8-v1",
                 eop.source_id};
     }
 
