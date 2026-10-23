@@ -14,6 +14,17 @@ from version import ROOT, check, python_versions
 from validation_inputs import PYTHON_EXAMPLES, stage_validation_inputs
 
 
+def built_cpp_example(build):
+    """Locate the fresh example for either single- or multi-configuration generators."""
+    filename = "orbelle_example.exe" if os.name == "nt" else "orbelle_example"
+    candidates = [build / "examples/cpp" / filename,
+                  build / "examples/cpp/Release" / filename]
+    matches = [path for path in candidates if path.is_file()]
+    if len(matches) != 1:
+        raise RuntimeError("Expected exactly one freshly built C++ example")
+    return matches[0]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dependency-prefix", type=Path, required=True)
@@ -21,10 +32,16 @@ def main():
     parser.add_argument("--reports", type=Path, required=True)
     parser.add_argument("--release", action="store_true")
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--cpp-example", type=Path)
+    parity = parser.add_mutually_exclusive_group()
+    parity.add_argument("--cpp-example", type=Path)
+    parity.add_argument("--build-cpp-example", action="store_true",
+                        help="Build the C++ parity example alongside this interpreter's extension")
     args = parser.parse_args()
     if args.release != bool(args.output):
         parser.error("--release and --output must be supplied together")
+    if args.release and args.build_cpp_example:
+        parser.error("--build-cpp-example cannot be used with --release")
+    cpp_example = args.cpp_example
     version = check(ROOT)
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
     if python_version not in python_versions()[1]:
@@ -95,14 +112,19 @@ def main():
         # Compile the same feature set as the wheel without invoking a package backend.
         pybind_dir = subprocess.check_output(
             [str(builder), "-I", "-m", "pybind11", "--cmakedir"], env=environment, text=True).strip()
-        definitions = config["tool"]["scikit-build"]["cmake"]["define"]
+        definitions = dict(config["tool"]["scikit-build"]["cmake"]["define"])
+        if args.build_cpp_example:
+            definitions["ORBELLE_BUILD_EXAMPLES"] = "ON"
         build = work / "build"
         run("python-configure", "cmake", "-S", source, "-B", build,
             "-DCMAKE_BUILD_TYPE=Release", f"-DPython_EXECUTABLE={builder}",
             *(["-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>"] if os.name == "nt" else []),
             f"-Dpybind11_DIR={pybind_dir}", f"-DCMAKE_PREFIX_PATH={prefix}",
             *(f"-D{name}={value}" for name, value in definitions.items()))
-        run("python-build", "cmake", "--build", build, "--config", "Release", "--target", "_native")
+        run("python-build", "cmake", "--build", build, "--config", "Release", "--target", "_native",
+            *(["orbelle_example"] if args.build_cpp_example else []))
+        if args.build_cpp_example:
+            cpp_example = built_cpp_example(build)
         site_packages = Path(subprocess.check_output(
             [str(consumer), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
             env=clean, text=True).strip())
@@ -116,9 +138,9 @@ def main():
     run("python-tests", consumer, "-I", "-m", "unittest", "discover", "-s", inputs / "bindings/python/tests", "-v", env=clean)
     for name in PYTHON_EXAMPLES:
         run(f"example-{name}", consumer, "-I", inputs / f"examples/python/{name}.py", env=clean)
-    if args.cpp_example:
+    if cpp_example:
         run("cpp-python-parity", consumer, "-I", inputs / "compare_examples.py",
-            "--cpp-example", args.cpp_example.resolve(), env=clean)
+            "--cpp-example", cpp_example.resolve(), env=clean)
     (reports / "passed.json").write_text(json.dumps({
         "passed": True, "python": python_version, "release": args.release,
     }), encoding="utf-8")

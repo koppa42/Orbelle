@@ -13,13 +13,13 @@ JOBS = {"metadata", "linux", "linux-consumer", "windows", "python-linux", "pytho
 REQUIRED = {
     "full": JOBS - {"linux-consumer"},
     "docs": {"metadata"},
-    "baseline": {"metadata", "linux", "windows"},
+    "baseline": JOBS - {"linux-consumer"},
     "release": JOBS,
 }
 DESCRIPTIONS = {
     "full": "Native and desktop tests plus every supported Python version; no release packages.",
     "docs": "Documentation-only change: workflow, version and tooling checks; native builds are skipped.",
-    "baseline": "Main integration tests: native/desktop and baseline Python; no matrix or release packages.",
+    "baseline": "Main integration tests: native/desktop and parallel baseline Python; no extra interpreters or release packages.",
     "release": "Full numerical tests, release builds and isolated installation checks.",
 }
 

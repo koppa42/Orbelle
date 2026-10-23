@@ -154,10 +154,11 @@ class Check:
     def tests(self):
         self.dependencies()
         self.build(install=False)
-        self.run("python-api", sys.executable, self.source / "tools/ci/check_python.py",
-                 "--dependency-prefix", self.prefix, "--work", self.work / "python",
-                 "--reports", self.reports / "python", "--cpp-example",
-                 self.work / "build/release/examples/cpp/orbelle_example")
+        if not self.args.skip_python:
+            self.run("python-api", sys.executable, self.source / "tools/ci/check_python.py",
+                     "--dependency-prefix", self.prefix, "--work", self.work / "python",
+                     "--reports", self.reports / "python", "--cpp-example",
+                     self.work / "build/release/examples/cpp/orbelle_example")
 
     def compute(self):
         """Validate portability and instrumented smoke workloads, not Linux performance."""
@@ -324,9 +325,13 @@ def main():
     parser.add_argument("--reports", type=Path, required=True)
     parser.add_argument("--delivery", type=Path)
     parser.add_argument("--test-dependencies", type=Path)
+    parser.add_argument("--skip-python", action="store_true",
+                        help="Run native tests only; Python is validated by a separate CI job")
     parser.add_argument("--vcpkg-root", default=os.environ.get("VCPKG_ROOT", "/opt/vcpkg"))
     parser.add_argument("--jobs", type=int, default=4)
     args = parser.parse_args()
+    if args.skip_python and args.stage != "tests":
+        parser.error("--skip-python is only supported with --stage tests")
     if platform.system() != "Linux" or args.jobs < 1:
         parser.error("A Linux host and a positive job count are required")
     if args.stage != "consumer" and not args.source:

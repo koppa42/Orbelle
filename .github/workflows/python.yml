@@ -139,6 +139,7 @@ jobs:
         shell: python {0}
         env:
           CI_SCOPE: ${{ inputs.release && 'release' || 'full' }}
+          BUILD_CPP_EXAMPLE: ${{ !inputs.release && matrix.python == inputs.baseline-python && 'true' || 'false' }}
         run: |
           import os, pathlib, subprocess, sys, tarfile
           root = pathlib.Path(os.environ['RUNNER_TEMP'])
@@ -149,6 +150,8 @@ jobs:
               '--work', str(root / 'python'), '--reports', str(root / 'reports')]
           if os.environ['CI_SCOPE'] == 'release':
               command += ['--release', '--output', str(root / 'assets')]
+          elif os.environ['BUILD_CPP_EXAMPLE'] == 'true':
+              command += ['--build-cpp-example']
           subprocess.run(command, check=True)
       - name: Upload Python release wheel
         if: inputs.release

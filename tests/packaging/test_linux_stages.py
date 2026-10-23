@@ -1,8 +1,11 @@
 """Regular CI preserves full numerical coverage; sanitizer runs stay explicit."""
 
 import argparse
+from contextlib import redirect_stderr
 import importlib.util
+import io
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -23,7 +26,8 @@ class LinuxStagesTests(unittest.TestCase):
         self.assertIn("sanitizers", linux.stages_for("all"))
         with tempfile.TemporaryDirectory() as directory:
             args = argparse.Namespace(source=ROOT, work=Path(directory) / "work",
-                                      reports=Path(directory) / "reports", delivery=None, jobs=1)
+                                      reports=Path(directory) / "reports", delivery=None, jobs=1,
+                                      skip_python=False)
             check = linux.Check(args)
             with patch.object(check, "dependencies") as deps, \
                  patch.object(check, "build") as build, patch.object(check, "run") as run:
@@ -31,6 +35,40 @@ class LinuxStagesTests(unittest.TestCase):
                 deps.assert_called_once()
                 build.assert_called_once_with(install=False)
                 self.assertEqual(run.call_args.args[0], "python-api")
+
+    def test_split_native_job_still_builds_and_runs_the_complete_native_stage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = argparse.Namespace(source=ROOT, work=Path(directory) / "work",
+                                      reports=Path(directory) / "reports", delivery=None, jobs=1,
+                                      skip_python=True)
+            check = linux.Check(args)
+            with patch.object(check, "dependencies") as deps, \
+                 patch.object(check, "build") as build, patch.object(check, "run") as run:
+                check.tests()
+                deps.assert_called_once()
+                build.assert_called_once_with(install=False)
+                run.assert_not_called()
+            with patch.object(check, "dependencies"), \
+                 patch.object(check, "build", side_effect=subprocess.CalledProcessError(1, "ctest")), \
+                 patch.object(check, "run") as run:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    check.tests()
+                run.assert_not_called()
+
+    def test_skip_python_cannot_change_release_or_other_stage_coverage(self):
+        for stage in ("all", "dependencies", "release", "sanitizers", "wheel", "export",
+                      "consumer", "compute", "package"):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                argv = ["check_linux.py", "--stage", stage, "--skip-python", "--source", str(ROOT),
+                        "--work", str(root / "work"), "--reports", str(root / "reports")]
+                with patch.object(sys, "argv", argv), patch.object(linux, "Check") as check, \
+                     redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as error:
+                        linux.main()
+                    self.assertEqual(error.exception.code, 2)
+                    check.assert_not_called()
+                self.assertFalse((root / "work").exists())
 
     def test_release_and_sanitizers_run_unfiltered_with_failure_detection(self):
         for sanitizer in (False, True):

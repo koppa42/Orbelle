@@ -605,47 +605,46 @@ TEST_P(WeatherEphemeris, HpopEphemerisSplitsTheLeapSecondWeatherJumpInBothDirect
     const core::Epoch short_first{boundary.tai_nanoseconds() - 3'000'000'000},
         short_last{boundary.tai_nanoseconds() + 3'000'000'000};
     const auto integrator = GetParam();
-    for (bool vop : {false, true}) {
-        SCOPED_TRACE(vop);
-        for (bool reverse : {false, true}) {
-            SCOPED_TRACE(reverse);
-            application::OrbitInput input;
-            input.propagator = application::OrbitPropagator::hpop;
-            input.initial = {reverse ? last : first,
-                             core::OriginId::earth,
-                             core::FrameId::gcrf,
-                             {6778137, 0, 0},
-                             {0, 6300, 4300}};
-            input.hpop.gravity_degree = input.hpop.gravity_order = 0;
-            input.hpop.integrator = integrator;
+    for (bool reverse : {false, true}) {
+        SCOPED_TRACE(reverse);
+        application::OrbitInput input;
+        input.propagator = application::OrbitPropagator::hpop;
+        input.initial = {reverse ? last : first,
+                         core::OriginId::earth,
+                         core::FrameId::gcrf,
+                         {6778137, 0, 0},
+                         {0, 6300, 4300}};
+        input.hpop.gravity_degree = input.hpop.gravity_order = 0;
+        input.hpop.integrator = integrator;
+        input.hpop.steps_per_orbit = 8192;
+        input.hpop.fixed_step_seconds = integrator == HpopIntegrator::rk4 ? 2 : 10;
+        input.hpop.drag.enabled = true;
+        input.hpop.drag.atmosphere = Model::nrlmsise00;
+        input.hpop.drag.weather_model = "celestrak";
+        input.hpop.drag.geomagnetic_update = Update::three_hourly;
+        input.hpop.drag.geomagnetic_source = Source::ap;
+        const auto env = data.force_environment(input);
+        const auto end = reverse ? first : last;
+
+        // RKV89 ignores the VOP draft. Its direct reference is also independent of
+        // reporting, interpolation and regularization, so reuse it for every variant
+        // in this direction without changing the reference's numerical settings.
+        auto fine = input.hpop;
+        fine.time_regularization = false;
+        fine.max_step_seconds = 7;
+        fine.integrator = HpopIntegrator::rkv89;
+        fine.step_control = HpopStepControl::relative_error;
+        const auto expected = runtime::make_hpop_session(input.initial, fine, env).sample(epochs);
+        auto short_initial = input.initial;
+        short_initial.epoch = reverse ? short_last : short_first;
+        fine.max_step_seconds = .2;
+        fine.min_step_seconds = 1e-6;
+        const auto short_expected =
+            runtime::make_hpop_session(short_initial, fine, env).sample(epochs);
+
+        for (bool vop : {false, true}) {
+            SCOPED_TRACE(vop);
             input.hpop.vop = vop;
-            input.hpop.steps_per_orbit = 8192;
-            input.hpop.fixed_step_seconds = integrator == HpopIntegrator::rk4 ? 2 : 10;
-            input.hpop.drag.enabled = true;
-            input.hpop.drag.atmosphere = Model::nrlmsise00;
-            input.hpop.drag.weather_model = "celestrak";
-            input.hpop.drag.geomagnetic_update = Update::three_hourly;
-            input.hpop.drag.geomagnetic_source = Source::ap;
-            const auto env = data.force_environment(input);
-            const auto end = reverse ? first : last;
-
-            // The direct reference does not use reporting/interpolation, and explicitly
-            // disables regularization. Evaluate the same three epochs once for all those
-            // variants; keep direction, VOP and all numerical settings unchanged.
-            auto fine = input.hpop;
-            fine.time_regularization = false;
-            fine.max_step_seconds = 7;
-            fine.integrator = HpopIntegrator::rkv89;
-            fine.step_control = HpopStepControl::relative_error;
-            const auto expected =
-                runtime::make_hpop_session(input.initial, fine, env).sample(epochs);
-            auto short_initial = input.initial;
-            short_initial.epoch = reverse ? short_last : short_first;
-            fine.max_step_seconds = .2;
-            fine.min_step_seconds = 1e-6;
-            const auto short_expected =
-                runtime::make_hpop_session(short_initial, fine, env).sample(epochs);
-
             for (bool regularized : {false, true}) {
                 SCOPED_TRACE(regularized);
                 input.hpop.time_regularization = regularized;

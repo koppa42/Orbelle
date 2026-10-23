@@ -295,8 +295,10 @@ TEST_F(MonthlyWeather, HpopConvergesAcrossLeapAndForecastNodesAndReopensFrozenDa
             const auto object = project.objects().get("satellite-1");
             const auto a = analysis.state(object, first, FrameId::gcrf),
                        b = analysis.state(object, last, FrameId::gcrf);
-            h.max_step_seconds = 7;
-            const auto refined = Project::from_data(settings);
+            // Keep the original settings for the later weather-only comparison.
+            auto refinement = settings;
+            refinement.satellites[0].orbit.hpop.max_step_seconds = 7;
+            const auto refined = Project::from_data(refinement);
             const auto finer = refined.prepare(data);
             for (const auto &state : {a, b}) {
                 const auto other =

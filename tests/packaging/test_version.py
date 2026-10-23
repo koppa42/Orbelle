@@ -1,8 +1,12 @@
 """Release tags must describe the version actually built by every entry point."""
 import importlib.util
+import json
+import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -48,6 +52,21 @@ class VersionTests(unittest.TestCase):
         path.write_text(path.read_text().replace('baseline-python = "3.13"', 'baseline-python = "3.99"'))
         with self.assertRaisesRegex(ValueError, "Python CI matrix"):
             version.python_versions(self.root)
+
+    def test_workflow_outputs_preserve_each_interpreter_once(self):
+        output = self.root / "github-output"
+        baseline, supported = version.python_versions(self.root)
+        with patch.object(version, "ROOT", self.root), \
+             patch.object(sys, "argv", ["version.py", "--github-output"]), \
+             patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}):
+            version.main()
+        values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+        regular = json.loads(values["python-versions"])
+        release_extras = json.loads(values["python-matrix"])
+        self.assertEqual(regular, supported)
+        self.assertEqual(regular.count(baseline), 1)
+        self.assertNotIn(baseline, release_extras)
+        self.assertCountEqual([baseline, *release_extras], supported)
 
 
 if __name__ == "__main__":
