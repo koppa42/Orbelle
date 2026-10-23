@@ -116,6 +116,7 @@ class GroundMap final : public QWidget {
     std::shared_ptr<const std::vector<Footprint>> footprints_;
     QRectF plot_rect() const;
     QRectF map_rect() const;
+    QRectF visible_map_rect() const;
     double minimum_zoom() const;
     QTransform map_transform() const;
     void clamp_pan();
@@ -145,7 +146,8 @@ class GroundMap final : public QWidget {
         bool complete = true;
         bool preview = false;
     };
-    void paint_base(QPainter &p, const Raster *display);
+    void paint_foreground(QPainter &p, const Raster *display);
+    void paint_base(QPainter &p, const Raster *display, bool cached_foreground = false);
     struct BaseKey {
         QTransform transform;
         QSize size;
@@ -157,11 +159,15 @@ class GroundMap final : public QWidget {
     };
     BaseKey base_key_;
     QImage base_image_;
+    BaseKey foreground_key_;
+    QImage foreground_image_;
     QElapsedTimer view_stable_;
     QCache<QString, QImage> labels_cache_{4096}; // KiB; bounded independently of object count.
     Raster raster_request(double margin = 160) const;
     Raster preview_request() const;
+    bool preview_usable() const;
     QTransform raster_transform(const Raster &raster) const;
+    void draw_raster(QPainter &p, const Raster &raster) const;
     bool covers_view(const Raster &raster, bool exact_scale = true) const;
     void cancel_obsolete_raster();
     static void allocate_raster(Raster &raster, QImage::Format format);

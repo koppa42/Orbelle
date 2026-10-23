@@ -469,7 +469,7 @@
     "ground_map.caption": "WGS84 · 等距圆柱投影   |   滚轮缩放 · 拖动平移 · Home 重置视图",
     "ground_map.label": "二维地面轨迹",
     "ground_map.ll": "经度 %1°%2    纬度 %3°%4",
-    "ground_map.navigation_help": "滚轮 / 触控板：以指针为中心缩放；缩小可查看全球\n左键 / 中键拖动：平移；单击：选择对象\n双击：放大；Shift + 双击：缩小\n+ / −：缩放；方向键：平移；Shift + 方向键：精细平移\nHome：重置为填满视区；Esc：取消拖动",
+    "ground_map.navigation_help": "滚轮 / 触控板：以指针为中心缩放；缩小可查看全球\n左键 / 中键拖动：平移，经度可循环；单击：选择对象\n双击：放大；Shift + 双击：缩小\n+ / −：缩放，最高 1024 倍；方向键：平移；Shift + 方向键：精细平移\nHome：重置为填满视区；Esc：取消拖动",
     "ground_station_editor.buttons": "重置",
     "ground_station_editor.constraint_form": "可见性约束",
     "ground_station_editor.form": "地面位置",

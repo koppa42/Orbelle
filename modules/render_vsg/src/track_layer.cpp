@@ -59,9 +59,12 @@ void main() {
     lateral = side[gl_VertexIndex] * (half_width + .75);
     current.xy += offset * lateral * 2 / view.viewport[0].zw * current.w;
     gl_Position = current;
-    // Quantized screen-space phase keeps dense samples from restarting every dash.
-    float angle = round(atan(dir.y, dir.x) / .7853981634) * .7853981634;
-    dash_direction = vec2(cos(angle), sin(angle));
+    dash_direction = vec2(1, 0);
+    if (style.parameters.y != 0) {
+        // Quantized screen-space phase keeps dense samples from restarting every dash.
+        float angle = round(atan(dir.y, dir.x) / .7853981634) * .7853981634;
+        dash_direction = vec2(cos(angle), sin(angle));
+    }
 }
 )glsl";
 constexpr const char *fragment_source = R"glsl(#version 450
@@ -72,11 +75,15 @@ layout(location=0) out vec4 color;
 void main() {
     float width = style.parameters.x * style.parameters.z;
     int pattern = int(style.parameters.y);
-    float distance = dot(gl_FragCoord.xy, dash_direction) / width;
-    if (pattern == 1 && mod(distance, 6) >= 4) discard;
-    if (pattern == 2 && mod(distance, 3) >= 1) discard;
-    float phase = mod(distance, 9);
-    if (pattern == 3 && ((phase >= 4 && phase < 6) || phase >= 7)) discard;
+    if (pattern != 0) {
+        float distance = dot(gl_FragCoord.xy, dash_direction) / width;
+        if (pattern == 1 && mod(distance, 6) >= 4) discard;
+        if (pattern == 2 && mod(distance, 3) >= 1) discard;
+        if (pattern == 3) {
+            float phase = mod(distance, 9);
+            if ((phase >= 4 && phase < 6) || phase >= 7) discard;
+        }
+    }
     float alpha = 1 - smoothstep(width * .5 - .5, width * .5 + .75, abs(lateral));
     if (alpha <= 0) discard;
     vec3 rgb = style.color.rgb;
