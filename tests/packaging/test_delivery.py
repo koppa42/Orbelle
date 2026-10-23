@@ -1,6 +1,7 @@
 """Regression checks for distributable metadata and isolated test inputs."""
 import argparse
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -30,6 +31,27 @@ python_dependencies = load_tool('export_python_dependencies', 'tools/ci/export_p
 
 
 class WindowsManifestTests(unittest.TestCase):
+    def test_managed_payload_has_complete_non_recursive_cleanup_inventory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / 'versions/0.3.1'
+            folder.mkdir(parents=True)
+            (folder / 'resources').mkdir()
+            (folder / 'OrbelleApp.exe').write_bytes(b'executable')
+            (folder / 'OrbelleUpdater.exe').write_bytes(b'helper')
+            (folder / 'resources/data.txt').write_bytes(b'bundled data')
+            windows.write_managed_version_manifest(folder, '0.3.1')
+            listing = (folder / 'orbelle-managed-files.txt').read_bytes()
+            self.assertEqual((folder / 'orbelle-managed.txt').read_bytes(),
+                             ('1\n' + hashlib.sha256(listing).hexdigest() + '\n').encode())
+            records = dict(line.split('  ', 1)[::-1] for line in listing.decode().splitlines())
+            self.assertEqual(set(records), {'OrbelleApp.exe', 'OrbelleUpdater.exe',
+                                            'resources/data.txt', 'manifest.json'})
+            for relative, digest in records.items():
+                self.assertEqual(digest, hashlib.sha256((folder / relative).read_bytes()).hexdigest())
+            manifest = json.loads((folder / 'manifest.json').read_text())
+            self.assertEqual(manifest['version'], '0.3.1')
+            self.assertEqual({item['path'] for item in manifest['files']}, set(records) - {'manifest.json'})
+
     def test_default_redist_can_have_a_different_servicing_patch(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

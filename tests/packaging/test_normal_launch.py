@@ -16,16 +16,16 @@ spec.loader.exec_module(windows)
 
 
 class NormalLaunchTests(unittest.TestCase):
-    def run_launch(self, setup_count=0, workbench_visible=True, native_caption=False):
+    def run_launch(self, setup_count=0, workbench_visible=True, native_caption=False, child_pid=123):
         process = Mock(pid=123, returncode=None)
         process.poll.side_effect = lambda: process.returncode
         process.terminate.side_effect = lambda: setattr(process, 'returncode', -15)
         suffix = ' - 星弦 Orbelle' if native_caption else ''
         title = '星弦 Orbelle · 准备基础数据' + suffix
-        inventory = {1: (123, '星弦 Orbelle  |  Untitled' + suffix),
+        inventory = {1: (child_pid, '星弦 Orbelle  |  Untitled' + suffix),
                      2: (999, title), 3: (999, '星弦 Orbelle  |  Other project')}
         for index in range(setup_count):
-            inventory[10 + index] = (123, title)
+            inventory[10 + index] = (child_pid, title)
 
         def enumerate_windows(callback, context):
             for handle in inventory:
@@ -39,7 +39,7 @@ class NormalLaunchTests(unittest.TestCase):
 
         def close(handle, message, word, long):
             self.assertEqual((message, word, long), (0x0010, 0, 0))
-            self.assertEqual(inventory[handle][0], process.pid)
+            self.assertEqual(inventory[handle][0], child_pid)
             # The main window cannot close while its modal preparation is open.
             if handle == (10 if setup_count else 1):
                 process.returncode = 0
@@ -57,8 +57,21 @@ class NormalLaunchTests(unittest.TestCase):
             GetWindowTextW=Mock(side_effect=window_title),
             IsWindowVisible=Mock(side_effect=lambda handle: workbench_visible or handle != 1),
             PostMessageW=Mock(side_effect=close))
+
+        def first_process(snapshot, output):
+            output._obj.th32ProcessID = child_pid
+            output._obj.th32ParentProcessID = process.pid
+            return True
+
+        kernel32 = SimpleNamespace(
+            CreateToolhelp32Snapshot=Mock(return_value=42),
+            Process32FirstW=Mock(side_effect=first_process),
+            Process32NextW=Mock(return_value=False),
+            CloseHandle=Mock())
         with tempfile.TemporaryDirectory() as directory, \
-             patch.object(windows.ctypes, 'WinDLL', return_value=user32, create=True), \
+             patch.object(windows.ctypes, 'WinDLL',
+                          side_effect=lambda name, **kw: user32 if name == 'user32' else kernel32,
+                          create=True), \
              patch.object(windows.ctypes, 'WINFUNCTYPE',
                           side_effect=lambda *args: lambda callback: callback, create=True), \
              patch.object(windows.subprocess, 'Popen', return_value=process), \
@@ -90,6 +103,10 @@ class NormalLaunchTests(unittest.TestCase):
 
     def test_ready_data_closes_workbench_and_ignores_other_process_setup(self):
         self.run_launch()
+
+    def test_root_launcher_closes_its_versioned_child_window(self):
+        self.run_launch(child_pid=456)
+        self.run_launch(child_pid=456, setup_count=1, workbench_visible=False)
 
     def test_ambiguous_setup_is_rejected_without_closing_any_window(self):
         self.run_launch(setup_count=2)

@@ -1,5 +1,6 @@
 #include "graphics_workbench.hpp"
 #include "../ui_text.hpp"
+#include "application_update_ui.hpp"
 #include "apply_timing.hpp"
 #include "eop_catalog.hpp"
 #include "epoch_editor.hpp"
@@ -322,9 +323,6 @@ class Workbench final : public WorkbenchWindow {
               bool output_only_probe)
         : app_(app), log_(log), smoke_dir_(smoke_dir), validation_(validation),
           benchmarking_(!benchmark_manifest.isEmpty()), frames_(runtime::make_frame_provider()),
-          eop_(runtime::load_eop_snapshot(
-              std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) /
-              "resources/eop/manifest.json")),
           viewer_(vsgQt::Viewer::create()),
           markers_(std::make_unique<render_vsg::MarkerLayer>(10000)),
           selection_(
@@ -344,11 +342,18 @@ class Workbench final : public WorkbenchWindow {
                     throw std::invalid_argument("Profile satellite count must be in [1, 128]");
             }
             playing_ = benchmarking_;
-            eop_history_ = eop_;
-            if (!benchmarking_)
-                eop_current_ = runtime::load_eop_snapshot(
-                    std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) /
-                    "resources/eop-current/manifest.json");
+            const bool fixture_mode = benchmarking_ || profile_ || !smoke_dir_.isEmpty();
+            std::vector<std::filesystem::path> bundled;
+            if (fixture_mode) {
+                test_resources_ = qEnvironmentVariable("ORBELLE_TEST_RESOURCES");
+                if (test_resources_.isEmpty())
+                    test_resources_ = QCoreApplication::applicationDirPath() + "/resources";
+                const auto fixtures = std::filesystem::path(test_resources_.toStdWString());
+                eop_ = runtime::load_eop_snapshot(fixtures / "eop/manifest.json");
+                if (!benchmarking_)
+                    bundled = {fixtures / "eop-current/manifest.json",
+                               fixtures / "eop/manifest.json"};
+            }
             if (!benchmarking_) {
                 const auto configured_home = qEnvironmentVariable("ORBELLE_DATA_HOME");
                 const auto normal_home =
@@ -357,13 +362,8 @@ class Workbench final : public WorkbenchWindow {
                               "/data"
                         : QDir(configured_home).absolutePath();
                 const auto store = smoke_dir_.isEmpty() ? normal_home : smoke_dir_ + "/data-store";
-                const auto resources =
-                    std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) /
-                    "resources";
                 eop_catalog_ = std::make_unique<EopCatalog>(
-                    std::filesystem::path(store.toStdWString()),
-                    std::vector<std::filesystem::path>{resources / "eop-current/manifest.json",
-                                                       resources / "eop/manifest.json"},
+                    std::filesystem::path(store.toStdWString()), bundled,
                     smoke_dir_.isEmpty() && configured_home.isEmpty()
                         ? std::filesystem::path((QStandardPaths::writableLocation(
                                                      QStandardPaths::AppLocalDataLocation) +
@@ -371,9 +371,11 @@ class Workbench final : public WorkbenchWindow {
                                                     .toStdWString())
                         : std::filesystem::path{},
                     false);
-                eop_current_ = eop_catalog_->providers().at(0);
-                eop_history_ = eop_catalog_->providers().at(1);
-                eop_ = eop_history_;
+                if (fixture_mode) {
+                    eop_current_ = eop_catalog_->providers().at(0);
+                    eop_ = eop_catalog_->providers().at(1);
+                } else if (!eop_catalog_->providers().empty())
+                    eop_ = eop_catalog_->providers().at(eop_catalog_->preferred_index());
             }
 #ifdef ORBELLE_DESKTOP_BENCHMARK
             if (benchmarking_)
@@ -519,6 +521,16 @@ class Workbench final : public WorkbenchWindow {
                     ui::text("graphics_workbench.analysis_menu.add_action"));
                 report_action_->setObjectName("openReports");
                 connect(report_action_, &QAction::triggered, this, [this] { show_reports(); });
+                if (!profile_ && smoke_dir_.isEmpty()) {
+                    application_update_ = new ApplicationUpdateUi(
+                        QString::fromStdWString(
+                            (eop_catalog_->store() / "desktop-preferences.ini").wstring()),
+                        menu_bar_, this);
+                    application_update_->restart_requested = [this] {
+                        update_restart_ = true;
+                        close();
+                    };
+                }
                 scene_menu_->addSeparator();
                 // Analysis and data were only reachable from menus; keep them one click away.
                 commands_->addSeparator();
@@ -1225,6 +1237,10 @@ class Workbench final : public WorkbenchWindow {
     void start_rendering() {
         clock_.restart();
         timer_.start();
+        if (application_update_)
+            application_update_->schedule_startup_check();
+        if (!benchmarking_ && !profile_ && smoke_dir_.isEmpty())
+            QTimer::singleShot(3000, this, [] { acknowledge_update_startup(); });
     }
     bool initialize_data(StartupSplash *splash) {
         if (benchmarking_ || profile_)
@@ -1256,7 +1272,8 @@ class Workbench final : public WorkbenchWindow {
                     return eop_catalog_->has_full_download(product);
                 }))
                 splash->hide();
-            if (!prepare_initial_data(this, *eop_catalog_))
+            if (!prepare_initial_data(this, *eop_catalog_, required, {},
+                                      [] { acknowledge_update_startup(); }))
                 return false;
             try {
                 const auto steps = startup_resource_steps(startup_resources_,
@@ -1284,24 +1301,49 @@ class Workbench final : public WorkbenchWindow {
                     return false;
             }
         }
+        if (eop_catalog_->providers().empty())
+            throw std::runtime_error(
+                "Initial data preparation did not install Earth orientation data");
+        eop_ = eop_catalog_->providers().at(eop_catalog_->preferred_index());
         if (editor_)
             editor_->set_time_provider(eop_catalog_->time_provider());
         eop_catalog_->set_update_schedule_enabled(true);
         return true;
     }
     void closeEvent(QCloseEvent *event) override {
-        if (!benchmarking_ && smoke_dir_.isEmpty() && !profile_) {
+        if (update_handover_pending_) {
+            event->ignore();
+            return;
+        }
+        if (!update_handed_over_ && !benchmarking_ && smoke_dir_.isEmpty() && !profile_) {
             if (busy()) {
                 if (project_candidate_.valid() && project_cancellation_)
                     project_cancellation_->store(true);
                 event->ignore();
+                update_restart_ = false;
                 statusBar()->showMessage(ui::text("graphics_workbench.label_12"), 5000);
                 return;
             }
             if (!confirm_replace_scenario()) {
                 event->ignore();
+                update_restart_ = false;
                 return;
             }
+        }
+        if (update_restart_ && !update_handed_over_ && application_update_) {
+            event->ignore();
+            update_handover_pending_ = true;
+            application_update_->launch_updater([this](bool ready, QString error) {
+                update_handover_pending_ = false;
+                update_handed_over_ = ready;
+                update_restart_ = ready;
+                if (ready)
+                    close();
+                else if (!error.isEmpty())
+                    QMessageBox::warning(this, ui::text("updates.failed"),
+                                         ui::text("updates.handoff_failed").arg(error));
+            });
+            return;
         }
         if (properties_dialog_)
             properties_dialog_->close();
@@ -3170,6 +3212,9 @@ class Workbench final : public WorkbenchWindow {
         return runtime::load_time_snapshot(eop_catalog_->data().time_file(info.sha256));
     }
     std::shared_ptr<const core::ITimeProvider> active_time() const {
+        if (!eop_)
+            return eop_catalog_ ? eop_catalog_->time_provider()
+                                : runtime::make_builtin_time_provider();
         active_time_ = time_for(eop_->data_info().time_data);
         return active_time_;
     }
@@ -6130,6 +6175,9 @@ class Workbench final : public WorkbenchWindow {
     QAction *open_action_ = nullptr, *save_action_ = nullptr, *save_as_action_ = nullptr;
     QAction *rename_action_ = nullptr, *duplicate_action_ = nullptr, *delete_action_ = nullptr;
     QAction *eop_action_ = nullptr;
+    ApplicationUpdateUi *application_update_ = nullptr;
+    bool update_restart_ = false;
+    bool update_handover_pending_ = false, update_handed_over_ = false;
     QAction *report_action_ = nullptr;
     ReportDialog *report_dialog_ = nullptr;
     std::vector<application::ReportDefinition> reports_;
@@ -6240,7 +6288,8 @@ class Workbench final : public WorkbenchWindow {
     QSize smoke_responsive_size_;
     bool orbit_capture_ = false, fit_pending_ = false;
     std::shared_ptr<const core::IFrameProvider> frames_;
-    std::shared_ptr<const core::IEarthOrientationProvider> eop_, eop_history_, eop_current_;
+    std::shared_ptr<const core::IEarthOrientationProvider> eop_, eop_current_;
+    QString test_resources_;
     vsg::ref_ptr<vsgQt::Viewer> viewer_;
     vsg::ref_ptr<vsg::Device> shared_device_ref_;
     vsg::ref_ptr<vsg::ResourceHints> hints_;

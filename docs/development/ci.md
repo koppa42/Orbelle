@@ -4,6 +4,8 @@
 
 ## 触发与测试范围
 
+Windows 桌面发布同时生成完整便携包和 `app`、`runtime`、`resources` 三个更新分包及更新清单，全部纳入 `SHA256SUMS`。发布前核对整包与分包内容一致、版本与路径合法、文件和归档散列正确。资源采用运行白名单，固定测试输入留在验证目录；详见[桌面软件更新](../architecture/application_updates.md)。
+
 | 触发 | 执行范围 |
 | --- | --- |
 | 代码、测试、CI、依赖或资源 PR | Windows / Linux 完整数值与行为回归、Python 3.11–3.15 API 测试；不构建发布包 |
@@ -76,11 +78,13 @@ Windows、Linux 和 Python 的 `commands.json` 记录每条命令的 UTC 开始�
 | 文件 | 用途 |
 | --- | --- |
 | `Orbelle-X.Y.Z-win-x64.zip` | Windows x64 便携桌面，解压后运行 `Orbelle.exe` |
+| `Orbelle-X.Y.Z-win-x64-{app,runtime,resources}.zip` | Windows 自动更新分包，分别包含程序、依赖与资源 |
+| `Orbelle-X.Y.Z-win-x64-update.json` | 分包和完整版本的文件、大小及 SHA-256 清单 |
 | `Orbelle-X.Y.Z-sdk-win-x64.zip` | Windows x64 / VS 2022 Release C++ 无界面 SDK |
 | `Orbelle-X.Y.Z-sdk-linux-x64.tar.gz` | Ubuntu 24.04 x86_64 Release C++ 无界面 SDK |
 | `orbelle-X.Y.Z-cpNNN-cpNNN-win_amd64.whl` | Windows x64；CPython 3.11～3.15，每个版本一个 wheel |
 | `orbelle-X.Y.Z-cpNNN-cpNNN-linux_x86_64.whl` | Ubuntu 24.04 x86_64；CPython 3.11～3.15，每个版本一个 wheel |
-| `SHA256SUMS` | 上述十三个文件的 SHA-256 |
+| `SHA256SUMS` | 上述十七个文件的 SHA-256 |
 
 SDK 包含计算库、头文件、CMake 配置、样例数据及链接依赖。将 SDK 根目录和其 `dependencies` 子目录一起加入 `CMAKE_PREFIX_PATH`；Windows 消费程序运行时还需将 `dependencies/bin` 加入进程 `PATH`。具体用法见包内 `README.txt`。
 

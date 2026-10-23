@@ -18,6 +18,20 @@ with patch.object(sys, "path", [str(ROOT / "tools/ci"), *sys.path]):
 
 
 class WindowsGeneratorTests(unittest.TestCase):
+    def test_release_stages_full_portable_and_all_update_assets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "release"
+            output.mkdir()
+            expected = {f"Orbelle-0.3.2-win-x64{suffix}" for suffix in
+                        (".zip", "-app.zip", "-runtime.zip", "-resources.zip", "-update.json")}
+            for name in expected:
+                (root / name).write_bytes(name.encode("ascii"))
+            windows.copy_desktop_assets(root, output, "0.3.2")
+            self.assertEqual({path.name for path in output.iterdir()}, expected)
+            for path in output.iterdir():
+                self.assertEqual(path.read_bytes(), path.name.encode("ascii"))
+
     def test_cached_ninja_and_visual_studio_keep_full_tests_and_python_parity(self):
         for generator in ("Ninja Multi-Config", "Visual Studio 17 2022"):
             with self.subTest(generator=generator), tempfile.TemporaryDirectory() as directory:

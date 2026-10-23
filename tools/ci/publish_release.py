@@ -5,10 +5,15 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import zipfile
 
 from version import ROOT, check, python_versions
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "packaging"))
+from update_bundles import asset_names, validate_portable_archive, validate_update_assets
+sys.path.pop(0)
 
 
 def validate_assets(directory, version):
@@ -17,6 +22,7 @@ def validate_assets(directory, version):
         f"Orbelle-{version}-sdk-win-x64.zip",
         f"Orbelle-{version}-sdk-linux-x64.tar.gz",
     }
+    expected.update(asset_names(version))
     for python in python_versions()[1]:
         tag = "cp" + python.replace(".", "")
         expected.update(f"orbelle-{version}-{tag}-{tag}-{platform}.whl"
@@ -35,6 +41,9 @@ def validate_assets(directory, version):
                     raise ValueError(f"Wheel metadata version differs: {name}")
                 if wheel.testzip() is not None:
                     raise ValueError(f"Corrupt wheel: {name}")
+    validate_update_assets(directory, version)
+    validate_portable_archive(directory / f"Orbelle-{version}-win-x64.zip", version,
+                              directory / f"Orbelle-{version}-win-x64-update.json")
     return [directory / name for name in sorted(expected)]
 
 
@@ -59,6 +68,8 @@ def publish(tag, assets, repo, run=subprocess.run):
         notes = (
             "Windows x64 desktop: download the portable ZIP and extract the whole folder. "
             "The desktop requires a Vulkan-capable GPU and driver.\n\n"
+            "The app, runtime and resources ZIPs plus update.json are consumed by the desktop updater; "
+            "for a new installation, use the complete portable ZIP.\n\n"
             "C++ SDKs include headless Runtime/ERFA/IERS/CSPICE/SQLite and their link dependencies. "
             "See README.txt inside the archive.\n\n"
             "Python wheels: CPython " + ", ".join(python_versions()[1]) + " x64 on Windows and Ubuntu 24.04. "

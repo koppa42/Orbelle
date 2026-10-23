@@ -1,0 +1,9 @@
+#pragma once
+#include <string_view>
+
+// Generated from the shared desktop catalogue; bootstrap code cannot load Qt resources.
+namespace orbelle::updater {
+constexpr const wchar_t *native_text(std::string_view key) noexcept {
+@native_text_entries@    return L"";
+}
+} // namespace orbelle::updater

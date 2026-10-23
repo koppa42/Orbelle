@@ -12,5 +12,6 @@ class EopCatalog;
 // False means cancellation; completed resources remain cached for the next launch.
 bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
                           const std::vector<DataProduct> &required = initial_data_products(),
-                          const std::function<void(DataProduct)> &download = {});
+                          const std::function<void(DataProduct)> &download = {},
+                          const std::function<void()> &visible_ready = {});
 } // namespace orbelle::desktop

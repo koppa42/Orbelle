@@ -87,7 +87,7 @@ def validate_source(path, source, messages):
             line = source.count("\n", 0, offset) + 1
             errors.append(f"{path}:{line}: display copy belongs in resources/text/zh_CN.json")
         # Metadata tables mark deferred lookups with ui::key, keeping them constexpr.
-        if re.search(r"ui::(?:text|utf8|key)\(\s*$", prefix) and value not in messages:
+        if re.search(r"(?:ui::(?:text|utf8|key)|\bnative_text)\(\s*$", prefix) and value not in messages:
             errors.append(f"{path}: unknown text key {value}")
     return errors, referenced
 
@@ -95,12 +95,13 @@ def validate_source(path, source, messages):
 def check(root):
     messages = read_catalogue(root / "apps/desktop/resources/text/zh_CN.json")
     errors, referenced = [], set()
-    for path in sorted((root / "apps/desktop/src").rglob("*")):
-        if path.suffix in (".cpp", ".hpp"):
-            found, used = validate_source(path.relative_to(root),
-                                          path.read_text(encoding="utf-8"), messages)
-            errors.extend(found)
-            referenced.update(used)
+    for source_root in (root / "apps/desktop/src", root / "apps/desktop/updater"):
+        for path in sorted(source_root.rglob("*")):
+            if path.suffix in (".cpp", ".hpp") and "tests" not in path.relative_to(source_root).parts:
+                found, used = validate_source(path.relative_to(root),
+                                              path.read_text(encoding="utf-8"), messages)
+                errors.extend(found)
+                referenced.update(used)
     errors.extend(f"Unused text key: {key}" for key in sorted(messages.keys() - referenced))
     return errors, len(messages)
 

@@ -15,6 +15,12 @@ from version import check
 from validation_inputs import PYTHON_EXAMPLES, stage_validation_inputs
 
 
+def copy_desktop_assets(work, output, version):
+    """Stage both the complete installation and all incremental update assets."""
+    for suffix in (".zip", "-app.zip", "-runtime.zip", "-resources.zip", "-update.json"):
+        shutil.copy2(work / f"Orbelle-{version}-win-x64{suffix}", output)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dependency-prefix", type=Path, required=True)
@@ -89,7 +95,7 @@ def main():
         "--build-dir", desktop, "--dependency-prefix", prefix,
         "--output", work / f"Orbelle-{args.version}-win-x64",
         "--reports", reports / "desktop-package", "--version", args.version, "--zip")
-    shutil.copy2(work / f"Orbelle-{args.version}-win-x64.zip", output)
+    copy_desktop_assets(work, output, args.version)
 
     # Copy tracked sources only: scikit-build must not walk vcpkg/build caches.
     wheel_source = work / "wheel-source"

@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from test_update_bundles import portable_fixture, updates
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/ci"))
@@ -21,8 +22,14 @@ class ReleaseTests(unittest.TestCase):
         self.assets = Path(self.temporary.name)
         self.version = version.check(ROOT)
         self.tag = "v" + self.version
-        for name in (f"Orbelle-{self.version}-win-x64.zip",
-                     f"Orbelle-{self.version}-sdk-win-x64.zip",
+        self.portable_temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.portable_temporary.cleanup)
+        portable = Path(self.portable_temporary.name) / "portable"
+        portable_fixture(portable, self.version)
+        updates.generate_update_bundles(portable, self.version, self.assets)
+        self.portable = portable
+        self.write_portable_archive()
+        for name in (f"Orbelle-{self.version}-sdk-win-x64.zip",
                      f"Orbelle-{self.version}-sdk-linux-x64.tar.gz"):
             (self.assets / name).write_bytes(b"test archive")
         for python in version.python_versions()[1]:
@@ -31,7 +38,14 @@ class ReleaseTests(unittest.TestCase):
                 with zipfile.ZipFile(self.assets / f"orbelle-{self.version}-{tag}-{tag}-{platform}.whl", "w") as wheel:
                     wheel.writestr(f"orbelle-{self.version}.dist-info/METADATA",
                                    f"Metadata-Version: 2.1\nName: orbelle\nVersion: {self.version}\n")
-        self.asset_count = 3 + 2 * len(version.python_versions()[1])
+        self.asset_count = 7 + 2 * len(version.python_versions()[1])
+
+    def write_portable_archive(self):
+        name = f"Orbelle-{self.version}-win-x64"
+        with zipfile.ZipFile(self.assets / (name + ".zip"), "w") as archive:
+            for path in sorted(self.portable.rglob("*")):
+                if path.is_file():
+                    archive.write(path, name + "/" + path.relative_to(self.portable).as_posix())
 
     def test_requires_every_platform_and_rejects_extra_files(self):
         self.assertEqual(len(publish_release.validate_assets(self.assets, self.version)), self.asset_count)
@@ -58,6 +72,34 @@ class ReleaseTests(unittest.TestCase):
         self.assertTrue(any("--draft" in command for command in calls))
         self.assertFalse(any("edit" in command for command in calls))
         self.assertEqual(len((self.assets / "SHA256SUMS").read_text().splitlines()), self.asset_count)
+        for name in updates.asset_names(self.version):
+            self.assertIn(f"{updates.digest(self.assets / name)}  {name}\n",
+                          (self.assets / "SHA256SUMS").read_text())
+
+    def test_corrupt_update_is_rejected_before_any_github_call(self):
+        (self.assets / updates.asset_names(self.version)[0]).write_bytes(b"damaged")
+        calls = []
+        with self.assertRaises(ValueError):
+            publish_release.publish(self.tag, self.assets, "owner/repo", lambda *args, **kwargs: calls.append(args))
+        self.assertEqual(calls, [])
+
+    def test_portable_contents_must_match_incremental_update(self):
+        (self.portable / "versions" / self.version / "OrbelleApp.exe").write_bytes(b"different application")
+        self.write_portable_archive()
+        with self.assertRaisesRegex(ValueError, "file contents differ"):
+            publish_release.validate_assets(self.assets, self.version)
+
+    def test_portable_inventory_cannot_add_unmanaged_version_files(self):
+        (self.portable / "versions" / self.version / "unexpected.dll").write_bytes(b"extra")
+        self.write_portable_archive()
+        with self.assertRaisesRegex(ValueError, "file inventories differ"):
+            publish_release.validate_assets(self.assets, self.version)
+
+    def test_portable_must_include_launchers_run_lock(self):
+        (self.portable / ".orbelle-running.lock").unlink()
+        self.write_portable_archive()
+        with self.assertRaisesRegex(ValueError, "Missing portable launcher files"):
+            publish_release.validate_assets(self.assets, self.version)
 
     def test_existing_draft_resumes_and_publishes_after_inventory_check(self):
         calls = []

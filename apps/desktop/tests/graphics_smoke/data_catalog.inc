@@ -6,8 +6,7 @@ void Workbench::smoke_data_catalog() {
         smoke_require(last_project_outcome_ == "opened" && satellites_.size() == 2 &&
                           satellites_[0].name() == QStringLiteral("观测卫星 A"),
                       "Object names were not restored from the project");
-        const auto resource = QCoreApplication::applicationDirPath() +
-                              (eop_ == eop_current_ ? "/resources/eop-current" : "/resources/eop");
+        const auto resource = test_resources_ + (eop_ == eop_current_ ? "/eop-current" : "/eop");
         QFile manifest(resource + "/manifest.json");
         smoke_require(manifest.open(QIODevice::ReadOnly), "Cannot open smoke EOP source");
         auto json = QJsonDocument::fromJson(manifest.readAll()).object();
@@ -201,10 +200,8 @@ void Workbench::smoke_data_catalog() {
         eop_catalog_ = std::make_unique<EopCatalog>(
             eop_catalog_->store(),
             std::vector<std::filesystem::path>{
-                std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) /
-                    "resources/eop-current/manifest.json",
-                std::filesystem::path(QCoreApplication::applicationDirPath().toStdWString()) /
-                    "resources/eop/manifest.json"},
+                std::filesystem::path(test_resources_.toStdWString()) / "eop-current/manifest.json",
+                std::filesystem::path(test_resources_.toStdWString()) / "eop/manifest.json"},
             std::filesystem::path{}, false);
         editor_->data_catalog = eop_catalog_.get();
         smoke_require(eop_catalog_->providers().size() == 3 && eop_catalog_->warnings().empty() &&
