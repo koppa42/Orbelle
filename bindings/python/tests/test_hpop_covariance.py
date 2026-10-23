@@ -4,15 +4,15 @@ import json
 import math
 import tempfile
 import unittest
-import orbelle as of
+import orbelle as ob
 
 ROOT = Path(__file__).resolve().parents[3]
 
 def covariance():
-    result = of.HpopCovarianceInput()
+    result = ob.HpopCovarianceInput()
     result.state = [[(10000.0 if i < 3 else 1.0) if i == j else 0.0
                      for j in range(6)] for i in range(6)]
-    drag, srp = of.HpopConsiderParameter(), of.HpopConsiderParameter()
+    drag, srp = ob.HpopConsiderParameter(), ob.HpopConsiderParameter()
     drag.variance, srp.variance = 1e-4, 2e-4
     drag.state_cross_covariance = [0.1, 0, 0, 0, 0, 0]
     srp.state_cross_covariance = [0, -.1, 0, 0, 0, 0]
@@ -20,9 +20,9 @@ def covariance():
     return result
 
 def orbit():
-    value = of.OrbitInput()
-    value.propagator = of.OrbitPropagator.HPOP
-    value.initial = of.CartesianState(of.Epoch(0), of.OriginId.EARTH, of.FrameId.GCRF,
+    value = ob.OrbitInput()
+    value.propagator = ob.OrbitPropagator.HPOP
+    value.initial = ob.CartesianState(ob.Epoch(0), ob.OriginId.EARTH, ob.FrameId.GCRF,
                                       (7e6, 1e6, 2e5), (-1000, 7200, 1200))
     options = value.hpop
     options.gravity_degree = options.gravity_order = 0
@@ -38,9 +38,9 @@ class HpopCovarianceTests(unittest.TestCase):
                 if line and not line.startswith("#")]
         ref = next(r for r in rows if r[0] == 14)
         value, initial = orbit(), covariance()
-        value.initial = of.CartesianState(of.Epoch(0), of.OriginId.EARTH, of.FrameId.GCRF,
+        value.initial = ob.CartesianState(ob.Epoch(0), ob.OriginId.EARTH, ob.FrameId.GCRF,
                                           ref[3:6], ref[6:9])
-        result = of.propagate_hpop_covariance(value, of.Epoch(int(ref[2]*1e9)), initial)
+        result = ob.propagate_hpop_covariance(value, ob.Epoch(int(ref[2]*1e9)), initial)
         phi = [ref[15+6*i:21+6*i] for i in range(6)]
         expected = [[sum(phi[i][k]*initial.state[k][k]*phi[j][k] for k in range(6))
                      for j in range(6)] for i in range(6)]
@@ -52,14 +52,14 @@ class HpopCovarianceTests(unittest.TestCase):
             self.assertAlmostEqual(result.covariance.drag.state_cross_covariance[i], expected_cross, delta=1e-7)
         self.assertEqual(result.covariance.drag.variance, initial.drag.variance)
         self.assertEqual(result.covariance.drag_srp_covariance, initial.drag_srp_covariance)
-        transported = of.transport_hpop_covariance(initial, result.variational)
+        transported = ob.transport_hpop_covariance(initial, result.variational)
         self.assertEqual(transported.covariance.state, result.covariance.state)
         self.assertEqual(result.contributions.consider_parameters, [[0.0]*6 for _ in range(6)])
 
     def test_owned_results_input_snapshot_and_concurrent_calls(self):
         value, initial = orbit(), covariance()
         def run():
-            return of.propagate_hpop_covariance(value, of.Epoch(600*10**9), initial)
+            return ob.propagate_hpop_covariance(value, ob.Epoch(600*10**9), initial)
         reference = run()
         with ThreadPoolExecutor(max_workers=3) as pool:
             values = list(pool.map(lambda _: run(), range(3)))
@@ -76,19 +76,19 @@ class HpopCovarianceTests(unittest.TestCase):
             initial.state = [[0.0]*6 for _ in range(6)]
             initial.drag = None
             return False
-        actual = of.propagate_hpop_covariance(value, of.Epoch(600*10**9), initial, cancelled=mutate_input)
+        actual = ob.propagate_hpop_covariance(value, ob.Epoch(600*10**9), initial, cancelled=mutate_input)
         self.assertEqual(actual.covariance.state, reference.covariance.state)
 
     def test_sampled_coast_order_duplicates_snapshot_and_cancellation(self):
         value, initial = orbit(), covariance()
-        times = [of.Epoch(t) for t in (600_000_000_001, -400_000_000_001, 0,
+        times = [ob.Epoch(t) for t in (600_000_000_001, -400_000_000_001, 0,
                                        300_000_000_000, -200_000_000_000, 600_000_000_001)]
-        result = of.sample_hpop_covariance(value, times, initial)
+        result = ob.sample_hpop_covariance(value, times, initial)
         self.assertEqual([v.variational.state.epoch.tai_nanoseconds for v in result],
                          [t.tai_nanoseconds for t in times])
         self.assertEqual(result[0].covariance.state, result[-1].covariance.state)
         for epoch, actual in zip(times, result):
-            exact = of.propagate_hpop_covariance(value, epoch, initial)
+            exact = ob.propagate_hpop_covariance(value, epoch, initial)
             for i in range(6):
                 for j in range(6):
                     error = abs(actual.covariance.state[i][j] - exact.covariance.state[i][j])
@@ -98,7 +98,7 @@ class HpopCovarianceTests(unittest.TestCase):
             times.clear()
             initial.state = [[0.0] * 6 for _ in range(6)]
             return False
-        snapshot = of.sample_hpop_covariance(value, times, initial, cancelled=mutate_input)
+        snapshot = ob.sample_hpop_covariance(value, times, initial, cancelled=mutate_input)
         self.assertEqual([v.covariance.state for v in snapshot],
                          [v.covariance.state for v in result])
         calls = 0
@@ -106,58 +106,58 @@ class HpopCovarianceTests(unittest.TestCase):
             nonlocal calls
             calls += 1
             return calls == 40
-        with self.assertRaises(of.AnalysisCancelled):
-            of.sample_hpop_covariance(value, [of.Epoch(600 * 10**9)], covariance(), cancelled=cancel)
+        with self.assertRaises(ob.AnalysisCancelled):
+            ob.sample_hpop_covariance(value, [ob.Epoch(600 * 10**9)], covariance(), cancelled=cancel)
         self.assertEqual(calls, 40)
-        self.assertEqual(of.sample_hpop_covariance(value, [], covariance()), [])
+        self.assertEqual(ob.sample_hpop_covariance(value, [], covariance()), [])
         with self.assertRaises(ValueError):
-            of.sample_hpop_covariance(value, [of.Epoch(0)] * 200001, covariance())
-        self.assertEqual(len(of.sample_hpop_covariance(value, [of.Epoch(0)], covariance())), 1)
+            ob.sample_hpop_covariance(value, [ob.Epoch(0)] * 200001, covariance())
+        self.assertEqual(len(ob.sample_hpop_covariance(value, [ob.Epoch(0)], covariance())), 1)
 
     def test_joint_validation_cancellation_and_retry(self):
         value, initial = orbit(), covariance()
-        of.validate_hpop_covariance(initial)
+        ob.validate_hpop_covariance(initial)
         with self.assertRaises(ValueError):
-            of.validate_hpop_covariance(of.HpopCovarianceInput())
+            ob.validate_hpop_covariance(ob.HpopCovarianceInput())
         invalid = covariance()
         parameter = invalid.drag
         parameter.state_cross_covariance = [100, 0, 0, 0, 0, 0]
         invalid.drag = parameter
         with self.assertRaises(ValueError):
-            of.validate_hpop_covariance(invalid)
-        for callback, error in ((lambda: True, of.AnalysisCancelled), (lambda: 1, TypeError)):
+            ob.validate_hpop_covariance(invalid)
+        for callback, error in ((lambda: True, ob.AnalysisCancelled), (lambda: 1, TypeError)):
             with self.assertRaises(error):
-                of.propagate_hpop_covariance(value, of.Epoch(100*10**9), initial, cancelled=callback)
+                ob.propagate_hpop_covariance(value, ob.Epoch(100*10**9), initial, cancelled=callback)
         with self.assertRaises(ValueError):
-            of.propagate_hpop_covariance(of.OrbitInput(), of.Epoch(0), initial)
-        result = of.propagate_hpop_covariance(value, of.Epoch(0), initial)
+            ob.propagate_hpop_covariance(ob.OrbitInput(), ob.Epoch(0), initial)
+        result = ob.propagate_hpop_covariance(value, ob.Epoch(0), initial)
         self.assertAlmostEqual(result.covariance.state[0][0], initial.state[0][0], delta=1e-10)
 
-    @unittest.skipUnless(of.ephemeris_available() and of.time_frames_available(), "requires providers")
+    @unittest.skipUnless(ob.ephemeris_available() and ob.time_frames_available(), "requires providers")
     def test_consider_covariance_composes_with_real_drag_and_srp_resources(self):
         eop = ROOT / "data/samples/eop/iers_c04_2016_12_28_2017_01_04/manifest.json"
         spice = ROOT / "data/samples/spice/de440s_2016_leap/manifest.json"
-        epoch = of.Epoch(json.loads(spice.read_text())["first_tai_ns"] + 3600*10**9)
+        epoch = ob.Epoch(json.loads(spice.read_text())["first_tai_ns"] + 3600*10**9)
         with tempfile.TemporaryDirectory() as folder:
-            data = of.DataSnapshot.load(eop_manifest=eop).with_ephemeris("de440s", spice, Path(folder))
+            data = ob.DataSnapshot.load(eop_manifest=eop).with_ephemeris("de440s", spice, Path(folder))
             try:
                 value, initial = orbit(), covariance()
-                value.initial = of.CartesianState(epoch, of.OriginId.EARTH, of.FrameId.GCRF,
+                value.initial = ob.CartesianState(epoch, ob.OriginId.EARTH, ob.FrameId.GCRF,
                                                   (7e6, 1e6, 2e5), (-1000, 7200, 1200))
                 options = value.hpop
                 drag, srp = options.drag, options.srp
                 drag.enabled, drag.cd = True, 0.0
-                drag.atmosphere = of.AtmosphereModel.NRLMSISE00
+                drag.atmosphere = ob.AtmosphereModel.NRLMSISE00
                 srp.enabled, srp.cr = True, 0.0
-                srp.shadow_model = of.SrpShadowModel.NONE
+                srp.shadow_model = ob.SrpShadowModel.NONE
                 options.drag, options.srp = drag, srp
                 value.hpop = options
-                midpoint = of.Epoch(epoch.tai_nanoseconds+300*10**9)
-                end = of.Epoch(epoch.tai_nanoseconds+600*10**9)
-                whole = of.propagate_hpop_covariance(value, end, initial, data=data)
-                first = of.propagate_hpop_covariance(value, midpoint, initial, data=data)
+                midpoint = ob.Epoch(epoch.tai_nanoseconds+300*10**9)
+                end = ob.Epoch(epoch.tai_nanoseconds+600*10**9)
+                whole = ob.propagate_hpop_covariance(value, end, initial, data=data)
+                first = ob.propagate_hpop_covariance(value, midpoint, initial, data=data)
                 value.initial = first.variational.state
-                split = of.propagate_hpop_covariance(value, end, first.covariance, data=data)
+                split = ob.propagate_hpop_covariance(value, end, first.covariance, data=data)
                 for i in range(6):
                     for j in range(6):
                         error = abs(whole.covariance.state[i][j]-split.covariance.state[i][j])

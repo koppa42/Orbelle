@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 import unittest
 
-import orbelle as of
+import orbelle as ob
 from orbelle import units as u
 from test_analysis import make_project
 
@@ -13,18 +13,18 @@ class ReportTemplateTests(unittest.TestCase):
     def test_reusable_template_preserves_source_and_provenance(self):
         project, station = make_project(0, 100)
         analysis = project.prepare()
-        selected = [of.reports.Column("state.x", unit="km", title="距离"), "time.epoch"]
-        template = of.reports.Template(selected)
+        selected = [ob.reports.Column("state.x", unit="km", title="距离"), "time.epoch"]
+        template = ob.reports.Template(selected)
         selected.clear()
-        result = analysis.report(of.ReportKind.CARTESIAN_STATE, objects=station,
-                                 step=u.ns(30), frame=of.FrameId.ITRF, template=template)
+        result = analysis.report(ob.ReportKind.CARTESIAN_STATE, objects=station,
+                                 step=u.ns(30), frame=ob.FrameId.ITRF, template=template)
         self.assertEqual(result.table.row_count, 5)
         self.assertEqual([c.id for c in result.table.columns], ["state.x", "time.epoch"])
         self.assertEqual(result.table.rows[0][0], 6378137)
         self.assertEqual(result.numeric_value(0, 0), 6378.137)
         self.assertEqual(result.column_title(0), "距离 (km)")
         project.objects.remove(station)
-        restored = of.reports.Template(units=of.ReportUnits.SI).apply(result)
+        restored = ob.reports.Template(units=ob.ReportUnits.SI).apply(result)
         self.assertEqual(len(restored.table.columns), 10)
         self.assertEqual(restored.table.rows[-1][2].tai_nanoseconds, 100)
         self.assertEqual(restored.input_revision, result.input_revision)
@@ -44,69 +44,69 @@ class ReportTemplateTests(unittest.TestCase):
         project, station = make_project()
         analysis = project.prepare()
         with self.assertRaises(ValueError):
-            analysis.report(of.ReportKind.OBJECT_SUMMARY, objects=[])
+            analysis.report(ob.ReportKind.OBJECT_SUMMARY, objects=[])
         with self.assertRaises(TypeError):
-            analysis.report(of.ReportKind.OBJECT_SUMMARY)
-        project.objects.ground_station("Second", location=of.Wgs84Location(u.deg(1), u.deg(0)))
-        self.assertEqual(analysis.report(of.ReportKind.OBJECT_SUMMARY,
-                                        objects=of.reports.ALL).table.row_count, 1)
-        report = project.prepare().report(of.ReportKind.OBJECT_SUMMARY, objects=of.reports.ALL)
+            analysis.report(ob.ReportKind.OBJECT_SUMMARY)
+        project.objects.ground_station("Second", location=ob.Wgs84Location(u.deg(1), u.deg(0)))
+        self.assertEqual(analysis.report(ob.ReportKind.OBJECT_SUMMARY,
+                                        objects=ob.reports.ALL).table.row_count, 1)
+        report = project.prepare().report(ob.ReportKind.OBJECT_SUMMARY, objects=ob.reports.ALL)
         self.assertEqual(report.table.row_count, 2)
-        self.assertEqual(report.definition.query.scope, of.ReportScope.ALL_COMPATIBLE)
+        self.assertEqual(report.definition.query.scope, ob.ReportScope.ALL_COMPATIBLE)
 
     def test_field_discovery_validation_and_template_conflicts(self):
-        fields = of.reports.fields(of.ReportKind.CARTESIAN_STATE)
+        fields = ob.reports.fields(ob.ReportKind.CARTESIAN_STATE)
         self.assertEqual(next(c for c in fields if c.id == "state.x").unit, "m")
         project, station = make_project()
         analysis = project.prepare()
         for columns in ([], ["state.x", "state.x"]):
             with self.assertRaises(ValueError):
-                of.reports.Template(columns)
+                ob.reports.Template(columns)
         for columns in ("state.x", [1]):
             with self.assertRaises(TypeError):
-                of.reports.Template(columns)
-        for columns in (["missing"], [of.reports.Column("state.x", unit="deg")]):
+                ob.reports.Template(columns)
+        for columns in (["missing"], [ob.reports.Column("state.x", unit="deg")]):
             calls = []
             with self.assertRaises(ValueError):
-                analysis.report(of.ReportKind.CARTESIAN_STATE, objects=station,
-                                frame=of.FrameId.ITRF, step=u.ns(30),
-                                template=of.reports.Template(columns), progress=lambda *a: calls.append(a))
+                analysis.report(ob.ReportKind.CARTESIAN_STATE, objects=station,
+                                frame=ob.FrameId.ITRF, step=u.ns(30),
+                                template=ob.reports.Template(columns), progress=lambda *a: calls.append(a))
             self.assertEqual(calls, [])
-        template = of.reports.Template()
+        template = ob.reports.Template()
         with self.assertRaises(FrozenInstanceError):
             template.columns = ()
         with self.assertRaises(TypeError):
-            analysis.report(of.ReportKind.OBJECT_SUMMARY, objects=station,
-                            template=template, units=of.ReportUnits.SI)
+            analysis.report(ob.ReportKind.OBJECT_SUMMARY, objects=station,
+                            template=template, units=ob.ReportUnits.SI)
 
     def test_utc_is_required_only_when_displayed(self):
         project, station = make_project()
-        template = of.reports.Template(["state.x"], time_scale=of.ReportTimeScale.UTC)
-        result = project.prepare().report(of.ReportKind.CARTESIAN_STATE, objects=station,
-                                          step=u.ns(30), frame=of.FrameId.ITRF, template=template)
-        tai = of.reports.Template([of.reports.Column("time.epoch", unit="TAI")],
-                                  time_scale=of.ReportTimeScale.UTC).apply(result)
+        template = ob.reports.Template(["state.x"], time_scale=ob.ReportTimeScale.UTC)
+        result = project.prepare().report(ob.ReportKind.CARTESIAN_STATE, objects=station,
+                                          step=u.ns(30), frame=ob.FrameId.ITRF, template=template)
+        tai = ob.reports.Template([ob.reports.Column("time.epoch", unit="TAI")],
+                                  time_scale=ob.ReportTimeScale.UTC).apply(result)
         self.assertEqual(tai.cell_text(0, 0), "2000-01-01T12:00:00.000000000")
         with self.assertRaises(ValueError):
-            of.reports.Template([of.reports.Column("time.epoch", unit="UTC")]).apply(result)
-        with self.assertRaises(of.AnalysisCapabilityError):
-            project.prepare().report(of.ReportKind.CARTESIAN_STATE, objects=station,
-                                     step=u.ns(30), frame=of.FrameId.ITRF,
-                                     template=of.reports.Template([of.reports.Column("time.epoch", unit="UTC")]))
+            ob.reports.Template([ob.reports.Column("time.epoch", unit="UTC")]).apply(result)
+        with self.assertRaises(ob.AnalysisCapabilityError):
+            project.prepare().report(ob.ReportKind.CARTESIAN_STATE, objects=station,
+                                     step=u.ns(30), frame=ob.FrameId.ITRF,
+                                     template=ob.reports.Template([ob.reports.Column("time.epoch", unit="UTC")]))
 
     def test_custom_template_roundtrip_and_missing_binding_remains_explicit(self):
         project, station = make_project()
-        result = project.prepare().report(of.ReportKind.CARTESIAN_STATE, objects=station,
-                                          step=u.ns(30), frame=of.FrameId.ITRF,
-                                          template=of.reports.Template(["time.epoch", of.reports.Column("state.x", unit="m", title="X")]))
+        result = project.prepare().report(ob.ReportKind.CARTESIAN_STATE, objects=station,
+                                          step=u.ns(30), frame=ob.FrameId.ITRF,
+                                          template=ob.reports.Template(["time.epoch", ob.reports.Column("state.x", unit="m", title="X")]))
         project.set_reports([result.definition])
         project.objects.remove(station)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "report.orbelle"
             project.save(path)
-            restored = of.load_project(path)
+            restored = ob.load_project(path)
             definition = restored.to_data().reports[0]
             self.assertEqual(definition.query.object_ids, [station.id])
-            self.assertEqual(definition.query.scope, of.ReportScope.OBJECTS)
+            self.assertEqual(definition.query.scope, ob.ReportScope.OBJECTS)
             self.assertEqual([(c.field, c.unit, c.title) for c in definition.format.columns],
                              [("time.epoch", "", ""), ("state.x", "m", "X")])

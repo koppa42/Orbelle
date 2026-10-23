@@ -90,7 +90,7 @@ CSV 使用 UTF-8 BOM、逗号分隔、双引号转义和 CRLF 行结束符，支
 
 ## 查询与呈现
 
-`ReportQuery` 只描述查询类型、对象范围、区间、步长和参考系；`ReportTemplate` 描述显示列、顺序、逐列单位/标题及默认单位和时间系统。`ReportDefinition{id, name, query, format}` 用于保存配置。Python、C++ 和桌面使用同一套字段定义、校验与文件结构。空对象集合不再隐含全选；普通查询需绑定对象，或显式使用 `ReportScope::all_compatible`（Python `of.reports.ALL`）。全选始终在捕获的分析/项目范围内生效。
+`ReportQuery` 只描述查询类型、对象范围、区间、步长和参考系；`ReportTemplate` 描述显示列、顺序、逐列单位/标题及默认单位和时间系统。`ReportDefinition{id, name, query, format}` 用于保存配置。Python、C++ 和桌面使用同一套字段定义、校验与文件结构。空对象集合不再隐含全选；普通查询需绑定对象，或显式使用 `ReportScope::all_compatible`（Python `ob.reports.ALL`）。全选始终在捕获的分析/项目范围内生效。
 
 生成时保留完整原始 SI 表。`ReportResult::with_template()` / Python `Template.apply()` 返回新呈现，可以重新显示先前隐藏的字段；不创建传播器、不读取数据文件、不重新采样。单元格数值仍是 SI，历元仍为精确 `Epoch`；显示值通过 `numeric_value()`、`cell_text()`、CSV 和绘图一致转换。单位覆盖只影响对应列；场景摘要的起止时刻也保留类型，可重新选择时间系统。实际显示 UTC 时才检查已捕获的 UTC 数据；不含时间列的表不因默认 UTC 而强制加载数据。
 
@@ -99,26 +99,26 @@ CSV 使用 UTF-8 BOM、逗号分隔、双引号转义和 CRLF 行结束符，支
 ## Python
 
 ```python
-import orbelle as of
+import orbelle as ob
 from orbelle import units as u
 
 # analysis 已由 project.prepare() 捕获，satellite 为项目对象句柄。
-template = of.reports.Template([
+template = ob.reports.Template([
     "time.epoch",
-    of.reports.Column("state.x", unit="km", title="X"),
-    of.reports.Column("state.vx", unit="m/s"),
+    ob.reports.Column("state.x", unit="km", title="X"),
+    ob.reports.Column("state.vx", unit="m/s"),
 ])
-result = analysis.report(of.ReportKind.CARTESIAN_STATE, objects=satellite,
+result = analysis.report(ob.ReportKind.CARTESIAN_STATE, objects=satellite,
                          step=u.s(30), template=template)
 result.export_csv("state.csv")
 # 恢复完整字段并改成 SI，不重新计算。
-si = of.reports.Template(units=of.ReportUnits.SI).apply(result)
+si = ob.reports.Template(units=ob.ReportUnits.SI).apply(result)
 print(si.numeric_value(0, 4))
 project.set_reports([result.definition])
 project.save("mission.orbelle")
 ```
 
-省略模板仍可使用 `units=`、`time_scale=` 便利参数；提供模板时两者须写入模板，避免重复配置。Python 默认工程单位与 TAI，`columns=None` 使用完整字段，显式空列表报错。`of.reports.fields(kind)` 返回字段 ID、默认标题和原始维度。`Template` / `Column` 为不可变配置值，`Template.apply()` 目前接受 `ReportResult`，其他类型结果继续使用各自的导出/数组方法。保存配置通过 `project.set_reports()` 整体校验并提交，读取可用 `project.to_data().reports` 副本。完整可运行示例见 [report_templates.py](../../examples/python/report_templates.py)。
+省略模板仍可使用 `units=`、`time_scale=` 便利参数；提供模板时两者须写入模板，避免重复配置。Python 默认工程单位与 TAI，`columns=None` 使用完整字段，显式空列表报错。`ob.reports.fields(kind)` 返回字段 ID、默认标题和原始维度。`Template` / `Column` 为不可变配置值，`Template.apply()` 目前接受 `ReportResult`，其他类型结果继续使用各自的导出/数组方法。保存配置通过 `project.set_reports()` 整体校验并提交，读取可用 `project.to_data().reports` 副本。完整可运行示例见 [report_templates.py](../../examples/python/report_templates.py)。
 
 ## C++
 

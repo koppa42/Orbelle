@@ -4,16 +4,16 @@ import math
 import tempfile
 import unittest
 
-import orbelle as of
+import orbelle as ob
 from orbelle import units as u
 from orbelle.missions import Coast, Impulse
 
 
 class MissionTests(unittest.TestCase):
     def make(self, propagation="two_body", **kwargs):
-        project = of.Project("Transfer", of.Epoch(0), of.Epoch(7_200_000_000_000))
-        orbit = of.orbits.Mission(
-            initial=of.orbits.Keplerian(of.Epoch(0), u.km(7000), 0, u.deg(28)),
+        project = ob.Project("Transfer", ob.Epoch(0), ob.Epoch(7_200_000_000_000))
+        orbit = ob.orbits.Mission(
+            initial=ob.orbits.Keplerian(ob.Epoch(0), u.km(7000), 0, u.deg(28)),
             segments=[Coast(u.ns(600_000_000_001), "Coast"),
                       Impulse((100, -2, 3), name="Raise"), Coast(u.ns(6_599_999_999_999))],
             propagation=propagation, **kwargs)
@@ -35,20 +35,20 @@ class MissionTests(unittest.TestCase):
         self.assertEqual(analysis.state(satellite, at=project.last).position_m, later.position_m)
         self.assertEqual(burns.input_sha256, analysis.states(satellite, step=u.s(60)).input_sha256)
         self.assertEqual(burns.provenance.object_id, satellite.id)
-        with self.assertRaises(of.AnalysisCancelled):
+        with self.assertRaises(ob.AnalysisCancelled):
             analysis.maneuvers(satellite, cancelled=lambda: True)
         with self.assertRaises(AttributeError):
             burn.name = "Mutated"
         self.assertEqual(len(analysis.maneuvers(satellite)), 1)
 
     def test_roundtrip_immutable_plans_reports_and_old_analysis(self):
-        project, satellite = self.make("hpop", hpop=of.orbits.HpopSettings(gravity_degree=0, gravity_order=0))
+        project, satellite = self.make("hpop", hpop=ob.orbits.HpopSettings(gravity_degree=0, gravity_order=0))
         analysis = project.prepare()
         state = analysis.state(satellite, at=project.last)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "mission.orbelle"
             project.save(path, analysis=analysis)
-            loaded = of.Project.open(path)
+            loaded = ob.Project.open(path)
             restored = loaded.objects[satellite.id]
             self.assertEqual(restored.orbit.mission, satellite.orbit.mission)
             self.assertEqual(loaded.prepare().state(restored, at=project.last).position_m, state.position_m)
@@ -59,7 +59,7 @@ class MissionTests(unittest.TestCase):
             segments=(plan.segments[0], Impulse((200, 0, 0)), plan.segments[2])))
         self.assertEqual(analysis.state(satellite, at=project.last).position_m, state.position_m)
         self.assertNotEqual(project.prepare().state(satellite, at=project.last).position_m, state.position_m)
-        report = analysis.report(of.ReportKind.CARTESIAN_STATE, objects=satellite, step=u.s(600))
+        report = analysis.report(ob.ReportKind.CARTESIAN_STATE, objects=satellite, step=u.s(600))
         self.assertEqual(report.table.row_count, 13)
 
     def test_invalid_inputs_and_coverage_fail_without_mutation(self):
@@ -67,24 +67,24 @@ class MissionTests(unittest.TestCase):
         revision = project.revision
         for call in (lambda: Coast(u.s(0)), lambda: Impulse((math.nan, 0, 0)),
                      lambda: Impulse((1, 2)), lambda: Impulse((0, 0, 0), frame="vvlh"),
-                     lambda: of.orbits.Mission(initial=satellite.orbit.initial, segments=[])):
+                     lambda: ob.orbits.Mission(initial=satellite.orbit.initial, segments=[])):
             with self.assertRaises((ValueError, TypeError)):
                 call()
-        with self.assertRaisesRegex(of.ProjectError, "cover the scenario"):
-            satellite.orbit = of.orbits.Mission(initial=satellite.orbit.initial, segments=[Coast(u.s(10))])
+        with self.assertRaisesRegex(ob.ProjectError, "cover the scenario"):
+            satellite.orbit = ob.orbits.Mission(initial=satellite.orbit.initial, segments=[Coast(u.s(10))])
         self.assertEqual(project.revision, revision)
         other, other_satellite = self.make()
-        with self.assertRaises(of.ProjectError):
+        with self.assertRaises(ob.ProjectError):
             project.prepare().maneuvers(other_satellite)
-        satellite.orbit = of.orbits.TwoBody(initial=satellite.orbit.initial)
+        satellite.orbit = ob.orbits.TwoBody(initial=satellite.orbit.initial)
         self.assertEqual(len(project.prepare().maneuvers(satellite)), 0)
 
     def test_hpop_coast_eop_dependency_even_in_gcrf(self):
         project, satellite = self.make("hpop")
         with self.assertRaisesRegex(ValueError, "HPOP.*EOP"):
             project.prepare()
-        eop = Path(of.__file__).parent / "data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
-        data = of.DataSnapshot.load(eop_manifest=eop)
+        eop = Path(ob.__file__).parent / "data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
+        data = ob.DataSnapshot.load(eop_manifest=eop)
         burns = project.prepare(data=data).maneuvers(satellite)
         self.assertEqual(burns.data_sha256, data.data_lock.sha256)
 

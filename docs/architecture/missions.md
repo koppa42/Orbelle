@@ -37,13 +37,13 @@ VNC 的 X 是速度单位向量、Y 是轨道法向 `unit(r × v)`、Z 是 `X ×
 ## Python
 
 ```python
-import orbelle as of
+import orbelle as ob
 from orbelle import units as u
 from orbelle.missions import Coast, Impulse
 
-project = of.Project("变轨", of.Epoch(0), of.Epoch(7_200_000_000_000))
-satellite = project.objects.satellite("Transfer", orbit=of.orbits.Mission(
-    initial=of.orbits.Keplerian(project.first, u.km(7000), 0, u.deg(28)),
+project = ob.Project("变轨", ob.Epoch(0), ob.Epoch(7_200_000_000_000))
+satellite = project.objects.satellite("Transfer", orbit=ob.orbits.Mission(
+    initial=ob.orbits.Keplerian(project.first, u.km(7000), 0, u.deg(28)),
     segments=[
         Coast(u.s(600), name="等待点火"),
         Impulse((120, 0, 0), frame="vnc", name="升轨"),  # m/s
@@ -60,28 +60,27 @@ for burn in burns.events:
 
 `segments` 支持列表或元组，配置捕获为不可变的 `missions.Plan`；脉冲输入明确使用 `delta_v_mps`，默认 VNC。时长用 `u.s()` / `u.ns()` 精确表示。修改计划可用 `dataclasses.replace`，再将新 `Orbit` 赋回 `satellite.orbit`；旧分析继续持有旧计划与已捕获数据。
 
-HPOP 滑行使用 `propagation="hpop", hpop=of.orbits.HpopSettings(...)`。点质量可设 `gravity_degree=0, gravity_order=0`，无需 EOP；默认 8×8 则需 `project.prepare(data=...)`。完整的两脉冲霍曼变轨见[可运行示例](../../examples/python/mission.py)。
+HPOP 滑行使用 `propagation="hpop", hpop=ob.orbits.HpopSettings(...)`。点质量可设 `gravity_degree=0, gravity_order=0`，无需 EOP；默认 8×8 则需 `project.prepare(data=...)`。完整的两脉冲霍曼变轨见[可运行示例](../../examples/python/mission.py)。
 
 ## C++
 
 ```cpp
 #include <orbelle/orbelle.hpp>
-namespace of = orbelle;
 using namespace std::chrono_literals;
 
-of::Project project{"Transfer", of::Epoch{0}, of::Epoch{7'200'000'000'000}};
-of::OrbitInput orbit;
-orbit.propagator = of::OrbitPropagator::mission;
-orbit.mission = {of::MissionCoastModel::two_body, {
-    of::MissionSegment::coast(600s, "Coast"),
-    of::MissionSegment::impulse({120, 0, 0}, of::ManeuverFrame::vnc, "Raise"),
-    of::MissionSegment::coast(6600s)
+orbelle::Project project{"Transfer", orbelle::Epoch{0}, orbelle::Epoch{7'200'000'000'000}};
+orbelle::OrbitInput orbit;
+orbit.propagator = orbelle::OrbitPropagator::mission;
+orbit.mission = {orbelle::MissionCoastModel::two_body, {
+    orbelle::MissionSegment::coast(600s, "Coast"),
+    orbelle::MissionSegment::impulse({120, 0, 0}, orbelle::ManeuverFrame::vnc, "Raise"),
+    orbelle::MissionSegment::coast(6600s)
 }};
 auto satellite = project.objects().create(
-    of::objects::Satellite{.name = "Transfer", .orbit = orbit});
+    orbelle::objects::Satellite{.name = "Transfer", .orbit = orbit});
 auto analysis = project.prepare();
 auto burns = analysis.maneuvers(satellite);
-auto states = analysis.states(satellite, 60s, of::FrameId::gcrf);
+auto states = analysis.states(satellite, 60s, orbelle::FrameId::gcrf);
 ```
 
 公共段类型位于 Core；`runtime::make_mission_session` 装配二体或 HPOP，桌面与两种 SDK 共用。`ManeuverSeries` 拥有结果、对象/修订/算法来源及输入和数据哈希；非任务序列卫星返回空记录，地面站和传感器不接受机动查询。取消回调可中止传播，失败不返回部分结果；已完成弧段可缓存，重试保持一致。

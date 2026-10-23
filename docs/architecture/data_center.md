@@ -91,16 +91,16 @@ EGM2008 / EGM96 从 [ICGEM 官方模型目录](https://icgem.gfz.de/tom_longtime
 重力收据以 `gravity/<ID>` 存入 SQLite settings，记录获取方式与时间，完整文件保存在 `gravity/<sha256>.dat`。`DataCatalog.install_gravity()` 先复制和校验再发布；`gravity_models()` 查询收据，`load_gravity(ID)` 校验并加载不可变资源。`DataSnapshot.with_gravity_file(ID, path)` 用于显式装配。`project.prepare(catalog)` 只加载对象实际选择的重力资源，项目以 `gravity/<ID>` 记录原文哈希和解析配置；下载时间不参与计算身份。
 
 ```python
-import orbelle as of
+import orbelle as ob
 from orbelle import units as u
 
-catalog = of.DataCatalog("local/data")
+catalog = ob.DataCatalog("local/data")
 entry = catalog.install_gravity("EGM2008.gfc", model="egm2008")
-data = of.DataSnapshot.load(eop_manifest="eop/manifest.json").with_gravity(
+data = ob.DataSnapshot.load(eop_manifest="eop/manifest.json").with_gravity(
     entry.selection, entry.file)
-project = of.Project("Gravity", of.Epoch(0), of.Epoch(600 * 10**9))
-sat = project.objects.satellite("Sat", orbit=of.orbits.Hpop(
-    initial=of.orbits.Keplerian(of.Epoch(0), u.km(7000), 0, u.deg(30)),
+project = ob.Project("Gravity", ob.Epoch(0), ob.Epoch(600 * 10**9))
+sat = project.objects.satellite("Sat", orbit=ob.orbits.Hpop(
+    initial=ob.orbits.Keplerian(ob.Epoch(0), u.km(7000), 0, u.deg(30)),
     gravity_model=entry.selection, gravity_mu=entry.info.mu, gravity_degree=21))
 analysis = project.prepare(data=data)
 project.save("gravity.orbelle", analysis=analysis)
@@ -123,16 +123,16 @@ HPOP 使用地心几何位置（无光行时/像差），通过专用 ICRF 轴�
 Python 显式装配本地文件的最小示例（点质量地球隔离 EOP 依赖；球谐地球还需覆盖全积分时段的 EOP）：
 
 ```python
-import orbelle as of
+import orbelle as ob
 from orbelle import units as u
 
-catalog = of.DataCatalog("local/data")
+catalog = ob.DataCatalog("local/data")
 entry = catalog.install_de440s("de440s.bsp")  # 显式本地安装，不隐式联网
-data = of.DataSnapshot.builtin_time().with_ephemeris(
+data = ob.DataSnapshot.builtin_time().with_ephemeris(
     entry.selection, entry.manifest, "local/ephemeris-runtime")
-project = of.Project("Sun and Moon", of.Epoch(0), of.Epoch(86400 * 10**9))
-sat = project.objects.satellite("Sat", orbit=of.orbits.Hpop(
-    initial=of.orbits.Keplerian(of.Epoch(0), u.km(42164), 0, u.deg(15)),
+project = ob.Project("Sun and Moon", ob.Epoch(0), ob.Epoch(86400 * 10**9))
+sat = project.objects.satellite("Sat", orbit=ob.orbits.Hpop(
+    initial=ob.orbits.Keplerian(ob.Epoch(0), u.km(42164), 0, u.deg(15)),
     gravity_degree=0, third_bodies=("sun", "moon")))
 analysis = project.prepare(data=data)
 project.save("sun-moon.orbelle", analysis=analysis)
@@ -169,21 +169,21 @@ IERS 文件内已有预测属于文件数据；越过完整有效样本范围后
 已经安装数据的目录可直接用于 `project.prepare(data=catalog)`；C++ 对应 `runtime::prepare(document, catalog)`。接口按整个项目时段读取当前来源、优先级和外推设置，数据变化仍需明确确认；同一次分析持有固定资源。按需提前调用 `catalog.snapshot(first, last)`，或使用 `earth_orientation=False` 只选择时间表。契约与错误处理见[分析 API](analysis_api.md)。
 
 ```python
-import orbelle as of
+import orbelle as ob
 
-catalog = of.DataCatalog('local/shared-data')
+catalog = ob.DataCatalog('local/shared-data')
 entry = catalog.install_eop('snapshot/manifest.json')
-catalog.record_acquisition(entry.lock_sha256, of.DataAcquisition.imported)
+catalog.record_acquisition(entry.lock_sha256, ob.DataAcquisition.imported)
 catalog.activate_eop(entry.lock_sha256)  # 安装后显式指定当前文件，旧分析不受影响
 # 也可直接安装完整原文件，自动推导可计算范围，不需要手工准备清单：
 # entry = catalog.import_finals('finals2000A.all',
 #     'https://datacenter.iers.org/data/9/finals2000A.all', '2026-10-10')
-project = of.load_project('mission.orbelle')
+project = ob.load_project('mission.orbelle')
 provider = catalog.load_eop(entry.lock_sha256)
 project.earth_orientation = provider.data_info  # 记录本次实际使用的数据
 print(catalog.snapshots[0].acquired_at_unix_seconds)
 # 直接加载文件仍使用显式策略；不读取目录设置：
-limited = of.load_eop_snapshot(entry.manifest, extrapolation_days=3)
+limited = ob.load_eop_snapshot(entry.manifest, extrapolation_days=3)
 project.earth_orientation = limited.data_info
 ```
 

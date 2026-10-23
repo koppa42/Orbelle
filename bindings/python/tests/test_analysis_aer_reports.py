@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import orbelle as of
+import orbelle as ob
 from orbelle import units as u
 from test_analysis_access import EOP, scene
 
@@ -17,10 +17,10 @@ class AnalysisAerTests(unittest.TestCase):
     def test_samples_preserve_exact_times_order_duplicates_and_endpoint(self):
         project, station, sat, sensor, data = scene()
         analysis = project.prepare(data=data)
-        epochs = [of.Epoch(10_000_000_007), of.Epoch(3), of.Epoch(10_000_000_007)]
+        epochs = [ob.Epoch(10_000_000_007), ob.Epoch(3), ob.Epoch(10_000_000_007)]
         result = analysis.aer(station, sat, times=iter(epochs))
-        self.assertIsInstance(result, of.AerSeries)
-        self.assertIsInstance(result[0], of.AerSample)
+        self.assertIsInstance(result, ob.AerSeries)
+        self.assertIsInstance(result[0], ob.AerSample)
         self.assertEqual(result.epoch.tai_nanoseconds, tuple(t.tai_nanoseconds for t in epochs))
         self.assertEqual(result[0].range_m, result[-1].range_m)
         self.assertEqual(len(result[::-1]), 3)
@@ -30,7 +30,7 @@ class AnalysisAerTests(unittest.TestCase):
         self.assertEqual(result.azimuth.unit, "rad")
         self.assertEqual(result.visible, tuple(s.visible for s in result))
         self.assertEqual(result.line_of_sight, tuple(s.line_of_sight for s in result))
-        sampled = analysis.aer(station, sensor, step=u.s(10), first=of.Epoch(3), last=epochs[0])
+        sampled = analysis.aer(station, sensor, step=u.s(10), first=ob.Epoch(3), last=epochs[0])
         self.assertEqual(sampled.epoch.tai_nanoseconds, (3, 10_000_000_003, 10_000_000_007))
         self.assertTrue(all(s.off_boresight_rad is not None for s in sampled))
         self.assertEqual(sampled.input_sha256,
@@ -44,17 +44,17 @@ class AnalysisAerTests(unittest.TestCase):
         with self.assertRaises(AttributeError):
             result[0].range_m = 0
         self.assertEqual(len(analysis.aer(station, sensor, times=[])), 0)
-        self.assertEqual(len(analysis.aer(station, sensor, step=u.s(10), last=of.Epoch(0))), 1)
+        self.assertEqual(len(analysis.aer(station, sensor, step=u.s(10), last=ob.Epoch(0))), 1)
 
     def test_visibility_and_snapshot_survive_object_changes_and_data_file_removal(self):
         with tempfile.TemporaryDirectory() as directory:
             snapshot = Path(directory) / "eop"
             shutil.copytree(EOP.parent, snapshot)
-            data = of.DataSnapshot.load(eop_manifest=snapshot / "manifest.json")
+            data = ob.DataSnapshot.load(eop_manifest=snapshot / "manifest.json")
             project, station, sat, sensor, data = scene(data)
             analysis = project.prepare(data=data)
             before = analysis.aer(station, sensor, step=u.s(10))
-            sensor.pointing = of.sensors.Pointing.track(station)
+            sensor.pointing = ob.sensors.Pointing.track(station)
             tracked = project.prepare(data=data).aer(station, sensor, step=u.s(10))
             wide = analysis.aer(station, sat, step=u.s(10))
             self.assertGreater(sum(tracked.visible), sum(before.visible))
@@ -62,7 +62,7 @@ class AnalysisAerTests(unittest.TestCase):
             project.objects.remove(sat)
             shutil.rmtree(snapshot)
             self.assertEqual(analysis.aer(station, sensor, step=u.s(10)).range.values, before.range.values)
-            report = analysis.report(of.ReportKind.AER, station=station, target=sensor, step=u.s(10))
+            report = analysis.report(ob.ReportKind.AER, station=station, target=sensor, step=u.s(10))
             self.assertEqual(report.table.row_count, len(before))
             del analysis, project, station, sat, sensor, data
             gc.collect()
@@ -74,24 +74,24 @@ class AnalysisAerTests(unittest.TestCase):
         project, station, sat, sensor, data = scene()
         analysis = project.prepare(data=data)
         for options in ({}, {"step": 1}, {"step": u.s(10), "times": []}, {"times": [3]},
-                        {"times": [], "first": of.Epoch(0)}, {"step": u.s(10), "last": 0},
+                        {"times": [], "first": ob.Epoch(0)}, {"step": u.s(10), "last": 0},
                         {"times": [], "cancelled": True}, {"times": [], "cancelled": lambda: 1}):
             with self.assertRaises(TypeError):
                 analysis.aer(station, sensor, **options)
         for options in ({"step": u.s(0)}, {"step": u.s(-1)}, {"step": u.ns(1)},
-                        {"times": repeat(of.Epoch(0))},
-                        {"step": u.s(1), "first": of.Epoch(1), "last": of.Epoch(0)}):
+                        {"times": repeat(ob.Epoch(0))},
+                        {"step": u.s(1), "first": ob.Epoch(1), "last": ob.Epoch(0)}):
             with self.assertRaises(ValueError):
                 analysis.aer(station, sensor, **options)
         with self.assertRaises(IndexError):
-            analysis.aer(station, sensor, times=[of.Epoch(-1)])
+            analysis.aer(station, sensor, times=[ob.Epoch(-1)])
         with self.assertRaises(TypeError):
             analysis.aer(sat, station, step=u.s(10))
-        with self.assertRaises(of.AnalysisCapabilityError):
+        with self.assertRaises(ob.AnalysisCapabilityError):
             project.prepare().aer(station, sensor, times=[])
-        other = of.Project("Other", project.first, project.last)
+        other = ob.Project("Other", project.first, project.last)
         foreign = other.objects.ground_station("Foreign", location=station.location)
-        with self.assertRaises(of.ProjectError):
+        with self.assertRaises(ob.ProjectError):
             analysis.aer(foreign, sensor, step=u.s(10))
         calls = 0
 
@@ -100,7 +100,7 @@ class AnalysisAerTests(unittest.TestCase):
             calls += 1
             return calls == 6
 
-        with self.assertRaises(of.AnalysisCancelled):
+        with self.assertRaises(ob.AnalysisCancelled):
             analysis.aer(station, sensor, step=u.s(10), cancelled=stop)
         self.assertEqual(calls, 6)
         with self.assertRaisesRegex(RuntimeError, "callback failed"):
@@ -108,7 +108,7 @@ class AnalysisAerTests(unittest.TestCase):
 
     def test_csv_keeps_exact_epochs_blanks_and_atomic_overwrite_policy(self):
         project, station, sat, _, data = scene()
-        result = project.prepare(data=data).aer(station, sat, times=[of.Epoch(3)])
+        result = project.prepare(data=data).aer(station, sat, times=[ob.Epoch(3)])
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "aer.csv"
             result.to_csv(path)
@@ -143,14 +143,14 @@ class AnalysisAerTests(unittest.TestCase):
     @unittest.skipUnless(importlib.util.find_spec("numpy"), "optional numpy not installed")
     def test_scalar_numpy_conversions_shape_units_missing_values_and_copy(self):
         import numpy as np
-        column = of.ScalarColumn((None, 0.0, 3.141592653589793), "rad")
+        column = ob.ScalarColumn((None, 0.0, 3.141592653589793), "rad")
         converted = column.to_numpy(unit="deg")
         np.testing.assert_allclose(converted, [np.nan, 0, 180], equal_nan=True)
         converted[1] = 50
         self.assertEqual(column.values[1], 0)
-        self.assertEqual(of.ScalarColumn((), "m").to_numpy().shape, (0,))
-        self.assertEqual(of.ScalarColumn((1000,), "m").to_numpy(unit="km").tolist(), [1])
-        self.assertEqual(of.ScalarColumn((2000,), "m/s").to_numpy(unit="km/s").tolist(), [2])
+        self.assertEqual(ob.ScalarColumn((), "m").to_numpy().shape, (0,))
+        self.assertEqual(ob.ScalarColumn((1000,), "m").to_numpy(unit="km").tolist(), [1])
+        self.assertEqual(ob.ScalarColumn((2000,), "m/s").to_numpy(unit="km/s").tolist(), [2])
         with self.assertRaises(ValueError):
             column.to_numpy(unit="km")
 
@@ -158,7 +158,7 @@ class AnalysisAerTests(unittest.TestCase):
     def test_dataframe_dtypes_missing_values_and_independent_storage(self):
         project, station, sat, _, data = scene()
         analysis = project.prepare(data=data)
-        for times in ([], [of.Epoch(3)], [of.Epoch(3), of.Epoch(7)]):
+        for times in ([], [ob.Epoch(3)], [ob.Epoch(3), ob.Epoch(7)]):
             result = analysis.aer(station, sat, times=times)
             table = result.to_pandas()
             self.assertEqual(str(table.epoch_tai_ns.dtype), "int64")
@@ -175,45 +175,45 @@ class AnalysisAerTests(unittest.TestCase):
 class AnalysisReportTests(unittest.TestCase):
     def test_all_templates_and_explicit_display_units(self):
         project, station, sat, sensor, data = scene()
-        covariance = of.orbits.CovarianceSettings(
+        covariance = ob.orbits.CovarianceSettings(
             enabled=True,
             state=tuple(tuple((10000.0 if i < 3 else 1.0) if i == j else 0.0
                               for j in range(6)) for i in range(6)),
         )
-        uncertain = project.objects.satellite("Uncertain", orbit=of.orbits.Hpop(
+        uncertain = project.objects.satellite("Uncertain", orbit=ob.orbits.Hpop(
             initial=sat.orbit.initial, gravity_degree=0, covariance=covariance))
         analysis = project.prepare(data=data)
-        for kind in of.ReportKind.__members__.values():
+        for kind in ob.ReportKind.__members__.values():
             with self.subTest(kind=kind):
                 options = {}
-                if kind in (of.ReportKind.AER, of.ReportKind.ACCESS_INTERVALS):
+                if kind in (ob.ReportKind.AER, ob.ReportKind.ACCESS_INTERVALS):
                     options.update(station=station, target=sensor, step=u.s(10))
-                elif kind in (of.ReportKind.RELATIVE_MOTION, of.ReportKind.INTERSATELLITE_ACCESS):
-                    options.update(objects=[sat, uncertain], step=u.s(60), last=of.Epoch(60 * 10**9))
-                elif kind == of.ReportKind.STATE_COVARIANCE:
+                elif kind in (ob.ReportKind.RELATIVE_MOTION, ob.ReportKind.INTERSATELLITE_ACCESS):
+                    options.update(objects=[sat, uncertain], step=u.s(60), last=ob.Epoch(60 * 10**9))
+                elif kind == ob.ReportKind.STATE_COVARIANCE:
                     options.update(objects=uncertain, step=u.s(60), last=project.first)
-                elif kind != of.ReportKind.SCENARIO_SUMMARY:
-                    options["objects"] = station if kind == of.ReportKind.GROUND_STATIONS else sat
-                    if kind not in (of.ReportKind.OBJECT_SUMMARY, of.ReportKind.GROUND_STATIONS):
+                elif kind != ob.ReportKind.SCENARIO_SUMMARY:
+                    options["objects"] = station if kind == ob.ReportKind.GROUND_STATIONS else sat
+                    if kind not in (ob.ReportKind.OBJECT_SUMMARY, ob.ReportKind.GROUND_STATIONS):
                         options["step"] = u.s(60)
-                if kind in (of.ReportKind.LIGHTING_INTERVALS, of.ReportKind.LIGHTING_STATE):
+                if kind in (ob.ReportKind.LIGHTING_INTERVALS, ob.ReportKind.LIGHTING_STATE):
                     # This EOP-only snapshot deliberately has no solar ephemeris.
                     # Successful lighting queries are covered by test_lighting.py.
                     with self.assertRaisesRegex(ValueError, "prepared solar ephemeris"):
                         analysis.report(kind, **options)
                     continue
                 report = analysis.report(kind, **options)
-                self.assertIsInstance(report, of.ReportResult)
-                if kind == of.ReportKind.ORBITAL_EVENTS:
+                self.assertIsInstance(report, ob.ReportResult)
+                if kind == ob.ReportKind.ORBITAL_EVENTS:
                     self.assertIsNotNone(report.orbital_event_statistics)
                 else:
                     self.assertGreater(report.table.row_count, 0)
                 self.assertEqual(report.input_revision, analysis.revision)
                 self.assertEqual(report.data_sha256, data.data_lock.sha256)
-                if kind == of.ReportKind.STATE_COVARIANCE:
+                if kind == ob.ReportKind.STATE_COVARIANCE:
                     self.assertEqual(report.table.row_count, 1)
                     self.assertEqual(report.numeric_value(0, 4), 0.01)
-        report = analysis.report(of.ReportKind.CARTESIAN_STATE, objects=[sat], step=u.s(30), last=of.Epoch(3))
+        report = analysis.report(ob.ReportKind.CARTESIAN_STATE, objects=[sat], step=u.s(30), last=ob.Epoch(3))
         self.assertEqual(report.table.row_count, 2)
         self.assertEqual(report.numeric_value(0, 4), 7000)
         self.assertEqual(report.column_unit(4), "km")
@@ -229,40 +229,40 @@ class AnalysisReportTests(unittest.TestCase):
                         {"objects": repeat(sat)}, {"objects": sat, "station": station},
                         {"objects": sat, "step": u.s(1)}):
             with self.assertRaises((TypeError, ValueError)):
-                analysis.report(of.ReportKind.OBJECT_SUMMARY, **options)
+                analysis.report(ob.ReportKind.OBJECT_SUMMARY, **options)
         with self.assertRaisesRegex(ValueError, "incompatible"):
-            analysis.report(of.ReportKind.STATE_COVARIANCE, objects=sat, step=u.s(60))
+            analysis.report(ob.ReportKind.STATE_COVARIANCE, objects=sat, step=u.s(60))
         with self.assertRaises(TypeError):
-            analysis.report(of.ReportKind.CARTESIAN_STATE, objects=sat)
+            analysis.report(ob.ReportKind.CARTESIAN_STATE, objects=sat)
         with self.assertRaises(TypeError):
-            analysis.report(of.ReportKind.SCENARIO_SUMMARY, objects=[])
+            analysis.report(ob.ReportKind.SCENARIO_SUMMARY, objects=[])
         with self.assertRaises(TypeError):
-            analysis.report(of.ReportKind.AER, objects=[station, sensor], step=u.s(10))
-        other = of.Project("Other", project.first, project.last)
+            analysis.report(ob.ReportKind.AER, objects=[station, sensor], step=u.s(10))
+        other = ob.Project("Other", project.first, project.last)
         foreign = other.objects.ground_station("Station", location=station.location)
-        with self.assertRaises(of.ProjectError):
-            analysis.report(of.ReportKind.GROUND_STATIONS, objects=foreign)
+        with self.assertRaises(ob.ProjectError):
+            analysis.report(ob.ReportKind.GROUND_STATIONS, objects=foreign)
         late = project.objects.ground_station("Late", location=station.location)
-        with self.assertRaises(of.ObjectNotFoundError):
-            analysis.report(of.ReportKind.GROUND_STATIONS, objects=late)
+        with self.assertRaises(ob.ObjectNotFoundError):
+            analysis.report(ob.ReportKind.GROUND_STATIONS, objects=late)
 
     def test_native_reports_do_not_implicitly_select_time_or_eop(self):
         project, station, sat, _, _ = scene()
         analysis = project.prepare()
-        report = analysis.report(of.ReportKind.CARTESIAN_STATE, objects=sat, step=u.s(60))
-        self.assertEqual(report.definition.format.time_scale, of.ReportTimeScale.TAI)
-        with self.assertRaises(of.AnalysisCapabilityError):
-            analysis.report(of.ReportKind.CARTESIAN_STATE, objects=sat, step=u.s(60), time_scale=of.ReportTimeScale.UTC)
-        with self.assertRaises(of.AnalysisCapabilityError):
-            analysis.report(of.ReportKind.CARTESIAN_STATE, objects=sat, step=u.s(60), frame=of.FrameId.ITRF)
-        self.assertEqual(analysis.report(of.ReportKind.GROUND_STATIONS, objects=station).table.row_count, 1)
+        report = analysis.report(ob.ReportKind.CARTESIAN_STATE, objects=sat, step=u.s(60))
+        self.assertEqual(report.definition.format.time_scale, ob.ReportTimeScale.TAI)
+        with self.assertRaises(ob.AnalysisCapabilityError):
+            analysis.report(ob.ReportKind.CARTESIAN_STATE, objects=sat, step=u.s(60), time_scale=ob.ReportTimeScale.UTC)
+        with self.assertRaises(ob.AnalysisCapabilityError):
+            analysis.report(ob.ReportKind.CARTESIAN_STATE, objects=sat, step=u.s(60), frame=ob.FrameId.ITRF)
+        self.assertEqual(analysis.report(ob.ReportKind.GROUND_STATIONS, objects=station).table.row_count, 1)
 
     def test_progress_cancellation_callback_exception_and_deleted_handles(self):
         project, _, sat, _, _ = scene()
         analysis = project.prepare()
         project.objects.remove(sat)
         progress = []
-        report = analysis.report(of.ReportKind.CARTESIAN_STATE, objects=sat, step=u.s(60),
+        report = analysis.report(ob.ReportKind.CARTESIAN_STATE, objects=sat, step=u.s(60),
                                  progress=lambda done, total: progress.append((done, total)))
         self.assertEqual(progress[-1], (report.table.row_count, report.table.row_count))
         self.assertEqual(progress, sorted(progress))
@@ -273,15 +273,15 @@ class AnalysisReportTests(unittest.TestCase):
             nonlocal cancelled
             cancelled = current == total
 
-        with self.assertRaises(of.AnalysisCancelled):
-            analysis.report(of.ReportKind.CARTESIAN_STATE, objects=sat, step=u.s(60),
+        with self.assertRaises(ob.AnalysisCancelled):
+            analysis.report(ob.ReportKind.CARTESIAN_STATE, objects=sat, step=u.s(60),
                             cancelled=lambda: cancelled, progress=done)
         with self.assertRaisesRegex(RuntimeError, "progress failed"):
-            analysis.report(of.ReportKind.OBJECT_SUMMARY, objects=sat,
+            analysis.report(ob.ReportKind.OBJECT_SUMMARY, objects=sat,
                             progress=lambda *_: (_ for _ in ()).throw(RuntimeError("progress failed")))
         for options in ({"cancelled": True}, {"cancelled": lambda: 1}, {"progress": True}):
             with self.assertRaises(TypeError):
-                analysis.report(of.ReportKind.OBJECT_SUMMARY, objects=sat, **options)
+                analysis.report(ob.ReportKind.OBJECT_SUMMARY, objects=sat, **options)
 
 
 if __name__ == "__main__":

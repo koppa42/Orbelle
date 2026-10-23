@@ -6,7 +6,7 @@ Only the formerly unbound EOP reference may be added by the desktop.
 import argparse
 import json
 from pathlib import Path
-import orbelle as of
+import orbelle as ob
 
 
 def fingerprint(satellite):
@@ -22,7 +22,8 @@ def fingerprint(satellite):
 
 
 def compare(original_path, restored_path):
-    original, restored = of.load_project(original_path), of.load_project(restored_path)
+    original = ob.load_project_data(original_path)
+    restored = ob.load_project_data(restored_path)
     for field in ('name', 'first', 'last', 'current'):
         left, right = getattr(original, field), getattr(restored, field)
         if field != 'name':

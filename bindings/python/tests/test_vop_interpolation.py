@@ -3,7 +3,7 @@ from pathlib import Path
 import math
 import tempfile
 import unittest
-import orbelle as of
+import orbelle as ob
 
 REFERENCE = Path(__file__).resolve().parents[3] / "tests/reference/propagators/vop_interpolation.txt"
 BASE = 8_000_000_000_000_000_123
@@ -19,20 +19,20 @@ class VopInterpolationTests(unittest.TestCase):
             row = line.split()
             if row[0] == "C":
                 _, kind, order, step, mu, size = row
-                config = of.OrbitInterpolationOptions()
-                config.method = of.OrbitInterpolationMethod.VOP
+                config = ob.OrbitInterpolationOptions()
+                config.method = ob.OrbitInterpolationMethod.VOP
                 config.order = int(order)
                 config.vop_mu = float(mu)
                 nodes, session = [], None
             else:
-                epoch = of.Epoch(BASE + int(row[1]))
+                epoch = ob.Epoch(BASE + int(row[1]))
                 y = list(map(float, row[2:]))
                 if row[0] == "N":
-                    nodes.append(of.CartesianState(epoch, of.OriginId.EARTH, of.FrameId.GCRF, y[:3], y[3:6]))
+                    nodes.append(ob.CartesianState(epoch, ob.OriginId.EARTH, ob.FrameId.GCRF, y[:3], y[3:6]))
                 else:
                     if session is None:
                         self.assertEqual(len(nodes), int(size))
-                        session = of.make_tabulated_orbit_session([nodes], config)
+                        session = ob.make_tabulated_orbit_session([nodes], config)
                         self.assertIn("vop-universal-transport-v1", session.provenance.algorithm)
                         self.assertIn("vop-mu=", session.provenance.algorithm)
                     actual = session.sample([epoch]).states[0]
@@ -44,14 +44,14 @@ class VopInterpolationTests(unittest.TestCase):
         self.assertEqual(count, 1059)
 
     def test_independent_mu_roundtrip_effective_hash_and_immutable_analysis(self):
-        initial = of.CartesianState(of.Epoch(0), of.OriginId.EARTH, of.FrameId.GCRF,
+        initial = ob.CartesianState(ob.Epoch(0), ob.OriginId.EARTH, ob.FrameId.GCRF,
                                     [7e6, 0, 0], [0, math.sqrt(MU/7e6), 0])
-        project = of.Project("VOP", of.Epoch(0), of.Epoch(1200*10**9))
-        orbit = of.orbits.Hpop(initial=initial, gravity_degree=0, interpolation="vop",
+        project = ob.Project("VOP", ob.Epoch(0), ob.Epoch(1200*10**9))
+        orbit = ob.orbits.Hpop(initial=initial, gravity_degree=0, interpolation="vop",
                               interpolation_order=1, interpolation_mu=MU,
                               report_ephemeris_on_fixed_step=True, max_step_seconds=300)
         satellite = project.objects.satellite("VOP", orbit=replace(orbit, step_seconds=60))
-        epoch = of.Epoch(317_123_456_789)
+        epoch = ob.Epoch(317_123_456_789)
         analysis = project.prepare()
         before = analysis.states(satellite, times=[epoch])
         theta = math.sqrt(MU/7e6**3)*(epoch.tai_nanoseconds/1e9)
@@ -66,7 +66,7 @@ class VopInterpolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)/"vop.orbelle"
             project.save(path)
-            reopened = of.Project.open(path)
+            reopened = ob.Project.open(path)
             restored = reopened.objects[satellite.id]
             self.assertEqual(restored.orbit.hpop, satellite.orbit.hpop)
             self.assertEqual(reopened.prepare().states(restored, times=[epoch]).position.values, changed.position.values)

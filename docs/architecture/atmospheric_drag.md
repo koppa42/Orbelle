@@ -41,12 +41,12 @@ JR 的高空温度比值使用直接指数求值，避免 `T∞−T` 相减后�
 历史数组按模型原生顺序保存：日 Ap、当前三小时 ap、此前 3 / 6 / 9 小时 ap、此前 12–33 小时八项 ap 的均值、此前 36–57 小时八项 ap 的均值。输入归调用方所有，模型按值使用；每次计算的状态独立。日模式设置 `SW[9]=1`，历史模式设置 `SW[9]=-1`，即使七项相同也不能把历史模式简化为日模式。原生定义见[原作者接口](https://git.linta.de/~brodo/nrlmsise-00.git/plain/nrlmsise-00.h?id=bc9a2feba4344e74201281e563332688a4d09cc3)。
 
 ```python
-inputs = of.AtmosphereInput()
-inputs.utc = of.UtcDateTime(2000, 2, 29, 12, 30, 0)
+inputs = ob.AtmosphereInput()
+inputs.utc = ob.UtcDateTime(2000, 2, 29, 12, 30, 0)
 inputs.geodetic = (0.4, 0.6, 400_000)  # 经度、大地纬度、椭球高；rad、rad、m
 inputs.f107, inputs.f107_average = 150, 150
 inputs.ap_history = (40, 400, 100, 50, 20, 7.125, 3.75)
-density = of.evaluate_atmosphere(of.AtmosphereModel.NRLMSISE00, inputs)
+density = ob.evaluate_atmosphere(ob.AtmosphereModel.NRLMSISE00, inputs)
 ```
 
 这个入口也供空间天气装配调用；标量密度接口本身不读取文件、不补齐缺值。HPOP 的文件模式在每个积分阶段通过不可变 `SpaceWeather` 取样；JR 与低空 NRLMSISE 分别使用自己的时间滞后。
@@ -122,16 +122,16 @@ JR 的四种更新选择在月预报段均使用连续月曲线，经模型地�
 项目格式为 v46 / OBJS v32，只读写当前版本。禁用模型时保存合法参数草稿，计算身份忽略这些草稿；启用时计入实际密度模型、天气、Cd、面积质量比、高度算法、太阳方法及 UTC/EOP/星历来源。NRLMSISE 主模型的低空草稿和未启用的拼接范围不改变结果身份。
 
 ```python
-import orbelle as of
+import orbelle as ob
 
-drag = of.orbits.DragSettings(
+drag = ob.orbits.DragSettings(
     enabled=True, atmosphere="jacchia_roberts", cd=2.2,
     area_mass_ratio_m2_per_kg=0.02,
     low_altitude_model="nrlmsise00", blending_range_m=30_000,
     f107=150, f107_average=150, kp=3,
     use_apparent_sun_position=True, use_approximate_altitude=True,
 )
-orbit = of.orbits.Hpop(initial=initial, drag=drag)
+orbit = ob.orbits.Hpop(initial=initial, drag=drag)
 # data 必须显式提供覆盖传播区间的 UTC、EOP、引力和太阳星历。
 satellite = project.objects.satellite("Satellite", orbit=orbit)
 analysis = project.prepare(data=data)

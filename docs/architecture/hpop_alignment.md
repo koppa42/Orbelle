@@ -255,15 +255,15 @@ P(t) = Φ(t) P0 Φ(t)ᵀ              （无过程噪声）
 Python 采用明确的模型值对象与关键字参数，卫星继续通过 `project.objects.satellite(...)` 创建。设计形态如下，**不是当前可执行示例**：
 
 ```python
-sat = project.objects.satellite("MySat", orbit=of.orbits.Hpop(
+sat = project.objects.satellite("MySat", orbit=ob.orbits.Hpop(
     initial=initial,
-    gravity=of.forces.Gravity("EGM2008", degree=21, order=21),
+    gravity=ob.forces.Gravity("EGM2008", degree=21, order=21),
     third_bodies=("sun", "moon"),
-    drag=of.forces.Drag(
+    drag=ob.forces.Drag(
         model="jacchia_roberts", cd=2.2, area_mass_ratio=0.02,
-        weather=of.weather.Manual(f107=150, f107_average=150, kp=3),
+        weather=ob.weather.Manual(f107=150, f107_average=150, kp=3),
     ),
-    srp=of.forces.SRP(cr=1.0, area_mass_ratio=0.02, shadow="dual_cone"),
+    srp=ob.forces.SRP(cr=1.0, area_mass_ratio=0.02, shadow="dual_cone"),
 ))
 analysis = project.prepare(data=data)
 ```

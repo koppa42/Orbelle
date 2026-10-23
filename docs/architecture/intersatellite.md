@@ -30,9 +30,9 @@
 报告库提供两种入口，左侧分别选择基准与目标卫星。结果页显示最近/最远距离、可见时段数与总时长；可定位全区间最近时刻、每段最近时刻或任意采样时刻。相对状态支持复用结果的字段/单位切换及 CSV/PNG 导出；可见窗口复用任务时间轴。窄分屏保持现有“编辑设置/查看结果”布局，保留对象绑定和结果。删除对象后保留失效 ID，重新生成明确报错。
 
 ```python
-relative = analysis.report(of.ReportKind.RELATIVE_MOTION,
+relative = analysis.report(ob.ReportKind.RELATIVE_MOTION,
     objects=[primary, target], step=u.s(60), boundary_tolerance=u.s(.001))
-passes = analysis.report(of.ReportKind.INTERSATELLITE_ACCESS,
+passes = analysis.report(ob.ReportKind.INTERSATELLITE_ACCESS,
     objects=[primary, target], step=u.s(60))
 closest = relative.intersatellite_statistics.minimum_range  # value: m, epoch: TAI
 ```

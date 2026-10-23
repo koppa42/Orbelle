@@ -8,32 +8,32 @@ import shutil
 import tempfile
 import unittest
 
-import orbelle as of
+import orbelle as ob
 
 
 ROOT = Path(__file__).resolve().parents[3]
-SAMPLE = Path(of.__file__).parent / "data/eop/iers_c04_2016_12_28_2017_01_04"
+SAMPLE = Path(ob.__file__).parent / "data/eop/iers_c04_2016_12_28_2017_01_04"
 
 
 class EopStateApiTests(unittest.TestCase):
     def test_import_is_persistent_idempotent_and_independent_of_source(self):
         source = self.relocated()
         store = source.parent / 'installed'
-        saved = of.import_eop_snapshot(source / 'manifest.json', store)
-        self.assertEqual(saved, of.import_eop_snapshot(source / 'manifest.json', store))
-        before = of.load_eop_snapshot(saved).at(self.epoch)
+        saved = ob.import_eop_snapshot(source / 'manifest.json', store)
+        self.assertEqual(saved, ob.import_eop_snapshot(source / 'manifest.json', store))
+        before = ob.load_eop_snapshot(saved).at(self.epoch)
         (source / 'eop.c04').write_text('changed', encoding='utf-8')
-        after = of.load_eop_snapshot(saved).at(self.epoch)
+        after = ob.load_eop_snapshot(saved).at(self.epoch)
         self.assertEqual(before.sample.ut1_minus_tai_seconds, after.sample.ut1_minus_tai_seconds)
-        with self.assertRaises(of.EopDataError):
-            of.import_eop_snapshot(source / 'manifest.json', store)
+        with self.assertRaises(ob.EopDataError):
+            ob.import_eop_snapshot(source / 'manifest.json', store)
         self.assertEqual(len(list(store.iterdir())), 1)
 
     def setUp(self):
-        self.time = of.make_builtin_time_provider()
-        self.frames = of.make_frame_provider()
-        self.eop = of.load_eop_snapshot(SAMPLE / "manifest.json")
-        self.epoch = self.time.from_utc(of.UtcDateTime(2017, 1, 1))
+        self.time = ob.make_builtin_time_provider()
+        self.frames = ob.make_frame_provider()
+        self.eop = ob.load_eop_snapshot(SAMPLE / "manifest.json")
+        self.epoch = self.time.from_utc(ob.UtcDateTime(2017, 1, 1))
 
     def relocated(self):
         parent = ROOT / "out/tests/python-eop"
@@ -46,7 +46,7 @@ class EopStateApiTests(unittest.TestCase):
 
     def test_installed_data_and_owned_provider_survive_relocation_and_file_change(self):
         destination = self.relocated()
-        provider = of.load_eop_snapshot(destination / "manifest.json")
+        provider = ob.load_eop_snapshot(destination / "manifest.json")
         info = provider.data_info
         epoch = info.first_epoch
         before = provider.at(epoch)
@@ -55,8 +55,8 @@ class EopStateApiTests(unittest.TestCase):
             stream.write(b"# changed after loading\n")
         self.assertEqual(provider.at(epoch).sample.ut1_minus_tai_seconds,
                          before.sample.ut1_minus_tai_seconds)
-        with self.assertRaises(of.EopDataError):
-            of.load_eop_snapshot(destination / "manifest.json")
+        with self.assertRaises(ob.EopDataError):
+            ob.load_eop_snapshot(destination / "manifest.json")
         del provider
         gc.collect()
         self.assertEqual(info.sha256, hashlib.sha256((SAMPLE / "eop.c04").read_bytes()).hexdigest())
@@ -65,21 +65,21 @@ class EopStateApiTests(unittest.TestCase):
 
     def test_leap_coverage_and_provenance(self):
         midnight = self.epoch
-        leap = self.time.from_utc(of.UtcDateTime(2016, 12, 31, 23, 59, 60))
+        leap = self.time.from_utc(ob.UtcDateTime(2016, 12, 31, 23, 59, 60))
         self.assertEqual(midnight.tai_nanoseconds - leap.tai_nanoseconds, 1_000_000_000)
         self.assertAlmostEqual(self.eop.at(midnight).sample.ut1_minus_tai_seconds, -36.4087130, delta=1e-12)
         self.assertLess(abs(self.eop.at(midnight).sample.ut1_minus_tai_seconds -
                             self.eop.at(leap).sample.ut1_minus_tai_seconds), 1e-6)
         for ns in (self.eop.data_info.first_epoch.tai_nanoseconds - 1,
                    self.eop.data_info.last_epoch.tai_nanoseconds + 1):
-            with self.assertRaises(of.EopCoverageError):
-                self.eop.at(of.Epoch(ns))
+            with self.assertRaises(ob.EopCoverageError):
+                self.eop.at(ob.Epoch(ns))
         destination = self.relocated()
         manifest_path = destination / "manifest.json"
         manifest = json.loads(manifest_path.read_text())
         manifest["first_mjd"] += 1
         manifest_path.write_text(json.dumps(manifest))
-        clipped = of.load_eop_snapshot(manifest_path)
+        clipped = ob.load_eop_snapshot(manifest_path)
         first = clipped.data_info.first_epoch
         self.assertNotEqual(self.eop.at(first).sample.source_id, clipped.at(first).sample.source_id)
 
@@ -89,30 +89,30 @@ class EopStateApiTests(unittest.TestCase):
         manifest = json.loads(path.read_text(encoding='utf-8'))
         manifest['last_mjd'] = 57753  # 2016-12-31, immediately before the leap second.
         path.write_text(json.dumps(manifest), encoding='utf-8')
-        strict = of.load_eop_snapshot(path)
-        extended = of.load_eop_snapshot(path, extrapolation_days=2)
+        strict = ob.load_eop_snapshot(path)
+        extended = ob.load_eop_snapshot(path, extrapolation_days=2)
         self.assertEqual(extended.data_info.sha256, strict.data_info.sha256)
         self.assertEqual(extended.data_info.last_epoch.tai_nanoseconds,
                          strict.data_info.last_epoch.tai_nanoseconds)
         self.assertEqual(extended.data_info.extrapolation_days, 2)
-        leap = self.time.from_utc(of.UtcDateTime(2016, 12, 31, 23, 59, 60))
-        midnight = self.time.from_utc(of.UtcDateTime(2017, 1, 1))
+        leap = self.time.from_utc(ob.UtcDateTime(2016, 12, 31, 23, 59, 60))
+        midnight = self.time.from_utc(ob.UtcDateTime(2017, 1, 1))
         a, b = extended.at(leap), extended.at(midnight)
         self.assertAlmostEqual(b.sample.ut1_minus_tai_seconds - a.sample.ut1_minus_tai_seconds,
                                a.rates.ut1_minus_tai_seconds_per_second, delta=1e-13)
         self.assertIn('extrapolation=endpoint-linear-tai-v1', b.sample.source_id)
-        with self.assertRaises(of.EopCoverageError):
+        with self.assertRaises(ob.EopCoverageError):
             strict.at(midnight)
         for limit in (-1, 31):
             with self.assertRaises(ValueError):
-                of.load_eop_snapshot(path, extrapolation_days=limit)
+                ob.load_eop_snapshot(path, extrapolation_days=limit)
         # Independently compare transformed velocity to a central position difference.
         def fixed_position(offset):
-            t = of.Epoch(midnight.tai_nanoseconds + round(offset * 1e9))
+            t = ob.Epoch(midnight.tai_nanoseconds + round(offset * 1e9))
             r = [7e6, 7500 * offset, 0]
             return self.frames.gcrf_to_itrf(t, extended.at(t).sample).apply_position(r)
         before, after = fixed_position(-0.1), fixed_position(0.1)
-        state = of.CartesianState(midnight, of.OriginId.EARTH, of.FrameId.GCRF,
+        state = ob.CartesianState(midnight, ob.OriginId.EARTH, ob.FrameId.GCRF,
                                   [7e6, 0, 0], [0, 7500, 0])
         result = self.frames.gcrf_to_itrf_state(midnight, b).apply(state)
         for i in range(3):
@@ -120,7 +120,7 @@ class EopStateApiTests(unittest.TestCase):
 
     def test_fixed_ground_state_and_roundtrip(self):
         transform = self.frames.gcrf_to_itrf_state(self.epoch, self.eop.at(self.epoch))
-        ground = of.CartesianState(self.epoch, of.OriginId.EARTH, of.FrameId.ITRF,
+        ground = ob.CartesianState(self.epoch, ob.OriginId.EARTH, ob.FrameId.ITRF,
                                    [6378137, 0, 0], [0, 0, 0])
         inertial = transform.inverse(ground)
         self.assertAlmostEqual(math.hypot(*inertial.velocity_mps), 465.1011, delta=0.001)
@@ -133,10 +133,10 @@ class EopStateApiTests(unittest.TestCase):
             self.assertAlmostEqual(a, b, delta=5e-10)
         with self.assertRaises(ValueError):
             transform.apply(ground)
-        for epoch, velocity in ((of.Epoch(self.epoch.tai_nanoseconds+1), [0, 0, 0]),
+        for epoch, velocity in ((ob.Epoch(self.epoch.tai_nanoseconds+1), [0, 0, 0]),
                                 (self.epoch, [float("nan"), 0, 0])):
             with self.assertRaises(ValueError):
-                transform.apply(of.CartesianState(epoch, of.OriginId.EARTH, of.FrameId.GCRF,
+                transform.apply(ob.CartesianState(epoch, ob.OriginId.EARTH, ob.FrameId.GCRF,
                                                    [7e6, 0, 0], velocity))
 
     def test_path_escape_unknown_schema_and_invalid_data(self):
@@ -146,8 +146,8 @@ class EopStateApiTests(unittest.TestCase):
         for update in ({"data_file": "../outside.c04"}, {"schema_version": 1.5},
                        {"unexpected": True}, {"interpolation": "unknown"}):
             path.write_text(json.dumps(original | update))
-            with self.assertRaises(of.EopDataError):
-                of.load_eop_snapshot(path)
+            with self.assertRaises(ob.EopDataError):
+                ob.load_eop_snapshot(path)
         # A valid hash alone is insufficient: malformed domain values are rejected too.
         lines = (destination / "eop.c04").read_bytes().splitlines(keepends=True)
         i = next(i for i, line in enumerate(lines) if line.strip() and not line.startswith(b"#"))
@@ -158,12 +158,12 @@ class EopStateApiTests(unittest.TestCase):
         (destination / "eop.c04").write_bytes(payload)
         original["sha256"] = hashlib.sha256(payload).hexdigest()
         path.write_text(json.dumps(original))
-        with self.assertRaises(of.EopDataError):
-            of.load_eop_snapshot(path)
+        with self.assertRaises(ob.EopDataError):
+            ob.load_eop_snapshot(path)
 
     def test_readonly_providers_can_be_shared_between_threads(self):
         first, last = self.eop.data_info.first_epoch, self.eop.data_info.last_epoch
-        epochs = [of.Epoch(first.tai_nanoseconds + (last.tai_nanoseconds-first.tai_nanoseconds)*i//15)
+        epochs = [ob.Epoch(first.tai_nanoseconds + (last.tai_nanoseconds-first.tai_nanoseconds)*i//15)
                   for i in range(16)]
         def calculate(epoch):
             transform = self.frames.gcrf_to_itrf_state(epoch, self.eop.at(epoch))

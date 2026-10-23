@@ -40,12 +40,12 @@ m=0 的 S 规范为零，其势函数项恒为零。TAI 纳秒历元精确转换
 Python 易用入口：
 
 ```python
-import orbelle as of
+import orbelle as ob
 
-data = of.DataSnapshot.load(eop_manifest="eop/manifest.json").with_ocean_tides(
+data = ob.DataSnapshot.load(eop_manifest="eop/manifest.json").with_ocean_tides(
     "fes2014bv1", "fes2014b.v1.with-s1.potential.txt")
-settings = of.orbits.OceanTideSettings(enabled=True, model="fes2014bv1", degree=4, order=4)
-# of.orbits.Hpop(initial=..., ocean_tides=settings)
+settings = ob.orbits.OceanTideSettings(enabled=True, model="fes2014bv1", degree=4, order=4)
+# ob.orbits.Hpop(initial=..., ocean_tides=settings)
 ```
 
 `OceanTideSettings` 是不可变值；低层 `OceanTideOptions` 对应 C++ 参数，`OceanTideModel.info` 是只读元数据。目录可 `install_ocean_tides(path, selection)`；官方 ID 只接受固定完整原文，修改后的外部文件必须使用自己的 ID。

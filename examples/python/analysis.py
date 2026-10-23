@@ -1,7 +1,7 @@
 """Fixed-input orbit queries. Optional: python analysis.py --csv trajectory.csv"""
 import argparse
 from pathlib import Path
-import orbelle as of
+import orbelle as ob
 from orbelle import units as u
 
 
@@ -11,16 +11,16 @@ def main() -> None:
     parser.add_argument("--data", type=Path, help="Select current local catalog data for ITRF output; never downloads")
     parser.add_argument("--project", type=Path, help="Save inputs with this analysis's data provenance; refuses an existing file")
     args = parser.parse_args()
-    project = of.Project("Observation", of.Epoch(0), of.Epoch(300_000_000_000))
-    satellite = project.objects.satellite("Observer", orbit=of.orbits.TwoBody(
-        initial=of.orbits.Keplerian(
+    project = ob.Project("Observation", ob.Epoch(0), ob.Epoch(300_000_000_000))
+    satellite = project.objects.satellite("Observer", orbit=ob.orbits.TwoBody(
+        initial=ob.orbits.Keplerian(
             epoch=project.first, semi_major_axis=u.km(7000), eccentricity=0.001,
             inclination=u.deg(53), raan=u.deg(0), argument_of_periapsis=u.deg(0),
         ),
     ))
-    data = of.DataCatalog(args.data) if args.data else None
+    data = ob.DataCatalog(args.data) if args.data else None
     analysis = project.prepare(data=data)
-    frame = of.FrameId.ITRF if args.data else of.FrameId.GCRF
+    frame = ob.FrameId.ITRF if args.data else ob.FrameId.GCRF
     trajectory = analysis.states(satellite, step=u.s(40), frame=frame)
     # A later edit does not rename or alter the earlier analysis.
     satellite.name = "Updated name"
@@ -31,7 +31,7 @@ def main() -> None:
         trajectory.to_csv(args.csv)
     if args.project:
         project.save(args.project, analysis=analysis)
-        reopened = of.Project.open(args.project, data=data)
+        reopened = ob.Project.open(args.project, data=data)
         print("Reopened:", reopened.name, reopened.analysis_status.name)
 
 

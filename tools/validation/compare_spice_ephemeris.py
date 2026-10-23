@@ -9,7 +9,7 @@ from random import Random
 
 import numpy as np
 from jplephem.spk import SPK
-import orbelle as of
+import orbelle as ob
 
 POSITION_TOLERANCE_M = 1e-3
 VELOCITY_TOLERANCE_MPS = 1e-7
@@ -29,12 +29,12 @@ def main():
     if source_hash != "c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2":
         raise ValueError("Full reference DE440s source hash mismatch")
     args.work_dir.mkdir(parents=True, exist_ok=True)
-    provider = of.load_spice_snapshot(args.manifest, args.work_dir / "kernels")
+    provider = ob.load_spice_snapshot(args.manifest, args.work_dir / "kernels")
     first, last = provider.data_info.first_epoch.tai_nanoseconds, provider.data_info.last_epoch.tai_nanoseconds
     ticks = {first+(last-first)*i//64 for i in range(65)}
     random = Random(4402016)
     ticks.update(random.randrange(first, last+1) for _ in range(64))
-    midnight = of.make_builtin_time_provider().from_utc(of.UtcDateTime(2017, 1, 1)).tai_nanoseconds
+    midnight = ob.make_builtin_time_provider().from_utc(ob.UtcDateTime(2017, 1, 1)).tai_nanoseconds
     ticks.update(midnight + offset for offset in (-2_000_000_000, -1_000_000_000, -500_000_000, -1, 0, 1, 500_000_000, 1_000_000_000))
     pairs = [(10, 399), (301, 399), (399, 0), (3, 0), (10, 301), (399, 301)]
     if args.all_planets:
@@ -56,7 +56,7 @@ def main():
                 return segment(0, body // 100) + segment(body // 100, body)
             return segment(0, 3) + segment(3, body)
         for ns in sorted(ticks):
-            epoch = of.Epoch(ns)
+            epoch = ob.Epoch(ns)
             tdb = provider.to_tdb(epoch)
             max_time_roundtrip = max(max_time_roundtrip, abs(provider.from_tdb(tdb).seconds_since(epoch)))
             for target, observer in pairs:

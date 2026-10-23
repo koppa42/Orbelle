@@ -5,7 +5,7 @@ import math
 import tempfile
 import unittest
 from pathlib import Path
-import orbelle as of
+import orbelle as ob
 from orbelle import units as u
 
 EOP = Path(__file__).resolve().parents[3] / "data/samples/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
@@ -29,29 +29,29 @@ class GravityTests(unittest.TestCase):
             root = Path(folder)
             file = root / "gravity.grv"
             file.write_text(GRV)
-            catalog = of.DataCatalog(root / "catalog")
+            catalog = ob.DataCatalog(root / "catalog")
             receipt = catalog.install_gravity(file)
             self.assertEqual(receipt.info.degree, 21)
             self.assertEqual(receipt.selection, "custom")
             self.assertEqual(len(catalog.gravity_models), 1)
-            data = of.DataSnapshot.load(eop_manifest=EOP).with_gravity("custom", receipt.file)
-            project = of.Project("Field", of.Epoch(0), of.Epoch(600 * 10**9))
-            sat = project.objects.satellite("Sat", orbit=of.orbits.Hpop(
-                initial=of.orbits.Keplerian(of.Epoch(0), u.km(7000), 0, u.deg(25)),
+            data = ob.DataSnapshot.load(eop_manifest=EOP).with_gravity("custom", receipt.file)
+            project = ob.Project("Field", ob.Epoch(0), ob.Epoch(600 * 10**9))
+            sat = project.objects.satellite("Sat", orbit=ob.orbits.Hpop(
+                initial=ob.orbits.Keplerian(ob.Epoch(0), u.km(7000), 0, u.deg(25)),
                 gravity_model="custom", gravity_degree=21))
-            with self.assertRaisesRegex(of.AnalysisCapabilityError, "Missing gravity"):
-                project.prepare(data=of.DataSnapshot.load(eop_manifest=EOP))
+            with self.assertRaisesRegex(ob.AnalysisCapabilityError, "Missing gravity"):
+                project.prepare(data=ob.DataSnapshot.load(eop_manifest=EOP))
             analysis = project.prepare(data=data)
             before = analysis.states(sat, step=u.s(60)).position.values
             project.save(root / "project.orbelle", analysis=analysis)
-            restored = of.Project.open(root / "project.orbelle", data=data)
+            restored = ob.Project.open(root / "project.orbelle", data=data)
             self.assertEqual(restored.objects[sat.id].orbit.hpop.gravity_model, "custom")
             file.write_text(GRV.replace("1e-8 2e-8", "2e-8 4e-8"))
             changed = data.with_gravity("custom", file)
-            plan = of.Project.plan_open(root / "project.orbelle", data=changed)
+            plan = ob.Project.plan_open(root / "project.orbelle", data=changed)
             self.assertEqual(plan.data_changes[0].role, "gravity/custom")
             self.assertEqual(analysis.states(sat, step=u.s(60)).position.values, before)
-            with self.assertRaises(of.DataChangedError):
+            with self.assertRaises(ob.DataChangedError):
                 plan.open()
             self.assertIsNotNone(plan.open(accept_data_changes=True))
             with self.assertRaises(RuntimeError):
@@ -65,31 +65,31 @@ class GravityTests(unittest.TestCase):
             custom = GRV.replace("BEGIN Coefficients", "Begin EarthIERSTideModel\n"
                 "IncludesPermTide No\nLoveNumbers 2 0 .3 .12\nEnd EarthIERSTideModel\nBEGIN Coefficients")
             file.write_text(custom)
-            catalog = of.DataCatalog(root / "catalog")
+            catalog = ob.DataCatalog(root / "catalog")
             try:
                 receipt = catalog.install_gravity(file)
                 self.assertEqual(receipt.info.solid_tide_k20, .3)
                 self.assertEqual(catalog.gravity_models[0].info.solid_tide_k20, .3)
                 with self.assertRaises(AttributeError):
                     receipt.info.solid_tide_k20 = .4
-                data = of.DataSnapshot.load(eop_manifest=EOP).with_gravity("custom", receipt.file)
-                project = of.Project("Love numbers", of.Epoch(0), of.Epoch(600 * 10**9))
-                sat = project.objects.satellite("Sat", orbit=of.orbits.Hpop(
-                    initial=of.orbits.Cartesian(of.Epoch(0), (7e6, 0, 0), (0, 6200, 5300)),
+                data = ob.DataSnapshot.load(eop_manifest=EOP).with_gravity("custom", receipt.file)
+                project = ob.Project("Love numbers", ob.Epoch(0), ob.Epoch(600 * 10**9))
+                sat = project.objects.satellite("Sat", orbit=ob.orbits.Hpop(
+                    initial=ob.orbits.Cartesian(ob.Epoch(0), (7e6, 0, 0), (0, 6200, 5300)),
                     gravity_model="custom", gravity_degree=2,
-                    solid_tides=of.orbits.SolidTideSettings("permanent")))
+                    solid_tides=ob.orbits.SolidTideSettings("permanent")))
                 analysis = project.prepare(data=data)
                 before = analysis.states(sat, step=u.s(60))
                 path = root / "love.orbelle"
                 project.save(path, analysis=analysis)
-                restored = of.Project.open(path, data=data)
+                restored = ob.Project.open(path, data=data)
                 self.assertEqual(restored.prepare(data=data).states(restored.objects[sat.id], step=u.s(60))
                                  .position.values, before.position.values)
                 file.write_text(custom.replace(".3 .12", ".4 .12"))
                 changed = data.with_gravity("custom", file)
-                plan = of.Project.plan_open(path, data=changed)
+                plan = ob.Project.plan_open(path, data=changed)
                 self.assertEqual(plan.data_changes[0].role, "gravity/custom")
-                with self.assertRaises(of.DataChangedError):
+                with self.assertRaises(ob.DataChangedError):
                     plan.open()
                 confirmed = plan.open(accept_data_changes=True)
                 after = confirmed.prepare(data=changed).states(confirmed.objects[sat.id], step=u.s(60))
@@ -106,7 +106,7 @@ class GravityTests(unittest.TestCase):
                 self.assertEqual(catalog.gravity_models[0].info.solid_tide_k20, .3)
             finally:
                 del catalog
-            reopened = of.DataCatalog(root / "catalog")
+            reopened = ob.DataCatalog(root / "catalog")
             try:
                 self.assertEqual(reopened.gravity_models[0].info.solid_tide_k20, .3)
             finally:
@@ -119,13 +119,13 @@ class GravityTests(unittest.TestCase):
             file.write_text(GRV.replace("Degree 21", "Degree 2190")
                             .replace("Order 21", "Order 2159")
                             .replace("21 21 1e-8 2e-8", "2190 2159 2e-8 -3e-8"))
-            catalog = of.DataCatalog(root / "catalog")
+            catalog = ob.DataCatalog(root / "catalog")
             receipt = catalog.install_gravity(file)
             self.assertEqual((receipt.info.degree, receipt.info.order), (2190, 2159))
-            data = of.DataSnapshot.load(eop_manifest=EOP).with_gravity("custom", receipt.file)
-            project = of.Project("Full field", of.Epoch(0), of.Epoch(2 * 10**9))
-            satellite = project.objects.satellite("Full", orbit=of.orbits.Hpop(
-                initial=of.orbits.Cartesian(of.Epoch(0), (6408136.3, 0, 0), (0, 6200, 4700)),
+            data = ob.DataSnapshot.load(eop_manifest=EOP).with_gravity("custom", receipt.file)
+            project = ob.Project("Full field", ob.Epoch(0), ob.Epoch(2 * 10**9))
+            satellite = project.objects.satellite("Full", orbit=ob.orbits.Hpop(
+                initial=ob.orbits.Cartesian(ob.Epoch(0), (6408136.3, 0, 0), (0, 6200, 4700)),
                 gravity_model="custom", gravity_degree=2190, gravity_order=2159,
                 max_step_seconds=1))
             settings = satellite.orbit.hpop
@@ -138,7 +138,7 @@ class GravityTests(unittest.TestCase):
             self.assertTrue(all(math.isfinite(x) for x in before.position_m + before.velocity_mps))
             path = root / "full.orbelle"
             project.save(path, analysis=analysis)
-            restored = of.Project.open(path, data=data)
+            restored = ob.Project.open(path, data=data)
             restored_satellite = restored.objects[satellite.id]
             self.assertEqual(restored_satellite.orbit.hpop, settings)
             after = restored.prepare(data=data).state(restored_satellite, at=project.last)
@@ -157,11 +157,11 @@ class SecularGravityTests(unittest.TestCase):
     def test_explicit_metadata_project_roundtrip_and_changed_epoch_confirmation(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            catalog = of.DataCatalog(root / "catalog")
+            catalog = ob.DataCatalog(root / "catalog")
             try:
                 receipt = catalog.install_gravity(self.SOURCE)
                 secular = receipt.info.secular_variations
-                self.assertIsInstance(secular, of.GravitySecularVariations)
+                self.assertIsInstance(secular, ob.GravitySecularVariations)
                 self.assertEqual(secular.reference_epoch.tai_nanoseconds, -32_184_000_000)
                 self.assertEqual(len(secular.rates_per_year), 4)
                 self.assertEqual((secular.rates_per_year[0].degree, secular.rates_per_year[0].order), (2, 0))
@@ -170,10 +170,10 @@ class SecularGravityTests(unittest.TestCase):
                     secular.rates_per_year[0].c = 2e-11
                 self.assertEqual(catalog.gravity_models[0].info.secular_variations.reference_epoch.tai_nanoseconds,
                                  -32_184_000_000)
-                data = of.DataSnapshot.load(eop_manifest=EOP).with_gravity("custom", receipt.file)
-                project = of.Project("Secular", of.Epoch(0), of.Epoch(600 * 10**9))
-                sat = project.objects.satellite("Sat", orbit=of.orbits.Hpop(
-                    initial=of.orbits.Cartesian(of.Epoch(0), (7e6, 0, 0), (0, 6200, 5300)),
+                data = ob.DataSnapshot.load(eop_manifest=EOP).with_gravity("custom", receipt.file)
+                project = ob.Project("Secular", ob.Epoch(0), ob.Epoch(600 * 10**9))
+                sat = project.objects.satellite("Sat", orbit=ob.orbits.Hpop(
+                    initial=ob.orbits.Cartesian(ob.Epoch(0), (7e6, 0, 0), (0, 6200, 5300)),
                     gravity_model="custom", gravity_degree=8, gravity_order=4,
                     include_secular_variations=True))
                 analysis = project.prepare(data=data)
@@ -181,14 +181,14 @@ class SecularGravityTests(unittest.TestCase):
                 self.assertIn("secular=file-linear-julian-year-v1", before.provenance.algorithm)
                 path = root / "project.orbelle"
                 project.save(path, analysis=analysis)
-                restored = of.Project.open(path, data=data)
+                restored = ob.Project.open(path, data=data)
                 self.assertTrue(restored.objects[sat.id].orbit.hpop.include_secular_variations)
                 changed_file = root / "shifted.grv"
                 changed_file.write_text(self.SOURCE.read_text().replace("2451545.0", "2453371.5"))
                 changed = data.with_gravity("custom", changed_file)
-                plan = of.Project.plan_open(path, data=changed)
+                plan = ob.Project.plan_open(path, data=changed)
                 self.assertEqual([v.role for v in plan.data_changes], ["gravity/custom"])
-                with self.assertRaises(of.DataChangedError):
+                with self.assertRaises(ob.DataChangedError):
                     plan.open()
                 accepted = plan.open(accept_data_changes=True)
                 after = accepted.prepare(data=changed).states(accepted.objects[sat.id], step=u.s(60))
@@ -197,7 +197,7 @@ class SecularGravityTests(unittest.TestCase):
                 self.assertNotEqual(after.data_sha256, before.data_sha256)
             finally:
                 del catalog
-            reopened = of.DataCatalog(root / "catalog")
+            reopened = ob.DataCatalog(root / "catalog")
             try:
                 self.assertEqual(reopened.gravity_models[0].info.secular_variations.reference_epoch.tai_nanoseconds,
                                  -32_184_000_000)
@@ -206,7 +206,7 @@ class SecularGravityTests(unittest.TestCase):
 
     def test_corrupt_secular_receipts_are_rejected_without_changing_raw_files(self):
         with tempfile.TemporaryDirectory() as folder:
-            catalog = of.DataCatalog(Path(folder) / "catalog")
+            catalog = ob.DataCatalog(Path(folder) / "catalog")
             try:
                 receipt = catalog.install_gravity(self.SOURCE)
                 saved = catalog.setting("gravity/custom")
@@ -243,15 +243,15 @@ class SecularGravityTests(unittest.TestCase):
 
     def test_static_file_cannot_enable_variations_and_flag_requires_bool(self):
         with self.assertRaisesRegex(TypeError, "include_secular_variations"):
-            of.orbits.HpopSettings(include_secular_variations=1)
+            ob.orbits.HpopSettings(include_secular_variations=1)
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             file = root / "static.grv"
             file.write_text(GRV)
-            data = of.DataSnapshot.load(eop_manifest=EOP).with_gravity("custom", file)
-            project = of.Project("Static", of.Epoch(0), of.Epoch(600 * 10**9))
-            sat = project.objects.satellite("Sat", orbit=of.orbits.Hpop(
-                initial=of.orbits.Cartesian(of.Epoch(0), (7e6, 0, 0), (0, 6200, 5300)),
+            data = ob.DataSnapshot.load(eop_manifest=EOP).with_gravity("custom", file)
+            project = ob.Project("Static", ob.Epoch(0), ob.Epoch(600 * 10**9))
+            sat = project.objects.satellite("Sat", orbit=ob.orbits.Hpop(
+                initial=ob.orbits.Cartesian(ob.Epoch(0), (7e6, 0, 0), (0, 6200, 5300)),
                 gravity_model="custom", gravity_degree=2, include_secular_variations=True))
             with self.assertRaisesRegex(ValueError, "secular reference epoch"):
                 project.prepare(data=data)
@@ -259,9 +259,9 @@ class SecularGravityTests(unittest.TestCase):
             self.assertIsNotNone(project.prepare(data=data))
 
     def test_point_mass_preserves_inactive_flag_without_changing_analysis(self):
-        project = of.Project("Draft", of.Epoch(0), of.Epoch(600 * 10**9))
-        sat = project.objects.satellite("Sat", orbit=of.orbits.Hpop(
-            initial=of.orbits.Cartesian(of.Epoch(0), (7e6, 0, 0), (0, 6200, 5300)),
+        project = ob.Project("Draft", ob.Epoch(0), ob.Epoch(600 * 10**9))
+        sat = project.objects.satellite("Sat", orbit=ob.orbits.Hpop(
+            initial=ob.orbits.Cartesian(ob.Epoch(0), (7e6, 0, 0), (0, 6200, 5300)),
             gravity_degree=0, include_secular_variations=False))
         before = project.prepare().states(sat, step=u.s(60))
         sat.orbit = replace(sat.orbit, hpop=replace(sat.orbit.hpop, include_secular_variations=True))
@@ -271,4 +271,4 @@ class SecularGravityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "draft.orbelle"
             project.save(path)
-            self.assertTrue(of.Project.open(path).objects[sat.id].orbit.hpop.include_secular_variations)
+            self.assertTrue(ob.Project.open(path).objects[sat.id].orbit.hpop.include_secular_variations)

@@ -1,16 +1,16 @@
 """Station-to-sensor access, AER and reports from one fixed analysis."""
 from pathlib import Path
-import orbelle as of
+import orbelle as ob
 from orbelle import units as u
 from orbelle.sensors import Cone, Pointing
 
-manifest = Path(of.__file__).parent / "data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
-project = of.Project("Ground access", of.Epoch(0), of.Epoch(7_200_000_000_000))
-data = of.DataSnapshot.load(eop_manifest=manifest)
+manifest = Path(ob.__file__).parent / "data/eop/iers_c04_2000_01_01_2000_01_02/manifest.json"
+project = ob.Project("Ground access", ob.Epoch(0), ob.Epoch(7_200_000_000_000))
+data = ob.DataSnapshot.load(eop_manifest=manifest)
 with project.edit():
-    satellite = project.objects.satellite("Observer", orbit=of.orbits.TwoBody(
-        initial=of.OrbitInput().initial))
-    station = project.objects.ground_station("Hong Kong", location=of.Wgs84Location(
+    satellite = project.objects.satellite("Observer", orbit=ob.orbits.TwoBody(
+        initial=ob.OrbitInput().initial))
+    station = project.objects.ground_station("Hong Kong", location=ob.Wgs84Location(
         longitude=u.deg(114.2), latitude=u.deg(22.3), ellipsoid_height=u.m(350)),
         minimum_elevation=u.deg(5))
     sensor = project.objects.sensor("Camera", parent=satellite,
@@ -36,7 +36,7 @@ assert aer.epoch.tai_nanoseconds[-1] == project.last.tai_nanoseconds
 # aer.to_csv("aer.csv")
 # elevation_deg = aer.elevation.to_numpy(unit="deg")  # Optional numpy.
 
-report = analysis.report(of.ReportKind.AER, station=station, target=sensor, step=u.s(30))
+report = analysis.report(ob.ReportKind.AER, station=station, target=sensor, step=u.s(30))
 assert report.table.row_count == len(aer)
 assert report.input_revision == analysis.revision
 print(f"Report: {report.column_title(5)} = {report.cell_text(0, 5)}")

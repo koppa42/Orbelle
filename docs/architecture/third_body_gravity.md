@@ -25,11 +25,11 @@ Cb 导入只读取 GM 子集：逐行 `Gm value`、`SystemGm value`（也接受 
 C++ 使用 `options.third_body(core::ThirdBody::jupiter)` 设置 `enabled`、`source`、`user_mu` 或 `cb`，通过 `runtime::load_cb_gravity(path, body, mu_scale)` 捕获文件常数。
 
 ```python
-cb = of.orbits.load_cb_gravity("Jupiter.cb", "jupiter", mu_scale=1.0)
-orbit = of.orbits.Hpop(
+cb = ob.orbits.load_cb_gravity("Jupiter.cb", "jupiter", mu_scale=1.0)
+orbit = ob.orbits.Hpop(
     initial=initial, gravity_degree=0,
     third_bodies=("sun", "moon", "jupiter"),
-    body_gravity=(of.orbits.ThirdBodySettings("jupiter", "cb_file", cb=cb),),
+    body_gravity=(ob.orbits.ThirdBodySettings("jupiter", "cb_file", cb=cb),),
 )
 # 手动来源：ThirdBodySettings("jupiter", "user_specified", mu=1.26712764e17)
 # sun_mu / moon_mu 仍是 Hpop() 中构造手动来源的便捷参数。

@@ -46,15 +46,15 @@ Python 通过 `project.objects` 管理对象，属性赋值和关键字更新进
 
 ```python
 from pathlib import Path
-import orbelle as of
+import orbelle as ob
 
-project = of.load_project('mission.orbelle')
-satellite = project.objects.find(type=of.objects.Satellite)[0]
+project = ob.load_project('mission.orbelle')
+satellite = project.objects.find(type=ob.objects.Satellite)[0]
 satellite.name = '观测卫星'
 copy = project.objects.duplicate(satellite, name='观测卫星 副本')
 project.objects.remove(copy)
 
-catalog = of.DataCatalog(Path('data/shared-store'))
+catalog = ob.DataCatalog(Path('data/shared-store'))
 installed = catalog.install_eop('snapshot/manifest.json')
 project.earth_orientation = catalog.load_eop(installed.lock_sha256).data_info
 project.save('mission-updated.orbelle')

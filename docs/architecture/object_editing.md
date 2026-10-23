@@ -5,12 +5,12 @@
 ## Python 常用操作
 
 ```python
-import orbelle as of
+import orbelle as ob
 from orbelle import units as u
 from orbelle.sensors import Cone, Pointing
 
-project = of.Project("Observation", of.Epoch(0), of.Epoch(7_200_000_000_000))
-initial = of.orbits.Keplerian(
+project = ob.Project("Observation", ob.Epoch(0), ob.Epoch(7_200_000_000_000))
+initial = ob.orbits.Keplerian(
     epoch=project.first,
     semi_major_axis=u.km(7000),
     eccentricity=0.001,
@@ -18,10 +18,10 @@ initial = of.orbits.Keplerian(
 )
 
 with project.edit():
-    satellite = project.objects.satellite("Observer", orbit=of.orbits.TwoBody(initial=initial))
+    satellite = project.objects.satellite("Observer", orbit=ob.orbits.TwoBody(initial=initial))
     station = project.objects.ground_station(
         "Hong Kong",
-        location=of.Wgs84Location(
+        location=ob.Wgs84Location(
             longitude=u.deg(114.2), latitude=u.deg(22.3), ellipsoid_height=u.m(350),
         ),
         minimum_elevation=u.deg(5),
@@ -42,11 +42,11 @@ with project.edit():
 project.save("observation.orbelle")
 ```
 
-`objects.satellite()`、`ground_station()`、`sensor()` 返回带类型的实时句柄。通用工具也可以构造 `of.objects.Satellite`、`GroundStation`、`Sensor` 不可变配置，再调用 `objects.create(definition)`。配置与句柄是不同类型；创建、更新方法有真实参数签名，随包提供类型提示。
+`objects.satellite()`、`ground_station()`、`sensor()` 返回带类型的实时句柄。通用工具也可以构造 `ob.objects.Satellite`、`GroundStation`、`Sensor` 不可变配置，再调用 `objects.create(definition)`。配置与句柄是不同类型；创建、更新方法有真实参数签名，随包提供类型提示。
 
 轨道入口提供 `orbits.TwoBody(initial=...)`、`J2(initial=...)`、`J4(initial=...)`、`Sgp4(tle=...)`，返回不可变 `orbits.Orbit` 配置。二体初值可用 GCRF `Keplerian`、不可变 `orbits.Cartesian` 或既有 `CartesianState`；J2/J4 明确接受各自平均根数。`Orbit.from_input(OrbitInput)` 是旧 SI 输入的显式转换入口，会丢弃旧对象 ID 和分析时段，由项目分配与维护。轨道转换沿用已有算法，不隐式下载时间或 EOP 数据。
 
-可替换的显示值是 `OrbitStyle`，例如 `satellite.display = of.OrbitStyle(line_color=0x73CDEE, line_width=2, line_style=of.LineStyle.DASHED)`。嵌套配置不可变；修改视场、位置、轨道或显示时替换完整值，不修改临时容器副本。模型文件配置暂通过低层项目值导入，句柄能读取，后续扩展属性编辑。
+可替换的显示值是 `OrbitStyle`，例如 `satellite.display = ob.OrbitStyle(line_color=0x73CDEE, line_width=2, line_style=ob.LineStyle.DASHED)`。嵌套配置不可变；修改视场、位置、轨道或显示时替换完整值，不修改临时容器副本。模型文件配置暂通过低层项目值导入，句柄能读取，后续扩展属性编辑。
 
 ## 查找与生命周期
 
@@ -58,7 +58,7 @@ project.save("observation.orbelle")
 | --- | --- |
 | `project.objects[id]` | 按 ID 查找；缺失抛 `KeyError`，不会回退到名称 |
 | `project.objects.get(id, default)` | 缺失返回默认值，默认是 `None` |
-| `project.objects.find(name="Camera", type=of.objects.Sensor)` | 返回所有匹配句柄；名称可以重复 |
+| `project.objects.find(name="Camera", type=ob.objects.Sensor)` | 返回所有匹配句柄；名称可以重复 |
 | `project.objects.read(sensor)` | 返回固定、不可变的对象状态 |
 | `project.objects.children(satellite)` | 返回卫星的直接子传感器 |
 | `project.objects.duplicate(satellite, name="Copy")` | 复制卫星及子传感器，分配新 ID，保留外部目标引用 |
@@ -86,7 +86,7 @@ project.unsubscribe(token)
 
 ## C++ 应用层入口
 
-普通 SDK 使用 [C++ 项目门面](cpp_api.md)的 `of::Project` 与 `of::objects`，编辑命令、引用和事务直接复用下列应用层实现。以下入口供需要显式管理底层文档的适配层使用。
+普通 SDK 使用 [C++ 项目门面](cpp_api.md)的 `orbelle::Project` 与 `orbelle::objects`，编辑命令、引用和事务直接复用下列应用层实现。以下入口供需要显式管理底层文档的适配层使用。
 
 ```cpp
 #include <orbelle/application/project_document.hpp>
@@ -102,7 +102,8 @@ auto sensor = objects.create(app::objects::Sensor{"Camera", satellite, 0.35, {}}
 edit.commit();
 
 auto before = project.snapshot(); // revision + shared_ptr<const Project>
-project.objects().update(sensor, app::objects::SensorUpdate{.half_angle_rad = 0.2});
+project.objects().update(sensor, app::objects::SensorUpdate{
+    .pattern = orbelle::core::SensorPattern{0.2}});
 ```
 
 `ObjectRef` 是带项目范围和类型的值身份，不指向容器元素。C++ 的候选编辑必须显式使用 `edit.objects()` 并 `commit()`，析构时丢弃未提交修改。编辑对象本身仅供一个线程使用；发布状态、独立候选提交和订阅表受锁保护。
@@ -111,7 +112,7 @@ project.objects().update(sensor, app::objects::SensorUpdate{.half_angle_rad = 0.
 
 ## 迁移与当前计算入口
 
-Python `of.Project` 和 `of.load_project()` 现在返回事务门面。旧的可变项目值改名为 `of.ProjectData`，文件层入口为 `of.load_project_data()`；原生文件格式回归测试继续验证这些低层值。需要与旧集成交换时使用 `Project.from_data(data)` 和 `project.to_data()`，两者均复制，修改副本不会回写项目。
+Python `ob.Project` 和 `ob.load_project()` 现在返回事务门面。旧的可变项目值改名为 `ob.ProjectData`，文件层入口为 `ob.load_project_data()`；原生文件格式回归测试继续验证这些低层值。需要与旧集成交换时使用 `Project.from_data(data)` 和 `project.to_data()`，两者均复制，修改副本不会回写项目。
 
 普通脚本不再修改 `project.satellites` 等列表。通过句柄操作对象；保存报告配置使用 `project.set_reports(definitions)`，读取旧配置可从显式 `to_data()` 副本取得。`project.earth_orientation = ...` 继续接受已明确选定的数据元信息，`None` 清空；`plan_prepare(data=...)` 提供数据确认计划，可传入固定的 `DataSnapshot` 或由 `DataCatalog` 按项目时段选源。
 

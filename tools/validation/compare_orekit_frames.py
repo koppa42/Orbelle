@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 
-import orbelle as of
+import orbelle as ob
 
 MATRIX_TOLERANCE = 2e-11  # ~4 microarcseconds; <1 mm at GEO for a single-axis error.
 VELOCITY_TOLERANCE = 2e-5  # m/s for r <= 42164 km, v <= 8 km/s.
@@ -46,16 +46,16 @@ def main():
     classpath = os.pathsep.join(jars)
     subprocess.run(["javac", "-cp", classpath, "-d", str(args.work_dir),
                     str(reference / "OrbelleFrameReference.java")], check=True)
-    eop = of.load_eop_snapshot(args.manifest)
+    eop = ob.load_eop_snapshot(args.manifest)
     first, last = eop.data_info.first_epoch.tai_nanoseconds, eop.data_info.last_epoch.tai_nanoseconds
-    cases = [eop.at(of.Epoch(first + (last-first)*i//32)) for i in range(33)]
+    cases = [eop.at(ob.Epoch(first + (last-first)*i//32)) for i in range(33)]
     # The measured snapshot covers one week; add explicitly synthetic dates to span the model.
-    time = of.make_builtin_time_provider()
+    time = ob.make_builtin_time_provider()
     for year in (1984, 2000, 2026):
-        epoch = time.from_utc(of.UtcDateTime(year, 7, 1, 12))
-        sample = of.EarthOrientationSample(epoch, -time.tai_minus_utc_seconds(epoch)+0.1,
+        epoch = time.from_utc(ob.UtcDateTime(year, 7, 1, 12))
+        sample = ob.EarthOrientationSample(epoch, -time.tai_minus_utc_seconds(epoch)+0.1,
                                            1e-6, -2e-6, 1e-9, -2e-9, f"synthetic-{year}")
-        cases.append(of.EarthOrientationState(sample, of.EarthOrientationRates(-1e-8, 1e-13, -2e-13, 2e-15, -1e-15)))
+        cases.append(ob.EarthOrientationState(sample, ob.EarthOrientationRates(-1e-8, 1e-13, -2e-13, 2e-15, -1e-15)))
     rows = []
     shifts = (0, -8, -4, -2, 2, 4, 8)
     for case in cases:
@@ -72,7 +72,7 @@ def main():
         raise ValueError("Incomplete independent reference output")
     if not all(math.isfinite(v) for row in reference_rows for v in row):
         raise ValueError("Nonfinite independent reference output")
-    frames = of.make_frame_provider()
+    frames = ob.make_frame_provider()
     max_matrix = max_velocity = max_step_change = 0.0
     for i, case in enumerate(cases):
         group = dict(zip(shifts, reference_rows[i*len(shifts):(i+1)*len(shifts)]))
@@ -82,7 +82,7 @@ def main():
         for position in ([7_000_000.0, 0.0, 0.0], [0.0, 42_164_000.0, 0.0],
                          [0.0, 0.0, 42_164_000.0]):
             velocity = [1000.0, -2000.0, 6000.0]
-            state = of.CartesianState(case.sample.epoch, of.OriginId.EARTH, of.FrameId.GCRF,
+            state = ob.CartesianState(case.sample.epoch, ob.OriginId.EARTH, ob.FrameId.GCRF,
                                       position, velocity)
             actual_v = transform.apply(state).velocity_mps
             reference_v = []

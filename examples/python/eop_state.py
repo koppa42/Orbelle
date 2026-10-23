@@ -2,16 +2,16 @@
 import math
 from pathlib import Path
 
-import orbelle as of
+import orbelle as ob
 
 
-time = of.make_builtin_time_provider()
-frames = of.make_frame_provider()
-manifest = Path(of.__file__).parent / "data/eop/iers_c04_2016_12_28_2017_01_04/manifest.json"
-eop = of.load_eop_snapshot(manifest)
-epoch = time.from_utc(of.UtcDateTime(2016, 12, 31, 23, 59, 60))
+time = ob.make_builtin_time_provider()
+frames = ob.make_frame_provider()
+manifest = Path(ob.__file__).parent / "data/eop/iers_c04_2016_12_28_2017_01_04/manifest.json"
+eop = ob.load_eop_snapshot(manifest)
+epoch = time.from_utc(ob.UtcDateTime(2016, 12, 31, 23, 59, 60))
 transform = frames.gcrf_to_itrf_state(epoch, eop.at(epoch))
-ground = of.CartesianState(epoch, of.OriginId.EARTH, of.FrameId.ITRF,
+ground = ob.CartesianState(epoch, ob.OriginId.EARTH, ob.FrameId.ITRF,
                            [6378137, 0, 0], [0, 0, 0])
 inertial = transform.inverse(ground)
 print(f"Snapshot: {eop.data_info.id}")

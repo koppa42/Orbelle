@@ -67,9 +67,9 @@ C++ 提供 `DataReference`、`DataLock`、`eop_data_lock`、`Project::data_lock(
 
 ```python
 import hashlib
-import orbelle as of
+import orbelle as ob
 
-project = of.load_project('mission.orbelle')
+project = ob.load_project('mission.orbelle')
 lock = project.data_lock
 assert hashlib.sha256(lock.canonical_bytes()).hexdigest() == lock.sha256
 assert project.to_scenario().data_lock.sha256 == lock.sha256

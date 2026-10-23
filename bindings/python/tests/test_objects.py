@@ -6,18 +6,18 @@ import inspect
 from pathlib import Path
 import tempfile
 import unittest
-import orbelle as of
+import orbelle as ob
 from orbelle import units as u
 from orbelle.sensors import Cone, Pointing
 
 
 def make_project():
-    project = of.Project("Objects", of.Epoch(0), of.Epoch(600_000_000_000))
+    project = ob.Project("Objects", ob.Epoch(0), ob.Epoch(600_000_000_000))
     with project.edit():
-        satellite = project.objects.satellite("Observer", orbit=of.orbits.TwoBody(
-            initial=of.orbits.Keplerian(epoch=project.first, semi_major_axis=u.km(7000),
+        satellite = project.objects.satellite("Observer", orbit=ob.orbits.TwoBody(
+            initial=ob.orbits.Keplerian(epoch=project.first, semi_major_axis=u.km(7000),
                                        eccentricity=0.001, inclination=u.deg(53))))
-        station = project.objects.ground_station("Hong Kong", location=of.Wgs84Location(
+        station = project.objects.ground_station("Hong Kong", location=ob.Wgs84Location(
             longitude=u.deg(114.2), latitude=u.deg(22.3), ellipsoid_height=u.m(350)))
         sensor = project.objects.sensor("Camera", parent=satellite,
             field_of_view=Cone(half_angle=u.deg(20)), pointing=Pointing.track(station))
@@ -37,7 +37,7 @@ class ObjectEditingTest(unittest.TestCase):
                 sensor.field_of_view=shape
                 self.assertEqual(sensor.field_of_view,shape)
                 project.save(path,overwrite=True)
-                restored=of.Project.open(path)
+                restored=ob.Project.open(path)
                 self.assertEqual(restored.objects[sensor.id].field_of_view,shape)
         before=project.revision
         with self.assertRaises(ValueError):
@@ -60,8 +60,8 @@ class ObjectEditingTest(unittest.TestCase):
         iterator = iter(project.objects)
         copy = project.objects.duplicate(sensor, name="Camera")
         self.assertEqual(len(tuple(iterator)), 3)
-        self.assertEqual(project.objects.find(name="Camera", type=of.objects.Sensor), (sensor, copy))
-        created = project.objects.create(of.objects.GroundStation("Station", station.location))
+        self.assertEqual(project.objects.find(name="Camera", type=ob.objects.Sensor), (sensor, copy))
+        created = project.objects.create(ob.objects.GroundStation("Station", station.location))
         self.assertNotEqual(created.id, station.id)
         self.assertEqual(created.location, station.location)
 
@@ -69,7 +69,7 @@ class ObjectEditingTest(unittest.TestCase):
         project, _, _, sensor = make_project()
         changes = []
         project.subscribe(changes.append)
-        with self.assertRaises(of.ProjectError):
+        with self.assertRaises(ob.ProjectError):
             sensor.update(name="Invalid", field_of_view=Cone(half_angle=u.deg(180)))
         self.assertEqual(sensor.name, "Camera")
         self.assertEqual(project.revision, 1)
@@ -97,7 +97,7 @@ class ObjectEditingTest(unittest.TestCase):
         project.objects.remove(satellite)
         self.assertEqual(saved.field_of_view.half_angle, u.deg(20))
         self.assertIn("deleted", repr(sensor))
-        with self.assertRaises(of.ObjectNotFoundError):
+        with self.assertRaises(ob.ObjectNotFoundError):
             _ = sensor.name
 
     def test_types_keywords_and_readonly_fields_fail_before_mutation(self):
@@ -133,7 +133,7 @@ class ObjectEditingTest(unittest.TestCase):
         self.assertEqual(station.minimum_elevation, u.deg(0))
         self.assertEqual(project.revision, 1)
         self.assertIsNone(project.objects.get(new.id))
-        with self.assertRaises(of.ObjectNotFoundError):
+        with self.assertRaises(ob.ObjectNotFoundError):
             _ = new.name
         replacement = project.objects.sensor("New", parent=satellite, field_of_view=Cone(u.deg(10)))
         self.assertNotEqual(new.id, replacement.id)
@@ -142,12 +142,12 @@ class ObjectEditingTest(unittest.TestCase):
         project, _, station, sensor = make_project()
         with project.edit():
             sensor.name = "Draft"
-            with self.assertRaises(of.ProjectError):
+            with self.assertRaises(ob.ProjectError):
                 sensor.update(name="Lost", field_of_view=Cone(u.deg(-1)))
             self.assertEqual(sensor.name, "Draft")
             sensor.field_of_view = Cone(u.deg(10))
         self.assertEqual(project.revision, 2)
-        with self.assertRaises(of.ProjectError):
+        with self.assertRaises(ob.ProjectError):
             with project.edit():
                 project.objects.remove(station)
                 self.assertEqual(sensor.pointing.target_id, station.id)
@@ -162,9 +162,9 @@ class ObjectEditingTest(unittest.TestCase):
     def test_nested_edits_cross_project_and_revision_conflict(self):
         project, _, station, sensor = make_project()
         other, other_satellite, other_station, _ = make_project()
-        with self.assertRaises(of.ProjectError):
+        with self.assertRaises(ob.ProjectError):
             project.objects.reparent(sensor, other_satellite)
-        with self.assertRaises(of.ProjectError):
+        with self.assertRaises(ob.ProjectError):
             sensor.pointing = Pointing.track(other_station)
         with project.edit():
             with self.assertRaises(RuntimeError):
@@ -172,7 +172,7 @@ class ObjectEditingTest(unittest.TestCase):
                     pass
             with other.edit():
                 other_station.name = "Other"
-        with self.assertRaises(of.RevisionConflictError):
+        with self.assertRaises(ob.RevisionConflictError):
             with project.edit():
                 station.name = "Stale"
                 with ThreadPoolExecutor(1) as executor:
@@ -183,13 +183,13 @@ class ObjectEditingTest(unittest.TestCase):
 
     def test_duplicate_cascade_reparent_and_soft_report_bindings(self):
         project, satellite, station, sensor = make_project()
-        definition = of.ReportDefinition()
+        definition = ob.ReportDefinition()
         definition.id, definition.name, definition.query.object_ids = "report", "Report", [sensor.id]
         project.set_reports([definition])
         plan = project.objects.plan_remove(station)
         self.assertEqual(plan.blocking_sensors, [sensor.id])
         self.assertEqual(plan.revision, project.revision)
-        with self.assertRaises(of.ProjectError):
+        with self.assertRaises(ob.ProjectError):
             project.objects.remove(station)
         copy = project.objects.duplicate(satellite, name="Copy")
         child, = project.objects.children(copy)
@@ -255,20 +255,20 @@ class ObjectEditingTest(unittest.TestCase):
                     project.to_scenario()
             project.save(path)
             self.assertFalse(project.dirty)
-            loaded = of.load_project(path)
+            loaded = ob.load_project(path)
             self.assertEqual(loaded.objects[sensor.id].name, sensor.name)
             self.assertEqual(loaded.objects[sensor.id].parent.id, satellite.id)
             expected = project.to_scenario().sample([project.first])
             actual = loaded.to_scenario().sample([project.first])
             self.assertEqual(expected[0].states[0].position_m, actual[0].states[0].position_m)
-            definition = of.ReportDefinition()
+            definition = ob.ReportDefinition()
             definition.id, definition.name = "summary", "Summary"
-            definition.query.kind = of.ReportKind.OBJECT_SUMMARY
+            definition.query.kind = ob.ReportKind.OBJECT_SUMMARY
             definition.query.object_ids = [satellite.id]
-            report = of.generate_report(loaded, definition)
+            report = ob.generate_report(loaded, definition)
             self.assertGreater(report.table.row_count, 0)
             sensor.name = "Unsaved"
-            with self.assertRaises(of.ProjectError):
+            with self.assertRaises(ob.ProjectError):
                 project.save(path)
             self.assertTrue(project.dirty)
             detached = project.to_data()
@@ -278,21 +278,21 @@ class ObjectEditingTest(unittest.TestCase):
     def test_settings_are_atomic_and_noop_does_not_dirty(self):
         project, satellite, _, _ = make_project()
         original = project.to_data()
-        with self.assertRaises(of.ProjectError):
-            project.update(name="Invalid", first=of.Epoch(900_000_000_000))
+        with self.assertRaises(ob.ProjectError):
+            project.update(name="Invalid", first=ob.Epoch(900_000_000_000))
         self.assertEqual(project.name, original.name)
         with project.edit():
             satellite.name = "Temp"
             satellite.name = "Observer"
         self.assertEqual(project.revision, 1)
-        project.update(first=of.Epoch(100), last=of.Epoch(1000))
+        project.update(first=ob.Epoch(100), last=ob.Epoch(1000))
         self.assertEqual(project.current.tai_nanoseconds, 100)
         self.assertEqual(project.to_data().satellites[0].orbit.last.tai_nanoseconds, 1000)
 
     def test_saved_ids_preserved_and_native_values_detached(self):
         path = Path(__file__).resolve().parents[3] / "tests/integration/fixtures/project-current.orbelle"
-        raw = of.load_project_data(path)
-        project = of.Project.open(path)
+        raw = ob.load_project_data(path)
+        project = ob.Project.open(path)
         self.assertEqual({obj.id for obj in project.objects},
                          {"satellite-a", "satellite-b", "station-a", "sensor-a"})
         self.assertEqual(project.objects["sensor-a"].parent, project.objects["satellite-a"])
@@ -300,27 +300,27 @@ class ObjectEditingTest(unittest.TestCase):
         self.assertNotEqual(raw.satellites[0].name, "New name")
 
     def test_orbit_constructors_preserve_model_and_mean_element_semantics(self):
-        first, last = of.Epoch(0), of.Epoch(600_000_000_000)
-        mean = of.J2MeanElements(first, 7e6, 0.01, 0.9, 0.1, 0.2, 0.3)
-        for configure, session in ((of.orbits.J2, of.make_j2_session), (of.orbits.J4, of.make_j4_session)):
+        first, last = ob.Epoch(0), ob.Epoch(600_000_000_000)
+        mean = ob.J2MeanElements(first, 7e6, 0.01, 0.9, 0.1, 0.2, 0.3)
+        for configure, session in ((ob.orbits.J2, ob.make_j2_session), (ob.orbits.J4, ob.make_j4_session)):
             with self.subTest(model=configure.__name__):
-                project = of.Project("Mean orbit", first, last)
+                project = ob.Project("Mean orbit", first, last)
                 satellite = project.objects.satellite("Satellite", orbit=configure(initial=mean))
                 actual = project.to_scenario().sample([first, last])[0]
                 expected = session(mean, satellite.id).sample([first, last])
                 for got, want in zip(actual.states, expected.states):
                     for a, b in zip(got.position_m, want.position_m):
                         self.assertAlmostEqual(a, b, delta=1e-6)
-        tle = of.Tle(
+        tle = ob.Tle(
             '1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753',
             '2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667')
-        time = of.make_builtin_time_provider()
+        time = ob.make_builtin_time_provider()
         epoch = time.from_utc(tle.epoch_utc)
-        project = of.Project("TLE", epoch, of.Epoch(epoch.tai_nanoseconds + 60_000_000_000))
-        satellite = project.objects.satellite("Vanguard", orbit=of.orbits.Sgp4(tle=tle))
+        project = ob.Project("TLE", epoch, ob.Epoch(epoch.tai_nanoseconds + 60_000_000_000))
+        satellite = project.objects.satellite("Vanguard", orbit=ob.orbits.Sgp4(tle=tle))
         actual = project.to_scenario(time).sample([epoch])[0].states[0]
-        expected = of.make_sgp4_session(tle, time, satellite.id).sample([epoch]).states[0]
-        self.assertEqual(actual.frame, of.FrameId.TEME)
+        expected = ob.make_sgp4_session(tle, time, satellite.id).sample([epoch]).states[0]
+        self.assertEqual(actual.frame, ob.FrameId.TEME)
         self.assertEqual(actual.position_m, expected.position_m)
 
 

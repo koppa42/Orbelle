@@ -44,24 +44,24 @@ AER 从设备位置计算，仰角相对于当地椭球法线确定的水平面�
 Python 示例：
 
 ```python
-import orbelle as of
+import orbelle as ob
 from orbelle import units as u
 
-project = of.Project("观测任务", of.Epoch(0), of.Epoch(7_200_000_000_000))
+project = ob.Project("观测任务", ob.Epoch(0), ob.Epoch(7_200_000_000_000))
 station = project.objects.ground_station("楼顶天线",
-    location=of.Wgs84Location(longitude=u.deg(114.2), latitude=u.deg(22.3),
+    location=ob.Wgs84Location(longitude=u.deg(114.2), latitude=u.deg(22.3),
                              ellipsoid_height=u.m(350), height_above_ground=u.m(25)),
     minimum_elevation=u.deg(5),
-    position_type=of.GroundPositionType.GEODETIC,
+    position_type=ob.GroundPositionType.GEODETIC,
     description="屋顶天线，设备离地 25 m")
-xyz = station.location.coordinates(of.GroundPositionType.CARTESIAN)  # 地面点，米
-station.location = of.Wgs84Location.from_coordinates(
-    of.GroundPositionType.CARTESIAN, xyz, height_above_ground=u.m(30))
+xyz = station.location.coordinates(ob.GroundPositionType.CARTESIAN)  # 地面点，米
+station.location = ob.Wgs84Location.from_coordinates(
+    ob.GroundPositionType.CARTESIAN, xyz, height_above_ground=u.m(30))
 station.description = "设备离地高度已调整"
 project.save("station.orbelle")
 ```
 
-C++ 使用 `of::GroundPositionType`、`of::ground_station_coordinates`、`of::ground_station_location`，创建与修改字段位于 `of::objects::GroundStation` / `GroundStationUpdate`；与 Python 共用校验、事务和计算实现。
+C++ 使用 `orbelle::GroundPositionType`、`orbelle::ground_station_coordinates`、`orbelle::ground_station_location`，创建与修改字段位于 `orbelle::objects::GroundStation` / `GroundStationUpdate`；与 Python 共用校验、事务和计算实现。
 
 当前不包含地形服务、方位仰角掩模、地形坡度、当地时间显示、通信/雷达模型或地面站子传感器。已有几何 Access 与卫星传感器能力见[可见性与传感器](access_sensors.md)。
 

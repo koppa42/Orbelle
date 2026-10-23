@@ -72,13 +72,13 @@ Windows/MSVC 示例程序为 `out/build/headless/examples/cpp/Release/orbelle_ex
 
 `desktop` 预设是基础 Qt 状态表窗口；完整场景工作台使用 `desktop-graphics`。便携包、wheel 与构建缓存位于本地 `out/`，不随源码克隆分发。
 
-Python 对象统一通过 `project.objects` 创建，支持带类型的对象句柄、属性赋值、关键字 `update()` 和 `with project.edit():` 原子编辑。用法及旧接口迁移见[对象编辑 API](docs/architecture/object_editing.md)；完整后续路线见[统一 API 与数据驱动设计](docs/architecture/object_api_design.md)。
+Python 示例使用 `import orbelle as ob`。对象统一通过 `project.objects` 创建，支持带类型的对象句柄、属性赋值、关键字 `update()` 和 `with project.edit():` 原子编辑。用法及旧接口迁移见[对象编辑 API](docs/architecture/object_editing.md)；完整后续路线见[统一 API 与数据驱动设计](docs/architecture/object_api_design.md)。
 
-C++ 包含 `<orbelle/orbelle.hpp>`，通过 `of::Project` 的 `objects()`、`prepare()`、`save()` 与 `Project::open()` 完成相同流程；创建对象使用 `of::objects::Satellite` 等配置值，事务显式提交。参见 [C++ 项目 API](docs/architecture/cpp_api.md)。
+C++ 包含 `<orbelle/orbelle.hpp>`，通过 `orbelle::Project` 的 `objects()`、`prepare()`、`save()` 与 `Project::open()` 完成相同流程；创建对象使用 `orbelle::objects::Satellite` 等配置值，事务显式提交。参见 [C++ 项目 API](docs/architecture/cpp_api.md)。
 
-`project.prepare()` 捕获固定分析输入，提供状态、可见区间、AER 和十七类内置报告查询：`analysis.states(sat, step=u.s(30))`、`analysis.access(station, sensor, search_step=u.s(1))`、`analysis.aer(station, sensor, step=u.s(10))`、`analysis.report(of.ReportKind.CARTESIAN_STATE, objects=[sat], step=u.s(30))`。可见区间与 AER 需准备 UTC/EOP 数据；数据变化通过固定计划确认。结果可直接导出 CSV，NumPy/pandas 为可选适配。参见[分析 API](docs/architecture/analysis_api.md)、[状态示例](examples/python/analysis.py)及[可见区间、AER 与报告示例](examples/python/access.py)。
+`project.prepare()` 捕获固定分析输入，提供状态、可见区间、AER 和十七类内置报告查询：`analysis.states(sat, step=u.s(30))`、`analysis.access(station, sensor, search_step=u.s(1))`、`analysis.aer(station, sensor, step=u.s(10))`、`analysis.report(ob.ReportKind.CARTESIAN_STATE, objects=[sat], step=u.s(30))`。可见区间与 AER 需准备 UTC/EOP 数据；数据变化通过固定计划确认。结果可直接导出 CSV，NumPy/pandas 为可选适配。参见[分析 API](docs/architecture/analysis_api.md)、[状态示例](examples/python/analysis.py)及[可见区间、AER 与报告示例](examples/python/access.py)。
 
-报告可通过 `template=of.reports.Template([...])` 选择字段和显示单位，也可用 `template.apply(result)` 复用已有结果。全部适用对象使用 `objects=of.reports.ALL`，空列表报错。详见[报告模板](docs/architecture/reports.md)和[可运行示例](examples/python/report_templates.py)。
+报告可通过 `template=ob.reports.Template([...])` 选择字段和显示单位，也可用 `template.apply(result)` 复用已有结果。全部适用对象使用 `objects=ob.reports.ALL`，空列表报错。详见[报告模板](docs/architecture/reports.md)和[可运行示例](examples/python/report_templates.py)。
 
 ## 测试与验证
 

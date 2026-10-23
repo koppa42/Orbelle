@@ -5,7 +5,7 @@ import math
 import struct
 import tempfile
 import unittest
-import orbelle as of
+import orbelle as ob
 from project_format import read_sections, with_sections
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -14,10 +14,10 @@ ROOT = Path(__file__).resolve().parents[3]
 def settings():
     state = tuple(tuple((10000.0 if i < 3 else 1.0) if i == j else 0.0
                         for j in range(6)) for i in range(6))
-    return of.orbits.CovarianceSettings(
+    return ob.orbits.CovarianceSettings(
         enabled=True, state=state, consider_analysis=True,
-        drag=of.orbits.CovarianceConsider(True, 1e-4, (.1, 0, 0, 0, 0, 0)),
-        srp=of.orbits.CovarianceConsider(True, 2e-4, (0, -.1, 0, 0, 0, 0)),
+        drag=ob.orbits.CovarianceConsider(True, 1e-4, (.1, 0, 0, 0, 0, 0)),
+        srp=ob.orbits.CovarianceConsider(True, 2e-4, (0, -.1, 0, 0, 0, 0)),
         consider_cross_correlation=True, drag_srp_covariance=5e-5)
 
 
@@ -26,11 +26,11 @@ def reference_project():
             (ROOT / "tests/reference/propagators/universal_kepler_stm.txt").read_text().splitlines()
             if line and not line.startswith("#")]
     ref = next(row for row in rows if row[0] == 14)
-    end = of.Epoch(round(ref[2] * 1e9))
-    project = of.Project("Covariance reference", of.Epoch(min(0, end.tai_nanoseconds)),
-                         of.Epoch(max(1, end.tai_nanoseconds)))
-    state = of.CartesianState(of.Epoch(0), of.OriginId.EARTH, of.FrameId.GCRF, ref[3:6], ref[6:9])
-    sat = project.objects.satellite("Satellite", orbit=of.orbits.Hpop(
+    end = ob.Epoch(round(ref[2] * 1e9))
+    project = ob.Project("Covariance reference", ob.Epoch(min(0, end.tai_nanoseconds)),
+                         ob.Epoch(max(1, end.tai_nanoseconds)))
+    state = ob.CartesianState(ob.Epoch(0), ob.OriginId.EARTH, ob.FrameId.GCRF, ref[3:6], ref[6:9])
+    sat = project.objects.satellite("Satellite", orbit=ob.orbits.Hpop(
         initial=state, gravity_degree=0, gravity_order=0, relative_tolerance=1e-13,
         position_tolerance_m=1e-6, velocity_tolerance_mps=1e-9, covariance=settings()))
     return project, sat, ref, end
@@ -42,7 +42,7 @@ class HpopCovarianceProjectTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "covariance.orbelle"
             p.save(path)
-            restored = of.Project.open(path)
+            restored = ob.Project.open(path)
             satellite = restored.objects[satellite.id]
             self.assertEqual(satellite.orbit.covariance, settings())
             a = restored.prepare()
@@ -62,8 +62,8 @@ class HpopCovarianceProjectTests(unittest.TestCase):
                 self.assertAlmostEqual(result.covariance.drag.state_cross_covariance[i],
                                        cross, delta=1e-7)
             print("Project covariance vs Orekit normalized max error:", largest)
-            report = a.report(of.ReportKind.STATE_COVARIANCE, objects=satellite,
-                              step=of.units.s(60), first=end, last=end)
+            report = a.report(ob.ReportKind.STATE_COVARIANCE, objects=satellite,
+                              step=ob.units.s(60), first=end, last=end)
             self.assertEqual(len(report.table.rows), 1)
             self.assertEqual(report.table.rows[0][4], result.covariance.state[0][0])
             self.assertEqual(report.numeric_value(0, 4), result.covariance.state[0][0] / 1e6)
@@ -77,12 +77,12 @@ class HpopCovarianceProjectTests(unittest.TestCase):
         expected = analysis.covariance(satellite, at=end).covariance.state
         satellite.orbit = replace(satellite.orbit, covariance=replace(settings(), enabled=False))
         self.assertEqual(analysis.covariance(satellite, at=end).covariance.state, expected)
-        with self.assertRaises(of.AnalysisCapabilityError):
+        with self.assertRaises(ob.AnalysisCapabilityError):
             p.prepare().covariance(satellite, at=end)
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(lambda _: analysis.covariance(satellite, at=end), range(2)))
         self.assertTrue(all(r.covariance.state == expected for r in results))
-        with self.assertRaises(of.AnalysisCancelled):
+        with self.assertRaises(ob.AnalysisCancelled):
             analysis.covariance(satellite, at=end, cancelled=lambda: True)
         with self.assertRaises(TypeError):
             analysis.covariance(satellite, at=end, cancelled=lambda: "yes")
@@ -92,7 +92,7 @@ class HpopCovarianceProjectTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "draft.orbelle"
             path.write_bytes(raw)
-            p = of.Project.open(path)
+            p = ob.Project.open(path)
             s = p.objects["satellite-b"].orbit.covariance
             self.assertFalse(s.enabled)
             self.assertEqual((s.frame, s.velocity), ("lvlh", "rotating"))
@@ -111,18 +111,18 @@ class HpopCovarianceProjectTests(unittest.TestCase):
                         body = bytes(value)
                     sections.append((tag, version, body))
                 path.write_bytes(with_sections(raw, sections))
-                with self.assertRaises(of.ProjectError):
-                    of.Project.open(path)
+                with self.assertRaises(ob.ProjectError):
+                    ob.Project.open(path)
 
     def test_immutable_configuration_validates_full_joint_matrix(self):
         with self.assertRaises(ValueError):
-            of.orbits.CovarianceSettings(enabled=True)
+            ob.orbits.CovarianceSettings(enabled=True)
         with self.assertRaises(ValueError):
-            replace(settings(), drag=of.orbits.CovarianceConsider(True, 1e-4, (100, 0, 0, 0, 0, 0)))
+            replace(settings(), drag=ob.orbits.CovarianceConsider(True, 1e-4, (100, 0, 0, 0, 0, 0)))
         with self.assertRaises(ValueError):
             replace(settings(), state=((1.0,),))
         with self.assertRaises(TypeError):
             replace(settings(), enabled=1)
         disabled = replace(settings(), enabled=False, consider_analysis=False,
-                           drag=of.orbits.CovarianceConsider(True, 0, (100, 0, 0, 0, 0, 0)))
-        self.assertEqual(of.orbits.CovarianceSettings._read(disabled._native()), disabled)
+                           drag=ob.orbits.CovarianceConsider(True, 0, (100, 0, 0, 0, 0, 0)))
+        self.assertEqual(ob.orbits.CovarianceSettings._read(disabled._native()), disabled)
