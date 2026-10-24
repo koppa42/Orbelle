@@ -81,6 +81,16 @@ TEST_F(QuantityTest, HpopSrpUnitsShadowAssignmentsResizeAndCancelPreserveExactDr
         EXPECT_EQ(sun->currentIndex(), 2);
         area->set_unit(Unit::square_centimetres_per_gram);
         area->findChild<QLineEdit *>("quantityValue")->setText("0.3");
+        choose(*area, Unit::square_centimetres_per_kilogram);
+        EXPECT_DOUBLE_EQ(area->value(Unit::square_metres_per_kilogram), .03);
+        choose(*area, Unit::square_centimetres_per_gram);
+        auto *pressure = dialog->findChild<QuantityEditor *>("hpopSrpPressure");
+        auto *distance = dialog->findChild<QuantityEditor *>("hpopSrpReferenceDistance");
+        ASSERT_TRUE(pressure && distance);
+        choose(*pressure, Unit::micropascal);
+        text(*pressure)->setText("4.56");
+        choose(*distance, Unit::astronomical_unit);
+        EXPECT_EQ(distance->value(Unit::metre), exact_distance);
         altitude->set_unit(Unit::kilometre);
         altitude->set_value(23, Unit::kilometre);
         shadow->setCurrentIndex(0);
@@ -156,6 +166,7 @@ TEST_F(QuantityTest, HpopSrpUnitsShadowAssignmentsResizeAndCancelPreserveExactDr
     EXPECT_EQ(options.srp.atmospheric_altitude_m, 23000);
     EXPECT_FALSE(options.srp.moon_shadow);
     EXPECT_EQ(options.srp.reference_distance_m, exact_distance);
+    EXPECT_DOUBLE_EQ(options.srp.pressure_at_reference_pa, 4.56e-6);
     const auto saved = options;
     QTimer::singleShot(0, [&] {
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
@@ -333,6 +344,10 @@ TEST_F(QuantityTest, HpopSatelliteMassUnitsKeyboardResizeReopenAndCancel) {
         EXPECT_EQ(mass->value(Unit::kilogram), 1250);
         choose(*mass, Unit::gram);
         EXPECT_EQ(mass->value(Unit::gram), 1250000);
+        choose(*mass, Unit::pound);
+        EXPECT_EQ(mass->value(Unit::kilogram), 1250);
+        choose(*mass, Unit::milligram);
+        EXPECT_EQ(mass->value(Unit::milligram), 1250000000);
         choose(*mass, Unit::tonne);
         EXPECT_EQ(text(*mass)->text(), QStringLiteral("1.25"));
         EXPECT_EQ(drag_area->text(), QStringLiteral("25 m²"));
