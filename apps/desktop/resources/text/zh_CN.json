@@ -902,7 +902,7 @@
     "orbit_wizard.below_surface": "近地点必须高于地球参考表面，请调整轨道高度、半长轴或偏心率。",
     "orbit_wizard.preview_compact": "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"4\"><tr><td width=\"50%\"><span style=\"color:#a9b3cc\">近地点高度</span><br/><b>%1 km</b></td><td width=\"50%\"><span style=\"color:#a9b3cc\">远地点高度</span><br/><b>%2 km</b></td></tr><tr><td width=\"50%\"><span style=\"color:#a9b3cc\">交点周期</span><br/><b>%3 min</b></td><td width=\"50%\"><span style=\"color:#a9b3cc\">轨道倾角</span><br/><b>%4°</b></td></tr><tr><td width=\"50%\"><span style=\"color:#a9b3cc\">偏心率</span><br/><b>%5</b></td><td width=\"50%\"><span style=\"color:#a9b3cc\">升交点进动</span><br/><b>%6°/天</b></td></tr>",
     "orbit_wizard.preview": "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"4\"><tr><td width=\"33%\"><span style=\"color:#a9b3cc\">近地点高度</span><br/><b>%1 km</b></td><td width=\"33%\"><span style=\"color:#a9b3cc\">远地点高度</span><br/><b>%2 km</b></td><td width=\"33%\"><span style=\"color:#a9b3cc\">交点周期</span><br/><b>%3 min</b></td></tr><tr><td width=\"33%\"><span style=\"color:#a9b3cc\">轨道倾角</span><br/><b>%4°</b></td><td width=\"33%\"><span style=\"color:#a9b3cc\">偏心率</span><br/><b>%5</b></td><td width=\"33%\"><span style=\"color:#a9b3cc\">升交点进动</span><br/><b>%6°/天</b></td></tr>",
-    "orbit_wizard.preview_invalid": "请输入有效的轨道参数以查看预览。",
+    "orbit_wizard.preview_invalid": "轨迹预览已暂停。",
     "integrator.bulirsch_stoer": "Bulirsch–Stoer",
     "integrator.gauss_jackson": "Gauss–Jackson 12",
     "integrator.rk4": "RK4",

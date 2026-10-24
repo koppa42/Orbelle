@@ -876,6 +876,8 @@ QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0
 QRubberBand { background: @accent/15; border: 1px solid @accent; }
 QLabel#dragPage { background: @raised; color: @text; border: 1px solid @accent; border-radius: 5px; padding: 5px 10px; }
 QLabel#inputError { color: @danger; font-size: 12px; padding: 4px 0; }
+QLabel#orbitWizardError { color: @danger; font-size: 12px; padding: 4px 0; }
+QLabel#orbitWizardPreview { background: @panel; border: 1px solid @line; border-radius: 6px; padding: 8px; }
 QLabel#orbitResult, QLabel#modelResult { color: @textMuted; font-size: 12px; }
 QLabel#orbitResult[error="true"], QLabel#modelResult[error="true"] { color: @danger; }
 QLineEdit#scenarioDataHash { font-family: "Cascadia Mono", "Consolas"; font-size: 11px; }
