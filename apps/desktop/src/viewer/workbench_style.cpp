@@ -754,6 +754,8 @@ QTreeWidget::item:selected { background: @accentWash; color: @accentBright; }
 QTreeWidget::item:hover:!selected { background: @accentHover; color: @text; }
 QTreeWidget::branch { background: @chrome; }
 QTreeWidget::branch:selected, QTreeWidget::branch:hover { background: @chrome; }
+/* Center both chevrons in a 12 px square without shrinking the branch hit area. */
+QTreeWidget#sceneObjects::branch { padding: 7px 2px; }
 QTreeWidget#sceneObjects::branch:has-children:closed { image: url(:/orbelle/icons/chevron-right.png); }
 QTreeWidget#sceneObjects::branch:has-children:open { image: url(:/orbelle/icons/chevron-down.png); }
 QTreeWidget#propertyNavigation { background: @panel; border: 0; border-right: 1px solid @line; padding: 10px 6px; outline: 0; }
@@ -1041,7 +1043,7 @@ QPushButton[objectSelector="true"]:focus { border-color: @accentBright; }
 QPushButton[objectSelector="true"]:disabled { color: @textFaint; border-color: @line; }
 QTreeWidget#objectSelectionTree { background: @field; border: 1px solid @line; border-radius: 6px; outline: 0; padding: 3px; }
 QTreeWidget#objectSelectionTree::item { height: 24px; padding: 2px 6px; border: 0; border-radius: 4px; }
-QTreeWidget#objectSelectionTree::branch { background: @field; }
+QTreeWidget#objectSelectionTree::branch { background: @field; padding: 8px 4px; }
 QTreeWidget#objectSelectionTree::branch:closed:has-children { image: url(:/orbelle/icons/chevron-right.png); }
 QTreeWidget#objectSelectionTree::branch:open:has-children { image: url(:/orbelle/icons/chevron-down.png); }
 QLabel#objectSelectionPurpose, QLabel#objectSelectionDetails, QLabel#objectSelectionCount { color: @textMuted; font-size: 12px; }
