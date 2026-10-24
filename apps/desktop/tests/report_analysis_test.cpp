@@ -6,19 +6,23 @@
 #include "../src/viewer/report_selection.hpp"
 #include "../src/viewer/workbench_style.hpp"
 #include "../src/viewer/workspace.hpp"
+#include "support/ui_test_support.hpp"
 #include "window_show_observer.hpp"
 #include <QApplication>
 #include <QComboBox>
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
+#include <QHelpEvent>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QMouseEvent>
 #include <QPushButton>
 #include <QTabBar>
 #include <QTableView>
 #include <QThread>
 #include <QTimer>
+#include <QToolTip>
 #include <QTreeWidget>
 #include <algorithm>
 #include <cmath>
@@ -536,6 +540,44 @@ TEST(ReportDialog, IntersatellitePairCurvesExtremaSeekAndResponsiveLayout) {
     dialog.findChild<QPushButton *>("generateReport")->click();
     wait_for_report(dialog);
     EXPECT_EQ(published->table.rows(), rows);
+}
+
+TEST(CoverageMap, DataHintsWaitForHelpEventAndRefreshAfterMetricChange) {
+    (void)test_app();
+    application::ReportDefinition definition;
+    auto &grid = definition.query.coverage;
+    grid.south_rad = grid.west_rad = -.1;
+    grid.north_rad = grid.east_rad = .1;
+    auto result = std::make_shared<runtime::ReportResult>(
+        runtime::ReportResult{definition, results::Table{{}, {}}});
+    result->last = core::Epoch{3600'000'000'000};
+    result->coverage_statistics = results::CoverageStatistics{};
+    result->coverage_statistics->points.push_back(
+        {{{0, 0, 0}, -.1, .1, -.1, .1, 1e6}, {}, {1800, 900, 900, 1}});
+    CoverageMap map;
+    map.resize(600, 400);
+    map.set_result(result);
+    map.show();
+    QCoreApplication::processEvents();
+    const QPoint point(300, 180);
+    QMouseEvent move(QEvent::MouseMove, point, map.mapToGlobal(point), Qt::NoButton, Qt::NoButton,
+                     Qt::NoModifier);
+    QCoreApplication::sendEvent(&map, &move);
+    EXPECT_FALSE(QToolTip::isVisible());
+    QHelpEvent help(QEvent::ToolTip, point, map.mapToGlobal(point));
+    QCoreApplication::sendEvent(&map, &help);
+    EXPECT_TRUE(help.isAccepted());
+    EXPECT_TRUE(QToolTip::isVisible());
+    EXPECT_TRUE(QToolTip::text().contains("50.000 %"));
+    map.set_metric(1);
+    ASSERT_TRUE(wait_for_ui([] { return !QToolTip::isVisible(); }, 600));
+    QCoreApplication::sendEvent(&map, &help);
+    EXPECT_TRUE(QToolTip::text().contains("0.250 h"));
+    map.set_result({});
+    ASSERT_TRUE(wait_for_ui([] { return !QToolTip::isVisible(); }, 600));
+    QCoreApplication::sendEvent(&map, &help);
+    EXPECT_FALSE(help.isAccepted());
+    EXPECT_FALSE(QToolTip::isVisible());
 }
 
 TEST(ReportDialog, CoverageHeatmapPointWindowsTemplatesAndResponsiveLayout) {

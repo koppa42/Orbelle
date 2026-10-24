@@ -231,6 +231,8 @@ cmake --build --preset desktop
 
 `desktop-graphics` 启用 Qt Widgets、VSG 1.1.15、vsgQt 0.4.0 和 Rocky 1.1.0，并使用 ERFA/IERS 把示例结果转为 ITRF。该路径处于集成验证阶段；正式验收以[图形协议](../validation/p0_graphics_protocol.md)和运行报告为准。
 
+`graphics` feature 显式安装 `qtbase[testlib]`，用于桌面悬停计时与输入交互测试。Qt Test 只链接测试目标；无界面 `tests` feature 仍仅依赖 GoogleTest。更新已有图形开发环境时需重新运行下面的依赖安装命令，避免本机完整 Qt 安装掩盖 CI 中缺少的组件。
+
 ```powershell
 vcpkg install --x-manifest-root=. --x-install-root=out/dependencies/installed --x-buildtrees-root=out/dependencies/buildtrees --x-packages-root=out/dependencies/packages --triplet=x64-windows --x-feature=tests --x-feature=time-frames --x-feature=spice --x-feature=graphics --x-feature=graphics-validation --x-no-default-features
 cmake --preset desktop-graphics "-DCMAKE_PREFIX_PATH=$PWD/out/dependencies/installed/x64-windows"

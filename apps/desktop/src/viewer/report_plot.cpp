@@ -1,6 +1,8 @@
 #include "report_plot.hpp"
 #include "../ui_text.hpp"
 #include "workbench_theme.hpp"
+#include <QApplication>
+#include <QHelpEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -579,7 +581,31 @@ const ReportPlot::Point *ReportPlot::nearest(QPointF position, const Series **so
     }
     return best;
 }
+bool ReportPlot::event(QEvent *event) {
+    if (event->type() != QEvent::ToolTip)
+        return QWidget::event(event);
+    const auto *help = static_cast<QHelpEvent *>(event);
+    const Series *series = nullptr;
+    if (!dragging_ && QApplication::mouseButtons() == Qt::NoButton && inside_plot(help->pos())) {
+        if (const auto *point = nearest(help->pos(), &series)) {
+            QToolTip::showText(
+                help->globalPos(),
+                "<b>" + series->label.toHtmlEscaped() + "</b><br>" +
+                    str(result_->cell_text(point->row, time_column_)).toHtmlEscaped() + " " +
+                    str(result_->column_unit(time_column_)) + "<br>" +
+                    str(result_->cell_text(point->row, series->column)) + " " +
+                    str(result_->column_unit(series->column)),
+                this, panels_[series->panel].rect.toAlignedRect());
+            event->accept();
+            return true;
+        }
+    }
+    QToolTip::hideText();
+    event->ignore();
+    return true;
+}
 void ReportPlot::mouseMoveEvent(QMouseEvent *event) {
+    QToolTip::hideText();
     cursor_ = event->position();
     hover_ = inside_plot(cursor_);
     if (dragging_ && panning_) {
@@ -587,20 +613,6 @@ void ReportPlot::mouseMoveEvent(QMouseEvent *event) {
             (drag_start_.x() - cursor_.x()) / drag_width_ * (drag_right_ - drag_left_);
         set_interval(drag_left_ + shift, drag_right_ + shift);
     }
-    const Series *series = nullptr;
-    if (hover_ && !dragging_) {
-        if (const auto *point = nearest(cursor_, &series)) {
-            QToolTip::showText(
-                event->globalPosition().toPoint(),
-                "<b>" + series->label.toHtmlEscaped() + "</b><br>" +
-                    str(result_->cell_text(point->row, time_column_)).toHtmlEscaped() + " " +
-                    str(result_->column_unit(time_column_)) + "<br>" +
-                    str(result_->cell_text(point->row, series->column)) + " " +
-                    str(result_->column_unit(series->column)),
-                this);
-        }
-    } else
-        QToolTip::hideText();
     update();
 }
 void ReportPlot::mousePressEvent(QMouseEvent *event) {

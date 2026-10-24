@@ -4740,6 +4740,11 @@ class Workbench final : public WorkbenchWindow {
                            ground_map_->zoom_centered(factor);
                    });
         bar->addStretch();
+        auto *help = info_marker(header);
+        help->setAccessibleName(ui::text("graphics_workbench.navigation_help"));
+        append_help(help,
+                    ui::text(slot ? "graphics_workbench.help" : "ground_map.navigation_help"));
+        bar->addWidget(help);
         auto *settings = new QMenu(header);
         if (!lighting_action_) {
             lighting_action_ = new QAction(ui::text("graphics_workbench.settings"), this);
@@ -4812,7 +4817,6 @@ class Workbench final : public WorkbenchWindow {
                 ui::text("graphics_workbench.container.set_accessible_name"));
             const auto help = ui::text("graphics_workbench.help");
             current->container->setAccessibleDescription(help);
-            current->container->setToolTip(help);
         }
         if (benchmarking_) {
             const auto ratio = current->window->devicePixelRatio();

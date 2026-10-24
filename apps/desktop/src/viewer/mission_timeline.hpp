@@ -31,6 +31,7 @@ class MissionTimeline final : public QSlider {
     QSize sizeHint() const override;
 
   protected:
+    bool event(QEvent *) override;
     void paintEvent(QPaintEvent *) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;

@@ -18,6 +18,7 @@ class CoverageMap final : public QWidget {
     std::function<void(std::size_t)> selected;
 
   protected:
+    bool event(QEvent *) override;
     void paintEvent(QPaintEvent *) override;
     void mousePressEvent(QMouseEvent *) override;
     void mouseMoveEvent(QMouseEvent *) override;

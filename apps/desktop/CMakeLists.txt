@@ -97,6 +97,7 @@ if(ORBELLE_WITH_VSG)
     # Serialize desktop interaction/timing tests while numerical tests run alongside them.
     # A resource lock leaves the other CTest slots available (unlike RUN_SERIAL).
     if(BUILD_TESTING)
+        find_package(Qt6 6.8 CONFIG REQUIRED COMPONENTS Test)
         add_executable(orbelle_update_tests tests/application_update_test.cpp
             tests/update_package_test.cpp src/viewer/application_update.cpp
             src/viewer/application_update_ui.cpp src/viewer/update_package.cpp
@@ -127,7 +128,7 @@ if(ORBELLE_WITH_VSG)
             src/viewer/welcome_page.cpp src/viewer/workbench_style.cpp)
         qt_add_resources(orbelle_welcome_tests "welcome_resources" PREFIX "/orbelle"
             BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/artwork/orbital-welcome.png)
-        target_link_libraries(orbelle_welcome_tests PRIVATE Qt6::Widgets GTest::gtest_main)
+        target_link_libraries(orbelle_welcome_tests PRIVATE Qt6::Widgets Qt6::Test GTest::gtest_main)
         orbelle_warnings(orbelle_welcome_tests)
         orbelle_copy_runtime_dlls(orbelle_welcome_tests)
         gtest_discover_tests(orbelle_welcome_tests DISCOVERY_MODE PRE_TEST

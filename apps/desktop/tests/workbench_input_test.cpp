@@ -1,15 +1,19 @@
+#include "../src/viewer/form_kit.hpp"
 #include "../src/viewer/workbench_style.hpp"
+#include "support/ui_test_support.hpp"
 #include <QAbstractItemView>
 #include <QApplication>
 #include <QComboBox>
 #include <QDateTimeEdit>
 #include <QDoubleSpinBox>
+#include <QHelpEvent>
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QMouseEvent>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSpinBox>
+#include <QTest>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 #ifdef Q_OS_WIN
@@ -54,7 +58,63 @@ class WorkbenchInput : public testing::Test {
         QApplication::sendEvent(&widget, &press);
         QApplication::sendEvent(&widget, &release);
     }
+
+    static void move(QWidget &widget, QPoint point) {
+        // The application starts hover timers only for window-system mouse events.
+        QTest::mouseMove(widget.window()->windowHandle(), widget.mapTo(widget.window(), point));
+    }
 };
+
+TEST_F(WorkbenchInput, TooltipsRequireAPauseForEveryTargetAndWheelCancelsPendingHelp) {
+    QWidget window;
+    auto *layout = new QVBoxLayout(&window);
+    auto *first = new QToolButton(&window);
+    auto *second = new QToolButton(&window);
+    first->setToolTip("First action");
+    second->setToolTip("Second action");
+    layout->addWidget(first);
+    layout->addWidget(second);
+    show(window);
+    move(*first, first->rect().center());
+    EXPECT_FALSE(wait_for_ui([] { return QToolTip::isVisible(); }, 400));
+    ASSERT_TRUE(wait_for_ui([] { return QToolTip::text() == "First action"; }, 2000));
+    // Visiting a neighbour after reading one hint must not enable Qt's 20 ms fast path.
+    QApplication::processEvents();
+    move(*second, second->rect().center());
+    EXPECT_FALSE(wait_for_ui([] { return QToolTip::text() == "Second action"; }, 400));
+    ASSERT_TRUE(wait_for_ui([] { return QToolTip::text() == "Second action"; }, 2000));
+    wheel(*second, {0, -120});
+    ASSERT_TRUE(wait_for_ui([] { return !QToolTip::isVisible(); }, 500));
+    move(*first, first->rect().center());
+    wheel(*first, {0, -120});
+    EXPECT_FALSE(wait_for_ui([] { return QToolTip::isVisible(); }, 1500));
+}
+
+TEST_F(WorkbenchInput, ExplanationsOpenOnlyOnActivationAndKeepAccessibleText) {
+    QWidget window;
+    auto *layout = new QVBoxLayout(&window);
+    auto *marker = info_marker(&window);
+    append_help(marker, "First line\nSecond <line>");
+    layout->addWidget(marker);
+    show(window);
+    EXPECT_EQ(marker->accessibleDescription(), "First line\nSecond <line>");
+    EXPECT_TRUE(marker->toolTip().isEmpty());
+    QHelpEvent hover(QEvent::ToolTip, marker->rect().center(),
+                     marker->mapToGlobal(marker->rect().center()));
+    QApplication::sendEvent(marker, &hover);
+    EXPECT_FALSE(QToolTip::isVisible());
+    marker->click();
+    ASSERT_TRUE(wait_for_ui([] { return QToolTip::isVisible(); }, 800));
+    EXPECT_TRUE(QToolTip::text().contains("First line<br>Second &lt;line&gt;"));
+    marker->setFocus(Qt::TabFocusReason);
+    key(*marker, Qt::Key_Escape);
+    ASSERT_TRUE(wait_for_ui([] { return !QToolTip::isVisible(); }, 500));
+    key(*marker, Qt::Key_Space);
+    EXPECT_TRUE(wait_for_ui([] { return QToolTip::isVisible(); }, 800));
+    EXPECT_TRUE(marker->hasFocus());
+    key(*marker, Qt::Key_Escape);
+    EXPECT_TRUE(wait_for_ui([] { return !QToolTip::isVisible(); }, 500));
+}
 
 TEST_F(WorkbenchInput, ClosedCombosIgnoreWheelWithOrWithoutFocus) {
     QWidget window;

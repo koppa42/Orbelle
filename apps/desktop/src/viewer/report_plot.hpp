@@ -30,6 +30,7 @@ class ReportPlot final : public QWidget {
     std::function<void(core::Epoch)> seek;
 
   protected:
+    bool event(QEvent *) override;
     void paintEvent(QPaintEvent *) override;
     void resizeEvent(QResizeEvent *) override;
     void mouseMoveEvent(QMouseEvent *) override;
