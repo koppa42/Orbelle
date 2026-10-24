@@ -112,11 +112,16 @@ J2 输入明确标作“初始平均椭圆”：根数使用平近点角 M，位
 
 | 物理量 | 可选单位 | 使用位置 |
 | --- | --- | --- |
-| 角度 | °、rad | 倾角、升交点赤经、近地点幅角、真近点角 |
-| 长度 | m、km | 位置、半长轴、模型示意直径 |
-| 速度 | m/s、km/s | Cartesian 速度 |
-| 时长 | ms、s、min、h、d | 轨道步长、轨迹前后时长 |
+| 角度 | °、rad、arcmin、arcsec、mas、rev | 轨道根数、地面站经纬度、传感器视场与指向 |
+| 长度 | m、km、cm、mm、ft、in、mi、nmi、au | 位置、半长轴、模型示意直径、地面站高度、光压参考距离 |
+| 速度 | m/s、km/s、cm/s、mm/s、km/h、ft/s、mph、kn | Cartesian 速度、脉冲机动 Δv |
+| 时长 | ns、µs、ms、s、min、h、d、wk | 轨道步长、轨迹前后时长、任务段时长 |
 | 引力参数 | m³/s²、km³/s² | 通用控件支持；卫星 μ 从中心天体读取 |
+| 面积质量比 | m²/kg、cm²/g、cm²/kg、m²/g | HPOP 阻力、太阳光压 |
+| 压强 | nPa、µPa、mPa、Pa、hPa、kPa、MPa、bar | HPOP 参考太阳光压 |
+| 质量 | kg、g、t、mg、lb | HPOP 卫星质量 |
+
+英尺、英里和海里采用国际定义，磅采用常衡质量：1 ft = 0.3048 m、1 in = 0.0254 m、1 mi = 1609.344 m、1 nmi = 1852 m、1 lb = 0.45359237 kg；kn 表示海里每小时。换算关系依据 [NIST SP 811](https://www.nist.gov/pml/special-publication-811/nist-guide-si-appendix-b-conversion-factors)。天文单位使用 [IAU 2012 B2](https://iau-a3.gitlab.io/NSFA/NSFA_fixed.html) 的精确定义 1 au = 149597870700 m，不依赖当前太阳星历。角分、角秒、毫角秒分别为 1/60°、1/3600°、1/3600000°，rev 为 360°。
 
 ```cpp
 using orbelle::desktop::QuantityEditor;
@@ -131,7 +136,7 @@ const double degrees = angle.value(Unit::degree); // 180，与显示单位无关
 
 组件以 SI 值保存未编辑的物理量；显示采用15位有效数字，反复切换单位不会把显示舍入写回存储。文本输入使用小数点并支持科学计数法。无效或未完成的输入保留原文并标记错误，读取及换单位会拒绝该输入；不同物理量之间的单位转换同样被拒绝。偏心率无量纲，不显示单位菜单。
 
-`set_range(min, max, unit)`、`set_single_step(step, unit)` 和 `set_quantum(quantum, unit)` 都按明确单位定义物理约束。轨道步长继续限定为1–60整数秒，例如 `0.75 min` 等于45秒，`0.751 min` 被拒绝。键盘上下键的物理增量不随显示单位改变。这里的 `d` 是86400秒时长，不用于替代 UTC 日历的“次日”。
+`set_range(min, max, unit)`、`set_single_step(step, unit)` 和 `set_quantum(quantum, unit)` 都按明确单位定义物理约束。轨道步长继续限定为1–60整数秒，例如 `0.75 min` 等于45秒，`0.751 min` 被拒绝；选择 µs 或 ns 也不会放宽字段的物理分辨率。键盘上下键的物理增量不随显示单位改变。这里的 `d` 是86400秒时长，`wk` 是604800秒时长，不用于替代 UTC 日历的“次日”或“下周”。
 
 `valueChanged` 只报告有效物理值的变化，参数是 SI 值；纯单位切换只触发 `unitChanged`。重新绑定参数时保留当前控件的单位选择；此选择目前不跨程序重启保存。单位切换不自动传播轨道，仍由应用按钮提交。公共计算 API 与 Python 保持原有 SI 约定，桌面适配器按明确单位读取；现有显示设置中分钟和千米字段的存储格式保持不变。
 

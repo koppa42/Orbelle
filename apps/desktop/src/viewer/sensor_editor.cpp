@@ -541,6 +541,9 @@ SensorEditor::SensorEditor(QWidget *parent) : QDialog(parent) {
     };
     const auto pair = [](QVBoxLayout *rows, QWidget *owner) {
         auto *container = new QWidget(owner);
+        // Let the row shrink below its two-column minimum so wider unit buttons can
+        // trigger the existing stacked layout instead of widening the scroll content.
+        container->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         auto *columns = new QHBoxLayout(container);
         columns->setContentsMargins(0, 0, 0, 0);
         columns->setSpacing(12);
