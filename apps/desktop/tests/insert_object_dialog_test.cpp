@@ -442,6 +442,93 @@ TEST_F(InsertionTest, WizardMapUsesRealFramesAndClearsInvalidOrSupersededPreview
     wizard.reject();
     EXPECT_FALSE(wizard.input());
 }
+
+TEST_F(InsertionTest, WizardInvalidDraftKeepsPreviewLayoutAndNavigationStable) {
+    const auto time = runtime::make_builtin_time_provider();
+    OrbitWizardDialog wizard(time->from_utc({2026, 10, 1, 0, 0, 0}));
+    QImage imagery(360, 180, QImage::Format_RGB32);
+    imagery.fill(Qt::darkBlue);
+    wizard.set_preview_context(imagery, runtime::make_frame_provider(),
+                               runtime::load_eop_snapshot(ORBELLE_TEST_EOP));
+    wizard.show();
+    auto *preview =
+        static_cast<OrbitDesignPreview *>(wizard.findChild<QWidget *>("orbitDesignPreview"));
+    auto *map = static_cast<GroundMap *>(wizard.findChild<QWidget *>("wizardGroundMap"));
+    auto *height = wizard.findChild<QuantityEditor *>("wizardAltitude");
+    auto *input = height->findChild<QLineEdit *>("quantityValue");
+    auto *summary = wizard.findChild<QLabel *>("orbitWizardPreview");
+    auto *next = wizard.findChild<QPushButton *>("acceptOrbitWizard");
+    const auto settle_layout = [] {
+        for (int iteration = 0; iteration < 8; ++iteration)
+            QApplication::processEvents();
+    };
+    const auto await_preview = [&] {
+        QElapsedTimer timer;
+        timer.start();
+        while (!preview->ready() && timer.elapsed() < 5000) {
+            QApplication::processEvents();
+            QThread::msleep(1);
+        }
+        settle_layout();
+        return preview->ready();
+    };
+    for (const QSize size : {QSize(980, 590), QSize(860, 590), QSize(360, 650)}) {
+        SCOPED_TRACE(std::to_string(size.width()));
+        wizard.resize(size);
+        height->set_value(500, Unit::kilometre);
+        ASSERT_TRUE(await_preview());
+        map->zoom(2, map->rect().center());
+        QKeyEvent pan(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier);
+        QApplication::sendEvent(map, &pan);
+        settle_layout();
+        const auto bounds = QRect(map->mapTo(&wizard, QPoint{}), map->size());
+        const auto result_height = summary->height();
+        const auto position = map->marker_position(0);
+        const auto zoom = map->zoom_factor();
+        for (const double value : {999.999, 10000., 500.}) {
+            height->set_value(value, Unit::kilometre);
+            settle_layout();
+            EXPECT_TRUE(next->isEnabled());
+            EXPECT_EQ(QRect(map->mapTo(&wizard, QPoint{}), map->size()), bounds);
+            EXPECT_EQ(summary->height(), result_height);
+            EXPECT_DOUBLE_EQ(map->zoom_factor(), zoom);
+        }
+        for (const QString draft : {QString("0"), QString("-"), QString()}) {
+            input->setText(draft);
+            settle_layout();
+            EXPECT_FALSE(next->isEnabled());
+            EXPECT_FALSE(wizard.findChild<QLabel *>("orbitWizardError")->text().isEmpty());
+            EXPECT_FALSE(summary->text().contains("请输入有效的轨道参数"));
+            EXPECT_EQ(map->track_count(), 0u);
+            EXPECT_EQ(QRect(map->mapTo(&wizard, QPoint{}), map->size()), bounds);
+            EXPECT_EQ(summary->height(), result_height);
+            EXPECT_DOUBLE_EQ(map->zoom_factor(), zoom);
+        }
+        height->set_value(500, Unit::kilometre);
+        ASSERT_TRUE(await_preview());
+        EXPECT_TRUE(next->isEnabled());
+        EXPECT_EQ(QRect(map->mapTo(&wizard, QPoint{}), map->size()), bounds);
+        EXPECT_EQ(map->marker_position(0), position);
+        EXPECT_DOUBLE_EQ(map->zoom_factor(), zoom);
+    }
+    wizard.resize(980, 590);
+    wizard.findChild<QComboBox *>("orbitWizardPreset")->setCurrentIndex(7);
+    ASSERT_TRUE(await_preview());
+    const auto repeated_bounds = QRect(map->mapTo(&wizard, QPoint{}), map->size());
+    const auto repeated_height = summary->height();
+    auto *days = wizard.findChild<QSpinBox *>("wizardRepeatDays");
+    days->setValue(1000000);
+    settle_layout();
+    EXPECT_FALSE(next->isEnabled());
+    EXPECT_TRUE(summary->text().contains("重复周期"));
+    EXPECT_EQ(QRect(map->mapTo(&wizard, QPoint{}), map->size()), repeated_bounds);
+    EXPECT_EQ(summary->height(), repeated_height);
+    days->setValue(1);
+    ASSERT_TRUE(await_preview());
+    EXPECT_TRUE(next->isEnabled());
+    EXPECT_EQ(QRect(map->mapTo(&wizard, QPoint{}), map->size()), repeated_bounds);
+}
+
 TEST_F(InsertionTest, PreviewCachesExactRotationsAndRefinesLatestDesignOnly) {
     class CountingFrames final : public core::IFrameProvider {
       public:

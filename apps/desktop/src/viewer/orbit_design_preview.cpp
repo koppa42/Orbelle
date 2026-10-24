@@ -1,5 +1,6 @@
 #include "orbit_design_preview.hpp"
 #include "../ui_text.hpp"
+#include "responsive_layout.hpp"
 #include "workbench_profile.hpp"
 #include "workbench_style.hpp"
 #include <QComboBox>
@@ -61,7 +62,21 @@ OrbitDesignPreview::OrbitDesignPreview(QWidget *parent) : QWidget(parent) {
     status_ = new QLabel(ui::text("orbit_wizard.preview_unavailable"));
     status_->setObjectName("orbitPreviewStatus");
     status_->setWordWrap(true);
+    status_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     layout->addWidget(status_);
+    new WidthObserver(status_, [this](int width) {
+        // Status changes should never resize the map, even when a narrow window
+        // wraps one of the messages onto a second line.
+        int height = status_->fontMetrics().lineSpacing();
+        for (const char *key : {"orbit_wizard.preview_unavailable", "orbit_wizard.preview_invalid",
+                                "orbit_wizard.preview_updating", "orbit_wizard.preview_failed",
+                                "orbit_wizard.map_hint"})
+            height = std::max(height, status_->fontMetrics()
+                                          .boundingRect(QRect(0, 0, width, 10000), Qt::TextWordWrap,
+                                                        ui::text(key))
+                                          .height());
+        status_->setFixedHeight(height);
+    });
     setMinimumHeight(250);
     update_timer_.setSingleShot(true);
     update_timer_.setTimerType(Qt::PreciseTimer);

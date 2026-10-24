@@ -10,6 +10,7 @@ class QLabel;
 class QComboBox;
 class QFormLayout;
 class QSpinBox;
+class QPushButton;
 namespace orbelle::desktop {
 class QuantityEditor;
 class OrbitDesignPreview;
@@ -28,7 +29,7 @@ class OrbitWizardDialog final : public QDialog {
     application::OrbitInput read_input() const;
     void update_type();
     void refresh_preview();
-    void render_results(const core::EarthOrbitDesign &design);
+    void render_results();
     core::Epoch epoch_;
     std::array<QuantityEditor *, 6> fields_;
     QuantityEditor *altitude_;
@@ -48,6 +49,7 @@ class OrbitWizardDialog final : public QDialog {
     OrbitDesignPreview *map_preview_;
     QLabel *preview_;
     QLabel *error_;
+    QPushButton *next_;
     std::optional<application::OrbitInput> input_;
     std::optional<core::EarthOrbitDesign> preview_design_;
     bool compact_results_ = false;

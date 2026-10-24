@@ -334,17 +334,18 @@ OrbitWizardDialog::OrbitWizardDialog(core::Epoch epoch, QWidget *parent)
     summary_layout->addWidget(map_preview_, 1);
     preview_ = new QLabel;
     preview_->setObjectName("orbitWizardPreview");
-    preview_->setWordWrap(true);
+    // A changing number must not wrap a result row and resize the map above it.
+    preview_->setWordWrap(false);
+    preview_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     preview_->setTextFormat(Qt::RichText);
     preview_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     summary_layout->addWidget(preview_);
-    new WidthObserver(summary, [this](int width) {
-        const bool compact = width < 450;
+    new WidthObserver(summary, [this, mode = WidthMode{}](int width) mutable {
+        const bool compact = mode.narrow(width, 450);
         if (compact_results_ == compact)
             return;
         compact_results_ = compact;
-        if (preview_design_)
-            render_results(*preview_design_);
+        render_results();
     });
     convention_ = new QLabel;
     convention_->setObjectName("hint");
@@ -355,6 +356,9 @@ OrbitWizardDialog::OrbitWizardDialog(core::Epoch epoch, QWidget *parent)
     error_->setObjectName("orbitWizardError");
     error_->setTextFormat(Qt::PlainText);
     error_->setWordWrap(true);
+    error_->ensurePolished();
+    // Reserve validation space even for an empty draft, including stacked layouts.
+    error_->setMinimumHeight(3 * error_->fontMetrics().lineSpacing() + 8);
     parameter_layout->addWidget(error_);
     parameter_layout->addStretch();
     columns->addWidget(summary, 7);
@@ -372,7 +376,7 @@ OrbitWizardDialog::OrbitWizardDialog(core::Epoch epoch, QWidget *parent)
     buttons->addStretch();
     auto *cancel = new QPushButton(ui::text("common.cancel"));
     cancel->setAutoDefault(false);
-    auto *next = new QPushButton(ui::text("orbit_wizard.continue"));
+    auto *next = next_ = new QPushButton(ui::text("orbit_wizard.continue"));
     next->setProperty("primary", true);
     next->setObjectName("acceptOrbitWizard");
     next->setDefault(true);
@@ -495,39 +499,50 @@ void OrbitWizardDialog::refresh_preview() {
         const auto design = read_design();
         preview_design_ = design;
         map_preview_->set_design(design);
-        render_results(design);
     } catch (const core::OrbitDesignError &error) {
         preview_design_.reset();
         map_preview_->set_design(std::nullopt);
-        preview_->setText(ui::text("orbit_wizard.preview_invalid"));
         error_->setText(design_error(error));
     } catch (const std::exception &error) {
         preview_design_.reset();
         map_preview_->set_design(std::nullopt);
-        preview_->setText(ui::text("orbit_wizard.preview_invalid"));
         error_->setText(QString::fromUtf8(error.what()));
     }
+    next_->setEnabled(preview_design_.has_value());
+    render_results();
 }
-void OrbitWizardDialog::render_results(const core::EarthOrbitDesign &design) {
-    const auto &elements = design.elements;
-    const auto &earth = core::central_body(core::OriginId::earth);
+void OrbitWizardDialog::render_results() {
+    // Invalid input clears values, not the summary's structure. Retaining the same
+    // rows also preserves the viewport while a number is temporarily incomplete.
+    std::array<QString, 6> values;
+    values.fill(QString(QChar(0x2014)));
+    if (preview_design_) {
+        const auto &design = *preview_design_;
+        const auto &elements = design.elements;
+        const auto &earth = core::central_body(core::OriginId::earth);
+        values = {QString::number((elements.semi_major_axis_m * (1 - elements.eccentricity) -
+                                   earth.equatorial_radius_m) /
+                                      1000,
+                                  'f', 2),
+                  QString::number((elements.semi_major_axis_m * (1 + elements.eccentricity) -
+                                   earth.equatorial_radius_m) /
+                                      1000,
+                                  'f', 2),
+                  QString::number(design.nodal_period_seconds / 60, 'f', 3),
+                  QString::number(elements.inclination_rad * 180 / std::numbers::pi, 'f', 6),
+                  QString::number(elements.eccentricity, 'f', 7),
+                  QString::number(design.raan_rate_rad_s * 86400 * 180 / std::numbers::pi, 'f', 6)};
+    }
     auto text = ui::text(compact_results_ ? "orbit_wizard.preview_compact" : "orbit_wizard.preview")
-                    .arg((elements.semi_major_axis_m * (1 - elements.eccentricity) -
-                          earth.equatorial_radius_m) /
-                             1000,
-                         0, 'f', 2)
-                    .arg((elements.semi_major_axis_m * (1 + elements.eccentricity) -
-                          earth.equatorial_radius_m) /
-                             1000,
-                         0, 'f', 2)
-                    .arg(design.nodal_period_seconds / 60, 0, 'f', 3)
-                    .arg(elements.inclination_rad * 180 / std::numbers::pi, 0, 'f', 6)
-                    .arg(elements.eccentricity, 0, 'f', 7)
-                    .arg(design.raan_rate_rad_s * 86400 * 180 / std::numbers::pi, 0, 'f', 6);
-    if (design.repeat_cycle_seconds > 0)
-        text += ui::text("orbit_wizard.repeat_preview")
-                    .arg(compact_results_ ? 2 : 3)
-                    .arg(design.repeat_cycle_seconds / 86400, 0, 'f', 6);
+                    .arg(values[0], values[1], values[2], values[3], values[4], values[5]);
+    const auto type = static_cast<Type>(type_->currentData().toInt());
+    if (type == Type::repeating_ground_trace || type == Type::repeating_sun_sync)
+        text +=
+            ui::text("orbit_wizard.repeat_preview")
+                .arg(compact_results_ ? 2 : 3)
+                .arg(preview_design_
+                         ? QString::number(preview_design_->repeat_cycle_seconds / 86400, 'f', 6)
+                         : QString(QChar(0x2014)));
     preview_->setText(text + QStringLiteral("</table>"));
 }
 } // namespace orbelle::desktop
