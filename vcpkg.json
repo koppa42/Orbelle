@@ -13,7 +13,7 @@
       "dependencies": [
         "sqlite3",
         "minizip",
-        { "name": "qtbase", "default-features": false, "features": ["widgets", "network", "openssl", "freetype", "png", "jpeg"] },
+        { "name": "qtbase", "default-features": false, "features": ["widgets", "network", "openssl", "freetype", "png", "jpeg", "testlib"] },
         "vsgqt",
         { "name": "vsg", "features": ["windowing"] },
         { "name": "rocky", "features": ["gdal"] }
