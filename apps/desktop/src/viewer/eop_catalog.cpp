@@ -712,7 +712,7 @@ int EopCatalog::update_interval_hours(DataProduct product) const {
     bool valid = false;
     const auto hours =
         QString::fromStdString(data_.setting(setting_key(product, "update-hours"))).toInt(&valid);
-    return valid && hours >= 1 && hours <= 168 ? hours : 24;
+    return valid && hours >= 1 && hours <= 168 ? hours : 168;
 }
 void EopCatalog::set_update_interval_hours(int hours, DataProduct product) {
     if (hours < 1 || hours > 168)

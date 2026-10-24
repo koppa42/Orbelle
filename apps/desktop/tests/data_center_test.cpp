@@ -892,7 +892,7 @@ TEST_F(DataCenterTest, UpdateResultsAndPreferencesSurviveFailureCancellationAndR
         EXPECT_EQ(catalog.update_status().state, DataUpdateState::failed);
         EXPECT_EQ(catalog.update_status().checked_at, checked_at);
         EXPECT_EQ(catalog.inventory()[0].acquired_at, downloaded_at);
-        catalog.set_update_interval_hours(168);
+        catalog.set_update_interval_hours(6);
         catalog.set_automatic_updates(false);
     }
     {
@@ -900,7 +900,7 @@ TEST_F(DataCenterTest, UpdateResultsAndPreferencesSurviveFailureCancellationAndR
         EXPECT_EQ(catalog.update_status().state, DataUpdateState::failed);
         EXPECT_EQ(catalog.update_status().checked_at, checked_at);
         EXPECT_EQ(catalog.update_status().checked_sha256, verified);
-        EXPECT_EQ(catalog.update_interval_hours(), 168);
+        EXPECT_EQ(catalog.update_interval_hours(), 6);
         EXPECT_FALSE(catalog.automatic_updates());
         Server server(payload());
         catalog.start_download(server.url());
@@ -1021,9 +1021,9 @@ TEST_F(DataCenterTest, C04AndUtcDownloadsAreIndependentAndRebindCalculationTimeA
         EXPECT_EQ(catalog.update_status().state, DataUpdateState::never_checked);
         EXPECT_EQ(catalog.inventory()[1].acquired_at, receipt);
         catalog.set_automatic_updates(false, DataProduct::c04);
-        catalog.set_update_interval_hours(168, DataProduct::utc);
+        catalog.set_update_interval_hours(24, DataProduct::utc);
         EXPECT_TRUE(catalog.automatic_updates());
-        EXPECT_EQ(catalog.update_interval_hours(), 24);
+        EXPECT_EQ(catalog.update_interval_hours(), 168);
         Server time_server(time_bytes);
         time_server.etag = "\"utc\"";
         catalog.start_download(time_server.url(), DataProduct::utc);
@@ -1064,7 +1064,7 @@ TEST_F(DataCenterTest, C04AndUtcDownloadsAreIndependentAndRebindCalculationTimeA
     EXPECT_EQ(reopened.data().resolve_eop(new_lock)->data_info().time_data.sha256, new_time_hash);
     EXPECT_FALSE(reopened.automatic_updates(DataProduct::c04));
     EXPECT_TRUE(reopened.automatic_updates());
-    EXPECT_EQ(reopened.update_interval_hours(DataProduct::utc), 168);
+    EXPECT_EQ(reopened.update_interval_hours(DataProduct::utc), 24);
     EXPECT_EQ(reopened.update_status(DataProduct::utc).state, DataUpdateState::failed);
     EXPECT_EQ(reopened.update_status(DataProduct::c04).state, DataUpdateState::unchanged);
 }
@@ -1404,10 +1404,10 @@ TEST_F(DataCenterTest, EphemerisDownloadRejectsWrongContentAndCanBeCancelled) {
     EXPECT_EQ(catalog.update_status(DataProduct::de440s).state, DataUpdateState::cancelled);
     EXPECT_TRUE(catalog.data().ephemerides().empty());
     catalog.set_automatic_updates(true, DataProduct::de440s);
-    catalog.set_update_interval_hours(168, DataProduct::de440s);
+    catalog.set_update_interval_hours(24, DataProduct::de440s);
     EopCatalog reopened(root() / "data", {}, {}, false);
     EXPECT_TRUE(reopened.automatic_updates(DataProduct::de440s));
-    EXPECT_EQ(reopened.update_interval_hours(DataProduct::de440s), 168);
+    EXPECT_EQ(reopened.update_interval_hours(DataProduct::de440s), 24);
 }
 TEST_F(DataCenterTest, LiveOfficialEphemerisDownloadAndRecheckRetainCurrentData) {
     const auto local_file = qEnvironmentVariable("ORBELLE_FULL_DE440S");
