@@ -57,7 +57,8 @@ if(ORBELLE_WITH_VSG)
         resources/startup/sakura-garden.png
         resources/startup/cozy-afternoon.png)
     # Original chevrons are pre-rendered at high resolution; no optional QtSvg plugin needed.
-    qt_add_resources(orbelle_desktop "workbench_icons" PREFIX "/orbelle"
+    # Embed large images directly in object files instead of compiling C++ byte arrays.
+    qt_add_resources(orbelle_desktop "workbench_icons" BIG_RESOURCES PREFIX "/orbelle"
         BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
         FILES resources/icons/chevron-down.png
               resources/icons/chevron-left.png resources/icons/chevron-right.png
@@ -96,6 +97,8 @@ if(ORBELLE_WITH_VSG)
         ORBELLE_VSGQT_VERSION="${vsgQt_VERSION}")
     # Serialize desktop interaction/timing tests while numerical tests run alongside them.
     # A resource lock leaves the other CTest slots available (unlike RUN_SERIAL).
+    # Prioritize this serial chain so it overlaps numerical work instead of finishing last.
+    # COST is a scheduling hint, independent of each test's timeout.
     if(BUILD_TESTING)
         find_package(Qt6 6.8 CONFIG REQUIRED COMPONENTS Test)
         add_executable(orbelle_update_tests tests/application_update_test.cpp
@@ -107,7 +110,7 @@ if(ORBELLE_WITH_VSG)
         orbelle_warnings(orbelle_update_tests)
         orbelle_copy_runtime_dlls(orbelle_update_tests)
         gtest_discover_tests(orbelle_update_tests DISCOVERY_MODE PRE_TEST
-            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests TIMEOUT 30
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests COST 1000 TIMEOUT 30
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbelle_object_selection_tests tests/object_selection_test.cpp
@@ -120,19 +123,19 @@ if(ORBELLE_WITH_VSG)
         orbelle_warnings(orbelle_object_selection_tests)
         orbelle_copy_runtime_dlls(orbelle_object_selection_tests)
         gtest_discover_tests(orbelle_object_selection_tests DISCOVERY_MODE PRE_TEST
-            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests TIMEOUT 20
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests COST 1000 TIMEOUT 20
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbelle_welcome_tests tests/welcome_page_test.cpp
             tests/workbench_window_test.cpp tests/workbench_input_test.cpp src/viewer/workbench_window.cpp
             src/viewer/welcome_page.cpp src/viewer/workbench_style.cpp)
-        qt_add_resources(orbelle_welcome_tests "welcome_resources" PREFIX "/orbelle"
+        qt_add_resources(orbelle_welcome_tests "welcome_resources" BIG_RESOURCES PREFIX "/orbelle"
             BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/artwork/orbital-welcome.png)
         target_link_libraries(orbelle_welcome_tests PRIVATE Qt6::Widgets Qt6::Test GTest::gtest_main)
         orbelle_warnings(orbelle_welcome_tests)
         orbelle_copy_runtime_dlls(orbelle_welcome_tests)
         gtest_discover_tests(orbelle_welcome_tests DISCOVERY_MODE PRE_TEST
-            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests TIMEOUT 10
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests COST 1000 TIMEOUT 10
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbelle_data_center_tests tests/data_center_test.cpp src/viewer/eop_catalog.cpp)
@@ -144,12 +147,13 @@ if(ORBELLE_WITH_VSG)
         target_link_libraries(orbelle_data_center_tests PRIVATE Orbelle::Runtime Qt6::Network GTest::gtest_main)
         orbelle_warnings(orbelle_data_center_tests)
         orbelle_copy_runtime_dlls(orbelle_data_center_tests)
-        gtest_discover_tests(orbelle_data_center_tests DISCOVERY_MODE PRE_TEST TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests TIMEOUT 30)
+        gtest_discover_tests(orbelle_data_center_tests DISCOVERY_MODE PRE_TEST
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests COST 1000 TIMEOUT 30)
         add_executable(orbelle_data_center_ui_tests tests/data_center_dialog_test.cpp
             src/viewer/eop_catalog.cpp src/viewer/data_center_dialog.cpp src/viewer/workbench_style.cpp
             src/viewer/initial_data_setup.cpp src/viewer/startup_splash.cpp
             src/viewer/startup_resources.cpp tests/startup_test.cpp)
-        qt_add_resources(orbelle_data_center_ui_tests "data_center_icons" PREFIX "/orbelle"
+        qt_add_resources(orbelle_data_center_ui_tests "data_center_icons" BIG_RESOURCES PREFIX "/orbelle"
             BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
             FILES resources/icons/chevron-down.png resources/artwork/data-preparation.png
                   ${orbelle_startup_artwork})
@@ -165,7 +169,7 @@ if(ORBELLE_WITH_VSG)
         orbelle_warnings(orbelle_data_center_ui_tests)
         orbelle_copy_runtime_dlls(orbelle_data_center_ui_tests)
         gtest_discover_tests(orbelle_data_center_ui_tests DISCOVERY_MODE PRE_TEST
-            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests TIMEOUT 20
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests COST 1000 TIMEOUT 20
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
     endif()
@@ -182,7 +186,7 @@ if(ORBELLE_WITH_VSG)
         orbelle_copy_runtime_dlls(orbelle_project_update_tests)
         gtest_discover_tests(orbelle_project_update_tests DISCOVERY_MODE PRE_TEST
             DISCOVERY_TIMEOUT 30 TEST_PREFIX "desktop." PROPERTIES
-            RESOURCE_LOCK orbelle_desktop_tests TIMEOUT 60)
+            RESOURCE_LOCK orbelle_desktop_tests COST 1000 TIMEOUT 60)
         add_executable(orbelle_orbit_scene_tests tests/orbit_scene_test.cpp src/viewer/orbit_scene.cpp)
         target_link_libraries(orbelle_orbit_scene_tests PRIVATE
             Orbelle::Runtime Orbelle::Visualization GTest::gtest_main)
@@ -192,7 +196,8 @@ if(ORBELLE_WITH_VSG)
         orbelle_copy_runtime_dlls(orbelle_orbit_scene_tests)
         # Discover after the build: Windows cold starts can exceed 5 s under compiler load.
         gtest_discover_tests(orbelle_orbit_scene_tests DISCOVERY_MODE PRE_TEST
-            DISCOVERY_TIMEOUT 30 TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests TIMEOUT 60)
+            DISCOVERY_TIMEOUT 30 TEST_PREFIX "desktop." PROPERTIES
+            RESOURCE_LOCK orbelle_desktop_tests COST 1000 TIMEOUT 60)
         add_executable(orbelle_quantity_tests tests/quantity_editor_test.cpp
             tests/orbit_editor_test.cpp
             tests/property_editor_test.cpp
@@ -224,7 +229,7 @@ if(ORBELLE_WITH_VSG)
         orbelle_warnings(orbelle_quantity_tests)
         orbelle_copy_runtime_dlls(orbelle_quantity_tests)
         gtest_discover_tests(orbelle_quantity_tests DISCOVERY_MODE PRE_TEST
-            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests TIMEOUT 10
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests COST 1000 TIMEOUT 10
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
     endif()
@@ -247,7 +252,7 @@ if(ORBELLE_WITH_VSG)
         orbelle_warnings(orbelle_report_ui_tests)
         orbelle_copy_runtime_dlls(orbelle_report_ui_tests)
         gtest_discover_tests(orbelle_report_ui_tests DISCOVERY_MODE PRE_TEST
-            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests TIMEOUT 20
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests COST 1000 TIMEOUT 20
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         # Explicit diagnostic target; excluded from ordinary builds and CTest timing gates.
@@ -265,7 +270,7 @@ if(ORBELLE_WITH_VSG)
         orbelle_warnings(orbelle_ground_map_tests)
         orbelle_copy_runtime_dlls(orbelle_ground_map_tests)
         gtest_discover_tests(orbelle_ground_map_tests DISCOVERY_MODE PRE_TEST
-            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests TIMEOUT 10
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests COST 1000 TIMEOUT 10
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbelle_view_navigation_tests tests/view_navigation_test.cpp
@@ -276,7 +281,7 @@ if(ORBELLE_WITH_VSG)
         orbelle_warnings(orbelle_view_navigation_tests)
         orbelle_copy_runtime_dlls(orbelle_view_navigation_tests)
         gtest_discover_tests(orbelle_view_navigation_tests DISCOVERY_MODE PRE_TEST
-            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests TIMEOUT 10
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests COST 1000 TIMEOUT 10
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbelle_timeline_tests tests/timeline_test.cpp
@@ -287,7 +292,7 @@ if(ORBELLE_WITH_VSG)
         orbelle_warnings(orbelle_timeline_tests)
         orbelle_copy_runtime_dlls(orbelle_timeline_tests)
         gtest_discover_tests(orbelle_timeline_tests DISCOVERY_MODE PRE_TEST
-            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests TIMEOUT 10
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests COST 1000 TIMEOUT 10
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
     endif()

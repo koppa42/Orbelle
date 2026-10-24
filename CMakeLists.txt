@@ -9,6 +9,8 @@ include(GNUInstallDirs)
 include(CTest)
 
 set(CMAKE_CXX_EXTENSIONS OFF)
+# C++20 is used without named modules; avoid a separate dependency scan per source.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(BUILD_TESTING)
