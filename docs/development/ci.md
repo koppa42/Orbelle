@@ -51,6 +51,8 @@ actionlint 在原生构建前运行，固定工具版本与 SHA-256，检查所�
 
 项目 C/C++ 编译使用固定版本的 [sccache](https://github.com/mozilla/sccache) 和 GitHub Actions 缓存；每次仍重新配置、链接并执行全部测试，只复用编译器、参数和源文件内容匹配的编译结果，不缓存测试结果或整个构建目录。Windows 使用 MSVC 2022 x64 与 Ninja Multi-Config，保留 `Release` 输出布局；Linux 使用 Ninja。原生构建与各 Python 扩展构建都启用编译缓存，任务结束记录命中、未命中及不可缓存统计。首次运行主要建立缓存，后续效果以实际命中率和阶段耗时为准。
 
+项目使用 C++20，但没有命名模块，因此按 [CMake 建议](https://cmake.org/cmake/help/latest/manual/cmake-cxxmodules.7.html#scanning-without-modules)关闭模块依赖预扫描，保留普通头文件依赖跟踪。该设置使用目录变量，不写入 CMake 缓存。桌面程序和测试中的大型图片集合通过 Qt [`BIG_RESOURCES`](https://doc.qt.io/qt-6/qt-add-resources.html) 直接嵌入目标文件，避免把图片展开成数百 MB 的 C++ 数组再交给编译器；资源路径、内容与打包方式保持不变。
+
 依赖使用仓库固定的 vcpkg 基线与 overlay，并缓存编译结果。Windows CI 使用专用的 `x64-windows-release` triplet，固定 v143 工具链，只构建实际用于测试和发布的 Release 依赖。本地默认 triplet 不变。首次 Windows 构建需要从源码编译 Qt、VSG、Rocky、GDAL 等依赖，耗时会明显长于后续运行。这里的 Release 是编译配置，不代表生成或发布安装包。诊断保留 14 天，跨作业依赖和标签发布产物保留 7 天。
 
 原生、Python 依赖准备和手动 sanitizer 共用依赖缓存动作，但 Windows 桌面、Linux 原生及两平台 Python 分别使用独立缓存系列。Python 不再回退读取桌面快照，避免把 Qt、图形依赖和历史版本复制到轻量缓存。手动 sanitizer 与 Linux 原生共享相同的未插桩第三方依赖。缓存指纹包含规范化的 `vcpkg.json`、注册表配置、overlay 文件与 CI triplet；仅排除根项目的版本字段，依赖版本、功能、覆盖项和基线仍参与计算。只修改 Orbelle 版本号或 JSON 排版不会切换依赖缓存。
@@ -68,6 +70,8 @@ GitHub 将 PR 生成的缓存限制在该 PR 的合并引用中，其他 PR 和 
 完整 Release 数值回归及手动 ASan/UBSan 都执行预设中的全量用例，保留原算法、参考数据、断言与精度容限；新增测试自动纳入。两者使用 `--no-tests=error` 拒绝空测试运行。
 
 常规 CI 通过 `CTEST_PARALLEL_LEVEL=4` 在每个平台内最多并行四个测试进程，不新增分片作业或测试筛选。桌面测试共享 `orbelle_desktop_tests` 资源锁，彼此串行，仍可与数值测试并行；手动 sanitizer 保持原并发设置。CSPICE 的进程内状态不会跨 CTest 进程共享；测试只读固定参考数据，写入各自的临时目录或具名 fixture 子目录。不要同时启动多个 CTest 操作同一个构建目录。
+
+共享桌面资源锁的测试统一设置较高的 [`COST`](https://cmake.org/cmake/help/latest/prop_test/COST.html) 调度优先级，让这条串行队列尽早与数值测试重叠，减少最后只剩桌面测试的等待。它不改变测试超时、锁、并发上限或覆盖范围；`COST` 是调度提示，不是运行时限。比较前后耗时时使用相同并发数，并确认构建目录中是否存在 CTest 学习得到的历史耗时，避免把热运行的排序优势误计为改进。
 
 天气跳变的 HPOP 星历回归按五种积分器参数化，仍覆盖正反向、Cowell/VOP、时间正则化开关、两种报告步长、三种插值方式及跳变前后 1 ns 和边界本身。直接参考固定使用不受 VOP 开关影响的 RKV89，在每个方向内计算一次并复用；两条被测星历生成入口仍分别执行。时间范围、步长、输入、参考算法和 1 mm / 1e-6 m/s 门槛不变。其他长时天气收敛用例中的重新打开、冻结数据和新数据计算是不同的行为验证，继续保留。
 

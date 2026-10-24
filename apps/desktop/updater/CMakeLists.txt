@@ -50,5 +50,6 @@ if(BUILD_TESTING)
             --launcher "$<TARGET_FILE:orbelle_launcher>"
             --updater "$<TARGET_FILE:orbelle_updater>"
             --stub "$<TARGET_FILE:orbelle_updater_stub>")
-    set_tests_properties(desktop.NativeUpdater PROPERTIES TIMEOUT 120 RESOURCE_LOCK orbelle_desktop_tests)
+    set_tests_properties(desktop.NativeUpdater PROPERTIES
+        TIMEOUT 120 RESOURCE_LOCK orbelle_desktop_tests COST 1000)
 endif()
