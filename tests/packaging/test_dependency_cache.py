@@ -121,6 +121,14 @@ class DependencyCacheTests(unittest.TestCase):
             with self.subTest(image=image), self.assertRaises(ValueError):
                 cache.cache_identity(self.source, "windows", image, "42", "1")
 
+    def test_literal_cache_path_is_preserved_for_actions_version_compatibility(self):
+        literal = "D:\\a\\_temp/vcpkg-binary-cache"
+        self.invoke("identify", "--source", self.source, "--profile", "windows", "--cache", literal,
+                    "--state", self.state,
+                    env={"ImageVersion": "20261012.333.1", "GITHUB_RUN_ID": "42", "GITHUB_RUN_ATTEMPT": "1"})
+        state = json.loads((self.state / "identity.json").read_text())
+        self.assertEqual(state["cache"], literal)
+
     def test_inventory_ignores_incomplete_non_package_and_empty_files(self):
         valid, _ = self.archive()
         (self.binaries / ("a" * 64 + ".zip")).write_bytes(b"interrupted upload")

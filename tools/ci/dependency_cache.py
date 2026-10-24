@@ -165,7 +165,7 @@ def main():
     identify = sub.add_parser("identify")
     identify.add_argument("--source", type=Path, default=Path.cwd())
     identify.add_argument("--profile", choices=FAMILIES, required=True)
-    identify.add_argument("--cache", type=Path, required=True)
+    identify.add_argument("--cache", required=True)
     identify.add_argument("--state", type=Path, required=True)
     begin = sub.add_parser("begin")
     begin.add_argument("--state", type=Path, required=True)
@@ -179,7 +179,9 @@ def main():
     if args.command == "identify":
         state = cache_identity(args.source, args.profile, os.environ.get("ImageVersion", ""),
                                os.environ["GITHUB_RUN_ID"], os.environ["GITHUB_RUN_ATTEMPT"])
-        state["cache"] = str(args.cache.resolve())
+        # Actions includes the literal path in its cache version. Preserve
+        # slash spelling on Windows so save and restore use the same version.
+        state["cache"] = args.cache
         write_json(identity_path, state)
         outputs({"key": state["key"], "restore-keys": "\n".join(state["restore_keys"])})
     elif args.command == "begin":
