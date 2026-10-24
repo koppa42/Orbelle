@@ -447,10 +447,11 @@ TEST(ErfaFrames, NumericReusePreservesEveryEopComponentRateAndExactEpoch) {
                               return frames->gcrf_to_itrf_state(input.sample.epoch, input);
                           }).get();
         const auto original = frames->gcrf_to_itrf_state(epoch, base);
-        if (i < 5)
+        if (i < 5) {
             EXPECT_NE(cold.rotation.matrix, original.rotation.matrix);
-        else if (i < 10)
+        } else if (i < 10) {
             EXPECT_NE(cold.rotation_rate_per_second, original.rotation_rate_per_second);
+        }
         for (int repeat = 0; repeat < 2; ++repeat) {
             const auto actual = frames->gcrf_to_itrf_state(input.sample.epoch, input);
             EXPECT_EQ(exact_matrix(actual.rotation.matrix), exact_matrix(cold.rotation.matrix));
