@@ -7,7 +7,7 @@
 ```python
 import orbelle as ob
 from orbelle import units as u
-from orbelle.sensors import Cone, Pointing
+from orbelle.sensors import Cone, Orientation, Pointing
 
 project = ob.Project("Observation", ob.Epoch(0), ob.Epoch(7_200_000_000_000))
 initial = ob.orbits.Keplerian(
@@ -33,7 +33,8 @@ with project.edit():
     )
 
 sensor.name = "Narrow camera"
-sensor.update(field_of_view=Cone(half_angle=u.deg(15)), pointing=Pointing.nadir())
+sensor.update(field_of_view=Cone(half_angle=u.deg(15)), pointing=Pointing.nadir(),
+              orientation=Orientation(x=u.deg(10), y=u.deg(-5), z=u.deg(30)))
 
 with project.edit():
     sensor.field_of_view = Cone(half_angle=u.deg(10))
@@ -43,6 +44,8 @@ project.save("observation.orbelle")
 ```
 
 `objects.satellite()`、`ground_station()`、`sensor()` 返回带类型的实时句柄。通用工具也可以构造 `ob.objects.Satellite`、`GroundStation`、`Sensor` 不可变配置，再调用 `objects.create(definition)`。配置与句柄是不同类型；创建、更新方法有真实参数签名，随包提供类型提示。
+
+`sensors.Orientation(x=..., y=..., z=...)` 是不可变的三轴角度配置，默认全零。`sensor.orientation`、`sensor.update(orientation=...)`、集合的创建和更新接口使用同一值；`SensorState.orientation` 保存对应快照。三个角度在一次事务内校验和发布，非角度或非有限值拒绝且保留原状态。局部内禀 X → Y → Z 顺序满足 `R = R_base Rx(x) Ry(y) Rz(z)`；X/Y 改变视轴，Z 只旋转最终视轴周围的视场。基准仍由对地心或跟踪站点确定，坐标轴约定见[传感器指向](access_sensors.md)。
 
 轨道入口提供 `orbits.TwoBody(initial=...)`、`J2(initial=...)`、`J4(initial=...)`、`Sgp4(tle=...)`，返回不可变 `orbits.Orbit` 配置。二体初值可用 GCRF `Keplerian`、不可变 `orbits.Cartesian` 或既有 `CartesianState`；J2/J4 明确接受各自平均根数。`Orbit.from_input(OrbitInput)` 是旧 SI 输入的显式转换入口，会丢弃旧对象 ID 和分析时段，由项目分配与维护。轨道转换沿用已有算法，不隐式下载时间或 EOP 数据。
 
@@ -116,6 +119,6 @@ Python `ob.Project` 和 `ob.load_project()` 现在返回事务门面。旧的可
 
 普通脚本不再修改 `project.satellites` 等列表。通过句柄操作对象；保存报告配置使用 `project.set_reports(definitions)`，读取旧配置可从显式 `to_data()` 副本取得。`project.earth_orientation = ...` 继续接受已明确选定的数据元信息，`None` 清空；`plan_prepare(data=...)` 提供数据确认计划，可传入固定的 `DataSnapshot` 或由 `DataCatalog` 按项目时段选源。
 
-`Project.open(path, data=...)` 校验所选数据，变化时通过 `DataChangedError.plan` 取得固定的打开计划；原始输入读取使用 `load_project_data()`。`save(path, analysis=...)` 可记录匹配的分析来源，普通保存保留现状。状态查询优先使用 `project.prepare()` 返回的 `Analysis`；`to_scenario(time=...)`、`generate_report(project, ...)` 和 `AccessSession(project, ...)` 继续捕获已提交输入，执行已有计算与数据匹配规则。文件包含仅 UTC 的来源和分析准备记录，以及报告查询/模板配置；仅读写当前 v49，旧格式明确拒绝，详见[分析 API](analysis_api.md)。
+`Project.open(path, data=...)` 校验所选数据，变化时通过 `DataChangedError.plan` 取得固定的打开计划；原始输入读取使用 `load_project_data()`。`save(path, analysis=...)` 可记录匹配的分析来源，普通保存保留现状。状态查询优先使用 `project.prepare()` 返回的 `Analysis`；`to_scenario(time=...)`、`generate_report(project, ...)` 和 `AccessSession(project, ...)` 继续捕获已提交输入，执行已有计算与数据匹配规则。文件包含仅 UTC 的来源和分析准备记录，以及报告查询/模板配置；仅读写当前 v50，旧格式明确拒绝，详见[分析 API](analysis_api.md)。
 
 完整示例见 [可见性分析](../../examples/python/access.py)和[保存项目](../../examples/python/save_project.py)。验证入口为 C++ `ProjectDocument.*` 集成测试、Python `test_objects.py`、原生文件与计算回归测试，以及安装后的 SDK 消费端。

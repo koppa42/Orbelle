@@ -133,6 +133,53 @@ TEST(Access, CircularHorizonMatchesAnalyticSolutionAndConeNarrowsWindow) {
     EXPECT_DOUBLE_EQ(std::get<double>(tracking.table.rows()[0][4]),
                      std::get<double>(result.table.rows()[0][4]));
 }
+TEST(Access, OffAxisPointingChangesTrackingVisibilityAerAndInputIdentity) {
+    if (!runtime::time_frames_available() || !runtime::two_body_available())
+        GTEST_SKIP();
+    auto context = circular();
+    context.project.sensors.push_back({"sensor", "Camera", "satellite-1", 10 * pi / 180,
+                                       application::SensorPointing::targeted, "station"});
+    auto &sensor = context.project.sensors.front();
+    const auto initial_hash = application::analysis_input_sha256(context.project);
+    runtime::AccessSession original(context, "station", "sensor");
+    EXPECT_TRUE(original.at(seconds(0)).visible);
+    sensor.tilt_x_rad = 30 * pi / 180;
+    const auto x_hash = application::analysis_input_sha256(context.project);
+    EXPECT_NE(x_hash, initial_hash);
+    const auto x_sample = runtime::AccessSession(context, "station", "sensor").at(seconds(0));
+    ASSERT_TRUE(x_sample.off_boresight_rad);
+    EXPECT_NEAR(*x_sample.off_boresight_rad, 30 * pi / 180, 1e-14);
+    EXPECT_FALSE(x_sample.visible);
+    EXPECT_TRUE(original.at(seconds(0)).visible); // Captured input remains immutable.
+    sensor.tilt_y_rad = 20 * pi / 180;
+    EXPECT_NE(application::analysis_input_sha256(context.project), x_hash);
+    const auto expected = std::acos(std::cos(sensor.tilt_x_rad) * std::cos(sensor.tilt_y_rad));
+    for (const auto pointing :
+         {application::SensorPointing::nadir, application::SensorPointing::targeted}) {
+        sensor.pointing = pointing;
+        for (double roll : {0., .7}) {
+            sensor.roll_rad = roll;
+            const auto sample = runtime::AccessSession(context, "station", "sensor").at(seconds(0));
+            ASSERT_TRUE(sample.off_boresight_rad);
+            EXPECT_NEAR(*sample.off_boresight_rad, expected, 1e-14);
+            EXPECT_FALSE(sample.visible);
+        }
+    }
+    const auto decoded = application::decode_project(application::encode_project(context.project));
+    EXPECT_EQ(decoded.sensors.front().tilt_x_rad, sensor.tilt_x_rad);
+    EXPECT_EQ(decoded.sensors.front().tilt_y_rad, sensor.tilt_y_rad);
+    EXPECT_EQ(decoded.sensors.front().roll_rad, sensor.roll_rad);
+    const auto copy = context.project.with_satellite_copy("satellite-1", "copy", "Copy");
+    ASSERT_EQ(copy.sensors.size(), 2U);
+    EXPECT_EQ(copy.sensors.back().tilt_x_rad, sensor.tilt_x_rad);
+    EXPECT_EQ(copy.sensors.back().tilt_y_rad, sensor.tilt_y_rad);
+    for (auto member :
+         {&application::ProjectSensor::tilt_x_rad, &application::ProjectSensor::tilt_y_rad}) {
+        auto invalid = context.project;
+        invalid.sensors.front().*member = std::numeric_limits<double>::quiet_NaN();
+        EXPECT_THROW(application::validate_project(invalid), application::ProjectError);
+    }
+}
 TEST(Access, SnapshotValidationAerAndCancellation) {
     if (!runtime::time_frames_available() || !runtime::two_body_available())
         GTEST_SKIP();

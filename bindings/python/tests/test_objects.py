@@ -25,6 +25,41 @@ def make_project():
 
 
 class ObjectEditingTest(unittest.TestCase):
+    def test_sensor_orientation_is_atomic_copied_and_persisted(self):
+        from orbelle.sensors import Orientation
+        project, satellite, _, sensor = make_project()
+        self.assertEqual(sensor.orientation, Orientation())
+        value = Orientation(u.deg(15), u.deg(-25), u.deg(40))
+        sensor.orientation = value
+        self.assertEqual(sensor.orientation, value)
+        self.assertEqual(project.objects.read(sensor).orientation, value)
+        changes = []
+        project.subscribe(changes.append)
+        project.objects.update(sensor, orientation=value)
+        self.assertEqual(changes, [])
+        copied = project.objects.duplicate(sensor)
+        self.assertEqual(copied.orientation, value)
+        created = project.objects.create(ob.objects.Sensor(
+            "Offset camera", satellite, Cone(u.deg(10)), orientation=value))
+        self.assertEqual(created.orientation, value)
+        revision = project.revision
+        with self.assertRaises((ValueError, ob.ProjectError)):
+            sensor.update(name="Invalid", orientation=Orientation(u.rad(float("nan"))))
+        self.assertEqual(project.revision, revision)
+        self.assertEqual(sensor.name, "Camera")
+        self.assertEqual(sensor.orientation, value)
+        with self.assertRaises(TypeError):
+            sensor.orientation = Orientation(15, u.deg(0), u.deg(0))
+        self.assertEqual(project.revision, revision)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "orientation.orbelle"
+            project.save(path)
+            restored = ob.Project.open(path)
+            self.assertEqual(restored.objects[sensor.id].orientation, value)
+            self.assertEqual(restored.objects[copied.id].orientation, value)
+        sensor.orientation = Orientation()
+        self.assertEqual(sensor.orientation, Orientation())
+
     def test_geometric_sensor_patterns_round_trip_and_atomic_rejection(self):
         from orbelle.sensors import ComplexConic, Rectangular, Custom
         project, _, _, sensor = make_project()

@@ -26,7 +26,7 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 49;
+constexpr std::uint32_t project_version = 50;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
@@ -47,7 +47,7 @@ constexpr std::array section_schemas{
     SectionSchema{objects_tag, 32, "Missing satellites section"},
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 3, "Missing ground stations section"},
-    SectionSchema{sensors_tag, 2, "Missing sensors section"},
+    SectionSchema{sensors_tag, 3, "Missing sensors section"},
     SectionSchema{reports_tag, 7, "Missing reports section"},
     SectionSchema{data_tag, 2, nullptr},
     SectionSchema{time_tag, 1, nullptr},
@@ -583,6 +583,8 @@ std::string analysis_input_sha256(const Project &project) {
         out.text(s->parent_satellite_id);
         write_sensor_pattern(out, s->pattern, false);
         out.real(s->roll_rad);
+        out.real(s->tilt_x_rad);
+        out.real(s->tilt_y_rad);
         out.number(static_cast<unsigned>(s->pointing), 4);
         out.text(s->pointing == SensorPointing::targeted ? s->target_station_id : "");
     }
@@ -736,7 +738,9 @@ void validate_project(const Project &project, bool relationships) {
         for (const auto &point : pattern.custom_points)
             check(std::isfinite(point.cone_rad) && std::isfinite(point.clock_rad),
                   "Sensor draft vertices must be finite");
-        check(std::isfinite(sensor.roll_rad), "Sensor roll must be finite");
+        check(std::isfinite(sensor.roll_rad) && std::isfinite(sensor.tilt_x_rad) &&
+                  std::isfinite(sensor.tilt_y_rad),
+              "Sensor rotation angles must be finite");
         check(sensor.display.color <= 0xffffff && std::isfinite(sensor.display.opacity) &&
                   sensor.display.opacity >= 0 && sensor.display.opacity <= 1 &&
                   std::isfinite(sensor.display.space_range_m) && sensor.display.space_range_m > 0 &&
@@ -1029,6 +1033,8 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         sensors.number(static_cast<unsigned>(sensor.pointing), 4);
         sensors.text(sensor.target_station_id);
         sensors.real(sensor.roll_rad);
+        sensors.real(sensor.tilt_x_rad);
+        sensors.real(sensor.tilt_y_rad);
         sensors.number(sensor.display.show_2d, 1);
         sensors.number(sensor.display.show_3d, 1);
         sensors.number(sensor.display.fill, 1);
@@ -1295,6 +1301,8 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             sensor.pointing = static_cast<SensorPointing>(pointing);
             sensor.target_station_id = sensors.text();
             sensor.roll_rad = sensors.real();
+            sensor.tilt_x_rad = sensors.real();
+            sensor.tilt_y_rad = sensors.real();
             sensor.display.show_2d = sensors.boolean();
             sensor.display.show_3d = sensors.boolean();
             sensor.display.fill = sensors.boolean();

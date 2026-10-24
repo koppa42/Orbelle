@@ -42,6 +42,23 @@ class Custom:
 FieldOfView = Cone | ComplexConic | Rectangular | Custom
 
 
+@dataclass(frozen=True, slots=True)
+class Orientation:
+    """Intrinsic local X -> Y -> Z rotations relative to the pointing frame.
+
+    X follows projected ITRF velocity at zero offset. Z is the final boresight;
+    its rotation changes the field-of-view clock angle without changing pointing.
+    """
+    x: u.Angle = u.deg(0)
+    y: u.Angle = u.deg(0)
+    z: u.Angle = u.deg(0)
+
+    def _radians(self) -> tuple[float, float, float]:
+        return (require(self.x, u.Angle, "orientation.x").radians,
+                require(self.y, u.Angle, "orientation.y").radians,
+                require(self.z, u.Angle, "orientation.z").radians)
+
+
 def _to_native(value: FieldOfView) -> n.SensorPattern:
     p = n.SensorPattern()
     def angle(v: u.Angle) -> float:

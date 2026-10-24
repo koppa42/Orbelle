@@ -108,6 +108,10 @@ std::vector<std::string> fields(const ProjectSensor &a, const ProjectSensor &b) 
         result.emplace_back("field_of_view");
     if (a.roll_rad != b.roll_rad)
         result.emplace_back("roll");
+    if (a.tilt_x_rad != b.tilt_x_rad)
+        result.emplace_back("tilt_x");
+    if (a.tilt_y_rad != b.tilt_y_rad)
+        result.emplace_back("tilt_y");
     if (a.display != b.display)
         result.emplace_back("display");
     if (a.pointing != b.pointing || a.target_station_id != b.target_station_id)
@@ -498,6 +502,8 @@ ObjectRef ObjectManager::create(const objects::Sensor &definition) {
                             {},
                             definition.roll_rad,
                             definition.display};
+        value.tilt_x_rad = definition.tilt_x_rad;
+        value.tilt_y_rad = definition.tilt_y_rad;
         if (definition.pointing.target) {
             check_ref(*definition.pointing.target, next, ObjectKind::ground_station);
             value.pointing = SensorPointing::targeted;
@@ -549,6 +555,10 @@ void ObjectManager::update(const ObjectRef &ref, const objects::SensorUpdate &pa
             value.pattern = *patch.pattern;
         if (patch.roll_rad)
             value.roll_rad = *patch.roll_rad;
+        if (patch.tilt_x_rad)
+            value.tilt_x_rad = *patch.tilt_x_rad;
+        if (patch.tilt_y_rad)
+            value.tilt_y_rad = *patch.tilt_y_rad;
         if (patch.display)
             value.display = *patch.display;
         if (patch.pointing) {

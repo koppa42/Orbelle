@@ -115,6 +115,34 @@ application::ReportDefinition definition(int mode = 0) {
     return d;
 }
 } // namespace
+TEST(Coverage, ThreeAxisSensorOffsetAffectsCoverageAndCapturedResultsStayUnchanged) {
+    if (!runtime::time_frames_available() || !runtime::two_body_available()) {
+        GTEST_SKIP();
+    }
+    auto ctx = context(1);
+    auto d = definition(1);
+    d.query.object_ids = {"sensor0"};
+    d.query.follow_scenario = false;
+    d.query.first = seconds(0);
+    d.query.last = seconds(10);
+    d.query.coverage = {-.01, .01, -.01, .01, .1, 0, true};
+    const auto baseline = runtime::generate_report(ctx, d);
+    ASSERT_TRUE(baseline.coverage_statistics);
+    EXPECT_NEAR(baseline.coverage_statistics->mean_coverage_fraction, 1, 1e-12);
+    // Either local tilt can turn the entire narrow cone away from Earth.
+    for (bool use_x : {true, false}) {
+        auto &sensor = ctx.project.sensors.front();
+        sensor.tilt_x_rad = use_x ? pi : 0;
+        sensor.tilt_y_rad = use_x ? 0 : pi;
+        sensor.roll_rad = .7;
+        const auto away = runtime::generate_report(ctx, d);
+        ASSERT_TRUE(away.coverage_statistics);
+        EXPECT_EQ(away.coverage_statistics->ever_covered_area_m2, 0);
+        EXPECT_EQ(away.coverage_statistics->mean_coverage_fraction, 0);
+        EXPECT_EQ(away.coverage_statistics->maximum_gap_seconds, 10);
+    }
+    EXPECT_NEAR(baseline.coverage_statistics->mean_coverage_fraction, 1, 1e-12);
+}
 TEST(Coverage, OrekitMultiAssetWindowsAndHipparchusEllipsoidAreas) {
     if (!runtime::time_frames_available() || !runtime::two_body_available())
         GTEST_SKIP();

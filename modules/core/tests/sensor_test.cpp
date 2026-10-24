@@ -1,5 +1,6 @@
 #include <cmath>
 #include <gtest/gtest.h>
+#include <limits>
 #include <numbers>
 #include <orbelle/core/propagation/sensor.hpp>
 using namespace orbelle::core;
@@ -46,6 +47,56 @@ TEST(Sensor, RectangleFourPlanesAndRoll) {
     const auto fallback = sensor_axes({0, 0, 0}, {0, 0, 1});
     EXPECT_EQ(fallback.z, (SensorVector{0, 0, 1}));
     EXPECT_THROW((void)sensor_axes({1, 0, 0}, {0, 0, 0}), std::invalid_argument);
+}
+TEST(Sensor, IntrinsicXyzRotationMatchesAnalyticBasisAndFinalBoresight) {
+    // Independently expanded Rx(30) Ry(45) Rz(60), expressed with exact radicals.
+    const double s2 = std::sqrt(2.), s3 = std::sqrt(3.), s6 = std::sqrt(6.);
+    const SensorAxes expected{{s2 / 4, .75 + s2 / 8, s3 / 4 - s6 / 8},
+                              {-s6 / 4, s3 / 4 - s6 / 8, .25 + 3 * s2 / 8},
+                              {s2 / 2, -s2 / 4, s6 / 4}};
+    const auto actual = sensor_axes({1, 0, 0}, {0, 0, 1}, 30 * d, 45 * d, 60 * d);
+    const auto no_roll = sensor_axes({1, 0, 0}, {0, 0, 1}, 30 * d, 45 * d, 0);
+    for (std::size_t i = 0; i < 3; ++i) {
+        EXPECT_NEAR(actual.x[i], expected.x[i], 2e-15);
+        EXPECT_NEAR(actual.y[i], expected.y[i], 2e-15);
+        EXPECT_NEAR(actual.z[i], expected.z[i], 2e-15);
+        EXPECT_DOUBLE_EQ(actual.z[i], no_roll.z[i]);
+    }
+    const auto x_only = sensor_axes({1, 0, 0}, {0, 0, 1}, 90 * d, 0, 0);
+    EXPECT_NEAR(x_only.z[1], -1, 1e-15);
+    const auto y_only = sensor_axes({1, 0, 0}, {0, 0, 1}, 0, 90 * d, 0);
+    EXPECT_NEAR(y_only.z[0], 1, 1e-15);
+    const auto roll_only = sensor_axes({1, 0, 0}, {0, 0, 1}, 0, 0, 90 * d);
+    EXPECT_NEAR(roll_only.x[1], 1, 1e-15);
+    EXPECT_EQ(roll_only.z, (SensorVector{0, 0, 1}));
+}
+TEST(Sensor, TiltedAxesRemainRightHandedAtSingularAnglesAndRejectNonfiniteOffsets) {
+    for (const SensorVector velocity :
+         {SensorVector{}, SensorVector{2, -3, 5}, SensorVector{1, 2, 3}}) {
+        for (const double tilt : {-90 * d, 90 * d, 360 * d, 12.34}) {
+            const auto axes = sensor_axes(velocity, {2, -3, 5}, .43, tilt, -.72);
+            const auto local_x = axes.to_local(axes.x), local_y = axes.to_local(axes.y),
+                       local_z = axes.to_local(axes.z);
+            const SensorVector cross{axes.x[1] * axes.y[2] - axes.x[2] * axes.y[1],
+                                     axes.x[2] * axes.y[0] - axes.x[0] * axes.y[2],
+                                     axes.x[0] * axes.y[1] - axes.x[1] * axes.y[0]};
+            const SensorVector v{2, -3, 5};
+            const auto round_trip = axes.to_world(axes.to_local(v));
+            for (std::size_t i = 0; i < 3; ++i) {
+                EXPECT_NEAR(local_x[i], i == 0 ? 1 : 0, 2e-15);
+                EXPECT_NEAR(local_y[i], i == 1 ? 1 : 0, 2e-15);
+                EXPECT_NEAR(local_z[i], i == 2 ? 1 : 0, 2e-15);
+                EXPECT_NEAR(cross[i], axes.z[i], 2e-15);
+                EXPECT_NEAR(round_trip[i], v[i], 1e-14);
+            }
+        }
+    }
+    for (const double bad :
+         {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()}) {
+        EXPECT_THROW((void)sensor_axes({1, 0, 0}, {0, 0, 1}, bad, 0, 0), std::invalid_argument);
+        EXPECT_THROW((void)sensor_axes({1, 0, 0}, {0, 0, 1}, 0, bad, 0), std::invalid_argument);
+        EXPECT_THROW((void)sensor_axes({1, 0, 0}, {0, 0, 1}, 0, 0, bad), std::invalid_argument);
+    }
 }
 TEST(Sensor, CustomConcavityAndOffAxisBoundary) {
     SensorPattern p;

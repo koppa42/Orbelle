@@ -61,6 +61,7 @@ struct Sensor {
     Pointing pointing = {};
     double roll_rad = 0;
     SensorDisplay display = {};
+    double tilt_x_rad = 0, tilt_y_rad = 0;
 };
 struct SatelliteUpdate {
     std::optional<std::string> name = {};
@@ -80,6 +81,7 @@ struct SensorUpdate {
     std::optional<Pointing> pointing = {};
     std::optional<double> roll_rad = {};
     std::optional<SensorDisplay> display = {};
+    std::optional<double> tilt_x_rad = {}, tilt_y_rad = {};
 };
 } // namespace objects
 

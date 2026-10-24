@@ -720,7 +720,7 @@ class SensorDefinition:
     @overload
     def __init__(self, name: str, parent: ObjectRef, half_angle_rad: float, pointing: PointingDefinition) -> None: ...
     @overload
-    def __init__(self, name: str, parent: ObjectRef, pattern: SensorPattern, pointing: PointingDefinition, roll_rad: float = 0, display: SensorDisplay = ...) -> None: ...
+    def __init__(self, name: str, parent: ObjectRef, pattern: SensorPattern, pointing: PointingDefinition, roll_rad: float = 0, display: SensorDisplay = ..., tilt_x_rad: float = 0, tilt_y_rad: float = 0) -> None: ...
 
 class SatelliteUpdate:
     def __init__(self) -> None: ...
@@ -742,6 +742,8 @@ class SensorUpdate:
     half_angle_rad: float | None
     pattern: SensorPattern | None
     roll_rad: float | None
+    tilt_x_rad: float | None
+    tilt_y_rad: float | None
     display: SensorDisplay | None
     pointing: PointingDefinition | None
 
@@ -1595,6 +1597,8 @@ class ProjectSensor:
     half_angle_rad: float
     pattern: SensorPattern
     roll_rad: float
+    tilt_x_rad: float
+    tilt_y_rad: float
     display: SensorDisplay
     pointing: SensorPointing
     target_station_id: str

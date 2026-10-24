@@ -43,6 +43,129 @@
 #include "support/property_editor_fixture.hpp"
 
 namespace orbelle::desktop {
+TEST_F(QuantityTest, SensorOrientationDiagramFollowsDraftAnglesAndInvalidInput) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    application::Project project("Scenario", core::Epoch{0}, core::Epoch{120'000'000'000});
+    application::ProjectSensor sensor;
+    sensor.display_name = "Sensor1";
+    sensor.parent_satellite_id = "Satellite1";
+    SensorEditor editor;
+    editor.set_sensor(sensor, project, false);
+    auto *pages = editor.findChild<QStackedWidget *>("sensorPages");
+    auto *diagram = editor.findChild<QWidget *>("sensorOrientationPreview");
+    auto *zero = editor.findChild<QPushButton *>("sensorZeroRotation");
+    ASSERT_TRUE(pages && diagram && zero);
+    pages->setCurrentIndex(1);
+    editor.resize(980, 720);
+    editor.show();
+    QApplication::processEvents();
+    QApplication::processEvents();
+    EXPECT_EQ(diagram->accessibleName(), QStringLiteral("三轴偏转示意图"));
+    const auto neutral = diagram->grab().toImage();
+    const auto capture = qEnvironmentVariable("ORBELLE_SENSOR_UI_CAPTURE");
+    if (!capture.isEmpty()) {
+        EXPECT_TRUE(diagram->grab().save(capture + "/sensor-orientation-neutral.png"));
+    }
+    bool applied = false;
+    editor.apply = [&](auto) { applied = true; };
+    for (const auto *name : {"sensorTiltX", "sensorTiltY", "sensorRoll"}) {
+        auto *field = editor.findChild<QuantityEditor *>(name);
+        ASSERT_TRUE(field);
+        field->set_value(30, Unit::degree);
+        QApplication::processEvents();
+        EXPECT_NE(diagram->grab().toImage(), neutral);
+        EXPECT_TRUE(diagram->accessibleDescription().contains("30"));
+        EXPECT_TRUE(editor.has_unapplied_changes());
+        EXPECT_FALSE(applied);
+        if (!capture.isEmpty()) {
+            EXPECT_TRUE(diagram->grab().save(capture + "/sensor-orientation-" + name + ".png"));
+        }
+        choose(*field, Unit::radian);
+        EXPECT_TRUE(diagram->accessibleDescription().contains("30"));
+        text(*field)->setText("invalid");
+        QApplication::processEvents();
+        EXPECT_EQ(diagram->accessibleDescription(), QStringLiteral("角度无效，请先修正输入"));
+        zero->click();
+        QApplication::processEvents();
+        EXPECT_EQ(diagram->grab().toImage(), neutral);
+        EXPECT_FALSE(editor.has_unapplied_changes());
+    }
+}
+TEST_F(QuantityTest, SensorThreeAxisOffsetsRemainDraftUntilAppliedAndResetTogether) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    application::Project project("Scenario", core::Epoch{0}, core::Epoch{120'000'000'000});
+    project.ground_stations.push_back({"station", "Ground station", {0, 0, 0}});
+    application::ProjectSensor sensor;
+    sensor.display_name = "Sensor1";
+    sensor.parent_satellite_id = "Satellite1";
+    sensor.tilt_x_rad = .123456789012345;
+    sensor.tilt_y_rad = -.234567890123456;
+    sensor.roll_rad = .345678901234567;
+    SensorEditor editor;
+    editor.set_sensor(sensor, project, false);
+    auto *x = editor.findChild<QuantityEditor *>("sensorTiltX");
+    auto *y = editor.findChild<QuantityEditor *>("sensorTiltY");
+    auto *z = editor.findChild<QuantityEditor *>("sensorRoll");
+    auto *zero = editor.findChild<QPushButton *>("sensorZeroRotation");
+    auto *reset = editor.findChild<QPushButton *>("resetSensor");
+    auto *apply = editor.findChild<QPushButton *>("applySensor");
+    ASSERT_TRUE(x && y && z && zero && reset && apply);
+    EXPECT_EQ(editor.sensor().tilt_x_rad, sensor.tilt_x_rad);
+    EXPECT_EQ(editor.sensor().tilt_y_rad, sensor.tilt_y_rad);
+    EXPECT_EQ(editor.sensor().roll_rad, sensor.roll_rad);
+    EXPECT_FALSE(editor.has_unapplied_changes());
+    std::optional<application::ProjectSensor> applied;
+    editor.apply = [&](auto value) { applied = value; };
+    x->set_value(15, Unit::degree);
+    y->set_value(-25, Unit::degree);
+    z->set_value(40, Unit::degree);
+    editor.findChild<QPushButton *>("sensorTargeted")->click();
+    EXPECT_TRUE(editor.has_unapplied_changes());
+    EXPECT_FALSE(applied);
+    EXPECT_EQ(editor.sensor().target_station_id, "station");
+    apply->click();
+    ASSERT_TRUE(applied);
+    EXPECT_NEAR(applied->tilt_x_rad, std::numbers::pi / 12, 1e-15);
+    EXPECT_NEAR(applied->tilt_y_rad, -25 * std::numbers::pi / 180, 1e-15);
+    EXPECT_NEAR(applied->roll_rad, 40 * std::numbers::pi / 180, 1e-15);
+    editor.accept_sensor(*applied);
+    EXPECT_FALSE(editor.has_unapplied_changes());
+    zero->click();
+    EXPECT_EQ(editor.sensor().tilt_x_rad, 0);
+    EXPECT_EQ(editor.sensor().tilt_y_rad, 0);
+    EXPECT_EQ(editor.sensor().roll_rad, 0);
+    EXPECT_TRUE(editor.has_unapplied_changes());
+    reset->click();
+    EXPECT_EQ(editor.sensor().tilt_x_rad, applied->tilt_x_rad);
+    EXPECT_EQ(editor.sensor().tilt_y_rad, applied->tilt_y_rad);
+    EXPECT_EQ(editor.sensor().roll_rad, applied->roll_rad);
+    EXPECT_FALSE(editor.has_unapplied_changes());
+    auto *pages = editor.findChild<QStackedWidget *>("sensorPages");
+    ASSERT_TRUE(pages);
+    pages->setCurrentIndex(1);
+    editor.show();
+    for (int width : {360, 980}) {
+        editor.resize(width, 720);
+        QApplication::processEvents();
+        QApplication::processEvents();
+        auto *scroll = editor.findChild<QScrollArea *>("sensorPointingScroll");
+        ASSERT_TRUE(scroll);
+        EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+        EXPECT_TRUE(editor.rect().contains(QRect(apply->mapTo(&editor, QPoint{}), apply->size())));
+        const auto capture = qEnvironmentVariable("ORBELLE_SENSOR_UI_CAPTURE");
+        if (!capture.isEmpty()) {
+            EXPECT_TRUE(
+                editor.grab().save(capture + QString("/sensor-rotation-%1.png").arg(width)));
+            auto *card = editor.findChild<QWidget *>("sensorRotationCard");
+            ASSERT_TRUE(card);
+            EXPECT_TRUE(card->grab().save(capture + QString("/sensor-card-%1.png").arg(width)));
+        }
+    }
+    text(*x)->setText("invalid");
+    EXPECT_THROW((void)editor.sensor(), std::invalid_argument);
+    reset->click();
+    EXPECT_FALSE(editor.has_unapplied_changes());
+}
 TEST_F(QuantityTest, SensorPatternFieldsPreserveGeometryAndRejectInvalidBoundaries) {
     application::Project project("Scenario", core::Epoch{0}, core::Epoch{120'000'000'000});
     application::ProjectSensor sensor;
@@ -385,6 +508,11 @@ TEST_F(QuantityTest, SensorPagesPreserveDraftUnitsAndSelectionAcrossNavigationMo
             EXPECT_EQ(tree->currentItem(), leaves[index]);
             auto *scroll = qobject_cast<QScrollArea *>(pages->currentWidget());
             ASSERT_TRUE(scroll);
+            // Nested responsive cards queue a layout request when switching direction.
+            ASSERT_TRUE(wait_for_ui([&] {
+                return scroll->horizontalScrollBar()->maximum() == 0 &&
+                       scroll->widget()->width() <= scroll->viewport()->width();
+            }));
             EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
             EXPECT_LE(scroll->widget()->width(), scroll->viewport()->width());
             EXPECT_LE(scroll->widget()->width(), 640);

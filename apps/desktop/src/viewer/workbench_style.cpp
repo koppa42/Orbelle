@@ -1012,6 +1012,10 @@ QLabel#sensorBadge { background: @accentWash; border: 1px solid @border; border-
 QFrame#sensorParent { background: @panel; border: 1px solid @line; border-radius: 6px; }
 QLabel#sensorParentName { color: @textSoft; }
 QFrame#sensorFov { background: @panel; border: 1px solid @line; border-radius: 8px; }
+QFrame#sensorRotationCard { background: @panel; border: 1px solid @line; border-radius: 8px; }
+QPushButton#sensorZeroRotation { background: transparent; border-color: transparent; padding: 3px 6px; color: @textMuted; }
+QPushButton#sensorZeroRotation:hover { background: @accentHover; color: @text; }
+QPushButton#sensorZeroRotation:focus { border-color: @accent; }
 QLabel#sensorFullAngle { color: @accent; font-size: 12px; }
 QPushButton[sensorChoice="true"] { background: @panel; border: 1px solid @border; border-radius: 4px; padding: 3px 8px; color: @textSoft; }
 QPushButton[sensorChoice="true"]:hover { background: @accentHover; border-color: @borderStrong; }

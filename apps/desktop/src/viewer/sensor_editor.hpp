@@ -13,6 +13,7 @@ class QSpinBox;
 namespace orbelle::desktop {
 class QuantityEditor;
 class SensorAnglePreview;
+class SensorOrientationPreview;
 class SensorParentLabel;
 class ObjectSelectionField;
 class SensorEditor final : public QDialog {
@@ -45,6 +46,7 @@ class SensorEditor final : public QDialog {
     ObjectSelectionField *target_;
     QuantityEditor *angle_;
     QuantityEditor *inner_, *clock_min_, *clock_max_, *horizontal_, *vertical_, *roll_, *range_;
+    QuantityEditor *tilt_x_, *tilt_y_;
     QComboBox *type_;
     QTableWidget *points_;
     QWidget *cone_fields_, *inner_fields_, *complex_fields_, *rectangle_fields_, *custom_fields_;
@@ -54,6 +56,7 @@ class SensorEditor final : public QDialog {
     std::uint32_t color_value_ = 0xf1a6ca;
     SensorParentLabel *parent_;
     SensorAnglePreview *preview_;
+    SensorOrientationPreview *orientation_preview_ = nullptr;
     QLabel *title_, *angle_label_, *full_angle_, *pointing_hint_, *target_hint_, *error_;
     QWidget *target_row_;
     QPushButton *apply_, *close_;

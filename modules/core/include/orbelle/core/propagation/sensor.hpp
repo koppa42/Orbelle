@@ -52,6 +52,12 @@ struct SensorAxes {
 // uses the least aligned ITRF coordinate axis. Positive roll rotates X toward Y.
 [[nodiscard]] SensorAxes sensor_axes(const SensorVector &velocity_itrf,
                                      const SensorVector &boresight_itrf, double roll_rad = 0);
+// Intrinsic right-handed rotations about local X, then the rotated Y, then the
+// final boresight Z. The zero-angle frame uses the same velocity convention above.
+// Thus R = R_base * Rx(tilt_x) * Ry(tilt_y) * Rz(roll); roll does not change Z.
+[[nodiscard]] SensorAxes sensor_axes(const SensorVector &velocity_itrf,
+                                     const SensorVector &boresight_itrf, double tilt_x_rad,
+                                     double tilt_y_rad, double roll_rad);
 // STK .pattern subset: HalfAngleAzimuthData, AzElMaskData, ReferenceDistance/PatternData.
 // Unknown directives, open/self-intersecting contours, and rear-hemisphere points fail.
 [[nodiscard]] SensorPattern parse_sensor_pattern(std::string_view text);

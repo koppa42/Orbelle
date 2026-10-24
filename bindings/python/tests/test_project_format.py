@@ -19,7 +19,7 @@ class ProjectFormatTests(unittest.TestCase):
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 49)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 50)
         self.path.write_bytes(self.raw)
         project = ob.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
@@ -63,6 +63,8 @@ class ProjectFormatTests(unittest.TestCase):
         self.assertEqual(plan.segments[0].duration.nanoseconds, 200_000_000_001)
         self.assertEqual(plan.segments[1].delta_v_mps, (12, -3, .5))
         self.assertEqual(project.objects["sensor-a"].parent, project.objects["satellite-a"])
+        self.assertEqual(project.objects["sensor-a"].orientation.x.radians, .125)
+        self.assertEqual(project.objects["sensor-a"].orientation.y.radians, -.25)
         self.assertEqual(project.analysis_status, ob.AnalysisStatus.UNRECORDED)
         self.assertEqual(project.to_data().reports[0].query.lighting_ephemeris, "fixture-sun")
         self.assertEqual(project.to_data().reports[1].query.kind, ob.ReportKind.ORBITAL_EVENTS)
@@ -139,14 +141,14 @@ class ProjectFormatTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(),altered)
 
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(49), 50, 0xFFFFFFFF):
+        for version in (*range(50), 51, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (ob.load_project_data, ob.load_project,
                                  ob.Project.open, ob.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(ob.ProjectError, f"version {version};.*only version 49"):
+                    with self.assertRaisesRegex(ob.ProjectError, f"version {version};.*only version 50"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 

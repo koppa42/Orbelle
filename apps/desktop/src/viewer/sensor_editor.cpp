@@ -1,5 +1,6 @@
 #include "sensor_editor.hpp"
 #include "../ui_text.hpp"
+#include "form_kit.hpp"
 #include "object_selection.hpp"
 #include "project_update.hpp"
 #include "quantity_editor.hpp"
@@ -33,6 +34,10 @@
 
 namespace orbelle::desktop {
 namespace {
+QColor sensor_axis_color(int axis) {
+    constexpr std::array colors{"#ee9aab", "#8fd2ab", "#8cbfee"};
+    return QColor(colors[axis]);
+}
 QTableWidgetItem *angle_item(double radians) {
     auto *item = new QTableWidgetItem(QString::number(radians * 180 / std::numbers::pi, 'g', 15));
     item->setData(Qt::UserRole, radians);
@@ -172,6 +177,120 @@ class SensorAnglePreview final : public QWidget {
     std::optional<double> degrees_;
     bool simple_ = true;
     std::vector<std::vector<core::SensorVector>> loops_;
+};
+
+// Local orientation only. The rectangle indicates clock angle, not the actual FOV.
+class SensorOrientationPreview final : public QWidget {
+  public:
+    explicit SensorOrientationPreview(QWidget *parent) : QWidget(parent) {
+        setObjectName("sensorOrientationPreview");
+        setMinimumWidth(220);
+        setFixedHeight(224);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        setAccessibleName(ui::text("sensor.pointing.diagram.title"));
+    }
+    void set_angles(std::optional<std::array<double, 3>> angles) {
+        axes_.reset();
+        if (angles) {
+            axes_ =
+                core::sensor_axes({1, 0, 0}, {0, 0, 1}, (*angles)[0], (*angles)[1], (*angles)[2]);
+            setAccessibleDescription(ui::text("sensor.pointing.diagram.angles")
+                                         .arg((*angles)[0] * 180 / std::numbers::pi, 0, 'g', 6)
+                                         .arg((*angles)[1] * 180 / std::numbers::pi, 0, 'g', 6)
+                                         .arg((*angles)[2] * 180 / std::numbers::pi, 0, 'g', 6));
+        } else {
+            setAccessibleDescription(ui::text("sensor.pointing.diagram.invalid"));
+        }
+        update();
+    }
+
+  protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(theme::color(theme::text_muted));
+        painter.drawText(QRect(8, 0, width() - 16, 20), Qt::AlignCenter,
+                         ui::text("sensor.pointing.diagram.heading"));
+        if (!axes_) {
+            painter.drawText(rect().adjusted(20, 40, -20, -40), Qt::AlignCenter | Qt::TextWordWrap,
+                             ui::text("sensor.pointing.diagram.invalid"));
+            return;
+        }
+        using V = core::SensorVector;
+        const QPointF origin(width() / 2. - 12, 104);
+        const double scale = std::min(68., (width() - 64.) / 2.);
+        const auto project = [&](const V &v) {
+            return origin +
+                   scale * QPointF(.8 * v[0] + .6 * v[1], .36 * v[0] - .48 * v[1] - .8 * v[2]);
+        };
+        const auto arrow = [&](const V &axis, QColor color, const QString &label, bool baseline) {
+            V tip = axis;
+            for (auto &v : tip)
+                v *= baseline ? 1.17 : .95;
+            const auto end = project(tip);
+            const auto delta = end - origin;
+            const auto length = std::hypot(delta.x(), delta.y());
+            painter.setPen(
+                QPen(color, baseline ? 1.1 : 2, baseline ? Qt::DashLine : Qt::SolidLine));
+            painter.drawLine(origin, end);
+            painter.setBrush(color);
+            if (length > 8) {
+                const auto along = delta / length;
+                const QPointF normal(-along.y(), along.x());
+                painter.setPen(Qt::NoPen);
+                painter.drawPolygon(
+                    QPolygonF{end, end - 7 * along + 3 * normal, end - 7 * along - 3 * normal});
+            }
+            // Put current-axis labels beside the arrow so zero offsets do not
+            // superimpose X/Y/Z on the longer baseline's X0/Y0/Z0 labels.
+            const auto offset =
+                length > 1
+                    ? (baseline
+                           ? delta * (13 / length)
+                           : delta * (6 / length) + QPointF(-delta.y(), delta.x()) * (13 / length))
+                    : QPointF(0, -12);
+            const auto position = end + offset;
+            painter.setPen(color);
+            painter.drawText(QRectF(std::clamp(position.x() - 20, 4., width() - 44.),
+                                    std::clamp(position.y() - 10, 22., 158.), 40, 20),
+                             Qt::AlignCenter, label);
+        };
+        const auto muted = theme::color(theme::text_muted, 155);
+        arrow({1, 0, 0}, muted, QStringLiteral("X0"), true);
+        arrow({0, 1, 0}, muted, QStringLiteral("Y0"), true);
+        arrow({0, 0, 1}, muted, QStringLiteral("Z0"), true);
+        const auto x_color = sensor_axis_color(0), y_color = sensor_axis_color(1),
+                   z_color = sensor_axis_color(2);
+        // An asymmetric orientation plane makes rotation about Z visible, including
+        // when the actual field of view is a rotationally symmetric cone.
+        QPolygonF plane;
+        for (const auto &corner : std::array<QPointF, 4>{QPointF(-.28, -.17), QPointF(.28, -.17),
+                                                         QPointF(.28, .17), QPointF(-.28, .17)}) {
+            V point{};
+            for (std::size_t i = 0; i < 3; ++i)
+                point[i] = .58 * axes_->z[i] + corner.x() * axes_->x[i] + corner.y() * axes_->y[i];
+            plane << project(point);
+        }
+        auto plane_fill = z_color;
+        plane_fill.setAlpha(24);
+        painter.setPen(QPen(z_color, 1));
+        painter.setBrush(plane_fill);
+        painter.drawPolygon(plane);
+        arrow(axes_->x, x_color, QStringLiteral("X"), false);
+        arrow(axes_->y, y_color, QStringLiteral("Y"), false);
+        arrow(axes_->z, z_color, QStringLiteral("Z"), false);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(theme::color(theme::text));
+        painter.drawEllipse(origin, 3, 3);
+        painter.setPen(theme::color(theme::text_muted));
+        painter.drawText(QRect(8, 181, width() - 16, 20), Qt::AlignCenter,
+                         ui::text("sensor.pointing.diagram.legend"));
+        painter.drawText(QRect(8, 204, width() - 16, 16), Qt::AlignCenter,
+                         ui::text("sensor.pointing.diagram.scope"));
+    }
+
+  private:
+    std::optional<core::SensorAxes> axes_;
 };
 
 SensorEditor::SensorEditor(QWidget *parent) : QDialog(parent) {
@@ -590,11 +709,77 @@ SensorEditor::SensorEditor(QWidget *parent) : QDialog(parent) {
     target_layout->addWidget(target_hint_);
     pointing_layout->addWidget(target_row_);
     layout->addLayout(pointing_layout);
-    roll_ = field(layout, body, "sensor.geometry.roll", "sensorRoll", -360, 360);
-    auto *roll_hint = new QLabel(ui::text("sensor.geometry.roll_hint"), body);
-    roll_hint->setWordWrap(true);
-    roll_hint->setObjectName("sensorCaption");
-    layout->addWidget(roll_hint);
+    layout->addSpacing(8);
+    auto *rotation_card = new QFrame(body);
+    rotation_card->setObjectName("sensorRotationCard");
+    auto *card_rows = new QVBoxLayout(rotation_card);
+    card_rows->setContentsMargins(16, 12, 16, 12);
+    card_rows->setSpacing(12);
+    auto *rotation_header = new QHBoxLayout;
+    rotation_header->setSpacing(6);
+    auto *rotation_title = new QLabel(ui::text("sensor.pointing.rotation"), rotation_card);
+    rotation_title->setObjectName("sensorSectionTitle");
+    rotation_header->addWidget(rotation_title);
+    auto *rotation_help = info_marker(rotation_card);
+    append_help(rotation_help, ui::text("sensor.geometry.roll_hint"));
+    rotation_header->addWidget(rotation_help);
+    rotation_header->addStretch();
+    auto *zero_rotation = new QPushButton(ui::text("sensor.pointing.zero_rotation"), rotation_card);
+    zero_rotation->setObjectName("sensorZeroRotation");
+    zero_rotation->setAutoDefault(false);
+    rotation_header->addWidget(zero_rotation);
+    card_rows->addLayout(rotation_header);
+    auto *rotation = new QWidget(rotation_card);
+    auto *rotation_columns = new QHBoxLayout(rotation);
+    rotation_columns->setContentsMargins(0, 0, 0, 0);
+    rotation_columns->setSpacing(24);
+    QWidget *rotation_fields = nullptr;
+    auto *rotation_rows = column(rotation_columns, rotation_fields);
+    rotation_fields->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    rotation_rows->setSpacing(12);
+    hint(rotation_rows, rotation_fields, "sensor.pointing.diagram.order");
+    const auto rotation_field = [&](int axis, const char *key, const char *name) {
+        auto *row = new QHBoxLayout;
+        row->setSpacing(10);
+        auto *badge = new QLabel(QString(QChar('X' + axis)), rotation_fields);
+        badge->setAlignment(Qt::AlignCenter);
+        badge->setFixedSize(24, 28);
+        badge->setStyleSheet(QStringLiteral("color: %1; font-weight: 600; font-size: 14px;")
+                                 .arg(sensor_axis_color(axis).name()));
+        badge->setToolTip(ui::text(key));
+        auto *editor = new QuantityEditor(Unit::degree, rotation_fields);
+        editor->setObjectName(name);
+        editor->set_label(ui::text(key));
+        editor->set_range(-360, 360, Unit::degree);
+        badge->setBuddy(editor->findChild<QLineEdit *>("quantityValue"));
+        row->addWidget(badge);
+        row->addWidget(editor, 1);
+        rotation_rows->addLayout(row);
+        connect(editor, &QuantityEditor::valueChanged, this, [this] { update_preview(); });
+        connect(editor, &QuantityEditor::unitChanged, this, [this] { update_preview(); });
+        return editor;
+    };
+    tilt_x_ = rotation_field(0, "sensor.pointing.tilt_x", "sensorTiltX");
+    tilt_y_ = rotation_field(1, "sensor.pointing.tilt_y", "sensorTiltY");
+    roll_ = rotation_field(2, "sensor.geometry.roll", "sensorRoll");
+    hint(rotation_rows, rotation_fields, "sensor.pointing.offset_hint");
+    orientation_preview_ = new SensorOrientationPreview(rotation);
+    rotation_columns->addWidget(orientation_preview_, 1, Qt::AlignTop);
+    // Observe the viewport: a horizontal form's minimum width must not prevent
+    // the very resize that switches it back to a vertical layout.
+    rotation_columns->setDirection(QBoxLayout::TopToBottom);
+    auto *pointing_scroll = qobject_cast<QScrollArea *>(pages->widget(1));
+    new WidthObserver(
+        pointing_scroll->viewport(), [rotation_columns, mode = WidthMode{}](int width) mutable {
+            rotation_columns->setDirection(mode.narrow(width, 590) ? QBoxLayout::TopToBottom
+                                                                   : QBoxLayout::LeftToRight);
+        });
+    card_rows->addWidget(rotation);
+    layout->addWidget(rotation_card);
+    connect(zero_rotation, &QPushButton::clicked, this, [this] {
+        for (auto *angle : {tilt_x_, tilt_y_, roll_})
+            angle->set_value(0, Unit::radian);
+    });
     layout->addStretch();
     page("sensorDisplayScroll", ui::text("sensor.pages.attributes_2d"));
     show_2d_ = new QCheckBox(ui::text("sensor.geometry.show_2d"), body);
@@ -708,9 +893,11 @@ SensorEditor::SensorEditor(QWidget *parent) : QDialog(parent) {
             update_pointing();
     });
     connect(target_, &ObjectSelectionField::selectionChanged, this, [this] { update_pointing(); });
-    connect(
-        angle_->findChild<QLineEdit *>("quantityValue"), &QLineEdit::textChanged, this,
-        [this] { update_preview(); }, Qt::QueuedConnection);
+    for (auto *editor : {angle_, tilt_x_, tilt_y_, roll_}) {
+        connect(
+            editor->findChild<QLineEdit *>("quantityValue"), &QLineEdit::textChanged, this,
+            [this] { update_preview(); }, Qt::QueuedConnection);
+    }
     nadir->setChecked(true);
     connect(type_, &QComboBox::currentIndexChanged, this, [this] {
         update_type();
@@ -766,6 +953,15 @@ void SensorEditor::update_pointing() {
 }
 
 void SensorEditor::update_preview() {
+    if (orientation_preview_) {
+        try {
+            orientation_preview_->set_angles(std::array{tilt_x_->value(Unit::radian),
+                                                        tilt_y_->value(Unit::radian),
+                                                        roll_->value(Unit::radian)});
+        } catch (const std::exception &) {
+            orientation_preview_->set_angles(std::nullopt);
+        }
+    }
     try {
         const auto p = pattern();
         preview_->set_pattern(p);
@@ -801,6 +997,8 @@ void SensorEditor::load_fields() {
     horizontal_->set_value(p.horizontal_half_angle_rad, Unit::radian);
     vertical_->set_value(p.vertical_half_angle_rad, Unit::radian);
     roll_->set_value(original_.roll_rad, Unit::radian);
+    tilt_x_->set_value(original_.tilt_x_rad, Unit::radian);
+    tilt_y_->set_value(original_.tilt_y_rad, Unit::radian);
     points_->setRowCount(0);
     auto points = p.custom_points;
     if (points.empty())
@@ -879,6 +1077,8 @@ application::ProjectSensor SensorEditor::sensor() const {
         throw std::invalid_argument(ui::utf8("sensor_editor.s"));
     s.pattern = pattern();
     s.roll_rad = roll_->value(Unit::radian);
+    s.tilt_x_rad = tilt_x_->value(Unit::radian);
+    s.tilt_y_rad = tilt_y_->value(Unit::radian);
     s.display = {show_2d_->isChecked(), show_3d_->isChecked(),     fill_->isChecked(),
                  color_value_,          opacity_->value() / 100.0, range_->value(Unit::metre)};
     if (opacity_->value() == qRound(original_.display.opacity * 100))
