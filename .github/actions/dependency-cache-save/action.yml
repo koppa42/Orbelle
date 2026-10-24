@@ -1,0 +1,33 @@
+name: Save completed dependency binaries
+description: Preserve changed or newly seeded snapshots, including after a failed or cancelled build.
+inputs:
+  state:
+    description: Directory created by dependency-cache-restore
+    required: true
+  installed:
+    description: vcpkg installed root containing the triplet directories
+    required: true
+  log:
+    description: Dependency installation log
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Compare dependency inventory and ABI inputs
+      id: plan
+      if: always()
+      shell: python {0}
+      env:
+        CACHE_STATE: ${{ inputs.state }}
+        CACHE_INSTALLED: ${{ inputs.installed }}
+        CACHE_LOG: ${{ inputs.log }}
+      run: |
+        import os, subprocess, sys
+        subprocess.run([sys.executable, 'tools/ci/dependency_cache.py', 'finish',
+            '--state', os.environ['CACHE_STATE'], '--installed', os.environ['CACHE_INSTALLED'],
+            '--log', os.environ['CACHE_LOG']], check=True)
+    - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      if: ${{ always() && steps.plan.outputs.save == 'true' }}
+      with:
+        path: ${{ steps.plan.outputs.cache }}
+        key: ${{ steps.plan.outputs.key }}

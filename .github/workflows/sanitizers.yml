@@ -32,23 +32,17 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ steps.version.outputs.baseline-python }}
-      - name: Identify runner image
-        id: toolchain
-        run: echo "image=$ImageVersion" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: microsoft/vcpkg
           ref: ${{ steps.version.outputs.vcpkg-baseline }}
           path: out/tools/vcpkg
           persist-credentials: false
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache
+      - uses: ./.github/actions/dependency-cache-restore
         with:
+          profile: linux
           path: ${{ runner.temp }}/linux/dependencies/binary-cache
-          key: vcpkg-ubuntu24-x64-v1-${{ steps.toolchain.outputs.image }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/ports/**', 'tools/ci/check_linux.py') }}
-          restore-keys: |
-            vcpkg-ubuntu24-x64-v1-${{ steps.toolchain.outputs.image }}-
-            vcpkg-ubuntu24-x64-v1-
+          state: ${{ runner.temp }}/reports/dependency-cache
       - name: Prepare toolchain
         run: |
           sudo apt-get update
@@ -59,6 +53,13 @@ jobs:
           python tools/ci/check_linux.py --stage sanitizers \
             --source "$GITHUB_WORKSPACE" --vcpkg-root "$GITHUB_WORKSPACE/out/tools/vcpkg" \
             --work "$RUNNER_TEMP/linux" --reports "$RUNNER_TEMP/reports/linux-sanitizers"
+      - uses: ./.github/actions/dependency-cache-save
+        if: always()
+        timeout-minutes: 4
+        with:
+          state: ${{ runner.temp }}/reports/dependency-cache
+          installed: ${{ runner.temp }}/linux/dependencies/installed
+          log: ${{ runner.temp }}/reports/linux-sanitizers/dependencies.log
       - name: Summarize command timings
         if: always()
         run: python tools/ci/summarize_timings.py --reports "$RUNNER_TEMP/reports"
@@ -67,6 +68,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: linux-sanitizer-reports
-          path: ${{ runner.temp }}/reports
+          path: |
+            ${{ runner.temp }}/reports
+            ${{ runner.temp }}/linux/dependencies/buildtrees/**/vcpkg_abi_info.txt
+            ${{ runner.temp }}/linux/dependencies/installed/*/share/*/vcpkg_abi_info.txt
           overwrite: true
           retention-days: 14
