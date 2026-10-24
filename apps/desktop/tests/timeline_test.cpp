@@ -2,10 +2,12 @@
 #include <QApplication>
 #include <QDate>
 #include <QFile>
+#include <QHelpEvent>
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QMouseEvent>
 #include <QTemporaryDir>
+#include <QToolTip>
 #include <QWheelEvent>
 #include <algorithm>
 #include <cmath>
@@ -72,6 +74,37 @@ TEST_F(Timeline, ZoomedPointerAndKeyboardSeekKeepMillisecondPrecision) {
     key(widget, Qt::Key_End);
     EXPECT_EQ(*requested, first + day);
     EXPECT_EQ(widget.visible_last(), first + day);
+}
+TEST_F(Timeline, HoverDetailsWaitForHelpEventAndStayHiddenDuringDragging) {
+    MissionTimeline widget;
+    widget.resize(1000, 144);
+    widget.show();
+    QCoreApplication::processEvents();
+    const auto point = widget.detail_rect().center().toPoint();
+    QMouseEvent move(QEvent::MouseMove, point, widget.mapToGlobal(point), Qt::NoButton,
+                     Qt::NoButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(&widget, &move);
+    EXPECT_FALSE(QToolTip::isVisible());
+    QHelpEvent help(QEvent::ToolTip, point, widget.mapToGlobal(point));
+    QCoreApplication::sendEvent(&widget, &help);
+    EXPECT_TRUE(help.isAccepted());
+    EXPECT_TRUE(QToolTip::isVisible());
+    EXPECT_TRUE(QToolTip::text().contains("UTC"));
+    QMouseEvent press(QEvent::MouseButtonPress, point, widget.mapToGlobal(point), Qt::LeftButton,
+                      Qt::LeftButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(&widget, &press);
+    QCoreApplication::sendEvent(&widget, &help);
+    EXPECT_FALSE(help.isAccepted());
+    EXPECT_FALSE(QToolTip::isVisible());
+    QMouseEvent release(QEvent::MouseButtonRelease, point, widget.mapToGlobal(point),
+                        Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(&widget, &release);
+    const auto overview = widget.overview_rect().center().toPoint();
+    QHelpEvent overview_help(QEvent::ToolTip, overview, widget.mapToGlobal(overview));
+    QCoreApplication::sendEvent(&widget, &overview_help);
+    EXPECT_TRUE(overview_help.isAccepted());
+    EXPECT_TRUE(QToolTip::isVisible());
+    EXPECT_TRUE(QToolTip::text().contains(QStringLiteral("拖动总览")));
 }
 TEST_F(Timeline, DownloadedTimeDataDrivesFutureEditorsAndCalendarTicks) {
     QTemporaryDir temporary;

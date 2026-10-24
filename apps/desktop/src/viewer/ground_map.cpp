@@ -261,7 +261,6 @@ GroundMap::GroundMap(QImage imagery, QWidget *parent)
     setAccessibleName(ui::text("ground_map.label"));
     const auto navigation_help = ui::text("ground_map.navigation_help");
     setAccessibleDescription(navigation_help);
-    setToolTip(navigation_help);
 }
 GroundMap::~GroundMap() {
     footprint_timer_.stop();

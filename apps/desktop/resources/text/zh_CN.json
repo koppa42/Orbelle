@@ -402,6 +402,7 @@
     "graphics_workbench.menu_bar.add_menu_3": "数据",
     "graphics_workbench.menu_bar.add_menu_4": "分析",
     "graphics_workbench.name": "重命名对象",
+    "graphics_workbench.navigation_help": "视图操作说明",
     "graphics_workbench.new_action.set_tool_tip": "新建场景 · Ctrl+N",
     "graphics_workbench.new_id": "不再使用",
     "graphics_workbench.object_commands.add_action": "重命名…",

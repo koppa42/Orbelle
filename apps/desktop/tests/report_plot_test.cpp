@@ -16,6 +16,7 @@
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QFileDialog>
+#include <QHelpEvent>
 #include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
@@ -29,6 +30,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QToolButton>
+#include <QToolTip>
 #include <QTreeWidget>
 #include <QWheelEvent>
 #include <algorithm>
@@ -353,6 +355,50 @@ TEST(ReportPlot, AngleWrapDoesNotDrawFalseCrossingAndPixelReductionRetainsPeaks)
     plot.set_result(data, 3, "X (km)");
     EXPECT_GT(curve_pixels(plot.image(1)), 10); // A one-sample peak survives pixel reduction.
     EXPECT_EQ(data->table.rows().size(), 20000U);
+}
+
+TEST(ReportPlot, DataHintsWaitForHelpEventAndDoNotReappearDuringDrag) {
+    (void)test_app();
+    application::ReportDefinition definition;
+    definition.format.time_scale = application::ReportTimeScale::tai;
+    auto result = std::make_shared<runtime::ReportResult>(runtime::ReportResult{
+        definition, results::Table{{{"object.id", "ID", ""},
+                                    {"object.name", "Object", ""},
+                                    {"time.epoch", "Time", "epoch"},
+                                    {"state.x", "X", "m"}},
+                                   {{std::string("a"), std::string("A"), core::Epoch{0}, 1000.0},
+                                    {std::string("a"), std::string("A"),
+                                     core::Epoch{10'000'000'000}, 2000.0}}}});
+    result->last = core::Epoch{10'000'000'000};
+    ReportPlot plot;
+    plot.resize(600, 400);
+    plot.set_result(result, 3, "Position X");
+    plot.show();
+    QCoreApplication::processEvents();
+    const QPoint point(300, 180);
+    QMouseEvent move(QEvent::MouseMove, point, plot.mapToGlobal(point), Qt::NoButton, Qt::NoButton,
+                     Qt::NoModifier);
+    QCoreApplication::sendEvent(&plot, &move);
+    EXPECT_FALSE(QToolTip::isVisible());
+    QHelpEvent help(QEvent::ToolTip, point, plot.mapToGlobal(point));
+    QCoreApplication::sendEvent(&plot, &help);
+    EXPECT_TRUE(help.isAccepted());
+    EXPECT_TRUE(QToolTip::isVisible());
+    EXPECT_TRUE(QToolTip::text().contains("<b>A</b>"));
+    QMouseEvent press(QEvent::MouseButtonPress, point, plot.mapToGlobal(point), Qt::LeftButton,
+                      Qt::LeftButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(&plot, &press);
+    QCoreApplication::sendEvent(&plot, &move);
+    QCoreApplication::sendEvent(&plot, &help);
+    EXPECT_FALSE(help.isAccepted());
+    EXPECT_FALSE(QToolTip::isVisible());
+    QMouseEvent release(QEvent::MouseButtonRelease, point, plot.mapToGlobal(point), Qt::LeftButton,
+                        Qt::NoButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(&plot, &release);
+    QHelpEvent outside(QEvent::ToolTip, {1, 1}, plot.mapToGlobal(QPoint(1, 1)));
+    QCoreApplication::sendEvent(&plot, &outside);
+    EXPECT_FALSE(outside.isAccepted());
+    EXPECT_FALSE(QToolTip::isVisible());
 }
 
 TEST(ReportPlot, CachedPaintingMatchesExportAfterViewDataFontAndOverlayChanges) {

@@ -1,6 +1,8 @@
 #include "coverage_map.hpp"
 #include "../ui_text.hpp"
 #include "workbench_style.hpp"
+#include <QApplication>
+#include <QHelpEvent>
 #include <QImage>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -32,6 +34,7 @@ CoverageMap::CoverageMap(QWidget *parent) : QWidget(parent) {
 }
 void CoverageMap::set_result(std::shared_ptr<const runtime::ReportResult> result,
                              bool reset_selection) {
+    QToolTip::hideText();
     result_ = std::move(result);
     if (reset_selection || !result_ || !result_->coverage_statistics ||
         selected_ >= result_->coverage_statistics->points.size())
@@ -39,6 +42,7 @@ void CoverageMap::set_result(std::shared_ptr<const runtime::ReportResult> result
     update();
 }
 void CoverageMap::set_metric(int metric) {
+    QToolTip::hideText();
     metric_ = metric;
     update();
 }
@@ -149,21 +153,31 @@ void CoverageMap::mousePressEvent(QMouseEvent *event) {
     }
     QWidget::mousePressEvent(event);
 }
-void CoverageMap::mouseMoveEvent(QMouseEvent *event) {
-    if (result_ && result_->coverage_statistics)
+bool CoverageMap::event(QEvent *event) {
+    if (event->type() != QEvent::ToolTip)
+        return QWidget::event(event);
+    const auto *help = static_cast<QHelpEvent *>(event);
+    if (QApplication::mouseButtons() == Qt::NoButton && result_ && result_->coverage_statistics)
         for (const auto &point : result_->coverage_statistics->points)
-            if (cell_rect(point.cell).contains(event->position())) {
-                QToolTip::showText(event->globalPosition().toPoint(),
+            if (cell_rect(point.cell).contains(help->pos())) {
+                QToolTip::showText(help->globalPos(),
                                    ui::text("coverage_map.label_4")
                                        .arg(point.cell.location.longitude_rad * degrees, 0, 'f', 3)
                                        .arg(point.cell.location.latitude_rad * degrees, 0, 'f', 3)
                                        .arg(value(point), 0, 'f', 3)
                                        .arg(metric_ == 0 ? "%" : "h")
                                        .arg(point.cell.area_m2 / 1e6, 0, 'f', 1),
-                                   this);
-                return;
+                                   this, cell_rect(point.cell).toAlignedRect());
+                event->accept();
+                return true;
             }
     QToolTip::hideText();
+    event->ignore();
+    return true;
+}
+void CoverageMap::mouseMoveEvent(QMouseEvent *event) {
+    QToolTip::hideText();
+    QWidget::mouseMoveEvent(event);
 }
 void CoverageMap::keyPressEvent(QKeyEvent *event) {
     if (result_ && result_->coverage_statistics && !result_->coverage_statistics->points.empty()) {

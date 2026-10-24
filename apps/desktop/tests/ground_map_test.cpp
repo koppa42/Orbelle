@@ -232,6 +232,8 @@ class GroundMapTest : public ::testing::Test {
 };
 TEST_F(GroundMapTest, ShortViewportFillsWithoutStretchingAndCanPanOrShowTheWholeWorld) {
     GroundMap map(imagery_);
+    EXPECT_TRUE(map.toolTip().isEmpty());
+    EXPECT_FALSE(map.accessibleDescription().isEmpty());
     map.resize(1000, 110);
     const auto p = [](double longitude, double latitude) {
         return core::ground_station_position(

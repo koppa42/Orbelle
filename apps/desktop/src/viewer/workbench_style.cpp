@@ -21,6 +21,7 @@
 #include <QStyleOption>
 #include <QStyleOptionViewItem>
 #include <QToolButton>
+#include <QToolTip>
 #include <algorithm>
 #include <iterator>
 #include <stdexcept>
@@ -50,6 +51,8 @@ class WorkbenchStyle final : public QProxyStyle {
         QProxyStyle::unpolish(widget);
     }
     bool eventFilter(QObject *watched, QEvent *event) override {
+        if (event->type() == QEvent::KeyPress)
+            QToolTip::hideText();
         if (event->type() == QEvent::Wheel && qobject_cast<QAbstractSpinBox *>(watched)) {
             // Ignored native wheel events continue to the surrounding scroll area.
             event->ignore();
@@ -61,6 +64,10 @@ class WorkbenchStyle final : public QProxyStyle {
                   QStyleHintReturn *return_data) const override {
         if (hint == SH_ComboBox_AllowWheelScrolling)
             return false; // The open popup keeps its ordinary item-view scrolling.
+        if (hint == SH_ToolTip_WakeUpDelay)
+            return 1200;
+        if (hint == SH_ToolTip_FallAsleepDelay)
+            return 0; // Every target needs a deliberate pause, including adjacent controls.
         return QProxyStyle::styleHint(hint, option, widget, return_data);
     }
     int pixelMetric(PixelMetric metric, const QStyleOption *option,
@@ -611,7 +618,9 @@ void style_dock(QDockWidget *dock, WorkbenchIcon icon) {
 void apply_workbench_style(QApplication &app) {
     // A dark scheme also gives Windows a dark native title bar and dark system dialogs.
     app.styleHints()->setColorScheme(Qt::ColorScheme::Dark);
-    app.setStyle(new WorkbenchStyle);
+    auto *style = new WorkbenchStyle;
+    app.setStyle(style);
+    app.installEventFilter(style);
     QPalette palette;
     palette.setColor(QPalette::Window, theme::color(theme::surface));
     palette.setColor(QPalette::WindowText, theme::color(theme::text));

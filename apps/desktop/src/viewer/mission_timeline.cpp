@@ -1,7 +1,9 @@
 #include "mission_timeline.hpp"
 #include "../ui_text.hpp"
 #include "workbench_style.hpp"
+#include <QApplication>
 #include <QDateTime>
+#include <QHelpEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -481,7 +483,33 @@ void MissionTimeline::drag_to(double x) {
         break;
     }
 }
+bool MissionTimeline::event(QEvent *event) {
+    if (event->type() != QEvent::ToolTip)
+        return QSlider::event(event);
+    const auto *help = static_cast<QHelpEvent *>(event);
+    if (drag_ == Drag::none && QApplication::mouseButtons() == Qt::NoButton) {
+        const auto overview = overview_rect().adjusted(-5, -3, 5, 4);
+        if (overview.contains(help->pos())) {
+            QToolTip::showText(help->globalPos(), ui::text("mission_timeline.label_13"), this,
+                               overview.toAlignedRect());
+            event->accept();
+            return true;
+        }
+        if (detail_rect().contains(help->pos())) {
+            QToolTip::showText(help->globalPos(),
+                               full_time(time_at(help->pos().x()), scale_, *time_) + " " +
+                                   scale_name(scale_) + ui::text("mission_timeline.label_14"),
+                               this, detail_rect().toAlignedRect());
+            event->accept();
+            return true;
+        }
+    }
+    QToolTip::hideText();
+    event->ignore();
+    return true;
+}
 void MissionTimeline::mouseMoveEvent(QMouseEvent *event) {
+    QToolTip::hideText();
     if (drag_ != Drag::none) {
         drag_to(event->position().x());
     } else if (overview_rect().adjusted(-5, -3, 5, 4).contains(event->position())) {
@@ -489,17 +517,10 @@ void MissionTimeline::mouseMoveEvent(QMouseEvent *event) {
         const bool edge = b - a >= 18 && (std::abs(event->position().x() - a) <= 6 ||
                                           std::abs(event->position().x() - b) <= 6);
         setCursor(edge ? Qt::SizeHorCursor : Qt::OpenHandCursor);
-        QToolTip::showText(event->globalPosition().toPoint(), ui::text("mission_timeline.label_13"),
-                           this);
     } else if (detail_rect().contains(event->position())) {
         setCursor(Qt::CrossCursor);
-        QToolTip::showText(event->globalPosition().toPoint(),
-                           full_time(time_at(event->position().x()), scale_, *time_) + " " +
-                               scale_name(scale_) + ui::text("mission_timeline.label_14"),
-                           this);
     } else {
         unsetCursor();
-        QToolTip::hideText();
     }
     event->accept();
 }

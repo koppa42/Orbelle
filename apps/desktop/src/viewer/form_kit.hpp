@@ -23,8 +23,7 @@
 //   * label columns are aligned across every group of a page (align_form_labels);
 //   * optional models are switched on from a toggle-styled check box (make_switch).
 namespace orbelle::desktop {
-// A small "i" button whose tooltip and accessible description hold the explanation; a
-// click shows it immediately so it also works without hovering.
+// Long explanations open only on click or keyboard activation, never on hover.
 inline QToolButton *info_marker(QWidget *parent = nullptr) {
     auto *marker = new QToolButton(parent);
     marker->setObjectName("infoMarker");
@@ -35,8 +34,8 @@ inline QToolButton *info_marker(QWidget *parent = nullptr) {
     marker->setFocusPolicy(Qt::TabFocus);
     marker->setAccessibleName(ui::text("common.info"));
     QObject::connect(marker, &QToolButton::clicked, marker, [marker] {
-        QToolTip::showText(marker->mapToGlobal(QPoint(0, marker->height())), marker->toolTip(),
-                           marker);
+        QToolTip::showText(marker->mapToGlobal(QPoint(0, marker->height())),
+                           marker->property("helpHtml").toString(), marker, marker->rect());
     });
     marker->hide();
     return marker;
@@ -48,8 +47,9 @@ inline void append_help(QToolButton *marker, const QString &text) {
     marker->setProperty("helpText", paragraphs);
     QString html = QStringLiteral("<div style='max-width:360px'>");
     for (const auto &paragraph : paragraphs)
-        html += QStringLiteral("<p style='margin:0 0 6px 0'>%1</p>").arg(paragraph.toHtmlEscaped());
-    marker->setToolTip(html + QStringLiteral("</div>"));
+        html += QStringLiteral("<p style='margin:0 0 6px 0'>%1</p>")
+                    .arg(paragraph.toHtmlEscaped().replace('\n', QStringLiteral("<br>")));
+    marker->setProperty("helpHtml", html + QStringLiteral("</div>"));
     marker->setAccessibleDescription(paragraphs.join('\n'));
     marker->show();
 }
