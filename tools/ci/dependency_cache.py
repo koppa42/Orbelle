@@ -11,10 +11,10 @@ import zipfile
 
 
 FAMILIES = {
-    "windows": ("vcpkg-win2022-release-v3-", "vcpkg-win2022-release-v2-"),
-    "linux": ("vcpkg-ubuntu24-x64-v2-", "vcpkg-ubuntu24-x64-v1-"),
-    "python-windows": ("python-deps-windows-v2-", "python-deps-windows-v1-"),
-    "python-linux": ("python-deps-linux-v2-", "python-deps-linux-v1-"),
+    "windows": ("vcpkg-win2022-release-v4-", "vcpkg-win2022-release-v3-", "vcpkg-win2022-release-v2-"),
+    "linux": ("vcpkg-ubuntu24-x64-v3-", "vcpkg-ubuntu24-x64-v2-", "vcpkg-ubuntu24-x64-v1-"),
+    "python-windows": ("python-deps-windows-v3-", "python-deps-windows-v2-", "python-deps-windows-v1-"),
+    "python-linux": ("python-deps-linux-v3-", "python-deps-linux-v2-", "python-deps-linux-v1-"),
 }
 VERSION_FIELDS = ("version", "version-semver", "version-string", "version-date", "port-version")
 ABI_NAME = re.compile(r"[0-9a-f]{64}\.zip")
@@ -44,15 +44,15 @@ def cache_identity(source, profile, image, run, attempt):
     for value in (image, run, attempt):
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", value):
             raise ValueError("Cache image/run identifiers must be nonempty single-line tokens")
-    current, legacy = FAMILIES[profile]
+    current, *legacy = FAMILIES[profile]
     digest = fingerprint(source)
-    prefix = f"{current}{image}-{digest}-"
-    families = [current, legacy]
-    if profile.startswith("python-"):
-        families += list(FAMILIES[profile.removeprefix("python-")])
-    # All same-image options precede any cross-image fallback. Keep legacy
-    # families and paths so rollout can reuse the existing expensive packages.
-    restore_keys = [prefix, *(f"{family}{image}-" for family in families), *families]
+    # vcpkg pins its ABI tools to the registry baseline. A runner image change
+    # alone no longer creates another identical snapshot; compiler/port ABI
+    # checks still decide whether each package can actually be reused.
+    prefix = f"{current}{digest}-"
+    # Never seed Python from desktop snapshots. Legacy caches from this same
+    # profile can seed the rollout and are compacted before being saved again.
+    restore_keys = [prefix, current, *(f"{family}{image}-" for family in legacy), *legacy]
     return {"profile": profile, "image": image, "fingerprint": digest,
             "prefix": prefix, "key": f"{prefix}{run}-{attempt}", "restore_keys": restore_keys}
 
@@ -94,6 +94,31 @@ def cached_abis(cache, packages):
 
 def save_needed(before, after, prefix, matched):
     return bool(after) and (before != after or not matched.startswith(prefix))
+
+
+def select_snapshot(after, before, installed, buildtrees):
+    # vcpkg writes the plan's ABI files before restoring/building packages.
+    # Keep these even on cancellation, when installed metadata is incomplete.
+    metadata = [*installed.glob("*/share/*/vcpkg_abi_info.txt"),
+                *buildtrees.glob("*/*.vcpkg_abi_info.txt")]
+    required = {hashlib.sha256(path.read_bytes()).hexdigest() for path in metadata}
+    return {name: stat for name, stat in after.items()
+            if Path(name).stem in required or before.get(name) != stat}
+
+
+def prune_snapshot(cache, selected):
+    # This directory is the disposable binary cache, never an installed tree.
+    # Verify every resolved target before unlinking; do not follow links outside
+    # the cache or recursively delete directories from supplied path strings.
+    root = cache.resolve()
+    stale = []
+    for path in cache.rglob("*"):
+        if path.is_symlink() or not path.resolve().is_relative_to(root):
+            raise ValueError(f"Refusing to prune a linked cache entry: {path}")
+        if path.is_file() and path.relative_to(cache).as_posix() not in selected:
+            stale.append(path)
+    for path in stale:
+        path.unlink()
 
 
 def package_report(installed, previous, log):
@@ -143,6 +168,10 @@ def summarize(state, report):
              f"Restored snapshot: `{state['matched'] or 'none'}`.", "",
              f"Complete archives: {report['before_count']} before, {report['after_count']} after. "
              f"Save a snapshot: {report['save']}.", "",
+             f"Snapshot retains {report['retained_count']} archives "
+             f"({report['retained_bytes'] / 1024**2:.1f} MiB); "
+             f"drops {report['after_count'] - report['retained_count']} unused archives "
+             f"({(report['after_bytes'] - report['retained_bytes']) / 1024**2:.1f} MiB).", "",
              "| Package | Matching ABI before install | Rebuilt | Install duration | Changed ABI inputs |",
              "| --- | --- | --- | --- | --- |"]
     for row in report["packages"]:
@@ -172,6 +201,7 @@ def main():
     finish = sub.add_parser("finish")
     finish.add_argument("--state", type=Path, required=True)
     finish.add_argument("--installed", type=Path, required=True)
+    finish.add_argument("--buildtrees", type=Path, required=True)
     finish.add_argument("--log", type=Path, required=True)
     args = parser.parse_args()
     identity_path = args.state / "identity.json"
@@ -198,13 +228,20 @@ def main():
             print("No initial cache inventory; nothing to save.")
             return
         state = json.loads(snapshot_path.read_text(encoding="utf-8"))
-        after = inventory(Path(state["cache"]))
-        save = save_needed(state["packages"], after, state["prefix"], state["matched"])
+        cache = Path(state["cache"])
+        after = inventory(cache)
+        selected = select_snapshot(after, state["packages"], args.installed, args.buildtrees)
+        save = save_needed(state["packages"], selected, state["prefix"], state["matched"])
+        if save:
+            prune_snapshot(cache, selected)
         # Decide saving before producing optional diagnostics, so a report
         # failure cannot discard packages completed during a failed build.
         outputs({"save": str(save).lower(), "key": state["key"], "cache": state["cache"]})
         log = args.log.read_text(encoding="utf-8", errors="replace") if args.log.is_file() else ""
         report = {"before_count": len(state["packages"]), "after_count": len(after), "save": save,
+                  "after_bytes": sum(stat[0] for stat in after.values()),
+                  "retained_count": len(selected),
+                  "retained_bytes": sum(stat[0] for stat in selected.values()),
                   "packages": package_report(args.installed, state["abis"], log)}
         write_json(args.state / "report.json", report)
         summarize(state, report)

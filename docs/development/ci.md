@@ -53,13 +53,17 @@ actionlint 在原生构建前运行，固定工具版本与 SHA-256，检查所�
 
 依赖使用仓库固定的 vcpkg 基线与 overlay，并缓存编译结果。Windows CI 使用专用的 `x64-windows-release` triplet，固定 v143 工具链，只构建实际用于测试和发布的 Release 依赖。本地默认 triplet 不变。首次 Windows 构建需要从源码编译 Qt、VSG、Rocky、GDAL 等依赖，耗时会明显长于后续运行。这里的 Release 是编译配置，不代表生成或发布安装包。诊断保留 14 天，跨作业依赖和标签发布产物保留 7 天。
 
-原生、Python 依赖准备和手动 sanitizer 共用依赖缓存动作。缓存指纹包含规范化的 `vcpkg.json`、注册表配置、overlay 文件与 CI triplet；仅排除根项目的版本字段，依赖版本、功能、覆盖项和基线仍参与计算。只修改 Orbelle 版本号或 JSON 排版不会切换依赖缓存。恢复时先选择同镜像、同指纹的快照，再选择同镜像的其他快照（包括旧版缓存键），最后才尝试跨镜像复用；Python 依赖也可以回退到同平台的原生依赖缓存。缓存路径保持一致，vcpkg 始终按编译器、工具、源码及包 ABI 决定是否真正复用，不关闭兼容性检查。
+原生、Python 依赖准备和手动 sanitizer 共用依赖缓存动作，但 Windows 桌面、Linux 原生及两平台 Python 分别使用独立缓存系列。Python 不再回退读取桌面快照，避免把 Qt、图形依赖和历史版本复制到轻量缓存。手动 sanitizer 与 Linux 原生共享相同的未插桩第三方依赖。缓存指纹包含规范化的 `vcpkg.json`、注册表配置、overlay 文件与 CI triplet；仅排除根项目的版本字段，依赖版本、功能、覆盖项和基线仍参与计算。只修改 Orbelle 版本号或 JSON 排版不会切换依赖缓存。
 
-安装前后比较完整二进制归档清单，仅在新增、重建依赖或需要建立当前配置的首份快照时保存，未变化的缓存不重复上传。新快照使用唯一运行编号，避免命中旧缓存后新增的包因缓存不可变而丢失。失败和取消时也尝试保存已完成的包，保存阶段上限四分钟；runner 被强制终止或存储服务不可用时不能保证保存成功。中断时尚未完成的包仍需重新编译。
+全部 CI 依赖安装使用 `--x-abi-tools-use-exact-versions`，由固定 vcpkg 基线中的工具清单 `scripts/vcpkg-tools.json` 决定 CMake、PowerShell 等 ABI 工具的版本，必要时下载对应工具；依据见 [vcpkg 工具版本与缓存](https://learn.microsoft.com/en-us/vcpkg/users/binarycaching-troubleshooting#mismatch-4-the-version-of-the-tools-changed-between-runs)。新缓存键不再包含 runner 镜像号，优先恢复同系列、同指纹的快照，然后尝试该系列其他快照；迁移期间可回退读取本系列旧格式键，优先同镜像旧缓存。保留原缓存路径以兼容 Actions 的路径版本校验。镜像号仍记录在诊断中；编译器不做伪装或跳过检查，vcpkg 始终按实际编译器、工具、源码及包 ABI 决定是否复用。首次切换固定工具可能需要重建，编译器更新仍会正常使相关缓存失效。
+
+保存前按本次安装及构建计划的 ABI 文件筛选归档，只保留本次需要的版本；中断时也保留本次新完成、尚未写入安装元数据的归档。淘汰其他功能组合、历史工具版本和不完整文件，不把整个历史缓存继续累加。仅在归档新增、重建、精简或需要建立当前配置的首份快照时保存；未变化的快照不重复上传。新快照使用唯一运行编号，避免缓存不可变而丢失新增的包。安装尚未建立计划且没有新包时不覆盖已有快照。失败和取消后的保存阶段上限四分钟；runner 被强制终止或存储服务不可用时不能保证保存成功，中断时尚未完成的包仍需重新编译。
+
+第三方依赖使用 vcpkg 的整包缓存，Linux 依赖安装明确关闭 CMake 的 sccache launcher，避免冷构建同时产生数千个重复的远程编译缓存条目。项目及 Python 扩展编译继续使用 sccache，测试范围、断言与精度容限保持不变。远端旧快照仍由 GitHub 缓存保留策略淘汰，本流程不删除其他分支的缓存。
 
 GitHub 将 PR 生成的缓存限制在该 PR 的合并引用中，其他 PR 和 `main` 不能读取；PR 可以读取目标分支的缓存，详见[缓存访问范围](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache)。`main` 的基准测试在验证合并结果的同时维护共享依赖缓存。首次建立缓存、依赖变化或 runner 工具链变化仍可能需要较长编译，不能承诺每次都命中缓存。
 
-排查耗时时先区分依赖安装、项目编译、测试和标签流程的打包。Actions 的 Dependency cache 摘要显示恢复的快照、归档数量、各包安装耗时、安装前是否已有匹配 ABI、是否重编译，以及与最近似缓存版本相比变化的 ABI 输入。完整指纹和差异保存在 `before.json`、`report.json` 与 `vcpkg_abi_info.txt` 诊断附件中；缓存中有某个 ABI 不等于安装一定成功，仍需结合 vcpkg 日志和作业结果。不要用减少 Python 支持版本或跳过行为测试来掩盖依赖冷启动问题。取消日常发布包构建可以减少重复工作，但不会消除测试所需的编译。
+排查耗时时先区分依赖安装、项目编译、测试和标签流程的打包。Actions 的 Dependency cache 摘要显示恢复的快照、精简前后归档数量与 MiB、各包安装耗时、安装前是否已有匹配 ABI、是否重编译，以及与最近似缓存版本相比变化的 ABI 输入。完整指纹和差异保存在 `before.json`、`report.json` 与 `*vcpkg_abi_info.txt` 诊断附件中；缓存中有某个 ABI 不等于安装一定成功，仍需结合 vcpkg 日志和作业结果。不要用减少 Python 支持版本或跳过行为测试来掩盖依赖冷启动问题。取消日常发布包构建可以减少重复工作，但不会消除测试所需的编译。
 
 完整 Release 数值回归及手动 ASan/UBSan 都执行预设中的全量用例，保留原算法、参考数据、断言与精度容限；新增测试自动纳入。两者使用 `--no-tests=error` 拒绝空测试运行。
 
