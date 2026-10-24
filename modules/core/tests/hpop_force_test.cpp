@@ -80,7 +80,9 @@ class ForceEop final : public IEarthOrientationProvider {
                       ForceTime{}.data_info()};
 
   public:
+    mutable std::atomic<unsigned> queries{0};
     EarthOrientationState at(Epoch e) const override {
+        ++queries;
         return {{e, 0, 0, 0, 0, 0, "synthetic-eop"}, {0, 0, 0, 0, 0}};
     }
     const EopDataInfo &data_info() const noexcept override { return info_; }
@@ -110,6 +112,7 @@ class ForceEphemeris final : public IThirdBodyEphemeris {
 
   public:
     mutable std::atomic<unsigned> position_queries{0};
+    mutable std::atomic<unsigned> apparent_queries{0};
     explicit ForceEphemeris(const Case &c, bool invalid_mu = false) : c_(c) {
         if (invalid_mu)
             info_.sun_mu = 0;
@@ -127,6 +130,14 @@ class ForceEphemeris final : public IThirdBodyEphemeris {
         if (body != ThirdBody::sun)
             throw std::invalid_argument("Unsupported synthetic state");
         return {position(body, e), c_.sun_v};
+    }
+    Vector apparent_sun_from_earth(Epoch) const override {
+        ++apparent_queries;
+        return {c_.sun[0], c_.sun[1] + 1e8, c_.sun[2]};
+    }
+    void validate_apparent_sun_interval(Epoch a, Epoch b) const override {
+        const std::array bodies{ThirdBody::sun};
+        validate_interval(a, b, bodies);
     }
     void validate_interval(Epoch a, Epoch b, std::span<const ThirdBody> bodies) const override {
         if (a.tai_nanoseconds() < info_.first.tai_nanoseconds() ||
@@ -168,6 +179,56 @@ HpopEnvironment environment(const Case &c, bool evolve = false) {
 }
 CartesianState state(const Case &c) { return {Epoch{0}, OriginId::earth, FrameId::gcrf, c.r, c.v}; }
 } // namespace
+
+TEST(HpopForce, SharesExactInputsWithinOneEvaluationAndRefreshesForEveryQuery) {
+    auto c = cases().front();
+    c.mask = 14; // Third bodies, SRP and drag, without relativistic state queries.
+    c.cd = 2.2;
+    c.cr = 1;
+    auto settings = options(c);
+    settings.srp.sun_position_method = SrpSunPositionMethod::apparent_to_true_cb;
+    settings.srp.shadow_model = SrpShadowModel::dual_cone;
+    settings.srp.moon_shadow = true;
+    settings.drag.use_apparent_sun_position = true;
+    auto resources = environment(c);
+    const auto eop = std::make_shared<ForceEop>();
+    const auto ephemeris = std::make_shared<ForceEphemeris>(c);
+    resources.eop = eop;
+    resources.ephemeris = ephemeris;
+    const auto initial = state(c);
+    const auto combined = evaluate_hpop_acceleration(initial, settings, resources);
+    EXPECT_EQ(eop->queries, 1U);
+    EXPECT_EQ(ephemeris->position_queries, 2U);
+    EXPECT_EQ(ephemeris->apparent_queries, 1U);
+    auto moved = initial;
+    moved.position_m[0] += 100;
+    EXPECT_NE(evaluate_hpop_acceleration(moved, settings, resources), combined);
+    EXPECT_EQ(eop->queries, 2U);
+    EXPECT_EQ(ephemeris->position_queries, 4U);
+    EXPECT_EQ(ephemeris->apparent_queries, 2U);
+    EXPECT_EQ(evaluate_hpop_acceleration(initial, settings, resources), combined);
+    // Isolated forces independently fetch the inputs. Their sum must match the
+    // combined path even when geometric and apparent Sun vectors differ.
+    auto base = settings;
+    base.third_body(ThirdBody::sun).enabled = base.third_body(ThirdBody::moon).enabled = false;
+    base.srp.enabled = base.drag.enabled = false;
+    const auto gravity = evaluate_hpop_acceleration(initial, base, resources);
+    auto expected = gravity;
+    for (int term = 0; term < 3; ++term) {
+        auto isolated = base;
+        if (term == 0) {
+            isolated.third_body(ThirdBody::sun).enabled = true;
+            isolated.third_body(ThirdBody::moon).enabled = true;
+        }
+        isolated.srp.enabled = term == 1;
+        isolated.drag.enabled = term == 2;
+        const auto value = evaluate_hpop_acceleration(initial, isolated, resources);
+        for (unsigned axis = 0; axis < 3; ++axis)
+            expected[axis] += value[axis] - gravity[axis];
+    }
+    for (unsigned axis = 0; axis < 3; ++axis)
+        EXPECT_NEAR(combined[axis], expected[axis], 1e-13);
+}
 
 TEST(HpopForce, CombinedAndIsolatedTermsMatchIndependentOrekitAutomaticDifferentiation) {
     const auto inputs = cases();

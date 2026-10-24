@@ -47,6 +47,7 @@ class JacchiaRoberts {
   public:
     double root1 = 0, root2 = 0, x_root = 0, y_root = 0, t_infinity = 0, tx = 0, sum = 0;
     double high_temperature_exponent = 0;
+    double base_temperature = 0, exp_kp = 0;
     double cbPolarRadius = 6378.137 * (1 - 1 / 298.257223563),
            cbPolarSquared = cbPolarRadius * cbPolarRadius;
     static constexpr double RHO_ZERO = 3.46e-9;
@@ -82,7 +83,8 @@ class JacchiaRoberts {
          -0.3131808e-19},
         {0.1097083e2, 0.6118742e-4, -0.1165003e-6, 0.9239354e-10, -0.3490739e-13, 0.5116298e-17,
          0.0}};
-    Real exotherm(Real *, Real *, GEOPARMS *, Real, Real, Real);
+    void prepare_exotherm(Real *, Real *, const GEOPARMS *, Real, Real);
+    Real exotherm(const GEOPARMS *, Real);
     Real rho_100(Real, Real);
     Real rho_125(Real, Real);
     Real rho_cor(Real, Real, Real, GEOPARMS *);
@@ -90,35 +92,34 @@ class JacchiaRoberts {
     void roots(Real[], Integer, Real[][2], Integer);
     void deflate_polynomial(Real[], Integer, Real, Real[]);
 };
-Real JacchiaRoberts::exotherm(Real space_craft[2], Real sun[3], GEOPARMS *geo, Real height,
-                              Real sun_dec, Real geo_lat) {
-
-    Real exotemp, expkp, hour_angle;
-    Real theta, eta, tau, th22, t1;
-    Real c_star[5], aux[4][2];
-    Integer i;
-    const Integer na = 5;
-
+void JacchiaRoberts::prepare_exotherm(Real space_craft[2], Real sun[3], const GEOPARMS *geo,
+                                      Real sun_dec, Real geo_lat) {
     // atan2 has a finite noon/midnight and pole limit; the upstream signed-acos
     // expression divides by its horizontal cross product at these positions.
-    hour_angle = atan2(sun[0] * space_craft[1] - sun[1] * space_craft[0],
-                       sun[0] * space_craft[0] + sun[1] * space_craft[1]);
-    theta = 0.5 * fabs(geo_lat + sun_dec);
-    eta = 0.5 * fabs(geo_lat - sun_dec);
-    tau = hour_angle - 0.64577182325 + 0.10471975512 * sin(hour_angle + 0.75049157836);
+    const Real hour_angle = atan2(sun[0] * space_craft[1] - sun[1] * space_craft[0],
+                                  sun[0] * space_craft[0] + sun[1] * space_craft[1]);
+    const Real theta = 0.5 * fabs(geo_lat + sun_dec);
+    const Real eta = 0.5 * fabs(geo_lat - sun_dec);
+    Real tau = hour_angle - 0.64577182325 + 0.10471975512 * sin(hour_angle + 0.75049157836);
     if (tau < -std::numbers::pi)
         tau += 2 * std::numbers::pi;
     else if (tau > std::numbers::pi)
         tau -= 2 * std::numbers::pi;
-    th22 = pow(sin(theta), 2.2);
-    t1 = (Real)geo->xtemp *
-         (1.0 + 0.3 * (th22 + pow(cos(0.5 * tau), 3.0) * (pow(cos(eta), 2.2) - th22)));
-    expkp = exp(geo->tkp);
-
+    const Real th22 = pow(sin(theta), 2.2);
+    base_temperature =
+        (Real)geo->xtemp *
+        (1.0 + 0.3 * (th22 + pow(cos(0.5 * tau), 3.0) * (pow(cos(eta), 2.2) - th22)));
+    exp_kp = exp(geo->tkp);
+}
+Real JacchiaRoberts::exotherm(const GEOPARMS *geo, Real height) {
+    Real exotemp;
+    Real c_star[5], aux[4][2];
+    Integer i;
+    const Integer na = 5;
     if (height < 200.0) {
-        t_infinity = t1 + 14.0 * geo->tkp + 0.02 * expkp;
+        t_infinity = base_temperature + 14.0 * geo->tkp + 0.02 * exp_kp;
     } else {
-        t_infinity = t1 + 28.0 * geo->tkp + 0.03 * expkp;
+        t_infinity = base_temperature + 28.0 * geo->tkp + 0.03 * exp_kp;
     }
 
     tx = 371.6678 + 0.0518806 * t_infinity - 294.3505 * exp(-0.00216222 * t_infinity);
@@ -472,14 +473,17 @@ AtmosphereEvaluation jacchia_roberts(const AtmosphereInput &input, double utc_gm
     double sun[3] = {std::cos(dec), 0, std::sin(dec)};
     GEOPARMS geo{input.kp,
                  379 + 3.24 * input.f107_average + 1.3 * (input.f107 - input.f107_average)};
+    // The 500 km reference and actual altitude share this exact solar geometry.
+    // Height-dependent Kp branches, root solves and temperatures stay independent.
+    model.prepare_exotherm(satellite, sun, &geo, dec, lat);
     const double height = input.geodetic.height_m / 1000;
     double density = 0, temperature = 183;
     if (height > 125) {
-        const double t500 = model.exotherm(satellite, sun, &geo, 500, dec, lat);
-        temperature = model.exotherm(satellite, sun, &geo, height, dec, lat);
+        const double t500 = model.exotherm(&geo, 500);
+        temperature = model.exotherm(&geo, height);
         density = model.rho_high(height, temperature, t500, dec, lat);
     } else {
-        temperature = model.exotherm(satellite, sun, &geo, height, dec, lat);
+        temperature = model.exotherm(&geo, height);
         density = height <= 90   ? model.RHO_ZERO
                   : height < 100 ? model.rho_100(height, temperature)
                                  : model.rho_125(height, temperature);

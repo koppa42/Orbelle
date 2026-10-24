@@ -10,9 +10,10 @@ struct SrpGeometry {
 };
 // Options have already been validated by the caller. Nominal and variational
 // paths share the same Sun method and geometric occultor-centre resolution.
+template <class Ephemeris>
 inline SrpGeometry resolve_srp_geometry(Epoch epoch, const std::array<double, 3> &r,
                                         const std::array<double, 3> &v, const SrpOptions &options,
-                                        const IThirdBodyEphemeris &ephemeris,
+                                        const Ephemeris &ephemeris,
                                         ApparentSunDifferential *partials = nullptr) {
     SrpGeometry result;
     switch (options.sun_position_method) {
