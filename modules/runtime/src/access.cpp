@@ -53,8 +53,9 @@ AccessSample detail::AccessGeometry::at(const core::CartesianState &state) const
             axis[i] = target_position[i] - state.position_m[i];
             direction[i] = station_position[i] - state.position_m[i];
         }
-        off_boresight = core::vector_angle(axis, direction);
-        const auto axes = core::sensor_axes(state.velocity_mps, axis, sensor->roll_rad);
+        const auto axes = core::sensor_axes(state.velocity_mps, axis, sensor->tilt_x_rad,
+                                            sensor->tilt_y_rad, sensor->roll_rad);
+        off_boresight = core::vector_angle(axes.z, direction);
         sensor_margin = pattern->margin(axes.to_local(direction));
         if (std::abs(*sensor_margin) <= 1e-14)
             sensor_margin = 0;

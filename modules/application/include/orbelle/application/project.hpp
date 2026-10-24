@@ -139,6 +139,8 @@ struct ProjectSensor {
     std::string target_station_id; // Required for ideal instantaneous targeted pointing.
     double roll_rad = 0;
     SensorDisplay display = {};
+    // Intrinsic local X -> Y -> Z rotations; roll_rad is the final Z rotation.
+    double tilt_x_rad = 0, tilt_y_rad = 0;
     [[nodiscard]] const std::string &name() const {
         return display_name.empty() ? object_id : display_name;
     }

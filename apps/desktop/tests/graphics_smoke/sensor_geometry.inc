@@ -7,6 +7,9 @@ void Workbench::smoke_sensor_geometry() {
         sensor.object_id = "geometry-smoke";
         sensor.display_name = "Geometry sensor";
         sensor.parent_satellite_id = project.satellites.front().orbit.object_id;
+        sensor.tilt_x_rad = .2;
+        sensor.tilt_y_rad = -.1;
+        sensor.roll_rad = .35;
         sensor.pattern.custom_points = {{.4, 0},
                                         {.25, std::numbers::pi / 2},
                                         {.4, std::numbers::pi},

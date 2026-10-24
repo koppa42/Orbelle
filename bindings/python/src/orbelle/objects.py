@@ -6,7 +6,7 @@ from . import _native as n
 from . import units as u
 from ._values import OrbitStyle, UNSET, Unset, Wgs84Location, require
 from .orbits import Orbit
-from .sensors import FieldOfView, Pointing, _to_native, _from_native
+from .sensors import FieldOfView, Orientation, Pointing, _to_native, _from_native
 if TYPE_CHECKING:
     from ._project import Project
 
@@ -33,6 +33,7 @@ class Sensor:
     parent: SatelliteHandle
     field_of_view: FieldOfView
     pointing: Pointing = Pointing()
+    orientation: Orientation = Orientation()
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +64,7 @@ class SensorState:
     parent_id: str
     field_of_view: FieldOfView
     pointing: Pointing
+    orientation: Orientation
 
 
 class ObjectHandle:
@@ -210,8 +212,16 @@ class SensorHandle(ObjectHandle):
     def pointing(self, value: Pointing) -> None:
         self.update(pointing=value)
 
+    @property
+    def orientation(self) -> Orientation:
+        return self._project.objects.read(self).orientation
+
+    @orientation.setter
+    def orientation(self, value: Orientation) -> None:
+        self.update(orientation=value)
+
     def update(self, *, name: str | Unset = UNSET, field_of_view: FieldOfView | Unset = UNSET,
-               pointing: Pointing | Unset = UNSET) -> None:
+               pointing: Pointing | Unset = UNSET, orientation: Orientation | Unset = UNSET) -> None:
         patch = n.SensorUpdate()
         if name is not UNSET:
             patch.name = require(name, str, "name")
@@ -219,6 +229,9 @@ class SensorHandle(ObjectHandle):
             patch.pattern = _to_native(field_of_view)
         if pointing is not UNSET:
             patch.pointing = require(pointing, Pointing, "pointing")._native()
+        if orientation is not UNSET:
+            patch.tilt_x_rad, patch.tilt_y_rad, patch.roll_rad = require(
+                orientation, Orientation, "orientation")._radians()
         self._project._manager().update(self._ref, patch)
 
 
@@ -292,7 +305,8 @@ class ObjectCollection:
                                        position_type=definition.position_type, description=definition.description)
         if isinstance(definition, Sensor):
             return self.sensor(definition.name, parent=definition.parent,
-                               field_of_view=definition.field_of_view, pointing=definition.pointing)
+                               field_of_view=definition.field_of_view, pointing=definition.pointing,
+                               orientation=definition.orientation)
         raise TypeError("definition expects objects.Satellite, GroundStation or Sensor")
 
     def satellite(self, name: str, *, orbit: Orbit, display: OrbitStyle = OrbitStyle()) -> SatelliteHandle:
@@ -311,11 +325,13 @@ class ObjectCollection:
         return GroundStationHandle(self._project, self._project._manager().create(definition))
 
     def sensor(self, name: str, *, parent: SatelliteHandle, field_of_view: FieldOfView,
-               pointing: Pointing = Pointing()) -> SensorHandle:
+               pointing: Pointing = Pointing(), orientation: Orientation = Orientation()) -> SensorHandle:
+        x, y, z = require(orientation, Orientation, "orientation")._radians()
         definition = n.SensorDefinition(require(name, str, "name"),
             require(parent, SatelliteHandle, "parent")._ref,
             _to_native(field_of_view),
-            require(pointing, Pointing, "pointing")._native())
+            require(pointing, Pointing, "pointing")._native(),
+            roll_rad=z, tilt_x_rad=x, tilt_y_rad=y)
         return SensorHandle(self._project, self._project._manager().create(definition))
 
     @overload
@@ -337,7 +353,8 @@ class ObjectCollection:
             return GroundStationState(obj.id, state.name, location, u.rad(state.minimum_elevation_rad),
                                       state.position_type, state.description)
         pointing = Pointing(state.target_station_id, self._project) if state.pointing == n.SensorPointing.TARGETED else Pointing()
-        return SensorState(obj.id, state.name, state.parent_satellite_id, _from_native(state.pattern), pointing)
+        orientation = Orientation(u.rad(state.tilt_x_rad), u.rad(state.tilt_y_rad), u.rad(state.roll_rad))
+        return SensorState(obj.id, state.name, state.parent_satellite_id, _from_native(state.pattern), pointing, orientation)
 
     def rename(self, obj: ObjectHandle, name: str) -> None:
         self._project._manager().rename(require(obj, ObjectHandle, "object")._ref, require(name, str, "name"))
@@ -351,22 +368,24 @@ class ObjectCollection:
                position_type: n.GroundPositionType | Unset = UNSET, description: str | Unset = UNSET) -> None: ...
     @overload
     def update(self, obj: SensorHandle, *, name: str | Unset = UNSET,
-               field_of_view: FieldOfView | Unset = UNSET, pointing: Pointing | Unset = UNSET) -> None: ...
+               field_of_view: FieldOfView | Unset = UNSET, pointing: Pointing | Unset = UNSET,
+               orientation: Orientation | Unset = UNSET) -> None: ...
     def update(self, obj: ObjectHandle, *, name: str | Unset = UNSET, orbit: Orbit | Unset = UNSET,
                display: OrbitStyle | Unset = UNSET, location: Wgs84Location | Unset = UNSET,
                minimum_elevation: u.Angle | Unset = UNSET, field_of_view: FieldOfView | Unset = UNSET,
-               pointing: Pointing | Unset = UNSET,
+               pointing: Pointing | Unset = UNSET, orientation: Orientation | Unset = UNSET,
                position_type: n.GroundPositionType | Unset = UNSET, description: str | Unset = UNSET) -> None:
         self._project._manager().read(require(obj, ObjectHandle, "object")._ref)
         values = {"name": name, "orbit": orbit, "display": display, "location": location,
                   "minimum_elevation": minimum_elevation, "field_of_view": field_of_view, "pointing": pointing,
+                  "orientation": orientation,
                   "position_type": position_type, "description": description}
         if isinstance(obj, SatelliteHandle):
             allowed = {"name", "orbit", "display"}
         elif isinstance(obj, GroundStationHandle):
             allowed = {"name", "location", "minimum_elevation", "position_type", "description"}
         elif isinstance(obj, SensorHandle):
-            allowed = {"name", "field_of_view", "pointing"}
+            allowed = {"name", "field_of_view", "pointing", "orientation"}
         else:
             raise TypeError("Expected a satellite, ground station or sensor handle")
         invalid = {field for field, value in values.items() if value is not UNSET} - allowed
@@ -379,7 +398,7 @@ class ObjectCollection:
             obj.update(name=name, location=location, minimum_elevation=minimum_elevation,
                        position_type=position_type, description=description)
         elif isinstance(obj, SensorHandle):
-            obj.update(name=name, field_of_view=field_of_view, pointing=pointing)
+            obj.update(name=name, field_of_view=field_of_view, pointing=pointing, orientation=orientation)
 
     def duplicate(self, obj: H, *, name: str | None = None) -> H:
         ref = require(obj, ObjectHandle, "object")._ref

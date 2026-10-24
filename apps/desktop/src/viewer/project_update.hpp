@@ -24,7 +24,8 @@ inline bool same_sensor_input(const application::ProjectSensor &a,
     return a.object_id == b.object_id && a.name() == b.name() &&
            a.parent_satellite_id == b.parent_satellite_id && a.pattern == b.pattern &&
            a.pointing == b.pointing && a.target_station_id == b.target_station_id &&
-           a.roll_rad == b.roll_rad && a.display == b.display;
+           a.roll_rad == b.roll_rad && a.tilt_x_rad == b.tilt_x_rad &&
+           a.tilt_y_rad == b.tilt_y_rad && a.display == b.display;
 }
 inline bool same_station_input(const application::ProjectGroundStation &a,
                                const application::ProjectGroundStation &b) {

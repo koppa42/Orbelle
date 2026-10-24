@@ -4009,9 +4009,11 @@ class Workbench final : public WorkbenchWindow {
                          .emplace(sensor.object_id, visualization::SensorView(sensor.pattern))
                          .first;
             }
-            auto mesh = it->second.project(
-                state.position_m, core::sensor_axes(state.velocity_mps, direction, sensor.roll_rad),
-                sensor.display.space_range_m);
+            auto mesh = it->second.project(state.position_m,
+                                           core::sensor_axes(state.velocity_mps, direction,
+                                                             sensor.tilt_x_rad, sensor.tilt_y_rad,
+                                                             sensor.roll_rad),
+                                           sensor.display.space_range_m);
             mesh.color = sensor.display.color;
             mesh.opacity = sensor.display.opacity;
             mesh.fill = sensor.display.fill;

@@ -274,7 +274,12 @@ SensorVector SensorAxes::to_world(const V &d) const {
             x[2] * d[0] + y[2] * d[1] + z[2] * d[2]};
 }
 SensorAxes sensor_axes(const V &velocity, const V &boresight, double roll) {
-    check(std::isfinite(roll), "Sensor roll must be finite");
+    return sensor_axes(velocity, boresight, 0, 0, roll);
+}
+SensorAxes sensor_axes(const V &velocity, const V &boresight, double tilt_x, double tilt_y,
+                       double roll) {
+    check(std::isfinite(tilt_x) && std::isfinite(tilt_y) && std::isfinite(roll),
+          "Sensor rotation angles must be finite");
     for (auto x : velocity)
         check(std::isfinite(x), "Sensor velocity must be finite");
     const auto z = unit(boresight);
@@ -297,9 +302,15 @@ SensorAxes sensor_axes(const V &velocity, const V &boresight, double roll) {
     x = unit(x);
     const auto y = unit(cross(z, x));
     SensorAxes axes{x, y, z};
+    const auto cx = std::cos(tilt_x), sx = std::sin(tilt_x), cy = std::cos(tilt_y),
+               sy = std::sin(tilt_y), cz = std::cos(roll), sz = std::sin(roll);
     for (std::size_t i = 0; i < 3; ++i) {
-        axes.x[i] = std::cos(roll) * x[i] + std::sin(roll) * y[i];
-        axes.y[i] = -std::sin(roll) * x[i] + std::cos(roll) * y[i];
+        const auto rotated_y = cx * y[i] + sx * z[i];
+        const auto rotated_z = -sx * y[i] + cx * z[i];
+        const auto rotated_x = cy * x[i] - sy * rotated_z;
+        axes.x[i] = cz * rotated_x + sz * rotated_y;
+        axes.y[i] = -sz * rotated_x + cz * rotated_y;
+        axes.z[i] = sy * x[i] + cy * rotated_z;
     }
     return axes;
 }

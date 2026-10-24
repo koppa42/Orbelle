@@ -36,9 +36,10 @@ void bind_project_document(py::module_ &module) {
         .def(py::init<std::string, ObjectRef, double, objects::Pointing>(), py::arg("name"),
              py::arg("parent"), py::arg("half_angle_rad"), py::arg("pointing"))
         .def(py::init<std::string, ObjectRef, orbelle::core::SensorPattern, objects::Pointing,
-                      double, SensorDisplay>(),
+                      double, SensorDisplay, double, double>(),
              py::arg("name"), py::arg("parent"), py::arg("pattern"), py::arg("pointing"),
-             py::arg("roll_rad") = 0, py::arg("display") = SensorDisplay{});
+             py::arg("roll_rad") = 0, py::arg("display") = SensorDisplay{},
+             py::arg("tilt_x_rad") = 0, py::arg("tilt_y_rad") = 0);
     py::class_<objects::SatelliteUpdate>(module, "SatelliteUpdate")
         .def(py::init<>())
         .def_readwrite("name", &objects::SatelliteUpdate::name)
@@ -65,6 +66,8 @@ void bind_project_document(py::module_ &module) {
             })
         .def_readwrite("pattern", &objects::SensorUpdate::pattern)
         .def_readwrite("roll_rad", &objects::SensorUpdate::roll_rad)
+        .def_readwrite("tilt_x_rad", &objects::SensorUpdate::tilt_x_rad)
+        .def_readwrite("tilt_y_rad", &objects::SensorUpdate::tilt_y_rad)
         .def_readwrite("display", &objects::SensorUpdate::display)
         .def_readwrite("pointing", &objects::SensorUpdate::pointing);
     py::class_<ProjectSnapshot>(module, "ProjectSnapshot")

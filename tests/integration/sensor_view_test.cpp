@@ -62,6 +62,32 @@ TEST(SensorView, PolarRectangularFootprintAndPartialLimb) {
     ASSERT_FALSE(mesh.sides.empty());
     on_earth(mesh);
 }
+TEST(SensorView, LocalXAndYTiltsMoveTheGroundFootprintInDifferentDirections) {
+    const visualization::SensorView view(core::SensorPattern(2 * d));
+    const auto check_tilt = [&](double x, double y) {
+        const auto axes = core::sensor_axes({0, 7500, 0}, {-1, 0, 0}, x, y, 0);
+        const auto mesh = view.project({7e6, 0, 0}, axes, 2e7);
+        EXPECT_FALSE(mesh.ground.empty());
+        on_earth(mesh);
+        for (const auto &triangle : mesh.ground) {
+            for (const auto &point : triangle) {
+                if (x > 0) {
+                    EXPECT_GT(point[2], 100000);
+                } else {
+                    EXPECT_GT(point[1], 100000);
+                }
+                const core::SensorVector ray{point[0] - 7e6, point[1], point[2]};
+                EXPECT_GE(
+                    core::SensorGeometry(core::SensorPattern(2 * d)).margin(axes.to_local(ray)),
+                    -.001);
+            }
+        }
+    };
+    check_tilt(20 * d, 0);
+    check_tilt(0, 20 * d);
+    const auto away = core::sensor_axes({0, 7500, 0}, {-1, 0, 0}, 180 * d, 0, 0);
+    EXPECT_TRUE(view.project({7e6, 0, 0}, away, 2e7).ground.empty());
+}
 TEST(SensorView, SpaceExtensionDoesNotLimitEarthIntersections) {
     const auto mesh =
         visualization::SensorView(core::SensorPattern(5 * d))

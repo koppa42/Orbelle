@@ -99,6 +99,8 @@ void bind_project(py::module_ &module) {
         .def_readwrite("parent_satellite_id", &application::ProjectSensor::parent_satellite_id)
         .def_readwrite("pattern", &application::ProjectSensor::pattern)
         .def_readwrite("roll_rad", &application::ProjectSensor::roll_rad)
+        .def_readwrite("tilt_x_rad", &application::ProjectSensor::tilt_x_rad)
+        .def_readwrite("tilt_y_rad", &application::ProjectSensor::tilt_y_rad)
         .def_readwrite("display", &application::ProjectSensor::display)
         .def_property(
             "half_angle_rad",
