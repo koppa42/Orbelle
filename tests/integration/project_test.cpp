@@ -209,6 +209,13 @@ TEST(Project, RelationshipIndexRequiresCorrectObjectKindsAndPreservesDraftValida
     p.sensors.push_back({"sensor", "Sensor", p.satellites[0].orbit.object_id, .3,
                          application::SensorPointing::targeted, "station"});
     EXPECT_NO_THROW(application::validate_project(p));
+    EXPECT_FALSE(p.sensors[0].display.show_space_extension);
+    const auto input_hash = application::analysis_input_sha256(p);
+    p.sensors[0].display.show_space_extension = true;
+    EXPECT_EQ(application::analysis_input_sha256(p), input_hash);
+    EXPECT_TRUE(application::decode_project(application::encode_project(p))
+                    .sensors[0]
+                    .display.show_space_extension);
     for (const auto &id : {std::string("station"), std::string("sensor"), std::string("missing")}) {
         auto bad = p;
         bad.sensors[0].parent_satellite_id = id;
@@ -468,6 +475,7 @@ TEST(Project, CurrentSchemaFixturePreservesInputsRelationshipsAndExactEncoding) 
     EXPECT_EQ(project.sensors[0].pointing, application::SensorPointing::targeted);
     EXPECT_EQ(project.sensors[0].tilt_x_rad, .125);
     EXPECT_EQ(project.sensors[0].tilt_y_rad, -.25);
+    EXPECT_TRUE(project.sensors[0].display.show_space_extension);
     ASSERT_EQ(project.reports.size(), 6U);
     EXPECT_EQ(project.reports[4].query.kind, application::ReportKind::coverage_grid);
     EXPECT_EQ(project.reports[5].query.kind, application::ReportKind::coverage_time);
@@ -545,8 +553,8 @@ TEST(Project, DataLocksHaveStableCanonicalOrderAndRejectDuplicateRoles) {
 }
 TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
     const auto bytes = application::encode_project(example());
-    for (std::uint32_t version = 0; version <= 51; ++version) {
-        if (version == 50)
+    for (std::uint32_t version = 0; version <= 52; ++version) {
+        if (version == 51)
             continue;
         SCOPED_TRACE(version);
         auto unsupported = bytes;
@@ -558,7 +566,7 @@ TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
         } catch (const application::ProjectError &error) {
             EXPECT_NE(std::string(error.what()).find("version " + std::to_string(version) + ";"),
                       std::string::npos);
-            EXPECT_NE(std::string(error.what()).find("reads only version 50"), std::string::npos);
+            EXPECT_NE(std::string(error.what()).find("reads only version 51"), std::string::npos);
         }
     }
 }

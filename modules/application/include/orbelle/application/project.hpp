@@ -130,6 +130,7 @@ struct SensorDisplay {
     bool show_2d = true, show_3d = true, fill = true;
     std::uint32_t color = 0xf1a6ca;
     double opacity = 0.16, space_range_m = 20'000'000;
+    bool show_space_extension = false;
     bool operator==(const SensorDisplay &) const = default;
 };
 struct ProjectSensor {

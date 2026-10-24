@@ -35,6 +35,35 @@ TEST(GroundFootprint, SplitsDateLineAndClosesPolarCapWithoutFillingOtherHemisphe
     EXPECT_FALSE(cap.contains({0, 70}));
     EXPECT_FALSE(cap.contains({0, -89}));
 }
+TEST(GroundFootprint, ObliqueStationTrackingFillMeetsEveryVisibleLimbSegment) {
+    constexpr double degree = std::numbers::pi / 180;
+    const auto surface = core::ground_station_position({-122.315 * degree, .151 * degree, 0});
+    const core::SensorVector satellite{surface[0] * 7e6 / 6378137., surface[1] * 7e6 / 6378137.,
+                                       surface[2] * 7e6 / 6378137.};
+    const auto station = core::ground_station_position({-105 * degree, 14 * degree, 0});
+    const auto axes =
+        core::sensor_axes({5000, 3000, 5000}, {station[0] - satellite[0], station[1] - satellite[1],
+                                               station[2] - satellite[2]});
+    const core::SensorPattern pattern(45 * degree);
+    const core::SensorGeometry geometry(pattern);
+    const auto mesh = visualization::SensorView(pattern).project(satellite, axes, 2e7);
+    const auto path = ground_footprint_path(mesh.ground);
+    const auto subpoint = ground_coordinates(satellite);
+    std::size_t checked = 0, gaps = 0;
+    for (const auto &edge : mesh.ground_edges) {
+        const core::SensorVector middle{(edge[0][0] + edge[1][0]) / 2 - satellite[0],
+                                        (edge[0][1] + edge[1][1]) / 2 - satellite[1],
+                                        (edge[0][2] + edge[1][2]) / 2 - satellite[2]};
+        if (geometry.margin(axes.to_local(middle)) < .03)
+            continue;
+        const auto point = (ground_coordinates(edge[0]) + ground_coordinates(edge[1])) / 2;
+        // Stay just inside the displayed outline, well below one pixel at normal zoom.
+        gaps += !path.contains(point + (subpoint - point) * 1e-4);
+        ++checked;
+    }
+    ASSERT_GT(checked, 20u);
+    EXPECT_EQ(gaps, 0u);
+}
 TEST(GroundLightingMask, MatchesPerPixelReferenceAtPolesSeamsAndTwilight) {
     for (int sample = 0; sample < 20; ++sample) {
         const double longitude = sample * std::numbers::pi / 5;
@@ -412,6 +441,59 @@ TEST_F(GroundMapTest, SensorRasterKeepsHolesAndRefreshesAfterPanResizeAndRemoval
     ASSERT_TRUE(settle(map));
     ASSERT_TRUE(settle(reference));
     expect_same_pixels(pixels(map), pixels(reference));
+}
+TEST_F(GroundMapTest, ObliqueSensorFillHasNoInternalRasterSeams) {
+    QImage black(720, 360, QImage::Format_RGB32);
+    black.fill(Qt::black);
+    GroundMap map(black);
+    map.resize(1000, 700);
+    map.set_grid_visible(false);
+    map.set_lighting(false);
+    map.set_sun_visible(false);
+    map.set_labels_visible(false);
+    map.set_snapshot(
+        {core::Epoch{0},
+         core::FrameId::itrf,
+         core::OriginId::earth,
+         {{"origin", {6378137, 0, 0}}, {"east", core::ground_station_position({.1, 0, 0})}}});
+    map.zoom_centered(4);
+    const core::SensorVector satellite{7e6, 0, 0};
+    const auto station = core::ground_station_position({.3, .2, 0});
+    const auto axes =
+        core::sensor_axes({0, 5000, 5000}, {station[0] - satellite[0], station[1], station[2]});
+    const core::SensorPattern pattern(std::numbers::pi / 4);
+    const core::SensorGeometry geometry(pattern);
+    auto mesh = visualization::SensorView(pattern).project(satellite, axes, 2e7);
+    mesh.color = 0xffffff;
+    mesh.opacity = 1;
+    mesh.ground_edges.clear();
+    map.set_sensor_footprints(std::span(&mesh, 1));
+    ASSERT_TRUE(settle(map));
+    const auto frame = pixels(map);
+    capture(frame, "seamless-fill");
+    const auto origin = map.marker_position(0) * map.devicePixelRatioF();
+    const auto east = map.marker_position(1) * map.devicePixelRatioF();
+    const auto radians_per_pixel =
+        .1 / ((map.marker_position(1).x() - map.marker_position(0).x()) * map.devicePixelRatioF());
+    int checked = 0, minimum = 255;
+    // Sample comfortably inside the analytic visible footprint, away from the
+    // markers and its antialiased boundary. Shared facet edges must stay opaque.
+    for (int y = 40; y < frame.height() - 90; ++y)
+        for (int x = 70; x < frame.width() - 40; ++x) {
+            if (QLineF(QPointF(x, y), origin).length() < 12 * map.devicePixelRatioF() ||
+                QLineF(QPointF(x, y), east).length() < 12 * map.devicePixelRatioF())
+                continue;
+            const auto point =
+                core::ground_station_position({(x + .5 - origin.x()) * radians_per_pixel,
+                                               (origin.y() - y - .5) * radians_per_pixel, 0});
+            const core::SensorVector ray{point[0] - satellite[0], point[1], point[2]};
+            if (point[0] < 5.95e6 || geometry.margin(axes.to_local(ray)) < .03)
+                continue;
+            minimum = std::min(minimum, frame.pixelColor(x, y).red());
+            ++checked;
+        }
+    ASSERT_GT(checked, 1000);
+    EXPECT_GE(minimum, 254);
 }
 TEST_F(GroundMapTest, TrackStyleChangesRepaintCachedGeometryWithColorWidthAndGaps) {
     GroundMap map(imagery_);

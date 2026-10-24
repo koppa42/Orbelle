@@ -19,7 +19,7 @@ class ProjectFormatTests(unittest.TestCase):
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 50)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 51)
         self.path.write_bytes(self.raw)
         project = ob.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
@@ -65,6 +65,7 @@ class ProjectFormatTests(unittest.TestCase):
         self.assertEqual(project.objects["sensor-a"].parent, project.objects["satellite-a"])
         self.assertEqual(project.objects["sensor-a"].orientation.x.radians, .125)
         self.assertEqual(project.objects["sensor-a"].orientation.y.radians, -.25)
+        self.assertTrue(project.to_data().sensors[0].display.show_space_extension)
         self.assertEqual(project.analysis_status, ob.AnalysisStatus.UNRECORDED)
         self.assertEqual(project.to_data().reports[0].query.lighting_ephemeris, "fixture-sun")
         self.assertEqual(project.to_data().reports[1].query.kind, ob.ReportKind.ORBITAL_EVENTS)
@@ -107,6 +108,20 @@ class ProjectFormatTests(unittest.TestCase):
                 ob.Project.open(self.path)
             self.assertEqual(self.path.read_bytes(),raw)
 
+    def test_invalid_sensor_space_extension_boolean_is_rejected(self):
+        sections = []
+        for tag, version, body in read_sections(self.raw):
+            if tag == b"SNSR":
+                self.assertEqual(version, 4)
+                self.assertEqual(body[-1], 1)
+                body = body[:-1] + b"\x02"
+            sections.append((tag, version, body))
+        raw = with_sections(self.raw, sections)
+        self.path.write_bytes(raw)
+        with self.assertRaises(ob.ProjectError):
+            ob.Project.open(self.path)
+        self.assertEqual(self.path.read_bytes(), raw)
+
     def test_invalid_shadow_boundary_flag_preserves_source(self):
         marker=struct.pack("<8d",1.25,.03,23000,4.56e-6,149597870700,696000000,6378137,1737400)
         sections=[]
@@ -141,14 +156,14 @@ class ProjectFormatTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(),altered)
 
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(50), 51, 0xFFFFFFFF):
+        for version in (*range(51), 52, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (ob.load_project_data, ob.load_project,
                                  ob.Project.open, ob.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(ob.ProjectError, f"version {version};.*only version 50"):
+                    with self.assertRaisesRegex(ob.ProjectError, f"version {version};.*only version 51"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 

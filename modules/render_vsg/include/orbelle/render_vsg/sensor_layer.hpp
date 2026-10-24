@@ -11,7 +11,8 @@ class SensorLayer {
     [[nodiscard]] vsg::ref_ptr<vsg::Node> node() const;
     [[nodiscard]] std::size_t capacity() const;
     static std::size_t required(std::span<const visualization::SensorMesh> meshes);
-    void update(std::span<const visualization::SensorMesh> meshes, bool srgb_framebuffer);
+    void update(std::span<const visualization::SensorMesh> meshes, bool srgb_framebuffer,
+                double device_pixel_ratio = 1);
 
   private:
     struct Impl;

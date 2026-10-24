@@ -35,4 +35,4 @@
 
 Python 示例见 [coverage.py](../../examples/python/coverage.py)：`analysis.report(ob.ReportKind.COVERAGE_GRID, objects=[satellite], coverage=grid, step=u.s(60))`。`CoverageGrid` 是可编辑的 SI 配置；返回的 `coverage_statistics.points` 保留每点位置、面积、合并区间与统计，模板转换不会重算轨道。ALL 模式不适用于覆盖资产。
 
-项目格式 v50 / RPTS7 保存全部覆盖参数，包括非活动草稿；只接受当前格式，旧版本明确拒绝。结果不写入项目，模板保存查询输入。暂不包含地形/折射、自定义多边形、自适应网格、概率覆盖、多重同时覆盖、重访百分位、通信链路及区域传感器规划。
+项目格式 v51 / RPTS7 保存全部覆盖参数，包括非活动草稿；只接受当前格式，旧版本明确拒绝。结果不写入项目，模板保存查询输入。暂不包含地形/折射、自定义多边形、自适应网格、概率覆盖、多重同时覆盖、重访百分位、通信链路及区域传感器规划。

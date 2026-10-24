@@ -82,6 +82,12 @@ class AccessTests(unittest.TestCase):
         stations = p.ground_stations
         stations[0].minimum_elevation_rad = 0.2
         p.ground_stations = stations
+        sensors = p.sensors
+        self.assertFalse(sensors[0].display.show_space_extension)
+        original_hash = native.report_input_sha256(p)
+        sensors[0].display.show_space_extension = True
+        p.sensors = sensors
+        self.assertEqual(native.report_input_sha256(p), original_hash)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'sensors.orbelle'
             p.save(path)
@@ -90,6 +96,7 @@ class AccessTests(unittest.TestCase):
             self.assertEqual(restored.sensors[0].parent_satellite_id, 'satellite-1')
             self.assertEqual(restored.sensors[0].pointing, native.SensorPointing.TARGETED)
             self.assertEqual(restored.sensors[0].half_angle_rad, p.sensors[0].half_angle_rad)
+            self.assertTrue(restored.sensors[0].display.show_space_extension)
             self.assertEqual(restored.ground_stations[0].minimum_elevation_rad, 0.2)
             raw = path.read_bytes()
             restored.save(path, overwrite=True)

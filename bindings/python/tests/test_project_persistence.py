@@ -158,7 +158,7 @@ class ProjectPersistenceTests(unittest.TestCase):
     def test_current_format_roundtrip_and_integrity(self):
         self.project.save(self.path, analysis=self.project.prepare(data=ob.DataSnapshot.builtin_time()))
         original = self.path.read_bytes()
-        self.assertEqual(struct.unpack_from("<I", original, 8)[0], 50)
+        self.assertEqual(struct.unpack_from("<I", original, 8)[0], 51)
         raw = ob.load_project_data(self.path)
         raw.save(self.path, overwrite=True)
         self.assertEqual(self.path.read_bytes(), original)

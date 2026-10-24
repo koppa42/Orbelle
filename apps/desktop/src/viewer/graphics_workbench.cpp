@@ -4017,6 +4017,7 @@ class Workbench final : public WorkbenchWindow {
             mesh.color = sensor.display.color;
             mesh.opacity = sensor.display.opacity;
             mesh.fill = sensor.display.fill;
+            mesh.show_space_extension = sensor.display.show_space_extension;
             if (sensor.display.show_2d)
                 sensor_footprints.push_back(mesh);
             if (sensor.display.show_3d) {
@@ -4033,7 +4034,7 @@ class Workbench final : public WorkbenchWindow {
         if (required && (!sensor_layer_ || sensor_layer_->capacity() < required)) {
             auto layer = std::make_unique<render_vsg::SensorLayer>(
                 std::max<std::size_t>(1024, required * 2));
-            layer->update(sensor_meshes, srgb);
+            layer->update(sensor_meshes, srgb, devicePixelRatioF());
             publish_static_node(layer->node(), [&] {
                 if (sensor_layer_) {
                     auto &children = earth_transform_->children;
@@ -4043,7 +4044,7 @@ class Workbench final : public WorkbenchWindow {
                 sensor_layer_ = std::move(layer);
             });
         } else if (sensor_layer_)
-            sensor_layer_->update(sensor_meshes, srgb);
+            sensor_layer_->update(sensor_meshes, srgb, devicePixelRatioF());
         if (ground_map_)
             ground_map_->set_sensor_footprints(sensor_footprints);
         for (std::size_t i = 0; i < stations_.size(); ++i) {
@@ -5874,7 +5875,7 @@ class Workbench final : public WorkbenchWindow {
         SmokeScenario{"specialist-reports", 178, 191, &Workbench::smoke_specialist_reports},
         SmokeScenario{"status-feedback", 192, 197, &Workbench::smoke_status_feedback},
         SmokeScenario{"object-insertion", 198, 203, &Workbench::smoke_object_insertion},
-        SmokeScenario{"sensor-geometry", 204, 206, &Workbench::smoke_sensor_geometry}};
+        SmokeScenario{"sensor-geometry", 204, 211, &Workbench::smoke_sensor_geometry}};
     const char *orbit_smoke_scenario() const {
         for (const auto &scenario : smoke_scenarios_)
             if (orbit_smoke_stage_ >= scenario.first_stage &&

@@ -825,8 +825,12 @@ SensorEditor::SensorEditor(QWidget *parent) : QDialog(parent) {
     show_3d_->setObjectName("sensorShow3d");
     layout->addWidget(show_3d_);
     layout->addSpacing(8);
+    show_space_ = new QCheckBox(ui::text("sensor.geometry.show_space_extension"), body);
+    show_space_->setObjectName("sensorShowSpaceExtension");
+    layout->addWidget(show_space_);
     range_ = field(layout, body, "sensor.geometry.range", "sensorSpaceRange", .001, 10000000,
                    Unit::kilometre);
+    connect(show_space_, &QCheckBox::toggled, range_, &QWidget::setEnabled);
     auto *range_hint = new QLabel(ui::text("sensor.geometry.range_hint"), body);
     range_hint->setWordWrap(true);
     range_hint->setObjectName("sensorCaption");
@@ -1018,6 +1022,8 @@ void SensorEditor::load_fields() {
     color_value_ = original_.display.color;
     update_color();
     range_->set_value(original_.display.space_range_m, Unit::metre);
+    show_space_->setChecked(original_.display.show_space_extension);
+    range_->setEnabled(original_.display.show_space_extension);
     update_type();
 }
 void SensorEditor::update_color() {
@@ -1081,6 +1087,7 @@ application::ProjectSensor SensorEditor::sensor() const {
     s.tilt_y_rad = tilt_y_->value(Unit::radian);
     s.display = {show_2d_->isChecked(), show_3d_->isChecked(),     fill_->isChecked(),
                  color_value_,          opacity_->value() / 100.0, range_->value(Unit::metre)};
+    s.display.show_space_extension = show_space_->isChecked();
     if (opacity_->value() == qRound(original_.display.opacity * 100))
         s.display.opacity = original_.display.opacity;
     s.pointing = static_cast<application::SensorPointing>(pointing_->checkedId());
