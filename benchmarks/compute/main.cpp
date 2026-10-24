@@ -202,7 +202,7 @@ void run(Json &report, const std::filesystem::path &data, const std::filesystem:
                 ed.id == "iers-c04-p0-tai-zero-v1",
             "Unexpected EOP snapshot");
     require(sd.manifest_sha256 ==
-                    "2b1a07664f8a2d52ef3d22b4f58023561d47a64f21f7ee544dfa421f7be90ce4" &&
+                    "3a2e2a06b00232e386e57d7f654956b3bad21f1234a3088e09d8c8f482ab5e21" &&
                 other->data_info().manifest_sha256 == sd.manifest_sha256,
             "Unexpected SPICE snapshot");
     report["data"] = {{"eop_id", ed.id},
@@ -463,8 +463,8 @@ int main(int argc, char **argv) {
         require(!std::filesystem::exists(output), "Output already exists");
         const auto profile = args.at("--profile").get<std::string>();
         require(profile == "baseline" || profile == "smoke", "Unknown profile");
-        const bool eligible = std::string{ORBELLE_BENCHMARK_CONFIG} == "Release" &&
-                              ORBELLE_BENCHMARK_SANITIZERS == 0;
+        const bool eligible =
+            std::string{ORBELLE_BENCHMARK_CONFIG} == "Release" && ORBELLE_BENCHMARK_SANITIZERS == 0;
         require(profile != "baseline" || eligible, "Baseline requires Release without sanitizers");
         const Profile p =
             profile == "baseline" ? Profile{10'000, 601, 10'000, 200, 5} : Profile{8, 7, 16, 8, 2};

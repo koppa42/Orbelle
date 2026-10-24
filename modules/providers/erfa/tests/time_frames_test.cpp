@@ -1,4 +1,5 @@
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <erfa.h>
@@ -396,6 +397,117 @@ TEST(ErfaFrames, CachedSeriesMatchesDirectErfaAcrossEpochsCorrectionsAndThreads)
         workers.push_back(std::async(std::launch::async, check, i));
     for (auto &worker : workers)
         EXPECT_LE(worker.get(), 5e-16);
+}
+
+TEST(ErfaFrames, NumericReusePreservesEveryEopComponentRateAndExactEpoch) {
+    const auto frames = providers::erfa::make_frame_provider();
+    const core::Epoch epoch{123'456'789};
+    const core::EarthOrientationState base{{epoch, -32.1, 1e-6, -2e-6, 1e-8, -2e-8, "base"},
+                                           {1e-8, 1e-12, -2e-12, 1e-13, -2e-13}};
+    std::vector<core::EarthOrientationState> inputs;
+    for (auto member : {&core::EarthOrientationSample::ut1_minus_tai_seconds,
+                        &core::EarthOrientationSample::polar_motion_x_rad,
+                        &core::EarthOrientationSample::polar_motion_y_rad,
+                        &core::EarthOrientationSample::celestial_pole_dx_rad,
+                        &core::EarthOrientationSample::celestial_pole_dy_rad}) {
+        auto changed = base;
+        changed.sample.*member += 1e-5;
+        inputs.push_back(changed);
+    }
+    for (auto member : {&core::EarthOrientationRates::ut1_minus_tai_seconds_per_second,
+                        &core::EarthOrientationRates::polar_motion_x_rad_per_second,
+                        &core::EarthOrientationRates::polar_motion_y_rad_per_second,
+                        &core::EarthOrientationRates::celestial_pole_dx_rad_per_second,
+                        &core::EarthOrientationRates::celestial_pole_dy_rad_per_second}) {
+        auto changed = base;
+        changed.rates.*member += 1e-6;
+        inputs.push_back(changed);
+    }
+    for (auto offset : {-1LL, 1LL}) {
+        auto changed = base;
+        changed.sample.epoch = core::Epoch{epoch.tai_nanoseconds() + offset};
+        inputs.push_back(changed);
+    }
+    for (double zero : {0., -0.}) {
+        auto changed = base;
+        changed.sample.polar_motion_x_rad = changed.sample.celestial_pole_dy_rad = zero;
+        changed.rates.polar_motion_x_rad_per_second =
+            changed.rates.celestial_pole_dy_rad_per_second = zero;
+        inputs.push_back(changed);
+    }
+    const auto exact_matrix = [](const core::Matrix3 &matrix) {
+        return std::bit_cast<std::array<std::uint64_t, 9>>(matrix);
+    };
+    for (std::size_t i = 0; i < inputs.size(); ++i) {
+        SCOPED_TRACE(i);
+        const auto &input = inputs[i];
+        // A new worker has no cached matrices. Compare against that cold evaluation
+        // after warming this thread with the same epoch and different numeric data.
+        const auto cold = std::async(std::launch::async, [&] {
+                              return frames->gcrf_to_itrf_state(input.sample.epoch, input);
+                          }).get();
+        const auto original = frames->gcrf_to_itrf_state(epoch, base);
+        if (i < 5) {
+            EXPECT_NE(cold.rotation.matrix, original.rotation.matrix);
+        } else if (i < 10) {
+            EXPECT_NE(cold.rotation_rate_per_second, original.rotation_rate_per_second);
+        }
+        for (int repeat = 0; repeat < 2; ++repeat) {
+            const auto actual = frames->gcrf_to_itrf_state(input.sample.epoch, input);
+            EXPECT_EQ(exact_matrix(actual.rotation.matrix), exact_matrix(cold.rotation.matrix));
+            EXPECT_EQ(exact_matrix(actual.rotation_rate_per_second),
+                      exact_matrix(cold.rotation_rate_per_second));
+            EXPECT_EQ(actual.rotation.epoch, input.sample.epoch);
+            EXPECT_EQ(frames->gcrf_to_itrf(input.sample.epoch, input.sample).matrix,
+                      actual.rotation.matrix);
+        }
+    }
+    const auto original = frames->gcrf_to_itrf_state(epoch, base);
+    for (int i = 0; i < 64; ++i) {
+        auto changed = base;
+        changed.sample.ut1_minus_tai_seconds += i + 1;
+        (void)frames->gcrf_to_itrf_state(epoch, changed);
+    }
+    const auto rebuilt = frames->gcrf_to_itrf_state(epoch, base);
+    EXPECT_EQ(exact_matrix(rebuilt.rotation.matrix), exact_matrix(original.rotation.matrix));
+    EXPECT_EQ(exact_matrix(rebuilt.rotation_rate_per_second),
+              exact_matrix(original.rotation_rate_per_second));
+}
+
+TEST(ErfaFrames, WarmNumericReuseRefreshesProvenanceAndStillValidatesInputs) {
+    const auto frames = providers::erfa::make_frame_provider();
+    const core::Epoch epoch{0};
+    core::EarthOrientationState input{{epoch, -32, 0, 0, 0, 0, "source-a"}, {}};
+    const auto original = frames->gcrf_to_itrf_state(epoch, input);
+    input.sample.source_id = "source-b";
+    const auto changed = frames->gcrf_to_itrf_state(epoch, input);
+    EXPECT_EQ(changed.rotation.eop_source_id, "source-b");
+    EXPECT_EQ(original.rotation.eop_source_id, "source-a");
+    EXPECT_EQ(changed.rotation.matrix, original.rotation.matrix);
+    EXPECT_EQ(changed.rotation_rate_per_second, original.rotation_rate_per_second);
+    EXPECT_EQ(frames->gcrf_to_itrf(epoch, input.sample).eop_source_id, "source-b");
+    input.sample.source_id.clear();
+    EXPECT_THROW((void)frames->gcrf_to_itrf(epoch, input.sample), std::invalid_argument);
+    EXPECT_THROW((void)frames->gcrf_to_itrf_state(epoch, input), std::invalid_argument);
+    input.sample.source_id = "source-b";
+    input.sample.epoch = core::Epoch{1};
+    EXPECT_THROW((void)frames->gcrf_to_itrf(epoch, input.sample), std::invalid_argument);
+    EXPECT_THROW((void)frames->gcrf_to_itrf_state(epoch, input), std::invalid_argument);
+    input.sample.epoch = epoch;
+    for (auto member : {&core::EarthOrientationRates::ut1_minus_tai_seconds_per_second,
+                        &core::EarthOrientationRates::polar_motion_x_rad_per_second,
+                        &core::EarthOrientationRates::polar_motion_y_rad_per_second,
+                        &core::EarthOrientationRates::celestial_pole_dx_rad_per_second,
+                        &core::EarthOrientationRates::celestial_pole_dy_rad_per_second}) {
+        for (double invalid : {std::numeric_limits<double>::quiet_NaN(),
+                               std::numeric_limits<double>::infinity(), .002, -.002}) {
+            input.rates.*member = invalid;
+            EXPECT_THROW((void)frames->gcrf_to_itrf_state(epoch, input), std::invalid_argument);
+        }
+        input.rates.*member = 0;
+    }
+    EXPECT_EQ(frames->gcrf_to_itrf_state(epoch, input).rotation_rate_per_second,
+              original.rotation_rate_per_second);
 }
 
 TEST(ErfaFrames, RotationPreservesGeometryAndInverts) {

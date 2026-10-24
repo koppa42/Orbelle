@@ -9,6 +9,55 @@ namespace orbelle::core {
 namespace {
 using Vector = std::array<double, 3>;
 using Matrix = std::array<Vector, 3>;
+// Lazy inputs for one force evaluation only. Reuse exact immutable provider
+// results across gravity, tides, third bodies, SRP and drag at the same epoch.
+// No stage/state history, interpolated values or spacecraft-dependent cache.
+class ForceInputs {
+    Epoch epoch_;
+    const HpopEnvironment &environment_;
+    mutable std::optional<EarthOrientationState> eop_;
+    mutable std::optional<PositionRotation> rotation_;
+    mutable std::optional<Vector> sun_, moon_, apparent_sun_;
+
+  public:
+    ForceInputs(Epoch epoch, const HpopEnvironment &environment)
+        : epoch_(epoch), environment_(environment) {}
+    const EarthOrientationState &eop() const {
+        if (!eop_)
+            eop_ = environment_.eop->at(epoch_);
+        return *eop_;
+    }
+    const PositionRotation &rotation() const {
+        if (!rotation_)
+            rotation_ = environment_.frames->gcrf_to_itrf(epoch_, eop().sample);
+        return *rotation_;
+    }
+    Vector position(ThirdBody body, Epoch at) const {
+        if (at != epoch_ || (body != ThirdBody::sun && body != ThirdBody::moon))
+            return environment_.ephemeris->position(body, at);
+        auto &value = body == ThirdBody::sun ? sun_ : moon_;
+        if (!value)
+            value = environment_.ephemeris->position(body, at);
+        return *value;
+    }
+    Vector apparent_sun_from_earth(Epoch at) const {
+        if (at != epoch_)
+            return environment_.ephemeris->apparent_sun_from_earth(at);
+        if (!apparent_sun_)
+            apparent_sun_ = environment_.ephemeris->apparent_sun_from_earth(at);
+        return *apparent_sun_;
+    }
+    Vector apparent_sun_from_spacecraft(Epoch at, const Vector &r, const Vector &v) const {
+        return environment_.ephemeris->apparent_sun_from_spacecraft(at, r, v);
+    }
+    ApparentSunDifferential apparent_sun_from_spacecraft_differential(Epoch at, const Vector &r,
+                                                                      const Vector &v) const {
+        return environment_.ephemeris->apparent_sun_from_spacecraft_differential(at, r, v);
+    }
+    Vector eclipsing_body_position(ThirdBody body, Epoch at) const {
+        return environment_.ephemeris->eclipsing_body_position(body, at);
+    }
+};
 std::function<double(Epoch)> sun_distance(const IThirdBodyEphemeris *ephemeris) {
     return [ephemeris](Epoch at) {
         const auto p = ephemeris->position(ThirdBody::sun, at);
@@ -46,7 +95,8 @@ void finite(const Vector &values) {
 }
 template <bool Differential>
 auto evaluate_gravity(const CartesianState &state, const HpopOptions &options,
-                      const HpopEnvironment &environment, const std::function<void()> &checkpoint) {
+                      const HpopEnvironment &environment, const ForceInputs &inputs,
+                      const std::function<void()> &checkpoint) {
     using Result = std::conditional_t<Differential, HpopForceDifferential, Vector>;
     Result result{};
     Vector &acceleration = [&]() -> Vector & {
@@ -66,16 +116,14 @@ auto evaluate_gravity(const CartesianState &state, const HpopOptions &options,
             acceleration = environment.gravity->acceleration(r, 0, 0);
         }
     } else {
-        const auto eop = environment.eop->at(epoch).sample;
-        const auto rotation = environment.frames->gcrf_to_itrf(epoch, eop);
+        const auto &eop = inputs.eop().sample;
+        const auto &rotation = inputs.rotation();
         std::array<TideRaisingBody, 2> bodies{};
         if (options.uses_full_solid_tides()) {
             const auto &info = environment.ephemeris->data_info();
             bodies = {
-                {{rotation.apply_position(environment.ephemeris->position(ThirdBody::sun, epoch)),
-                  info.sun_mu},
-                 {rotation.apply_position(environment.ephemeris->position(ThirdBody::moon, epoch)),
-                  info.moon_mu}}};
+                {{rotation.apply_position(inputs.position(ThirdBody::sun, epoch)), info.sun_mu},
+                 {rotation.apply_position(inputs.position(ThirdBody::moon, epoch)), info.moon_mu}}};
         }
         auto corrections = solid_tide_corrections(environment.gravity->info(), options.solid_tides,
                                                   options.gravity_degree, options.gravity_order,
@@ -124,8 +172,10 @@ auto evaluate_force(const CartesianState &state, const HpopOptions &options,
     using Result = std::conditional_t<Differential, HpopForceDifferential, Vector>;
     if (checkpoint)
         checkpoint();
+    const ForceInputs inputs(state.epoch, environment);
     Result result = evaluate_gravity<Differential>(
-        state, differential_gravity ? *differential_gravity : options, environment, checkpoint);
+        state, differential_gravity ? *differential_gravity : options, environment, inputs,
+        checkpoint);
     Vector &acceleration = [&]() -> Vector & {
         if constexpr (Differential)
             return result.force.acceleration_mps2;
@@ -139,14 +189,13 @@ auto evaluate_force(const CartesianState &state, const HpopOptions &options,
     };
     if constexpr (Differential)
         if (differential_gravity)
-            acceleration = evaluate_gravity<false>(state, options, environment, checkpoint);
+            acceleration = evaluate_gravity<false>(state, options, environment, inputs, checkpoint);
     const auto &r = state.position_m;
     const auto &v = state.velocity_mps;
     const auto epoch = state.epoch;
     check();
     if (options.include_relativistic_accelerations) {
-        const auto rotation =
-            environment.frames->gcrf_to_itrf(epoch, environment.eop->at(epoch).sample);
+        const auto &rotation = inputs.rotation();
         const auto sun = environment.ephemeris->geometric_state(ThirdBody::sun, epoch);
         Vector part;
         if constexpr (Differential) {
@@ -173,7 +222,7 @@ auto evaluate_force(const CartesianState &state, const HpopOptions &options,
                 continue;
             check();
             const double mu = third_body_mu(options.third_body(body), body, info);
-            const auto p = environment.ephemeris->position(body, epoch);
+            const auto p = inputs.position(body, epoch);
             Vector part;
             if constexpr (Differential) {
                 const auto force = third_body_differential(r, p, mu);
@@ -195,8 +244,7 @@ auto evaluate_force(const CartesianState &state, const HpopOptions &options,
             add_blocks(result.force, force.force);
             result.srp_parameter_jacobian_pa = force.srp_parameter_jacobian_pa;
         } else {
-            const auto geometry =
-                detail::resolve_srp_geometry(epoch, r, v, options.srp, *environment.ephemeris);
+            const auto geometry = detail::resolve_srp_geometry(epoch, r, v, options.srp, inputs);
             auto force = evaluate_srp(r, geometry.sun, options.srp, geometry.moon,
                                       std::span{geometry.additional}.first(geometry.count));
             if (shadow_lighting) {
@@ -213,12 +261,11 @@ auto evaluate_force(const CartesianState &state, const HpopOptions &options,
     }
     check();
     if (options.drag.enabled) {
-        const auto transform =
-            environment.frames->gcrf_to_itrf_state(epoch, environment.eop->at(epoch));
+        const auto transform = environment.frames->gcrf_to_itrf_state(epoch, inputs.eop());
         const auto fixed = transform.apply(state);
         const auto sun = options.drag.use_apparent_sun_position
-                             ? environment.ephemeris->apparent_sun_from_earth(epoch)
-                             : environment.ephemeris->position(ThirdBody::sun, epoch);
+                             ? inputs.apparent_sun_from_earth(epoch)
+                             : inputs.position(ThirdBody::sun, epoch);
         std::optional<SpaceWeatherSample> weather, lower;
         if (!options.drag.weather_model.empty()) {
             const auto &d = options.drag;

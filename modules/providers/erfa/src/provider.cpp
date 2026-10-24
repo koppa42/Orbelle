@@ -1,3 +1,4 @@
+#include "cip_interpolation.hpp"
 #include "iers1996_nutation.hpp"
 #include "leap_seconds.hpp"
 #include <algorithm>
@@ -270,15 +271,14 @@ std::array<double, 3> model_cip(core::JulianDate tt) {
     };
     // The uncorrected IAU series depends only on these exact two TT doubles.
     // RK stages repeat epochs; gravity, drag and their derivatives also share them.
-    // No time rounding, interpolation, EOP values or provider identities enter this cache.
+    // No time rounding, EOP values or provider identities enter this lookup.
     // Thread-local bounded storage avoids locks and races between concurrent analyses.
     thread_local std::array<Entry, 64> entries;
     thread_local std::size_t count = 0, next = 0;
     for (std::size_t i = 0; i < count; ++i)
         if (entries[i].tt.day == tt.day && entries[i].tt.fraction == tt.fraction)
             return entries[i].value;
-    std::array<double, 3> value;
-    eraXys06a(tt.day, tt.fraction, &value[0], &value[1], &value[2]);
+    const auto value = detail::interpolated_cip(tt);
     entries[next] = {tt, value};
     next = (next + 1) % entries.size();
     count = std::min(count + 1, entries.size());
@@ -326,6 +326,59 @@ double earth_angle(core::Epoch epoch, const core::EarthOrientationSample &eop) {
 core::Matrix3 spin(double angle) {
     const auto c = std::cos(angle), s = std::sin(angle);
     return {{{c, s, 0}, {-s, c, 0}, {0, 0, 1}}};
+}
+
+using OrientationKey = std::array<std::uint64_t, 5>;
+OrientationKey orientation_key(const core::EarthOrientationSample &eop) {
+    return {std::bit_cast<std::uint64_t>(eop.ut1_minus_tai_seconds),
+            std::bit_cast<std::uint64_t>(eop.polar_motion_x_rad),
+            std::bit_cast<std::uint64_t>(eop.polar_motion_y_rad),
+            std::bit_cast<std::uint64_t>(eop.celestial_pole_dx_rad),
+            std::bit_cast<std::uint64_t>(eop.celestial_pole_dy_rad)};
+}
+OrientationKey orientation_key(const core::EarthOrientationRates &rates) {
+    return {std::bit_cast<std::uint64_t>(rates.ut1_minus_tai_seconds_per_second),
+            std::bit_cast<std::uint64_t>(rates.polar_motion_x_rad_per_second),
+            std::bit_cast<std::uint64_t>(rates.polar_motion_y_rad_per_second),
+            std::bit_cast<std::uint64_t>(rates.celestial_pole_dx_rad_per_second),
+            std::bit_cast<std::uint64_t>(rates.celestial_pole_dy_rad_per_second)};
+}
+struct ItrfNumeric {
+    core::Epoch epoch;
+    OrientationKey eop;
+    double angle;
+    core::Matrix3 rotation;
+    std::optional<std::pair<OrientationKey, core::Matrix3>> derivative;
+};
+// Only validated numeric inputs enter this thread-local cache. Source metadata is
+// constructed afresh by each public call. Full ns and all EOP bits (including
+// signed zero) are keys; Rdot also requires every rate component to match.
+ItrfNumeric &itrf_numeric(core::Epoch epoch, const core::EarthOrientationSample &eop) {
+    thread_local std::array<std::optional<ItrfNumeric>, 16> entries;
+    thread_local std::size_t next = 0;
+    const auto key = orientation_key(eop);
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        auto &entry = entries[(next + entries.size() - 1 - i) % entries.size()];
+        if (entry && entry->epoch == epoch && entry->eop == key)
+            return *entry;
+    }
+    const auto slow = slow_rotations(tt_jd(epoch), {eop, {}}, 0);
+    const double angle = earth_angle(epoch, eop);
+    auto &entry = entries[next];
+    entry = ItrfNumeric{
+        epoch, key, angle, multiply(multiply(slow.polar, spin(angle)), slow.celestial), {}};
+    next = (next + 1) % entries.size();
+    return *entry;
+}
+core::PositionRotation itrf_rotation(core::Epoch epoch, const core::EarthOrientationSample &eop,
+                                     const core::Matrix3 &matrix) {
+    return {epoch,
+            core::OriginId::earth,
+            core::FrameId::gcrf,
+            core::FrameId::itrf,
+            matrix,
+            "erfa-2.0.1-iau2006-2000a-cpo-model-s-cip-cheb8-v1",
+            eop.source_id};
 }
 
 constexpr double arcsec = std::numbers::pi / (180 * 3600);
@@ -421,7 +474,7 @@ class FrameProvider final : public core::IFrameProvider {
                 core::FrameId::gcrf,
                 target,
                 fk5_rotation(epoch, {eop, {}}, target, 0),
-                "erfa-2.0.1-iau2006-2000a-to-fk5-iers1996-c7-pseudo-fixed",
+                "erfa-2.0.1-iau2006-2000a-to-fk5-iers1996-c7-pseudo-fixed-cip-cheb8-v1",
                 eop.source_id};
     }
     core::StateTransform gcrf_to_celestial_state(core::Epoch epoch,
@@ -542,14 +595,7 @@ class FrameProvider final : public core::IFrameProvider {
     core::PositionRotation gcrf_to_itrf(core::Epoch epoch,
                                         const core::EarthOrientationSample &eop) const override {
         validate_eop(epoch, eop);
-        const auto slow = slow_rotations(tt_jd(epoch), {eop, {}}, 0);
-        return {epoch,
-                core::OriginId::earth,
-                core::FrameId::gcrf,
-                core::FrameId::itrf,
-                multiply(multiply(slow.polar, spin(earth_angle(epoch, eop))), slow.celestial),
-                "erfa-2.0.1-iau2006-2000a-cpo-model-s",
-                eop.source_id};
+        return itrf_rotation(epoch, eop, itrf_numeric(epoch, eop).rotation);
     }
 
     core::StateTransform gcrf_to_itrf_state(core::Epoch epoch,
@@ -564,7 +610,13 @@ class FrameProvider final : public core::IFrameProvider {
                     "EOP rates must be finite and at most 0.001 SI units/s");
             }
         }
-        auto rotation = gcrf_to_itrf(epoch, eop.sample);
+        validate_eop(epoch, eop.sample);
+        auto &cached = itrf_numeric(epoch, eop.sample);
+        auto rotation = itrf_rotation(epoch, eop.sample, cached.rotation);
+        const auto key = orientation_key(rates);
+        constexpr auto derivative_model = "analytic-era-plus-polar-cip-fd4-1s-local-tangent";
+        if (cached.derivative && cached.derivative->first == key)
+            return {std::move(rotation), cached.derivative->second, derivative_model};
         const auto tt = tt_jd(epoch);
         const auto middle = slow_rotations(tt, eop, 0);
         const auto m2 = slow_rotations(tt, eop, -2), m1 = slow_rotations(tt, eop, -1);
@@ -580,7 +632,7 @@ class FrameProvider final : public core::IFrameProvider {
                              12;
             }
         }
-        const auto angle = earth_angle(epoch, eop.sample);
+        const auto angle = cached.angle;
         const auto z = spin(angle);
         const double omega = 2 * std::numbers::pi * 1.00273781191135448 / 86400.0 *
                              (1 + rates.ut1_minus_tai_seconds_per_second);
@@ -595,7 +647,8 @@ class FrameProvider final : public core::IFrameProvider {
                 rdot[i][j] += second[i][j] + third[i][j];
             }
         }
-        return {std::move(rotation), rdot, "analytic-era-plus-polar-cip-fd4-1s-local-tangent"};
+        cached.derivative = std::pair{key, rdot};
+        return {std::move(rotation), rdot, derivative_model};
     }
 };
 } // namespace

@@ -27,11 +27,11 @@ EXPECTED_DATA = {
     "time_id": "iers-bulletin-c-72-2026-07",
     "time_sha256": "6cb6f5d4b819f2e568e25db4b0b26d89dedf031fdffb18bc94d40f4e94e268d7",
     "spice_id": "orbelle-de440s-2016-leap-v1",
-    "spice_manifest_sha256": "2b1a07664f8a2d52ef3d22b4f58023561d47a64f21f7ee544dfa421f7be90ce4",
+    "spice_manifest_sha256": "3a2e2a06b00232e386e57d7f654956b3bad21f1234a3088e09d8c8f482ab5e21",
     "spice_toolkit_version": "CSPICE_N0067",
     "spice_model": "DE440s-derived-Earth-Moon-Sun; SPICE J2000 with DE440 ICRF axes",
     "spice_first_tai_ns": 536155236000000000, "spice_last_tai_ns": 536760037000000000,
-    "frame_model": "erfa-2.0.1-iau2006-2000a-cpo-model-s",
+    "frame_model": "erfa-2.0.1-iau2006-2000a-cpo-model-s-cip-cheb8-v1",
     "frame_derivative_model": "analytic-era-plus-polar-cip-fd4-1s-local-tangent",
     "kernels": [
         {"file": "naif0012.tls",

@@ -5,6 +5,39 @@
 #include <orbelle/core/propagation/gravity.hpp>
 #include <sstream>
 using namespace orbelle::core;
+
+TEST(Gravity, LowDegreeGradientMatchesGeneralPotentialDerivativesAcrossPolesAndTruncations) {
+    constexpr double radius = 6378136.3;
+    for (const int degree : {2, 10, 21, 32}) {
+        std::vector<GravityCoefficient> coefficients;
+        for (int n = 2; n <= degree; ++n)
+            for (int m = 0; m <= n; ++m)
+                coefficients.push_back(
+                    {n, m, 1e-6 * std::sin(n * 3. + m), m == 0 ? 0 : 1e-6 * std::cos(n + m * 2.)});
+        // The empty degree 33 selects the independently implemented general
+        // potential/gradient recurrence, with exactly the same physical field.
+        const GravityModel model(
+            {"gradient cross-check", {}, {}, "tide_free", 3.986004415e14, radius, 33, 33},
+            coefficients);
+        for (const int order : {0, 1, degree}) {
+            for (const double height : {10., 400000., 36000000.}) {
+                const double r = radius + height;
+                for (const std::array<double, 3> position :
+                     {std::array{0., 0., r}, std::array{0., 0., -r}, std::array{1e-7, 0., r},
+                      std::array{-1e-7, 1e-7, -r}, std::array{r, 0., 0.}, std::array{0., -r, 0.},
+                      std::array{r * .6, r * .48, r * .64},
+                      std::array{-r * .6, r * .48, -r * .64}}) {
+                    const auto fast = model.acceleration(position, degree, order);
+                    const auto general = model.acceleration(position, 33, order);
+                    for (std::size_t axis = 0; axis < 3; ++axis)
+                        EXPECT_NEAR(fast[axis], general[axis], 5e-12)
+                            << "degree=" << degree << " order=" << order << " axis=" << axis;
+                }
+            }
+        }
+    }
+}
+
 TEST(Gravity, HighDegreeNormalizedFieldMatchesIndependentOrekitIncludingNearPoles) {
     std::vector<GravityCoefficient> coefficients;
     for (int n = 2; n <= 360; ++n)

@@ -34,7 +34,11 @@ J2000 TT 对应本工程的 `Epoch(-32'184'000'000)`，对应 UTC 为 2000-01-01
 
 返回值 `PositionRotation` 包含历元、Earth 原点、源/目标参考系、行优先矩阵、模型 ID 和 EOP 来源。使用列向量约定 `r_ITRF = R * r_GCRF`；逆位置变换使用转置矩阵。调用者应保证传入的位置属于该结果标注的历元、原点和源参考系。
 
-GCRF/ITRF 表示地心 GCRS/ITRS 的轴向关系，没有实现特定 ITRF 实现版本间的站坐标变换。模型 ID 为 `erfa-2.0.1-iau2006-2000a-cpo-model-s`：`eraXys06a` 求理论 X/Y/s，X/Y 加入观测 dX/dY 后调用 `eraC2ixys`；依 IERS 2010 §5.5.3 保留理论 s。地球自转角与极移分别使用 `eraEra00`、`eraPom00`/`eraSp00`。
+GCRF/ITRF 表示地心 GCRS/ITRS 的轴向关系，没有实现特定 ITRF 实现版本间的站坐标变换。模型 ID 为 `erfa-2.0.1-iau2006-2000a-cpo-model-s-cip-cheb8-v1`：`eraXys06a` 提供完整理论 X/Y/s，X/Y 加入观测 dX/dY 后调用 `eraC2ixys`；依 IERS 2010 §5.5.3 保留理论 s。地球自转角与极移分别使用 `eraEra00`、`eraPom00`/`eraSp00`。
+
+理论 X/Y/s 使用固定 TT 日窗口的八阶 Chebyshev 拟合：33 个完整级数采样点、中心值平移及四个独立检查点。检查点任一分量误差超过 2e−16 rad 时，该窗口回退到完整级数。四个线程局部窗口及 64 个精确两部分 TT 键保持内存有界；窗口由日期决定，反向查询、跨日及淘汰后重建不改变多项式。EOP、地球自转、极移和观测修正仍按真实查询历元求值，速度变换仍保留完整 Rdot。覆盖整个 int64 Epoch 范围的密集独立 ERFA 检查保留 5e−16 rad 分量容限，跨日速度差分保留 3e−16 rad/s 容限；原有 Orekit 参考和矩阵容限不变。FK5 路径的模型 ID 也记录 `cip-cheb8-v1`。
+
+GCRF→ITRF 的数值矩阵另使用 16 项线程局部缓存，键为完整 TAI 纳秒及五个 EOP 数值的原始位；Rdot 还要求五个变化率的原始位一致。只复用完全相同输入的矩阵，区分正负零，不舍入历元或 EOP。来源标识和公开返回对象每次重新构造，输入检查也在查找前执行；更换来源、错误输入、缓存淘汰和并发查询不改变公开语义。该精确复用不改变模型 ID。
 
 ## 本地 EOP 快照
 
@@ -76,7 +80,7 @@ GCRF/ITRF 表示地心 GCRS/ITRS 的轴向关系，没有实现特定 ITRF 实�
 
 `ORBELLE_WITH_ERFA` 默认关闭；`time-frames` CMake 预设和标准 wheel 构建显式开启。Runtime 装配 Erfa 和 Iers，两者均只依赖 Core 接口；Iers 通过注入的时间 Provider 换算节点。Erfa 私有链接 `erfa::erfa`，Iers 私有使用 nlohmann-json 3.12.0 和 PicoSHA2 1.0.1。Core/Application 不依赖具体 Provider。
 
-Runtime 始终公开能力查询 `time_frames_available()`；禁用 Provider 的构建调用相应工厂会抛出明确的错误。Python 绑定通过 Runtime 装配，公开头文件不泄漏 ERFA 类型。当前 Provider 只读、无可变缓存；调用的 ERFA 函数也不访问可变闰秒表。
+Runtime 始终公开能力查询 `time_frames_available()`；禁用 Provider 的构建调用相应工厂会抛出明确的错误。Python 绑定通过 Runtime 装配，公开头文件不泄漏 ERFA 类型。Provider 的数据快照只读；理论级数缓存为线程局部，不含 EOP、Provider 指针或闰秒表。调用的 ERFA 函数不访问可变闰秒表。
 
 闰秒表可通过 `load_time_snapshot` 在运行时独立加载；桌面数据中心可联网更新，既有实例保持不变。EOP 通过 `load_eop_snapshot_with_time` 或带 `time_file` 的 DataCatalog 导入绑定对应时间数据。TAI↔TDB 与太阳/月球几何状态已由独立的 [CSPICE Provider](spice.md) 提供；ERFA 的 `julian_date` 仍只接受 TAI/TT。统一数据目录与 EOP／UTC 下载更新已实现；TEME 已接入；TCB 及 SPICE 星历状态到 GCRF 的完整模型转换尚未实现。
 

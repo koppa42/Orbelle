@@ -38,6 +38,39 @@ class TimedFrames final : public core::IFrameProvider {
         return result;
     }
 };
+class TimedEphemeris final : public core::IThirdBodyEphemeris {
+    std::shared_ptr<const core::IThirdBodyEphemeris> source_;
+
+  public:
+    explicit TimedEphemeris(std::shared_ptr<const core::IThirdBodyEphemeris> source)
+        : source_(std::move(source)) {}
+    mutable double elapsed = 0;
+    mutable std::size_t calls = 0;
+    std::array<double, 3> position(core::ThirdBody body, core::Epoch at) const override {
+        const auto start = Clock::now();
+        auto result = source_->position(body, at);
+        elapsed += milliseconds(start);
+        ++calls;
+        return result;
+    }
+    std::array<double, 3> apparent_sun_from_earth(core::Epoch at) const override {
+        const auto start = Clock::now();
+        auto result = source_->apparent_sun_from_earth(at);
+        elapsed += milliseconds(start);
+        ++calls;
+        return result;
+    }
+    void validate_interval(core::Epoch first, core::Epoch last,
+                           std::span<const core::ThirdBody> bodies) const override {
+        source_->validate_interval(first, last, bodies);
+    }
+    void validate_apparent_sun_interval(core::Epoch first, core::Epoch last) const override {
+        source_->validate_apparent_sun_interval(first, last);
+    }
+    const core::ThirdBodyDataInfo &data_info() const noexcept override {
+        return source_->data_info();
+    }
+};
 } // namespace
 int main(int argc, char **argv) {
     if (argc != 4 || std::string(ORBELLE_BENCHMARK_CONFIG) != "Release") {
@@ -77,9 +110,11 @@ int main(int argc, char **argv) {
                 Json runs = Json::array();
                 for (int run = 0; run < 3; ++run) {
                     const auto frames = std::make_shared<TimedFrames>();
+                    const auto measured_ephemeris = std::make_shared<TimedEphemeris>(ephemeris);
                     const auto begin = Clock::now();
                     const auto orbit = core::make_hpop_interpolated(
-                        initial, first, last, options, {frames, eop, gravity, ephemeris, time});
+                        initial, first, last, options,
+                        {frames, eop, gravity, measured_ephemeris, time});
                     const double setup = milliseconds(begin);
                     const auto start = Clock::now();
                     const auto end = orbit->state_at(last);
@@ -97,6 +132,8 @@ int main(int argc, char **argv) {
                     runs.push_back({{"setup_ms", setup},
                                     {"propagation_ms", propagation},
                                     {"frames_ms", frame_time},
+                                    {"ephemeris_ms", measured_ephemeris->elapsed},
+                                    {"ephemeris_calls", measured_ephemeris->calls},
                                     {"rotation_calls", frames->positions},
                                     {"transform_calls", frames->states},
                                     {"sampling_ms", sampling},

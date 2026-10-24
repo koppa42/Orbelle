@@ -14,7 +14,7 @@ std::string hpop_algorithm(const core::HpopOptions &options,
     auto algorithm =
         std::string(options.uses_vop() ? "hpop-vop-universal-osculating-gcrf-tai-v1;"
                                        : "hpop-cowell-gcrf-tai-v1;") +
-        (options.integrator == core::HpopIntegrator::rkf78 ? "rkf78-7th-fehlberg-r287-v1;"
+        (options.integrator == core::HpopIntegrator::rkf78 ? "rkf78-8th-fehlberg-r287-v2;"
          : options.integrator == core::HpopIntegrator::rkv89
              ? "rkv89-efficient-8th-rklib-a1bf2d26-v1;"
          : options.integrator == core::HpopIntegrator::bulirsch_stoer
@@ -28,7 +28,8 @@ std::string hpop_algorithm(const core::HpopOptions &options,
         (options.gravity_model.empty() ? std::string(core::egm96_model_id())
                                        : options.gravity_model) +
         ";degree=" + std::to_string(options.gravity_degree) +
-        ";order=" + std::to_string(options.gravity_order);
+        ";order=" + std::to_string(options.gravity_order) +
+        ";force-evaluation=normalized-neighbour32-v1";
     if (options.time_regularization) {
         std::ostringstream config;
         config.imbue(std::locale::classic());

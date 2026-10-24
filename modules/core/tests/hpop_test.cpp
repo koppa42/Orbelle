@@ -737,7 +737,7 @@ TEST(Hpop, BulirschStoerMatchesIndependentHipparchusForEccentricJ2AndTimeVarying
     RecordProperty("max_position_error_m", metrics_r.str());
     RecordProperty("max_velocity_error_mps", metrics_v.str());
 }
-TEST(Hpop, Rkf78AdvancesTheSeventhOrderMemberAndControlsRejectedSteps) {
+TEST(Hpop, Rkf78AdvancesTheEighthOrderMemberAndControlsRejectedSteps) {
     const auto initial = eccentric_analytic(0), expected = eccentric_analytic(600);
     auto options = point_mass();
     options.integrator = HpopIntegrator::rkf78;
@@ -750,8 +750,8 @@ TEST(Hpop, Rkf78AdvancesTheSeventhOrderMemberAndControlsRejectedSteps) {
     options.min_step_seconds = options.max_step_seconds = 75;
     const auto fine = make_hpop(initial, options)->state_at(expected.epoch);
     const double ratio = position_error(coarse, expected) / position_error(fine, expected);
-    EXPECT_GT(ratio, 115); // Seventh order predicts 2^7; eighth-order advancement is excluded.
-    EXPECT_LT(ratio, 150);
+    EXPECT_GT(ratio, 220); // Eighth order predicts 2^8; seventh-order advancement is excluded.
+    EXPECT_LT(ratio, 290);
     EXPECT_LT(position_error(fine, expected), 1e-5);
     RecordProperty("coarse_position_error_m", std::to_string(position_error(coarse, expected)));
     RecordProperty("fine_position_error_m", std::to_string(position_error(fine, expected)));
@@ -765,6 +765,46 @@ TEST(Hpop, Rkf78AdvancesTheSeventhOrderMemberAndControlsRejectedSteps) {
     options.min_step_seconds = .001;
     const auto adaptive = make_hpop(initial, options)->state_at(expected.epoch);
     EXPECT_LT(position_error(adaptive, expected), 1e-4);
+}
+TEST(Hpop, Rkf78LocalExtrapolationPreservesMillimetreAccuracyOverSevenDays) {
+    constexpr double a = 8e6, e = .16;
+    const double rate = std::sqrt(egm96_mu / (a * a * a)), beta = std::sqrt(1 - e * e);
+    const auto analytic = [&](double seconds) {
+        const double mean = std::remainder(rate * seconds, 2 * std::numbers::pi);
+        double anomaly = mean;
+        for (int i = 0; i < 12; ++i)
+            anomaly -= (anomaly - e * std::sin(anomaly) - mean) / (1 - e * std::cos(anomaly));
+        const double c = std::cos(anomaly), s = std::sin(anomaly);
+        return CartesianState{Epoch{static_cast<std::int64_t>(seconds * 1e9)},
+                              OriginId::earth,
+                              FrameId::gcrf,
+                              {a * (c - e), a * beta * s, 0},
+                              {-a * rate * s / (1 - e * c), a * rate * beta * c / (1 - e * c), 0}};
+    };
+    auto options = point_mass();
+    options.step_control = HpopStepControl::fixed;
+    options.fixed_step_seconds = 60;
+    options.interpolation.method = OrbitInterpolationMethod::lagrange;
+    options.interpolation.order = 7;
+    for (int direction : {-1, 1}) {
+        const Epoch end{direction * 604800'000'000'000LL};
+        const auto orbit =
+            make_hpop_interpolated(analytic(0), direction < 0 ? end : Epoch{0},
+                                   direction > 0 ? end : Epoch{0}, options, {}, 60'000'000'000LL);
+        double maximum = 0;
+        for (int seconds = 0; seconds <= 604800; seconds += 600) {
+            const auto expected = analytic(direction * seconds);
+            const auto actual = orbit->state_at(expected.epoch);
+            maximum = std::max(maximum, position_error(actual, expected));
+            EXPECT_LT(position_error(actual, expected), .002);
+            EXPECT_LT(std::hypot(actual.velocity_mps[0] - expected.velocity_mps[0],
+                                 actual.velocity_mps[1] - expected.velocity_mps[1],
+                                 actual.velocity_mps[2] - expected.velocity_mps[2]),
+                      3e-6);
+        }
+        RecordProperty(direction < 0 ? "backward_max_position_m" : "forward_max_position_m",
+                       std::to_string(maximum));
+    }
 }
 TEST(Hpop, Rkv89AdvancesTheEighthOrderMemberAndControlsRejectedSteps) {
     const auto initial = eccentric_analytic(0), expected = eccentric_analytic(6000);
@@ -1082,6 +1122,64 @@ TEST(HpopEphemeris, AcceptedAndReportedEndpointsMatchIndependentHipparchus) {
         }
     }
 }
+TEST(HpopEphemeris, CoastReusesExactEndpointForcesAndMatchesUncachedDirectIntegration) {
+    auto options = point_mass();
+    options.gravity_degree = 2;
+    options.step_control = HpopStepControl::fixed;
+    options.fixed_step_seconds = 60;
+    const auto frames = std::make_shared<FixedFrames>();
+    const HpopEnvironment environment{frames, std::make_shared<FixedEop>()};
+    for (auto direction : {-1LL, 1LL}) {
+        const Epoch end{direction * 600'000'000'000LL};
+        frames->evaluations = 0;
+        const auto expected = make_hpop(circular(), options, environment)->state_at(end);
+        const auto direct_evaluations = frames->evaluations.load();
+        frames->evaluations = 0;
+        const auto arcs =
+            propagate_hpop_ephemeris(circular(), end, options, environment, 60'000'000'000LL);
+        ASSERT_EQ(arcs.size(), 1U);
+        ASSERT_EQ(arcs[0].size(), 11U);
+        // Counts include setup and successful endpoint validation in both paths.
+        // At least nine repeated start stages of this ten-step coast are avoided.
+        EXPECT_LE(frames->evaluations + 9, direct_evaluations);
+        const auto &last = direction > 0 ? arcs[0].back() : arcs[0].front();
+        EXPECT_EQ(last.position_m, expected.position_m);
+        EXPECT_EQ(last.velocity_mps, expected.velocity_mps);
+        const auto direct = make_hpop(circular(), options, environment);
+        for (const auto &node : arcs[0]) {
+            const auto state = direct->state_at(node.epoch);
+            EXPECT_EQ(node.position_m, state.position_m);
+            EXPECT_EQ(node.velocity_mps, state.velocity_mps);
+        }
+    }
+}
+
+TEST(Hpop, ConcurrentPartialQueriesKeepIndependentForceScratch) {
+    auto options = point_mass();
+    options.gravity_degree = 2;
+    const HpopEnvironment environment{std::make_shared<FixedFrames>(),
+                                      std::make_shared<FixedEop>()};
+    const auto shared = make_hpop(circular(), options, environment);
+    const std::array epochs{Epoch{61'234'567'891}, Epoch{-71'234'567'891}, Epoch{41'234'567'891},
+                            Epoch{-21'234'567'891}};
+    std::vector<CartesianState> expected;
+    for (auto epoch : epochs)
+        expected.push_back(make_hpop(circular(), options, environment)->state_at(epoch));
+    std::vector<std::future<bool>> jobs;
+    for (std::size_t i = 0; i < epochs.size(); ++i)
+        jobs.push_back(std::async(std::launch::async, [&, i] {
+            for (int repeat = 0; repeat < 32; ++repeat) {
+                const auto actual = shared->state_at(epochs[i]);
+                if (actual.position_m != expected[i].position_m ||
+                    actual.velocity_mps != expected[i].velocity_mps)
+                    return false;
+            }
+            return true;
+        }));
+    for (auto &job : jobs)
+        EXPECT_TRUE(job.get());
+}
+
 TEST(HpopEphemeris, FixedGridOutputAndExactNanosecondEndpointsWorkInBothDirections) {
     for (bool vop : {false, true}) {
         SCOPED_TRACE(vop);

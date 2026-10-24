@@ -248,6 +248,38 @@ TEST(Spice, KernelOrderAndContextSwitchingAreDeterministic) {
     EXPECT_NE(first_wins->data_info().manifest_sha256, second_wins->data_info().manifest_sha256);
 }
 
+TEST(Spice, RepeatedQueriesKeepExactEpochBodyObserverAndSurviveEvictionAndErrors) {
+    Fixture input;
+    const auto provider = input.load();
+    const core::Epoch epoch{1234567890123LL};
+    const auto original = provider->geometric_state(100001, 399, epoch);
+    for (int pass = 0; pass < 2; ++pass) {
+        const auto repeated = provider->geometric_state(100001, 399, epoch);
+        EXPECT_EQ(original.position_m, repeated.position_m);
+        EXPECT_EQ(original.velocity_mps, repeated.velocity_mps);
+        EXPECT_EQ(original.tdb.seconds_past_j2000, repeated.tdb.seconds_past_j2000);
+        EXPECT_EQ(original.source_id, repeated.source_id);
+        const auto reverse = provider->geometric_state(399, 100001, epoch);
+        EXPECT_EQ(reverse.target_naif_id, 399);
+        EXPECT_EQ(reverse.observer_naif_id, 100001);
+        for (std::size_t axis = 0; axis < 3; ++axis) {
+            EXPECT_DOUBLE_EQ(reverse.position_m[axis], -original.position_m[axis]);
+            EXPECT_DOUBLE_EQ(reverse.velocity_mps[axis], -original.velocity_mps[axis]);
+        }
+        const core::Epoch adjacent{epoch.tai_nanoseconds() + 1};
+        const auto next = provider->geometric_state(100001, 399, adjacent);
+        EXPECT_EQ(next.epoch, adjacent);
+        EXPECT_NE(next.position_m, original.position_m);
+        analytic(next);
+        EXPECT_THROW((void)provider->geometric_state(999999, 399, epoch),
+                     core::EphemerisCoverageError);
+        EXPECT_THROW((void)provider->geometric_state(100001, 399, core::Epoch{3600000000001LL}),
+                     core::EphemerisCoverageError);
+        for (int i = 0; i < 128; ++i)
+            analytic(provider->geometric_state(100001, 399, core::Epoch{i * 1000000000LL}));
+    }
+}
+
 TEST(Spice, ConcurrentAlternatingSnapshotsMatchSerialQueries) {
     Fixture input;
     const auto a = input.load();
@@ -336,6 +368,198 @@ TEST(Spice, RealSnapshotSunMoonAndIndependentTdbModel) {
     }
 }
 #endif
+
+namespace {
+constexpr std::array<std::pair<int, int>, 5> de_queries{
+    {{10, 399}, {301, 399}, {399, 0}, {10, 0}, {10, 301}}};
+struct DirectSample {
+    core::Epoch epoch;
+    double et;
+    std::array<std::array<double, 6>, de_queries.size()> states;
+    std::array<double, 3> apparent;
+};
+// Capture independent high-level CSPICE results before creating any Provider.
+// Never manipulate the global kernel pool behind a live Provider's back.
+std::vector<DirectSample> direct_samples(const std::filesystem::path &manifest) {
+    const auto document = Json::parse(read(manifest));
+    kclear_c();
+    std::vector<std::filesystem::path> spks;
+    for (const auto &kernel : document.at("kernels")) {
+        const auto path = manifest.parent_path() / kernel.at("file").get<std::string>();
+        furnsh_c(path.string().c_str());
+        spice_ok();
+        if (kernel.at("kind") != "LSK")
+            spks.push_back(path);
+    }
+    const auto first = document.at("first_tai_ns").get<std::int64_t>() + 600000000000LL;
+    const auto last = document.at("last_tai_ns").get<std::int64_t>();
+    std::vector<std::int64_t> epochs{first, last};
+    for (int i = 0; i < 513; ++i)
+        epochs.push_back(first + (last - first) / 512 * i);
+    // Include both sides of every segment and type-2 record boundary in range.
+    const auto boundary = [&](double et) {
+        const auto ns = static_cast<std::int64_t>(std::llround(unitim_c(et, "TDB", "TAI") * 1e9));
+        for (const auto offset : {-10000LL, -1LL, 0LL, 1LL, 10000LL})
+            if (ns + offset >= first && ns + offset <= last)
+                epochs.push_back(ns + offset);
+    };
+    for (const auto &path : spks) {
+        SpiceInt handle = 0;
+        dafopr_c(path.string().c_str(), &handle);
+        dafbfs_c(handle);
+        SpiceBoolean found = SPICEFALSE;
+        daffna_c(&found);
+        while (found) {
+            double descriptor[5]{}, bounds[2]{};
+            SpiceInt fields[6]{};
+            dafgs_c(descriptor);
+            dafus_c(descriptor, 2, 6, bounds, fields);
+            boundary(bounds[0]);
+            boundary(bounds[1]);
+            if (fields[3] == 2) {
+                double directory[4]{};
+                dafgda_c(handle, fields[5] - 3, fields[5], directory);
+                for (int i = 0; i <= static_cast<int>(directory[3]); ++i)
+                    boundary(directory[0] + directory[1] * i);
+            }
+            daffna_c(&found);
+        }
+        dafcls_c(handle);
+        spice_ok();
+    }
+    std::sort(epochs.begin(), epochs.end());
+    epochs.erase(std::unique(epochs.begin(), epochs.end()), epochs.end());
+    std::vector<DirectSample> result;
+    for (const auto ns : epochs) {
+        // Use the public Epoch conversion: converting the entire ns count to a
+        // double first would introduce an extra rounding at modern dates.
+        DirectSample sample{core::Epoch{ns},
+                            unitim_c(core::Epoch{ns}.seconds_since(core::Epoch{0}), "TAI", "TDB"),
+                            {},
+                            {}};
+        double light_time = 0;
+        for (std::size_t i = 0; i < de_queries.size(); ++i) {
+            const auto [target, observer] = de_queries[i];
+            spkez_c(target, sample.et, "J2000", "NONE", observer, sample.states[i].data(),
+                    &light_time);
+        }
+        spkezp_c(10, sample.et, "J2000", "LT+S", 399, sample.apparent.data(), &light_time);
+        spice_ok();
+        result.push_back(sample);
+    }
+    kclear_c();
+    spice_ok();
+    return result;
+}
+void compare_direct(const core::IEphemerisProvider &provider, const DirectSample &sample) {
+    SCOPED_TRACE(sample.epoch.tai_nanoseconds());
+    EXPECT_EQ(provider.to_tdb(sample.epoch).seconds_past_j2000, sample.et);
+    for (std::size_t i = 0; i < de_queries.size(); ++i) {
+        const auto [target, observer] = de_queries[i];
+        SCOPED_TRACE(target);
+        SCOPED_TRACE(observer);
+        const auto state = provider.geometric_state(target, observer, sample.epoch);
+        EXPECT_EQ(state.epoch, sample.epoch);
+        for (unsigned axis = 0; axis < 3; ++axis) {
+            EXPECT_EQ(state.position_m[axis], sample.states[i][axis] * 1000);
+            EXPECT_EQ(state.velocity_mps[axis], sample.states[i][axis + 3] * 1000);
+        }
+    }
+    const auto apparent = provider.apparent_sun_from_earth(sample.epoch);
+    for (unsigned axis = 0; axis < 3; ++axis)
+        EXPECT_EQ(apparent[axis], sample.apparent[axis] * 1000);
+}
+void de_kernel(const std::filesystem::path &path, double shift, bool overlays) {
+    std::filesystem::remove(path);
+    SpiceInt handle = 0;
+    spkopn_c(path.string().c_str(), "Synthetic DE chains and overlapping segments", 0, &handle);
+    const auto segment = [&](int body, int centre, const char *frame, int type, double first,
+                             double interval, int records, double origin) {
+        constexpr int degree = 5;
+        const int axes = type == 2 ? 3 : 6;
+        std::vector<double> coefficients(static_cast<std::size_t>(records * axes * (degree + 1)));
+        for (int record = 0; record < records; ++record)
+            for (int axis = 0; axis < axes; ++axis)
+                for (int c = 0; c <= degree; ++c)
+                    coefficients[(record * axes + axis) * (degree + 1) + c] =
+                        c == 0 ? (axis < 3 ? origin + shift + 13 * record + 17 * axis : .3)
+                               : (axis + 1.) / (c * c * c);
+        if (type == 2)
+            spkw02_c(handle, body, centre, frame, first, first + interval * records,
+                     "Original type 2 coefficients", interval, records, degree, coefficients.data(),
+                     first);
+        else
+            spkw03_c(handle, body, centre, frame, first, first + interval * records,
+                     "Higher priority type 3", interval, records, degree, coefficients.data(),
+                     first);
+        spice_ok();
+    };
+    if (!overlays) {
+        segment(10, 0, "J2000", 2, -6000, 250, 48, 1e6);
+        segment(3, 0, "J2000", 2, -6000, 250, 48, 8e7);
+        segment(399, 3, "J2000", 2, -6000, 250, 48, 1000);
+        segment(301, 3, "J2000", 2, -6000, 250, 48, 3e5);
+    } else {
+        segment(10, 0, "J2000", 2, -900, 2100, 1, 2e6);
+        segment(10, 0, "J2000", 2, -400, 700, 1, 3e6);
+        segment(10, 0, "J2000", 3, -100, 200, 1, 4e6);
+        segment(301, 0, "J2000", 2, -500, 1000, 1, 7e7);
+        segment(3, 0, "ECLIPJ2000", 2, -700, 1400, 1, 9e7);
+    }
+    spkcls_c(handle);
+    spice_ok();
+}
+} // namespace
+
+TEST(Spice, DeType2MatchesToolkitAtDenseEpochsAndRecordBoundaries) {
+    const auto expected = direct_samples(ORBELLE_SPICE_SAMPLE);
+    const auto provider = providers::spice::load_snapshot(
+        ORBELLE_SPICE_SAMPLE, std::filesystem::path(ORBELLE_SPICE_TEST_DIR) / "type2-real");
+    for (const auto &sample : expected)
+        compare_direct(*provider, sample);
+    for (auto sample = expected.rbegin(); sample != expected.rend(); ++sample)
+        compare_direct(*provider, *sample);
+}
+
+TEST(Spice, DeType2HonoursOverlappingFileSegmentFrameAndTypePriority) {
+    Fixture fixture;
+    de_kernel(fixture.root / "a.bsp", 0, false);
+    de_kernel(fixture.root / "b.bsp", 1234, true);
+    fixture.document["kernels"] =
+        Json::array({fixture.kernel("naif0012.tls", "LSK"), fixture.kernel("a.bsp", "SPK"),
+                     fixture.kernel("b.bsp", "SPK")});
+    fixture.save();
+    const auto overlay_expected = direct_samples(fixture.manifest);
+    std::swap(fixture.document["kernels"][1], fixture.document["kernels"][2]);
+    fixture.save();
+    const auto base_expected = direct_samples(fixture.manifest);
+    const auto base = fixture.load();
+    std::swap(fixture.document["kernels"][1], fixture.document["kernels"][2]);
+    fixture.save();
+    const auto overlay = fixture.load();
+    for (const auto &sample : base_expected)
+        compare_direct(*base, sample);
+    for (const auto &sample : overlay_expected)
+        compare_direct(*overlay, sample);
+    // Alternate snapshots/DAF handles and jump across more records than fit in
+    // either cache. Concurrent queries must match the independently loaded pool.
+    std::vector<std::future<void>> workers;
+    for (unsigned worker = 0; worker < 4; ++worker)
+        workers.push_back(std::async(std::launch::async, [&, worker] {
+            for (unsigned i = 0; i < 24; ++i) {
+                const auto index = (i * 137 + worker * 23) % base_expected.size();
+                compare_direct(*base, base_expected[index]);
+                compare_direct(*overlay, overlay_expected[index]);
+            }
+        }));
+    for (auto &worker : workers)
+        worker.get();
+    EXPECT_THROW((void)base->geometric_state(10, 399, core::Epoch{3600000000001LL}),
+                 core::EphemerisCoverageError);
+    EXPECT_THROW((void)base->geometric_state(999999, 399, core::Epoch{0}),
+                 core::EphemerisCoverageError);
+    compare_direct(*base, base_expected.front());
+}
 
 namespace {
 constexpr std::array<double, 3> sun_origin{-8e7, 1e7, 2e7}, sun_velocity{.01, -.02, .03};
@@ -441,6 +665,13 @@ TEST(Spice, MovingSunLightTimeAndAberration) {
         const auto earth = provider->apparent_sun_from_earth(core::Epoch{0});
         for (std::size_t i = 0; i < 3; ++i)
             EXPECT_NEAR(centre[i], earth[i], 1e-3);
+        // A geometric Sun entry must never be returned for the same-epoch
+        // light-time/aberration query, or vice versa.
+        const auto geometric = provider->geometric_state(10, 399, core::Epoch{0});
+        EXPECT_NE(geometric.position_m, earth);
+        EXPECT_EQ(provider->apparent_sun_from_earth(core::Epoch{0}), earth);
+        EXPECT_EQ(provider->geometric_state(10, 399, core::Epoch{0}).position_m,
+                  geometric.position_m);
         EXPECT_THROW((void)provider->apparent_sun_from_spacecraft(core::Epoch{0}, {2e15, 0, 0}, {}),
                      core::EphemerisCoverageError);
         EXPECT_THROW((void)provider->apparent_sun_from_spacecraft(
@@ -464,6 +695,14 @@ TEST(Spice, MovingSunCertifiesHistoryAndGaps) {
                      core::EphemerisCoverageError);
         EXPECT_THROW((void)provider->apparent_sun_from_spacecraft(core::Epoch{0}, {}, {}),
                      core::EphemerisCoverageError);
+        // A cached reception-time Sun must not conceal a hole at emission.
+        EXPECT_NO_THROW((void)provider->geometric_state(10, 399, core::Epoch{0}));
+        EXPECT_THROW((void)provider->apparent_sun_from_earth(core::Epoch{0}),
+                     core::EphemerisCoverageError);
+        const auto valid = provider->apparent_sun_from_earth(core::Epoch{1000000000000LL});
+        EXPECT_THROW((void)provider->apparent_sun_from_earth(core::Epoch{0}),
+                     core::EphemerisCoverageError);
+        EXPECT_EQ(provider->apparent_sun_from_earth(core::Epoch{1000000000000LL}), valid);
     }
     linear_sun_kernel(fixture, false, -100);
     const auto provider = fixture.load();

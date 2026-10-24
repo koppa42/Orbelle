@@ -132,7 +132,7 @@ TEST(Propagators, HpopProvenanceIdentifiesTheSeventhOrderRkfMember) {
                                        {7e6, 0, 0},
                                        {0, std::sqrt(core::egm96_mu / 7e6), 0}};
     const auto session = runtime::make_hpop_session(initial, options);
-    EXPECT_NE(session.provenance().algorithm.find("rkf78-7th-fehlberg-r287-v1;"),
+    EXPECT_NE(session.provenance().algorithm.find("rkf78-8th-fehlberg-r287-v2;"),
               std::string::npos);
     EXPECT_EQ(session.provenance().algorithm.find("rkf78-8th-v1;"), std::string::npos);
 }

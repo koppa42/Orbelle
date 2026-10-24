@@ -50,9 +50,9 @@ template <std::size_t N> struct CompensatedState {
         }
     }
 };
-// Fehlberg, NASA TR R-287 (1968), Table X, p. 65. Advance the seventh-order
-// member, as in STK RKF 7(8); estimate error using the embedded eighth-order
-// member. All stage epochs stay within a step.
+// Fehlberg, NASA TR R-287 (1968), Table X, p. 65. Local extrapolation advances
+// the eighth-order member, retaining the 7/8 defect and its 1/8 controller.
+// Both members share the same 13 stages; no extra force evaluations are needed.
 constexpr std::array<double, 13> rkf_c{0,       2.0 / 27, 1.0 / 9, 1.0 / 6, 5.0 / 12, 0.5, 5.0 / 6,
                                        1.0 / 6, 2.0 / 3,  1.0 / 3, 1,       0,        1};
 constexpr double rkf_a[13][13] = {
@@ -71,8 +71,8 @@ constexpr double rkf_a[13][13] = {
     {3.0 / 205, 0, 0, 0, 0, -6.0 / 41, -3.0 / 205, -3.0 / 41, 3.0 / 41, 6.0 / 41},
     {-1777.0 / 4100, 0, 0, -341.0 / 164, 4496.0 / 1025, -289.0 / 82, 2193.0 / 4100, 51.0 / 82,
      33.0 / 164, 12.0 / 41, 0, 1}};
-constexpr std::array<double, 13> rkf_b7{
-    41.0 / 840, 0, 0, 0, 0, 34.0 / 105, 9.0 / 35, 9.0 / 35, 9.0 / 280, 9.0 / 280, 41.0 / 840, 0, 0};
+constexpr std::array<double, 13> rkf_b8{
+    0, 0, 0, 0, 0, 34.0 / 105, 9.0 / 35, 9.0 / 35, 9.0 / 280, 9.0 / 280, 0, 41.0 / 840, 41.0 / 840};
 #include "rkv89_coefficients.inc"
 template <std::size_t N, class Derivative>
 TrialStep<N> rk4_trial(double t, const std::array<double, N> &s, double h,
@@ -120,7 +120,7 @@ TrialStep<N> rkf78(double t, const std::array<double, N> &s, double h, const Der
     for (std::size_t i = 0; i < s.size(); ++i) {
         double sum = 0;
         for (std::size_t j = 0; j < 13; ++j)
-            sum += rkf_b7[j] * k[j][i];
+            sum += rkf_b8[j] * k[j][i];
         increment[i] = h * sum;
         result[i] += increment[i];
         if (control.fixed)

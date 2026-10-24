@@ -34,6 +34,15 @@ orbelle_warnings(orbelle_hpop_benchmark)
 orbelle_sanitizers(orbelle_hpop_benchmark)
 orbelle_copy_runtime_dlls(orbelle_hpop_benchmark)
 
+add_executable(orbelle_hpop_reference EXCLUDE_FROM_ALL hpop_reference.cpp)
+target_link_libraries(orbelle_hpop_reference PRIVATE
+    Orbelle::Runtime nlohmann_json::nlohmann_json)
+target_compile_definitions(orbelle_hpop_reference PRIVATE
+    ORBELLE_BENCHMARK_CONFIG="$<CONFIG>")
+orbelle_warnings(orbelle_hpop_reference)
+orbelle_sanitizers(orbelle_hpop_reference)
+orbelle_copy_runtime_dlls(orbelle_hpop_reference)
+
 add_executable(orbelle_workflow_benchmark EXCLUDE_FROM_ALL workflows.cpp)
 target_link_libraries(orbelle_workflow_benchmark PRIVATE
     Orbelle::Runtime nlohmann_json::nlohmann_json)

@@ -29,7 +29,7 @@
 - 重力：静态 EGM 缺元数据时的默认长期演化、潮汐最小振幅筛选、次要分潮推算；WGS84 原始球谐模型继续暂缓。
 - 光压与附加力：椭球阴影轮廓、遮挡体视位置、更多卫星与小天体、反照、热辐射、地表反射模型、插件和其他高级设置。
 - 协方差：FG / JPLFile、协方差插值、状态相关跳变、跨机动及执行误差、其他考虑参数、通用交叉项增删、三维不确定度显示。
-- STK 实机细节：默认值、完整合法范围、误差范数及同配置直接数值验收。当前没有 STK 安装，首版使用已保存的 Orekit、GMAT、原作者模型及其他独立参考，不宣称与 STK 内部实现完全等价。
+- STK 实机细节：默认值、完整合法范围、误差范数及同配置直接数值验收。已接入 STK Engine 11.6 实机性能与轨迹对照，但 EOP、行星星历版本和误差范数尚未全部对齐；继续使用已保存的 Orekit、GMAT、原作者模型及其他独立参考，不宣称与 STK 内部实现完全等价。
 
 ## 桌面应用与计算耗时
 
@@ -46,7 +46,7 @@
 | 耗时反馈 | 后台准备分别显示重力场、海潮、天气、太阳系星历以及当前卫星的轨道与轨迹计算；取消继续保留已有结果 |
 | 启动与复用 | 启动画面先准备默认 EGM2008 / DE440s，再进入工作台；缓存跨场景复用，只保留当前默认资源，不积累历史模型。其他资源按需加载 |
 
-优化不通过降低重力阶次、放宽积分误差或替换物理模型实现。重力文件按块读取并校验全部原始字节，重复使用分词缓冲；Windows 使用系统 CNG SHA-256，其他平台使用原有 SHA-256 实现。文件格式、内容身份及损坏拒绝行为不变。ERFA 的未修正 IAU 岁差章动级数只缓存**完全相同的两部分 TT 参数**，每线程最多 64 项；不舍入时刻、不插值，EOP 及其导数仍在每次调用时应用，缓存不跨数据依赖复用修正后的结果。
+优化不通过降低重力阶次、放宽积分误差或替换物理模型实现。重力文件按块读取并校验全部原始字节，重复使用分词缓冲；Windows 使用系统 CNG SHA-256，其他平台使用原有 SHA-256 实现。文件格式、内容身份及损坏拒绝行为不变。ERFA 理论级数的固定日窗口拟合、误差检查与完整级数回退，以及完整纳秒／EOP 数值键的矩阵复用，遵循[时间与参考系](time_frames.md)。CSPICE 复用原始 SPK 系数和精确时刻查询，保留原阶次求值、片段优先级与通用回退。私有滑行段只复用输入完全一致的受力结果，状态校验、天气和阴影的单侧语义保持不变。
 
 性能基准 `orbelle_hpop_benchmark` 分别记录完整 EGM2008 读取、模型准备、首次星历生成、坐标变换和后续采样；用相同输入比较优化前后的全部输出采样。它不是 STK 实机测速。复现方法与结果判读见[验证协议](../validation/hpop_protocol.md#应用性能测量)。
 
@@ -88,7 +88,7 @@
 
 ### 参考图与范围约定
 
-维护者已明确以 STK 设计为准，后续截图只作参考；本机没有 STK，WGS84 球谐系数模型暂缓。WGS84 椭球高度已支持，不代表同名球谐重力模型已经实现。球形阻力与光压继续各自输入 A/m，共享质量放在 Additional；手动天气按 STK 输入 Kp，第三体沿用 Name / Use / Source / Gravity Value 表。
+维护者已明确以 STK 设计为准，后续截图只作参考；本机 STK Engine 11.6 已用于六组固定输入的性能对照，WGS84 球谐系数模型仍暂缓。WGS84 椭球高度已支持，不代表同名球谐重力模型已经实现。球形阻力与光压继续各自输入 A/m，共享质量放在 Additional；手动天气按 STK 输入 Kp，第三体沿用 Name / Use / Source / Gravity Value 表。
 
 | 顺序 | 功能 | 当前状态 |
 | --- | --- | --- |
@@ -124,7 +124,7 @@
 | Additional | Relativistic Accelerations；Satellite Mass | 已接入 IERS 2003 三项相对论、TAI 星历速度、自转轴方向与共享卫星质量；质量用于球形对应面积换算，不覆盖各自显式给定的面积质量比；相对论和球形质量语义分别与 Orekit 对照。见[相对论契约](relativity.md) |
 | Additional | Use Plugin；Plugin 选择；Plugin Settings | 待实现：注册、具名设置、生命周期、加速度及偏导契约、可复现配置和错误隔离 |
 | Additional | Advanced 子窗口 | 待实现：继续逐项核对官方高级设置；须与力模型版本和数值含义对应，不能放一个空入口 |
-| Integrator | Integration 方法 | 部分：RK4、RKF78、RKV 8(9) Efficient、Bulirsch–Stoer、Gauss–Jackson 12 已实现；RKV 已做 SciPy DOP853 / Orekit 数值对照及八阶收敛验证；Bulirsch–Stoer 已做 Hipparchus GBS / Orekit 对照、自动升阶及步长收敛；Gauss–Jackson 已做 Hipparchus GBS / Orekit 对照、固定步长收敛与两种校正验证；RKF 7(8) 已按官方定义改为七阶推进，并通过 Hipparchus / Orekit 对照和七阶收敛验证；STK 同配置验收仍待完成 |
+| Integrator | Integration 方法 | 部分：RK4、RKF78、RKV 8(9) Efficient、Bulirsch–Stoer、Gauss–Jackson 12 已实现；RKV 已做 SciPy DOP853 / Orekit 数值对照及八阶收敛验证；Bulirsch–Stoer 已做 Hipparchus GBS / Orekit 对照、自动升阶及步长收敛；Gauss–Jackson 已做 Hipparchus GBS / Orekit 对照、固定步长收敛与两种校正验证；RKF 7(8) 采用八阶局部外推，通过 Hipparchus / Orekit、八阶收敛及七天解析验证；STK 11.6 同源数据分力核验已覆盖重力、永久潮、日月和无阴影光压，带阴影光压与 JR 阻力仍有残差 |
 | Integrator | VOP；Predictor Corrector Scheme | 已接入：Gauss–Jackson Full/Pseudo Correction；RKF78 / Bulirsch–Stoer 可选独立的 VOP 通用变量方程，支持固定、自适应及时间正则化，并有 Orekit/Hipparchus 对照；STK 内部实现和同配置实测仍未取得，见 [VOP 积分](vop_integration.md) |
 | Integrator | Fixed/Relative Error；Tolerance；Min/Max Step | 部分：独立 Fixed/Relative Error 选择已实现；RK4/GJ 强制固定，RKF/RKV/BS 两模式，固定网格及 BS 十八阶外推已验证。固定/自适应范围已扩至 1e−6–86400 s，自适应缓存不再截短配置上限，并有局部动力学首步估计及长弧独立对照。相对误差仍为混合绝对/相对分量尺度；STK 误差范数、完整合法范围/默认值及实机组合仍待核对，截图仅参考 |
 | Integrator | Interpolation 方法；Order；VOP μ | 部分：Lagrange / Hermite / VOP、独立插值 μ、项目自动装配、机动分段、UI / 持久化 / 分析及报告已接入并有独立参考，见[科学插值](orbit_interpolation.md)；VOP 通用变量搬移与 Hipparchus 插值、J2 步长收敛对照已接入，STK 同配置验收仍待完成 |
@@ -306,7 +306,7 @@ C++ 共享同一份具名强类型定义，Python 不要求创建 `Update` 包�
 3. 先比较单点加速度和环境输入，再逐个开启第三体、阻力、光压、潮汐等，最后比较组合轨道。给出每轴、范数及 RTN 的最大值 / RMS / 终点差，不能只比较终点距离。
 4. 使用低轨、导航高度、同步轨道及高偏心率案例；包含 ±时间、跨 UTC 日界、三小时天气边界、日月食、近极轨、覆盖端点、随机顺序与并发查询。
 5. 将数值积分误差、物理模型差异和数据差异分开。用更严格容差 / 减半步长确认收敛，再依据模型和参考数据精度确定每类测试容限；不以调宽阈值消除差异。
-6. STK 直接输出尚未取得前，继续使用独立 Orekit / 模型官方参考做回归，并明确标记“尚未完成 STK 数值验收”。截图只能证明参数和界面含义，不能生成参考轨迹或精度结论。
+6. STK 的有限算例比较不能替代完整数值验收。已有可选 STK Engine 11.6 实机性能／轨迹对照工具，使用共享 ICRF 初始状态、1 天／7 天传播及逐分钟输出，见[性能对照协议](../validation/hpop_protocol.md#stk-实机性能对照)。EOP、行星星历版本及控制器尚未全部对齐，继续保留独立 Orekit / 模型官方参考；截图本身不能生成参考轨迹或精度结论。
 
 实际运行证据进入 `out/validation/`，可复现输入和协议进入 `tests/reference/` 与 `docs/validation/`；不提交维护者的原始截图、个人场景或程序安装文件。
 

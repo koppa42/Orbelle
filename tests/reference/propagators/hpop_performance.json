@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "epoch_utc": [
+    2026,
+    10,
+    24,
+    4,
+    0,
+    0
+  ],
+  "epoch_tai_ns": 846086437000000000,
+  "frame": "ICRF/GCRF",
+  "mu_m3_s2": 398600441500000.0,
+  "output_step_s": 60,
+  "cases": {
+    "scenario4": {
+      "duration_s": 86400,
+      "position_m": [
+        6719854.730087558,
+        -40526.771108671295,
+        -17606.457433707525
+      ],
+      "velocity_mps": [
+        50.74112297720079,
+        5865.4833040332305,
+        5865.1137704914445
+      ],
+      "description": "Shared ICRF Cartesian state of the 8000 km, e=0.16, 45 deg Scenario4."
+    },
+    "leo": {
+      "duration_s": 86400,
+      "position_m": [
+        6993000.0,
+        0,
+        0
+      ],
+      "velocity_mps": [
+        0,
+        -1051.2583692642745,
+        7480.091971066022
+      ],
+      "description": "GCRF perigee: a=7000000 m, e=0.001, i=98 deg; RAAN/argument/anomaly=0."
+    },
+    "gnss": {
+      "duration_s": 86400,
+      "position_m": [
+        26294400.0,
+        0,
+        0
+      ],
+      "velocity_mps": [
+        0,
+        2244.3430671076108,
+        3205.2540777352183
+      ],
+      "description": "GCRF perigee: a=26560000 m, e=0.01, i=55 deg; RAAN/argument/anomaly=0."
+    },
+    "geo": {
+      "duration_s": 86400,
+      "position_m": [
+        42121836.0,
+        0,
+        0
+      ],
+      "velocity_mps": [
+        0,
+        3077.737800456548,
+        5.371671267455413
+      ],
+      "description": "GCRF perigee: a=42164000 m, e=0.001, i=0.1 deg; RAAN/argument/anomaly=0."
+    },
+    "eccentric": {
+      "duration_s": 86400,
+      "position_m": [
+        7968000.000000001,
+        0,
+        0
+      ],
+      "velocity_mps": [
+        0,
+        4129.173151683703,
+        8245.768245692909
+      ],
+      "description": "GCRF perigee: a=26560000 m, e=0.7, i=63.4 deg; RAAN/argument/anomaly=0."
+    },
+    "scenario4_week": {
+      "duration_s": 604800,
+      "position_m": [
+        6719854.730087558,
+        -40526.771108671295,
+        -17606.457433707525
+      ],
+      "velocity_mps": [
+        50.74112297720079,
+        5865.4833040332305,
+        5865.1137704914445
+      ],
+      "description": "Same shared Scenario4 state, seven-day propagation."
+    }
+  }
+}
