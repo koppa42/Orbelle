@@ -1082,6 +1082,64 @@ TEST(HpopEphemeris, AcceptedAndReportedEndpointsMatchIndependentHipparchus) {
         }
     }
 }
+TEST(HpopEphemeris, CoastReusesExactEndpointForcesAndMatchesUncachedDirectIntegration) {
+    auto options = point_mass();
+    options.gravity_degree = 2;
+    options.step_control = HpopStepControl::fixed;
+    options.fixed_step_seconds = 60;
+    const auto frames = std::make_shared<FixedFrames>();
+    const HpopEnvironment environment{frames, std::make_shared<FixedEop>()};
+    for (auto direction : {-1LL, 1LL}) {
+        const Epoch end{direction * 600'000'000'000LL};
+        frames->evaluations = 0;
+        const auto expected = make_hpop(circular(), options, environment)->state_at(end);
+        const auto direct_evaluations = frames->evaluations.load();
+        frames->evaluations = 0;
+        const auto arcs =
+            propagate_hpop_ephemeris(circular(), end, options, environment, 60'000'000'000LL);
+        ASSERT_EQ(arcs.size(), 1U);
+        ASSERT_EQ(arcs[0].size(), 11U);
+        // Counts include setup and successful endpoint validation in both paths.
+        // At least nine repeated start stages of this ten-step coast are avoided.
+        EXPECT_LE(frames->evaluations + 9, direct_evaluations);
+        const auto &last = direction > 0 ? arcs[0].back() : arcs[0].front();
+        EXPECT_EQ(last.position_m, expected.position_m);
+        EXPECT_EQ(last.velocity_mps, expected.velocity_mps);
+        const auto direct = make_hpop(circular(), options, environment);
+        for (const auto &node : arcs[0]) {
+            const auto state = direct->state_at(node.epoch);
+            EXPECT_EQ(node.position_m, state.position_m);
+            EXPECT_EQ(node.velocity_mps, state.velocity_mps);
+        }
+    }
+}
+
+TEST(Hpop, ConcurrentPartialQueriesKeepIndependentForceScratch) {
+    auto options = point_mass();
+    options.gravity_degree = 2;
+    const HpopEnvironment environment{std::make_shared<FixedFrames>(),
+                                      std::make_shared<FixedEop>()};
+    const auto shared = make_hpop(circular(), options, environment);
+    const std::array epochs{Epoch{61'234'567'891}, Epoch{-71'234'567'891}, Epoch{41'234'567'891},
+                            Epoch{-21'234'567'891}};
+    std::vector<CartesianState> expected;
+    for (auto epoch : epochs)
+        expected.push_back(make_hpop(circular(), options, environment)->state_at(epoch));
+    std::vector<std::future<bool>> jobs;
+    for (std::size_t i = 0; i < epochs.size(); ++i)
+        jobs.push_back(std::async(std::launch::async, [&, i] {
+            for (int repeat = 0; repeat < 32; ++repeat) {
+                const auto actual = shared->state_at(epochs[i]);
+                if (actual.position_m != expected[i].position_m ||
+                    actual.velocity_mps != expected[i].velocity_mps)
+                    return false;
+            }
+            return true;
+        }));
+    for (auto &job : jobs)
+        EXPECT_TRUE(job.get());
+}
+
 TEST(HpopEphemeris, FixedGridOutputAndExactNanosecondEndpointsWorkInBothDirections) {
     for (bool vop : {false, true}) {
         SCOPED_TRACE(vop);

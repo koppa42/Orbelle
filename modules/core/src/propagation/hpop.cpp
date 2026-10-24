@@ -8,6 +8,7 @@
 #include "integrators/vop.hpp"
 #include "srp_geometry.hpp"
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -52,6 +53,17 @@ template <bool Variational = false> class HpopSystem final : public IStateProvid
     HpopOptions options_;
     HpopEnvironment environment_;
     std::optional<Epoch> ephemeris_end_;
+    struct CoastDerivative {
+        Epoch epoch;
+        std::array<std::uint64_t, 6> state;
+        std::optional<Epoch> weather;
+        std::optional<std::uint64_t> lighting;
+        State value;
+    };
+    // Only a private, end-bounded coast uses this scratch. Public random-access
+    // HpopSystem instances may integrate partial queries concurrently and never
+    // read or write it. Variational propagation retains its existing checkpoints.
+    mutable std::optional<CoastDerivative> coast_derivative_;
     std::optional<Regularization> regularization_;
     // Caches only full, epoch-anchored integration blocks. Partial queries cannot
     // alter the solution used by later queries. Both directions start at t=0.
@@ -320,9 +332,26 @@ template <bool Variational = false> class HpopSystem final : public IStateProvid
                 }
             return result;
         } else {
-            const auto acceleration = detail::hpop_acceleration_unchecked(
-                state, options_, environment_, weather_at, shadow_lighting);
-            return {s[3], s[4], s[5], acceleration[0], acceleration[1], acceleration[2]};
+            const auto evaluate = [&] {
+                const auto acceleration = detail::hpop_acceleration_unchecked(
+                    state, options_, environment_, weather_at, shadow_lighting);
+                return State{s[3], s[4], s[5], acceleration[0], acceleration[1], acceleration[2]};
+            };
+            if (!ephemeris_end_)
+                return evaluate();
+            const auto key = std::bit_cast<std::array<std::uint64_t, 6>>(s);
+            const auto lighting =
+                shadow_lighting ? std::optional{std::bit_cast<std::uint64_t>(*shadow_lighting)}
+                                : std::nullopt;
+            if (coast_derivative_ && coast_derivative_->epoch == state.epoch &&
+                coast_derivative_->state == key && coast_derivative_->weather == weather_at &&
+                coast_derivative_->lighting == lighting)
+                return coast_derivative_->value;
+            const auto result = evaluate();
+            // Endpoint validation still runs above. Reuse its successful force
+            // evaluation only for exactly the same state and force boundary side.
+            coast_derivative_ = CoastDerivative{state.epoch, key, weather_at, lighting, result};
+            return result;
         }
     }
     using TrialStep = detail::TrialStep<dimension>;
