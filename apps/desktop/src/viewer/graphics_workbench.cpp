@@ -16,6 +16,7 @@
 #include "project_scene.hpp"
 #include "project_update.hpp"
 #include "quantity_editor.hpp"
+#include "report_creation.hpp"
 #include "report_dialog.hpp"
 #include "report_plot.hpp"
 #include "report_selection.hpp"
@@ -520,7 +521,7 @@ class Workbench final : public WorkbenchWindow {
                     workbench_icon(WorkbenchIcon::properties),
                     ui::text("graphics_workbench.analysis_menu.add_action"));
                 report_action_->setObjectName("openReports");
-                connect(report_action_, &QAction::triggered, this, [this] { show_reports(); });
+                connect(report_action_, &QAction::triggered, this, [this] { create_report(); });
                 if (!profile_ && smoke_dir_.isEmpty()) {
                     application_update_ = new ApplicationUpdateUi(
                         QString::fromStdWString(
@@ -1147,26 +1148,16 @@ class Workbench final : public WorkbenchWindow {
                                     : selected_station_
                                         ? stations_.at(*selected_station_).config.object_id
                                         : satellites_.at(*selected_).orbit->input.object_id;
-                                const auto report_kind =
-                                    selected_sensor()   ? application::ReportKind::access_intervals
-                                    : selected_station_ ? application::ReportKind::ground_stations
-                                                        : application::ReportKind::cartesian_state;
                                 connect(report, &QAction::triggered, this,
-                                        [this, report_id, report_kind] {
-                                            show_reports();
-                                            if (report_dialog_)
-                                                report_dialog_->select_object(report_id,
-                                                                              report_kind);
-                                        });
+                                        [this, report_id] { create_report(report_id); });
                                 auto *access =
                                     menu.addAction(ui::text("graphics_workbench.access"));
                                 access->setObjectName("openObjectAccess");
                                 access->setEnabled(!busy() && !stations_.empty() &&
                                                    !satellites_.empty());
                                 connect(access, &QAction::triggered, this, [this, report_id] {
-                                    show_reports();
-                                    report_dialog_->select_object(
-                                        report_id, application::ReportKind::access_intervals);
+                                    create_report(report_id,
+                                                  application::ReportKind::access_intervals);
                                 });
                                 if (selected_ && !selected_sensor()) {
                                     auto *sensor =
@@ -1931,6 +1922,8 @@ class Workbench final : public WorkbenchWindow {
             clear_access_display();
         if (report_dialog_ && scenario_)
             report_dialog_->update_project(project_snapshot(project_path_), active_time());
+        if (report_creation_ && scenario_)
+            report_creation_->update_project(project_snapshot(project_path_));
         if (scenario_) {
             const auto filename = project_path_.isEmpty() ? ui::text("graphics_workbench.filename")
                                                           : QFileInfo(project_path_).fileName();
@@ -2085,6 +2078,23 @@ class Workbench final : public WorkbenchWindow {
         for (const auto &[id, model] : ocean_tides_)
             resources = resources.with_ocean_tides(id, model);
         return {project_snapshot(project_path_), std::move(resources), orbit_sessions_};
+    }
+    void create_report(const std::string &context = {},
+                       std::optional<application::ReportKind> preset = {}) {
+        if (!scenario_ || busy() || report_creation_)
+            return;
+        if (report_dialog_ && report_dialog_->is_busy()) {
+            workspace_->open(report_dialog_, false);
+            return;
+        }
+        ReportCreationDialog chooser(project_snapshot(project_path_), context, preset, this);
+        report_creation_ = &chooser;
+        const bool accepted = chooser.exec() == QDialog::Accepted;
+        report_creation_ = nullptr;
+        if (!accepted || !scenario_ || busy())
+            return;
+        show_reports();
+        report_dialog_->configure_report(chooser.definition());
     }
     void show_reports() {
         if (!scenario_ || busy())
@@ -5830,6 +5840,7 @@ class Workbench final : public WorkbenchWindow {
     static void smoke_require(bool condition, const char *message);
     static int smoke_report_column(const QAbstractItemModel *model, const char *id);
     void smoke_choose_report(const QString &key);
+    void smoke_prepare_report_creation(const QString &key, bool all);
     void smoke_edit_covariance(double variance, bool accept);
     void smoke_record(const char *kind);
     bool smoke_caches_ready();
@@ -6187,6 +6198,7 @@ class Workbench final : public WorkbenchWindow {
     bool update_handover_pending_ = false, update_handed_over_ = false;
     QAction *report_action_ = nullptr;
     ReportDialog *report_dialog_ = nullptr;
+    QPointer<ReportCreationDialog> report_creation_;
     std::vector<application::ReportDefinition> reports_;
     ReportDialog::Ready pending_report_input_;
     std::unique_ptr<EopCatalog> eop_catalog_;

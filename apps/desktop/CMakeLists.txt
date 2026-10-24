@@ -71,7 +71,7 @@ if(ORBELLE_WITH_VSG)
         src/viewer/update_package.cpp
         src/viewer/workbench_window.cpp
         src/viewer/view_navigation.cpp
-        src/viewer/report_dialog.cpp src/viewer/coverage_map.cpp src/viewer/report_plot.cpp src/viewer/report_selection.cpp
+        src/viewer/report_dialog.cpp src/viewer/coverage_map.cpp src/viewer/report_plot.cpp src/viewer/report_selection.cpp src/viewer/report_creation.cpp
         src/viewer/project_scene.cpp src/viewer/eop_catalog.cpp src/viewer/data_center_dialog.cpp
         src/viewer/orbit_scene.cpp src/viewer/orbit_editor.cpp src/viewer/hpop_settings.cpp src/viewer/hpop_covariance_editor.cpp src/viewer/mission_editor.cpp src/viewer/track_style_editor.cpp src/viewer/workbench_style.cpp
         src/viewer/satellite_model.cpp src/viewer/mission_timeline.cpp src/viewer/scenario_dialog.cpp
@@ -230,12 +230,13 @@ if(ORBELLE_WITH_VSG)
     endif()
     if(BUILD_TESTING AND ORBELLE_WITH_ERFA)
         add_executable(orbelle_report_ui_tests tests/report_dialog_test.cpp
+            tests/report_creation_test.cpp
             tests/report_plot_test.cpp
             tests/report_selection_test.cpp
             tests/report_table_test.cpp
             tests/report_analysis_test.cpp
             tests/support/report_test_support.cpp
-            src/viewer/report_dialog.cpp src/viewer/coverage_map.cpp src/viewer/report_plot.cpp src/viewer/report_selection.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp src/viewer/workspace.cpp
+            src/viewer/report_dialog.cpp src/viewer/coverage_map.cpp src/viewer/report_plot.cpp src/viewer/report_selection.cpp src/viewer/report_creation.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp src/viewer/workspace.cpp
             src/viewer/object_selection.cpp src/viewer/object_selection.hpp)
         set_target_properties(orbelle_report_ui_tests PROPERTIES AUTOMOC ON)
         qt_add_resources(orbelle_report_ui_tests "report_icons" PREFIX "/orbelle"

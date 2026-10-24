@@ -390,16 +390,12 @@ void ReportColumnSelectionDialog::accept() {
     if (confirm_->isEnabled())
         QDialog::accept();
 }
-ReportSelectionDialog::ReportSelectionDialog(std::vector<ReportChoice> choices, QString selected,
-                                             QWidget *parent)
-    : QDialog(parent) {
-    setObjectName("reportSelectionDialog");
-    setWindowTitle(ui::text("report_selection.label_7"));
-    setWindowIcon(workbench_icon(WorkbenchIcon::properties));
-    resize(840, 580);
-    setMinimumSize(360, 440);
+ReportSelectionPanel::ReportSelectionPanel(std::vector<ReportChoice> choices, QString selected,
+                                           QWidget *parent)
+    : QWidget(parent) {
+    setObjectName("reportSelectionPanel");
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(10);
     split_ = new QSplitter(this);
     split_->setObjectName("reportSelectionSplit");
@@ -516,25 +512,14 @@ ReportSelectionDialog::ReportSelectionDialog(std::vector<ReportChoice> choices, 
     count_->setObjectName("reportSelectionCount");
     footer->addWidget(count_);
     footer->addStretch();
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    confirm_ = buttons->button(QDialogButtonBox::Ok);
-    confirm_->setObjectName("reportSelectionConfirm");
-    confirm_->setText(ui::text("report_selection.confirm.set_text"));
-    confirm_->setProperty("primary", true);
-    confirm_->setDefault(true);
-    // QDialogButtonBox polishes standard buttons before their role/name is assigned here.
-    confirm_->style()->unpolish(confirm_);
-    confirm_->style()->polish(confirm_);
-    buttons->button(QDialogButtonBox::Cancel)->setText(ui::text("common.cancel"));
-    buttons->button(QDialogButtonBox::Cancel)->setAutoDefault(false);
-    footer->addWidget(buttons);
     layout->addLayout(footer);
-    connect(buttons, &QDialogButtonBox::accepted, this, &ReportSelectionDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(search_, &QLineEdit::textChanged, this, [this] { filter(); });
     connect(source_, &QTabBar::currentChanged, this, [this] { filter(); });
     connect(list_, &QListWidget::currentRowChanged, this, [this] { preview(); });
-    connect(list_, &QListWidget::itemDoubleClicked, this, [this] { accept(); });
+    connect(list_, &QListWidget::itemDoubleClicked, this, [this] {
+        if (is_valid())
+            emit activated();
+    });
     set_choices(std::move(choices));
     for (int row = 0; row < list_->count(); ++row)
         if (list_->item(row)->data(Qt::UserRole).toString() == selected)
@@ -542,7 +527,7 @@ ReportSelectionDialog::ReportSelectionDialog(std::vector<ReportChoice> choices, 
     search_->setFocus();
 }
 
-void ReportSelectionDialog::set_choices(std::vector<ReportChoice> choices) {
+void ReportSelectionPanel::set_choices(std::vector<ReportChoice> choices) {
     const auto selected = selection();
     choices_ = std::move(choices);
     {
@@ -569,11 +554,11 @@ void ReportSelectionDialog::set_choices(std::vector<ReportChoice> choices) {
     }
     filter();
 }
-QString ReportSelectionDialog::selection() const {
+QString ReportSelectionPanel::selection() const {
     const auto *item = list_->currentItem();
     return item ? item->data(Qt::UserRole).toString() : QString{};
 }
-void ReportSelectionDialog::filter() {
+void ReportSelectionPanel::filter() {
     const auto query = search_->text().trimmed();
     int visible = 0;
     for (int row = 0; row < list_->count(); ++row) {
@@ -593,7 +578,7 @@ void ReportSelectionDialog::filter() {
     empty_->setVisible(visible == 0);
     preview();
 }
-void ReportSelectionDialog::preview() {
+void ReportSelectionPanel::preview() {
     const auto found = std::ranges::find(choices_, selection(), &ReportChoice::key);
     const bool valid =
         found != choices_.end() && list_->currentItem() && !list_->currentItem()->isHidden();
@@ -615,19 +600,16 @@ void ReportSelectionDialog::preview() {
     note_->setVisible(valid && !found->note.isEmpty());
     warning_->setText(valid ? found->unavailable_reason : QString{});
     warning_->setVisible(valid && !found->unavailable_reason.isEmpty());
-    confirm_->setEnabled(valid && found->unavailable_reason.isEmpty());
+    valid_ = valid && found->unavailable_reason.isEmpty();
+    emit selectionChanged();
     preview_scroll_->verticalScrollBar()->setValue(0);
 }
-void ReportSelectionDialog::accept() {
-    if (confirm_->isEnabled())
-        QDialog::accept();
-}
-void ReportSelectionDialog::resizeEvent(QResizeEvent *event) {
-    QDialog::resizeEvent(event);
+void ReportSelectionPanel::resizeEvent(QResizeEvent *event) {
+    QWidget::resizeEvent(event);
     if (!split_)
         return;
     const auto orientation = event->size().width() < 640 ? Qt::Vertical : Qt::Horizontal;
-    layout()->setContentsMargins(12, 12, 12, 12);
+    layout()->setContentsMargins(0, 0, 0, 0);
     if (split_->orientation() != orientation) {
         (split_->orientation() == Qt::Horizontal ? wide_sizes_ : narrow_sizes_) = split_->sizes();
         split_->setOrientation(orientation);
@@ -638,5 +620,45 @@ void ReportSelectionDialog::resizeEvent(QResizeEvent *event) {
         if (list_->currentItem())
             list_->scrollToItem(list_->currentItem());
     });
+}
+ReportSelectionDialog::ReportSelectionDialog(std::vector<ReportChoice> choices, QString selected,
+                                             QWidget *parent)
+    : QDialog(parent) {
+    setObjectName("reportSelectionDialog");
+    setWindowTitle(ui::text("report_selection.label_7"));
+    setWindowIcon(workbench_icon(WorkbenchIcon::properties));
+    resize(840, 580);
+    setMinimumSize(360, 440);
+    auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(10);
+    panel_ = new ReportSelectionPanel(std::move(choices), std::move(selected), this);
+    layout->addWidget(panel_, 1);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    confirm_ = buttons->button(QDialogButtonBox::Ok);
+    confirm_->setObjectName("reportSelectionConfirm");
+    confirm_->setText(ui::text("report_selection.confirm.set_text"));
+    confirm_->setProperty("primary", true);
+    confirm_->setDefault(true);
+    confirm_->style()->unpolish(confirm_);
+    confirm_->style()->polish(confirm_);
+    confirm_->setEnabled(panel_->is_valid());
+    buttons->button(QDialogButtonBox::Cancel)->setText(ui::text("common.cancel"));
+    buttons->button(QDialogButtonBox::Cancel)->setAutoDefault(false);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, this, &ReportSelectionDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(panel_, &ReportSelectionPanel::selectionChanged, this,
+            [this] { confirm_->setEnabled(panel_->is_valid()); });
+    connect(panel_, &ReportSelectionPanel::activated, this, &ReportSelectionDialog::accept);
+    panel_->findChild<QLineEdit *>("reportSelectionSearch")->setFocus();
+}
+void ReportSelectionDialog::set_choices(std::vector<ReportChoice> choices) {
+    panel_->set_choices(std::move(choices));
+}
+QString ReportSelectionDialog::selection() const { return panel_->selection(); }
+void ReportSelectionDialog::accept() {
+    if (panel_->is_valid())
+        QDialog::accept();
 }
 } // namespace orbelle::desktop

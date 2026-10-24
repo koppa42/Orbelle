@@ -2,10 +2,12 @@ void Workbench::smoke_reports() {
     auto input = orbit_ ? orbit_->input : OrbitInput{};
     switch (orbit_smoke_stage_) {
     case 121:
+        smoke_prepare_report_creation("builtin:2", true);
+        timer_.stop();
         report_action_->trigger();
+        timer_.start();
         smoke_require(report_dialog_ && workspace_->contains(report_dialog_),
                       "Report did not open in the workspace");
-        smoke_choose_report("builtin:2");
         report_dialog_->findChild<QComboBox *>("reportFrame")->setCurrentIndex(1);
         report_dialog_->findChild<QDoubleSpinBox *>("reportStep")->setValue(600);
         QTimer::singleShot(0, [] {
@@ -145,8 +147,11 @@ void Workbench::smoke_reports() {
     case 125:
         smoke_require(last_project_outcome_ == "opened" && reports_.size() == 1,
                       "Project reopen lost report configurations");
+        smoke_prepare_report_creation("template:" + QString::fromStdString(reports_.front().id),
+                                      true);
+        timer_.stop();
         report_action_->trigger();
-        smoke_choose_report("template:" + QString::fromStdString(reports_.front().id));
+        timer_.start();
         report_dialog_->findChild<QPushButton *>("generateReport")->click();
         ++orbit_smoke_stage_;
         break;
@@ -205,10 +210,13 @@ void Workbench::smoke_reports() {
             smoke_require(action != nullptr, "Object report action is missing");
             // The clicked object's stable ID must survive unrelated selection changes.
             set_selection(0);
-            action->trigger();
+            smoke_prepare_report_creation("builtin:2", false);
             menu->close();
+            action->trigger();
         });
+        timer_.stop();
         objects_->customContextMenuRequested(objects_->visualItemRect(item).center());
+        timer_.start();
         smoke_require(report_dialog_->findChild<QLabel *>("reportScopeLabel")->text() ==
                           item->text(0),
                       "Context report did not bind the right-clicked object");

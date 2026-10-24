@@ -950,6 +950,24 @@ QWidget#reportHeading { background: @chrome; border-bottom: 1px solid @line; }
 QWidget#reportSettingsPanel, QWidget#reportSettings { background: @panel; }
 QWidget#reportGenerateActions { background: @panel; border-top: 1px solid @line; }
 QLabel#reportSectionTitle { color: @textSoft; font-size: 12px; padding-bottom: 3px; border-bottom: 1px solid @line; }
+QLabel#reportCreationProgress { color: @textMuted; font-size: 11px; padding-bottom: 2px; }
+QLabel#reportCreationSummary { color: @textMuted; padding-bottom: 10px; }
+QFrame#reportBindingCard { background: transparent; border: 0; }
+QLabel#reportBindingRole { color: @textSoft; font-size: 12px; font-weight: 600; }
+QLabel#reportBindingBadge { color: @textMuted; background: @raised; border-radius: 4px; font-size: 10px; padding: 2px 6px; }
+QLabel#reportBindingBadge[ready="true"] { color: @accentBright; background: @accentHover; }
+QLabel#reportBindingBadge[warning="true"] { color: @warning; background: @warningWash; }
+QLabel#reportBindingDetail, QLabel#reportCreationStatus { color: @textMuted; font-size: 11px; }
+QListWidget#reportCreationSelectedObjects { background: @chrome; border: 1px solid @line; border-radius: 6px; }
+QPushButton#reportCreationManageObjects { color: @accent; background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 3px 6px; font-size: 12px; }
+QPushButton#reportCreationManageObjects:hover { background: @accentHover; }
+QPushButton#reportCreationManageObjects:focus { border-color: @accent; }
+QPushButton#reportCreationBack { color: @textSoft; background: transparent; border: 1px solid transparent; padding: 4px 6px; }
+QPushButton#reportCreationBack:hover { color: @text; background: @overlay; }
+QPushButton#reportCreationBack:focus { border-color: @accent; }
+QDialog#reportCreationDialog QPushButton[reportObjectField="true"] { background: @chrome; border: 1px solid @line; border-radius: 6px; padding: 8px 10px; min-height: 20px; }
+QDialog#reportCreationDialog QPushButton[reportObjectField="true"]:hover { background: @fieldMuted; border-color: @borderStrong; }
+QDialog#reportCreationDialog QPushButton[reportObjectField="true"]:focus { background: @chrome; border-color: @sakura; }
 QLabel#reportScopeLabel { color: @text; }
 QLabel#reportScopeDetail, QLabel#reportInterval, QLabel#reportEstimate { color: @textMuted; font-size: 11px; }
 QLabel#reportInterval { font-family: "Cascadia Mono", "Consolas"; }

@@ -3,6 +3,7 @@
 #include "coverage_map.hpp"
 #include "epoch_editor.hpp"
 #include "object_selection.hpp"
+#include "report_creation.hpp"
 #include "report_names.hpp"
 #include "report_plot.hpp"
 #include "report_selection.hpp"
@@ -163,45 +164,6 @@ class StepSpinBox final : public QDoubleSpinBox {
 QString text(const std::string &value) { return QString::fromStdString(value); }
 bool pair_report(ReportKind kind) {
     return report_is_access(kind) || report_is_intersatellite(kind);
-}
-QString kind_name(ReportKind kind) {
-    switch (kind) {
-    case ReportKind::scenario_summary:
-        return ui::text("report_dialog.label");
-    case ReportKind::object_summary:
-        return ui::text("report_dialog.label_2");
-    case ReportKind::cartesian_state:
-        return ui::text("report_dialog.label_3");
-    case ReportKind::ground_stations:
-        return ui::text("report_dialog.label_4");
-    case ReportKind::classical_elements:
-        return ui::text("report_dialog.label_5");
-    case ReportKind::geodetic_position:
-        return ui::text("report_dialog.label_6");
-    case ReportKind::orbital_motion:
-        return ui::text("report_dialog.label_7");
-    case ReportKind::access_intervals:
-        return ui::text("report_dialog.label_8");
-    case ReportKind::aer:
-        return ui::text("report_dialog.label_9");
-    case ReportKind::lighting_intervals:
-        return ui::text("report_dialog.label_10");
-    case ReportKind::lighting_state:
-        return ui::text("report_dialog.label_11");
-    case ReportKind::orbital_events:
-        return ui::text("report_dialog.label_12");
-    case ReportKind::relative_motion:
-        return ui::text("report_dialog.label_13");
-    case ReportKind::intersatellite_access:
-        return ui::text("report_dialog.label_14");
-    case ReportKind::coverage_grid:
-        return ui::text("report_dialog.label_15");
-    case ReportKind::coverage_time:
-        return ui::text("report_dialog.label_16");
-    case ReportKind::state_covariance:
-        return ui::text("report_dialog.label_17");
-    }
-    return {};
 }
 QString localized(QString value) {
     static const std::map<QString, QString> labels{
@@ -553,6 +515,37 @@ struct ReportDialog::Impl {
             caption->setObjectName("reportSectionTitle");
             config->addWidget(caption);
         };
+        auto *template_heading = new QHBoxLayout;
+        auto *template_title = new QLabel(ui::text("report_dialog.template_title"), settings);
+        template_title->setObjectName("reportSectionTitle");
+        template_heading->addWidget(template_title);
+        template_heading->addStretch();
+        config_menu = new QToolButton(settings);
+        config_menu->setObjectName("reportConfigMenu");
+        config_menu->setText(ui::text("report_dialog.config_menu.set_text"));
+        config_menu->setToolTip(ui::text("report_dialog.config_menu.set_tool_tip"));
+        config_menu->setPopupMode(QToolButton::InstantPopup);
+        auto *menu = new QMenu(config_menu);
+        store = menu->addAction(ui::text("report_dialog.menu.add_action"));
+        store->setObjectName("saveReport");
+        update_template = menu->addAction(ui::text("report_dialog.menu.add_action_2"));
+        update_template->setObjectName("updateReport");
+        menu->addSeparator();
+        remove = menu->addAction(ui::text("report_dialog.menu.add_action_3"));
+        remove->setObjectName("deleteReport");
+        config_menu->setMenu(menu);
+        template_heading->addWidget(config_menu);
+        config->addLayout(template_heading);
+        library = new ReportSelectionButton(settings);
+        library->setObjectName("reportLibrary");
+        library->setProperty("objectSelector", true);
+        library->setAutoDefault(false);
+        library->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        library->setAccessibleName(ui::text("report_dialog.library.set_accessible_name"));
+        config->addWidget(library);
+        template_description = note({}, settings);
+        template_description->setObjectName("reportTemplateDescription");
+        config->addWidget(template_description);
         section(ui::text("report_dialog.label_84"));
         auto *scope_row = new QHBoxLayout;
         scope_label = new QLabel(settings);
@@ -585,38 +578,6 @@ struct ReportDialog::Impl {
         pair_form->addRow(ui::text("report_dialog.label_52"), access_station);
         pair_form->addRow(ui::text("report_dialog.pair_form.add_row"), access_target);
         config->addWidget(access_pair);
-        auto *template_heading = new QHBoxLayout;
-        auto *template_title = new QLabel(ui::text("report_dialog.template_title"), settings);
-        template_title->setObjectName("reportSectionTitle");
-        template_heading->addWidget(template_title);
-        template_heading->addStretch();
-        config_menu = new QToolButton(settings);
-        config_menu->setObjectName("reportConfigMenu");
-        config_menu->setText(ui::text("report_dialog.config_menu.set_text"));
-        config_menu->setToolTip(ui::text("report_dialog.config_menu.set_tool_tip"));
-        config_menu->setPopupMode(QToolButton::InstantPopup);
-        auto *menu = new QMenu(config_menu);
-        store = menu->addAction(ui::text("report_dialog.menu.add_action"));
-        store->setObjectName("saveReport");
-        update_template = menu->addAction(ui::text("report_dialog.menu.add_action_2"));
-        update_template->setObjectName("updateReport");
-        menu->addSeparator();
-        remove = menu->addAction(ui::text("report_dialog.menu.add_action_3"));
-        remove->setObjectName("deleteReport");
-        config_menu->setMenu(menu);
-        template_heading->addWidget(config_menu);
-        config->addSpacing(8);
-        config->addLayout(template_heading);
-        library = new ReportSelectionButton(settings);
-        library->setObjectName("reportLibrary");
-        library->setProperty("objectSelector", true);
-        library->setAutoDefault(false);
-        library->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        library->setAccessibleName(ui::text("report_dialog.library.set_accessible_name"));
-        config->addWidget(library);
-        template_description = note({}, settings);
-        template_description->setObjectName("reportTemplateDescription");
-        config->addWidget(template_description);
         coverage_settings = new QWidget(settings);
         coverage_settings->setObjectName("coverageSettings");
         auto *coverage_form = new QFormLayout(coverage_settings);
@@ -1354,7 +1315,7 @@ struct ReportDialog::Impl {
     void fill_library() {
         const bool saved = std::ranges::any_of(
             project.reports, [this](const auto &definition) { return definition.id == draft.id; });
-        library->setText(saved ? text(draft.name) : kind_name(draft.query.kind));
+        library->setText(saved ? text(draft.name) : report_kind_name(draft.query.kind));
         library->setIcon(workbench_icon(saved ? WorkbenchIcon::save : WorkbenchIcon::properties));
         library->setToolTip(library->text() + ui::text("report_dialog.library.set_tool_tip"));
         library->setAccessibleDescription(library->toolTip());
@@ -1377,119 +1338,30 @@ struct ReportDialog::Impl {
         return names.join(QStringLiteral("、"));
     }
     std::vector<ReportChoice> report_choices() const {
-        const auto description = [](ReportKind kind) -> QString {
-            switch (kind) {
-            case ReportKind::scenario_summary:
-                return ui::text("report_dialog.label_121");
-            case ReportKind::object_summary:
-                return ui::text("report_dialog.label_122");
-            case ReportKind::cartesian_state:
-                return ui::text("report_dialog.label_123");
-            case ReportKind::ground_stations:
-                return ui::text("report_dialog.label_124");
-            case ReportKind::classical_elements:
-                return ui::text("report_dialog.label_125");
-            case ReportKind::geodetic_position:
-                return ui::text("report_dialog.label_126");
-            case ReportKind::orbital_motion:
-                return ui::text("report_dialog.label_127");
-            case ReportKind::access_intervals:
-                return ui::text("report_dialog.label_128");
-            case ReportKind::aer:
-                return ui::text("report_dialog.label_129");
-            case ReportKind::lighting_intervals:
-                return ui::text("report_dialog.label_130");
-            case ReportKind::lighting_state:
-                return ui::text("report_dialog.label_131");
-            case ReportKind::orbital_events:
-                return ui::text("report_dialog.label_132");
-            case ReportKind::relative_motion:
-                return ui::text("report_dialog.label_133");
-            case ReportKind::intersatellite_access:
-                return ui::text("report_dialog.label_134");
-            case ReportKind::coverage_grid:
-                return ui::text("report_dialog.label_135");
-            case ReportKind::coverage_time:
-                return ui::text("report_dialog.label_136");
-            case ReportKind::state_covariance:
-                return ui::text("report_dialog.label_137");
-            }
-            return {};
-        };
-        const auto output = [](ReportKind kind) -> QString {
-            switch (kind) {
-            case ReportKind::coverage_grid:
-                return ui::text("report_dialog.output");
-            case ReportKind::coverage_time:
-                return ui::text("report_dialog.label_138");
-            case ReportKind::scenario_summary:
-                return ui::text("report_dialog.label_139");
-            case ReportKind::object_summary:
-                return ui::text("report_dialog.label_140");
-            case ReportKind::ground_stations:
-                return ui::text("report_dialog.label_141");
-            case ReportKind::access_intervals:
-            case ReportKind::intersatellite_access:
-                return ui::text("report_dialog.label_142");
-            case ReportKind::lighting_intervals:
-                return ui::text("report_dialog.label_143");
-            case ReportKind::orbital_events:
-                return ui::text("report_dialog.label_144");
-            default:
-                return ui::text("report_dialog.label_145");
-            }
-        };
-        const auto icon = [](ReportKind kind) {
-            switch (kind) {
-            case ReportKind::scenario_summary:
-                return WorkbenchIcon::earth;
-            case ReportKind::object_summary:
-                return WorkbenchIcon::satellite;
-            case ReportKind::ground_stations:
-                return WorkbenchIcon::ground_station;
-            case ReportKind::coverage_grid:
-            case ReportKind::coverage_time:
-            case ReportKind::geodetic_position:
-                return WorkbenchIcon::map;
-            case ReportKind::access_intervals:
-                return WorkbenchIcon::clock;
-            case ReportKind::aer:
-                return WorkbenchIcon::focus;
-            default:
-                return WorkbenchIcon::orbit;
-            }
-        };
         std::vector<ReportChoice> choices;
-        for (auto kind : report_kinds)
-            choices.push_back({QStringLiteral("builtin:%1").arg(static_cast<int>(kind)),
-                               kind_name(kind),
-                               kind_name(kind),
-                               description(kind),
-                               report_is_intersatellite(kind) ? ui::text("report_dialog.label_146")
-                               : report_is_access(kind)       ? ui::text("report_dialog.label_147")
-                                                        : report_scope(scope_ids, all_objects),
-                               false,
-                               compatible(kind) ? QString{} : ui::text("report_dialog.label_148"),
-                               output(kind),
-                               {},
-                               icon(kind)});
+        for (auto kind : report_kinds) {
+            auto choice = report_kind_choice(kind);
+            choice.scope = report_is_intersatellite(kind) ? ui::text("report_dialog.label_146")
+                           : report_is_access(kind)       ? ui::text("report_dialog.label_147")
+                                                          : report_scope(scope_ids, all_objects);
+            choice.unavailable_reason =
+                compatible(kind) ? QString{} : ui::text("report_dialog.label_148");
+            choices.push_back(std::move(choice));
+        }
         for (const auto &definition : project.reports) {
             QString warning;
             const auto objects = project_object_choices(project);
             for (const auto &id : definition.query.object_ids)
                 if (std::ranges::find(objects, id, &ObjectChoice::id) == objects.end())
                     warning = ui::text("report_dialog.label_149");
-            choices.push_back({"template:" + text(definition.id),
-                               text(definition.name),
-                               kind_name(definition.query.kind),
-                               description(definition.query.kind),
-                               report_scope(definition.query.object_ids,
-                                            definition.query.scope == ReportScope::all_compatible),
-                               true,
-                               {},
-                               output(definition.query.kind),
-                               ui::text("report_dialog.label_150") + warning,
-                               icon(definition.query.kind)});
+            auto choice = report_kind_choice(definition.query.kind);
+            choice.key = "template:" + text(definition.id);
+            choice.name = text(definition.name);
+            choice.scope = report_scope(definition.query.object_ids,
+                                        definition.query.scope == ReportScope::all_compatible);
+            choice.saved = true;
+            choice.note = ui::text("report_dialog.label_150") + warning;
+            choices.push_back(std::move(choice));
         }
         return choices;
     }
@@ -1732,17 +1604,21 @@ struct ReportDialog::Impl {
         scope_ids = {access_station->id(), access_target->id()};
         all_objects = false;
     }
-    void choose(int row) {
+    void choose(int row, const ReportDefinition *selected = nullptr) {
         if (row < 0 || loading)
             return;
-        if (row < builtin_count && !compatible(static_cast<ReportKind>(row)))
+        if (!selected && row < builtin_count && !compatible(static_cast<ReportKind>(row)))
             return;
         loading = true;
-        if (row < builtin_count) {
+        if (selected) {
+            draft = *selected;
+            scope_ids = draft.query.object_ids;
+            all_objects = draft.query.scope == ReportScope::all_compatible;
+        } else if (row < builtin_count) {
             draft = {};
             draft.id = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
             draft.query.kind = static_cast<ReportKind>(row);
-            draft.name = kind_name(draft.query.kind).toStdString();
+            draft.name = report_kind_name(draft.query.kind).toStdString();
             draft.query.first = project.first;
             draft.query.last = project.last;
             draft.query.object_ids = scope_ids;
@@ -1757,7 +1633,7 @@ struct ReportDialog::Impl {
         }
         const bool coverage = report_is_coverage(draft.query.kind);
         coverage_settings->setVisible(coverage);
-        if (coverage && row < builtin_count) {
+        if (coverage && row < builtin_count && !selected) {
             if (all_objects)
                 scope_ids.clear();
             const auto choices =
@@ -1801,7 +1677,7 @@ struct ReportDialog::Impl {
         scope_button->setVisible(!access);
         scope_detail->setVisible(!access);
         if (access)
-            fill_access_pair(row >= builtin_count);
+            fill_access_pair(selected || row >= builtin_count);
         follow->setChecked(draft.query.follow_scenario);
         first->set_epoch(draft.query.follow_scenario ? project.first : draft.query.first);
         last->set_epoch(draft.query.follow_scenario ? project.last : draft.query.last);
@@ -2781,6 +2657,16 @@ ReportDialog::ReportDialog(application::Project project,
       impl_(std::make_unique<Impl>(this, std::move(project), std::move(time), std::move(prepare),
                                    std::move(save), std::move(seek))) {}
 ReportDialog::~ReportDialog() = default;
+bool ReportDialog::is_busy() const { return !impl_->generate->isEnabled(); }
+bool ReportDialog::configure_report(const application::ReportDefinition &definition) {
+    if (is_busy())
+        return false;
+    impl_->choose(static_cast<int>(definition.query.kind), &definition);
+    impl_->narrow_settings = true;
+    impl_->wide_settings = true;
+    impl_->adapt(width());
+    return true;
+}
 void ReportDialog::select_object(const std::string &id, application::ReportKind kind) {
     auto &self = *impl_;
     if (!self.generate->isEnabled()) {
