@@ -25,13 +25,18 @@ struct ReportChoice {
 };
 
 // The choice remains a draft until accepted. Keys survive renames, reordering and deletion.
-class ReportSelectionDialog final : public QDialog {
+class ReportSelectionPanel final : public QWidget {
+    Q_OBJECT
   public:
-    ReportSelectionDialog(std::vector<ReportChoice> choices, QString selected,
-                          QWidget *parent = nullptr);
+    ReportSelectionPanel(std::vector<ReportChoice> choices, QString selected,
+                         QWidget *parent = nullptr);
     void set_choices(std::vector<ReportChoice> choices);
     [[nodiscard]] QString selection() const;
-    void accept() override;
+    [[nodiscard]] bool is_valid() const { return valid_; }
+
+  signals:
+    void selectionChanged();
+    void activated();
 
   protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -48,6 +53,19 @@ class ReportSelectionDialog final : public QDialog {
     QList<int> wide_sizes_, narrow_sizes_;
     QLabel *title_, *category_, *description_, *scope_, *warning_, *count_, *empty_;
     QLabel *symbol_, *output_, *note_, *output_heading_, *scope_heading_;
+    bool valid_ = false;
+};
+
+class ReportSelectionDialog final : public QDialog {
+  public:
+    ReportSelectionDialog(std::vector<ReportChoice> choices, QString selected,
+                          QWidget *parent = nullptr);
+    void set_choices(std::vector<ReportChoice> choices);
+    [[nodiscard]] QString selection() const;
+    void accept() override;
+
+  private:
+    ReportSelectionPanel *panel_;
     QPushButton *confirm_;
 };
 

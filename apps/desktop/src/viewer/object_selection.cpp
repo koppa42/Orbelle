@@ -86,21 +86,14 @@ std::vector<ObjectChoice> project_object_choices(const application::Project &pro
     return objects;
 }
 
-ObjectSelectionDialog::ObjectSelectionDialog(std::vector<ObjectChoice> objects,
-                                             ObjectSelectionOptions options,
-                                             ObjectSelection selection, QWidget *parent)
-    : QDialog(parent), options_(std::move(options)), value_(std::move(selection)) {
-    setObjectName("objectSelectionDialog");
-    setWindowTitle(ui::text("object_selection.label_4"));
-    setWindowIcon(workbench_icon(WorkbenchIcon::search));
-    resize(600, 540);
-    setMinimumSize(360, 360);
+ObjectSelectionPanel::ObjectSelectionPanel(std::vector<ObjectChoice> objects,
+                                           ObjectSelectionOptions options,
+                                           ObjectSelection selection, QWidget *parent)
+    : QWidget(parent), options_(std::move(options)), value_(std::move(selection)) {
+    setObjectName("objectSelectionPanel");
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(theme::space::page);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
-    auto *title = new QLabel(ui::text("object_selection.title"), this);
-    title->setObjectName("panelTitle");
-    layout->addWidget(title);
     auto *purpose = new QLabel(options_.purpose, this);
     purpose->setObjectName("objectSelectionPurpose");
     purpose->setTextFormat(Qt::PlainText);
@@ -165,18 +158,6 @@ ObjectSelectionDialog::ObjectSelectionDialog(std::vector<ObjectChoice> objects,
     clear_->setVisible(options_.multiple);
     footer->addWidget(clear_);
     layout->addLayout(footer);
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    confirm_ = buttons->button(QDialogButtonBox::Ok);
-    confirm_->setText(ui::text("common.ok"));
-    confirm_->setProperty("primary", true);
-    confirm_->style()->unpolish(confirm_);
-    confirm_->style()->polish(confirm_);
-    confirm_->setDefault(true);
-    buttons->button(QDialogButtonBox::Cancel)->setText(ui::text("common.cancel"));
-    buttons->button(QDialogButtonBox::Cancel)->setAutoDefault(false);
-    layout->addWidget(buttons);
-    connect(buttons, &QDialogButtonBox::accepted, this, &ObjectSelectionDialog::confirm);
-    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(search_, &QLineEdit::textChanged, this, [this] { filter(); });
     connect(kind_, &QComboBox::currentIndexChanged, this, [this] { filter(); });
     connect(all_, &QCheckBox::toggled, this, [this](bool checked) {
@@ -202,7 +183,7 @@ ObjectSelectionDialog::ObjectSelectionDialog(std::vector<ObjectChoice> objects,
     });
     connect(tree_, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item, int) {
         if (!options_.multiple && item->data(0, available_role).toBool())
-            confirm();
+            emit activated();
     });
     connect(clear_, &QPushButton::clicked, this, [this] {
         const QSignalBlocker guard(tree_);
@@ -216,7 +197,7 @@ ObjectSelectionDialog::ObjectSelectionDialog(std::vector<ObjectChoice> objects,
     search_->setFocus();
 }
 
-void ObjectSelectionDialog::set_objects(std::vector<ObjectChoice> objects) {
+void ObjectSelectionPanel::set_objects(std::vector<ObjectChoice> objects) {
     rebuilding_ = true;
     const QSignalBlocker tree_guard(tree_), kind_guard(kind_);
     objects_ = std::move(objects);
@@ -281,7 +262,7 @@ void ObjectSelectionDialog::set_objects(std::vector<ObjectChoice> objects) {
     filter();
 }
 
-void ObjectSelectionDialog::filter() {
+void ObjectSelectionPanel::filter() {
     if (rebuilding_)
         return;
     const auto query = search_->text().trimmed();
@@ -305,7 +286,7 @@ void ObjectSelectionDialog::filter() {
     update_status();
 }
 
-void ObjectSelectionDialog::update_status() {
+void ObjectSelectionPanel::update_status() {
     if (rebuilding_ || !count_)
         return;
     std::unordered_set<std::string> available;
@@ -331,7 +312,8 @@ void ObjectSelectionDialog::update_status() {
     if (!value_.all && missing)
         count_->setText(count_->text() +
                         ui::text("object_selection.count.set_text_2").arg(missing));
-    confirm_->setEnabled(value_.all || (!value_.ids.empty() && missing == 0));
+    valid_ =
+        (value_.all && !available.empty()) || (!value_.all && !value_.ids.empty() && missing == 0);
     clear_->setEnabled(!value_.all && !value_.ids.empty());
     auto *current = tree_->currentItem();
     const auto path = current ? current->data(0, path_role).toString() : QString{};
@@ -342,18 +324,58 @@ void ObjectSelectionDialog::update_status() {
                       details_->fontMetrics().elidedText("ID: " + id, Qt::ElideMiddle, width)
                 : ui::text("object_selection.label_8"));
     details_->setToolTip(path + "\nID: " + id);
+    emit selectionChanged();
 }
-void ObjectSelectionDialog::resizeEvent(QResizeEvent *event) {
-    QDialog::resizeEvent(event);
+void ObjectSelectionPanel::resizeEvent(QResizeEvent *event) {
+    QWidget::resizeEvent(event);
     update_status();
 }
-ObjectSelection ObjectSelectionDialog::selection() const {
+ObjectSelection ObjectSelectionPanel::selection() const {
     return value_.all ? ObjectSelection{{}, true} : value_;
 }
-void ObjectSelectionDialog::confirm() {
-    update_status();
-    if (confirm_->isEnabled())
-        accept();
+ObjectSelectionDialog::ObjectSelectionDialog(std::vector<ObjectChoice> objects,
+                                             ObjectSelectionOptions options,
+                                             ObjectSelection selection, QWidget *parent)
+    : QDialog(parent) {
+    setObjectName("objectSelectionDialog");
+    setWindowTitle(ui::text("object_selection.label_4"));
+    setWindowIcon(workbench_icon(WorkbenchIcon::search));
+    resize(600, 540);
+    setMinimumSize(360, 360);
+    auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(theme::space::page);
+    layout->setSpacing(12);
+    auto *title = new QLabel(ui::text("object_selection.title"), this);
+    title->setObjectName("panelTitle");
+    layout->addWidget(title);
+    panel_ = new ObjectSelectionPanel(std::move(objects), std::move(options), std::move(selection),
+                                      this);
+    layout->addWidget(panel_, 1);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    confirm_ = buttons->button(QDialogButtonBox::Ok);
+    confirm_->setText(ui::text("common.ok"));
+    confirm_->setProperty("primary", true);
+    confirm_->style()->unpolish(confirm_);
+    confirm_->style()->polish(confirm_);
+    confirm_->setDefault(true);
+    confirm_->setEnabled(panel_->is_valid());
+    buttons->button(QDialogButtonBox::Cancel)->setText(ui::text("common.cancel"));
+    buttons->button(QDialogButtonBox::Cancel)->setAutoDefault(false);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, this, &ObjectSelectionDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(panel_, &ObjectSelectionPanel::selectionChanged, this,
+            [this] { confirm_->setEnabled(panel_->is_valid()); });
+    connect(panel_, &ObjectSelectionPanel::activated, this, &ObjectSelectionDialog::accept);
+    panel_->findChild<QLineEdit *>("objectSelectionSearch")->setFocus();
+}
+void ObjectSelectionDialog::set_objects(std::vector<ObjectChoice> objects) {
+    panel_->set_objects(std::move(objects));
+}
+ObjectSelection ObjectSelectionDialog::selection() const { return panel_->selection(); }
+void ObjectSelectionDialog::accept() {
+    if (panel_->is_valid())
+        QDialog::accept();
 }
 
 ObjectSelectionField::ObjectSelectionField(QWidget *parent) : QPushButton(parent) {
@@ -383,6 +405,10 @@ void ObjectSelectionField::set_selection(ObjectSelection selection) {
 void ObjectSelectionField::set_id(std::string id) {
     set_selection(
         {id.empty() ? std::vector<std::string>{} : std::vector<std::string>{std::move(id)}, false});
+}
+void ObjectSelectionField::set_action_text(QString text) {
+    action_text_ = std::move(text);
+    update();
 }
 std::string ObjectSelectionField::id() const {
     return selection_.ids.empty() ? std::string{} : selection_.ids.front();
@@ -420,8 +446,29 @@ void ObjectSelectionField::refresh() {
 void ObjectSelectionField::paintEvent(QPaintEvent *) {
     QStyleOptionButton option;
     initStyleOption(&option);
-    option.text = fontMetrics().elidedText(text(), Qt::ElideMiddle, std::max(0, width() - 70));
     QStylePainter painter(this);
+    if (!action_text_.isEmpty()) {
+        option.text.clear();
+        option.icon = {};
+        painter.drawControl(QStyle::CE_PushButton, option);
+        icon().paint(&painter, QRect(12, (height() - 16) / 2, 16, 16), Qt::AlignCenter,
+                     isEnabled() ? QIcon::Normal : QIcon::Disabled);
+        const int action_width = fontMetrics().horizontalAdvance(action_text_);
+        const QRect action(width() - action_width - 14, 0, action_width, height());
+        const QRect label(38, 0, std::max(0, action.left() - 52), height());
+        const bool empty = !selection_.all && selection_.ids.empty();
+        painter.setPen(theme::color(!isEnabled() ? theme::text_faint
+                                    : empty      ? theme::text_muted
+                                                 : theme::text));
+        painter.drawText(
+            label, Qt::AlignVCenter | Qt::AlignLeft,
+            fontMetrics().elidedText(empty ? ui::text("object_selection.unselected") : text(),
+                                     Qt::ElideMiddle, label.width()));
+        painter.setPen(theme::color(isEnabled() ? theme::accent : theme::text_faint));
+        painter.drawText(action, Qt::AlignVCenter | Qt::AlignRight, action_text_);
+        return;
+    }
+    option.text = fontMetrics().elidedText(text(), Qt::ElideMiddle, std::max(0, width() - 70));
     painter.drawControl(QStyle::CE_PushButton, option);
     workbench_icon(WorkbenchIcon::more)
         .paint(&painter, QRect(width() - 26, (height() - 16) / 2, 16, 16), Qt::AlignCenter,

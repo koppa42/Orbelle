@@ -12,6 +12,46 @@ int Workbench::smoke_report_column(const QAbstractItemModel *model, const char *
     throw std::runtime_error(std::string("Missing report field: ") + id);
 }
 
+void Workbench::smoke_prepare_report_creation(const QString &key, bool all) {
+    QTimer::singleShot(0, this, [this, key, all] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        smoke_require(dialog && dialog->objectName() == "reportCreationDialog",
+                      "New report did not start with the report type selector");
+        auto *list = dialog->findChild<QListWidget *>("reportSelectionList");
+        auto *next = dialog->findChild<QPushButton *>("reportCreationNext");
+        smoke_require(list && next, "Report creation controls are missing");
+        for (int row = 0; row < list->count(); ++row)
+            if (list->item(row)->data(Qt::UserRole).toString() == key)
+                list->setCurrentRow(row);
+        smoke_require(next->isEnabled(), "Requested report type is unavailable");
+        dialog->grab().save(smoke_dir_ +
+                            (all ? "/report-create-types.png" : "/report-create-context.png"));
+        next->click();
+        if (dialog->isVisible()) {
+            if (all) {
+                auto *field = dialog->findChild<ObjectSelectionField *>("reportCreationObject0");
+                smoke_require(field, "Report object field is missing");
+                QTimer::singleShot(0, this, [this] {
+                    auto *picker =
+                        qobject_cast<ObjectSelectionDialog *>(QApplication::activeModalWidget());
+                    smoke_require(picker, "Report object field did not open the shared selector");
+                    auto *scope = picker->findChild<QCheckBox *>("objectSelectionAll");
+                    smoke_require(scope, "Explicit report scope option is missing");
+                    scope->setChecked(true);
+                    picker->grab().save(smoke_dir_ + "/report-create-picker.png");
+                    picker->accept();
+                });
+                field->click();
+            }
+            dialog->grab().save(smoke_dir_ + (all ? "/report-create-objects.png"
+                                                  : "/report-create-context-objects.png"));
+            smoke_require(next->isEnabled(), "Explicit report object selection was rejected");
+            next->click();
+        }
+        smoke_require(dialog->result() == QDialog::Accepted, "Report creation did not finish");
+    });
+}
+
 void Workbench::smoke_choose_report(const QString &key) {
     auto *button = report_dialog_->findChild<QPushButton *>("reportLibrary");
     smoke_require(button != nullptr, "Report selection button is missing");

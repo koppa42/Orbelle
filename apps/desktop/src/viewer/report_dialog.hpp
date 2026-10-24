@@ -24,6 +24,8 @@ class ReportDialog final : public QDialog {
     ~ReportDialog() override;
     [[nodiscard]] QSize minimumSizeHint() const override { return {320, 300}; }
     void select_object(const std::string &id, application::ReportKind kind);
+    [[nodiscard]] bool is_busy() const;
+    bool configure_report(const application::ReportDefinition &definition);
     void update_project(application::Project project,
                         std::shared_ptr<const core::ITimeProvider> time);
     std::function<void(std::shared_ptr<const runtime::ReportResult>, const runtime::Analysis &)>
