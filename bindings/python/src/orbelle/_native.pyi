@@ -1585,6 +1585,7 @@ class SensorDisplay:
     color: int
     opacity: float
     space_range_m: float
+    show_space_extension: bool
 
 class SensorPointing:
     NADIR: SensorPointing

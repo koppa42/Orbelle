@@ -50,7 +50,7 @@ class SensorEditor final : public QDialog {
     QComboBox *type_;
     QTableWidget *points_;
     QWidget *cone_fields_, *inner_fields_, *complex_fields_, *rectangle_fields_, *custom_fields_;
-    QCheckBox *show_2d_, *show_3d_, *fill_;
+    QCheckBox *show_2d_, *show_3d_, *fill_, *show_space_;
     QSpinBox *opacity_;
     QPushButton *color_;
     std::uint32_t color_value_ = 0xf1a6ca;

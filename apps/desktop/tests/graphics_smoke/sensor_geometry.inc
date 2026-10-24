@@ -47,7 +47,105 @@ void Workbench::smoke_sensor_geometry() {
         smoke_final_frames_ = 0;
         break;
     }
-    case 206:
+    case 206: {
+        auto project = project_snapshot(project_path_);
+        const auto state = satellites_.front().orbit->track.sample_state(snapshot_.epoch);
+        const vsg::dvec3 scaled(state.position_m[0] / 6378137., state.position_m[1] / 6378137.,
+                                state.position_m[2] / 6356752.314245179);
+        const auto radial = vsg::normalize(scaled);
+        const auto axes = core::sensor_axes(state.velocity_mps, state.position_m);
+        const auto along = vsg::normalize(vsg::dvec3(axes.x[0], axes.x[1], axes.x[2]));
+        const auto angle = .8 * std::acos(1 / vsg::length(scaled));
+        const auto target = vsg::normalize(radial * std::cos(angle) + along * std::sin(angle));
+        application::ProjectGroundStation station;
+        station.object_id = "limb-station";
+        station.display_name = "Limb station";
+        station.location = core::ground_station_location(
+            core::GroundPositionType::cartesian,
+            {target.x * 6378137., target.y * 6378137., target.z * 6356752.314245179});
+        project.ground_stations.push_back(station);
+        auto &sensor = project.sensors.front();
+        sensor.pattern = core::SensorPattern(45 * std::numbers::pi / 180);
+        sensor.pointing = application::SensorPointing::targeted;
+        sensor.target_station_id = station.object_id;
+        sensor.tilt_x_rad = sensor.tilt_y_rad = sensor.roll_rad = 0;
+        sensor.display.color = 0x4eb3ff;
+        start_project(std::move(project), project_path_, true);
+        smoke_final_frames_ = 0;
+        ++orbit_smoke_stage_;
+        break;
+    }
+    case 207: {
+        if (project_candidate_.valid() || ++smoke_final_frames_ < 4)
+            break;
+        change_display_frame(1);
+        lighting_action_->setChecked(false);
+        smoke_set_view_layout(0);
+        set_selection(0);
+        const auto state = satellites_.front().orbit->track.sample_state(snapshot_.epoch);
+        const auto axes = core::sensor_axes(state.velocity_mps, state.position_m);
+        const vsg::dvec3 satellite(state.position_m[0], state.position_m[1], state.position_m[2]);
+        const vsg::dvec3 radial(axes.z[0], axes.z[1], axes.z[2]);
+        const vsg::dvec3 along(axes.x[0], axes.x[1], axes.x[2]);
+        const vsg::dvec3 side(axes.y[0], axes.y[1], axes.y[2]);
+        const auto center = satellite + along * 1e6 - radial * 3e5;
+        slots_[0]->navigation->set_viewpoint(
+            vsg::LookAt::create(center + radial * 4e6 + side * 4e6, center, radial));
+        smoke_final_frames_ = 0;
+        ++orbit_smoke_stage_;
+        break;
+    }
+    case 208:
+        if (++smoke_final_frames_ < 4 || !view_captures_ready())
+            break;
+        save_workbench_image("sensor-station-limb-3d.png");
+        save_project_to(smoke_dir_ + "/sensor-station-limb.orbelle");
+        workspace_->select_view(1);
+        ground_map_->reset_view();
+        ground_map_->focus_selection();
+        ground_map_->zoom_centered(2);
+        smoke_final_frames_ = 0;
+        ++orbit_smoke_stage_;
+        break;
+    case 209: {
+        if (++smoke_final_frames_ < 4 || !ground_map_->footprints_ready())
+            break;
+        save_workbench_image("sensor-station-limb-2d.png");
+        smoke_record("sensor-station-tracking-zero-offset-limb-rendered");
+        ground_map_->reset_view();
+        workspace_->select_view(0);
+        auto project = project_snapshot(project_path_);
+        project.sensors.front().display.show_space_extension = true;
+        start_project(std::move(project), project_path_, true);
+        smoke_final_frames_ = 0;
+        ++orbit_smoke_stage_;
+        break;
+    }
+    case 210: {
+        if (project_candidate_.valid() || ++smoke_final_frames_ < 4 || !view_captures_ready())
+            break;
+        save_workbench_image("sensor-station-limb-space-3d.png");
+        const auto extension_saved = smoke_dir_ + "/sensor-station-limb-space.orbelle";
+        save_project_to(extension_saved);
+        smoke_require(
+            application::load_project(std::filesystem::path(extension_saved.toStdWString()))
+                .sensors.front()
+                .display.show_space_extension,
+            "Sensor space extension setting was not saved");
+        smoke_record("sensor-space-extension-enabled-and-saved");
+        // Restore the bounded FOV before the general whole-globe framing check.
+        // The targeted case intentionally includes a long extension into space.
+        const auto saved = smoke_dir_ + "/sensor-geometry-3.orbelle";
+        start_project(application::load_project(std::filesystem::path(saved.toStdWString())), saved,
+                      true);
+        fit_views();
+        smoke_final_frames_ = 0;
+        ++orbit_smoke_stage_;
+        break;
+    }
+    case 211:
+        if (project_candidate_.valid())
+            break;
         if (++smoke_final_frames_ >= 4)
             ++orbit_smoke_stage_;
         break;

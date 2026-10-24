@@ -91,6 +91,7 @@ void bind_project(py::module_ &module) {
         .def_readwrite("fill", &application::SensorDisplay::fill)
         .def_readwrite("color", &application::SensorDisplay::color)
         .def_readwrite("opacity", &application::SensorDisplay::opacity)
+        .def_readwrite("show_space_extension", &application::SensorDisplay::show_space_extension)
         .def_readwrite("space_range_m", &application::SensorDisplay::space_range_m);
     py::class_<application::ProjectSensor>(module, "ProjectSensor")
         .def(py::init<>())

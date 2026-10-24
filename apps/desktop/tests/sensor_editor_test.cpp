@@ -485,7 +485,18 @@ TEST_F(QuantityTest, SensorPagesPreserveDraftUnitsAndSelectionAcrossNavigationMo
     EXPECT_FALSE(opacity->isEnabled());
     fill->setChecked(true);
     EXPECT_TRUE(opacity->isEnabled());
-    editor.findChild<QuantityEditor *>("sensorSpaceRange")->set_value(1234, Unit::kilometre);
+    auto *show_space = editor.findChild<QCheckBox *>("sensorShowSpaceExtension");
+    auto *range = editor.findChild<QuantityEditor *>("sensorSpaceRange");
+    ASSERT_TRUE(show_space && range);
+    EXPECT_FALSE(show_space->isChecked());
+    EXPECT_FALSE(range->isEnabled());
+    show_space->setChecked(true);
+    EXPECT_TRUE(range->isEnabled());
+    range->set_value(1234, Unit::kilometre);
+    show_space->setChecked(false);
+    EXPECT_FALSE(editor.sensor().display.show_space_extension);
+    EXPECT_DOUBLE_EQ(editor.sensor().display.space_range_m, 1234000);
+    show_space->setChecked(true);
     const auto display_draft = editor.sensor().display;
     editor.show();
     for (const int width : {1500, 800, 480, 320, 1500}) {
@@ -534,6 +545,8 @@ TEST_F(QuantityTest, SensorPagesPreserveDraftUnitsAndSelectionAcrossNavigationMo
     EXPECT_EQ(editor.sensor().display, display_draft);
     editor.findChild<QPushButton *>("resetSensor")->click();
     EXPECT_FALSE(editor.has_unapplied_changes());
+    EXPECT_FALSE(show_space->isChecked());
+    EXPECT_FALSE(range->isEnabled());
     EXPECT_EQ(pages->currentIndex(), 2);
 }
 } // namespace orbelle::desktop

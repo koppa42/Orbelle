@@ -1159,6 +1159,8 @@ GroundMap::Raster GroundMap::rasterize_footprints(Raster result,
     FootprintClipBuffer projected, scratch;
     Raster mask = result;
     mask.image = {};
+    Raster samples = mask;
+    samples.ratio *= 2;
     for (const auto &footprint : footprints) {
         if (cancelled.load(std::memory_order_relaxed))
             break;
@@ -1170,17 +1172,23 @@ GroundMap::Raster GroundMap::rasterize_footprints(Raster result,
             });
         }
         if (fill_visible) {
-            if (mask.image.isNull())
+            if (mask.image.isNull()) {
                 allocate_raster(mask, QImage::Format_ARGB32_Premultiplied);
-            mask.image.fill(Qt::transparent);
-            QPainter fill(&mask.image);
+                allocate_raster(samples, QImage::Format_Alpha8);
+            }
+            samples.image.fill(0);
+            QPainter fill(&samples.image);
             fill.translate(-result.bounds.topLeft());
             fill.setClipRect(result.bounds);
             fill.setPen(Qt::NoPen);
-            fill.setBrush(footprint.color);
-            // Rasterize the union as opaque facets, then apply opacity once. This
-            // avoids shared-edge seams and quadratic winding work on a huge path.
-            // No antialiasing on internal edges; the external outline is antialiased.
+            fill.setBrush(Qt::white);
+            // Resolve coverage at 2x in an opaque one-byte mask, then average
+            // each 2x2 block once. Shared facet edges cannot introduce seams or
+            // accumulate alpha, and large meshes avoid a costly winding union.
+            const auto append = [&](std::span<const QPointF> points) {
+                if (points.size() >= 3)
+                    fill.drawPolygon(points.data(), static_cast<int>(points.size()));
+            };
             std::array<QPointF, 8> polygon;
             int count = 0;
             const auto draw = [&] {
@@ -1204,12 +1212,11 @@ GroundMap::Raster GroundMap::rasterize_footprints(Raster result,
                         contained = contained && world.bounds.contains(projected[j]);
                     }
                     if (contained) {
-                        fill.drawPolygon(projected.data(), count, Qt::WindingFill);
+                        append(std::span(projected.data(), static_cast<std::size_t>(count)));
                     } else {
                         const auto clipped =
                             clip_footprint_polygon(projected, count, world.bounds, scratch);
-                        fill.drawPolygon(clipped.data(), static_cast<int>(clipped.size()),
-                                         Qt::WindingFill);
+                        append(clipped);
                     }
                 }
             };
@@ -1227,6 +1234,24 @@ GroundMap::Raster GroundMap::rasterize_footprints(Raster result,
             if (!cancelled.load(std::memory_order_relaxed))
                 draw();
             fill.end();
+            std::array<QRgb, 5> palette;
+            for (int i = 0; i <= 4; ++i)
+                palette[i] = qPremultiply(qRgba(footprint.color.red(), footprint.color.green(),
+                                                footprint.color.blue(), (i * 255 + 2) / 4));
+            for (int y = 0; y < mask.image.height(); ++y) {
+                if ((y % 64) == 0 && cancelled.load(std::memory_order_relaxed))
+                    break;
+                auto *target = reinterpret_cast<QRgb *>(mask.image.scanLine(y));
+                const auto *top = samples.image.constScanLine(2 * y);
+                const auto *bottom = samples.image.constScanLine(2 * y + 1);
+                for (int x = 0; x < mask.image.width(); ++x) {
+                    const auto covered = (top[2 * x] >> 7) + (top[2 * x + 1] >> 7) +
+                                         (bottom[2 * x] >> 7) + (bottom[2 * x + 1] >> 7);
+                    target[x] = palette[covered];
+                }
+            }
+            if (cancelled.load(std::memory_order_relaxed))
+                break;
             output.setOpacity(footprint.opacity);
             output.drawImage(result.bounds.topLeft(), mask.image);
             output.setOpacity(1);
