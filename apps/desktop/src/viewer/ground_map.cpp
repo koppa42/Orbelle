@@ -21,7 +21,7 @@ namespace orbelle::desktop {
 namespace {
 constexpr double maximum_zoom = 1024;
 constexpr double preview_width = 2048;
-double axis_step(double pixels_per_degree, int spacing) {
+double axis_step(double pixels_per_degree, double spacing) {
     for (const double step : {0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5,  1.,
                               2.,    5.,    10.,   15.,  30.,  45.,  60., 90., 180., 360.})
         if (step * pixels_per_degree >= spacing)
@@ -33,10 +33,14 @@ QFont axis_font() {
     font.setPixelSize(10);
     return font;
 }
-QPointF axis_steps(double pixels_per_degree) {
+QPointF axis_steps(double pixels_per_degree, const QSizeF &viewport) {
     const QFontMetrics metrics(axis_font());
-    return {axis_step(pixels_per_degree, metrics.horizontalAdvance("180.000 W") + 12),
-            axis_step(pixels_per_degree, std::max(36, metrics.height() * 3))};
+    // Non-overlapping labels can still crowd a large view. Bound the number of
+    // intervals as well as the text spacing, all in Qt logical pixels.
+    const auto horizontal =
+        std::max({112.0, viewport.width() / 7, metrics.horizontalAdvance("180.000 W") + 32.0});
+    const auto vertical = std::max({64.0, viewport.height() / 5, metrics.height() * 4.0});
+    return {axis_step(pixels_per_degree, horizontal), axis_step(pixels_per_degree, vertical)};
 }
 double wrap(double value, double period) {
     return value - period * std::floor(value / period + 0.5);
@@ -783,7 +787,7 @@ void GroundMap::paint_grid(QPainter &p) {
         return;
     const auto area = map_rect();
     const auto transform = map_transform();
-    const auto steps = axis_steps(area.width() / 360);
+    const auto steps = axis_steps(area.width() / 360, visible_map_rect().size());
     auto pen = QPen(theme::color(theme::accent, 60), 0.7, Qt::DotLine);
     // Qt's wide/dashed stroker can process the entire world-length line before
     // applying the clip, especially above DPR 1. Trim it first and preserve the
@@ -811,7 +815,7 @@ void GroundMap::paint_axes(QPainter &p) {
     const auto transform = map_transform();
     p.setPen(theme::color(theme::text_muted));
     p.setFont(axis_font());
-    const auto steps = axis_steps(area.width() / 360);
+    const auto steps = axis_steps(area.width() / 360, visible_map_rect().size());
     const auto longitude_step = steps.x(), latitude_step = steps.y();
     const auto geographic = transform.inverted().mapRect(visible_map_rect());
     const auto number = [](double value, double step) {
