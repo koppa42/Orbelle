@@ -97,23 +97,17 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ needs.metadata.outputs.baseline-python }}
-      - name: Identify runner image
-        id: toolchain
-        run: echo "image=$ImageVersion" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: microsoft/vcpkg
           ref: ${{ needs.metadata.outputs.vcpkg-baseline }}
           path: out/tools/vcpkg
           persist-credentials: false
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache
+      - uses: ./.github/actions/dependency-cache-restore
         with:
+          profile: linux
           path: ${{ runner.temp }}/linux/dependencies/binary-cache
-          key: vcpkg-ubuntu24-x64-v1-${{ steps.toolchain.outputs.image }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/ports/**', 'tools/ci/check_linux.py') }}
-          restore-keys: |
-            vcpkg-ubuntu24-x64-v1-${{ steps.toolchain.outputs.image }}-
-            vcpkg-ubuntu24-x64-v1-
+          state: ${{ runner.temp }}/reports/dependency-cache
       - name: Prepare toolchain
         run: |
           sudo apt-get update
@@ -132,6 +126,13 @@ jobs:
             --vcpkg-root "$GITHUB_WORKSPACE/out/tools/vcpkg" \
             --work "$RUNNER_TEMP/linux" --reports "$RUNNER_TEMP/reports/linux-build" \
             "${args[@]}"
+      - uses: ./.github/actions/dependency-cache-save
+        if: always()
+        timeout-minutes: 4
+        with:
+          state: ${{ runner.temp }}/reports/dependency-cache
+          installed: ${{ runner.temp }}/linux/dependencies/installed
+          log: ${{ runner.temp }}/reports/linux-build/dependencies.log
       - name: Export release installation test inputs
         if: inputs.release-tag != ''
         run: |
@@ -155,7 +156,10 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: linux-build-reports
-          path: ${{ runner.temp }}/reports
+          path: |
+            ${{ runner.temp }}/reports
+            ${{ runner.temp }}/linux/dependencies/buildtrees/**/vcpkg_abi_info.txt
+            ${{ runner.temp }}/linux/dependencies/installed/*/share/*/vcpkg_abi_info.txt
           overwrite: true
           retention-days: 14
 
@@ -230,14 +234,12 @@ jobs:
         with:
           python-version: ${{ needs.metadata.outputs.baseline-python }}
       - name: Check Windows toolchain
-        id: toolchain
         run: |
           $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
           $vs = & $vswhere -latest -products '*' -version '[17.0,18.0)' `
             -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if ($LASTEXITCODE -or !$vs) { throw 'Visual Studio 2022 C++ tools are required' }
           "VCPKG_VISUAL_STUDIO_PATH=$vs" >> $env:GITHUB_ENV
-          "image=$env:ImageVersion" >> $env:GITHUB_OUTPUT
           Write-Host "Using $vs (runner image $env:ImageVersion)"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -245,35 +247,33 @@ jobs:
           ref: ${{ needs.metadata.outputs.vcpkg-baseline }}
           path: out/tools/vcpkg
           persist-credentials: false
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache
+      - uses: ./.github/actions/dependency-cache-restore
         with:
+          profile: windows
           path: ${{ runner.temp }}/vcpkg-binary-cache
-          key: vcpkg-win2022-release-v2-${{ steps.toolchain.outputs.image }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/ports/**', 'cmake/triplets/ci/**') }}
-          restore-keys: |
-            vcpkg-win2022-release-v2-${{ steps.toolchain.outputs.image }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/ports/**', 'cmake/triplets/ci/**') }}-
-            vcpkg-win2022-release-v2-
+          state: ${{ runner.temp }}/reports/dependency-cache
       - name: Install dependencies
-        id: dependencies
         run: |
           & out/tools/vcpkg/bootstrap-vcpkg.bat -disableMetrics
           if ($LASTEXITCODE) { throw 'vcpkg bootstrap failed' }
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/vcpkg-binary-cache" | Out-Null
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/reports/dependency-cache" | Out-Null
           $env:VCPKG_BINARY_SOURCES = "clear;files,$env:RUNNER_TEMP/vcpkg-binary-cache,readwrite"
           & out/tools/vcpkg/vcpkg.exe install --x-manifest-root=. `
             --x-install-root=out/dependencies/installed --x-buildtrees-root=out/dependencies/buildtrees `
             --x-packages-root=out/dependencies/packages --downloads-root=out/dependencies/downloads `
             --overlay-triplets=cmake/triplets/ci --triplet=x64-windows-release `
             --host-triplet=x64-windows-release --x-no-default-features --x-feature=tests `
-            --x-feature=time-frames --x-feature=spice --x-feature=graphics --clean-after-build
+            --x-feature=time-frames --x-feature=spice --x-feature=graphics --clean-after-build `
+            2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP/reports/dependency-cache/install.log"
           if ($LASTEXITCODE) { throw 'vcpkg install failed' }
-      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        # Keep completed packages even if a later dependency fails. A unique
-        # partial key lets subsequent attempts extend the immutable cache.
-        if: ${{ !cancelled() && steps.cache.outputs.cache-primary-key != '' && steps.cache.outputs.cache-hit != 'true' }}
+      - uses: ./.github/actions/dependency-cache-save
+        if: always()
+        timeout-minutes: 4
         with:
-          path: ${{ runner.temp }}/vcpkg-binary-cache
-          key: ${{ steps.cache.outputs.cache-primary-key }}${{ steps.dependencies.outcome != 'success' && format('-partial-{0}-{1}', github.run_id, github.run_attempt) || '' }}
+          state: ${{ runner.temp }}/reports/dependency-cache
+          installed: out/dependencies/installed
+          log: ${{ runner.temp }}/reports/dependency-cache/install.log
       - uses: ./.github/actions/compiler-cache
       - name: Compile and test; package only for a release tag
         env:
@@ -313,6 +313,8 @@ jobs:
             ${{ runner.temp }}/reports
             out/dependencies/installed/vcpkg/status
             out/dependencies/buildtrees/**/*.log
+            out/dependencies/buildtrees/**/vcpkg_abi_info.txt
+            out/dependencies/installed/*/share/*/vcpkg_abi_info.txt
           overwrite: true
           retention-days: 14
 

@@ -1,0 +1,42 @@
+name: Restore dependency binaries
+description: Prefer compatible runner snapshots and record the packages present before installation.
+inputs:
+  profile:
+    description: windows, linux, python-windows or python-linux
+    required: true
+  path:
+    description: Existing vcpkg binary cache path (also part of the Actions cache version)
+    required: true
+  state:
+    description: Directory for cache inventory and diagnostics
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Identify dependency configuration
+      id: identity
+      shell: python {0}
+      env:
+        CACHE_PROFILE: ${{ inputs.profile }}
+        CACHE_PATH: ${{ inputs.path }}
+        CACHE_STATE: ${{ inputs.state }}
+      run: |
+        import os, subprocess, sys
+        subprocess.run([sys.executable, 'tools/ci/dependency_cache.py', 'identify',
+            '--profile', os.environ['CACHE_PROFILE'], '--cache', os.environ['CACHE_PATH'],
+            '--state', os.environ['CACHE_STATE']], check=True)
+    - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      id: restore
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ steps.identity.outputs.key }}
+        restore-keys: ${{ steps.identity.outputs.restore-keys }}
+    - name: Inventory restored packages
+      shell: python {0}
+      env:
+        CACHE_STATE: ${{ inputs.state }}
+        CACHE_MATCHED_KEY: ${{ steps.restore.outputs.cache-matched-key }}
+      run: |
+        import os, subprocess, sys
+        subprocess.run([sys.executable, 'tools/ci/dependency_cache.py', 'begin',
+            '--state', os.environ['CACHE_STATE']], check=True)

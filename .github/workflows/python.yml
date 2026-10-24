@@ -41,13 +41,6 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ inputs.baseline-python }}
-      - name: Identify runner image
-        id: toolchain
-        shell: python {0}
-        run: |
-          import os
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
-              output.write('image=' + os.environ['ImageVersion'] + '\n')
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: microsoft/vcpkg
@@ -56,13 +49,11 @@ jobs:
           persist-credentials: false
       # Keep the native jobs' cache paths: cache versions include the path,
       # so a fallback key alone cannot reuse an archive at another location.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: ./.github/actions/dependency-cache-restore
         with:
+          profile: python-${{ inputs.platform }}
           path: ${{ runner.temp }}/${{ inputs.platform == 'linux' && 'linux/dependencies/binary-cache' || 'vcpkg-binary-cache' }}
-          key: python-deps-${{ inputs.platform }}-v1-${{ steps.toolchain.outputs.image }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/ports/**', 'cmake/triplets/ci/**') }}
-          restore-keys: |
-            python-deps-${{ inputs.platform }}-v1-${{ steps.toolchain.outputs.image }}-
-            ${{ inputs.platform == 'linux' && 'vcpkg-ubuntu24-x64-v1-' || 'vcpkg-win2022-release-v2-' }}${{ steps.toolchain.outputs.image }}-
+          state: ${{ runner.temp }}/python-deps/cache-report
       - name: Prepare Linux dependency tools
         if: inputs.platform == 'linux'
         run: |
@@ -92,11 +83,26 @@ jobs:
               '--x-feature=data-catalog', '--clean-after-build']
           if windows:
               command += [f'--overlay-triplets={source / "cmake/triplets/ci"}', f'--host-triplet={triplet}']
-          subprocess.run(command, check=True,
-              env=dict(os.environ, VCPKG_BINARY_SOURCES=f'clear;files,{cache},readwrite'))
+          with (work / 'cache-report/install.log').open('w', encoding='utf-8') as log:
+              with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                      text=True, errors='replace',
+                      env=dict(os.environ, VCPKG_BINARY_SOURCES=f'clear;files,{cache},readwrite')) as process:
+                  for line in process.stdout:
+                      log.write(line)
+                      log.flush()
+                      print(line, end='', flush=True)
+                  if process.wait():
+                      raise subprocess.CalledProcessError(process.returncode, command)
           subprocess.run([sys.executable, 'tools/ci/export_python_dependencies.py',
               '--dependency-prefix', str(work / 'installed' / triplet),
               '--output', str(work / 'python-dependencies.tar.gz')], check=True)
+      - uses: ./.github/actions/dependency-cache-save
+        if: always()
+        timeout-minutes: 4
+        with:
+          state: ${{ runner.temp }}/python-deps/cache-report
+          installed: ${{ runner.temp }}/python-deps/installed
+          log: ${{ runner.temp }}/python-deps/cache-report/install.log
       - name: Upload Python test dependencies
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -107,11 +113,16 @@ jobs:
           overwrite: true
           retention-days: 7
       - name: Upload dependency diagnostics
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: python-dependencies-${{ inputs.platform }}-reports
-          path: ${{ runner.temp }}/python-deps/buildtrees/**/*.log
+          path: |
+            ${{ runner.temp }}/python-deps/cache-report
+            ${{ runner.temp }}/python-deps/installed/vcpkg/status
+            ${{ runner.temp }}/python-deps/buildtrees/**/*.log
+            ${{ runner.temp }}/python-deps/buildtrees/**/vcpkg_abi_info.txt
+            ${{ runner.temp }}/python-deps/installed/*/share/*/vcpkg_abi_info.txt
           retention-days: 14
 
   python:
