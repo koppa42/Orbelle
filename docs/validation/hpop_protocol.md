@@ -64,13 +64,13 @@ java -cp "out/validation/long-steps;$classpath" OrbelleLongStepReference out/val
 
 ## RKF 7(8)
 
-按 [STK 13.1 Integrator](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm) 的定义推进七阶解，以八阶嵌入解估计误差。系数核对 [Fehlberg NASA TR R-287](https://ntrs.nasa.gov/api/citations/19680027281/downloads/19680027281.pdf) 的 Table X（印刷第 65 页，PDF 第 72 页）；原 PDF SHA-256 为 `5553a2a3eb53785a461762cc2b29428015f1b32c3ad0a5cb57f85a421256a0c8`。零基阶段 0、10 的七阶权重为 41/840，阶段 11、12 为 0；误差用 `abs(h × 41/840 × (k11 + k12 − k0 − k10))`，控制指数为 1/8。运行时来源为 `rkf78-7th-fehlberg-r287-v1`，明确区别先前的八阶推进；不改变公开 `rkf78` 枚举或项目 v41 / OBJS32 的布局。
+系数来自 [Fehlberg NASA TR R-287](https://ntrs.nasa.gov/api/citations/19680027281/downloads/19680027281.pdf) Table X（印刷第 65 页，PDF 第 72 页；原 PDF SHA-256 为 `5553a2a3eb53785a461762cc2b29428015f1b32c3ad0a5cb57f85a421256a0c8`）。采用局部外推推进八阶成员：零基阶段 0、10 的输出权重为 0，阶段 11、12 为 41/840；其余权重不变。误差仍为 `abs(h × 41/840 × (k11 + k12 − k0 − k10))`，步长控制指数仍为 1/8。两成员复用全部 13 个阶段，不增加力评估次数。结果来源标识为 `rkf78-8th-fehlberg-r287-v2`，公开枚举和项目布局不变。
 
-成熟算法对照复用下述 Hipparchus 4.0.2 GBS 的 60 组固定输出和独立生成器，SHA-256 为 `62e89df62c29838d5fd03e37ce73ffac28632be40467cafeb4bbccb93ce6885b`。包含圆轨道、偏心率 0.7/0.98、J2、随时间变化的月球差分引力、正反向一天、非整数秒和 1 ns；GBS 参考已通过 60/30 s 收敛和 SciPy DOP853 交叉核验。生产 RKF 使用最大 300 s、相对容差 1e−14、位置/速度绝对容差 1e−8 m / 1e−11 m/s，保持 5 mm / 5e−6 m/s 三维验收线。局部动力学首步估计增量后，Windows/MSVC 最大位置差 2.519 mm、速度差 2.677e−6 m/s。既有 Orekit Holmes–Featherstone/DP853 的 60 组重力轨迹使用默认容差也通过原验收线。
+[STK 文档](https://help.agi.com/stk/Content/hpop/hpopIntegrator.htm) 将 RKF 7(8) 描述为七阶方法、八阶误差控制。不能仅据这一名称推断其实际推进成员：STK Engine 11.6 的相同初值、GM、固定 60 s 七天两体输出与八阶成员相符。采用八阶推进的依据是解析收敛、独立算法对照和实际输出核验，不宣称已知 STK 内部实现或逐位复制其误差控制器。
 
-独立 Kepler 解析解采用偏心率 0.7、近地点 7000 km、600 s 弧段。以松容差和相同的最小/最大步长确保 150/75 s 两组等步积分，误差比须在 115–150 内，七阶预期为 128；实测约 133.411，细步位置误差约 7 µm。先用旧八阶生产权重运行同一测试，得到 243.105 并失败，确认该测试能区分推进成员。另验证拒步、无法达到精度的最小步报错、取消后的完整缓存复用、乱序/并发、大 Epoch 和纳秒查询。该阶次测试锁定自适应方法的步长上下界；独立固定步长模式另见前一节。
+`Rkf78MatchesIndependentHipparchusForEccentricJ2AndTimeVaryingForces` 复用 Hipparchus 4.0.2 GBS 的 60 组完整状态及独立生成器，SHA-256 为 `62e89df62c29838d5fd03e37ce73ffac28632be40467cafeb4bbccb93ce6885b`。包含圆轨道、偏心率 0.7/0.98、J2、运动月球、正反向一天、非整数秒和 1 ns。参考经 60/30 s 收敛及 SciPy DOP853 交叉核验；原 5 mm / 5e−6 m/s 三维容限保持不变。既有 Orekit 球谐轨迹、VOP、正则化、变分、天气跳变和阴影边界参考继续使用原验收线。
 
-Qt 沿用自适应积分器交互验收，增加 RKF 7(8) 的键盘顺序、摘要、非法步长、取消/重开及 430/720 逻辑宽度；Windows 实际 DPR 1.5/2.25 的四张 RKF 截图均已检查。误差范数、步长控制器和 STK 同配置轨迹尚未直接对照，七阶推进对齐不能代替完整 STK 验收。
+阶次测试使用偏心率 0.7、近地点 7000 km、600 s 弧段的 Kepler 解析解，固定步长上下界为 150/75 s，松容差禁止拒步。误差比须在 220–290 内，八阶预期为 256，排除原七阶推进。新增七天正反向两体测试：a=8000 km、e=0.16、固定 60 s 步长，沿途每 600 s 检查独立 Kepler 解，三维位置 / 速度须低于 2 mm / 3e−6 m/s；原七阶推进在该算例达约 23 cm，无法通过。拒步、最小步报错、取消、乱序/并发、大 Epoch、纳秒和独立固定模式测试继续保留。
 
 ## RKV 8(9) Efficient
 
@@ -382,7 +382,34 @@ python tools/validation/compare_hpop_stk.py --before out/validation/<before> --a
 
 使用同一 STK 重力文件；若文件尾含当前导入器不支持的 `ProcessNoise` 块，仅为此关闭协方差的基准生成截至 `END Coefficients` 的原始字节前缀副本。保留头部、GM、参考半径、归一化标志、潮汐和长期变化元数据、全部系数，不把过程噪声解释成力系数；在运行目录记录原文件／副本哈希及操作。现有 Orbelle 重力文件也可计时，但不能宣称双方系数完全相同。
 
-每次使用新输出目录，保留两端实际版本、资源哈希、STK `.sc/.sa` 设置、各次耗时及全部输出点。顺序运行，避免编译和其他测试竞争 CPU；比较三次传播中位数，首次加载、准备和后续采样单独记录。比较工具验证输入身份、初始状态和逐点时间网格，分别报告优化前后及两者对 STK 的位置／速度／RTN 最大、RMS、终点差。EOP、行星星历版本与误差范数尚未全部匹配，所以 STK 差异不能等同于 Orbelle 的积分误差；完整模型验收仍依靠各专项独立参考和收敛测试。性能结果只覆盖计算，不包含桌面启动、属性发布和渲染。
+每次使用新输出目录，保留两端实际版本、资源哈希、STK `.sc/.sa` 设置、各次耗时及全部输出点。顺序运行，避免编译和其他测试竞争 CPU；比较三次传播中位数，首次加载、准备和后续采样单独记录。比较工具验证输入身份、初始状态和逐点时间网格，分别报告优化前后及两者对 STK 的位置／速度／RTN 最大、RMS、终点差。同源精度核验按下述流程另行执行；STK 差异不能自动等同于 Orbelle 的积分误差，完整模型验收仍依靠各专项独立参考和收敛测试。性能结果只覆盖计算，不包含桌面启动、属性发布和渲染。
+
+### 同源数据与七天精度核验
+
+生产 HPOP 继续使用经过身份校验的 DE440s。它是 DE440 的短时间覆盖文件，不为适配旧版 STK 改成 DE430。验证工具 `orbelle_hpop_reference` 为显式 SPK 快照提供只用于比较的日月适配器，保留原始清单、来源散列、覆盖检查、参考系检查和明确 GM；不放宽 Runtime 的 DE440s 契约，也不将旧星历伪装成 DE440。
+
+1. 读取 STK 实际 EOP 文件和覆盖范围；安装附带的数据可能早于算例多年。用 `export_stk_eop.py` 将同一 finals2000A 快照的日节点导出为 STK v1.1 文件，通过 `-EopFile` 仅对独立验证场景加载。UT1/极移/dX/dY 共用节点，LOD 由源快照 UT1 斜率导出，DAT 来自 UTC 表；dPsi/dEps 为零，因此要求双方使用 IAU 2006。保留两端插值实现不同这一限制。
+2. 核对 STK 的实际星历和中央天体文件。STK 11.6 安装的 `planets.bsp` 日月/地球段来自 DE430，可在本机创建具备真实来源的比较清单。记录 Sun.cb 的太阳半径、光度和日月 GM。光压常数按 `L/(4πc AU²)` 换算，并用无阴影光压轨迹独立核验；旧版帮助中的常数可能与安装数据不同，不能只按文档抄值。
+3. 依次比较 `point_mass`、`gravity21`、`tides`、`third_body`、无阴影 `srp`、有阴影 `srp`、`drag`、`full`。全部导出 60 s 网格的完整位置/速度，报告最大、RMS、终点差。纯两体还要对照独立 Kepler 解；有阴影和阻力再做最大步长 60/30/15 s 与绝对容差收紧的收敛检查。
+
+```powershell
+python tools/validation/export_stk_eop.py --eop <finals2000A-manifest.json> --output <new-EOP.txt>
+./tools/validation/measure_hpop_stk.ps1 -GravityFile <force-only-EGM2008.grv> -EopFile <new-EOP.txt> -Cases scenario4_week -Forces point_mass,gravity21,full -OutputDirectory out/validation/<stk-matched>
+cmake --build <compute-build> --config Release --target orbelle_hpop_reference
+<compute-build>/benchmarks/compute/Release/orbelle_hpop_reference.exe tests/reference/propagators/hpop_performance.json <gravity-file> <eop-manifest> <comparison-spk-manifest> <settings.json> out/validation/<reference>
+```
+
+参考工具的设置示例（SI）：
+
+```json
+{"schema_version":1,"runs":3,"cases":["scenario4_week"],"forces":["point_mass","gravity21","tides","third_body","srp","drag","full"],"sun_radius_m":695508000,"srp_pressure_pa":4.553409623459175e-6}
+```
+
+可选设置为 `relative_tolerance`、`position_tolerance_m`、`velocity_tolerance_mps`、`min_step_seconds`、`max_step_seconds`、`fixed_step_seconds`、`integrator`（`rkf78`/`rkv89`）、`shadow_model`（`dual_cone`/`none`）和 `use_approximate_altitude`。STK 工具支持相应的 `-ErrorTolerance`、`-MaxStep`、`-FixedStep` 与 `-NoShadow`；固定步长在 STK 中通过 Propagator.Step 设置，数据仍按输入文件的报告网格导出。始终检查保存的 `.sa`：重复设置 `UseSolidTides=true` 会把永久潮重置为 Full，脚本只在配置后关闭不需要的力。
+
+同源日月和 EOP 不能消除所有模型差异。已用 STK 11.6 分离出带阴影光压与 JR 阻力的剩余偏差；无阴影光压、重力场和第三体一致不代表全力模型已等价。记录实测残差与收敛结果，不把本算例的数值一致性宣称为实际轨道预报精度，也不更改默认物理常数来拟合某个工具。
+
+单次力计算的 EOP、旋转、日月几何与视太阳结果只在函数局部复用；JR 的 500 km 参考与实际高度复用相同太阳几何，保留各自高度/Kp 分支。组合/分力独立对照、重复状态查询、全部原有力模型参考及优化前后逐位比较覆盖这一提速路径。不同历元、航天器视太阳、历史天气查询和新计算不共用该局部缓存。
 
 ### 启动预加载与内存
 

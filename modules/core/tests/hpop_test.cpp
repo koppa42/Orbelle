@@ -737,7 +737,7 @@ TEST(Hpop, BulirschStoerMatchesIndependentHipparchusForEccentricJ2AndTimeVarying
     RecordProperty("max_position_error_m", metrics_r.str());
     RecordProperty("max_velocity_error_mps", metrics_v.str());
 }
-TEST(Hpop, Rkf78AdvancesTheSeventhOrderMemberAndControlsRejectedSteps) {
+TEST(Hpop, Rkf78AdvancesTheEighthOrderMemberAndControlsRejectedSteps) {
     const auto initial = eccentric_analytic(0), expected = eccentric_analytic(600);
     auto options = point_mass();
     options.integrator = HpopIntegrator::rkf78;
@@ -750,8 +750,8 @@ TEST(Hpop, Rkf78AdvancesTheSeventhOrderMemberAndControlsRejectedSteps) {
     options.min_step_seconds = options.max_step_seconds = 75;
     const auto fine = make_hpop(initial, options)->state_at(expected.epoch);
     const double ratio = position_error(coarse, expected) / position_error(fine, expected);
-    EXPECT_GT(ratio, 115); // Seventh order predicts 2^7; eighth-order advancement is excluded.
-    EXPECT_LT(ratio, 150);
+    EXPECT_GT(ratio, 220); // Eighth order predicts 2^8; seventh-order advancement is excluded.
+    EXPECT_LT(ratio, 290);
     EXPECT_LT(position_error(fine, expected), 1e-5);
     RecordProperty("coarse_position_error_m", std::to_string(position_error(coarse, expected)));
     RecordProperty("fine_position_error_m", std::to_string(position_error(fine, expected)));
@@ -765,6 +765,46 @@ TEST(Hpop, Rkf78AdvancesTheSeventhOrderMemberAndControlsRejectedSteps) {
     options.min_step_seconds = .001;
     const auto adaptive = make_hpop(initial, options)->state_at(expected.epoch);
     EXPECT_LT(position_error(adaptive, expected), 1e-4);
+}
+TEST(Hpop, Rkf78LocalExtrapolationPreservesMillimetreAccuracyOverSevenDays) {
+    constexpr double a = 8e6, e = .16;
+    const double rate = std::sqrt(egm96_mu / (a * a * a)), beta = std::sqrt(1 - e * e);
+    const auto analytic = [&](double seconds) {
+        const double mean = std::remainder(rate * seconds, 2 * std::numbers::pi);
+        double anomaly = mean;
+        for (int i = 0; i < 12; ++i)
+            anomaly -= (anomaly - e * std::sin(anomaly) - mean) / (1 - e * std::cos(anomaly));
+        const double c = std::cos(anomaly), s = std::sin(anomaly);
+        return CartesianState{Epoch{static_cast<std::int64_t>(seconds * 1e9)},
+                              OriginId::earth,
+                              FrameId::gcrf,
+                              {a * (c - e), a * beta * s, 0},
+                              {-a * rate * s / (1 - e * c), a * rate * beta * c / (1 - e * c), 0}};
+    };
+    auto options = point_mass();
+    options.step_control = HpopStepControl::fixed;
+    options.fixed_step_seconds = 60;
+    options.interpolation.method = OrbitInterpolationMethod::lagrange;
+    options.interpolation.order = 7;
+    for (int direction : {-1, 1}) {
+        const Epoch end{direction * 604800'000'000'000LL};
+        const auto orbit =
+            make_hpop_interpolated(analytic(0), direction < 0 ? end : Epoch{0},
+                                   direction > 0 ? end : Epoch{0}, options, {}, 60'000'000'000LL);
+        double maximum = 0;
+        for (int seconds = 0; seconds <= 604800; seconds += 600) {
+            const auto expected = analytic(direction * seconds);
+            const auto actual = orbit->state_at(expected.epoch);
+            maximum = std::max(maximum, position_error(actual, expected));
+            EXPECT_LT(position_error(actual, expected), .002);
+            EXPECT_LT(std::hypot(actual.velocity_mps[0] - expected.velocity_mps[0],
+                                 actual.velocity_mps[1] - expected.velocity_mps[1],
+                                 actual.velocity_mps[2] - expected.velocity_mps[2]),
+                      3e-6);
+        }
+        RecordProperty(direction < 0 ? "backward_max_position_m" : "forward_max_position_m",
+                       std::to_string(maximum));
+    }
 }
 TEST(Hpop, Rkv89AdvancesTheEighthOrderMemberAndControlsRejectedSteps) {
     const auto initial = eccentric_analytic(0), expected = eccentric_analytic(6000);

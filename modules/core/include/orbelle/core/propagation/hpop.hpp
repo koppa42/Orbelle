@@ -106,7 +106,8 @@ struct HpopOptions {
     // 0/0 selects the chosen model's monopole. File models support up to degree 2190, within their
     // actual order limit.
     int gravity_degree = 8, gravity_order = 8;
-    // RKF 7(8) advances order 7; RKV 8(9) advances order 8. Both use embedded error control.
+    // RKF 7(8) uses eighth-order local extrapolation; RKV 8(9) advances order 8.
+    // Both retain their embedded error estimates and step-control exponents.
     HpopIntegrator integrator = HpopIntegrator::rkf78;
     // Universal-variable variation of parameters; only effective for RKF78 / Bulirsch-Stoer.
     // Other methods retain this inactive draft. Independent of VOP ephemeris interpolation.

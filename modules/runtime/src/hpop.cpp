@@ -14,7 +14,7 @@ std::string hpop_algorithm(const core::HpopOptions &options,
     auto algorithm =
         std::string(options.uses_vop() ? "hpop-vop-universal-osculating-gcrf-tai-v1;"
                                        : "hpop-cowell-gcrf-tai-v1;") +
-        (options.integrator == core::HpopIntegrator::rkf78 ? "rkf78-7th-fehlberg-r287-v1;"
+        (options.integrator == core::HpopIntegrator::rkf78 ? "rkf78-8th-fehlberg-r287-v2;"
          : options.integrator == core::HpopIntegrator::rkv89
              ? "rkv89-efficient-8th-rklib-a1bf2d26-v1;"
          : options.integrator == core::HpopIntegrator::bulirsch_stoer

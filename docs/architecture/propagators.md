@@ -63,7 +63,7 @@ Python 使用 `integrator="gauss_jackson"` 和 `correction="full"` / `"pseudo"`�
 Gauss–Jackson 的自适应参数只保留草稿，RK 方法的校正选项同样不参与计算身份。项目 v46 / OBJS32 保存两种设置，结果来源区分 `gauss-jackson12-summed-bs14to18-startup-full-v3` 与 `gauss-jackson12-summed-bs14to18-startup-pseudo-v3`。这套启动与收敛策略是本项目明确的实现，不宣称与 STK 的内部策略相同；高偏心轨道须做固定步长收敛检查，见[数值对照](../validation/hpop_protocol.md#gaussjackson-12)。
 
 
-RKF 7(8) 系数来自 Fehlberg [NASA TR R-287](https://ntrs.nasa.gov/citations/19680027281) 第 65 页 Table X，按 STK 的定义推进七阶解，以嵌入八阶解估计误差，步长控制指数为 1/8。结果算法标识为 `rkf78-7th-fehlberg-r287-v1`，避免与之前八阶推进的结果混用；公开枚举 `rkf78` 不变。不宣称逐位复现 STK 的步长控制器。直接积分工厂的自适应模式从初始历元向前后独立建立宽度为 `max(300, max_step_seconds)` 秒的完整计算段，余段单独积分；改变采样、乱序、重复和并发查询不改变结果。共享缓存加锁，取消保留已完成段，不发布部分结果。每次查询最多 200000 次积分尝试，距离初始历元最多 366 天；这是资源边界，不是精度保证。显示插值不参与科学查询。普通项目及任务滑行采用连续有界星历，Lagrange / Hermite / VOP 方法与阶数可配置；固定输出开启时使用轨道页步长，见[科学插值契约](orbit_interpolation.md)。首次查询在捕获的资源上生成完整滑行段，之后查询使用不可变插值节点。
+RKF 7(8) 系数来自 Fehlberg [NASA TR R-287](https://ntrs.nasa.gov/citations/19680027281) 第 65 页 Table X，采用局部外推推进八阶成员，以七/八阶解之差估计误差，步长控制指数仍为 1/8；两个成员共享 13 个力评估阶段。结果算法标识为 `rkf78-8th-fehlberg-r287-v2`，区别于原七阶推进结果；公开枚举 `rkf78` 不变。不宣称逐位复现 STK 的步长控制器。直接积分工厂的自适应模式从初始历元向前后独立建立宽度为 `max(300, max_step_seconds)` 秒的完整计算段，余段单独积分；改变采样、乱序、重复和并发查询不改变结果。共享缓存加锁，取消保留已完成段，不发布部分结果。每次查询最多 200000 次积分尝试，距离初始历元最多 366 天；这是资源边界，不是精度保证。显示插值不参与科学查询。普通项目及任务滑行采用连续有界星历，Lagrange / Hermite / VOP 方法与阶数可配置；固定输出开启时使用轨道页步长，见[科学插值契约](orbit_interpolation.md)。首次查询在捕获的资源上生成完整滑行段，之后查询使用不可变插值节点。
 
 ```python
 satellite = project.objects.satellite("Numerical", orbit=ob.orbits.Hpop(
