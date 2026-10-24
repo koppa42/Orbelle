@@ -59,6 +59,7 @@ jobs:
         with:
           state: ${{ runner.temp }}/reports/dependency-cache
           installed: ${{ runner.temp }}/linux/dependencies/installed
+          buildtrees: ${{ runner.temp }}/linux/dependencies/buildtrees
           log: ${{ runner.temp }}/reports/linux-sanitizers/dependencies.log
       - name: Summarize command timings
         if: always()
@@ -70,7 +71,7 @@ jobs:
           name: linux-sanitizer-reports
           path: |
             ${{ runner.temp }}/reports
-            ${{ runner.temp }}/linux/dependencies/buildtrees/**/vcpkg_abi_info.txt
+            ${{ runner.temp }}/linux/dependencies/buildtrees/**/*vcpkg_abi_info.txt
             ${{ runner.temp }}/linux/dependencies/installed/*/share/*/vcpkg_abi_info.txt
           overwrite: true
           retention-days: 14

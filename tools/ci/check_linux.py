@@ -118,12 +118,16 @@ class Check:
         for directory in ("installed", "buildtrees", "packages", "downloads", "binary-cache"):
             (deps / directory).mkdir(parents=True, exist_ok=True)
         self.run("dependencies", vcpkg_root / "vcpkg", "install",
+                 "--x-abi-tools-use-exact-versions",
                  f"--x-manifest-root={self.source}", f"--x-install-root={deps / 'installed'}",
                  f"--x-buildtrees-root={deps / 'buildtrees'}",
                  f"--x-packages-root={deps / 'packages'}", f"--downloads-root={deps / 'downloads'}",
                  "--triplet=x64-linux", "--x-no-default-features", "--x-feature=tests",
                  "--x-feature=time-frames", "--x-feature=spice", "--x-feature=data-catalog",
-                 extra_env={"VCPKG_BINARY_SOURCES": f"clear;files,{deps / 'binary-cache'},readwrite"})
+                 # vcpkg already caches whole dependency packages. Avoid
+                 # thousands of redundant sccache uploads on a cold build.
+                 extra_env={"VCPKG_BINARY_SOURCES": f"clear;files,{deps / 'binary-cache'},readwrite",
+                            "CMAKE_C_COMPILER_LAUNCHER": "", "CMAKE_CXX_COMPILER_LAUNCHER": ""})
         shutil.copy2(deps / "installed/vcpkg/status", self.reports / "vcpkg-status.txt")
 
     def build(self, sanitizer=False, install=True):

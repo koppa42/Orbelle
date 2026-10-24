@@ -4,6 +4,8 @@ import argparse
 from contextlib import redirect_stderr
 import importlib.util
 import io
+import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -20,6 +22,24 @@ with patch.object(sys, "path", [str(ROOT / "tools/ci"), *sys.path]):
 
 
 class LinuxStagesTests(unittest.TestCase):
+    def test_dependency_build_pins_tools_and_does_not_pollute_project_compiler_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = argparse.Namespace(source=ROOT, work=Path(directory) / "work",
+                                      reports=Path(directory) / "reports", delivery=None, jobs=1,
+                                      vcpkg_root=Path(directory) / "vcpkg")
+            with patch.dict(os.environ, CMAKE_C_COMPILER_LAUNCHER="sccache",
+                            CMAKE_CXX_COMPILER_LAUNCHER="sccache"):
+                check = linux.Check(args)
+            baseline = json.loads((ROOT / "vcpkg.json").read_text())["builtin-baseline"]
+            with patch.object(linux.subprocess, "check_output", return_value=baseline), \
+                    patch.object(check, "run") as run, patch.object(linux.shutil, "copy2"):
+                check.dependencies()
+            call = next(item for item in run.call_args_list if item.args[0] == "dependencies")
+            self.assertIn("--x-abi-tools-use-exact-versions", call.args)
+            for name in ("CMAKE_C_COMPILER_LAUNCHER", "CMAKE_CXX_COMPILER_LAUNCHER"):
+                self.assertEqual(call.kwargs["extra_env"][name], "")
+                self.assertEqual(check.env[name], "sccache")
+
     def test_regular_stages_and_explicit_sanitizer_stage_remain_separate(self):
         self.assertEqual(linux.stages_for("package"), ("dependencies", "release", "wheel", "export"))
         self.assertEqual(linux.stages_for("sanitizers"), ("dependencies", "sanitizers"))

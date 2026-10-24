@@ -1,5 +1,5 @@
 name: Restore dependency binaries
-description: Prefer compatible runner snapshots and record the packages present before installation.
+description: Restore snapshots within one dependency profile and record packages present before installation.
 inputs:
   profile:
     description: windows, linux, python-windows or python-linux

@@ -132,6 +132,7 @@ jobs:
         with:
           state: ${{ runner.temp }}/reports/dependency-cache
           installed: ${{ runner.temp }}/linux/dependencies/installed
+          buildtrees: ${{ runner.temp }}/linux/dependencies/buildtrees
           log: ${{ runner.temp }}/reports/linux-build/dependencies.log
       - name: Export release installation test inputs
         if: inputs.release-tag != ''
@@ -158,7 +159,7 @@ jobs:
           name: linux-build-reports
           path: |
             ${{ runner.temp }}/reports
-            ${{ runner.temp }}/linux/dependencies/buildtrees/**/vcpkg_abi_info.txt
+            ${{ runner.temp }}/linux/dependencies/buildtrees/**/*vcpkg_abi_info.txt
             ${{ runner.temp }}/linux/dependencies/installed/*/share/*/vcpkg_abi_info.txt
           overwrite: true
           retention-days: 14
@@ -259,7 +260,7 @@ jobs:
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/vcpkg-binary-cache" | Out-Null
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/reports/dependency-cache" | Out-Null
           $env:VCPKG_BINARY_SOURCES = "clear;files,$env:RUNNER_TEMP/vcpkg-binary-cache,readwrite"
-          & out/tools/vcpkg/vcpkg.exe install --x-manifest-root=. `
+          & out/tools/vcpkg/vcpkg.exe install --x-abi-tools-use-exact-versions --x-manifest-root=. `
             --x-install-root=out/dependencies/installed --x-buildtrees-root=out/dependencies/buildtrees `
             --x-packages-root=out/dependencies/packages --downloads-root=out/dependencies/downloads `
             --overlay-triplets=cmake/triplets/ci --triplet=x64-windows-release `
@@ -273,6 +274,7 @@ jobs:
         with:
           state: ${{ runner.temp }}/reports/dependency-cache
           installed: out/dependencies/installed
+          buildtrees: out/dependencies/buildtrees
           log: ${{ runner.temp }}/reports/dependency-cache/install.log
       - uses: ./.github/actions/compiler-cache
       - name: Compile and test; package only for a release tag
@@ -313,7 +315,7 @@ jobs:
             ${{ runner.temp }}/reports
             out/dependencies/installed/vcpkg/status
             out/dependencies/buildtrees/**/*.log
-            out/dependencies/buildtrees/**/vcpkg_abi_info.txt
+            out/dependencies/buildtrees/**/*vcpkg_abi_info.txt
             out/dependencies/installed/*/share/*/vcpkg_abi_info.txt
           overwrite: true
           retention-days: 14

@@ -47,8 +47,8 @@ jobs:
           ref: ${{ inputs.vcpkg-baseline }}
           path: out/tools/vcpkg
           persist-credentials: false
-      # Keep the native jobs' cache paths: cache versions include the path,
-      # so a fallback key alone cannot reuse an archive at another location.
+      # Keep literal paths for legacy Python snapshots, but restore only this
+      # profile's keys. Desktop snapshots are never used as a Python fallback.
       - uses: ./.github/actions/dependency-cache-restore
         with:
           profile: python-${{ inputs.platform }}
@@ -76,6 +76,7 @@ jobs:
                           '-disableMetrics'], check=True)
           triplet = 'x64-windows-release' if windows else 'x64-linux'
           command = [str(vcpkg / ('vcpkg.exe' if windows else 'vcpkg')), 'install',
+              '--x-abi-tools-use-exact-versions',
               f'--x-manifest-root={source}', f'--x-install-root={work / "installed"}',
               f'--x-buildtrees-root={work / "buildtrees"}', f'--x-packages-root={work / "packages"}',
               f'--downloads-root={work / "downloads"}', f'--triplet={triplet}',
@@ -102,6 +103,7 @@ jobs:
         with:
           state: ${{ runner.temp }}/python-deps/cache-report
           installed: ${{ runner.temp }}/python-deps/installed
+          buildtrees: ${{ runner.temp }}/python-deps/buildtrees
           log: ${{ runner.temp }}/python-deps/cache-report/install.log
       - name: Upload Python test dependencies
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -121,7 +123,7 @@ jobs:
             ${{ runner.temp }}/python-deps/cache-report
             ${{ runner.temp }}/python-deps/installed/vcpkg/status
             ${{ runner.temp }}/python-deps/buildtrees/**/*.log
-            ${{ runner.temp }}/python-deps/buildtrees/**/vcpkg_abi_info.txt
+            ${{ runner.temp }}/python-deps/buildtrees/**/*vcpkg_abi_info.txt
             ${{ runner.temp }}/python-deps/installed/*/share/*/vcpkg_abi_info.txt
           retention-days: 14
 
