@@ -1106,6 +1106,14 @@ QTableWidget#hpopThirdBodyTable::item:selected { background: transparent; color:
 QTableWidget#hpopThirdBodyTable QComboBox, QTableWidget#hpopThirdBodyTable QFrame[quantityField="true"] { background: transparent; border-color: transparent; }
 QTableWidget#hpopThirdBodyTable QComboBox:hover, QTableWidget#hpopThirdBodyTable QFrame[quantityField="true"]:hover { border-color: @border; }
 QTableWidget#hpopThirdBodyTable QComboBox:focus, QTableWidget#hpopThirdBodyTable QFrame[quantityField="true"][focused="true"] { border-color: @accent; background: @field; }
+QTableWidget#regionVertices { background: @field; border: 1px solid @line; gridline-color: @line; selection-background-color: @accentWash; selection-color: @accentBright; }
+QTableWidget#regionVertices::item:selected { background: @accentWash; color: @accentBright; }
+QHeaderView#regionVertexNumbers::section { border-left: 3px solid transparent; }
+QHeaderView#regionVertexNumbers::section:checked { background: @accentWash; color: @accentBright; border-left-color: @accent; font-weight: 600; }
+QTableWidget#regionVertices QFrame[quantityField="true"] { background: transparent; border-color: transparent; border-radius: 0; }
+QTableWidget#regionVertices QFrame[quantityField="true"]:hover { border-color: @borderStrong; }
+QTableWidget#regionVertices QFrame[quantityField="true"][focused="true"] { background: @field; border-color: @accent; }
+QTableWidget#regionVertices QFrame[quantityField="true"][invalid="true"] { border-color: @danger; }
 QDialog#hpopSettingsDialog QComboBox { max-width: 242px; }
 QDialog#hpopSettingsDialog QSpinBox, QDialog#hpopSettingsDialog QDoubleSpinBox { max-width: 258px; }
 )QSS")));

@@ -6,7 +6,10 @@
 #include <QComboBox>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QHeaderView>
+#include <QKeyEvent>
 #include <QLabel>
+#include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScrollArea>
@@ -99,6 +102,113 @@ TEST_F(QuantityTest, RegionPolygonValidationAndNarrowLayoutRetainVertices) {
     editor.findChild<QPushButton *>("regionGlobal")->click();
     EXPECT_TRUE(editor.region().boundary.vertices.empty());
     EXPECT_NEAR(editor.region().boundary.north_rad, std::numbers::pi / 2, 1e-15);
+}
+TEST_F(QuantityTest, RegionVertexSelectionFollowsEditingAndRemovesTheHighlightedVertex) {
+    apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
+    RegionEditor editor;
+    application::ProjectRegion region;
+    region.display_name = "顶点选择";
+    region.boundary.vertices = {{1, .1}, {1.5, .1}, {1.5, .5}, {1, .5}};
+    editor.set_region(region, false);
+    editor.show();
+    editor.activateWindow();
+    const auto settle = [] {
+        for (int i = 0; i < 12; ++i)
+            QCoreApplication::processEvents();
+    };
+    settle();
+    auto *table = editor.findChild<QTableWidget *>("regionVertices");
+    auto *remove = editor.findChild<QPushButton *>("regionRemoveVertex");
+    auto *add = editor.findChild<QPushButton *>("regionAddVertex");
+    ASSERT_TRUE(table && remove && add);
+    const auto click = [&](QWidget *widget, QPoint point) {
+        QMouseEvent press(QEvent::MouseButtonPress, point, widget->mapToGlobal(point),
+                          Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease, point, widget->mapToGlobal(point),
+                            Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(widget, &press);
+        QCoreApplication::sendEvent(widget, &release);
+        settle();
+    };
+    const auto selected_row = [&] {
+        const auto rows = table->selectionModel()->selectedRows();
+        return rows.size() == 1 ? rows.front().row() : -1;
+    };
+    const auto capture = [&](const QString &name) {
+        const auto directory = qEnvironmentVariable("ORBELLE_REGION_UI_CAPTURE");
+        if (!directory.isEmpty()) {
+            ASSERT_TRUE(QDir().mkpath(directory));
+            EXPECT_TRUE(editor.grab().save(directory + '/' + name + ".png"));
+        }
+    };
+    table->clearSelection();
+    EXPECT_FALSE(remove->isEnabled());
+    auto *header = table->verticalHeader();
+    click(header->viewport(), {header->width() / 2, header->sectionViewportPosition(0) + 12});
+    EXPECT_EQ(selected_row(), 0);
+    EXPECT_TRUE(remove->isEnabled());
+    table->setFocus();
+    QKeyEvent down(QEvent::KeyPress, Qt::Key_Down, Qt::NoModifier);
+    QCoreApplication::sendEvent(table, &down);
+    EXPECT_EQ(selected_row(), 1);
+
+    auto *latitude = static_cast<QuantityEditor *>(table->cellWidget(2, 1));
+    auto *input = text(*latitude);
+    click(input, input->rect().center());
+    input->setFocus();
+    settle();
+    EXPECT_EQ(selected_row(), 2);
+    EXPECT_EQ(table->currentColumn(), 1);
+    EXPECT_EQ(editor.region().boundary, region.boundary);
+    capture("vertex-selection-editing");
+    QKeyEvent tab(QEvent::KeyPress, Qt::Key_Tab, Qt::NoModifier);
+    QCoreApplication::sendEvent(input, &tab);
+    settle();
+    EXPECT_EQ(selected_row(), 3);
+    EXPECT_EQ(table->currentColumn(), 0);
+    QKeyEvent backtab(QEvent::KeyPress, Qt::Key_Backtab, Qt::ShiftModifier);
+    ASSERT_TRUE(QApplication::focusWidget());
+    QCoreApplication::sendEvent(QApplication::focusWidget(), &backtab);
+    settle();
+    EXPECT_EQ(selected_row(), 2);
+    EXPECT_EQ(table->currentColumn(), 1);
+    latitude->findChild<QToolButton *>()->setFocus();
+    settle();
+    choose(*latitude, Unit::radian);
+    EXPECT_EQ(selected_row(), 2);
+    EXPECT_EQ(editor.region().boundary, region.boundary);
+    remove->setFocus();
+    settle();
+    EXPECT_EQ(selected_row(), 2); // The target stays highlighted while using row actions.
+    capture("vertex-selection-row-action");
+    editor.resize(560, 640);
+    settle();
+    EXPECT_EQ(selected_row(), 2);
+    capture("vertex-selection-narrow");
+
+    auto *last = static_cast<QuantityEditor *>(table->cellWidget(3, 0));
+    remove->click();
+    settle();
+    ASSERT_EQ(table->rowCount(), 3);
+    auto expected = region.boundary.vertices;
+    expected.erase(expected.begin() + 2);
+    EXPECT_EQ(editor.region().boundary.vertices, expected);
+    text(*last)->setFocus();
+    settle();
+    EXPECT_EQ(selected_row(), 2); // Persistent editor indexes follow the removed row.
+    table->clearSelection();
+    EXPECT_FALSE(remove->isEnabled());
+    remove->click();
+    EXPECT_EQ(table->rowCount(), 3);
+    add->click();
+    settle();
+    ASSERT_EQ(table->rowCount(), 4);
+    EXPECT_EQ(selected_row(), 3);
+    EXPECT_TRUE(text(*static_cast<QuantityEditor *>(table->cellWidget(3, 0)))->hasFocus());
+    editor.findChild<QPushButton *>("resetRegion")->click();
+    settle();
+    EXPECT_FALSE(editor.has_unapplied_changes());
+    EXPECT_FALSE(remove->isEnabled());
 }
 TEST_F(QuantityTest, RegionPropertiesMatchOtherObjectsAndPreserveAllPageDrafts) {
     apply_workbench_style(*qobject_cast<QApplication *>(QApplication::instance()));
