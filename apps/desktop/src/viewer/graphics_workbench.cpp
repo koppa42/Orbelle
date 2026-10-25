@@ -6209,6 +6209,7 @@ class Workbench final : public WorkbenchWindow {
     void smoke_object_insertion();
     void smoke_sensor_geometry();
     void smoke_regions();
+    void smoke_globe_rendering();
     struct SmokeScenario {
         const char *name;
         int first_stage;
@@ -6231,7 +6232,8 @@ class Workbench final : public WorkbenchWindow {
         SmokeScenario{"status-feedback", 192, 197, &Workbench::smoke_status_feedback},
         SmokeScenario{"object-insertion", 198, 203, &Workbench::smoke_object_insertion},
         SmokeScenario{"sensor-geometry", 204, 215, &Workbench::smoke_sensor_geometry},
-        SmokeScenario{"regions", 216, 223, &Workbench::smoke_regions}};
+        SmokeScenario{"regions", 216, 223, &Workbench::smoke_regions},
+        SmokeScenario{"globe-rendering", 224, 249, &Workbench::smoke_globe_rendering}};
     const char *orbit_smoke_scenario() const {
         for (const auto &scenario : smoke_scenarios_)
             if (orbit_smoke_stage_ >= scenario.first_stage &&
@@ -6720,6 +6722,7 @@ class Workbench final : public WorkbenchWindow {
 // without exposing test-only APIs. Scenario implementations live with desktop tests.
 #include "../../tests/graphics_smoke/data_catalog.inc"
 #include "../../tests/graphics_smoke/display_cache_docking.inc"
+#include "../../tests/graphics_smoke/globe_rendering.inc"
 #include "../../tests/graphics_smoke/ground_stations.inc"
 #include "../../tests/graphics_smoke/helpers.inc"
 #include "../../tests/graphics_smoke/hpop_apply.inc"

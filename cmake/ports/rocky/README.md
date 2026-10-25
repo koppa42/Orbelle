@@ -25,3 +25,10 @@ the one-shot callback queue and pending compile result must be read under their
 respective writer mutexes. Callbacks run after releasing the queue mutex so they
 can enqueue subsequent work. Compilation results retain the upstream update/reset
 locking scope, with the availability check moved inside that scope.
+
+`polar-tangent-frame.patch` keeps the terrain tangent basis finite at the poles
+of root geodetic tiles. The local surface normal can be parallel to the Y axis;
+normalizing its cross product then produces NaNs and black slits when zoomed out,
+even with lighting disabled. A nonparallel axis is used only when the squared
+tangent length is below `1e-12`. This leaves the tile count, LOD settings and
+ordinary terrain normals unchanged.
