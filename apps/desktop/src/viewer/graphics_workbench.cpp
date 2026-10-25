@@ -11,6 +11,7 @@
 #include "initial_data_setup.hpp"
 #include "insert_object_dialog.hpp"
 #include "mission_timeline.hpp"
+#include "object_selection.hpp"
 #include "orbit_design_preview.hpp"
 #include "orbit_editor.hpp"
 #include "orbit_scene.hpp"
@@ -142,6 +143,16 @@
 
 namespace orbelle::desktop {
 namespace {
+QString sensor_tooltip(const application::ProjectSensor &sensor) {
+    const std::array<const char *, 4> pattern_names{
+        "sensor.geometry.simple", "sensor.geometry.complex", "sensor.geometry.rectangular",
+        "sensor.geometry.custom"};
+    return object_tooltip(
+        QString::fromStdString(sensor.name()),
+        ui::text("sensor.geometry.tooltip")
+            .arg(ui::text(pattern_names.at(static_cast<std::size_t>(sensor.pattern.type)))));
+}
+
 constexpr std::array playback_rates{0.1,  0.5,  1.0,   2.0,   5.0,   10.0,
                                     20.0, 50.0, 100.0, 200.0, 500.0, 1000.0};
 double adjacent_playback_rate(double current, bool faster) {
@@ -1838,8 +1849,7 @@ class Workbench final : public WorkbenchWindow {
                 new QTreeWidgetItem(scenario_item_, {QString::fromStdString(region.name())});
             item->setIcon(
                 0, workbench_icon(WorkbenchIcon::map, QColor::fromRgb(region.display.color)));
-            item->setToolTip(
-                0, ui::text("common.object_id_hint").arg(QString::fromStdString(region.object_id)));
+            item->setToolTip(0, object_tooltip(item->text(0), ui::text("region.title")));
             region_items_.push_back(item);
         }
     }
@@ -2984,8 +2994,8 @@ class Workbench final : public WorkbenchWindow {
                 tracks->addChild(satellite.tracks);
                 satellite.item = new QTreeWidgetItem(root.get(), {satellite.name()});
                 satellite.item->setToolTip(
-                    0, ui::text("common.object_id_hint")
-                           .arg(QString::fromStdString(config.orbit.object_id)));
+                    0, object_tooltip(satellite.name(),
+                                      ui::text("graphics_workbench.item.set_tool_tip_3")));
                 satellite.item->setIcon(0,
                                         workbench_icon(WorkbenchIcon::satellite,
                                                        QColor::fromRgb(config.display.line_color)));
@@ -2999,21 +3009,16 @@ class Workbench final : public WorkbenchWindow {
                     new QTreeWidgetItem(parent->item, {QString::fromStdString(sensor.name())});
                 item->setData(0, Qt::UserRole + 17, QString::fromStdString(sensor.object_id));
                 item->setIcon(0, workbench_icon(WorkbenchIcon::focus, theme::color(theme::sakura)));
-                const std::array<const char *, 4> pattern_names{
-                    "sensor.geometry.simple", "sensor.geometry.complex",
-                    "sensor.geometry.rectangular", "sensor.geometry.custom"};
-                item->setToolTip(0, ui::text("sensor.geometry.tooltip")
-                                        .arg(ui::text(pattern_names.at(
-                                            static_cast<std::size_t>(sensor.pattern.type))))
-                                        .arg(QString::fromStdString(sensor.object_id)));
+                item->setToolTip(0, sensor_tooltip(sensor));
             }
             for (const auto &config : candidate->project.ground_stations) {
                 Station station{config};
                 station.item = new QTreeWidgetItem(root.get(), {station.name()});
                 station.item->setIcon(
                     0, workbench_icon(WorkbenchIcon::ground_station, theme::color(theme::success)));
-                station.item->setToolTip(0, ui::text("graphics_workbench.item.set_tool_tip_2")
-                                                .arg(QString::fromStdString(config.object_id)));
+                station.item->setToolTip(
+                    0, object_tooltip(station.name(),
+                                      ui::text("graphics_workbench.item.set_tool_tip_2")));
                 stations.push_back(std::move(station));
             }
             auto region_node = make_region_node(candidate->project.regions);
@@ -3239,6 +3244,9 @@ class Workbench final : public WorkbenchWindow {
                 continue;
             satellite.display_name = name;
             satellite.item->setText(0, satellite.name());
+            satellite.item->setToolTip(
+                0, object_tooltip(satellite.name(),
+                                  ui::text("graphics_workbench.item.set_tool_tip_3")));
             ground_map_->set_name(i, satellite.name());
         }
         for (std::size_t i = 0; i < stations_.size(); ++i) {
@@ -3247,6 +3255,9 @@ class Workbench final : public WorkbenchWindow {
                 continue;
             station.config.display_name = name;
             station.item->setText(0, station.name());
+            station.item->setToolTip(
+                0,
+                object_tooltip(station.name(), ui::text("graphics_workbench.item.set_tool_tip_2")));
             ground_map_->set_station_name(i, station.config.object_id, station.name());
         }
         for (auto &sensor : sensors_)
@@ -3255,14 +3266,18 @@ class Workbench final : public WorkbenchWindow {
                 for (auto &satellite : satellites_)
                     for (int i = 0; i < satellite.item->childCount(); ++i) {
                         auto *item = satellite.item->child(i);
-                        if (item->data(0, Qt::UserRole + 17).toString().toStdString() == id)
+                        if (item->data(0, Qt::UserRole + 17).toString().toStdString() == id) {
                             item->setText(0, QString::fromStdString(name));
+                            item->setToolTip(0, sensor_tooltip(sensor));
+                        }
                     }
             }
         for (std::size_t i = 0; i < regions_.size(); ++i)
             if (regions_[i].object_id == id) {
                 regions_[i].display_name = name;
                 region_items_[i]->setText(0, QString::fromStdString(name));
+                region_items_[i]->setToolTip(
+                    0, object_tooltip(QString::fromStdString(name), ui::text("region.title")));
                 if (region_editor_bound_ && region_editor_->bound_object_id() == id)
                     region_editor_->sync_name(name);
             }
@@ -4632,7 +4647,6 @@ class Workbench final : public WorkbenchWindow {
                 satellite.item->setIcon(
                     0, workbench_icon(WorkbenchIcon::satellite,
                                       QColor::fromRgb(satellite.display.line_color)));
-                satellite.item->setToolTip(0, ui::text("graphics_workbench.item.set_tool_tip_3"));
                 satellites_.push_back(std::move(satellite));
                 scenario_item_->setExpanded(true);
             }
@@ -4640,6 +4654,9 @@ class Workbench final : public WorkbenchWindow {
             orbit_sessions_ = std::move(pending_orbit_sessions_);
             satellites_[index].display_name = pending_orbit_name_;
             satellites_[index].item->setText(0, satellites_[index].name());
+            satellites_[index].item->setToolTip(
+                0, object_tooltip(satellites_[index].name(),
+                                  ui::text("graphics_workbench.item.set_tool_tip_3")));
             filter_objects();
             mark_project_dirty();
             if (pending_orbit_target_)
