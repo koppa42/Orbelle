@@ -128,13 +128,46 @@ void Workbench::smoke_display_cache_docking() {
         findChild<QAction *>("expandTimeline")->setChecked(true);
         ++orbit_smoke_stage_;
         break;
-    case 58:
+    case 58: {
         smoke_require(timeline_->isVisible() && workspace_->height() == smoke_workspace_height_ &&
                           timeline_->current_time() == smoke_timeline_epoch_ &&
                           timeline_->visible_first() == smoke_timeline_first_ &&
                           timeline_->visible_last() == smoke_timeline_last_,
                       "Restoring the timeline changed its time or browsing range");
         smoke_record("timeline-collapse-restores-workspace-and-time-range");
+        auto *show = findChild<QAction *>("showTimeline");
+        auto *expand = findChild<QAction *>("expandTimeline");
+        smoke_require(show && view_menu_->actions().contains(show) && show->isEnabled() &&
+                          show->isChecked() && show->text() == QStringLiteral("时间轴"),
+                      "View menu has no checked timeline recovery action");
+        // The native toolbar context menu uses the same action as View -> Timeline.
+        time_toolbar_->toggleViewAction()->trigger();
+        smoke_require(!time_toolbar_->isVisible() && !show->isChecked() && !expand->isChecked(),
+                      "Hidden timeline still reports itself as expanded");
+        update_actions();
+        smoke_require(!time_toolbar_->isVisible(),
+                      "An ordinary action update reopened the hidden timeline");
+        expand->trigger();
+        smoke_require(time_toolbar_->isVisible() && timeline_->isVisible() && show->isChecked() &&
+                          expand->isChecked(),
+                      "Expand did not reopen the hidden timeline in one action");
+        smoke_record("hidden-timeline-reopens-through-expand-command");
+        findChild<QToolButton *>("collapseTimeline")->click();
+        show->trigger();
+        show->trigger();
+        smoke_require(time_toolbar_->isVisible() && time_label_->isVisible() &&
+                          !timeline_->isVisible() && !expand->isChecked(),
+                      "View menu did not preserve the collapsed timeline controls");
+        findChild<QToolButton *>("collapseTimeline")->click();
+        smoke_require(
+            timeline_->isVisible() && expand->isChecked() &&
+                timeline_->current_time() == smoke_timeline_epoch_ &&
+                timeline_->visible_first() == smoke_timeline_first_ &&
+                timeline_->visible_last() == smoke_timeline_last_ &&
+                editor_->findChild<QuantityEditor *>("displayStep")->value(Unit::second) == 60,
+            "Reopening the timeline changed its time, range or property draft");
+        smoke_record("timeline-view-menu-restores-controls-and-preserves-state");
+        save_workbench_image("timeline-reopened-from-view-menu.png");
         properties_dialog_->close();
         slots_[1]->dock->show();
         fit_views();
@@ -142,6 +175,7 @@ void Workbench::smoke_display_cache_docking() {
         smoke_wait_frame_ = frame_count_ + 3;
         ++orbit_smoke_stage_;
         break;
+    }
     case 59:
         if (frame_count_ < smoke_wait_frame_ || !view_captures_ready())
             return;
