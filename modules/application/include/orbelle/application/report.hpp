@@ -86,7 +86,7 @@ struct ReportQuery {
     // Lighting uses an explicitly prepared, immutable solar ephemeris.
     std::string lighting_ephemeris = "de440s";
     core::CoverageGrid coverage{};
-    std::string region_id;
+    std::string region_id = {};
     bool operator==(const ReportQuery &) const = default;
 };
 struct ReportColumnSpec {
