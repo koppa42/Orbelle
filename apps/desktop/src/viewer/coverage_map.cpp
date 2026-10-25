@@ -72,15 +72,23 @@ QRectF CoverageMap::map_rect() const {
     const double h = std::min(rect.height(), rect.width() / aspect);
     return {rect.center().x() - w / 2, rect.center().y() - h / 2, w, h};
 }
-QRectF CoverageMap::cell_rect(const core::CoverageCell &c) const {
+QRectF CoverageMap::cell_rect(const core::CoverageCell &c, qreal pixel_ratio) const {
     const auto &g = result_->coverage_statistics && result_->coverage_statistics->region
                         ? result_->coverage_statistics->grid
                         : result_->definition.query.coverage;
     const auto r = map_rect();
     const double x = r.width() / core::coverage_longitude_span(g);
     const double y = r.height() / (g.north_rad - g.south_rad);
-    return {r.left() + (c.west_rad - g.west_rad) * x, r.top() + (g.north_rad - c.north_rad) * y,
-            (c.east_rad - c.west_rad) * x, (c.north_rad - c.south_rad) * y};
+    // Project each shared edge identically, then snap it to the destination
+    // device pixels. Independently rasterizing fractional origins and widths
+    // can leave one-pixel cracks between adjacent cells, especially at high DPI.
+    const auto edge = [pixel_ratio](double coordinate) {
+        return pixel_ratio > 0 ? std::round(coordinate * pixel_ratio) / pixel_ratio : coordinate;
+    };
+    return {QPointF(edge(r.left() + (c.west_rad - g.west_rad) * x),
+                    edge(r.top() + (g.north_rad - c.north_rad) * y)),
+            QPointF(edge(r.left() + (c.east_rad - g.west_rad) * x),
+                    edge(r.top() + (g.north_rad - c.south_rad) * y))};
 }
 double CoverageMap::value(const results::CoveragePoint &point) const {
     return metric_ == 0 ? 100 * point.statistics.covered_seconds /
@@ -104,8 +112,9 @@ void CoverageMap::draw_background(QPainter &p) const {
         return;
     const auto &points = result_->coverage_statistics->points;
     p.setRenderHint(QPainter::Antialiasing, false);
+    const auto pixel_ratio = p.device()->devicePixelRatioF();
     for (const auto &point : points) {
-        const auto r = cell_rect(point.cell);
+        const auto r = cell_rect(point.cell, pixel_ratio);
         p.fillRect(r, ramp(value(point) / maximum()));
         if (r.width() >= 6 && r.height() >= 6) {
             p.setPen(QColor(255, 255, 255, 35));
@@ -162,7 +171,8 @@ void CoverageMap::draw_selection(QPainter &p) const {
     if (selected_ < points.size()) {
         p.setPen(QPen(QColor("#ffffff"), 2));
         p.setBrush(Qt::NoBrush);
-        p.drawRect(cell_rect(points[selected_].cell).adjusted(1, 1, -1, -1));
+        p.drawRect(cell_rect(points[selected_].cell, p.device()->devicePixelRatioF())
+                       .adjusted(1, 1, -1, -1));
     }
 }
 void CoverageMap::paintEvent(QPaintEvent *) {

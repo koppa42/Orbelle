@@ -24,6 +24,7 @@
 #include <QTimer>
 #include <QToolTip>
 #include <QTreeWidget>
+#include <QtMath>
 #include <algorithm>
 #include <cmath>
 #include <gtest/gtest.h>
@@ -615,6 +616,125 @@ TEST(CoverageMap, CachedPaintMatchesFreshMapAfterSelectionMetricResizeAndResultC
     compare(1, result);
     map.set_result({});
     compare(1, {});
+}
+
+TEST(CoverageMap, UniformGlobalHeatmapHasNoUnpaintedSeams) {
+    (void)test_app();
+    application::ReportDefinition definition;
+    auto &grid = definition.query.coverage;
+    grid.south_rad = -std::numbers::pi / 2;
+    grid.north_rad = std::numbers::pi / 2;
+    grid.west_rad = -std::numbers::pi;
+    grid.east_rad = std::numbers::pi;
+    grid.resolution_rad = 5 * std::numbers::pi / 180;
+    auto result = std::make_shared<runtime::ReportResult>(
+        runtime::ReportResult{definition, results::Table{{}, {}}});
+    result->last = core::Epoch{3600'000'000'000};
+    result->coverage_statistics = results::CoverageStatistics{};
+    for (const auto &cell : core::coverage_grid(grid))
+        result->coverage_statistics->points.push_back({cell, {}, {1800, 1800, 1800, 1}});
+    result->coverage_statistics->maximum_gap_seconds = 1800;
+    CoverageMap map;
+    map.set_result(result);
+    map.show();
+    for (const QSize size : {QSize(860, 540), QSize(635, 413), QSize(421, 307)}) {
+        map.resize(size);
+        QCoreApplication::processEvents();
+        for (int metric : {0, 1}) {
+            map.set_metric(metric);
+            const auto screen = map.grab().toImage();
+            const auto exported = map.image();
+            const auto capture = qEnvironmentVariable("ORBELLE_REPORT_UI_CAPTURE");
+            if (!capture.isEmpty()) {
+                QDir().mkpath(capture);
+                screen.save(capture +
+                            QString("/uniform-heatmap-%1-%2.png").arg(size.width()).arg(metric));
+                exported.save(capture +
+                              QString("/uniform-export-%1-%2.png").arg(size.width()).arg(metric));
+            }
+            for (const auto &image : {screen, exported}) {
+                SCOPED_TRACE(::testing::Message()
+                             << "size=" << size.width() << "x" << size.height()
+                             << " metric=" << metric << " DPR=" << image.devicePixelRatio());
+                const double ratio = image.devicePixelRatio();
+                const auto radius = std::min(size.width(), size.height()) / 5;
+                const auto center = QPointF(size.width() / 2., size.height() / 2.);
+                const QColor expected = metric == 0 ? QColor("#43b5be") : QColor("#e6d68a");
+                int dark_pixels = 0;
+                // This central patch lies inside the fully covered map at each
+                // size. Grid lines and selection may brighten it, never darken it.
+                for (int y = qCeil((center.y() - radius) * ratio);
+                     y < qFloor((center.y() + radius) * ratio); ++y)
+                    for (int x = qCeil((center.x() - radius) * ratio);
+                         x < qFloor((center.x() + radius) * ratio); ++x) {
+                        const auto color = image.pixelColor(x, y);
+                        if (color.red() < expected.red() - 1 ||
+                            color.green() < expected.green() - 1 ||
+                            color.blue() < expected.blue() - 1)
+                            ++dark_pixels;
+                    }
+                EXPECT_EQ(dark_pixels, 0);
+            }
+        }
+    }
+}
+
+TEST(CoverageMap, DatelineCellsKeepDistinctValuesSelectionAndUnsampledSpace) {
+    (void)test_app();
+    application::ReportDefinition definition;
+    auto &grid = definition.query.coverage;
+    const auto rad = std::numbers::pi / 180;
+    grid.south_rad = -10 * rad;
+    grid.north_rad = 10 * rad;
+    grid.west_rad = 170 * rad;
+    grid.east_rad = -170 * rad;
+    grid.resolution_rad = 5.1 * rad;
+    auto result = std::make_shared<runtime::ReportResult>(
+        runtime::ReportResult{definition, results::Table{{}, {}}});
+    result->last = core::Epoch{3600'000'000'000};
+    result->coverage_statistics = results::CoverageStatistics{};
+    auto cells = core::coverage_grid(grid);
+    ASSERT_EQ(cells.size(), 16U);
+    for (std::size_t i = 0; i < cells.size(); ++i) {
+        if (i == 5)
+            continue;
+        const bool covered = i % 2 == 1;
+        result->coverage_statistics->points.push_back(
+            {cells[i],
+             {},
+             {covered ? 1800. : 0., covered ? 1800. : 3600., covered ? 1800. : 3600., 1}});
+    }
+    result->coverage_statistics->maximum_gap_seconds = 3600;
+    CoverageMap map;
+    map.resize(600, 400);
+    map.set_result(result);
+    map.show();
+    QCoreApplication::processEvents();
+    for (int metric : {0, 1}) {
+        map.set_metric(metric);
+        for (const auto &image : {map.grab().toImage(), map.image()}) {
+            const auto pixel = [&](QPointF position) {
+                return image.pixelColor(qRound(position.x() * image.devicePixelRatio()),
+                                        qRound(position.y() * image.devicePixelRatio()));
+            };
+            // The 20 x 20 degree map occupies a 288 x 288 logical-pixel square.
+            // Its cells cross +180 degrees but remain adjacent on this local map.
+            EXPECT_EQ(pixel({206, 290}), metric == 0 ? QColor("#24364e") : QColor("#e6d68a"));
+            EXPECT_EQ(pixel({278, 290}), QColor("#43b5be"));
+            EXPECT_EQ(pixel({350, 290}), metric == 0 ? QColor("#24364e") : QColor("#e6d68a"));
+            EXPECT_EQ(pixel({278, 218}), pixel({0, 0}));
+        }
+    }
+    QMouseEvent click(QEvent::MouseButtonPress, QPointF(350, 290),
+                      map.mapToGlobal(QPoint(350, 290)), Qt::LeftButton, Qt::LeftButton,
+                      Qt::NoModifier);
+    QCoreApplication::sendEvent(&map, &click);
+    EXPECT_EQ(map.point_index(), 2U);
+    QMouseEvent empty(QEvent::MouseButtonPress, QPointF(278, 218),
+                      map.mapToGlobal(QPoint(278, 218)), Qt::LeftButton, Qt::LeftButton,
+                      Qt::NoModifier);
+    QCoreApplication::sendEvent(&map, &empty);
+    EXPECT_EQ(map.point_index(), 2U);
 }
 
 TEST(ReportDialog, DenseCoverageEstimateUsesMemorySettingAndDiscardsOlderEdits) {
