@@ -227,6 +227,36 @@ class GroundMapTest : public ::testing::Test {
         return core::ground_station_position(
             {longitude * std::numbers::pi / 180, latitude * std::numbers::pi / 180, 0});
     }
+    static visualization::SensorMesh sensor_patch(double longitude, double half_width = 6) {
+        visualization::SensorMesh mesh;
+        const auto left = longitude - half_width, right = longitude + half_width;
+        mesh.ground = {{position(left, -6), position(right, -6), position(right, 6)},
+                       {position(left, -6), position(right, 6), position(left, 6)}};
+        mesh.color = 0xff00ff;
+        mesh.opacity = .7;
+        return mesh;
+    }
+    static void configure_sensor_map(GroundMap &map) {
+        map.resize(640, 400);
+        map.set_labels_visible(false);
+        map.set_grid_visible(false);
+        map.set_lighting(false);
+        map.set_sun_visible(false);
+    }
+    static std::pair<int, double> sensor_pixels(const QImage &image) {
+        int count = 0;
+        double horizontal = 0;
+        const auto ratio = image.devicePixelRatio();
+        for (int y = qCeil(14 * ratio); y < image.height() - 44 * ratio; ++y)
+            for (int x = qCeil(38 * ratio); x < image.width() - 16 * ratio; ++x) {
+                const auto color = image.pixelColor(x, y);
+                if (color.red() > 140 && color.blue() > 140 && color.green() < 70) {
+                    ++count;
+                    horizontal += x;
+                }
+            }
+        return {count, count ? horizontal / count : 0};
+    }
     static bool wheel(GroundMap &map, QPointF point, QPoint angle, QPoint pixel = {}) {
         QWheelEvent event(point, point, pixel, angle, Qt::NoButton, Qt::NoModifier,
                           pixel.isNull() ? Qt::NoScrollPhase : Qt::ScrollUpdate, false);
@@ -315,15 +345,16 @@ TEST_F(GroundMapTest, ProfileZoomedSensorPanning) {
     double device_ratio = 1;
     for (int mode = 0; mode < 3; ++mode) {
         GroundMap map(imagery_);
+        std::optional<visualization::SensorView> sensor;
         configure(map);
         map.resize(1280, 800);
         if (mode) {
             core::SensorPattern pattern;
             pattern.half_angle_rad = (mode == 1 ? 45 : 80) * std::numbers::pi / 180;
-            const visualization::SensorView view(pattern);
+            sensor.emplace(pattern);
             const core::SensorVector position{mode == 1 ? 7e6 : 42e6, 0, 0};
             const auto axes = core::sensor_axes({0, 7500, 0}, {-1, 0, 0});
-            const auto mesh = view.project(position, axes, 20e6);
+            const auto mesh = sensor->project(position, axes, 20e6);
             std::cout << "pan mode " << mode << ": " << mesh.ground.size() << " facets\n"
                       << std::flush;
             map.set_sensor_footprints(std::span(&mesh, 1));
@@ -379,6 +410,44 @@ TEST_F(GroundMapTest, ProfileZoomedSensorPanning) {
             profile.record("map_detail_settle_ms", latency.nsecsElapsed() * 1e-6);
         }
         profile.phase("settle", false);
+        for (const auto zoom : {2, 12}) {
+            map.reset_view();
+            map.zoom(zoom, QRectF(map.rect()).adjusted(38, 14, -16, -44).center());
+            ASSERT_TRUE(settle(map));
+            profile.phase(QString("playback-zoom-%1-mode-%2").arg(zoom).arg(mode), true);
+            for (int step = 0; step < 48; ++step) {
+                {
+                    const ProfileScope frame("map_playback_frame_ms");
+                    const auto angle = step * .0005;
+                    const auto radius = mode == 2 ? 42e6 : 7e6;
+                    const core::SensorVector position{radius * std::cos(angle),
+                                                      radius * std::sin(angle), 0};
+                    const core::SensorVector velocity{-7500 * std::sin(angle),
+                                                      7500 * std::cos(angle), 0};
+                    if (sensor) {
+                        visualization::SensorMesh mesh;
+                        {
+                            const ProfileScope projection("sensor_projection_ms");
+                            mesh = sensor->project(
+                                position,
+                                core::sensor_axes(velocity, {-position[0], -position[1], 0}), 20e6);
+                        }
+                        map.set_sensor_footprints(std::span(&mesh, 1), true);
+                    }
+                    map.set_snapshot({core::Epoch{step * 1'000'000'000LL},
+                                      core::FrameId::itrf,
+                                      core::OriginId::earth,
+                                      {{"Satellite", position}}});
+                    if (step == 12 || step == 28)
+                        map.zoom_centered(step == 12 ? 2 : .5);
+                    QCoreApplication::processEvents();
+                    (void)pixels(map);
+                }
+                QThread::msleep(8);
+            }
+            profile.phase("settle", false);
+            ASSERT_TRUE(settle(map));
+        }
     }
     profile.finish({{"logical_width", 1280},
                     {"logical_height", 800},
@@ -439,6 +508,100 @@ TEST_F(GroundMapTest, SensorRasterKeepsHolesAndRefreshesAfterPanResizeAndRemoval
     reference.set_sensor_footprints({});
     process_for(80);
     ASSERT_TRUE(settle(map));
+    ASSERT_TRUE(settle(reference));
+    expect_same_pixels(pixels(map), pixels(reference));
+}
+TEST_F(GroundMapTest, SensorPlaybackPublishesMovingFramesWithoutClearingCompletedCoverage) {
+    GroundMap map(imagery_), reference(imagery_);
+    configure_sensor_map(map);
+    configure_sensor_map(reference);
+    auto mesh = sensor_patch(-20);
+    bool visible = false;
+    double first_center = 0, last_center = 0;
+    // Start playback before any raster exists. Each new position arrives without
+    // waiting for its worker, as it does on the workbench's shared frame timer.
+    for (int i = 0; i < 48; ++i) {
+        mesh = sensor_patch(-20 + i * .5);
+        map.set_sensor_footprints(std::span(&mesh, 1), true);
+        const auto frame = pixels(map);
+        const auto [count, center] = sensor_pixels(frame);
+        if (visible)
+            EXPECT_GT(count, 100) << "coverage disappeared at playback frame " << i;
+        if (count > 100) {
+            if (!visible) {
+                first_center = center;
+                capture(frame, "first-playback-coverage");
+            }
+            visible = true;
+            last_center = center;
+        }
+        process_for(8);
+    }
+    ASSERT_TRUE(visible) << "continuous updates starved the footprint worker";
+    EXPECT_GT(last_center - first_center, 10 * map.devicePixelRatioF());
+    capture(pixels(map), "moving-coverage");
+    ASSERT_TRUE(settle(map));
+    reference.set_sensor_footprints(std::span(&mesh, 1));
+    ASSERT_TRUE(settle(reference));
+    expect_same_pixels(pixels(map), pixels(reference));
+}
+TEST_F(GroundMapTest, SensorCoverageSurvivesZoomBurstsBeyondTheOverviewScale) {
+    QImage imagery(720, 360, QImage::Format_RGB32);
+    imagery.fill(QColor(90, 110, 130));
+    GroundMap map(imagery), reference(imagery);
+    for (auto *view : {&map, &reference}) {
+        configure_sensor_map(*view);
+        view->show();
+        view->zoom(12, QRectF(view->rect()).adjusted(38, 14, -16, -44).center());
+    }
+    auto mesh = sensor_patch(0, 80);
+    map.set_sensor_footprints(std::span(&mesh, 1));
+    ASSERT_TRUE(settle(map));
+    const auto plot = QRectF(map.rect()).adjusted(38, 14, -16, -44);
+    const auto center = (plot.center() * map.devicePixelRatioF()).toPoint();
+    const auto coverage = pixels(map).pixelColor(center);
+    ASSERT_GT(coverage.red(), 140);
+    // A large wheel burst can outgrow the old detail before a worker completes.
+    map.zoom(4, plot.center());
+    EXPECT_EQ(pixels(map).pixelColor(center), coverage);
+    for (const auto factor : {.25, 4.0, .25}) {
+        map.zoom_centered(factor);
+        QElapsedTimer animation;
+        animation.start();
+        do {
+            EXPECT_EQ(pixels(map).pixelColor(center), coverage) << "zoom=" << map.zoom_factor();
+            process_for(8);
+        } while (animation.elapsed() < 160);
+    }
+    capture(pixels(map), "zoomed-coverage");
+    ASSERT_TRUE(settle(map));
+    reference.zoom(map.zoom_factor() / reference.zoom_factor(), plot.center());
+    reference.set_sensor_footprints(std::span(&mesh, 1));
+    ASSERT_TRUE(settle(reference));
+    expect_same_pixels(pixels(map), pixels(reference));
+}
+TEST_F(GroundMapTest, ReplacingSensorsDiscardsInFlightPlaybackCoverage) {
+    GroundMap map(imagery_), reference(imagery_);
+    configure_sensor_map(map);
+    configure_sensor_map(reference);
+    auto mesh = sensor_patch(-30);
+    map.set_sensor_footprints(std::span(&mesh, 1));
+    ASSERT_TRUE(settle(map));
+    ASSERT_GT(sensor_pixels(pixels(map)).first, 100);
+    mesh = sensor_patch(-29);
+    map.set_sensor_footprints(std::span(&mesh, 1), true);
+    (void)pixels(map);
+    // Replace the collection while a playback request is running. A surviving
+    // sensor must not allow the removed/edited sensor's old result to reappear.
+    mesh = sensor_patch(30);
+    mesh.color = 0x00ddff;
+    map.set_sensor_footprints(std::span(&mesh, 1));
+    for (int i = 0; i < 8; ++i) {
+        EXPECT_EQ(sensor_pixels(pixels(map)).first, 0);
+        process_for(8);
+    }
+    ASSERT_TRUE(settle(map));
+    reference.set_sensor_footprints(std::span(&mesh, 1));
     ASSERT_TRUE(settle(reference));
     expect_same_pixels(pixels(map), pixels(reference));
 }

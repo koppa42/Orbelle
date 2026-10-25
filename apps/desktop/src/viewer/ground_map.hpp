@@ -58,7 +58,10 @@ class GroundMap final : public QWidget {
     void set_station_name(std::size_t index, const std::string &id, const QString &name);
     void set_ground_stations(const std::vector<application::ProjectGroundStation> &stations);
     void set_snapshot(const visualization::RenderSnapshot &snapshot);
-    void set_sensor_footprints(std::span<const visualization::SensorMesh> meshes);
+    // Continuous playback keeps completed coverage while coalescing newer positions.
+    // Configuration changes and time jumps use the default replacement behavior.
+    void set_sensor_footprints(std::span<const visualization::SensorMesh> meshes,
+                               bool continuous = false);
     void set_selection(std::optional<std::size_t> index);
     void set_access_link(std::optional<std::pair<std::size_t, std::size_t>> pair, bool visible);
     void set_display(std::size_t index, const DisplaySettings &settings, core::Epoch first,
@@ -108,7 +111,8 @@ class GroundMap final : public QWidget {
         bool operator==(const Point &) const = default;
     };
     struct Footprint {
-        QPainterPath fill, edges;
+        std::vector<core::SensorTriangle> ground;
+        std::vector<std::array<core::SensorVector, 2>> edges;
         QColor color;
         double opacity;
         bool filled;
@@ -170,8 +174,9 @@ class GroundMap final : public QWidget {
     QTransform raster_transform(const Raster &raster) const;
     bool same_scale(const Raster &raster) const;
     QRectF raster_draw_bounds(const Raster &raster) const;
-    bool useful_detail(const Raster &raster) const;
-    bool prefer_detail(const Raster &candidate, const Raster &current) const;
+    bool useful_detail(const Raster &raster, bool allow_rescale = false) const;
+    bool prefer_detail(const Raster &candidate, const Raster &current,
+                       bool allow_rescale = false) const;
     void draw_raster(QPainter &p, const Raster &raster) const;
     void draw_layer(QPainter &p, const Raster *detail, const Raster *fallback) const;
     bool covers_view(const Raster &raster, bool exact_scale = true, double margin = 0) const;
@@ -195,6 +200,7 @@ class GroundMap final : public QWidget {
     std::shared_ptr<std::atomic_bool> cancel_footprints_;
     QTimer footprint_timer_;
     std::uint64_t footprints_revision_ = 0;
+    std::uint64_t footprints_reset_revision_ = 0;
     Raster footprint_raster_, footprint_preview_, footprint_request_;
     std::uint64_t trails_revision_ = 0;
     std::uint64_t geometry_revision_ = 0;

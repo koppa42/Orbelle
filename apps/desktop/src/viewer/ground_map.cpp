@@ -328,10 +328,14 @@ void GroundMap::set_station_name(std::size_t index, const std::string &id, const
         points_[marker].name = name;
     update();
 }
-QPainterPath ground_footprint_path(std::span<const core::SensorTriangle> triangles) {
+namespace {
+QPainterPath footprint_path(std::span<const core::SensorTriangle> triangles,
+                            const std::atomic_bool *cancelled) {
     QPainterPath path;
     path.setFillRule(Qt::WindingFill);
     for (const auto &triangle : triangles) {
+        if (cancelled && cancelled->load(std::memory_order_relaxed))
+            break;
         QPolygonF polygon;
         for (const auto &p : triangle) {
             auto point = ground_coordinates(p);
@@ -373,24 +377,33 @@ QPainterPath ground_footprint_path(std::span<const core::SensorTriangle> triangl
     }
     return path;
 }
-void GroundMap::set_sensor_footprints(std::span<const visualization::SensorMesh> meshes) {
+} // namespace
+QPainterPath ground_footprint_path(std::span<const core::SensorTriangle> triangles) {
+    return footprint_path(triangles, nullptr);
+}
+void GroundMap::set_sensor_footprints(std::span<const visualization::SensorMesh> meshes,
+                                      bool continuous) {
+    const ProfileScope profile("map_footprint_input_ms");
     if (meshes.empty() && !footprints_)
         return;
     auto footprints = std::make_shared<std::vector<Footprint>>();
-    for (const auto &mesh : meshes) {
-        Footprint fp{{}, {}, QColor::fromRgb(mesh.color), mesh.opacity, mesh.fill};
-        fp.fill = ground_footprint_path(mesh.ground);
-        for (const auto &edge : mesh.ground_edges)
-            fp.edges.addPath(
-                ground_path({ground_coordinates(edge[0]), ground_coordinates(edge[1])}));
-        footprints->push_back(std::move(fp));
-    }
+    footprints->reserve(meshes.size());
+    // Copy only the immutable display input here. Geographic path conversion can
+    // dominate large footprints, so coalesce frames before doing it on the worker.
+    for (const auto &mesh : meshes)
+        footprints->push_back(
+            {mesh.ground, mesh.ground_edges, QColor::fromRgb(mesh.color), mesh.opacity, mesh.fill});
     footprints_ = footprints->empty() ? nullptr : std::move(footprints);
     ++footprints_revision_;
-    footprint_raster_ = {};
-    footprint_preview_ = {};
-    if (cancel_footprints_)
-        cancel_footprints_->store(true, std::memory_order_relaxed);
+    if (!continuous || !footprints_) {
+        // Edits, seeks and removals invalidate even in-flight results. Ordinary
+        // playback instead lets its worker finish and then samples the latest input.
+        footprints_reset_revision_ = footprints_revision_;
+        footprint_raster_ = {};
+        footprint_preview_ = {};
+        if (cancel_footprints_)
+            cancel_footprints_->store(true, std::memory_order_relaxed);
+    }
     update();
 }
 void GroundMap::set_snapshot(const visualization::RenderSnapshot &snapshot) {
@@ -973,13 +986,16 @@ QRectF GroundMap::raster_draw_bounds(const Raster &raster) const {
     }
     return bounds;
 }
-bool GroundMap::useful_detail(const Raster &raster) const {
-    return same_scale(raster) && raster_draw_bounds(raster).intersects(plot_rect());
+bool GroundMap::useful_detail(const Raster &raster, bool allow_rescale) const {
+    return !raster.bounds.isEmpty() && !raster.preview && raster.ratio == devicePixelRatioF() &&
+           (allow_rescale || same_scale(raster)) &&
+           raster_draw_bounds(raster).intersects(plot_rect());
 }
-bool GroundMap::prefer_detail(const Raster &candidate, const Raster &current) const {
-    if (!useful_detail(candidate))
+bool GroundMap::prefer_detail(const Raster &candidate, const Raster &current,
+                              bool allow_rescale) const {
+    if (!useful_detail(candidate, allow_rescale))
         return false;
-    if (!useful_detail(current) || covers_view(candidate))
+    if (!useful_detail(current, allow_rescale) || covers_view(candidate))
         return true;
     const auto overlap = [&](const Raster &raster) {
         const auto visible = raster_draw_bounds(raster).intersected(plot_rect());
@@ -1165,8 +1181,12 @@ GroundMap::Raster GroundMap::rasterize_footprints(Raster result,
         if (cancelled.load(std::memory_order_relaxed))
             break;
         bool fill_visible = false;
+        QPainterPath fill_path;
         if (footprint.filled && footprint.opacity > 0) {
-            const auto fill_bounds = footprint.fill.boundingRect();
+            fill_path = footprint_path(footprint.ground, &cancelled);
+            if (cancelled.load(std::memory_order_relaxed))
+                break;
+            const auto fill_bounds = fill_path.boundingRect();
             fill_visible = std::any_of(worlds.begin(), worlds.end(), [&](const auto &world) {
                 return world.geographic.intersects(fill_bounds);
             });
@@ -1220,10 +1240,10 @@ GroundMap::Raster GroundMap::rasterize_footprints(Raster result,
                     }
                 }
             };
-            for (int i = 0; i < footprint.fill.elementCount(); ++i) {
+            for (int i = 0; i < fill_path.elementCount(); ++i) {
                 if ((i % 256) == 0 && cancelled.load(std::memory_order_relaxed))
                     break;
-                const auto element = footprint.fill.elementAt(i);
+                const auto element = fill_path.elementAt(i);
                 if (element.isMoveTo()) {
                     draw();
                     count = 0;
@@ -1260,10 +1280,16 @@ GroundMap::Raster GroundMap::rasterize_footprints(Raster result,
         color.setAlphaF(.85f);
         output.setPen(QPen(color, 1.2));
         output.setBrush(Qt::NoBrush);
+        QPainterPath edges;
+        for (const auto &edge : footprint.edges) {
+            if (cancelled.load(std::memory_order_relaxed))
+                break;
+            edges.addPath(ground_path({ground_coordinates(edge[0]), ground_coordinates(edge[1])}));
+        }
         output.save();
         for (const auto &world : worlds) {
             output.setClipRect(world.bounds);
-            if (!draw_track(output, world.transform.map(footprint.edges), &cancelled))
+            if (!draw_track(output, world.transform.map(edges), &cancelled))
                 break;
         }
         output.restore();
@@ -1281,10 +1307,12 @@ void GroundMap::poll_footprints() {
         auto result = pending_footprints_.get();
         if (WorkbenchProfile::active)
             WorkbenchProfile::active->record("map_footprint_worker_ms", result.milliseconds);
-        if (result.complete && result.revision == footprints_revision_) {
+        if (result.complete && result.revision >= footprints_reset_revision_) {
             if (result.preview)
                 footprint_preview_ = std::move(result);
-            else if (prefer_detail(result, footprint_raster_))
+            else if (useful_detail(result, true) &&
+                     (result.revision > footprint_raster_.revision ||
+                      prefer_detail(result, footprint_raster_, true)))
                 footprint_raster_ = std::move(result);
         }
     } catch (const std::exception &) {
@@ -1295,22 +1323,31 @@ void GroundMap::poll_footprints() {
     update();
 }
 void GroundMap::prepare_footprints(bool navigating) {
-    if (cancel_footprints_ && (footprint_request_.revision != footprints_revision_ ||
-                               (!footprint_request_.preview && !useful_detail(footprint_request_))))
+    if (cancel_footprints_ &&
+        (footprint_request_.revision < footprints_reset_revision_ ||
+         (!footprint_request_.preview && !useful_detail(footprint_request_, true))))
         cancel_footprints_->store(true, std::memory_order_relaxed);
     poll_footprints();
     if (!footprints_ || pending_footprints_.valid())
         return;
     const bool ready =
-        navigating ? same_scale(footprint_raster_) && covers_view(footprint_raster_, false, 64)
-                   : footprints_ready();
-    if (ready)
+        footprint_raster_.revision == footprints_revision_ &&
+        (navigating ? same_scale(footprint_raster_) && covers_view(footprint_raster_, false, 64)
+                    : footprints_ready());
+    const bool preview_ready =
+        footprint_preview_.revision == footprints_revision_ && !footprint_preview_.image.isNull();
+    if (ready && (!preview_usable() || preview_ready))
         return;
-    const bool preview = preview_usable() && footprint_preview_.image.isNull();
-    if (zoom_animation_.state() == QAbstractAnimation::Running && !preview && preview_usable())
+    // Alternate overview and detail during playback so neither fallback can age
+    // indefinitely. Only one immutable request runs; intermediate times are coalesced.
+    const bool preview =
+        preview_usable() && (footprint_preview_.image.isNull() ||
+                             footprint_preview_.revision < footprint_raster_.revision);
+    if (zoom_animation_.state() == QAbstractAnimation::Running && !preview && preview_usable() &&
+        preview_ready)
         return;
-    // Refill before the overscan runs out. A same-scale worker keeps running
-    // through fractional input while any of its coverage remains useful.
+    // Refill before the overscan runs out. Zooming reprojects completed coverage
+    // and keeps useful workers running until current-scale detail replaces it.
     auto request = preview ? preview_request() : raster_request();
     request.revision = footprints_revision_;
     footprint_request_ = request;
@@ -1484,15 +1521,10 @@ void GroundMap::paintEvent(QPaintEvent *event) {
         p.save();
         p.setClipRect(plot);
         const Raster *footprint = nullptr;
-        if (!footprint_raster_.image.isNull() && footprint_raster_.ratio == devicePixelRatioF()) {
-            const auto scale = raster_transform(footprint_raster_).m11();
-            if (scale >= .5 && scale <= 2 && raster_draw_bounds(footprint_raster_).intersects(plot))
-                footprint = &footprint_raster_;
-        }
-        const auto *footprint_fallback = preview_usable() && !footprint_preview_.image.isNull() &&
-                                                 footprint_preview_.revision == footprints_revision_
-                                             ? &footprint_preview_
-                                             : nullptr;
+        if (!footprint_raster_.image.isNull() && useful_detail(footprint_raster_, true))
+            footprint = &footprint_raster_;
+        const auto *footprint_fallback =
+            preview_usable() && !footprint_preview_.image.isNull() ? &footprint_preview_ : nullptr;
         draw_layer(p, footprint, footprint_fallback);
         p.setRenderHint(QPainter::SmoothPixmapTransform, false);
         const auto label_context = font().toString() + '/' + QString::number(devicePixelRatioF());

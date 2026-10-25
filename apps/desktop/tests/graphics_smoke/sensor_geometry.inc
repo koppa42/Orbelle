@@ -143,11 +143,88 @@ void Workbench::smoke_sensor_geometry() {
         ++orbit_smoke_stage_;
         break;
     }
-    case 211:
-        if (project_candidate_.valid())
+    case 211: {
+        if (project_candidate_.valid() || ++smoke_final_frames_ < 4)
             break;
-        if (++smoke_final_frames_ >= 4)
-            ++orbit_smoke_stage_;
+        auto project = project_snapshot(project_path_);
+        auto &sensor = project.sensors.front();
+        sensor.pattern = core::SensorPattern(45 * std::numbers::pi / 180);
+        sensor.pointing = application::SensorPointing::nadir;
+        sensor.target_station_id.clear();
+        sensor.tilt_x_rad = sensor.tilt_y_rad = sensor.roll_rad = 0;
+        sensor.display.color = 0xff00ff;
+        sensor.display.opacity = .85;
+        start_project(std::move(project), project_path_, true);
+        smoke_final_frames_ = 0;
+        ++orbit_smoke_stage_;
+        break;
+    }
+    case 212:
+        if (project_candidate_.valid() || ++smoke_final_frames_ < 4)
+            break;
+        workspace_->select_view(1);
+        // Smoke playback uses frame_count_ seconds. Warm the map near that time
+        // so the first moving sample remains inside the focused viewport.
+        seek_epoch(core::Epoch{
+            scenario_->first().tai_nanoseconds() +
+            static_cast<std::int64_t>(
+                std::fmod(static_cast<double>(frame_count_), duration_seconds()) * 1e9)});
+        snapshot_ = sample_frame(*precise_epoch_);
+        update_satellite();
+        set_selection(0);
+        ground_map_->reset_view();
+        ground_map_->focus_selection();
+        smoke_final_frames_ = 0;
+        ++orbit_smoke_stage_;
+        break;
+    case 213:
+        if (++smoke_final_frames_ < 4 || !ground_map_->footprints_ready())
+            break;
+        save_workbench_image("sensor-playback-start-2d.png");
+        smoke_view_epoch_ = snapshot_.epoch;
+        set_playing(true);
+        smoke_final_frames_ = 0;
+        ++orbit_smoke_stage_;
+        break;
+    case 214: {
+        ++smoke_final_frames_;
+        if (smoke_final_frames_ == 6 || smoke_final_frames_ == 22)
+            ground_map_->zoom_centered(2);
+        if (smoke_final_frames_ == 14 || smoke_final_frames_ == 30)
+            ground_map_->zoom_centered(.5);
+        const auto image = ground_map_->grab().toImage();
+        const auto ratio = image.devicePixelRatio();
+        int coverage = 0;
+        for (int y = qCeil(14 * ratio); y < image.height() - 44 * ratio; ++y)
+            for (int x = qCeil(38 * ratio); x < image.width() - 16 * ratio; ++x) {
+                const auto color = image.pixelColor(x, y);
+                coverage += color.red() > 180 && color.blue() > 180 && color.green() < 70;
+            }
+        smoke_require(coverage > 20, "2D sensor coverage disappeared during playback/zoom");
+        if (smoke_final_frames_ == 12)
+            save_workbench_image("sensor-playback-zoom-2d.png");
+        if (smoke_final_frames_ < 40)
+            break;
+        smoke_require(snapshot_.epoch.tai_nanoseconds() > smoke_view_epoch_.tai_nanoseconds() &&
+                          ground_map_->epoch() == snapshot_.epoch,
+                      "Sensor playback did not advance the shared scene time");
+        set_playing(false);
+        save_workbench_image("sensor-playback-stop-2d.png");
+        smoke_record("sensor-2d-coverage-continuous-through-playback-and-zoom");
+        const auto saved = smoke_dir_ + "/sensor-geometry-3.orbelle";
+        start_project(application::load_project(std::filesystem::path(saved.toStdWString())), saved,
+                      true);
+        smoke_final_frames_ = 0;
+        ++orbit_smoke_stage_;
+        break;
+    }
+    case 215:
+        if (project_candidate_.valid() || ++smoke_final_frames_ < 4)
+            break;
+        ground_map_->reset_view();
+        workspace_->select_view(0);
+        fit_views();
+        ++orbit_smoke_stage_;
         break;
     default:
         throw std::logic_error("Stage does not belong to sensor_geometry");
