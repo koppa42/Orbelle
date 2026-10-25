@@ -3914,7 +3914,7 @@ class Workbench final : public WorkbenchWindow {
         update_actions();
         show_timeline_status();
     }
-    void update_satellite() {
+    void update_satellite(bool advance_footprints = false) {
         const ProfileScope profile("satellite_update_ms");
         if (benchmarking_) {
             markers_->update(snapshot_);
@@ -4056,7 +4056,7 @@ class Workbench final : public WorkbenchWindow {
         } else if (sensor_layer_)
             sensor_layer_->update(sensor_meshes, srgb, devicePixelRatioF());
         if (ground_map_)
-            ground_map_->set_sensor_footprints(sensor_footprints);
+            ground_map_->set_sensor_footprints(sensor_footprints, advance_footprints);
         for (std::size_t i = 0; i < stations_.size(); ++i) {
             const auto &station = stations_[i].config;
             fixed.markers.push_back(
@@ -5341,7 +5341,6 @@ class Workbench final : public WorkbenchWindow {
                                             : qRound(10000 * seconds_ / duration_seconds()));
             slider_->blockSignals(false);
         }
-        requested_time_ = false;
         const core::Epoch epoch =
             !benchmarking_ && !playing_ && precise_epoch_
                 ? *precise_epoch_
@@ -5351,9 +5350,12 @@ class Workbench final : public WorkbenchWindow {
             track_pixel_ratio_ = devicePixelRatioF();
             satellite_state_dirty_ = true;
         }
+        const bool advance_footprints = playing_ && !requested_time_ && !satellite_state_dirty_ &&
+                                        epoch.tai_nanoseconds() > snapshot_.epoch.tai_nanoseconds();
+        requested_time_ = false;
         if (benchmarking_ || satellite_state_dirty_ || snapshot_.epoch != epoch) {
             snapshot_ = sample_frame(epoch);
-            update_satellite();
+            update_satellite(advance_footprints);
         }
         request_display_cache();
         if (time_label_ && (time_label_epoch_ != epoch || time_label_scale_ != display_scale_)) {
@@ -5886,7 +5888,7 @@ class Workbench final : public WorkbenchWindow {
         SmokeScenario{"specialist-reports", 178, 191, &Workbench::smoke_specialist_reports},
         SmokeScenario{"status-feedback", 192, 197, &Workbench::smoke_status_feedback},
         SmokeScenario{"object-insertion", 198, 203, &Workbench::smoke_object_insertion},
-        SmokeScenario{"sensor-geometry", 204, 211, &Workbench::smoke_sensor_geometry}};
+        SmokeScenario{"sensor-geometry", 204, 215, &Workbench::smoke_sensor_geometry}};
     const char *orbit_smoke_scenario() const {
         for (const auto &scenario : smoke_scenarios_)
             if (orbit_smoke_stage_ >= scenario.first_stage &&
