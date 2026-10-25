@@ -35,7 +35,7 @@ TEST(DesktopText, MissingKeyFailsExplicitly) {
 TEST(DesktopText, PlaceholdersUnicodeAndLineBreaksArePreserved) {
     EXPECT_EQ(ui::text("coverage_map.label_4").arg("12", "34", "h", "5", "678"),
               QString::fromUtf8("经度 12° · 纬度 34°\nh 5\n面积 678 km²"));
-    EXPECT_EQ(ui::text("common.object_id_hint").arg("station-1"),
-              QString::fromUtf8("ID：station-1"));
+    EXPECT_EQ(ui::text("sensor.geometry.tooltip").arg(QString::fromUtf8("圆锥")),
+              QString::fromUtf8("圆锥视场"));
 }
 } // namespace orbelle::desktop

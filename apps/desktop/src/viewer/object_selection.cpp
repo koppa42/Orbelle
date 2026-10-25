@@ -10,6 +10,7 @@
 #include <QSignalBlocker>
 #include <QStyleOptionButton>
 #include <QStylePainter>
+#include <QTextDocument>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
@@ -47,6 +48,10 @@ bool contains(const std::vector<std::string> &ids, const std::string &id) {
     return std::ranges::find(ids, id) != ids.end();
 }
 } // namespace
+
+QString object_tooltip(const QString &name, const QString &detail) {
+    return Qt::convertFromPlainText(name + "\n" + detail);
+}
 
 std::vector<ObjectChoice> project_object_choices(const application::Project &project,
                                                  std::initializer_list<ObjectKind> allowed) {
@@ -233,8 +238,7 @@ void ObjectSelectionPanel::set_objects(std::vector<ObjectChoice> objects) {
         item->setData(0, kind_role, static_cast<int>(object.kind));
         item->setData(0, path_role, object.path.isEmpty() ? object.name : object.path);
         item->setData(0, available_role, object.selectable && !missing);
-        item->setToolTip(0,
-                         item->data(0, path_role).toString() + "\nID: " + object_text(object.id));
+        item->setToolTip(0, object_tooltip(item->data(0, path_role).toString(), item->text(1)));
         Qt::ItemFlags flags = Qt::ItemIsEnabled;
         if (object.selectable)
             flags |= Qt::ItemIsSelectable;
@@ -327,13 +331,13 @@ void ObjectSelectionPanel::update_status() {
     clear_->setEnabled(!value_.all && !value_.ids.empty());
     auto *current = tree_->currentItem();
     const auto path = current ? current->data(0, path_role).toString() : QString{};
-    const auto id = current ? current->data(0, id_role).toString() : QString{};
+    const auto kind = current ? current->text(1) : QString{};
     const int width = std::max(1, details_->width());
-    details_->setText(
-        current ? details_->fontMetrics().elidedText(path, Qt::ElideMiddle, width) + "\n" +
-                      details_->fontMetrics().elidedText("ID: " + id, Qt::ElideMiddle, width)
-                : ui::text("object_selection.label_8"));
-    details_->setToolTip(path + "\nID: " + id);
+    details_->setText(current ? details_->fontMetrics().elidedText(path, Qt::ElideMiddle, width) +
+                                    "\n" +
+                                    details_->fontMetrics().elidedText(kind, Qt::ElideMiddle, width)
+                              : ui::text("object_selection.label_8"));
+    details_->setToolTip(current ? object_tooltip(path, kind) : QString{});
     emit selectionChanged();
 }
 void ObjectSelectionPanel::resizeEvent(QResizeEvent *event) {
@@ -432,6 +436,7 @@ QSize ObjectSelectionField::minimumSizeHint() const {
 }
 void ObjectSelectionField::refresh() {
     QString label;
+    QString detail;
     auto glyph = workbench_icon(WorkbenchIcon::search);
     if (selection_.all)
         label = options_.all_label;
@@ -443,14 +448,14 @@ void ObjectSelectionField::refresh() {
         const auto found = std::ranges::find(objects_, id(), &ObjectChoice::id);
         if (found != objects_.end() && found->selectable) {
             label = found->path.isEmpty() ? found->name : found->path;
+            detail = kind_name(found->kind);
             glyph = object_icon(found->kind);
         } else
             label = object_text(id()) + ui::text("object_selection.label_7");
     }
     setText(label);
     setIcon(glyph);
-    setToolTip(label + (selection_.ids.size() == 1 ? "\nID: " + object_text(id()) : QString{}) +
-               ui::text("object_selection.label_10"));
+    setToolTip(object_tooltip(label, (detail + ui::text("object_selection.label_10")).trimmed()));
     setAccessibleDescription(label + ui::text("object_selection.label_11"));
 }
 void ObjectSelectionField::paintEvent(QPaintEvent *) {

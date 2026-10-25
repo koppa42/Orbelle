@@ -648,7 +648,8 @@ struct ReportCreationDialog::Impl {
                                                : object && object->kind == ObjectKind::sensor
                                                    ? "object_selection.label_3"
                                                    : "object_selection.label"));
-                        item->setToolTip(name + "\nID: " + QString::fromStdString(id));
+                        item->setToolTip(
+                            object_tooltip(name, item->data(Qt::UserRole + 1).toString()));
                         if (!object || !object->selectable)
                             item->setForeground(theme::color(theme::warning));
                         if (item->data(Qt::UserRole).toString() == current_id)

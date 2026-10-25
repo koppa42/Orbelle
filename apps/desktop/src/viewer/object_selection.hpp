@@ -14,6 +14,8 @@ class QTreeWidgetItem;
 
 namespace orbelle::desktop {
 enum class ObjectKind { satellite, ground_station, sensor, region, other };
+// Names and paths are user text; escape them before Qt renders a rich-text tooltip.
+QString object_tooltip(const QString &name, const QString &detail);
 struct ObjectChoice {
     std::string id;
     QString name;
