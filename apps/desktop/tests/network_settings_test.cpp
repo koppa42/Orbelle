@@ -663,8 +663,9 @@ TEST_F(NetworkSettingsTest, IntegratedDataUsesOneNavigationAndFitsEveryProductAt
                          << "width=" << width << " product=" << static_cast<int>(product));
             select_data(dialog, product);
             auto *tabs = dialog.findChild<QTabWidget *>("dataPages");
-            EXPECT_EQ(tabs->isTabVisible(1), product != DataProduct::custom_gravity &&
-                                                 product != DataProduct::custom_ocean_tides);
+            EXPECT_EQ(tabs->isTabVisible(1),
+                      product == DataProduct::finals2000a || product == DataProduct::c04 ||
+                          product == DataProduct::utc || product == DataProduct::space_weather);
             for (int tab = 0; tab < tabs->count(); ++tab) {
                 if (!tabs->isTabVisible(tab))
                     continue;

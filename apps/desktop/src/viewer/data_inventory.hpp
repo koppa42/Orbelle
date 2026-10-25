@@ -30,6 +30,13 @@ inline bool gravity_product(DataProduct p) {
 inline bool ocean_product(DataProduct p) {
     return p == DataProduct::fes2014bv1 || p == DataProduct::custom_ocean_tides;
 }
+inline bool fixed_model_product(DataProduct p) {
+    return gravity_product(p) || ocean_product(p) || p == DataProduct::de440s;
+}
+inline bool updatable_product(DataProduct p) {
+    return p == DataProduct::finals2000a || p == DataProduct::c04 || p == DataProduct::utc ||
+           p == DataProduct::space_weather;
+}
 inline std::string ocean_selection(DataProduct p) {
     return p == DataProduct::fes2014bv1 ? "fes2014bv1" : "custom-ocean";
 }
@@ -51,7 +58,9 @@ enum class DataUpdateState {
     failed,
     cancelled,
     interrupted,
-    local_changed
+    local_changed,
+    verifying,
+    verified
 };
 struct DataUpdateStatus {
     DataUpdateState state = DataUpdateState::never_checked;
@@ -70,6 +79,7 @@ struct DataInventoryItem {
     std::optional<qint64> acquired_at;
     QDateTime first, last;
     bool exclusive_end = false;
+    bool online_download = false;
     bool online_updates = false;
     bool raw_import = false;
     bool manifest_import = false;

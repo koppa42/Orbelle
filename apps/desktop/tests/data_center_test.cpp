@@ -6,6 +6,7 @@
 #include <QEvent>
 #include <QFile>
 #include <QHostAddress>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTcpServer>
@@ -1362,6 +1363,128 @@ TEST_F(DataCenterTest, GravityImportRunsInBackgroundAndRejectsInvalidReplacement
     EXPECT_EQ(catalog.update_status(DataProduct::egm2008).state, DataUpdateState::failed);
     EXPECT_FALSE(catalog.has_full_download(DataProduct::egm2008));
 }
+TEST_F(DataCenterTest, FixedProductsIgnoreOldSchedulesButRetainDownloadAndImport) {
+    EopCatalog catalog(root() / "data", {}, {}, false);
+    for (const auto *prefix :
+         {"gravity-egm2008", "gravity-egm96", "de440s", "ocean-tides-fes2014bv1"})
+        catalog.data().set_setting(std::string(prefix) + "-auto-update", "1");
+    for (const auto product :
+         {DataProduct::egm2008, DataProduct::egm96, DataProduct::de440s, DataProduct::fes2014bv1}) {
+        const auto item = catalog.inventory().at(static_cast<std::size_t>(product));
+        EXPECT_TRUE(item.online_download);
+        EXPECT_TRUE(item.raw_import);
+        EXPECT_FALSE(item.online_updates);
+        ASSERT_FALSE(catalog.automatic_updates(product));
+        EXPECT_FALSE(catalog.preferences().updates.contains(product));
+        EXPECT_THROW(catalog.set_automatic_updates(true, product), std::invalid_argument);
+        EXPECT_THROW(catalog.set_update_interval_hours(24, product), std::invalid_argument);
+    }
+    for (const auto product : {DataProduct::utc, DataProduct::finals2000a, DataProduct::c04,
+                               DataProduct::space_weather}) {
+        EXPECT_TRUE(catalog.inventory().at(static_cast<std::size_t>(product)).online_updates);
+        EXPECT_TRUE(catalog.preferences().updates.contains(product));
+        catalog.set_automatic_updates(false, product);
+    }
+    catalog.check_updates_if_due(QDateTime::currentSecsSinceEpoch());
+    EXPECT_FALSE(catalog.downloading());
+    EopCatalog reopened(root() / "data", {}, {}, false);
+    EXPECT_FALSE(reopened.automatic_updates(DataProduct::egm2008));
+    EXPECT_EQ(reopened.preferences().updates.size(), 4U);
+}
+TEST_F(DataCenterTest, LocalGravityVerificationPreservesDataAndDetectsDamageOrMissingFiles) {
+    EopCatalog catalog(root() / "data", {}, {}, false);
+    const auto product = DataProduct::custom_gravity;
+    catalog.verify_files(product);
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(product).state, DataUpdateState::failed);
+    QFile source(temp.filePath("custom.grv"));
+    ASSERT_TRUE(source.open(QIODevice::WriteOnly));
+    const QByteArray bytes = "stk.v.6.0\nModel Local\nDegree 2\nOrder 0\nGm 3.986004415e14\n"
+                             "RefDistance 6378136.3\nNormalized Yes\nIncludesPermTide No\n"
+                             "BEGIN Coefficients\n2 0 -0.000484 0\nEND Coefficients\n";
+    source.write(bytes);
+    source.close();
+    catalog.import_raw(root() / "custom.grv", product);
+    complete(catalog);
+    ASSERT_EQ(catalog.update_status(product).state, DataUpdateState::updated);
+    const auto before = catalog.inventory().at(static_cast<std::size_t>(product));
+    const auto revision = catalog.revision();
+    catalog.verify_files(product);
+    EXPECT_TRUE(catalog.verifying_files());
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(product).state, DataUpdateState::verified);
+    EXPECT_FALSE(catalog.update_status(product).checked_at);
+    EXPECT_EQ(catalog.revision(), revision);
+    const auto after = catalog.inventory().at(static_cast<std::size_t>(product));
+    EXPECT_EQ(after.acquired_at, before.acquired_at);
+    EXPECT_EQ(after.acquisition, before.acquisition);
+    EXPECT_EQ(after.sha256, before.sha256);
+    catalog.verify_files(product);
+    catalog.cancel_download();
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(product).state, DataUpdateState::cancelled);
+    QFile installed(QString::fromStdWString(before.file.wstring()));
+    ASSERT_TRUE(installed.open(QIODevice::ReadOnly));
+    EXPECT_EQ(installed.readAll(), bytes);
+    installed.close();
+    catalog.verify_files(product);
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(product).state, DataUpdateState::verified);
+    ASSERT_TRUE(installed.open(QIODevice::WriteOnly | QIODevice::Append));
+    installed.write("damage");
+    installed.close();
+    catalog.verify_files(product);
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(product).state, DataUpdateState::failed);
+    ASSERT_TRUE(installed.open(QIODevice::ReadOnly));
+    EXPECT_EQ(installed.readAll(), bytes + "damage");
+    installed.close();
+    EXPECT_EQ(catalog.inventory().at(static_cast<std::size_t>(product)).acquired_at,
+              before.acquired_at);
+    ASSERT_TRUE(installed.remove());
+    catalog.verify_files(product);
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(product).state, DataUpdateState::failed);
+    EXPECT_FALSE(installed.exists());
+}
+TEST_F(DataCenterTest, EphemerisVerificationChecksEveryKernelWithoutInstallingAgain) {
+    if (!runtime::ephemeris_available())
+        GTEST_SKIP();
+    EopCatalog catalog(root() / "data", {}, {}, false);
+    catalog.import_ephemeris_snapshot(ORBELLE_TEST_PLANETS);
+    complete(catalog);
+    ASSERT_EQ(catalog.update_status(DataProduct::de440s).state, DataUpdateState::updated);
+    const auto entry = catalog.data().ephemerides().at(0);
+    catalog.verify_files(DataProduct::de440s);
+    complete(catalog);
+    ASSERT_EQ(catalog.update_status(DataProduct::de440s).state, DataUpdateState::verified);
+    QFile manifest(QString::fromStdWString(entry.manifest.wstring()));
+    ASSERT_TRUE(manifest.open(QIODevice::ReadOnly));
+    const auto kernels = QJsonDocument::fromJson(manifest.readAll()).object()["kernels"].toArray();
+    manifest.close();
+    ASSERT_GT(kernels.size(), 1);
+    for (const auto &value : kernels) {
+        QFile kernel(QString::fromStdWString(entry.manifest.parent_path().wstring()) + '/' +
+                     value.toObject()["file"].toString());
+        ASSERT_TRUE(kernel.open(QIODevice::ReadOnly));
+        const auto original = kernel.readAll();
+        kernel.close();
+        ASSERT_TRUE(kernel.open(QIODevice::WriteOnly | QIODevice::Append));
+        kernel.write("damage");
+        kernel.close();
+        catalog.verify_files(DataProduct::de440s);
+        complete(catalog);
+        EXPECT_EQ(catalog.update_status(DataProduct::de440s).state, DataUpdateState::failed);
+        ASSERT_TRUE(kernel.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        kernel.write(original);
+        kernel.close();
+    }
+    catalog.verify_files(DataProduct::de440s);
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(DataProduct::de440s).state, DataUpdateState::verified);
+    EXPECT_EQ(catalog.data().ephemerides().at(0).acquired_at_unix_seconds,
+              entry.acquired_at_unix_seconds);
+}
 TEST_F(DataCenterTest, LiveOfficialGravityDownload) {
     if (qEnvironmentVariableIsEmpty("ORBELLE_LIVE_GRAVITY"))
         GTEST_SKIP();
@@ -1391,7 +1514,7 @@ TEST_F(DataCenterTest, EphemerisDownloadRejectsWrongContentAndCanBeCancelled) {
     EopCatalog catalog(root() / "data", {}, {}, false);
     EXPECT_FALSE(catalog.automatic_updates(DataProduct::de440s));
     EXPECT_FALSE(catalog.has_full_download(DataProduct::de440s));
-    EXPECT_TRUE(
+    EXPECT_FALSE(
         catalog.inventory().at(static_cast<std::size_t>(DataProduct::de440s)).online_updates);
     Server server("invalid SPK data");
     catalog.start_download(server.url(), DataProduct::de440s);
@@ -1403,11 +1526,10 @@ TEST_F(DataCenterTest, EphemerisDownloadRejectsWrongContentAndCanBeCancelled) {
     complete(catalog);
     EXPECT_EQ(catalog.update_status(DataProduct::de440s).state, DataUpdateState::cancelled);
     EXPECT_TRUE(catalog.data().ephemerides().empty());
-    catalog.set_automatic_updates(true, DataProduct::de440s);
-    catalog.set_update_interval_hours(24, DataProduct::de440s);
+    EXPECT_THROW(catalog.set_automatic_updates(true, DataProduct::de440s), std::invalid_argument);
+    EXPECT_THROW(catalog.set_update_interval_hours(24, DataProduct::de440s), std::invalid_argument);
     EopCatalog reopened(root() / "data", {}, {}, false);
-    EXPECT_TRUE(reopened.automatic_updates(DataProduct::de440s));
-    EXPECT_EQ(reopened.update_interval_hours(DataProduct::de440s), 24);
+    EXPECT_FALSE(reopened.automatic_updates(DataProduct::de440s));
 }
 TEST_F(DataCenterTest, LiveOfficialEphemerisDownloadAndRecheckRetainCurrentData) {
     const auto local_file = qEnvironmentVariable("ORBELLE_FULL_DE440S");
@@ -1465,7 +1587,8 @@ TEST_F(DataCenterTest, LiveOfficialEphemerisDownloadAndRecheckRetainCurrentData)
         complete(catalog);
         EXPECT_EQ(catalog.update_status(DataProduct::de440s).state, DataUpdateState::unchanged);
         ASSERT_EQ(local_source->requests.size(), 3);
-        EXPECT_TRUE(local_source->requests.back().contains("If-None-Match: " + local_source->etag));
+        EXPECT_FALSE(local_source->requests.back().contains("If-None-Match:"));
+        EXPECT_GT(catalog.received_bytes(), 30000000);
     }
     EXPECT_EQ(catalog.data().ephemerides().at(0).info.content_sha256,
               augmented.info.content_sha256);
@@ -1528,6 +1651,13 @@ TEST_F(DataCenterTest, OceanImportRunsInBackgroundAndFailedOrCancelledDownloadsP
     EXPECT_EQ(item.ocean_tides->order, 0);
     EXPECT_FALSE(item.first.isValid());
     const auto frozen = catalog.data().load_ocean_tides("custom-ocean");
+    catalog.verify_files(DataProduct::custom_ocean_tides);
+    complete(catalog);
+    EXPECT_EQ(catalog.update_status(DataProduct::custom_ocean_tides).state,
+              DataUpdateState::verified);
+    EXPECT_EQ(
+        catalog.inventory().at(static_cast<std::size_t>(DataProduct::custom_ocean_tides)).sha256,
+        item.sha256);
     ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
     file.write("bad ocean data");
     file.close();
@@ -1571,7 +1701,8 @@ TEST_F(DataCenterTest, FullOceanTransferRecheckAndInvalidReplacementPreserveFroz
     complete(catalog);
     EXPECT_EQ(catalog.update_status(DataProduct::fes2014bv1).state, DataUpdateState::unchanged);
     ASSERT_EQ(server.requests.size(), 2);
-    EXPECT_TRUE(server.requests.back().contains("If-None-Match: " + server.etag));
+    EXPECT_FALSE(server.requests.back().contains("If-None-Match:"));
+    EXPECT_GT(catalog.received_bytes(), 10000000);
     Server invalid("truncated replacement");
     catalog.start_download(invalid.url(), DataProduct::fes2014bv1);
     complete(catalog);

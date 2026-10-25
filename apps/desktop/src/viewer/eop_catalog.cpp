@@ -197,7 +197,7 @@ EopCatalog::EopCatalog(std::filesystem::path store, std::vector<std::filesystem:
                 .object();
         const auto saved_state = saved.value("state").toInt(-1);
         if (saved.value("schema").toInt() == 1 && saved_state >= 0 &&
-            saved_state <= static_cast<int>(DataUpdateState::local_changed)) {
+            saved_state <= static_cast<int>(DataUpdateState::verified)) {
             update_.state = static_cast<DataUpdateState>(saved_state);
             update_.checked_at = timestamp(saved.value("checked_at").toString());
             update_.attempted_at = timestamp(saved.value("attempted_at").toString());
@@ -205,7 +205,8 @@ EopCatalog::EopCatalog(std::filesystem::path store, std::vector<std::filesystem:
             update_.message = saved.value("message").toString();
             update_.diagnostics = saved.value("diagnostics").toString().left(24576);
             if (update_.state == DataUpdateState::checking ||
-                update_.state == DataUpdateState::downloading) {
+                update_.state == DataUpdateState::downloading ||
+                update_.state == DataUpdateState::verifying) {
                 update_.state = DataUpdateState::interrupted;
                 update_.message = ui::text("eop_catalog.label_7");
             }
@@ -225,18 +226,28 @@ EopCatalog::EopCatalog(std::filesystem::path store, std::vector<std::filesystem:
         auto &record = update(active_product_);
         try {
             const auto installed = resource_job_.get();
-            record.state = record.checked_sha256 == QString::fromStdString(installed.sha256)
-                               ? DataUpdateState::unchanged
-                               : DataUpdateState::updated;
-            record.checked_sha256 = QString::fromStdString(installed.sha256);
-            if (installed.acquisition == runtime::DataAcquisition::downloaded) {
-                record.checked_at = QDateTime::currentSecsSinceEpoch();
-                data_.set_setting(setting_key(active_product_, "installed-source"),
-                                  installed.sha256);
-                data_.set_settings(resource_response_);
+            if (verifying_) {
+                if (*resource_cancel_)
+                    throw std::runtime_error(ui::utf8("eop_catalog.checkpoint"));
+                if (current_hash(active_product_) != installed.sha256)
+                    throw std::runtime_error(ui::utf8("eop_catalog.verification_changed"));
+                record.state = DataUpdateState::verified;
+                record.checked_sha256 = QString::fromStdString(installed.sha256);
+                record.message = status_ = ui::text("eop_catalog.verification_complete");
+            } else {
+                record.state = record.checked_sha256 == QString::fromStdString(installed.sha256)
+                                   ? DataUpdateState::unchanged
+                                   : DataUpdateState::updated;
+                record.checked_sha256 = QString::fromStdString(installed.sha256);
+                if (installed.acquisition == runtime::DataAcquisition::downloaded) {
+                    record.checked_at = QDateTime::currentSecsSinceEpoch();
+                    data_.set_setting(setting_key(active_product_, "installed-source"),
+                                      installed.sha256);
+                    data_.set_settings(resource_response_);
+                }
+                record.message = status_ = ui::text("eop_catalog.label_8");
+                ++revision_;
             }
-            record.message = status_ = ui::text("eop_catalog.label_8");
-            ++revision_;
         } catch (const std::exception &e) {
             record.state = resource_cancel_ && *resource_cancel_ ? DataUpdateState::cancelled
                                                                  : DataUpdateState::failed;
@@ -249,6 +260,7 @@ EopCatalog::EopCatalog(std::filesystem::path store, std::vector<std::filesystem:
         download_.reset();
         resource_cancel_.reset();
         resource_response_.clear();
+        verifying_ = false;
     });
     connect(&deadline_, &QTimer::timeout, this, [this] {
         transfer_error_ = ui::text("eop_catalog.label_9");
@@ -383,12 +395,12 @@ std::vector<DataInventoryItem> EopCatalog::inventory() const {
     const auto &clock = time_;
     const auto entries = data_.snapshots();
     std::vector<DataInventoryItem> items(all_data_products.size());
-    items[0].online_updates = true;
+    items[0].online_download = items[0].online_updates = true;
     items[0].raw_import = true;
     items[0].manifest_import = true;
     items[0].source_url = QString::fromStdString(source_url(DataProduct::finals2000a));
     items[1].product = DataProduct::c04;
-    items[1].online_updates = true;
+    items[1].online_download = items[1].online_updates = true;
     items[1].raw_import = true;
     items[1].source_url = QString::fromStdString(source_url(DataProduct::c04));
     items[1].manifest_import = true;
@@ -440,7 +452,7 @@ std::vector<DataInventoryItem> EopCatalog::inventory() const {
     auto &utc = items[2];
     const auto &time = clock->data_info();
     utc.product = DataProduct::utc;
-    utc.online_updates = true;
+    utc.online_download = utc.online_updates = true;
     utc.raw_import = true;
     utc.installation = DataInstallation::builtin;
     utc.acquisition = runtime::DataAcquisition::bundled;
@@ -470,7 +482,7 @@ std::vector<DataInventoryItem> EopCatalog::inventory() const {
     for (auto p : {DataProduct::egm2008, DataProduct::egm96, DataProduct::custom_gravity}) {
         auto &item = items[static_cast<std::size_t>(p)];
         item.product = p;
-        item.online_updates = p != DataProduct::custom_gravity;
+        item.online_download = p != DataProduct::custom_gravity;
         item.raw_import = true;
         item.source_url = QString::fromStdString(source_url(p));
         for (const auto &entry : gravity) {
@@ -493,7 +505,7 @@ std::vector<DataInventoryItem> EopCatalog::inventory() const {
     }
     auto &ephemeris = items[static_cast<std::size_t>(DataProduct::de440s)];
     ephemeris.product = DataProduct::de440s;
-    ephemeris.online_updates = true;
+    ephemeris.online_download = true;
     ephemeris.raw_import = true;
     ephemeris.source_url = QString::fromStdString(source_url(DataProduct::de440s));
     for (const auto &entry : data_.ephemerides()) {
@@ -532,7 +544,7 @@ std::vector<DataInventoryItem> EopCatalog::inventory() const {
     }
     auto &weather = items[static_cast<std::size_t>(DataProduct::space_weather)];
     weather.product = DataProduct::space_weather;
-    weather.online_updates = weather.raw_import = true;
+    weather.online_download = weather.online_updates = weather.raw_import = true;
     weather.source_url = QString::fromStdString(runtime::space_weather_download_url());
     for (const auto &entry : data_.weather_sources()) {
         if (entry.selection != "celestrak")
@@ -559,7 +571,7 @@ std::vector<DataInventoryItem> EopCatalog::inventory() const {
         auto &item = items[static_cast<std::size_t>(product)];
         item.product = product;
         item.raw_import = true;
-        item.online_updates = product == DataProduct::fes2014bv1;
+        item.online_download = product == DataProduct::fes2014bv1;
         item.source_url = QString::fromStdString(source_url(product));
         for (const auto &entry : oceans) {
             if (entry.selection != ocean_selection(product))
@@ -584,7 +596,8 @@ std::vector<DataInventoryItem> EopCatalog::inventory() const {
 }
 DataUpdateStatus EopCatalog::update_status(DataProduct product) const {
     auto result = updates_.at(static_cast<std::size_t>(product));
-    if ((result.state == DataUpdateState::updated || result.state == DataUpdateState::unchanged) &&
+    if ((result.state == DataUpdateState::updated || result.state == DataUpdateState::unchanged ||
+         result.state == DataUpdateState::verified) &&
         QString::fromStdString(current_hash(product)) != result.checked_sha256) {
         result.state = DataUpdateState::local_changed;
         result.message = ui::text("eop_catalog.label_10");
@@ -696,7 +709,7 @@ DataPreferences EopCatalog::preferences() const {
     result.finals_extrapolation_days = data_.extrapolation_days(runtime::EopProduct::finals2000a);
     result.c04_extrapolation_days = data_.extrapolation_days(runtime::EopProduct::c04);
     for (auto product : all_data_products)
-        if (product != DataProduct::custom_gravity && product != DataProduct::custom_ocean_tides)
+        if (updatable_product(product))
             result.updates.emplace(product, DataUpdatePreference{automatic_updates(product),
                                                                  update_interval_hours(product)});
     return result;
@@ -735,11 +748,15 @@ void EopCatalog::set_preferred_product(DataProduct product) {
     refresh_current();
 }
 bool EopCatalog::automatic_updates(DataProduct product) const {
+    if (!updatable_product(product))
+        return false;
     if (force_product(product))
         return data_.setting(setting_key(product, "auto-update")) == "1";
     return data_.setting(setting_key(product, "auto-update")) != "0";
 }
 void EopCatalog::set_automatic_updates(bool enabled, DataProduct product) {
+    if (!updatable_product(product))
+        throw std::invalid_argument("This data product has no periodic updates");
     data_.set_setting(setting_key(product, "auto-update"), enabled ? "1" : "0");
     ++revision_;
 }
@@ -750,6 +767,8 @@ int EopCatalog::update_interval_hours(DataProduct product) const {
     return valid && hours >= 1 && hours <= 168 ? hours : 168;
 }
 void EopCatalog::set_update_interval_hours(int hours, DataProduct product) {
+    if (!updatable_product(product))
+        throw std::invalid_argument("This data product has no periodic updates");
     if (hours < 1 || hours > 168)
         throw std::invalid_argument("Update interval must be 1..168 hours");
     data_.set_setting(setting_key(product, "update-hours"), std::to_string(hours));
@@ -884,6 +903,93 @@ void EopCatalog::cancel_download() {
     } else if (retry_.isActive())
         finish_download_failure(ui::text("eop_catalog.validation_9"));
 }
+void EopCatalog::verify_files(DataProduct product) {
+    if (downloading())
+        return;
+    if (!fixed_model_product(product))
+        throw std::invalid_argument("Local model verification requires a fixed data product");
+    active_product_ = product;
+    verifying_ = true;
+    cancelled_ = false;
+    received_ = 0;
+    total_ = -1;
+    last_installed_.reset();
+    resource_response_.clear();
+    resource_cancel_ = std::make_shared<std::atomic_bool>(false);
+    auto &record = update(product);
+    record.attempted_at = QDateTime::currentSecsSinceEpoch();
+    record.state = DataUpdateState::verifying;
+    record.diagnostics.clear();
+    record.message = status_ = ui::text("eop_catalog.verifying_files");
+    resource_job_ =
+        std::async(std::launch::async, [root = store_, product, cancel = resource_cancel_] {
+            runtime::DataCatalog catalog(root);
+            std::vector<std::pair<std::filesystem::path, std::string>> files;
+            std::string identity;
+            if (gravity_product(product)) {
+                for (const auto &entry : catalog.gravity_models())
+                    if (entry.selection == gravity_selection(product)) {
+                        identity = entry.info.sha256;
+                        files.emplace_back(entry.file, identity);
+                    }
+            } else if (ocean_product(product)) {
+                for (const auto &entry : catalog.ocean_tide_models())
+                    if (entry.selection == ocean_selection(product)) {
+                        identity = entry.info.sha256;
+                        files.emplace_back(entry.file, identity);
+                    }
+            } else {
+                for (const auto &entry : catalog.ephemerides()) {
+                    if (entry.selection != "de440s")
+                        continue;
+                    identity = entry.info.content_sha256;
+                    const auto kernels = ephemeris_kernels(entry);
+                    if (kernels.isEmpty())
+                        throw std::runtime_error(ui::utf8("eop_catalog.verification_manifest"));
+                    files.emplace_back(entry.manifest, identity);
+                    for (const auto &value : kernels) {
+                        const auto kernel = value.toObject();
+                        files.emplace_back(entry.manifest.parent_path() /
+                                               std::filesystem::path(
+                                                   kernel.value("file").toString().toStdWString()),
+                                           kernel.value("sha256").toString().toStdString());
+                    }
+                }
+            }
+            if (files.empty())
+                throw std::runtime_error(ui::utf8("eop_catalog.verification_missing"));
+            std::array<char, 64 * 1024> buffer;
+            for (const auto &[path, expected] : files) {
+                if (*cancel)
+                    throw std::runtime_error(ui::utf8("eop_catalog.checkpoint"));
+                QFile file(QString::fromStdWString(path.wstring()));
+                if (!file.open(QIODevice::ReadOnly))
+                    throw std::runtime_error(ui::text("eop_catalog.verification_read_failed")
+                                                 .arg(file.fileName())
+                                                 .toStdString());
+                const auto size = file.size();
+                qint64 read = 0;
+                QCryptographicHash hash(QCryptographicHash::Sha256);
+                while (!file.atEnd()) {
+                    if (*cancel)
+                        throw std::runtime_error(ui::utf8("eop_catalog.checkpoint"));
+                    const auto count = file.read(buffer.data(), static_cast<qint64>(buffer.size()));
+                    if (count <= 0 || count > size - read)
+                        throw std::runtime_error(ui::text("eop_catalog.verification_read_failed")
+                                                     .arg(file.fileName())
+                                                     .toStdString());
+                    hash.addData(QByteArrayView(buffer.data(), count));
+                    read += count;
+                }
+                if (read != size || hash.result().toHex().toStdString() != expected)
+                    throw std::runtime_error(ui::text("eop_catalog.verification_mismatch")
+                                                 .arg(file.fileName())
+                                                 .toStdString());
+            }
+            return InstalledResource{identity, runtime::DataAcquisition::unknown};
+        });
+    resource_poll_.start(50);
+}
 void EopCatalog::start_download(QUrl url, DataProduct product) {
     start_download_from_sources(url.isEmpty() ? download_sources(product) : QList<QUrl>{url},
                                 product);
@@ -914,7 +1020,7 @@ void EopCatalog::start_download_from_sources(const QList<QUrl> &sources, DataPro
         source_index_ = 0;
         source_attempt_ = 0;
         redirects_ = 0;
-        unconditional_ = false;
+        unconditional_ = fixed_model_product(product);
         // One deadline includes connection setup, every source and retry delays.
         deadline_.start(force_product(product) ? 1800000 : 120000);
         start_download_attempt();
@@ -995,7 +1101,7 @@ bool EopCatalog::recover_download(QNetworkReply &reply, int http, bool condition
     } else if (source_index_ + 1 < download_sources_.size() && deadline_.remainingTime() > 100) {
         ++source_index_;
         source_attempt_ = 0;
-        unconditional_ = false;
+        unconditional_ = fixed_model_product(active_product_);
         delay = 100;
         status_ =
             ui::text("eop_catalog.switch_source").arg(download_sources_[source_index_].host());
@@ -1241,6 +1347,7 @@ void EopCatalog::start_resource_install(const std::filesystem::path &file, DataP
                                         runtime::DataAcquisition acquisition,
                                         EphemerisImport ephemeris_import) {
     active_product_ = product;
+    verifying_ = false;
     last_installed_.reset();
     total_ = -1;
     resource_cancel_ = std::make_shared<std::atomic_bool>(false);
