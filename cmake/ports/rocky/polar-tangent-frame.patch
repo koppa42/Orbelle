@@ -1,0 +1,16 @@
+diff --git a/src/rocky/vsg/shaders/rocky.terrain.vert b/src/rocky/vsg/shaders/rocky.terrain.vert
+--- a/src/rocky/vsg/shaders/rocky.terrain.vert
++++ b/src/rocky/vsg/shaders/rocky.terrain.vert
+@@ -131,6 +131,11 @@ vec3 computeNormal_ts(in vec2 uv)
+ mat3 computeTBN_ts(in vec3 n)
+ {
+-    vec3 t = normalize(cross(vec3(0,1,0), n));
++    // At a root tile's poles, n is parallel to the local Y axis.
++    // Avoid normalizing a zero (or underflowing) cross product.
++    vec3 tangent = cross(vec3(0,1,0), n);
++    if (dot(tangent, tangent) < 1e-12)
++        tangent = cross(vec3(0,0,1), n);
++    vec3 t = normalize(tangent);
+     vec3 b = normalize(cross(n, t));
+     return mat3(t, b, n);
+ }

@@ -4,7 +4,7 @@ vcpkg_from_github(
     REF 59d953669485b07c31e8207780a89a90973044bf
     SHA512 122dfb9716f4bf8148dc4e4d83aa3f80a8f435a941771d1dbd2b50cebcb3e0b1da07bf787b6582d00cde2404a0c9ca647f5726d458a697aee426e731cb202aed
     HEAD_REF main
-    PATCHES optional-imgui.patch update-synchronization.patch
+    PATCHES optional-imgui.patch update-synchronization.patch polar-tangent-frame.patch
 )
 
 # Upstream unconditionally adds demos/tests. They are not part of the dependency SDK.

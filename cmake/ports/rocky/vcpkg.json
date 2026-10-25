@@ -1,7 +1,7 @@
 {
   "name": "rocky",
   "version": "1.1.0",
-  "port-version": 1,
+  "port-version": 2,
   "description": "Rocky geospatial renderer, fixed Orbelle integration build",
   "homepage": "https://github.com/pelicanmapping/rocky",
   "license": "MIT",
