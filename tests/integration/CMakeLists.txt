@@ -34,4 +34,4 @@ gtest_discover_tests(orbelle_integration_tests DISCOVERY_MODE PRE_TEST
 
 target_include_directories(orbelle_integration_tests PRIVATE "${PROJECT_SOURCE_DIR}/tests/support")
 
-target_sources(orbelle_integration_tests PRIVATE sensor_view_test.cpp)
+target_sources(orbelle_integration_tests PRIVATE sensor_view_test.cpp region_view_test.cpp)

@@ -10,6 +10,7 @@
 #include <orbelle/core/propagation/ground_station.hpp>
 #include <orbelle/core/propagation/hpop.hpp>
 #include <orbelle/core/propagation/j4_mean_elements.hpp>
+#include <orbelle/core/propagation/region.hpp>
 #include <orbelle/core/propagation/sensor.hpp>
 #include <orbelle/core/propagation/tle.hpp>
 #include <span>
@@ -146,6 +147,25 @@ struct ProjectSensor {
         return display_name.empty() ? object_id : display_name;
     }
 };
+struct RegionDisplay {
+    bool show_2d = true, show_3d = true;
+    // Shared opaque sRGB outline color; fill uses the same color in both views.
+    std::uint32_t color = 0x8cd3b0;
+    bool fill = true;
+    double opacity = .12; // [0,1], display only.
+    bool operator==(const RegionDisplay &) const = default;
+};
+struct ProjectRegion {
+    std::string object_id = "region-1", display_name;
+    core::RegionBoundary boundary;
+    RegionDisplay display;
+    std::string description;
+    // Angular grid spacing at the equator, radians in (0, pi].
+    double grid_resolution_rad = 5 * std::numbers::pi / 180;
+    [[nodiscard]] const std::string &name() const {
+        return display_name.empty() ? object_id : display_name;
+    }
+};
 // A successfully prepared analysis, not a cache of calculated results.
 struct AnalysisRecord {
     std::string input_sha256, data_sha256;
@@ -159,6 +179,7 @@ struct Project {
     std::vector<ProjectSatellite> satellites;
     std::vector<ProjectGroundStation> ground_stations;
     std::vector<ProjectSensor> sensors;
+    std::vector<ProjectRegion> regions;
     std::vector<ReportDefinition> reports;
     // Provenance of the last calculation, not a requirement to load an old file.
     // The desktop checks current data/policy and requires consent for changes.
@@ -191,6 +212,15 @@ class ProjectError : public std::runtime_error {
 // Editors may temporarily leave references unresolved in a private candidate.
 // Published projects and files must always validate with relationships enabled.
 void validate_project(const Project &project, bool relationships = true);
+// Named regions bind by stable ID. Empty region_id retains an explicit inline
+// rectangle for SDK queries; a missing nonempty ID is an error, never a fallback.
+[[nodiscard]] const ProjectRegion &report_region(const Project &, const ReportQuery &);
+[[nodiscard]] core::CoverageGrid report_coverage_bounds(const Project &, const ReportQuery &);
+void visit_report_coverage_grid(const Project &, const ReportQuery &,
+                                const std::function<void(const core::CoverageCell &)> &consume,
+                                const std::function<void()> &check_cancelled = {});
+[[nodiscard]] std::vector<core::CoverageCell> report_coverage_grid(const Project &,
+                                                                   const ReportQuery &);
 // Includes the path from each noncentral HPOP initial epoch to the scenario.
 [[nodiscard]] std::pair<core::Epoch, core::Epoch> calculation_data_interval(const Project &project);
 // Physical inputs, stable IDs and relationships; excludes names, appearance,

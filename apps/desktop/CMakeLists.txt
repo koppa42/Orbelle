@@ -81,6 +81,7 @@ if(ORBELLE_WITH_VSG)
         src/viewer/orbit_design_preview.cpp src/viewer/orbit_design_preview.hpp
         src/viewer/ground_station_editor.cpp src/viewer/ground_station_editor.hpp
         src/viewer/sensor_editor.cpp src/viewer/sensor_editor.hpp
+        src/viewer/region_editor.cpp src/viewer/region_editor.hpp
         src/viewer/object_selection.cpp src/viewer/object_selection.hpp
         src/viewer/epoch_editor.cpp src/viewer/ground_map.cpp src/viewer/workspace.cpp
         src/viewer/workbench_profile.cpp src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
@@ -202,7 +203,7 @@ if(ORBELLE_WITH_VSG)
             tests/orbit_editor_test.cpp
             tests/property_editor_test.cpp
             tests/facility_editor_test.cpp
-            tests/sensor_editor_test.cpp
+            tests/sensor_editor_test.cpp tests/region_editor_test.cpp
             tests/mission_editor_test.cpp
             tests/hpop_settings_test.cpp
             tests/hpop_gravity_test.cpp
@@ -215,7 +216,7 @@ if(ORBELLE_WITH_VSG)
             src/viewer/satellite_creation.cpp
             src/viewer/orbit_design_preview.cpp src/viewer/ground_map.cpp src/viewer/workbench_profile.cpp
             src/viewer/quantity_editor.cpp src/viewer/quantity_editor.hpp
-            src/viewer/ground_station_editor.cpp src/viewer/sensor_editor.cpp
+            src/viewer/ground_station_editor.cpp src/viewer/sensor_editor.cpp src/viewer/region_editor.cpp
             src/viewer/object_selection.cpp src/viewer/object_selection.hpp
             src/viewer/orbit_editor.cpp src/viewer/hpop_settings.cpp src/viewer/hpop_covariance_editor.cpp src/viewer/data_center_dialog.cpp src/viewer/mission_editor.cpp src/viewer/track_style_editor.cpp src/viewer/epoch_editor.cpp src/viewer/workbench_style.cpp)
         target_sources(orbelle_quantity_tests PRIVATE src/viewer/eop_catalog.cpp)

@@ -23,6 +23,9 @@ QPointF ground_coordinates(const std::array<double, 3> &position_m);
 // Opaque multiplicative day/night display mask; input is an ITRF unit direction.
 QImage ground_lighting_mask(const std::array<double, 3> &sun_direction);
 QPainterPath ground_path(std::span<const QPointF> longitude_latitude);
+// Closed, continuously unwrapped longitude/latitude outline, in radians.
+// Returns a fill clipped to [-180,180] x [-90,90] degrees, including seam pieces.
+QPainterPath ground_region_path(std::span<const core::RegionVertex> outline);
 QPainterPath ground_footprint_path(std::span<const core::SensorTriangle> triangles);
 inline QPainterPath ground_path(std::initializer_list<QPointF> points) {
     return ground_path(std::span<const QPointF>(points.begin(), points.size()));
@@ -57,6 +60,7 @@ class GroundMap final : public QWidget {
     void set_name(std::size_t index, const QString &name);
     void set_station_name(std::size_t index, const std::string &id, const QString &name);
     void set_ground_stations(const std::vector<application::ProjectGroundStation> &stations);
+    void set_regions(const std::vector<application::ProjectRegion> &regions);
     void set_snapshot(const visualization::RenderSnapshot &snapshot);
     // Continuous playback keeps completed coverage while coalescing newer positions.
     // Configuration changes and time jumps use the default replacement behavior.
@@ -107,6 +111,18 @@ class GroundMap final : public QWidget {
     bool event(QEvent *) override;
 
   private:
+    struct RegionOverlay {
+        QPainterPath path;
+        QPainterPath fill_path;
+        QColor color;
+        double opacity;
+        bool fill;
+        bool visible;
+        QPointF center;
+        QSizeF extent;
+    };
+    std::vector<RegionOverlay> regions_;
+    std::optional<std::size_t> selected_region_;
     struct Point {
         QString name;
         QPointF geographic;

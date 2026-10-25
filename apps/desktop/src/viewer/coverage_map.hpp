@@ -1,4 +1,5 @@
 #pragma once
+#include <QImage>
 #include <QWidget>
 #include <functional>
 #include <memory>
@@ -26,12 +27,15 @@ class CoverageMap final : public QWidget {
 
   private:
     std::shared_ptr<const runtime::ReportResult> result_;
+    std::vector<core::RegionVertex> outline_;
+    QImage background_;
     int metric_ = 0;
     std::size_t selected_ = 0;
     QRectF map_rect() const;
     QRectF cell_rect(const core::CoverageCell &) const;
     double value(const results::CoveragePoint &) const;
     double maximum() const;
-    void draw(QPainter &) const;
+    void draw_background(QPainter &) const;
+    void draw_selection(QPainter &) const;
 };
 } // namespace orbelle::desktop

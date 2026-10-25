@@ -1831,4 +1831,107 @@ TEST_F(GroundMapTest, AnimatedZoomSettlesToTheSameDetailedTracksAsDirectZoom) {
     ASSERT_TRUE(settle(fresh));
     expect_same_pixels(pixels(map), pixels(fresh));
 }
+TEST_F(GroundMapTest, RegionOutlinePersistsAcrossPlaybackAndFocusesAcrossDateLine) {
+    GroundMap map(imagery_);
+    configure(map);
+    map.set_lighting(false);
+    map.set_grid_visible(false);
+    map.set_tracks_visible(false);
+    map.show();
+    ASSERT_TRUE(settle(map));
+    const auto empty = pixels(map);
+    application::ProjectRegion region;
+    region.boundary.vertices = {{-.5, -.2}, {.5, -.2}, {0, .2}};
+    region.display.color = 0xff00ff;
+    map.set_regions({region});
+    ASSERT_TRUE(settle(map));
+    const auto outlined = pixels(map);
+    EXPECT_NE(outlined, empty);
+    for (int i = 0; i < 10; ++i) {
+        map.set_snapshot({core::Epoch{100 + i},
+                          core::FrameId::itrf,
+                          core::OriginId::earth,
+                          {{"Satellite", {7e6, 0, 0}}}});
+        EXPECT_EQ(pixels(map), outlined);
+    }
+    region.boundary.vertices = {{3.0, -.2}, {-3.0, -.2}, {3.1, .2}};
+    map.set_regions({region});
+    map.set_selection(1); // One marker precedes the region.
+    map.focus_selection();
+    ASSERT_TRUE(settle(map));
+    EXPECT_GT(map.zoom_factor(), 2);
+    int highlighted = 0;
+    const auto focused = pixels(map);
+    for (int y = 0; y < focused.height(); ++y)
+        for (int x = 0; x < focused.width(); ++x) {
+            const auto c = focused.pixelColor(x, y);
+            highlighted += c.red() > 220 && c.blue() > 220 && c.green() < 40;
+        }
+    EXPECT_GT(highlighted, 100);
+    region.display.show_2d = false;
+    map.set_regions({region});
+    ASSERT_TRUE(settle(map));
+    EXPECT_NE(pixels(map), focused);
+}
+TEST_F(GroundMapTest, RegionFillClipsDateLineAndConcavitiesAndPreservesColorOnSelection) {
+    GroundMap map(imagery_);
+    map.resize(800, 400);
+    map.set_lighting(false);
+    map.set_grid_visible(false);
+    map.set_sun_visible(false);
+    map.show();
+    ASSERT_TRUE(settle(map));
+    const auto background = pixels(map);
+    const auto plot = QRectF(map.rect()).adjusted(38, 14, -16, -44);
+    const auto point = [&](double longitude, double latitude) {
+        const auto scale = std::max(plot.width(), 2 * plot.height()) / 360;
+        return ((plot.center() + QPointF(longitude * scale, -latitude * scale)) *
+                map.devicePixelRatioF())
+            .toPoint();
+    };
+    constexpr double degree = std::numbers::pi / 180;
+    application::ProjectRegion region;
+    region.display.color = 0x4080c0;
+    region.display.opacity = 1;
+    region.boundary.south_rad = -20 * degree;
+    region.boundary.north_rad = 20 * degree;
+    region.boundary.west_rad = 170 * degree;
+    region.boundary.east_rad = -170 * degree;
+    for (bool polygon : {false, true}) {
+        if (polygon)
+            region.boundary.vertices = {{170 * degree, -20 * degree},
+                                        {-170 * degree, -20 * degree},
+                                        {-170 * degree, 20 * degree},
+                                        {170 * degree, 20 * degree}};
+        map.set_regions({region});
+        ASSERT_TRUE(settle(map));
+        const auto filled = pixels(map);
+        for (double longitude : {-176., 176.})
+            EXPECT_EQ(filled.pixelColor(point(longitude, 0)), QColor(0x40, 0x80, 0xc0));
+        EXPECT_EQ(filled.pixelColor(point(0, 0)), background.pixelColor(point(0, 0)));
+    }
+    region.boundary.vertices = {{-40 * degree, -30 * degree},
+                                {40 * degree, -30 * degree},
+                                {40 * degree, 30 * degree},
+                                {0, 0},
+                                {-40 * degree, 30 * degree}};
+    map.set_regions({region});
+    const auto filled = pixels(map);
+    EXPECT_EQ(filled.pixelColor(point(0, -15)), QColor(0x40, 0x80, 0xc0));
+    EXPECT_EQ(filled.pixelColor(point(0, 20)), background.pixelColor(point(0, 20)));
+    map.set_selection(0);
+    const auto selected = pixels(map);
+    EXPECT_EQ(selected.pixelColor(point(0, -15)), QColor(0x40, 0x80, 0xc0));
+    EXPECT_EQ(selected.pixelColor(point(40, 0)), QColor(0x40, 0x80, 0xc0));
+    region.display.opacity = .25;
+    map.set_regions({region});
+    const auto translucent = pixels(map).pixelColor(point(0, -15));
+    const auto base = background.pixelColor(point(0, -15));
+    EXPECT_NEAR(translucent.red(), .25 * 0x40 + .75 * base.red(), 1);
+    EXPECT_NEAR(translucent.green(), .25 * 0x80 + .75 * base.green(), 1);
+    EXPECT_NEAR(translucent.blue(), .25 * 0xc0 + .75 * base.blue(), 1);
+    region.display.fill = false;
+    map.set_regions({region});
+    EXPECT_EQ(pixels(map).pixelColor(point(0, -15)), base);
+}
 } // namespace orbelle::desktop

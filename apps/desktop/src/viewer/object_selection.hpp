@@ -13,7 +13,7 @@ class QTreeWidget;
 class QTreeWidgetItem;
 
 namespace orbelle::desktop {
-enum class ObjectKind { satellite, ground_station, sensor, other };
+enum class ObjectKind { satellite, ground_station, sensor, region, other };
 struct ObjectChoice {
     std::string id;
     QString name;
@@ -33,10 +33,11 @@ struct ObjectSelectionOptions {
     // Empty disables the explicit all-objects option. Empty IDs alone never mean all.
     QString all_label;
 };
-std::vector<ObjectChoice>
-project_object_choices(const application::Project &project,
-                       std::initializer_list<ObjectKind> allowed = {
-                           ObjectKind::satellite, ObjectKind::ground_station, ObjectKind::sensor});
+std::vector<ObjectChoice> project_object_choices(const application::Project &project,
+                                                 std::initializer_list<ObjectKind> allowed = {
+                                                     ObjectKind::satellite,
+                                                     ObjectKind::ground_station, ObjectKind::sensor,
+                                                     ObjectKind::region});
 
 class ObjectSelectionPanel final : public QWidget {
     Q_OBJECT

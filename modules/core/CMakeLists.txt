@@ -1,4 +1,5 @@
 orbelle_module(orbelle_core Core
+    src/propagation/region.cpp
     src/propagation/sensor.cpp
     src/propagation/orbit_design.cpp
     src/propagation/circular_two_body.cpp src/propagation/ground_station.cpp src/frames/position_rotation.cpp

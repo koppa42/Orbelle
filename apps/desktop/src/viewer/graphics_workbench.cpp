@@ -17,6 +17,7 @@
 #include "project_scene.hpp"
 #include "project_update.hpp"
 #include "quantity_editor.hpp"
+#include "region_editor.hpp"
 #include "report_creation.hpp"
 #include "report_dialog.hpp"
 #include "report_plot.hpp"
@@ -36,6 +37,7 @@
 #include "workspace.hpp"
 #include <QUuid>
 #include <numbers>
+#include <orbelle/render_vsg/region_layer.hpp>
 #include <orbelle/runtime/access.hpp>
 #include <orbelle/runtime/ephemeris.hpp>
 #include <orbelle/runtime/gravity.hpp>
@@ -554,18 +556,21 @@ class Workbench final : public WorkbenchWindow {
                 insert_menu_->addSeparator();
                 for (const auto type :
                      {InsertObjectType::satellite, InsertObjectType::ground_station,
-                      InsertObjectType::sensor}) {
+                      InsertObjectType::sensor, InsertObjectType::region}) {
                     const bool satellite = type == InsertObjectType::satellite;
                     auto *action = insert_menu_->addAction(
-                        workbench_icon(satellite ? WorkbenchIcon::satellite
+                        workbench_icon(type == InsertObjectType::region ? WorkbenchIcon::map
+                                       : satellite                      ? WorkbenchIcon::satellite
                                        : type == InsertObjectType::sensor
                                            ? WorkbenchIcon::focus
                                            : WorkbenchIcon::ground_station),
-                        ui::text(satellite ? "insert_object_dialog.quick_satellite"
+                        ui::text(type == InsertObjectType::region ? "region.quick_insert"
+                                 : satellite ? "insert_object_dialog.quick_satellite"
                                  : type == InsertObjectType::sensor
                                      ? "insert_object_dialog.quick_sensor"
                                      : "insert_object_dialog.quick_station"));
-                    action->setObjectName(satellite ? "insertSatellitePreferred"
+                    action->setObjectName(type == InsertObjectType::region ? "insertRegionPreferred"
+                                          : satellite ? "insertSatellitePreferred"
                                           : type == InsertObjectType::sensor
                                               ? "insertSensorPreferred"
                                               : "insertStationPreferred");
@@ -1158,21 +1163,27 @@ class Workbench final : public WorkbenchWindow {
                                 report->setObjectName("openObjectReport");
                                 report->setEnabled(!busy());
                                 const auto report_id =
-                                    selected_sensor() ? selected_sensor()->object_id
+                                    selected_region_    ? regions_.at(*selected_region_).object_id
+                                    : selected_sensor() ? selected_sensor()->object_id
                                     : selected_station_
                                         ? stations_.at(*selected_station_).config.object_id
                                         : satellites_.at(*selected_).orbit->input.object_id;
                                 connect(report, &QAction::triggered, this,
                                         [this, report_id] { create_report(report_id); });
-                                auto *access =
-                                    menu.addAction(ui::text("graphics_workbench.access"));
+                                auto *access = menu.addAction(
+                                    ui::text(selected_region_ ? "region.coverage_report"
+                                                              : "graphics_workbench.access"));
                                 access->setObjectName("openObjectAccess");
-                                access->setEnabled(!busy() && !stations_.empty() &&
-                                                   !satellites_.empty());
-                                connect(access, &QAction::triggered, this, [this, report_id] {
-                                    create_report(report_id,
-                                                  application::ReportKind::access_intervals);
-                                });
+                                access->setEnabled(!busy() && !satellites_.empty() &&
+                                                   (selected_region_ || !stations_.empty()));
+                                const bool coverage = selected_region_.has_value();
+                                connect(
+                                    access, &QAction::triggered, this, [this, report_id, coverage] {
+                                        create_report(
+                                            report_id,
+                                            coverage ? application::ReportKind::coverage_grid
+                                                     : application::ReportKind::access_intervals);
+                                    });
                                 if (selected_ && !selected_sensor()) {
                                     auto *sensor =
                                         menu.addAction(ui::text("graphics_workbench.sensor"));
@@ -1681,9 +1692,12 @@ class Workbench final : public WorkbenchWindow {
             station_editor_->set_busy(!idle);
         if (sensor_editor_)
             sensor_editor_->setEnabled(idle);
+        if (region_editor_)
+            region_editor_->set_busy(!idle);
         for (auto *action : {rename_action_, duplicate_action_, delete_action_})
             if (action)
-                action->setEnabled(selected_marker_index().has_value() && idle);
+                action->setEnabled((selected_marker_index().has_value() || selected_region_) &&
+                                   idle);
         if (eop_action_)
             eop_action_->setEnabled(idle);
         if (report_action_)
@@ -1742,12 +1756,12 @@ class Workbench final : public WorkbenchWindow {
             map_action_->setEnabled(active);
         if (properties_action_)
             properties_action_->setEnabled(
-                idle && (selected_marker_index().has_value() ||
+                idle && (selected_marker_index().has_value() || selected_region_ ||
                          (scenario_ && objects_->currentItem() == scenario_item_)));
         if (focus_action_)
-            focus_action_->setEnabled(selected_marker_index().has_value());
+            focus_action_->setEnabled(selected_marker_index().has_value() || selected_region_);
         for (auto *button : view_focus_buttons_)
-            button->setEnabled(selected_marker_index().has_value());
+            button->setEnabled(selected_marker_index().has_value() || selected_region_);
     }
     std::optional<std::size_t> object_index(const QTreeWidgetItem *item) const {
         if (item && !item->data(0, Qt::UserRole + 17).toString().isEmpty())
@@ -1758,6 +1772,9 @@ class Workbench final : public WorkbenchWindow {
         for (std::size_t i = 0; i < stations_.size(); ++i)
             if (stations_[i].item == item)
                 return satellites_.size() + i;
+        for (std::size_t i = 0; i < region_items_.size(); ++i)
+            if (region_items_[i] == item)
+                return satellites_.size() + stations_.size() + i;
         return std::nullopt;
     }
     void filter_objects() {
@@ -1780,6 +1797,8 @@ class Workbench final : public WorkbenchWindow {
         }
         for (auto &station : stations_)
             station.item->setHidden(!station.name().contains(text, Qt::CaseInsensitive));
+        for (auto *item : region_items_)
+            item->setHidden(!item->text(0).contains(text, Qt::CaseInsensitive));
     }
     const application::ProjectSensor *selected_sensor() const {
         if (!objects_ || !objects_->currentItem())
@@ -1788,6 +1807,147 @@ class Workbench final : public WorkbenchWindow {
             objects_->currentItem()->data(0, Qt::UserRole + 17).toString().toStdString();
         const auto found = std::ranges::find(sensors_, id, &application::ProjectSensor::object_id);
         return found == sensors_.end() ? nullptr : &*found;
+    }
+    struct RegionNodes {
+        vsg::ref_ptr<vsg::Group> root = vsg::Group::create();
+        std::vector<std::unique_ptr<render_vsg::RegionLayer>> layers;
+    };
+    RegionNodes make_region_node(const std::vector<application::ProjectRegion> &regions) const {
+        RegionNodes nodes;
+        const auto format = slots_.empty() || !slots_.front()->window->windowAdapter
+                                ? VK_FORMAT_B8G8R8A8_SRGB
+                                : slots_.front()->window->windowAdapter->surfaceFormat().format;
+        const bool srgb = format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB;
+        for (const auto &region : regions) {
+            if (!region.display.show_3d) {
+                nodes.layers.push_back(nullptr);
+                continue;
+            }
+            const auto mesh = visualization::region_mesh(
+                region.boundary, region.display.fill && region.display.opacity > 0);
+            auto layer = std::make_unique<render_vsg::RegionLayer>(
+                mesh, region.display.color, region.display.opacity, devicePixelRatioF(), srgb);
+            nodes.root->addChild(layer->node());
+            nodes.layers.push_back(std::move(layer));
+        }
+        return nodes;
+    }
+    void append_region_items() {
+        for (const auto &region : regions_) {
+            auto *item =
+                new QTreeWidgetItem(scenario_item_, {QString::fromStdString(region.name())});
+            item->setIcon(
+                0, workbench_icon(WorkbenchIcon::map, QColor::fromRgb(region.display.color)));
+            item->setToolTip(
+                0, ui::text("common.object_id_hint").arg(QString::fromStdString(region.object_id)));
+            region_items_.push_back(item);
+        }
+    }
+    void apply_regions(std::vector<application::ProjectRegion> next,
+                       const std::string &selected_id) {
+        auto candidate = project_snapshot(project_path_);
+        candidate.regions = next;
+        application::validate_project(candidate);
+        const bool geometry_changed = next.size() != regions_.size() ||
+                                      !std::equal(next.begin(), next.end(), regions_.begin(),
+                                                  [](const auto &a, const auto &b) {
+                                                      return a.object_id == b.object_id &&
+                                                             a.boundary == b.boundary &&
+                                                             a.display == b.display;
+                                                  });
+        if (geometry_changed) {
+            auto node = make_region_node(next);
+            const auto previous = earth_transform_->children;
+            try {
+                publish_static_node(node.root, [&] {
+                    if (region_group_)
+                        std::erase(earth_transform_->children, region_group_);
+                    earth_transform_->addChild(node.root);
+                });
+            } catch (...) {
+                begin_change();
+                earth_transform_->children = previous;
+                rebuild();
+                throw;
+            }
+            region_group_ = node.root;
+            region_layers_ = std::move(node.layers);
+        }
+        {
+            const QSignalBlocker block(objects_);
+            for (auto *item : region_items_)
+                delete item;
+            region_items_.clear();
+            regions_ = std::move(next);
+            append_region_items();
+            scenario_item_->setExpanded(true);
+            filter_objects();
+        }
+        if (geometry_changed)
+            ground_map_->set_regions(regions_);
+        const auto found =
+            std::ranges::find(regions_, selected_id, &application::ProjectRegion::object_id);
+        set_selection(found == regions_.end()
+                          ? std::optional<std::size_t>{}
+                          : satellites_.size() + stations_.size() +
+                                static_cast<std::size_t>(found - regions_.begin()));
+        mark_project_dirty();
+    }
+    void edit_region(bool creating, bool defaults = false) {
+        if (!scenario_ || busy() || (!creating && !selected_region_))
+            return;
+        if (creating && !defaults && region_editor_bound_ && region_editor_creating_) {
+            workspace_->open(region_editor_, false);
+            return;
+        }
+        if (!region_editor_) {
+            region_editor_ = new RegionEditor(this);
+            region_editor_->apply = [this](application::ProjectRegion value) {
+                auto next = regions_;
+                const auto found = std::ranges::find(next, value.object_id,
+                                                     &application::ProjectRegion::object_id);
+                if (found == next.end()) {
+                    if (!region_editor_creating_)
+                        throw std::invalid_argument(ui::utf8("region.missing"));
+                    next.push_back(value);
+                } else {
+                    if (found->display_name == value.display_name &&
+                        found->boundary == value.boundary && found->display == value.display &&
+                        found->description == value.description &&
+                        found->grid_resolution_rad == value.grid_resolution_rad) {
+                        region_editor_->show_result(ui::text("region.applied"));
+                        return;
+                    }
+                    *found = value;
+                }
+                apply_regions(std::move(next), value.object_id);
+                region_editor_->accept_region(value);
+                region_editor_creating_ = false;
+                region_editor_->show_result(ui::text("region.applied"));
+            };
+        }
+        application::ProjectRegion value;
+        if (creating) {
+            value.object_id = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+            value.display_name =
+                ui::text("region.default_name").arg(regions_.size() + 1).toStdString();
+        } else
+            value = regions_.at(*selected_region_);
+        if (!creating && region_editor_bound_ &&
+            region_editor_->bound_object_id() == value.object_id) {
+            workspace_->open(region_editor_, false);
+            return;
+        }
+        if (region_editor_bound_ && region_editor_->has_unapplied_changes() &&
+            !confirm_discard_property(region_editor_))
+            return;
+        region_editor_->set_region(value, creating);
+        region_editor_bound_ = true;
+        region_editor_creating_ = creating;
+        if (defaults)
+            region_editor_->apply(region_editor_->region());
+        else
+            workspace_->open(region_editor_, false);
     }
     void edit_sensor(bool creating, bool defaults = false, const std::string &parent_id = {}) {
         auto parent_index = selected_;
@@ -1924,12 +2084,15 @@ class Workbench final : public WorkbenchWindow {
     QString selected_name() const {
         if (const auto *sensor = selected_sensor())
             return QString::fromStdString(sensor->name());
+        if (selected_region_)
+            return QString::fromStdString(regions_.at(*selected_region_).name());
         return selected_           ? satellites_.at(*selected_).name()
                : selected_station_ ? stations_.at(*selected_station_).name()
                                    : QString{};
     }
     bool object_id_exists(const std::string &id) const {
-        return std::ranges::any_of(sensors_, [&](const auto &s) { return s.object_id == id; }) ||
+        return std::ranges::any_of(regions_, [&](const auto &r) { return r.object_id == id; }) ||
+               std::ranges::any_of(sensors_, [&](const auto &s) { return s.object_id == id; }) ||
                std::any_of(satellites_.begin(), satellites_.end(),
                            [&](const auto &s) { return s.orbit->input.object_id == id; }) ||
                std::any_of(stations_.begin(), stations_.end(),
@@ -1982,6 +2145,7 @@ class Workbench final : public WorkbenchWindow {
             project.ground_stations.push_back(station.config);
         project.reports = reports_;
         project.sensors = sensors_;
+        project.regions = regions_;
         return project;
     }
     std::vector<runtime::CatalogGravity>
@@ -2215,6 +2379,15 @@ class Workbench final : public WorkbenchWindow {
                 }
                 update_access_display();
             };
+            report_dialog_->open_region_properties = [this](const std::string &id) {
+                const auto found =
+                    std::ranges::find(regions_, id, &application::ProjectRegion::object_id);
+                if (found == regions_.end())
+                    return;
+                set_selection(satellites_.size() + stations_.size() +
+                              static_cast<std::size_t>(found - regions_.begin()));
+                edit_region(false);
+            };
         }
         workspace_->open(report_dialog_, false);
     }
@@ -2285,6 +2458,8 @@ class Workbench final : public WorkbenchWindow {
             drafts.push_back(station_editor_);
         if (sensor_editor_bound_ && sensor_editor_->has_unapplied_changes())
             drafts.push_back(sensor_editor_);
+        if (region_editor_bound_ && region_editor_->has_unapplied_changes())
+            drafts.push_back(region_editor_);
         if (scenario_has_draft())
             drafts.push_back(scenario_properties_);
         return drafts;
@@ -2841,16 +3016,22 @@ class Workbench final : public WorkbenchWindow {
                                                 .arg(QString::fromStdString(config.object_id)));
                 stations.push_back(std::move(station));
             }
+            auto region_node = make_region_node(candidate->project.regions);
+            const auto previous_earth = earth_transform_->children;
             const auto previous_tracks = orbit_group_->children,
                        previous_models = model_group_->children;
             begin_change();
             try {
                 orbit_group_->children = tracks->children;
                 model_group_->children = models->children;
+                if (region_group_)
+                    std::erase(earth_transform_->children, region_group_);
+                earth_transform_->addChild(region_node.root);
                 rebuild();
             } catch (...) {
                 orbit_group_->children = previous_tracks;
                 model_group_->children = previous_models;
+                earth_transform_->children = previous_earth;
                 rebuild();
                 throw;
             }
@@ -2861,6 +3042,14 @@ class Workbench final : public WorkbenchWindow {
             satellites_ = std::move(satellites);
             stations_ = std::move(stations);
             sensors_ = candidate->project.sensors;
+            regions_ = candidate->project.regions;
+            region_group_ = region_node.root;
+            region_layers_ = std::move(region_node.layers);
+            region_items_.clear();
+            if (!project_edit_ && region_editor_) {
+                region_editor_->close();
+                region_editor_bound_ = false;
+            }
             clear_access_display();
             if (sensor_editor_ && !project_edit_)
                 sensor_editor_->close();
@@ -2892,6 +3081,7 @@ class Workbench final : public WorkbenchWindow {
                 objects_->clear();
                 scenario_item_ = root.release();
                 objects_->addTopLevelItem(scenario_item_);
+                append_region_items();
                 // Expansion and visibility only take effect after items belong to the tree.
                 scenario_item_->setExpanded(root_expanded);
                 for (const auto &satellite : satellites_) {
@@ -2909,6 +3099,7 @@ class Workbench final : public WorkbenchWindow {
             model_diameter_km_ = satellites_.empty() ? 1000 : satellites_.front().model_diameter_km;
             ground_map_->publish_tracks(std::move(candidate->ground_tracks));
             ground_map_->set_ground_stations(candidate->project.ground_stations);
+            ground_map_->set_regions(regions_);
             if (!project_edit_)
                 ground_map_->reset_view();
             set_workspace_name(QString::fromStdString(scenario_->name()));
@@ -3034,6 +3225,9 @@ class Workbench final : public WorkbenchWindow {
         for (auto &sensor : candidate.sensors)
             if (sensor.object_id == id)
                 rename(sensor);
+        for (auto &region : candidate.regions)
+            if (region.object_id == id)
+                rename(region);
         if (!found)
             throw std::invalid_argument("Object not found: " + id);
         application::validate_project(candidate);
@@ -3064,6 +3258,13 @@ class Workbench final : public WorkbenchWindow {
                         if (item->data(0, Qt::UserRole + 17).toString().toStdString() == id)
                             item->setText(0, QString::fromStdString(name));
                     }
+            }
+        for (std::size_t i = 0; i < regions_.size(); ++i)
+            if (regions_[i].object_id == id) {
+                regions_[i].display_name = name;
+                region_items_[i]->setText(0, QString::fromStdString(name));
+                if (region_editor_bound_ && region_editor_->bound_object_id() == id)
+                    region_editor_->sync_name(name);
             }
         filter_objects();
         // External renames update only the name baseline, preserving other drafts,
@@ -3103,6 +3304,8 @@ class Workbench final : public WorkbenchWindow {
             return;
         if (const auto *sensor = selected_sensor())
             rename_object(sensor->object_id, name.trimmed().toStdString());
+        else if (selected_region_)
+            rename_object(regions_[*selected_region_].object_id, name.trimmed().toStdString());
         else if (selected_station_)
             rename_object(stations_[*selected_station_].config.object_id,
                           name.trimmed().toStdString());
@@ -3111,7 +3314,7 @@ class Workbench final : public WorkbenchWindow {
                           name.trimmed().toStdString());
     }
     void rename_selected() {
-        if (busy() || !selected_marker_index())
+        if (busy() || (!selected_marker_index() && !selected_region_))
             return;
         bool accepted = false;
         const auto name = QInputDialog::getText(this, ui::text("graphics_workbench.name"),
@@ -3127,9 +3330,19 @@ class Workbench final : public WorkbenchWindow {
         }
     }
     void duplicate_selected() {
-        if (busy() || !selected_marker_index())
+        if (busy() || (!selected_marker_index() && !selected_region_))
             return;
         try {
+            if (selected_region_) {
+                auto next = regions_;
+                auto copy = regions_.at(*selected_region_);
+                copy.display_name = copy.name() + ui::utf8("graphics_workbench.s");
+                copy.object_id = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+                const auto id = copy.object_id;
+                next.push_back(std::move(copy));
+                apply_regions(std::move(next), id);
+                return;
+            }
             if (selected_sensor()) {
                 auto p = project_snapshot(project_path_);
                 auto s = *selected_sensor();
@@ -3171,15 +3384,26 @@ class Workbench final : public WorkbenchWindow {
         }
     }
     void delete_selected() {
-        if (busy() || !selected_marker_index())
+        if (busy() || (!selected_marker_index() && !selected_region_))
             return;
-        const auto index = *selected_marker_index();
+        const auto index = selected_marker_index().value_or(0);
         if (QMessageBox::question(this, ui::text("graphics_workbench.index"),
                                   ui::text("graphics_workbench.index_2").arg(selected_name()),
                                   QMessageBox::Yes | QMessageBox::Cancel,
                                   QMessageBox::Cancel) != QMessageBox::Yes)
             return;
         try {
+            if (selected_region_) {
+                const auto id = regions_.at(*selected_region_).object_id;
+                auto next = regions_;
+                std::erase_if(next, [&](const auto &region) { return region.object_id == id; });
+                apply_regions(std::move(next), {});
+                if (region_editor_bound_ && region_editor_->bound_object_id() == id) {
+                    region_editor_->close();
+                    region_editor_bound_ = false;
+                }
+                return;
+            }
             const auto current = project_snapshot(project_path_);
             if (selected_sensor()) {
                 auto p = current;
@@ -3262,14 +3486,18 @@ class Workbench final : public WorkbenchWindow {
             throw std::invalid_argument("Create an empty scenario before inserting objects");
         const auto old_tracks = orbit_group_->children;
         const auto old_models = model_group_->children;
+        const auto old_earth = earth_transform_->children;
         begin_change();
         try {
             orbit_group_->children.clear();
             model_group_->children.clear();
+            if (region_group_)
+                std::erase(earth_transform_->children, region_group_);
             rebuild();
         } catch (...) {
             orbit_group_->children = old_tracks;
             model_group_->children = old_models;
+            earth_transform_->children = old_earth;
             rebuild();
             throw;
         }
@@ -3280,6 +3508,14 @@ class Workbench final : public WorkbenchWindow {
         satellites_.clear();
         stations_.clear();
         sensors_.clear();
+        regions_.clear();
+        region_items_.clear();
+        selected_region_.reset();
+        region_group_ = {};
+        region_layers_.clear();
+        if (region_editor_)
+            region_editor_->close();
+        region_editor_bound_ = false;
         clear_access_display();
         if (sensor_editor_)
             sensor_editor_->close();
@@ -3289,6 +3525,7 @@ class Workbench final : public WorkbenchWindow {
         if (ground_map_) {
             ground_map_->set_orbits({});
             ground_map_->set_ground_stations({});
+            ground_map_->set_regions({});
             ground_map_->reset_view();
         }
         orbit_.reset();
@@ -3428,6 +3665,11 @@ class Workbench final : public WorkbenchWindow {
             case InsertObjectType::ground_station:
                 begin_insert_station(request.method);
                 break;
+            case InsertObjectType::region:
+                edit_region(true, request.method == InsertObjectMethod::defaults);
+                if (request.method == InsertObjectMethod::defaults)
+                    insertion_dialog()->show_result(ui::text("insert_object_dialog.completed"));
+                return;
             case InsertObjectType::sensor:
                 if (request.parent_id.empty())
                     return;
@@ -3660,6 +3902,10 @@ class Workbench final : public WorkbenchWindow {
             set_playing(resume);
     }
     void open_properties() {
+        if (selected_region_ && !busy()) {
+            edit_region(false);
+            return;
+        }
         if (selected_sensor() && !busy()) {
             edit_sensor(false);
             return;
@@ -3913,19 +4159,28 @@ class Workbench final : public WorkbenchWindow {
             selected_ = selection;
             return;
         }
-        if (selection && *selection >= satellites_.size() + stations_.size())
+        const auto marker_count = satellites_.size() + stations_.size();
+        if (selection && *selection >= marker_count + regions_.size())
             selection.reset();
         selected_ = selection && *selection < satellites_.size() ? selection : std::nullopt;
-        selected_station_ = selection && *selection >= satellites_.size()
-                                ? std::optional<std::size_t>{*selection - satellites_.size()}
-                                : std::nullopt;
+        selected_region_ = selection && *selection >= marker_count
+                               ? std::optional<std::size_t>{*selection - marker_count}
+                               : std::nullopt;
+        selected_station_ =
+            selection && *selection >= satellites_.size() && *selection < marker_count
+                ? std::optional<std::size_t>{*selection - satellites_.size()}
+                : std::nullopt;
         if (ground_map_)
             ground_map_->set_selection(selection);
+        for (std::size_t i = 0; i < region_layers_.size(); ++i)
+            if (region_layers_[i])
+                region_layers_[i]->set_selected(selected_region_ == i);
         if (synchronize_tree && objects_) {
             const QSignalBlocker block(objects_);
             objects_->clearSelection();
             auto *item = selected_           ? satellites_.at(*selected_).item
                          : selected_station_ ? stations_.at(*selected_station_).item
+                         : selected_region_  ? region_items_.at(*selected_region_)
                                              : nullptr;
             objects_->setCurrentItem(item);
             if (item)
@@ -4541,13 +4796,23 @@ class Workbench final : public WorkbenchWindow {
         if (benchmarking_ || !scenario_)
             return;
         double bound = 6378137.0;
-        for (const auto &satellite : satellites_)
-            bound = std::max(bound, satellite.orbit->max_radius_m);
+        if (!selected_region_)
+            for (const auto &satellite : satellites_)
+                bound = std::max(bound, satellite.orbit->max_radius_m);
         bound *= 1.15;
         const auto r = snapshot_.markers.empty()
                            ? std::array<double, 3>{-3e6, 5e6, 2e6}
                            : snapshot_.markers.at(selected_marker_index().value_or(0)).position_m;
-        const auto direction = vsg::normalize(vsg::dvec3(r[0], r[1], r[2]));
+        auto position = vsg::dvec3(r[0], r[1], r[2]);
+        if (selected_region_) {
+            const auto bounds = core::region_grid_bounds(regions_.at(*selected_region_).boundary);
+            const auto center = core::ground_station_position(
+                {std::remainder(bounds.west_rad + core::coverage_longitude_span(bounds) / 2,
+                                2 * std::numbers::pi),
+                 (bounds.south_rad + bounds.north_rad) / 2, 0});
+            position = earth_transform_->matrix * vsg::dvec3(center[0], center[1], center[2]);
+        }
+        const auto direction = vsg::normalize(position);
         const auto reference_up =
             std::abs(direction.z) > 0.9 ? vsg::dvec3(0, 1, 0) : vsg::dvec3(0, 0, 1);
         const auto side = vsg::normalize(vsg::cross(reference_up, direction));
@@ -4573,6 +4838,10 @@ class Workbench final : public WorkbenchWindow {
         }
     }
     void focus_satellite(std::optional<std::size_t> target = std::nullopt) {
+        if (selected_region_) {
+            fit_views(target);
+            return;
+        }
         if (!selected_marker_index())
             return;
         const auto &r = snapshot_.markers.at(*selected_marker_index()).position_m;
@@ -5631,7 +5900,7 @@ class Workbench final : public WorkbenchWindow {
                                  : satellites_.empty() && stations_.empty()
                                      ? ui::text("graphics_workbench.label_105")
                                      : ui::text("graphics_workbench.label_106")
-                                           .arg(selected_marker_index()
+                                           .arg((selected_marker_index() || selected_region_)
                                                     ? selected_name()
                                                     : ui::text("graphics_workbench.label_107")));
         if (!smoke_dir_.isEmpty() && (benchmarking_ || smoke_bootstrap_ == 3)) {
@@ -5913,6 +6182,7 @@ class Workbench final : public WorkbenchWindow {
     void smoke_status_feedback();
     void smoke_object_insertion();
     void smoke_sensor_geometry();
+    void smoke_regions();
     struct SmokeScenario {
         const char *name;
         int first_stage;
@@ -5934,7 +6204,8 @@ class Workbench final : public WorkbenchWindow {
         SmokeScenario{"specialist-reports", 178, 191, &Workbench::smoke_specialist_reports},
         SmokeScenario{"status-feedback", 192, 197, &Workbench::smoke_status_feedback},
         SmokeScenario{"object-insertion", 198, 203, &Workbench::smoke_object_insertion},
-        SmokeScenario{"sensor-geometry", 204, 215, &Workbench::smoke_sensor_geometry}};
+        SmokeScenario{"sensor-geometry", 204, 215, &Workbench::smoke_sensor_geometry},
+        SmokeScenario{"regions", 216, 223, &Workbench::smoke_regions}};
     const char *orbit_smoke_scenario() const {
         for (const auto &scenario : smoke_scenarios_)
             if (orbit_smoke_stage_ >= scenario.first_stage &&
@@ -6261,6 +6532,13 @@ class Workbench final : public WorkbenchWindow {
     QPushButton *cancel_project_button_ = nullptr;
     std::vector<Satellite> satellites_;
     std::vector<Station> stations_;
+    RegionEditor *region_editor_ = nullptr;
+    bool region_editor_bound_ = false, region_editor_creating_ = false;
+    std::vector<application::ProjectRegion> regions_;
+    std::vector<QTreeWidgetItem *> region_items_;
+    std::optional<std::size_t> selected_region_;
+    vsg::ref_ptr<vsg::Group> region_group_;
+    std::vector<std::unique_ptr<render_vsg::RegionLayer>> region_layers_;
     SensorEditor *sensor_editor_ = nullptr;
     std::vector<application::ProjectSensor> sensors_;
     std::optional<runtime::AccessSession> access_session_;
@@ -6293,7 +6571,7 @@ class Workbench final : public WorkbenchWindow {
     QLabel *workspace_label_ = nullptr, *workspace_dot_ = nullptr;
     QMenuBar *menu_bar_ = nullptr;
     QAction *new_action_ = nullptr, *example_action_ = nullptr, *insert_action_ = nullptr;
-    std::array<QAction *, 3> quick_insert_actions_{};
+    std::array<QAction *, 4> quick_insert_actions_{};
     InsertObjectDialog *insert_dialog_ = nullptr;
     bool insertion_pending_ = false;
     QAction *fit_action_ = nullptr, *aux_action_ = nullptr, *map_action_ = nullptr;
@@ -6422,6 +6700,7 @@ class Workbench final : public WorkbenchWindow {
 #include "../../tests/graphics_smoke/orbit_editing.inc"
 #include "../../tests/graphics_smoke/project_objects.inc"
 #include "../../tests/graphics_smoke/property_drafts.inc"
+#include "../../tests/graphics_smoke/regions.inc"
 #include "../../tests/graphics_smoke/reports.inc"
 #include "../../tests/graphics_smoke/scenario_properties.inc"
 #include "../../tests/graphics_smoke/sensor_geometry.inc"

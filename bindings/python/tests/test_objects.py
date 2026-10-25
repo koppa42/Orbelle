@@ -329,7 +329,7 @@ class ObjectEditingTest(unittest.TestCase):
         raw = ob.load_project_data(path)
         project = ob.Project.open(path)
         self.assertEqual({obj.id for obj in project.objects},
-                         {"satellite-a", "satellite-b", "station-a", "sensor-a"})
+                         {"satellite-a", "satellite-b", "station-a", "sensor-a", "region-a", "region-b"})
         self.assertEqual(project.objects["sensor-a"].parent, project.objects["satellite-a"])
         project.objects[next(iter(project.objects)).id].name = "New name"
         self.assertNotEqual(raw.satellites[0].name, "New name")

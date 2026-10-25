@@ -17,6 +17,16 @@
 
 namespace orbelle::runtime {
 inline constexpr std::size_t max_report_rows = 200000;
+inline constexpr std::size_t default_coverage_memory_bytes = 512ULL * 1024 * 1024;
+struct CoverageReportEstimate {
+    std::size_t points = 0, rows = 0;
+    // Minimum budget for workspace and stored points/table, excluding intervals.
+    std::size_t storage_bytes = 0;
+};
+[[nodiscard]] CoverageReportEstimate
+estimate_coverage_report(const application::Project &, const application::ReportDefinition &,
+                         std::size_t memory_bytes = default_coverage_memory_bytes,
+                         const std::function<void()> &check_cancelled = {});
 struct ReportContext {
     application::Project project;
     // Owning snapshots; calculation builds sessions from this exact project.
@@ -27,6 +37,9 @@ struct ReportContext {
     std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> ephemerides{};
     std::map<std::string, std::shared_ptr<const core::SpaceWeather>> weather{};
     std::map<std::string, std::shared_ptr<const core::OceanTideModel>> ocean_tides{};
+    // Per-job coverage storage/workspace budget. Excludes input providers, other
+    // live reports, and caller-side copies. Does not change numerical inputs.
+    std::size_t coverage_memory_bytes = default_coverage_memory_bytes;
     [[nodiscard]] core::HpopEnvironment
     force_environment(const application::OrbitInput &input) const;
 };
@@ -59,8 +72,10 @@ class ReportCancelled : public std::runtime_error {
 };
 // Excludes object display names, saved reports, playback time and object graphics.
 [[nodiscard]] std::string report_input_sha256(const application::Project &project);
-[[nodiscard]] std::size_t estimate_report_rows(const application::Project &project,
-                                               const application::ReportDefinition &definition);
+[[nodiscard]] std::size_t
+estimate_report_rows(const application::Project &project,
+                     const application::ReportDefinition &definition,
+                     std::size_t coverage_memory_bytes = default_coverage_memory_bytes);
 [[nodiscard]] ReportResult
 generate_report(const ReportContext &context, const application::ReportDefinition &definition,
                 const std::atomic_bool *cancel = nullptr,

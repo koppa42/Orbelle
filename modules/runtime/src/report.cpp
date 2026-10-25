@@ -7,6 +7,7 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <locale>
 #include <numbers>
 #include <orbelle/core/propagation/lighting.hpp>
@@ -185,6 +186,18 @@ std::string report_input_sha256(const application::Project &project) {
     auto p = project;
     p.reports.clear();
     p.current = p.first;
+    for (auto &region : p.regions) {
+        region.display_name.clear();
+        region.description.clear();
+        region.display = {};
+        if (!region.boundary.vertices.empty()) {
+            const core::RegionBoundary defaults;
+            region.boundary.south_rad = defaults.south_rad;
+            region.boundary.north_rad = defaults.north_rad;
+            region.boundary.west_rad = defaults.west_rad;
+            region.boundary.east_rad = defaults.east_rad;
+        }
+    }
     for (auto &s : p.ground_stations) {
         s.display_name.clear();
         s.description.clear();
@@ -282,25 +295,70 @@ std::string report_input_sha256(const application::Project &project) {
     const auto bytes = application::encode_project(p);
     return picosha2::hash256_hex_string(bytes);
 }
-std::size_t estimate_report_rows(const Project &p, const ReportDefinition &d) {
+CoverageReportEstimate estimate_coverage_report(const Project &p, const ReportDefinition &d,
+                                                std::size_t memory_bytes,
+                                                const std::function<void()> &check_cancelled) {
     validate_project(p);
     validate_report_definition(d);
-    if (report_is_coverage(d.query.kind)) {
-        detail::validate_coverage_assets(p, d.query);
-        const auto cells = core::coverage_grid(d.query.coverage);
-        const auto [first, last] = interval(p, d);
-        check(first.tai_nanoseconds() < last.tai_nanoseconds(),
-              "Coverage requires a positive analysis interval");
-        const auto step = static_cast<std::uint64_t>(d.query.step_nanoseconds);
-        const auto span = ticks_between(first, last);
-        check(span / step < max_report_rows, "Coverage exceeds 200000 time nodes");
-        const auto nodes = span / step + 1 + (span % step != 0);
-        check(nodes <= max_report_rows, "Coverage exceeds 200000 time nodes");
-        check(nodes <= 50'000'000 / (cells.size() * d.query.object_ids.size()),
-              "Coverage grid, assets and interval exceed the evaluation budget");
-        return d.query.kind == ReportKind::coverage_grid ? cells.size()
-                                                         : static_cast<std::size_t>(nodes);
+    check(report_is_coverage(d.query.kind), "Coverage estimate requires a coverage report");
+    detail::validate_coverage_assets(p, d.query);
+    const auto [first, last] = interval(p, d);
+    check(first.tai_nanoseconds() < last.tai_nanoseconds(),
+          "Coverage requires a positive analysis interval");
+    const auto step = static_cast<std::uint64_t>(d.query.step_nanoseconds);
+    const auto span = ticks_between(first, last);
+    check(span <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()),
+          "Coverage search interval is not representable");
+    const auto nodes = span / step + 1 + (span % step != 0);
+    const bool grid = d.query.kind == ReportKind::coverage_grid;
+    // Include publication/template copies and allocation overhead. Numerical
+    // providers and caller-side copies are outside this per-report budget.
+    const auto text_bytes = grid ? 64 : d.name.size() + 64;
+    auto row_bytes = sizeof(Row) + report_columns(d.query.kind).size() * sizeof(results::Cell) +
+                     text_bytes + (grid ? 0 : 2 * sizeof(double));
+    if (!d.format.columns.empty())
+        row_bytes += sizeof(Row) + d.format.columns.size() * sizeof(results::Cell) + text_bytes;
+    const auto point_bytes = 2 * sizeof(results::CoveragePoint) + (grid ? row_bytes : 0);
+    const auto fixed_bytes = static_cast<long double>(detail::coverage_workspace_bytes) +
+                             (grid ? 0.L : static_cast<long double>(nodes) * row_bytes);
+    const auto memory_error = [&](long double required) {
+        throw std::invalid_argument(
+            "Coverage needs at least " +
+            std::to_string(static_cast<double>(std::ceil(required / (1024 * 1024)))) +
+            " MiB for workspace/results; budget is " +
+            std::to_string(memory_bytes / (1024 * 1024)) +
+            " MiB. Increase the coverage memory budget or reduce result size");
+    };
+    if (fixed_bytes >= memory_bytes)
+        memory_error(fixed_bytes + point_bytes);
+    const auto capacity = static_cast<std::size_t>((memory_bytes - fixed_bytes) / point_bytes);
+    std::size_t points = 0;
+    const auto bounds = application::report_coverage_bounds(p, d.query);
+    if (d.query.region_id.empty() ||
+        application::report_region(p, d.query).boundary.vertices.empty()) {
+        points = core::coverage_grid_size(bounds, capacity, check_cancelled);
+    } else {
+        application::visit_report_coverage_grid(
+            p, d.query,
+            [&](const auto &) {
+                if (points >= capacity)
+                    memory_error(fixed_bytes +
+                                 (static_cast<long double>(points) + 1) * point_bytes);
+                ++points;
+            },
+            check_cancelled);
     }
+    if (check_cancelled)
+        check_cancelled();
+    return {points, grid ? points : static_cast<std::size_t>(nodes),
+            static_cast<std::size_t>(fixed_bytes + static_cast<long double>(points) * point_bytes)};
+}
+std::size_t estimate_report_rows(const Project &p, const ReportDefinition &d,
+                                 std::size_t coverage_memory_bytes) {
+    if (report_is_coverage(d.query.kind))
+        return estimate_coverage_report(p, d, coverage_memory_bytes).rows;
+    validate_project(p);
+    validate_report_definition(d);
     const auto selected = report_is_access(d.query.kind) ? std::vector<Selection>{} : select(p, d);
     if (report_is_access(d.query.kind))
         validate_access_pair(p, d.query.object_ids);
@@ -349,7 +407,13 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
                         const ReportExecution &execution,
                         const std::function<void(std::size_t, std::size_t)> &progress) {
     execution.check_cancelled();
-    const auto total = estimate_report_rows(context.project, d);
+    const auto coverage_plan =
+        report_is_coverage(d.query.kind)
+            ? estimate_coverage_report(context.project, d, context.coverage_memory_bytes,
+                                       execution.check_cancelled)
+            : CoverageReportPlan{};
+    const auto total = report_is_coverage(d.query.kind) ? coverage_plan.rows
+                                                        : estimate_report_rows(context.project, d);
     const auto [first, last] = interval(context.project, d);
     if (report_uses_utc(d.format, d.query.kind)) {
         (void)epoch_text(first, ReportTimeScale::utc, context.time.get());
@@ -375,7 +439,8 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
     std::optional<results::OrbitalEventStatistics> orbital_event_statistics;
     std::optional<results::IntersatelliteStatistics> intersatellite_statistics;
     std::optional<results::CoverageStatistics> coverage_statistics;
-    rows.reserve(total);
+    if (!report_is_coverage(d.query.kind))
+        rows.reserve(total);
     const auto selected = (report_is_access(d.query.kind) || report_is_coverage(d.query.kind))
                               ? std::vector<Selection>{}
                               : select(context.project, d);
@@ -386,7 +451,7 @@ detail::generate_report(const ReportContext &context, const ReportDefinition &d,
         execution.check_cancelled();
     };
     if (report_is_coverage(d.query.kind)) {
-        auto data = coverage_report(context, d, first, last, total, execution, progress);
+        auto data = coverage_report(context, d, first, last, coverage_plan, execution, progress);
         rows = std::move(data.rows);
         coverage_statistics = std::move(data.statistics);
     } else if (report_is_intersatellite(d.query.kind)) {

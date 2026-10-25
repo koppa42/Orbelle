@@ -482,12 +482,15 @@ results::AerSeries Analysis::aer(const ObjectRef &station, const ObjectRef &targ
 ReportResult Analysis::report(const application::ReportQuery &query,
                               const application::ReportTemplate &format,
                               const std::function<bool()> &cancelled,
-                              const std::function<void(std::size_t, std::size_t)> &progress) const {
-    return report(ReportDefinition{"query", "Report", query, format}, cancelled, progress);
+                              const std::function<void(std::size_t, std::size_t)> &progress,
+                              std::size_t coverage_memory_bytes) const {
+    return report(ReportDefinition{"query", "Report", query, format}, cancelled, progress,
+                  coverage_memory_bytes);
 }
 ReportResult Analysis::report(const ReportDefinition &definition,
                               const std::function<bool()> &cancelled,
-                              const std::function<void(std::size_t, std::size_t)> &progress) const {
+                              const std::function<void(std::size_t, std::size_t)> &progress,
+                              std::size_t coverage_memory_bytes) const {
     // A callback may edit a caller-owned definition; capture it before the first callback.
     const auto captured = definition;
     check_cancelled(cancelled);
@@ -496,6 +499,7 @@ ReportResult Analysis::report(const ReportDefinition &definition,
                           data().gravity_models(),  data().ephemerides(),
                           data().weather_sources(), data().ocean_tide_models()};
     record_data(context.project, data());
+    context.coverage_memory_bytes = coverage_memory_bytes;
     if (!data().time() && report_uses_utc(captured.format, captured.query.kind))
         throw AnalysisCapabilityError("Prepare with UTC data for a UTC report, or select TAI/TT");
     const detail::ReportExecution execution{

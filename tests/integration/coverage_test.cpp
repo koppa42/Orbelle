@@ -18,6 +18,10 @@ core::Epoch seconds(double t) {
     return core::Epoch{static_cast<std::int64_t>(std::llround(t * 1e9))};
 }
 class IdentityFrames final : public core::IFrameProvider {
+  public:
+    mutable std::size_t state_calls = 0;
+
+  private:
     core::PositionRotation gcrf_to_itrf(core::Epoch epoch,
                                         const core::EarthOrientationSample &) const override {
         return {epoch,
@@ -30,6 +34,7 @@ class IdentityFrames final : public core::IFrameProvider {
     }
     core::StateTransform gcrf_to_itrf_state(core::Epoch epoch,
                                             const core::EarthOrientationState &eop) const override {
+        ++state_calls;
         return {gcrf_to_itrf(epoch, eop.sample), {}, "Test zero rotation"};
     }
 };
@@ -287,12 +292,258 @@ TEST(Coverage, LimitsValidationCancellationAndFormatting) {
     bad.query.first = seconds(0);
     bad.query.last = core::Epoch{199999500000};
     bad.query.step_nanoseconds = 1000000;
-    EXPECT_THROW((void)runtime::estimate_report_rows(ctx.project, bad), std::invalid_argument);
+    EXPECT_NO_THROW((void)runtime::estimate_report_rows(ctx.project, bad));
+    bad.query.kind = application::ReportKind::coverage_time;
+    EXPECT_GT(runtime::estimate_report_rows(ctx.project, bad), 200000);
+    EXPECT_THROW((void)runtime::estimate_report_rows(ctx.project, bad, 64 * 1024 * 1024),
+                 std::invalid_argument);
     bad = d;
     bad.query.coverage.minimum_elevation_rad = std::numeric_limits<double>::quiet_NaN();
     EXPECT_THROW((void)runtime::estimate_report_rows(ctx.project, bad), std::invalid_argument);
     ctx.eop.reset();
     EXPECT_THROW((void)runtime::generate_report(ctx, d), std::invalid_argument);
+}
+
+TEST(Coverage, ThousandAssetUnionRetainsValidationAndResourceBudgets) {
+    if (!runtime::time_frames_available() || !runtime::two_body_available())
+        GTEST_SKIP();
+    auto ctx = context();
+    auto d = definition();
+    d.query.object_ids.clear();
+    d.query.follow_scenario = false;
+    d.query.first = seconds(0);
+    d.query.last = seconds(10);
+    d.query.coverage = {-.01, .01, -.01, .01, .1, 0, true};
+    const auto seed = ctx.project.satellites.front();
+    ctx.project.satellites.clear();
+    for (std::size_t i = 0; i < 2048; ++i) {
+        auto sat = seed;
+        sat.orbit.object_id = "asset-" + std::to_string(i);
+        d.query.object_ids.push_back(sat.orbit.object_id);
+        ctx.project.satellites.push_back(std::move(sat));
+    }
+    const auto result = runtime::generate_report(ctx, d);
+    ASSERT_TRUE(result.coverage_statistics);
+    const auto &s = *result.coverage_statistics;
+    ASSERT_EQ(s.points.size(), 1);
+    ASSERT_EQ(s.points[0].windows.size(), 1);
+    EXPECT_DOUBLE_EQ(s.mean_coverage_fraction, 1);
+    EXPECT_DOUBLE_EQ(s.points[0].statistics.covered_seconds, 10);
+    EXPECT_DOUBLE_EQ(s.maximum_gap_seconds, 0);
+    auto bad = d;
+    bad.query.object_ids.push_back("over-limit");
+    EXPECT_THROW(application::validate_report_definition(bad), std::invalid_argument);
+    bad = d;
+    bad.query.object_ids.back() = "missing";
+    EXPECT_THROW((void)runtime::generate_report(ctx, bad), std::invalid_argument);
+    bad = d;
+    bad.query.coverage.resolution_rad = .0001;
+    bad.query.last = seconds(600);
+    // Long-running work is permitted; only its explicitly budgeted storage is bounded.
+    EXPECT_NO_THROW((void)runtime::estimate_report_rows(ctx.project, bad));
+    EXPECT_THROW((void)runtime::estimate_report_rows(ctx.project, bad, 64 * 1024 * 1024),
+                 std::invalid_argument);
+    auto &last = ctx.project.satellites.back().orbit;
+    last.first = last.initial.epoch = seconds(5);
+    EXPECT_THROW((void)runtime::generate_report(ctx, d), application::ProjectError);
+}
+
+TEST(Coverage, ExactEpochFrameTransformsAreSharedAcrossAssets) {
+    if (!runtime::time_frames_available() || !runtime::two_body_available())
+        GTEST_SKIP();
+    auto ctx = context();
+    auto frames = std::make_shared<IdentityFrames>();
+    ctx.frames = frames;
+    auto d = definition();
+    d.query.object_ids = {"sat0"};
+    d.query.follow_scenario = false;
+    d.query.first = seconds(0);
+    d.query.last = seconds(600);
+    d.query.event_search_mode = core::AccessSearchMode::fixed_grid;
+    d.query.coverage = {-.01, .01, 3.0, 3.1, .2, 0, true};
+    const auto single = runtime::generate_report(ctx, d);
+    const auto calls = frames->state_calls;
+    EXPECT_GT(calls, 2);
+    frames->state_calls = 0;
+    for (int i = 2; i < 65; ++i) {
+        auto sat = ctx.project.satellites.front();
+        sat.orbit.object_id = "sat" + std::to_string(i);
+        d.query.object_ids.push_back(sat.orbit.object_id);
+        ctx.project.satellites.push_back(std::move(sat));
+    }
+    const auto joint = runtime::generate_report(ctx, d);
+    ASSERT_TRUE(joint.coverage_statistics);
+    EXPECT_EQ(frames->state_calls, calls);
+    EXPECT_DOUBLE_EQ(joint.coverage_statistics->mean_coverage_fraction,
+                     single.coverage_statistics->mean_coverage_fraction);
+    EXPECT_TRUE(joint.coverage_statistics->points[0].windows.empty());
+    // Cancellation after work starts must stop a large selection as well.
+    std::atomic_bool cancelled{false};
+    EXPECT_THROW((void)runtime::generate_report(ctx, d, &cancelled,
+                                                [&](std::size_t done, std::size_t) {
+                                                    if (done)
+                                                        cancelled = true;
+                                                }),
+                 runtime::ReportCancelled);
+}
+
+TEST(Coverage, LargeSelectionMatchesUnionOfIndependentFullIntervalSearches) {
+    if (!runtime::time_frames_available() || !runtime::two_body_available())
+        GTEST_SKIP();
+    auto ctx = context();
+    const auto seed = ctx.project.satellites.front();
+    ctx.project.satellites.clear();
+    auto d = definition();
+    d.query.object_ids.clear();
+    d.query.follow_scenario = false;
+    d.query.first = seconds(7);
+    d.query.last = seconds(11983);
+    d.query.coverage = {-.01, .01, -.01, .01, .1, 0, true};
+    std::vector<core::AccessInterval> independent;
+    for (int i = 0; i < 65; ++i) {
+        auto sat = seed;
+        const auto angle = 2 * pi * double(i) / 65;
+        const auto c = std::cos(angle), s = std::sin(angle);
+        sat.orbit.object_id = "asset-" + std::to_string(i);
+        sat.orbit.initial.position_m = {7e6 * c, 7e6 * s, 0};
+        sat.orbit.initial.velocity_mps = {-6200 * s, 6200 * c, 5300};
+        ctx.project.satellites.push_back(sat);
+        d.query.object_ids.push_back(sat.orbit.object_id);
+    }
+    for (const auto &id : d.query.object_ids) {
+        auto single = d;
+        single.query.object_ids = {id};
+        const auto result = runtime::generate_report(ctx, single);
+        const auto &windows = result.coverage_statistics->points[0].windows;
+        independent.insert(independent.end(), windows.begin(), windows.end());
+    }
+    const auto expected = core::merge_coverage_intervals(d.query.first, d.query.last, independent);
+    ASSERT_FALSE(expected.empty());
+    for (int order = 0; order < 2; ++order) {
+        const auto result = runtime::generate_report(ctx, d);
+        const auto &actual = result.coverage_statistics->points[0].windows;
+        ASSERT_EQ(actual.size(), expected.size());
+        for (std::size_t i = 0; i < expected.size(); ++i) {
+            EXPECT_EQ(actual[i].first, expected[i].first);
+            EXPECT_EQ(actual[i].last, expected[i].last);
+            EXPECT_EQ(actual[i].start_clipped, expected[i].first == d.query.first);
+            EXPECT_EQ(actual[i].stop_clipped, expected[i].last == d.query.last);
+        }
+        std::ranges::reverse(d.query.object_ids);
+    }
+}
+
+TEST(Coverage, LongSearchReusesTransformsAcrossAssetsAndReportsMonotonicProgress) {
+    if (!runtime::time_frames_available() || !runtime::two_body_available())
+        GTEST_SKIP();
+    auto ctx = context();
+    auto frames = std::make_shared<IdentityFrames>();
+    ctx.frames = frames;
+    auto d = definition();
+    d.query.follow_scenario = false;
+    d.query.first = seconds(0);
+    d.query.last = seconds(600);
+    d.query.step_nanoseconds = 10'000'000;
+    d.query.event_search_mode = core::AccessSearchMode::fixed_grid;
+    d.query.coverage = {-.01, .01, 3.0, 3.1, .2, 0, true};
+    std::size_t previous = 0, notifications = 0;
+    const auto result =
+        runtime::generate_report(ctx, d, nullptr, [&](std::size_t done, std::size_t total) {
+            EXPECT_GE(done, previous);
+            EXPECT_LE(done, total);
+            previous = done;
+            ++notifications;
+        });
+    ASSERT_EQ(result.coverage_statistics->points.size(), 1);
+    EXPECT_TRUE(result.coverage_statistics->points[0].windows.empty());
+    EXPECT_DOUBLE_EQ(result.coverage_statistics->maximum_gap_seconds, 600);
+    EXPECT_GT(notifications, 0);
+    EXPECT_EQ(previous, result.table.rows().size());
+    // More epochs than the frame cache holds: evaluating each asset over the
+    // entire interval first would repeat almost every expensive transform.
+    const auto epochs = 60000u + 1;
+    EXPECT_GE(frames->state_calls, epochs);
+    EXPECT_LT(frames->state_calls, epochs + 100);
+}
+
+TEST(Coverage, DenseGridUsesAdjustableMemoryBudgetAndKeepsEveryPoint) {
+    if (!runtime::time_frames_available() || !runtime::two_body_available())
+        GTEST_SKIP();
+    auto ctx = context();
+    auto d = definition();
+    d.query.object_ids = {"sat0"};
+    d.query.follow_scenario = false;
+    d.query.first = seconds(0);
+    d.query.last = seconds(1);
+    d.query.event_search_mode = core::AccessSearchMode::fixed_grid;
+    d.query.coverage = {-pi / 2, pi / 2, -pi, pi, .5 * pi / 180, 0, true};
+    const auto estimate = runtime::estimate_coverage_report(ctx.project, d);
+    EXPECT_GT(estimate.points, 160000);
+    EXPECT_EQ(estimate.rows, estimate.points);
+    ctx.coverage_memory_bytes = 64 * 1024 * 1024;
+    EXPECT_THROW((void)runtime::generate_report(ctx, d), std::invalid_argument);
+    ctx.coverage_memory_bytes = runtime::default_coverage_memory_bytes;
+    const auto result = runtime::generate_report(ctx, d);
+    ASSERT_TRUE(result.coverage_statistics);
+    EXPECT_EQ(result.table.rows().size(), estimate.points);
+    EXPECT_EQ(result.coverage_statistics->points.size(), estimate.points);
+    EXPECT_GT(result.coverage_statistics->mean_coverage_fraction, 0);
+    EXPECT_LT(result.coverage_statistics->mean_coverage_fraction, 1);
+    // A dense polygon preflight is cancellable even before allocating result rows.
+    application::ProjectRegion region;
+    region.object_id = "dense";
+    region.display_name = "Dense";
+    region.boundary.vertices = {{0, 0}, {.5, 0}, {0, .5}};
+    region.grid_resolution_rad = 1e-6;
+    ctx.project.regions.push_back(region);
+    d.query.region_id = "dense";
+    d.query.coverage.resolution_rad = 1e-6;
+    EXPECT_THROW((void)runtime::estimate_coverage_report(ctx.project, d,
+                                                         runtime::default_coverage_memory_bytes,
+                                                         [] { throw runtime::ReportCancelled{}; }),
+                 runtime::ReportCancelled);
+}
+
+TEST(Coverage, TimeCurveMatchesWindowMembershipAcrossBatchesAndPartialFinalStep) {
+    if (!runtime::time_frames_available() || !runtime::two_body_available())
+        GTEST_SKIP();
+    auto ctx = context();
+    auto d = definition();
+    d.query.kind = application::ReportKind::coverage_time;
+    d.query.follow_scenario = false;
+    d.query.first = seconds(7);
+    d.query.last = seconds(11983);
+    d.query.step_nanoseconds = 37'000'000'000;
+    d.query.coverage = {-.5, .5, -.5, .5, .25, 0, true};
+    const auto result = runtime::generate_report(ctx, d);
+    const auto &stats = *result.coverage_statistics;
+    ASSERT_EQ(std::get<core::Epoch>(result.table.rows().back()[2]), d.query.last);
+    for (const auto &row : result.table.rows()) {
+        const auto t = std::get<core::Epoch>(row[2]).tai_nanoseconds();
+        double visible = 0, accumulated = 0;
+        for (const auto &point : stats.points) {
+            if (!point.windows.empty() && point.windows.front().first.tai_nanoseconds() <= t)
+                accumulated += point.cell.area_m2;
+            for (const auto &window : point.windows)
+                if (window.first.tai_nanoseconds() <= t && t <= window.last.tai_nanoseconds()) {
+                    visible += point.cell.area_m2;
+                    break;
+                }
+        }
+        EXPECT_NEAR(std::get<double>(row[3]), visible, stats.total_area_m2 * 1e-14);
+        EXPECT_NEAR(std::get<double>(row[5]), accumulated, stats.total_area_m2 * 1e-14);
+    }
+    // Output rows and search work can exceed the former fixed node ceiling.
+    d.query.object_ids = {"sat0"};
+    d.query.first = seconds(0);
+    d.query.last = core::Epoch{199999500000};
+    d.query.step_nanoseconds = 1000000;
+    d.query.event_search_mode = core::AccessSearchMode::fixed_grid;
+    d.query.coverage = {-.01, .01, -.01, .01, .1, 0, true};
+    const auto dense = runtime::generate_report(ctx, d);
+    EXPECT_EQ(dense.table.rows().size(), 200001);
+    EXPECT_EQ(std::get<core::Epoch>(dense.table.rows().back()[2]), d.query.last);
+    EXPECT_DOUBLE_EQ(std::get<double>(dense.table.rows().back()[4]), 1);
 }
 
 TEST(Coverage, HpopScientificEphemerisMatchesOrekitWindows) {
@@ -342,4 +593,56 @@ TEST(Coverage, HpopScientificEphemerisMatchesOrekitWindows) {
                         ref.points[i].windows[j].second, 2e-6);
         }
     }
+}
+
+TEST(Coverage, NamedPolygonUsesCapturedGeometryAndMissingRegionNeverFallsBack) {
+    if (!runtime::time_frames_available() || !runtime::two_body_available())
+        GTEST_SKIP();
+    auto ctx = context();
+    application::ProjectRegion region;
+    region.object_id = "area";
+    region.display_name = "Triangle";
+    region.boundary.vertices = {{-.1, -.1}, {.1, -.1}, {0, .1}};
+    region.grid_resolution_rad = .05;
+    ctx.project.regions.push_back(region);
+    auto d = definition();
+    d.query.region_id = "area";
+    d.query.follow_scenario = false;
+    d.query.first = seconds(0);
+    d.query.last = seconds(60);
+    d.query.coverage.resolution_rad = 1; // Inactive inline draft; named region owns the grid.
+    const auto result = runtime::generate_report(ctx, d);
+    const auto &stats = *result.coverage_statistics;
+    ASSERT_FALSE(stats.points.empty());
+    ASSERT_TRUE(stats.region);
+    EXPECT_EQ(*stats.region, region.boundary);
+    EXPECT_NEAR(stats.grid.west_rad, -.1, 1e-15);
+    EXPECT_DOUBLE_EQ(stats.grid.resolution_rad, .05);
+    EXPECT_EQ(runtime::estimate_report_rows(ctx.project, d), stats.points.size());
+    for (const auto &point : stats.points)
+        EXPECT_TRUE(core::region_contains(region.boundary, {point.cell.location.longitude_rad,
+                                                            point.cell.location.latitude_rad}));
+    const auto report_hash = runtime::report_input_sha256(ctx.project);
+    const auto orbit_hash = application::analysis_input_sha256(ctx.project);
+    ctx.project.regions[0].display_name = "Renamed";
+    ctx.project.regions[0].description = "A note";
+    ctx.project.regions[0].display.color = 0xffffff;
+    ctx.project.regions[0].display.fill = false;
+    ctx.project.regions[0].display.opacity = .37;
+    EXPECT_EQ(runtime::report_input_sha256(ctx.project), report_hash);
+    ctx.project.regions[0].grid_resolution_rad = .025;
+    EXPECT_NE(runtime::report_input_sha256(ctx.project), report_hash);
+    EXPECT_EQ(application::analysis_input_sha256(ctx.project), orbit_hash);
+    EXPECT_DOUBLE_EQ(stats.grid.resolution_rad, .05);
+    ctx.project.regions[0].boundary.vertices[2].latitude_rad = .2;
+    EXPECT_NE(runtime::report_input_sha256(ctx.project), report_hash);
+    EXPECT_EQ(application::analysis_input_sha256(ctx.project), orbit_hash);
+    EXPECT_EQ(*stats.region, region.boundary); // Already published results own their boundary.
+    const auto reopened = application::decode_project(application::encode_project(ctx.project));
+    EXPECT_EQ(reopened.regions.front().boundary, ctx.project.regions.front().boundary);
+    EXPECT_DOUBLE_EQ(reopened.regions.front().grid_resolution_rad, .025);
+    EXPECT_EQ(reopened.regions.front().display, ctx.project.regions.front().display);
+    ctx.project.regions.clear();
+    EXPECT_THROW((void)runtime::generate_report(ctx, d), application::ProjectError);
+    EXPECT_THROW((void)runtime::estimate_report_rows(ctx.project, d), application::ProjectError);
 }

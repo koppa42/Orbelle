@@ -10,7 +10,7 @@ class QPushButton;
 class QTreeWidget;
 
 namespace orbelle::desktop {
-enum class InsertObjectType { satellite, ground_station, sensor };
+enum class InsertObjectType { satellite, ground_station, sensor, region };
 enum class InsertObjectMethod { define_properties, defaults, orbit_wizard, tle_file };
 struct InsertObjectRequest {
     InsertObjectType type;

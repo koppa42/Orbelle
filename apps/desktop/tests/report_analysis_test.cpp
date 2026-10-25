@@ -580,6 +580,86 @@ TEST(CoverageMap, DataHintsWaitForHelpEventAndRefreshAfterMetricChange) {
     EXPECT_FALSE(QToolTip::isVisible());
 }
 
+TEST(CoverageMap, CachedPaintMatchesFreshMapAfterSelectionMetricResizeAndResultChange) {
+    (void)test_app();
+    application::ReportDefinition definition;
+    auto &grid = definition.query.coverage;
+    grid.south_rad = grid.west_rad = -.1;
+    grid.north_rad = grid.east_rad = .1;
+    auto result = std::make_shared<runtime::ReportResult>(
+        runtime::ReportResult{definition, results::Table{{}, {}}});
+    result->last = core::Epoch{3600'000'000'000};
+    result->coverage_statistics = results::CoverageStatistics{};
+    auto &stats = *result->coverage_statistics;
+    stats.maximum_gap_seconds = 1800;
+    stats.points.push_back({{{-.05, 0, 0}, -.1, .1, -.1, 0, 1e6}, {}, {1800, 900, 900, 1}});
+    stats.points.push_back({{{.05, 0, 0}, -.1, .1, 0, .1, 1e6}, {}, {900, 1800, 1800, 1}});
+    CoverageMap map;
+    map.resize(600, 400);
+    map.set_result(result);
+    const auto initial = map.grab().toImage();
+    map.select_point(1);
+    EXPECT_NE(initial, map.grab().toImage());
+    const auto compare = [&](int metric, std::shared_ptr<const runtime::ReportResult> expected) {
+        CoverageMap fresh;
+        fresh.resize(map.size());
+        fresh.set_result(std::move(expected));
+        fresh.set_metric(metric);
+        fresh.select_point(map.point_index());
+        EXPECT_EQ(map.grab().toImage(), fresh.grab().toImage());
+    };
+    compare(0, result);
+    map.set_metric(1);
+    compare(1, result);
+    map.resize(420, 300);
+    compare(1, result);
+    map.set_result({});
+    compare(1, {});
+}
+
+TEST(ReportDialog, DenseCoverageEstimateUsesMemorySettingAndDiscardsOlderEdits) {
+    (void)test_app();
+    if (!runtime::time_frames_available())
+        GTEST_SKIP();
+    std::shared_ptr<const core::ITimeProvider> time = runtime::make_builtin_time_provider();
+    application::Project project{"Dense estimate", core::Epoch{0}, core::Epoch{600'000'000'000}};
+    application::ProjectSatellite sat;
+    sat.orbit.object_id = "asset";
+    sat.orbit.first = project.first;
+    sat.orbit.last = project.last;
+    sat.orbit.initial = {
+        project.first, core::OriginId::earth, core::FrameId::gcrf, {7e6, 0, 0}, {0, 6200, 5300}};
+    project.satellites.push_back(sat);
+    application::ProjectRegion region;
+    region.object_id = "world";
+    region.boundary = {
+        -std::numbers::pi / 2, std::numbers::pi / 2, -std::numbers::pi, std::numbers::pi, {}};
+    region.grid_resolution_rad = .25 * std::numbers::pi / 180;
+    project.regions.push_back(region);
+    ReportDialog dialog(project, time, [](const auto &, auto) {}, [](auto) {}, [](auto) {});
+    application::ReportDefinition definition;
+    definition.id = definition.name = "Dense coverage";
+    definition.query.kind = application::ReportKind::coverage_grid;
+    definition.query.object_ids = {"asset"};
+    definition.query.region_id = "world";
+    ASSERT_TRUE(dialog.configure_report(definition));
+    dialog.show();
+    auto *memory = dialog.findChild<QDoubleSpinBox *>("coverageMemoryMiB");
+    auto *estimate = dialog.findChild<QLabel *>("reportEstimate");
+    ASSERT_TRUE(memory && estimate);
+    EXPECT_FALSE(dialog.findChild<QDoubleSpinBox *>("coverageResolution"));
+    ASSERT_TRUE(wait_for_ui([&] { return estimate->text().contains("budget"); }, 3000));
+    memory->setValue(1536);
+    ASSERT_TRUE(
+        wait_for_ui([&] { return estimate->text().contains(QStringLiteral("个网格点")); }, 3000));
+    EXPECT_TRUE(estimate->text().contains("MiB"));
+    project.regions.front().grid_resolution_rad = .01 * std::numbers::pi / 180;
+    dialog.update_project(project, time);
+    project.regions.front().grid_resolution_rad = std::numbers::pi / 180;
+    dialog.update_project(project, time);
+    ASSERT_TRUE(wait_for_ui([&] { return estimate->text().startsWith("41344"); }, 3000));
+}
+
 TEST(ReportDialog, CoverageHeatmapPointWindowsTemplatesAndResponsiveLayout) {
     (void)test_app();
     if (!runtime::two_body_available())
@@ -600,6 +680,13 @@ TEST(ReportDialog, CoverageHeatmapPointWindowsTemplatesAndResponsiveLayout) {
     sat.orbit.initial = {
         project.first, core::OriginId::earth, core::FrameId::gcrf, {7e6, 0, 0}, {0, 6200, 5300}};
     project.satellites.push_back(sat);
+    application::ProjectRegion region;
+    region.object_id = "world";
+    region.display_name = "全球区域";
+    region.boundary = {
+        -std::numbers::pi / 2, std::numbers::pi / 2, -std::numbers::pi, std::numbers::pi, {}};
+    region.grid_resolution_rad = 20 * std::numbers::pi / 180;
+    project.regions.push_back(region);
     int preparations = 0;
     core::Epoch sought{-1};
     std::shared_ptr<const runtime::ReportResult> result;
@@ -612,12 +699,21 @@ TEST(ReportDialog, CoverageHeatmapPointWindowsTemplatesAndResponsiveLayout) {
         [&](auto reports) { project.reports = std::move(reports); },
         [&](auto epoch) { sought = epoch; });
     dialog.result_published = [&](auto r, const auto &) { result = r; };
-    dialog.select_object("asset", application::ReportKind::coverage_grid);
+    application::ReportDefinition definition;
+    definition.id = definition.name = "Global coverage";
+    definition.query.kind = application::ReportKind::coverage_grid;
+    definition.query.object_ids = {"asset"};
+    definition.query.region_id = "world";
+    ASSERT_TRUE(dialog.configure_report(definition));
+    std::string edited_region;
+    dialog.open_region_properties = [&](const auto &id) { edited_region = id; };
+    dialog.findChild<QPushButton *>("coverageRegionProperties")->click();
+    EXPECT_EQ(edited_region, "world");
     dialog.show();
     dialog.resize(1140, 820);
     QCoreApplication::processEvents();
-    dialog.findChild<QPushButton *>("coverageGlobal")->click();
-    dialog.findChild<QDoubleSpinBox *>("coverageResolution")->setValue(20);
+    EXPECT_FALSE(dialog.findChild<QPushButton *>("coverageGlobal"));
+    EXPECT_FALSE(dialog.findChild<QDoubleSpinBox *>("coverageNorth"));
     dialog.findChild<QPushButton *>("generateReport")->click();
     wait_for_report(dialog, 20000);
     ASSERT_TRUE(result);
@@ -675,8 +771,8 @@ TEST(ReportDialog, CoverageHeatmapPointWindowsTemplatesAndResponsiveLayout) {
     EXPECT_EQ(project.reports[0].query.object_ids, (std::vector<std::string>{"asset"}));
     EXPECT_DOUBLE_EQ(project.reports[0].query.coverage.west_rad, -std::numbers::pi);
     choose_report(dialog, static_cast<int>(application::ReportKind::coverage_time));
-    dialog.findChild<QDoubleSpinBox *>("coverageResolution")->setValue(30);
-    dialog.findChild<QPushButton *>("coverageGlobal")->click();
+    project.regions.front().grid_resolution_rad = 30 * std::numbers::pi / 180;
+    dialog.update_project(project, time);
     dialog.findChild<QPushButton *>("generateReport")->click();
     wait_for_report(dialog, 20000);
     ASSERT_EQ(result->definition.query.kind, application::ReportKind::coverage_time);
@@ -687,12 +783,14 @@ TEST(ReportDialog, CoverageHeatmapPointWindowsTemplatesAndResponsiveLayout) {
     if (!capture.isEmpty())
         dialog.grab().save(capture + "/coverage-curve-1140.png");
     auto previous = result;
-    dialog.findChild<QDoubleSpinBox *>("coverageNorth")->setValue(-90);
+    project.regions.clear();
+    dialog.update_project(project, time);
     dialog.findChild<QPushButton *>("generateReport")->click();
     wait_for_report(dialog);
     EXPECT_EQ(result, previous);
     EXPECT_EQ(preparations, 2);
     choose_report(dialog, static_cast<int>(application::report_kinds.size()));
+    project.regions.push_back(region);
     project.satellites.clear();
     dialog.update_project(project, time);
     dialog.findChild<QPushButton *>("generateReport")->click();

@@ -19,7 +19,7 @@ class ProjectFormatTests(unittest.TestCase):
         self.raw = FIXTURE.read_bytes()
 
     def test_fixed_current_fixture_opens_with_preserved_inputs_and_relationships(self):
-        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 51)
+        self.assertEqual(struct.unpack_from("<I", self.raw, 8)[0], 54)
         self.path.write_bytes(self.raw)
         project = ob.Project.open(self.path)
         self.assertEqual(project.objects["satellite-a"].name, "观测卫星 A")
@@ -27,6 +27,18 @@ class ProjectFormatTests(unittest.TestCase):
         self.assertEqual(low.reports[4].query.kind, ob.ReportKind.COVERAGE_GRID)
         self.assertEqual(low.reports[4].query.coverage.east_rad, -2.9)
         self.assertFalse(low.reports[4].query.coverage.include_end_gaps)
+        self.assertEqual(low.reports[4].query.region_id, "region-a")
+        self.assertEqual([r.object_id for r in low.regions], ["region-a", "region-b"])
+        self.assertEqual(low.regions[0].boundary.west_rad, 2.9)
+        self.assertFalse(low.regions[0].display.show_3d)
+        self.assertEqual(low.regions[1].boundary.vertices[1].longitude_rad, -3.0)
+        self.assertEqual(low.regions[1].description, "Great-circle triangle")
+        self.assertEqual(low.regions[0].grid_resolution_rad, .1)
+        self.assertEqual(low.regions[1].grid_resolution_rad, .05)
+        self.assertTrue(low.regions[0].display.fill)
+        self.assertEqual(low.regions[0].display.opacity, .12)
+        self.assertFalse(low.regions[1].display.fill)
+        self.assertEqual(low.regions[1].display.opacity, .35)
         self.assertEqual(project.objects["satellite-b"].orbit.hpop.max_step_seconds, 45)
         self.assertEqual(project.objects["satellite-b"].orbit.hpop.solid_tides,
                          ob.orbits.SolidTideSettings("full", True, True))
@@ -85,6 +97,25 @@ class ProjectFormatTests(unittest.TestCase):
                 if tag == b"RPTS":
                     body = bytearray(body)
                     self.assertEqual(body.count(marker), 2)
+                    struct.pack_into("<" + fmt, body, body.index(marker) + offset, value)
+                sections.append((tag, version, body))
+            raw = with_sections(self.raw, sections)
+            self.path.write_bytes(raw)
+            with self.subTest(offset=offset), self.assertRaises(ob.ProjectError):
+                ob.Project.open(self.path)
+            self.assertEqual(self.path.read_bytes(), raw)
+
+    def test_region_section_rejects_invalid_geometry_counts_and_flags(self):
+        marker = struct.pack("<4dI", -.2, .3, 2.9, -2.9, 0)
+        spacing_offset = 42 + 4 + len("Date line region")
+        for offset, fmt, value in ((0, "d", float("nan")), (32, "I", 257), (36, "B", 2),
+                                  (spacing_offset, "d", 0), (spacing_offset, "d", float("nan")),
+                                  (spacing_offset+8, "B", 2), (spacing_offset+9, "d", -0.1),
+                                  (spacing_offset+9, "d", 1.1), (spacing_offset+9, "d", float("nan"))):
+            sections = []
+            for tag, version, body in read_sections(self.raw):
+                if tag == b"REGN":
+                    body = bytearray(body)
                     struct.pack_into("<" + fmt, body, body.index(marker) + offset, value)
                 sections.append((tag, version, body))
             raw = with_sections(self.raw, sections)
@@ -156,14 +187,14 @@ class ProjectFormatTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(),altered)
 
     def test_all_previous_and_unknown_versions_are_rejected_by_every_open_entry(self):
-        for version in (*range(51), 52, 0xFFFFFFFF):
+        for version in (*range(54), 55, 0xFFFFFFFF):
             raw = bytearray(self.raw)
             struct.pack_into("<I", raw, 8, version)
             self.path.write_bytes(raw)
             for open_project in (ob.load_project_data, ob.load_project,
                                  ob.Project.open, ob.Project.plan_open):
                 with self.subTest(version=version, entry=open_project.__name__):
-                    with self.assertRaisesRegex(ob.ProjectError, f"version {version};.*only version 51"):
+                    with self.assertRaisesRegex(ob.ProjectError, f"version {version};.*only version 54"):
                         open_project(self.path)
                     self.assertEqual(self.path.read_bytes(), raw)
 

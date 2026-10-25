@@ -37,6 +37,7 @@ class ReportCreation : public ::testing::Test {
         project.satellites.push_back(satellite);
         project.ground_stations.push_back({"station", "东站"});
         project.sensors.push_back({"sensor", "观测仪", "alpha"});
+        project.regions.push_back({"region", "研究区"});
         return project;
     }
     static QPushButton *next(ReportCreationDialog &dialog) {
@@ -452,7 +453,7 @@ TEST_F(ReportCreation, ReportTypeDeterminesSelectableObjectTypes) {
         ReportCreationDialog dialog(project());
         select(dialog, kind);
         dialog.accept();
-        picker(dialog, 0, [&](auto &modal) {
+        picker(dialog, kind == ReportKind::coverage_grid ? 1 : 0, [&](auto &modal) {
             auto *types = modal.template findChild<QComboBox *>("objectSelectionKind");
             ASSERT_NE(types, nullptr);
             const bool station = kind == ReportKind::ground_stations;
@@ -555,6 +556,50 @@ TEST_F(ReportCreation, NarrowLayoutKeepsNavigationReachable) {
             EXPECT_TRUE(modal.grab().save(directory + "/report-create-object-picker.png"));
     });
     general.reject();
+}
+TEST_F(ReportCreation, RegionContextRequiresExplicitAssetsAndPreservesMissingBinding) {
+    auto input = project();
+    ReportCreationDialog dialog(input, "region", ReportKind::coverage_grid);
+    EXPECT_TRUE(next(dialog)->isEnabled());
+    dialog.accept();
+    ASSERT_TRUE(field(dialog, 0) && field(dialog, 1));
+    EXPECT_EQ(field(dialog, 0)->id(), "region");
+    EXPECT_FALSE(next(dialog)->isEnabled());
+    EXPECT_TRUE(field(dialog, 1)->selection().ids.empty());
+    field(dialog, 1)->set_selection({{"alpha", "sensor"}, false});
+    EXPECT_TRUE(next(dialog)->isEnabled());
+    input.regions.front().display_name = "改名区域";
+    dialog.update_project(input);
+    EXPECT_EQ(field(dialog, 0)->id(), "region");
+    EXPECT_TRUE(next(dialog)->isEnabled());
+    input.regions.clear();
+    dialog.update_project(input);
+    EXPECT_FALSE(next(dialog)->isEnabled());
+    EXPECT_EQ(field(dialog, 0)->id(), "region");
+    input = project();
+    dialog.update_project(input);
+    dialog.accept();
+    EXPECT_EQ(dialog.result(), QDialog::Accepted);
+    EXPECT_EQ(dialog.definition().query.region_id, "region");
+    EXPECT_EQ(dialog.definition().query.object_ids, (std::vector<std::string>{"alpha", "sensor"}));
+    for (auto &satellite : input.satellites) {
+        satellite.orbit.first = input.first;
+        satellite.orbit.last = input.last;
+        satellite.orbit.initial.epoch = input.first;
+    }
+    ReportDialog report(
+        input, runtime::make_builtin_time_provider(),
+        [](const ReportQuery &, ReportDialog::Ready) {}, [](auto) {}, [](auto) {});
+    ASSERT_TRUE(report.configure_report(dialog.definition()));
+    EXPECT_TRUE(report.windowTitle().contains(QStringLiteral("研究区")));
+    input.regions.front().display_name = "重新命名的区域";
+    report.update_project(input, runtime::make_builtin_time_provider());
+    EXPECT_TRUE(report.windowTitle().contains(QStringLiteral("重新命名的区域")));
+    ReportCreationDialog from_asset(input, "alpha", ReportKind::coverage_time);
+    from_asset.accept();
+    EXPECT_EQ(field(from_asset, 1)->selection().ids, (std::vector<std::string>{"alpha"}));
+    EXPECT_TRUE(field(from_asset, 0)->id().empty());
+    EXPECT_FALSE(next(from_asset)->isEnabled());
 }
 } // namespace
 } // namespace orbelle::desktop

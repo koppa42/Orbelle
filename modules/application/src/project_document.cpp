@@ -54,6 +54,8 @@ ObjectState read_object(const Project &project, const std::string &id, ObjectKin
         return lookup(project.ground_stations, id);
     case ObjectKind::sensor:
         return lookup(project.sensors, id);
+    case ObjectKind::region:
+        return lookup(project.regions, id);
     }
     throw ProjectError("Invalid object kind");
 }
@@ -118,6 +120,20 @@ std::vector<std::string> fields(const ProjectSensor &a, const ProjectSensor &b) 
         result.emplace_back("pointing");
     return result;
 }
+std::vector<std::string> fields(const ProjectRegion &a, const ProjectRegion &b) {
+    std::vector<std::string> result;
+    if (a.display_name != b.display_name)
+        result.emplace_back("name");
+    if (a.boundary != b.boundary)
+        result.emplace_back("boundary");
+    if (a.display != b.display)
+        result.emplace_back("display");
+    if (a.description != b.description)
+        result.emplace_back("description");
+    if (a.grid_resolution_rad != b.grid_resolution_rad)
+        result.emplace_back("grid_resolution_rad");
+    return result;
+}
 template <typename T>
 void diff_objects(const std::vector<T> &before, const std::vector<T> &after, ChangeSet &changes) {
     std::map<std::string, const T *> old;
@@ -142,6 +158,7 @@ auto metadata_bytes(Project value) {
     value.satellites.clear();
     value.ground_stations.clear();
     value.sensors.clear();
+    value.regions.clear();
     return encode_project(value);
 }
 void notify(const std::shared_ptr<detail::DocumentState> &state) {
@@ -232,6 +249,7 @@ void ProjectDocument::save(const std::filesystem::path &path, const ProjectSnaps
         diff_objects(before.project->satellites, owned->satellites, changes);
         diff_objects(before.project->ground_stations, owned->ground_stations, changes);
         diff_objects(before.project->sensors, owned->sensors, changes);
+        diff_objects(before.project->regions, owned->regions, changes);
         changes.settings_changed = metadata_bytes(*before.project) != metadata_bytes(*owned);
     }
     detail::DocumentState::Notification pending{std::move(changes), {}};
@@ -367,6 +385,7 @@ void ProjectEdit::commit() {
         diff_objects(before.satellites, after.satellites, changes);
         diff_objects(before.ground_stations, after.ground_stations, changes);
         diff_objects(before.sensors, after.sensors, changes);
+        diff_objects(before.regions, after.regions, changes);
         changes.settings_changed = metadata_bytes(before) != metadata_bytes(after);
     }
     bool dispatch = false;
@@ -418,6 +437,9 @@ ObjectRef ObjectManager::get(const std::string &id) const {
     for (const auto &s : snap.project->sensors)
         if (id_of(s) == id)
             return {state_->scope, id, ObjectKind::sensor};
+    for (const auto &s : snap.project->regions)
+        if (id_of(s) == id)
+            return {state_->scope, id, ObjectKind::region};
     throw ObjectNotFoundError("Object '" + id + "' no longer exists");
 }
 std::vector<ObjectRef> ObjectManager::find(const std::optional<std::string> &name,
@@ -434,6 +456,7 @@ std::vector<ObjectRef> ObjectManager::find(const std::optional<std::string> &nam
     append(snap.project->satellites, ObjectKind::satellite);
     append(snap.project->ground_stations, ObjectKind::ground_station);
     append(snap.project->sensors, ObjectKind::sensor);
+    append(snap.project->regions, ObjectKind::region);
     return found;
 }
 ObjectState ObjectManager::read(const ObjectRef &ref) const {
@@ -489,6 +512,30 @@ ObjectRef ObjectManager::create(const objects::GroundStation &definition) {
                                         definition.description});
     });
     return ref;
+}
+ObjectRef ObjectManager::create(const objects::Region &definition) {
+    const auto ref = allocate(ObjectKind::region);
+    mutate([&](Project &next) {
+        next.regions.push_back({ref.id(), definition.name, definition.boundary, definition.display,
+                                definition.description, definition.grid_resolution_rad});
+    });
+    return ref;
+}
+void ObjectManager::update(const ObjectRef &ref, const objects::RegionUpdate &patch) {
+    mutate([&](Project &next) {
+        check_ref(ref, next, ObjectKind::region);
+        auto &value = lookup(next.regions, ref.id());
+        if (patch.name)
+            value.display_name = *patch.name;
+        if (patch.boundary)
+            value.boundary = *patch.boundary;
+        if (patch.display)
+            value.display = *patch.display;
+        if (patch.description)
+            value.description = *patch.description;
+        if (patch.grid_resolution_rad)
+            value.grid_resolution_rad = *patch.grid_resolution_rad;
+    });
 }
 ObjectRef ObjectManager::create(const objects::Sensor &definition) {
     const auto ref = allocate(ObjectKind::sensor);
@@ -581,6 +628,9 @@ void ObjectManager::rename(const ObjectRef &ref, const std::string &name) {
     case ObjectKind::sensor:
         update(ref, objects::SensorUpdate{name, {}, {}});
         break;
+    case ObjectKind::region:
+        update(ref, objects::RegionUpdate{name});
+        break;
     }
 }
 void ObjectManager::reparent(const ObjectRef &sensor, const ObjectRef &parent) {
@@ -613,6 +663,8 @@ ObjectRef ObjectManager::duplicate(const ObjectRef &ref, const std::string &name
                     value.object_id = copy.id();
                     if constexpr (std::is_same_v<T, ProjectGroundStation>)
                         next.ground_stations.push_back(value);
+                    else if constexpr (std::is_same_v<T, ProjectRegion>)
+                        next.regions.push_back(value);
                     else
                         next.sensors.push_back(value);
                 }
@@ -633,7 +685,8 @@ RemovalPlan ObjectManager::plan_remove(const ObjectRef &ref) const {
             result.blocking_sensors.push_back(s.object_id);
     }
     for (const auto &r : snap.project->reports)
-        if (std::ranges::any_of(r.query.object_ids, [&](const auto &id) {
+        if (r.query.region_id == ref.id() ||
+            std::ranges::any_of(r.query.object_ids, [&](const auto &id) {
                 return std::ranges::find(result.removed, id) != result.removed.end();
             }))
             result.affected_reports.push_back(r.id);
@@ -644,6 +697,7 @@ void ObjectManager::remove(const ObjectRef &ref) {
         check_ref(ref, next);
         std::erase_if(next.satellites, [&](const auto &s) { return id_of(s) == ref.id(); });
         std::erase_if(next.ground_stations, [&](const auto &s) { return id_of(s) == ref.id(); });
+        std::erase_if(next.regions, [&](const auto &s) { return id_of(s) == ref.id(); });
         std::erase_if(next.sensors, [&](const auto &s) {
             return id_of(s) == ref.id() || s.parent_satellite_id == ref.id();
         });

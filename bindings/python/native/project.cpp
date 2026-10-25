@@ -30,6 +30,36 @@ void bind_data_lock(py::module_ &module) {
         });
 }
 void bind_project(py::module_ &module) {
+    py::class_<core::RegionVertex>(module, "RegionVertex")
+        .def(py::init<double, double>(), py::arg("longitude_rad"), py::arg("latitude_rad"))
+        .def_readwrite("longitude_rad", &core::RegionVertex::longitude_rad)
+        .def_readwrite("latitude_rad", &core::RegionVertex::latitude_rad);
+    py::class_<core::RegionBoundary>(module, "RegionBoundary")
+        .def(py::init<>())
+        .def_readwrite("south_rad", &core::RegionBoundary::south_rad)
+        .def_readwrite("north_rad", &core::RegionBoundary::north_rad)
+        .def_readwrite("west_rad", &core::RegionBoundary::west_rad)
+        .def_readwrite("east_rad", &core::RegionBoundary::east_rad)
+        .def_readwrite("vertices", &core::RegionBoundary::vertices);
+    module.def("validate_region_boundary", &core::validate_region_boundary);
+    module.def("region_contains", &core::region_contains);
+    module.def("region_outline", &core::region_outline);
+    py::class_<application::RegionDisplay>(module, "RegionDisplay")
+        .def(py::init<>())
+        .def_readwrite("show_2d", &application::RegionDisplay::show_2d)
+        .def_readwrite("show_3d", &application::RegionDisplay::show_3d)
+        .def_readwrite("color", &application::RegionDisplay::color)
+        .def_readwrite("fill", &application::RegionDisplay::fill)
+        .def_readwrite("opacity", &application::RegionDisplay::opacity);
+    py::class_<application::ProjectRegion>(module, "ProjectRegion")
+        .def(py::init<>())
+        .def_readwrite("object_id", &application::ProjectRegion::object_id)
+        .def_readwrite("display_name", &application::ProjectRegion::display_name)
+        .def_readwrite("boundary", &application::ProjectRegion::boundary)
+        .def_readwrite("display", &application::ProjectRegion::display)
+        .def_readwrite("description", &application::ProjectRegion::description)
+        .def_readwrite("grid_resolution_rad", &application::ProjectRegion::grid_resolution_rad)
+        .def_property_readonly("name", &application::ProjectRegion::name);
     py::register_exception<application::ProjectError>(module, "ProjectError", PyExc_ValueError);
     py::enum_<core::GroundPositionType>(module, "GroundPositionType")
         .value("GEODETIC", core::GroundPositionType::geodetic)
@@ -432,6 +462,7 @@ void bind_project(py::module_ &module) {
         .def_readwrite("satellites", &application::Project::satellites)
         .def_readwrite("ground_stations", &application::Project::ground_stations)
         .def_readwrite("sensors", &application::Project::sensors)
+        .def_readwrite("regions", &application::Project::regions)
         .def_readwrite("reports", &application::Project::reports)
         .def_readwrite("earth_orientation", &application::Project::earth_orientation)
         .def_readwrite("time_data", &application::Project::time_data)

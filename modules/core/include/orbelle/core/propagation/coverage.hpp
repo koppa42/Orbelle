@@ -1,4 +1,6 @@
 #pragma once
+#include <functional>
+#include <limits>
 #include <numbers>
 #include <orbelle/core/propagation/access.hpp>
 
@@ -23,7 +25,16 @@ struct CoverageCell {
 };
 void validate_coverage_grid(const CoverageGrid &grid);
 [[nodiscard]] double coverage_longitude_span(const CoverageGrid &grid);
-// At most 4096 centre-sampled cells; positive analytic WGS84 surface areas.
+// No fixed point-count limit. The visitor owns storage and may throw to cancel.
+// Size queries allocate no cells; maximum_cells is a caller's resource budget.
+[[nodiscard]] std::size_t
+coverage_grid_size(const CoverageGrid &grid,
+                   std::size_t maximum_cells = std::numeric_limits<std::size_t>::max(),
+                   const std::function<void()> &check_cancelled = {});
+void visit_coverage_grid(const CoverageGrid &grid,
+                         const std::function<void(const CoverageCell &)> &consume,
+                         const std::function<void()> &check_cancelled = {});
+// Materializing convenience API, subject to vector addressability/allocation.
 [[nodiscard]] std::vector<CoverageCell> coverage_grid(const CoverageGrid &grid);
 // Union touching/overlapping positive intervals within [first,last]. Inputs must
 // already be clipped to the analysis interval. Does not fill sub-tolerance gaps.

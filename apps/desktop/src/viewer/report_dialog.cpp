@@ -54,6 +54,7 @@
 #include <algorithm>
 #include <cmath>
 #include <future>
+#include <limits>
 #include <map>
 #include <numbers>
 #include <orbelle/project.hpp>
@@ -424,7 +425,11 @@ struct ReportDialog::Impl {
     QSortFilterProxyModel *table_proxy;
     QTabBar *views;
     QWidget *coverage_settings, *coverage_page;
-    std::array<QDoubleSpinBox *, 6> coverage_fields{};
+    ObjectSelectionField *coverage_region;
+    QLabel *coverage_region_summary;
+    QPushButton *coverage_region_properties;
+    QDoubleSpinBox *coverage_elevation;
+    QDoubleSpinBox *coverage_memory;
     QCheckBox *coverage_ends;
     CoverageMap *coverage_map;
     QComboBox *coverage_metric, *coverage_windows;
@@ -455,6 +460,10 @@ struct ReportDialog::Impl {
     std::future<void> export_job;
     std::shared_ptr<std::atomic_bool> cancellation;
     std::shared_ptr<std::atomic_size_t> completed;
+    std::shared_ptr<std::atomic_size_t> progress_total;
+    std::future<QString> estimate_job;
+    std::shared_ptr<std::atomic_bool> estimate_cancel;
+    std::optional<ReportDefinition> pending_estimate;
     bool waiting = false, loading = false, changed = false;
     bool compact = false, wide_settings = true, narrow_settings = true;
     WidthMode panel_mode;
@@ -583,52 +592,56 @@ struct ReportDialog::Impl {
         auto *coverage_form = new QFormLayout(coverage_settings);
         coverage_form->setContentsMargins(0, 8, 0, 0);
         coverage_form->setRowWrapPolicy(QFormLayout::WrapAllRows);
-        const std::array labels{
-            ui::text("report_dialog.label_88"), QString{},
-            ui::text("report_dialog.label_89"), QString{},
-            ui::text("report_dialog.label_90"), ui::text("report_dialog.label_91")};
-        const std::array names{"coverageSouth", "coverageNorth",      "coverageWest",
-                               "coverageEast",  "coverageResolution", "coverageElevation"};
-        for (int i = 0; i < 6; ++i) {
-            coverage_fields[i] = new QDoubleSpinBox(coverage_settings);
-            coverage_fields[i]->setObjectName(names[i]);
-            coverage_fields[i]->setAccessibleName(QString::fromLatin1(names[i]));
-            coverage_fields[i]->setDecimals(4);
-            coverage_fields[i]->setRange(i == 4   ? .01
-                                         : i == 5 ? 0
-                                         : i < 2  ? -90
-                                                  : -180,
-                                         i < 2 || i == 5 ? 90 : 180);
-            coverage_fields[i]->setSuffix(QStringLiteral("°"));
-            coverage_fields[i]->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        }
-        for (int i : {0, 2}) {
-            auto *pair = new QHBoxLayout;
-            pair->addWidget(coverage_fields[i]);
-            pair->addWidget(coverage_fields[i + 1]);
-            coverage_form->addRow(labels[i], pair);
-        }
-        for (int i : {4, 5})
-            coverage_form->addRow(labels[i], coverage_fields[i]);
-        coverage_fields[2]->setToolTip(ui::text("report_dialog.label_92"));
-        auto *global = new QPushButton(ui::text("report_dialog.global"), coverage_settings);
-        global->setObjectName("coverageGlobal");
-        coverage_form->addRow(global);
+        coverage_region = new ObjectSelectionField(coverage_settings);
+        coverage_region->setObjectName("coverageRegion");
+        coverage_region->set_options({ui::text("region.title"), false, {}});
+        coverage_form->addRow(ui::text("region.title"), coverage_region);
+        coverage_region_summary = new QLabel(coverage_settings);
+        coverage_region_summary->setObjectName("coverageRegionSummary");
+        coverage_region_summary->setWordWrap(true);
+        coverage_form->addRow(coverage_region_summary);
+        coverage_region_properties =
+            new QPushButton(ui::text("region.open_properties"), coverage_settings);
+        coverage_region_properties->setObjectName("coverageRegionProperties");
+        coverage_form->addRow(coverage_region_properties);
+        QObject::connect(coverage_region_properties, &QPushButton::clicked, owner, [this] {
+            if (owner->open_region_properties)
+                owner->open_region_properties(coverage_region->id());
+        });
+        auto *conditions =
+            new QLabel(ui::text("report_dialog.coverage.conditions"), coverage_settings);
+        conditions->setObjectName("reportSectionTitle");
+        coverage_form->addRow(conditions);
+        coverage_elevation = new QDoubleSpinBox(coverage_settings);
+        coverage_elevation->setObjectName("coverageElevation");
+        coverage_elevation->setDecimals(4);
+        coverage_elevation->setRange(0, 90);
+        coverage_elevation->setSuffix(QStringLiteral("°"));
+        coverage_elevation->setToolTip(ui::text("report_dialog.coverage.elevation_hint"));
+        coverage_form->addRow(ui::text("report_dialog.label_91"), coverage_elevation);
         coverage_ends = new QCheckBox(ui::text("report_dialog.label_93"), coverage_settings);
         coverage_ends->setObjectName("coverageEndGaps");
         coverage_ends->setToolTip(ui::text("report_dialog.coverage_ends.set_tool_tip"));
         coverage_form->addRow(coverage_ends);
+        coverage_memory = new QDoubleSpinBox(coverage_settings);
+        coverage_memory->setObjectName("coverageMemoryMiB");
+        coverage_memory->setDecimals(0);
+        coverage_memory->setRange(1,
+                                  double(std::numeric_limits<std::size_t>::max() / (1024 * 1024)));
+        coverage_memory->setValue(double(runtime::default_coverage_memory_bytes / (1024 * 1024)));
+        coverage_memory->setSuffix(QStringLiteral(" MiB"));
+        coverage_memory->setToolTip(ui::text("report_dialog.coverage_memory.hint"));
+        coverage_form->addRow(ui::text("report_dialog.coverage_memory.label"), coverage_memory);
+        QObject::connect(coverage_memory, &QDoubleSpinBox::valueChanged, owner,
+                         [this] { update_estimate(); });
         config->addWidget(coverage_settings);
-        for (auto *field : coverage_fields)
-            QObject::connect(field, &QDoubleSpinBox::valueChanged, owner, [this] { edit(); });
+        QObject::connect(coverage_elevation, &QDoubleSpinBox::valueChanged, owner,
+                         [this] { edit(); });
         QObject::connect(coverage_ends, &QCheckBox::toggled, owner, [this] { edit(); });
-        QObject::connect(global, &QPushButton::clicked, owner, [this] {
-            loading = true;
-            coverage_fields[0]->setValue(-90);
-            coverage_fields[1]->setValue(90);
-            coverage_fields[2]->setValue(-180);
-            coverage_fields[3]->setValue(180);
-            loading = false;
+        QObject::connect(coverage_region, &ObjectSelectionField::selectionChanged, owner, [this] {
+            refresh_region();
+            if (!loading)
+                refresh_scope();
             edit();
         });
         sampling = new QWidget(settings);
@@ -1311,6 +1324,10 @@ struct ReportDialog::Impl {
     ~Impl() {
         if (cancellation)
             cancellation->store(true);
+        if (estimate_cancel)
+            estimate_cancel->store(true);
+        if (estimate_job.valid())
+            estimate_job.wait();
     }
     void fill_library() {
         const bool saved = std::ranges::any_of(
@@ -1456,10 +1473,17 @@ struct ReportDialog::Impl {
                                   ? (single_station ? ui::text("report_dialog.detail.set_text")
                                                     : ui::text("report_dialog.label_152"))
                                   : ui::text("report_dialog.label_153"));
-        owner->setWindowTitle(
-            scope_ids.size() == 1
-                ? ui::text("report_dialog.owner.set_window_title").arg(labels.front())
-                : ui::text("common.report"));
+        QString title = scope_ids.size() == 1 ? labels.front() : QString{};
+        if (report_is_coverage(draft.query.kind) && !coverage_region->id().empty()) {
+            const auto id = coverage_region->id();
+            const auto region =
+                std::ranges::find(project.regions, id, &application::ProjectRegion::object_id);
+            title = region == project.regions.end() ? text(id) + ui::text("report_dialog.found")
+                                                    : text(region->name());
+        }
+        owner->setWindowTitle(title.isEmpty()
+                                  ? ui::text("common.report")
+                                  : ui::text("report_dialog.owner.set_window_title").arg(title));
         if (report_chooser)
             report_chooser->set_choices(report_choices());
     }
@@ -1609,6 +1633,7 @@ struct ReportDialog::Impl {
             return;
         if (!selected && row < builtin_count && !compatible(static_cast<ReportKind>(row)))
             return;
+        const auto previous_region = coverage_region->id();
         loading = true;
         if (selected) {
             draft = *selected;
@@ -1634,6 +1659,7 @@ struct ReportDialog::Impl {
         const bool coverage = report_is_coverage(draft.query.kind);
         coverage_settings->setVisible(coverage);
         if (coverage && row < builtin_count && !selected) {
+            draft.query.region_id = previous_region;
             if (all_objects)
                 scope_ids.clear();
             const auto choices =
@@ -1645,14 +1671,13 @@ struct ReportDialog::Impl {
                 scope_ids.push_back(project.satellites.front().orbit.object_id);
             all_objects = false;
         }
+        coverage_region->set_objects(project_object_choices(project, {ObjectKind::region}));
+        coverage_region->set_id(draft.query.region_id);
+        refresh_region();
         const auto &grid = draft.query.coverage;
-        const std::array angles{grid.south_rad, grid.north_rad,      grid.west_rad,
-                                grid.east_rad,  grid.resolution_rad, grid.minimum_elevation_rad};
-        for (int i = 0; i < 6; ++i) {
-            coverage_fields[i]->setValue(angles[i] * 180 / std::numbers::pi);
-            coverage_fields[i]->setProperty("originalRadians", angles[i]);
-            coverage_fields[i]->setProperty("originalDisplay", coverage_fields[i]->value());
-        }
+        coverage_elevation->setValue(grid.minimum_elevation_rad * 180 / std::numbers::pi);
+        coverage_elevation->setProperty("originalRadians", grid.minimum_elevation_rad);
+        coverage_elevation->setProperty("originalDisplay", coverage_elevation->value());
         coverage_ends->setChecked(grid.include_end_gaps);
         const bool access = pair_report(draft.query.kind);
         access_options->setVisible(report_uses_event_search(draft.query.kind));
@@ -1794,20 +1819,18 @@ struct ReportDialog::Impl {
         d.format.time_scale = static_cast<ReportTimeScale>(scale->currentIndex());
         if (d.format.columns.empty())
             d.format.columns = default_columns(d.query.kind);
+        d.query.region_id = coverage_region->id();
         auto &g = d.query.coverage;
-        const auto angle = [&](int i) {
-            const auto *field = coverage_fields[i];
-            return field->value() == field->property("originalDisplay").toDouble()
-                       ? field->property("originalRadians").toDouble()
-                       : field->value() * std::numbers::pi / 180;
-        };
-        g.south_rad = angle(0);
-        g.north_rad = angle(1);
-        g.west_rad = angle(2);
-        g.east_rad = angle(3);
-        g.resolution_rad = angle(4);
-        g.minimum_elevation_rad = angle(5);
+        g.minimum_elevation_rad = coverage_elevation->value() ==
+                                          coverage_elevation->property("originalDisplay").toDouble()
+                                      ? coverage_elevation->property("originalRadians").toDouble()
+                                      : coverage_elevation->value() * std::numbers::pi / 180;
         g.include_end_gaps = coverage_ends->isChecked();
+        if (report_is_coverage(d.query.kind)) {
+            if (d.query.region_id.empty())
+                throw std::invalid_argument(ui::utf8("region.select_for_coverage"));
+            g = application::report_coverage_bounds(project, d.query);
+        }
         validate_report_definition(d);
         return d;
     }
@@ -2122,17 +2145,21 @@ struct ReportDialog::Impl {
         coverage_windows->setToolTip(ui::text("report_dialog.coverage_windows.set_tool_tip"));
         coverage_jump->setEnabled(!p.windows.empty());
     }
+    std::size_t coverage_memory_bytes() const {
+        return static_cast<std::size_t>(coverage_memory->value()) * 1024 * 1024;
+    }
     void update_estimate() {
+        if (estimate_cancel)
+            estimate_cancel->store(true);
+        pending_estimate.reset();
         try {
             const auto d = definition();
-            const auto rows = runtime::estimate_report_rows(project, d);
             if (report_is_coverage(d.query.kind)) {
-                estimate->setText(ui::text("report_dialog.estimate.set_text")
-                                      .arg(core::coverage_grid(d.query.coverage).size())
-                                      .arg(d.query.object_ids.size())
-                                      .arg(rows));
+                pending_estimate = d;
+                estimate->setText(ui::text("report_dialog.estimate.loading"));
                 return;
             }
+            const auto rows = runtime::estimate_report_rows(project, d);
             estimate->setText((report_uses_event_search(d.query.kind)
                                    ? ui::text("report_dialog.estimate.set_text_2")
                                    : ui::text("report_dialog.label_179"))
@@ -2143,6 +2170,19 @@ struct ReportDialog::Impl {
         } catch (const std::exception &error) {
             estimate->setText(QString::fromUtf8(error.what()));
         }
+    }
+    void refresh_region() {
+        const auto found = std::ranges::find(project.regions, coverage_region->id(),
+                                             &application::ProjectRegion::object_id);
+        const bool valid = found != project.regions.end();
+        coverage_region_properties->setEnabled(valid);
+        coverage_region_summary->setText(
+            valid ? ui::text("region.coverage_summary")
+                        .arg(ui::text(found->boundary.vertices.empty() ? "region.rectangle"
+                                                                       : "region.polygon"))
+                        .arg(found->grid_resolution_rad * 180 / std::numbers::pi, 0, 'g', 10)
+                  : ui::text(coverage_region->id().empty() ? "region.select_for_coverage"
+                                                           : "region.missing"));
     }
     bool result_is_current() const {
         // The report hash also records its actual resources, including a newly selected
@@ -2197,14 +2237,29 @@ struct ReportDialog::Impl {
     void start() {
         try {
             const auto d = definition();
-            expected = runtime::estimate_report_rows(project, d);
+            if (report_is_coverage(d.query.kind)) {
+                (void)application::report_coverage_bounds(project, d.query);
+                const auto choices =
+                    project_object_choices(project, {ObjectKind::satellite, ObjectKind::sensor});
+                for (const auto &id : d.query.object_ids)
+                    if (std::ranges::find(choices, id, &ObjectChoice::id) == choices.end())
+                        throw std::invalid_argument(
+                            ui::utf8("report_dialog.coverage.asset_missing"));
+            }
+            if (estimate_cancel)
+                estimate_cancel->store(true);
+            pending_estimate.reset();
+            expected =
+                report_is_coverage(d.query.kind) ? 0 : runtime::estimate_report_rows(project, d);
+            const auto memory_bytes = coverage_memory_bytes();
             waiting = true;
             const auto ticket = ++request;
             set_busy(true);
             progress->setRange(0, 0);
             status->setText(ui::text("report_dialog.status.set_text_9"));
             const QPointer<ReportDialog> guard(owner);
-            prepare(d.query, [guard, ticket, d](std::optional<ReportInput> context, QString error) {
+            prepare(d.query, [guard, ticket, d, memory_bytes](std::optional<ReportInput> context,
+                                                              QString error) {
                 if (!guard)
                     return;
                 auto &self = *guard->impl_;
@@ -2224,10 +2279,13 @@ struct ReportDialog::Impl {
                         self.status->setText(ui::text("report_dialog.status.set_text_10"));
                         return;
                     }
-                    self.expected = runtime::estimate_report_rows(context->project, d);
+                    self.expected = report_is_coverage(d.query.kind)
+                                        ? 0
+                                        : runtime::estimate_report_rows(context->project, d);
                     self.job_generation = self.input_generation;
                     self.cancellation = std::make_shared<std::atomic_bool>(false);
                     self.completed = std::make_shared<std::atomic_size_t>(0);
+                    self.progress_total = std::make_shared<std::atomic_size_t>(self.expected);
                     self.progress->setRange(0, static_cast<int>(self.expected));
                     self.progress->setValue(0);
                     self.status->setText(ui::text("report_dialog.status.set_text_11"));
@@ -2240,7 +2298,9 @@ struct ReportDialog::Impl {
                     self.job = std::async(std::launch::async, [snapshot = std::move(*context), d,
                                                                retained = std::move(retained),
                                                                cancel = self.cancellation,
-                                                               count = self.completed]() mutable {
+                                                               count = self.completed,
+                                                               total = self.progress_total,
+                                                               memory_bytes]() mutable {
                         if (cancel->load())
                             throw runtime::AnalysisCancelled{};
                         auto analysis =
@@ -2251,7 +2311,11 @@ struct ReportDialog::Impl {
                                       std::move(snapshot.data), std::move(snapshot.sessions));
                         auto result = analysis.report(
                             d, [cancel] { return cancel->load(); },
-                            [count](std::size_t current, std::size_t) { count->store(current); });
+                            [count, total](std::size_t current, std::size_t size) {
+                                total->store(size);
+                                count->store(current);
+                            },
+                            memory_bytes);
                         return GeneratedReport{std::move(analysis), std::move(result)};
                     });
                 } catch (const std::exception &failure) {
@@ -2575,8 +2639,43 @@ struct ReportDialog::Impl {
         status->setText(ui::text("report_dialog.status.set_text_21").arg(rows.size()));
     }
     void poll() {
+        if (estimate_job.valid() &&
+            estimate_job.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            const auto value = estimate_job.get();
+            if (!estimate_cancel->load())
+                estimate->setText(value);
+        }
+        if (!job.valid() && !waiting && !estimate_job.valid() && pending_estimate) {
+            auto d = std::move(*pending_estimate);
+            pending_estimate.reset();
+            estimate_cancel = std::make_shared<std::atomic_bool>(false);
+            estimate_job = std::async(std::launch::async, [snapshot = project, d = std::move(d),
+                                                           memory = coverage_memory_bytes(),
+                                                           cancelled = estimate_cancel] {
+                try {
+                    const auto size = runtime::estimate_coverage_report(snapshot, d, memory, [&] {
+                        if (cancelled->load())
+                            throw runtime::ReportCancelled{};
+                    });
+                    return ui::text("report_dialog.estimate.set_text")
+                        .arg(size.points)
+                        .arg(d.query.object_ids.size())
+                        .arg(size.rows)
+                        .arg(size.storage_bytes / (1024 * 1024) +
+                             (size.storage_bytes % (1024 * 1024) != 0));
+                } catch (const std::exception &error) {
+                    return QString::fromUtf8(error.what());
+                }
+            });
+        }
         if (job.valid()) {
-            progress->setValue(static_cast<int>(completed->load()));
+            const auto total = progress_total->load();
+            if (total) {
+                const auto maximum = static_cast<int>(std::min<std::size_t>(total, 1000000));
+                progress->setRange(0, maximum);
+                progress->setValue(static_cast<int>(
+                    std::min(1.L, static_cast<long double>(completed->load()) / total) * maximum));
+            }
             if (job.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
                 return;
             try {
@@ -2584,6 +2683,12 @@ struct ReportDialog::Impl {
                 if (cancellation->load())
                     throw runtime::AnalysisCancelled{};
                 if (job_generation == input_generation) {
+                    if (generated.report.coverage_statistics)
+                        estimate->setText(
+                            ui::text("report_dialog.estimate.completed")
+                                .arg(generated.report.coverage_statistics->points.size())
+                                .arg(generated.report.definition.query.object_ids.size())
+                                .arg(generated.report.table.rows().size()));
                     result_analysis = std::move(generated.analysis);
                     publish(std::make_shared<runtime::ReportResult>(std::move(generated.report)));
                     narrow_settings = false;
@@ -2628,6 +2733,8 @@ struct ReportDialog::Impl {
                 cancellation->store(true);
         }
         project = std::move(next);
+        coverage_region->set_objects(project_object_choices(project, {ObjectKind::region}));
+        refresh_region();
         time = std::move(clock);
         first->set_time_provider(time);
         last->set_time_provider(time);

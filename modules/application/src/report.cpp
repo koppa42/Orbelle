@@ -184,8 +184,9 @@ void validate_report_query(const ReportQuery &d) {
         (report_uses_event_search(d.kind) && d.event_tolerance_nanoseconds > d.step_nanoseconds))
         throw std::invalid_argument("Invalid event search mode or boundary tolerance");
     core::validate_coverage_grid(d.coverage);
-    if (report_is_coverage(d.kind) && (d.scope != ReportScope::objects || d.object_ids.size() > 32))
-        throw std::invalid_argument("Coverage requires 1 to 32 explicitly selected assets");
+    if (report_is_coverage(d.kind) &&
+        (d.scope != ReportScope::objects || d.object_ids.size() > 2048))
+        throw std::invalid_argument("Coverage requires 1 to 2048 explicitly selected assets");
     if (d.lighting_ephemeris.empty() || d.lighting_ephemeris.size() > 16384)
         throw std::invalid_argument("Lighting ephemeris selection is required");
     std::set<std::string> ids;
