@@ -47,24 +47,27 @@ class InsertionTest : public ::testing::Test {
     QString preferences() const { return temporary.filePath("preferences.ini"); }
 };
 
-TEST_F(InsertionTest, DefaultsAreExplicitPersistentAndIndependentPerType) {
+TEST_F(InsertionTest, CurrentSelectionDoesNotOverwriteCentrallyConfiguredDefaults) {
     {
         InsertObjectDialog dialog(preferences());
         method(dialog, InsertObjectMethod::defaults);
         EXPECT_EQ(dialog.default_method(InsertObjectType::satellite),
                   InsertObjectMethod::define_properties);
-        click(dialog, "saveDefaultInsertMethod");
-        EXPECT_EQ(dialog.default_method(InsertObjectType::satellite), InsertObjectMethod::defaults);
+        EXPECT_EQ(dialog.findChild<QPushButton *>("saveDefaultInsertMethod"), nullptr);
+        EXPECT_EQ(dialog.findChild<QCheckBox *>("keepInsertObjectsOpen"), nullptr);
+        EXPECT_FALSE(QFile::exists(preferences()));
         dialog.select_type(InsertObjectType::ground_station);
         EXPECT_EQ(dialog.selection()->method, InsertObjectMethod::define_properties);
         dialog.select_type(InsertObjectType::satellite);
-        EXPECT_EQ(dialog.selection()->method, InsertObjectMethod::defaults);
+        EXPECT_EQ(dialog.selection()->method, InsertObjectMethod::define_properties);
     }
+    QSettings settings(preferences(), QSettings::IniFormat);
+    settings.setValue("insertion/default-method/satellite", "defaults");
+    settings.sync();
     InsertObjectDialog reopened(preferences());
     EXPECT_EQ(reopened.selection()->method, InsertObjectMethod::defaults);
     EXPECT_EQ(reopened.default_method(InsertObjectType::sensor),
               InsertObjectMethod::define_properties);
-    QSettings settings(preferences(), QSettings::IniFormat);
     settings.setValue("insertion/default-method/sensor", "tle-file");
     settings.setValue("insertion/default-method/ground-station", "unknown");
     settings.sync();
@@ -76,6 +79,9 @@ TEST_F(InsertionTest, DefaultsAreExplicitPersistentAndIndependentPerType) {
 }
 
 TEST_F(InsertionTest, ContinuousInsertBlocksDuplicatesAndCloseDoesNotResubmit) {
+    QSettings saved(preferences(), QSettings::IniFormat);
+    saved.setValue("insertion/keep-open", true);
+    saved.sync();
     InsertObjectDialog dialog(preferences());
     int calls = 0;
     dialog.insert = [&](InsertObjectRequest request) {
@@ -85,7 +91,6 @@ TEST_F(InsertionTest, ContinuousInsertBlocksDuplicatesAndCloseDoesNotResubmit) {
     };
     dialog.show();
     method(dialog, InsertObjectMethod::defaults);
-    dialog.findChild<QCheckBox *>("keepInsertObjectsOpen")->setChecked(true);
     click(dialog, "insertObject");
     EXPECT_TRUE(dialog.isVisible());
     click(dialog, "insertObject");
@@ -95,6 +100,31 @@ TEST_F(InsertionTest, ContinuousInsertBlocksDuplicatesAndCloseDoesNotResubmit) {
     click(dialog, "insertObject");
     EXPECT_EQ(calls, 2);
     click(dialog, "closeInsertObjects");
+    EXPECT_FALSE(dialog.isVisible());
+    EXPECT_EQ(calls, 2);
+}
+TEST_F(InsertionTest, ReopenedWindowLoadsCentrallyAppliedPreferences) {
+    InsertObjectDialog dialog(preferences());
+    dialog.show();
+    dialog.hide();
+    QSettings saved(preferences(), QSettings::IniFormat);
+    saved.setValue("insertion/default-method/satellite", "orbit-wizard");
+    saved.setValue("insertion/keep-open", true);
+    saved.sync();
+    dialog.show();
+    EXPECT_EQ(dialog.selection()->method, InsertObjectMethod::orbit_wizard);
+    int calls = 0;
+    dialog.insert = [&](InsertObjectRequest) { ++calls; };
+    method(dialog, InsertObjectMethod::defaults);
+    click(dialog, "insertObject");
+    EXPECT_TRUE(dialog.isVisible());
+    EXPECT_EQ(calls, 1);
+    dialog.reject();
+    saved.setValue("insertion/keep-open", false);
+    saved.sync();
+    dialog.show();
+    method(dialog, InsertObjectMethod::defaults);
+    click(dialog, "insertObject");
     EXPECT_FALSE(dialog.isVisible());
     EXPECT_EQ(calls, 2);
 }
@@ -173,17 +203,20 @@ TEST_F(InsertionTest, NarrowLayoutKeepsActionsReachableAndPreservesSelection) {
     EXPECT_EQ(dialog.findChild<QLabel *>("insertDestination")->textFormat(), Qt::PlainText);
 }
 
-TEST_F(InsertionTest, PreferenceWriteFailureIsVisibleAndDoesNotChangeDefault) {
+TEST_F(InsertionTest, UnavailablePreferencesDoNotPreventOneTimeInsertion) {
     QFile file(temporary.filePath("blocked"));
     ASSERT_TRUE(file.open(QIODevice::WriteOnly));
     file.close();
     InsertObjectDialog dialog(file.fileName() + "/preferences.ini");
+    int calls = 0;
+    dialog.insert = [&](InsertObjectRequest) { ++calls; };
+    dialog.show();
     method(dialog, InsertObjectMethod::defaults);
-    click(dialog, "saveDefaultInsertMethod");
+    click(dialog, "insertObject");
     EXPECT_EQ(dialog.default_method(InsertObjectType::satellite),
               InsertObjectMethod::define_properties);
-    EXPECT_EQ(dialog.findChild<QLabel *>("insertObjectResult")->text(),
-              "无法保存添加偏好，请检查配置目录是否可写。");
+    EXPECT_EQ(calls, 1);
+    EXPECT_TRUE(dialog.findChild<QLabel *>("insertObjectResult")->text().isEmpty());
 }
 
 const QString valid_tle = "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753\n"

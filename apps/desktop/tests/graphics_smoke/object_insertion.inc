@@ -3,12 +3,18 @@ void Workbench::smoke_object_insertion() {
     switch (orbit_smoke_stage_) {
     case 198: {
         smoke_insert_counts_ = {satellites_.size(), stations_.size(), sensors_.size()};
+        PreferencesDialog preferences(*network_settings_, eop_catalog_.get(), this,
+                                      PreferencesPage::insertion);
+        auto *default_method = preferences.findChild<QComboBox *>("preferencesInsertMethod0");
+        default_method->setCurrentIndex(default_method->findData("defaults"));
+        preferences.findChild<QCheckBox *>("preferencesKeepInsertOpen")->setChecked(true);
+        preferences.findChild<QPushButton *>("savePreferences")->click();
+        smoke_require(preferences.result() == QDialog::Accepted,
+                      "Cannot save the central insertion preferences");
         show_insert_objects();
         insert_dialog_->select_type(InsertObjectType::satellite);
         auto *methods = insert_dialog_->findChild<QTreeWidget *>("insertObjectMethods");
         methods->setCurrentItem(methods->topLevelItem(1));
-        insert_dialog_->findChild<QCheckBox *>("keepInsertObjectsOpen")->setChecked(true);
-        insert_dialog_->findChild<QPushButton *>("saveDefaultInsertMethod")->click();
         auto *button = insert_dialog_->findChild<QPushButton *>("insertObject");
         button->click();
         smoke_require(busy() && !button->isEnabled(), "Insertion was not blocked while busy");

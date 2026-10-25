@@ -2,13 +2,13 @@
 #include "../ui_text.hpp"
 #include "responsive_layout.hpp"
 #include "workbench_style.hpp"
-#include <QCheckBox>
 #include <QFrame>
 #include <QHeaderView>
 #include <QLabel>
 #include <QPushButton>
 #include <QScreen>
 #include <QScrollArea>
+#include <QShowEvent>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <array>
@@ -126,11 +126,6 @@ InsertObjectDialog::InsertObjectDialog(const QString &preferences_file, QWidget 
     method_label->setMinimumHeight(32);
     method_heading->addWidget(method_label);
     method_heading->addStretch();
-    save_default_ = new QPushButton(ui::text("insert_object_dialog.save_default"));
-    save_default_->setObjectName("saveDefaultInsertMethod");
-    save_default_->setToolTip(ui::text("insert_object_dialog.default_hint"));
-    save_default_->setAutoDefault(false);
-    method_heading->addWidget(save_default_);
     right->addLayout(method_heading);
     methods_ = new QTreeWidget;
     methods_->setObjectName("insertObjectMethods");
@@ -182,11 +177,6 @@ InsertObjectDialog::InsertObjectDialog(const QString &preferences_file, QWidget 
     auto *footer_layout = new QHBoxLayout(footer);
     footer_layout->setContentsMargins(0, 0, 0, 0);
     footer_layout->setSpacing(12);
-    keep_open_ = new QCheckBox(ui::text("insert_object_dialog.keep_open"));
-    keep_open_->setObjectName("keepInsertObjectsOpen");
-    keep_open_->setToolTip(ui::text("insert_object_dialog.keep_open_hint"));
-    keep_open_->setChecked(settings_.value("insertion/keep-open", false).toBool());
-    footer_layout->addWidget(keep_open_);
     auto *buttons = new QHBoxLayout;
     buttons->addStretch();
     auto *close = new QPushButton(ui::text("common.close"));
@@ -211,32 +201,21 @@ InsertObjectDialog::InsertObjectDialog(const QString &preferences_file, QWidget 
     connect(types_, &QTreeWidget::itemActivated, this, [this] { submit(); });
     connect(insert_, &QPushButton::clicked, this, [this] { submit(); });
     connect(close, &QPushButton::clicked, this, &QDialog::reject);
-    connect(save_default_, &QPushButton::clicked, this, [this] {
-        const auto request = selection();
-        if (!request || busy_)
-            return;
-        const auto key = preference_key(request->type);
-        const auto previous = settings_.value(key);
-        for (const auto &method : methods)
-            if (method.method == request->method)
-                settings_.setValue(key, method.key);
-        if (save_preferences()) {
-            refresh_details();
-            show_result(ui::text("insert_object_dialog.default_saved"));
-        } else {
-            settings_.setValue(key, previous);
-        }
-    });
-    connect(keep_open_, &QCheckBox::toggled, this, [this](bool checked) {
-        settings_.setValue("insertion/keep-open", checked);
-        save_preferences();
-    });
     select_type(InsertObjectType::satellite);
 }
 
 void InsertObjectDialog::set_scenario(const QString &name) {
     destination_->setText(ui::text("insert_object_dialog.destination.set_text") + name);
     destination_->setToolTip(name);
+}
+void InsertObjectDialog::showEvent(QShowEvent *event) {
+    // The reusable insertion window picks up centrally applied preferences when reopened.
+    if (!event->spontaneous()) {
+        settings_.sync();
+        keep_open_ = settings_.value("insertion/keep-open", false).toBool();
+        refresh_methods();
+    }
+    QDialog::showEvent(event);
 }
 InsertObjectMethod InsertObjectDialog::default_method(InsertObjectType type) const {
     const auto value = settings_.value(preference_key(type)).toString();
@@ -301,10 +280,7 @@ void InsertObjectDialog::refresh_details() {
     parent_->setVisible(sensor);
     parent_->setEnabled(!busy_);
     insert_->setEnabled(!busy_ && request && (!sensor || parent_->contains(parent_->id())));
-    save_default_->setEnabled(!busy_ && request &&
-                              default_method(request->type) != request->method);
     methods_->setEnabled(!busy_ && request.has_value());
-    keep_open_->setEnabled(!busy_ && request && request->method == InsertObjectMethod::defaults);
     insert_->setText(ui::text(request && request->method == InsertObjectMethod::defaults
                                   ? "insert_object_dialog.label_5"
                               : request && request->method == InsertObjectMethod::tle_file
@@ -339,19 +315,12 @@ void InsertObjectDialog::show_result(const QString &message) {
     result_->setText(message);
     result_->setVisible(!message.isEmpty());
 }
-bool InsertObjectDialog::save_preferences() {
-    settings_.sync();
-    if (settings_.status() == QSettings::NoError)
-        return true;
-    show_result(ui::text("insert_object_dialog.preferences_failed"));
-    return false;
-}
 void InsertObjectDialog::submit() {
     const auto request = selection();
     if (!isVisible() || !request || busy_ || !insert || !insert_->isEnabled())
         return;
     show_result({});
-    if (request->method != InsertObjectMethod::defaults || !keep_open_->isChecked())
+    if (request->method != InsertObjectMethod::defaults || !keep_open_)
         hide();
     insert(*request);
 }

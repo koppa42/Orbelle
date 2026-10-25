@@ -203,7 +203,11 @@ TEST_F(ApplicationUpdateTest, DisabledStartupNeverMakesARequestButManualCheckSti
     Network network;
     network.responses = {{200, release_json("0.3.1"), {}}};
     ApplicationUpdate update("0.3.1", settings(), temp.path(), nullptr, &network);
-    update.set_startup_enabled(false);
+    // A centrally applied preference must reach an already constructed updater.
+    QSettings preferences(settings(), QSettings::IniFormat);
+    preferences.setValue("updates/startup", false);
+    preferences.sync();
+    EXPECT_FALSE(update.startup_enabled());
     update.check(false);
     EXPECT_TRUE(network.requests.empty());
     update.check(true);
@@ -554,11 +558,9 @@ TEST_F(ApplicationUpdateTest, UpdateDialogFitsNarrowWindowsWithoutAutomaticNetwo
         const QRect bounds(button->mapTo(&dialog, QPoint{}), button->size());
         EXPECT_TRUE(dialog.rect().contains(bounds)) << button->text().toStdString();
     }
-    auto *checkbox = dialog.findChild<QCheckBox *>();
-    ASSERT_NE(checkbox, nullptr);
-    checkbox->setChecked(false);
-    QSettings saved(settings(), QSettings::IniFormat);
-    EXPECT_FALSE(saved.value("updates/startup", true).toBool());
+    EXPECT_EQ(dialog.findChild<QCheckBox *>(), nullptr);
+    for (auto *action : menus.findChildren<QAction *>())
+        EXPECT_FALSE(action->isCheckable());
     dialog.close();
 }
 } // namespace

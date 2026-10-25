@@ -4,7 +4,6 @@
 #include <QTimer>
 #include <functional>
 class QAction;
-class QCheckBox;
 class QLabel;
 class QMenuBar;
 class QProgressBar;
@@ -30,10 +29,8 @@ class ApplicationUpdateUi final : public QDialog {
     QTimer prompt_;
     QLabel *heading_, *description_;
     QTextBrowser *notes_;
-    QCheckBox *startup_;
     QProgressBar *progress_;
     QPushButton *primary_, *skip_, *later_, *release_page_;
-    QAction *startup_action_;
     bool manual_visible_ = false, offered_ = false;
 };
 // A launcher handshake is acknowledged only after the normal visible UI is responsive.

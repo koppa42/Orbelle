@@ -859,6 +859,7 @@ TEST(DataCenterDialog, InitialSetupDefaultResourcesRemainReadableAtNarrowWidths)
     QTemporaryDir temporary;
     EopCatalog catalog(std::filesystem::path(temporary.path().toStdWString()), {}, {}, false);
     DownloadServer source(initial_fixture(ORBELLE_TEST_TIME));
+    bool network_opened = false;
     QTimer::singleShot(120, [&] {
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
         ASSERT_TRUE(dialog);
@@ -880,12 +881,25 @@ TEST(DataCenterDialog, InitialSetupDefaultResourcesRemainReadableAtNarrowWidths)
         for (auto *scroll : dialog->findChildren<QScrollArea *>())
             EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
         capture_initial_setup(dialog, "initial-data-all-resources-compact");
+        auto *network = dialog->findChild<QPushButton *>("initialDataNetworkSettings");
+        ASSERT_NE(network, nullptr);
+        EXPECT_FALSE(network->visibleRegion().isEmpty());
+        network->click();
+        EXPECT_TRUE(dialog->isVisible());
         dialog->findChild<QPushButton *>("initialDataCancel")->click();
     });
     EXPECT_FALSE(prepare_initial_data(
         nullptr, catalog, initial_data_products(),
         [&](auto product) { catalog.start_download(source.url(), product); }, {},
-        QDate(2026, 10, 24)));
+        QDate(2026, 10, 24),
+        [&](QWidget *parent) {
+            network_opened = true;
+            EXPECT_EQ(parent, QApplication::activeModalWidget());
+            QDialog network(parent);
+            QTimer::singleShot(120, &network, &QDialog::reject);
+            network.exec();
+        }));
+    EXPECT_TRUE(network_opened);
     finish_initial_cancel(catalog);
 }
 TEST(DataCenterDialog, LiveInitialDataSetup) {

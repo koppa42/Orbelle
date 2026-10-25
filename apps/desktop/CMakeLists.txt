@@ -68,6 +68,7 @@ if(ORBELLE_WITH_VSG)
     find_package(rocky 1.1.0 EXACT CONFIG REQUIRED)
     find_package(vsgXchange 1.1.13 EXACT CONFIG REQUIRED)
     target_sources(orbelle_desktop PRIVATE src/viewer/graphics_workbench.cpp
+        src/viewer/network_settings.cpp src/viewer/preferences_dialog.cpp
         src/viewer/application_update.cpp src/viewer/application_update_ui.cpp
         src/viewer/update_package.cpp
         src/viewer/workbench_window.cpp
@@ -102,6 +103,20 @@ if(ORBELLE_WITH_VSG)
     # COST is a scheduling hint, independent of each test's timeout.
     if(BUILD_TESTING)
         find_package(Qt6 6.8 CONFIG REQUIRED COMPONENTS Test)
+        add_executable(orbelle_network_settings_tests tests/network_settings_test.cpp
+            src/viewer/network_settings.cpp src/viewer/preferences_dialog.cpp
+            src/viewer/data_center_dialog.cpp src/viewer/eop_catalog.cpp src/viewer/workbench_style.cpp)
+        qt_add_resources(orbelle_network_settings_tests "preferences_icons" PREFIX "/orbelle"
+            BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+            FILES resources/icons/chevron-down.png resources/icons/chevron-right.png)
+        target_link_libraries(orbelle_network_settings_tests PRIVATE
+            Orbelle::Runtime Qt6::Widgets Qt6::Network Qt6::Test GTest::gtest_main)
+        orbelle_warnings(orbelle_network_settings_tests)
+        orbelle_copy_runtime_dlls(orbelle_network_settings_tests)
+        gtest_discover_tests(orbelle_network_settings_tests DISCOVERY_MODE PRE_TEST
+            TEST_PREFIX "desktop." PROPERTIES RESOURCE_LOCK orbelle_desktop_tests COST 1000 TIMEOUT 20
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+            ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbelle_update_tests tests/application_update_test.cpp
             tests/update_package_test.cpp src/viewer/application_update.cpp
             src/viewer/application_update_ui.cpp src/viewer/update_package.cpp

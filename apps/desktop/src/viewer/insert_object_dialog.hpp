@@ -4,7 +4,6 @@
 #include <QSettings>
 #include <functional>
 #include <optional>
-class QCheckBox;
 class QLabel;
 class QPushButton;
 class QTreeWidget;
@@ -31,18 +30,20 @@ class InsertObjectDialog final : public QDialog {
     [[nodiscard]] std::optional<InsertObjectRequest> selection() const;
     std::function<void(InsertObjectRequest)> insert;
 
+  protected:
+    void showEvent(QShowEvent *event) override;
+
   private:
     void refresh_methods();
     void refresh_details();
     void submit();
-    bool save_preferences();
     QSettings settings_;
     QTreeWidget *types_, *methods_;
     QLabel *destination_, *description_, *result_;
-    QPushButton *insert_, *save_default_;
-    QCheckBox *keep_open_;
+    QPushButton *insert_;
     ObjectSelectionField *parent_;
     QLabel *parent_label_;
     bool busy_ = false;
+    bool keep_open_ = false;
 };
 } // namespace orbelle::desktop

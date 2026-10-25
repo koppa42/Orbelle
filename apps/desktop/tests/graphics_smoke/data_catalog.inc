@@ -23,32 +23,43 @@ void Workbench::smoke_data_catalog() {
         QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs, true);
         QTimer::singleShot(0, [&, source] {
             auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
-            smoke_require(dialog != nullptr, "Missing EOP dialog");
+            smoke_require(dialog && dialog->objectName() == "applicationPreferencesDialog",
+                          "Missing shared preferences dialog");
             auto *details = dialog->findChild<QLabel *>("dataInventoryDetails");
             auto *automatic = dialog->findChild<QCheckBox *>("dataAutoUpdate");
-            auto *inventory = dialog->findChild<QTreeWidget *>("dataInventory");
+            auto *inventory = dialog->findChild<QTreeWidget *>("propertyNavigation");
+            auto *apply = dialog->findChild<QPushButton *>("applyPreferences");
+            smoke_require(inventory && inventory->topLevelItemCount() == 4 && apply,
+                          "Missing preferences navigation or Apply");
+            auto *data_root = inventory->topLevelItem(static_cast<int>(PreferencesPage::data));
+            inventory->setCurrentItem(data_root);
             auto *priority = dialog->findChild<QListWidget *>("eopSourcePriority");
             auto *pages = dialog->findChild<QTabWidget *>("dataPages");
             smoke_require(pages && details && automatic && automatic->isChecked() && inventory &&
-                              inventory->topLevelItemCount() == 6 && priority &&
-                              inventory->topLevelItem(0)->childCount() == 2 &&
-                              priority->isVisible() &&
+                              data_root->childCount() == 6 && priority &&
+                              data_root->child(0)->childCount() == 2 && priority->isVisible() &&
                               !dialog->findChild<QComboBox *>("eopSnapshots") &&
                               !dialog->findChild<QPushButton *>("setDefaultEop") &&
                               !dialog->findChild<QPushButton *>("applyEopSnapshot"),
                           "Data inventory must show current data without version/default controls");
-            auto *group = inventory->topLevelItem(0);
+            auto *group = data_root->child(0);
             auto *finals = group->child(0);
             auto *c04 = group->child(1);
-            auto *utc = inventory->topLevelItem(1);
-            smoke_require(
-                priority->model()->moveRow({}, 1, {}, 0) &&
-                    eop_catalog_->preferred_product() == DataProduct::c04 &&
-                    inventory->currentItem() == group && scenario_->data_lock() == smoke_data_lock_,
-                "Reordering sources must persist priority without changing the active scene");
+            auto *utc = data_root->child(1);
+            inventory->setCurrentItem(group);
             smoke_require(priority->model()->moveRow({}, 1, {}, 0) &&
-                              eop_catalog_->preferred_product() == DataProduct::finals2000a,
+                              eop_catalog_->preferred_product() == DataProduct::finals2000a &&
+                              inventory->currentItem() == group &&
+                              scenario_->data_lock() == smoke_data_lock_,
+                          "Reordering must keep a draft without changing the active scene");
+            apply->click();
+            smoke_require(eop_catalog_->preferred_product() == DataProduct::c04,
+                          "Apply did not save source priority");
+            smoke_require(priority->model()->moveRow({}, 1, {}, 0),
                           "Cannot restore default source priority");
+            apply->click();
+            smoke_require(eop_catalog_->preferred_product() == DataProduct::finals2000a,
+                          "Cannot apply restored source priority");
             QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
             smoke_require(dialog->grab().save(smoke_dir_ + "/data-center-priority.png"),
                           "Cannot save source priority page");
@@ -57,7 +68,7 @@ void Workbench::smoke_data_catalog() {
                               ->text()
                               .contains(QStringLiteral("随程序提供")),
                           "Missing acquisition information");
-            smoke_require(finals->text(0).contains(QStringLiteral("内置示例")) &&
+            smoke_require(finals->toolTip(0).contains(QStringLiteral("内置示例")) &&
                               dialog->findChild<QLabel *>("dataLastChecked")
                                   ->text()
                                   .contains(QStringLiteral("尚未检查")),
@@ -68,6 +79,7 @@ void Workbench::smoke_data_catalog() {
                           "Overview must not expose advanced update settings");
             pages->setCurrentIndex(1);
             frequency->setCurrentIndex(frequency->findData(6));
+            apply->click();
             smoke_require(eop_catalog_->update_interval_hours() == 6,
                           "Automatic update frequency was not persisted");
             frequency->setCurrentIndex(frequency->findData(24));
@@ -92,6 +104,9 @@ void Workbench::smoke_data_catalog() {
                           "Extrapolation should default off");
             allow->setChecked(true);
             days->setValue(2);
+            smoke_require(eop_catalog_->extrapolation_days(0) == 0,
+                          "Unapplied extrapolation draft was persisted");
+            apply->click();
             smoke_require(eop_catalog_->extrapolation_days(0) == 2,
                           "Extrapolation limit was not saved");
             inventory->setCurrentItem(c04);
@@ -120,7 +135,7 @@ void Workbench::smoke_data_catalog() {
             const auto imported_row =
                 eop_->data_info().interpolation.starts_with("finals2000a") ? 0 : 1;
             const auto imported = eop_catalog_->inventory()[static_cast<std::size_t>(imported_row)];
-            smoke_require(inventory->topLevelItemCount() == 6 &&
+            smoke_require(data_root->childCount() == 6 &&
                               inventory->currentItem() == group->child(imported_row) &&
                               imported.provider_index == 2 && imported.acquired_at &&
                               imported.acquisition == runtime::DataAcquisition::imported &&
@@ -135,15 +150,17 @@ void Workbench::smoke_data_catalog() {
             inventory->setCurrentItem(finals);
             automatic->setChecked(false);
             automatic->setChecked(true);
+            apply->click();
             smoke_require(eop_catalog_->automatic_updates() && !eop_catalog_->downloading(),
                           "Update policy was not saved or unexpectedly started a download");
             automatic->setChecked(false);
+            apply->click();
             smoke_require(scenario_->data_lock() == smoke_data_lock_,
                           "Refreshing the data inventory changed the active data lock");
             smoke_record("data-inventory-acquisition-expiry-and-no-history-controls");
             dialog->reject();
         });
-        eop_action_->trigger();
+        preferences_action_->trigger();
         smoke_answer_data(true);
         start_project(project_snapshot(project_path_), project_path_);
         project_cancellation_->store(true);

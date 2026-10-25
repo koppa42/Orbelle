@@ -66,7 +66,8 @@ QString product_title(DataProduct product) {
 bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
                           const std::vector<DataProduct> &required,
                           const std::function<void(DataProduct)> &download,
-                          const std::function<void()> &visible_ready, QDate utc_day) {
+                          const std::function<void()> &visible_ready, QDate utc_day,
+                          const std::function<void(QWidget *)> &network_settings) {
     if (!utc_day.isValid())
         utc_day = QDateTime::currentDateTimeUtc().date();
     const auto ready = [&](auto product) { return initial_data_ready(catalog, product, utc_day); };
@@ -115,6 +116,21 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
     auto *progress = new QProgressBar;
     progress->setObjectName("initialDataProgress");
     layout->addWidget(progress);
+    bool editing_network = false;
+    if (network_settings) {
+        auto *network_row = new QHBoxLayout;
+        auto *network = new QPushButton(ui::text("network_settings.startup_action"));
+        network->setObjectName("initialDataNetworkSettings");
+        network->setAutoDefault(false);
+        network_row->addWidget(network);
+        network_row->addStretch();
+        layout->addLayout(network_row);
+        QObject::connect(network, &QPushButton::clicked, &dialog, [&] {
+            editing_network = true;
+            network_settings(&dialog);
+            editing_network = false;
+        });
+    }
     auto *actions = new QHBoxLayout;
     auto *retry = new QPushButton(ui::text("initial_data_setup.retry"));
     retry->setObjectName("initialDataRetry");
@@ -181,6 +197,8 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
         }
     };
     const auto advance = [&] {
+        if (editing_network)
+            return;
         if (owned && !catalog.downloading()) {
             paused = !ready(*owned);
             owned.reset();
@@ -205,7 +223,9 @@ bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
         advance();
     });
     QObject::connect(manage, &QPushButton::clicked, &dialog, [&] {
+        editing_network = true;
         show_data_center(&dialog, catalog);
+        editing_network = false;
         paused = false;
         advance();
     });
