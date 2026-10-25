@@ -73,7 +73,7 @@ TEST(RegionView, ConcaveDateLineAndReversedPolygonsDoNotFillTheirNotch) {
         }
 }
 TEST(RegionView, CollinearVerticesAndHighLatitudeRemainValidDisplayGeometry) {
-    for (const std::vector<core::RegionVertex> vertices :
+    for (const std::vector<core::RegionVertex> &vertices :
          {std::vector<core::RegionVertex>{{0, 0}, {.1, 0}, {.2, 0}, {.3, 0}, {.3, .2}, {0, .2}},
           std::vector<core::RegionVertex>{{-1, 1.3}, {1, 1.3}, {0, 1.5}}}) {
         core::RegionBoundary boundary;
