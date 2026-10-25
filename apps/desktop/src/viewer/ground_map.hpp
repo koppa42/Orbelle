@@ -66,7 +66,9 @@ class GroundMap final : public QWidget {
     void set_access_link(std::optional<std::pair<std::size_t, std::size_t>> pair, bool visible);
     void set_display(std::size_t index, const DisplaySettings &settings, core::Epoch first,
                      core::Epoch last);
-    void set_sun_direction(const std::array<double, 3> &direction);
+    // Continuous playback coalesces lighting updates in one image worker. Explicit
+    // time jumps/settings replace immediately; the latest image settles after pause.
+    void set_sun_direction(const std::array<double, 3> &direction, bool continuous = false);
     void set_lighting(bool enabled);
     void set_grid_visible(bool enabled);
     void set_tracks_visible(bool enabled);
@@ -87,6 +89,7 @@ class GroundMap final : public QWidget {
     [[nodiscard]] double zoom_factor() const { return zoom_; }
     [[nodiscard]] bool tracks_ready() const;
     [[nodiscard]] bool footprints_ready() const;
+    [[nodiscard]] bool background_ready() const;
     [[nodiscard]] bool tracks_transitioning() const {
         return refinement_pending_ || refinement_animation_.state() == QAbstractAnimation::Running;
     }
@@ -131,6 +134,9 @@ class GroundMap final : public QWidget {
     void finish_drag(bool restore = false);
     void rebuild_night();
     void paint_background(QPainter &p, const QRectF &bounds, bool cache_imagery);
+    void invalidate_background(bool immediate);
+    void prepare_background(bool navigating);
+    void poll_background();
     void paint_grid(QPainter &p);
     void paint_axes(QPainter &p);
     void invalidate_tracks(bool geometry_changed = true);
@@ -149,6 +155,11 @@ class GroundMap final : public QWidget {
         double milliseconds = 0;
         bool complete = true;
         bool preview = false;
+    };
+    struct BackgroundResult {
+        Raster raster;
+        QImage night;
+        std::uint64_t generation = 0;
     };
     void paint_foreground(QPainter &p, const Raster *display, const Raster *fallback);
     void paint_base(QPainter &p, const Raster *display, const Raster *fallback,
@@ -206,6 +217,10 @@ class GroundMap final : public QWidget {
     std::uint64_t geometry_revision_ = 0;
     QImage imagery_;
     QImage night_;
+    std::future<BackgroundResult> pending_background_;
+    QTimer background_timer_;
+    std::uint64_t lighting_revision_ = 0, background_generation_ = 0;
+    bool background_reset_ = true;
     Raster background_, imagery_raster_, trails_, preview_, pending_view_;
     Raster previous_detail_, blended_detail_;
     QVariantAnimation refinement_animation_;

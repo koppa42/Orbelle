@@ -79,6 +79,35 @@ void draw_world_image(QPainter &p, const QImage &image, const QRectF &area, cons
                         target.height() * image.height() / area.height());
     p.drawImage(target, image, source);
 }
+void paint_sunlight(QPainter &p, const QRectF &bounds, const QTransform &transform,
+                    const QImage &night, const std::array<double, 3> &direction, bool lighting,
+                    bool show_sun) {
+    if (lighting) {
+        p.setCompositionMode(QPainter::CompositionMode_Multiply);
+        each_world(transform, bounds, [&](const auto &, const QRectF &area) {
+            draw_world_image(p, night, area, bounds);
+        });
+        p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    }
+    if (show_sun) {
+        p.setPen(QPen(QColor("#efd69b"), 1));
+        p.setBrush(QColor("#efd69b"));
+        each_world(
+            transform, bounds.adjusted(-10, -10, 10, 10), [&](const auto &copy, const auto &) {
+                const auto sun = copy.map(QPointF(
+                    std::atan2(direction[1], direction[0]) * 180 / std::numbers::pi,
+                    std::asin(std::clamp(direction[2], -1.0, 1.0)) * 180 / std::numbers::pi));
+                if (!bounds.adjusted(-10, -10, 10, 10).contains(sun))
+                    return;
+                p.drawEllipse(sun, 3, 3);
+                for (int i = 0; i < 8; ++i) {
+                    const double angle = i * std::numbers::pi / 4;
+                    const QPointF ray(std::cos(angle), std::sin(angle));
+                    p.drawLine(sun + ray * 6, sun + ray * 9);
+                }
+            });
+    }
+}
 bool clip_line(QLineF &line, const QRectF &bounds, double &first) {
     const auto start = line.p1(), delta = line.p2() - start;
     first = 0;
@@ -233,6 +262,8 @@ GroundMap::GroundMap(QImage imagery, QWidget *parent)
     connect(&raster_timer_, &QTimer::timeout, this, [this] { poll_raster(); });
     footprint_timer_.setInterval(16);
     connect(&footprint_timer_, &QTimer::timeout, this, [this] { poll_footprints(); });
+    background_timer_.setInterval(8);
+    connect(&background_timer_, &QTimer::timeout, this, [this] { poll_background(); });
     pan_settle_timer_.setSingleShot(true);
     pan_settle_timer_.setInterval(120);
     connect(&pan_settle_timer_, &QTimer::timeout, this, [this] { update(); });
@@ -263,6 +294,9 @@ GroundMap::GroundMap(QImage imagery, QWidget *parent)
     setAccessibleDescription(navigation_help);
 }
 GroundMap::~GroundMap() {
+    background_timer_.stop();
+    if (pending_background_.valid())
+        pending_background_.wait();
     footprint_timer_.stop();
     if (cancel_footprints_)
         cancel_footprints_->store(true);
@@ -476,21 +510,33 @@ void GroundMap::set_display(std::size_t index, const DisplaySettings &settings, 
         invalidate_tracks();
     }
 }
-void GroundMap::set_sun_direction(const std::array<double, 3> &direction) {
+void GroundMap::set_sun_direction(const std::array<double, 3> &direction, bool continuous) {
     const auto length = std::hypot(direction[0], direction[1], direction[2]);
     if (!std::isfinite(length) || std::abs(length - 1) > 1e-6)
         throw std::invalid_argument("Map sunlight requires a finite unit vector");
     const double change =
         std::hypot(direction[0] - sun_direction_[0], direction[1] - sun_direction_[1],
                    direction[2] - sun_direction_[2]);
+    if (!continuous && background_dirty_) {
+        background_reset_ = true;
+        ++background_generation_;
+        update();
+    }
     if (!night_.isNull() && change < 0.00035)
         return;
     sun_direction_ = direction;
     night_dirty_ = true;
-    if (lighting_ || show_sun_) {
-        background_dirty_ = true;
-        update();
+    if (lighting_ || show_sun_)
+        invalidate_background(!continuous);
+}
+void GroundMap::invalidate_background(bool immediate) {
+    background_dirty_ = true;
+    ++lighting_revision_;
+    if (immediate) {
+        background_reset_ = true;
+        ++background_generation_;
     }
+    update();
 }
 void GroundMap::rebuild_night() {
     const ProfileScope profile("map_night_ms");
@@ -564,8 +610,7 @@ void GroundMap::set_lighting(bool enabled) {
     if (lighting_ == enabled)
         return;
     lighting_ = enabled;
-    background_dirty_ = true;
-    update();
+    invalidate_background(true);
 }
 void GroundMap::set_grid_visible(bool enabled) {
     if (grid_ == enabled)
@@ -587,8 +632,7 @@ void GroundMap::set_sun_visible(bool enabled) {
     if (show_sun_ == enabled)
         return;
     show_sun_ = enabled;
-    background_dirty_ = true;
-    update();
+    invalidate_background(true);
 }
 void GroundMap::focus_selection() {
     if (!selected_ || *selected_ >= points_.size())
@@ -764,34 +808,90 @@ void GroundMap::paint_background(QPainter &p, const QRectF &bounds, bool cache_i
         imagery_raster_ = {};
         paint_imagery(p);
     }
-    if (lighting_) {
-        if (night_dirty_)
-            rebuild_night();
-        p.setCompositionMode(QPainter::CompositionMode_Multiply);
-        each_world(transform, bounds, [&](const auto &, const QRectF &area) {
-            draw_world_image(p, night_, area, bounds);
-        });
-        p.setCompositionMode(QPainter::CompositionMode_SourceOver);
-    }
-    if (show_sun_) {
-        p.setPen(QPen(QColor("#efd69b"), 1));
-        p.setBrush(QColor("#efd69b"));
-        each_world(
-            transform, bounds.adjusted(-10, -10, 10, 10), [&](const auto &copy, const auto &) {
-                const auto sun = copy.map(QPointF(
-                    std::atan2(sun_direction_[1], sun_direction_[0]) * 180 / std::numbers::pi,
-                    std::asin(std::clamp(sun_direction_[2], -1.0, 1.0)) * 180 / std::numbers::pi));
-                if (!bounds.adjusted(-10, -10, 10, 10).contains(sun))
-                    return;
-                p.drawEllipse(sun, 3, 3);
-                for (int i = 0; i < 8; ++i) {
-                    const double angle = i * std::numbers::pi / 4;
-                    const QPointF ray(std::cos(angle), std::sin(angle));
-                    p.drawLine(sun + ray * 6, sun + ray * 9);
-                }
-            });
-    }
+    if (lighting_ && night_dirty_)
+        rebuild_night();
+    paint_sunlight(p, bounds, transform, night_, sun_direction_, lighting_, show_sun_);
     p.restore();
+}
+bool GroundMap::background_ready() const {
+    return !background_dirty_ && !pending_background_.valid() && covers_view(background_);
+}
+void GroundMap::poll_background() {
+    if (!pending_background_.valid() ||
+        pending_background_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return;
+    try {
+        auto result = pending_background_.get();
+        if (WorkbenchProfile::active)
+            WorkbenchProfile::active->record("map_background_worker_ms",
+                                             result.raster.milliseconds);
+        // A seek, settings change, resize or navigation must never install an old
+        // lighting/view snapshot. Newer continuous times are coalesced, not cancelled.
+        if (result.generation == background_generation_ &&
+            result.raster.transform == map_transform() && covers_view(result.raster)) {
+            background_ = std::move(result.raster);
+            background_dirty_ = background_.revision != lighting_revision_;
+            if (!result.night.isNull()) {
+                night_ = std::move(result.night);
+                night_dirty_ = background_dirty_;
+            }
+        }
+    } catch (const std::exception &) {
+        // Retain the displayed image and retry on a later paint.
+    }
+    background_timer_.stop();
+    update();
+}
+void GroundMap::prepare_background(bool navigating) {
+    poll_background();
+    if (!background_dirty_ && !background_.image.isNull() && covers_view(background_, !navigating))
+        return;
+    auto request = raster_request(96);
+    request.revision = lighting_revision_;
+    if (background_dirty_ && !background_reset_ && !navigating && !background_.image.isNull() &&
+        covers_view(background_) && !imagery_raster_.image.isNull() &&
+        imagery_raster_.transform == request.transform &&
+        imagery_raster_.bounds == request.bounds && imagery_raster_.ratio == request.ratio) {
+        if (!pending_background_.valid()) {
+            // Own immutable images/settings; no QWidget, global profiler or mutable
+            // cache is touched by the worker. One job bounds memory and queue length.
+            pending_background_ = std::async(
+                std::launch::async,
+                [request = std::move(request), imagery = imagery_raster_.image,
+                 night = night_dirty_ ? QImage{} : night_, direction = sun_direction_,
+                 lighting = lighting_, show_sun = show_sun_,
+                 generation = background_generation_]() mutable {
+                    QElapsedTimer timer;
+                    timer.start();
+                    if (lighting && night.isNull())
+                        night = ground_lighting_mask(direction);
+                    allocate_raster(request, QImage::Format_RGB32);
+                    {
+                        QPainter painter(&request.image);
+                        painter.setRenderHint(QPainter::Antialiasing);
+                        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+                        painter.translate(-request.bounds.topLeft());
+                        painter.setClipRect(request.bounds);
+                        painter.drawImage(request.bounds.topLeft(), imagery);
+                        paint_sunlight(painter, request.bounds, request.transform, night, direction,
+                                       lighting, show_sun);
+                    }
+                    request.milliseconds = timer.nsecsElapsed() * 1e-6;
+                    return BackgroundResult{std::move(request), std::move(night), generation};
+                });
+            background_timer_.start();
+        }
+        return;
+    }
+    const ProfileScope rebuild("map_background_ms");
+    ++background_generation_;
+    background_ = std::move(request);
+    allocate_raster(background_, QImage::Format_RGB32);
+    QPainter cache(&background_.image);
+    cache.translate(-background_.bounds.topLeft());
+    paint_background(cache, background_.bounds, !navigating);
+    background_dirty_ = false;
+    background_reset_ = false;
 }
 void GroundMap::paint_grid(QPainter &p) {
     const ProfileScope profile("map_grid_ms");
@@ -1398,16 +1498,8 @@ void GroundMap::paintEvent(QPaintEvent *event) {
         (previous_detail_.transform != map_transform() ||
          previous_detail_.ratio != devicePixelRatioF() || !covers_view(previous_detail_)))
         cancel_refinement();
-    if (!footer_only && (background_dirty_ || background_.image.isNull() ||
-                         !covers_view(background_, !navigating))) {
-        const ProfileScope rebuild("map_background_ms");
-        background_ = raster_request(96);
-        allocate_raster(background_, QImage::Format_RGB32);
-        QPainter cache(&background_.image);
-        cache.translate(-background_.bounds.topLeft());
-        paint_background(cache, background_.bounds, !navigating);
-        background_dirty_ = false;
-    }
+    if (!footer_only)
+        prepare_background(navigating);
     // One immutable worker request at a time; never queue intermediate viewports.
     // Heavy rasterization must not hold the shared Qt input / Vulkan frame thread.
     cancel_obsolete_raster();
