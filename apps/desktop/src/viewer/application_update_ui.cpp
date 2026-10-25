@@ -35,6 +35,7 @@ ApplicationUpdateUi::ApplicationUpdateUi(QString preferences, QMenuBar *menus, Q
     layout->setContentsMargins(20, 18, 20, 18);
     layout->setSpacing(12);
     heading_ = new QLabel;
+    heading_->setObjectName("applicationUpdateHeading");
     heading_->setWordWrap(true);
     auto font = heading_->font();
     font.setPointSizeF(font.pointSizeF() + 2);
@@ -42,6 +43,7 @@ ApplicationUpdateUi::ApplicationUpdateUi(QString preferences, QMenuBar *menus, Q
     heading_->setFont(font);
     layout->addWidget(heading_);
     description_ = new QLabel;
+    description_->setObjectName("applicationUpdateDescription");
     description_->setWordWrap(true);
     layout->addWidget(description_);
     notes_ = new QTextBrowser;
@@ -95,7 +97,18 @@ ApplicationUpdateUi::ApplicationUpdateUi(QString preferences, QMenuBar *menus, Q
         prompt_.stop();
         show();
     });
-    update_.changed = [this] { refresh(); };
+    progress_refresh_.setSingleShot(true);
+    progress_refresh_.setInterval(50);
+    connect(&progress_refresh_, &QTimer::timeout, this, [this] { refresh(); });
+    update_.changed = [this] {
+        // Coalesce transfer chunks, but publish phase changes and cancellation immediately.
+        if (update_.state() == ApplicationUpdateState::downloading &&
+            displayed_state_ == update_.state() && displayed_bundle_ == update_.bundle()) {
+            if (!progress_refresh_.isActive())
+                progress_refresh_.start();
+        } else
+            refresh();
+    };
     resize(QSize(600, 460).boundedTo(parent->screen()->availableGeometry().size() - QSize(40, 60)));
     refresh();
 }
@@ -132,7 +145,10 @@ void ApplicationUpdateUi::reject() {
     QDialog::reject();
 }
 void ApplicationUpdateUi::refresh() {
+    progress_refresh_.stop();
     const auto state = update_.state();
+    displayed_state_ = state;
+    displayed_bundle_ = update_.bundle();
     const bool available = state == ApplicationUpdateState::available;
     const bool ready = state == ApplicationUpdateState::ready;
     const bool error = state == ApplicationUpdateState::error;
@@ -143,10 +159,11 @@ void ApplicationUpdateUi::refresh() {
     const bool installable = update_.portable() && release && release->assets.contains(manifest);
     release_page_->setVisible(release.has_value());
     notes_->setVisible(release.has_value() || error);
-    if (error)
-        notes_->setPlainText(update_.error());
-    else if (release)
-        notes_->setPlainText(release->notes);
+    const auto notes = error ? update_.error() : release ? release->notes : QString{};
+    if (displayed_notes_ != notes) {
+        displayed_notes_ = notes;
+        notes_->setPlainText(notes);
+    }
     skip_->setVisible(available);
     primary_->setVisible(ready || ((available || error) && installable) || (error && !release));
     primary_->setText(ready               ? ui::text("updates.restart")
@@ -155,26 +172,24 @@ void ApplicationUpdateUi::refresh() {
     later_->setText(busy                 ? ui::text("updates.cancel")
                     : available || ready ? ui::text("updates.later")
                                          : ui::text("updates.close"));
-    progress_->setVisible(busy);
-    progress_->setRange(0, 0);
-    if (release)
-        description_->setText(
-            ui::text("updates.versions").arg(update_.current_version(), release->version));
-    else
-        description_->setText(ui::text("updates.current").arg(update_.current_version()));
+    QString heading;
+    auto description =
+        release ? ui::text("updates.versions").arg(update_.current_version(), release->version)
+                : ui::text("updates.current").arg(update_.current_version());
+    const bool determinate = state == ApplicationUpdateState::downloading && update_.total() > 0;
     if (state == ApplicationUpdateState::checking)
-        heading_->setText(ui::text("updates.checking"));
+        heading = ui::text("updates.checking");
     else if (available) {
-        heading_->setText(ui::text("updates.available").arg(release->version));
+        heading = ui::text("updates.available").arg(release->version);
         if (!installable)
-            description_->setText(ui::text("updates.manual_install"));
+            description = ui::text("updates.manual_install");
     } else if (ready) {
-        heading_->setText(ui::text("updates.ready"));
-        description_->setText(ui::text("updates.restart_detail"));
+        heading = ui::text("updates.ready");
+        description = ui::text("updates.restart_detail");
     } else if (state == ApplicationUpdateState::preparing) {
-        heading_->setText(update_.cancelled() ? ui::text("updates.cancelling")
-                                              : ui::text("updates.preparing"));
-        description_->setText(ui::text("updates.preparing_detail"));
+        heading =
+            update_.cancelled() ? ui::text("updates.cancelling") : ui::text("updates.preparing");
+        description = ui::text("updates.preparing_detail");
     } else if (state == ApplicationUpdateState::downloading) {
         QString part = ui::text("updates.part_manifest");
         if (update_.bundle() == "app")
@@ -183,18 +198,25 @@ void ApplicationUpdateUi::refresh() {
             part = ui::text("updates.part_runtime");
         else if (update_.bundle() == "resources")
             part = ui::text("updates.part_resources");
-        heading_->setText(ui::text("updates.downloading").arg(part));
-        if (update_.total() > 0) {
-            progress_->setRange(0, 1000);
-            progress_->setValue(static_cast<int>(1000 * update_.received() / update_.total()));
-            description_->setText(ui::text("updates.progress")
-                                      .arg(QString::number(update_.received() / 1048576.0, 'f', 1),
-                                           QString::number(update_.total() / 1048576.0, 'f', 1)));
-        }
+        heading = ui::text("updates.downloading").arg(part);
+        if (determinate)
+            description = ui::text("updates.progress")
+                              .arg(QString::number(update_.received() / 1048576.0, 'f', 1),
+                                   QString::number(update_.total() / 1048576.0, 'f', 1));
     } else if (error)
-        heading_->setText(ui::text("updates.failed"));
+        heading = ui::text("updates.failed");
     else
-        heading_->setText(ui::text("updates.latest"));
+        heading = ui::text("updates.latest");
+    heading_->setText(heading);
+    description_->setText(description);
+    if (busy) {
+        const auto maximum = determinate ? 1000 : 0;
+        if (progress_->maximum() != maximum)
+            progress_->setRange(0, maximum);
+        if (determinate)
+            progress_->setValue(static_cast<int>(1000 * update_.received() / update_.total()));
+    }
+    progress_->setVisible(busy);
     if (available && !manual_visible_ && !offered_ && !prompt_.isActive())
         prompt_.start();
 }
