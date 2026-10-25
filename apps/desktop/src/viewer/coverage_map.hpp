@@ -32,7 +32,7 @@ class CoverageMap final : public QWidget {
     int metric_ = 0;
     std::size_t selected_ = 0;
     QRectF map_rect() const;
-    QRectF cell_rect(const core::CoverageCell &) const;
+    QRectF cell_rect(const core::CoverageCell &, qreal pixel_ratio = 0) const;
     double value(const results::CoveragePoint &) const;
     double maximum() const;
     void draw_background(QPainter &) const;
