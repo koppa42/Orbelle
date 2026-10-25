@@ -39,7 +39,7 @@ AER 从设备位置计算，仰角相对于当地椭球法线确定的水平面�
 
 `ProjectGroundStation` 保存稳定 ID、显示名称、`GroundStationLocation`、最低仰角、`position_type` 和 `description`。ID 在所有对象中唯一；坐标类型与描述为元数据，不进入数值输入哈希。位置改变更新状态修订；名称、描述或坐标表示改变不会重算数值 Session。物理修改沿用后台候选准备与原子发布，失败或取消保留原场景；所有对象合计上限 10,000。
 
-当前项目为 v51，必需 `GSTN` v3 段保存上述字段；只接受当前格式，旧项目明确报错，详见[项目文件](project_files.md)。复制和保存重开保留新增字段。Runtime 模型标识为 `ground-station-wgs84-fixed-itrf-v2`。
+当前项目为 v54，必需 `GSTN` v3 段保存上述字段；只接受当前格式，旧项目明确报错，详见[项目文件](project_files.md)。复制和保存重开保留新增字段。Runtime 模型标识为 `ground-station-wgs84-fixed-itrf-v2`。
 
 Python 示例：
 

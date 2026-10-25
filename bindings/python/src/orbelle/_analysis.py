@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, overload
 from . import _native as n
 from . import reports
 from ._values import require
-from .objects import ObjectHandle, SatelliteHandle, GroundStationHandle, SensorHandle
+from .objects import ObjectHandle, SatelliteHandle, GroundStationHandle, SensorHandle, RegionHandle
 from .units import Duration
 
 if TYPE_CHECKING:
@@ -558,6 +558,8 @@ class Analysis:
                event_search_mode: n.AccessSearchMode | None = None,
                lighting_ephemeris: str | None = None,
                coverage: n.CoverageGrid | None = None,
+               coverage_memory_mib: int = 512,
+               region: RegionHandle | None = None,
                boundary_tolerance: Duration | None = None,
                cancelled: Callable[[], bool] | None = None,
                progress: Callable[[int, int], None] | None = None) -> n.ReportResult:
@@ -568,6 +570,9 @@ class Analysis:
         objects=[primary, target] and prepared EOP data. A template controls presentation.
         SCENARIO_SUMMARY needs no selection. Sampled reports require step. TAI is
         the default display scale; UTC requires data selected when preparing.
+        A named region owns the coverage boundary and grid spacing; coverage then
+        supplies minimum elevation and end-gap policy. Without a region, coverage
+        also defines the inline grid boundary and spacing.
         """
         require(kind, n.ReportKind, "kind")
         access = kind in (n.ReportKind.AER, n.ReportKind.ACCESS_INTERVALS)
@@ -601,9 +606,9 @@ class Analysis:
             if len(selection) != 2 or not all(isinstance(s, SatelliteHandle) for s in selection):
                 raise TypeError("Intersatellite reports require objects=[primary satellite, target satellite]")
         is_coverage = kind in (n.ReportKind.COVERAGE_GRID, n.ReportKind.COVERAGE_TIME)
-        if is_coverage and (not 1 <= len(selection) <= 32 or
+        if is_coverage and (not 1 <= len(selection) <= 2048 or
                             not all(isinstance(s, (SatelliteHandle, SensorHandle)) for s in selection)):
-            raise TypeError("Coverage requires 1–32 explicit satellite or sensor assets")
+            raise TypeError("Coverage requires 1–2048 explicit satellite or sensor assets")
         snapshot = self._native.snapshot
         ids = []
         for object in selection:
@@ -632,6 +637,12 @@ class Analysis:
             if not is_coverage:
                 raise TypeError("coverage is only used by coverage reports")
             definition.query.coverage = require(coverage, n.CoverageGrid, "coverage")
+        if region is not None:
+            if not is_coverage:
+                raise TypeError("region is only used by coverage reports")
+            ref = require(region, RegionHandle, "region")._ref
+            snapshot.read(ref)
+            definition.query.region_id = ref.id
         if lighting_ephemeris is not None:
             if kind not in (n.ReportKind.LIGHTING_INTERVALS, n.ReportKind.LIGHTING_STATE):
                 raise TypeError("lighting_ephemeris is only used by lighting reports")
@@ -653,7 +664,11 @@ class Analysis:
                 definition.query.last = snapshot.last if last is None else require(last, n.Epoch, "last")
         elif step is not None or first is not None or last is not None:
             raise TypeError("Static reports do not use step or first/last")
-        return self._native.report(definition, cancelled, progress)
+        if isinstance(coverage_memory_mib, bool) or not isinstance(coverage_memory_mib, int):
+            raise TypeError("coverage_memory_mib must be an integer MiB budget")
+        if coverage_memory_mib <= 0:
+            raise ValueError("coverage_memory_mib must be positive")
+        return self._native.report(definition, cancelled, progress, coverage_memory_mib * 1024**2)
 
     def access(self, station: GroundStationHandle, target: SatelliteHandle | SensorHandle, *,
                search_step: Duration, boundary_tolerance: Duration = Duration(1_000_000),

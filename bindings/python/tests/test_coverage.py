@@ -30,6 +30,9 @@ class CoverageTests(unittest.TestCase):
         result = analysis.report(ob.ReportKind.COVERAGE_GRID, objects=[sat], step=u.s(60),
                                  coverage=grid, progress=lambda n, total: progress.append((n, total)))
         stats = result.coverage_statistics
+        self.assertEqual(stats.point_count, len(stats.points))
+        self.assertEqual([p.statistics.covered_seconds for p in stats.iter_points()],
+                         [p.statistics.covered_seconds for p in stats.points])
         self.assertEqual(result.table.row_count, len(stats.points))
         self.assertGreater(stats.ever_covered_area_m2, 0)
         self.assertLessEqual(stats.ever_covered_area_m2, stats.total_area_m2)
@@ -66,9 +69,18 @@ class CoverageTests(unittest.TestCase):
     def test_explicit_assets_limits_errors_and_cancel(self):
         p, sat, data, grid = scene()
         analysis = p.prepare(data=data)
+        with self.assertRaisesRegex(ValueError, "MiB"):
+            analysis.report(ob.ReportKind.COVERAGE_GRID, objects=[sat], step=u.s(60),
+                            coverage=grid, coverage_memory_mib=1)
+        for invalid in (False, 1.5, "512"):
+            with self.assertRaises(TypeError):
+                analysis.report(ob.ReportKind.COVERAGE_GRID, objects=[sat], step=u.s(60),
+                                coverage=grid, coverage_memory_mib=invalid)
         for assets in (ob.reports.ALL, [], [sat, sat]):
             with self.assertRaises((ValueError, TypeError)):
                 analysis.report(ob.ReportKind.COVERAGE_GRID, objects=assets, step=u.s(60), coverage=grid)
+        with self.assertRaisesRegex(TypeError, "2048"):
+            analysis.report(ob.ReportKind.COVERAGE_GRID, objects=[sat] * 2049, step=u.s(60), coverage=grid)
         with self.assertRaises(TypeError):
             analysis.report(ob.ReportKind.CARTESIAN_STATE, objects=[sat], step=u.s(60), coverage=grid)
         with self.assertRaises(ob.AnalysisCancelled):

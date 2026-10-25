@@ -37,6 +37,7 @@ from ._native import (
     ReportKind, ReportUnits, ReportTimeScale, ReportDefinition, ReportColumn, ReportTable,
     ReportResult, ReportScope, ReportQuery, ReportTemplate, ReportColumnSpec,
     CoverageGrid, CoverageCell, CoverageTimeStatistics, CoveragePoint, CoverageStatistics,
+    RegionVertex, RegionBoundary, RegionDisplay, ProjectRegion,
     LightingStatistics, LightingPhaseStatistics, OrbitalEventStatistics, IntersatelliteStatistics,
 )
 
@@ -44,7 +45,7 @@ from ._native import (
 # Ordinary scripts use the shared, transactional Project facade below.
 from ._native import ObjectNotFoundError, RevisionConflictError, EditClosedError, ChangeSet
 from ._values import Wgs84Location, OrbitStyle
-from . import objects, orbits, sensors, units, reports, missions
+from . import objects, orbits, sensors, units, reports, missions, regions
 from ._native import ManeuverEvent, ManeuverSeries, AccessSearchMode, AccessExtremum, PassExtrema, AccessStatistics
 from ._project import (
     Project, load_project, AccessSession, generate_report, estimate_report_rows, report_input_sha256,
@@ -57,6 +58,7 @@ from ._analysis import (
 
 __all__ = [
     "CoverageGrid", "CoverageCell", "CoverageTimeStatistics", "CoveragePoint", "CoverageStatistics",
+    "RegionVertex", "RegionBoundary", "RegionDisplay", "ProjectRegion", "regions",
     "LightingStatistics", "LightingPhaseStatistics", "OrbitalEventStatistics", "IntersatelliteStatistics",
     "CatalogGravity", "GravityInfo", "GravityCoefficient", "GravitySecularVariations", "CatalogEphemeris", "ThirdBodyDataInfo",
     "Analysis", "AnalysisPlan", "ProjectOpenPlan", "AnalysisRecord", "AnalysisStatus", "DataSnapshot", "DataChange", "DataChangedError",

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "start_utc": "1 Jan 2000 12:00:00.000",
+  "duration_s": 21600,
+  "short_duration_s": 3600,
+  "resolution_deg": 5,
+  "minimum_elevation_deg": 10,
+  "cone_half_angle_deg": 45,
+  "satellites": [
+    {"name": "Asset1", "position_m": [7000000, 0, 0], "velocity_mps": [0, 6200, 5300], "rotation_z_rad": 0},
+    {"name": "Asset2", "position_m": [7000000, 0, 0], "velocity_mps": [0, 6200, 5300], "rotation_z_rad": 1}
+  ],
+  "regions": [
+    {"name": "rectangle", "bounds_deg": [20, 50, 90, 130]},
+    {"name": "concave_polygon", "vertices_deg": [[90, 10], [130, 10], [130, 50], [112, 30], [90, 50]]},
+    {"name": "dateline_polygon", "vertices_deg": [[165, -20], [-165, -20], [-170, 25], [175, 10], [165, 25]]}
+  ]
+}

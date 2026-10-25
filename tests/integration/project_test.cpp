@@ -553,8 +553,8 @@ TEST(Project, DataLocksHaveStableCanonicalOrderAndRejectDuplicateRoles) {
 }
 TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
     const auto bytes = application::encode_project(example());
-    for (std::uint32_t version = 0; version <= 52; ++version) {
-        if (version == 51)
+    for (std::uint32_t version = 0; version <= 55; ++version) {
+        if (version == 54)
             continue;
         SCOPED_TRACE(version);
         auto unsupported = bytes;
@@ -566,7 +566,7 @@ TEST(Project, RejectsEveryPreviousVersionAndFutureVersionBeforeReadingPayload) {
         } catch (const application::ProjectError &error) {
             EXPECT_NE(std::string(error.what()).find("version " + std::to_string(version) + ";"),
                       std::string::npos);
-            EXPECT_NE(std::string(error.what()).find("reads only version 51"), std::string::npos);
+            EXPECT_NE(std::string(error.what()).find("reads only version 54"), std::string::npos);
         }
     }
 }

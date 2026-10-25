@@ -5,7 +5,7 @@
 #include <variant>
 
 namespace orbelle::application {
-enum class ObjectKind { satellite, ground_station, sensor };
+enum class ObjectKind { satellite, ground_station, sensor, region };
 class ObjectNotFoundError : public ProjectError {
     using ProjectError::ProjectError;
 };
@@ -38,6 +38,20 @@ class ObjectRef {
 };
 
 namespace objects {
+struct Region {
+    std::string name;
+    core::RegionBoundary boundary;
+    RegionDisplay display;
+    std::string description;
+    double grid_resolution_rad = 5 * std::numbers::pi / 180;
+};
+struct RegionUpdate {
+    std::optional<std::string> name = {};
+    std::optional<core::RegionBoundary> boundary = {};
+    std::optional<RegionDisplay> display = {};
+    std::optional<std::string> description = {};
+    std::optional<double> grid_resolution_rad = {};
+};
 struct Satellite {
     std::string name;
     OrbitInput orbit = {};
@@ -85,7 +99,8 @@ struct SensorUpdate {
 };
 } // namespace objects
 
-using ObjectState = std::variant<ProjectSatellite, ProjectGroundStation, ProjectSensor>;
+using ObjectState =
+    std::variant<ProjectSatellite, ProjectGroundStation, ProjectSensor, ProjectRegion>;
 struct ProjectSnapshot {
     std::uint64_t revision;
     std::shared_ptr<const Project> project;
@@ -122,9 +137,11 @@ class ObjectManager {
     [[nodiscard]] ObjectRef create(const objects::Satellite &definition);
     [[nodiscard]] ObjectRef create(const objects::GroundStation &definition);
     [[nodiscard]] ObjectRef create(const objects::Sensor &definition);
+    [[nodiscard]] ObjectRef create(const objects::Region &definition);
     void update(const ObjectRef &ref, const objects::SatelliteUpdate &patch);
     void update(const ObjectRef &ref, const objects::GroundStationUpdate &patch);
     void update(const ObjectRef &ref, const objects::SensorUpdate &patch);
+    void update(const ObjectRef &ref, const objects::RegionUpdate &patch);
     void rename(const ObjectRef &ref, const std::string &name);
     [[nodiscard]] ObjectRef duplicate(const ObjectRef &ref, const std::string &name);
     void reparent(const ObjectRef &sensor, const ObjectRef &parent);

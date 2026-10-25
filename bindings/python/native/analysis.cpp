@@ -291,15 +291,17 @@ void bind_analysis(py::module_ &module) {
         .def(
             "report",
             [](const runtime::Analysis &analysis, const application::ReportDefinition &definition,
-               const py::object &cancelled, const py::object &progress) {
+               const py::object &cancelled, const py::object &progress,
+               std::size_t coverage_memory_bytes) {
                 const auto captured = definition;
                 const auto check = cancellation(cancelled);
                 const auto notify = progress_callback(progress);
                 py::gil_scoped_release release;
-                return analysis.report(captured, check, notify);
+                return analysis.report(captured, check, notify, coverage_memory_bytes);
             },
             py::arg("definition"), py::arg("cancelled") = py::none(),
-            py::arg("progress") = py::none());
+            py::arg("progress") = py::none(),
+            py::arg("coverage_memory_bytes") = runtime::default_coverage_memory_bytes);
     py::class_<runtime::ProjectOpenPlan>(module, "ProjectOpenPlan")
         .def(py::init<const std::filesystem::path &, const runtime::DataCatalog &>(),
              py::arg("path"), py::arg("data"), py::call_guard<py::gil_scoped_release>())

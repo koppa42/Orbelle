@@ -30,6 +30,8 @@ QString kind_name(ObjectKind kind) {
         return ui::text("object_selection.label_2");
     case ObjectKind::sensor:
         return ui::text("object_selection.label_3");
+    case ObjectKind::region:
+        return ui::text("region.title");
     default:
         return ui::text("common.objects");
     }
@@ -38,6 +40,7 @@ QIcon object_icon(ObjectKind kind) {
     return workbench_icon(kind == ObjectKind::satellite        ? WorkbenchIcon::satellite
                           : kind == ObjectKind::ground_station ? WorkbenchIcon::ground_station
                           : kind == ObjectKind::sensor         ? WorkbenchIcon::focus
+                          : kind == ObjectKind::region         ? WorkbenchIcon::map
                                                                : WorkbenchIcon::properties);
 }
 bool contains(const std::vector<std::string> &ids, const std::string &id) {
@@ -83,6 +86,13 @@ std::vector<ObjectChoice> project_object_choices(const application::Project &pro
                                sensor.parent_satellite_id,
                                parent_name + QStringLiteral(" / ") + object_text(sensor.name())});
         }
+    if (permits(ObjectKind::region))
+        for (const auto &region : project.regions)
+            objects.push_back({region.object_id,
+                               object_text(region.name()),
+                               ObjectKind::region,
+                               {},
+                               object_text(region.name())});
     return objects;
 }
 
@@ -204,8 +214,8 @@ void ObjectSelectionPanel::set_objects(std::vector<ObjectChoice> objects) {
     const int previous_kind = kind_->count() ? kind_->currentData().toInt() : -1;
     kind_->clear();
     kind_->addItem(ui::text("object_selection.kind.add_item"), -1);
-    for (const auto kind :
-         {ObjectKind::satellite, ObjectKind::ground_station, ObjectKind::sensor, ObjectKind::other})
+    for (const auto kind : {ObjectKind::satellite, ObjectKind::ground_station, ObjectKind::sensor,
+                            ObjectKind::region, ObjectKind::other})
         if (std::ranges::any_of(objects_,
                                 [kind](const auto &o) { return o.selectable && o.kind == kind; }))
             kind_->addItem(kind_name(kind), static_cast<int>(kind));

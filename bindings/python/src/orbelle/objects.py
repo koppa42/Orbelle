@@ -7,8 +7,26 @@ from . import units as u
 from ._values import OrbitStyle, UNSET, Unset, Wgs84Location, require
 from .orbits import Orbit
 from .sensors import FieldOfView, Orientation, Pointing, _to_native, _from_native
+from . import regions
 if TYPE_CHECKING:
     from ._project import Project
+
+
+@dataclass(frozen=True, slots=True)
+class Region:
+    name: str
+    boundary: regions.Boundary
+    description: str = ""
+    grid_spacing: u.Angle = u.deg(5)
+
+
+@dataclass(frozen=True, slots=True)
+class RegionState:
+    id: str
+    name: str
+    boundary: regions.Boundary
+    description: str
+    grid_spacing: u.Angle
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,10 +253,52 @@ class SensorHandle(ObjectHandle):
         self._project._manager().update(self._ref, patch)
 
 
+class RegionHandle(ObjectHandle):
+    __slots__ = ()
+
+    @property
+    def grid_spacing(self) -> u.Angle:
+        return self._project.objects.read(self).grid_spacing
+
+    @grid_spacing.setter
+    def grid_spacing(self, value: u.Angle) -> None:
+        self.update(grid_spacing=value)
+
+    @property
+    def boundary(self) -> regions.Boundary:
+        return self._project.objects.read(self).boundary
+
+    @boundary.setter
+    def boundary(self, value: regions.Boundary) -> None:
+        self.update(boundary=value)
+
+    @property
+    def description(self) -> str:
+        return self._project.objects.read(self).description
+
+    @description.setter
+    def description(self, value: str) -> None:
+        self.update(description=value)
+
+    def update(self, *, name: str | Unset = UNSET,
+               boundary: regions.Boundary | Unset = UNSET,
+               description: str | Unset = UNSET, grid_spacing: u.Angle | Unset = UNSET) -> None:
+        patch = n.RegionUpdate()
+        if name is not UNSET:
+            patch.name = require(name, str, "name")
+        if boundary is not UNSET:
+            patch.boundary = regions._to_native(boundary)
+        if grid_spacing is not UNSET:
+            patch.grid_resolution_rad = require(grid_spacing, u.Angle, "grid_spacing").radians
+        if description is not UNSET:
+            patch.description = require(description, str, "description")
+        self._project._manager().update(self._ref, patch)
+
+
 _KINDS = {Satellite: n.ObjectKind.SATELLITE, GroundStation: n.ObjectKind.GROUND_STATION,
-          Sensor: n.ObjectKind.SENSOR}
+          Sensor: n.ObjectKind.SENSOR, Region: n.ObjectKind.REGION}
 _HANDLES = {n.ObjectKind.SATELLITE: SatelliteHandle, n.ObjectKind.GROUND_STATION: GroundStationHandle,
-            n.ObjectKind.SENSOR: SensorHandle}
+            n.ObjectKind.SENSOR: SensorHandle, n.ObjectKind.REGION: RegionHandle}
 H = TypeVar("H", bound=ObjectHandle)
 T = TypeVar("T")
 
@@ -281,11 +341,13 @@ class ObjectCollection:
     @overload
     def find(self, *, name: str | None = None, type: type[Sensor]) -> tuple[SensorHandle, ...]: ...
     @overload
+    def find(self, *, name: str | None = None, type: type[Region]) -> tuple[RegionHandle, ...]: ...
+    @overload
     def find(self, *, name: str | None = None, type: None = None) -> tuple[ObjectHandle, ...]: ...
     def find(self, *, name: str | None = None,
-             type: type[Satellite] | type[GroundStation] | type[Sensor] | None = None) -> tuple[ObjectHandle, ...]:
+             type: type[Satellite] | type[GroundStation] | type[Sensor] | type[Region] | None = None) -> tuple[ObjectHandle, ...]:
         if type is not None and type not in _KINDS:
-            raise TypeError("type expects objects.Satellite, GroundStation or Sensor")
+            raise TypeError("type expects objects.Satellite, GroundStation, Sensor or Region")
         if name is not None:
             require(name, str, "name")
         return tuple(self._wrap(ref) for ref in self._project._manager().find(name, None if type is None else _KINDS[type]))
@@ -296,7 +358,12 @@ class ObjectCollection:
     def create(self, definition: GroundStation) -> GroundStationHandle: ...
     @overload
     def create(self, definition: Sensor) -> SensorHandle: ...
-    def create(self, definition: Satellite | GroundStation | Sensor) -> ObjectHandle:
+    @overload
+    def create(self, definition: Region) -> RegionHandle: ...
+    def create(self, definition: Satellite | GroundStation | Sensor | Region) -> ObjectHandle:
+        if isinstance(definition, Region):
+            return self.region(definition.name, boundary=definition.boundary, description=definition.description,
+                               grid_spacing=definition.grid_spacing)
         if isinstance(definition, Satellite):
             return self.satellite(definition.name, orbit=definition.orbit, display=definition.display)
         if isinstance(definition, GroundStation):
@@ -307,7 +374,14 @@ class ObjectCollection:
             return self.sensor(definition.name, parent=definition.parent,
                                field_of_view=definition.field_of_view, pointing=definition.pointing,
                                orientation=definition.orientation)
-        raise TypeError("definition expects objects.Satellite, GroundStation or Sensor")
+        raise TypeError("definition expects objects.Satellite, GroundStation, Sensor or Region")
+
+    def region(self, name: str, *, boundary: regions.Boundary, description: str = "",
+               grid_spacing: u.Angle = u.deg(5)) -> RegionHandle:
+        definition = n.RegionDefinition(require(name, str, "name"), regions._to_native(boundary),
+                                         n.RegionDisplay(), require(description, str, "description"),
+                                         require(grid_spacing, u.Angle, "grid_spacing").radians)
+        return RegionHandle(self._project, self._project._manager().create(definition))
 
     def satellite(self, name: str, *, orbit: Orbit, display: OrbitStyle = OrbitStyle()) -> SatelliteHandle:
         definition = n.SatelliteDefinition(require(name, str, "name"), require(orbit, Orbit, "orbit")._native(),
@@ -341,9 +415,14 @@ class ObjectCollection:
     @overload
     def read(self, obj: SensorHandle) -> SensorState: ...
     @overload
-    def read(self, obj: ObjectHandle) -> SatelliteState | GroundStationState | SensorState: ...
-    def read(self, obj: ObjectHandle) -> SatelliteState | GroundStationState | SensorState:
+    def read(self, obj: RegionHandle) -> RegionState: ...
+    @overload
+    def read(self, obj: ObjectHandle) -> SatelliteState | GroundStationState | SensorState | RegionState: ...
+    def read(self, obj: ObjectHandle) -> SatelliteState | GroundStationState | SensorState | RegionState:
         state = self._project._manager().read(require(obj, ObjectHandle, "object")._ref)
+        if isinstance(state, n.ProjectRegion):
+            return RegionState(obj.id, state.name, regions._from_native(state.boundary), state.description,
+                               u.rad(state.grid_resolution_rad))
         if isinstance(state, n.ProjectSatellite):
             return SatelliteState(obj.id, state.name, Orbit.from_input(state.orbit), OrbitStyle._read(state.display),
                                   state.model_kind, state.model_diameter_m, state.model_path)
@@ -370,24 +449,32 @@ class ObjectCollection:
     def update(self, obj: SensorHandle, *, name: str | Unset = UNSET,
                field_of_view: FieldOfView | Unset = UNSET, pointing: Pointing | Unset = UNSET,
                orientation: Orientation | Unset = UNSET) -> None: ...
+    @overload
+    def update(self, obj: RegionHandle, *, name: str | Unset = UNSET,
+               boundary: regions.Boundary | Unset = UNSET, description: str | Unset = UNSET,
+               grid_spacing: u.Angle | Unset = UNSET) -> None: ...
     def update(self, obj: ObjectHandle, *, name: str | Unset = UNSET, orbit: Orbit | Unset = UNSET,
                display: OrbitStyle | Unset = UNSET, location: Wgs84Location | Unset = UNSET,
                minimum_elevation: u.Angle | Unset = UNSET, field_of_view: FieldOfView | Unset = UNSET,
                pointing: Pointing | Unset = UNSET, orientation: Orientation | Unset = UNSET,
-               position_type: n.GroundPositionType | Unset = UNSET, description: str | Unset = UNSET) -> None:
+               position_type: n.GroundPositionType | Unset = UNSET, description: str | Unset = UNSET,
+               boundary: regions.Boundary | Unset = UNSET, grid_spacing: u.Angle | Unset = UNSET) -> None:
         self._project._manager().read(require(obj, ObjectHandle, "object")._ref)
         values = {"name": name, "orbit": orbit, "display": display, "location": location,
                   "minimum_elevation": minimum_elevation, "field_of_view": field_of_view, "pointing": pointing,
                   "orientation": orientation,
-                  "position_type": position_type, "description": description}
+                  "position_type": position_type, "description": description, "boundary": boundary,
+                  "grid_spacing": grid_spacing}
         if isinstance(obj, SatelliteHandle):
             allowed = {"name", "orbit", "display"}
         elif isinstance(obj, GroundStationHandle):
             allowed = {"name", "location", "minimum_elevation", "position_type", "description"}
         elif isinstance(obj, SensorHandle):
             allowed = {"name", "field_of_view", "pointing", "orientation"}
+        elif isinstance(obj, RegionHandle):
+            allowed = {"name", "boundary", "description", "grid_spacing"}
         else:
-            raise TypeError("Expected a satellite, ground station or sensor handle")
+            raise TypeError("Expected a satellite, ground station, sensor or region handle")
         invalid = {field for field, value in values.items() if value is not UNSET} - allowed
         if invalid:
             raise TypeError(f"{type(obj).__name__} does not accept {', '.join(sorted(invalid))}; "
@@ -399,6 +486,8 @@ class ObjectCollection:
                        position_type=position_type, description=description)
         elif isinstance(obj, SensorHandle):
             obj.update(name=name, field_of_view=field_of_view, pointing=pointing, orientation=orientation)
+        elif isinstance(obj, RegionHandle):
+            obj.update(name=name, boundary=boundary, description=description, grid_spacing=grid_spacing)
 
     def duplicate(self, obj: H, *, name: str | None = None) -> H:
         ref = require(obj, ObjectHandle, "object")._ref

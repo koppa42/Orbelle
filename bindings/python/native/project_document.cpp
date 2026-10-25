@@ -16,7 +16,20 @@ void bind_project_document(py::module_ &module) {
     py::enum_<ObjectKind>(module, "ObjectKind")
         .value("SATELLITE", ObjectKind::satellite)
         .value("GROUND_STATION", ObjectKind::ground_station)
-        .value("SENSOR", ObjectKind::sensor);
+        .value("SENSOR", ObjectKind::sensor)
+        .value("REGION", ObjectKind::region);
+    py::class_<objects::Region>(module, "RegionDefinition")
+        .def(py::init<std::string, orbelle::core::RegionBoundary, RegionDisplay, std::string,
+                      double>(),
+             py::arg("name"), py::arg("boundary"), py::arg("display"), py::arg("description"),
+             py::arg("grid_resolution_rad") = 5 * std::numbers::pi / 180);
+    py::class_<objects::RegionUpdate>(module, "RegionUpdate")
+        .def(py::init<>())
+        .def_readwrite("name", &objects::RegionUpdate::name)
+        .def_readwrite("boundary", &objects::RegionUpdate::boundary)
+        .def_readwrite("display", &objects::RegionUpdate::display)
+        .def_readwrite("description", &objects::RegionUpdate::description)
+        .def_readwrite("grid_resolution_rad", &objects::RegionUpdate::grid_resolution_rad);
     py::class_<ObjectRef>(module, "ObjectRef")
         .def_property_readonly("id", &ObjectRef::id)
         .def_property_readonly("kind", &ObjectRef::kind)
@@ -117,6 +130,9 @@ void bind_project_document(py::module_ &module) {
         .def("create", py::overload_cast<const objects::Satellite &>(&ObjectManager::create))
         .def("create", py::overload_cast<const objects::GroundStation &>(&ObjectManager::create))
         .def("create", py::overload_cast<const objects::Sensor &>(&ObjectManager::create))
+        .def("create", py::overload_cast<const objects::Region &>(&ObjectManager::create))
+        .def("update", py::overload_cast<const ObjectRef &, const objects::RegionUpdate &>(
+                           &ObjectManager::update))
         .def("update", py::overload_cast<const ObjectRef &, const objects::SatelliteUpdate &>(
                            &ObjectManager::update))
         .def("update", py::overload_cast<const ObjectRef &, const objects::GroundStationUpdate &>(

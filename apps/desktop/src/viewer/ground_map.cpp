@@ -9,6 +9,7 @@
 #include <QMouseEvent>
 #include <QPaintEvent>
 #include <QPainter>
+#include <QPainterPathStroker>
 #include <QSignalBlocker>
 #include <QWheelEvent>
 #include <algorithm>
@@ -465,7 +466,59 @@ void GroundMap::set_ground_stations(
     for (const auto &station : stations)
         station_names_.emplace(station.object_id, QString::fromStdString(station.name()));
 }
+QPainterPath ground_region_path(std::span<const core::RegionVertex> outline) {
+    QPolygonF polygon;
+    for (const auto &p : outline)
+        polygon.push_back(
+            {p.longitude_rad * 180 / std::numbers::pi, p.latitude_rad * 180 / std::numbers::pi});
+    QPainterPath unwrapped, fill_path, world;
+    unwrapped.addPolygon(polygon);
+    unwrapped.closeSubpath();
+    world.addRect(QRectF(-180, -90, 360, 180));
+    fill_path.setFillRule(Qt::WindingFill);
+    // Clip whole polygons: closing individual outline fragments would create
+    // diagonal fills across the date line.
+    for (const double offset : {-360., 0., 360.})
+        fill_path.addPath(unwrapped.translated(offset, 0).intersected(world));
+    return fill_path;
+}
+void GroundMap::set_regions(const std::vector<application::ProjectRegion> &regions) {
+    std::vector<RegionOverlay> next;
+    for (const auto &region : regions) {
+        std::vector<QPointF> coordinates;
+        const auto outline = core::region_outline(region.boundary);
+        for (auto p : outline) {
+            coordinates.emplace_back(std::remainder(p.longitude_rad * 180 / std::numbers::pi, 360.),
+                                     p.latitude_rad * 180 / std::numbers::pi);
+        }
+        const auto bounds = core::region_grid_bounds(region.boundary);
+        const double span = core::coverage_longitude_span(bounds), degrees = 180 / std::numbers::pi;
+        next.push_back({ground_path(coordinates),
+                        ground_region_path(outline),
+                        QColor::fromRgb(region.display.color),
+                        region.display.opacity,
+                        region.display.fill,
+                        region.display.show_2d,
+                        {std::remainder((bounds.west_rad + span / 2) * degrees, 360.),
+                         (bounds.south_rad + bounds.north_rad) * degrees / 2},
+                        {span * degrees, (bounds.north_rad - bounds.south_rad) * degrees}});
+    }
+    regions_ = std::move(next);
+    selected_region_.reset();
+    base_image_ = {};
+    foreground_image_ = {};
+    update();
+}
 void GroundMap::set_selection(std::optional<std::size_t> index) {
+    const auto region =
+        index && *index >= points_.size() && *index - points_.size() < regions_.size()
+            ? std::optional<std::size_t>{*index - points_.size()}
+            : std::nullopt;
+    if (region != selected_region_) {
+        selected_region_ = region;
+        base_image_ = {};
+        foreground_image_ = {};
+    }
     if (selected_ == index)
         return;
     selected_ = index;
@@ -635,6 +688,17 @@ void GroundMap::set_sun_visible(bool enabled) {
     invalidate_background(true);
 }
 void GroundMap::focus_selection() {
+    if (selected_region_ && *selected_region_ < regions_.size()) {
+        const auto &region = regions_[*selected_region_];
+        const auto plot = plot_rect();
+        const double base_width = map_rect().width() / zoom_;
+        const double desired =
+            .8 * 360 / base_width *
+            std::min(plot.width() / region.extent.width(), plot.height() / region.extent.height());
+        zoom(desired / zoom_, plot.center());
+        pan_by(plot.center() - map_transform().map(region.center));
+        return;
+    }
     if (!selected_ || *selected_ >= points_.size())
         return;
     zoom(std::max(1.0, 2.0 / zoom_), plot_rect().center());
@@ -1464,6 +1528,22 @@ void GroundMap::paint_foreground(QPainter &p, const Raster *display, const Raste
     p.setClipRect(plot_rect());
     paint_grid(p);
     draw_layer(p, display, fallback);
+    // Region paths change only on edits. This static foreground is reused during playback.
+    each_world(map_transform(), plot_rect(), [&](const auto &transform, const auto &) {
+        for (std::size_t i = 0; i < regions_.size(); ++i) {
+            const auto &region = regions_[i];
+            if (!region.visible)
+                continue;
+            if (region.fill && region.opacity > 0) {
+                auto tint = region.color;
+                tint.setAlphaF(region.opacity);
+                p.fillPath(transform.map(region.fill_path), tint);
+            }
+            p.setPen(QPen(region.color, selected_region_ == i ? 2.5 : 1.5));
+            p.setBrush(Qt::NoBrush);
+            draw_track(p, transform.map(region.path));
+        }
+    });
     p.restore();
 }
 void GroundMap::paint_base(QPainter &p, const Raster *display, const Raster *fallback,
@@ -1804,6 +1884,16 @@ void GroundMap::mouseReleaseEvent(QMouseEvent *event) {
                 nearest = distance;
                 hit = i;
             }
+        }
+        if (!hit) {
+            QPainterPathStroker picker;
+            picker.setWidth(12);
+            each_world(map_transform(), plot_rect(), [&](const auto &transform, const auto &) {
+                for (std::size_t i = 0; i < regions_.size() && !hit; ++i)
+                    if (regions_[i].visible && picker.createStroke(transform.map(regions_[i].path))
+                                                   .contains(event->position()))
+                        hit = points_.size() + i;
+            });
         }
         select(hit);
     }

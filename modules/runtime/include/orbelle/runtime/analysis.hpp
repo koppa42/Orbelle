@@ -147,11 +147,13 @@ class Analysis {
     [[nodiscard]] ReportResult
     report(const application::ReportDefinition &definition,
            const std::function<bool()> &cancelled = {},
-           const std::function<void(std::size_t, std::size_t)> &progress = {}) const;
+           const std::function<void(std::size_t, std::size_t)> &progress = {},
+           std::size_t coverage_memory_bytes = default_coverage_memory_bytes) const;
     [[nodiscard]] ReportResult
     report(const application::ReportQuery &query, const application::ReportTemplate &format = {},
            const std::function<bool()> &cancelled = {},
-           const std::function<void(std::size_t, std::size_t)> &progress = {}) const;
+           const std::function<void(std::size_t, std::size_t)> &progress = {},
+           std::size_t coverage_memory_bytes = default_coverage_memory_bytes) const;
 
   private:
     struct Impl;

@@ -36,6 +36,10 @@ void CoverageMap::set_result(std::shared_ptr<const runtime::ReportResult> result
                              bool reset_selection) {
     QToolTip::hideText();
     result_ = std::move(result);
+    background_ = {};
+    outline_ = result_ && result_->coverage_statistics && result_->coverage_statistics->region
+                   ? core::region_outline(*result_->coverage_statistics->region)
+                   : std::vector<core::RegionVertex>{};
     if (reset_selection || !result_ || !result_->coverage_statistics ||
         selected_ >= result_->coverage_statistics->points.size())
         selected_ = 0;
@@ -44,6 +48,7 @@ void CoverageMap::set_result(std::shared_ptr<const runtime::ReportResult> result
 void CoverageMap::set_metric(int metric) {
     QToolTip::hideText();
     metric_ = metric;
+    background_ = {};
     update();
 }
 void CoverageMap::select_point(std::size_t index) {
@@ -59,14 +64,18 @@ QRectF CoverageMap::map_rect() const {
     QRectF rect(44, 38, std::max(1, width() - 60), std::max(1, height() - 112));
     if (!result_)
         return rect;
-    const auto &g = result_->definition.query.coverage;
+    const auto &g = result_->coverage_statistics && result_->coverage_statistics->region
+                        ? result_->coverage_statistics->grid
+                        : result_->definition.query.coverage;
     const double aspect = core::coverage_longitude_span(g) / (g.north_rad - g.south_rad);
     const double w = std::min(rect.width(), rect.height() * aspect);
     const double h = std::min(rect.height(), rect.width() / aspect);
     return {rect.center().x() - w / 2, rect.center().y() - h / 2, w, h};
 }
 QRectF CoverageMap::cell_rect(const core::CoverageCell &c) const {
-    const auto &g = result_->definition.query.coverage;
+    const auto &g = result_->coverage_statistics && result_->coverage_statistics->region
+                        ? result_->coverage_statistics->grid
+                        : result_->definition.query.coverage;
     const auto r = map_rect();
     const double x = r.width() / core::coverage_longitude_span(g);
     const double y = r.height() / (g.north_rad - g.south_rad);
@@ -85,7 +94,7 @@ double CoverageMap::maximum() const {
                ? std::max(1e-9, result_->coverage_statistics->maximum_gap_seconds / 3600.)
                : 1.;
 }
-void CoverageMap::draw(QPainter &p) const {
+void CoverageMap::draw_background(QPainter &p) const {
     p.fillRect(rect(), theme::color(theme::surface));
     p.setRenderHint(QPainter::Antialiasing);
     p.setPen(theme::color(theme::text));
@@ -105,7 +114,27 @@ void CoverageMap::draw(QPainter &p) const {
     }
     const auto r = map_rect();
     p.setPen(theme::color(theme::text_muted));
-    const auto &g = result_->definition.query.coverage;
+    const auto &g = result_->coverage_statistics && result_->coverage_statistics->region
+                        ? result_->coverage_statistics->grid
+                        : result_->definition.query.coverage;
+    if (!outline_.empty()) {
+        QPolygonF boundary;
+        const auto span = core::coverage_longitude_span(g);
+        for (const auto &vertex : outline_) {
+            const auto lon =
+                g.west_rad + span / 2 +
+                std::remainder(vertex.longitude_rad - g.west_rad - span / 2, 2 * std::numbers::pi);
+            boundary << QPointF(r.left() + (lon - g.west_rad) * r.width() / span,
+                                r.top() + (g.north_rad - vertex.latitude_rad) * r.height() /
+                                              (g.north_rad - g.south_rad));
+        }
+        p.save();
+        p.setClipRect(r.adjusted(-1, -1, 1, 1));
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(QPen(QColor("#ffffff"), 1.5));
+        p.drawPolyline(boundary);
+        p.restore();
+    }
     const auto deg = [](double rad) {
         return QString::number(std::remainder(rad, 2 * std::numbers::pi) * degrees, 'g', 5) +
                QChar(0x00b0);
@@ -125,6 +154,11 @@ void CoverageMap::draw(QPainter &p) const {
                QStringLiteral("0"));
     p.drawText(QRectF(legend.center().x(), legend.bottom() + 3, legend.width() / 2, 18),
                Qt::AlignRight, QString::number(maximum(), 'g', 5));
+}
+void CoverageMap::draw_selection(QPainter &p) const {
+    if (!result_ || !result_->coverage_statistics)
+        return;
+    const auto &points = result_->coverage_statistics->points;
     if (selected_ < points.size()) {
         p.setPen(QPen(QColor("#ffffff"), 2));
         p.setBrush(Qt::NoBrush);
@@ -132,14 +166,23 @@ void CoverageMap::draw(QPainter &p) const {
     }
 }
 void CoverageMap::paintEvent(QPaintEvent *) {
+    const auto ratio = devicePixelRatioF();
+    if (background_.size() != size() * ratio || background_.devicePixelRatio() != ratio) {
+        background_ = QImage(size() * ratio, QImage::Format_ARGB32_Premultiplied);
+        background_.setDevicePixelRatio(ratio);
+        QPainter cached(&background_);
+        draw_background(cached);
+    }
     QPainter p(this);
-    draw(p);
+    p.drawImage(QPoint(0, 0), background_);
+    draw_selection(p);
 }
 QImage CoverageMap::image() const {
     QImage output(size() * 2, QImage::Format_ARGB32_Premultiplied);
     output.setDevicePixelRatio(2);
     QPainter p(&output);
-    draw(p);
+    draw_background(p);
+    draw_selection(p);
     return output;
 }
 void CoverageMap::mousePressEvent(QMouseEvent *event) {
@@ -154,6 +197,9 @@ void CoverageMap::mousePressEvent(QMouseEvent *event) {
     QWidget::mousePressEvent(event);
 }
 bool CoverageMap::event(QEvent *event) {
+    if (event->type() == QEvent::FontChange || event->type() == QEvent::PaletteChange ||
+        event->type() == QEvent::StyleChange)
+        background_ = {};
     if (event->type() != QEvent::ToolTip)
         return QWidget::event(event);
     const auto *help = static_cast<QHelpEvent *>(event);

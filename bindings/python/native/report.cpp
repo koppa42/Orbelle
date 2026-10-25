@@ -120,7 +120,19 @@ void bind_reports(py::module_ &module) {
         .def_readonly("windows", &results::CoveragePoint::windows)
         .def_readonly("statistics", &results::CoveragePoint::statistics);
     py::class_<results::CoverageStatistics>(module, "CoverageStatistics")
+        .def_property_readonly("grid", [](const results::CoverageStatistics &s) { return s.grid; })
+        .def_property_readonly("region",
+                               [](const results::CoverageStatistics &s) { return s.region; })
         .def_readonly("points", &results::CoverageStatistics::points)
+        .def_property_readonly("point_count",
+                               [](const results::CoverageStatistics &s) { return s.points.size(); })
+        .def(
+            "iter_points",
+            [](const results::CoverageStatistics &s) {
+                return py::make_iterator<py::return_value_policy::copy>(s.points.begin(),
+                                                                        s.points.end());
+            },
+            py::keep_alive<0, 1>())
         .def_readonly("total_area_m2", &results::CoverageStatistics::total_area_m2)
         .def_readonly("ever_covered_area_m2", &results::CoverageStatistics::ever_covered_area_m2)
         .def_readonly("mean_coverage_fraction",
@@ -131,6 +143,7 @@ void bind_reports(py::module_ &module) {
         .def_readwrite("kind", &application::ReportQuery::kind)
         .def_readwrite("scope", &application::ReportQuery::scope)
         .def_readwrite("object_ids", &application::ReportQuery::object_ids)
+        .def_readwrite("region_id", &application::ReportQuery::region_id)
         .def_readwrite("follow_scenario", &application::ReportQuery::follow_scenario)
         .def_readwrite("first", &application::ReportQuery::first)
         .def_readwrite("last", &application::ReportQuery::last)
@@ -232,15 +245,30 @@ void bind_reports(py::module_ &module) {
             },
             py::arg("path"), py::arg("overwrite") = false);
     module.def("estimate_report_rows", &runtime::estimate_report_rows, py::arg("project"),
-               py::arg("definition"));
+               py::arg("definition"),
+               py::arg("coverage_memory_bytes") = runtime::default_coverage_memory_bytes);
+    py::class_<runtime::CoverageReportEstimate>(module, "CoverageReportEstimate")
+        .def_readonly("points", &runtime::CoverageReportEstimate::points)
+        .def_readonly("rows", &runtime::CoverageReportEstimate::rows)
+        .def_readonly("storage_bytes", &runtime::CoverageReportEstimate::storage_bytes);
+    module.def(
+        "estimate_coverage_report",
+        [](const application::Project &project, const application::ReportDefinition &definition,
+           std::size_t memory_bytes) {
+            return runtime::estimate_coverage_report(project, definition, memory_bytes);
+        },
+        py::arg("project"), py::arg("definition"),
+        py::arg("coverage_memory_bytes") = runtime::default_coverage_memory_bytes);
     module.def("report_input_sha256", &runtime::report_input_sha256, py::arg("project"));
     module.def(
         "generate_report",
         [](const application::Project &project, const application::ReportDefinition &definition,
            const std::optional<std::filesystem::path> &eop_manifest,
-           const std::optional<std::filesystem::path> &time_file) {
+           const std::optional<std::filesystem::path> &time_file,
+           std::size_t coverage_memory_bytes) {
             // Copy mutable Python inputs before releasing the GIL.
             runtime::ReportContext snapshot{project, {}, {}, {}};
+            snapshot.coverage_memory_bytes = coverage_memory_bytes;
             const auto requested = definition;
             py::gil_scoped_release release;
             if (runtime::time_frames_available()) {
@@ -260,5 +288,6 @@ void bind_reports(py::module_ &module) {
             return runtime::generate_report(snapshot, requested);
         },
         py::arg("project"), py::arg("definition"), py::arg("eop_manifest") = py::none(),
-        py::arg("time_file") = py::none());
+        py::arg("time_file") = py::none(),
+        py::arg("coverage_memory_bytes") = runtime::default_coverage_memory_bytes);
 }

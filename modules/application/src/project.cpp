@@ -26,11 +26,11 @@ namespace {
 static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
 constexpr std::size_t max_file = 64 * 1024 * 1024, max_text = 16384, max_objects = 10000;
 constexpr std::array<std::uint8_t, 8> magic{'O', 'R', 'B', 'F', 'P', 'R', 'J', '\n'};
-constexpr std::uint32_t project_version = 51;
+constexpr std::uint32_t project_version = 54;
 constexpr std::uint32_t scene_tag = 0x454e4353, objects_tag = 0x534a424f, data_tag = 0x41544144,
                         lock_tag = 0x4b434f4c, stations_tag = 0x4e545347, reports_tag = 0x53545052,
                         styles_tag = 0x4c595453, sensors_tag = 0x52534e53, time_tag = 0x454d4954,
-                        analysis_tag = 0x594c4e41;
+                        analysis_tag = 0x594c4e41, regions_tag = 0x4e474552;
 [[noreturn]] void invalid(const char *message) { throw ProjectError(message); }
 void check(bool condition, const char *message) {
     if (!condition)
@@ -48,7 +48,8 @@ constexpr std::array section_schemas{
     SectionSchema{styles_tag, 1, "Missing track styles section"},
     SectionSchema{stations_tag, 3, "Missing ground stations section"},
     SectionSchema{sensors_tag, 4, "Missing sensors section"},
-    SectionSchema{reports_tag, 7, "Missing reports section"},
+    SectionSchema{reports_tag, 8, "Missing reports section"},
+    SectionSchema{regions_tag, 3, "Missing regions section"},
     SectionSchema{data_tag, 2, nullptr},
     SectionSchema{time_tag, 1, nullptr},
     SectionSchema{analysis_tag, 1, nullptr},
@@ -590,6 +591,38 @@ std::string analysis_input_sha256(const Project &project) {
     }
     return picosha2::hash256_hex_string(out.bytes);
 }
+const ProjectRegion &report_region(const Project &project, const ReportQuery &query) {
+    const auto found =
+        std::ranges::find(project.regions, query.region_id, &ProjectRegion::object_id);
+    if (found == project.regions.end())
+        throw ProjectError("Coverage region is missing; select an existing region");
+    return *found;
+}
+core::CoverageGrid report_coverage_bounds(const Project &project, const ReportQuery &query) {
+    if (query.region_id.empty())
+        return query.coverage;
+    const auto &region = report_region(project, query);
+    auto grid = core::region_grid_bounds(region.boundary, query.coverage);
+    grid.resolution_rad = region.grid_resolution_rad;
+    return grid;
+}
+std::vector<core::CoverageCell> report_coverage_grid(const Project &project,
+                                                     const ReportQuery &query) {
+    return query.region_id.empty()
+               ? core::coverage_grid(query.coverage)
+               : core::region_coverage_grid(report_region(project, query).boundary,
+                                            report_coverage_bounds(project, query));
+}
+void visit_report_coverage_grid(const Project &project, const ReportQuery &query,
+                                const std::function<void(const core::CoverageCell &)> &consume,
+                                const std::function<void()> &check_cancelled) {
+    if (query.region_id.empty())
+        core::visit_coverage_grid(query.coverage, consume, check_cancelled);
+    else
+        core::visit_region_coverage_grid(report_region(project, query).boundary,
+                                         report_coverage_bounds(project, query), consume,
+                                         check_cancelled);
+}
 std::pair<core::Epoch, core::Epoch> calculation_data_interval(const Project &project) {
     auto first = project.first, last = project.last;
     for (const auto &satellite : project.satellites) {
@@ -610,12 +643,13 @@ void validate_project(const Project &project, bool relationships) {
           "Invalid project analysis interval");
     check(project.current.tai_nanoseconds() >= first && project.current.tai_nanoseconds() <= last,
           "Project current time is outside its analysis interval");
-    check(project.satellites.size() + project.ground_stations.size() + project.sensors.size() <=
+    check(project.satellites.size() + project.ground_stations.size() + project.sensors.size() +
+                  project.regions.size() <=
               max_objects,
           "Project exceeds 10000 objects");
     // Views remain valid for this read-only validation. Keep object kinds in the
     // uniqueness index so every sensor relationship needs only a logarithmic lookup.
-    enum class Kind { satellite, station, sensor };
+    enum class Kind { satellite, station, sensor, region };
     std::map<std::string_view, Kind> ids;
     const auto has_kind = [&](const std::string &id, Kind kind) {
         const auto found = ids.find(id);
@@ -753,6 +787,24 @@ void validate_project(const Project &project, bool relationships) {
                   has_kind(sensor.target_station_id, Kind::station),
               "Sensor target ground station does not exist; reassign the sensor first");
     }
+    for (const auto &region : project.regions) {
+        text_check(region.object_id, true);
+        text_check(region.display_name, !region.display_name.empty());
+        text_check(region.description);
+        check(ids.emplace(region.object_id, Kind::region).second, "Duplicate project object ID");
+        check(region.display.color <= 0xffffff, "Invalid region display color");
+        check(std::isfinite(region.display.opacity) && region.display.opacity >= 0 &&
+                  region.display.opacity <= 1,
+              "Invalid region display opacity");
+        check(std::isfinite(region.grid_resolution_rad) && region.grid_resolution_rad > 0 &&
+                  region.grid_resolution_rad <= std::numbers::pi,
+              "Region grid spacing must be in (0,180] degrees");
+        try {
+            core::validate_region_boundary(region.boundary);
+        } catch (const std::invalid_argument &e) {
+            throw ProjectError(e.what());
+        }
+    }
     check(project.reports.size() <= 128, "Project exceeds 128 report definitions");
     std::set<std::string> report_ids;
     for (const auto &report : project.reports) {
@@ -761,6 +813,7 @@ void validate_project(const Project &project, bool relationships) {
         check(report_ids.insert(report.id).second, "Duplicate report ID");
         for (const auto &id : report.query.object_ids)
             text_check(id, true);
+        text_check(report.query.region_id);
         for (const auto &column : report.format.columns) {
             text_check(column.field, true);
             text_check(column.unit);
@@ -1044,6 +1097,28 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
         sensors.number(sensor.display.show_space_extension, 1);
     }
     payload.section(sensors_tag, sensors);
+    Writer regions;
+    regions.number(project.regions.size(), 4);
+    for (const auto &region : project.regions) {
+        regions.text(region.object_id);
+        regions.text(region.display_name);
+        const auto &b = region.boundary;
+        for (double value : {b.south_rad, b.north_rad, b.west_rad, b.east_rad})
+            regions.real(value);
+        regions.number(b.vertices.size(), 4);
+        for (auto vertex : b.vertices) {
+            regions.real(vertex.longitude_rad);
+            regions.real(vertex.latitude_rad);
+        }
+        regions.number(region.display.show_2d, 1);
+        regions.number(region.display.show_3d, 1);
+        regions.number(region.display.color, 4);
+        regions.text(region.description);
+        regions.real(region.grid_resolution_rad);
+        regions.number(region.display.fill, 1);
+        regions.real(region.display.opacity);
+    }
+    payload.section(regions_tag, regions);
     Writer reports;
     reports.number(project.reports.size(), 4);
     for (const auto &report : project.reports) {
@@ -1066,6 +1141,7 @@ std::vector<std::uint8_t> encode_project(const Project &project) {
                              grid.resolution_rad, grid.minimum_elevation_rad})
             reports.real(value);
         reports.number(grid.include_end_gaps, 1);
+        reports.text(report.query.region_id);
         reports.number(report.query.frame == core::FrameId::gcrf ? 1 : 2, 4);
         reports.number(static_cast<unsigned>(report.format.units), 4);
         reports.number(static_cast<unsigned>(report.format.time_scale), 4);
@@ -1316,6 +1392,37 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
         sensors.done();
     }
     {
+        Reader regions{sections.at(regions_tag)};
+        const auto region_count = regions.number(4);
+        check(region_count + project.satellites.size() + project.ground_stations.size() +
+                      project.sensors.size() <=
+                  max_objects,
+              "Project exceeds 10000 objects");
+        for (std::uint64_t i = 0; i < region_count; ++i) {
+            ProjectRegion region;
+            region.object_id = regions.text();
+            region.display_name = regions.text();
+            auto &b = region.boundary;
+            b.south_rad = regions.real();
+            b.north_rad = regions.real();
+            b.west_rad = regions.real();
+            b.east_rad = regions.real();
+            const auto vertices = regions.number(4);
+            check(vertices <= 256, "Too many region vertices");
+            for (std::uint64_t j = 0; j < vertices; ++j)
+                b.vertices.push_back({regions.real(), regions.real()});
+            region.display.show_2d = regions.boolean();
+            region.display.show_3d = regions.boolean();
+            region.display.color = static_cast<std::uint32_t>(regions.number(4));
+            region.description = regions.text();
+            region.grid_resolution_rad = regions.real();
+            region.display.fill = regions.boolean();
+            region.display.opacity = regions.real();
+            project.regions.push_back(std::move(region));
+        }
+        regions.done();
+    }
+    {
         Reader reports{sections.at(reports_tag)};
         const auto report_count = reports.number(4);
         check(report_count <= 128, "Project exceeds 128 report definitions");
@@ -1353,6 +1460,7 @@ Project decode_project(std::span<const std::uint8_t> bytes) {
             grid.resolution_rad = reports.real();
             grid.minimum_elevation_rad = reports.real();
             grid.include_end_gaps = reports.boolean();
+            report.query.region_id = reports.text();
             const auto frame = reports.number(4), units = reports.number(4),
                        scale = reports.number(4);
             check((frame == 1 || frame == 2) && units <= 1 && scale <= 2,

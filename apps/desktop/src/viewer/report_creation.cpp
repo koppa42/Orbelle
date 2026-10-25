@@ -271,6 +271,10 @@ bool pair_report(ReportKind kind) {
     return report_is_access(kind) || report_is_intersatellite(kind);
 }
 std::vector<ObjectChoice> role_objects(const Project &project, ReportKind kind, int role) {
+    if (report_is_coverage(kind))
+        return project_object_choices(
+            project, role == 0 ? std::initializer_list{ObjectKind::region}
+                               : std::initializer_list{ObjectKind::satellite, ObjectKind::sensor});
     if (report_is_intersatellite(kind))
         return project_object_choices(project, {ObjectKind::satellite});
     if (report_is_access(kind))
@@ -280,6 +284,8 @@ std::vector<ObjectChoice> role_objects(const Project &project, ReportKind kind, 
     return report_object_choices(project, kind);
 }
 QString role_name(ReportKind kind, int role) {
+    if (report_is_coverage(kind))
+        return ui::text(role == 0 ? "region.title" : "region.coverage_assets");
     if (report_is_intersatellite(kind))
         return ui::text(role == 0 ? "report_dialog.label_157" : "report_dialog.label_158");
     if (report_is_access(kind))
@@ -397,7 +403,10 @@ struct ReportCreationDialog::Impl {
             return -1;
         if (has_object(role_objects(project, kind, 0), context))
             return 0;
-        return pair_report(kind) && has_object(role_objects(project, kind, 1), context) ? 1 : -1;
+        return (pair_report(kind) || report_is_coverage(kind)) &&
+                       has_object(role_objects(project, kind, 1), context)
+                   ? 1
+                   : -1;
     }
     QString requirements(ReportKind kind) const {
         if (kind == ReportKind::scenario_summary)
@@ -427,10 +436,11 @@ struct ReportCreationDialog::Impl {
                 choice.note = ui::text("report_creation.bound_context").arg(object_name(context));
             if (kind != ReportKind::scenario_summary) {
                 const auto first = role_objects(project, kind, 0);
-                const bool available =
-                    std::ranges::any_of(first, &ObjectChoice::selectable) &&
-                    (!report_is_access(kind) || !role_objects(project, kind, 1).empty()) &&
-                    (!report_is_intersatellite(kind) || first.size() >= 2);
+                const bool available = std::ranges::any_of(first, &ObjectChoice::selectable) &&
+                                       (!(report_is_access(kind) || report_is_coverage(kind)) ||
+                                        std::ranges::any_of(role_objects(project, kind, 1),
+                                                            &ObjectChoice::selectable)) &&
+                                       (!report_is_intersatellite(kind) || first.size() >= 2);
                 if (!available)
                     choice.unavailable_reason =
                         ui::text("report_creation.missing_objects").arg(requirements(kind));
@@ -444,7 +454,8 @@ struct ReportCreationDialog::Impl {
             const auto base = std::ranges::find(builtins, key, &ReportChoice::key);
             if (base == builtins.end())
                 continue;
-            if (!context.empty() && definition.query.scope != ReportScope::all_compatible &&
+            if (!context.empty() && context != definition.query.region_id &&
+                definition.query.scope != ReportScope::all_compatible &&
                 std::ranges::find(definition.query.object_ids, context) ==
                     definition.query.object_ids.end())
                 continue;
@@ -453,6 +464,8 @@ struct ReportCreationDialog::Impl {
             choice.name = QString::fromStdString(definition.name);
             choice.saved = true;
             QStringList names;
+            if (!definition.query.region_id.empty())
+                names << object_name(definition.query.region_id);
             for (const auto &id : definition.query.object_ids)
                 names << object_name(id);
             choice.scope = definition.query.scope == ReportScope::all_compatible
@@ -540,7 +553,9 @@ struct ReportCreationDialog::Impl {
             if (object.selectable)
                 available.insert(object.id);
         return !selected.ids.empty() &&
-               (!pair_report(draft.query.kind) || selected.ids.size() == 1) &&
+               (!(pair_report(draft.query.kind) ||
+                  (report_is_coverage(draft.query.kind) && binding.role == 0)) ||
+                selected.ids.size() == 1) &&
                std::ranges::all_of(selected.ids,
                                    [&](const auto &id) { return available.contains(id); });
     }
@@ -694,6 +709,7 @@ struct ReportCreationDialog::Impl {
             initial_context_role = 1;
         if (!direct(draft.query.kind)) {
             const bool pair = pair_report(draft.query.kind);
+            const bool coverage = report_is_coverage(draft.query.kind);
             auto *scroll = new QScrollArea(pages);
             scroll->setObjectName("reportCreationBindings");
             scroll->setWidgetResizable(true);
@@ -702,9 +718,15 @@ struct ReportCreationDialog::Impl {
             auto *layout = new QVBoxLayout(content);
             layout->setContentsMargins(0, 0, 4, 0);
             layout->setSpacing(20);
-            for (int role = 0; role < (pair ? 2 : 1); ++role) {
+            for (int role = 0; role < (pair || coverage ? 2 : 1); ++role) {
+                const bool multiple = !pair && (!coverage || role == 1);
                 ObjectSelection selection;
-                if (pair) {
+                if (coverage) {
+                    if (role == 0 && !draft.query.region_id.empty())
+                        selection.ids = {draft.query.region_id};
+                    else if (role == 1)
+                        selection.ids = draft.query.object_ids;
+                } else if (pair) {
                     if (draft.query.object_ids.size() == 2)
                         selection.ids = {draft.query.object_ids[role]};
                 } else {
@@ -719,8 +741,8 @@ struct ReportCreationDialog::Impl {
                 card_layout->setContentsMargins(0, 0, 0, 0);
                 card_layout->setSpacing(8);
                 auto *header = new QHBoxLayout;
-                auto *label = new QLabel(pair ? role_name(draft.query.kind, role)
-                                              : ui::text("report_creation.objects"),
+                auto *label = new QLabel(pair || coverage ? role_name(draft.query.kind, role)
+                                                          : ui::text("report_creation.objects"),
                                          card);
                 label->setObjectName("reportBindingRole");
                 label->setWordWrap(true);
@@ -732,7 +754,7 @@ struct ReportCreationDialog::Impl {
                 header->addWidget(binding.badge);
                 header->addStretch();
                 card_layout->addLayout(header);
-                if (!pair) {
+                if (multiple) {
                     auto *hint = new QLabel(requirements(draft.query.kind), card);
                     hint->setObjectName("reportBindingDetail");
                     hint->setWordWrap(true);
@@ -743,18 +765,18 @@ struct ReportCreationDialog::Impl {
                 binding.field->setAccessibleName(role_name(draft.query.kind, role));
                 binding.field->setMinimumHeight(40);
                 binding.field->setProperty("reportObjectField", true);
-                binding.field->set_options(
-                    {pair ? role_name(draft.query.kind, role) : requirements(draft.query.kind),
-                     !pair,
-                     pair || report_is_coverage(draft.query.kind)
-                         ? QString{}
-                         : ui::text("report_dialog.label_156")});
+                binding.field->set_options({pair || coverage ? role_name(draft.query.kind, role)
+                                                             : requirements(draft.query.kind),
+                                            multiple,
+                                            pair || report_is_coverage(draft.query.kind)
+                                                ? QString{}
+                                                : ui::text("report_dialog.label_156")});
                 binding.field->set_selection(selection);
                 label->setBuddy(binding.field);
                 card_layout->addWidget(binding.field);
                 QObject::connect(binding.field, &ObjectSelectionField::selectionChanged, owner,
                                  [this] { update_candidates(); });
-                if (!pair) {
+                if (multiple) {
                     binding.selected_list = new QListWidget(card);
                     binding.selected_list->setObjectName("reportCreationSelectedObjects");
                     binding.selected_list->setAccessibleName(
@@ -838,7 +860,10 @@ struct ReportCreationDialog::Impl {
         draft.query.object_ids.clear();
         if (draft.query.kind == ReportKind::scenario_summary)
             draft.query.scope = ReportScope::all_compatible;
-        else if (pair_report(draft.query.kind)) {
+        else if (report_is_coverage(draft.query.kind)) {
+            draft.query.region_id = selection(bindings[0]).ids.front();
+            draft.query.object_ids = selection(bindings[1]).ids;
+        } else if (pair_report(draft.query.kind)) {
             draft.query.object_ids.resize(2);
             for (const auto &binding : bindings)
                 draft.query.object_ids[binding.role] = selection(binding).ids.front();

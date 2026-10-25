@@ -28,6 +28,7 @@ class ReportDialog final : public QDialog {
     bool configure_report(const application::ReportDefinition &definition);
     void update_project(application::Project project,
                         std::shared_ptr<const core::ITimeProvider> time);
+    std::function<void(const std::string &)> open_region_properties;
     std::function<void(std::shared_ptr<const runtime::ReportResult>, const runtime::Analysis &)>
         result_published;
 

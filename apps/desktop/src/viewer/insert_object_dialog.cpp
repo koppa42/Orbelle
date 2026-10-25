@@ -32,7 +32,9 @@ constexpr std::array objects{
                WorkbenchIcon::ground_station},
     ObjectSpec{InsertObjectType::sensor, "sensor", "insert_object_dialog.sensor",
                "insert_object_dialog.sensor_properties", "insert_object_dialog.sensor_defaults",
-               WorkbenchIcon::focus}};
+               WorkbenchIcon::focus},
+    ObjectSpec{InsertObjectType::region, "region", "region.title", "region.insert_properties",
+               "region.insert_defaults", WorkbenchIcon::map}};
 struct MethodChoice {
     InsertObjectMethod method;
     const char *key;

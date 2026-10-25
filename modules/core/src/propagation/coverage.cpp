@@ -21,6 +21,16 @@ double area_primitive(double latitude) {
     const double e = std::sqrt(e2), s = std::sin(latitude);
     return a * a * (1 - e2) * .5 * (s / (1 - e2 * s * s) + std::atanh(e * s) / e);
 }
+std::size_t latitude_bands(const CoverageGrid &g) {
+    validate_coverage_grid(g);
+    const double span = g.north_rad - g.south_rad;
+    const auto count = std::max(1.0, std::ceil(span / g.resolution_rad));
+    check(std::isfinite(count) && count < double(std::numeric_limits<std::size_t>::max()),
+          "Coverage grid dimensions are not representable; increase the angular spacing");
+    check(g.south_rad + span / count > g.south_rad && g.north_rad - span / count < g.north_rad,
+          "Coverage grid spacing is below floating-point coordinate precision");
+    return static_cast<std::size_t>(count);
+}
 } // namespace
 void validate_coverage_grid(const CoverageGrid &g) {
     for (double v : {g.south_rad, g.north_rad, g.west_rad, g.east_rad, g.resolution_rad,
@@ -41,14 +51,46 @@ double coverage_longitude_span(const CoverageGrid &g) {
     const auto span = g.east_rad - g.west_rad;
     return span > 0 ? span : span + 2 * pi;
 }
-std::vector<CoverageCell> coverage_grid(const CoverageGrid &g) {
+std::size_t coverage_grid_size(const CoverageGrid &g, std::size_t maximum_cells,
+                               const std::function<void()> &check_cancelled) {
+    const auto bands = latitude_bands(g);
+    const auto span = g.north_rad - g.south_rad;
+    const auto longitude_span = coverage_longitude_span(g);
+    // Sum of cosines at uniformly spaced band midpoints, before column rounding.
+    // This lower bound rejects impossible allocations without iterating billions
+    // of latitude bands. The slack only protects roundoff near a budget boundary.
+    const auto unrounded = static_cast<long double>(longitude_span) / g.resolution_rad *
+                           std::cos((g.north_rad + g.south_rad) * .5L) * std::sin(span * .5L) /
+                           std::sin(span / (2.L * bands));
+    check(bands <= maximum_cells && unrounded * (1 - 1e-12L) <= maximum_cells,
+          "Coverage grid exceeds the requested storage budget; increase memory or grid spacing");
+    std::size_t count = 0;
+    for (std::size_t row = 0; row < bands; ++row) {
+        if (check_cancelled && row % 256 == 0)
+            check_cancelled();
+        const auto south = g.south_rad + span * (double(row) / double(bands));
+        const auto north =
+            row + 1 == bands ? g.north_rad : g.south_rad + span * (double(row + 1) / double(bands));
+        const auto columns = std::max(
+            1., std::ceil(longitude_span * std::cos((south + north) * .5) / g.resolution_rad));
+        check(
+            std::isfinite(columns) && columns < double(std::numeric_limits<std::size_t>::max()) &&
+                columns <= static_cast<long double>(maximum_cells - count),
+            "Coverage grid exceeds the requested storage budget; increase memory or grid spacing");
+        count += static_cast<std::size_t>(columns);
+    }
+    return count;
+}
+void visit_coverage_grid(const CoverageGrid &g,
+                         const std::function<void(const CoverageCell &)> &consume,
+                         const std::function<void()> &check_cancelled) {
+    check(bool(consume), "Coverage grid visitor is required");
     const auto longitude_span = coverage_longitude_span(g);
     const double latitude_span = g.north_rad - g.south_rad;
-    const auto count = std::max(1.0, std::ceil(latitude_span / g.resolution_rad));
-    check(std::isfinite(count) && count <= 4096, "Coverage grid exceeds 4096 cells");
-    const auto bands = static_cast<std::size_t>(count);
-    std::vector<CoverageCell> cells;
+    const auto bands = latitude_bands(g);
     for (std::size_t row = 0; row < bands; ++row) {
+        if (check_cancelled)
+            check_cancelled();
         const auto south = g.south_rad + latitude_span * (double(row) / double(bands));
         const auto north = row + 1 == bands
                                ? g.north_rad
@@ -56,19 +98,27 @@ std::vector<CoverageCell> coverage_grid(const CoverageGrid &g) {
         const auto latitude = (south + north) * .5;
         const auto columns_d =
             std::max(1.0, std::ceil(longitude_span * std::cos(latitude) / g.resolution_rad));
-        check(std::isfinite(columns_d) && columns_d <= double(4096 - cells.size()),
-              "Coverage grid exceeds 4096 cells; increase resolution");
+        check(std::isfinite(columns_d) &&
+                  columns_d < double(std::numeric_limits<std::size_t>::max()),
+              "Coverage grid dimensions are not representable; increase the angular spacing");
         const auto columns = static_cast<std::size_t>(columns_d);
         const auto strip_area = area_primitive(north) - area_primitive(south);
         for (std::size_t col = 0; col < columns; ++col) {
+            if (check_cancelled && col % 256 == 0)
+                check_cancelled();
             const auto west = g.west_rad + longitude_span * (double(col) / double(columns));
             const auto east = g.west_rad + longitude_span * (double(col + 1) / double(columns));
             const auto longitude = std::remainder((west + east) * .5, 2 * pi);
             const auto area = strip_area * (east - west);
             check(area > 0 && std::isfinite(area), "Coverage cell area is not representable");
-            cells.push_back({{longitude, latitude, 0}, south, north, west, east, area});
+            consume({{longitude, latitude, 0}, south, north, west, east, area});
         }
     }
+}
+std::vector<CoverageCell> coverage_grid(const CoverageGrid &g) {
+    std::vector<CoverageCell> cells;
+    cells.reserve(coverage_grid_size(g, cells.max_size()));
+    visit_coverage_grid(g, [&](const auto &cell) { cells.push_back(cell); });
     return cells;
 }
 std::vector<AccessInterval> merge_coverage_intervals(Epoch first, Epoch last,
