@@ -27,6 +27,9 @@ class ApplicationUpdateUi final : public QDialog {
     void show_manual();
     ApplicationUpdate update_;
     QTimer prompt_;
+    QTimer progress_refresh_;
+    ApplicationUpdateState displayed_state_ = ApplicationUpdateState::idle;
+    QString displayed_bundle_, displayed_notes_;
     QLabel *heading_, *description_;
     QTextBrowser *notes_;
     QProgressBar *progress_;

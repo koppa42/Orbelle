@@ -1,6 +1,7 @@
 #include "../src/viewer/application_update.hpp"
 #include "../src/viewer/application_update_ui.hpp"
 #include "../src/viewer/workbench_style.hpp"
+#include "support/ui_test_support.hpp"
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -14,9 +15,13 @@
 #include <QMainWindow>
 #include <QMenuBar>
 #include <QNetworkReply>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QScopeGuard>
+#include <QScrollBar>
 #include <QTemporaryDir>
+#include <QTextBrowser>
+#include <QTextDocument>
 #include <cstring>
 #include <gtest/gtest.h>
 #include <minizip/zip.h>
@@ -59,6 +64,14 @@ class Reply final : public QNetworkReply {
         setFinished(true);
         emit finished();
     }
+    void deliver(const QByteArray &bytes) {
+        bytes_.append(bytes);
+        emit readyRead();
+    }
+    void complete() {
+        setFinished(true);
+        emit finished();
+    }
     qint64 bytesAvailable() const override {
         return bytes_.size() - offset_ + QIODevice::bytesAvailable();
     }
@@ -81,12 +94,14 @@ class Network final : public QNetworkAccessManager {
   public:
     QList<Response> responses;
     QList<QNetworkRequest> requests;
+    QPointer<Reply> last_reply;
 
   protected:
     QNetworkReply *createRequest(Operation, const QNetworkRequest &request, QIODevice *) override {
         requests.append(request);
         const auto response = responses.isEmpty() ? Response{503, {}, {}} : responses.takeFirst();
-        return new Reply(request, response, this);
+        last_reply = new Reply(request, response, this);
+        return last_reply;
     }
 };
 QByteArray release_json(QString version = "0.3.2", QJsonArray assets = {}) {
@@ -541,6 +556,168 @@ TEST_F(ApplicationUpdateTest, UpdateDialogDownloadsAndShowsReadyStateAtNarrowWid
     verify_layout_and_capture("ready");
     fixture.ready();
     dialog.close();
+}
+TEST_F(ApplicationUpdateTest, UpdateDialogCoalescesProgressAndPreservesReleaseNotes) {
+    const auto previous_version = QCoreApplication::applicationVersion();
+    const auto restore_version = qScopeGuard(
+        [previous_version] { QCoreApplication::setApplicationVersion(previous_version); });
+    QCoreApplication::setApplicationVersion("0.3.1");
+    apply_workbench_style(*qApp);
+    DownloadFixture fixture(temp.path());
+    auto release = QJsonDocument::fromJson(fixture.release()).object();
+    QString release_notes;
+    for (int i = 0; i < 80; ++i)
+        release_notes += QStringLiteral("Update note %1: Download progress stays stable.\n").arg(i);
+    release["body"] = release_notes;
+    Network network;
+    network.responses = {{200, QJsonDocument(release).toJson(), {}},
+                         {200, fixture.manifest, {}},
+                         {200, {}, {}, true}};
+    QMainWindow window;
+    QMenuBar menus;
+    ApplicationUpdateUi dialog(settings(), &menus, &window, &network, fixture.current);
+    auto *check = menus.findChild<QAction *>("checkApplicationUpdates");
+    auto *download = dialog.findChild<QPushButton *>("downloadApplicationUpdate");
+    auto *progress = dialog.findChild<QProgressBar *>();
+    auto *notes = dialog.findChild<QTextBrowser *>();
+    auto *heading = dialog.findChild<QLabel *>("applicationUpdateHeading");
+    ASSERT_NE(check, nullptr);
+    ASSERT_NE(download, nullptr);
+    ASSERT_NE(progress, nullptr);
+    ASSERT_NE(notes, nullptr);
+    ASSERT_NE(heading, nullptr);
+    check->trigger();
+    ASSERT_TRUE(wait_for_ui([&] { return download->isVisible(); }));
+    download->click();
+    ASSERT_TRUE(wait_for_ui([&] { return network.requests.size() == 3; }));
+    ASSERT_NE(network.last_reply, nullptr);
+    EXPECT_EQ(progress->maximum(), 1000);
+    EXPECT_EQ(progress->value(), 0);
+    EXPECT_EQ(heading->text(), QString::fromUtf8("正在下载程序…"));
+    QCoreApplication::processEvents();
+    auto cursor = notes->textCursor();
+    cursor.setPosition(100);
+    cursor.setPosition(120, QTextCursor::KeepAnchor);
+    notes->setTextCursor(cursor);
+    auto *scroll = notes->verticalScrollBar();
+    ASSERT_GT(scroll->maximum(), 0);
+    scroll->setValue(scroll->maximum() / 2);
+    const auto scroll_position = scroll->value();
+    const auto selection = notes->textCursor().selectedText();
+    const auto progress_bounds = progress->geometry();
+    int document_changes = 0;
+    QList<int> values;
+    QObject observer;
+    QObject::connect(notes->document(), &QTextDocument::contentsChanged, &observer,
+                     [&] { ++document_changes; });
+    QObject::connect(progress, &QProgressBar::valueChanged, &observer,
+                     [&](int value) { values.append(value); });
+    const auto application = fixture.archives["app"];
+    const auto half = application.size() / 2;
+    for (qsizetype offset = 0; offset < half; offset += 17)
+        network.last_reply->deliver(
+            application.mid(offset, std::min(qsizetype{17}, half - offset)));
+    // A burst of network chunks must not repaint the dialog once per chunk.
+    EXPECT_TRUE(values.isEmpty());
+    const auto halfway_value = static_cast<int>(1000 * half / application.size());
+    ASSERT_TRUE(wait_for_ui([&] { return progress->value() == halfway_value; }));
+    EXPECT_EQ(values, QList<int>{halfway_value});
+    EXPECT_EQ(document_changes, 0);
+    EXPECT_EQ(scroll->value(), scroll_position);
+    EXPECT_EQ(notes->textCursor().selectedText(), selection);
+    EXPECT_EQ(progress->geometry(), progress_bounds);
+    EXPECT_EQ(progress->maximum(), 1000);
+    const auto screenshots = qEnvironmentVariable("ORBELLE_UPDATE_SCREENSHOTS");
+    if (!screenshots.isEmpty()) {
+        ASSERT_TRUE(QDir().mkpath(screenshots));
+        EXPECT_TRUE(dialog.grab().save(QDir(screenshots).filePath("downloading.png")));
+    }
+    // Repeated notifications with unchanged progress must not reset the bar or document.
+    for (int i = 0; i < 20; ++i)
+        network.last_reply->deliver({});
+    bool settled = false;
+    QTimer::singleShot(100, &observer, [&] { settled = true; });
+    ASSERT_TRUE(wait_for_ui([&] { return settled; }));
+    EXPECT_EQ(values, QList<int>{halfway_value});
+    EXPECT_EQ(document_changes, 0);
+    EXPECT_EQ(scroll->value(), scroll_position);
+    EXPECT_EQ(notes->textCursor().selectedText(), selection);
+    network.last_reply->deliver(application.mid(half));
+    network.last_reply->complete();
+    EXPECT_EQ(heading->text(), QString::fromUtf8("正在校验和准备更新…"));
+    EXPECT_EQ(progress->maximum(), 0);
+    ASSERT_TRUE(wait_for_ui([&] {
+        return download->isVisible() && download->text() == QString::fromUtf8("重启并更新");
+    }));
+    EXPECT_FALSE(progress->isVisible());
+    EXPECT_EQ(document_changes, 0);
+    fixture.ready();
+    dialog.close();
+}
+TEST_F(ApplicationUpdateTest, PendingProgressCannotOverwriteCancellationOrFailure) {
+    const auto previous_version = QCoreApplication::applicationVersion();
+    const auto restore_version = qScopeGuard(
+        [previous_version] { QCoreApplication::setApplicationVersion(previous_version); });
+    QCoreApplication::setApplicationVersion("0.3.1");
+    for (const bool cancel : {true, false}) {
+        SCOPED_TRACE(cancel ? "cancel" : "failure");
+        const auto directory = temp.path() + (cancel ? "/cancel" : "/failure");
+        DownloadFixture fixture(directory);
+        Network network;
+        network.responses = {
+            {200, fixture.release(), {}}, {200, fixture.manifest, {}}, {200, {}, {}, true}};
+        QMainWindow window;
+        QMenuBar menus;
+        ApplicationUpdateUi dialog(directory + "/preferences.ini", &menus, &window, &network,
+                                   fixture.current);
+        auto *check = menus.findChild<QAction *>("checkApplicationUpdates");
+        auto *download = dialog.findChild<QPushButton *>("downloadApplicationUpdate");
+        auto *progress = dialog.findChild<QProgressBar *>();
+        auto *heading = dialog.findChild<QLabel *>("applicationUpdateHeading");
+        auto *notes = dialog.findChild<QTextBrowser *>();
+        ASSERT_NE(check, nullptr);
+        ASSERT_NE(download, nullptr);
+        ASSERT_NE(progress, nullptr);
+        ASSERT_NE(heading, nullptr);
+        ASSERT_NE(notes, nullptr);
+        check->trigger();
+        ASSERT_TRUE(wait_for_ui([&] { return download->isVisible(); }));
+        download->click();
+        ASSERT_TRUE(wait_for_ui([&] { return network.requests.size() == 3; }));
+        ASSERT_NE(network.last_reply, nullptr);
+        network.last_reply->deliver(fixture.archives["app"].first(10));
+        if (cancel)
+            dialog.close();
+        else
+            network.last_reply->complete();
+        const auto expected_heading = QString::fromUtf8(cancel ? "发现新版本 0.3.2" : "更新未完成");
+        EXPECT_EQ(heading->text(), expected_heading);
+        EXPECT_TRUE(progress->isHidden());
+        if (!cancel)
+            EXPECT_TRUE(notes->toPlainText().contains("verification failed"));
+        bool settled = false;
+        QObject observer;
+        QTimer::singleShot(100, &observer, [&] { settled = true; });
+        ASSERT_TRUE(wait_for_ui([&] { return settled; }));
+        EXPECT_EQ(heading->text(), expected_heading);
+        EXPECT_TRUE(progress->isHidden());
+        fixture.unchanged();
+        // Reopen after cancellation, or retry the failed download, with fresh counters.
+        if (cancel) {
+            network.responses = {{200, fixture.release(), {}}};
+            check->trigger();
+            ASSERT_TRUE(wait_for_ui([&] { return download->isVisible(); }));
+        }
+        network.responses = {{200, fixture.manifest, {}}, {200, fixture.archives["app"], {}}};
+        download->click();
+        EXPECT_EQ(progress->maximum(), 1000);
+        EXPECT_EQ(progress->value(), 0);
+        ASSERT_TRUE(wait_for_ui([&] {
+            return download->isVisible() && download->text() == QString::fromUtf8("重启并更新");
+        }));
+        fixture.ready();
+        dialog.close();
+    }
 }
 TEST_F(ApplicationUpdateTest, UpdateDialogFitsNarrowWindowsWithoutAutomaticNetworkTraffic) {
     apply_workbench_style(*qApp);

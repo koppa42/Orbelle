@@ -187,7 +187,6 @@ void ApplicationUpdate::check(bool manual) {
     error_.clear();
     release_.reset();
     state_ = ApplicationUpdateState::checking;
-    notify();
     request(release_endpoint, Request::release, metadata_limit);
 }
 void ApplicationUpdate::request(const QUrl &url, Request kind, qint64 size_limit,
@@ -249,6 +248,7 @@ void ApplicationUpdate::request(const QUrl &url, Request kind, qint64 size_limit
     });
     connect(reply, &QNetworkReply::finished, this, [this, reply] { finish_reply(reply); });
     deadline_.start(kind == Request::bundle ? 30 * 60 * 1000 : 20000);
+    notify();
 }
 void ApplicationUpdate::finish_reply(QNetworkReply *reply) {
     reply->deleteLater();
@@ -368,7 +368,6 @@ void ApplicationUpdate::download() {
     prepared_.clear();
     state_ = ApplicationUpdateState::downloading;
     active_bundle_ = QStringLiteral("manifest");
-    notify();
     request(asset.url, Request::manifest, asset.size, asset.sha256);
 }
 void ApplicationUpdate::begin_plan() {
@@ -405,7 +404,6 @@ void ApplicationUpdate::next_bundle() {
         return;
     }
     state_ = ApplicationUpdateState::downloading;
-    notify();
     request(release_->assets[found->name].url, Request::bundle, static_cast<qint64>(found->size),
             found->sha256);
 }
