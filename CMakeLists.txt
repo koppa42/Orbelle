@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(Orbelle VERSION 0.4.0 LANGUAGES CXX)
+project(Orbelle VERSION 0.4.1 LANGUAGES CXX)
 
 include(cmake/OrbelleOptions.cmake)
 include(cmake/OrbelleWarnings.cmake)
