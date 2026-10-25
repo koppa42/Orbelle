@@ -163,7 +163,8 @@ class GroundMapTest : public ::testing::Test {
         do {
             QCoreApplication::processEvents();
             (void)pixels(map);
-            if (map.tracks_ready() && !map.tracks_transitioning() && map.footprints_ready())
+            if (map.tracks_ready() && !map.tracks_transitioning() && map.footprints_ready() &&
+                map.background_ready())
                 return true;
             QThread::msleep(1);
         } while (deadline.elapsed() < 3000);
@@ -828,6 +829,64 @@ TEST_F(GroundMapTest, PlaybackLightingAndDisabledSunLayersKeepImageryAndLatestDi
         view->set_sun_direction({0.8, 0, 0.6});
     }
     expect_same_pixels(pixels(cached), pixels(fresh));
+}
+TEST_F(GroundMapTest, ContinuousLightingKeepsTheImageAndSettlesToTheLatestTime) {
+    GroundMap map(imagery_), fresh(imagery_);
+    configure(map);
+    configure(fresh);
+    const auto original = pixels(map);
+    map.set_sun_direction({0, 1, 0}, true);
+    // The first paint starts the worker and still draws the complete previous image.
+    EXPECT_EQ(pixels(map), original);
+    EXPECT_FALSE(map.background_ready());
+    for (const auto direction : {std::array<double, 3>{0, 0, 1}, {-1, 0, 0}, {0, -0.8, -0.6}}) {
+        map.set_sun_direction(direction, true);
+        (void)pixels(map);
+    }
+    fresh.set_sun_direction({0, -0.8, -0.6});
+    // No further time inputs: the pending/coalesced image must finish after pause.
+    ASSERT_TRUE(settle(map));
+    EXPECT_NE(pixels(map), original);
+    expect_same_pixels(pixels(map), pixels(fresh));
+}
+TEST_F(GroundMapTest, PendingLightingCannotRestoreAnOldTimeSettingsOrViewport) {
+    for (int change = 0; change < 3; ++change) {
+        SCOPED_TRACE(change);
+        GroundMap map(imagery_), fresh(imagery_);
+        configure(map);
+        configure(fresh);
+        (void)pixels(map);
+        map.set_sun_direction({0, 1, 0}, true);
+        (void)pixels(map); // Leave an immutable job in flight.
+        ASSERT_FALSE(map.background_ready());
+        if (change == 0) {
+            for (auto *view : {&map, &fresh})
+                view->set_sun_direction({-0.8, 0, 0.6});
+        } else if (change == 1) {
+            for (auto *view : {&map, &fresh}) {
+                view->set_lighting(false);
+                view->set_sun_visible(false);
+            }
+        } else {
+            fresh.set_sun_direction({0, 1, 0});
+            for (auto *view : {&map, &fresh}) {
+                view->zoom(1.37, QPointF(220, 170));
+                view->resize(731, 427);
+            }
+        }
+        expect_same_pixels(pixels(map), pixels(fresh));
+        ASSERT_TRUE(settle(map)); // Also drain the superseded job before comparing again.
+        expect_same_pixels(pixels(map), pixels(fresh));
+    }
+}
+TEST_F(GroundMapTest, ClosingWithPendingLightingOwnsItsWorkerInputs) {
+    GroundMap map(imagery_);
+    configure(map);
+    (void)pixels(map);
+    map.set_sun_direction({0, 1, 0}, true);
+    (void)pixels(map);
+    EXPECT_FALSE(map.background_ready());
+    // Destruction drains the worker before releasing images and timer state.
 }
 TEST_F(GroundMapTest, ObsoleteWorkerCannotRestoreAReplacedOrbit) {
     GroundMap map(imagery_), fresh(imagery_);

@@ -1,5 +1,6 @@
 #include "graphics_workbench.hpp"
 #include "../ui_text.hpp"
+#include "animation_timing.hpp"
 #include "application_update_ui.hpp"
 #include "apply_timing.hpp"
 #include "eop_catalog.hpp"
@@ -1082,7 +1083,7 @@ class Workbench final : public WorkbenchWindow {
                 seconds_ = benchmarking_ ? value : duration_seconds() * value / 10000.0;
                 precise_epoch_.reset();
                 requested_time_ = true;
-                clock_.restart();
+                reset_playback_clock();
             });
             build_slot(false);
             build_slot(true);
@@ -1194,6 +1195,8 @@ class Workbench final : public WorkbenchWindow {
             connect(&timer_, &QTimer::timeout, this, [this] {
                 try {
                     frame();
+                    if (timer_.isActive() && !stopped_ && !finished_)
+                        schedule_next_frame();
                 } catch (const std::exception &error) {
                     fail(error.what());
                 } catch (const vsg::Exception &error) {
@@ -1226,7 +1229,7 @@ class Workbench final : public WorkbenchWindow {
     }
     ~Workbench() override { shutdown(); }
     void start_rendering() {
-        clock_.restart();
+        reset_playback_clock();
         timer_.start();
         if (application_update_)
             application_update_->schedule_startup_check();
@@ -3580,7 +3583,7 @@ class Workbench final : public WorkbenchWindow {
                                         : ui::text("graphics_workbench.play_2"));
             play_action_->setIcon(play_icon(value));
         }
-        clock_.restart();
+        reset_playback_clock();
     }
     void seek_epoch(core::Epoch epoch) {
         if (!scenario_ || epoch.tai_nanoseconds() < scenario_->first().tai_nanoseconds() ||
@@ -3593,7 +3596,7 @@ class Workbench final : public WorkbenchWindow {
         slider_->setValue(qRound(seconds_ / duration_seconds() * 10000));
         if (timeline_)
             timeline_->set_current_time(epoch.tai_nanoseconds() / 1'000'000, true);
-        clock_.restart();
+        reset_playback_clock();
     }
     void choose_time() {
         if (!scenario_)
@@ -3914,7 +3917,7 @@ class Workbench final : public WorkbenchWindow {
         update_actions();
         show_timeline_status();
     }
-    void update_satellite(bool advance_footprints = false) {
+    void update_satellite(bool continuous = false) {
         const ProfileScope profile("satellite_update_ms");
         if (benchmarking_) {
             markers_->update(snapshot_);
@@ -3927,7 +3930,7 @@ class Workbench final : public WorkbenchWindow {
             sun_direction_ = display_to_itrf_->apply_position(gcrf);
             sun_epoch_ = snapshot_.epoch;
             if (ground_map_)
-                ground_map_->set_sun_direction(sun_direction_);
+                ground_map_->set_sun_direction(sun_direction_, continuous);
         }
         vsg::dmat4 earth_rotation;
         if (display_frame_ == core::FrameId::gcrf)
@@ -4056,7 +4059,7 @@ class Workbench final : public WorkbenchWindow {
         } else if (sensor_layer_)
             sensor_layer_->update(sensor_meshes, srgb, devicePixelRatioF());
         if (ground_map_)
-            ground_map_->set_sensor_footprints(sensor_footprints, advance_footprints);
+            ground_map_->set_sensor_footprints(sensor_footprints, continuous);
         for (std::size_t i = 0; i < stations_.size(); ++i) {
             const auto &station = stations_[i].config;
             fixed.markers.push_back(
@@ -5143,7 +5146,7 @@ class Workbench final : public WorkbenchWindow {
             return true;
         static const QStringList phases{"3d-paused",  "3d-drag", "2d-paused",  "2d-hover",
                                         "2d-pan",     "2d-play", "split-play", "2d-zoom",
-                                        "2d-settled", "3d-zoom"};
+                                        "2d-settled", "3d-zoom", "3d-play"};
         constexpr int warmup = 45, measured = 180, length = warmup + measured;
         const int phase = profile_frame_ / length, local = profile_frame_ % length;
         if (phase == phases.size()) {
@@ -5159,6 +5162,7 @@ class Workbench final : public WorkbenchWindow {
                 {"map_width", ground_map_->width()},
                 {"map_height", ground_map_->height()},
                 {"device_pixel_ratio", devicePixelRatioF()},
+                {"screen_refresh_hz", screen() ? screen()->refreshRate() : 60},
                 {"navigation",
                  QJsonObject{{"map_pan_moves", profile_pan_moves_},
                              {"map_pan_max_displacement_pixels", profile_pan_distance_},
@@ -5175,6 +5179,7 @@ class Workbench final : public WorkbenchWindow {
         }
         profile_->phase(phases[phase], local >= warmup);
         profile_->tick();
+        profile_->record("scheduled_interval_ms", timer_.interval());
         const auto mouse = [](QObject *target, QEvent::Type type, QPointF p, Qt::MouseButton button,
                               Qt::MouseButtons buttons) {
             QMouseEvent event(type, p, p, button, buttons, Qt::NoModifier);
@@ -5188,7 +5193,7 @@ class Workbench final : public WorkbenchWindow {
         };
         if (local == 0) {
             std::cerr << "Profile phase: " << phases[phase].toStdString() << '\n';
-            set_playing(phase == 5 || phase == 6);
+            set_playing(phase == 5 || phase == 6 || phase == 10);
             if (phase < 2)
                 workspace_->select_view(0);
             else if (phase < 6)
@@ -5268,6 +5273,31 @@ class Workbench final : public WorkbenchWindow {
         ++profile_frame_;
         return true;
     }
+    void reset_playback_clock() {
+        if (!clock_.isValid())
+            clock_.start();
+        playback_clock_.reset(clock_.nsecsElapsed());
+        frame_pacer_.reset();
+    }
+    void schedule_next_frame() {
+        // Keep the fixed benchmark/smoke cadence and idle camera behavior. Normal
+        // playback uses the visible displays' refresh budget, with no catch-up queue.
+        if (benchmarking_ || !smoke_dir_.isEmpty())
+            return;
+        if (!playing_) {
+            frame_pacer_.reset();
+            if (timer_.interval() != 16)
+                timer_.start(16);
+            return;
+        }
+        auto rate = screen() ? screen()->refreshRate() : 60.0;
+        for (const auto &slot : slots_)
+            if (slot->container->isVisible() && slot->window->isExposed() && slot->window->screen())
+                rate = std::max(rate, slot->window->screen()->refreshRate());
+        if (ground_map_ && ground_map_->isVisible() && ground_map_->screen())
+            rate = std::max(rate, ground_map_->screen()->refreshRate());
+        timer_.start(frame_pacer_.delay_ms(clock_.nsecsElapsed(), rate));
+    }
     void frame() {
         if (!profile_step())
             return;
@@ -5330,12 +5360,11 @@ class Workbench final : public WorkbenchWindow {
         }
 #endif
         if (!requested_time_ && (playing_ || (benchmarking_ && !smoke_dir_.isEmpty()))) {
-            seconds_ =
-                !smoke_dir_.isEmpty()
-                    ? std::fmod(static_cast<double>(frame_count_), duration_seconds())
-                    : std::fmod(seconds_ + static_cast<double>(clock_.restart()) *
-                                               (benchmarking_ ? 0.01 : playback_rate_ * 0.001),
-                                duration_seconds());
+            seconds_ = !smoke_dir_.isEmpty()
+                           ? std::fmod(static_cast<double>(frame_count_), duration_seconds())
+                           : std::fmod(seconds_ + playback_clock_.advance(clock_.nsecsElapsed()) *
+                                                      (benchmarking_ ? 10 : playback_rate_),
+                                       duration_seconds());
             slider_->blockSignals(true);
             slider_->setValue(benchmarking_ ? static_cast<int>(seconds_)
                                             : qRound(10000 * seconds_ / duration_seconds()));
@@ -5350,12 +5379,12 @@ class Workbench final : public WorkbenchWindow {
             track_pixel_ratio_ = devicePixelRatioF();
             satellite_state_dirty_ = true;
         }
-        const bool advance_footprints = playing_ && !requested_time_ && !satellite_state_dirty_ &&
-                                        epoch.tai_nanoseconds() > snapshot_.epoch.tai_nanoseconds();
+        const bool continuous = playing_ && !requested_time_ && !satellite_state_dirty_ &&
+                                epoch.tai_nanoseconds() > snapshot_.epoch.tai_nanoseconds();
         requested_time_ = false;
         if (benchmarking_ || satellite_state_dirty_ || snapshot_.epoch != epoch) {
             snapshot_ = sample_frame(epoch);
-            update_satellite(advance_footprints);
+            update_satellite(continuous);
         }
         request_display_cache();
         if (time_label_ && (time_label_epoch_ != epoch || time_label_scale_ != display_scale_)) {
@@ -6344,6 +6373,8 @@ class Workbench final : public WorkbenchWindow {
     int profile_pan_moves_ = 0, profile_zoom_changes_ = 0;
     double profile_pan_distance_ = 0, profile_zoom_min_ = 1, profile_zoom_max_ = 1;
     QElapsedTimer clock_;
+    PlaybackClock playback_clock_;
+    FramePacer frame_pacer_;
     QJsonArray view_report_;
     QJsonArray interaction_report_;
     visualization::RenderSnapshot snapshot_{

@@ -274,6 +274,7 @@ if(ORBELLE_WITH_VSG)
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..")
         add_executable(orbelle_view_navigation_tests tests/view_navigation_test.cpp
+            tests/animation_timing_test.cpp
             src/viewer/view_navigation.cpp)
         target_link_libraries(orbelle_view_navigation_tests PRIVATE
             Qt6::Widgets vsg::vsg GTest::gtest_main)
