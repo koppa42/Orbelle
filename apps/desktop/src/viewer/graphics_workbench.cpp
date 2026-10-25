@@ -796,11 +796,15 @@ class Workbench final : public WorkbenchWindow {
                 view_menu_->addAction(object_dock->toggleViewAction());
                 show_orbit_status();
             }
-            auto *toolbar = benchmarking_ ? new QToolBar(ui::text("common.time"), this)
-                                          : new FlushToolBar(ui::text("common.time"), this);
+            auto *toolbar = benchmarking_
+                                ? new QToolBar(ui::text("common.time"), this)
+                                : new FlushToolBar(ui::text("graphics_workbench.heading"), this);
             time_toolbar_ = toolbar;
-            if (!benchmarking_)
+            if (!benchmarking_) {
                 toolbar->setObjectName("timelineBar");
+                toolbar->toggleViewAction()->setObjectName("showTimeline");
+                view_menu_->addAction(toolbar->toggleViewAction());
+            }
             addToolBar(benchmarking_ ? Qt::TopToolBarArea : Qt::BottomToolBarArea, toolbar);
             toolbar->setMovable(false);
             toolbar->setIconSize(QSize(18, 18));
@@ -1048,6 +1052,8 @@ class Workbench final : public WorkbenchWindow {
                 connect(collapse, &QToolButton::clicked, expand, &QAction::toggle);
                 connect(expand, &QAction::toggled, this, [this, collapse, timeline](bool expanded) {
                     timeline_->setVisible(expanded);
+                    if (expanded)
+                        time_toolbar_->show();
                     // QToolBar caches the widget action's size hint; refresh both layouts.
                     timeline->layout()->activate();
                     time_toolbar_->layout()->invalidate();
@@ -1061,6 +1067,13 @@ class Workbench final : public WorkbenchWindow {
                                  : ui::text("graphics_workbench.collapse.set_tool_tip_2"));
                     collapse->setAccessibleName(collapse->toolTip());
                 });
+                connect(toolbar, &QToolBar::visibilityChanged, expand,
+                        [this, expand](bool visible) {
+                            // A hidden toolbar must offer a one-step expand command, while
+                            // reopening it from View preserves the inner collapsed state.
+                            const QSignalBlocker block(expand);
+                            expand->setChecked(visible && !timeline_->isHidden());
+                        });
                 controls->addWidget(collapse);
                 control_rows->addLayout(controls);
                 layout->addWidget(control_panel);
@@ -1707,8 +1720,12 @@ class Workbench final : public WorkbenchWindow {
         if (insert_menu_)
             insert_menu_->setEnabled(active);
         if (time_toolbar_) {
+            const bool activation_changed = time_toolbar_->isEnabled() != active;
             time_toolbar_->setEnabled(active);
-            time_toolbar_->setVisible(active);
+            // Ordinary selection/playback updates must not undo a user's hide action.
+            if (!active || activation_changed)
+                time_toolbar_->setVisible(active);
+            time_toolbar_->toggleViewAction()->setEnabled(active);
         }
         if (object_dock_) {
             if (!active)
