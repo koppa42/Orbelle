@@ -310,8 +310,9 @@ void Workbench::smoke_sensors_navigation() {
         smoke_require(
             width() <= 880 && compact_navigation &&
                 commands_->toolButtonStyle() == Qt::ToolButtonTextBesideIcon &&
-                commands_->widgetForAction(eop_action_)->isVisible() &&
-                commands_->rect().contains(commands_->actionGeometry(eop_action_)) &&
+                commands_->widgetForAction(report_action_)->isVisible() &&
+                commands_->rect().contains(commands_->actionGeometry(report_action_)) &&
+                !findChild<QAction *>("manageEopData") && preferences_action_->isEnabled() &&
                 findChild<QWidget *>("timelineControls")->height() > 50 &&
                 smoke_action_in_workspace("applyOrbit"),
             qPrintable(

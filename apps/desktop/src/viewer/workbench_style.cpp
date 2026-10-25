@@ -774,6 +774,9 @@ QTreeWidget#propertyNavigation::item:selected { background: @accentWash; color: 
 QTreeWidget#propertyNavigation::item:disabled { color: @textFaint; }
 QTreeWidget#propertyNavigation::branch { background: transparent; }
 QTreeWidget#propertyNavigation::branch:selected { background: @panel; }
+QTreeWidget#propertyNavigation[preferencesTree="true"]::branch { padding: 7px 2px; }
+QTreeWidget#propertyNavigation[preferencesTree="true"]::branch:has-children:closed { image: url(:/orbelle/icons/chevron-right.png); }
+QTreeWidget#propertyNavigation[preferencesTree="true"]::branch:has-children:open { image: url(:/orbelle/icons/chevron-down.png); }
 QDialog#insertObjectsDialog QLabel, QDialog#insertObjectsDialog QTreeWidget, QDialog#insertObjectsDialog QPushButton, QDialog#insertObjectsDialog QCheckBox { font-size: 13px; }
 QLabel#insertDestination { color: @textMuted; }
 QLabel#insertSectionHeading { color: @text; font-weight: 600; }
@@ -783,9 +786,6 @@ QTreeWidget#insertObjectTypes::branch { background: @field; }
 QTreeWidget#insertObjectMethods { background: @field; border: 1px solid @line; border-radius: 5px; padding: 6px; outline: 0; }
 QTreeWidget#insertObjectMethods::item { height: 32px; padding: 4px 10px; border-radius: 0; }
 QLabel#insertMethodDescription { color: @textMuted; padding: 6px 2px 10px 2px; }
-QPushButton#saveDefaultInsertMethod { background: transparent; border-color: transparent; padding: 4px 6px; }
-QPushButton#saveDefaultInsertMethod:hover { background: @accentHover; border-color: @line; }
-QPushButton#saveDefaultInsertMethod:focus { border-color: @accent; }
 QHeaderView::section { background: @panel; color: @textMuted; border: 0; border-right: 1px solid @line; border-bottom: 1px solid @line; padding: 4px 8px; font-size: 11px; }
 QLineEdit#objectSearch { background: @field; padding: 4px 8px; border-color: @line; border-radius: 5px; }
 QLineEdit#objectSearch:focus { border-color: @accent; }

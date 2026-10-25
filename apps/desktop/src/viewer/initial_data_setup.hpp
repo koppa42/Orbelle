@@ -18,5 +18,6 @@ class EopCatalog;
 bool prepare_initial_data(QWidget *parent, EopCatalog &catalog,
                           const std::vector<DataProduct> &required = initial_data_products(),
                           const std::function<void(DataProduct)> &download = {},
-                          const std::function<void()> &visible_ready = {}, QDate utc_day = {});
+                          const std::function<void()> &visible_ready = {}, QDate utc_day = {},
+                          const std::function<void(QWidget *)> &network_settings = {});
 } // namespace orbelle::desktop

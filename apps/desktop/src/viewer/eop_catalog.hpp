@@ -8,6 +8,7 @@
 #include <QTimer>
 #include <array>
 #include <atomic>
+#include <functional>
 #include <future>
 #include <optional>
 #include <orbelle/runtime/data_catalog.hpp>
@@ -16,8 +17,22 @@
 class QWidget;
 
 namespace orbelle::desktop {
+struct DataUpdatePreference {
+    bool automatic = false;
+    int hours = 168;
+    bool operator==(const DataUpdatePreference &) const = default;
+};
+struct DataPreferences {
+    DataProduct preferred = DataProduct::c04;
+    int finals_extrapolation_days = 0, c04_extrapolation_days = 0;
+    std::map<DataProduct, DataUpdatePreference> updates;
+    bool operator==(const DataPreferences &) const = default;
+};
 class EopCatalog : public QObject {
   public:
+    // The desktop supplies its shared preferences entry. Nested editors use the
+    // same route without owning the application settings or opening a second inspector.
+    std::function<void(QWidget *, std::optional<DataProduct>)> open_data_center;
     using Provider = std::shared_ptr<const core::IEarthOrientationProvider>;
     EopCatalog(std::filesystem::path store, std::vector<std::filesystem::path> bundled,
                std::filesystem::path legacy = {}, bool automatic = true);
@@ -37,6 +52,9 @@ class EopCatalog : public QObject {
     update_status(DataProduct product = DataProduct::finals2000a) const;
     [[nodiscard]] std::shared_ptr<const core::ITimeProvider> time_provider() const { return time_; }
     [[nodiscard]] DataProduct preferred_product() const;
+    [[nodiscard]] DataPreferences preferences() const;
+    // Validate every field and publish the complete preference batch in one transaction.
+    void set_preferences(const DataPreferences &preferences);
     void set_preferred_product(DataProduct product);
     void set_automatic_updates(bool enabled, DataProduct product = DataProduct::finals2000a);
     [[nodiscard]] bool automatic_updates(DataProduct product = DataProduct::finals2000a) const;

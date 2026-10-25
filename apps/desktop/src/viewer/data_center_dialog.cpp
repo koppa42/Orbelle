@@ -1,4 +1,5 @@
 #include "../ui_text.hpp"
+#include "data_center_widget.hpp"
 #include "eop_catalog.hpp"
 #include "form_kit.hpp"
 #include "responsive_layout.hpp"
@@ -220,16 +221,19 @@ class PriorityDelegate final : public QStyledItemDelegate {
     }
 };
 } // namespace
-void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataProduct> initial) {
-    QDialog dialog(parent);
-    dialog.setObjectName("eopDataDialog");
-    dialog.setWindowTitle(ui::text("common.data_center"));
-    dialog.setWindowIcon(workbench_icon(WorkbenchIcon::database));
-    dialog.resize(
-        QSize(1020, 720).boundedTo(dialog.screen()->availableGeometry().size() - QSize(48, 72)));
-    dialog.setSizeGripEnabled(true);
-    dialog.setMinimumSize(360, 360);
-    auto *layout = new QVBoxLayout(&dialog);
+QWidget *create_data_center_widget(QWidget *parent, EopCatalog &catalog,
+                                   const DataCenterContext &context) {
+    auto *center = new QWidget(parent);
+    center->setObjectName("dataCenterPage");
+    struct State {
+        bool narrow = false, showing_details = false, syncing_priority = false;
+        std::vector<DataInventoryItem> entries;
+        QString operation_error;
+        std::uint64_t seen_revision = 0;
+        QDate seen_day;
+    };
+    auto session = std::make_shared<State>();
+    auto *layout = new QVBoxLayout(center);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     auto *header = new QWidget;
@@ -240,7 +244,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     auto *heading_title = new QLabel(ui::text("common.data_center"));
     heading_title->setObjectName("panelTitle");
     heading->addWidget(heading_title);
-    auto *back = new QPushButton(ui::text("data_center_dialog.back"), &dialog);
+    auto *back = new QPushButton(ui::text("data_center_dialog.back"), center);
     back->setObjectName("dataBackToList");
     back->setIcon(workbench_icon(WorkbenchIcon::database));
     back->hide();
@@ -254,27 +258,35 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     panels->setSpacing(0);
     auto *sidebar = new QWidget;
     sidebar->setObjectName("dataSidebar");
-    sidebar->setFixedWidth(std::clamp(dialog.width() / 4, 220, 258));
+    sidebar->setFixedWidth(240);
     auto *sidebar_layout = new QVBoxLayout(sidebar);
     sidebar_layout->setContentsMargins(8, 12, 8, 12);
     sidebar_layout->setSpacing(8);
     auto *inventory_caption = new QLabel(ui::text("data_center_dialog.back"));
     inventory_caption->setObjectName("dataSidebarCaption");
     sidebar_layout->addWidget(inventory_caption);
-    auto *list = new DataTreeWidget;
-    list->setObjectName("dataInventory");
-    list->setAccessibleName(ui::text("data_center_dialog.list.set_accessible_name"));
-    list->setItemDelegate(new DataItemDelegate(list));
-    list->setMouseTracking(true);
-    list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    list->setMinimumHeight(100);
-    list->setSelectionMode(QAbstractItemView::SingleSelection);
-    list->setHeaderHidden(true);
-    list->setIndentation(16);
-    auto *eop_node = new QTreeWidgetItem(list, {ui::text("data_center_dialog.eop_node")});
+    auto *list = context.navigation ? context.navigation : new DataTreeWidget;
+    if (!context.navigation) {
+        list->setObjectName("dataInventory");
+        list->setAccessibleName(ui::text("data_center_dialog.list.set_accessible_name"));
+        list->setItemDelegate(new DataItemDelegate(list));
+        list->setMouseTracking(true);
+        list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        list->setMinimumHeight(100);
+        list->setSelectionMode(QAbstractItemView::SingleSelection);
+        list->setHeaderHidden(true);
+        list->setIndentation(16);
+    }
+    const auto root_item = [=](const QString &label) {
+        return context.navigation_root
+                   ? new QTreeWidgetItem(context.navigation_root, {label.section('\n', 0, 0)})
+                   : new QTreeWidgetItem(list, {label});
+    };
+    auto *eop_node = root_item(ui::text("data_center_dialog.eop_node"));
     eop_node->setSizeHint(0, QSize(0, 52));
-    const auto add_source = [&](DataProduct product, QTreeWidgetItem *parent) {
-        auto *item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(list);
+    const auto add_source = [=](DataProduct product, QTreeWidgetItem *parent) {
+        auto *owner = parent ? parent : context.navigation_root;
+        auto *item = owner ? new QTreeWidgetItem(owner) : new QTreeWidgetItem(list);
         item->setData(0, Qt::UserRole, static_cast<int>(product));
         item->setSizeHint(0, QSize(0, 52));
         return item;
@@ -282,18 +294,17 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     auto *finals_node = add_source(DataProduct::finals2000a, eop_node);
     auto *c04_node = add_source(DataProduct::c04, eop_node);
     auto *utc_node = add_source(DataProduct::utc, nullptr);
-    auto *gravity_node = new QTreeWidgetItem(list, {ui::text("data_center_dialog.gravity_node")});
+    auto *gravity_node = root_item(ui::text("data_center_dialog.gravity_node"));
     gravity_node->setSizeHint(0, QSize(0, 54));
     auto *egm2008_node = add_source(DataProduct::egm2008, gravity_node);
     auto *egm96_node = add_source(DataProduct::egm96, gravity_node);
     auto *custom_node = add_source(DataProduct::custom_gravity, gravity_node);
     gravity_node->setExpanded(true);
-    auto *ephemeris_node =
-        new QTreeWidgetItem(list, {ui::text("data_center_dialog.ephemeris_node")});
+    auto *ephemeris_node = root_item(ui::text("data_center_dialog.ephemeris_node"));
     ephemeris_node->setSizeHint(0, QSize(0, 54));
     auto *de440s_node = add_source(DataProduct::de440s, ephemeris_node);
     auto *weather_node = add_source(DataProduct::space_weather, nullptr);
-    auto *ocean_node = new QTreeWidgetItem(list, {ui::text("data_center_dialog.ocean_node")});
+    auto *ocean_node = root_item(ui::text("data_center_dialog.ocean_node"));
     ocean_node->setSizeHint(0, QSize(0, 54));
     auto *fes_node = add_source(DataProduct::fes2014bv1, ocean_node);
     auto *custom_ocean_node = add_source(DataProduct::custom_ocean_tides, ocean_node);
@@ -301,7 +312,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     ephemeris_node->setExpanded(true);
     eop_node->setExpanded(true);
     list->setCurrentItem(eop_node);
-    sidebar_layout->addWidget(list, 1);
+    if (!context.navigation)
+        sidebar_layout->addWidget(list, 1);
     auto *inventory_note = new QLabel(ui::text("data_center_dialog.inventory_note"));
     inventory_note->setObjectName("dataSidebarCaption");
     sidebar_layout->addWidget(inventory_note);
@@ -317,6 +329,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     auto *title = new QLabel;
     title->setObjectName("dataName");
     title->setWordWrap(true);
+    title->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     auto *data_heading = new QHBoxLayout;
     data_heading->addWidget(title, 1);
     auto *state = new QLabel;
@@ -327,11 +340,32 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     auto *data_description = new QLabel;
     data_description->setObjectName("dataDescription");
     data_description->setWordWrap(true);
+    data_description->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     detail_layout->addWidget(data_description);
+    QLabel *preferences_hint = nullptr;
+    if (context.draft) {
+        preferences_hint = new QLabel(ui::text("preferences.data_actions_help"));
+        preferences_hint->setObjectName("muted");
+        preferences_hint->setWordWrap(true);
+        preferences_hint->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        detail_layout->addWidget(preferences_hint);
+    }
+    auto *group_scroll = new QScrollArea;
+    group_scroll->setObjectName("dataGroupScroll");
+    group_scroll->setWidgetResizable(true);
+    group_scroll->setFrameShape(QFrame::NoFrame);
+    group_scroll->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+    auto *group_body = new QWidget;
+    auto *group_layout = new QVBoxLayout(group_body);
+    group_layout->setContentsMargins(0, 12, 0, 0);
     auto *gravity_summary = new QLabel(ui::text("data_center_dialog.gravity_summary"));
     gravity_summary->setWordWrap(true);
     gravity_summary->setObjectName("hint");
-    detail_layout->addWidget(gravity_summary);
+    gravity_summary->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    group_layout->addWidget(gravity_summary);
+    group_layout->addStretch();
+    group_scroll->setWidget(group_body);
+    detail_layout->addWidget(group_scroll, 1);
     auto *priority_scroll = new QScrollArea;
     priority_scroll->setWidgetResizable(true);
     priority_scroll->setFrameShape(QFrame::NoFrame);
@@ -395,7 +429,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     auto *pages = new QTabWidget;
     pages->setObjectName("dataPages");
     pages->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
-    const auto page = [&](const QString &label) {
+    const auto page = [=](const QString &label) {
         auto *scroll = new QScrollArea;
         scroll->setWidgetResizable(true);
         scroll->setFrameShape(QFrame::NoFrame);
@@ -421,7 +455,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     form->setRowWrapPolicy(QFormLayout::WrapLongRows);
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-    const auto field = [&](const QString &caption, const char *name) {
+    const auto field = [=](const QString &caption, const char *name) {
         auto *label = new QLabel;
         label->setObjectName(name);
         label->setTextFormat(Qt::PlainText);
@@ -528,7 +562,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     technical->setTextInteractionFlags(Qt::TextSelectableByMouse);
     file_layout->addWidget(technical);
     file_layout->addStretch();
-    auto *warnings = new QLabel(catalog.warnings().join('\n'), &dialog);
+    auto *warnings = new QLabel(catalog.warnings().join('\n'), center);
     warnings->setObjectName("inputError");
     warnings->setContentsMargins(24, 8, 24, 8);
     warnings->setTextFormat(Qt::PlainText);
@@ -564,56 +598,77 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
     footer->addWidget(close);
     layout->addWidget(footer_panel);
     responsive_columns(acquisition, actions, 380);
-    bool narrow = false, showing_details = false;
-    const auto show_panels = [&] {
-        sidebar->setVisible(!narrow || !showing_details);
-        panel->setVisible(!narrow || showing_details);
-        back->setVisible(narrow && showing_details);
-        description->setVisible(!narrow);
+
+    const auto show_panels = [=] {
+        if (context.navigation) {
+            header->hide();
+            sidebar->hide();
+            footer_panel->hide();
+            panel->show();
+            return;
+        }
+        sidebar->setVisible(!session->narrow || !session->showing_details);
+        panel->setVisible(!session->narrow || session->showing_details);
+        back->setVisible(session->narrow && session->showing_details);
+        description->setVisible(!session->narrow);
     };
-    new WidthObserver(&dialog, [&, mode = WidthMode{}](int width) mutable {
-        narrow = mode.narrow(width, 760);
-        sidebar->setMinimumWidth(narrow ? 0 : std::clamp(width / 4, 220, 258));
-        sidebar->setMaximumWidth(narrow ? QWIDGETSIZE_MAX : sidebar->minimumWidth());
-        detail_layout->setContentsMargins(narrow ? 18 : 24, 16, narrow ? 18 : 24, 18);
+    new WidthObserver(center, [=, mode = WidthMode{}](int width) mutable {
+        session->narrow = mode.narrow(width, 760);
+        sidebar->setMinimumWidth(session->narrow ? 0 : std::clamp(width / 4, 220, 258));
+        sidebar->setMaximumWidth(session->narrow ? QWIDGETSIZE_MAX : sidebar->minimumWidth());
+        detail_layout->setContentsMargins(theme::space::page);
         show_panels();
     });
-    QObject::connect(back, &QPushButton::clicked, &dialog, [&] {
-        showing_details = false;
+    QObject::connect(back, &QPushButton::clicked, center, [=] {
+        session->showing_details = false;
         show_panels();
         list->setFocus();
     });
-    const auto open_details = [&] {
-        showing_details = true;
+    const auto open_details = [=] {
+        if (context.navigation)
+            return;
+        session->showing_details = true;
         show_panels();
-        if (narrow)
+        if (session->narrow)
             back->setFocus();
     };
-    QObject::connect(list, &QTreeWidget::itemClicked, &dialog, open_details);
-    QObject::connect(list, &QTreeWidget::itemActivated, &dialog, open_details);
-    auto entries = catalog.inventory();
-    QString operation_error;
-    bool syncing_priority = false;
-    const auto selected = [&]() -> std::optional<DataProduct> {
-        return list->currentItem() == eop_node || list->currentItem() == gravity_node ||
+    QObject::connect(list, &QTreeWidget::itemClicked, center, open_details);
+    QObject::connect(list, &QTreeWidget::itemActivated, center, open_details);
+    session->entries = catalog.inventory();
+    const auto in_data = [=] {
+        if (!context.navigation_root)
+            return true;
+        for (auto *item = list->currentItem(); item; item = item->parent())
+            if (item == context.navigation_root)
+                return true;
+        return false;
+    };
+    const auto selected = [=]() -> std::optional<DataProduct> {
+        return list->currentItem() == context.navigation_root || list->currentItem() == eop_node ||
+                       list->currentItem() == gravity_node ||
                        list->currentItem() == ephemeris_node || list->currentItem() == ocean_node
                    ? std::nullopt
                    : std::optional{static_cast<DataProduct>(
                          list->currentItem()->data(0, Qt::UserRole).toInt())};
     };
-    const auto inventory_item = [&](DataProduct product) -> const DataInventoryItem & {
-        return *std::find_if(entries.begin(), entries.end(),
-                             [&](const auto &entry) { return entry.product == product; });
+    const auto inventory_item = [=](DataProduct product) -> const DataInventoryItem & {
+        return *std::find_if(session->entries.begin(), session->entries.end(),
+                             [product](const auto &entry) { return entry.product == product; });
     };
-    const auto selected_item = [&]() -> const DataInventoryItem & {
+    const auto selected_item = [=]() -> const DataInventoryItem & {
         return inventory_item(*selected());
     };
-    const auto update_details = [&] {
+    const auto update_details = [=, &catalog] {
+        if (!in_data())
+            return;
         const bool group = !selected();
-        gravity_summary->setVisible(list->currentItem() == gravity_node ||
-                                    list->currentItem() == ephemeris_node ||
-                                    list->currentItem() == ocean_node);
-        priority_scroll->setVisible(group);
+        const bool summary = list->currentItem() == gravity_node ||
+                             list->currentItem() == ephemeris_node ||
+                             list->currentItem() == ocean_node;
+        group_scroll->setVisible(summary);
+        priority_scroll->setVisible(group && !summary);
+        if (preferences_hint)
+            preferences_hint->setVisible(!summary);
         pages->setVisible(!group);
         state->setVisible(!group);
         facts->setVisible(!group);
@@ -656,9 +711,13 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         const bool is_ocean = ocean_product(item.product);
         const bool is_ephemeris = item.product == DataProduct::de440s;
         acquisition->show();
-        policy_title->setVisible(item.extrapolation);
-        extrapolation->setVisible(item.extrapolation);
-        extrapolation_note->setVisible(item.extrapolation);
+        const bool configurable_eop =
+            item.extrapolation || (context.draft && (item.product == DataProduct::finals2000a ||
+                                                     item.product == DataProduct::c04));
+        pages->setTabVisible(1, item.online_updates || configurable_eop);
+        policy_title->setVisible(configurable_eop);
+        extrapolation->setVisible(configurable_eop);
+        extrapolation_note->setVisible(configurable_eop);
         download->setVisible(item.online_updates);
         raw->setVisible(item.raw_import);
         manifest->setVisible(item.manifest_import || is_ephemeris);
@@ -669,17 +728,24 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         schedule->setVisible(item.online_updates);
         const QSignalBlocker auto_block(automatic), frequency_block(frequency), allow_block(allow),
             days_block(days);
-        automatic->setChecked(catalog.automatic_updates(item.product));
+        automatic->setChecked(context.draft && context.draft->updates.contains(item.product)
+                                  ? context.draft->updates.at(item.product).automatic
+                                  : catalog.automatic_updates(item.product));
         schedule->setText(automatic->isChecked() ? ui::text("data_center_dialog.schedule.set_text")
                                                  : ui::text("data_center_dialog.edule.set_text"));
-        const auto hours = catalog.update_interval_hours(item.product);
+        const auto hours = context.draft && context.draft->updates.contains(item.product)
+                               ? context.draft->updates.at(item.product).hours
+                               : catalog.update_interval_hours(item.product);
         if (frequency->findData(hours) < 0)
             frequency->addItem(ui::text("data_center_dialog.frequency.add_item_4").arg(hours),
                                hours);
         frequency->setCurrentIndex(frequency->findData(hours));
         frequency->setEnabled(automatic->isChecked());
-        if (item.provider_index) {
-            const auto limit = catalog.extrapolation_days(*item.provider_index);
+        if (configurable_eop) {
+            const auto limit = context.draft ? (item.product == DataProduct::finals2000a
+                                                    ? context.draft->finals_extrapolation_days
+                                                    : context.draft->c04_extrapolation_days)
+                                             : catalog.extrapolation_days(*item.provider_index);
             allow->setChecked(limit > 0);
             days->setValue(limit > 0 ? limit : 3);
             days->setEnabled(limit > 0);
@@ -785,11 +851,11 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
                          ? QString{}
                          : ui::text("data_center_dialog.label_44") + item.identity_sha256));
     };
-    const auto show_error = [&](const std::exception &error) {
-        operation_error = QString::fromUtf8(error.what());
+    const auto show_error = [=](const std::exception &error) {
+        session->operation_error = QString::fromUtf8(error.what());
     };
-    const auto select_provider = [&](int index) {
-        for (const auto &entry : entries)
+    const auto select_provider = [=](int index) {
+        for (const auto &entry : session->entries)
             if (entry.provider_index == static_cast<std::size_t>(index)) {
                 eop_node->setExpanded(true);
                 list->setCurrentItem(entry.product == DataProduct::finals2000a ? finals_node
@@ -797,52 +863,62 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
                 return;
             }
     };
-    const auto rebuild = [&] {
-        entries = catalog.inventory();
+    const auto rebuild = [=, &catalog] {
+        session->entries = catalog.inventory();
         update_details();
     };
-    const auto selection_changed = [&] {
-        operation_error.clear();
+    const auto selection_changed = [=] {
+        if (!in_data())
+            return;
+        session->operation_error.clear();
         pages->setCurrentIndex(0);
         qobject_cast<QScrollArea *>(pages->widget(0))->verticalScrollBar()->setValue(0);
         update_details();
     };
-    QObject::connect(list, &QTreeWidget::currentItemChanged, &dialog, selection_changed);
-    QObject::connect(priority->model(), &QAbstractItemModel::rowsMoved, &dialog, [&] {
+    QObject::connect(list, &QTreeWidget::currentItemChanged, center, selection_changed);
+    QObject::connect(priority->model(), &QAbstractItemModel::rowsMoved, center, [=, &catalog] {
         move_up->setEnabled(priority->currentRow() > 0);
         move_down->setEnabled(priority->currentRow() >= 0 &&
                               priority->currentRow() < priority->count() - 1);
-        if (syncing_priority)
+        if (session->syncing_priority)
             return;
-        operation_error.clear();
+        session->operation_error.clear();
         try {
-            catalog.set_preferred_product(
-                static_cast<DataProduct>(priority->item(0)->data(Qt::UserRole).toInt()));
+            const auto preferred =
+                static_cast<DataProduct>(priority->item(0)->data(Qt::UserRole).toInt());
+            if (context.draft) {
+                context.draft->preferred = preferred;
+                if (context.changed)
+                    context.changed();
+            } else
+                catalog.set_preferred_product(preferred);
         } catch (const std::exception &error) {
             show_error(error);
         }
     });
-    const auto move_priority = [&](int offset) {
+    const auto move_priority = [=](int offset) {
         const auto row = priority->currentRow();
         const auto target = row + offset;
         if (row >= 0 && target >= 0 && target < priority->count())
             priority->model()->moveRow({}, row, {}, target > row ? target + 1 : target);
     };
-    QObject::connect(move_up, &QToolButton::clicked, &dialog, [&] { move_priority(-1); });
-    QObject::connect(move_down, &QToolButton::clicked, &dialog, [&] { move_priority(1); });
-    QObject::connect(download, &QPushButton::clicked, &dialog, [&] {
-        operation_error.clear();
+    QObject::connect(move_up, &QToolButton::clicked, center,
+                     [move_priority] { move_priority(-1); });
+    QObject::connect(move_down, &QToolButton::clicked, center,
+                     [move_priority] { move_priority(1); });
+    QObject::connect(download, &QPushButton::clicked, center, [=, &catalog] {
+        session->operation_error.clear();
         catalog.start_download({}, *selected());
     });
-    QObject::connect(manifest, &QPushButton::clicked, &dialog, [&] {
+    QObject::connect(manifest, &QPushButton::clicked, center, [=, &catalog] {
         const auto file = QFileDialog::getOpenFileName(
-            &dialog,
+            center,
             selected() == DataProduct::de440s ? ui::text("data_center_dialog.label_45")
                                               : ui::text("data_center_dialog.label_46"),
             {}, ui::text("data_center_dialog.label_47"));
         if (file.isEmpty())
             return;
-        operation_error.clear();
+        session->operation_error.clear();
         try {
             if (selected() == DataProduct::de440s) {
                 catalog.import_ephemeris_snapshot(std::filesystem::path(file.toStdWString()));
@@ -857,12 +933,12 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
             show_error(error);
         }
     });
-    QObject::connect(planetary_centres, &QPushButton::clicked, &dialog, [&] {
-        const auto file = QFileDialog::getOpenFileName(&dialog, ui::text("data_center_dialog.file"),
+    QObject::connect(planetary_centres, &QPushButton::clicked, center, [=, &catalog] {
+        const auto file = QFileDialog::getOpenFileName(center, ui::text("data_center_dialog.file"),
                                                        {}, ui::text("data_center_dialog.file_2"));
         if (file.isEmpty())
             return;
-        operation_error.clear();
+        session->operation_error.clear();
         try {
             catalog.import_planetary_centres(std::filesystem::path(file.toStdWString()));
             rebuild();
@@ -870,9 +946,9 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
             show_error(error);
         }
     });
-    QObject::connect(raw, &QPushButton::clicked, &dialog, [&] {
+    QObject::connect(raw, &QPushButton::clicked, center, [=, &catalog] {
         const auto file = QFileDialog::getOpenFileName(
-            &dialog, ui::text("data_center_dialog.file_3").arg(title->text()), {},
+            center, ui::text("data_center_dialog.file_3").arg(title->text()), {},
             ocean_product(*selected())                  ? ui::text("data_center_dialog.label_48")
             : *selected() == DataProduct::space_weather ? ui::text("data_center_dialog.label_49")
             : *selected() == DataProduct::de440s        ? ui::text("data_center_dialog.label_50")
@@ -880,7 +956,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
                                                         : ui::text("data_center_dialog.label_52"));
         if (file.isEmpty())
             return;
-        operation_error.clear();
+        session->operation_error.clear();
         try {
             catalog.import_raw(std::filesystem::path(file.toStdWString()), *selected());
             rebuild();
@@ -890,50 +966,71 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
             show_error(error);
         }
     });
-    QObject::connect(automatic, &QCheckBox::toggled, &dialog, [&](bool value) {
+    QObject::connect(automatic, &QCheckBox::toggled, center, [=, &catalog](bool value) {
         try {
-            catalog.set_automatic_updates(value, *selected());
+            if (context.draft) {
+                context.draft->updates.at(*selected()).automatic = value;
+                if (context.changed)
+                    context.changed();
+            } else
+                catalog.set_automatic_updates(value, *selected());
         } catch (const std::exception &error) {
             show_error(error);
         }
         update_details();
     });
-    QObject::connect(frequency, &QComboBox::currentIndexChanged, &dialog, [&] {
+    QObject::connect(frequency, &QComboBox::currentIndexChanged, center, [=, &catalog] {
         try {
-            catalog.set_update_interval_hours(frequency->currentData().toInt(), *selected());
+            if (context.draft) {
+                context.draft->updates.at(*selected()).hours = frequency->currentData().toInt();
+                if (context.changed)
+                    context.changed();
+            } else
+                catalog.set_update_interval_hours(frequency->currentData().toInt(), *selected());
         } catch (const std::exception &error) {
             show_error(error);
         }
         update_details();
     });
-    const auto save_extrapolation = [&] {
-        if (!selected() || !selected_item().provider_index)
+    const auto save_extrapolation = [=, &catalog] {
+        if (!selected() || (!context.draft && !selected_item().provider_index))
             return;
         try {
-            catalog.set_extrapolation_days(*selected_item().provider_index,
-                                           allow->isChecked() ? days->value() : 0);
+            const auto limit = allow->isChecked() ? days->value() : 0;
+            if (context.draft) {
+                (*selected() == DataProduct::finals2000a ? context.draft->finals_extrapolation_days
+                                                         : context.draft->c04_extrapolation_days) =
+                    limit;
+                if (context.changed)
+                    context.changed();
+            } else
+                catalog.set_extrapolation_days(*selected_item().provider_index, limit);
         } catch (const std::exception &error) {
             show_error(error);
         }
         update_details();
     };
-    QObject::connect(allow, &QCheckBox::toggled, &dialog, save_extrapolation);
-    QObject::connect(days, &QSpinBox::valueChanged, &dialog, save_extrapolation);
-    QObject::connect(cancel, &QPushButton::clicked, &dialog, [&] { catalog.cancel_download(); });
-    QObject::connect(copy_diagnostics, &QPushButton::clicked, &dialog, [&] {
+    QObject::connect(allow, &QCheckBox::toggled, center, save_extrapolation);
+    QObject::connect(days, &QSpinBox::valueChanged, center, save_extrapolation);
+    QObject::connect(cancel, &QPushButton::clicked, center,
+                     [&catalog] { catalog.cancel_download(); });
+    QObject::connect(copy_diagnostics, &QPushButton::clicked, center, [=, &catalog] {
         if (const auto product = selected())
             QGuiApplication::clipboard()->setText(catalog.update_status(*product).diagnostics);
     });
-    QObject::connect(close, &QPushButton::clicked, &dialog, &QDialog::reject);
-    QTimer timer;
-    std::uint64_t seen_revision = 0;
-    QDate seen_day;
-    const auto refresh = [&] {
+    QObject::connect(close, &QPushButton::clicked, center, [center] {
+        if (auto *dialog = qobject_cast<QDialog *>(center->window()))
+            dialog->reject();
+    });
+    auto *timer = new QTimer(center);
+    const auto refresh = [=, &catalog] {
+        if (!in_data())
+            return;
         const auto today = QDateTime::currentDateTimeUtc().date();
-        if (seen_revision != catalog.revision() || seen_day != today) {
+        if (session->seen_revision != catalog.revision() || session->seen_day != today) {
             rebuild();
-            seen_revision = catalog.revision();
-            seen_day = today;
+            session->seen_revision = catalog.revision();
+            session->seen_day = today;
         }
         const bool busy = catalog.downloading();
         for (auto *node : {finals_node, c04_node, utc_node, egm2008_node, egm96_node, custom_node,
@@ -947,23 +1044,27 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
             const auto installation = (busy && catalog.active_product() == entry.product) || failed
                                           ? check_text(update.state)
                                           : installation_text(entry);
-            node->setText(
-                0, name + "\n" + installation + "\n" +
-                       (ocean_product(entry.product) ? ui::text("data_center_dialog.node.set_text")
-                        : gravity_product(entry.product) ? ui::text("data_center_dialog.label_53")
-                        : entry.last.isValid()           ? (entry.product == DataProduct::utc
-                                                                ? ui::text("data_center_dialog.label_54")
-                                                                : ui::text("data_center_dialog.label_55")) +
-                                                     entry.last.date().toString(Qt::ISODate)
-                                               : ui::text("data_center_dialog.label_56")));
+            const auto details =
+                name + "\n" + installation + "\n" +
+                (ocean_product(entry.product)     ? ui::text("data_center_dialog.node.set_text")
+                 : gravity_product(entry.product) ? ui::text("data_center_dialog.label_53")
+                 : entry.last.isValid()           ? (entry.product == DataProduct::utc
+                                                         ? ui::text("data_center_dialog.label_54")
+                                                         : ui::text("data_center_dialog.label_55")) +
+                                              entry.last.date().toString(Qt::ISODate)
+                                        : ui::text("data_center_dialog.label_56"));
+            // Publish only the final label. Alternating detailed/compact labels each tick
+            // floods the view and Windows accessibility with changes even while idle.
+            node->setText(0, context.navigation ? name : details);
             node->setData(0, Qt::UserRole + 1, entry.online_updates && failed);
-            node->setToolTip(0, node->text(0));
+            node->setToolTip(0, details);
         }
         if (priority->item(0)->data(Qt::UserRole).toInt() !=
-            static_cast<int>(catalog.preferred_product())) {
-            syncing_priority = true;
+            static_cast<int>(context.draft ? context.draft->preferred
+                                           : catalog.preferred_product())) {
+            session->syncing_priority = true;
             priority->model()->moveRow({}, 1, {}, 0);
-            syncing_priority = false;
+            session->syncing_priority = false;
         }
         for (int row = 0; row < priority->count(); ++row) {
             auto *entry_item = priority->item(row);
@@ -981,8 +1082,8 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         move_up->setEnabled(priority->currentRow() > 0);
         move_down->setEnabled(priority->currentRow() >= 0 &&
                               priority->currentRow() < priority->count() - 1);
-        priority_error->setText(operation_error);
-        priority_error->setVisible(!operation_error.isEmpty());
+        priority_error->setText(session->operation_error);
+        priority_error->setVisible(!session->operation_error.isEmpty());
         if (!selected())
             return;
         const auto &item = selected_item();
@@ -1018,7 +1119,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         }
         schedule->setText(automatic->isChecked() ? ui::text("data_center_dialog.schedule.set_text")
                                                  : ui::text("data_center_dialog.edule.set_text"));
-        QString message = operation_error;
+        QString message = session->operation_error;
         if (message.isEmpty() &&
             (item.online_updates || gravity_product(item.product) || ocean_product(item.product))) {
             if (downloading_this) {
@@ -1041,7 +1142,7 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         }
         status->setText(message);
         const bool warning =
-            !operation_error.isEmpty() ||
+            !session->operation_error.isEmpty() ||
             (item.online_updates && (update.state == DataUpdateState::failed ||
                                      update.state == DataUpdateState::interrupted));
         if (status->property("warning").toBool() != warning) {
@@ -1051,25 +1152,52 @@ void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataPr
         }
         status->setVisible(!status->text().isEmpty());
     };
-    QObject::connect(list, &QTreeWidget::currentItemChanged, &dialog, refresh);
-    QObject::connect(priority, &QListWidget::currentRowChanged, &dialog, [&] {
+    QObject::connect(list, &QTreeWidget::currentItemChanged, center, refresh);
+    QObject::connect(priority, &QListWidget::currentRowChanged, center, [=] {
         move_up->setEnabled(priority->currentRow() > 0);
         move_down->setEnabled(priority->currentRow() >= 0 &&
                               priority->currentRow() < priority->count() - 1);
     });
-    QObject::connect(download, &QPushButton::clicked, &dialog, refresh);
-    QObject::connect(raw, &QPushButton::clicked, &dialog, refresh);
-    QObject::connect(manifest, &QPushButton::clicked, &dialog, refresh);
-    QObject::connect(cancel, &QPushButton::clicked, &dialog, refresh);
-    QObject::connect(&timer, &QTimer::timeout, &dialog, refresh);
-    timer.start(150);
+    QObject::connect(download, &QPushButton::clicked, center, refresh);
+    QObject::connect(raw, &QPushButton::clicked, center, refresh);
+    QObject::connect(manifest, &QPushButton::clicked, center, refresh);
+    QObject::connect(cancel, &QPushButton::clicked, center, refresh);
+    QObject::connect(timer, &QTimer::timeout, center, refresh);
+    timer->start(150);
     refresh();
+    if (context.navigation) {
+        header->hide();
+        sidebar->hide();
+        footer_panel->hide();
+        for (auto *button : center->findChildren<QPushButton *>())
+            button->setAutoDefault(false);
+    }
+    return center;
+}
+void show_data_center(QWidget *parent, EopCatalog &catalog, std::optional<DataProduct> initial) {
+    if (catalog.open_data_center) {
+        catalog.open_data_center(parent, initial);
+        return;
+    }
+    QDialog dialog(parent);
+    dialog.setObjectName("eopDataDialog");
+    dialog.setWindowTitle(ui::text("common.data_center"));
+    dialog.setWindowIcon(workbench_icon(WorkbenchIcon::database));
+    dialog.resize(
+        QSize(1020, 720).boundedTo(dialog.screen()->availableGeometry().size() - QSize(48, 72)));
+    dialog.setSizeGripEnabled(true);
+    dialog.setMinimumSize(360, 360);
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(0, 0, 0, 0);
+    auto *center = create_data_center_widget(&dialog, catalog);
+    layout->addWidget(center);
     if (initial) {
-        for (auto *node : {finals_node, c04_node, utc_node, egm2008_node, egm96_node, custom_node,
-                           de440s_node, weather_node, fes_node, custom_ocean_node})
-            if (node->data(0, Qt::UserRole).toInt() == static_cast<int>(*initial)) {
-                list->setCurrentItem(node);
-                list->itemActivated(node, 0);
+        auto *list = center->findChild<QTreeWidget *>("dataInventory");
+        for (QTreeWidgetItemIterator item(list); *item; ++item)
+            if ((*item)->data(0, Qt::UserRole).isValid() &&
+                (*item)->data(0, Qt::UserRole).toInt() == static_cast<int>(*initial)) {
+                list->setCurrentItem(*item);
+                list->itemActivated(*item, 0);
                 break;
             }
     }

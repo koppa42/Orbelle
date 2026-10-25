@@ -690,6 +690,41 @@ DataProduct EopCatalog::preferred_product() const {
     return data_.preferred_eop() == runtime::EopProduct::finals2000a ? DataProduct::finals2000a
                                                                      : DataProduct::c04;
 }
+DataPreferences EopCatalog::preferences() const {
+    DataPreferences result;
+    result.preferred = preferred_product();
+    result.finals_extrapolation_days = data_.extrapolation_days(runtime::EopProduct::finals2000a);
+    result.c04_extrapolation_days = data_.extrapolation_days(runtime::EopProduct::c04);
+    for (auto product : all_data_products)
+        if (product != DataProduct::custom_gravity && product != DataProduct::custom_ocean_tides)
+            result.updates.emplace(product, DataUpdatePreference{automatic_updates(product),
+                                                                 update_interval_hours(product)});
+    return result;
+}
+void EopCatalog::set_preferences(const DataPreferences &next) {
+    if (next.preferred != DataProduct::c04 && next.preferred != DataProduct::finals2000a)
+        throw std::invalid_argument("EOP priority must be finals2000A or C04");
+    for (int days : {next.finals_extrapolation_days, next.c04_extrapolation_days})
+        if (days < 0 || days > core::max_eop_extrapolation_days)
+            throw std::invalid_argument("EOP extrapolation limit must be 0..30 days");
+    const auto previous = preferences();
+    if (next.updates.size() != previous.updates.size())
+        throw std::invalid_argument("Incomplete data update preferences");
+    std::map<std::string, std::string> values{
+        {"eop-preferred-product", next.preferred == DataProduct::c04 ? "c04" : "finals2000a"},
+        {"extrapolation-finals2000a-days", std::to_string(next.finals_extrapolation_days)},
+        {"extrapolation-c04-days", std::to_string(next.c04_extrapolation_days)}};
+    for (const auto &[product, setting] : next.updates) {
+        if (!previous.updates.contains(product) || setting.hours < 1 || setting.hours > 168)
+            throw std::invalid_argument("Invalid data update preferences");
+        values[setting_key(product, "auto-update")] = setting.automatic ? "1" : "0";
+        values[setting_key(product, "update-hours")] = std::to_string(setting.hours);
+    }
+    if (previous == next)
+        return;
+    data_.set_settings(values);
+    refresh_current();
+}
 void EopCatalog::set_preferred_product(DataProduct product) {
     if (product != DataProduct::finals2000a && product != DataProduct::c04)
         throw std::invalid_argument("EOP priority must be finals2000A or C04");

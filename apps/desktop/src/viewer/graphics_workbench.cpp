@@ -11,10 +11,12 @@
 #include "initial_data_setup.hpp"
 #include "insert_object_dialog.hpp"
 #include "mission_timeline.hpp"
+#include "network_settings.hpp"
 #include "object_selection.hpp"
 #include "orbit_design_preview.hpp"
 #include "orbit_editor.hpp"
 #include "orbit_scene.hpp"
+#include "preferences_dialog.hpp"
 #include "project_scene.hpp"
 #include "project_update.hpp"
 #include "quantity_editor.hpp"
@@ -377,6 +379,8 @@ class Workbench final : public WorkbenchWindow {
                               "/data"
                         : QDir(configured_home).absolutePath();
                 const auto store = smoke_dir_.isEmpty() ? normal_home : smoke_dir_ + "/data-store";
+                network_settings_ =
+                    std::make_unique<NetworkSettings>(store + "/desktop-preferences.ini");
                 eop_catalog_ = std::make_unique<EopCatalog>(
                     std::filesystem::path(store.toStdWString()), bundled,
                     smoke_dir_.isEmpty() && configured_home.isEmpty()
@@ -386,6 +390,10 @@ class Workbench final : public WorkbenchWindow {
                                                     .toStdWString())
                         : std::filesystem::path{},
                     false);
+                eop_catalog_->open_data_center = [this](QWidget *parent,
+                                                        std::optional<DataProduct> product) {
+                    show_preferences(parent, PreferencesPage::data, product);
+                };
                 if (fixture_mode) {
                     eop_current_ = eop_catalog_->providers().at(0);
                     eop_ = eop_catalog_->providers().at(1);
@@ -522,13 +530,6 @@ class Workbench final : public WorkbenchWindow {
                 example_action_ =
                     scene_menu_->addAction(ui::text("graphics_workbench.scene_menu.add_action_2"));
                 connect(example_action_, &QAction::triggered, this, [this] { open_example(); });
-                auto *data_menu =
-                    menu_bar_->addMenu(ui::text("graphics_workbench.menu_bar.add_menu_3"));
-                eop_action_ =
-                    data_menu->addAction(workbench_icon(WorkbenchIcon::database),
-                                         ui::text("graphics_workbench.data_menu.add_action"));
-                eop_action_->setObjectName("manageEopData");
-                connect(eop_action_, &QAction::triggered, this, [this] { manage_eop_data(); });
                 auto *analysis_menu =
                     menu_bar_->addMenu(ui::text("graphics_workbench.menu_bar.add_menu_4"));
                 report_action_ = analysis_menu->addAction(
@@ -536,6 +537,13 @@ class Workbench final : public WorkbenchWindow {
                     ui::text("graphics_workbench.analysis_menu.add_action"));
                 report_action_->setObjectName("openReports");
                 connect(report_action_, &QAction::triggered, this, [this] { create_report(); });
+                auto *tools_menu = menu_bar_->addMenu(ui::text("network_settings.tools_menu"));
+                preferences_action_ = tools_menu->addAction(
+                    workbench_icon(WorkbenchIcon::properties), ui::text("network_settings.action"));
+                preferences_action_->setObjectName("openApplicationSettings");
+                preferences_action_->setShortcut(QKeySequence("Ctrl+,"));
+                connect(preferences_action_, &QAction::triggered, this,
+                        [this] { show_preferences(this); });
                 if (!profile_ && smoke_dir_.isEmpty()) {
                     application_update_ = new ApplicationUpdateUi(
                         QString::fromStdWString(
@@ -547,13 +555,11 @@ class Workbench final : public WorkbenchWindow {
                     };
                 }
                 scene_menu_->addSeparator();
-                // Analysis and data were only reachable from menus; keep them one click away.
+                // Reports are a frequent scenario operation; keep them one click away.
                 commands_->addSeparator();
                 report_action_->setToolTip(
                     ui::text("graphics_workbench.report_action.set_tool_tip"));
                 commands_->addAction(report_action_);
-                eop_action_->setToolTip(ui::text("graphics_workbench.eop_action.set_tool_tip"));
-                commands_->addAction(eop_action_);
                 // Inserting lives with the objects it creates: the explorer's add button,
                 // the Insert menu and Ctrl+Shift+I.
                 insert_action_ = new QAction(workbench_icon(WorkbenchIcon::add),
@@ -694,7 +700,7 @@ class Workbench final : public WorkbenchWindow {
                 editor_->gravity_models = [this] { return eop_catalog_->data().gravity_models(); };
                 editor_->ephemerides = [this] { return eop_catalog_->data().ephemerides(); };
                 editor_->manage_ephemerides = [this] {
-                    show_data_center(editor_, *eop_catalog_, DataProduct::de440s);
+                    show_preferences(editor_, PreferencesPage::data, DataProduct::de440s);
                     return eop_catalog_->data().ephemerides();
                 };
                 editor_->transform_state = [this](core::CartesianState state, core::FrameId frame) {
@@ -1301,8 +1307,9 @@ class Workbench final : public WorkbenchWindow {
                     return initial_data_ready(*eop_catalog_, product);
                 }))
                 splash->hide();
-            if (!prepare_initial_data(this, *eop_catalog_, required, {},
-                                      [] { acknowledge_update_startup(); }))
+            if (!prepare_initial_data(
+                    this, *eop_catalog_, required, {}, [] { acknowledge_update_startup(); }, {},
+                    [this](QWidget *parent) { show_preferences(parent); }))
                 return false;
             try {
                 const auto steps = startup_resource_steps(startup_resources_,
@@ -1325,7 +1332,7 @@ class Workbench final : public WorkbenchWindow {
                     message.addButton(ui::text("startup_splash.manage"), QMessageBox::ActionRole);
                 message.exec();
                 if (message.clickedButton() == manage)
-                    show_data_center(nullptr, *eop_catalog_);
+                    show_preferences(nullptr, PreferencesPage::data);
                 else if (message.standardButton(message.clickedButton()) != QMessageBox::Retry)
                     return false;
             }
@@ -1709,8 +1716,8 @@ class Workbench final : public WorkbenchWindow {
             if (action)
                 action->setEnabled((selected_marker_index().has_value() || selected_region_) &&
                                    idle);
-        if (eop_action_)
-            eop_action_->setEnabled(idle);
+        if (preferences_action_)
+            preferences_action_->setEnabled(idle);
         if (report_action_)
             report_action_->setEnabled(active && idle);
         if (cancel_project_button_)
@@ -2658,7 +2665,7 @@ class Workbench final : public WorkbenchWindow {
             message.addButton(ui::text("graphics_workbench.manage"), QMessageBox::ActionRole);
         message.exec();
         if (message.clickedButton() == manage)
-            show_data_center(this, *eop_catalog_);
+            show_preferences(this, PreferencesPage::data);
     }
     QString extrapolation_description(const core::EopDataInfo &info, core::Epoch first,
                                       core::Epoch last) const {
@@ -3442,10 +3449,10 @@ class Workbench final : public WorkbenchWindow {
                                  QString::fromUtf8(error.what()));
         }
     }
-    void manage_eop_data() {
-        if (busy())
-            return;
-        show_data_center(this, *eop_catalog_);
+    void show_preferences(QWidget *parent, PreferencesPage page = PreferencesPage::network,
+                          std::optional<DataProduct> product = {}) {
+        PreferencesDialog dialog(*network_settings_, eop_catalog_.get(), parent, page, product);
+        dialog.exec();
     }
     void create_scenario() {
         if (busy())
@@ -5964,6 +5971,9 @@ class Workbench final : public WorkbenchWindow {
     void smoke_insert_dialog(std::optional<InsertObjectMethod> method,
                              const QString &screenshot = {}, bool escape = false) {
         timer_.stop();
+        QSettings preferences(network_settings_->preferences_file(), QSettings::IniFormat);
+        preferences.setValue("insertion/keep-open", false);
+        preferences.sync();
         insert_action_->trigger();
         auto *dialog = insertion_dialog();
         dialog->select_type(InsertObjectType::satellite);
@@ -5971,7 +5981,6 @@ class Workbench final : public WorkbenchWindow {
         auto *insert = dialog->findChild<QPushButton *>("insertObject");
         if (!dialog->isVisible() || !methods || !insert)
             throw std::runtime_error("Insert objects command did not open the chooser");
-        dialog->findChild<QCheckBox *>("keepInsertObjectsOpen")->setChecked(false);
         for (int i = 0; i < methods->topLevelItemCount(); ++i)
             if (methods->topLevelItem(i)->data(0, Qt::UserRole).toInt() ==
                 static_cast<int>(method.value_or(InsertObjectMethod::define_properties)))
@@ -6528,7 +6537,7 @@ class Workbench final : public WorkbenchWindow {
     std::future<std::shared_ptr<PreparedProject>> project_candidate_;
     QAction *open_action_ = nullptr, *save_action_ = nullptr, *save_as_action_ = nullptr;
     QAction *rename_action_ = nullptr, *duplicate_action_ = nullptr, *delete_action_ = nullptr;
-    QAction *eop_action_ = nullptr;
+    QAction *preferences_action_ = nullptr;
     ApplicationUpdateUi *application_update_ = nullptr;
     bool update_restart_ = false;
     bool update_handover_pending_ = false, update_handed_over_ = false;
@@ -6538,6 +6547,7 @@ class Workbench final : public WorkbenchWindow {
     std::vector<application::ReportDefinition> reports_;
     ReportDialog::Ready pending_report_input_;
     std::unique_ptr<EopCatalog> eop_catalog_;
+    std::unique_ptr<NetworkSettings> network_settings_;
     std::map<std::string, std::shared_ptr<const core::GravityModel>> gravity_;
     std::map<std::string, std::shared_ptr<const core::IThirdBodyEphemeris>> ephemerides_;
     std::map<std::string, std::shared_ptr<const core::SpaceWeather>> weather_;

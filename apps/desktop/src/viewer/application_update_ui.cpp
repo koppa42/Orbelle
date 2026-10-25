@@ -2,7 +2,6 @@
 #include "../ui_text.hpp"
 #include <QAction>
 #include <QApplication>
-#include <QCheckBox>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
@@ -13,7 +12,6 @@
 #include <QProgressDialog>
 #include <QPushButton>
 #include <QScreen>
-#include <QSignalBlocker>
 #include <QTextBrowser>
 #include <QVBoxLayout>
 #ifdef Q_OS_WIN
@@ -59,9 +57,6 @@ ApplicationUpdateUi::ApplicationUpdateUi(QString preferences, QMenuBar *menus, Q
     progress_ = new QProgressBar;
     progress_->setTextVisible(false);
     layout->addWidget(progress_);
-    startup_ = new QCheckBox(ui::text("updates.startup"));
-    startup_->setChecked(update_.startup_enabled());
-    layout->addWidget(startup_);
     auto *buttons = new QDialogButtonBox;
     primary_ = buttons->addButton(ui::text("updates.download"), QDialogButtonBox::ActionRole);
     primary_->setObjectName("downloadApplicationUpdate");
@@ -88,19 +83,6 @@ ApplicationUpdateUi::ApplicationUpdateUi(QString preferences, QMenuBar *menus, Q
     auto *check = help->addAction(ui::text("updates.check"));
     check->setObjectName("checkApplicationUpdates");
     connect(check, &QAction::triggered, this, [this] { show_manual(); });
-    startup_action_ = help->addAction(ui::text("updates.startup"));
-    startup_action_->setCheckable(true);
-    startup_action_->setChecked(update_.startup_enabled());
-    connect(startup_, &QCheckBox::toggled, this, [this](bool enabled) {
-        update_.set_startup_enabled(enabled);
-        const QSignalBlocker blocker(startup_action_);
-        startup_action_->setChecked(enabled);
-    });
-    connect(startup_action_, &QAction::toggled, this, [this](bool enabled) {
-        update_.set_startup_enabled(enabled);
-        const QSignalBlocker blocker(startup_);
-        startup_->setChecked(enabled);
-    });
     prompt_.setInterval(500);
     connect(&prompt_, &QTimer::timeout, this, [this] {
         if (update_.state() != ApplicationUpdateState::available || offered_) {
