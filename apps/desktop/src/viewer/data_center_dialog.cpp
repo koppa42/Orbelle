@@ -62,8 +62,8 @@ QString product_name(DataProduct p) {
 QString installation_text(const DataInventoryItem &item) {
     switch (item.installation) {
     case DataInstallation::missing:
-        return item.online_updates ? ui::text("data_center_dialog.label_6")
-                                   : ui::text("data_center_dialog.label_7");
+        return item.online_download ? ui::text("data_center_dialog.label_6")
+                                    : ui::text("data_center_dialog.label_7");
     case DataInstallation::bundled_sample:
         return ui::text("data_center_dialog.label_8");
     case DataInstallation::local_file:
@@ -95,6 +95,10 @@ QString check_text(DataUpdateState state) {
         return ui::text("data_center_dialog.label_19");
     case DataUpdateState::local_changed:
         return ui::text("data_center_dialog.label_20");
+    case DataUpdateState::verifying:
+        return ui::text("data_center_dialog.verifying");
+    case DataUpdateState::verified:
+        return ui::text("data_center_dialog.verified");
     }
     return {};
 }
@@ -493,8 +497,11 @@ QWidget *create_data_center_widget(QWidget *parent, EopCatalog &catalog,
     raw->setIcon(workbench_icon(WorkbenchIcon::folder));
     auto *manifest = new QPushButton(ui::text("data_center_dialog.manifest"));
     manifest->setObjectName("importEopSnapshot");
+    auto *verify = new QPushButton(ui::text("data_center_dialog.verify_files"));
+    verify->setObjectName("verifyDataFiles");
     actions->addWidget(download);
     actions->addWidget(raw);
+    actions->addWidget(verify);
     file_layout->addWidget(manifest, 0, Qt::AlignLeft);
     actions->addStretch();
     acquisition_layout->addLayout(actions);
@@ -589,7 +596,7 @@ QWidget *create_data_center_widget(QWidget *parent, EopCatalog &catalog,
     auto *cancel = new QPushButton(ui::text("data_center_dialog.cancel"));
     cancel->setObjectName("cancelEopDownload");
     actions->insertWidget(3, cancel);
-    for (auto *button : {download, raw, cancel}) {
+    for (auto *button : {download, raw, verify, cancel}) {
         button->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
         actions->setAlignment(button, Qt::AlignLeft | Qt::AlignVCenter);
     }
@@ -597,7 +604,7 @@ QWidget *create_data_center_widget(QWidget *parent, EopCatalog &catalog,
     close->setMinimumWidth(88);
     footer->addWidget(close);
     layout->addWidget(footer_panel);
-    responsive_columns(acquisition, actions, 380);
+    responsive_columns(acquisition, actions, 460);
 
     const auto show_panels = [=] {
         if (context.navigation) {
@@ -718,7 +725,9 @@ QWidget *create_data_center_widget(QWidget *parent, EopCatalog &catalog,
         policy_title->setVisible(configurable_eop);
         extrapolation->setVisible(configurable_eop);
         extrapolation_note->setVisible(configurable_eop);
-        download->setVisible(item.online_updates);
+        download->setVisible(item.online_download);
+        verify->setVisible(fixed_model_product(item.product) && !item.file.empty());
+        form->setRowVisible(checked, item.online_updates);
         raw->setVisible(item.raw_import);
         manifest->setVisible(item.manifest_import || is_ephemeris);
         manifest->setText(is_ephemeris ? ui::text("data_center_dialog.manifest.set_text")
@@ -831,11 +840,11 @@ QWidget *create_data_center_widget(QWidget *parent, EopCatalog &catalog,
                               ? ui::text("data_center_dialog.note.set_text_4")
                               : ui::text("data_center_dialog.label_43"));
         else if (item.installation == DataInstallation::bundled_sample)
-            note->setText(item.online_updates ? ui::text("data_center_dialog.note.set_text_5")
-                                              : ui::text("data_center_dialog.note.set_text_6"));
+            note->setText(item.online_download ? ui::text("data_center_dialog.note.set_text_5")
+                                               : ui::text("data_center_dialog.note.set_text_6"));
         else if (item.installation == DataInstallation::missing)
-            note->setText(item.online_updates ? ui::text("data_center_dialog.note.set_text_7")
-                                              : ui::text("data_center_dialog.note.set_text_8"));
+            note->setText(item.online_download ? ui::text("data_center_dialog.note.set_text_7")
+                                               : ui::text("data_center_dialog.note.set_text_8"));
         else
             note->setText(ui::text("data_center_dialog.note.set_text_9"));
         const auto location = is_time && item.file.empty() ? ui::text("data_center_dialog.location")
@@ -909,6 +918,14 @@ QWidget *create_data_center_widget(QWidget *parent, EopCatalog &catalog,
     QObject::connect(download, &QPushButton::clicked, center, [=, &catalog] {
         session->operation_error.clear();
         catalog.start_download({}, *selected());
+    });
+    QObject::connect(verify, &QPushButton::clicked, center, [=, &catalog] {
+        session->operation_error.clear();
+        try {
+            catalog.verify_files(*selected());
+        } catch (const std::exception &error) {
+            show_error(error);
+        }
     });
     QObject::connect(manifest, &QPushButton::clicked, center, [=, &catalog] {
         const auto file = QFileDialog::getOpenFileName(
@@ -1041,9 +1058,12 @@ QWidget *create_data_center_widget(QWidget *parent, EopCatalog &catalog,
             const auto update = catalog.update_status(entry.product);
             const bool failed = update.state == DataUpdateState::failed ||
                                 update.state == DataUpdateState::interrupted;
-            const auto installation = (busy && catalog.active_product() == entry.product) || failed
-                                          ? check_text(update.state)
-                                          : installation_text(entry);
+            const auto installation =
+                failed && fixed_model_product(entry.product)
+                    ? ui::text("data_center_dialog.operation_failed")
+                : (busy && catalog.active_product() == entry.product) || failed
+                    ? check_text(update.state)
+                    : installation_text(entry);
             const auto details =
                 name + "\n" + installation + "\n" +
                 (ocean_product(entry.product)     ? ui::text("data_center_dialog.node.set_text")
@@ -1056,7 +1076,8 @@ QWidget *create_data_center_widget(QWidget *parent, EopCatalog &catalog,
             // Publish only the final label. Alternating detailed/compact labels each tick
             // floods the view and Windows accessibility with changes even while idle.
             node->setText(0, context.navigation ? name : details);
-            node->setData(0, Qt::UserRole + 1, entry.online_updates && failed);
+            node->setData(0, Qt::UserRole + 1,
+                          (entry.online_download || fixed_model_product(entry.product)) && failed);
             node->setToolTip(0, details);
         }
         if (priority->item(0)->data(Qt::UserRole).toInt() !=
@@ -1090,13 +1111,18 @@ QWidget *create_data_center_widget(QWidget *parent, EopCatalog &catalog,
         const auto update = catalog.update_status(item.product);
         copy_diagnostics->setVisible(!update.diagnostics.isEmpty());
         const bool downloading_this = busy && catalog.active_product() == item.product;
+        const bool verifying_this = downloading_this && catalog.verifying_files();
         checked->setText(
             item.online_updates
                 ? (update.attempted_at ? local_time(*update.attempted_at) + "\n" : QString{}) +
                       check_text(update.state)
             : item.product == DataProduct::utc ? ui::text("data_center_dialog.label_58")
                                                : ui::text("data_center_dialog.label_59"));
-        download->setText(downloading_this ? check_text(update.state)
+        download->setText(downloading_this && !verifying_this ? check_text(update.state)
+                          : fixed_model_product(item.product) &&
+                                  item.installation != DataInstallation::missing &&
+                                  item.installation != DataInstallation::bundled_sample
+                              ? ui::text("data_center_dialog.download_again")
                           : update.state == DataUpdateState::failed ||
                                   update.state == DataUpdateState::interrupted
                               ? ui::text("data_center_dialog.label_60")
@@ -1105,10 +1131,15 @@ QWidget *create_data_center_widget(QWidget *parent, EopCatalog &catalog,
                               ? ui::text("data_center_dialog.label_61")
                               : ui::text("data_center_dialog.label_62"));
         download->setEnabled(!busy);
+        verify->setEnabled(!busy && !item.file.empty());
+        verify->setText(verifying_this ? ui::text("data_center_dialog.verifying")
+                                       : ui::text("data_center_dialog.verify_files"));
         raw->setEnabled(!busy);
         planetary_centres->setEnabled(!busy);
         manifest->setEnabled(!busy);
         cancel->setVisible(downloading_this);
+        cancel->setText(verifying_this ? ui::text("data_center_dialog.cancel_verification")
+                                       : ui::text("data_center_dialog.cancel"));
         progress->setVisible(downloading_this);
         if (busy && catalog.total_bytes() > 0) {
             progress->setRange(0, 1000);
@@ -1120,8 +1151,7 @@ QWidget *create_data_center_widget(QWidget *parent, EopCatalog &catalog,
         schedule->setText(automatic->isChecked() ? ui::text("data_center_dialog.schedule.set_text")
                                                  : ui::text("data_center_dialog.edule.set_text"));
         QString message = session->operation_error;
-        if (message.isEmpty() &&
-            (item.online_updates || gravity_product(item.product) || ocean_product(item.product))) {
+        if (message.isEmpty() && (item.online_download || fixed_model_product(item.product))) {
             if (downloading_this) {
                 message = update.message;
                 if (catalog.received_bytes() > 0)
@@ -1133,18 +1163,22 @@ QWidget *create_data_center_widget(QWidget *parent, EopCatalog &catalog,
             } else if (update.state == DataUpdateState::failed ||
                        update.state == DataUpdateState::interrupted ||
                        update.state == DataUpdateState::cancelled ||
-                       update.state == DataUpdateState::local_changed) {
+                       update.state == DataUpdateState::local_changed ||
+                       (fixed_model_product(item.product) &&
+                        (update.state == DataUpdateState::verified ||
+                         update.state == DataUpdateState::updated ||
+                         update.state == DataUpdateState::unchanged))) {
                 message = update.message;
-                if (update.checked_at)
+                if (item.online_updates && update.checked_at)
                     message +=
                         ui::text("data_center_dialog.label_63") + local_time(*update.checked_at);
             }
         }
         status->setText(message);
-        const bool warning =
-            !session->operation_error.isEmpty() ||
-            (item.online_updates && (update.state == DataUpdateState::failed ||
-                                     update.state == DataUpdateState::interrupted));
+        const bool warning = !session->operation_error.isEmpty() ||
+                             ((item.online_download || fixed_model_product(item.product)) &&
+                              (update.state == DataUpdateState::failed ||
+                               update.state == DataUpdateState::interrupted));
         if (status->property("warning").toBool() != warning) {
             status->setProperty("warning", warning);
             status->style()->unpolish(status);
@@ -1159,6 +1193,7 @@ QWidget *create_data_center_widget(QWidget *parent, EopCatalog &catalog,
                               priority->currentRow() < priority->count() - 1);
     });
     QObject::connect(download, &QPushButton::clicked, center, refresh);
+    QObject::connect(verify, &QPushButton::clicked, center, refresh);
     QObject::connect(raw, &QPushButton::clicked, center, refresh);
     QObject::connect(manifest, &QPushButton::clicked, center, refresh);
     QObject::connect(cancel, &QPushButton::clicked, center, refresh);

@@ -67,6 +67,9 @@ class EopCatalog : public QObject {
     void start_download_from_sources(const QList<QUrl> &sources,
                                      DataProduct product = DataProduct::finals2000a);
     void cancel_download();
+    // Verify installed fixed-model bytes locally, without changing acquisition or model identity.
+    void verify_files(DataProduct product);
+    [[nodiscard]] bool verifying_files() const { return verifying_ && resource_job_.valid(); }
     void check_updates_if_due(qint64 now, QUrl source = {});
     void set_update_schedule_enabled(bool enabled);
     [[nodiscard]] bool has_full_download(DataProduct product = DataProduct::finals2000a) const;
@@ -132,6 +135,7 @@ class EopCatalog : public QObject {
     std::shared_ptr<std::atomic_bool> resource_cancel_;
     QTimer resource_poll_;
     std::map<std::string, std::string> resource_response_;
+    bool verifying_ = false;
     DataProduct active_product_ = DataProduct::finals2000a;
     std::shared_ptr<const core::ITimeProvider> time_;
     std::filesystem::path time_file_;

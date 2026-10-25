@@ -1,6 +1,8 @@
+#include "../src/viewer/data_center_widget.hpp"
 #include "../src/viewer/eop_catalog.hpp"
 #include "../src/viewer/initial_data_setup.hpp"
 #include "../src/viewer/workbench_style.hpp"
+#include "support/ui_test_support.hpp"
 #include "window_show_observer.hpp"
 #include <QApplication>
 #include <QCheckBox>
@@ -26,6 +28,7 @@
 #include <QTemporaryDir>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QVBoxLayout>
 #include <QWindow>
 #include <gtest/gtest.h>
 #ifdef Q_OS_WIN
@@ -477,6 +480,10 @@ TEST(DataCenterDialog, GravityHasItsOwnGroupAndStaticValidityWithoutImplicitDown
         QApplication::processEvents();
         EXPECT_EQ(dialog->findChild<QLabel *>("dataName")->text(), QStringLiteral("EGM2008"));
         EXPECT_FALSE(dialog->findChild<QCheckBox *>("dataAutoUpdate")->isChecked());
+        EXPECT_FALSE(dialog->findChild<QTabWidget *>("dataPages")->isTabVisible(1));
+        EXPECT_TRUE(dialog->findChild<QLabel *>("dataLastChecked")->isHidden());
+        EXPECT_FALSE(dialog->findChild<QPushButton *>("verifyDataFiles")->isVisible());
+        EXPECT_FALSE(dialog->findChild<QPushButton *>("verifyDataFiles")->isEnabled());
         EXPECT_TRUE(dialog->findChild<QPushButton *>("downloadEop")->isVisible());
         bool static_validity = false;
         for (const auto *label : dialog->findChildren<QLabel *>())
@@ -502,6 +509,80 @@ TEST(DataCenterDialog, GravityHasItsOwnGroupAndStaticValidityWithoutImplicitDown
     show_data_center(nullptr, catalog);
     EXPECT_TRUE(inspected);
 }
+TEST(DataCenterDialog, InstalledModelCanBeVerifiedCancelledAndVerifiedAgainAtNarrowWidth) {
+    (void)test_app();
+    QTemporaryDir temporary;
+    const auto root = std::filesystem::path(temporary.path().toStdWString());
+    QFile source(temporary.filePath("local.grv"));
+    ASSERT_TRUE(source.open(QIODevice::WriteOnly));
+    source.write("stk.v.6.0\nModel Local\nDegree 2\nOrder 0\nGm 3.986004415e14\n"
+                 "RefDistance 6378136.3\nNormalized Yes\nIncludesPermTide No\n"
+                 "BEGIN Coefficients\n2 0 -0.000484 0\nEND Coefficients\n");
+    source.close();
+    EopCatalog catalog(root / "data", {}, {}, false);
+    catalog.import_raw(root / "local.grv", DataProduct::custom_gravity);
+    ASSERT_TRUE(wait_for_ui([&] { return !catalog.downloading(); }));
+    ASSERT_EQ(catalog.update_status(DataProduct::custom_gravity).state, DataUpdateState::updated);
+    QDialog dialog;
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(create_data_center_widget(&dialog, catalog));
+    dialog.setMinimumSize(360, 360);
+    dialog.resize(1020, 720);
+    dialog.show();
+    auto *tree = dialog.findChild<QTreeWidget *>("dataInventory");
+    auto *custom = tree->topLevelItem(2)->child(2);
+    tree->setCurrentItem(custom);
+    auto *verify = dialog.findChild<QPushButton *>("verifyDataFiles");
+    auto *raw = dialog.findChild<QPushButton *>("importRawEop");
+    auto *cancel = dialog.findChild<QPushButton *>("cancelEopDownload");
+    auto *tabs = dialog.findChild<QTabWidget *>("dataPages");
+    auto *status = dialog.findChild<QLabel *>("dataCenterStatus");
+    ASSERT_NE(verify, nullptr);
+    ASSERT_NE(cancel, nullptr);
+    ASSERT_NE(status, nullptr);
+    EXPECT_FALSE(tabs->isTabVisible(1));
+    EXPECT_TRUE(dialog.findChild<QLabel *>("dataLastChecked")->isHidden());
+    ASSERT_TRUE(verify->isEnabled());
+    verify->click();
+    EXPECT_TRUE(catalog.verifying_files());
+    EXPECT_EQ(cancel->text(), QString::fromUtf8("取消校验"));
+    EXPECT_TRUE(cancel->isVisible());
+    EXPECT_FALSE(verify->isEnabled());
+    cancel->click();
+    ASSERT_TRUE(wait_for_ui([&] { return !catalog.downloading() && verify->isEnabled(); }));
+    EXPECT_EQ(catalog.update_status(DataProduct::custom_gravity).state, DataUpdateState::cancelled);
+    verify->click();
+    ASSERT_TRUE(wait_for_ui([&] {
+        return !catalog.downloading() && status->text() == QString::fromUtf8("本地文件校验通过。");
+    }));
+    EXPECT_EQ(catalog.update_status(DataProduct::custom_gravity).state, DataUpdateState::verified);
+    const auto output = qEnvironmentVariable("ORBELLE_DATA_UI_CAPTURE");
+    for (int width : {1020, 360, 500}) {
+        SCOPED_TRACE(width);
+        dialog.resize(width, 660);
+        tree->itemActivated(custom, 0);
+        for (int i = 0; i < 12; ++i)
+            QCoreApplication::processEvents();
+        ASSERT_TRUE(wait_for_ui([&] { return dialog.width() == width; }));
+        ASSERT_TRUE(wait_for_ui([&] {
+            return !raw->geometry().intersects(verify->geometry()) &&
+                   !status->geometry().intersects(verify->geometry());
+        }));
+        EXPECT_TRUE(verify->isVisible());
+        EXPECT_GE(verify->width(), verify->sizeHint().width());
+        for (auto *scroll : dialog.findChildren<QScrollArea *>())
+            if (scroll->isVisible()) {
+                EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+                EXPECT_LE(scroll->widget()->width(), scroll->viewport()->width());
+            }
+        if (!output.isEmpty()) {
+            ASSERT_TRUE(QDir().mkpath(output));
+            EXPECT_TRUE(dialog.grab().save(output + QStringLiteral("/verified-%1.png").arg(width)));
+        }
+    }
+    dialog.close();
+}
 TEST(DataCenterDialog, EphemerisGroupAndDetailsRemainReadableAtCompactWidth) {
     (void)test_app();
     QTemporaryDir temporary;
@@ -523,7 +604,8 @@ TEST(DataCenterDialog, EphemerisGroupAndDetailsRemainReadableAtCompactWidth) {
         EXPECT_TRUE(centres->isVisible());
         EXPECT_TRUE(centres->isEnabled());
         auto *tabs = dialog->findChild<QTabWidget *>("dataPages");
-        tabs->setCurrentIndex(1);
+        EXPECT_FALSE(tabs->isTabVisible(1));
+        EXPECT_TRUE(dialog->findChild<QLabel *>("dataLastChecked")->isHidden());
         EXPECT_FALSE(dialog->findChild<QCheckBox *>("dataAutoUpdate")->isChecked());
         tabs->setCurrentIndex(2);
         EXPECT_TRUE(dialog->findChild<QPushButton *>("importEopSnapshot")->isVisible());
