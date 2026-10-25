@@ -9,6 +9,7 @@
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QFontMetricsF>
 #include <QFormLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -86,8 +87,33 @@ class RegionBoundaryPreview final : public QWidget {
                              ui::text("region.preview.invalid"));
             return;
         }
-        const auto map_width = std::min(width() - 64., 292.);
-        const QRectF map((width() - map_width) / 2, 26, map_width, map_width / 2);
+        auto tick_font = painter.font();
+        tick_font.setPointSizeF(tick_font.pointSizeF() * .85);
+        const QFontMetricsF metrics(tick_font);
+        std::array<QString, 3> latitudes, longitudes;
+        std::array<qreal, 3> longitude_widths;
+        qreal latitude_width = 0;
+        for (int i = 0; i <= 2; ++i) {
+            latitudes[i] = QString::number(view_.bottom() - i * view_.height() / 2, 'g', 3) +
+                           QStringLiteral("°");
+            longitudes[i] =
+                QString::number(std::remainder(view_.left() + i * view_.width() / 2, 360.), 'g',
+                                4) +
+                QStringLiteral("°");
+            latitude_width = std::max(latitude_width, metrics.horizontalAdvance(latitudes[i]));
+            longitude_widths[i] = std::ceil(metrics.horizontalAdvance(longitudes[i]));
+        }
+        latitude_width = std::ceil(latitude_width);
+        const auto tick_height = std::ceil(metrics.height());
+        constexpr qreal padding = 16, tick_gap = 8;
+        const auto left = padding + std::max(latitude_width + tick_gap, longitude_widths[0] / 2);
+        const auto right = padding + longitude_widths[2] / 2;
+        const auto map_width = std::max(1., std::min(width() - left - right, 292.));
+        const auto top = padding + tick_height / 2;
+        const auto bottom = padding + tick_gap + tick_height;
+        const QRectF map(left + std::max(0., (width() - left - right - map_width) / 2),
+                         top + (height() - top - bottom - map_width / 2) / 2, map_width,
+                         map_width / 2);
         const QTransform transform(map.width() / view_.width(), 0, 0,
                                    -map.height() / view_.height(),
                                    map.left() - view_.left() * map.width() / view_.width(),
@@ -123,19 +149,20 @@ class RegionBoundaryPreview final : public QWidget {
             }
         }
         painter.restore();
-        auto font = painter.font();
-        font.setPointSizeF(font.pointSizeF() * .85);
-        painter.setFont(font);
+        painter.setFont(tick_font);
         painter.setPen(theme::color(theme::text_muted));
         for (int i = 0; i <= 2; ++i) {
-            const auto latitude = view_.bottom() - i * view_.height() / 2;
-            const auto longitude = std::remainder(view_.left() + i * view_.width() / 2, 360.);
-            painter.drawText(QRectF(map.left() - 34, map.top() + i * map.height() / 2 - 8, 32, 16),
-                             Qt::AlignRight,
-                             QString::number(latitude, 'g', 3) + QStringLiteral("°"));
-            painter.drawText(
-                QRectF(map.left() + i * map.width() / 2 - 32, map.bottom() + 4, 64, 18),
-                Qt::AlignCenter, QString::number(longitude, 'g', 4) + QStringLiteral("°"));
+            painter.drawText(QRectF(map.left() - tick_gap - latitude_width,
+                                    map.top() + i * map.height() / 2 - tick_height / 2,
+                                    latitude_width, tick_height),
+                             Qt::AlignRight | Qt::AlignVCenter, latitudes[i]);
+            // Keep endpoint labels readable when the preview becomes narrow.
+            if (i == 1 && (map.width() < longitude_widths[0] + longitude_widths[1] + 2 * tick_gap ||
+                           map.width() < longitude_widths[1] + longitude_widths[2] + 2 * tick_gap))
+                continue;
+            painter.drawText(QRectF(map.left() + i * map.width() / 2 - longitude_widths[i] / 2,
+                                    map.bottom() + tick_gap, longitude_widths[i], tick_height),
+                             Qt::AlignCenter, longitudes[i]);
         }
     }
 
