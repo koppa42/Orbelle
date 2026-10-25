@@ -9,12 +9,14 @@
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QEvent>
 #include <QFontMetricsF>
 #include <QFormLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPainter>
+#include <QPersistentModelIndex>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScrollArea>
@@ -23,6 +25,7 @@
 #include <QTabBar>
 #include <QTableWidget>
 #include <QTimer>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <algorithm>
@@ -30,6 +33,32 @@
 #include <numbers>
 
 namespace orbelle::desktop {
+namespace {
+// Embedded editors consume mouse/focus events before the table sees them. Keep
+// its selection on the edited vertex, including after rows are inserted/removed.
+class VertexSelectionFilter final : public QObject {
+  public:
+    VertexSelectionFilter(QuantityEditor *field, QTableWidget *table, const QModelIndex &index)
+        : QObject(field), table_(table), index_(index) {
+        field->installEventFilter(this);
+        field->findChild<QLineEdit *>()->installEventFilter(this);
+        field->findChild<QToolButton *>()->installEventFilter(this);
+    }
+
+  protected:
+    bool eventFilter(QObject *object, QEvent *event) override {
+        if (index_.isValid() &&
+            (event->type() == QEvent::FocusIn || event->type() == QEvent::MouseButtonPress))
+            table_->setCurrentCell(index_.row(), index_.column(),
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        return QObject::eventFilter(object, event);
+    }
+
+  private:
+    QTableWidget *table_;
+    QPersistentModelIndex index_;
+};
+} // namespace
 class RegionBoundaryPreview final : public QWidget {
   public:
     explicit RegionBoundaryPreview(QWidget *parent) : QWidget(parent) {
@@ -378,8 +407,10 @@ RegionEditor::RegionEditor(QWidget *parent) : QDialog(parent) {
         {ui::text("region.longitude"), ui::text("region.latitude")});
     vertices_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     vertices_->horizontalHeader()->setMinimumSectionSize(154);
+    vertices_->verticalHeader()->setObjectName("regionVertexNumbers");
     vertices_->setSelectionBehavior(QAbstractItemView::SelectRows);
     vertices_->setSelectionMode(QAbstractItemView::SingleSelection);
+    vertices_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     vertices_->setMinimumHeight(190);
     vertices_->setMaximumHeight(300);
     polygon_layout->addWidget(vertices_);
@@ -390,18 +421,32 @@ RegionEditor::RegionEditor(QWidget *parent) : QDialog(parent) {
     auto *remove = new QPushButton(ui::text("region.remove_vertex"), polygon);
     remove->setObjectName("regionRemoveVertex");
     remove->setAutoDefault(false);
+    remove->setEnabled(false);
     row_buttons->addWidget(add);
     row_buttons->addWidget(remove);
     row_buttons->addStretch();
     polygon_layout->addLayout(row_buttons);
+    connect(vertices_, &QTableWidget::itemSelectionChanged, remove, [this, remove] {
+        remove->setEnabled(!vertices_->selectionModel()->selectedRows().isEmpty());
+    });
     connect(add, &QPushButton::clicked, this, [this] {
-        if (vertices_->rowCount() < 256)
+        if (vertices_->rowCount() < 256) {
             append_vertex({});
+            const auto row = vertices_->rowCount() - 1;
+            vertices_->setCurrentCell(row, 0);
+            vertices_->scrollTo(vertices_->model()->index(row, 0));
+            vertices_->cellWidget(row, 0)->setFocus();
+        }
         request_preview();
     });
     connect(remove, &QPushButton::clicked, this, [this] {
-        if (vertices_->currentRow() >= 0)
-            vertices_->removeRow(vertices_->currentRow());
+        const auto selection = vertices_->selectionModel()->selectedRows();
+        if (selection.isEmpty())
+            return;
+        const auto row = selection.front().row();
+        vertices_->removeRow(row);
+        if (vertices_->rowCount() > 0)
+            vertices_->setCurrentCell(std::min(row, vertices_->rowCount() - 1), 0);
         request_preview();
     });
     auto *polygon_hint = caution_label(ui::text("region.polygon_limits"));
@@ -534,6 +579,7 @@ void RegionEditor::append_vertex(core::RegionVertex vertex) {
     vertices_->insertRow(row);
     for (int col = 0; col < 2; ++col) {
         auto *field = new QuantityEditor(Unit::degree, vertices_);
+        field->setMaximumWidth(QWIDGETSIZE_MAX);
         field->set_range(col == 0 ? -180 : -90, col == 0 ? 180 : 90, Unit::degree);
         field->set_label(ui::text(col == 0 ? "region.longitude" : "region.latitude"));
         field->set_value(col == 0 ? vertex.longitude_rad : vertex.latitude_rad, Unit::radian);
@@ -549,6 +595,7 @@ void RegionEditor::append_vertex(core::RegionVertex vertex) {
         connect(input, &QLineEdit::textChanged, this, [this] { request_preview(); });
         connect(field, &QuantityEditor::valueChanged, this, [this] { request_preview(); });
         vertices_->setCellWidget(row, col, field);
+        new VertexSelectionFilter(field, vertices_, vertices_->model()->index(row, col));
     }
     vertices_->setRowHeight(row, 40);
 }
